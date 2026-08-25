@@ -8,8 +8,8 @@ use synveda_types::access::{GrantSource, RoleKey};
 use synveda_types::anchor::ScopeAnchor;
 use synveda_types::scope::{Scope, ScopeKind};
 use synveda_types::{
-    Error, GrantId, GroupId, KnowledgeItemId, Lapse, PolicyAssignment, ProjectId, Result, ScopeId,
-    Sensitivity, SessionId, TenantId, WorkspaceId,
+    CurrentRelaxation, Error, GrantId, GroupId, KnowledgeItemId, PolicyAssignment, ProjectId,
+    Result, ScopeId, Sensitivity, SessionId, TenantId, WorkspaceId,
 };
 
 /// The PDP's own view of a governed scope: a node with a parent, a tenant, a
@@ -344,9 +344,9 @@ pub enum Action {
     ///
     /// Names the tier it is asking about, exactly as [`Action::MemoryRead`]
     /// does and for the same reason: with four values the seam can be asked
-    /// about a tier before any content is fetched. It carries no `lapsed`
-    /// attribute — the lapse vocabulary is closed over `memory.read`
-    /// (ADR-0037 decision 2) — and no pack names `restricted`, because
+    /// about a tier before any content is fetched. It carries no relaxation
+    /// input — CPR-31 closes that vocabulary over `KnowledgeRead` — and no
+    /// pack names `restricted`, because
     /// nothing in the product mints that tier for an authored asset.
     ///
     /// It is also the read action that makes a rewind or a pin of
@@ -374,7 +374,7 @@ pub enum Action {
     /// no readable memory there at all.
     ///
     /// Carries the tier for [`Action::PromptRead`]'s reason and carries no
-    /// `lapsed` for the same one. It is also the read action that makes a
+    /// relaxation input for the same one. It is also the read action that makes a
     /// rewind or a pin of `context-pack/published` decidable, which
     /// discharges ADR-0036 decision 3 for the second of the three kinds it
     /// refused by name, leaving `skill`.
@@ -397,7 +397,7 @@ pub enum Action {
     /// nowhere in the composition plan walk.
     ///
     /// Carries the tier for [`Action::PromptRead`]'s reason and carries no
-    /// `lapsed` for the same one. CPR-23 applies it to exact immutable
+    /// relaxation input for the same one. CPR-23 applies it to exact immutable
     /// versions selected by project/principal bindings; no Skill channel
     /// remains.
     SkillRead,
@@ -435,6 +435,9 @@ pub enum Action {
     /// Create, publish, bind, pin, enable, disable or roll back governed
     /// runtime configuration through VedaFlow (CPR-30, ADR-0089).
     ConfigurationWrite,
+    /// Create, revise, or revoke a time-boxed policy relaxation through the
+    /// one typed VedaFlow path (CPR-31, ADR-0090).
+    RelaxationWrite,
     /// Release or reject one quarantined event at its scope. Never a
 
     /// Read service-identity registrations: one at its anchor node, or
@@ -547,26 +550,6 @@ pub enum Action {
     /// Whether the verdicts recorded so far are *enough* is the approval
     /// matrix's arithmetic, never this decision's (ADR-0032 decision 5).
     ProposalReview,
-    /// Run an approved lapse proposal's effect at the resource scope: open
-    /// a time-boxed grant of one action over this scope's material to
-    /// another scope's members (AUTHZ-4, ADR-0037 decision 15).
-    ///
-    /// The resource is the scope whose material is *disclosed*, never the
-    /// one receiving it: authority over a disclosure belongs where the
-    /// material is. Like publishing, the route resolves the approval matrix
-    /// on top of this decision — a lapse is the `policy` cell, which every
-    /// pack has carried since FLOW-3.
-    LapseGrant,
-    /// End a standing lapse early, with a mandatory reason (ADR-0037
-    /// decision 15).
-    ///
-    /// Its own action rather than a mode of [`Action::LapseGrant`], on
-    /// [`Action::ChannelRollback`]'s precedent: a pack must be able to grant
-    /// one broadly and the other narrowly. It deliberately resolves *no*
-    /// approval matrix — a revocation installs nothing and can only narrow,
-    /// and a product whose answer to "that grant was a mistake" is "convene
-    /// the two stewards again" has not shipped revocation.
-    LapseRevoke,
 }
 
 impl Action {
@@ -577,7 +560,7 @@ impl Action {
     /// every action is in exactly one of the four groups, so a new action
     /// that nobody classified fails the build rather than silently going
     /// unanswerable at CNSL-2's probe.
-    pub const ALL: [Action; 50] = [
+    pub const ALL: [Action; 49] = [
         Action::ScopeCreate,
         Action::ScopeRead,
         Action::ScopeUpdate,
@@ -614,6 +597,7 @@ impl Action {
         Action::PolicyAssign,
         Action::ConfigurationRead,
         Action::ConfigurationWrite,
+        Action::RelaxationWrite,
         Action::ServiceIdentityRead,
         Action::ServiceIdentityManage,
         Action::AuditRead,
@@ -626,8 +610,6 @@ impl Action {
         Action::ProposalRead,
         Action::ProposalOpen,
         Action::ProposalReview,
-        Action::LapseGrant,
-        Action::LapseRevoke,
     ];
 
     /// The actions a capability probe answers as a plain yes/no about a
@@ -645,7 +627,7 @@ impl Action {
     /// a scope resource at all (ADR-0045 decision 2); it appears in
     /// [`Action::PROBED_AT_TENANT`], where the chain it reads actually
     /// lives.
-    pub const PROBED_AT_SCOPE: [Action; 40] = [
+    pub const PROBED_AT_SCOPE: [Action; 39] = [
         Action::ScopeCreate,
         Action::ScopeRead,
         Action::ScopeUpdate,
@@ -675,6 +657,7 @@ impl Action {
         Action::PolicyAssign,
         Action::ConfigurationRead,
         Action::ConfigurationWrite,
+        Action::RelaxationWrite,
         Action::ServiceIdentityRead,
         Action::ServiceIdentityManage,
         Action::ChannelRead,
@@ -684,8 +667,6 @@ impl Action {
         Action::ProposalRead,
         Action::ProposalOpen,
         Action::ProposalReview,
-        Action::LapseGrant,
-        Action::LapseRevoke,
     ];
 
     /// The same, for the **tenant** plane — what `whoami` answers.
@@ -775,6 +756,7 @@ impl Action {
             Action::PolicyAssign => "policy.assign",
             Action::ConfigurationRead => "configuration.read",
             Action::ConfigurationWrite => "configuration.write",
+            Action::RelaxationWrite => "relaxation.write",
             Action::ServiceIdentityRead => "service_identity.read",
             Action::ServiceIdentityManage => "service_identity.manage",
             Action::AuditRead => "audit.read",
@@ -787,8 +769,6 @@ impl Action {
             Action::ProposalRead => "proposal.read",
             Action::ProposalOpen => "proposal.open",
             Action::ProposalReview => "proposal.review",
-            Action::LapseGrant => "lapse.grant",
-            Action::LapseRevoke => "lapse.revoke",
         }
     }
 
@@ -831,6 +811,7 @@ impl Action {
             Action::PolicyAssign => "PolicyAssign",
             Action::ConfigurationRead => "ConfigurationRead",
             Action::ConfigurationWrite => "ConfigurationWrite",
+            Action::RelaxationWrite => "RelaxationWrite",
             Action::ServiceIdentityRead => "ServiceIdentityRead",
             Action::ServiceIdentityManage => "ServiceIdentityManage",
             Action::AuditRead => "AuditRead",
@@ -843,8 +824,6 @@ impl Action {
             Action::ProposalRead => "ProposalRead",
             Action::ProposalOpen => "ProposalOpen",
             Action::ProposalReview => "ProposalReview",
-            Action::LapseGrant => "LapseGrant",
-            Action::LapseRevoke => "LapseRevoke",
         }
     }
 }
@@ -993,22 +972,11 @@ pub struct AuthzContext<'a> {
     /// and keeps the answers as a set, so a pack that says something
     /// non-contiguous gets exactly what it said (decision 3).
     pub sensitivity: Option<Sensitivity>,
-    /// The lapses standing over the caller **as the caller's own read
-    /// found them** (AUTHZ-4, ADR-0037 decision 9): grants whose grantee
-    /// scope is on [`AuthzContext::principal_scopes`], neither revoked nor
-    /// expired at the instant that query ran.
-    ///
-    /// Caller-supplied — policy knows nothing of storage (seed §2.4) — and
-    /// *pre-filtered* for
-    /// the reason that matters more: expiry is a property of the decision
-    /// rather than of a job, so the one query that loads these rows is the
-    /// one place a window ends (decision 4). Empty means no grant stands,
-    /// which is the zero-config answer everywhere.
-    ///
-    /// The PDP still gates them on the resource's own pack: a pack whose
-    /// lapse ceiling is zero admits none of these, standing or not
-    /// (decision 5).
-    pub lapses: &'a [Lapse],
+    /// Active, Configuration-admitted relaxations for this exact authenticated
+    /// subject. Storage pre-filters by database time; the PDP independently
+    /// matches action, target scope, sensitivity and subject before exposing
+    /// the required `context.relaxed` attribute to Cedar.
+    pub relaxations: &'a [CurrentRelaxation],
 }
 
 /// The verdict, plus everything the decision log and audit event need to

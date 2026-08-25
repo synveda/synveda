@@ -1,11 +1,11 @@
-// regulated-strict@22 — the default product pack (seed §6, ADR-0014,
+// regulated-strict@23 — the default product pack (seed §6, ADR-0014,
 // ADR-0015, ADR-0018, ADR-0020, ADR-0021, ADR-0031, ADR-0032, ADR-0036,
 // ADR-0037, ADR-0038).
 //
 // Deny-first: composition reads the principal's own chain, plus whatever
 // a content-role grant explicitly reaches — under this pack a viewer,
 // member or curator grant *is* the seed's "explicit grant" for
-// cross-scope read; AUTHZ-4 lapses add the time-boxed variant. Everything
+// cross-scope read; CPR-31 adds the governed, time-boxed Knowledge variant. Everything
 // this pack does not name is denied by Cedar's default-deny, and the
 // compiled-in base layer forbids sealed principals everything and holds
 // the personal-scope privacy floor (ADR-0074 deleted the binding
@@ -16,8 +16,8 @@
 // deliberate they are: membership reads the working tiers, an explicit
 // content-role grant (or one's own scope) reaches `confidential`, and
 // `restricted` is reachable by nothing this pack can say — the base layer
-// forbids it outright unless a lapse that declared the tier stands, and such
-// a lapse cleared the invariant floor's administrator requirement to exist.
+// forbids it outright unless a typed Knowledge relaxation stands, and that
+// immutable version cleared the invariant approval floor before application.
 
 // **The privacy floor moved.** Until CPR-6 every permit here restated
 // `resource.kind != "user"`; it is now one base-layer forbid over
@@ -150,8 +150,8 @@ permit (
 // deferral rather than lifting it: classification says how sensitive
 // material is, and the privacy floor is about *whose* it is (ADR-0015
 // decision 4). A tier cannot answer a question about ownership, so the
-// exclusion stays exactly where it was — and a lapse cannot target a
-// user-kind scope either.
+// exclusion stays exactly where it was — and a relaxation cannot target a
+// principal-shaped scope either.
 permit (
     principal,
     action == Synveda::Action::"MemoryRead",
@@ -191,8 +191,8 @@ permit (
 
 // Stable Knowledge uses its own action and aggregate entity (CPR-16,
 // ADR-0081). Scope decisions govern create/list; item decisions govern exact
-// reads and immutable-revision mutations. The reach mirrors memory without
-// inheriting its lapse override.
+// reads and immutable-revision mutations. Relaxation is a separate, exact
+// Knowledge PDP input rather than an inherited record-plane override.
 permit (principal, action == Synveda::Action::"KnowledgeRead", resource)
 when {
     resource is Synveda::Scope
@@ -791,41 +791,16 @@ permit (
         && context.roles.containsAny(["curator", "reviewer", "owner", "administrator"])
 };
 
-// The lapse plane (AUTHZ-4, ADR-0037 decision 15): pack-uniform, like the
-// channel, quarantine and proposal planes and for the same reason — how
-// content crosses the trust boundary does not loosen per pack. What varies
-// per pack is the *window* (the LapseConfig ceiling) and the *approvals*
-// (the `policy` cell of the matrix, which has carried tech plan §2.4's lapse
-// row since FLOW-3).
-//
-// Granting is the administrator's act (seed §6: "a steward may apply a
-// scoped, reasoned, time-boxed override" — `steward` is `administrator`
-// since ADR-0074 decision 6), with owner above it. Curator is deliberately
-// absent: a lapse is policy, and ADR-0015 put the policy plane at that
-// level and above. The resource is the scope whose material is disclosed,
-// so an administrator granted at an org unit may open its subtree's
-// material and may not open a sibling's.
+// Governed relaxations (CPR-31, ADR-0090): create, revision and revocation
+// use one Policy/apply path and the same owner/administrator authority at the
+// exact scope whose Knowledge may be disclosed.
 permit (
     principal,
-    action == Synveda::Action::"LapseGrant",
+    action == Synveda::Action::"RelaxationWrite",
     resource
 ) when {
     resource in principal.tenant
         && context.roles.containsAny(["owner", "administrator"])
-};
-
-// Revoking is wider than granting, which is the whole reason the two are
-// separate actions: `reviewer` joins, because ending a disclosure early is
-// incident response — the same key that adjudicates quarantined events
-// (MEM-2) and reviews executable skills. Revocation installs nothing
-// and can only narrow, so no matrix stands in front of it.
-permit (
-    principal,
-    action == Synveda::Action::"LapseRevoke",
-    resource
-) when {
-    resource in principal.tenant
-        && context.roles.containsAny(["reviewer", "owner", "administrator"])
 };
 
 // The directory plane (AUTH-4, ADR-0059 decision 13): who may wire this

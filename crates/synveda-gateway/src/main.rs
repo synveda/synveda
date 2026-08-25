@@ -326,21 +326,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         "capture extractor and Knowledge embedder ready; retired record writers are disabled"
     );
 
-    // The lapse expiry sweep (AUTHZ-4, ADR-0037 decision 4). Bookkeeping:
-    // it chains `policy.lapse.expired` for windows that have closed, and
-    // every grant it touches stopped deciding reads at `expires_at`
-    // whether or not this loop is running. The default cadence is
-    // deliberately slack for that reason — a late audit line is the only
-    // thing a slow sweep costs.
-    let lapse_sweep_secs = match std::env::var("SYNVEDA_LAPSE_SWEEP_SECS") {
+    // Governed relaxation expiry bookkeeping (CPR-31, ADR-0090). Database
+    // time already ended authority at the hard boundary; this loop records
+    // the content-free system event once.
+    let relaxation_sweep_secs = match std::env::var("SYNVEDA_RELAXATION_SWEEP_SECS") {
         Ok(value) => value
             .parse::<u64>()
-            .map_err(|_| "SYNVEDA_LAPSE_SWEEP_SECS must be a positive integer")?,
+            .map_err(|_| "SYNVEDA_RELAXATION_SWEEP_SECS must be a positive integer")?,
         Err(_) => 60,
     };
-    let lapse_sweep = synveda_gateway::lapses::spawn_expiry_sweep(
+    let relaxation_sweep = synveda_gateway::relaxations::spawn_expiry_sweep(
         pool.clone(),
-        Duration::from_secs(lapse_sweep_secs.max(1)),
+        Duration::from_secs(relaxation_sweep_secs.max(1)),
     );
 
     // The search index sidecar and its indexer (CTX-1, ADR-0024): a
@@ -491,7 +488,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     search_indexer.abort();
     knowledge_indexer.abort();
     capture_worker.abort();
-    lapse_sweep.abort();
+    relaxation_sweep.abort();
     if let Some(sync) = directory_sync {
         sync.abort();
     }

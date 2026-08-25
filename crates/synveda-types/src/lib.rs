@@ -43,7 +43,6 @@ pub mod knowledge;
 // **caller-supplied** object and neither is in this crate: the gateway's
 // idempotency digest and the session ledger's payload hash.
 pub mod json;
-mod lapse;
 mod mover;
 // Reusable durable operation vocabulary (CPR-16, ADR-0081).
 pub mod operation;
@@ -55,6 +54,8 @@ mod proposal;
 mod quarantine;
 mod record;
 mod redaction;
+/// Immutable, governed policy relaxations (CPR-31, ADR-0090).
+pub mod relaxation;
 // Canonical repository identity (CPR-4, ADR-0071 decision 4). Public as a
 // module so `repository::identify` reads as what it is at every call site —
 // the one place two clients agree on what "the same repository" means.
@@ -109,16 +110,12 @@ pub use id::{
     ContextFeedbackId, ContextRunId, ContextSelectionId, DirectoryGroupId, DirectoryUserId,
     DurableOperationId, GrantId, GraphEdgeId, GraphVertexId, GroupId, IdentityId, ImportArtifactId,
     ImportJobId, ImportMappingId, InviteId, KnowledgeItemId, KnowledgeRelationId,
-    KnowledgeRevisionId, KnowledgeSourceId, LapseId, ProjectId, ProposalId, RecordId, RepositoryId,
-    ScimCredentialId, ScopeId, SessionEventId, SessionId, SkillBindingId, SkillId, SkillTestRunId,
-    SkillUsageEventId, SkillVersionId, TenantId, ToolBindingId, ToolServerId, ToolServerVersionId,
-    ToolTestRunId, WorkspaceId,
+    KnowledgeRevisionId, KnowledgeSourceId, ProjectId, ProposalId, RecordId, RelaxationId,
+    RelaxationVersionId, RepositoryId, ScimCredentialId, ScopeId, SessionEventId, SessionId,
+    SkillBindingId, SkillId, SkillTestRunId, SkillUsageEventId, SkillVersionId, TenantId,
+    ToolBindingId, ToolServerId, ToolServerVersionId, ToolTestRunId, WorkspaceId,
 };
 pub use identity::{Identity, IdentityKind, IdentityStatus};
-pub use lapse::{
-    Lapse, LapseAction, LapseConfig, LapseOutcome, LapseTerms, MAX_LAPSE_REASON,
-    PRODUCT_MAX_DURATION_SECS, STRICT_MAX_DURATION_SECS,
-};
 pub use mover::{MoverConfig, PersonalMemory};
 pub use pack::{
     CHUNK_CHARS, ContextPackChannel, ContextPackName, DocumentChunk, DocumentName, DocumentPath,
@@ -139,6 +136,10 @@ pub use proposal::{ProposalEffect, ProposalState, ProposalView, Verdict};
 pub use quarantine::QuarantineState;
 pub use record::{RecordClass, RecordKind};
 pub use redaction::{RedactionConfig, RedactionMode};
+pub use relaxation::{
+    CurrentRelaxation, Relaxation, RelaxationAction, RelaxationCommand, RelaxationMutationOutcome,
+    RelaxationMutationResult, RelaxationStatus, RelaxationTerms, RelaxationVersion,
+};
 pub use retention::{
     ClassTtl, MAX_RETENTION_DAYS, MIN_STAGING_DAYS, RetentionConfig, RetentionMode,
 };

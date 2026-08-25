@@ -340,7 +340,7 @@ fn anchor_context<'a>(
         resources: &input.resources,
         assignments,
         default_pack: input.default_pack.as_deref(),
-        lapses: &[],
+        relaxations: &[],
         sensitivity: None,
     }
 }
@@ -482,7 +482,7 @@ async fn probe(
 
     // One event for the whole fan-out (decision 4). The payload carries
     // counts and scope ids — never a third party's binding, and never a
-    // lapse's reason, which is free text a steward wrote about an incident.
+    // relaxation reason, which is free text written about an incident.
     let mut payload = json!({
         "op": "capabilities",
         "route": op,

@@ -89,11 +89,10 @@ const INDEX_LEGEND: &str = "Summarised entries were abbreviated to fit the token
 
 /// The marker forms a record's content must not be able to reproduce
 /// inside the region the renderer leaves to content (decision 11).
-const MARKER_FORMS: [&str; 6] = [
+const MARKER_FORMS: [&str; 5] = [
     " [confidential]",
     " [restricted]",
     " [unreviewed]",
-    " [lapse]",
     " [public]",
     "(recall ",
 ];

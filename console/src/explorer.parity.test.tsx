@@ -27,12 +27,11 @@ import { fileURLToPath } from "node:url";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import {
-  describeEnd,
+  deniedCount,
   mayDo,
   mayRead,
-  deniedCount,
   type Capabilities,
-  type LapseListing,
+  type RelaxationListing,
 } from "./explorer.mjs";
 import type { EffectiveConfigurationView } from "./generated/api.js";
 import { toText } from "./text.mjs";
@@ -40,7 +39,7 @@ import { toText } from "./text.mjs";
 const CASES = [
   "configuration-inherited",
   "capabilities-with-denial",
-  "lapses-standing-and-ended",
+  "relaxations-current-and-ended",
 ] as const;
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), "..", "fixtures", "explorer");
@@ -105,17 +104,16 @@ function render(name: string, asked: string, payload: unknown): string {
         ),
       );
     }
-    case "lapses-standing-and-ended": {
-      const listing = payload as LapseListing;
+    case "relaxations-current-and-ended": {
+      const listing = payload as RelaxationListing;
       return toText(
         renderToStaticMarkup(
           <ul>
-            {listing.lapses.map((lapse) => (
-              <li key={lapse.id}>
-                <span>{lapse.outcome}</span> {lapse.action}{" "}
-                {describeEnd(lapse.grantee_scope_path, lapse.grantee_scope_id)} →{" "}
-                {describeEnd(lapse.target_scope_path, lapse.target_scope_id)}
-                <div>{lapse.reason}</div>
+            {listing.relaxations.map((relaxation) => (
+              <li key={relaxation.id}>
+                <span>{relaxation.status}</span> {relaxation.current.action}{" "}
+                {relaxation.current.subject} → {relaxation.current.target_scope_id}
+                <div>{relaxation.current.reason}</div>
               </li>
             ))}
           </ul>,

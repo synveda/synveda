@@ -28,12 +28,13 @@ use synveda_policy::{
 };
 use synveda_store::anchors::AnchorSelection;
 use synveda_store::{
-    anchors, identities, lapses, policy_assignments, policy_packs, rls, scopes, tenants,
+    anchors, configuration, identities, policy_assignments, policy_packs, relaxations, rls, scopes,
+    tenants,
 };
 use synveda_types::anchor::AnchorSet;
 use synveda_types::scope::{Scope, ScopeKind};
 use synveda_types::{
-    Error, GroupId, Identity, IdentityKind, Lapse, LapseAction, Result, ScopeId, Sensitivity,
+    CurrentRelaxation, Error, GroupId, Identity, IdentityKind, Result, ScopeId, Sensitivity,
     TenantId,
 };
 
@@ -63,14 +64,9 @@ pub(crate) struct DecisionInput {
     pub(crate) resources: Vec<ResourceEntity>,
     pub(crate) assignments: Vec<synveda_types::PolicyAssignment>,
     pub(crate) default_pack: Option<String>,
-    /// The lapses standing over this caller, as of this request's own read
-    /// (AUTHZ-4, ADR-0037 decision 4): grants whose grantee scope is on the
-    /// caller's placement chain, neither revoked nor expired.
-    ///
-    /// **This is where expiry happens.** Nothing runs to end a lapse; the
-    /// predicate on this one query does, so a sweep that is down cannot
-    /// leave a grant standing.
-    pub(crate) lapses: Vec<Lapse>,
+    /// Active immutable relaxations for this exact authenticated subject,
+    /// narrowed by the target scope's current governed Configuration.
+    pub(crate) relaxations: Vec<CurrentRelaxation>,
     /// The caller's identity row, already read for the principal — so
     /// handlers whose resource *is* the placement (observe, MEM-1) never
     /// read it twice. `None` for verified subjects with no identity.
@@ -103,7 +99,7 @@ impl DecisionInput {
             resources: &self.resources,
             assignments: &self.assignments,
             default_pack: self.default_pack.as_deref(),
-            lapses: &self.lapses,
+            relaxations: &self.relaxations,
             // Named per decision by [`decide_read`], which is the only way
             // to ask `MemoryRead` here: a read decided without a tier is
             // refused by the PDP rather than defaulted (AUTHZ-5, ADR-0038
@@ -325,17 +321,27 @@ async fn gather_inner(
         policy_assignments::for_scopes(&mut *conn, tenant_id, &chain_ids).await?
     };
     let default_pack = policy_assignments::default_pack(&mut *conn, tenant_id).await?;
-    // The grants standing over this caller (AUTHZ-4, ADR-0037 decision 4).
-    // Keyed on the *placement* chain, not the resource's: a lapse grants to
-    // everyone at or under a grantee scope, and which scope is being
-    // *decided* is the target, resolved per decision inside the PDP.
-    //
-    // Read here, per request, alongside bindings and assignments — and for
-    // a stronger reason than theirs. Their per-request read keeps a
-    // next-request freshness promise; this one *is* the expiry mechanism.
-    // Caching it would make a window end late by the length of the cache.
-    let lapse_scopes: Vec<ScopeId> = principal_scopes.iter().map(|node| node.id).collect();
-    let lapses = lapses::active_for_scopes(&mut *conn, tenant_id, &lapse_scopes).await?;
+    // Database time removes expired rows. The current immutable Configuration
+    // at each target may narrow a standing version immediately; it never
+    // manufactures a grant.
+    let mut active_relaxations = Vec::new();
+    for relaxation in
+        relaxations::active_for_subject(&mut *conn, tenant_id, &principal.subject).await?
+    {
+        let effective = configuration::effective_at_scope(
+            &mut *conn,
+            tenant_id,
+            relaxation.version.terms.target_scope_id,
+        )
+        .await?;
+        if effective
+            .document
+            .relaxations
+            .permits(relaxation.version.terms.action)
+        {
+            active_relaxations.push(relaxation);
+        }
+    }
     Ok(DecisionInput {
         principal,
         chain,
@@ -345,7 +351,7 @@ async fn gather_inner(
         resources,
         assignments,
         default_pack,
-        lapses,
+        relaxations: active_relaxations,
         identity,
     })
 }
@@ -374,63 +380,6 @@ async fn scope_chain_of(
         nodes.push(ScopeNode::from_scope(&ancestor, false));
     }
     Ok(nodes.into())
-}
-
-/// One off-chain scope a standing lapse reaches, with the rows its own
-/// `MemoryRead` decision needs (AUTHZ-4, ADR-0037 decision 10).
-///
-/// Owned, because the read path borrows from it after the gathering
-/// transaction has been dropped.
-pub(crate) struct LapsedChain {
-    /// The grant that reaches the scope.
-    pub(crate) lapse: Lapse,
-    /// The target's own chain, node-first.
-    pub(crate) chain: Arc<[ScopeNode]>,
-    /// Pack assignments for that chain.
-    pub(crate) assignments: Vec<synveda_types::PolicyAssignment>,
-}
-
-/// Resolves what an inject needs to decide the caller's lapsed scopes: for
-/// each grant reaching a scope off the caller's own chain, that scope's
-/// chain and assignments.
-///
-/// The cost the feature is honest about (ADR-0037 decision 10): the
-/// effective pack is a property of the resource, so a scope the caller's
-/// chain does not cover needs its own rows. Chains come from the HIER-2
-/// cache, so the usual case is warm; the assignments are one indexed read
-/// per lapsed scope, paid only by callers who actually hold a grant.
-///
-/// A target whose chain no longer resolves is dropped here rather than
-/// planned and denied later — a deleted scope grants nothing, which is the
-/// same fail-closed reading an unplaced principal gets.
-pub(crate) async fn gather_lapsed(
-    _state: &AppState,
-    conn: &mut PgConnection,
-    input: &DecisionInput,
-) -> Result<Vec<LapsedChain>> {
-    let tenant_id = input.principal.tenant_id;
-    // One shared containment rule with the PDP's own permit, so the plan
-    // and the decision can never disagree about who a grant reaches.
-    let granting = synveda_policy::lapsed_scopes(
-        &input.principal_scopes,
-        &input.lapses,
-        LapseAction::MemoryRead,
-    );
-    let mut resolved = Vec::with_capacity(granting.len());
-    for lapse in granting {
-        let Some(target) = scopes::get(&mut *conn, tenant_id, lapse.target_scope_id).await? else {
-            continue;
-        };
-        let chain = scope_chain_of(&mut *conn, tenant_id, &target).await?;
-        let chain_ids: Vec<ScopeId> = chain.iter().map(|node| node.id).collect();
-        let assignments = policy_assignments::for_scopes(&mut *conn, tenant_id, &chain_ids).await?;
-        resolved.push(LapsedChain {
-            lapse: lapse.clone(),
-            chain,
-            assignments,
-        });
-    }
-    Ok(resolved)
 }
 
 /// An allowed decision plus what the audit event embeds: the verdict
@@ -494,8 +443,8 @@ pub(crate) fn decide_from(
 
 /// [`decide`] for `KnowledgeRead` (CPR-16, ADR-0081).
 ///
-/// Knowledge names a tier like the retired record read, but deliberately
-/// carries no lapse override. Keeping the wrapper distinct prevents a caller
+/// Knowledge names a tier like the retired record read and carries only
+/// matched immutable relaxations. Keeping the wrapper distinct prevents a caller
 /// from authorising one corpus with the other corpus's action.
 pub(crate) fn decide_knowledge_read(
     state: &AppState,

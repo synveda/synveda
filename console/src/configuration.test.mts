@@ -39,6 +39,11 @@ const document: ConfigurationDocumentBody = {
     reference_days: 30,
   },
   advertisement: { skills: true, tools: false },
+  relaxations: {
+    enabled: true,
+    maximum_duration_secs: 86_400,
+    allowed_actions: ["knowledge.read"],
+  },
   allowed_external_providers: ["anthropic", "remote_mcp"],
 };
 

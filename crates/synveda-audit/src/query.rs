@@ -46,21 +46,19 @@ pub const DISCLOSURE_ACTIONS: [AuditAction; 1] = [AuditAction::SessionContextCom
 ///
 /// Deliberately a list of actions rather than a fold: this module hands
 /// back the events, and the caller that knows the scope tree assembles the
-/// answer. Historical grants, Configuration changes and lapses exist nowhere
-/// else — `scope_grants`, `configuration_bindings` and `policy_lapses` are
-/// current-state projections, and a revoked grant leaves no row — so these
-/// events are not merely the tamper-evident record of what governed a scope
-/// in March, they are the only record.
+/// answer. Historical grants, Configuration changes and immutable relaxation
+/// transitions must be reconstructed from the chain rather than inferred
+/// from current heads, so these events are not merely tamper evidence: they
+/// are the transaction-time record.
 ///
 /// Pass to [`search`] via [`EventFilter::actions`].
-pub const AUTHORITY_ACTIONS: [AuditAction; 11] = [
+pub const AUTHORITY_ACTIONS: [AuditAction; 10] = [
     AuditAction::AccessGranted,
     AuditAction::AccessRevoked,
     AuditAction::ConfigurationChangeApplied,
     AuditAction::CuratorRulesUpdated,
-    AuditAction::LapseGranted,
-    AuditAction::LapseRevoked,
-    AuditAction::LapseExpired,
+    AuditAction::RelaxationChangeApplied,
+    AuditAction::RelaxationExpired,
     AuditAction::MemoryClassified,
     AuditAction::ChannelPublished,
     AuditAction::ChannelRolledBack,

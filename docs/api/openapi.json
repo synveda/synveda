@@ -5447,264 +5447,6 @@
         ]
       }
     },
-    "/v1/lapses": {
-      "get": {
-        "tags": [
-          "policy-relaxations"
-        ],
-        "summary": "`GET /v1/lapses` — grants over one scope, or every grant this caller\nmay see.",
-        "description": "Under `PolicyRead` rather than an action of its own: a lapse is policy,\nand \"how is this node governed\" should have one place to look (the\nADR-0032 decision 15 argument for curator files).\n\n# The scope-free form is a union of per-scope decisions\n\nA lapse has two ends, and until CNSL-2 only the target end could be\nlisted — so the steward of a *granted* scope could not see the grant\ntheir own team held, and therefore could not revoke it, though\n`POST /v1/lapses/{id}/revoke` has existed since AUTHZ-4. Each row is now\nvisible if the caller holds `PolicyRead` at **either** end, decided per\nscope exactly as the scoped form decides it. No tenant-wide grant is\ninvented: that shape exists next door on `GET /v1/admin/grants` and is\nheld by org-admins, who are not the people this view is for.",
-        "operationId": "list_lapses",
-        "parameters": [
-          {
-            "name": "scope_id",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          },
-          {
-            "name": "active",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "boolean"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Visible standing or historical relaxations",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/LapseListResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "No usable credential",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Policy read is not permitted",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "The requested scope is absent",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ]
-      },
-      "post": {
-        "tags": [
-          "policy-relaxations"
-        ],
-        "summary": "`POST /v1/lapses` — open a lapse proposal. Grants nothing.",
-        "operationId": "propose_lapse",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/LapseProposeBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "The opened relaxation proposal",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/LapseProposeResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "The relaxation terms are invalid",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "No usable credential",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Opening this proposal is not permitted",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "A named scope is absent",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "The scope has reached its open-proposal limit",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ]
-      }
-    },
-    "/v1/lapses/{id}/revoke": {
-      "post": {
-        "tags": [
-          "policy-relaxations"
-        ],
-        "summary": "`POST /v1/lapses/{id}/revoke` — end a standing grant early.",
-        "description": "Resolves no approval matrix. A revocation installs nothing and can only\nnarrow, and a product whose answer to \"that grant was a mistake\" is\n\"convene the two stewards again\" has not shipped revocation (ADR-0037\ndecision 15).",
-        "operationId": "revoke_lapse",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/LapseRevokeBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "The revoked relaxation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/LapseView"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "The revocation reason is invalid",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "No usable credential",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Revoking the relaxation is not permitted",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "The relaxation is absent",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "The relaxation is already inactive",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ]
-      }
-    },
     "/v1/me": {
       "get": {
         "tags": [
@@ -7517,94 +7259,6 @@
         ]
       }
     },
-    "/v1/proposals/{id}/lapse": {
-      "post": {
-        "tags": [
-          "proposals"
-        ],
-        "summary": "`POST /v1/proposals/{id}/lapse` — run an approved lapse proposal's\neffect.",
-        "description": "The parallel of `/publish`, and it takes the same shape: the proposal\nopen, the requirement satisfied, and one Cedar decision — here\n`LapseGrant` at the target, the scope whose material is disclosed.",
-        "operationId": "grant_lapse_proposal",
-        "parameters": [
-          {
-            "name": "id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "The granted relaxation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/LapseView"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "The proposal is not a relaxation",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "No usable credential",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Granting the relaxation is not permitted",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "The proposal is absent",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "Approvals are incomplete or the proposal is closed",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ]
-      }
-    },
     "/v1/proposals/{id}/publish": {
       "post": {
         "tags": [
@@ -8132,6 +7786,445 @@
           },
           "409": {
             "description": "The event was already reviewed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/relaxations": {
+      "get": {
+        "tags": [
+          "policy-relaxations"
+        ],
+        "summary": "List policy-visible relaxations. The cursor follows the last candidate\nconsidered, so a fully denied page can be empty and still advance.",
+        "operationId": "list_relaxations",
+        "parameters": [
+          {
+            "name": "scope_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Policy-visible relaxations",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelaxationListView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid cursor or filter",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "policy-relaxations"
+        ],
+        "summary": "Create a stable relaxation and its first immutable version through\nVedaFlow.",
+        "operationId": "create_relaxation",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Required; reuse verbatim on retry.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateRelaxationBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Change opened",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelaxationMutationView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid terms",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/relaxations/{id}": {
+      "get": {
+        "tags": [
+          "policy-relaxations"
+        ],
+        "summary": "Read one current stable aggregate.",
+        "operationId": "get_relaxation",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Current relaxation",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelaxationView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Relaxation absent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "patch": {
+        "tags": [
+          "policy-relaxations"
+        ],
+        "summary": "Publish a replacement immutable version with an exact head precondition.",
+        "operationId": "revise_relaxation",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Required; reuse verbatim on retry.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviseRelaxationBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Change opened",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelaxationMutationView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Relaxation absent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Stale current-version precondition",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/relaxations/{id}/revoke": {
+      "post": {
+        "tags": [
+          "policy-relaxations"
+        ],
+        "summary": "End a current version early through a governed VedaFlow change.",
+        "operationId": "revoke_relaxation",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Required; reuse verbatim on retry.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RevokeRelaxationBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Revocation change opened",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelaxationMutationView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Relaxation absent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Stale or inactive version",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/relaxations/{id}/versions": {
+      "get": {
+        "tags": [
+          "policy-relaxations"
+        ],
+        "summary": "List immutable versions newest first.",
+        "operationId": "list_relaxation_versions",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Immutable relaxation versions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RelaxationVersionListView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Relaxation absent",
             "content": {
               "application/json": {
                 "schema": {
@@ -12976,7 +13069,7 @@
                 "items": {
                   "$ref": "#/components/schemas/AuditEventView"
                 },
-                "description": "The events that opened and closed authority over the window — role\nbindings, pack assignments, lapses, publications, classifications.\nThese are *inputs*, not a set of principals."
+                "description": "The events that opened and closed authority over the window — role\ngrants, pack assignments, relaxations, publications, classifications.\nThese are *inputs*, not a set of principals."
               },
               "authority_truncated": {
                 "type": "boolean",
@@ -14566,6 +14659,7 @@
           "context",
           "freshness",
           "advertisement",
+          "relaxations",
           "allowed_external_providers"
         ],
         "properties": {
@@ -14590,6 +14684,9 @@
           },
           "policy_pack": {
             "type": "string"
+          },
+          "relaxations": {
+            "$ref": "#/components/schemas/RelaxationConfigurationBody"
           }
         },
         "additionalProperties": false
@@ -15922,6 +16019,61 @@
           }
         },
         "additionalProperties": false
+      },
+      "CreateRelaxationBody": {
+        "allOf": [
+          {
+            "type": "object",
+            "description": "Complete reviewed terms for create and revision requests.",
+            "required": [
+              "subject_identity_id",
+              "action",
+              "max_sensitivity",
+              "requested_start_at",
+              "requested_end_at",
+              "reason"
+            ],
+            "properties": {
+              "action": {
+                "type": "string",
+                "enum": [
+                  "knowledge.read"
+                ]
+              },
+              "max_sensitivity": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "requested_end_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "requested_start_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "subject_identity_id": {
+                "type": "string",
+                "format": "uuid"
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "required": [
+              "target_scope_id"
+            ],
+            "properties": {
+              "target_scope_id": {
+                "type": "string",
+                "format": "uuid"
+              }
+            }
+          }
+        ]
       },
       "CreateScopeBody": {
         "type": "object",
@@ -17723,256 +17875,6 @@
             "type": "string",
             "format": "uuid",
             "description": "Session whose access was independently decided."
-          }
-        }
-      },
-      "LapseListResponse": {
-        "type": "object",
-        "required": [
-          "lapses"
-        ],
-        "properties": {
-          "lapses": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/LapseView"
-            }
-          },
-          "max_lapses": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "format": "int64"
-          },
-          "scope_id": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "uuid"
-          },
-          "scope_path": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "standing_only": {
-            "type": [
-              "boolean",
-              "null"
-            ]
-          },
-          "truncated": {
-            "type": [
-              "boolean",
-              "null"
-            ]
-          }
-        }
-      },
-      "LapseProposeBody": {
-        "type": "object",
-        "required": [
-          "scope_id",
-          "grantee_scope_id",
-          "action",
-          "duration_secs",
-          "reason"
-        ],
-        "properties": {
-          "action": {
-            "type": "string",
-            "description": "What to relax. A closed vocabulary; anything outside it is refused\nby name (ADR-0037 decision 2)."
-          },
-          "duration_secs": {
-            "type": "integer",
-            "format": "int32",
-            "description": "How long the grant runs **once its effect executes** — never from\nnow, because a proposal that sits in a queue for a week must not\nspend the window it was approved for.",
-            "minimum": 0
-          },
-          "grantee_scope_id": {
-            "type": "string",
-            "format": "uuid",
-            "description": "Who would get the access: every principal placed at or under this\nscope. A single person is their own personal scope, so this one\nshape covers \"team X\" and \"just Dana\"."
-          },
-          "max_sensitivity": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "The most sensitive material this grant would disclose, and therefore\nthe tier its approval matrix resolves at (AUTHZ-5, ADR-0038\ndecision 6). Omitted means the working tier, which is what every\ngrant meant before the field existed.\n\nDeclaring `restricted` is what pulls in the invariant floor —\n`compliance` plus two distinct approvers — so the ask and the price\nof the ask are the same statement."
-          },
-          "reason": {
-            "type": "string",
-            "description": "Why. Mandatory: it is what two approvers weigh and what an auditor\nreads afterwards."
-          },
-          "scope_id": {
-            "type": "string",
-            "format": "uuid",
-            "description": "The scope whose material would be disclosed. Requirements resolve\nhere, `ProposalOpen` is decided here, and this is the only scope the\npermit will cover."
-          }
-        }
-      },
-      "LapseProposeResponse": {
-        "type": "object",
-        "required": [
-          "proposal_id",
-          "commit",
-          "state",
-          "effect",
-          "target_scope_id",
-          "target_scope_slug",
-          "grantee_scope_id",
-          "grantee_scope_slug",
-          "action",
-          "max_sensitivity",
-          "duration_secs",
-          "reason",
-          "required",
-          "outstanding"
-        ],
-        "properties": {
-          "action": {
-            "type": "string"
-          },
-          "commit": {
-            "type": "string"
-          },
-          "duration_secs": {
-            "type": "integer",
-            "format": "int32",
-            "minimum": 0
-          },
-          "effect": {
-            "type": "string"
-          },
-          "grantee_scope_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "grantee_scope_slug": {
-            "type": "string"
-          },
-          "max_sensitivity": {
-            "type": "string"
-          },
-          "outstanding": {
-            "type": "string"
-          },
-          "proposal_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "reason": {
-            "type": "string"
-          },
-          "required": {
-            "type": "string"
-          },
-          "state": {
-            "type": "string"
-          },
-          "target_scope_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "target_scope_slug": {
-            "type": "string"
-          }
-        }
-      },
-      "LapseRevokeBody": {
-        "type": "object",
-        "required": [
-          "reason"
-        ],
-        "properties": {
-          "reason": {
-            "type": "string",
-            "description": "Why. Mandatory, like the grant's own reason: an ending an auditor\ncannot read the reason for is not a governed act."
-          }
-        }
-      },
-      "LapseView": {
-        "type": "object",
-        "description": "One standing or historical grant, as the listing and the detail render\nit.",
-        "required": [
-          "id",
-          "proposal_id",
-          "grantee_scope_id",
-          "target_scope_id",
-          "action",
-          "reason",
-          "granted_at",
-          "expires_at",
-          "granted_by",
-          "outcome"
-        ],
-        "properties": {
-          "action": {
-            "type": "string"
-          },
-          "expires_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "granted_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "granted_by": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "grantee_scope_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "grantee_scope_path": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "outcome": {
-            "type": "string",
-            "description": "Standing, expired, or revoked — rendered from the row rather than\nstored on it, the [`synveda_types::ProposalView`] discipline: a\nstored state would need something to run to stay true."
-          },
-          "proposal_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "reason": {
-            "type": "string"
-          },
-          "revoke_reason": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "revoked_at": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "format": "date-time"
-          },
-          "target_scope_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "target_scope_path": {
-            "type": [
-              "string",
-              "null"
-            ]
           }
         }
       },
@@ -19966,7 +19868,7 @@
           },
           "effect": {
             "type": "string",
-            "description": "What running this proposal would do (AUTHZ-4, ADR-0037\ndecision 16). `published` for every FLOW-3 proposal; `lapse` for a\ngrant. Named for the effect rather than the channel because a lapse\nhas no channel, and a field that said `published` on a proposal that\npublishes nothing would be the paper-over this feature refused at\nthe schema."
+            "description": "What running this proposal would do. `published` writes a channel,\n`classify` changes sensitivity, and `apply` executes a typed governed\nartifact command (including a policy relaxation)."
           },
           "id": {
             "type": "string",
@@ -20280,6 +20182,358 @@
         },
         "additionalProperties": false
       },
+      "RelaxationConfigurationBody": {
+        "type": "object",
+        "description": "Time-boxed relaxation bounds. This document can narrow the closed product\nvocabulary but never grants authority by itself.",
+        "required": [
+          "enabled",
+          "maximum_duration_secs",
+          "allowed_actions"
+        ],
+        "properties": {
+          "allowed_actions": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "maximum_duration_secs": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "RelaxationListView": {
+        "type": "object",
+        "required": [
+          "relaxations"
+        ],
+        "properties": {
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "relaxations": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RelaxationView"
+            }
+          }
+        }
+      },
+      "RelaxationMutationView": {
+        "type": "object",
+        "description": "Result shared by create, revise and revoke.",
+        "required": [
+          "change_id",
+          "outcome",
+          "relaxation_id"
+        ],
+        "properties": {
+          "change_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "applied",
+              "pending_review",
+              "rejected"
+            ]
+          },
+          "relaxation_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "version_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          }
+        }
+      },
+      "RelaxationTermsBody": {
+        "type": "object",
+        "description": "Complete reviewed terms for create and revision requests.",
+        "required": [
+          "subject_identity_id",
+          "action",
+          "max_sensitivity",
+          "requested_start_at",
+          "requested_end_at",
+          "reason"
+        ],
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "knowledge.read"
+            ]
+          },
+          "max_sensitivity": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "requested_end_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "requested_start_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "subject_identity_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "additionalProperties": false
+      },
+      "RelaxationVersionListView": {
+        "type": "object",
+        "required": [
+          "versions"
+        ],
+        "properties": {
+          "next_cursor": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "versions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RelaxationVersionView"
+            }
+          }
+        }
+      },
+      "RelaxationVersionView": {
+        "type": "object",
+        "description": "One immutable reviewed version.",
+        "required": [
+          "id",
+          "relaxation_id",
+          "ordinal",
+          "change_id",
+          "subject_identity_id",
+          "subject",
+          "target_scope_id",
+          "action",
+          "max_sensitivity",
+          "requested_start_at",
+          "requested_end_at",
+          "effective_start_at",
+          "hard_expires_at",
+          "reason",
+          "configuration_hash",
+          "content_hash",
+          "creator_id",
+          "approver_ids",
+          "auto_applied",
+          "created_at"
+        ],
+        "properties": {
+          "action": {
+            "type": "string",
+            "enum": [
+              "knowledge.read"
+            ]
+          },
+          "approver_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          "auto_applied": {
+            "type": "boolean"
+          },
+          "change_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "configuration_hash": {
+            "type": "string"
+          },
+          "configuration_version_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "content_hash": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "creator_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "effective_start_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "hard_expires_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "max_sensitivity": {
+            "type": "string"
+          },
+          "ordinal": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "relaxation_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "requested_end_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "requested_start_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "subject": {
+            "type": "string"
+          },
+          "subject_identity_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "target_scope_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "RelaxationView": {
+        "type": "object",
+        "description": "Current stable aggregate projection.",
+        "required": [
+          "id",
+          "governing_scope_id",
+          "current_version_id",
+          "revision",
+          "status",
+          "current",
+          "created_at",
+          "created_by",
+          "updated_at",
+          "updated_by"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "created_by": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "current": {
+            "$ref": "#/components/schemas/RelaxationVersionView"
+          },
+          "current_version_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "governing_scope_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "revocation_change_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "revocation_reason": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "revoked_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time"
+          },
+          "revoked_by": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "scheduled",
+              "active",
+              "expired",
+              "revoked"
+            ]
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_by": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
       "ReplaceCandidateBody": {
         "type": "object",
         "description": "Replace one visible current Knowledge item with this candidate.",
@@ -20408,6 +20662,78 @@
             "description": "When it last changed."
           }
         }
+      },
+      "ReviseRelaxationBody": {
+        "allOf": [
+          {
+            "type": "object",
+            "description": "Complete reviewed terms for create and revision requests.",
+            "required": [
+              "subject_identity_id",
+              "action",
+              "max_sensitivity",
+              "requested_start_at",
+              "requested_end_at",
+              "reason"
+            ],
+            "properties": {
+              "action": {
+                "type": "string",
+                "enum": [
+                  "knowledge.read"
+                ]
+              },
+              "max_sensitivity": {
+                "type": "string"
+              },
+              "reason": {
+                "type": "string"
+              },
+              "requested_end_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "requested_start_at": {
+                "type": "string",
+                "format": "date-time"
+              },
+              "subject_identity_id": {
+                "type": "string",
+                "format": "uuid"
+              }
+            },
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "required": [
+              "expected_current_version_id"
+            ],
+            "properties": {
+              "expected_current_version_id": {
+                "type": "string",
+                "format": "uuid"
+              }
+            }
+          }
+        ]
+      },
+      "RevokeRelaxationBody": {
+        "type": "object",
+        "required": [
+          "expected_current_version_id",
+          "reason"
+        ],
+        "properties": {
+          "expected_current_version_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
       },
       "RollbackConfigurationBindingBody": {
         "type": "object",

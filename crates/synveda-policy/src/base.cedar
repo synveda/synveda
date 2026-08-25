@@ -2,13 +2,10 @@
 // pack at compile time — embedded and stored custom packs alike — so no
 // pack, however authored, can drop these rules.
 //
-// Until AUTHZ-4 this file held only forbids, and the sentence for it was
-// "these are the things no pack can escape". It now also holds one permit,
-// so the sentence is weaker: **these are the things no pack can change**
-// (ADR-0037 decision 7). The permit is last, and every forbid above it
-// still wins — including AUTHZ-5's `restricted` forbid, whose one `unless`
-// is the same grant the permit turns on, so the two read as one rule about
-// lapses seen from either end (ADR-0038 decision 5).
+// CPR-31 keeps one narrowly typed permit beside the forbids, so the contract
+// is **these are the things no pack can change**. The permit is last, and
+// every forbid above it still wins — including quarantine, sealing,
+// principal-scope privacy and service-token confinement (ADR-0090).
 //
 // Quarantined principals may do nothing (AUTH-2, ADR-0013 decision 5):
 // a forbid overrides any permit a pack adds, current or future.
@@ -24,8 +21,8 @@ forbid (
 // design: quarantine says *this caller* may do nothing, a seal says nothing
 // may be done to *this material*. A person's personal scope is sealed when
 // the directory says they have left, and from that moment no pack, no role
-// and no lapse reaches it — the lapse permit at the bottom of this file
-// could not anyway, because its `resource.kind != "principal"` privacy floor
+// and no policy relaxation reaches it — the typed permit at the bottom of
+// this file could not anyway, because its non-principal privacy floor
 // (ADR-0015 decision 4) already excludes every personal scope, sealed or
 // live.
 //
@@ -185,10 +182,9 @@ unless {
 // without an administrator and two distinct approvers, under every pack,
 // unauthorable away (ADR-0032 decision 4's invariant approval floor, on the
 // grant-key vocabulary since CPR-7). This is its mirror. Nothing reaches a
-// *reader* at `restricted` without a standing lapse — and because a lapse's
-// approval matrix resolves at the tier it declares, the grant that lifts
-// this forbid is one an administrator signed. One tier, one meaning, both
-// directions, the same role.
+// *reader* at `restricted`. Stable Knowledge can cross this floor only through
+// a matched, immutable relaxation whose VedaFlow matrix resolved at the tier
+// it declared. The retired record plane has no relaxation path.
 //
 // `context.sensitivity` is required by the schema, so this forbid can never
 // be skipped for want of the attribute — the ADR-0015 decision 5 shape,
@@ -204,49 +200,38 @@ forbid (
     principal,
     action == Synveda::Action::"MemoryRead",
     resource
-) when { context.sensitivity == "restricted" }
-unless { context.lapsed };
+) when { context.sensitivity == "restricted" };
 
-// Knowledge does not inherit the retired lapse override. Until the governed
-// relaxation successor explicitly extends the new vocabulary, restricted
-// Knowledge is not readable under any pack.
+// A matched immutable Knowledge relaxation may lift only this tier floor.
+// Every other forbid in this base layer still wins.
 forbid (
     principal,
     action == Synveda::Action::"KnowledgeRead",
     resource
-) when { context.sensitivity == "restricted" };
+) when { context.sensitivity == "restricted" }
+unless { context.relaxed };
 
-// Lapses (AUTHZ-4, ADR-0037 decision 7): the product's one base-layer
-// *permit*, and it is here rather than in each pack because a lapse is an
-// override. A pack that could neutralise it by not mentioning it would make
-// "lapse" mean different things in different tenants, which is the
-// trustworthiness rule that reserved the product pack names (ADR-0014
-// decision 6).
-//
-// `context.lapsed` is the PDP's own resolution and is never a caller's
-// claim: it is true only when a standing grant row covers exactly this
-// principal (placed at or under the grantee scope), this action, and this
-// resource — and only when the pack in force at the resource still admits
-// lapses at all. So a pack refuses the mechanism outright by setting its
-// lapse ceiling to zero (decision 5), visibly, in configuration.
-//
-// A pack that wants to refuse it for a *subtree* writes its own forbid;
-// Cedar honours that over any permit, which is exactly the escape hatch a
-// base-layer permit needs to be safe.
-//
-// What still forbids over this permit is the reason it is safe to put here:
-// a quarantined principal is unaffected, and a service identity cannot be
-// widened past its anchor, because ADR-0018's confinement forbid above
-// carves out only own-chain MemoryRead. `resource.kind != "principal"` is
-// ADR-0015 decision 4's privacy floor restated where it cannot be
-// forgotten — nobody's personal memory is disclosed by a lapse, and the
-// grant surface refuses such a target by name as well. Since CPR-6 the
-// forbid above says the same thing for every action, so this clause is the
-// narrower of two statements of one rule rather than the only one.
+// The relaxation is interpreted inside Cedar, never after a denial. Two
+// clauses cover the list/query scope resource and an exact KnowledgeItem.
+// Personal scopes remain excluded here and at the command/store boundary;
+// quarantine, sealing, and service-token confinement remain overriding
+// forbids.
 permit (
     principal,
-    action == Synveda::Action::"MemoryRead",
+    action == Synveda::Action::"KnowledgeRead",
     resource
 ) when {
-    context.lapsed && resource.kind != "principal"
+    context.relaxed
+        && resource is Synveda::Scope
+        && resource.kind != "principal"
+};
+
+permit (
+    principal,
+    action == Synveda::Action::"KnowledgeRead",
+    resource
+) when {
+    context.relaxed
+        && resource is Synveda::KnowledgeItem
+        && resource.scope.kind != "principal"
 };

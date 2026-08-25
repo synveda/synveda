@@ -44,12 +44,15 @@ programme convention established in Prompt 1.
 | Versioned OKF v0.2 validation, import planning/candidates and deterministic Knowledge export | CPR-27 | **complete** | `98f5bcd` | `0dbf163` | adapter 6/6; types 1/1; store 1/1; gateway 1/1; capture 4/4; OpenAPI 5/5; RLS 1/1; console 197/197 | PASS | PASS (`synveda_test_1177`) | canonical v0.2 pinned to `ad30107`; isolated `demos/cpr-27-okf-v02.sh` PASS; no remote fetch/live-host claim | none |
 | Public-API OKF CLI and generated project-console import/export workflows | CPR-28 | **complete** | `0dbf163` | `683a17d` | adapter 6/6; CLI 150/150; console 207/207; public API 1/1; production build PASS | PASS | N/A — client/pure-validation only | isolated `demos/cpr-28-okf-workflows.sh` PASS: real local fixture + public lifecycle + generated console; no remote-host claim | none |
 | Exact generated public contract and console/CLI/generic-MCP client convergence | CPR-29 | **complete** | `683a17d` | `b33ba51` | OpenAPI 6/6; service 5/5; audit 13/13; CLI 156/156 + corpus 5/5; MCP 44/44; console 208/208; Claude adapter 98/98 | PASS | PASS | isolated `demos/cpr-29-public-contract.sh` PASS; generated API + 78-script demo gate PASS | none |
-| Versioned governed runtime configuration, templates and scope bindings | CPR-30 | **complete** | `b33ba51` | next checkpoint | domain 4/4; API 1/1; capture 4/4; context 3/3; approvals 6/6; packs 7/7; PDP 11/11; RLS 83/83; OpenAPI 6/6; console 210/210 | PASS | PASS | isolated `demos/cpr-30-governed-configuration.sh` PASS: 2 artifacts, 3 versions, 2 bindings, 6 audited applies, zero assignment tables; 79-script demo gate PASS | none |
+| Versioned governed runtime configuration, templates and scope bindings | CPR-30 | **complete** | `b33ba51` | `ed7d233` | domain 4/4; API 1/1; capture 4/4; context 3/3; approvals 6/6; packs 7/7; PDP 11/11; RLS 83/83; OpenAPI 6/6; console 210/210 | PASS | PASS | isolated `demos/cpr-30-governed-configuration.sh` PASS: 2 artifacts, 3 versions, 2 bindings, 6 audited applies, zero assignment tables; 79-script demo gate PASS | none |
+| Governed auto-apply audit and versioned exact-subject policy-relaxation successor | CPR-31 | **complete** | `ed7d233` | next checkpoint | types 210/210 + serde 50/50; policy relaxation 3/3; API 2/2; RLS 83/83; OpenAPI 6/6; audit 27/27; CLI 155/155 + MCP 5/5; console 209/209; retrieval 53/53 | PASS | PASS (`synveda_test_35856`) | isolated `demos/cpr-31-governed-relaxations.sh` PASS: 2 aggregates, 3 immutable versions, 5 governed changes, zero predecessor tables; 79-script demo gate PASS | none |
 
-**Exact next objective:** allocate and complete CPR-31, the governed auto-apply
-and relaxation successor: audit every Knowledge, Skill, Tool and Configuration
-mutation for one VedaFlow path, then replace `policy_lapses` with versioned,
-time-boxed relaxations on the current scopes and artifact families.
+**Exact next objective:** allocate and execute CPR-32 from the CPR-31
+checkpoint: extend the one VedaFlow proposal/change model across Knowledge,
+Skills, Tool servers/bindings, Configuration, policy relaxations and OKF
+publication, including distinct-person and self-approval rules, inherited
+review requirements, revision-aware verdicts, cancellation and one Advanced
+Reviews surface.
 
 ### Starting-point objective map
 
@@ -4174,5 +4177,88 @@ frontend changes, deletions, tests, and the resulting commit hash.
 
 - **Commit.** `feat(configuration): version governed runtime profiles
   (CPR-30)` on `feat/context-platform-mvp`.
+- **Commit hash.** Written by the next checkpoint under the programme's
+  next-checkpoint convention.
+
+### Repository governance objective — governed auto-apply and policy relaxations (CPR-31)
+
+- **Selected feature and decision.** **CPR-31** is delivered from `ed7d233`;
+  it records CPR-30's commit as
+  `ed7d233879e96bebf8030c1d3d135fd5df2a2cbe`. Accepted ADR-0090 fixes the
+  successor boundary: a relaxation is one stable aggregate with immutable
+  reviewed versions, not an alternate authorisation path. Each version names
+  one provisioned identity, its frozen principal spelling, one exact
+  non-principal scope, the closed `knowledge.read` action, a sensitivity
+  ceiling, requested window, database-time hard expiry, reason, creator,
+  exact approvers and the effective Configuration version/digest.
+
+- **One governed mutation path.** Create, revise and revoke are typed
+  `Policy/apply` VedaFlow effects. Before proposal and again before effect,
+  the gateway checks aggregate and tenant ownership, exact subject and scope,
+  `RelaxationWrite`, `ProposalOpen`, the live pack matrix, canonical payload,
+  current Configuration bounds and stale-head preconditions. Open
+  collaboration may satisfy that same persisted change with zero explicit
+  approvals; standard retains it for an administrator; regulated retains it
+  for two distinct administrators. Rejection remains terminal and applies no
+  version. Existing Knowledge, Capture/OKF, Skill, Tool and Configuration
+  acceptance suites were rerun to prove that their personal auto-apply paths
+  still persist typed VedaFlow history, immutable versions and content-free
+  audit rather than branching around governance.
+
+- **Authorisation and expiry.** Request gathering selects only database-time
+  active rows matching the authenticated principal and the current
+  Configuration's narrowed action/duration controls. Cedar receives those
+  immutable matches as `context.relaxed` and alone decides the exact
+  Knowledge read; personal-scope privacy, quarantine and service-identity
+  confinement remain base-layer forbids. Expiry therefore withdraws authority
+  without relying on a worker. The sweep records one content-free,
+  hash-chained expiry event and never extends or recreates permission.
+
+- **Schema and hard cut.** Migration `0056_governed_policy_relaxations` adds
+  `policy_relaxations`, `policy_relaxation_versions` and
+  `policy_relaxation_changes`, with tenant-qualified ownership, immutable
+  version and append-only change triggers, enabled and forced RLS, exact
+  current-head constraints and bounded indexes. It drops `policy_lapses`, its
+  effect type, policy-pack setting, functions, store module and public routes
+  without reading or translating old rows. Epoch **2** now has **54 migration
+  files**, **693** checked SQLx query descriptions and **91** tenant tables in
+  the forced-RLS completeness inventory.
+
+- **Generated product surfaces.** Two net operations grow the exact
+  authenticated contract **162 → 164 operations** and **255 → 260 schemas**:
+  cursor-paginated governed relaxation reads plus idempotent create,
+  revision-preconditioned revise and revoke commands. `synveda relaxation
+  list|show|create|revise|revoke` is an HTTP-only client. Advanced Scopes uses
+  generated operations and types to show the exact subject, target, action,
+  immutable versions, governance outcome and expiry/revocation state;
+  Configuration links to that single surface. The old lapse demo is replaced
+  by the governed-relaxation acceptance narrative.
+
+- **Gate findings.** Database execution found that the new closed action
+  vocabulary parsed `knowledge.read` but its derived serializer emitted
+  `knowledge_read`; the enum now pins the canonical dotted spelling and
+  explicitly rejects the underscore form. That correction necessarily moved
+  a Configuration digest, so the explorer fixture was regenerated through
+  its recorder and immediately replayed. The RLS completeness inventory also
+  had all three new forced tables but listed them on the wrong side of
+  `policy_packs`; its sorted-order assertion is restored. None of these
+  failures was suppressed or excluded.
+
+- **Tests and exact results.** Types **210/210** plus serde **50/50**, policy
+  relaxation **3/3**, public lifecycle **2/2**, audit **27/27**, service
+  confinement regression **1/1**, forced RLS **83/83**, OpenAPI **6/6**,
+  complete CLI **155/155** plus authentic MCP corpus **5/5**, retrieval
+  **53/53** (one deliberate load test ignored), complete console **209/209**
+  and production build pass. Generated API/SQLx, dependency, licence, backlog,
+  ADR and **79-script** demo-drift checks pass. The console bundle is 418.50 kB
+  JavaScript (116.95 kB gzip) and 18.85 kB CSS (4.29 kB gzip). Isolated
+  `demos/cpr-31-governed-relaxations.sh` passes with two stable aggregates,
+  three immutable versions, five governed changes and no `policy_lapses`
+  table. Complete final-byte `make ci` and full disposable-Postgres
+  `make db-test` **PASS**, the latter against `synveda_test_35856`. This is
+  deterministic local product evidence and adds no external-provider claim.
+
+- **Commit.** `feat(governance): add governed auto-apply and relaxations
+  (CPR-31)` on `feat/context-platform-mvp`.
 - **Commit hash.** Written by the next checkpoint under the programme's
   next-checkpoint convention.

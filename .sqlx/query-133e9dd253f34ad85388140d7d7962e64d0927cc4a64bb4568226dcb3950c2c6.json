@@ -1,0 +1,104 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select id, tenant_id, governing_scope_id, current_version_id,\n                  revision, created_at, created_by, updated_at, updated_by,\n                  revoked_at, revoked_by, revocation_proposal_id,\n                  revocation_reason, expiry_recorded_at\n             from policy_relaxations\n            where tenant_id = $1\n              and ($2::uuid is null or governing_scope_id = $2)\n              and ($3::timestamptz is null\n                   or (updated_at, id) < ($3, $4::uuid))\n            order by updated_at desc, id desc\n            limit $5",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "tenant_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "governing_scope_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "current_version_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "revision",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "created_by",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 7,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "updated_by",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 9,
+        "name": "revoked_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 10,
+        "name": "revoked_by",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 11,
+        "name": "revocation_proposal_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 12,
+        "name": "revocation_reason",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 13,
+        "name": "expiry_recorded_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Timestamptz",
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "133e9dd253f34ad85388140d7d7962e64d0927cc4a64bb4568226dcb3950c2c6"
+}

@@ -1,17 +1,16 @@
 //! What happens to a person's own memory when the directory moves them
 //! (AUTH-4, ADR-0059 decision 10).
 //!
-//! Rides the loaded pack beside [`crate::RetentionConfig`] and
-//! [`crate::LapseConfig`], and resolves at the scope the person is moving
-//! **away from** — authority over material belongs where the material is,
-//! which is ADR-0037's rule for lapses applied to a move.
+//! Rides the loaded pack beside [`crate::RetentionConfig`] and resolves at
+//! the scope the person is moving **away from** — authority over material
+//! belongs where the material is.
 //!
 //! ## Why this is a policy question at all
 //!
 //! The instinct is that carrying somebody's notes into a more open
 //! department discloses them. It does not: every embedded pack excludes
 //! user-kind scopes from every content-role grant (ADR-0015 decision 4's
-//! privacy floor), and the base layer's lapse permit excludes them too, so
+//! privacy floor), and the base layer's explicit principal-scope forbid means
 //! a personal scope is readable by its owner and by nobody else no matter
 //! where in the tree it hangs.
 //!

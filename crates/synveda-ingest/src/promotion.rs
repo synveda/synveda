@@ -494,8 +494,8 @@ async fn evaluate_scope(
         default_pack: default_pack.as_deref(),
         sensitivity: None,
         // The engine acts under the material owner's own authority at
-        // their own scope; no lapse bears on that (ADR-0037 decision 2).
-        lapses: &[],
+        // their own scope; a relaxation cannot target it (ADR-0090).
+        relaxations: &[],
     };
     let pack = deps
         .pdp
@@ -865,7 +865,7 @@ async fn authorize_owner(
         assignments: &assignments,
         default_pack: default_pack.as_deref(),
         sensitivity: None,
-        lapses: &[],
+        relaxations: &[],
     };
     let decision = deps.pdp.authorize(
         &principal,
@@ -914,7 +914,7 @@ async fn resolve_requirement(
         assignments: &assignments,
         default_pack: default_pack.as_deref(),
         sensitivity: None,
-        lapses: &[],
+        relaxations: &[],
     };
     let pack = deps
         .pdp

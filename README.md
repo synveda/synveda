@@ -119,10 +119,10 @@ switchers, a People page and the governance surfaces under **Advanced**. See
 | **2 — Governance** | VedaFlow, lapses, dedup, decay, recall, graph, audit queries, prompts, context packs, eval gates | ✅ 22/22 |
 | **3 — Enterprise** | SCIM, real IdPs, skills registry, console, Helm, release & distribution, residency, Qdrant | 🚧 14/27 |
 | **4 — Ecosystem** | SDKs, importers, telemetry, DR, gateway scale | 🚧 2/17 |
-| **5 — Context platform** | The redesign: fresh epoch, governed scopes, sessions, immutable Knowledge, capture, explainable context, Skills, Tools, OKF, one public contract and governed runtime configuration | 🚧 30 packages delivered; programme continues |
+| **5 — Context platform** | The redesign: fresh epoch, governed scopes, sessions, immutable Knowledge, capture, explainable context, Skills, Tools, OKF, one public contract, governed runtime configuration and policy relaxations | 🚧 31 packages delivered; programme continues |
 
-One further feature (AUTH-6, session and token hygiene) is unscheduled — **127
-in total, 96 delivered** (`docs/backlog/STATUS.md` is the count `make ci`
+One further feature (AUTH-6, session and token hygiene) is unscheduled — **128
+in total, 97 delivered** (`docs/backlog/STATUS.md` is the count `make ci`
 checks). Phase 5 is the 33-prompt context-platform redesign, in flight on
 `feat/context-platform-mvp`; Phase 3 is paused mid-phase behind it. The fourteen Phase 3 items finished are the skills registry
 and its governance (SKIL-1 through SKIL-4), the installable single binary
@@ -258,7 +258,7 @@ Being explicit, so nothing here misleads:
   A host killed before any lifecycle hook writes the in-flight turn can still
   lose that tail; nothing which reached the local spool is lost.
 - **The authenticated application contract is exact.** CPR-29 derives one
-  executable catalogue; with CPR-30 it contains 162 bearer-authenticated
+  executable catalogue; with CPR-31 it contains 164 bearer-authenticated
   `/v1` operations,
   checks it against OpenAPI in both directions, and generates the console
   operation/type table from that document. The console contains no
@@ -266,6 +266,13 @@ Being explicit, so nothing here misleads:
   CLI commands and the generic MCP adapter use public PDP-governed routes.
   OAuth, operational probes and the separately authenticated `/scim/v2`
   protocol intentionally remain outside this application contract.
+- **Policy relaxation is governed data, not an override.** One stable
+  aggregate and immutable versions name the exact subject, scope,
+  `knowledge.read` permission, tier and hard expiry. Create, revise and revoke
+  all enter VedaFlow; a personal profile may auto-apply the recorded change,
+  while stricter profiles retain or reject it. The database clock ends access,
+  current Configuration may only narrow it, and Cedar still makes the read
+  decision. The predecessor table, routes, CLI and pack setting are gone.
 - **No Python/TS SDKs** (ADPT-4) and **no importers** from claude-mem, Cognee or
   mem0 (ADPT-5).
 - **No per-tenant encryption keys, WORM export or SIEM streaming**

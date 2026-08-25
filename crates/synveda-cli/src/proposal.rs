@@ -41,7 +41,7 @@ struct Summary {
     #[serde(default)]
     source_scope_path: Option<String>,
     asset: String,
-    /// What running it would do: `published`, or `lapse` since AUTHZ-4.
+    /// What running it would do: publish, classify, or apply a typed command.
     effect: String,
     state: ProposalView,
     sensitivity: Sensitivity,

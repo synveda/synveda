@@ -378,26 +378,11 @@ namespace Synveda {
     // comparing an encoding, because with four values the enumeration is the
     // documentation and there is no arithmetic to get wrong.
     //
-    // `lapsed` is required — not optional — because a policy that
-    // referenced a missing attribute would error,
-    // Cedar would drop it, and the base layer's lapse permit would silently
-    // stop existing. The PDP sets it on every MemoryRead request, true only
-    // when a standing grant covers exactly this (principal, action, scope)
-    // **at or above this tier** *and* the pack in force at that scope still
-    // admits lapses at all (AUTHZ-4, ADR-0037 decisions 5 and 9; AUTHZ-5,
-    // ADR-0038 decision 6). `sensitivity` is required for the same reason:
-    // the base layer's `restricted` forbid must never go missing for want of
-    // an attribute.
-    //
-    // They are deliberately the only action's attributes. A lapse relaxes a
-    // closed vocabulary (synveda_types::LapseAction), and an attribute that
-    // existed on every action would be an invitation to widen that
-    // vocabulary in a pack rather than in a reviewed diff.
     action MemoryRead
         appliesTo {
             principal: [Principal],
             resource: [Scope],
-            context: { roles: Set<String>, lapsed: Bool, sensitivity: String },
+            context: { roles: Set<String>, sensitivity: String },
         };
 
     // Reclassification (AUTHZ-5, ADR-0038 decision 9): may this principal
@@ -432,16 +417,15 @@ namespace Synveda {
             context: { roles: Set<String> },
         };
 
-    // Knowledge reads carry the exact immutable revision's sensitivity.
-    // Unlike the pre-cut MemoryRead action they have no lapse attribute:
-    // CPR-16 adds no second override path, and restricted Knowledge therefore
-    // remains behind the invariant floor until the governed-relaxation
-    // successor deliberately extends this vocabulary.
+    // Knowledge reads carry the exact immutable revision's sensitivity and a
+    // required PDP-computed relaxation match. `relaxed` is never a caller
+    // claim; omitting it makes the request invalid rather than dropping the
+    // base-layer privacy and restricted-tier rules (CPR-31, ADR-0090).
     action KnowledgeRead
         appliesTo {
             principal: [Principal],
             resource: [Scope, KnowledgeItem],
-            context: { roles: Set<String>, sensitivity: String },
+            context: { roles: Set<String>, sensitivity: String, relaxed: Bool },
         };
 
     action KnowledgeWrite, KnowledgeForget
@@ -458,10 +442,10 @@ namespace Synveda {
     // `PromptRead` carries `sensitivity` for MemoryRead's reason: with four
     // values the seam can be asked about a tier before any content is
     // fetched, so a pack prices a `confidential` prompt exactly as it prices
-    // confidential memory. It deliberately carries **no** `lapsed`: the
-    // lapse vocabulary is closed over `memory.read` (ADR-0037 decision 2)
-    // and widening it is a lapse feature's decision, taken in two reviewed
-    // places, not a side effect of adding an asset type. And no pack names
+    // confidential memory. It deliberately carries no relaxation input:
+    // CPR-31 closes that vocabulary over `KnowledgeRead`, and widening it is
+    // a reviewed feature decision, not a side effect of adding an asset type.
+    // And no pack names
     // `restricted` here, because nothing in the product can mint that tier
     // for an authored asset — migration 0029's CHECK is where that is
     // structural (ADR-0049 decision 5).
@@ -577,6 +561,16 @@ namespace Synveda {
         appliesTo {
             principal: [Principal],
             resource: [Tenant, Scope],
+            context: { roles: Set<String> },
+        };
+
+    // Immutable time-boxed permission changes. Every create, revision and
+    // revocation is a typed Policy/apply VedaFlow change, so one action is
+    // sufficient and there is no narrowing-only bypass path.
+    action RelaxationWrite
+        appliesTo {
+            principal: [Principal],
+            resource: [Scope],
             context: { roles: Set<String> },
         };
 
@@ -764,32 +758,4 @@ namespace Synveda {
             context: { roles: Set<String> },
         };
 
-    // The lapse plane (AUTHZ-4, ADR-0037 decision 15).
-    //
-    // LapseGrant runs an approved lapse proposal's effect: it opens a
-    // time-boxed, reasoned grant of one action from one scope to another.
-    // LapseRevoke ends a standing grant early.
-    //
-    // Two actions rather than one, on ChannelRollback's precedent and for
-    // its reason: a pack must be able to grant one broadly and the other
-    // narrowly, because the responder who should be able to end a lapse at
-    // 3am is not the steward who should be able to open one. Revoking
-    // resolves no matrix — it installs nothing and can only narrow.
-    //
-    // The resource of both is the **target** scope, the one whose material
-    // is disclosed. Authority over a disclosure belongs where the material
-    // is, never where the request came from. Never tenant-level: a lapse is
-    // always about one node's material.
-    //
-    // Neither is PolicyAssign, which is the obvious reuse and the wrong one:
-    // PolicyAssign is the single action decided with the resource's own
-    // assignment skipped (ADR-0014 decision 4), so a lapse would be
-    // authorized under the node's *parent's* pack while its approval matrix
-    // resolved under the node's own.
-    action LapseGrant, LapseRevoke
-        appliesTo {
-            principal: [Principal],
-            resource: [Scope],
-            context: { roles: Set<String> },
-        };
 }

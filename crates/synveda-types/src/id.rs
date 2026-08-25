@@ -161,9 +161,15 @@ define_id!(
 );
 
 define_id!(
-    /// Identifies a policy lapse — one time-boxed, dual-approved grant of a
-    /// single action from one scope to another (AUTHZ-4, ADR-0037).
-    LapseId
+    /// Identifies one stable governed policy relaxation aggregate (CPR-31,
+    /// ADR-0090).
+    RelaxationId
+);
+
+define_id!(
+    /// Identifies one immutable version of a governed policy relaxation
+    /// (CPR-31, ADR-0090).
+    RelaxationVersionId
 );
 
 define_id!(

@@ -294,7 +294,7 @@ async fn get_inner(state: &AppState) -> Result<MeView> {
     //
     // Both decisions come off **one** `gather`. That is not an optimisation
     // for its own sake: a gather is four reads (the identity, the chain, the
-    // assignments, the bindings, the standing lapses), and this route is the
+    // assignments, the grants and the active relaxations), and this route is the
     // one a client calls on every page load. Sharing the input changes no
     // verdict — it is the same rows either decision would have read, at the
     // same instant — and it is the shape ADR-0042 decision 6 measured for the

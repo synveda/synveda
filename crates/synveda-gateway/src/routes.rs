@@ -303,12 +303,16 @@ define_routes! {
     ],
     "/v1/projects/{project_id}/tool-config" => [GET crate::tool_registry::generate_config],
 
-    "/v1/proposals/{id}/lapse" => [POST crate::lapses::grant],
-    "/v1/lapses" => [
-        GET crate::lapses::list,
-        POST crate::lapses::propose,
+    "/v1/relaxations" => [
+        GET crate::relaxations::list,
+        POST crate::relaxations::create,
     ],
-    "/v1/lapses/{id}/revoke" => [POST crate::lapses::revoke],
+    "/v1/relaxations/{id}" => [
+        GET crate::relaxations::get,
+        PATCH crate::relaxations::revise,
+    ],
+    "/v1/relaxations/{id}/versions" => [GET crate::relaxations::versions],
+    "/v1/relaxations/{id}/revoke" => [POST crate::relaxations::revoke],
     "/v1/admin/scopes/{scope_id}/curators" => [
         GET crate::curators::get,
         PUT crate::curators::put,

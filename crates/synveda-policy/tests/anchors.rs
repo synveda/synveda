@@ -192,7 +192,7 @@ impl<'a> Ask<'a> {
             resources: self.resources,
             assignments: self.assignments,
             default_pack: Some(self.pack),
-            lapses: &[],
+            relaxations: &[],
             sensitivity: None,
         }
     }

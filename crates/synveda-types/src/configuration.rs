@@ -12,6 +12,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::knowledge::KnowledgeType;
+use crate::relaxation::{PRODUCT_MAX_RELAXATION_SECS, RelaxationAction};
 use crate::{
     ConfigurationArtifactId, ConfigurationBindingId, ConfigurationVersionId, Error, ProposalId,
     Result, ScopeId, TenantId, TraceRetentionMode,
@@ -269,6 +270,62 @@ pub struct AdvertisementConfiguration {
     pub tools: bool,
 }
 
+/// Policy-relaxation bounds. These settings can only narrow the closed
+/// product vocabulary; Cedar remains the authority that turns a matched row
+/// into a decision.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RelaxationConfiguration {
+    /// Master narrowing switch. Disabling it ends every standing relaxation
+    /// under this effective configuration on the next request.
+    pub enabled: bool,
+    /// Maximum authority window calculated at effect time.
+    pub maximum_duration_secs: u32,
+    /// Sorted, duplicate-free subset of the product vocabulary.
+    pub allowed_actions: Vec<RelaxationAction>,
+}
+
+impl RelaxationConfiguration {
+    /// Validate the canonical narrowing shape.
+    pub fn validate(&self) -> Result<()> {
+        if self.maximum_duration_secs > PRODUCT_MAX_RELAXATION_SECS {
+            return Err(Error::Invalid {
+                message: format!(
+                    "relaxation maximum_duration_secs must be at most {PRODUCT_MAX_RELAXATION_SECS}"
+                ),
+            });
+        }
+        if self
+            .allowed_actions
+            .windows(2)
+            .any(|pair| pair[0] >= pair[1])
+        {
+            return Err(Error::Invalid {
+                message: "relaxation allowed_actions must be sorted and unique".to_owned(),
+            });
+        }
+        if self.enabled {
+            if self.maximum_duration_secs == 0 || self.allowed_actions.is_empty() {
+                return Err(Error::Invalid {
+                    message: "enabled relaxations need a positive duration and at least one action"
+                        .to_owned(),
+                });
+            }
+        } else if self.maximum_duration_secs != 0 || !self.allowed_actions.is_empty() {
+            return Err(Error::Invalid {
+                message: "disabled relaxations must use zero duration and no actions".to_owned(),
+            });
+        }
+        Ok(())
+    }
+
+    /// Whether a standing row may participate under this current document.
+    #[must_use]
+    pub fn permits(&self, action: RelaxationAction) -> bool {
+        self.enabled && self.allowed_actions.binary_search(&action).is_ok()
+    }
+}
+
 /// One complete immutable runtime document.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -283,6 +340,8 @@ pub struct ConfigurationDocument {
     pub freshness: FreshnessConfiguration,
     /// Skill and Tool advertisement switches.
     pub advertisement: AdvertisementConfiguration,
+    /// Time-boxed policy-relaxation bounds.
+    pub relaxations: RelaxationConfiguration,
     /// Sorted, duplicate-free provider-family allowlist.
     pub allowed_external_providers: Vec<ExternalProvider>,
 }
@@ -386,6 +445,16 @@ impl ConfigurationDocument {
                 skills: true,
                 tools: true,
             },
+            relaxations: RelaxationConfiguration {
+                enabled: true,
+                maximum_duration_secs: match template {
+                    ConfigurationTemplate::Personal => 7 * 24 * 60 * 60,
+                    ConfigurationTemplate::Team | ConfigurationTemplate::Enterprise => {
+                        30 * 24 * 60 * 60
+                    }
+                },
+                allowed_actions: vec![RelaxationAction::KnowledgeRead],
+            },
             allowed_external_providers: providers,
         }
     }
@@ -410,6 +479,7 @@ impl ConfigurationDocument {
         self.capture.validate()?;
         self.context.validate()?;
         self.freshness.validate()?;
+        self.relaxations.validate()?;
         if self
             .allowed_external_providers
             .windows(2)

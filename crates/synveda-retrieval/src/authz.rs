@@ -12,20 +12,19 @@
 //! `standard`'s shared subtree finally become reachable, seven ADRs
 //! after ADR-0024 option 2 parked them.
 //!
-//! Three sources of candidate, one decision per `(scope, tier)` for all
-//! of them: the caller's chain, the scopes a lapse reaches (AUTHZ-4), and
-//! recall's widened set. They differ only in where the scope came from and
-//! what its channel rule is — never in how it is decided, because a second
-//! way to decide would be a second answer to "may this caller see this
-//! record" (seed §2.2).
+//! Two sources of candidate, one decision per `(scope, tier)` for all of
+//! them: the caller's chain and recall's widened set. They differ only in
+//! where the scope came from — never in how it is decided, because a
+//! second way to decide would be a second answer to "may this caller see
+//! this record" (seed §2.2).
 
 use synveda_policy::{
     AuthzContext, EntityBatch, Pdp, PermittedTiers, Principal, Resource, ScopeNode,
 };
 use synveda_types::anchor::ScopeAnchor;
 use synveda_types::{
-    CompositionConfig, GroupId, Lapse, LapseId, PolicyAssignment, Result, ScopeId, ScopeTier,
-    Sensitivity, TraceRetentionMode,
+    CompositionConfig, GroupId, PolicyAssignment, Result, ScopeId, ScopeTier, Sensitivity,
+    TraceRetentionMode,
 };
 
 use crate::compose::ComposeScope;
@@ -55,21 +54,6 @@ pub struct MemoryReadInputs<'a> {
     pub assignments: &'a [PolicyAssignment],
     /// The tenant's stored default pack, if any.
     pub default_pack: Option<&'a str>,
-    /// The lapses standing over the caller (AUTHZ-4, ADR-0037): grants
-    /// whose grantee scope is on `chain`, neither revoked nor expired as of
-    /// the read that produced them.
-    ///
-    /// These reach *every* decision the walk takes, including the chain's:
-    /// a grant naming a scope the caller is already under is redundant with
-    /// the membership floor, not wrong.
-    pub lapses: &'a [Lapse],
-    /// The off-chain scopes those grants reach, each with the rows its own
-    /// decision needs — `synveda_policy::lapsed_scopes` over `lapses`, with
-    /// every target's chain and assignments resolved by the caller.
-    ///
-    /// A lapse is a row that names its target (ADR-0037 decision 13),
-    /// which is what made these enumerable before `candidates` existed.
-    pub lapsed: &'a [LapsedScope<'a>],
     /// Recall's widened candidate set (CTX-5, ADR-0042 decision 2): the
     /// scopes that could contribute a record to *this* request, which is
     /// how a pack's own permits beyond the chain — granted subtrees,
@@ -77,43 +61,20 @@ pub struct MemoryReadInputs<'a> {
     ///
     /// **Empty for every `inject`**, which is what keeps ADR-0024
     /// decision 1's universe exactly where it was on the hot path. A scope
-    /// already on `chain` or already reached by a lapse is skipped rather
-    /// than decided twice: the nearer source wins, because it is the one
-    /// that carries the gradient position and, for a lapse, the grant id
-    /// the audit event names.
+    /// already on `chain` is skipped rather than decided twice.
     pub candidates: &'a [CandidateScope<'a>],
 }
 
 /// One scope of recall's widened universe, with what deciding it costs
 /// (CTX-5, ADR-0042 decisions 2 and 3).
 ///
-/// Structurally a [`LapsedScope`] without the grant, and decided by the
-/// same code — the difference is the channel rule. A lapse admits only
-/// what its target stands behind (ADR-0037 decision 11); a widened
-/// candidate is an ordinary pack grant, so it composes under that scope's
-/// own channel rule exactly as a chain scope does.
+/// An ordinary pack-visible scope, decided under its own chain and
+/// assignments and composed under that scope's own channel rule.
 #[derive(Debug, Clone, Copy)]
 pub struct CandidateScope<'a> {
     /// The scope to decide.
     pub scope_id: ScopeId,
     /// That scope's own chain, node-first, from the scope closure.
-    pub chain: &'a [ScopeNode],
-    /// Pack assignments for that chain's nodes.
-    pub assignments: &'a [PolicyAssignment],
-}
-
-/// One off-chain scope a lapse reaches, with what deciding it costs
-/// (ADR-0037 decision 10).
-///
-/// The chain and assignments are the caller's to resolve — this crate
-/// touches no storage — and they are the honest price of the feature: a
-/// lapsed scope is not on the caller's chain, so the rows the chain walk
-/// already had do not cover it.
-#[derive(Debug, Clone, Copy)]
-pub struct LapsedScope<'a> {
-    /// The grant that reaches this scope.
-    pub lapse: &'a Lapse,
-    /// The **target's** own chain, node-first, from the scope closure.
     pub chain: &'a [ScopeNode],
     /// Pack assignments for that chain's nodes.
     pub assignments: &'a [PolicyAssignment],
@@ -190,7 +151,7 @@ pub fn permitted_chain_scopes(pdp: &Pdp, inputs: &MemoryReadInputs<'_>) -> Resul
             resources: &[],
             assignments: inputs.assignments,
             default_pack: inputs.default_pack,
-            lapses: inputs.lapses,
+            relaxations: &[],
             // Named per tier inside the sweep (ADR-0038 decision 2).
             sensitivity: None,
         };
@@ -225,10 +186,8 @@ pub fn permitted_chain_scopes(pdp: &Pdp, inputs: &MemoryReadInputs<'_>) -> Resul
 /// membership against are simply absent), so the failure mode of getting
 /// this wrong is a caller reading less than they should — never more.
 fn materialise(pdp: &Pdp, inputs: &MemoryReadInputs<'_>) -> Result<EntityBatch> {
-    let mut owned: Vec<Vec<ScopeNode>> =
-        Vec::with_capacity(1 + inputs.lapsed.len() + inputs.candidates.len());
+    let mut owned: Vec<Vec<ScopeNode>> = Vec::with_capacity(1 + inputs.candidates.len());
     owned.push(inputs.chain.to_vec());
-    owned.extend(inputs.lapsed.iter().map(|lapsed| lapsed.chain.to_vec()));
     owned.extend(
         inputs
             .candidates
@@ -263,18 +222,9 @@ struct OffChain<'a> {
     scope_id: ScopeId,
     chain: &'a [ScopeNode],
     assignments: &'a [PolicyAssignment],
-    /// The grant that reached it, when one did. `None` is recall's widened
-    /// universe: an ordinary pack permit, which is the whole difference
-    /// between the two off-chain sources.
-    lapse: Option<LapseId>,
 }
 
 /// Decides one off-chain scope and appends what it produced.
-///
-/// The lapse loop and recall's widened sweep share this because they must:
-/// two bodies would be two answers to "may this caller see this record",
-/// and the second one would be the one nobody's leak suite covers
-/// (ADR-0042 decision 3).
 ///
 /// Each is decided under **its own** chain and assignments — the effective
 /// pack is a property of the resource (ADR-0014 decision 3), and deciding a
@@ -305,14 +255,9 @@ fn plan_off_chain(
         resources: &[],
         assignments: scope.assignments,
         default_pack: inputs.default_pack,
-        lapses: inputs.lapses,
+        relaxations: &[],
         sensitivity: None,
     };
-    // Per tier here too, and for a lapse this is where the grant's declared
-    // ceiling shows up as a *smaller set*: the PDP sets `context.lapsed`
-    // only at tiers at or below what the grant declared (ADR-0038
-    // decision 6), so a working-tier grant plans the working tiers and a
-    // restricted one plans all four.
     let permitted = permitted_tiers(pdp, batch, inputs.principal, target, &context)?;
     decisions.push(ScopeDecision {
         scope_id: target,
@@ -320,7 +265,6 @@ fn plan_off_chain(
         sensitivities: permitted.memory.clone(),
         pack_name: permitted.decision.pack_name,
         pack_version: permitted.decision.pack_version,
-        lapse: scope.lapse,
     });
     if permitted.memory.is_empty() {
         return Ok(());
@@ -335,48 +279,13 @@ fn plan_off_chain(
         scope_id: target,
         kind: node.kind,
         path: path_of(scope.chain, &chain_paths(scope.chain), target),
-        // A lapse admits what the target scope stands behind and nothing
-        // else. Not the pack's channel rule: derived material is unreviewed
-        // extraction output nobody at the target has looked at, and it is
-        // the one thing the approvers could not inspect before consenting
-        // (ADR-0037 decision 11).
-        //
-        // A widened candidate is not a grant anybody approved — it is the
-        // pack's own permit, asked at last — so it composes under that
-        // scope's channel rule exactly as a chain scope does.
-        include_derived: scope.lapse.is_none() && effective.composition.channels.includes_derived(),
+        include_derived: effective.composition.channels.includes_derived(),
         sensitivities: permitted.memory,
-        // A **lapse** admits what its target published as memory and
-        // nothing else: ADR-0037 decision 11 bounded a grant to what its
-        // approvers could inspect, and a lapse names a scope rather than a
-        // bundle. A reader who should have another scope's conventions gets
-        // them by being placed or bound, which is the decision
-        // `ContextPackRead` already takes on the chain.
-        //
-        // A **widened candidate** is not a grant anybody approved — it is
-        // the pack's own permit, asked at last — so its pack material
-        // composes exactly as a chain scope's does. Same distinction
-        // `include_derived` makes one line up, for the same reason.
-        pack_sensitivities: if scope.lapse.is_some() {
-            Vec::new()
-        } else {
-            permitted.context_pack
-        },
-        // The same distinction one line down, and for skills it is not even
-        // reachable: a lapse admits what its target published as memory
-        // (ADR-0037 decision 11), and skills are advertised on `inject`
-        // only, which is the one path with no widened candidates at all
-        // (ADR-0054 decision 13). Written out rather than left to that
-        // coincidence, because the coincidence is CTX-5's to change.
-        skill_sensitivities: if scope.lapse.is_some() {
-            Vec::new()
-        } else {
-            permitted.skill
-        },
+        pack_sensitivities: permitted.context_pack,
+        skill_sensitivities: permitted.skill,
         index_tier: effective.composition.index_tier,
         index_entry_chars: effective.composition.index_entry_chars,
         skill_index: effective.composition.skill_index,
-        lapse: scope.lapse,
         retention: effective.retention,
     });
     Ok(())
@@ -448,14 +357,6 @@ pub struct ScopeDecision {
     pub pack_name: String,
     /// The pack's version at decision time.
     pub pack_version: i64,
-    /// The lapse that put this scope on the walk, when it was not the
-    /// caller's own chain that did (AUTHZ-4, ADR-0037 decision 12).
-    ///
-    /// This is the audit chain's half of "why was that in the block": the
-    /// `context.injected` event carries these decisions, so a grant that
-    /// reached a reader is named in the same event as the material it
-    /// reached them with.
-    pub lapse: Option<LapseId>,
 }
 
 /// The [`permitted_chain_scopes`] sweep extended with composition
@@ -488,7 +389,7 @@ pub fn composition_plan(pdp: &Pdp, inputs: &MemoryReadInputs<'_>) -> Result<Comp
         resources: &[],
         assignments: inputs.assignments,
         default_pack: inputs.default_pack,
-        lapses: inputs.lapses,
+        relaxations: &[],
         // Named per tier inside the sweep (ADR-0038 decision 2).
         sensitivity: None,
     };
@@ -520,7 +421,6 @@ pub fn composition_plan(pdp: &Pdp, inputs: &MemoryReadInputs<'_>) -> Result<Comp
             sensitivities: permitted.memory.clone(),
             pack_name: permitted.decision.pack_name,
             pack_version: permitted.decision.pack_version,
-            lapse: None,
         });
         // A scope is planned when it admits *any* kind of material.
         // `ContextPackRead` non-empty while `MemoryRead` is empty is the
@@ -564,7 +464,6 @@ pub fn composition_plan(pdp: &Pdp, inputs: &MemoryReadInputs<'_>) -> Result<Comp
             // Whether this scope's skills are named at all (SKIL-4,
             // ADR-0054 decision 11).
             skill_index: effective.composition.skill_index,
-            lapse: None,
             // The horizons this scope *serves* under, from the same
             // resolution (MEM-6, ADR-0040 decision 10). Nothing is stamped
             // on a record, so a pack applied a second ago governs the
@@ -573,35 +472,8 @@ pub fn composition_plan(pdp: &Pdp, inputs: &MemoryReadInputs<'_>) -> Result<Comp
         });
     }
 
-    // The scopes a lapse reaches, **after** the chain (ADR-0037
-    // decision 10): last in gradient order, so a lapsed record loses every
-    // conflict against the reader's own material rather than winning one.
-    //
-    // Each is decided under its own chain and its own assignments — the
-    // effective pack is a property of the resource (ADR-0014 decision 3),
-    // and deciding a scope with somebody else's chain would fall back to
-    // the tenant default and materialise an entity graph with no ancestry.
-    for lapsed in inputs.lapsed {
-        plan_off_chain(
-            pdp,
-            &batch,
-            inputs,
-            OffChain {
-                scope_id: lapsed.lapse.target_scope_id,
-                chain: lapsed.chain,
-                assignments: lapsed.assignments,
-                lapse: Some(lapsed.lapse.id),
-            },
-            &mut decisions,
-            &mut scopes,
-        )?;
-    }
-
     // Recall's widened universe, last (CTX-5, ADR-0042 decision 2) and
-    // empty for every inject. Scopes the chain or a lapse already planned
-    // are skipped: deciding one twice would double-count it in the audit
-    // event and could drop a lapse's grant id from the entry that names
-    // why the reader could see it.
+    // empty for every inject. Scopes the chain already planned are skipped.
     let planned: Vec<ScopeId> = decisions.iter().map(|decision| decision.scope_id).collect();
     for candidate in inputs.candidates {
         if planned.contains(&candidate.scope_id) {
@@ -615,7 +487,6 @@ pub fn composition_plan(pdp: &Pdp, inputs: &MemoryReadInputs<'_>) -> Result<Comp
                 scope_id: candidate.scope_id,
                 chain: candidate.chain,
                 assignments: candidate.assignments,
-                lapse: None,
             },
             &mut decisions,
             &mut scopes,

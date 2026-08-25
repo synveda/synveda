@@ -463,7 +463,7 @@ async fn publish_inner(
     // means compliance and two distinct approvers. Asking it at the set's
     // tier instead would make `restricted` material unpublishable by
     // anyone, which would leave the invariant floor's own cell unreachable
-    // and a restricted lapse with nothing to disclose.
+    // and a restricted governance decision with nothing to disclose.
     decide_asset_read(state, &input, asset_kind, scope_id)?;
     let entries: Vec<String> = drafts
         .iter()
@@ -669,8 +669,8 @@ fn channel_of(asset: AssetKind, channel: Option<Channel>) -> Result<ChannelRef> 
 /// third and SKIL-1 (ADR-0051 decision 10) the fourth — which **closes**
 /// ADR-0036 decision 3's deferral: every asset kind that has a channel now
 /// has a read action, and the refusal below survives only for `policy`,
-/// which has no channel at all (a lapse writes a row, ADR-0037
-/// decision 16).
+/// whose governed artifacts apply through typed effects rather than a
+/// content channel.
 fn decide_asset_read(
     state: &AppState,
     input: &crate::authz::DecisionInput,
@@ -685,9 +685,9 @@ fn decide_asset_read(
         AssetKind::ContextPack => {
             authz::decide_context_pack_read(state, input, resource, Sensitivity::WORKING)
         }
-        // `policy` is the one that remains, and it has no channel at all —
-        // a lapse writes a row (ADR-0037 decision 16). ADR-0036 decision 3's
-        // refusal-by-name now reaches no asset kind that has one.
+        // `policy` is the one that remains, and it has no content channel at
+        // all. ADR-0036 decision 3's refusal-by-name now reaches no asset kind
+        // that has one.
         other => Err(Error::Invalid {
             message: format!(
                 "{} has no channel, so there is nothing here to rewind or pin",

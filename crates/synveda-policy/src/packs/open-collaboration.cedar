@@ -1,4 +1,4 @@
-// open-collaboration@22 — tenant-wide read (seed §6, ADR-0014, ADR-0015,
+// open-collaboration@23 — tenant-wide read (seed §6, ADR-0014, ADR-0015,
 // ADR-0018, ADR-0020, ADR-0021, ADR-0031, ADR-0032, ADR-0036,
 // ADR-0037, ADR-0038).
 //
@@ -7,8 +7,8 @@
 // **non-restricted** content" is now the pack rather than a comment
 // pointing at a future feature: the org-wide permit names every tier below
 // `restricted`, and `restricted` is the base layer's forbid, liftable only
-// by a lapse that declared the tier and therefore cleared the invariant
-// floor's administrator requirement (ADR-0038 decisions 4 and 5).
+// by a matched immutable Knowledge relaxation that cleared the invariant
+// approval floor (ADR-0090).
 
 // **The privacy floor moved.** Until CPR-6 every permit here restated
 // `resource.kind != "user"`; it is now one base-layer forbid over
@@ -745,41 +745,16 @@ permit (
         && context.roles.containsAny(["curator", "reviewer", "owner", "administrator"])
 };
 
-// The lapse plane (AUTHZ-4, ADR-0037 decision 15): pack-uniform, like the
-// channel, quarantine and proposal planes and for the same reason — how
-// content crosses the trust boundary does not loosen per pack. What varies
-// per pack is the *window* (the LapseConfig ceiling) and the *approvals*
-// (the `policy` cell of the matrix, which has carried tech plan §2.4's lapse
-// row since FLOW-3).
-//
-// Granting is the administrator's act (seed §6: "a steward may apply a
-// scoped, reasoned, time-boxed override" — `steward` is `administrator`
-// since ADR-0074 decision 6), with owner above it. Curator is deliberately
-// absent: a lapse is policy, and ADR-0015 put the policy plane at that
-// level and above. The resource is the scope whose material is disclosed,
-// so an administrator granted at an org unit may open its subtree's
-// material and may not open a sibling's.
+// Governed relaxations (CPR-31, ADR-0090): create, revision and revocation
+// use one Policy/apply path and the same owner/administrator authority at the
+// exact scope whose Knowledge may be disclosed.
 permit (
     principal,
-    action == Synveda::Action::"LapseGrant",
+    action == Synveda::Action::"RelaxationWrite",
     resource
 ) when {
     resource in principal.tenant
         && context.roles.containsAny(["owner", "administrator"])
-};
-
-// Revoking is wider than granting, which is the whole reason the two are
-// separate actions: `reviewer` joins, because ending a disclosure early is
-// incident response — the same key that adjudicates quarantined events
-// (MEM-2) and reviews executable skills. Revocation installs nothing
-// and can only narrow, so no matrix stands in front of it.
-permit (
-    principal,
-    action == Synveda::Action::"LapseRevoke",
-    resource
-) when {
-    resource in principal.tenant
-        && context.roles.containsAny(["reviewer", "owner", "administrator"])
 };
 
 // The directory plane (AUTH-4, ADR-0059 decision 13): who may wire this

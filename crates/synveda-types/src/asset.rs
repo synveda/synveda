@@ -10,8 +10,8 @@ use crate::Error;
 /// What kind of governed asset a VedaFlow object holds.
 ///
 /// The four managed asset classes of seed §4.3 plus policy, which tech plan
-/// §2.3 makes an asset in its own right: "policy packs and lapses are
-/// themselves assets flowing through VedaFlow".
+/// §2.3 makes an asset in its own right. Policy packs, configuration and
+/// relaxations themselves flow through VedaFlow.
 ///
 /// This is part of a VedaFlow object's content address (FLOW-1, ADR-0030
 /// decision 4), not a label beside it: identical bytes registered as a prompt
@@ -42,8 +42,8 @@ pub enum AssetKind {
     /// A curated bundle pinned to a scope: docs, conventions, glossaries
     /// (PRMT-2).
     ContextPack,
-    /// A policy pack or lapse, flowing through the same propose/review/approve
-    /// path as everything else it governs.
+    /// A policy pack, governed configuration or relaxation, flowing through
+    /// the same propose/review/approve path as everything else it governs.
     Policy,
     /// A complete immutable runtime-configuration document or revisioned
     /// scope binding (CPR-30, ADR-0089). Templates are source data; this is

@@ -65,8 +65,6 @@ fn inputs<'a>(
         default_pack: None,
         anchors: &[],
         groups: &[],
-        lapses: &[],
-        lapsed: &[],
         candidates: &[],
     }
 }
@@ -199,8 +197,6 @@ fn service_identity_composes_its_own_chain_through_confinement() {
             default_pack: None,
             anchors: &[],
             groups: &[],
-            lapses: &[],
-            lapsed: &[],
             candidates: &[],
         },
     )

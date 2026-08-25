@@ -1,0 +1,21 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update policy_relaxations\n                      set revision = $4, updated_at = $5, updated_by = $6,\n                          revoked_at = $5, revoked_by = $6,\n                          revocation_proposal_id = $7, revocation_reason = $8\n                    where tenant_id = $1 and id = $2\n                      and current_version_id = $3 and revoked_at is null",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Int8",
+        "Timestamptz",
+        "Uuid",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "bfd7c7e0fa5e25bfb5e42a1f269da545b12428f2bf0e778d3a4271242aac6b8d"
+}

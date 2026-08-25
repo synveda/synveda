@@ -158,7 +158,7 @@ fn ac_decisions_are_microsecond_level() {
         resources: &[],
         assignments: &assignments,
         default_pack: None,
-        lapses: &[],
+        relaxations: &[],
     };
 
     let call = |action: Action| {

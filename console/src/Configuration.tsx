@@ -30,8 +30,8 @@ import type {
   ConfigurationVersionListView,
   ConfigurationVersionView,
   EffectiveConfigurationView,
-  LapseListResponse,
   PacksResponse,
+  RelaxationListView,
 } from "./generated/api.js";
 import { whenOf } from "./people.mjs";
 import { invalidate, Loaded, useQuery, useRefresh } from "./Query.js";
@@ -94,7 +94,7 @@ export function Configuration() {
         {(body) => <Artifacts artifacts={body.artifacts} targetScopeId={target?.id ?? null} />}
       </Loaded>
       <PolicySources />
-      <StandingRelaxations />
+      <GovernedRelaxations />
     </>
   );
 }
@@ -459,14 +459,25 @@ function PolicySources() {
   );
 }
 
-function StandingRelaxations() {
-  const entry = useQuery("lapses", () => request("list_lapses", { query: {} }));
+function GovernedRelaxations() {
+  const entry = useQuery("relaxations", () =>
+    request("list_relaxations", { query: { limit: "200" } }),
+  );
   return (
     <section>
-      <h2>Standing legacy relaxations</h2>
-      <p className="muted">Read-only until the governed relaxation successor replaces this model in the next package.</p>
-      <Loaded<LapseListResponse> entry={entry} what="standing relaxations">
-        {(body) => <p>{body.lapses.length === 0 ? "Nothing is relaxed." : `${body.lapses.length} time-boxed relaxation(s) are active.`}</p>}
+      <h2>Governed policy relaxations</h2>
+      <p className="muted">
+        Each entry is an immutable Policy/apply version bound to the exact Configuration version
+        that permitted it. Database time enforces its hard expiry.
+      </p>
+      <Loaded<RelaxationListView> entry={entry} what="governed relaxations">
+        {(body) => (
+          <p>
+            {body.relaxations.length === 0
+              ? "Nothing is relaxed."
+              : `${body.relaxations.length} policy-visible relaxation(s).`}
+          </p>
+        )}
       </Loaded>
     </section>
   );

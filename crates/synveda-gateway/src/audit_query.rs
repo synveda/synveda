@@ -329,7 +329,7 @@ pub(crate) struct DisclosuresResponse {
     /// with what they got. This is evidence.
     disclosed: Vec<DisclosureView>,
     /// The events that opened and closed authority over the window — role
-    /// bindings, pack assignments, lapses, publications, classifications.
+    /// grants, pack assignments, relaxations, publications, classifications.
     /// These are *inputs*, not a set of principals.
     authority: Vec<EventView>,
     /// Whether the authority half hit its own cap, which is separate from

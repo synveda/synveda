@@ -290,7 +290,7 @@ export type AuditDisclosureView = {
 export type AuditDisclosuresResponse = AuditFrame & {
     /**
      * The events that opened and closed authority over the window — role
-     * bindings, pack assignments, lapses, publications, classifications.
+     * grants, pack assignments, relaxations, publications, classifications.
      * These are *inputs*, not a set of principals.
      */
     authority: AuditEventView[];
@@ -1141,6 +1141,7 @@ export type ConfigurationDocumentBody = {
     context: ContextConfigurationBody;
     freshness: FreshnessConfigurationBody;
     policy_pack: string;
+    relaxations: RelaxationConfigurationBody;
   };
 
 /**
@@ -1823,6 +1824,17 @@ export type CreateProjectBody = {
      * Workspace-unique handle, same grammar as a workspace slug.
      */
     slug: string;
+  };
+
+export type CreateRelaxationBody = {
+    action: "knowledge.read";
+    max_sensitivity: string;
+    reason: string;
+    requested_end_at: string;
+    requested_start_at: string;
+    subject_identity_id: string;
+  } & {
+    target_scope_id: string;
   };
 
 /**
@@ -2846,108 +2858,6 @@ export type KnowledgeUsageView = {
      * Session whose access was independently decided.
      */
     session_id: string;
-  };
-
-export type LapseListResponse = {
-    lapses: LapseView[];
-    max_lapses?: number | null;
-    scope_id?: string | null;
-    scope_path?: string | null;
-    standing_only?: boolean | null;
-    truncated?: boolean | null;
-  };
-
-export type LapseProposeBody = {
-    /**
-     * What to relax. A closed vocabulary; anything outside it is refused
-     * by name (ADR-0037 decision 2).
-     */
-    action: string;
-    /**
-     * How long the grant runs **once its effect executes** — never from
-     * now, because a proposal that sits in a queue for a week must not
-     * spend the window it was approved for.
-     */
-    duration_secs: number;
-    /**
-     * Who would get the access: every principal placed at or under this
-     * scope. A single person is their own personal scope, so this one
-     * shape covers "team X" and "just Dana".
-     */
-    grantee_scope_id: string;
-    /**
-     * The most sensitive material this grant would disclose, and therefore
-     * the tier its approval matrix resolves at (AUTHZ-5, ADR-0038
-     * decision 6). Omitted means the working tier, which is what every
-     * grant meant before the field existed.
-     *
-     * Declaring `restricted` is what pulls in the invariant floor —
-     * `compliance` plus two distinct approvers — so the ask and the price
-     * of the ask are the same statement.
-     */
-    max_sensitivity?: string | null;
-    /**
-     * Why. Mandatory: it is what two approvers weigh and what an auditor
-     * reads afterwards.
-     */
-    reason: string;
-    /**
-     * The scope whose material would be disclosed. Requirements resolve
-     * here, `ProposalOpen` is decided here, and this is the only scope the
-     * permit will cover.
-     */
-    scope_id: string;
-  };
-
-export type LapseProposeResponse = {
-    action: string;
-    commit: string;
-    duration_secs: number;
-    effect: string;
-    grantee_scope_id: string;
-    grantee_scope_slug: string;
-    max_sensitivity: string;
-    outstanding: string;
-    proposal_id: string;
-    reason: string;
-    required: string;
-    state: string;
-    target_scope_id: string;
-    target_scope_slug: string;
-  };
-
-export type LapseRevokeBody = {
-    /**
-     * Why. Mandatory, like the grant's own reason: an ending an auditor
-     * cannot read the reason for is not a governed act.
-     */
-    reason: string;
-  };
-
-/**
- * One standing or historical grant, as the listing and the detail render
- * it.
- */
-export type LapseView = {
-    action: string;
-    expires_at: string;
-    granted_at: string;
-    granted_by: string;
-    grantee_scope_id: string;
-    grantee_scope_path?: string | null;
-    id: string;
-    /**
-     * Standing, expired, or revoked — rendered from the row rather than
-     * stored on it, the [`synveda_types::ProposalView`] discipline: a
-     * stored state would need something to run to stay true.
-     */
-    outcome: string;
-    proposal_id: string;
-    reason: string;
-    revoke_reason?: string | null;
-    revoked_at?: string | null;
-    target_scope_id: string;
-    target_scope_path?: string | null;
   };
 
 /**
@@ -4107,12 +4017,9 @@ export type ProposalSummary = {
     commit: string;
     created_at: string;
     /**
-     * What running this proposal would do (AUTHZ-4, ADR-0037
-     * decision 16). `published` for every FLOW-3 proposal; `lapse` for a
-     * grant. Named for the effect rather than the channel because a lapse
-     * has no channel, and a field that said `published` on a proposal that
-     * publishes nothing would be the paper-over this feature refused at
-     * the schema.
+     * What running this proposal would do. `published` writes a channel,
+     * `classify` changes sensitivity, and `apply` executes a typed governed
+     * artifact command (including a policy relaxation).
      */
     effect: string;
     id: string;
@@ -4273,6 +4180,96 @@ export type RegisterToolServerBody = {
   };
 
 /**
+ * Time-boxed relaxation bounds. This document can narrow the closed product
+ * vocabulary but never grants authority by itself.
+ */
+export type RelaxationConfigurationBody = {
+    allowed_actions: string[];
+    enabled: boolean;
+    maximum_duration_secs: number;
+  };
+
+export type RelaxationListView = {
+    next_cursor?: string | null;
+    relaxations: RelaxationView[];
+  };
+
+/**
+ * Result shared by create, revise and revoke.
+ */
+export type RelaxationMutationView = {
+    change_id: string;
+    outcome: "applied" | "pending_review" | "rejected";
+    relaxation_id: string;
+    revision?: number | null;
+    version_id?: string | null;
+  };
+
+/**
+ * Complete reviewed terms for create and revision requests.
+ */
+export type RelaxationTermsBody = {
+    action: "knowledge.read";
+    max_sensitivity: string;
+    reason: string;
+    requested_end_at: string;
+    requested_start_at: string;
+    subject_identity_id: string;
+  };
+
+export type RelaxationVersionListView = {
+    next_cursor?: number | null;
+    versions: RelaxationVersionView[];
+  };
+
+/**
+ * One immutable reviewed version.
+ */
+export type RelaxationVersionView = {
+    action: "knowledge.read";
+    approver_ids: string[];
+    auto_applied: boolean;
+    change_id: string;
+    configuration_hash: string;
+    configuration_version_id?: string | null;
+    content_hash: string;
+    created_at: string;
+    creator_id: string;
+    effective_start_at: string;
+    hard_expires_at: string;
+    id: string;
+    max_sensitivity: string;
+    ordinal: number;
+    reason: string;
+    relaxation_id: string;
+    requested_end_at: string;
+    requested_start_at: string;
+    subject: string;
+    subject_identity_id: string;
+    target_scope_id: string;
+  };
+
+/**
+ * Current stable aggregate projection.
+ */
+export type RelaxationView = {
+    created_at: string;
+    created_by: string;
+    current: RelaxationVersionView;
+    current_version_id: string;
+    governing_scope_id: string;
+    id: string;
+    revision: number;
+    revocation_change_id?: string | null;
+    revocation_reason?: string | null;
+    revoked_at?: string | null;
+    revoked_by?: string | null;
+    status: "scheduled" | "active" | "expired" | "revoked";
+    updated_at: string;
+    updated_by: string;
+  };
+
+/**
  * Replace one visible current Knowledge item with this candidate.
  */
 export type ReplaceCandidateBody = {
@@ -4351,6 +4348,22 @@ export type RepositoryView = {
      * When it last changed.
      */
     updated_at: string;
+  };
+
+export type ReviseRelaxationBody = {
+    action: "knowledge.read";
+    max_sensitivity: string;
+    reason: string;
+    requested_end_at: string;
+    requested_start_at: string;
+    subject_identity_id: string;
+  } & {
+    expected_current_version_id: string;
+  };
+
+export type RevokeRelaxationBody = {
+    expected_current_version_id: string;
+    reason: string;
   };
 
 /**
@@ -6486,33 +6499,6 @@ export type Operations = {
     readonly response: KnowledgeMutationView;
   };
   /**
-   * `GET /v1/lapses` — grants over one scope, or every grant this caller
-   * may see.
-   */
-  readonly list_lapses: {
-    readonly path: "/v1/lapses";
-    readonly method: "GET";
-    readonly response: LapseListResponse;
-  };
-  /**
-   * `POST /v1/lapses` — open a lapse proposal. Grants nothing.
-   */
-  readonly propose_lapse: {
-    readonly path: "/v1/lapses";
-    readonly method: "POST";
-    readonly body: LapseProposeBody;
-    readonly response: LapseProposeResponse;
-  };
-  /**
-   * `POST /v1/lapses/{id}/revoke` — end a standing grant early.
-   */
-  readonly revoke_lapse: {
-    readonly path: "/v1/lapses/{id}/revoke";
-    readonly method: "POST";
-    readonly body: LapseRevokeBody;
-    readonly response: LapseView;
-  };
-  /**
    * `GET /v1/me`.
    */
   readonly get_me: {
@@ -6724,15 +6710,6 @@ export type Operations = {
     readonly response: ProposalReviewResponse;
   };
   /**
-   * `POST /v1/proposals/{id}/lapse` — run an approved lapse proposal's
-   * effect.
-   */
-  readonly grant_lapse_proposal: {
-    readonly path: "/v1/proposals/{id}/lapse";
-    readonly method: "POST";
-    readonly response: LapseView;
-  };
-  /**
    * `POST /v1/proposals/{id}/publish` — run an approved proposal's effect.
    */
   readonly publish_proposal: {
@@ -6785,6 +6762,62 @@ export type Operations = {
     readonly method: "POST";
     readonly body: QuarantineReviewBody;
     readonly response: QuarantineEventView;
+  };
+  /**
+   * List policy-visible relaxations. The cursor follows the last candidate
+   * considered, so a fully denied page can be empty and still advance.
+   */
+  readonly list_relaxations: {
+    readonly path: "/v1/relaxations";
+    readonly method: "GET";
+    readonly response: RelaxationListView;
+  };
+  /**
+   * Create a stable relaxation and its first immutable version through
+   * VedaFlow.
+   */
+  readonly create_relaxation: {
+    readonly path: "/v1/relaxations";
+    readonly method: "POST";
+    readonly body: CreateRelaxationBody;
+    readonly idempotent: true;
+    readonly response: RelaxationMutationView;
+  };
+  /**
+   * Read one current stable aggregate.
+   */
+  readonly get_relaxation: {
+    readonly path: "/v1/relaxations/{id}";
+    readonly method: "GET";
+    readonly response: RelaxationView;
+  };
+  /**
+   * Publish a replacement immutable version with an exact head precondition.
+   */
+  readonly revise_relaxation: {
+    readonly path: "/v1/relaxations/{id}";
+    readonly method: "PATCH";
+    readonly body: ReviseRelaxationBody;
+    readonly idempotent: true;
+    readonly response: RelaxationMutationView;
+  };
+  /**
+   * End a current version early through a governed VedaFlow change.
+   */
+  readonly revoke_relaxation: {
+    readonly path: "/v1/relaxations/{id}/revoke";
+    readonly method: "POST";
+    readonly body: RevokeRelaxationBody;
+    readonly idempotent: true;
+    readonly response: RelaxationMutationView;
+  };
+  /**
+   * List immutable versions newest first.
+   */
+  readonly list_relaxation_versions: {
+    readonly path: "/v1/relaxations/{id}/versions";
+    readonly method: "GET";
+    readonly response: RelaxationVersionListView;
   };
   /**
    * `GET /v1/scim/credentials` — the inventory, revoked and expired ones
@@ -7421,9 +7454,6 @@ export const OPERATIONS = {
   supersede_knowledge: { path: "/v1/knowledge/{id}/supersede", method: "POST", idempotent: true },
   get_knowledge_usage: { path: "/v1/knowledge/{id}/usage", method: "GET" },
   verify_knowledge: { path: "/v1/knowledge/{id}/verify", method: "POST", idempotent: true },
-  list_lapses: { path: "/v1/lapses", method: "GET" },
-  propose_lapse: { path: "/v1/lapses", method: "POST" },
-  revoke_lapse: { path: "/v1/lapses/{id}/revoke", method: "POST" },
   get_me: { path: "/v1/me", method: "GET" },
   list_okf_imports: { path: "/v1/okf/imports", method: "GET" },
   get_okf_import: { path: "/v1/okf/imports/{id}", method: "GET" },
@@ -7448,13 +7478,18 @@ export const OPERATIONS = {
   get_proposal: { path: "/v1/proposals/{id}", method: "GET" },
   apply_proposal: { path: "/v1/proposals/{id}/apply", method: "POST" },
   approve_proposal: { path: "/v1/proposals/{id}/approve", method: "POST" },
-  grant_lapse_proposal: { path: "/v1/proposals/{id}/lapse", method: "POST" },
   publish_proposal: { path: "/v1/proposals/{id}/publish", method: "POST" },
   reject_proposal: { path: "/v1/proposals/{id}/reject", method: "POST" },
   withdraw_proposal: { path: "/v1/proposals/{id}/withdraw", method: "POST" },
   list_quarantine: { path: "/v1/quarantine", method: "GET" },
   reject_quarantined_event: { path: "/v1/quarantine/{event_id}/reject", method: "POST" },
   release_quarantined_event: { path: "/v1/quarantine/{event_id}/release", method: "POST" },
+  list_relaxations: { path: "/v1/relaxations", method: "GET" },
+  create_relaxation: { path: "/v1/relaxations", method: "POST", idempotent: true },
+  get_relaxation: { path: "/v1/relaxations/{id}", method: "GET" },
+  revise_relaxation: { path: "/v1/relaxations/{id}", method: "PATCH", idempotent: true },
+  revoke_relaxation: { path: "/v1/relaxations/{id}/revoke", method: "POST", idempotent: true },
+  list_relaxation_versions: { path: "/v1/relaxations/{id}/versions", method: "GET" },
   list_scim_credentials: { path: "/v1/scim/credentials", method: "GET" },
   issue_scim_credential: { path: "/v1/scim/credentials", method: "POST" },
   revoke_scim_credential: { path: "/v1/scim/credentials/{id}/revoke", method: "POST" },

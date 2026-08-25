@@ -755,15 +755,6 @@ async fn prepare_context(
     }
     let session_chain: Vec<ScopeNode> = input.chain.to_vec();
     let own_chain: Vec<ScopeNode> = input.principal_scopes.to_vec();
-    let lapsed_chains = authz::gather_lapsed(state, &mut tx, &input).await?;
-    let lapsed: Vec<synveda_retrieval::LapsedScope<'_>> = lapsed_chains
-        .iter()
-        .map(|resolved| synveda_retrieval::LapsedScope {
-            lapse: &resolved.lapse,
-            chain: &resolved.chain,
-            assignments: &resolved.assignments,
-        })
-        .collect();
     let candidate_scopes: Vec<CandidateScope<'_>> = session_chain
         .iter()
         .enumerate()
@@ -783,8 +774,6 @@ async fn prepare_context(
             groups: &input.groups,
             assignments: &assignments,
             default_pack: input.default_pack.as_deref(),
-            lapses: &input.lapses,
-            lapsed: &lapsed,
             candidates: &candidate_scopes,
         },
     )?;
@@ -810,6 +799,11 @@ async fn prepare_context(
     for scope in session_chain.iter().chain(own_chain.iter()) {
         if !content_scopes.contains(&scope.id) {
             content_scopes.push(scope.id);
+        }
+    }
+    for relaxation in &input.relaxations {
+        if !content_scopes.contains(&relaxation.version.terms.target_scope_id) {
+            content_scopes.push(relaxation.version.terms.target_scope_id);
         }
     }
     let knowledge_scopes = if configuration
@@ -2819,6 +2813,11 @@ fn query_scope_ids(input: &authz::DecisionInput) -> Vec<ScopeId> {
     for scope in input.chain.iter().chain(input.principal_scopes.iter()) {
         if !scopes.contains(&scope.id) {
             scopes.push(scope.id);
+        }
+    }
+    for relaxation in &input.relaxations {
+        if !scopes.contains(&relaxation.version.terms.target_scope_id) {
+            scopes.push(relaxation.version.terms.target_scope_id);
         }
     }
     scopes

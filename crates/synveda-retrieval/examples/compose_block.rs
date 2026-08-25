@@ -96,8 +96,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             groups: &groups,
             assignments: &assignments,
             default_pack: default_pack.as_deref(),
-            lapses: &[],
-            lapsed: &[],
             candidates: &[],
         },
     )?;

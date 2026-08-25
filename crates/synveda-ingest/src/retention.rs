@@ -291,7 +291,7 @@ async fn effective_retention(
         assignments: &assignments,
         default_pack: default_pack.as_deref(),
         sensitivity: Some(Sensitivity::WORKING),
-        lapses: &[],
+        relaxations: &[],
     };
     let pack = deps
         .pdp

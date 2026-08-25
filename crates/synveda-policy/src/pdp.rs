@@ -21,9 +21,9 @@ use cedar_policy::{
 };
 use synveda_types::access::{RoleKey, inherits_into};
 use synveda_types::{
-    ApprovalMatrix, CompositionConfig, DedupConfig, Error, Lapse, LapseAction, LapseConfig,
-    MoverConfig, PackConfig, PromotionConfig, RedactionConfig, Result, RetentionConfig, ScopeId,
-    Sensitivity, SkillQualityConfig, SkillScanConfig, TenantId,
+    ApprovalMatrix, CompositionConfig, CurrentRelaxation, DedupConfig, Error, MoverConfig,
+    PackConfig, PromotionConfig, RedactionConfig, RelaxationAction, Result, RetentionConfig,
+    ScopeId, Sensitivity, SkillQualityConfig, SkillScanConfig, TenantId,
 };
 
 use synveda_types::scope::ScopeKind;
@@ -56,10 +56,10 @@ pub const OPEN_COLLABORATION: &str = "open-collaboration";
 /// channel plane (ADR-0031 decision 12). `@7`: FLOW-3 added the proposal
 /// plane and each pack's approval matrix (ADR-0032 decisions 3 and 16).
 /// `@8`: FLOW-7 added the rewind and pin actions (ADR-0036 decision 3).
-/// `@9`: AUTHZ-4 added the lapse plane and the base layer's first permit
-/// (ADR-0037 decisions 7 and 15). `@10`: AUTHZ-5 made sensitivity a policy
+/// `@9`: AUTHZ-4 added the retired time-boxed record grant (ADR-0037
+/// decisions 7 and 15). `@10`: AUTHZ-5 made sensitivity a policy
 /// attribute — every `MemoryRead` permit names the tiers it covers, the base
-/// layer forbids `restricted` outright unless a lapse declared it, and the
+/// layer forbids `restricted` outright unless that reviewed grant declared it, and the
 /// classification plane joined (ADR-0038 decisions 4, 5 and 9). `@11`: AUD-2
 /// added `AuditRead` to the read-only admin permit every pack has carried
 /// since AUTHZ-2 — the line whose comment named this feature — which makes
@@ -159,18 +159,19 @@ pub const OPEN_COLLABORATION: &str = "open-collaboration";
 /// (`KnowledgeRead`, `KnowledgeWrite`, `KnowledgeForget`) and exact item
 /// entity (ADR-0081). Read/write reach mirrors each pack's existing content
 /// shape, while irreversible forget is own-home role-free and otherwise
-/// owner/administrator-only. Knowledge does not inherit the retired lapse
+/// owner/administrator-only. Knowledge does not inherit the retired grant
 /// override. The approval matrix mirrors memory so personal/small-scope
 /// changes can auto-apply under the permissive profiles but still pass
 /// through a real VedaFlow change.
-/// `@22`: CPR-30 adds the governed runtime-configuration read/write plane.
+/// `@23`: CPR-31 replaces that mutable model with typed, versioned Policy/apply
+/// relaxations and makes `context.relaxed` part of the Knowledge decision.
 /// Writes resolve against the inherited selector, so a binding cannot grant
 /// authority to install itself; the shipped packs keep both surfaces
 /// administrative.
 pub const EMBEDDED_PACKS: [(&str, i64); 3] = [
-    (REGULATED_STRICT, 22),
-    (STANDARD, 22),
-    (OPEN_COLLABORATION, 22),
+    (REGULATED_STRICT, 23),
+    (STANDARD, 23),
+    (OPEN_COLLABORATION, 23),
 ];
 
 /// Whether `name` is reserved for the product (ADR-0014 decision 6): the
@@ -208,10 +209,6 @@ struct LoadedPack {
     /// for the same reason as the matrix. Empty means nothing
     /// auto-promotes at scopes this pack governs.
     promotion: Arc<PromotionConfig>,
-    /// The lapse ceiling (AUTHZ-4, ADR-0037 decision 5): the longest window
-    /// a lapse at scopes this pack governs may run for, and — at zero —
-    /// whether any may stand at all. `Copy`, so no `Arc`.
-    lapse: LapseConfig,
     /// What the ingestion pipeline does with a restatement or a
     /// contradiction at scopes this pack governs (MEM-5, ADR-0039
     /// decision 12). `Copy`, so no `Arc`.
@@ -308,11 +305,6 @@ pub struct EffectivePack {
     /// Empty in every embedded pack — a trigger nobody configured must
     /// not fire.
     pub promotion: Arc<PromotionConfig>,
-    /// The pack's lapse ceiling (AUTHZ-4, ADR-0037 decision 5): how long a
-    /// lapse at scopes this pack governs may run, and whether one may
-    /// stand at all. The grant surface reads it to bound a window; the PDP
-    /// reads it on every `MemoryRead` to gate a standing one.
-    pub lapse: LapseConfig,
     /// The pack's dedup configuration (MEM-5, ADR-0039 decision 12): what
     /// the extraction worker does when a candidate restates or contradicts
     /// a record its owner's scope already holds.
@@ -408,11 +400,6 @@ impl Pdp {
         // decision 2: derived is readable-per-policy by design; the
         // published-only restriction is an explicit choice, never a
         // default).
-        // The lapse ceilings are tech plan §2.4's SMB collapse in the one
-        // place a window is a number: `regulated-strict` grants seed §6's
-        // own example (30 days) and the relaxed packs the product maximum
-        // (90). No pack refuses lapses outright — that is a tenant's
-        // decision to make in a stored pack, not a product default.
         // The retention configs are ADR-0040 decision 13's one product
         // default that can differ per pack without destroying anything a
         // tenant expected to keep: no pack sets a record horizon, and
@@ -429,7 +416,6 @@ impl Pdp {
                 REGULATED_STRICT,
                 REGULATED_STRICT_SRC,
                 RedactionConfig::STRICT,
-                LapseConfig::STRICT,
                 RetentionConfig::STRICT,
                 MoverConfig::STRICT,
                 SkillScanConfig::STRICT,
@@ -439,7 +425,6 @@ impl Pdp {
                 STANDARD,
                 STANDARD_SRC,
                 RedactionConfig::REDACT_ALL,
-                LapseConfig::RELAXED,
                 RetentionConfig::DEFAULT,
                 MoverConfig::FOLLOWS,
                 SkillScanConfig::FLOOR,
@@ -449,7 +434,6 @@ impl Pdp {
                 OPEN_COLLABORATION,
                 OPEN_COLLABORATION_SRC,
                 RedactionConfig::REDACT_ALL,
-                LapseConfig::RELAXED,
                 RetentionConfig::DEFAULT,
                 MoverConfig::FOLLOWS,
                 SkillScanConfig::FLOOR,
@@ -457,7 +441,7 @@ impl Pdp {
             ),
         ];
         let mut embedded = HashMap::new();
-        for ((name, version), (_, source, redaction, lapse, retention, mover, scan, quality)) in
+        for ((name, version), (_, source, redaction, retention, mover, scan, quality)) in
             EMBEDDED_PACKS.iter().zip(sources)
         {
             let pack = compile(
@@ -474,7 +458,6 @@ impl Pdp {
                     // that opened proposals nobody asked for would be a
                     // surprise arriving through an upgrade.
                     promotion: None,
-                    lapse: Some(lapse),
                     // All three dedup identically, and the product
                     // default supersedes: seed §4.4 already resolves
                     // conflicts by "newer valid-time beats older", so a
@@ -552,7 +535,6 @@ impl Pdp {
                 composition: Some(CompositionConfig::DEFAULT),
                 approvals: Some(ApprovalMatrix::empty()),
                 promotion: None,
-                lapse: None,
                 dedup: None,
                 retention: None,
                 mover: None,
@@ -683,8 +665,8 @@ impl Pdp {
     ///
     /// Everything else about the decision is unchanged and still
     /// per-call: the effective pack still resolves from *this* resource's
-    /// chain and assignments, the roles from the bindings that reach it,
-    /// the lapses from the grants that bear on it. Only the entity store
+    /// chain and assignments, the roles from the grants that reach it,
+    /// and the relaxations bearing on the exact read. Only the entity store
     /// is shared, and a caller that hands over a batch missing a chain
     /// gets a *denial*, never a wrong allow — an absent scope entity fails
     /// the membership tests every permit is built on.
@@ -824,23 +806,15 @@ impl Pdp {
         roles: &[&'static str],
         context: &AuthzContext<'_>,
     ) -> Result<AuthzDecision> {
-        // The standing grants that bear on *this* decision, gated by the
-        // pack in force at the resource: a pack whose ceiling is zero
-        // admits none of them on the very next request, standing or not
-        // (ADR-0037 decision 5). Empty for every action but `MemoryRead`,
-        // which is the only one the vocabulary lets a lapse relax.
-        let lapsed: Vec<&Lapse> = if pack.lapse.admits_lapses() {
-            lapsing(action, resource, *context).collect()
-        } else {
-            Vec::new()
-        };
+        let relaxed: Vec<&CurrentRelaxation> =
+            relaxing(principal, action, resource, *context).collect();
         let request = self.request(
             principal,
             action,
             resource,
             roles,
             RequestContext {
-                lapsed: !lapsed.is_empty(),
+                relaxed: !relaxed.is_empty(),
                 sensitivity: context.sensitivity,
             },
         )?;
@@ -875,13 +849,11 @@ impl Pdp {
             authz.resource = %resource,
             authz.decision = verdict,
             authz.roles = %roles.join(","),
-            // Which grant let this through, by id — the decision log's half
-            // of "why was this in that block" (ADR-0037 decision 12). Empty
-            // on every decision no lapse bore on, which is almost all of
-            // them.
-            authz.lapses = %lapsed
+            // Exact immutable relaxation versions bearing on this decision.
+            // Empty on every action except a matched KnowledgeRead.
+            authz.relaxations = %relaxed
                 .iter()
-                .map(|lapse| lapse.id.to_string())
+                .map(|relaxation| relaxation.version.id.to_string())
                 .collect::<Vec<_>>()
                 .join(","),
             policy.pack = %decision.pack_name,
@@ -941,7 +913,6 @@ impl Pdp {
             composition: pack.composition,
             approvals: Arc::clone(&pack.approvals),
             promotion: Arc::clone(&pack.promotion),
-            lapse: pack.lapse,
             dedup: pack.dedup,
             retention: pack.retention,
             mover: pack.mover,
@@ -1430,7 +1401,7 @@ impl Pdp {
         extras: RequestContext,
     ) -> Result<Request> {
         let RequestContext {
-            lapsed,
+            relaxed,
             sensitivity,
         } = extras;
         use cedar_policy::RestrictedExpression;
@@ -1453,14 +1424,11 @@ impl Pdp {
                     .map(|role| RestrictedExpression::new_string((*role).to_owned())),
             ),
         )];
-        if action == Action::MemoryRead {
-            // Both required by the schema, and for the reason a required
-            // attribute always is: a missing attribute makes the base
-            // layer's lapse permit — and, since AUTHZ-5, its `restricted`
-            // forbid — error, and Cedar drops a policy that errors
-            // (ADR-0015 decision 5's shape, ADR-0037 decision 9,
-            // ADR-0038 decision 2).
-            pairs.push(("lapsed".to_owned(), RestrictedExpression::new_bool(lapsed)));
+        if action == Action::KnowledgeRead {
+            pairs.push((
+                "relaxed".to_owned(),
+                RestrictedExpression::new_bool(relaxed),
+            ));
         }
         if matches!(
             action,
@@ -1471,9 +1439,7 @@ impl Pdp {
                 | Action::SkillRead
         ) {
             // The tier every read seam names (ADR-0038 decision 2; ADR-0049
-            // decision 4; ADR-0050 decision 7; ADR-0051 decision 10). No
-            // authored-asset read takes `lapsed`: a lapse relaxes a closed
-            // vocabulary, and `memory.read` is all of it.
+            // decision 4; ADR-0050 decision 7; ADR-0051 decision 10).
             let sensitivity = sensitivity.ok_or_else(|| Error::Internal {
                 message: format!("{action} decided without a sensitivity tier in context"),
             })?;
@@ -1525,10 +1491,8 @@ impl Pdp {
         Ok(EntityUid::from_type_name_and_id(type_name.clone(), eid))
     }
 }
-/// The per-action context attributes, resolved by the PDP rather than
-/// supplied: whether a standing lapse covers a `MemoryRead` (ADR-0037
-/// decision 9), and which tier that read is asking about (ADR-0038
-/// decision 2).
+/// Per-action context attributes resolved by the PDP: whether an immutable
+/// relaxation covers a Knowledge read, and which tier the read asks about.
 ///
 /// A struct rather than two parameters because they arrive together and
 /// are set together — and because the schema requires each of them for its
@@ -1536,7 +1500,7 @@ impl Pdp {
 /// dropped policy.
 #[derive(Debug, Clone, Copy)]
 struct RequestContext {
-    lapsed: bool,
+    relaxed: bool,
     sensitivity: Option<Sensitivity>,
 }
 
@@ -1617,109 +1581,42 @@ fn effective_roles(resource: Resource, context: &AuthzContext<'_>) -> Vec<&'stat
     roles
 }
 
-/// The lapse vocabulary's view of one PDP action: `Some` when a standing
-/// grant could relax it, `None` for everything else.
-///
-/// The mapping rather than a name comparison, so the closed vocabulary
-/// (`synveda_types::LapseAction`) and this one grow together or not at all
-/// — a lapse naming an action outside it is refused at the grant surface,
-/// and one that somehow reached a row still relaxes nothing here.
+/// Map the PDP vocabulary into the deliberately closed relaxation vocabulary.
 #[must_use]
-pub const fn lapsable(action: Action) -> Option<LapseAction> {
+pub const fn relaxable(action: Action) -> Option<RelaxationAction> {
     match action {
-        Action::MemoryRead => Some(LapseAction::MemoryRead),
+        Action::KnowledgeRead => Some(RelaxationAction::KnowledgeRead),
         _ => None,
     }
 }
 
-/// Whether `lapse` bears on one decision: it grants the action being
-/// decided at exactly the resource scope, and the principal is placed at or
-/// under its grantee scope — `principal in grantee`, read off the placement
-/// chain the PDP already has (ADR-0037 decision 9).
-///
-/// The one containment rule, shared by the decision and by the read path's
-/// plan, because the failure it prevents is asymmetric: a plan that offers
-/// a scope the permit refuses costs a wasted decision, and a permit that
-/// allows a scope the plan never offers is a grant nobody can see.
-fn covers(
-    lapse: &Lapse,
-    principal_scopes: &[ScopeNode],
-    action: LapseAction,
-    resource: ScopeId,
-) -> bool {
-    lapse.grants(action, resource)
-        && principal_scopes
-            .iter()
-            .any(|node| node.id == lapse.grantee_scope_id)
-}
-
-/// The grants bearing on one decision — [`covers`] over the context's rows,
-/// bounded by the tier each grant declared (AUTHZ-5, ADR-0038 decision 6),
-/// and empty for every action no lapse may relax.
-///
-/// A decision with no tier in context relaxes nothing, which cannot happen
-/// for the one lapsable action — [`Pdp::request`] refuses to build a
-/// `MemoryRead` request without one — and is the fail-closed reading if the
-/// vocabulary ever grows an action whose seam has no tier.
-fn lapsing<'a>(
+/// Exact immutable relaxations bearing on one decision. Storage has already
+/// filtered by database time and current Configuration; the PDP repeats the
+/// subject, action, target and tier match so a malformed row widens nothing.
+fn relaxing<'a>(
+    principal: &Principal,
     action: Action,
     resource: Resource,
     context: AuthzContext<'a>,
-) -> impl Iterator<Item = &'a Lapse> {
-    let wanted = lapsable(action);
-    // A lapse names a scope. Nothing else it could name is one: a workspace, a
-    // project or a session is decided at its own scope and would be reached
-    // through that, and a lapse over a group or a grant is not in the closed
-    // vocabulary (ADR-0037 decision 2).
+) -> impl Iterator<Item = &'a CurrentRelaxation> {
+    let wanted = relaxable(action);
     let target = match resource {
         Resource::Scope(id) => Some(id),
+        Resource::KnowledgeItem(_) => context.scopes.first().map(|scope| scope.id),
         Resource::Tenant(_)
         | Resource::Workspace(_)
         | Resource::Project(_)
         | Resource::Session(_)
-        | Resource::KnowledgeItem(_)
         | Resource::Group(_)
         | Resource::Grant(_) => None,
     };
-    context.lapses.iter().filter(move |lapse| {
+    context.relaxations.iter().filter(move |relaxation| {
         let (Some(wanted), Some(target), Some(sensitivity)) = (wanted, target, context.sensitivity)
         else {
             return false;
         };
-        covers(lapse, context.principal_scopes, wanted, target)
-            && lapse.grants_at(wanted, target, sensitivity)
+        relaxation.matches(&principal.subject, wanted, target, sensitivity)
     })
-}
-
-/// The scopes a caller reaches only by lapse, with the grant that reached
-/// each — what the read path adds to a composition plan *after* the chain
-/// (ADR-0037 decision 10).
-///
-/// Public because the plan and the permit must agree about who a grant
-/// reaches, and one implementation is how they cannot drift. It does **not**
-/// apply the pack ceiling: that is a property of the target's own effective
-/// pack, which the `MemoryRead` decision the plan then takes resolves
-/// anyway — so this may offer a scope the PDP goes on to refuse, which is
-/// the safe direction.
-///
-/// Ordered by grant time then id, so a plan built twice from the same rows
-/// is the same plan — CTX-2's determinism AC reaches down here.
-#[must_use]
-pub fn lapsed_scopes<'a>(
-    principal_scopes: &[ScopeNode],
-    lapses: &'a [Lapse],
-    action: LapseAction,
-) -> Vec<&'a Lapse> {
-    let mut seen: HashSet<ScopeId> = principal_scopes.iter().map(|node| node.id).collect();
-    let mut granting: Vec<&Lapse> = lapses
-        .iter()
-        .filter(|lapse| covers(lapse, principal_scopes, action, lapse.target_scope_id))
-        .collect();
-    granting.sort_unstable_by_key(|lapse| (lapse.granted_at, lapse.id.as_uuid()));
-    // A target already on the caller's own chain is not reached "only by
-    // lapse", and two grants naming one target are one plan entry.
-    granting.retain(|lapse| seen.insert(lapse.target_scope_id));
-    granting
 }
 
 /// [`Entity::new`] mapped onto the taxonomy — shared by the fragment
@@ -1749,10 +1646,6 @@ fn compile(
     let composition = config.composition.unwrap_or_default();
     let approvals = config.approvals.unwrap_or_default();
     let promotion = config.promotion.unwrap_or_default();
-    // Unconfigured falls back to the strict 30-day window rather than to
-    // zero: a lapse ceiling narrows, and a missing narrowing must not become
-    // a missing mechanism (ADR-0037 decision 5).
-    let lapse = config.lapse.unwrap_or_default();
     // Unconfigured is the product config — supersession on — for the reason
     // the composition config's fallback is the product one: this config
     // never grants anything, so its default is the honest fallback rather
@@ -1794,12 +1687,6 @@ fn compile(
     promotion.validate().map_err(|err| Error::Invalid {
         message: format!("policy pack {name}@{version} promotion rules: {err}"),
     })?;
-    // And for a ceiling: a pack asking for a longer window than the product
-    // permits is refused when it is written, not clamped in silence at the
-    // first grant that noticed.
-    lapse.validate().map_err(|err| Error::Invalid {
-        message: format!("policy pack {name}@{version} lapse config: {err}"),
-    })?;
     // And for the thresholds: a similarity outside `0..=1` would make a
     // band unreachable, which reads as "the feature is off" without ever
     // saying so (ADR-0039 decision 12).
@@ -1838,7 +1725,6 @@ fn compile(
         composition,
         approvals: Arc::new(approvals),
         promotion: Arc::new(promotion),
-        lapse,
         dedup,
         retention,
         mover,

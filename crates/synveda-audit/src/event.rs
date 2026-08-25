@@ -415,29 +415,16 @@ pub enum AuditAction {
     /// Plaintext, owned source descriptors and indexes were removed, leaving
     /// only hashes and identifiers in the tombstone and chain.
     KnowledgeErased,
-    /// An approved lapse proposal's effect ran: a time-boxed grant now
-    /// stands over the target scope's material (AUTHZ-4, ADR-0037
-    /// decision 17). Payload carries both scopes, the action granted, the
-    /// window, the mandatory reason, the proposal, and the requirement as
-    /// resolved — never any of the material the grant discloses.
-    ///
-    /// The window is the load-bearing field: with it recorded here, the
-    /// trail is complete even if the expiry sweep never runs, because when
-    /// the grant stopped deciding anything is arithmetic over this event.
-    LapseGranted,
-    /// A standing grant was ended early, with its mandatory reason and the
-    /// window it cut short.
-    LapseRevoked,
     /// Records left the live corpus because they were past the horizon
     /// the pack at their scope sets (MEM-6, ADR-0040 decision 15) — one
     /// event per scope per sweep batch, under `actor_kind=system`.
     /// Carries the pack and version that decided, the horizon per class,
     /// the record ids and their ages; never record content.
     ///
-    /// Unlike [`AuditAction::LapseExpired`] this is **not** bookkeeping: a
-    /// lapse expires whether or not its sweep runs, but a record leaves
-    /// the corpus only because this loop ran, and the event commits in the
-    /// same transaction as the delete.
+    /// Unlike [`AuditAction::RelaxationExpired`] this is **not** bookkeeping:
+    /// a relaxation expires whether or not its sweep runs, but a record
+    /// leaves the corpus only because this loop ran, and the event commits
+    /// in the same transaction as the delete.
     ///
     /// What it describes is a *temporal* delete: the record stops being
     /// current, `as_of` keeps answering, and destruction is the second
@@ -575,15 +562,19 @@ pub enum AuditAction {
     ConfigurationChangeApplied,
     /// A Configuration/apply effect reached a terminal precondition refusal.
     ConfigurationChangeRejected,
-    /// A grant reached the end of its window. Emitted by the sweep under
-    /// `actor_kind=system`, and **bookkeeping only** — the grant stopped
-    /// deciding anything at `expires_at` whether or not this was ever
-    /// written (ADR-0037 decision 4).
-    ///
-    /// Revoked grants deliberately get no expiry event: their ending is
-    /// already on the chain, and a second event asserting the same fact is
-    /// something an auditor would have to reconcile (ADR-0019 decision 4).
-    LapseExpired,
+    /// A typed Policy/apply relaxation command was opened. Carries only
+    /// identifiers, immutable term/configuration hashes and approval
+    /// arithmetic; never Knowledge content.
+    RelaxationChangeOpened,
+    /// A governed relaxation create, revision or early revocation completed.
+    RelaxationChangeApplied,
+    /// A relaxation effect reached a terminal validation or revision
+    /// precondition refusal.
+    RelaxationChangeRejected,
+    /// The current immutable relaxation version reached its hard expiry.
+    /// This system event is bookkeeping only: database time stopped the
+    /// permission regardless of whether the sweep emitted it.
+    RelaxationExpired,
 }
 
 impl AuditAction {
@@ -595,7 +586,7 @@ impl AuditAction {
     /// unit test below plus the fact that an action missing from here is
     /// an event `GET /v1/audit/events` cannot filter for. Add the variant
     /// and add it here in the same diff.
-    pub const ALL: [AuditAction; 98] = [
+    pub const ALL: [AuditAction; 99] = [
         AuditAction::AuthzDecision,
         AuditAction::TenantResolutionDenied,
         AuditAction::TokenRejected,
@@ -669,9 +660,6 @@ impl AuditAction {
         AuditAction::KnowledgeChangeRejected,
         AuditAction::KnowledgeErasureBlocked,
         AuditAction::KnowledgeErased,
-        AuditAction::LapseGranted,
-        AuditAction::LapseRevoked,
-        AuditAction::LapseExpired,
         AuditAction::MemoryExpired,
         AuditAction::MemoryDisposed,
         AuditAction::PromptAuthored,
@@ -694,6 +682,10 @@ impl AuditAction {
         AuditAction::ConfigurationChangeOpened,
         AuditAction::ConfigurationChangeApplied,
         AuditAction::ConfigurationChangeRejected,
+        AuditAction::RelaxationChangeOpened,
+        AuditAction::RelaxationChangeApplied,
+        AuditAction::RelaxationChangeRejected,
+        AuditAction::RelaxationExpired,
     ];
 
     /// The stable dotted name stored in the `action` column. Renaming an
@@ -774,9 +766,6 @@ impl AuditAction {
             AuditAction::KnowledgeChangeRejected => "knowledge.change.rejected",
             AuditAction::KnowledgeErasureBlocked => "knowledge.erasure.blocked",
             AuditAction::KnowledgeErased => "knowledge.erased",
-            AuditAction::LapseGranted => "policy.lapse.granted",
-            AuditAction::LapseRevoked => "policy.lapse.revoked",
-            AuditAction::LapseExpired => "policy.lapse.expired",
             AuditAction::MemoryExpired => "memory.expired",
             AuditAction::MemoryDisposed => "memory.disposed",
             AuditAction::PromptAuthored => "prompt.authored",
@@ -799,6 +788,10 @@ impl AuditAction {
             AuditAction::ConfigurationChangeOpened => "configuration.change.opened",
             AuditAction::ConfigurationChangeApplied => "configuration.change.applied",
             AuditAction::ConfigurationChangeRejected => "configuration.change.rejected",
+            AuditAction::RelaxationChangeOpened => "policy.relaxation.change.opened",
+            AuditAction::RelaxationChangeApplied => "policy.relaxation.change.applied",
+            AuditAction::RelaxationChangeRejected => "policy.relaxation.change.rejected",
+            AuditAction::RelaxationExpired => "policy.relaxation.expired",
         }
     }
 }

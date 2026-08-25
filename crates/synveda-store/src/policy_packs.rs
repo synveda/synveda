@@ -19,8 +19,8 @@ use chrono::{DateTime, Utc};
 use sqlx::PgExecutor;
 use sqlx::postgres::PgConnection;
 use synveda_types::{
-    ApprovalMatrix, DedupConfig, Error, LapseConfig, PackConfig, PromotionConfig, Result,
-    RetentionConfig, TenantId,
+    ApprovalMatrix, DedupConfig, Error, PackConfig, PromotionConfig, Result, RetentionConfig,
+    TenantId,
 };
 
 /// A tenant's stored policy pack.
@@ -116,10 +116,6 @@ pub async fn apply(
         .as_ref()
         .map(|value| config_json("promotion", serde_json::to_value(value)))
         .transpose()?;
-    let lapse_json = config
-        .lapse
-        .map(|value| config_json("lapse", serde_json::to_value(value)))
-        .transpose()?;
     let dedup_json = config
         .dedup
         .map(|value| config_json("dedup", serde_json::to_value(value)))
@@ -145,15 +141,14 @@ pub async fn apply(
         r#"
         insert into policy_packs
             (tenant_id, name, version, source, redaction, composition, approvals,
-             promotion, lapse, dedup, retention, mover, scan, quality)
-        values ($1, $2, 1, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+             promotion, dedup, retention, mover, scan, quality)
+        values ($1, $2, 1, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
         on conflict (tenant_id, name) do update
             set source = excluded.source,
                 redaction = excluded.redaction,
                 composition = excluded.composition,
                 approvals = excluded.approvals,
                 promotion = excluded.promotion,
-                lapse = excluded.lapse,
                 dedup = excluded.dedup,
                 retention = excluded.retention,
                 mover = excluded.mover,
@@ -162,7 +157,7 @@ pub async fn apply(
                 version = policy_packs.version + 1,
                 updated_at = now()
         returning tenant_id, name, version, source, redaction, composition,
-                  approvals, promotion, lapse, dedup, retention, mover, scan, quality,
+                  approvals, promotion, dedup, retention, mover, scan, quality,
                   updated_at
         "#,
         tenant_id.as_uuid(),
@@ -172,7 +167,6 @@ pub async fn apply(
         composition_json,
         approvals_json,
         promotion_json,
-        lapse_json,
         dedup_json,
         retention_json,
         mover_json,
@@ -198,7 +192,7 @@ pub async fn stored(executor: impl PgExecutor<'_>, tenant_id: TenantId) -> Resul
         PolicyPackRow,
         r#"
         select tenant_id, name, version, source, redaction, composition,
-               approvals, promotion, lapse, dedup, retention, mover, scan, quality,
+               approvals, promotion, dedup, retention, mover, scan, quality,
                updated_at
         from policy_packs where tenant_id = $1
         order by name
@@ -227,7 +221,7 @@ pub async fn get(
         PolicyPackRow,
         r#"
         select tenant_id, name, version, source, redaction, composition,
-               approvals, promotion, lapse, dedup, retention, mover, scan, quality,
+               approvals, promotion, dedup, retention, mover, scan, quality,
                updated_at
         from policy_packs where tenant_id = $1 and name = $2
         "#,
@@ -290,7 +284,6 @@ struct PolicyPackRow {
     composition: Option<serde_json::Value>,
     approvals: Option<serde_json::Value>,
     promotion: Option<serde_json::Value>,
-    lapse: Option<serde_json::Value>,
     dedup: Option<serde_json::Value>,
     retention: Option<serde_json::Value>,
     mover: Option<serde_json::Value>,
@@ -365,26 +358,6 @@ impl From<PolicyPackRow> for PolicyPack {
                         .map(|()| config)
                 },
             );
-        // A ceiling above the product maximum is refused at apply; one that
-        // reached the row anyway is treated as unconfigured — the strict
-        // 30-day window — rather than clamped in silence, so the warning is
-        // what an operator sees instead of a window they did not choose.
-        // `resolved_max_secs` bounds it either way (ADR-0037 decision 5).
-        let lapse: Option<LapseConfig> =
-            parse_config(&row.name, "lapse", row.lapse).and_then(|config: LapseConfig| {
-                config
-                    .validate()
-                    .inspect_err(|err| {
-                        tracing::warn!(
-                            policy.pack = %row.name,
-                            error = %err,
-                            "stored lapse config is invalid; \
-                             treating the pack as unconfigured (the strict window)"
-                        );
-                    })
-                    .ok()
-                    .map(|()| config)
-            });
         // Thresholds outside `0..=1` make a band unreachable, which reads
         // as "the feature is off" without saying so. Unconfigured is the
         // product config, which is the same fail-safe the composition
@@ -456,7 +429,6 @@ impl From<PolicyPackRow> for PolicyPack {
                 composition,
                 approvals,
                 promotion,
-                lapse,
                 dedup,
                 retention,
                 mover,

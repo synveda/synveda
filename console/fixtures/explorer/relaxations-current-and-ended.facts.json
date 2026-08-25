@@ -1,0 +1,13 @@
+{
+  "must_name": [
+    "a governed window that was revoked",
+    "knowledge.read",
+    "joint incident review",
+    "knowledge.read",
+    "active",
+    "revoked"
+  ],
+  "must_not_name": [
+    "memory.read"
+  ]
+}

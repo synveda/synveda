@@ -776,7 +776,7 @@ fn row_context<'a>(
         resources,
         assignments,
         default_pack: input.default_pack.as_deref(),
-        lapses: &[],
+        relaxations: &[],
         sensitivity: None,
     }
 }

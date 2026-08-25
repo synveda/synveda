@@ -75,7 +75,7 @@ Phase 5 — context platform redesign, since 2026-08-17, on
 `feat/context-platform-mvp`. Phase 3 is paused mid-phase, not finished —
 OPS-9, OPS-10, TEN-5,6, AUD-3,4, GRPH-3, EVAL-6, CTX-7, OPS-3,4, ADPT-3,
 CTX-6 and FLOW-8 are still open, and no live Entra/Okta tenant or real
-Cursor frame has been replayed. **127 features filed, 96 delivered**;
+Cursor frame has been replayed. **128 features filed, 97 delivered**;
 STATUS.md and `make check-backlog` are the authority on the count — the
 headline number has drifted four times, the fourth being this file itself,
 which still read 104/71 after CPR-8 filed the 105th. That is why the
@@ -132,7 +132,7 @@ Load-bearing facts about Phase 5:
   (INSTALL.md's SQL).
 - CPR-29 (ADR-0088): the generated OpenAPI contract is the complete
   authenticated application plane — established at 156 operations and
-  extended to **162 operations by CPR-30** — from `/v1/me` through governance,
+  extended to **164 operations by CPR-31** — from `/v1/me` through governance,
   audit, Knowledge, capture, context, Skills, Tools, OKF and Configuration. One
   executable route catalogue builds the router and supplies the inventory an
   exact parity test compares with OpenAPI. The console has no hand-written
@@ -150,6 +150,15 @@ Load-bearing facts about Phase 5:
   capture/context record version evidence; all four tables are forced-RLS.
   The mutable default/assignment tables and routes are deleted without
   translation, and no binding falls back to them.
+- CPR-31 (ADR-0090): policy relaxation is one stable aggregate with immutable
+  versions naming an exact provisioned subject, non-personal scope,
+  `knowledge.read` permission, tier and hard expiry. Create, revise and revoke
+  are typed `Policy/apply` VedaFlow changes; open collaboration may auto-apply
+  the same persisted change that standard retains for review or rejection.
+  Database time ends authority, current Configuration can only narrow it, and
+  Cedar still decides with privacy, quarantine and service confinement above
+  the permit. Three tables are forced-RLS; the predecessor table, effect,
+  routes, CLI/DTOs and pack setting are deleted without translation.
 - CPR-10 (ADR-0076): **a run is a record**. `sessions`, `session_events` and
   `session_context_runs` replace `session_id: text`; the governed scope a run
   is decided at is derived from its workspace and project by composite keys

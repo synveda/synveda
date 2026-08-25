@@ -211,6 +211,45 @@ assignment routes have no aliases; `/v1/policy/packs` remains a read-only Cedar
 source catalogue and local `synveda policy apply|clear` remains documented
 operator break-glass for source installation, not runtime selection.
 
+## Governed policy relaxations
+
+A relaxation temporarily widens one provisioned subject's ability to read
+current Knowledge at one non-personal scope. It is not a Cedar bypass: create,
+revision and early revocation each open a typed `Policy/apply` VedaFlow change,
+the live matrix returns `applied`, `pending_review` or `rejected`, and Cedar
+still makes every Knowledge decision. The first release supports only the
+closed `knowledge.read` action.
+
+The effective Configuration at the target must enable that action and caps the
+window. The stored hard expiry is calculated when the change applies; database
+time ends authority even if the expiry bookkeeping worker is unavailable.
+Changing Configuration may narrow a standing relaxation immediately. Personal
+principal scopes cannot be targets, and quarantine, sealing and service-token
+confinement remain overriding forbids.
+
+Inspect these under **Advanced → Scopes**, or with the public-HTTP CLI:
+
+```sh
+synveda relaxation list --scope <scope-id>
+synveda relaxation show <relaxation-id>
+synveda relaxation create --scope <scope-id> --subject <identity-id> \
+  --start 2026-08-25T12:00:00Z --end 2026-08-25T14:00:00Z \
+  --reason "bounded incident investigation"
+synveda relaxation revise <relaxation-id> --expected <current-version-id> \
+  --subject <identity-id> --start 2026-08-25T12:00:00Z \
+  --end 2026-08-25T13:00:00Z --reason "narrowed investigation window"
+synveda relaxation revoke <relaxation-id> --expected <current-version-id> \
+  --reason "investigation complete"
+```
+
+The subject flag takes the identity UUID returned by the authenticated
+identity surface, not a free-form user name. Revisions require the exact
+current immutable version. Ordinary API, console, CLI, log and audit responses
+carry identifiers, hashes and bounded reasons, never Knowledge content or a
+second permission token. The predecessor routes and command have no aliases;
+an old development database is refused by the schema-epoch guard rather than
+translated.
+
 ## Check it works
 
 ```sh

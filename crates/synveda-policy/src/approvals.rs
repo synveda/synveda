@@ -23,7 +23,7 @@
 //! | context pack → tenant root / org unit | curator + administrator, 2 distinct | 1 × curator | 1 × curator |
 //! | skill | administrator, 2 distinct (+ floor's reviewer) | 1 × administrator (+ floor) | 1 × administrator (+ floor) |
 //! | tool | administrator, 2 distinct (+ floor's reviewer) | 1 × administrator (+ floor) | 1 × administrator (+ floor) |
-//! | policy | 2 × administrator | 1 × administrator | 1 × administrator |
+//! | policy | 2 × administrator | 1 × administrator | — (auto) |
 //! | anything `restricted` | the floor: administrator, 2 distinct | same | same |
 //!
 //! The role names are grant keys since CPR-7 (ADR-0074 decision 6):
@@ -139,8 +139,9 @@ pub fn regulated_strict() -> ApprovalMatrix {
                 &[(RoleKey::Administrator, 1)],
                 2,
             ),
-            // "Policy lapse under regulated-strict: 2 × steward at target
-            // scope". Policy governs everything else, so it is the one
+            // A Policy relaxation under regulated-strict needs two
+            // administrators at the target scope. Policy governs everything
+            // else, so it is the one
             // asset whose review needs two holders of the same role.
             rule(
                 Some(AssetKind::Policy),
@@ -250,12 +251,6 @@ pub fn open_collaboration() -> ApprovalMatrix {
             ),
             rule(
                 Some(AssetKind::Tool),
-                None,
-                &[(RoleKey::Administrator, 1)],
-                1,
-            ),
-            rule(
-                Some(AssetKind::Policy),
                 None,
                 &[(RoleKey::Administrator, 1)],
                 1,

@@ -137,17 +137,9 @@ impl fmt::Display for ProposalView {
 
 /// What running a proposal's effect would do.
 ///
-/// Until AUTHZ-4 a proposal had exactly one possible effect — publish its
-/// members onto the target scope's published channel — and the column
-/// holding this was called `target_channel` with a `= 'published'` check.
-/// A lapse has no target channel at all: its effect is a grant row
-/// (ADR-0037 decision 16). So the column names the *effect*, and this is
-/// its vocabulary.
-///
-/// [`ProposalEffect::Lapse`] is deliberately **not** a [`Channel`] variant.
-/// No scope has a `policy/lapse` ref, nothing writes one, and a channel
-/// that cannot express withdrawal cannot express expiry either — the same
-/// fact that kept `staged` unwritten (ADR-0032 decision 2).
+/// The column retains its historical `target_channel` name, but this is the
+/// effect vocabulary: publication writes a channel, classification changes
+/// record state, and apply executes a typed governed command.
 ///
 /// There is no `Default`: what a proposal would *do* is the first thing a
 /// reviewer needs to know.
@@ -157,10 +149,6 @@ pub enum ProposalEffect {
     /// Publish the members onto the target scope's published channel
     /// (FLOW-3). The only effect there was until AUTHZ-4.
     Published,
-    /// Open a time-boxed grant over the target scope's material
-    /// (AUTHZ-4, ADR-0037). Always an [`crate::AssetKind::Policy`]
-    /// proposal whose one member is the lapse's reviewed terms.
-    Lapse,
     /// Move the members to the sensitivity their proposed versions carry
     /// (AUTHZ-5, ADR-0038 decision 9) — the only path to `restricted`, and
     /// the only path back down from it.
@@ -184,9 +172,8 @@ pub enum ProposalEffect {
 
 impl ProposalEffect {
     /// Every effect.
-    pub const ALL: [ProposalEffect; 4] = [
+    pub const ALL: [ProposalEffect; 3] = [
         ProposalEffect::Published,
-        ProposalEffect::Lapse,
         ProposalEffect::Classify,
         ProposalEffect::Apply,
     ];
@@ -197,7 +184,6 @@ impl ProposalEffect {
     pub const fn as_str(&self) -> &'static str {
         match self {
             ProposalEffect::Published => "published",
-            ProposalEffect::Lapse => "lapse",
             ProposalEffect::Classify => "classify",
             ProposalEffect::Apply => "apply",
         }
@@ -205,14 +191,14 @@ impl ProposalEffect {
 
     /// The channel this effect writes, when it writes one.
     ///
-    /// `None` for a lapse and for a reclassification, which is the honest
-    /// answer rather than a stand-in: their effects are rows, and a caller
+    /// `None` for reclassification and typed application, which is the honest
+    /// answer rather than a stand-in: their effects are state changes, and a caller
     /// that needs a channel here has taken a wrong turn.
     #[must_use]
     pub const fn channel(&self) -> Option<Channel> {
         match self {
             ProposalEffect::Published => Some(Channel::Published),
-            ProposalEffect::Lapse | ProposalEffect::Classify | ProposalEffect::Apply => None,
+            ProposalEffect::Classify | ProposalEffect::Apply => None,
         }
     }
 }
@@ -348,11 +334,7 @@ mod tests {
             ProposalEffect::Published.channel(),
             Some(Channel::Published)
         );
-        assert_eq!(
-            ProposalEffect::Lapse.channel(),
-            None,
-            "a lapse writes a row, not a channel; standing in for one would be a lie"
-        );
+        assert_eq!(ProposalEffect::Apply.channel(), None);
         assert!("derived".parse::<ProposalEffect>().is_err());
         assert!("staged".parse::<ProposalEffect>().is_err());
     }

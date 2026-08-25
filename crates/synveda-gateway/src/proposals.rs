@@ -163,12 +163,9 @@ pub(crate) struct ProposalSummary {
     #[serde(skip_serializing_if = "Option::is_none")]
     source_scope_path: Option<String>,
     asset: String,
-    /// What running this proposal would do (AUTHZ-4, ADR-0037
-    /// decision 16). `published` for every FLOW-3 proposal; `lapse` for a
-    /// grant. Named for the effect rather than the channel because a lapse
-    /// has no channel, and a field that said `published` on a proposal that
-    /// publishes nothing would be the paper-over this feature refused at
-    /// the schema.
+    /// What running this proposal would do. `published` writes a channel,
+    /// `classify` changes sensitivity, and `apply` executes a typed governed
+    /// artifact command (including a policy relaxation).
     #[schema(value_type = String)]
     effect: ProposalEffect,
     /// The five-state vocabulary tech plan §2.3 describes: the stored
@@ -1308,6 +1305,9 @@ async fn apply_inner(state: &AppState, id: ProposalId) -> Result<Json<serde_json
         (AssetKind::Configuration, ProposalEffect::Apply) => {
             serde_json::to_value(crate::configuration::apply_reviewed(state, id).await?)
         }
+        (AssetKind::Policy, ProposalEffect::Apply) => {
+            serde_json::to_value(crate::relaxations::apply_reviewed(state, id).await?)
+        }
         _ => {
             return Err(Error::Invalid {
                 message: format!(
@@ -2035,6 +2035,9 @@ async fn member_views(
     if proposal.asset == AssetKind::Configuration {
         return configuration_change_member_views(tx, tenant_id, proposal, &proposed).await;
     }
+    if proposal.asset == AssetKind::Policy && proposal.effect == ProposalEffect::Apply {
+        return relaxation_change_member_views(tx, tenant_id, proposal, &proposed).await;
+    }
     if proposal.asset == AssetKind::Prompt {
         return prompt_member_views(tx, tenant_id, proposal, &proposed).await;
     }
@@ -2367,6 +2370,84 @@ async fn configuration_change_member_views(
     }])
 }
 
+/// [`member_views`] for an immutable typed Policy/apply relaxation command
+/// (CPR-31, ADR-0090). The complete bounded terms are reviewable here and
+/// their canonical digest must match the content-addressed manifest.
+async fn relaxation_change_member_views(
+    tx: &mut sqlx::PgConnection,
+    tenant_id: TenantId,
+    proposal: &vedaflow::StoredProposal,
+    proposed: &[vedaflow::ChannelMember],
+) -> Result<Vec<MemberView>> {
+    let [member] = proposed else {
+        return Err(Error::Internal {
+            message: format!(
+                "relaxation change {} has {} members rather than one command",
+                proposal.id,
+                proposed.len()
+            ),
+        });
+    };
+    if member.name != "command" {
+        return Err(Error::Internal {
+            message: format!(
+                "relaxation change {} names member {:?}, expected command",
+                proposal.id, member.name
+            ),
+        });
+    }
+    let change = synveda_store::relaxations::change(&mut *tx, tenant_id, proposal.id)
+        .await?
+        .ok_or_else(|| Error::Internal {
+            message: format!("relaxation change {} has no typed effect", proposal.id),
+        })?;
+    let object = vedaflow::read_object(&mut *tx, tenant_id, member.object)
+        .await?
+        .ok_or_else(|| Error::Internal {
+            message: format!(
+                "relaxation change {} names missing manifest object {}",
+                proposal.id,
+                member.object.to_hex()
+            ),
+        })?;
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&object.content).map_err(|error| Error::Internal {
+            message: format!(
+                "relaxation change {} manifest is invalid: {error}",
+                proposal.id
+            ),
+        })?;
+    let manifest_hash = manifest
+        .get("payload_hash")
+        .and_then(serde_json::Value::as_str);
+    let value = synveda_types::json::canonicalise(&serde_json::to_value(&change.command).map_err(
+        |error| Error::Internal {
+            message: format!(
+                "encode relaxation change {} for review: {error}",
+                proposal.id
+            ),
+        },
+    )?);
+    let rendered = serde_json::to_string_pretty(&value).map_err(|error| Error::Internal {
+        message: format!("render relaxation change {}: {error}", proposal.id),
+    })?;
+    let payload_hash = blake3::hash(value.to_string().as_bytes())
+        .to_hex()
+        .to_string();
+    Ok(vec![MemberView {
+        member: member.name.clone(),
+        asset: AssetKind::Policy.as_str().to_owned(),
+        object_hash: member.object.to_hex(),
+        unchanged: payload_hash == change.payload_hash
+            && manifest_hash == Some(change.payload_hash.as_str()),
+        sensitivity: proposal.sensitivity,
+        content: rendered.clone(),
+        effect: MemberEffect::Apply,
+        proposed: rendered,
+        baseline: None,
+    }])
+}
+
 /// [`member_views`] for a context-pack proposal (PRMT-2, ADR-0050).
 ///
 /// [`prompt_member_views`] one table over, with one difference that is
@@ -2587,11 +2668,11 @@ fn decide_asset_read(
         AssetKind::ContextPack => {
             authz::decide_context_pack_read(state, input, resource, Sensitivity::WORKING)
         }
-        // `policy` is the one that remains, and it is not proposable here —
-        // a lapse is its own route (ADR-0037 decision 16).
+        // Typed governed artifacts are opened by their own command routes;
+        // this generic authoring route carries only prompt/pack documents.
         other => Err(Error::Invalid {
             message: format!(
-                "{} is not an asset a proposal carries; a policy lapse is POST /v1/lapses",
+                "{} is not an authored artifact this proposal route carries",
                 other.as_str()
             ),
         }),

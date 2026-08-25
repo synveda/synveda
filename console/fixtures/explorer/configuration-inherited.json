@@ -6,7 +6,7 @@
     "binding_scope_id": "0199c000-0000-7000-8000-000000000002",
     "artifact_id": "0199c000-0000-7000-8000-000000000003",
     "version_id": "0199c000-0000-7000-8000-000000000004",
-    "content_hash": "5d716931de4c27e66309b59160665b0348a976a6e0d0c394b01c5bd66941c783",
+    "content_hash": "6ffb4d59eb95e51cd87079d4770024297e54cdfc171a23ef7a09155e54e4544a",
     "document": {
       "policy_pack": "eng-pack",
       "capture": {
@@ -37,6 +37,13 @@
       "advertisement": {
         "skills": true,
         "tools": true
+      },
+      "relaxations": {
+        "enabled": true,
+        "maximum_duration_secs": 604800,
+        "allowed_actions": [
+          "knowledge.read"
+        ]
       },
       "allowed_external_providers": [
         "anthropic",

@@ -355,8 +355,7 @@ mod tests {
 
     /// There is no clamp here any more, and that is the feature: the engine
     /// executes the plan it is handed. `restricted` reaches these pairs only
-    /// when the PDP put it there, which takes a lapse that declared the tier
-    /// and therefore cleared the compliance floor.
+    /// when the PDP put it there.
     #[test]
     fn the_engine_carries_whatever_tier_the_plan_permitted() {
         let top = SearchFilter::for_scope(scope(1), &Sensitivity::ALL);

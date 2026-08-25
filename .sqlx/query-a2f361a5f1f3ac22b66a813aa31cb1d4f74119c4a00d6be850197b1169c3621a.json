@@ -1,0 +1,59 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select proposal_id,\n                  payload as \"payload: Json<RelaxationCommand>\", payload_hash,\n                  resulting_relaxation_id, resulting_version_id,\n                  resulting_revision, applied_at\n             from policy_relaxation_changes\n            where tenant_id = $1 and proposal_id = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "proposal_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "payload: Json<RelaxationCommand>",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 2,
+        "name": "payload_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "resulting_relaxation_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "resulting_version_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "resulting_revision",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 6,
+        "name": "applied_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "a2f361a5f1f3ac22b66a813aa31cb1d4f74119c4a00d6be850197b1169c3621a"
+}

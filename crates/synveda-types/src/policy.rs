@@ -10,8 +10,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    ApprovalMatrix, CompositionConfig, DedupConfig, LapseConfig, MoverConfig, PromotionConfig,
-    RedactionConfig, RetentionConfig, ScopeId, SkillQualityConfig, SkillScanConfig, TenantId,
+    ApprovalMatrix, CompositionConfig, DedupConfig, MoverConfig, PromotionConfig, RedactionConfig,
+    RetentionConfig, ScopeId, SkillQualityConfig, SkillScanConfig, TenantId,
 };
 
 /// A per-node policy pack assignment: the node (and its subtree, until a
@@ -38,9 +38,8 @@ pub struct PolicyAssignment {
 /// read path composes under (CTX-2, ADR-0025 decisions 2–3), the
 /// approvals a publication needs (FLOW-3, ADR-0032 decision 3), the
 /// rules that open a promotion proposal without a human deciding to
-/// (FLOW-4, ADR-0033 decision 6), the longest window a lapse may run
-/// for (AUTHZ-4, ADR-0037 decision 5), what the ingestion pipeline
-/// does with a restatement or a contradiction (MEM-5, ADR-0039
+/// (FLOW-4, ADR-0033 decision 6), what the ingestion pipeline does with a
+/// restatement or a contradiction (MEM-5, ADR-0039
 /// decision 12), how long material is served, kept and destroyed
 /// (MEM-6, ADR-0040), and the severity at which a skill bundle's
 /// security scan refuses rather than reports (SKIL-2, ADR-0052
@@ -51,8 +50,7 @@ pub struct PolicyAssignment {
 /// strict redaction, the product composition config (which only ever
 /// narrows), the empty approval matrix — which still resolves to the
 /// invariant floor, never to "no review needed" — no promotion rules
-/// at all, because an absent trigger must not fire, the strict lapse
-/// window, which narrows and never grants, the product dedup config,
+/// at all, because an absent trigger must not fire, the product dedup config,
 /// which removes nothing a reader could otherwise have seen except the
 /// facts a newer statement replaced, and the product retention config,
 /// whose record horizons are all unset — a pack that configures nothing
@@ -67,8 +65,6 @@ pub struct PackConfig {
     pub approvals: Option<ApprovalMatrix>,
     /// The pack's auto-promotion rules.
     pub promotion: Option<PromotionConfig>,
-    /// The pack's lapse ceiling.
-    pub lapse: Option<LapseConfig>,
     /// The pack's dedup and conflict-detection configuration.
     pub dedup: Option<DedupConfig>,
     /// The pack's retention, disposal and staleness configuration.

@@ -355,7 +355,7 @@ fn filters_never_leak_on_either_leg() {
             results
                 .iter()
                 .any(|hit| hit.record.state.sensitivity == Sensitivity::Restricted),
-            "including the one only a compliance-signed lapse can produce"
+            "including the top tier explicitly named by the plan"
         );
 
         // And a pair set that names a tier at the *wrong* scope admits

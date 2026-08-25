@@ -11,13 +11,12 @@ import { test } from "node:test";
 
 import {
   deniedCount,
-  describeEnd,
-  lapsesTouching,
   mayDo,
   mayRead,
   offers,
+  relaxationsAt,
   type Capabilities,
-  type Lapse,
+  type Relaxation,
 } from "./explorer.mjs";
 
 const HERE = "0199aa11-1111-7111-8111-111111111111";
@@ -67,41 +66,49 @@ test("an action the probe never asked about is not offered", () => {
   assert.equal(offers(capabilities(), "something.new"), false);
 });
 
-function lapse(overrides: Partial<Lapse> = {}): Lapse {
+function relaxation(overrides: Partial<Relaxation> = {}): Relaxation {
   return {
     id: "0199bb11-1111-7111-8111-111111111111",
-    grantee_scope_id: HERE,
-    target_scope_id: ABOVE,
-    action: "memory.read",
-    reason: "joint incident review",
-    granted_at: "2026-08-01T09:00:00Z",
-    expires_at: "2026-09-01T09:00:00Z",
-    granted_by: "0199bb11-1111-7111-8111-111111111112",
-    proposal_id: "0199bb11-1111-7111-8111-111111111113",
-    outcome: "active",
+    governing_scope_id: HERE,
+    current_version_id: "0199bb11-1111-7111-8111-111111111112",
+    revision: 1,
+    status: "active",
+    current: {
+      id: "0199bb11-1111-7111-8111-111111111112",
+      relaxation_id: "0199bb11-1111-7111-8111-111111111111",
+      ordinal: 1,
+      change_id: "0199bb11-1111-7111-8111-111111111113",
+      subject_identity_id: "0199bb11-1111-7111-8111-111111111114",
+      subject: "alice",
+      target_scope_id: HERE,
+      action: "knowledge.read",
+      max_sensitivity: "internal",
+      requested_start_at: "2026-08-01T09:00:00Z",
+      requested_end_at: "2026-09-01T09:00:00Z",
+      effective_start_at: "2026-08-01T09:00:00Z",
+      hard_expires_at: "2026-09-01T09:00:00Z",
+      reason: "joint incident review",
+      configuration_hash: "a".repeat(64),
+      content_hash: "b".repeat(64),
+      creator_id: "0199bb11-1111-7111-8111-111111111114",
+      approver_ids: [],
+      auto_applied: true,
+      created_at: "2026-08-01T09:00:00Z",
+    },
+    created_at: "2026-08-01T09:00:00Z",
+    created_by: "0199bb11-1111-7111-8111-111111111114",
+    updated_at: "2026-08-01T09:00:00Z",
+    updated_by: "0199bb11-1111-7111-8111-111111111114",
     ...overrides,
   };
 }
 
-test("a scope sees the grants at both of its ends", () => {
-  // ADR-0058 decision 7 in the renderer: a grant is as much a fact about
-  // the team that received it as about the team that disclosed, and a view
-  // showing only the target end tells a granted team nothing is happening.
-  const receiving = lapse();
-  const disclosing = lapse({ id: "b", grantee_scope_id: ABOVE, target_scope_id: HERE });
-  const elsewhere = lapse({ id: "c", grantee_scope_id: ABOVE, target_scope_id: ABOVE });
-  const touching = lapsesTouching([receiving, disclosing, elsewhere], HERE);
+test("a scope shows only relaxations governed at that exact target", () => {
+  const here = relaxation();
+  const elsewhere = relaxation({ id: "c", governing_scope_id: ABOVE });
+  const touching = relaxationsAt([here, elsewhere], HERE);
   assert.deepEqual(
     touching.map((entry) => entry.id),
-    [receiving.id, "b"],
+    [here.id],
   );
-});
-
-test("an end the reader may not read shows an abbreviated id and no path", () => {
-  // The gateway omits the path for an end this caller cannot read, so a
-  // grant visible from one end never discloses where the other end sits.
-  assert.equal(describeEnd("acme/eng/platform", HERE), "acme/eng/platform");
-  const hidden = describeEnd(undefined, HERE);
-  assert.match(hidden, /^«/);
-  assert.equal(hidden.includes("/"), false, `no path leaked: ${hidden}`);
 });

@@ -2097,6 +2097,24 @@ CPR-30  Governed runtime configuration artifacts (XL)
   all new tenant tables are forced-RLS; focused tests, demo, `make ci` and
   `make db-test` pass. ADR-0089.
 
+CPR-31  Governed auto-apply and policy relaxations (XL)
+  Filed 2026-08-25 by the autonomous continuation. Prove that Knowledge,
+  Skills, Tools and Configuration all auto-apply only by completing their
+  typed VedaFlow change, then replace the old lapse plane with stable,
+  versioned, exact-subject policy relaxations over current Knowledge. AC:
+  create/revise/revoke are `Policy/apply` commands under live PDP and matrix
+  evaluation; the personal profile may auto-apply while stricter profiles
+  retain the same bytes for review or rejection; immutable versions retain
+  creator, approvers, effective Configuration evidence, requested window,
+  hard expiry, exact `knowledge.read` permission and content hash; reads end
+  authority by database time, current Configuration can narrow a standing
+  grant, and Cedar matches the exact subject/scope/action/tier before allowing
+  any Knowledge address; principal-scope privacy and service confinement hold;
+  cursor-paginated public API, generated console and HTTP CLI cover the full
+  lifecycle; `policy_lapses`, lapse routes/DTOs/CLI/config and old runtime
+  markers are deleted without translation; all new tables are forced-RLS;
+  focused tests, demo, `make ci` and `make db-test` pass. ADR-0090.
+
 ──────────────────────────────────────────────
 Sequencing (features → phases)
 ──────────────────────────────────────────────
@@ -2190,7 +2208,7 @@ Phase 4 ecosystem: ADPT-4,5,6,7,8 · PRMT-3 · SKIL-5 · MEM-7 · OPS-5,6,7 · C
    or an evaluation harness — and that is a *when*, not an *if*, since ADPT-1's own demo
    is a script. What it must not become is a warning in a README: the gap is silent,
    returns exit 0, and reads exactly like a session that was observed.)
-Phase 5 context platform (redesign): CPR-1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30
+Phase 5 context platform (redesign): CPR-1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31
    (Added 2026-08-17. Its own phase rather than a slot in Phase 4, because it is not the
    next feature — it is the programme that re-cuts the model every feature above was built
    on, for an audience none of them was: one person, or four sharing agent context, who

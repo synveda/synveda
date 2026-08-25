@@ -81,8 +81,8 @@ pub struct NewProposal<'a> {
     /// Which asset type.
     pub asset: AssetKind,
     /// What running this proposal would do: publish its members onto the
-    /// target's channel, or — since AUTHZ-4 — open a lapse (ADR-0037
-    /// decision 16). This module runs neither; the caller does.
+    /// target's channel or apply a typed governed effect. This module runs
+    /// neither; the caller does.
     pub effect: ProposalEffect,
     /// The members, as `(entry name, content address)`.
     pub members: &'a [(String, ObjectHash)],

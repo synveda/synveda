@@ -25,10 +25,10 @@
 
 import type {
   BatchResponse,
-  LapseListResponse,
-  LapseView,
   ListResponse,
   NodeCapabilities,
+  RelaxationListView,
+  RelaxationView,
   ScopeView,
 } from "./generated/api.js";
 
@@ -43,9 +43,9 @@ export type Capabilities = NodeCapabilities;
 /** The batch probe's envelope. */
 export type CapabilityBatch = BatchResponse;
 
-export type Lapse = LapseView;
+export type Relaxation = RelaxationView;
 
-export type LapseListing = LapseListResponse;
+export type RelaxationListing = RelaxationListView;
 
 /**
  * The actions a capability answer says yes to, sorted.
@@ -86,28 +86,12 @@ export function offers(capabilities: Capabilities | null, action: string): boole
 }
 
 /**
- * The lapses touching a scope, from either end.
+ * Relaxations governed at this exact scope.
  *
- * Both ends, because that is the whole of ADR-0058 decision 7: a grant is
- * as much a fact about the team that received it as about the team that
- * disclosed. A view that showed only the target end would tell the administrator
- * of a granted team that nothing is happening to them.
+ * A CPR-31 relaxation freezes one provisioned identity as its subject and
+ * one non-principal scope as its target. There is no inherited grantee end
+ * and therefore no client-side reconstruction of one.
  */
-export function lapsesTouching(lapses: Lapse[], scopeId: string): Lapse[] {
-  return lapses.filter(
-    (lapse) => lapse.grantee_scope_id === scopeId || lapse.target_scope_id === scopeId,
-  );
-}
-
-/**
- * An end of a grant, as a reader may see it: the path when they may read
- * that scope, the id when they may not.
- *
- * The gateway omits the path for an end this caller cannot read, so a grant
- * visible from one end never discloses where the other end sits in the
- * organisation. The id is left because it is enough to name the row and not
- * enough to locate it.
- */
-export function describeEnd(path: string | null | undefined, id: string): string {
-  return path ?? `«${id.slice(0, 8)}»`;
+export function relaxationsAt(relaxations: Relaxation[], scopeId: string): Relaxation[] {
+  return relaxations.filter((relaxation) => relaxation.governing_scope_id === scopeId);
 }

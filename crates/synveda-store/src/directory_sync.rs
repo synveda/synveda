@@ -94,7 +94,7 @@ pub struct DirectorySyncState {
 /// A human's authorisation to seal past the breaker (ADR-0060 decision 10).
 ///
 /// Reasoned, time-boxed, signed, and bounded by a ceiling — the fourth being
-/// the one the lapse does not have, and the one that stops "authorise 300,
+/// what stops "authorise 300,
 /// the directory degrades further, seal 5,000".
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SealAuthorisation {
@@ -441,8 +441,8 @@ pub async fn absent_at_least(
 /// Grants a seal authorisation (ADR-0060 decision 10).
 ///
 /// The window starts **now** and both ends come from the database's clock,
-/// so an authorisation can never be born already expired by a skewed one —
-/// `lapses::grant`'s rule, for the same reason. Any authorisation already in
+/// so an authorisation can never be born already expired by a skewed one.
+/// Any authorisation already in
 /// force is replaced rather than added to: at most one stands at a time, so
 /// there is never a question of which ceiling applies.
 ///
@@ -505,8 +505,8 @@ pub async fn authorise_seals(
 /// The clock is the database's `now()`, which is `transaction_timestamp()`
 /// and therefore **frozen for the life of the calling transaction**. So the
 /// window is judged as at the moment the transaction opened, not the moment
-/// this statement runs: one pass judges one clock throughout, which is the
-/// rule `lapses::active_for_scopes` states and the reason it gives. It also
+/// this statement runs: one pass judges one clock throughout, matching the
+/// policy-relaxation read predicate. It also
 /// means an authorisation cannot expire out from under a pass mid-way, and
 /// that a pass held open for longer than the window could still spend one —
 /// immaterial while windows are operator-sized in hours and this runs in a

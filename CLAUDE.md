@@ -92,6 +92,13 @@ CPR-29, the exact generated application contract and client convergence, is
 delivered under ADR-0088; the 156-operation authenticated application contract,
 executable router, generated console client and ordinary CLI/adapter boundary
 are now exact.
+CPR-30, governed runtime Configuration, is delivered under ADR-0089; immutable
+documents and revisioned scope bindings select policy, capture, context,
+freshness, advertisement and providers over one runtime.
+CPR-31, governed policy relaxation, is delivered under ADR-0090; immutable
+exact-subject `knowledge.read` versions replace the pre-cut mutable plane, and
+personal auto-apply is an outcome of the same VedaFlow/PDP/audit path stricter
+profiles retain for review.
 **It is a pre-1.0 hard
 cut**: a fresh schema epoch, no old-data migration, no compatibility shims,
 and old databases rejected with a reset instruction. Since CPR-2 that is
@@ -151,10 +158,11 @@ the committed file and the tree disagree, and `console/src/generated/api.ts`
 is generated from that file (`make check-api-types`). **Never hand-edit
 either.** To refresh both: `SYNVEDA_WRITE_OPENAPI=1 cargo test -p
 synveda-gateway --test openapi` then `node scripts/generate-api-types.mjs`.
-The document covers the complete authenticated application plane — **156
+The document covers the complete authenticated application plane — **164
 operations** from `/v1/me` through workspaces/projects/repositories, access,
 governance, policy, audit, sessions, Knowledge, capture, context, immutable
-Skills, trusted MCP Tools and OKF. Since CPR-29 one route catalogue constructs
+Skills, trusted MCP Tools, OKF, Configuration and policy relaxations. Since
+CPR-29 one route catalogue constructs
 the executable router and exposes the method/path inventory that the OpenAPI
 test compares exactly in both directions; the console has no hand-written
 application operation, and ordinary service/audit CLI and generic MCP paths
@@ -202,7 +210,7 @@ explicitly and say so.
 
 Phases 0, 1 and 2 are complete; SKIL-1 through SKIL-4, OPS-1, CNSL-1, ADPT-2,
 CNSL-2, AUTH-4, AUTH-5, EVAL-3, OPS-2, TEN-3, TEN-4 and OPS-8 are the Phase 3
-features done. 96 of 127 features delivered — see docs/backlog/STATUS.md for
+features done. 97 of 128 features delivered — see docs/backlog/STATUS.md for
 what each one proved and what it left standing. (The total read 86 until
 2026-08-05, when it was corrected to the 88 STATUS.md and `make
 check-backlog` had both said for some time; AUTHZ-7 was filed the same day by
@@ -354,6 +362,15 @@ personal/team/enterprise documents now select policy, capture, context,
 freshness, Skill/Tool advertisement and providers through immutable versions;
 every binding/version change enters typed VedaFlow, and the mutable assignment
 tables and routes are gone.
+**CPR-31 was filed next**, making it **128 with 96 delivered**: it audits the
+one-path auto-apply invariant and replaces the pre-cut lapse plane with
+immutable, exact-subject, time-boxed `Policy/apply` relaxations.
+It was delivered the same day, making it **128 with 97 delivered**: the old
+row/effect/config plane is deleted without translation; stable aggregates and
+immutable versions retain exact subject/scope/permission/tier/window,
+approvers and Configuration evidence; Cedar and database time decide the
+window, while open collaboration auto-applies only by completing the same
+typed VedaFlow change standard retains for review or rejection.
 
 Since CPR-9 a **listing decides per row**. The audit of Prompts 1–7 found that
 `GET /v1/workspaces` and `/v1/me` took one decision at the tenant root and

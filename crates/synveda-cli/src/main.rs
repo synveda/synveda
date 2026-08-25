@@ -25,7 +25,6 @@ mod diff;
 mod directory;
 mod init;
 mod keys;
-mod lapse;
 mod login;
 mod mcp;
 mod okf;
@@ -34,6 +33,7 @@ mod plugin;
 mod prompt;
 mod proposal;
 mod recall;
+mod relaxation;
 mod reset;
 mod scim;
 mod scope;
@@ -157,13 +157,9 @@ enum Command {
     /// authorisation that releases its circuit breaker (AUTH-5, ADR-0060).
     #[command(subcommand)]
     Directory(DirectoryCommand),
-    /// What is currently relaxed, and over what (AUTHZ-4's grants).
-    ///
-    /// The lapse machinery is this product's answer to "strict by default,
-    /// relaxable by design" (seed §2.3), and until CNSL-2 there was no
-    /// terminal in which to ask what was relaxed.
+    /// Governed, immutable, time-boxed policy relaxations.
     #[command(subcommand)]
-    Lapse(LapseCommand),
+    Relaxation(RelaxationCommand),
     /// Log in to a gateway through your browser (AUTH-1 end to end,
     /// ADR-0027 decision 5) and store the session under a profile. This
     /// is the whole of "zero-config": every other Synveda client on this
@@ -1460,23 +1456,76 @@ enum ScimTokenCommand {
 }
 
 #[derive(Subcommand)]
-enum LapseCommand {
-    /// Standing grants anywhere you may read, or one scope's history.
-    ///
-    /// Each grant is visible from *either* end — the scope that discloses
-    /// and the scope that receives — so the steward of a granted team can
-    /// list, and therefore revoke, what their own team holds (ADR-0058
-    /// decision 7).
+enum RelaxationCommand {
+    /// Policy-visible current or historical relaxations.
     List {
-        /// Limit to grants over one target scope. Without it, every grant
-        /// you may see, anywhere in the tenant.
         #[arg(long)]
         scope: Option<ScopeId>,
-        /// Include grants that have expired or been revoked. Default with
-        /// --scope (that form answers "who could read this in March"),
-        /// off without it (that form answers "what is relaxed now").
         #[arg(long)]
-        all: bool,
+        status: Option<String>,
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show the current aggregate and immutable version history.
+    Show {
+        id: synveda_types::RelaxationId,
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Open a governed create change.
+    Create {
+        #[arg(long)]
+        scope: ScopeId,
+        #[arg(long)]
+        subject: IdentityId,
+        #[arg(long, default_value = "knowledge.read")]
+        action: String,
+        #[arg(long, default_value = "internal")]
+        max_sensitivity: String,
+        #[arg(long)]
+        start: String,
+        #[arg(long)]
+        end: String,
+        #[arg(long)]
+        reason: String,
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Publish a replacement immutable version.
+    Revise {
+        id: synveda_types::RelaxationId,
+        #[arg(long)]
+        expected: synveda_types::RelaxationVersionId,
+        #[arg(long)]
+        subject: IdentityId,
+        #[arg(long, default_value = "knowledge.read")]
+        action: String,
+        #[arg(long, default_value = "internal")]
+        max_sensitivity: String,
+        #[arg(long)]
+        start: String,
+        #[arg(long)]
+        end: String,
+        #[arg(long)]
+        reason: String,
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// End a current immutable version early through VedaFlow.
+    Revoke {
+        id: synveda_types::RelaxationId,
+        #[arg(long)]
+        expected: synveda_types::RelaxationVersionId,
+        #[arg(long)]
+        reason: String,
         #[arg(long)]
         profile: Option<String>,
         #[arg(long)]
@@ -1870,12 +1919,72 @@ async fn run(cli: Cli) -> Result<(), String> {
         Command::Scim(ScimCommand::Token(ScimTokenCommand::Revoke { id, profile })) => {
             scim::revoke(&profile_name(profile), &id).await
         }
-        Command::Lapse(LapseCommand::List {
+        Command::Relaxation(RelaxationCommand::List {
             scope,
-            all,
+            status,
             profile,
             json,
-        }) => lapse::list(&profile_name(profile), scope, all, json).await,
+        }) => relaxation::list(&profile_name(profile), scope, status.as_deref(), json).await,
+        Command::Relaxation(RelaxationCommand::Show { id, profile, json }) => {
+            relaxation::show(&profile_name(profile), id, json).await
+        }
+        Command::Relaxation(RelaxationCommand::Create {
+            scope,
+            subject,
+            action,
+            max_sensitivity,
+            start,
+            end,
+            reason,
+            profile,
+            json,
+        }) => {
+            relaxation::create(
+                &profile_name(profile),
+                scope,
+                subject,
+                &action,
+                &max_sensitivity,
+                &start,
+                &end,
+                &reason,
+                json,
+            )
+            .await
+        }
+        Command::Relaxation(RelaxationCommand::Revise {
+            id,
+            expected,
+            subject,
+            action,
+            max_sensitivity,
+            start,
+            end,
+            reason,
+            profile,
+            json,
+        }) => {
+            relaxation::revise(
+                &profile_name(profile),
+                id,
+                expected,
+                subject,
+                &action,
+                &max_sensitivity,
+                &start,
+                &end,
+                &reason,
+                json,
+            )
+            .await
+        }
+        Command::Relaxation(RelaxationCommand::Revoke {
+            id,
+            expected,
+            reason,
+            profile,
+            json,
+        }) => relaxation::revoke(&profile_name(profile), id, expected, &reason, json).await,
         Command::Login {
             gateway,
             issuer,

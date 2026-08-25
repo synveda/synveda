@@ -1,7 +1,7 @@
 //! The scheduled pull sync (AUTH-5, ADR-0060): one pass, and what it is
 //! entitled to conclude.
 //!
-//! The loop is the pack refresher's and the lapse sweep's shape — one pass
+//! The loop is the pack refresher's and relaxation sweep's shape — one pass
 //! immediately, then one per interval, failures logged and never fatal
 //! (ADR-0060 decision 1). It lives in this crate because [`reconcile`] does:
 //! a pull writes the mirror and then calls the same projection the SCIM plane
@@ -12,7 +12,7 @@
 //! 1. **Yield to the push plane.** A tenant with a live SCIM credential is
 //!    skipped entirely (decision 5). Live means issued and not revoked, and
 //!    deliberately not "unexpired": an unrotated expiry is an operational
-//!    lapse, and the answer to "the push plane broke" must not be a silent
+//!    failure, and the answer to "the push plane broke" must not be a silent
 //!    3am handover to a plane that has never enumerated this directory.
 //! 2. **Enumerate.** Full, never a delta feed (decision 6).
 //! 3. **Record presence, always.** Everybody the pass saw is upserted into
@@ -315,7 +315,7 @@ fn storage(err: sqlx::Error) -> synveda_types::Error {
 /// Whether the SCIM plane owns this tenant (ADR-0060 decision 5).
 ///
 /// "Live" is issued and not revoked. An **expired** credential still counts,
-/// which is the decision's sharp end: expiry is an operational lapse rather
+/// which is the decision's sharp end: expiry is an operational failure rather
 /// than a handover, and a tenant that stops syncing loudly is a better
 /// failure than one that silently changes which plane decides who has left.
 async fn push_plane_owns(state: &AppState, tenant_id: TenantId) -> Result<bool> {

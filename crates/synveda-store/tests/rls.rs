@@ -21,7 +21,7 @@ use sqlx::{PgPool, Postgres, Transaction};
 use synveda_store::records::{self, RecordState};
 use synveda_store::{
     access, configuration, context, idempotency, identities, knowledge, policy_packs, projects,
-    quarantine, repositories, rls, scopes, sessions, tenants, workspaces,
+    quarantine, relaxations, repositories, rls, scopes, sessions, tenants, workspaces,
 };
 // The generic scope vocabulary, reached through its module because the old
 // hierarchy still owns the root name until Prompt 6 (CPR-3, ADR-0070).
@@ -37,8 +37,9 @@ use synveda_types::{
     ContextCandidateId, ContextCompletionStatus, ContextFeedbackId, ContextFeedbackType,
     ContextReasonCode, ContextRunId, ContextSelectionId, Error, GrantId, GroupId, IdentityId,
     IdentityKind, InviteId, KnowledgeItemId, KnowledgeRevisionId, KnowledgeSourceId, PackConfig,
-    ProjectId, RecordClass, RecordId, RecordKind, RepositoryId, ScopeId, Sensitivity, SessionId,
-    TenantId, TenantStatus, TraceRetentionMode, WorkspaceId,
+    ProjectId, ProposalId, RecordClass, RecordId, RecordKind, RelaxationId, RelaxationVersionId,
+    RepositoryId, ScopeId, Sensitivity, SessionId, TenantId, TenantStatus, TraceRetentionMode,
+    WorkspaceId,
 };
 
 // ── Harness ──────────────────────────────────────────────────────────────────
@@ -297,8 +298,12 @@ const COVERED: &[&str] = &[
     // policy — the shape ADR-0059 decision 13 set for the provisioning
     // credential, and for the same threat model.
     "pending_invites",
-    "policy_lapses",
     "policy_packs",
+    // CPR-31 (ADR-0090): the stable head, immutable reviewed versions and
+    // typed VedaFlow command projection are independently tenant-bound.
+    "policy_relaxation_changes",
+    "policy_relaxation_versions",
+    "policy_relaxations",
     "project_repositories",
     "projects",
     "promotion_watermarks",
@@ -3938,284 +3943,242 @@ fn the_projection_is_rebuildable_by_the_app_role() {
     });
 }
 
-// ── AUTHZ-4: standing lapse grants (ADR-0037) ───────────────────────────────
+// ── CPR-31: governed, versioned policy relaxations (ADR-0090) ──────────
 
-/// Seeds a granted lapse: the proposal whose effect it was, and a standing
-/// window an hour wide.
-async fn seed_lapse(pool: &PgPool) -> (TenantId, ScopeId, uuid::Uuid) {
-    let (tenant, target, proposal) = seed_proposal(pool).await;
-    let lapse = uuid::Uuid::now_v7();
-    sqlx::query!(
-        "insert into policy_lapses
-             (tenant_id, id, proposal_id, grantee_scope_id, target_scope_id,
-              action, max_sensitivity, reason, expires_at, granted_by)
-         values ($1, $2, $3, $4, $5, 'memory.read', 'internal',
-                 'joint incident review', now() + interval '1 hour', $6)",
-        tenant.as_uuid(),
-        lapse,
-        proposal,
-        ScopeId::new().as_uuid(),
-        target.as_uuid(),
-        IdentityId::new().as_uuid(),
+async fn seed_relaxation(
+    pool: &PgPool,
+    lifetime: chrono::TimeDelta,
+) -> (
+    TenantId,
+    ScopeId,
+    IdentityId,
+    String,
+    RelaxationId,
+    RelaxationVersionId,
+    ProposalId,
+) {
+    let (tenant, target, _, _) = seed_configuration(pool).await;
+    let mut tx = pool.begin().await.expect("begin Relaxation fixture");
+    let principal = scopes::create(
+        &mut tx,
+        &new_scope(
+            tenant,
+            Some(target),
+            scope::ScopeKind::Principal,
+            "relaxation-subject",
+        ),
     )
-    .execute(pool)
     .await
-    .expect("seed lapse");
-    (tenant, target, lapse)
+    .expect("create Relaxation subject scope");
+    let actor = IdentityId::new();
+    let subject = "subject-relaxation-subject".to_owned();
+    identities::create(
+        &mut tx,
+        actor,
+        tenant,
+        Some(&subject),
+        IdentityKind::User,
+        None,
+        Some("Relaxation subject"),
+        principal.id,
+    )
+    .await
+    .expect("create Relaxation subject identity");
+
+    let relaxation_id = RelaxationId::new();
+    let version_id = RelaxationVersionId::new();
+    let proposal_id = ProposalId::new();
+    let now = chrono::Utc::now();
+    let command = synveda_types::relaxation::RelaxationCommand::Create {
+        relaxation_id,
+        version_id,
+        terms: synveda_types::relaxation::RelaxationTerms {
+            subject_identity_id: actor,
+            target_scope_id: target,
+            action: synveda_types::relaxation::RelaxationAction::KnowledgeRead,
+            max_sensitivity: Sensitivity::Internal,
+            requested_start_at: now - chrono::TimeDelta::seconds(1),
+            requested_end_at: now + lifetime,
+            reason: "time-boxed incident investigation".to_owned(),
+        },
+    };
+    sqlx::query!(
+        "insert into vedaflow_proposals
+             (tenant_id, id, target_scope_id, source_scope_id, asset_kind,
+              target_channel, commit_hash, sensitivity, title, proposer_id,
+              proposer_subject)
+         values ($1, $2, $3, $3, 'policy', 'apply', $4, 'internal',
+                 'RLS Relaxation fixture', $5, $6)",
+        tenant.as_uuid(),
+        proposal_id.as_uuid(),
+        target.as_uuid(),
+        &[4_u8; 32][..],
+        actor.as_uuid(),
+        &subject,
+    )
+    .execute(&mut *tx)
+    .await
+    .expect("open Relaxation fixture proposal");
+    let payload_hash = blake3::hash(
+        synveda_types::json::canonicalise(
+            &serde_json::to_value(&command).expect("encode Relaxation command"),
+        )
+        .to_string()
+        .as_bytes(),
+    )
+    .to_hex()
+    .to_string();
+    relaxations::insert_change(&mut tx, tenant, proposal_id, &command, &payload_hash)
+        .await
+        .expect("store Relaxation change");
+    let effective = configuration::effective_at_scope(&mut tx, tenant, target)
+        .await
+        .expect("resolve governed Configuration");
+    let applied = relaxations::apply(
+        &mut tx,
+        tenant,
+        proposal_id,
+        actor,
+        &[],
+        &effective,
+        &command,
+    )
+    .await
+    .expect("apply Relaxation fixture");
+    relaxations::complete_change(&mut tx, tenant, proposal_id, applied)
+        .await
+        .expect("complete Relaxation fixture");
+    tx.commit().await.expect("commit Relaxation fixture");
+    (
+        tenant,
+        target,
+        actor,
+        subject,
+        relaxation_id,
+        version_id,
+        proposal_id,
+    )
 }
 
-/// The three attacks a standing grant invites, all of which the schema has
-/// to refuse rather than the handler (ADR-0037's compliance notes).
-///
-/// The third is the one this table exists to make impossible: an UPDATE
-/// that pushes `expires_at` forward turns a 30-day grant into a permanent
-/// one *without a second approval*, and it would leave the proposal, the
-/// approvals, and the audit chain all still saying "30 days".
+async fn visible_relaxation_rows(
+    tx: &mut Transaction<'static, Postgres>,
+    tenant: TenantId,
+) -> (i64, i64, i64) {
+    let row = sqlx::query!(
+        r#"select
+             (select count(*) from policy_relaxations where tenant_id = $1) as "aggregates!",
+             (select count(*) from policy_relaxation_versions where tenant_id = $1) as "versions!",
+             (select count(*) from policy_relaxation_changes where tenant_id = $1) as "changes!""#,
+        tenant.as_uuid(),
+    )
+    .fetch_one(&mut **tx)
+    .await
+    .expect("count Relaxation rows");
+    (row.aggregates, row.versions, row.changes)
+}
+
 #[test]
-fn a_grant_cannot_be_forged_resurrected_or_extended() {
+fn relaxation_rows_are_tenant_isolated_and_versions_are_immutable() {
     let Some(db) = db() else { return };
     db.rt.block_on(async {
-        let (victim, victim_target, victim_lapse) = seed_lapse(&db.pool).await;
-        let (adversary, _, adversary_lapse) = seed_lapse(&db.pool).await;
+        let (victim, _, _, _, relaxation_id, version_id, _) =
+            seed_relaxation(&db.pool, chrono::TimeDelta::hours(1)).await;
+        let (adversary, _, _, _, _, _, _) =
+            seed_relaxation(&db.pool, chrono::TimeDelta::hours(1)).await;
 
-        // 1. A grant forged onto another tenant's scope: the ordinary
-        //    isolation, on the one table whose rows widen access.
         let mut tx = app_tx(&db.pool, Some(adversary)).await;
-        let forged = sqlx::query!(
-            "insert into policy_lapses
-                 (tenant_id, id, proposal_id, grantee_scope_id, target_scope_id,
-                  action, max_sensitivity, reason, expires_at, granted_by)
-             values ($1, $2, $3, $4, $5, 'memory.read', 'internal', 'forged',
-                     now() + interval '1 hour', $6)",
-            victim.as_uuid(),
-            uuid::Uuid::now_v7(),
-            uuid::Uuid::now_v7(),
-            ScopeId::new().as_uuid(),
-            victim_target.as_uuid(),
-            IdentityId::new().as_uuid(),
-        )
-        .execute(&mut *tx)
-        .await;
-        assert!(
-            forged.is_err(),
-            "a forged-tenant grant must be rejected: it would widen another \
-             tenant's reads with no proposal behind it"
-        );
-        drop(tx);
-
-        // A cross-tenant revocation is a legal statement matching nothing —
-        // unreachable rather than merely unwritten.
-        let mut tx = app_tx(&db.pool, Some(adversary)).await;
+        assert_eq!(visible_relaxation_rows(&mut tx, victim).await, (0, 0, 0));
+        assert_eq!(visible_relaxation_rows(&mut tx, adversary).await, (1, 1, 1));
         let reached = sqlx::query!(
-            "update policy_lapses set revoked_at = now(), revoked_by = $2,
-                                      revoke_reason = 'not yours'
-             where tenant_id = $1",
+            "update policy_relaxations set expiry_recorded_at = now()
+             where tenant_id = $1 and id = $2",
             victim.as_uuid(),
-            IdentityId::new().as_uuid(),
+            relaxation_id.as_uuid(),
         )
         .execute(&mut *tx)
         .await
-        .expect("cross-tenant revoke runs")
+        .expect("cross-tenant bookkeeping update is a legal no-op")
         .rows_affected();
-        assert_eq!(reached, 0, "another tenant's grant must be unreachable");
+        assert_eq!(reached, 0, "another tenant's Relaxation is unreachable");
         drop(tx);
 
-        // 2. A revocation is terminal: it cannot be undone, and it cannot
-        //    be re-cast to move the reason or the actor.
-        let mut tx = app_tx(&db.pool, Some(adversary)).await;
-        sqlx::query!(
-            "update policy_lapses set revoked_at = now(), revoked_by = $2,
-                                      revoke_reason = 'incident closed'
-             where tenant_id = $1 and id = $3",
-            adversary.as_uuid(),
-            IdentityId::new().as_uuid(),
-            adversary_lapse,
-        )
-        .execute(&mut *tx)
-        .await
-        .expect("revoke own grant");
-        let resurrected = sqlx::query!(
-            "update policy_lapses set revoked_at = null, revoked_by = null,
-                                      revoke_reason = null
-             where tenant_id = $1 and id = $2",
-            adversary.as_uuid(),
-            adversary_lapse,
-        )
-        .execute(&mut *tx)
-        .await;
-        assert!(
-            resurrected.is_err(),
-            "a revoked grant must not be un-revoked: reinstating access is a \
-             new proposal, not an UPDATE"
-        );
+        let mut tx = app_tx(&db.pool, None).await;
+        assert_eq!(visible_relaxation_rows(&mut tx, victim).await, (0, 0, 0));
         drop(tx);
 
-        // 3. The window is immutable. This is the attack the trigger exists
-        //    for: everything else about the grant still reads as approved.
-        let mut tx = app_tx(&db.pool, Some(victim)).await;
-        let extended = sqlx::query!(
-            "update policy_lapses set expires_at = now() + interval '3650 days'
+        let changed = sqlx::query!(
+            "update policy_relaxation_versions set reason = 'rewritten after approval'
              where tenant_id = $1 and id = $2",
             victim.as_uuid(),
-            victim_lapse,
-        )
-        .execute(&mut *tx)
-        .await;
-        let message = extended
-            .expect_err("expires_at must be immutable")
-            .to_string();
-        assert!(
-            message.contains("second approval"),
-            "the refusal must say why, got: {message}"
-        );
-        drop(tx);
-
-        // 4. The declared tier is immutable, and it is the same attack in
-        //    the other dimension (AUTHZ-5, ADR-0038): raised after approval,
-        //    an `internal` grant two stewards approved becomes a
-        //    `restricted` one no compliance approver ever saw — while the
-        //    proposal, the approvals and the chain all still say `internal`.
-        let mut tx = app_tx(&db.pool, Some(victim)).await;
-        let widened = sqlx::query!(
-            "update policy_lapses set max_sensitivity = 'restricted'
-             where tenant_id = $1 and id = $2",
-            victim.as_uuid(),
-            victim_lapse,
-        )
-        .execute(&mut *tx)
-        .await;
-        let message = widened
-            .expect_err("max_sensitivity must be immutable")
-            .to_string();
-        assert!(
-            message.contains("approvers signed"),
-            "the refusal must say why, got: {message}"
-        );
-        drop(tx);
-
-        // And a tier outside the vocabulary is refused by the CHECK, not
-        // stored and puzzled over later.
-        let mut tx = app_tx(&db.pool, Some(victim)).await;
-        let nonsense = sqlx::query!(
-            "insert into policy_lapses
-                 (tenant_id, id, proposal_id, grantee_scope_id, target_scope_id,
-                  action, max_sensitivity, reason, expires_at, granted_by)
-             values ($1, $2, $3, $4, $5, 'memory.read', 'top-secret', 'invented tier',
-                     now() + interval '1 hour', $6)",
-            victim.as_uuid(),
-            uuid::Uuid::now_v7(),
-            uuid::Uuid::now_v7(),
-            ScopeId::new().as_uuid(),
-            victim_target.as_uuid(),
-            IdentityId::new().as_uuid(),
-        )
-        .execute(&mut *tx)
-        .await;
-        assert!(
-            nonsense.is_err(),
-            "a tier outside the vocabulary must be refused at the column"
-        );
-
-        drop(tx);
-
-        // And the rest of the terms with it — a moved target scope would
-        // point an approved grant at material nobody reviewed, and a moved
-        // grantee would hand it to somebody nobody approved.
-        //
-        // One transaction per attempt: a refused statement aborts the
-        // transaction it ran in, so sharing one would prove only that the
-        // first refusal happened.
-        for column in [
-            "target_scope_id = gen_random_uuid()",
-            "grantee_scope_id = gen_random_uuid()",
-            "reason = 'something else'",
-            "granted_at = now() - interval '1 day'",
-            "proposal_id = gen_random_uuid()",
-            "granted_by = gen_random_uuid()",
-        ] {
-            let mut tx = app_tx(&db.pool, Some(victim)).await;
-            let statement =
-                format!("update policy_lapses set {column} where id = '{victim_lapse}'");
-            let outcome = sqlx::raw_sql(&statement).execute(&mut *tx).await;
-            assert!(outcome.is_err(), "{column} must be immutable");
-            drop(tx);
-        }
-
-        // The app role holds no DELETE: a grant is the record of why an
-        // inject composed what it composed, and the outcome is rendered
-        // from the row rather than by removing it.
-        let mut tx = app_tx(&db.pool, Some(victim)).await;
-        let deleted = sqlx::raw_sql("delete from policy_lapses")
-            .execute(&mut *tx)
-            .await;
-        assert!(
-            deleted.is_err(),
-            "the app role must hold no DELETE on grants"
-        );
-        drop(tx);
-
-        // The trigger, for whoever is not running under RLS at all.
-        let owner = sqlx::query!(
-            "delete from policy_lapses where tenant_id = $1",
-            victim.as_uuid(),
+            version_id.as_uuid(),
         )
         .execute(&db.pool)
         .await;
         assert!(
-            owner.is_err(),
-            "the table owner must not be able to delete a grant either"
+            changed
+                .expect_err("a reviewed version must be immutable")
+                .to_string()
+                .contains("immutable"),
+            "the schema trigger must refuse privileged rewrites too"
         );
+        let moved = sqlx::query!(
+            "update policy_relaxations set governing_scope_id = gen_random_uuid()
+             where tenant_id = $1 and id = $2",
+            victim.as_uuid(),
+            relaxation_id.as_uuid(),
+        )
+        .execute(&db.pool)
+        .await;
+        assert!(
+            moved
+                .expect_err("aggregate identity must be immutable")
+                .to_string()
+                .contains("identity is immutable")
+        );
+
+        let mut tx = app_tx(&db.pool, Some(victim)).await;
+        let deleted = sqlx::raw_sql("delete from policy_relaxation_versions")
+            .execute(&mut *tx)
+            .await;
+        assert!(deleted.is_err(), "the app role holds no version DELETE");
     });
 }
 
-/// The expiry stamp is bookkeeping and is written once: two overlapping
-/// sweeps cannot chain one expiry twice.
-///
-/// The row keeps deciding nothing either way — `expires_at` passed — so
-/// this guards the audit chain against a duplicate, not access against a
-/// leak.
 #[test]
-fn an_expiry_can_only_be_chained_once() {
+fn relaxation_expiry_is_authoritative_and_chained_once() {
     let Some(db) = db() else { return };
     db.rt.block_on(async {
-        let (tenant, _, lapse) = seed_lapse(&db.pool).await;
+        let (tenant, _, _, subject, relaxation_id, _, _) =
+            seed_relaxation(&db.pool, chrono::TimeDelta::milliseconds(250)).await;
+        tokio::time::sleep(std::time::Duration::from_millis(350)).await;
         let mut tx = app_tx(&db.pool, Some(tenant)).await;
-
-        let first = sqlx::query!(
-            "update policy_lapses set expiry_recorded_at = now()
-             where tenant_id = $1 and id = $2 and expiry_recorded_at is null",
-            tenant.as_uuid(),
-            lapse,
-        )
-        .execute(&mut *tx)
-        .await
-        .expect("stamp the expiry")
-        .rows_affected();
-        assert_eq!(first, 1);
-
-        // The loser of the race matches nothing rather than double-chaining.
-        let second = sqlx::query!(
-            "update policy_lapses set expiry_recorded_at = now()
-             where tenant_id = $1 and id = $2 and expiry_recorded_at is null",
-            tenant.as_uuid(),
-            lapse,
-        )
-        .execute(&mut *tx)
-        .await
-        .expect("the second sweep runs")
-        .rows_affected();
-        assert_eq!(second, 0, "one expiry, one event");
-
-        // And an unguarded restamp raises rather than moving the record.
+        assert!(
+            relaxations::active_for_subject(&mut tx, tenant, &subject)
+                .await
+                .expect("resolve active Relaxations")
+                .is_empty(),
+            "database time, not the sweep, ends access"
+        );
+        assert!(
+            relaxations::record_expiry(&mut tx, tenant, relaxation_id, 1)
+                .await
+                .expect("record first expiry")
+        );
+        assert!(
+            !relaxations::record_expiry(&mut tx, tenant, relaxation_id, 1)
+                .await
+                .expect("the losing sweep is a no-op"),
+            "one expiry produces one audit event"
+        );
         let restamped = sqlx::query!(
-            "update policy_lapses set expiry_recorded_at = now() + interval '1 day'
+            "update policy_relaxations set expiry_recorded_at = now() + interval '1 day'
              where tenant_id = $1 and id = $2",
             tenant.as_uuid(),
-            lapse,
+            relaxation_id.as_uuid(),
         )
         .execute(&mut *tx)
         .await;
-        assert!(restamped.is_err(), "a chained expiry must not move");
+        assert!(restamped.is_err(), "a recorded expiry cannot move");
     });
 }
 

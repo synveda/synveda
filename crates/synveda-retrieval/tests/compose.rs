@@ -108,8 +108,8 @@ impl Chain {
         self.scopes_at(&[Sensitivity::Public, Sensitivity::Internal])
     }
 
-    /// The same plan with a stated tier set — what a binding, an own-home
-    /// read, or a lapse that declared a ceiling produces.
+    /// The same plan with a stated tier set — what a binding or an own-home
+    /// read produces.
     fn scopes_at(&self, sensitivities: &[Sensitivity]) -> Vec<ComposeScope> {
         [
             (self.user, ScopeKind::Principal, "acme/eng/team-a/alice"),
@@ -142,8 +142,6 @@ impl Chain {
             index_tier: CompositionConfig::DEFAULT.index_tier,
             index_entry_chars: CompositionConfig::DEFAULT.index_entry_chars,
             skill_index: CompositionConfig::DEFAULT.skill_index,
-            // The caller's own chain: nothing here arrives by a grant.
-            lapse: None,
             // The product config: the machinery on, no record horizon,
             // so these fixtures compose exactly as they did before MEM-6
             // (ADR-0040 decision 13).
@@ -901,7 +899,7 @@ fn the_plans_tiers_are_what_composes() {
     // A plan that permits every tier composes every tier: there is no
     // clamp here any more, because a clamp is a decision nobody took. What
     // keeps `restricted` out of a real block is the PDP, which needs a
-    // compliance-signed lapse to put it in a plan at all.
+    // PDP decision to put it in a plan at all.
     let restricted_plan = ComposeRequest::new(chain.scopes_at(&Sensitivity::ALL), 1_500, now);
     let block = run(db, tenant, &restricted_plan);
     let composed = ids(&block);

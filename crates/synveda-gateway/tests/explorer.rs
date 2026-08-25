@@ -16,8 +16,8 @@
 //! 4. **Roles carry an origin from three places** (decision 6) — bound here,
 //!    bound at an ancestor, bound tenant-wide — because a view that reported
 //!    all three the same way would pass for a build that resolved nothing.
-//! 5. **A lapse is visible from either end** (decision 7), and the end the
-//!    reader may not read keeps its path.
+//! 5. **A governed relaxation is listed only through its PDP-visible target**
+//!    (CPR-31), with its exact subject and immutable current version.
 //! 6. **The bound splits rather than truncates** (decision 5).
 //!
 //! Tests need a live Postgres: they read `DATABASE_URL` and skip with a
@@ -63,13 +63,11 @@ struct World {
     eng: ScopeId,
     platform: ScopeId,
     vault: ScopeId,
+    sam_id: IdentityId,
     /// A steward at `platform`, bound at the team.
     sam: String,
     /// A viewer at `platform` — the reader who holds one role short.
     vic: String,
-    /// A steward at `vault`, the disclosing side — a lapse is a proposal
-    /// and the disclosing side is where it is opened (ADR-0037 decision 3).
-    vaughn: String,
 }
 
 async fn world() -> Option<World> {
@@ -104,9 +102,8 @@ async fn world() -> Option<World> {
     let vault = unit(&mut tx, tenant, eng.id, "vault").await;
     tx.commit().await.expect("commit scopes");
 
-    for subject in ["sam", "vic"] {
-        seed_user(&pool, tenant, subject).await;
-    }
+    let sam_id = seed_user(&pool, tenant, "sam").await;
+    seed_user(&pool, tenant, "vic").await;
     seed_user(&pool, tenant, "vaughn").await;
     bind(
         &pool,
@@ -137,9 +134,9 @@ async fn world() -> Option<World> {
         eng: eng.id,
         platform: platform.id,
         vault: vault.id,
+        sam_id,
         sam: issue("sam", tenant),
         vic: issue("vic", tenant),
-        vaughn: issue("vaughn", tenant),
     })
 }
 
@@ -306,47 +303,28 @@ async fn a_probe_answers_about_its_own_caller_and_takes_no_subject() {
     assert_eq!(spied["roles"], json!(["viewer"]));
 }
 
-// ── 5. A lapse from either end ───────────────────────────────────────────────
+// ── 5. A relaxation at its exact governed target ────────────────
 
 #[tokio::test]
-async fn a_grant_is_visible_from_both_ends_and_hides_the_end_you_cannot_read() {
+async fn a_relaxation_listing_names_the_exact_target_and_subject() {
     let Some(w) = world().await else { return };
-    // Everything is permitted except `PolicyRead` away from platform — so
-    // `vic` may read the governance of their own team and not the vault's,
-    // which is what makes "visible from one end" distinguishable from
-    // "visible".
     install(&w, "platform-only", 1, &platform_only(w.platform)).await;
 
-    // A grant disclosing vault's material to platform's members, written at
-    // the store seam: the governed path is AUTHZ-4's proposal + effect, and
-    // this test is about the *listing*, not about how a grant is minted.
-    let lapse_id = grant(&w, w.platform, w.vault, "joint incident review").await;
+    let relaxation = relaxation(&w, w.platform, w.sam_id, "joint incident review").await;
 
-    let (status, listing) = get(&w.app, &w.vic, "/v1/lapses").await;
+    let (status, listing) = get(&w.app, &w.vic, "/v1/relaxations").await;
     assert_eq!(status, StatusCode::OK);
-    let lapses = listing["lapses"].as_array().unwrap();
-    let found = lapses
+    let found = listing["relaxations"]
+        .as_array()
+        .expect("relaxations")
         .iter()
-        .find(|lapse| lapse["id"].as_str() == Some(lapse_id.as_str()))
-        .unwrap_or_else(|| panic!("the grant this reader receives is listed: {listing}"));
-
-    // Visible from the *grantee* end — the half `at_target` could never
-    // answer, and the reason a steward could not revoke what they held.
-    let grantee_path = found["grantee_scope_path"].as_str().unwrap_or_default();
-    assert!(
-        grantee_path.ends_with("eng/platform"),
-        "the end this reader may read carries its path: {grantee_path}"
-    );
-    assert!(
-        found["target_scope_path"].is_null(),
-        "and the end they may not read does not: a grant visible from one \
-         end must not disclose where the other end sits: {found}"
-    );
-    assert_eq!(found["reason"], json!("joint incident review"));
-
-    // The scope-free form is standing-only by default; the scoped form
-    // keeps its history question.
-    assert_eq!(listing["standing_only"], json!(true));
+        .find(|row| row["id"] == relaxation["id"])
+        .unwrap_or_else(|| panic!("the governed relaxation is listed: {listing}"));
+    assert_eq!(found["governing_scope_id"], w.platform.to_string());
+    assert_eq!(found["current"]["target_scope_id"], w.platform.to_string());
+    assert_eq!(found["current"]["subject"], "sam");
+    assert_eq!(found["current"]["reason"], "joint incident review");
+    assert!(found.get("grantee_scope_id").is_none());
 }
 
 // ── 6. The bound splits rather than truncating ───────────────────────────────
@@ -475,49 +453,41 @@ async fn last_payload(pool: &PgPool, tenant: TenantId) -> Value {
     events.last().expect("at least one event").payload.clone()
 }
 
-/// Opens a standing grant **through the governed path**.
-///
-/// Not at the store seam: `policy_lapses.proposal_id` is a foreign key, so a
-/// synthetic proposal id fails — which is the schema saying what ADR-0037
-/// decision 1 says, that a lapse is a proposal and there is no direct route.
-/// The test found that out by trying, and it is a better test for going the
-/// long way: the row it lists is one the product actually mints.
-async fn grant(w: &World, grantee: ScopeId, target: ScopeId, reason: &str) -> String {
-    // The disclosing side opens it (ADR-0037 decision 3), so the proposer is
-    // a steward at the *target*.
-    let (status, opened) = post(
+/// Opens and returns one auto-applied immutable relaxation through the public
+/// Policy/apply command route.
+async fn relaxation(w: &World, target: ScopeId, subject: IdentityId, reason: &str) -> Value {
+    let now = chrono::Utc::now();
+    let key = format!("cnsl2-relaxation-{}", synveda_types::RelaxationId::new());
+    let (status, opened) = post_key(
         &w.app,
-        &w.vaughn,
-        "/v1/lapses",
+        &w.sam,
+        "/v1/relaxations",
+        &key,
         json!({
-            "scope_id": target,
-            "grantee_scope_id": grantee,
-            "action": "memory.read",
-            "duration_secs": 3600,
+            "target_scope_id": target,
+            "subject_identity_id": subject,
+            "action": "knowledge.read",
+            "max_sensitivity": "internal",
+            "requested_start_at": now - chrono::TimeDelta::minutes(1),
+            "requested_end_at": now + chrono::TimeDelta::hours(1),
             "reason": reason,
         }),
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "opening the lapse failed: {opened}");
-    let proposal = opened["proposal_id"].as_str().expect("proposal id");
-
-    // No approval call: under this test's permissive pack the `policy`
-    // cell is already satisfied when the proposal opens, and approving a
-    // satisfied proposal is a 409 that says so by name. Under
-    // `regulated-strict` the same cell asks for two distinct stewards and
-    // AUTHZ-4's own suite covers that arithmetic. What is under test here
-    // is the *listing*, so the cheapest grant this pack will mint is the
-    // right one to build it from — and running the effect is still a
-    // second, separately authorized call (ADR-0037 decision 1).
-    let (status, granted) = post(
-        &w.app,
-        &w.vaughn,
-        &format!("/v1/proposals/{proposal}/lapse"),
-        json!({}),
-    )
-    .await;
-    assert_eq!(status, StatusCode::OK, "granting failed: {granted}");
-    granted["id"].as_str().expect("lapse id").to_owned()
+    assert_eq!(
+        status,
+        StatusCode::CREATED,
+        "opening relaxation failed: {opened}"
+    );
+    assert_eq!(opened["outcome"], "applied", "{opened}");
+    let id = opened["relaxation_id"].as_str().expect("relaxation id");
+    let (status, current) = get(&w.app, &w.sam, &format!("/v1/relaxations/{id}")).await;
+    assert_eq!(
+        status,
+        StatusCode::OK,
+        "reading relaxation failed: {current}"
+    );
+    current
 }
 
 async fn unit(
@@ -544,14 +514,15 @@ async fn unit(
     .expect("create org unit")
 }
 
-async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str) {
+async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str) -> IdentityId {
     let mut tx = pool.begin().await.expect("begin");
     let own = scopes::ensure_principal_scope(&mut tx, tenant, subject, subject)
         .await
         .expect("mint principal scope");
+    let id = IdentityId::new();
     identities::create(
         &mut tx,
-        IdentityId::new(),
+        id,
         tenant,
         Some(subject),
         IdentityKind::User,
@@ -562,6 +533,7 @@ async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str) {
     .await
     .expect("create identity");
     tx.commit().await.expect("commit user");
+    id
 }
 
 async fn bind(
@@ -697,32 +669,15 @@ async fn get(app: &Router, token: &str, uri: &str) -> (StatusCode, Value) {
     )
     .await
 }
-
-async fn post(app: &Router, token: &str, uri: &str, body: Value) -> (StatusCode, Value) {
-    call(
-        app,
-        Request::builder()
-            .method("POST")
-            .uri(uri)
-            .header("authorization", format!("Bearer {token}"))
-            .header("content-type", "application/json")
-            .body(Body::from(body.to_string()))
-            .expect("request"),
-    )
-    .await
-}
-
 // ── The parity corpus (ADR-0058 decision 10) ─────────────────────────────────
 //
-// Four payloads recorded from the real API, each with a `.facts.json` saying
-// what a reader must be told. Both renderers answer them: the CLI's in
-// `crates/synveda-cli`, the console's in `console/src/explorer.parity.test.tsx`.
+// Three payloads recorded from the real API, each with a `.facts.json`
+// saying what the console must tell a reader.
 //
 // The cases are chosen for the judgements the surfaces make rather than the
 // shapes a serialiser emits — an origin that is *not* local, a pack from two
-// levels up, a grant beside one that has ended, and a capability answer with
-// a denial in it. A corpus of happy paths proves the two renderers agree
-// about nothing difficult.
+// levels up, a relaxation beside one that has ended, and a capability answer
+// with a denial in it. A corpus of happy paths proves nothing difficult.
 //
 // `SYNVEDA_RECORD_FIXTURES=1 make db-test` re-records; otherwise this
 // verifies, which is the point — a corpus nobody checks drifts out of the
@@ -756,9 +711,30 @@ fn stabilise(value: &mut Value, map: &mut std::collections::BTreeMap<String, Str
             }
         }
         Value::Array(items) => items.iter_mut().for_each(|item| stabilise(item, map)),
-        Value::Object(fields) => fields
-            .iter_mut()
-            .for_each(|(_, field)| stabilise(field, map)),
+        Value::Object(fields) => {
+            let relaxation_version = fields.contains_key("relaxation_id")
+                && fields.contains_key("content_hash")
+                && fields.contains_key("reason");
+            fields
+                .iter_mut()
+                .for_each(|(_, field)| stabilise(field, map));
+            // Relaxation fixtures use a live window so that the public API
+            // reports one active row. Its real content hash therefore moves
+            // with the request instant even after the timestamp is normalised
+            // above. Keep a distinct 64-hex stand-in derived from the stable
+            // reason; this is the same shape-preserving treatment as UUIDs,
+            // not a replacement for the server's digest assertion.
+            if relaxation_version {
+                let reason = fields
+                    .get("reason")
+                    .and_then(Value::as_str)
+                    .expect("relaxation fixture reason");
+                fields.insert(
+                    "content_hash".to_owned(),
+                    Value::String(blake3::hash(reason.as_bytes()).to_hex().to_string()),
+                );
+            }
+        }
         _ => {}
     }
 }
@@ -846,11 +822,16 @@ async fn the_explorer_parity_corpus_is_what_the_gateway_serves() {
     let (_, caps) = get(&w.app, &w.vic, &caps_path(w.platform)).await;
     let caps = the_one(&caps).clone();
 
-    // A standing grant and one that has already ended, so a renderer that
-    // showed them the same way fails on exactly this case.
-    grant(&w, w.platform, w.vault, "joint incident review").await;
-    expire_one(&w).await;
-    let (_, lapses) = get(&w.app, &w.sam, "/v1/lapses?active=false").await;
+    // A current relaxation and one revoked early, so a renderer that showed
+    // them the same way fails on exactly this case.
+    relaxation(&w, w.platform, w.sam_id, "joint incident review").await;
+    revoke_one(&w).await;
+    let (_, relaxations) = get(
+        &w.app,
+        &w.sam,
+        &format!("/v1/relaxations?scope_id={}", w.platform),
+    )
+    .await;
 
     let mut ids = std::collections::BTreeMap::new();
     // The node each payload is *about*, because an origin cannot be
@@ -866,8 +847,8 @@ async fn the_explorer_parity_corpus_is_what_the_gateway_serves() {
             json!({"asked_about": asked_about, "payload": caps}),
         ),
         (
-            "lapses-standing-and-ended",
-            json!({"asked_about": asked_about, "payload": lapses}),
+            "relaxations-current-and-ended",
+            json!({"asked_about": asked_about, "payload": relaxations}),
         ),
     ] {
         stabilise(&mut payload, &mut ids);
@@ -926,19 +907,20 @@ fn facts_for(name: &str, case: &Value) -> Value {
                 "must_not_name": denied_actions(payload),
             })
         }
-        "lapses-standing-and-ended" => {
+        "relaxations-current-and-ended" => {
             let mut must = Vec::new();
-            let mut outcomes = std::collections::BTreeSet::new();
-            for lapse in payload["lapses"].as_array().unwrap() {
-                must.push(lapse["reason"].as_str().unwrap().to_owned());
-                outcomes.insert(lapse["outcome"].as_str().unwrap().to_owned());
+            let mut statuses = std::collections::BTreeSet::new();
+            for relaxation in payload["relaxations"].as_array().unwrap() {
+                must.push(relaxation["current"]["reason"].as_str().unwrap().to_owned());
+                must.push(relaxation["current"]["action"].as_str().unwrap().to_owned());
+                statuses.insert(relaxation["status"].as_str().unwrap().to_owned());
             }
             assert!(
-                outcomes.len() > 1,
-                "this case exists to carry a standing grant beside an ended one, got {outcomes:?}"
+                statuses.len() > 1,
+                "this case exists to carry an active relaxation beside a revoked one, got {statuses:?}"
             );
-            must.extend(outcomes);
-            json!({"must_name": must, "must_not_name": []})
+            must.extend(statuses);
+            json!({"must_name": must, "must_not_name": ["memory.read"]})
         }
         other => panic!("no facts derivation for {other}"),
     }
@@ -954,19 +936,32 @@ fn denied_actions(payload: &Value) -> Vec<String> {
         .collect()
 }
 
-/// Ends one grant early so the corpus carries a standing row beside a
-/// finished one. Revocation rather than waiting: an expiry needs a clock to
-/// pass and a corpus must not be slow.
-async fn expire_one(w: &World) {
-    let extra = grant(w, w.platform, w.vault, "a grant that was withdrawn").await;
-    let (status, body) = post(
-        &w.app,
-        &w.vaughn,
-        &format!("/v1/lapses/{extra}/revoke"),
-        json!({"reason": "the review finished early"}),
+/// Ends one relaxation early so the corpus carries an active row beside a
+/// terminal one without waiting for a clock.
+async fn revoke_one(w: &World) {
+    let extra = relaxation(
+        w,
+        w.platform,
+        w.sam_id,
+        "a governed window that was revoked",
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "revoking failed: {body}");
+    let id = extra["id"].as_str().expect("relaxation id");
+    let version = extra["current_version_id"]
+        .as_str()
+        .expect("current version");
+    let (status, body) = post_key(
+        &w.app,
+        &w.sam,
+        &format!("/v1/relaxations/{id}/revoke"),
+        "cnsl2-revoke-relaxation",
+        json!({
+            "expected_current_version_id": version,
+            "reason": "the review finished early"
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "revoking failed: {body}");
 }
 
 /// The defect CNSL-2's own demo found, and the reason decision 3 is read
@@ -1261,8 +1256,8 @@ async fn wide_world() -> Option<World> {
         eng: placeholder,
         platform: placeholder,
         vault: placeholder,
+        sam_id: IdentityId::new(),
         sam: issue("sam", tenant),
         vic: issue("vic", tenant),
-        vaughn: issue("vaughn", tenant),
     })
 }

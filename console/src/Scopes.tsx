@@ -1,6 +1,7 @@
 /**
  * Advanced ▸ Scopes (CNSL-2; the governed-scope re-cut CPR-7; re-homed by
- * CPR-8) — scopes, effective Configuration and standing lapses on one page.
+ * CPR-8; relaxation successor CPR-31) — scopes, effective Configuration and
+ * governed relaxations on one page.
  *
  * CPR-7 converted this screen off the deleted hierarchy and onto the
  * governed scope plane (`/v1/admin/scopes`), which is where its calls
@@ -34,15 +35,14 @@ import type { Outcome } from "./api.mjs";
 import { request } from "./client.mjs";
 import {
   deniedCount,
-  describeEnd,
-  lapsesTouching,
   mayDo,
   mayRead,
+  relaxationsAt,
   type Capabilities,
   type CapabilityBatch,
-  type Lapse,
-  type LapseListing,
   type Node,
+  type Relaxation,
+  type RelaxationListing,
   type ScopeLevel,
 } from "./explorer.mjs";
 import type { EffectiveConfigurationView } from "./generated/api.js";
@@ -50,7 +50,7 @@ import type { EffectiveConfigurationView } from "./generated/api.js";
 export function Scopes() {
   const [root, setRoot] = useState<Outcome | { kind: "loading" }>({ kind: "loading" });
   const [selected, setSelected] = useState<Node | null>(null);
-  const [lapses, setLapses] = useState<Lapse[]>([]);
+  const [relaxations, setRelaxations] = useState<Relaxation[]>([]);
 
   const load = useCallback(async () => {
     const outcome = await request("list_scopes", { query: {} });
@@ -59,13 +59,11 @@ export function Scopes() {
       const level = outcome.body as ScopeLevel;
       setSelected(level.parent ?? level.scopes[0] ?? null);
     }
-    // Standing grants are read once for the whole screen rather than per
-    // node: the scope-free listing is already the set this reader may see
-    // anywhere, so asking again per selection would be the same answer
-    // filtered twice.
-    const grants = await request("list_lapses", { query: {} });
-    if (grants.kind === "ok") {
-      setLapses((grants.body as LapseListing).lapses ?? []);
+    // The scope-free listing is already a per-row PDP-filtered set, so read
+    // it once and select the exact governed target locally.
+    const governed = await request("list_relaxations", { query: { limit: "200" } });
+    if (governed.kind === "ok") {
+      setRelaxations((governed.body as RelaxationListing).relaxations ?? []);
     }
   }, []);
 
@@ -101,7 +99,7 @@ export function Scopes() {
           ))}
         </div>
         {selected ? (
-          <NodeDetail key={selected.id} node={selected} lapses={lapses} />
+          <NodeDetail key={selected.id} node={selected} relaxations={relaxations} />
         ) : (
           <p className="muted">Choose a scope.</p>
         )}
@@ -190,7 +188,7 @@ function Branch({
 }
 
 /** The three panels, for the selected scope. */
-function NodeDetail({ node, lapses }: { node: Node; lapses: Lapse[] }) {
+function NodeDetail({ node, relaxations }: { node: Node; relaxations: Relaxation[] }) {
   const [configuration, setConfiguration] = useState<Outcome | { kind: "loading" }>({ kind: "loading" });
   const [caps, setCaps] = useState<Outcome | { kind: "loading" }>({ kind: "loading" });
 
@@ -209,7 +207,7 @@ function NodeDetail({ node, lapses }: { node: Node; lapses: Lapse[] }) {
     })();
   }, [node.id]);
 
-  const touching = lapsesTouching(lapses, node.id);
+  const governedHere = relaxationsAt(relaxations, node.id);
   return (
     <article className="node-detail">
       <h3>{node.slug}</h3>
@@ -218,7 +216,7 @@ function NodeDetail({ node, lapses }: { node: Node; lapses: Lapse[] }) {
       </p>
 
       <ConfigurationPanel state={configuration} node={node} />
-      <LapsePanel lapses={touching} node={node} />
+      <RelaxationPanel relaxations={governedHere} />
       <CapabilityPanel state={caps} node={node} />
     </article>
   );
@@ -264,33 +262,31 @@ function ConfigurationPanel({ state, node }: { state: Outcome | { kind: "loading
   );
 }
 
-function LapsePanel({ lapses, node }: { lapses: Lapse[]; node: Node }) {
+function RelaxationPanel({ relaxations }: { relaxations: Relaxation[] }) {
   return (
     <section>
-      <h4>standing grants</h4>
-      {lapses.length === 0 ? (
+      <h4>governed relaxations</h4>
+      {relaxations.length === 0 ? (
         <p className="muted">nothing is relaxed here</p>
       ) : (
-        <ul className="lapses">
-          {lapses.map((lapse) => {
-            const receiving = lapse.grantee_scope_id === node.id;
-            return (
-              <li key={lapse.id}>
-                <span className={`tag ${lapse.outcome}`}>{lapse.outcome}</span>{" "}
-                {/* Which side of the grant this scope is on is the first
-                    thing an administrator needs: receiving access and disclosing
-                    material are different facts about their team. */}
-                <strong>{receiving ? "receives" : "discloses"}</strong> {lapse.action}{" "}
-                {receiving
-                  ? `from ${describeEnd(lapse.target_scope_path, lapse.target_scope_id)}`
-                  : `to ${describeEnd(lapse.grantee_scope_path, lapse.grantee_scope_id)}`}
+        <ul className="relaxations">
+          {relaxations.map((relaxation) => (
+              <li key={relaxation.id}>
+                <span className={`tag ${relaxation.status}`}>{relaxation.status}</span>{" "}
+                <strong>{relaxation.current.action}</strong> for {relaxation.current.subject}
                 <div className="muted">
-                  until {new Date(lapse.expires_at).toISOString().slice(0, 16).replace("T", " ")} UTC
-                  — {lapse.reason}
+                  through {relaxation.current.max_sensitivity} until{" "}
+                  {new Date(relaxation.current.hard_expires_at).toISOString().slice(0, 16).replace("T", " ")} UTC
+                  {" — "}{relaxation.current.reason}
+                </div>
+                <div className="muted">
+                  version {relaxation.current.ordinal} ·{" "}
+                  {relaxation.current.auto_applied
+                    ? "auto-applied through VedaFlow"
+                    : `${relaxation.current.approver_ids.length} recorded approver(s)`}
                 </div>
               </li>
-            );
-          })}
+          ))}
         </ul>
       )}
     </section>

@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update policy_relaxation_changes\n              set resulting_relaxation_id = $3, resulting_version_id = $4,\n                  resulting_revision = $5, applied_at = now()\n            where tenant_id = $1 and proposal_id = $2 and applied_at is null",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "227421fef76622253ca84d69234dfee2396373c740bdb9efb5f0e9b87a8d058f"
+}

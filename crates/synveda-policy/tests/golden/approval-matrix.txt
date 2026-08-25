@@ -438,21 +438,21 @@ open-collaboration context-pack restricted org_unit   curator×1 + administrator
 open-collaboration context-pack restricted workspace  curator×1 + administrator×1 + 2distinct
 open-collaboration context-pack restricted project    curator×1 + administrator×1 + 2distinct
 open-collaboration context-pack restricted principal  curator×1 + administrator×1 + 2distinct
-open-collaboration policy public tenant     administrator×1 + 1distinct
-open-collaboration policy public org_unit   administrator×1 + 1distinct
-open-collaboration policy public workspace  administrator×1 + 1distinct
-open-collaboration policy public project    administrator×1 + 1distinct
-open-collaboration policy public principal  administrator×1 + 1distinct
-open-collaboration policy internal tenant     administrator×1 + 1distinct
-open-collaboration policy internal org_unit   administrator×1 + 1distinct
-open-collaboration policy internal workspace  administrator×1 + 1distinct
-open-collaboration policy internal project    administrator×1 + 1distinct
-open-collaboration policy internal principal  administrator×1 + 1distinct
-open-collaboration policy confidential tenant     administrator×1 + 1distinct
-open-collaboration policy confidential org_unit   administrator×1 + 1distinct
-open-collaboration policy confidential workspace  administrator×1 + 1distinct
-open-collaboration policy confidential project    administrator×1 + 1distinct
-open-collaboration policy confidential principal  administrator×1 + 1distinct
+open-collaboration policy public tenant     auto
+open-collaboration policy public org_unit   auto
+open-collaboration policy public workspace  auto
+open-collaboration policy public project    auto
+open-collaboration policy public principal  auto
+open-collaboration policy internal tenant     auto
+open-collaboration policy internal org_unit   auto
+open-collaboration policy internal workspace  auto
+open-collaboration policy internal project    auto
+open-collaboration policy internal principal  auto
+open-collaboration policy confidential tenant     auto
+open-collaboration policy confidential org_unit   auto
+open-collaboration policy confidential workspace  auto
+open-collaboration policy confidential project    auto
+open-collaboration policy confidential principal  auto
 open-collaboration policy restricted tenant     administrator×1 + 2distinct
 open-collaboration policy restricted org_unit   administrator×1 + 2distinct
 open-collaboration policy restricted workspace  administrator×1 + 2distinct

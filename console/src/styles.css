@@ -409,12 +409,12 @@ button:disabled {
   font-size: 0.84rem;
 }
 
-ul.lapses {
+ul.relaxations {
   list-style: none;
   padding: 0;
 }
 
-ul.lapses li {
+ul.relaxations li {
   padding: 0.35rem 0;
   border-bottom: 1px solid var(--line);
 }

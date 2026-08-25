@@ -1,4 +1,4 @@
-// standard@22 — shares by default inside what you belong to (seed §6,
+// standard@23 — shares by default inside what you belong to (seed §6,
 // ADR-0014, ADR-0015, ADR-0018, ADR-0020, ADR-0021, ADR-0031, ADR-0032,
 // ADR-0036, ADR-0037, ADR-0038, ADR-0072, ADR-0073).
 //
@@ -26,7 +26,8 @@
 // What sharing by default means here is still the *working* tiers: an
 // anchor's subtree is a default, not an explicit grant, so `confidential`
 // still takes a content role or one's own scope, exactly as under
-// regulated-strict. `restricted` takes a lapse under every pack.
+// regulated-strict. `restricted` Knowledge takes a governed relaxation under
+// every pack.
 
 // **The privacy floor moved.** Until CPR-6 every permit here restated
 // `resource.kind != "user"`; it is now one base-layer forbid over
@@ -191,7 +192,8 @@ permit (
 
 // Stable Knowledge (CPR-16, ADR-0081): the same content reach as memory,
 // expressed over both a scope (create/list) and an exact aggregate (read or
-// mutate). Knowledge has no inherited lapse path.
+// mutate). A relaxation is matched exactly for subject, scope, action, tier
+// and database-time window before Cedar sees it.
 permit (principal, action == Synveda::Action::"KnowledgeRead", resource)
 when {
     resource is Synveda::Scope
@@ -776,41 +778,16 @@ permit (
         && context.roles.containsAny(["curator", "reviewer", "owner", "administrator"])
 };
 
-// The lapse plane (AUTHZ-4, ADR-0037 decision 15): pack-uniform, like the
-// channel, quarantine and proposal planes and for the same reason — how
-// content crosses the trust boundary does not loosen per pack. What varies
-// per pack is the *window* (the LapseConfig ceiling) and the *approvals*
-// (the `policy` cell of the matrix, which has carried tech plan §2.4's lapse
-// row since FLOW-3).
-//
-// Granting is the administrator's act (seed §6: "a steward may apply a
-// scoped, reasoned, time-boxed override" — `steward` is `administrator`
-// since ADR-0074 decision 6), with owner above it. Curator is deliberately
-// absent: a lapse is policy, and ADR-0015 put the policy plane at that
-// level and above. The resource is the scope whose material is disclosed,
-// so an administrator granted at an org unit may open its subtree's
-// material and may not open a sibling's.
+// Governed relaxations (CPR-31, ADR-0090): create, revision and revocation
+// use one Policy/apply path and the same owner/administrator authority at the
+// exact scope whose Knowledge may be disclosed.
 permit (
     principal,
-    action == Synveda::Action::"LapseGrant",
+    action == Synveda::Action::"RelaxationWrite",
     resource
 ) when {
     resource in principal.tenant
         && context.roles.containsAny(["owner", "administrator"])
-};
-
-// Revoking is wider than granting, which is the whole reason the two are
-// separate actions: `reviewer` joins, because ending a disclosure early is
-// incident response — the same key that adjudicates quarantined events
-// (MEM-2) and reviews executable skills. Revocation installs nothing
-// and can only narrow, so no matrix stands in front of it.
-permit (
-    principal,
-    action == Synveda::Action::"LapseRevoke",
-    resource
-) when {
-    resource in principal.tenant
-        && context.roles.containsAny(["reviewer", "owner", "administrator"])
 };
 
 // The directory plane (AUTH-4, ADR-0059 decision 13): who may wire this

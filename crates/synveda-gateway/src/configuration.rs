@@ -24,8 +24,10 @@ use synveda_types::configuration::{
     ConfigurationCommand, ConfigurationContextChannel, ConfigurationDocument,
     ConfigurationMutationOutcome, ConfigurationMutationResult, ConfigurationTemplate,
     ConfigurationVersion, EffectiveConfiguration, ExternalProvider, FreshnessConfiguration,
+    RelaxationConfiguration,
 };
 use synveda_types::json::canonicalise;
+use synveda_types::relaxation::RelaxationAction;
 use synveda_types::scope::Scope;
 use synveda_types::{
     AssetKind, ConfigurationArtifactId, ConfigurationBindingId, ConfigurationVersionId, Error,
@@ -113,6 +115,17 @@ pub(crate) struct AdvertisementConfigurationBody {
     pub tools: bool,
 }
 
+/// Time-boxed relaxation bounds. This document can narrow the closed product
+/// vocabulary but never grants authority by itself.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct RelaxationConfigurationBody {
+    pub enabled: bool,
+    pub maximum_duration_secs: u32,
+    #[schema(value_type = Vec<String>)]
+    pub allowed_actions: Vec<String>,
+}
+
 /// A complete immutable governed runtime document.
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, ToSchema)]
 #[serde(deny_unknown_fields)]
@@ -122,6 +135,7 @@ pub(crate) struct ConfigurationDocumentBody {
     pub context: ContextConfigurationBody,
     pub freshness: FreshnessConfigurationBody,
     pub advertisement: AdvertisementConfigurationBody,
+    pub relaxations: RelaxationConfigurationBody,
     /// `anthropic`, `vllm`, `tei`, or `remote_mcp`, sorted and unique.
     pub allowed_external_providers: Vec<String>,
 }
@@ -163,6 +177,16 @@ impl TryFrom<ConfigurationDocumentBody> for ConfigurationDocument {
             advertisement: AdvertisementConfiguration {
                 skills: value.advertisement.skills,
                 tools: value.advertisement.tools,
+            },
+            relaxations: RelaxationConfiguration {
+                enabled: value.relaxations.enabled,
+                maximum_duration_secs: value.relaxations.maximum_duration_secs,
+                allowed_actions: value
+                    .relaxations
+                    .allowed_actions
+                    .into_iter()
+                    .map(|name| name.parse())
+                    .collect::<Result<Vec<RelaxationAction>>>()?,
             },
             allowed_external_providers: value
                 .allowed_external_providers
@@ -210,6 +234,16 @@ impl From<ConfigurationDocument> for ConfigurationDocumentBody {
             advertisement: AdvertisementConfigurationBody {
                 skills: value.advertisement.skills,
                 tools: value.advertisement.tools,
+            },
+            relaxations: RelaxationConfigurationBody {
+                enabled: value.relaxations.enabled,
+                maximum_duration_secs: value.relaxations.maximum_duration_secs,
+                allowed_actions: value
+                    .relaxations
+                    .allowed_actions
+                    .into_iter()
+                    .map(|action| action.as_str().to_owned())
+                    .collect(),
             },
             allowed_external_providers: value
                 .allowed_external_providers

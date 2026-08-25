@@ -50,7 +50,7 @@ use synveda_store::search::{self, ScopeClassCutoff};
 use synveda_store::{packs, skills as skill_store};
 use synveda_types::scope::ScopeKind;
 use synveda_types::{
-    Channel, ContextPackName, DocumentName, EntryTier, IndexTier, LapseId, RecordClass, RecordId,
+    Channel, ContextPackName, DocumentName, EntryTier, IndexTier, RecordClass, RecordId,
     RecordKind, Result, RetentionConfig, ScopeId, ScopeTier, Sensitivity, SkillBindingId,
     SkillIndex, SkillName, SkillVersionId, TenantId,
 };
@@ -171,15 +171,6 @@ pub struct ComposeScope {
     /// (SKIL-4, ADR-0054 decision 11) — from the same effective-pack
     /// resolution, per candidate scope like everything else here.
     pub skill_index: SkillIndex,
-    /// The lapse this scope is on the plan by, when it is not on the
-    /// caller's own chain (AUTHZ-4, ADR-0037 decisions 10 and 12).
-    ///
-    /// `None` for every chain scope, which is almost all of them. When set,
-    /// `include_derived` is always false — a lapse admits what the target
-    /// published and nothing else — and the section is marked, because a
-    /// block that deliberately contains another scope's material has to say
-    /// so (the CTX-3 degradation-header discipline).
-    pub lapse: Option<LapseId>,
 }
 
 /// One composition request. `scopes` must be in gradient order,
@@ -890,15 +881,7 @@ async fn advertise_skills(
     let scopes: Vec<&ComposeScope> = request
         .scopes
         .iter()
-        .filter(|scope| {
-            // A lapse admits what its target published as *memory* and
-            // nothing else (ADR-0037 decision 11): a grant's approvers
-            // consented to a scope's records, and a capability a fleet
-            // installs is not one of them.
-            scope.lapse.is_none()
-                && scope.skill_index.advertises()
-                && !scope.skill_sensitivities.is_empty()
-        })
+        .filter(|scope| scope.skill_index.advertises() && !scope.skill_sensitivities.is_empty())
         .collect();
     if scopes.is_empty() {
         return Ok(Availability {
@@ -1448,10 +1431,6 @@ pub async fn admit(
 ///    sensitivity *is* the document's, and the exact `(scope, tier)` pair
 ///    is enforced below where the tree that named it is known.
 ///
-/// A lapsed scope contributes nothing: a lapse admits what its target
-/// published as *memory*, and widening it to bundles is a lapse feature's
-/// decision taken in two reviewed places rather than a side effect here
-/// (ADR-0037 decision 11).
 async fn admit_pack_chunks(
     conn: &mut PgConnection,
     tenant_id: TenantId,
@@ -1462,7 +1441,7 @@ async fn admit_pack_chunks(
     let pack_scopes: Vec<&ComposeScope> = request
         .scopes
         .iter()
-        .filter(|scope| scope.lapse.is_none() && !scope.pack_sensitivities.is_empty())
+        .filter(|scope| !scope.pack_sensitivities.is_empty())
         .collect();
     if pack_scopes.is_empty() {
         return Ok(Vec::new());
@@ -1674,18 +1653,9 @@ fn assemble(
         .scopes
         .iter()
         .map(|scope| {
-            // A lapsed section says so. The reader is not a member of this
-            // scope and reached it through a time-boxed grant; a header
-            // identical to their own team's would be the block claiming
-            // otherwise (ADR-0037 decision 12).
-            let marker = if scope.lapse.is_some() {
-                " [lapse]"
-            } else {
-                ""
-            };
             (
                 scope.scope_id,
-                format!("\n## {} ({}){marker}\n", scope.path, scope.kind),
+                format!("\n## {} ({})\n", scope.path, scope.kind),
             )
         })
         .collect();
@@ -2207,7 +2177,6 @@ mod tests {
             index_tier: IndexTier::Demote,
             index_entry_chars: 320,
             skill_index: SkillIndex::Names,
-            lapse: None,
         }
     }
 

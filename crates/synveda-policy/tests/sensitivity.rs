@@ -9,7 +9,7 @@
 //! caller-supplied rows, the shape the gateway feeds it; there is no bypass
 //! here and no direct policy evaluation (CLAUDE.md, seed §2.2).
 //!
-//! The fixture is `packs.rs`'s and `lapses.rs`'s, deliberately, because the
+//! The fixture is `packs.rs`'s because the
 //! question is what the *same* golden decisions do once a tier is named:
 //!
 //! ```text
@@ -21,7 +21,7 @@
 //!     └── team-c ── dave-user
 //! ```
 
-use chrono::{TimeDelta, Utc};
+use chrono::Utc;
 use synveda_policy::{
     Action, AuthzContext, OPEN_COLLABORATION, Pdp, Principal, REGULATED_STRICT, Resource, STANDARD,
     ScopeNode,
@@ -29,10 +29,7 @@ use synveda_policy::{
 use synveda_types::access::RoleKey;
 use synveda_types::anchor::{AnchorSource, ScopeAnchor};
 use synveda_types::scope::ScopeKind;
-use synveda_types::{
-    IdentityId, Lapse, LapseAction, LapseId, PolicyAssignment, ProposalId, ScopeId, Sensitivity,
-    TenantId,
-};
+use synveda_types::{PolicyAssignment, ScopeId, Sensitivity, TenantId};
 
 struct Fixture {
     tenant: TenantId,
@@ -99,29 +96,6 @@ impl Fixture {
             token_scope: None,
         }
     }
-
-    /// A standing grant declaring how sensitive the material it discloses
-    /// may be (ADR-0038 decision 6).
-    fn lapse_at(&self, grantee: &str, target: &str, max_sensitivity: Sensitivity) -> Lapse {
-        let now = Utc::now();
-        Lapse {
-            id: LapseId::new(),
-            tenant_id: self.tenant,
-            proposal_id: ProposalId::new(),
-            grantee_scope_id: self.node(grantee).id,
-            target_scope_id: self.node(target).id,
-            action: LapseAction::MemoryRead,
-            max_sensitivity,
-            reason: "joint incident review".to_owned(),
-            granted_at: now,
-            expires_at: now + TimeDelta::hours(1),
-            granted_by: IdentityId::new(),
-            revoked_at: None,
-            revoked_by: None,
-            revoke_reason: None,
-            expiry_recorded_at: None,
-        }
-    }
 }
 
 fn fixture() -> Fixture {
@@ -162,7 +136,6 @@ struct Ask<'a> {
     /// Empty for every ask about the old hierarchy; `standard`'s sharing
     /// default reads them, because that is what it shares by.
     anchors: &'a [ScopeAnchor],
-    lapses: &'a [Lapse],
 }
 
 fn read(pdp: &Pdp, fx: &Fixture, ask: &Ask<'_>) -> bool {
@@ -177,7 +150,7 @@ fn read(pdp: &Pdp, fx: &Fixture, ask: &Ask<'_>) -> bool {
             principal_scopes: &principal_scopes,
             anchors: ask.anchors,
             assignments: ask.assignments,
-            lapses: ask.lapses,
+            relaxations: &[],
             sensitivity: Some(ask.sensitivity),
             ..Default::default()
         },
@@ -217,7 +190,6 @@ fn ask<'a>(
         sensitivity: Sensitivity::Internal,
         assignments,
         anchors: &[],
-        lapses: &[],
     }
 }
 
@@ -350,77 +322,6 @@ fn restricted_is_denied_under_every_pack_at_every_scope_including_your_own() {
     }
 }
 
-/// The one carve-out, and it is the grant a compliance approver signed: a
-/// lapse lifts the forbid **only at the tier it declared** (decisions 5
-/// and 6). A working-tier grant is not a door to restricted material.
-#[test]
-fn only_a_lapse_that_declared_the_tier_lifts_the_restricted_forbid() {
-    let pdp = Pdp::new().expect("build pdp");
-    let fx = fixture();
-    let alice = fx.placed("alice", "alice-user");
-    let assignments = [fx.assignment("org", REGULATED_STRICT)];
-
-    let working = [fx.lapse_at("team-a", "team-b", Sensitivity::Internal)];
-    assert_eq!(
-        tiers(
-            &pdp,
-            &fx,
-            &Ask {
-                lapses: &working,
-                ..ask(&alice, "alice-user", "team-b", &assignments)
-            }
-        ),
-        [Sensitivity::Public, Sensitivity::Internal],
-        "a working-tier grant opens the working tiers and nothing above them"
-    );
-
-    let confidential = [fx.lapse_at("team-a", "team-b", Sensitivity::Confidential)];
-    assert_eq!(
-        tiers(
-            &pdp,
-            &fx,
-            &Ask {
-                lapses: &confidential,
-                ..ask(&alice, "alice-user", "team-b", &assignments)
-            }
-        ),
-        [
-            Sensitivity::Public,
-            Sensitivity::Internal,
-            Sensitivity::Confidential
-        ],
-    );
-
-    let restricted = [fx.lapse_at("team-a", "team-b", Sensitivity::Restricted)];
-    assert_eq!(
-        tiers(
-            &pdp,
-            &fx,
-            &Ask {
-                lapses: &restricted,
-                ..ask(&alice, "alice-user", "team-b", &assignments)
-            }
-        ),
-        Sensitivity::ALL,
-        "a restricted-declaring grant is the only thing that reaches the top tier"
-    );
-
-    // And it reaches it at the target it named, never at a neighbour — the
-    // tier does not widen the scope rule (ADR-0037 decision 8).
-    assert!(
-        !read(
-            &pdp,
-            &fx,
-            &Ask {
-                sensitivity: Sensitivity::Restricted,
-                lapses: &restricted,
-                ..ask(&alice, "alice-user", "team-c", &assignments)
-            }
-        ),
-        "a grant over team-b says nothing about team-c at any tier"
-    );
-}
-
 /// Seed §6's own sentence, which has been a comment deferring to this
 /// feature since ADR-0014: "org-wide read for **non-restricted** content".
 #[test]
@@ -511,54 +412,6 @@ fn standard_shares_what_you_hold_at_the_working_tiers_only() {
     );
 }
 
-/// Base-layer forbids beat the base layer's own permit, at every tier: a
-/// quarantined principal and a confined service identity are unaffected by
-/// a grant that declared the top tier (ADR-0037 decision 7, restated where
-/// the new forbid could have changed it).
-#[test]
-fn a_forbid_still_beats_a_restricted_grant() {
-    let pdp = Pdp::new().expect("build pdp");
-    let fx = fixture();
-    let assignments = [fx.assignment("org", REGULATED_STRICT)];
-    let restricted = [fx.lapse_at("team-a", "team-b", Sensitivity::Restricted)];
-
-    let quarantined = Principal {
-        quarantined: true,
-        ..fx.placed("alice", "alice-user")
-    };
-    assert!(
-        tiers(
-            &pdp,
-            &fx,
-            &Ask {
-                lapses: &restricted,
-                ..ask(&quarantined, "alice-user", "team-b", &assignments)
-            }
-        )
-        .is_empty(),
-        "quarantine holds at every tier, grant or no grant"
-    );
-
-    // An agent anchored at team-a: the confinement forbid carves out only
-    // own-chain MemoryRead, so a grant cannot widen it past its anchor.
-    let agent = Principal {
-        token_scope: Some(fx.node("team-a").id),
-        ..fx.placed("agent", "alice-user")
-    };
-    assert!(
-        tiers(
-            &pdp,
-            &fx,
-            &Ask {
-                lapses: &restricted,
-                ..ask(&agent, "alice-user", "team-b", &assignments)
-            }
-        )
-        .is_empty(),
-        "a service identity is not widened past its anchor by any tier"
-    );
-}
-
 /// A `MemoryRead` decided without naming a tier is refused, not defaulted:
 /// the `grant`-on-`RoleAssign` discipline, applied to the attribute the
 /// base layer's `restricted` forbid stands on (decision 2).
@@ -599,10 +452,8 @@ fn a_read_decided_without_a_tier_fails_closed_rather_than_defaulting() {
 ///
 /// The second half is the difference. `restricted` is denied here the way it
 /// is denied for memory, but for a different reason and with a different
-/// consequence: memory's is the base layer's forbid, liftable by a lapse
-/// whose approvers included compliance; a prompt's is that **no pack names
-/// the tier at all**, and no lapse can name it either, because the lapse
-/// vocabulary is closed over `memory.read`. So a `restricted` prompt would
+/// consequence: memory's is the base layer's invariant forbid; a prompt's is
+/// that **no pack names the tier at all**. So a `restricted` prompt would
 /// be unreadable by everyone, forever — which is why migration 0029 refuses
 /// to store one.
 #[test]
@@ -626,7 +477,7 @@ fn the_prompt_plane_mirrors_the_memory_plane_and_stops_below_restricted() {
                         principal_scopes: &principal_scopes,
                         anchors: ask.anchors,
                         assignments: ask.assignments,
-                        lapses: ask.lapses,
+                        relaxations: &[],
                         sensitivity: Some(*tier),
                         ..Default::default()
                     },

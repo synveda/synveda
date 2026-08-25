@@ -740,7 +740,7 @@ async fn decide_exact(
         assignments: &assignments,
         default_pack: default_pack.as_deref(),
         sensitivity,
-        lapses: &[],
+        relaxations: &[],
     };
     deps.pdp.authorize(&principal, action, resource, &context)
 }

@@ -77,7 +77,6 @@ pub mod channels;
 pub mod commits;
 pub mod curators;
 pub mod hash;
-pub mod lapses;
 pub mod objects;
 pub mod packs;
 pub mod policy;
@@ -105,7 +104,6 @@ pub use curators::{
     MAX_CURATOR_FILE_BYTES, StoredCuratorFile, nearest_curators, read_curators, write_curators,
 };
 pub use hash::{CommitHash, ObjectHash, PolicySnapshotHash, TreeHash, bundle_digest};
-pub use lapses::{LapseAsset, put_lapse, read_lapse};
 pub use objects::{MAX_OBJECT_BYTES, StoredObject, put_object, read_object, read_objects};
 pub use packs::{
     ContextPackAsset, ContextPackChannelState, put_context_pack, read_context_pack_members,
