@@ -413,6 +413,12 @@ pub enum AuditAction {
     /// lifecycle or retention precondition no longer permitted its effect.
     /// Carries only a stable reason code and identifiers.
     KnowledgeChangeRejected,
+    /// A bounded, policy-visible matcher retained one durable conflict set.
+    /// Carries set/member ids, classifications and hashes only.
+    KnowledgeConflictOpened,
+    /// A revision-aware Knowledge/VedaFlow change made one conflict set
+    /// terminal. Carries the exact resolution and change id, never content.
+    KnowledgeConflictResolved,
     /// A retention or legal-hold hook blocked a governed erasure operation.
     KnowledgeErasureBlocked,
     /// Plaintext, owned source descriptors and indexes were removed, leaving
@@ -589,7 +595,7 @@ impl AuditAction {
     /// unit test below plus the fact that an action missing from here is
     /// an event `GET /v1/audit/events` cannot filter for. Add the variant
     /// and add it here in the same diff.
-    pub const ALL: [AuditAction; 100] = [
+    pub const ALL: [AuditAction; 102] = [
         AuditAction::AuthzDecision,
         AuditAction::TenantResolutionDenied,
         AuditAction::TokenRejected,
@@ -662,6 +668,8 @@ impl AuditAction {
         AuditAction::KnowledgeChangeOpened,
         AuditAction::KnowledgeChangeApplied,
         AuditAction::KnowledgeChangeRejected,
+        AuditAction::KnowledgeConflictOpened,
+        AuditAction::KnowledgeConflictResolved,
         AuditAction::KnowledgeErasureBlocked,
         AuditAction::KnowledgeErased,
         AuditAction::MemoryExpired,
@@ -769,6 +777,8 @@ impl AuditAction {
             AuditAction::KnowledgeChangeOpened => "knowledge.change.opened",
             AuditAction::KnowledgeChangeApplied => "knowledge.change.applied",
             AuditAction::KnowledgeChangeRejected => "knowledge.change.rejected",
+            AuditAction::KnowledgeConflictOpened => "knowledge.conflict.opened",
+            AuditAction::KnowledgeConflictResolved => "knowledge.conflict.resolved",
             AuditAction::KnowledgeErasureBlocked => "knowledge.erasure.blocked",
             AuditAction::KnowledgeErased => "knowledge.erased",
             AuditAction::MemoryExpired => "memory.expired",

@@ -283,6 +283,11 @@ const COVERED: &[&str] = &[
     // provenance, governance state nor the fact that erasure happened may
     // become a cross-tenant side channel.
     "knowledge_changes",
+    // CPR-37 (ADR-0096): even the existence, cardinality and classification
+    // of a conflict can reveal denied Knowledge, so sets and exact members
+    // are independently tenant-bound and member-filtered above this backstop.
+    "knowledge_conflict_members",
+    "knowledge_conflict_sets",
     "knowledge_erasure_tombstones",
     "knowledge_index_invalidations",
     "knowledge_items",

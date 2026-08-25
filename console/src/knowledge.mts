@@ -18,6 +18,7 @@ export const ORIGINS = ["observed", "asserted", "authored", "imported"] as const
 export const LIFECYCLES = [
   "active",
   "stale",
+  "transitional",
   "superseded",
   "archived",
   "erasure_pending",
@@ -48,6 +49,10 @@ export interface KnowledgeFilters {
   updatedFrom: string;
   updatedBefore: string;
   stale: "" | "true" | "false";
+  asOf: string;
+  asKnownAt: string;
+  includeHistory: boolean;
+  includeTransitional: boolean;
 }
 
 export const EMPTY_KNOWLEDGE_FILTERS: KnowledgeFilters = {
@@ -64,6 +69,10 @@ export const EMPTY_KNOWLEDGE_FILTERS: KnowledgeFilters = {
   updatedFrom: "",
   updatedBefore: "",
   stale: "",
+  asOf: "",
+  asKnownAt: "",
+  includeHistory: false,
+  includeTransitional: false,
 };
 
 /** Converts browser controls into the generated client's string-only query. */
@@ -90,13 +99,19 @@ export function knowledgeQuery(
     updated_from: instant(filters.updatedFrom),
     updated_before: instant(filters.updatedBefore),
     stale: value(filters.stale),
+    as_of: instant(filters.asOf),
+    as_known_at: instant(filters.asKnownAt),
+    include_history: filters.includeHistory ? "true" : undefined,
+    include_transitional: filters.includeTransitional ? "true" : undefined,
     cursor: cursor ?? undefined,
     limit: "50",
   };
 }
 
 export function knowledgeIsFiltered(filters: KnowledgeFilters): boolean {
-  return Object.values(filters).some((value) => value.length > 0);
+  return Object.values(filters).some((value) =>
+    typeof value === "boolean" ? value : value.length > 0,
+  );
 }
 
 /** Scope wording is a reading of the aggregate, not an authorisation guess. */

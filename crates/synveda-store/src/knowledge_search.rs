@@ -73,8 +73,14 @@ pub struct Filters {
     pub updated_before: Option<DateTime<Utc>>,
     /// Whether the current revision is due for verification.
     pub stale: Option<bool>,
-    /// Valid-time instant at which current state is evaluated.
+    /// Valid-time instant at which aggregate state is evaluated.
     pub at: DateTime<Utc>,
+    /// Transaction-time instant whose aggregate head is authoritative.
+    pub as_known_at: DateTime<Utc>,
+    /// Admit historical lifecycle heads (stale, superseded and archived).
+    pub include_history: bool,
+    /// Admit unresolved/future transitional heads.
+    pub include_transitional: bool,
 }
 
 impl Filters {
@@ -165,8 +171,14 @@ pub async fn list_candidates(
         select current.id as "item_id!",
                current.updated_at as "updated_at!",
                0::float8 as "score!"
-        from knowledge_current current
+        from knowledge_item_versions current
+        join knowledge_revisions revision
+          on revision.tenant_id = current.tenant_id
+         and revision.knowledge_item_id = current.id
+         and revision.id = current.current_revision_id
         where current.tenant_id = $1
+          and current.tx_from <= $19
+          and (current.tx_to is null or $19 < current.tx_to)
           and ($2::uuid is null or exists (
               select 1
               from workspaces workspace
@@ -187,9 +199,14 @@ pub async fn list_candidates(
           and ($5::text is null or current.owner_principal_id = $5)
           and ($6::text is null or current.knowledge_type = $6)
           and ($7::text is null or current.origin = $7)
-          and (($8::text is null and current.lifecycle_state = 'active')
-               or current.lifecycle_state = $8)
-          and ($9::text is null or $9 = any(current.tags))
+          and (($8::text is not null and current.lifecycle_state = $8)
+               or ($8::text is null and (
+                   current.lifecycle_state = 'active'
+                   or ($13 = true and current.lifecycle_state = 'stale')
+                   or ($20 and current.lifecycle_state in ('stale', 'superseded', 'archived'))
+                   or ($21 and current.lifecycle_state = 'transitional')
+               )))
+          and ($9::text is null or $9 = any(revision.tags))
           and ($10::text is null or exists (
               select 1
               from knowledge_revision_sources link
@@ -202,12 +219,34 @@ pub async fn list_candidates(
           ))
           and ($11::timestamptz is null or current.updated_at >= $11)
           and ($12::timestamptz is null or current.updated_at < $12)
-          and ($13::bool is null or $13 = (
-              current.lifecycle_state = 'stale'
-              or (current.stale_after is not null and current.stale_after <= $14)
+          -- Non-date freshness signals are checked only after exact PDP
+          -- authorisation during hydration; retain the typed filter argument
+          -- here without pre-filtering candidate evidence.
+          and ($13::bool is null or current.id is not null)
+          and ((revision.valid_from <= $14
+                and (revision.valid_to is null or $14 < revision.valid_to))
+               or ($21 and current.lifecycle_state = 'transitional'))
+          and ($20 or not exists (
+              select 1
+                from knowledge_relations transition
+                join knowledge_item_versions successor
+                  on successor.tenant_id = transition.tenant_id
+                 and successor.id = transition.source_item_id
+                 and successor.tx_from <= $19
+                 and (successor.tx_to is null or $19 < successor.tx_to)
+                join knowledge_revisions successor_revision
+                  on successor_revision.tenant_id = successor.tenant_id
+                 and successor_revision.knowledge_item_id = successor.id
+                 and successor_revision.id = successor.current_revision_id
+               where transition.tenant_id = current.tenant_id
+                 and transition.target_item_id = current.id
+                 and transition.relation_type = 'transitions_to'
+                 and transition.created_at <= $19
+                 and successor.lifecycle_state = 'active'
+                 and successor_revision.valid_from <= $14
+                 and (successor_revision.valid_to is null
+                      or $14 < successor_revision.valid_to)
           ))
-          and current.valid_from <= $14
-          and (current.valid_to is null or $14 < current.valid_to)
           and (cardinality($18::uuid[]) = 0 or current.scope_id = any($18))
           and ($15::timestamptz is null
                or current.updated_at < $15
@@ -233,6 +272,9 @@ pub async fn list_candidates(
         cursor_id,
         limit.max(1),
         &filters.scope_uuids(),
+        filters.as_known_at,
+        filters.include_history,
+        filters.include_transitional,
     )
     .fetch_all(&mut *conn)
     .await
@@ -269,11 +311,14 @@ pub async fn lexical_candidates(
                    revision.search_document,
                    websearch_to_tsquery('simple'::regconfig, $2)
                )::float8 as "score!"
-        from knowledge_current current
+        from knowledge_item_versions current
         join knowledge_revisions revision
           on revision.tenant_id = current.tenant_id
+         and revision.knowledge_item_id = current.id
          and revision.id = current.current_revision_id
         where current.tenant_id = $1
+          and current.tx_from <= $18
+          and (current.tx_to is null or $18 < current.tx_to)
           and revision.search_document @@ websearch_to_tsquery('simple'::regconfig, $2)
           and ($3::uuid is null or exists (
               select 1
@@ -295,9 +340,14 @@ pub async fn lexical_candidates(
           and ($6::text is null or current.owner_principal_id = $6)
           and ($7::text is null or current.knowledge_type = $7)
           and ($8::text is null or current.origin = $8)
-          and (($9::text is null and current.lifecycle_state = 'active')
-               or current.lifecycle_state = $9)
-          and ($10::text is null or $10 = any(current.tags))
+          and (($9::text is not null and current.lifecycle_state = $9)
+               or ($9::text is null and (
+                   current.lifecycle_state = 'active'
+                   or ($14 = true and current.lifecycle_state = 'stale')
+                   or ($19 and current.lifecycle_state in ('stale', 'superseded', 'archived'))
+                   or ($20 and current.lifecycle_state = 'transitional')
+               )))
+          and ($10::text is null or $10 = any(revision.tags))
           and ($11::text is null or exists (
               select 1
               from knowledge_revision_sources link
@@ -310,12 +360,31 @@ pub async fn lexical_candidates(
           ))
           and ($12::timestamptz is null or current.updated_at >= $12)
           and ($13::timestamptz is null or current.updated_at < $13)
-          and ($14::bool is null or $14 = (
-              current.lifecycle_state = 'stale'
-              or (current.stale_after is not null and current.stale_after <= $15)
+          and ($14::bool is null or current.id is not null)
+          and ((revision.valid_from <= $15
+                and (revision.valid_to is null or $15 < revision.valid_to))
+               or ($20 and current.lifecycle_state = 'transitional'))
+          and ($19 or not exists (
+              select 1
+                from knowledge_relations transition
+                join knowledge_item_versions successor
+                  on successor.tenant_id = transition.tenant_id
+                 and successor.id = transition.source_item_id
+                 and successor.tx_from <= $18
+                 and (successor.tx_to is null or $18 < successor.tx_to)
+                join knowledge_revisions successor_revision
+                  on successor_revision.tenant_id = successor.tenant_id
+                 and successor_revision.knowledge_item_id = successor.id
+                 and successor_revision.id = successor.current_revision_id
+               where transition.tenant_id = current.tenant_id
+                 and transition.target_item_id = current.id
+                 and transition.relation_type = 'transitions_to'
+                 and transition.created_at <= $18
+                 and successor.lifecycle_state = 'active'
+                 and successor_revision.valid_from <= $15
+                 and (successor_revision.valid_to is null
+                      or $15 < successor_revision.valid_to)
           ))
-          and current.valid_from <= $15
-          and (current.valid_to is null or $15 < current.valid_to)
           and (cardinality($17::uuid[]) = 0 or current.scope_id = any($17))
         order by 3 desc, current.updated_at desc, current.id desc
         limit $16
@@ -337,6 +406,9 @@ pub async fn lexical_candidates(
         filters.at,
         limit.max(1),
         &filters.scope_uuids(),
+        filters.as_known_at,
+        filters.include_history,
+        filters.include_transitional,
     )
     .fetch_all(&mut *conn)
     .await
@@ -477,6 +549,9 @@ macro_rules! semantic_query {
                 filters.at,
                 limit.max(1),
                 &filters.scope_uuids(),
+                filters.as_known_at,
+                filters.include_history,
+                filters.include_transitional,
             )
             .fetch_all(&mut *conn)
             .await
@@ -657,6 +732,9 @@ mod tests {
             updated_before: None,
             stale: None,
             at: Utc::now(),
+            as_known_at: Utc::now(),
+            include_history: false,
+            include_transitional: false,
         };
         assert_eq!(filters.knowledge_type_name(), Some("convention"));
         assert_eq!(filters.origin_name(), Some("authored"));

@@ -871,8 +871,9 @@ function ReplaceAction({
   onSubmit: (body: ReturnType<typeof replaceBody>) => Promise<void>;
 }) {
   const preferred =
-    candidate.matches.find((match) => match.kind === "possible_supersession") ??
-    candidate.matches.find((match) => match.kind === "conflict") ??
+    candidate.matches.find((match) => match.kind === "supersession") ??
+    candidate.matches.find((match) => match.kind === "transition") ??
+    candidate.matches.find((match) => match.kind === "contradiction") ??
     candidate.matches[0];
   const [matchId, setMatchId] = useState(preferred?.knowledge_item_id ?? "");
   const matched = candidate.matches.find((match) => match.knowledge_item_id === matchId) ?? null;

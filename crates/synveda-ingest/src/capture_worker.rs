@@ -21,13 +21,14 @@ use synveda_store::capture::{self, NewCaptureCandidate};
 use synveda_store::knowledge::KnowledgeSnapshot;
 use synveda_store::knowledge_search::{self, Filters};
 use synveda_store::{
-    anchors, configuration, identities, knowledge, policy_assignments, rls, tenants,
+    anchors, configuration, identities, knowledge, knowledge_conflicts, policy_assignments, rls,
+    tenants,
 };
 use synveda_types::capture::{CaptureBatch, CaptureMatch, CaptureMatchKind, CaptureSourceKind};
 use synveda_types::configuration::{ConfigurationDocument, ExternalProvider};
 use synveda_types::knowledge::{
-    KnowledgeLifecycleState, KnowledgeRevisionContent, normalise_knowledge_tags,
-    validate_knowledge_revision_content,
+    ConflictClassification, KnowledgeLifecycleState, KnowledgeRevisionContent,
+    classify_knowledge_match, normalise_knowledge_tags, validate_knowledge_revision_content,
 };
 use synveda_types::{
     Error, IdentityKind, IdentityStatus, Result, ScopeId, Sensitivity, SessionId, TenantId,
@@ -398,6 +399,40 @@ async fn process_one(deps: &Deps, config: &Config, tenant_id: TenantId) -> Resul
         &proposed,
     )
     .await?;
+    let mut conflict_sets = Vec::new();
+    for candidate in &proposed {
+        let Some(classification) = dominant_classification(&candidate.matches) else {
+            continue;
+        };
+        let matches = candidate
+            .matches
+            .iter()
+            .map(|matched| knowledge_conflicts::MatchedRevision {
+                item_id: matched.knowledge_item_id,
+                revision_id: matched.knowledge_revision_id,
+                classification: capture_classification(matched.kind),
+                similarity_permille: matched.similarity_permille,
+                reason_code: matched.reason_code.clone(),
+            })
+            .collect::<Vec<_>>();
+        let set = knowledge_conflicts::create(
+            &mut write,
+            &knowledge_conflicts::NewConflictSet {
+                id: synveda_types::ConflictSetId::new(),
+                tenant_id,
+                scope_id: candidate.proposed_scope_id,
+                project_id: candidate.proposed_project_id,
+                classification,
+                challenger_item_id: None,
+                challenger_revision_id: None,
+                capture_candidate_id: Some(candidate.id),
+                matches: &matches,
+                created_by: &batch.principal_id,
+            },
+        )
+        .await?;
+        conflict_sets.push(set.id);
+    }
     append_batch_event(
         &mut write,
         &completed,
@@ -407,6 +442,26 @@ async fn process_one(deps: &Deps, config: &Config, tenant_id: TenantId) -> Resul
         visible_match_count,
     )
     .await?;
+    for conflict_set_id in &conflict_sets {
+        synveda_audit::append(
+            &mut write,
+            tenant_id,
+            &AuditEvent {
+                occurred_at: Utc::now(),
+                actor: Actor::system(ACTOR_COMPONENT),
+                action: AuditAction::KnowledgeConflictOpened,
+                resource: format!("knowledge-conflict:{conflict_set_id}"),
+                outcome: Outcome::Success,
+                payload: json!({
+                    "conflict_set_id": conflict_set_id,
+                    "capture_batch_id": batch.id,
+                    "source": "capture",
+                }),
+                trace_id: None,
+            },
+        )
+        .await?;
+    }
     write.commit().await.map_err(commit_error)?;
     for candidate in &proposed {
         metrics::counter!(
@@ -555,6 +610,9 @@ async fn visible_matches(
         updated_before: None,
         stale: None,
         at: Utc::now(),
+        as_known_at: Utc::now(),
+        include_history: false,
+        include_transitional: false,
     };
     let query = format!("{} {}", proposed.content.title, proposed.content.summary);
     let candidates = knowledge_search::lexical_candidates(
@@ -604,72 +662,51 @@ fn classify_match(
     proposed: &NewCaptureCandidate,
     existing: &KnowledgeSnapshot,
 ) -> Option<CaptureMatch> {
-    if proposed.content_hash == existing.revision.content_hash {
-        return Some(CaptureMatch {
-            knowledge_item_id: existing.item.id,
-            knowledge_revision_id: existing.revision.id,
-            kind: CaptureMatchKind::Duplicate,
-            similarity_permille: 1_000,
-            reason_code: "same_content_hash".to_owned(),
-        });
-    }
-    let proposed_tokens = tokens(&format!(
-        "{} {} {}",
-        proposed.content.title, proposed.content.summary, proposed.content.body_markdown
-    ));
-    let existing_tokens = tokens(&format!(
-        "{} {} {}",
-        existing.revision.content.title,
-        existing.revision.content.summary,
-        existing.revision.content.body_markdown
-    ));
-    if proposed_tokens.is_empty() || existing_tokens.is_empty() {
-        return None;
-    }
-    let intersection = proposed_tokens.intersection(&existing_tokens).count();
-    let union = proposed_tokens.union(&existing_tokens).count();
-    let similarity = i32::try_from(intersection * 1_000 / union).unwrap_or(1_000);
-    let proposed_negated = has_negation(&proposed.content.body_markdown);
-    let existing_negated = has_negation(&existing.revision.content.body_markdown);
-    let (kind, reason) = if similarity >= 850 {
-        (CaptureMatchKind::Duplicate, "lexical_near_duplicate")
-    } else if similarity >= 450
-        && proposed.knowledge_type == existing.item.knowledge_type
-        && proposed_negated != existing_negated
-    {
-        (
-            CaptureMatchKind::Conflict,
-            "shared_subject_opposite_polarity",
-        )
-    } else if similarity >= 550 && proposed.knowledge_type == existing.item.knowledge_type {
-        (
-            CaptureMatchKind::PossibleSupersession,
-            "shared_subject_new_statement",
-        )
-    } else {
-        return None;
-    };
+    let matched = classify_knowledge_match(
+        proposed.knowledge_type,
+        &proposed.content,
+        &proposed.content_hash,
+        existing.item.knowledge_type,
+        &existing.revision.content,
+        &existing.revision.content_hash,
+        Utc::now(),
+    )?;
     Some(CaptureMatch {
         knowledge_item_id: existing.item.id,
         knowledge_revision_id: existing.revision.id,
-        kind,
-        similarity_permille: similarity,
-        reason_code: reason.to_owned(),
+        kind: match matched.classification {
+            ConflictClassification::Duplicate => CaptureMatchKind::Duplicate,
+            ConflictClassification::Support => CaptureMatchKind::Support,
+            ConflictClassification::Contradiction => CaptureMatchKind::Contradiction,
+            ConflictClassification::Supersession => CaptureMatchKind::Supersession,
+            ConflictClassification::Transition => CaptureMatchKind::Transition,
+        },
+        similarity_permille: matched.similarity_permille,
+        reason_code: matched.reason_code.to_owned(),
     })
 }
 
-fn tokens(value: &str) -> BTreeSet<String> {
-    value
-        .split(|character: char| !character.is_alphanumeric())
-        .filter(|token| token.chars().count() >= 2)
-        .map(str::to_lowercase)
-        .collect()
+const fn capture_classification(kind: CaptureMatchKind) -> ConflictClassification {
+    match kind {
+        CaptureMatchKind::Duplicate => ConflictClassification::Duplicate,
+        CaptureMatchKind::Support => ConflictClassification::Support,
+        CaptureMatchKind::Contradiction => ConflictClassification::Contradiction,
+        CaptureMatchKind::Supersession => ConflictClassification::Supersession,
+        CaptureMatchKind::Transition => ConflictClassification::Transition,
+    }
 }
 
-fn has_negation(value: &str) -> bool {
-    tokens(value)
+fn dominant_classification(matches: &[CaptureMatch]) -> Option<ConflictClassification> {
+    matches
         .iter()
-        .any(|token| matches!(token.as_str(), "not" | "never" | "no" | "without"))
+        .map(|matched| capture_classification(matched.kind))
+        .max_by_key(|classification| match classification {
+            ConflictClassification::Contradiction => 5,
+            ConflictClassification::Transition => 4,
+            ConflictClassification::Supersession => 3,
+            ConflictClassification::Duplicate => 2,
+            ConflictClassification::Support => 1,
+        })
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -875,6 +912,7 @@ fn commit_error(error: sqlx::Error) -> Error {
 mod tests {
     use super::*;
     use synveda_types::knowledge::{KnowledgeOrigin, KnowledgeType};
+    use synveda_types::{KnowledgeItemId, KnowledgeRevisionId};
 
     fn candidate(body: &str) -> NewCaptureCandidate {
         let content = KnowledgeRevisionContent {
@@ -908,15 +946,48 @@ mod tests {
     #[test]
     fn deterministic_matcher_distinguishes_duplicate_conflict_and_weak_overlap() {
         let proposed = candidate("Public requests never use X-Request-Id.");
-        let exact_tokens = tokens("Public requests never use X-Request-Id.");
-        assert!(exact_tokens.contains("public"));
-        assert!(has_negation(&proposed.content.body_markdown));
-        assert!(!has_negation("Public requests use X-Request-Id."));
-        assert!(
-            tokens("unrelated release procedure")
-                .intersection(&exact_tokens)
-                .count()
-                == 0
+        let mut existing = candidate("Public requests use X-Request-Id.");
+        let snapshot = KnowledgeSnapshot {
+            item: synveda_types::knowledge::KnowledgeItem {
+                id: KnowledgeItemId::new(),
+                tenant_id: TenantId::new(),
+                scope_id: ScopeId::new(),
+                project_id: None,
+                owner_principal_id: None,
+                knowledge_type: KnowledgeType::Convention,
+                origin: KnowledgeOrigin::Authored,
+                lifecycle_state: KnowledgeLifecycleState::Active,
+                current_revision_id: KnowledgeRevisionId::new(),
+                created_by: None,
+                updated_by: None,
+                created_at: Utc::now(),
+                updated_at: Utc::now(),
+                transaction_from: Utc::now(),
+            },
+            revision: synveda_types::knowledge::KnowledgeRevision {
+                id: KnowledgeRevisionId::new(),
+                tenant_id: TenantId::new(),
+                knowledge_item_id: KnowledgeItemId::new(),
+                revision_number: 1,
+                content: existing.content.clone(),
+                content_hash: existing.content_hash.clone(),
+                created_by: None,
+                transaction_time: Utc::now(),
+            },
+            transaction_to: None,
+        };
+        assert_eq!(
+            classify_match(&proposed, &snapshot).map(|matched| matched.kind),
+            Some(CaptureMatchKind::Contradiction)
+        );
+        existing.content = proposed.content.clone();
+        existing.content_hash = proposed.content_hash.clone();
+        let mut exact = snapshot;
+        exact.revision.content = existing.content;
+        exact.revision.content_hash = existing.content_hash;
+        assert_eq!(
+            classify_match(&proposed, &exact).map(|matched| matched.kind),
+            Some(CaptureMatchKind::Duplicate)
         );
     }
 

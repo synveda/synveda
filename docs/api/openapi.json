@@ -4591,6 +4591,44 @@
             }
           },
           {
+            "name": "as_of",
+            "in": "query",
+            "description": "Semantic valid-time instant. Defaults to now.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "as_known_at",
+            "in": "query",
+            "description": "Transaction-time instant. Defaults to now and cannot be in the future.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "name": "include_history",
+            "in": "query",
+            "description": "Include stale, superseded and archived aggregate heads.",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
+            "name": "include_transitional",
+            "in": "query",
+            "description": "Include unresolved or future transitional heads.",
+            "required": false,
+            "schema": {
+              "type": "boolean"
+            }
+          },
+          {
             "name": "cursor",
             "in": "query",
             "description": "Opaque cursor returned by the previous page.",
@@ -4718,6 +4756,323 @@
           },
           "409": {
             "description": "Idempotency key conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/knowledge-conflicts": {
+      "get": {
+        "tags": [
+          "knowledge"
+        ],
+        "summary": "List fully policy-visible conflict sets.",
+        "operationId": "list_knowledge_conflicts",
+        "parameters": [
+          {
+            "name": "scope_id",
+            "in": "query",
+            "description": "Exact governing scope.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "project_id",
+            "in": "query",
+            "description": "Exact project.",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "description": "Resolution state. Omission means open and pending-review sets.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "description": "Opaque cursor.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "description": "Rows to serve, 1–200.",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Fully visible durable conflict evidence",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConflictSetListView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid filter or cursor",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Knowledge reading denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/knowledge-conflicts/{id}": {
+      "get": {
+        "tags": [
+          "knowledge"
+        ],
+        "summary": "Read one fully visible conflict set.",
+        "operationId": "get_knowledge_conflict",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conflict set id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Fully visible conflict evidence",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConflictSetView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A member is not visible",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such conflict set",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/knowledge-conflicts/{id}/resolve": {
+      "post": {
+        "tags": [
+          "knowledge"
+        ],
+        "summary": "Resolve one Knowledge-backed conflict through VedaFlow.",
+        "operationId": "resolve_knowledge_conflict",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "description": "Conflict set id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Required; reuse verbatim on retry.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResolveConflictBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Idempotent replay",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeMutationView"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "VedaFlow resolution opened",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KnowledgeMutationView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid resolution",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "A member or proposal action was denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such set/member",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict revision moved",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/knowledge-freshness-policies": {
+      "get": {
+        "tags": [
+          "knowledge"
+        ],
+        "summary": "Resolve type-aware policies from one exact governed Configuration.",
+        "operationId": "list_knowledge_freshness_policies",
+        "parameters": [
+          {
+            "name": "scope_id",
+            "in": "query",
+            "description": "Exact governed scope.",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Exact effective freshness policies",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FreshnessPolicyListView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Knowledge reading denied at the scope",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such scope",
             "content": {
               "application/json": {
                 "schema": {
@@ -14433,8 +14788,10 @@
             "type": "string",
             "enum": [
               "duplicate",
-              "conflict",
-              "possible_supersession"
+              "support",
+              "contradiction",
+              "supersession",
+              "transition"
             ]
           },
           "knowledge_item_id": {
@@ -15345,6 +15702,204 @@
               "team",
               "enterprise"
             ]
+          }
+        }
+      },
+      "ConflictMemberView": {
+        "type": "object",
+        "description": "One exact, independently authorised conflict member.",
+        "required": [
+          "id",
+          "role",
+          "classification",
+          "similarity_permille",
+          "reason_code"
+        ],
+        "properties": {
+          "capture_candidate_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Reviewable candidate, disclosed only after source and destination PDP\ndecisions."
+          },
+          "classification": {
+            "type": "string",
+            "enum": [
+              "duplicate",
+              "support",
+              "contradiction",
+              "supersession",
+              "transition"
+            ]
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Stable member evidence id."
+          },
+          "knowledge_item_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Exact stable Knowledge item, absent for a capture challenger."
+          },
+          "knowledge_revision": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/KnowledgeRevisionView",
+                "description": "Exact immutable content compared."
+              }
+            ]
+          },
+          "reason_code": {
+            "type": "string",
+            "description": "Stable content-free reason code."
+          },
+          "role": {
+            "type": "string",
+            "description": "`challenger` or `current`."
+          },
+          "similarity_permille": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Integer similarity."
+          }
+        }
+      },
+      "ConflictSetListView": {
+        "type": "object",
+        "description": "Cursor-paginated fully visible conflict sets.",
+        "required": [
+          "conflicts",
+          "policy_exclusions"
+        ],
+        "properties": {
+          "conflicts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ConflictSetView"
+            },
+            "description": "Fully visible rows."
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Opaque next candidate position."
+          },
+          "policy_exclusions": {
+            "type": "boolean",
+            "description": "At least one candidate set was wholly omitted by policy. No count or\nclassification is disclosed."
+          }
+        }
+      },
+      "ConflictSetView": {
+        "type": "object",
+        "description": "One fully visible durable conflict set.",
+        "required": [
+          "id",
+          "scope_id",
+          "classification",
+          "status",
+          "revision",
+          "members",
+          "created_at",
+          "updated_at"
+        ],
+        "properties": {
+          "classification": {
+            "type": "string",
+            "enum": [
+              "duplicate",
+              "support",
+              "contradiction",
+              "supersession",
+              "transition"
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Creation time."
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Stable resolution address."
+          },
+          "members": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ConflictMemberView"
+            },
+            "description": "Every member; no denied member is represented or counted."
+          },
+          "project_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Project association."
+          },
+          "resolution": {
+            "type": "string",
+            "enum": [
+              "keep_separate",
+              "support",
+              "duplicate",
+              "supersede",
+              "transition",
+              "archive"
+            ]
+          },
+          "resolution_change_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Exact VedaFlow resolution when one has opened."
+          },
+          "resolved_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Resolution time."
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Revision precondition for a resolution."
+          },
+          "scope_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Governing scope."
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "open",
+              "pending_review",
+              "resolved",
+              "dismissed"
+            ]
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Last state transition."
           }
         }
       },
@@ -17140,6 +17695,85 @@
         },
         "additionalProperties": false
       },
+      "FreshnessPolicyListView": {
+        "type": "object",
+        "description": "Every type-aware policy under one exact effective configuration.",
+        "required": [
+          "policies"
+        ],
+        "properties": {
+          "policies": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FreshnessPolicyView"
+            },
+            "description": "Closed Knowledge vocabulary in declaration order."
+          }
+        }
+      },
+      "FreshnessPolicyView": {
+        "type": "object",
+        "description": "Public evaluated freshness policy for one Knowledge type.",
+        "required": [
+          "scope_id",
+          "knowledge_type",
+          "default_days",
+          "triggers",
+          "configuration_hash"
+        ],
+        "properties": {
+          "configuration_artifact_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Exact Configuration aggregate, absent for fail-safe configuration."
+          },
+          "configuration_binding_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Exact binding selected nearest-first."
+          },
+          "configuration_hash": {
+            "type": "string",
+            "description": "Canonical configuration hash, including fail-safe."
+          },
+          "configuration_version_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Exact immutable Configuration version."
+          },
+          "default_days": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Governed default interval; zero means no implicit date.",
+            "minimum": 0
+          },
+          "knowledge_type": {
+            "type": "string",
+            "description": "Knowledge type."
+          },
+          "scope_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Scope at which resolution was requested."
+          },
+          "triggers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Stable type-specific verification signals."
+          }
+        }
+      },
       "GrantList": {
         "type": "object",
         "description": "The grant listing.",
@@ -17888,6 +18522,7 @@
             "enum": [
               "active",
               "stale",
+              "transitional",
               "superseded",
               "archived",
               "erasure_pending",
@@ -18128,6 +18763,7 @@
           "confidence_permille",
           "valid_from",
           "stale",
+          "freshness_reasons",
           "verification_metadata",
           "content_hash",
           "metadata",
@@ -18153,6 +18789,13 @@
               "null"
             ],
             "description": "Author label, when recorded."
+          },
+          "freshness_reasons": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Explainable effective freshness reasons; empty means current."
           },
           "id": {
             "type": "string",
@@ -21349,6 +21992,46 @@
             "description": "When it last changed."
           }
         }
+      },
+      "ResolveConflictBody": {
+        "type": "object",
+        "description": "One governed conflict resolution.",
+        "required": [
+          "expected_revision",
+          "resolution",
+          "reason"
+        ],
+        "properties": {
+          "expected_revision": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Exact conflict-set revision inspected."
+          },
+          "reason": {
+            "type": "string",
+            "description": "Bounded human rationale retained in the VedaFlow command."
+          },
+          "resolution": {
+            "type": "string",
+            "enum": [
+              "keep_separate",
+              "support",
+              "duplicate",
+              "supersede",
+              "transition",
+              "archive"
+            ]
+          },
+          "transition_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "Exact future valid-time boundary for `transition` only."
+          }
+        },
+        "additionalProperties": false
       },
       "ReviseRelaxationBody": {
         "allOf": [

@@ -841,7 +841,7 @@ export type CaptureDecisionView = {
  * One independently authorised current-Knowledge comparison.
  */
 export type CaptureMatchView = {
-    kind: "duplicate" | "conflict" | "possible_supersession";
+    kind: "duplicate" | "support" | "contradiction" | "supersession" | "transition";
     /**
      * Existing stable aggregate.
      */
@@ -1262,6 +1262,103 @@ export type ConfigurationVersionView = {
     id: string;
     ordinal: number;
     source_template?: "personal" | "team" | "enterprise";
+  };
+
+/**
+ * One exact, independently authorised conflict member.
+ */
+export type ConflictMemberView = {
+    /**
+     * Reviewable candidate, disclosed only after source and destination PDP
+     * decisions.
+     */
+    capture_candidate_id?: string | null;
+    classification: "duplicate" | "support" | "contradiction" | "supersession" | "transition";
+    /**
+     * Stable member evidence id.
+     */
+    id: string;
+    /**
+     * Exact stable Knowledge item, absent for a capture challenger.
+     */
+    knowledge_item_id?: string | null;
+    knowledge_revision?: null | KnowledgeRevisionView;
+    /**
+     * Stable content-free reason code.
+     */
+    reason_code: string;
+    /**
+     * `challenger` or `current`.
+     */
+    role: string;
+    /**
+     * Integer similarity.
+     */
+    similarity_permille: number;
+  };
+
+/**
+ * Cursor-paginated fully visible conflict sets.
+ */
+export type ConflictSetListView = {
+    /**
+     * Fully visible rows.
+     */
+    conflicts: ConflictSetView[];
+    /**
+     * Opaque next candidate position.
+     */
+    next_cursor?: string | null;
+    /**
+     * At least one candidate set was wholly omitted by policy. No count or
+     * classification is disclosed.
+     */
+    policy_exclusions: boolean;
+  };
+
+/**
+ * One fully visible durable conflict set.
+ */
+export type ConflictSetView = {
+    classification: "duplicate" | "support" | "contradiction" | "supersession" | "transition";
+    /**
+     * Creation time.
+     */
+    created_at: string;
+    /**
+     * Stable resolution address.
+     */
+    id: string;
+    /**
+     * Every member; no denied member is represented or counted.
+     */
+    members: ConflictMemberView[];
+    /**
+     * Project association.
+     */
+    project_id?: string | null;
+    resolution?: "keep_separate" | "support" | "duplicate" | "supersede" | "transition" | "archive";
+    /**
+     * Exact VedaFlow resolution when one has opened.
+     */
+    resolution_change_id?: string | null;
+    /**
+     * Resolution time.
+     */
+    resolved_at?: string | null;
+    /**
+     * Revision precondition for a resolution.
+     */
+    revision: number;
+    /**
+     * Governing scope.
+     */
+    scope_id: string;
+    status: "open" | "pending_review" | "resolved" | "dismissed";
+    /**
+     * Last state transition.
+     */
+    updated_at: string;
   };
 
 /**
@@ -2228,6 +2325,54 @@ export type FreshnessConfigurationBody = {
   };
 
 /**
+ * Every type-aware policy under one exact effective configuration.
+ */
+export type FreshnessPolicyListView = {
+    /**
+     * Closed Knowledge vocabulary in declaration order.
+     */
+    policies: FreshnessPolicyView[];
+  };
+
+/**
+ * Public evaluated freshness policy for one Knowledge type.
+ */
+export type FreshnessPolicyView = {
+    /**
+     * Exact Configuration aggregate, absent for fail-safe configuration.
+     */
+    configuration_artifact_id?: string | null;
+    /**
+     * Exact binding selected nearest-first.
+     */
+    configuration_binding_id?: string | null;
+    /**
+     * Canonical configuration hash, including fail-safe.
+     */
+    configuration_hash: string;
+    /**
+     * Exact immutable Configuration version.
+     */
+    configuration_version_id?: string | null;
+    /**
+     * Governed default interval; zero means no implicit date.
+     */
+    default_days: number;
+    /**
+     * Knowledge type.
+     */
+    knowledge_type: string;
+    /**
+     * Scope at which resolution was requested.
+     */
+    scope_id: string;
+    /**
+     * Stable type-specific verification signals.
+     */
+    triggers: string[];
+  };
+
+/**
  * The grant listing.
  */
 export type GrantList = {
@@ -2659,7 +2804,7 @@ export type KnowledgeItemView = {
      */
     id: string;
     knowledge_type: "fact" | "decision" | "preference" | "procedure" | "entity" | "episode" | "convention" | "warning" | "reference";
-    lifecycle_state: "active" | "stale" | "superseded" | "archived" | "erasure_pending" | "erased";
+    lifecycle_state: "active" | "stale" | "transitional" | "superseded" | "archived" | "erasure_pending" | "erased";
     /**
      * Fused search score, absent outside a query listing.
      */
@@ -2802,6 +2947,10 @@ export type KnowledgeRevisionView = {
      * Author label, when recorded.
      */
     created_by?: string | null;
+    /**
+     * Explainable effective freshness reasons; empty means current.
+     */
+    freshness_reasons: string[];
     /**
      * Immutable revision id.
      */
@@ -4527,6 +4676,25 @@ export type RepositoryView = {
      * When it last changed.
      */
     updated_at: string;
+  };
+
+/**
+ * One governed conflict resolution.
+ */
+export type ResolveConflictBody = {
+    /**
+     * Exact conflict-set revision inspected.
+     */
+    expected_revision: number;
+    /**
+     * Bounded human rationale retained in the VedaFlow command.
+     */
+    reason: string;
+    resolution: "keep_separate" | "support" | "duplicate" | "supersede" | "transition" | "archive";
+    /**
+     * Exact future valid-time boundary for `transition` only.
+     */
+    transition_at?: string | null;
   };
 
 export type ReviseRelaxationBody = {
@@ -6608,6 +6776,40 @@ export type Operations = {
     readonly response: KnowledgeMutationView;
   };
   /**
+   * List fully policy-visible conflict sets.
+   */
+  readonly list_knowledge_conflicts: {
+    readonly path: "/v1/knowledge-conflicts";
+    readonly method: "GET";
+    readonly response: ConflictSetListView;
+  };
+  /**
+   * Read one fully visible conflict set.
+   */
+  readonly get_knowledge_conflict: {
+    readonly path: "/v1/knowledge-conflicts/{id}";
+    readonly method: "GET";
+    readonly response: ConflictSetView;
+  };
+  /**
+   * Resolve one Knowledge-backed conflict through VedaFlow.
+   */
+  readonly resolve_knowledge_conflict: {
+    readonly path: "/v1/knowledge-conflicts/{id}/resolve";
+    readonly method: "POST";
+    readonly body: ResolveConflictBody;
+    readonly idempotent: true;
+    readonly response: KnowledgeMutationView;
+  };
+  /**
+   * Resolve type-aware policies from one exact governed Configuration.
+   */
+  readonly list_knowledge_freshness_policies: {
+    readonly path: "/v1/knowledge-freshness-policies";
+    readonly method: "GET";
+    readonly response: FreshnessPolicyListView;
+  };
+  /**
    * `POST /v1/knowledge/merge` — combine current items and all provenance.
    */
   readonly merge_knowledge: {
@@ -7657,6 +7859,10 @@ export const OPERATIONS = {
   accept_invite: { path: "/v1/invites/{invite_token}/accept", method: "POST" },
   list_knowledge: { path: "/v1/knowledge", method: "GET" },
   create_knowledge: { path: "/v1/knowledge", method: "POST", idempotent: true },
+  list_knowledge_conflicts: { path: "/v1/knowledge-conflicts", method: "GET" },
+  get_knowledge_conflict: { path: "/v1/knowledge-conflicts/{id}", method: "GET" },
+  resolve_knowledge_conflict: { path: "/v1/knowledge-conflicts/{id}/resolve", method: "POST", idempotent: true },
+  list_knowledge_freshness_policies: { path: "/v1/knowledge-freshness-policies", method: "GET" },
   merge_knowledge: { path: "/v1/knowledge/merge", method: "POST", idempotent: true },
   get_knowledge: { path: "/v1/knowledge/{id}", method: "GET" },
   edit_knowledge: { path: "/v1/knowledge/{id}", method: "PATCH", idempotent: true },

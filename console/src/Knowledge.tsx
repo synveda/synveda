@@ -29,7 +29,10 @@ import {
   type KnowledgeFilters,
 } from "./knowledge.mjs";
 import type {
+  ConflictSetListView,
+  ConflictSetView,
   CreateKnowledgeBody,
+  FreshnessPolicyListView,
   KnowledgeContentBody,
   KnowledgeHistoryView,
   KnowledgeItemView,
@@ -38,6 +41,7 @@ import type {
   KnowledgeSourcesView,
   KnowledgeUsageListView,
   MergeKnowledgeBody,
+  ResolveConflictBody,
   SupersedeKnowledgeBody,
 } from "./generated/api.js";
 
@@ -76,6 +80,8 @@ export function Knowledge() {
   const entry = useQuery(key, () => request("list_knowledge", { query }));
   const retry = useRefresh(key);
   const scopes = writableScopes(me, workspace, project);
+  const policyScopeId = project?.scope_id ?? workspace?.scope_id ??
+    me.anchors.find((anchor) => anchor.source === "principal_scope")?.scope_id;
 
   const applyFilters = useCallback(() => {
     setSeen([]);
@@ -90,6 +96,14 @@ export function Knowledge() {
         <button type="button" onClick={() => setCreating((value) => !value)}>
           {creating ? "Close new item" : "Add Knowledge"}
         </button>
+        <button type="button" onClick={() => {
+          const next = { ...draft, stale: "true" as const, lifecycle: "" };
+          setDraft(next); setFilters(next); setSeen([]); setCursor(null);
+        }}>Staleness queue</button>
+        <button type="button" onClick={() => {
+          const next = { ...draft, includeHistory: true, includeTransitional: true };
+          setDraft(next); setFilters(next); setSeen([]); setCursor(null);
+        }}>Current + history</button>
       </div>
       {creating ? (
         <CreateForm
@@ -102,6 +116,8 @@ export function Knowledge() {
           }}
         />
       ) : null}
+      <ConflictQueue />
+      {policyScopeId ? <FreshnessPolicySummary scopeId={policyScopeId} /> : null}
       <KnowledgeFilterBar
         filters={draft}
         onChange={(next) => setDraft((current) => ({ ...current, ...next }))}
@@ -197,6 +213,7 @@ export function KnowledgeRow({ item }: { item: KnowledgeItemView }) {
         <span className={`tag ${item.lifecycle_state === "active" ? "done" : "warn"}`}>
           {item.lifecycle_state}
         </span>
+        {revision.stale ? <span className="tag warn">verification due</span> : null}
         <p>{revision.summary}</p>
         <div className="muted">
           {item.knowledge_type} · {visibilityLabel(item)} · revision {revision.revision_number} ·{" "}
@@ -267,6 +284,13 @@ function KnowledgeDetail({ item }: { item: KnowledgeItemView }) {
           </dd>
           <dt>Verification due</dt>
           <dd>{revision.stale_after ? whenOf(revision.stale_after) : "not scheduled"}</dd>
+          <dt>Freshness state</dt>
+          <dd>
+            {revision.stale ? "verification due" : "current"}
+            {revision.freshness_reasons.length > 0
+              ? ` · ${revision.freshness_reasons.join(", ").replaceAll("_", " ")}`
+              : ""}
+          </dd>
           <dt>Transaction time</dt>
           <dd>{whenOf(revision.transaction_time)}</dd>
         </dl>
@@ -371,6 +395,168 @@ function KnowledgeDetail({ item }: { item: KnowledgeItemView }) {
   );
 }
 
+function ConflictQueue() {
+  const key = "knowledge/conflicts/open";
+  const entry = useQuery(key, () =>
+    request("list_knowledge_conflicts", { query: { limit: "50" } }),
+  );
+  const retry = useRefresh(key);
+  return (
+    <section className="knowledge-conflicts" aria-labelledby="knowledge-conflicts-heading">
+      <h2 id="knowledge-conflicts-heading">Conflict review</h2>
+      <p className="muted">
+        Unresolved challengers stay outside ordinary current Knowledge. Every resolution is a
+        revision-aware VedaFlow change.
+      </p>
+      <Loaded<ConflictSetListView> entry={entry} what="Knowledge conflicts" onRetry={retry}>
+        {(body) => (
+          <>
+            {body.policy_exclusions ? (
+              <div className="banner warn">
+                Some conflict evidence is outside your policy. No item, edge, classification or
+                count is disclosed.
+              </div>
+            ) : null}
+            {body.conflicts.length === 0 ? (
+              <p className="muted">No fully visible conflicts await resolution.</p>
+            ) : (
+              <div className="knowledge-conflict-list">
+                {body.conflicts.map((conflict) => (
+                  <ConflictReview key={`${conflict.id}-${conflict.revision}`} conflict={conflict} />
+                ))}
+              </div>
+            )}
+          </>
+        )}
+      </Loaded>
+    </section>
+  );
+}
+
+export function ConflictReview({ conflict }: { conflict: ConflictSetView }) {
+  const [resolution, setResolution] = useState<ResolveConflictBody["resolution"]>(
+    conflict.classification === "transition" ? "transition" :
+      conflict.classification === "supersession" ? "supersede" :
+        conflict.classification === "support" ? "support" :
+          conflict.classification === "duplicate" ? "duplicate" : "keep_separate",
+  );
+  const [reason, setReason] = useState("");
+  const [transitionAt, setTransitionAt] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
+  const challenger = conflict.members.find((member) => member.role === "challenger");
+  const currents = conflict.members.filter((member) => member.role === "current");
+  const captureBacked = Boolean(challenger?.capture_candidate_id);
+  return (
+    <details className="knowledge-conflict" open={conflict.status === "open"}>
+      <summary>
+        <strong>{conflict.classification.replaceAll("_", " ")}</strong> · {conflict.status.replaceAll("_", " ")} · revision {conflict.revision}
+      </summary>
+      <div className="knowledge-conflict-comparison">
+        <ConflictMember title="Challenger" member={challenger} />
+        <div>
+          <h3>Current comparison</h3>
+          {currents.map((member) => (
+            <ConflictMember key={member.id} title={member.classification.replaceAll("_", " ")} member={member} />
+          ))}
+        </div>
+      </div>
+      {captureBacked ? (
+        <p>
+          This challenger is still a capture candidate. Resolve it in <Link href={hrefOf("learnings")}>New Learnings</Link> so publication remains candidate-governed.
+        </p>
+      ) : conflict.status === "open" ? (
+        <form className="stacked-form" onSubmit={async (event) => {
+          event.preventDefault(); setBusy(true); setStatus(null);
+          const body: ResolveConflictBody = {
+            expected_revision: conflict.revision,
+            resolution,
+            reason,
+            transition_at: resolution === "transition" && transitionAt
+              ? new Date(transitionAt).toISOString()
+              : undefined,
+          };
+          const answer = await request("resolve_knowledge_conflict", {
+            path: { id: conflict.id }, body, idempotencyKey: idempotencyKey(),
+          });
+          setBusy(false);
+          if (answer.kind === "ok") {
+            setStatus(mutationMessage(answer.body));
+            invalidate("knowledge");
+          } else {
+            setStatus(answer.kind === "unauthenticated" ? "Your session has expired." : answer.message);
+          }
+        }}>
+          <Select label="Resolution" value={resolution} values={["keep_separate", "support", "duplicate", "supersede", "transition", "archive"] as const} allowEmpty={false} onChange={(value) => setResolution(value as ResolveConflictBody["resolution"])} />
+          {resolution === "transition" ? (
+            <Field label="Future valid time">
+              <input type="datetime-local" required value={transitionAt} onChange={(event) => setTransitionAt(event.target.value)} />
+            </Field>
+          ) : null}
+          <Field label="Resolution reason">
+            <input required value={reason} onChange={(event) => setReason(event.target.value)} />
+          </Field>
+          <button type="submit" disabled={busy || !reason.trim()}>{busy ? "Submitting…" : "Resolve through VedaFlow"}</button>
+          {status ? <p role="status">{status}</p> : null}
+        </form>
+      ) : null}
+    </details>
+  );
+}
+
+function ConflictMember({ title, member }: {
+  title: string;
+  member: ConflictSetView["members"][number] | undefined;
+}) {
+  if (!member) return <div><h3>{title}</h3><p className="muted">No visible evidence.</p></div>;
+  const revision = member.knowledge_revision;
+  return (
+    <article>
+      <h3>{title}</h3>
+      {revision ? (
+        <>
+          <strong>{revision.title}</strong>
+          <div className="knowledge-body">{revision.body_markdown}</div>
+          <p className="muted">
+            revision {revision.revision_number} · {member.similarity_permille} / 1000 · {member.reason_code.replaceAll("_", " ")}
+          </p>
+          {member.knowledge_item_id ? (
+            <Link href={hrefOf("knowledge-item", { knowledge_id: member.knowledge_item_id })}>Open Knowledge item</Link>
+          ) : null}
+        </>
+      ) : (
+        <p className="muted">Capture candidate {member.capture_candidate_id}</p>
+      )}
+    </article>
+  );
+}
+
+function FreshnessPolicySummary({ scopeId }: { scopeId: string }) {
+  const key = `knowledge/freshness/${scopeId}`;
+  const entry = useQuery(key, () =>
+    request("list_knowledge_freshness_policies", { query: { scope_id: scopeId } }),
+  );
+  return (
+    <details className="knowledge-freshness-policies">
+      <summary>Effective freshness policy</summary>
+      <Loaded<FreshnessPolicyListView> entry={entry} what="freshness policy">
+        {(body) => (
+          <table>
+            <thead><tr><th>Type</th><th>Default</th><th>Verification signals</th></tr></thead>
+            <tbody>{body.policies.map((policy) => (
+              <tr key={policy.knowledge_type}>
+                <td>{policy.knowledge_type}</td>
+                <td>{policy.default_days === 0 ? "explicit only" : `${policy.default_days} days`}</td>
+                <td>{policy.triggers.join(", ").replaceAll("_", " ")}</td>
+              </tr>
+            ))}</tbody>
+          </table>
+        )}
+      </Loaded>
+    </details>
+  );
+}
+
 function KnowledgeFilterBar({
   filters,
   onChange,
@@ -424,6 +610,20 @@ function KnowledgeFilterBar({
         <input type="datetime-local" value={filters.updatedBefore} onChange={(event) => onChange({ updatedBefore: event.target.value })} />
       </Field>
       <Select label="Staleness" value={filters.stale} values={["true", "false"] as const} onChange={(value) => onChange({ stale: value as KnowledgeFilters["stale"] })} />
+      <Field label="Valid at">
+        <input type="datetime-local" value={filters.asOf} onChange={(event) => onChange({ asOf: event.target.value })} />
+      </Field>
+      <Field label="As known at">
+        <input type="datetime-local" value={filters.asKnownAt} onChange={(event) => onChange({ asKnownAt: event.target.value })} />
+      </Field>
+      <label className="choice">
+        <input type="checkbox" checked={filters.includeHistory} onChange={(event) => onChange({ includeHistory: event.target.checked })} />
+        Include stale, superseded and archived history
+      </label>
+      <label className="choice">
+        <input type="checkbox" checked={filters.includeTransitional} onChange={(event) => onChange({ includeTransitional: event.target.checked })} />
+        Include unresolved and future transitions
+      </label>
       <button type="submit">Search</button>
       {knowledgeIsFiltered(filters) ? (
         <button type="button" onClick={onClear}>Clear</button>

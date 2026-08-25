@@ -117,6 +117,11 @@ one-runtime deployment convergence, is delivered under ADR-0095; installed
 host, Compose and Helm use the same gateway/schema/contract and forced-RLS
 runtime role, while governed Configuration—not a deployment edition—selects
 behaviour. The obsolete init demo and release seeder are deleted.
+CPR-37, conflict and freshness management, is delivered under ADR-0096;
+bounded post-PDP write/capture classification records exact forced-RLS
+evidence, ambiguous heads remain transitional until VedaFlow resolution, and
+freshness plus valid/as-known query semantics are evaluated from governed
+Configuration without latest-row-wins.
 **It is a pre-1.0 hard
 cut**: a fresh schema epoch, no old-data migration, no compatibility shims,
 and old databases rejected with a reset instruction. Since CPR-2 that is
@@ -176,7 +181,7 @@ the committed file and the tree disagree, and `console/src/generated/api.ts`
 is generated from that file (`make check-api-types`). **Never hand-edit
 either.** To refresh both: `SYNVEDA_WRITE_OPENAPI=1 cargo test -p
 synveda-gateway --test openapi` then `node scripts/generate-api-types.mjs`.
-The document covers the complete authenticated application plane — **167
+The document covers the complete authenticated application plane — **171
 operations** from `/v1/me` through workspaces/projects/repositories, access,
 governance, policy, audit, sessions, Knowledge, capture, context, immutable
 Skills, trusted MCP Tools, OKF, Configuration, policy relaxations and
@@ -229,7 +234,7 @@ explicitly and say so.
 
 Phases 0, 1 and 2 are complete; SKIL-1 through SKIL-4, OPS-1, CNSL-1, ADPT-2,
 CNSL-2, AUTH-4, AUTH-5, EVAL-3, OPS-2, TEN-3, TEN-4 and OPS-8 are the Phase 3
-features done. 102 of 133 features delivered — see docs/backlog/STATUS.md for
+features done. 103 of 134 features delivered — see docs/backlog/STATUS.md for
 what each one proved and what it left standing. (The total read 86 until
 2026-08-05, when it was corrected to the 88 STATUS.md and `make
 check-backlog` had both said for some time; AUTHZ-7 was filed the same day by
@@ -439,6 +444,16 @@ Compose paths now use a separately provisioned non-superuser/non-BYPASSRLS
 dead `init --demo` identities and ACME release seeder are deleted without a
 compatibility alias. One-gateway and restart-shaped upgrade limits remain
 explicit.
+**CPR-37 was filed next**, making it **134 with 102 delivered**: it adds
+durable conflict evidence, governed resolution, type-aware freshness and
+orthogonal valid-time/as-known Knowledge queries rather than reading multiple
+unresolved heads as current truth.
+It was delivered the same day, making it **134 with 103 delivered**: exact
+members are protected by RLS and per-item PDP, ambiguous writes stay
+transitional until the same VedaFlow lifecycle resolves them, and the effective
+freshness Configuration is frozen as revision evidence. The generated contract
+is 171 operations / 272 schemas and the Knowledge Browser exposes conflict,
+future-transition and staleness review without denied-member leakage.
 
 Since CPR-9 a **listing decides per row**. The audit of Prompts 1–7 found that
 `GET /v1/workspaces` and `/v1/me` took one decision at the tenant root and

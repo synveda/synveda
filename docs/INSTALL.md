@@ -716,7 +716,16 @@ entry gets a *Show raw payload* control; where you do not, the page says which
 role it takes.
 
 The public Knowledge Browser searches current active revisions and exposes
-immutable history and independently authorised provenance. Session extraction
+immutable history and independently authorised provenance. Its conflict queue
+compares exact revisions and resolves keep-separate, support, duplicate,
+supersede, future-transition or archive choices through VedaFlow. Conflicting
+challengers remain `transitional` and absent from ordinary results until that
+change applies; capture-backed challengers stay in New Learnings. **Valid at**
+and **As known at** are separate controls, and history/transitional rows only
+appear when explicitly requested. The staleness queue explains explicit or
+configured due dates plus type-specific repository-change, failed-use and
+source-freshness signals; verification creates a new immutable revision.
+Session extraction
 produces reviewable capture candidates; **New Learnings** groups them by batch
 and lets you filter by project, session and decision state, inspect their exact
 source-event summaries and current-Knowledge comparisons, and accept, edit,

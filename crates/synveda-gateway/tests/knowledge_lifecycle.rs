@@ -19,11 +19,13 @@ use synveda_gateway::{knowledge, telemetry};
 use synveda_identity::{Claims, Hs256Verifier, TenantContext, with_tenant};
 use synveda_ingest::embedding::Embedder as _;
 use synveda_store::{
-    access, identities, knowledge as stored, knowledge_search, rls, scopes, tenants,
+    access, identities, knowledge as stored, knowledge_conflicts, knowledge_search, rls, scopes,
+    tenants,
 };
 use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
 use synveda_types::knowledge::{
-    KnowledgeCommand, KnowledgeExpectedRevision, KnowledgeLifecycleState, KnowledgeMutationOutcome,
+    ConflictClassification, ConflictResolutionKind, ConflictSetStatus, KnowledgeCommand,
+    KnowledgeExpectedRevision, KnowledgeLifecycleState, KnowledgeMutationOutcome,
     KnowledgeMutationResult, KnowledgeOrigin, KnowledgeRelationType, KnowledgeRevisionContent,
     KnowledgeSourceDraft, KnowledgeSourceType, KnowledgeType,
 };
@@ -314,7 +316,8 @@ async fn api(
     let value = if bytes.is_empty() {
         Value::Null
     } else {
-        serde_json::from_slice(&bytes).expect("decode API response")
+        serde_json::from_slice(&bytes)
+            .unwrap_or_else(|_| json!({"raw": String::from_utf8_lossy(&bytes).into_owned()}))
     };
     (status, headers, value)
 }
@@ -1546,6 +1549,9 @@ async fn public_knowledge_api_is_current_governed_paginated_and_tenant_safe() {
             updated_before: None,
             stale: None,
             at: Utc::now(),
+            as_known_at: Utc::now(),
+            include_history: false,
+            include_transitional: false,
         },
         state.embedder.model(),
         &query_vector,
@@ -1633,4 +1639,420 @@ async fn public_knowledge_api_is_current_governed_paginated_and_tenant_safe() {
         .rollback()
         .await
         .expect("roll back foreign probe");
+}
+
+#[tokio::test]
+async fn conflicts_are_transitional_governed_and_temporally_queryable() {
+    let _guard = serial().await;
+    let Some((state, tenant)) = admitted_tenant().await else {
+        return;
+    };
+    use_standard(&state.pool, tenant.id).await;
+    let alice = seed_user(&state.pool, tenant.id, "alice-conflict@pulseboard.test").await;
+    let subject = alice.subject.as_deref().expect("Alice has a subject");
+
+    let (original, original_id, original_revision, _) = create_command(
+        alice.scope_id,
+        Some(subject),
+        "Request correlation",
+        "Public HTTP requests use X-Request-Id for correlation.",
+        json!({"case": "original"}),
+    );
+    let original_result = command_as(&state, &tenant, subject, original)
+        .await
+        .expect("create original Knowledge");
+    assert_eq!(original_result.outcome, KnowledgeMutationOutcome::Applied);
+    let known_before_challenger = Utc::now();
+    tokio::time::sleep(Duration::from_millis(2)).await;
+
+    let (challenger, challenger_id, challenger_revision, _) = create_command(
+        alice.scope_id,
+        Some(subject),
+        "Request correlation",
+        "Public HTTP requests do not use X-Request-Id because traceparent replaces the correlation header.",
+        json!({"case": "challenger"}),
+    );
+    let challenger_result = command_as(&state, &tenant, subject, challenger)
+        .await
+        .expect("create conflicting Knowledge through VedaFlow");
+    assert_eq!(challenger_result.outcome, KnowledgeMutationOutcome::Applied);
+    assert_eq!(
+        snapshot(&state.pool, tenant.id, challenger_id)
+            .await
+            .expect("challenger retained")
+            .item
+            .lifecycle_state,
+        KnowledgeLifecycleState::Transitional,
+        "an unresolved challenger is never ordinary current Knowledge"
+    );
+
+    let mut tx = rls::begin_tenant_tx(&state.pool, tenant.id)
+        .await
+        .expect("begin conflict read");
+    let sets = knowledge_conflicts::list(
+        &mut tx,
+        tenant.id,
+        Some(alice.scope_id),
+        None,
+        Some(ConflictSetStatus::Open),
+        None,
+        10,
+    )
+    .await
+    .expect("list durable conflicts");
+    tx.commit().await.expect("commit conflict read");
+    assert_eq!(sets.len(), 1);
+    let conflict = sets[0].clone();
+
+    let verifier = Hs256Verifier::new(SECRET);
+    let token = verifier.issue(subject, tenant.id, Duration::from_secs(300));
+    let app = router(state.clone());
+    let (mut stale_procedure, stale_id, _, _) = create_command(
+        alice.scope_id,
+        Some(subject),
+        "Staging rollback cleanup",
+        "After a failed staging rollout, remove the temporary rollback marker.",
+        json!({"case": "explicit-staleness"}),
+    );
+    let KnowledgeCommand::Create {
+        knowledge_type,
+        content,
+        ..
+    } = &mut stale_procedure
+    else {
+        unreachable!("create_command always returns Create")
+    };
+    *knowledge_type = KnowledgeType::Procedure;
+    let now = Utc::now();
+    content.valid_from = now - chrono::Duration::days(2);
+    content.stale_after = Some(now - chrono::Duration::days(1));
+    command_as(&state, &tenant, subject, stale_procedure)
+        .await
+        .expect("create explicitly stale procedure through VedaFlow");
+    let (policy_status, _, policies) = api(
+        &app,
+        Method::GET,
+        &format!(
+            "/v1/knowledge-freshness-policies?scope_id={}",
+            alice.scope_id
+        ),
+        &token,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(policy_status, StatusCode::OK, "{policies}");
+    assert_eq!(policies["policies"].as_array().map(Vec::len), Some(9));
+    let procedure_policy = policies["policies"]
+        .as_array()
+        .expect("freshness policy list")
+        .iter()
+        .find(|policy| policy["knowledge_type"] == "procedure")
+        .expect("procedure freshness policy");
+    assert!(procedure_policy["configuration_hash"].is_string());
+    assert!(
+        procedure_policy["triggers"]
+            .as_array()
+            .is_some_and(|triggers| triggers.iter().any(|value| value == "failed_use"))
+    );
+    let (stale_status, _, stale_body) = api(
+        &app,
+        Method::GET,
+        "/v1/knowledge?stale=true&limit=20",
+        &token,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(stale_status, StatusCode::OK, "{stale_body}");
+    let stale_row = stale_body["items"]
+        .as_array()
+        .expect("staleness queue")
+        .iter()
+        .find(|item| item["id"] == stale_id.to_string())
+        .expect("explicitly stale procedure is queued");
+    assert_eq!(stale_row["current_revision"]["stale"], true);
+    assert_eq!(
+        stale_row["current_revision"]["freshness_reasons"],
+        json!(["explicit_date"])
+    );
+
+    let (default_status, _, default_body) = api(
+        &app,
+        Method::GET,
+        "/v1/knowledge?limit=20",
+        &token,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(default_status, StatusCode::OK, "{default_body}");
+    let default_ids = default_body["items"]
+        .as_array()
+        .expect("Knowledge rows")
+        .iter()
+        .filter_map(|item| item["id"].as_str())
+        .collect::<Vec<_>>();
+    assert!(default_ids.iter().any(|id| *id == original_id.to_string()));
+    assert!(
+        !default_ids
+            .iter()
+            .any(|id| *id == challenger_id.to_string())
+    );
+
+    let (transitional_status, _, transitional_body) = api(
+        &app,
+        Method::GET,
+        "/v1/knowledge?include_transitional=true&limit=20",
+        &token,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(transitional_status, StatusCode::OK, "{transitional_body}");
+    assert!(
+        transitional_body["items"]
+            .as_array()
+            .expect("transitional rows")
+            .iter()
+            .any(|item| item["id"] == challenger_id.to_string())
+    );
+
+    let resolved = command_as(
+        &state,
+        &tenant,
+        subject,
+        KnowledgeCommand::ResolveConflict {
+            conflict_set_id: conflict.id,
+            expected_conflict_revision: conflict.revision,
+            resolution: ConflictResolutionKind::Supersede,
+            transition_at: None,
+            reason: "traceparent is the reviewed current convention".to_owned(),
+        },
+    )
+    .await
+    .expect("resolve conflict through VedaFlow");
+    assert_eq!(resolved.outcome, KnowledgeMutationOutcome::Applied);
+    assert_eq!(
+        snapshot(&state.pool, tenant.id, original_id)
+            .await
+            .expect("original history retained")
+            .item
+            .lifecycle_state,
+        KnowledgeLifecycleState::Superseded
+    );
+    assert_eq!(
+        snapshot(&state.pool, tenant.id, challenger_id)
+            .await
+            .expect("challenger current")
+            .item
+            .lifecycle_state,
+        KnowledgeLifecycleState::Active
+    );
+
+    let temporal_uri = format!(
+        "/v1/knowledge?include_history=true&as_known_at={}&limit=20",
+        known_before_challenger
+            .to_rfc3339()
+            .replace(':', "%3A")
+            .replace('+', "%2B")
+    );
+    let (temporal_status, _, temporal_body) =
+        api(&app, Method::GET, &temporal_uri, &token, None, None).await;
+    assert_eq!(temporal_status, StatusCode::OK, "{temporal_body}");
+    let temporal = temporal_body["items"].as_array().expect("temporal rows");
+    assert!(temporal.iter().any(|item| {
+        item["id"] == original_id.to_string()
+            && item["current_revision"]["id"] == original_revision.to_string()
+    }));
+    assert!(
+        !temporal
+            .iter()
+            .any(|item| item["id"] == challenger_id.to_string())
+    );
+
+    let (stale_challenger, _, _, _) = create_command(
+        alice.scope_id,
+        Some(subject),
+        "Request correlation",
+        "Public HTTP requests do use X-Request-Id and traceparent does not replace the correlation header.",
+        json!({"case": "stale-resolution"}),
+    );
+    command_as(&state, &tenant, subject, stale_challenger)
+        .await
+        .expect("open second conflict");
+    let mut tx = rls::begin_tenant_tx(&state.pool, tenant.id)
+        .await
+        .expect("begin second conflict read");
+    let open = knowledge_conflicts::list(
+        &mut tx,
+        tenant.id,
+        Some(alice.scope_id),
+        None,
+        Some(ConflictSetStatus::Open),
+        None,
+        10,
+    )
+    .await
+    .expect("list second conflict");
+    tx.commit().await.expect("commit second conflict read");
+    let second = open.first().expect("second conflict is open").clone();
+    let stale_resolution = command_as(
+        &state,
+        &tenant,
+        subject,
+        KnowledgeCommand::ResolveConflict {
+            conflict_set_id: second.id,
+            expected_conflict_revision: second.revision + 10,
+            resolution: ConflictResolutionKind::Archive,
+            transition_at: None,
+            reason: "deliberately stale precondition".to_owned(),
+        },
+    )
+    .await
+    .expect("stale conflict resolution is a governed rejection");
+    assert_eq!(stale_resolution.outcome, KnowledgeMutationOutcome::Rejected);
+    let mut tx = rls::begin_tenant_tx(&state.pool, tenant.id)
+        .await
+        .expect("begin final conflict read");
+    let still_open = knowledge_conflicts::get(&mut tx, tenant.id, second.id)
+        .await
+        .expect("read rejected conflict")
+        .expect("conflict retained");
+    tx.commit().await.expect("commit final conflict read");
+    assert_eq!(still_open.status, ConflictSetStatus::Open);
+    assert_eq!(still_open.revision, second.revision);
+
+    let (release_schedule, release_id, _, _) = create_command(
+        alice.scope_id,
+        Some(subject),
+        "Release train schedule",
+        "The release train runs on Tuesday.",
+        json!({"case": "transition-current"}),
+    );
+    command_as(&state, &tenant, subject, release_schedule)
+        .await
+        .expect("create current release schedule");
+    let transition_at = Utc::now() + chrono::Duration::days(7);
+    let (mut future_schedule, future_id, future_revision, _) = create_command(
+        alice.scope_id,
+        Some(subject),
+        "Release train schedule",
+        "The release train runs on Wednesday.",
+        json!({"case": "transition-future"}),
+    );
+    let KnowledgeCommand::Create { content, .. } = &mut future_schedule else {
+        unreachable!("create_command always returns Create")
+    };
+    content.valid_from = transition_at;
+    command_as(&state, &tenant, subject, future_schedule)
+        .await
+        .expect("open future transition");
+    assert_eq!(
+        snapshot(&state.pool, tenant.id, future_id)
+            .await
+            .expect("future challenger retained")
+            .item
+            .lifecycle_state,
+        KnowledgeLifecycleState::Transitional
+    );
+    let mut tx = rls::begin_tenant_tx(&state.pool, tenant.id)
+        .await
+        .expect("begin transition conflict read");
+    let transition = knowledge_conflicts::list(
+        &mut tx,
+        tenant.id,
+        Some(alice.scope_id),
+        None,
+        Some(ConflictSetStatus::Open),
+        None,
+        20,
+    )
+    .await
+    .expect("list transition conflicts")
+    .into_iter()
+    .find(|set| set.classification == ConflictClassification::Transition)
+    .expect("future transition classified explicitly");
+    tx.commit().await.expect("commit transition conflict read");
+    let transitioned = command_as(
+        &state,
+        &tenant,
+        subject,
+        KnowledgeCommand::ResolveConflict {
+            conflict_set_id: transition.id,
+            expected_conflict_revision: transition.revision,
+            resolution: ConflictResolutionKind::Transition,
+            transition_at: Some(transition_at),
+            reason: "the reviewed release-calendar change starts next week".to_owned(),
+        },
+    )
+    .await
+    .expect("schedule future transition through VedaFlow");
+    assert_eq!(transitioned.revision_id, Some(future_revision));
+    assert_eq!(
+        snapshot(&state.pool, tenant.id, release_id)
+            .await
+            .expect("predecessor retained")
+            .item
+            .lifecycle_state,
+        KnowledgeLifecycleState::Active,
+        "a future transition does not rewrite or prematurely supersede its predecessor"
+    );
+    let as_of = |at: chrono::DateTime<Utc>| at.to_rfc3339().replace(':', "%3A").replace('+', "%2B");
+    let (before_status, _, before_transition) = api(
+        &app,
+        Method::GET,
+        &format!(
+            "/v1/knowledge?as_of={}&limit=50",
+            as_of(transition_at - chrono::Duration::seconds(1))
+        ),
+        &token,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(before_status, StatusCode::OK, "{before_transition}");
+    let before_ids = before_transition["items"]
+        .as_array()
+        .expect("pre-transition current rows");
+    assert!(
+        before_ids
+            .iter()
+            .any(|item| item["id"] == release_id.to_string())
+    );
+    assert!(
+        !before_ids
+            .iter()
+            .any(|item| item["id"] == future_id.to_string())
+    );
+    let (after_status, _, after_transition) = api(
+        &app,
+        Method::GET,
+        &format!(
+            "/v1/knowledge?as_of={}&limit=50",
+            as_of(transition_at + chrono::Duration::seconds(1))
+        ),
+        &token,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(after_status, StatusCode::OK, "{after_transition}");
+    let after_ids = after_transition["items"]
+        .as_array()
+        .expect("post-transition current rows");
+    assert!(
+        !after_ids
+            .iter()
+            .any(|item| item["id"] == release_id.to_string())
+    );
+    assert!(
+        after_ids
+            .iter()
+            .any(|item| item["id"] == future_id.to_string())
+    );
+    assert_eq!(
+        challenger_revision,
+        resolved.revision_id.expect("resolved revision")
+    );
 }

@@ -27,13 +27,15 @@ use synveda_policy::{Action, Resource, ResourceEntity};
 use synveda_store::anchors::AnchorSelection;
 use synveda_store::context as context_store;
 use synveda_store::knowledge::{self as store, KnowledgeSnapshot};
+use synveda_store::knowledge_freshness;
 use synveda_store::knowledge_search::{self as search, Candidate, Filters, ListCursor};
 use synveda_store::{rls, scopes};
 use synveda_types::knowledge::{
-    KnowledgeCommand, KnowledgeExpectedRevision, KnowledgeLifecycleState, KnowledgeMutationOutcome,
-    KnowledgeMutationResult, KnowledgeOrigin, KnowledgeRelation, KnowledgeRelationType,
-    KnowledgeRevision, KnowledgeRevisionContent, KnowledgeSource, KnowledgeSourceDraft,
-    KnowledgeSourceType, KnowledgeType, normalise_knowledge_tags,
+    FreshnessAssessment, KnowledgeCommand, KnowledgeExpectedRevision, KnowledgeLifecycleState,
+    KnowledgeMutationOutcome, KnowledgeMutationResult, KnowledgeOrigin, KnowledgeRelation,
+    KnowledgeRelationType, KnowledgeRevision, KnowledgeRevisionContent, KnowledgeSource,
+    KnowledgeSourceDraft, KnowledgeSourceType, KnowledgeType, assess_freshness,
+    normalise_knowledge_tags,
 };
 use synveda_types::{
     ContextSelectionId, Error, KnowledgeItemId, KnowledgeRevisionId, ProjectId, ProposalId, Result,
@@ -136,6 +138,8 @@ pub struct KnowledgeRevisionView {
     pub stale_after: Option<DateTime<Utc>>,
     /// Whether verification is due at response time.
     pub stale: bool,
+    /// Explainable effective freshness reasons; empty means current.
+    pub freshness_reasons: Vec<String>,
     /// Bounded verification evidence.
     #[schema(value_type = Object)]
     pub verification_metadata: Value,
@@ -168,6 +172,11 @@ impl KnowledgeRevisionView {
             valid_to: content.valid_to,
             stale_after: content.stale_after,
             stale: content.stale_after.is_some_and(|due| due <= at),
+            freshness_reasons: content
+                .stale_after
+                .filter(|due| *due <= at)
+                .map(|_| vec!["explicit_date".to_owned()])
+                .unwrap_or_default(),
             verification_metadata: content.verification_metadata,
             content_hash: revision.content_hash,
             metadata: content.metadata,
@@ -284,6 +293,15 @@ impl KnowledgeItemView {
             match_score: score,
             relationships: Vec::new(),
         }
+    }
+
+    fn apply_freshness(&mut self, assessment: &FreshnessAssessment) {
+        self.current_revision.stale = assessment.stale;
+        self.current_revision.freshness_reasons = assessment
+            .reasons
+            .iter()
+            .map(|reason| reason.as_str().to_owned())
+            .collect();
     }
 }
 
@@ -703,6 +721,20 @@ pub struct ListKnowledgeParams {
     /// Whether verification is due.
     #[serde(default)]
     pub stale: Option<bool>,
+    /// Semantic valid-time instant. Defaults to now.
+    #[serde(default)]
+    #[param(value_type = Option<String>, format = "date-time")]
+    pub as_of: Option<DateTime<Utc>>,
+    /// Transaction-time instant. Defaults to now and cannot be in the future.
+    #[serde(default)]
+    #[param(value_type = Option<String>, format = "date-time")]
+    pub as_known_at: Option<DateTime<Utc>>,
+    /// Include stale, superseded and archived aggregate heads.
+    #[serde(default)]
+    pub include_history: bool,
+    /// Include unresolved or future transitional heads.
+    #[serde(default)]
+    pub include_transitional: bool,
     /// Opaque cursor returned by the previous page.
     #[serde(default)]
     pub cursor: Option<String>,
@@ -777,7 +809,7 @@ fn normalise_query(raw: Option<&str>) -> Result<Option<String>> {
     Ok(Some(query.to_owned()))
 }
 
-fn parse_filters(params: &ListKnowledgeParams, at: DateTime<Utc>) -> Result<Filters> {
+fn parse_filters(params: &ListKnowledgeParams, now: DateTime<Utc>) -> Result<Filters> {
     if params
         .updated_before
         .zip(params.updated_from)
@@ -796,6 +828,12 @@ fn parse_filters(params: &ListKnowledgeParams, at: DateTime<Utc>) -> Result<Filt
         ),
         None => None,
     };
+    let as_known_at = params.as_known_at.unwrap_or(now);
+    if as_known_at > now {
+        return Err(Error::Invalid {
+            message: "as_known_at cannot be in the future".to_owned(),
+        });
+    }
     Ok(Filters {
         scope_ids: Vec::new(),
         workspace_id: params.workspace_id,
@@ -810,7 +848,10 @@ fn parse_filters(params: &ListKnowledgeParams, at: DateTime<Utc>) -> Result<Filt
         updated_from: params.updated_from,
         updated_before: params.updated_before,
         stale: params.stale,
-        at,
+        at: params.as_of.unwrap_or(now),
+        as_known_at,
+        include_history: params.include_history,
+        include_transitional: params.include_transitional,
     })
 }
 
@@ -829,6 +870,10 @@ fn filter_digest(params: &ListKnowledgeParams, query: Option<&str>) -> String {
         "updated_from": params.updated_from,
         "updated_before": params.updated_before,
         "stale": params.stale,
+        "as_of": params.as_of,
+        "as_known_at": params.as_known_at,
+        "include_history": params.include_history,
+        "include_transitional": params.include_transitional,
     }));
     blake3::hash(canonical.to_string().as_bytes())
         .to_hex()
@@ -1069,7 +1114,7 @@ fn reject_secrets(value: &Value) -> Result<()> {
     }
 }
 
-async fn execute_command<F>(
+pub(crate) async fn execute_command<F>(
     state: &AppState,
     headers: &HeaderMap,
     operation: &'static str,
@@ -1159,7 +1204,7 @@ pub(crate) async fn authorize_snapshot(
     )
 }
 
-async fn listing_gate(
+pub(crate) async fn listing_gate(
     state: &AppState,
     tx: &mut sqlx::PgConnection,
 ) -> Result<(Authorized, Resource)> {
@@ -1179,7 +1224,7 @@ async fn listing_gate(
     Ok((allowed, resource))
 }
 
-async fn read_event(
+pub(crate) async fn read_event(
     tx: &mut sqlx::PgConnection,
     tenant_id: TenantId,
     op: &'static str,
@@ -1203,7 +1248,7 @@ async fn read_event(
     .map(|_| ())
 }
 
-async fn respond<T: IntoResponse>(
+pub(crate) async fn respond<T: IntoResponse>(
     state: &AppState,
     op: &'static str,
     result: Result<T>,
@@ -1290,6 +1335,39 @@ struct VisibilityPage<'a> {
     more_candidates: bool,
     filter_digest: &'a str,
     at: DateTime<Utc>,
+    as_known_at: DateTime<Utc>,
+    stale_filter: Option<bool>,
+}
+
+async fn hydrate_candidate(
+    tx: &mut sqlx::PgConnection,
+    tenant_id: TenantId,
+    item_id: KnowledgeItemId,
+    as_known_at: DateTime<Utc>,
+) -> Result<Option<KnowledgeSnapshot>> {
+    store::as_known_at(&mut *tx, tenant_id, item_id, as_known_at).await
+}
+
+async fn snapshot_freshness(
+    tx: &mut sqlx::PgConnection,
+    tenant_id: TenantId,
+    snapshot: &KnowledgeSnapshot,
+    at: DateTime<Utc>,
+) -> Result<FreshnessAssessment> {
+    let evidence = knowledge_freshness::evidence(
+        tx,
+        tenant_id,
+        snapshot.revision.id,
+        snapshot.item.project_id,
+    )
+    .await?;
+    Ok(assess_freshness(
+        snapshot.item.knowledge_type,
+        snapshot.item.lifecycle_state,
+        snapshot.revision.content.stale_after,
+        evidence,
+        at,
+    ))
 }
 
 async fn visible_plain_page(
@@ -1304,18 +1382,29 @@ async fn visible_plain_page(
     for candidate in candidates {
         consumed += 1;
         last = Some(candidate);
-        let Some(snapshot) = store::current(&mut *tx, page.tenant_id, candidate.item_id).await?
+        let Some(snapshot) =
+            hydrate_candidate(tx, page.tenant_id, candidate.item_id, page.as_known_at).await?
         else {
             continue;
         };
-        // Hydrate-and-verify current truth. A concurrent head change between
-        // candidate generation and hydration cannot leak a row that no longer
-        // satisfies the candidate query.
+        // Hydrate-and-verify exact transaction truth. A head change between
+        // candidate generation and hydration cannot substitute newer content.
         if snapshot.item.updated_at != candidate.updated_at {
             continue;
         }
         match authorize_snapshot(page.state, tx, page.tenant_id, &snapshot).await {
-            Ok(_) => served.push(KnowledgeItemView::from_snapshot(snapshot, page.at, None)),
+            Ok(_) => {
+                let freshness = snapshot_freshness(tx, page.tenant_id, &snapshot, page.at).await?;
+                if page
+                    .stale_filter
+                    .is_some_and(|expected| expected != freshness.stale)
+                {
+                    continue;
+                }
+                let mut view = KnowledgeItemView::from_snapshot(snapshot, page.at, None);
+                view.apply_freshness(&freshness);
+                served.push(view);
+            }
             Err(Error::PolicyDenied { .. } | Error::NotFound { .. }) => continue,
             Err(error) => return Err(error),
         }
@@ -1352,7 +1441,8 @@ async fn visible_search_page(
     for candidate in candidates {
         consumed += 1;
         last = Some(candidate);
-        let Some(snapshot) = store::current(&mut *tx, page.tenant_id, candidate.item_id).await?
+        let Some(snapshot) =
+            hydrate_candidate(tx, page.tenant_id, candidate.item_id, page.as_known_at).await?
         else {
             continue;
         };
@@ -1360,11 +1450,19 @@ async fn visible_search_page(
             continue;
         }
         match authorize_snapshot(page.state, tx, page.tenant_id, &snapshot).await {
-            Ok(_) => served.push(KnowledgeItemView::from_snapshot(
-                snapshot,
-                page.at,
-                Some(candidate.score),
-            )),
+            Ok(_) => {
+                let freshness = snapshot_freshness(tx, page.tenant_id, &snapshot, page.at).await?;
+                if page
+                    .stale_filter
+                    .is_some_and(|expected| expected != freshness.stale)
+                {
+                    continue;
+                }
+                let mut view =
+                    KnowledgeItemView::from_snapshot(snapshot, page.at, Some(candidate.score));
+                view.apply_freshness(&freshness);
+                served.push(view);
+            }
             Err(Error::PolicyDenied { .. } | Error::NotFound { .. }) => continue,
             Err(error) => return Err(error),
         }
@@ -1477,7 +1575,9 @@ pub(crate) async fn list(
                     limit: limit as usize,
                     more_candidates: more,
                     filter_digest: &digest,
-                    at,
+                    at: filters.at,
+                    as_known_at: filters.as_known_at,
+                    stale_filter: filters.stale,
                 },
             )
             .await?;
@@ -1568,7 +1668,9 @@ pub(crate) async fn list(
                 limit: limit as usize,
                 more_candidates: more,
                 filter_digest: &digest,
-                at,
+                at: filters.at,
+                as_known_at: filters.as_known_at,
+                stale_filter: filters.stale,
             },
         )
         .await?;
@@ -1653,8 +1755,10 @@ pub(crate) async fn get(
         let snapshot = snapshot(&mut tx, tenant_id, id).await?;
         let allowed = authorize_snapshot(&state, &mut tx, tenant_id, &snapshot).await?;
         let relations = visible_relations(&state, &mut tx, tenant_id, id).await?;
+        let freshness = snapshot_freshness(&mut tx, tenant_id, &snapshot, at).await?;
         let revision_id = snapshot.revision.id;
         let mut view = KnowledgeItemView::from_snapshot(snapshot, at, None);
+        view.apply_freshness(&freshness);
         view.relationships = relations;
         read_event(
             &mut tx,

@@ -103,10 +103,12 @@ pub(crate) fn render_export(items: &[ExportKnowledge]) -> Result<ExportBundle> {
         }
         if item.lifecycle == KnowledgeLifecycleState::Erased
             || item.lifecycle == KnowledgeLifecycleState::ErasurePending
+            || item.lifecycle == KnowledgeLifecycleState::Transitional
         {
             return Err(Error::Invalid {
-                message: "erased or erasure-pending Knowledge cannot enter an OKF export"
-                    .to_owned(),
+                message:
+                    "transitional, erased or erasure-pending Knowledge cannot enter an OKF export"
+                        .to_owned(),
             });
         }
     }
@@ -296,6 +298,7 @@ fn render_item(
                 KnowledgeLifecycleState::ErasurePending | KnowledgeLifecycleState::Erased => {
                     unreachable!("refused above")
                 }
+                KnowledgeLifecycleState::Transitional => unreachable!("refused above"),
             }
             .to_owned(),
         ),

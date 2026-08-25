@@ -253,10 +253,14 @@ export function matchLabel(kind: string): string {
   switch (kind) {
     case "duplicate":
       return "Near duplicate";
-    case "conflict":
+    case "contradiction":
       return "Likely conflict";
-    case "possible_supersession":
+    case "supersession":
       return "Possible replacement";
+    case "transition":
+      return "Possible future transition";
+    case "support":
+      return "Supporting evidence";
     default:
       return stateLabel(kind);
   }

@@ -60,6 +60,8 @@ pub mod identities;
 pub mod imports;
 pub mod keys;
 pub mod knowledge;
+pub mod knowledge_conflicts;
+pub mod knowledge_freshness;
 pub mod knowledge_lifecycle;
 pub mod knowledge_search;
 pub mod packs;

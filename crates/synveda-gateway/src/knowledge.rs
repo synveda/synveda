@@ -21,17 +21,21 @@ use synveda_store::knowledge::{
     self as store, KnowledgeSnapshot, NewKnowledgeItem, NewKnowledgeRelation, NewKnowledgeRevision,
     NewKnowledgeSource,
 };
-use synveda_store::{anchors::AnchorSelection, knowledge_lifecycle, projects, rls, scopes};
+use synveda_store::{
+    anchors::AnchorSelection, capture as capture_store, configuration, knowledge_conflicts,
+    knowledge_lifecycle, knowledge_search, projects, rls, scopes,
+};
 use synveda_types::json::canonicalise;
 use synveda_types::knowledge::{
-    KnowledgeCommand, KnowledgeLifecycleState, KnowledgeMutationOutcome, KnowledgeMutationResult,
-    KnowledgeRelationType, KnowledgeSourceDraft, validate_knowledge_revision_content,
-    validate_knowledge_source,
+    ConflictClassification, ConflictMemberRole, ConflictResolutionKind, ConflictSetStatus,
+    FreshnessPolicy, KnowledgeCommand, KnowledgeLifecycleState, KnowledgeMutationOutcome,
+    KnowledgeMutationResult, KnowledgeRelationType, KnowledgeSourceDraft, classify_knowledge_match,
+    validate_knowledge_revision_content, validate_knowledge_source,
 };
 use synveda_types::{
-    ArtifactFamily, ArtifactReference, AssetKind, DurableOperationId, Error, IdentityId,
-    KnowledgeItemId, KnowledgeRelationId, KnowledgeRevisionId, KnowledgeSourceId, ProposalEffect,
-    ProposalId, ProposalState, Result, ScopeId, Sensitivity, TenantId,
+    ArtifactFamily, ArtifactReference, AssetKind, ConflictSetId, DurableOperationId, Error,
+    IdentityId, KnowledgeItemId, KnowledgeRelationId, KnowledgeRevisionId, KnowledgeSourceId,
+    ProposalEffect, ProposalId, ProposalState, Result, ScopeId, Sensitivity, TenantId,
 };
 use synveda_vedaflow::{self as vedaflow, PolicySnapshot, Signer};
 
@@ -43,6 +47,8 @@ use crate::idempotency::Claim;
 
 /// Maximum length of an archive/restore/forget reason.
 pub const MAX_KNOWLEDGE_REASON_CHARS: usize = 1_000;
+/// Durable conflict-set transitions by source/outcome.
+pub const KNOWLEDGE_CONFLICTS_TOTAL: &str = "synveda_knowledge_conflicts_total";
 
 /// Open a governed Knowledge change and auto-apply it only when the active
 /// approval matrix has no outstanding requirement.
@@ -80,12 +86,13 @@ pub async fn command_idempotent(
 
 async fn command_inner(
     state: &AppState,
-    command: KnowledgeCommand,
+    mut command: KnowledgeCommand,
     idempotency: Option<&Claim>,
 ) -> Result<KnowledgeMutationResult> {
-    validate_command(&command)?;
     let tenant_id = ambient_tenant()?;
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
+    apply_freshness_policy(&mut tx, tenant_id, &mut command).await?;
+    validate_command(&command)?;
     let authorization = authorize_command(state, &mut tx, tenant_id, &command).await?;
     let actor = identity_of(&authorization.proposal_input)?;
     let actor_subject = authorization.proposal_input.principal.subject.clone();
@@ -185,6 +192,24 @@ async fn command_inner(
         )
         .await?
     } else {
+        if let KnowledgeCommand::ResolveConflict {
+            conflict_set_id,
+            expected_conflict_revision,
+            resolution,
+            ..
+        } = &command
+        {
+            knowledge_conflicts::mark_pending(
+                &mut tx,
+                tenant_id,
+                *conflict_set_id,
+                *expected_conflict_revision,
+                proposal.id,
+                *resolution,
+                &actor_subject,
+            )
+            .await?;
+        }
         metrics::counter!(
             knowledge_lifecycle::KNOWLEDGE_LIFECYCLE_ACTS_TOTAL,
             "act" => "pending_review",
@@ -208,6 +233,323 @@ async fn command_inner(
         message: format!("commit Knowledge command: {err}"),
     })?;
     Ok(result)
+}
+
+/// Freeze the exact effective freshness evidence into every content-bearing
+/// command before its payload is hashed and opened in VedaFlow. Explicit
+/// `stale_after` remains authoritative; an absent date receives the governed
+/// type interval when one exists.
+async fn apply_freshness_policy(
+    tx: &mut PgConnection,
+    tenant_id: TenantId,
+    command: &mut KnowledgeCommand,
+) -> Result<()> {
+    let target = match command {
+        KnowledgeCommand::Create {
+            scope_id,
+            knowledge_type,
+            ..
+        }
+        | KnowledgeCommand::Supersede {
+            scope_id,
+            knowledge_type,
+            ..
+        }
+        | KnowledgeCommand::Merge {
+            scope_id,
+            knowledge_type,
+            ..
+        } => Some((*scope_id, *knowledge_type)),
+        KnowledgeCommand::Edit { item_id, .. } => {
+            let snapshot = store::current(&mut *tx, tenant_id, *item_id)
+                .await?
+                .ok_or_else(|| missing_item(*item_id))?;
+            Some((snapshot.item.scope_id, snapshot.item.knowledge_type))
+        }
+        KnowledgeCommand::Verify { .. }
+        | KnowledgeCommand::Archive { .. }
+        | KnowledgeCommand::Restore { .. }
+        | KnowledgeCommand::Forget { .. }
+        | KnowledgeCommand::ResolveConflict { .. } => None,
+    };
+    let Some((scope_id, knowledge_type)) = target else {
+        return Ok(());
+    };
+    let effective = configuration::effective_at_scope(tx, tenant_id, scope_id).await?;
+    let policy = FreshnessPolicy::from_effective(&effective, knowledge_type);
+    let content = match command {
+        KnowledgeCommand::Create { content, .. }
+        | KnowledgeCommand::Edit { content, .. }
+        | KnowledgeCommand::Supersede { content, .. }
+        | KnowledgeCommand::Merge { content, .. } => content,
+        _ => return Ok(()),
+    };
+    apply_policy_to_content(content, &policy, Utc::now())
+}
+
+fn apply_policy_to_content(
+    content: &mut synveda_types::knowledge::KnowledgeRevisionContent,
+    policy: &FreshnessPolicy,
+    basis: chrono::DateTime<Utc>,
+) -> Result<()> {
+    let explicit = content.stale_after.is_some();
+    if !explicit && let Some(mut due) = policy.interval_due_at(basis) {
+        if let Some(valid_to) = content.valid_to {
+            due = due.min(valid_to);
+        }
+        if due > content.valid_from {
+            content.stale_after = Some(due);
+        }
+    }
+    let metadata = content
+        .metadata
+        .as_object_mut()
+        .ok_or_else(|| Error::Invalid {
+            message: "Knowledge metadata must be a JSON object".to_owned(),
+        })?;
+    metadata.insert(
+        "synveda_freshness_policy".to_owned(),
+        json!({
+            "scope_id": policy.scope_id,
+            "knowledge_type": policy.knowledge_type.as_str(),
+            "default_days": policy.default_days,
+            "triggers": policy.triggers.iter().map(|trigger| trigger.as_str()).collect::<Vec<_>>(),
+            "configuration_artifact_id": policy.configuration_artifact_id,
+            "configuration_binding_id": policy.configuration_binding_id,
+            "configuration_version_id": policy.configuration_version_id,
+            "configuration_hash": policy.configuration_hash,
+            "due_source": if explicit { "explicit_revision" } else { "governed_default" },
+        }),
+    );
+    validate_knowledge_revision_content(content)
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn classify_write(
+    state: &AppState,
+    tx: &mut PgConnection,
+    tenant_id: TenantId,
+    scope_id: ScopeId,
+    project_id: Option<synveda_types::ProjectId>,
+    owner_principal_id: Option<String>,
+    knowledge_type: synveda_types::knowledge::KnowledgeType,
+    content: &synveda_types::knowledge::KnowledgeRevisionContent,
+    exclude_item_id: Option<KnowledgeItemId>,
+) -> Result<Vec<knowledge_conflicts::MatchedRevision>> {
+    let at = Utc::now();
+    let filters = knowledge_search::Filters {
+        scope_ids: Vec::new(),
+        workspace_id: None,
+        project_id,
+        scope_id: Some(scope_id),
+        owner_principal_id,
+        knowledge_type: Some(knowledge_type),
+        origin: None,
+        lifecycle: Some(KnowledgeLifecycleState::Active),
+        tag: None,
+        source_type: None,
+        updated_from: None,
+        updated_before: None,
+        stale: None,
+        at,
+        as_known_at: at,
+        include_history: false,
+        include_transitional: false,
+    };
+    let query = format!("{} {}", content.title, content.summary);
+    let depth = knowledge_conflicts::MAX_CONFLICT_MEMBERS as i64 * 2;
+    let mut candidates =
+        knowledge_search::lexical_candidates(tx, tenant_id, &filters, &query, depth).await?;
+    // A negation or renamed term can make the web-search expression narrower
+    // than the actual shared subject. Complete the bounded pool with recent
+    // same-type/scope heads, then run the one deterministic classifier over
+    // both sources. This is still bounded and every row is independently
+    // authorised below.
+    let mut seen = candidates
+        .iter()
+        .map(|candidate| candidate.item_id)
+        .collect::<HashSet<_>>();
+    for candidate in knowledge_search::list_candidates(tx, tenant_id, &filters, None, depth).await?
+    {
+        if seen.insert(candidate.item_id) {
+            candidates.push(candidate);
+        }
+    }
+    let proposed_hash = store::revision_content_hash(content);
+    let mut matches = Vec::new();
+    for candidate in candidates {
+        if Some(candidate.item_id) == exclude_item_id {
+            continue;
+        }
+        let Some(existing) = store::current(&mut *tx, tenant_id, candidate.item_id).await? else {
+            continue;
+        };
+        match crate::knowledge_api::authorize_snapshot(state, tx, tenant_id, &existing).await {
+            Ok(_) => {}
+            Err(Error::PolicyDenied { .. } | Error::NotFound { .. }) => continue,
+            Err(error) => return Err(error),
+        }
+        let Some(matched) = classify_knowledge_match(
+            knowledge_type,
+            content,
+            &proposed_hash,
+            existing.item.knowledge_type,
+            &existing.revision.content,
+            &existing.revision.content_hash,
+            at,
+        ) else {
+            continue;
+        };
+        matches.push(knowledge_conflicts::MatchedRevision {
+            item_id: existing.item.id,
+            revision_id: existing.revision.id,
+            classification: matched.classification,
+            similarity_permille: matched.similarity_permille,
+            reason_code: matched.reason_code.to_owned(),
+        });
+    }
+    matches.sort_by(|left, right| {
+        right
+            .similarity_permille
+            .cmp(&left.similarity_permille)
+            .then_with(|| left.item_id.cmp(&right.item_id))
+    });
+    matches.truncate(knowledge_conflicts::MAX_CONFLICT_MEMBERS - 1);
+    Ok(matches)
+}
+
+fn dominant_classification(
+    matches: &[knowledge_conflicts::MatchedRevision],
+) -> ConflictClassification {
+    matches
+        .iter()
+        .map(|matched| matched.classification)
+        .max_by_key(|classification| match classification {
+            ConflictClassification::Contradiction => 5,
+            ConflictClassification::Transition => 4,
+            ConflictClassification::Supersession => 3,
+            ConflictClassification::Duplicate => 2,
+            ConflictClassification::Support => 1,
+        })
+        .expect("a retained conflict has at least one match")
+}
+
+async fn retain_write_conflict(
+    tx: &mut PgConnection,
+    tenant_id: TenantId,
+    change_id: ProposalId,
+    mut challenger: KnowledgeSnapshot,
+    matches: &[knowledge_conflicts::MatchedRevision],
+    actor_subject: &str,
+) -> Result<KnowledgeSnapshot> {
+    let classification = dominant_classification(matches);
+    if matches
+        .iter()
+        .any(|matched| matched.classification.requires_resolution())
+    {
+        challenger = store::set_lifecycle(
+            tx,
+            tenant_id,
+            challenger.item.id,
+            challenger.revision.id,
+            KnowledgeLifecycleState::Transitional,
+            Some(actor_subject),
+        )
+        .await?
+        .ok_or_else(|| missing_item(challenger.item.id))?;
+    }
+    let set = knowledge_conflicts::create(
+        tx,
+        &knowledge_conflicts::NewConflictSet {
+            id: ConflictSetId::new(),
+            tenant_id,
+            scope_id: challenger.item.scope_id,
+            project_id: challenger.item.project_id,
+            classification,
+            challenger_item_id: Some(challenger.item.id),
+            challenger_revision_id: Some(challenger.revision.id),
+            capture_candidate_id: None,
+            matches,
+            created_by: actor_subject,
+        },
+    )
+    .await?;
+    let needs_resolution = matches
+        .iter()
+        .any(|matched| matched.classification.requires_resolution());
+    audit::record(
+        tx,
+        tenant_id,
+        AuditAction::KnowledgeConflictOpened,
+        Resource::KnowledgeItem(challenger.item.id).to_string(),
+        Outcome::Success,
+        json!({
+            "change_id": change_id,
+            "conflict_set_id": set.id,
+            "classification": classification.as_str(),
+            "challenger_item_id": challenger.item.id,
+            "challenger_revision_id": challenger.revision.id,
+            "visible_member_count": matches.len() + 1,
+            "transitional": challenger.item.lifecycle_state == KnowledgeLifecycleState::Transitional,
+            "requires_resolution": needs_resolution,
+        }),
+    )
+    .await?;
+    if !needs_resolution {
+        for matched in matches {
+            store::add_relation(
+                tx,
+                &NewKnowledgeRelation {
+                    id: KnowledgeRelationId::new(),
+                    tenant_id,
+                    source_item_id: challenger.item.id,
+                    target_item_id: matched.item_id,
+                    asserting_revision_id: challenger.revision.id,
+                    relation_type: KnowledgeRelationType::Supports,
+                    metadata: json!({
+                        "change_id": change_id,
+                        "conflict_set_id": set.id,
+                        "classification": matched.classification.as_str(),
+                    }),
+                    created_by: Some(actor_subject.to_owned()),
+                },
+            )
+            .await?;
+        }
+        knowledge_conflicts::mark_resolved(
+            tx,
+            tenant_id,
+            set.id,
+            set.revision,
+            change_id,
+            ConflictResolutionKind::Support,
+            actor_subject,
+        )
+        .await?;
+        audit::record(
+            tx,
+            tenant_id,
+            AuditAction::KnowledgeConflictResolved,
+            Resource::KnowledgeItem(challenger.item.id).to_string(),
+            Outcome::Success,
+            json!({
+                "change_id": change_id,
+                "conflict_set_id": set.id,
+                "resolution": "support",
+                "automatic": true,
+                "challenger_item_id": challenger.item.id,
+                "challenger_revision_id": challenger.revision.id,
+            }),
+        )
+        .await?;
+    }
+    metrics::counter!(
+        KNOWLEDGE_CONFLICTS_TOTAL,
+        "source" => "knowledge_write",
+        "classification" => classification.as_str()
+    )
+    .increment(1);
+    Ok(challenger)
 }
 
 fn artifact_references(
@@ -312,6 +654,17 @@ fn artifact_references(
             payload_hash,
             Some(expected_revision_id.to_string()),
         )?],
+        KnowledgeCommand::ResolveConflict {
+            conflict_set_id,
+            expected_conflict_revision,
+            ..
+        } => vec![ArtifactReference::new(
+            ArtifactFamily::Knowledge,
+            conflict_set_id.to_string(),
+            "resolve_conflict",
+            payload_hash,
+            Some(expected_conflict_revision.to_string()),
+        )?],
     };
 
     let sources = match command {
@@ -323,6 +676,7 @@ fn artifact_references(
         | KnowledgeCommand::Archive { .. }
         | KnowledgeCommand::Restore { .. }
         | KnowledgeCommand::Forget { .. } => &[],
+        KnowledgeCommand::ResolveConflict { .. } => &[],
     };
     for source in sources
         .iter()
@@ -606,6 +960,30 @@ async fn authorize_command(
     tenant_id: TenantId,
     command: &KnowledgeCommand,
 ) -> Result<CommandAuthorization> {
+    // Capture challengers remain governed by New Learnings. Authorise both
+    // their source and proposed destination before revealing that this command
+    // is intentionally unavailable; otherwise a guessed conflict-set id would
+    // become a same-tenant candidate-existence oracle.
+    let mut capture_backed_conflict = false;
+    if let KnowledgeCommand::ResolveConflict {
+        conflict_set_id, ..
+    } = command
+    {
+        let set = knowledge_conflicts::get(&mut *tx, tenant_id, *conflict_set_id)
+            .await?
+            .ok_or_else(|| Error::NotFound {
+                entity: format!("conflict set {conflict_set_id}"),
+            })?;
+        if let Some(candidate_id) = set.capture_candidate_id {
+            capture_backed_conflict = true;
+            let candidate = capture_store::get_candidate(&mut *tx, tenant_id, candidate_id)
+                .await?
+                .ok_or_else(|| Error::NotFound {
+                    entity: format!("conflict set {conflict_set_id}"),
+                })?;
+            crate::capture::authorize_context_candidate(state, tx, tenant_id, &candidate).await?;
+        }
+    }
     let targets = load_targets(tx, tenant_id, command).await?;
     for snapshot in &targets {
         let scope = scope_for(tx, tenant_id, snapshot.item.scope_id).await?;
@@ -639,6 +1017,11 @@ async fn authorize_command(
                 snapshot.revision.content.sensitivity,
             )?;
         }
+    }
+    if capture_backed_conflict {
+        return Err(Error::Invalid {
+            message: "capture-backed conflicts are resolved through New Learnings".to_owned(),
+        });
     }
 
     let target_scope_id = command_scope(command, &targets)?;
@@ -750,8 +1133,20 @@ async fn apply_loaded(
             content,
             sources,
         } => {
+            let matches = classify_write(
+                state,
+                tx,
+                tenant_id,
+                *scope_id,
+                *project_id,
+                owner_principal_id.clone(),
+                *knowledge_type,
+                content,
+                None,
+            )
+            .await?;
             let source_ids = create_sources(tx, tenant_id, sources, actor_subject).await?;
-            let snapshot = store::create_item(
+            let mut snapshot = store::create_item(
                 tx,
                 &NewKnowledgeItem {
                     id: *item_id,
@@ -771,6 +1166,17 @@ async fn apply_loaded(
                 &source_ids,
             )
             .await?;
+            if !matches.is_empty() {
+                snapshot = retain_write_conflict(
+                    tx,
+                    tenant_id,
+                    change_id,
+                    snapshot,
+                    &matches,
+                    actor_subject,
+                )
+                .await?;
+            }
             AppliedEffect::item(snapshot.item.id, snapshot.revision.id)
         }
         KnowledgeCommand::Edit {
@@ -780,8 +1186,21 @@ async fn apply_loaded(
             content,
             sources,
         } => {
+            let before = current(tx, tenant_id, *item_id, *expected_revision_id).await?;
+            let matches = classify_write(
+                state,
+                tx,
+                tenant_id,
+                before.item.scope_id,
+                before.item.project_id,
+                before.item.owner_principal_id.clone(),
+                before.item.knowledge_type,
+                content,
+                Some(*item_id),
+            )
+            .await?;
             let source_ids = create_sources(tx, tenant_id, sources, actor_subject).await?;
-            let snapshot = store::append_revision(
+            let mut snapshot = store::append_revision(
                 tx,
                 tenant_id,
                 *item_id,
@@ -795,6 +1214,17 @@ async fn apply_loaded(
             )
             .await?
             .ok_or_else(|| missing_item(*item_id))?;
+            if !matches.is_empty() {
+                snapshot = retain_write_conflict(
+                    tx,
+                    tenant_id,
+                    change_id,
+                    snapshot,
+                    &matches,
+                    actor_subject,
+                )
+                .await?;
+            }
             AppliedEffect::item(snapshot.item.id, snapshot.revision.id)
         }
         KnowledgeCommand::Verify {
@@ -806,6 +1236,15 @@ async fn apply_loaded(
             let current = current(tx, tenant_id, *item_id, *expected_revision_id).await?;
             let mut content = current.revision.content.clone();
             content.verification_metadata = canonicalise(verification_metadata);
+            content.stale_after = None;
+            let effective = configuration::effective_at_scope(
+                tx,
+                tenant_id,
+                current.item.scope_id,
+            )
+            .await?;
+            let policy = FreshnessPolicy::from_effective(&effective, current.item.knowledge_type);
+            apply_policy_to_content(&mut content, &policy, Utc::now())?;
             validate_knowledge_revision_content(&content)?;
             let source_ids =
                 store::revision_source_ids(&mut *tx, tenant_id, current.revision.id).await?;
@@ -967,6 +1406,187 @@ async fn apply_loaded(
             }
             AppliedEffect::item(result.item.id, result.revision.id)
         }
+        KnowledgeCommand::ResolveConflict {
+            conflict_set_id,
+            expected_conflict_revision,
+            resolution,
+            transition_at,
+            ..
+        } => {
+            let set = knowledge_conflicts::get(tx, tenant_id, *conflict_set_id)
+                .await?
+                .ok_or_else(|| Error::NotFound {
+                    entity: format!("conflict set {conflict_set_id}"),
+                })?;
+            if set.capture_candidate_id.is_some() {
+                return Err(Error::Invalid {
+                    message: "a capture-backed conflict is resolved through New Learnings so the candidate remains the publication authority".to_owned(),
+                });
+            }
+            let members = knowledge_conflicts::members(tx, tenant_id, *conflict_set_id).await?;
+            let challenger_member = members
+                .iter()
+                .find(|member| member.role == ConflictMemberRole::Challenger)
+                .ok_or_else(|| Error::Internal {
+                    message: format!("conflict set {conflict_set_id} has no challenger"),
+                })?;
+            let challenger_item_id = challenger_member.knowledge_item_id.ok_or_else(|| {
+                Error::Internal {
+                    message: format!("conflict set {conflict_set_id} challenger is not Knowledge"),
+                }
+            })?;
+            let challenger_revision_id = challenger_member.knowledge_revision_id.ok_or_else(|| {
+                Error::Internal {
+                    message: format!("conflict set {conflict_set_id} challenger has no revision"),
+                }
+            })?;
+            let mut challenger = current(
+                tx,
+                tenant_id,
+                challenger_item_id,
+                challenger_revision_id,
+            )
+            .await?;
+            if *resolution == ConflictResolutionKind::Transition {
+                let transition_at = transition_at.ok_or_else(|| Error::Invalid {
+                    message: "a transition resolution requires transition_at".to_owned(),
+                })?;
+                if transition_at <= Utc::now()
+                    || challenger.revision.content.valid_from != transition_at
+                {
+                    return Err(Error::Invalid {
+                        message: "transition_at must equal the challenger's future valid_from"
+                            .to_owned(),
+                    });
+                }
+            } else if transition_at.is_some() {
+                return Err(Error::Invalid {
+                    message: "transition_at is valid only for a transition resolution".to_owned(),
+                });
+            }
+
+            let mut currents = Vec::new();
+            for member in members
+                .iter()
+                .filter(|member| member.role == ConflictMemberRole::Current)
+            {
+                let item_id = member.knowledge_item_id.ok_or_else(|| Error::Internal {
+                    message: format!("conflict set {conflict_set_id} has a non-Knowledge current member"),
+                })?;
+                let revision_id = member.knowledge_revision_id.ok_or_else(|| Error::Internal {
+                    message: format!("conflict set {conflict_set_id} current member has no revision"),
+                })?;
+                currents.push(current(tx, tenant_id, item_id, revision_id).await?);
+            }
+            if currents.is_empty() {
+                return Err(Error::Conflict {
+                    message: format!("conflict set {conflict_set_id} has no current member"),
+                });
+            }
+
+            if *resolution == ConflictResolutionKind::Supersede {
+                for current in &currents {
+                    ensure_current_for_replacement(current)?;
+                    store::set_lifecycle(
+                        tx,
+                        tenant_id,
+                        current.item.id,
+                        current.revision.id,
+                        KnowledgeLifecycleState::Superseded,
+                        Some(actor_subject),
+                    )
+                    .await?
+                    .ok_or_else(|| missing_item(current.item.id))?;
+                }
+            }
+            let challenger_state = match resolution {
+                ConflictResolutionKind::Archive | ConflictResolutionKind::Duplicate => {
+                    KnowledgeLifecycleState::Archived
+                }
+                ConflictResolutionKind::KeepSeparate
+                | ConflictResolutionKind::Support
+                | ConflictResolutionKind::Supersede
+                | ConflictResolutionKind::Transition => KnowledgeLifecycleState::Active,
+            };
+            if challenger.item.lifecycle_state != challenger_state {
+                challenger = store::set_lifecycle(
+                    tx,
+                    tenant_id,
+                    challenger.item.id,
+                    challenger.revision.id,
+                    challenger_state,
+                    Some(actor_subject),
+                )
+                .await?
+                .ok_or_else(|| missing_item(challenger.item.id))?;
+            }
+            if *resolution != ConflictResolutionKind::Archive {
+                for current in &currents {
+                    let relation_type = match resolution {
+                        ConflictResolutionKind::KeepSeparate => {
+                            ConflictClassification::Contradiction.relation_type()
+                        }
+                        ConflictResolutionKind::Support => KnowledgeRelationType::Supports,
+                        ConflictResolutionKind::Duplicate => KnowledgeRelationType::Duplicates,
+                        ConflictResolutionKind::Supersede => KnowledgeRelationType::Supersedes,
+                        ConflictResolutionKind::Transition => KnowledgeRelationType::TransitionsTo,
+                        ConflictResolutionKind::Archive => unreachable!("checked above"),
+                    };
+                    store::add_relation(
+                        tx,
+                        &NewKnowledgeRelation {
+                            id: KnowledgeRelationId::new(),
+                            tenant_id,
+                            source_item_id: challenger.item.id,
+                            target_item_id: current.item.id,
+                            asserting_revision_id: challenger.revision.id,
+                            relation_type,
+                            metadata: json!({
+                                "change_id": change_id,
+                                "conflict_set_id": conflict_set_id,
+                                "resolution": resolution.as_str(),
+                            }),
+                            created_by: Some(actor_subject.to_owned()),
+                        },
+                    )
+                    .await?;
+                }
+            }
+            knowledge_conflicts::mark_resolved(
+                tx,
+                tenant_id,
+                *conflict_set_id,
+                *expected_conflict_revision,
+                change_id,
+                *resolution,
+                actor_subject,
+            )
+            .await?;
+            audit::record(
+                tx,
+                tenant_id,
+                AuditAction::KnowledgeConflictResolved,
+                Resource::KnowledgeItem(challenger.item.id).to_string(),
+                Outcome::Success,
+                json!({
+                    "change_id": change_id,
+                    "conflict_set_id": conflict_set_id,
+                    "resolution": resolution.as_str(),
+                    "challenger_item_id": challenger.item.id,
+                    "challenger_revision_id": challenger.revision.id,
+                    "current_member_count": currents.len(),
+                    "transition_at": transition_at,
+                }),
+            )
+            .await?;
+            metrics::counter!(
+                KNOWLEDGE_CONFLICTS_TOTAL,
+                "source" => "resolution",
+                "classification" => set.classification.as_str()
+            )
+            .increment(1);
+            AppliedEffect::item(challenger.item.id, challenger.revision.id)
+        }
         KnowledgeCommand::Archive {
             item_id,
             expected_revision_id,
@@ -977,6 +1597,7 @@ async fn apply_loaded(
                 current.item.lifecycle_state,
                 KnowledgeLifecycleState::Active
                     | KnowledgeLifecycleState::Stale
+                    | KnowledgeLifecycleState::Transitional
                     | KnowledgeLifecycleState::Superseded
             ) {
                 return Err(Error::Conflict {
@@ -1263,6 +1884,22 @@ async fn reject_change(
         item_id,
         operation_id,
     } = rejected;
+    if let KnowledgeCommand::ResolveConflict {
+        conflict_set_id, ..
+    } = command
+    {
+        let set = knowledge_conflicts::get(&mut *tx, tenant_id, *conflict_set_id)
+            .await?
+            .ok_or_else(|| Error::NotFound {
+                entity: format!("conflict set {conflict_set_id}"),
+            })?;
+        if set.status == ConflictSetStatus::PendingReview
+            && set.resolution_change_id == Some(change_id)
+        {
+            knowledge_conflicts::reopen_after_rejection(tx, tenant_id, *conflict_set_id, change_id)
+                .await?;
+        }
+    }
     if !vedaflow::proposals::close(
         tx,
         tenant_id,
@@ -1421,6 +2058,45 @@ async fn load_targets(
     tenant_id: TenantId,
     command: &KnowledgeCommand,
 ) -> Result<Vec<KnowledgeSnapshot>> {
+    if let KnowledgeCommand::ResolveConflict {
+        conflict_set_id, ..
+    } = command
+    {
+        let set = knowledge_conflicts::get(&mut *tx, tenant_id, *conflict_set_id)
+            .await?
+            .ok_or_else(|| Error::NotFound {
+                entity: format!("conflict set {conflict_set_id}"),
+            })?;
+        let members = knowledge_conflicts::members(&mut *tx, tenant_id, *conflict_set_id).await?;
+        let mut snapshots = Vec::with_capacity(members.len());
+        for member in members {
+            let (Some(item_id), Some(revision_id)) =
+                (member.knowledge_item_id, member.knowledge_revision_id)
+            else {
+                continue;
+            };
+            let current = store::current(&mut *tx, tenant_id, item_id)
+                .await?
+                .ok_or_else(|| missing_item(item_id))?;
+            let revision = store::revision(&mut *tx, tenant_id, item_id, revision_id)
+                .await?
+                .ok_or_else(|| Error::NotFound {
+                    entity: format!("Knowledge revision {revision_id}"),
+                })?;
+            snapshots.push(KnowledgeSnapshot {
+                item: current.item,
+                revision,
+                transaction_to: current.transaction_to,
+            });
+        }
+        if snapshots.is_empty() && set.capture_candidate_id.is_none() {
+            return Err(Error::Internal {
+                message: format!("conflict set {conflict_set_id} has no Knowledge evidence"),
+            });
+        }
+        return Ok(snapshots);
+    }
+
     let item_ids: Vec<KnowledgeItemId> = match command {
         KnowledgeCommand::Create { .. } => Vec::new(),
         KnowledgeCommand::Edit { item_id, .. }
@@ -1432,6 +2108,7 @@ async fn load_targets(
         KnowledgeCommand::Merge { inputs, .. } => {
             inputs.iter().map(|input| input.item_id).collect()
         }
+        KnowledgeCommand::ResolveConflict { .. } => unreachable!("handled above"),
     };
     let mut snapshots = Vec::with_capacity(item_ids.len());
     for item_id in item_ids {
@@ -1586,6 +2263,7 @@ fn proposed_result_item(command: &KnowledgeCommand) -> Option<KnowledgeItemId> {
         | KnowledgeCommand::Archive { item_id, .. }
         | KnowledgeCommand::Restore { item_id, .. }
         | KnowledgeCommand::Forget { item_id, .. } => Some(*item_id),
+        KnowledgeCommand::ResolveConflict { .. } => None,
     }
 }
 
@@ -1754,6 +2432,26 @@ fn validate_command(command: &KnowledgeCommand) -> Result<()> {
         KnowledgeCommand::Archive { reason, .. }
         | KnowledgeCommand::Restore { reason, .. }
         | KnowledgeCommand::Forget { reason, .. } => validate_reason(reason)?,
+        KnowledgeCommand::ResolveConflict {
+            expected_conflict_revision,
+            resolution,
+            transition_at,
+            reason,
+            ..
+        } => {
+            if *expected_conflict_revision <= 0 {
+                return Err(Error::Invalid {
+                    message: "a conflict resolution requires a positive expected revision"
+                        .to_owned(),
+                });
+            }
+            validate_reason(reason)?;
+            if (*resolution == ConflictResolutionKind::Transition) != transition_at.is_some() {
+                return Err(Error::Invalid {
+                    message: "transition_at is required only for transition resolution".to_owned(),
+                });
+            }
+        }
     }
     Ok(())
 }

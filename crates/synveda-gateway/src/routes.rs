@@ -104,6 +104,10 @@ define_routes! {
     "/v1/knowledge/{id}/supersede" => [POST crate::knowledge_api::supersede],
     "/v1/knowledge/{id}/archive" => [POST crate::knowledge_api::archive],
     "/v1/knowledge/{id}/restore" => [POST crate::knowledge_api::restore],
+    "/v1/knowledge-conflicts" => [GET crate::knowledge_conflicts::list],
+    "/v1/knowledge-conflicts/{id}" => [GET crate::knowledge_conflicts::get],
+    "/v1/knowledge-conflicts/{id}/resolve" => [POST crate::knowledge_conflicts::resolve],
+    "/v1/knowledge-freshness-policies" => [GET crate::knowledge_conflicts::freshness_policies],
 
     "/v1/workspaces" => [
         GET crate::workspaces::list,

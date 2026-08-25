@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into knowledge_conflict_sets\n              (id, tenant_id, scope_id, project_id, classification,\n               capture_candidate_id, created_by)\n           values ($1, $2, $3, $4, $5, $6, $7)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "8a7fa0ae962dd43dc57e6781e6bcd1c41bff72220a1dd1b242080dd034d60c4e"
+}

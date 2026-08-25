@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update knowledge_conflict_sets\n              set status = 'open', revision = revision + 1,\n                  resolution_change_id = null, resolution = null,\n                  resolved_by = null, resolved_at = null,\n                  updated_at = clock_timestamp()\n            where tenant_id = $1 and id = $2 and status = 'pending_review'\n              and resolution_change_id = $3",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "eacff1025a2878987055c148dc52d7e23d156abb324324eb3b528f623ff9555f"
+}

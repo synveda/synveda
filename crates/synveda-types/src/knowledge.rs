@@ -13,6 +13,7 @@
 //! the application layer decides through the PDP before reading or changing
 //! an aggregate.
 
+use std::collections::BTreeSet;
 use std::fmt;
 use std::str::FromStr;
 
@@ -21,9 +22,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::{
-    DurableOperationId, Error, KnowledgeItemId, KnowledgeRelationId, KnowledgeRevisionId,
-    KnowledgeSourceId, ProjectId, ProposalId, Result, ScopeId, Sensitivity, SessionEventId,
-    TenantId,
+    CaptureCandidateId, ConfigurationArtifactId, ConfigurationBindingId, ConfigurationVersionId,
+    ConflictMemberId, ConflictSetId, DurableOperationId, Error, KnowledgeItemId,
+    KnowledgeRelationId, KnowledgeRevisionId, KnowledgeSourceId, ProjectId, ProposalId, Result,
+    ScopeId, Sensitivity, SessionEventId, TenantId,
 };
 
 /// Longest Knowledge title, in characters.
@@ -183,6 +185,9 @@ pub enum KnowledgeLifecycleState {
     Active,
     /// Still present but due for verification.
     Stale,
+    /// Immutable content exists but an explicit conflict or future transition
+    /// has not yet been resolved into ordinary current truth.
+    Transitional,
     /// Replaced by an explicit superseding item or revision.
     Superseded,
     /// Intentionally removed from ordinary current use.
@@ -198,6 +203,7 @@ impl KnowledgeLifecycleState {
     pub const ALL: &'static [Self] = &[
         Self::Active,
         Self::Stale,
+        Self::Transitional,
         Self::Superseded,
         Self::Archived,
         Self::ErasurePending,
@@ -210,6 +216,7 @@ impl KnowledgeLifecycleState {
         match self {
             Self::Active => "active",
             Self::Stale => "stale",
+            Self::Transitional => "transitional",
             Self::Superseded => "superseded",
             Self::Archived => "archived",
             Self::ErasurePending => "erasure_pending",
@@ -538,6 +545,584 @@ pub struct KnowledgeRelation {
     pub created_at: DateTime<Utc>,
 }
 
+/// Deterministic write/capture classification between two exact statements.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConflictClassification {
+    /// The content is materially the same.
+    Duplicate,
+    /// The proposed statement adds compatible evidence.
+    Support,
+    /// Both statements cannot be current truth as written.
+    Contradiction,
+    /// The proposed statement appears to replace the existing one now.
+    Supersession,
+    /// The proposed statement appears to replace the existing one in future
+    /// valid time.
+    Transition,
+}
+
+impl ConflictClassification {
+    /// Stable declaration order.
+    pub const ALL: &'static [Self] = &[
+        Self::Duplicate,
+        Self::Support,
+        Self::Contradiction,
+        Self::Supersession,
+        Self::Transition,
+    ];
+
+    /// Stable wire/storage name.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Duplicate => "duplicate",
+            Self::Support => "support",
+            Self::Contradiction => "contradiction",
+            Self::Supersession => "supersession",
+            Self::Transition => "transition",
+        }
+    }
+
+    /// Relation proposed by this classification.
+    #[must_use]
+    pub const fn relation_type(self) -> KnowledgeRelationType {
+        match self {
+            Self::Duplicate => KnowledgeRelationType::Duplicates,
+            Self::Support => KnowledgeRelationType::Supports,
+            Self::Contradiction => KnowledgeRelationType::Contradicts,
+            Self::Supersession => KnowledgeRelationType::Supersedes,
+            Self::Transition => KnowledgeRelationType::TransitionsTo,
+        }
+    }
+
+    /// Whether this classification must stay outside ordinary current truth
+    /// until a governed resolution is applied.
+    #[must_use]
+    pub const fn requires_resolution(self) -> bool {
+        !matches!(self, Self::Support)
+    }
+}
+
+impl fmt::Display for ConflictClassification {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+impl FromStr for ConflictClassification {
+    type Err = Error;
+
+    fn from_str(value: &str) -> Result<Self> {
+        Self::ALL
+            .iter()
+            .copied()
+            .find(|classification| classification.as_str() == value)
+            .ok_or_else(|| Error::Invalid {
+                message: format!("unknown conflict classification: {value:?}"),
+            })
+    }
+}
+
+/// Lifecycle of one durable conflict set.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConflictSetStatus {
+    /// No governed resolution has been opened.
+    Open,
+    /// The resolution change is waiting for VedaFlow review.
+    PendingReview,
+    /// A governed resolution changed current state.
+    Resolved,
+    /// The challenger was deliberately archived/dismissed.
+    Dismissed,
+}
+
+impl ConflictSetStatus {
+    /// Stable vocabulary.
+    pub const ALL: &'static [Self] = &[
+        Self::Open,
+        Self::PendingReview,
+        Self::Resolved,
+        Self::Dismissed,
+    ];
+
+    /// Stable wire/storage name.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Open => "open",
+            Self::PendingReview => "pending_review",
+            Self::Resolved => "resolved",
+            Self::Dismissed => "dismissed",
+        }
+    }
+}
+
+impl fmt::Display for ConflictSetStatus {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+impl FromStr for ConflictSetStatus {
+    type Err = Error;
+
+    fn from_str(value: &str) -> Result<Self> {
+        Self::ALL
+            .iter()
+            .copied()
+            .find(|status| status.as_str() == value)
+            .ok_or_else(|| Error::Invalid {
+                message: format!("unknown conflict status: {value:?}"),
+            })
+    }
+}
+
+/// Role of one member in a conflict set.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConflictMemberRole {
+    /// Newly written Knowledge or the reviewable capture proposal.
+    Challenger,
+    /// Current visible Knowledge against which it was compared.
+    Current,
+}
+
+impl ConflictMemberRole {
+    /// Stable wire/storage name.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Challenger => "challenger",
+            Self::Current => "current",
+        }
+    }
+}
+
+impl FromStr for ConflictMemberRole {
+    type Err = Error;
+
+    fn from_str(value: &str) -> Result<Self> {
+        match value {
+            "challenger" => Ok(Self::Challenger),
+            "current" => Ok(Self::Current),
+            _ => Err(Error::Invalid {
+                message: format!("unknown conflict member role: {value:?}"),
+            }),
+        }
+    }
+}
+
+/// Governed way an unresolved Knowledge-backed set becomes terminal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConflictResolutionKind {
+    /// Both statements are deliberately current separate truths.
+    KeepSeparate,
+    /// Retain the challenger as supporting evidence.
+    Support,
+    /// Retain the challenger as an explicit duplicate.
+    Duplicate,
+    /// Challenger becomes current and the matched current heads are
+    /// explicitly superseded.
+    Supersede,
+    /// Challenger becomes a future-valid transition.
+    Transition,
+    /// Challenger is archived and current heads remain unchanged.
+    Archive,
+}
+
+impl ConflictResolutionKind {
+    /// Stable vocabulary.
+    pub const ALL: &'static [Self] = &[
+        Self::KeepSeparate,
+        Self::Support,
+        Self::Duplicate,
+        Self::Supersede,
+        Self::Transition,
+        Self::Archive,
+    ];
+
+    /// Stable wire/storage name.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::KeepSeparate => "keep_separate",
+            Self::Support => "support",
+            Self::Duplicate => "duplicate",
+            Self::Supersede => "supersede",
+            Self::Transition => "transition",
+            Self::Archive => "archive",
+        }
+    }
+}
+
+impl fmt::Display for ConflictResolutionKind {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+impl FromStr for ConflictResolutionKind {
+    type Err = Error;
+
+    fn from_str(value: &str) -> Result<Self> {
+        Self::ALL
+            .iter()
+            .copied()
+            .find(|resolution| resolution.as_str() == value)
+            .ok_or_else(|| Error::Invalid {
+                message: format!("unknown conflict resolution: {value:?}"),
+            })
+    }
+}
+
+/// One durable set of exact conflict evidence.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConflictSet {
+    /// Stable set id.
+    pub id: ConflictSetId,
+    /// Tenant isolation boundary.
+    pub tenant_id: TenantId,
+    /// Governing scope shared by the retained evidence.
+    pub scope_id: ScopeId,
+    /// Project association when the conflict is project-bound.
+    pub project_id: Option<ProjectId>,
+    /// Dominant deterministic classification.
+    pub classification: ConflictClassification,
+    /// Current resolution state.
+    pub status: ConflictSetStatus,
+    /// Optimistic revision for resolution.
+    pub revision: i64,
+    /// Reviewable candidate when the challenger is not yet Knowledge.
+    pub capture_candidate_id: Option<CaptureCandidateId>,
+    /// Applied or pending VedaFlow resolution.
+    pub resolution_change_id: Option<ProposalId>,
+    /// Chosen terminal resolution.
+    pub resolution: Option<ConflictResolutionKind>,
+    /// Creation actor.
+    pub created_by: String,
+    /// Resolution actor.
+    pub resolved_by: Option<String>,
+    /// Creation time.
+    pub created_at: DateTime<Utc>,
+    /// Last state transition.
+    pub updated_at: DateTime<Utc>,
+    /// Resolution time.
+    pub resolved_at: Option<DateTime<Utc>>,
+}
+
+/// One exact revision or capture proposal retained in a conflict set.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConflictMember {
+    /// Stable member id.
+    pub id: ConflictMemberId,
+    /// Owning tenant.
+    pub tenant_id: TenantId,
+    /// Owning conflict set.
+    pub conflict_set_id: ConflictSetId,
+    /// Challenger/current role.
+    pub role: ConflictMemberRole,
+    /// Exact stable Knowledge item, absent for a capture challenger.
+    pub knowledge_item_id: Option<KnowledgeItemId>,
+    /// Exact immutable revision, paired with `knowledge_item_id`.
+    pub knowledge_revision_id: Option<KnowledgeRevisionId>,
+    /// Reviewable capture candidate, mutually exclusive with Knowledge ids.
+    pub capture_candidate_id: Option<CaptureCandidateId>,
+    /// Classification relative to the challenger.
+    pub classification: ConflictClassification,
+    /// Bounded deterministic similarity score.
+    pub similarity_permille: i32,
+    /// Stable bounded classifier reason.
+    pub reason_code: String,
+    /// Retention time.
+    pub created_at: DateTime<Utc>,
+}
+
+/// Why one Knowledge type becomes due for verification.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FreshnessTrigger {
+    /// A governed lifecycle transition explicitly marked the item stale.
+    LifecycleState,
+    /// Explicit revision `stale_after` always wins.
+    ExplicitDate,
+    /// Governed type interval.
+    ConfiguredInterval,
+    /// A decision changes only through explicit supersession.
+    ExplicitSupersession,
+    /// A meaningful project repository change asks for verification.
+    RepositoryChange,
+    /// Unhelpful/correction feedback asks for procedure verification.
+    FailedUse,
+    /// Episodes are retained history rather than expiring truth.
+    Historical,
+    /// Preference freshness remains bound to owner and governing scope.
+    OwnerScope,
+    /// Reference freshness inherits an exact source signal when supplied.
+    SourceFreshness,
+}
+
+impl FreshnessTrigger {
+    /// Stable wire name.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::LifecycleState => "lifecycle_state",
+            Self::ExplicitDate => "explicit_date",
+            Self::ConfiguredInterval => "configured_interval",
+            Self::ExplicitSupersession => "explicit_supersession",
+            Self::RepositoryChange => "repository_change",
+            Self::FailedUse => "failed_use",
+            Self::Historical => "historical",
+            Self::OwnerScope => "owner_scope",
+            Self::SourceFreshness => "source_freshness",
+        }
+    }
+}
+
+/// Authoritative non-content evidence consulted at read/context time.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct FreshnessEvidence {
+    /// A project repository explicitly reports a different content revision.
+    pub repository_changed: bool,
+    /// The exact revision received unhelpful or correction feedback.
+    pub failed_use: bool,
+    /// An immutable source descriptor reports that its source is stale.
+    pub source_stale: bool,
+}
+
+/// Explainable freshness result for one exact immutable revision.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FreshnessAssessment {
+    /// Whether the revision is due for verification.
+    pub stale: bool,
+    /// Explicit/configured due instant retained on the revision.
+    pub due_at: Option<DateTime<Utc>>,
+    /// Every effective reason in stable order.
+    pub reasons: Vec<FreshnessTrigger>,
+}
+
+/// Evaluate type-aware freshness without mutating the immutable revision.
+///
+/// Expensive reconciliation remains a write/capture concern. Reads combine
+/// the revision's frozen due date with bounded, authoritative signals only.
+#[must_use]
+pub fn assess_freshness(
+    knowledge_type: KnowledgeType,
+    lifecycle: KnowledgeLifecycleState,
+    stale_after: Option<DateTime<Utc>>,
+    evidence: FreshnessEvidence,
+    at: DateTime<Utc>,
+) -> FreshnessAssessment {
+    let mut reasons = Vec::new();
+    if lifecycle == KnowledgeLifecycleState::Stale {
+        reasons.push(FreshnessTrigger::LifecycleState);
+    }
+    if stale_after.is_some_and(|due| due <= at) {
+        reasons.push(FreshnessTrigger::ExplicitDate);
+    }
+    match knowledge_type {
+        KnowledgeType::Convention if evidence.repository_changed => {
+            reasons.push(FreshnessTrigger::RepositoryChange);
+        }
+        KnowledgeType::Procedure if evidence.failed_use => {
+            reasons.push(FreshnessTrigger::FailedUse);
+        }
+        KnowledgeType::Reference if evidence.source_stale => {
+            reasons.push(FreshnessTrigger::SourceFreshness);
+        }
+        _ => {}
+    }
+    FreshnessAssessment {
+        stale: !reasons.is_empty(),
+        due_at: stale_after,
+        reasons,
+    }
+}
+
+/// Evaluated type-aware freshness policy from one exact governed
+/// Configuration version. There is deliberately no separately mutable policy
+/// row (ADR-0096 decision 5).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FreshnessPolicy {
+    /// Scope at which this answer was requested.
+    pub scope_id: ScopeId,
+    /// Knowledge type to which it applies.
+    pub knowledge_type: KnowledgeType,
+    /// Configured implicit interval; zero means no interval.
+    pub default_days: u32,
+    /// Type-specific signals in stable order.
+    pub triggers: Vec<FreshnessTrigger>,
+    /// Governing Configuration aggregate, absent for fail-safe defaults.
+    pub configuration_artifact_id: Option<ConfigurationArtifactId>,
+    /// Effective binding, absent when fail-safe.
+    pub configuration_binding_id: Option<ConfigurationBindingId>,
+    /// Exact immutable Configuration version, absent when fail-safe.
+    pub configuration_version_id: Option<ConfigurationVersionId>,
+    /// Canonical exact Configuration document hash.
+    pub configuration_hash: String,
+}
+
+impl FreshnessPolicy {
+    /// Project the exact governed runtime configuration into the policy for
+    /// one Knowledge type.
+    #[must_use]
+    pub fn from_effective(
+        configuration: &crate::configuration::EffectiveConfiguration,
+        knowledge_type: KnowledgeType,
+    ) -> Self {
+        let mut triggers = vec![FreshnessTrigger::ExplicitDate];
+        match knowledge_type {
+            KnowledgeType::Decision => triggers.push(FreshnessTrigger::ExplicitSupersession),
+            KnowledgeType::Convention => {
+                triggers.push(FreshnessTrigger::RepositoryChange);
+                if configuration.document.freshness.days_for(knowledge_type) > 0 {
+                    triggers.push(FreshnessTrigger::ConfiguredInterval);
+                }
+            }
+            KnowledgeType::Procedure => {
+                triggers.push(FreshnessTrigger::FailedUse);
+                if configuration.document.freshness.days_for(knowledge_type) > 0 {
+                    triggers.push(FreshnessTrigger::ConfiguredInterval);
+                }
+            }
+            KnowledgeType::Episode => triggers.push(FreshnessTrigger::Historical),
+            KnowledgeType::Preference => triggers.push(FreshnessTrigger::OwnerScope),
+            KnowledgeType::Reference => {
+                triggers.push(FreshnessTrigger::SourceFreshness);
+                if configuration.document.freshness.days_for(knowledge_type) > 0 {
+                    triggers.push(FreshnessTrigger::ConfiguredInterval);
+                }
+            }
+            KnowledgeType::Fact | KnowledgeType::Entity | KnowledgeType::Warning => {
+                if configuration.document.freshness.days_for(knowledge_type) > 0 {
+                    triggers.push(FreshnessTrigger::ConfiguredInterval);
+                }
+            }
+        }
+        Self {
+            scope_id: configuration.scope_id,
+            knowledge_type,
+            default_days: configuration.document.freshness.days_for(knowledge_type),
+            triggers,
+            configuration_artifact_id: configuration.artifact_id,
+            configuration_binding_id: configuration.binding_id,
+            configuration_version_id: configuration.version_id,
+            configuration_hash: configuration.content_hash.clone(),
+        }
+    }
+
+    /// Interval-derived due date. Explicit revision dates are evaluated by the
+    /// caller before this fallback.
+    #[must_use]
+    pub fn interval_due_at(&self, basis: DateTime<Utc>) -> Option<DateTime<Utc>> {
+        (self.default_days > 0)
+            .then(|| basis.checked_add_signed(chrono::Duration::days(i64::from(self.default_days))))
+            .flatten()
+    }
+}
+
+/// Result of comparing one proposed exact statement to one current revision.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KnowledgeMatch {
+    /// Proposed relation class.
+    pub classification: ConflictClassification,
+    /// Integer Jaccard/content score.
+    pub similarity_permille: i32,
+    /// Stable classifier reason.
+    pub reason_code: &'static str,
+}
+
+/// Bounded deterministic match classification shared by capture and direct
+/// Knowledge writes.
+#[must_use]
+pub fn classify_knowledge_match(
+    proposed_type: KnowledgeType,
+    proposed: &KnowledgeRevisionContent,
+    proposed_hash: &str,
+    existing_type: KnowledgeType,
+    existing: &KnowledgeRevisionContent,
+    existing_hash: &str,
+    as_of: DateTime<Utc>,
+) -> Option<KnowledgeMatch> {
+    if proposed_hash == existing_hash {
+        return Some(KnowledgeMatch {
+            classification: ConflictClassification::Duplicate,
+            similarity_permille: 1_000,
+            reason_code: "same_content_hash",
+        });
+    }
+    let proposed_tokens = knowledge_tokens(&format!(
+        "{} {} {}",
+        proposed.title, proposed.summary, proposed.body_markdown
+    ));
+    let existing_tokens = knowledge_tokens(&format!(
+        "{} {} {}",
+        existing.title, existing.summary, existing.body_markdown
+    ));
+    if proposed_tokens.is_empty() || existing_tokens.is_empty() {
+        return None;
+    }
+    let intersection = proposed_tokens.intersection(&existing_tokens).count();
+    let union = proposed_tokens.union(&existing_tokens).count();
+    let similarity = i32::try_from(intersection * 1_000 / union).unwrap_or(1_000);
+    let same_type = proposed_type == existing_type;
+    // Temporal intent and opposite polarity are stronger than lexical
+    // proximity. A one-word negation or a future validity boundary often
+    // leaves the token sets almost identical; classifying either as a near
+    // duplicate would silently discard the exact distinction review needs.
+    let classification = if similarity >= 450
+        && same_type
+        && knowledge_has_negation(&proposed.body_markdown)
+            != knowledge_has_negation(&existing.body_markdown)
+    {
+        (
+            ConflictClassification::Contradiction,
+            "shared_subject_opposite_polarity",
+        )
+    } else if similarity >= 450 && same_type && proposed.valid_from > as_of {
+        (
+            ConflictClassification::Transition,
+            "shared_subject_future_validity",
+        )
+    } else if similarity >= 850 {
+        (ConflictClassification::Duplicate, "lexical_near_duplicate")
+    } else if similarity >= 550 && same_type {
+        (
+            ConflictClassification::Supersession,
+            "shared_subject_new_statement",
+        )
+    } else if similarity >= 400 && same_type {
+        (
+            ConflictClassification::Support,
+            "shared_subject_supporting_statement",
+        )
+    } else {
+        return None;
+    };
+    Some(KnowledgeMatch {
+        classification: classification.0,
+        similarity_permille: similarity,
+        reason_code: classification.1,
+    })
+}
+
+fn knowledge_tokens(value: &str) -> BTreeSet<String> {
+    value
+        .split(|character: char| !character.is_alphanumeric())
+        .filter(|token| token.chars().count() >= 2)
+        .map(str::to_lowercase)
+        .collect()
+}
+
+fn knowledge_has_negation(value: &str) -> bool {
+    knowledge_tokens(value)
+        .iter()
+        .any(|token| matches!(token.as_str(), "not" | "never" | "no" | "without"))
+}
+
 /// Governed mutations supported by the Knowledge command layer (CPR-16,
 /// ADR-0081).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -559,6 +1144,8 @@ pub enum KnowledgeCommandKind {
     Restore,
     /// Govern irreversible plaintext erasure.
     Forget,
+    /// Resolve one exact durable conflict set.
+    ResolveConflict,
 }
 
 impl KnowledgeCommandKind {
@@ -572,6 +1159,7 @@ impl KnowledgeCommandKind {
         Self::Archive,
         Self::Restore,
         Self::Forget,
+        Self::ResolveConflict,
     ];
 
     /// Stable wire/storage name.
@@ -586,6 +1174,7 @@ impl KnowledgeCommandKind {
             Self::Archive => "archive",
             Self::Restore => "restore",
             Self::Forget => "forget",
+            Self::ResolveConflict => "resolve_conflict",
         }
     }
 }
@@ -774,6 +1363,19 @@ pub enum KnowledgeCommand {
         /// Bounded human reason; only its hash survives successful erasure.
         reason: String,
     },
+    /// Resolve an exact Knowledge-backed conflict set.
+    ResolveConflict {
+        /// Durable set being resolved.
+        conflict_set_id: ConflictSetId,
+        /// Exact set revision inspected by the resolver.
+        expected_conflict_revision: i64,
+        /// Closed governed outcome.
+        resolution: ConflictResolutionKind,
+        /// Future valid-time boundary required by `transition`.
+        transition_at: Option<DateTime<Utc>>,
+        /// Bounded human rationale.
+        reason: String,
+    },
 }
 
 impl KnowledgeCommand {
@@ -789,6 +1391,7 @@ impl KnowledgeCommand {
             Self::Archive { .. } => KnowledgeCommandKind::Archive,
             Self::Restore { .. } => KnowledgeCommandKind::Restore,
             Self::Forget { .. } => KnowledgeCommandKind::Forget,
+            Self::ResolveConflict { .. } => KnowledgeCommandKind::ResolveConflict,
         }
     }
 
@@ -820,6 +1423,7 @@ impl KnowledgeCommand {
                 .map(|input| input.item_id)
                 .chain(std::iter::once(*result_item_id))
                 .collect(),
+            Self::ResolveConflict { .. } => Vec::new(),
         }
     }
 }
@@ -1036,7 +1640,17 @@ pub fn validate_knowledge_source(
     if let Some(hash) = content_hash {
         validate_content_hash(hash)?;
     }
-    validate_metadata("source metadata", metadata)
+    validate_metadata("source metadata", metadata)?;
+    if metadata
+        .get("synveda_freshness_state")
+        .is_some_and(|value| !matches!(value.as_str(), Some("current" | "stale")))
+    {
+        return Err(Error::Invalid {
+            message: "source metadata synveda_freshness_state must be `current` or `stale`"
+                .to_owned(),
+        });
+    }
+    Ok(())
 }
 
 /// Validates a lower-case BLAKE3-256 hex digest.
@@ -1256,5 +1870,111 @@ mod tests {
             assert!(!state.is_current(), "{state} is not ordinary current truth");
         }
         assert!("deleted".parse::<KnowledgeLifecycleState>().is_err());
+    }
+
+    #[test]
+    fn deterministic_matcher_separates_duplicates_conflicts_and_transitions() {
+        let now = Utc::now();
+        let existing = content();
+        let exact = classify_knowledge_match(
+            KnowledgeType::Convention,
+            &existing,
+            "a",
+            KnowledgeType::Convention,
+            &existing,
+            "a",
+            now,
+        )
+        .expect("exact content matches");
+        assert_eq!(exact.classification, ConflictClassification::Duplicate);
+
+        let mut contradiction = existing.clone();
+        contradiction.body_markdown =
+            "Public requests do not use traceparent; use a request id.".to_owned();
+        contradiction.summary = "Public requests do not use traceparent.".to_owned();
+        let opposite = classify_knowledge_match(
+            KnowledgeType::Convention,
+            &contradiction,
+            "b",
+            KnowledgeType::Convention,
+            &existing,
+            "a",
+            now,
+        )
+        .expect("shared subject with opposite polarity matches");
+        assert_eq!(
+            opposite.classification,
+            ConflictClassification::Contradiction
+        );
+
+        let mut transition = existing.clone();
+        transition.valid_from = now + chrono::Duration::days(7);
+        transition.body_markdown =
+            "Use traceparent on public requests after the gateway rollout.".to_owned();
+        transition.summary = "Public requests use traceparent after rollout.".to_owned();
+        let future = classify_knowledge_match(
+            KnowledgeType::Convention,
+            &transition,
+            "c",
+            KnowledgeType::Convention,
+            &existing,
+            "a",
+            now,
+        )
+        .expect("future shared subject matches");
+        assert_eq!(future.classification, ConflictClassification::Transition);
+    }
+
+    #[test]
+    fn freshness_is_type_aware_and_explainable() {
+        let at = Utc::now();
+        let due = at - chrono::Duration::minutes(1);
+        let convention = assess_freshness(
+            KnowledgeType::Convention,
+            KnowledgeLifecycleState::Active,
+            Some(due),
+            FreshnessEvidence {
+                repository_changed: true,
+                failed_use: true,
+                source_stale: true,
+            },
+            at,
+        );
+        assert!(convention.stale);
+        assert_eq!(
+            convention.reasons,
+            [
+                FreshnessTrigger::ExplicitDate,
+                FreshnessTrigger::RepositoryChange
+            ]
+        );
+
+        let decision = assess_freshness(
+            KnowledgeType::Decision,
+            KnowledgeLifecycleState::Active,
+            None,
+            FreshnessEvidence {
+                repository_changed: true,
+                failed_use: true,
+                source_stale: true,
+            },
+            at,
+        );
+        assert!(
+            !decision.stale,
+            "decisions move through explicit supersession"
+        );
+
+        let procedure = assess_freshness(
+            KnowledgeType::Procedure,
+            KnowledgeLifecycleState::Active,
+            None,
+            FreshnessEvidence {
+                failed_use: true,
+                ..FreshnessEvidence::default()
+            },
+            at,
+        );
+        assert_eq!(procedure.reasons, [FreshnessTrigger::FailedUse]);
     }
 }

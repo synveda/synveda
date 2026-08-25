@@ -127,10 +127,10 @@ switchers, a People page and the governance surfaces under **Advanced**. See
 | **2 — Governance** | VedaFlow, lapses, dedup, decay, recall, graph, audit queries, prompts, context packs, eval gates | ✅ 22/22 |
 | **3 — Enterprise** | SCIM, real IdPs, skills registry, console, Helm, release & distribution, residency, Qdrant | 🚧 14/27 |
 | **4 — Ecosystem** | SDKs, importers, telemetry, DR, gateway scale | 🚧 2/17 |
-| **5 — Context platform** | The redesign: fresh epoch, governed scopes, sessions, immutable Knowledge, capture, explainable context, Skills, Tools, OKF, one public contract, governed runtime configuration, policy relaxations, offline-verifiable audit export, shared directory access, stable secret custody and one deployment runtime | 🚧 36 packages delivered; programme continues |
+| **5 — Context platform** | The redesign: fresh epoch, governed scopes, sessions, immutable Knowledge, capture, explainable context, Skills, Tools, OKF, one public contract, governed runtime configuration, policy relaxations, offline-verifiable audit export, shared directory access, stable secret custody and one deployment runtime | 🚧 37 packages delivered; programme continues |
 
-One further feature (AUTH-6, session and token hygiene) is unscheduled — **133
-in total, 102 delivered** (`docs/backlog/STATUS.md` is the count `make ci`
+One further feature (AUTH-6, session and token hygiene) is unscheduled — **134
+in total, 103 delivered** (`docs/backlog/STATUS.md` is the count `make ci`
 checks). Phase 5 is the 33-prompt context-platform redesign, in flight on
 `feat/context-platform-mvp`; Phase 3 is paused mid-phase behind it. The fourteen Phase 3 items finished are the skills registry
 and its governance (SKIL-1 through SKIL-4), the installable single binary
@@ -173,7 +173,14 @@ Published benchmark scores, and what they do and do not measure:
   Reviews.
 - **The read path** — the Knowledge Browser lists and searches current active
   revisions with cursor pagination, per-object PDP decisions and independently
-  authorised provenance. Lexical search is immediate; configured TEI enables
+  authorised provenance. Direct writes and capture share a bounded classifier;
+  duplicate, contradiction, supersession and future-transition challengers are
+  `transitional` until a revision-aware VedaFlow resolution, so unresolved
+  statements never become competing current truth. The browser exposes the
+  fully policy-visible conflict queue, type-aware freshness/staleness signals,
+  and orthogonal valid-time (`as_of`) and transaction-time (`as_known_at`)
+  queries with explicit history/transitional switches. Lexical search is
+  immediate; configured TEI enables
   semantic fusion, while the deterministic test embedder is honestly reported
   as lexical-only. Session context runs now persist an explainable plan over
   exact immutable Knowledge revisions: candidates, selections, reason/score

@@ -66,6 +66,7 @@ pub mod error;
 pub mod idempotency;
 pub mod knowledge;
 pub mod knowledge_api;
+pub mod knowledge_conflicts;
 pub mod knowledge_index;
 pub mod me;
 pub mod okf;

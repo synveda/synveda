@@ -946,10 +946,12 @@ button.link {
   font-size: 0.85rem;
 }
 
-/* ── Knowledge Browser (CPR-17, ADR-0082) ─────────────────────────────── */
+/* ── Knowledge Browser + conflict/freshness review (CPR-17/37) ───────── */
 
 .knowledge-toolbar {
   display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
   justify-content: flex-end;
   margin: -2.9rem 0 1rem;
 }
@@ -1032,6 +1034,52 @@ ul.knowledge-list a.row:hover strong {
   max-width: 44rem;
   border-bottom: 1px solid var(--line);
   padding: 0.65rem 0;
+}
+
+.knowledge-conflicts,
+.knowledge-freshness-policies {
+  max-width: 72rem;
+  margin: 1rem 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 1rem;
+}
+
+.knowledge-conflict-list {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.knowledge-conflict {
+  border-left: 3px solid var(--error-line);
+  padding: 0.7rem 0.9rem;
+  background: color-mix(in srgb, var(--error-line) 4%, transparent);
+}
+
+.knowledge-conflict > summary,
+.knowledge-freshness-policies > summary {
+  cursor: pointer;
+}
+
+.knowledge-conflict-comparison {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(18rem, 1fr));
+  gap: 1rem;
+  margin: 0.8rem 0;
+}
+
+.knowledge-conflict-comparison article {
+  min-width: 0;
+}
+
+.knowledge-conflict-comparison .knowledge-body {
+  font-size: 0.9rem;
+  padding: 0.7rem;
+}
+
+.knowledge-freshness-policies table {
+  width: 100%;
+  margin-top: 0.8rem;
 }
 
 /* ── OKF exchange (CPR-28, ADR-0087) ─────────────────────────────────── */
@@ -1186,8 +1234,9 @@ button.danger {
   margin-left: 0;
 }
 
-.tag.match-conflict,
-.tag.match-possible_supersession {
+.tag.match-contradiction,
+.tag.match-supersession,
+.tag.match-transition {
   border-color: var(--error-line);
 }
 
@@ -1579,7 +1628,8 @@ ul.tool-catalogue-list a.row:hover strong {
     margin: 0 0 1rem;
   }
 
-  .knowledge-columns {
+  .knowledge-columns,
+  .knowledge-conflict-comparison {
     grid-template-columns: 1fr;
   }
 

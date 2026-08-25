@@ -647,12 +647,12 @@ fn candidate_match(mapping: &ImportMapping) -> Option<CaptureMatch> {
             (CaptureMatchKind::Duplicate, 1_000, "okf_content_hash")
         }
         ImportMappingClassification::Update => (
-            CaptureMatchKind::PossibleSupersession,
+            CaptureMatchKind::Supersession,
             950,
             "okf_source_path_changed",
         ),
         ImportMappingClassification::Conflict => {
-            (CaptureMatchKind::Conflict, 700, "okf_title_conflict")
+            (CaptureMatchKind::Contradiction, 700, "okf_title_conflict")
         }
         ImportMappingClassification::Addition => return None,
     };

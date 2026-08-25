@@ -19,6 +19,10 @@ test("Knowledge filters map exactly to the public collection contract", () => {
     source: "repository",
     stale: "true" as const,
     updatedFrom: "2026-08-24T10:30",
+    asOf: "2026-08-25T12:00",
+    asKnownAt: "2026-08-25T11:00",
+    includeHistory: true,
+    includeTransitional: true,
   };
   assert.deepEqual(knowledgeQuery(filters, "next"), {
     query: "webhook retry",
@@ -34,6 +38,10 @@ test("Knowledge filters map exactly to the public collection contract", () => {
     updated_from: new Date("2026-08-24T10:30").toISOString(),
     updated_before: undefined,
     stale: "true",
+    as_of: new Date("2026-08-25T12:00").toISOString(),
+    as_known_at: new Date("2026-08-25T11:00").toISOString(),
+    include_history: "true",
+    include_transitional: "true",
     cursor: "next",
     limit: "50",
   });

@@ -107,8 +107,10 @@ string_enum!(
     CaptureMatchKind,
     [
         Duplicate => "duplicate",
-        Conflict => "conflict",
-        PossibleSupersession => "possible_supersession"
+        Support => "support",
+        Contradiction => "contradiction",
+        Supersession => "supersession",
+        Transition => "transition"
     ],
     "capture match kind"
 );

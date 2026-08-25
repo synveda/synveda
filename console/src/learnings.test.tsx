@@ -162,7 +162,7 @@ function candidate(overrides: Partial<CaptureCandidateView> = {}): CaptureCandid
       {
         knowledge_item_id: "knowledge-old",
         knowledge_revision_id: "revision-old",
-        kind: "possible_supersession",
+        kind: "supersession",
         similarity_permille: 860,
         reason_code: "shared_terms_with_polarity_change",
       },

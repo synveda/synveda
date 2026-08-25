@@ -24,7 +24,7 @@
  * # What it deliberately does not do
  *
  * It does not wrap routes absent from the contract. Since CPR-29 the document
- * covers all 165 bearer-authenticated production `/v1` operations; auth,
+ * covers all 171 bearer-authenticated production `/v1` operations; auth,
  * operational probes and the separately authenticated SCIM protocol remain
  * outside this application client by design.
  */

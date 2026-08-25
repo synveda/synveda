@@ -150,7 +150,7 @@ function matched(overrides: Partial<CaptureMatchView> = {}): CaptureMatchView {
   return {
     knowledge_item_id: "knowledge-old",
     knowledge_revision_id: "revision-old",
-    kind: "possible_supersession",
+    kind: "supersession",
     similarity_permille: 860,
     reason_code: "shared_terms_with_polarity_change",
     ...overrides,

@@ -128,6 +128,18 @@ define_id!(
 );
 
 define_id!(
+    /// Identifies one durable set of exact Knowledge/capture conflict evidence
+    /// (CPR-37, ADR-0096).
+    ConflictSetId
+);
+
+define_id!(
+    /// Identifies one exact member retained in a Knowledge conflict set
+    /// (CPR-37, ADR-0096).
+    ConflictMemberId
+);
+
+define_id!(
     /// Identifies one durable external knowledge-format import plan (CPR-27,
     /// ADR-0087).
     ImportJobId

@@ -33,6 +33,7 @@ use synveda_store::context::{
     self as store, NewContextCandidate, NewContextFeedback, NewContextSelection,
 };
 use synveda_store::knowledge::{self as knowledge, KnowledgeSnapshot};
+use synveda_store::knowledge_freshness;
 use synveda_store::knowledge_search::{self as search, Candidate, Filters};
 use synveda_store::sessions::{self, ContextRunCursor, ContextRunFilter, NewContextRun};
 use synveda_store::{configuration, policy_assignments, rls, scopes};
@@ -42,7 +43,7 @@ use synveda_types::configuration::{
 };
 use synveda_types::context::{ContextFeedbackType, ContextReasonCode, TraceRetentionMode};
 use synveda_types::knowledge::{
-    KnowledgeLifecycleState, KnowledgeRevision, KnowledgeSource, KnowledgeType,
+    KnowledgeLifecycleState, KnowledgeRevision, KnowledgeSource, KnowledgeType, assess_freshness,
 };
 use synveda_types::relaxation::CurrentRelaxation;
 use synveda_types::session::{ContextRun, Session};
@@ -912,6 +913,9 @@ fn context_filters(
         updated_before: None,
         stale: None,
         at,
+        as_known_at: at,
+        include_history: false,
+        include_transitional: false,
     }
 }
 
@@ -1275,7 +1279,7 @@ async fn collect_planned_candidates(
             if !reasons.contains(&reason) {
                 reasons.push(reason);
             }
-        } else if stale_at(&snapshot, &prepared.configuration, at) {
+        } else if stale_at(tx, tenant_id, &snapshot, at).await? {
             reasons.push(ContextReasonCode::Stale);
             exclusion = Some(ContextReasonCode::Stale);
         }
@@ -1380,24 +1384,27 @@ async fn collect_planned_candidates(
     Ok((planned, denied))
 }
 
-fn stale_at(
+async fn stale_at(
+    tx: &mut sqlx::PgConnection,
+    tenant_id: TenantId,
     snapshot: &KnowledgeSnapshot,
-    configuration: &EffectiveConfiguration,
     at: DateTime<Utc>,
-) -> bool {
-    if let Some(due) = snapshot.revision.content.stale_after {
-        return due <= at;
-    }
-    let days = configuration
-        .document
-        .freshness
-        .days_for(snapshot.item.knowledge_type);
-    days > 0
-        && snapshot
-            .revision
-            .transaction_time
-            .checked_add_signed(chrono::Duration::days(i64::from(days)))
-            .is_some_and(|due| due <= at)
+) -> Result<bool> {
+    let evidence = knowledge_freshness::evidence(
+        tx,
+        tenant_id,
+        snapshot.revision.id,
+        snapshot.item.project_id,
+    )
+    .await?;
+    Ok(assess_freshness(
+        snapshot.item.knowledge_type,
+        snapshot.item.lifecycle_state,
+        snapshot.revision.content.stale_after,
+        evidence,
+        at,
+    )
+    .stale)
 }
 
 fn source_line(source: &KnowledgeSource) -> String {

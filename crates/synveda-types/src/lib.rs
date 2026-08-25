@@ -109,15 +109,15 @@ pub use error::{Error, Result};
 pub use graph::{Depth, Graph};
 pub use id::{
     CapabilitySnapshotId, CaptureBatchId, CaptureCandidateDecisionId, CaptureCandidateId,
-    ConfigurationArtifactId, ConfigurationBindingId, ConfigurationVersionId, ContextCandidateId,
-    ContextFeedbackId, ContextRunId, ContextSelectionId, DirectoryUserId, DurableOperationId,
-    GrantId, GraphEdgeId, GraphVertexId, GroupId, IdentityId, ImportArtifactId, ImportJobId,
-    ImportMappingId, InviteId, KnowledgeItemId, KnowledgeRelationId, KnowledgeRevisionId,
-    KnowledgeSourceId, ProjectId, ProposalId, RecordId, RelaxationId, RelaxationVersionId,
-    RepositoryId, ScimCredentialId, ScopeId, SessionEventId, SessionId, SkillBindingId, SkillId,
-    SkillTestRunId, SkillUsageEventId, SkillVersionId, TenantId, TenantSecretId,
-    TenantSecretReencryptionJobId, ToolBindingId, ToolServerId, ToolServerVersionId, ToolTestRunId,
-    WorkspaceId,
+    ConfigurationArtifactId, ConfigurationBindingId, ConfigurationVersionId, ConflictMemberId,
+    ConflictSetId, ContextCandidateId, ContextFeedbackId, ContextRunId, ContextSelectionId,
+    DirectoryUserId, DurableOperationId, GrantId, GraphEdgeId, GraphVertexId, GroupId, IdentityId,
+    ImportArtifactId, ImportJobId, ImportMappingId, InviteId, KnowledgeItemId, KnowledgeRelationId,
+    KnowledgeRevisionId, KnowledgeSourceId, ProjectId, ProposalId, RecordId, RelaxationId,
+    RelaxationVersionId, RepositoryId, ScimCredentialId, ScopeId, SessionEventId, SessionId,
+    SkillBindingId, SkillId, SkillTestRunId, SkillUsageEventId, SkillVersionId, TenantId,
+    TenantSecretId, TenantSecretReencryptionJobId, ToolBindingId, ToolServerId,
+    ToolServerVersionId, ToolTestRunId, WorkspaceId,
 };
 pub use identity::{Identity, IdentityKind, IdentityStatus};
 pub use mover::{MoverConfig, PersonalMemory};

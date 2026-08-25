@@ -944,6 +944,30 @@ async fn candidate_matches_are_reauthorised_and_foreign_tenants_see_404() {
         admin_candidates[0]["matches"][0]["knowledge_item_id"],
         existing_id
     );
+    let (status, conflict_page) = call(
+        &app,
+        "GET",
+        "/v1/knowledge-conflicts?status=open&limit=200",
+        &admin,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{conflict_page}");
+    let conflict = conflict_page["conflicts"]
+        .as_array()
+        .expect("conflict page")
+        .iter()
+        .find(|set| {
+            set["members"].as_array().is_some_and(|members| {
+                members
+                    .iter()
+                    .any(|member| member["capture_candidate_id"] == admin_candidates[0]["id"])
+            })
+        })
+        .expect("capture-backed conflict evidence");
+    let conflict_id = conflict["id"].as_str().expect("conflict id").to_owned();
+    let conflict_revision = conflict["revision"].as_i64().expect("conflict revision");
 
     // A sibling-project member can read this standard-profile session and
     // its internal candidate through the governed ambit, but confidential
@@ -976,6 +1000,49 @@ async fn candidate_matches_are_reauthorised_and_foreign_tenants_see_404() {
         matches!(status, StatusCode::FORBIDDEN | StatusCode::NOT_FOUND),
         "confidential match unexpectedly readable: {status} {denied_item}"
     );
+    let (status, hidden_conflicts) = call(
+        &app,
+        "GET",
+        "/v1/knowledge-conflicts?status=open&limit=200",
+        &member,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{hidden_conflicts}");
+    assert_eq!(hidden_conflicts["conflicts"], json!([]));
+    assert_eq!(hidden_conflicts["policy_exclusions"], true);
+    let (status, denied_resolution) = call(
+        &app,
+        "POST",
+        &format!("/v1/knowledge-conflicts/{conflict_id}/resolve"),
+        &member,
+        Some("hidden-capture-conflict"),
+        Some(json!({
+            "expected_revision": conflict_revision,
+            "resolution": "duplicate",
+            "reason": "a guessed id must not reveal the candidate or comparison",
+        })),
+    )
+    .await;
+    assert!(
+        matches!(status, StatusCode::FORBIDDEN | StatusCode::NOT_FOUND),
+        "capture conflict became an existence oracle: {status} {denied_resolution}"
+    );
+    let (status, new_learnings_only) = call(
+        &app,
+        "POST",
+        &format!("/v1/knowledge-conflicts/{conflict_id}/resolve"),
+        &admin,
+        Some("capture-conflict-owned-by-review"),
+        Some(json!({
+            "expected_revision": conflict_revision,
+            "resolution": "duplicate",
+            "reason": "capture challengers retain New Learnings as publication authority",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{new_learnings_only}");
 
     let candidate_id = admin_candidates[0]["id"]
         .as_str()

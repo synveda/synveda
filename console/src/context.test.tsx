@@ -34,6 +34,7 @@ function revision(overrides: Partial<KnowledgeRevisionView> = {}): KnowledgeRevi
     sensitivity: "internal",
     confidence_permille: 960,
     stale: false,
+    freshness_reasons: [],
     valid_from: "2026-08-24T09:00:00Z",
     transaction_time: "2026-08-24T09:01:00Z",
     content_hash: "hash-current",

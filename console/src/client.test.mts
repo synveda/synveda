@@ -163,6 +163,7 @@ test("the idempotent creations are exactly the ones the document marks", () => {
     "publish_configuration_version",
     "register_tool_server",
     "replace_capture_candidate",
+    "resolve_knowledge_conflict",
     "restore_knowledge",
     "revise_relaxation",
     "revoke_relaxation",

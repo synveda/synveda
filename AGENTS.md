@@ -75,7 +75,7 @@ Phase 5 — context platform redesign, since 2026-08-17, on
 `feat/context-platform-mvp`. Phase 3 is paused mid-phase, not finished —
 OPS-9, OPS-10, TEN-5,6, AUD-3,4, GRPH-3, EVAL-6, CTX-7, OPS-3,4, ADPT-3,
 CTX-6 and FLOW-8 are still open, and no live Entra/Okta tenant or real
-  Cursor frame has been replayed. **133 features filed, 102 delivered**;
+  Cursor frame has been replayed. **134 features filed, 103 delivered**;
 STATUS.md and `make check-backlog` are the authority on the count — the
 headline number has drifted four times, the fourth being this file itself,
 which still read 104/71 after CPR-8 filed the 105th. That is why the
@@ -132,7 +132,7 @@ Load-bearing facts about Phase 5:
   (INSTALL.md's SQL).
 - CPR-29 (ADR-0088): the generated OpenAPI contract is the complete
   authenticated application plane — established at 156 operations and
-  extended to **167 operations by CPR-34** — from `/v1/me` through governance,
+  extended to **171 operations by CPR-37** — from `/v1/me` through governance,
   audit, Knowledge, capture, context, Skills, Tools, OKF and Configuration. One
   executable route catalogue builds the router and supplies the inventory an
   exact parity test compares with OpenAPI. The console has no hand-written
@@ -207,6 +207,17 @@ Load-bearing facts about Phase 5:
   and `make check-deploy` renders every shape, checks current routes/roles and
   proves repeat packaging cannot retain removed assets. The chart still pins
   one gateway replica and release upgrades remain restart-shaped.
+- CPR-37 (ADR-0096): bounded post-PDP classification creates durable
+  forced-RLS conflict sets with exact Knowledge-revision or capture-candidate
+  evidence. Ambiguous heads are `transitional` and invisible to ordinary
+  retrieval until revision-aware VedaFlow resolution chooses support,
+  separate truth, supersession, future transition or archive; denied members
+  suppress the whole public set. Freshness is an evaluated view of the exact
+  governed Configuration version, not a second mutable policy plane, and
+  public queries compose valid time, as-known transaction time, history and
+  transitional state. The Knowledge Browser exposes comparison, staleness,
+  future transition and resolution; the contract has **171 operations / 272
+  schemas**.
 - CPR-10 (ADR-0076): **a run is a record**. `sessions`, `session_events` and
   `session_context_runs` replace `session_id: text`; the governed scope a run
   is decided at is derived from its workspace and project by composite keys

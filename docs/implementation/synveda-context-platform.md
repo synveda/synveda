@@ -50,12 +50,13 @@ programme convention established in Prompt 1.
 | Policy-authorised context-platform audit questions and deterministic offline-verifiable export | CPR-33 | **complete** | `cf52f34` | `3c61e5e` | audit 23/23 + tamper 7/7; gateway 16/16; terminal refs 5/5; CLI audit 4/4; OpenAPI 6/6; console 212/212; RLS completeness PASS | PASS | PASS (`synveda_test_51591`) | isolated `demos/cpr-33-audit-export.sh` PASS: 7 self-audited export reads, 49 typed artifact events, one payload index; 81-script demo gate PASS | none |
 | Directory push/pull convergence on shared principals, Groups, memberships and grants | CPR-34 | **complete** | `3c61e5e` | `13ba059` | connectors 5/5; store access 30/30 + anchors 13/13 + sync 8/8; gateway access 18/18 + sync 9/9 + SCIM 10/10 + anchors 9/9; OpenAPI 6/6; console 212/212; RLS 83/83 | PASS | PASS (fresh disposable database; removed on success) | isolated `demos/cpr-34-directory-convergence.sh` PASS: 3 shared directory groups, 6 chained transitions, identity-keyed membership, zero mirror tables; 82-script demo gate PASS; Entra/Okta fixtures remain captured/transcribed | no live Entra/Okta tenant available; no live claim made |
 | Stable tenant secret references, fail-closed Tool/directory resolution, DEK re-encryption jobs and Knowledge-native sealed export | CPR-35 | **complete** | `13ba059` | `2e70aaf` | types 214/214; crypto 39/39; store keys 14/14 + Knowledge export + RLS; gateway Tools 2/2 + directory sync 10/10; CLI 158/158 | PASS | PASS (`synveda_test_69956`) | `demos/cpr-35-key-secret-convergence.sh` + re-cut TEN-4 demo PASS; 83-script drift gate PASS | none; no external key-provider claim made |
-| One gateway/schema/contract and forced-RLS runtime login across installed host, Compose and Helm | CPR-36 | **complete** | `2e70aaf` | pending (CPR-37 ledger) | init 19/19 including DB/RLS; deploy checker 4/4; epoch 10/10; OpenAPI 6/6; Helm lint/render PASS | PASS | PASS (`synveda_test_77612`) | isolated `demos/cpr-36-deployment-convergence.sh` PASS; two Compose + Helm renders; repeat-package upgrade check; 84-script drift gate PASS | no kind cluster rerun in this package; existing OPS-2 gate remains authoritative |
+| One gateway/schema/contract and forced-RLS runtime login across installed host, Compose and Helm | CPR-36 | **complete** | `2e70aaf` | `ca3730f` | init 19/19 including DB/RLS; deploy checker 4/4; epoch 10/10; OpenAPI 6/6; Helm lint/render PASS | PASS | PASS (`synveda_test_77612`) | isolated `demos/cpr-36-deployment-convergence.sh` PASS; two Compose + Helm renders; repeat-package upgrade check; 84-script drift gate PASS | no kind cluster rerun in this package; existing OPS-2 gate remains authoritative |
+| Durable conflict evidence, governed resolution, evaluated freshness and bitemporal Knowledge query | CPR-37 | **complete** | `ca3730f` | pending (CPR-38 ledger) | Knowledge types 7/7; lifecycle 5/5; capture API 4/4; ingest 2/2; context 3/3; OKF 2/2; RLS 83/83; OpenAPI 6/6; console 215/215 | PASS | PASS (`synveda_test_85309`, removed) | isolated `demos/cpr-37-conflict-freshness.sh` PASS; 85-script drift gate PASS | none |
 
-**Exact next objective:** file and complete CPR-37, the conflict,
-supersession and freshness engine over current Knowledge: explicit governed
-resolution, type-aware policy, bitemporal query semantics and current/history
-console evidence without latest-row-wins or contradictory-current leakage.
+**Exact next objective:** file and complete CPR-38, bounded anchor-first graph
+retrieval integrated into ContextRun: per-boundary PDP decisions, explicit hop,
+fan-out, time and token budgets, visible evidence paths and honest lexical/vector
+degradation without graph-only or unbounded traversal.
 
 ### Starting-point objective map
 
@@ -4653,3 +4654,84 @@ frontend changes, deletions, tests, and the resulting commit hash.
   (CPR-36)` on `feat/context-platform-mvp`.
 - **Commit hash.** Written by the next checkpoint under the programme's
   next-checkpoint convention.
+
+### Prompt 27 — conflict, supersession and freshness engine (CPR-37)
+
+- **Selected feature and decision.** **CPR-37** is delivered from `ca3730f`;
+  it records CPR-36's commit as
+  `ca3730f7d43b0bd6fd2a1a22d86d48093eea7395`. Accepted ADR-0096 makes a
+  conflict an explicit governed evidence aggregate, not a read-time model
+  guess or a second Knowledge head. The shared deterministic classifier is
+  deliberately bounded and orders exact content, negation, future-valid
+  transition and lexical evidence so a high-overlap correction cannot collapse
+  into a duplicate. It runs only after per-item Knowledge PDP decisions at
+  direct write and session-capture time; reads do no generative reconciliation.
+
+- **Durable conflict boundary.** Migration `0061_conflict_freshness.sql` adds
+  `knowledge_conflict_sets` and `knowledge_conflict_members`, exact stable ids,
+  closed classifications/member roles/resolutions, immutable evidence members,
+  useful current/open indexes and enabled/forced tenant RLS. Evidence names an
+  exact Knowledge revision or a reviewable capture candidate. Public list/get
+  performs candidate-boundary and exact-revision ownership/PDP checks before
+  returning a set; if any member is denied, the whole set, its count and its
+  edges disappear. Resolution repeats those checks before revealing whether a
+  capture-backed set belongs in New Learnings, so a guessed same-tenant id is
+  not an existence oracle.
+
+- **Current state and governed resolution.** `transitional` joins the closed
+  Knowledge lifecycle vocabulary. An ambiguous create or edit may advance the
+  immutable head but is absent from ordinary current listing, search and
+  ContextRun until the conflict resolves. The new `ResolveConflict` Knowledge
+  command carries exact set and revision preconditions through the existing
+  VedaFlow create/evaluate/execute path. Resolution can retain separate truth,
+  attach support/duplicate evidence, supersede, schedule a future transition,
+  or archive; the existing governed merge remains the content-combining path.
+  Supersession and transition preserve every revision and explicit relation.
+  A future successor remains transitional before its valid boundary; the
+  predecessor is current before that instant, the successor is current after
+  it, and history remains queryable.
+
+- **Freshness and bitemporal query.** `FreshnessPolicy`, evidence and
+  assessment are value objects evaluated from the exact effective CPR-30
+  Configuration. A Knowledge revision freezes the artifact/version/binding ids,
+  content hash and effective type policy beside its computed due date rather
+  than consulting a mutable freshness table later. Explicit `stale_after` wins;
+  interval, explicit-supersession, repository-change, failed-use and
+  source-freshness signals are type-aware and only expose reduced evidence
+  after the exact Knowledge PDP. Cursor search/list composes `as_of` valid time,
+  `as_known_at` transaction time, `include_history` and
+  `include_transitional`; default retrieval remains current, active and visible.
+
+- **Contract and console.** The generated contract adds cursor conflict list,
+  exact conflict detail, idempotent governed resolution and effective freshness
+  policy endpoints plus orthogonal temporal Knowledge parameters. The
+  Knowledge Browser uses only generated operations and adds a conflict queue,
+  exact current/history comparison, future-transition choice, staleness queue,
+  verification and effective-policy evidence. Capture/OKF vocabulary now uses
+  the final duplicate/support/contradiction/supersession/transition classes,
+  and source metadata validation supports freshness without leaking payloads.
+
+- **Schema and inventories.** Epoch **2** now has **59 migration files**, **92
+  forced-RLS tenant tables**, **171 OpenAPI operations / 272 schemas**, **102
+  audit actions**, and **726 SQLx descriptions**. Four superseded query
+  descriptions were removed and fourteen current descriptions generated. The
+  conflict-opened and conflict-resolved transitions are hash-chained audit
+  actions; no record model, latest-row-wins fallback, dual write or mutable
+  freshness-policy table was added.
+
+- **Tests and exact results.** Knowledge types **7/7**; Knowledge lifecycle
+  **5/5**; capture API **4/4**; ingest capture worker **2/2**; context runs
+  **3/3**; OKF API/library **2/2**; store RLS **83/83**, including completeness
+  over all 92 tenant tables; OpenAPI **6/6**; and console **215/215** plus the
+  production build pass. Regressions cover the denied-member oracle,
+  contradictory-current context exclusion, exact stale dates, policy evidence,
+  valid/as-known projection and future transition across its boundary.
+  `demos/cpr-37-conflict-freshness.sh` passes on its isolated fresh database,
+  and the complete **85-script** demo-drift gate passes. Complete `make ci`
+  **PASS**. Full fresh-database `make db-test` **PASS** against
+  `synveda_test_85309`, removed by the harness.
+
+- **Commit.** `feat(memory): add conflict and freshness management (CPR-37)`
+  on `feat/context-platform-mvp`.
+- **Commit hash.** Written by CPR-38 under the programme's next-checkpoint
+  convention.
