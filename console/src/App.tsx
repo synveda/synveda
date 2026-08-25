@@ -41,6 +41,7 @@ import { Knowledge, KnowledgeItem } from "./Knowledge.js";
 import { ContextInspector } from "./Context.js";
 import { Learnings } from "./Learnings.js";
 import { Onboarding } from "./Onboarding.js";
+import { OkfExchange } from "./Okf.js";
 import { People } from "./People.js";
 import { Reviews } from "./Reviews.js";
 import { Session } from "./Session.js";
@@ -215,6 +216,8 @@ function Page({ route, me }: { route: RouteMatch | null; me: MeView }) {
       return <KnowledgeItem knowledgeId={route.params.knowledge_id as string} />;
     case "learnings":
       return <Learnings />;
+    case "okf":
+      return <OkfExchange />;
     case "tools":
       return <Tools />;
     case "tool-server":

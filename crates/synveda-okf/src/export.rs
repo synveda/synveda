@@ -146,6 +146,61 @@ pub(crate) fn render_export(items: &[ExportKnowledge]) -> Result<ExportBundle> {
     })
 }
 
+pub(crate) fn validate_bundle(bundle: &ExportBundle) -> Result<()> {
+    if bundle.format_version != OKF_VERSION || bundle.specification_commit != OKF_SPEC_COMMIT {
+        return Err(Error::Invalid {
+            message: "OKF export does not match the pinned v0.2 adapter".to_owned(),
+        });
+    }
+    if bundle.files.is_empty() || bundle.files.len() > 2_001 {
+        return Err(Error::Invalid {
+            message: "OKF export must contain an index and at most 2000 concepts".to_owned(),
+        });
+    }
+    if bundle.files.first().map(|file| file.logical_path.as_str()) != Some("index.md") {
+        return Err(Error::Invalid {
+            message: "OKF export must begin with index.md".to_owned(),
+        });
+    }
+
+    let mut prior: Option<&str> = None;
+    let mut digest = blake3::Hasher::new();
+    digest.update(OKF_VERSION.as_bytes());
+    for (index, file) in bundle.files.iter().enumerate() {
+        let path = crate::archive::normalise_path(&file.logical_path)?;
+        if path != file.logical_path {
+            return Err(Error::Invalid {
+                message: "OKF export contains a non-canonical logical path".to_owned(),
+            });
+        }
+        if index > 0
+            && (path == "index.md" || prior.is_some_and(|previous| previous >= path.as_str()))
+        {
+            return Err(Error::Invalid {
+                message: "OKF export paths are duplicated or not bytewise ordered".to_owned(),
+            });
+        }
+        let actual = blake3::hash(file.content.as_bytes()).to_hex().to_string();
+        if actual != file.content_hash {
+            return Err(Error::Invalid {
+                message: format!("OKF export file hash is inconsistent: {path}"),
+            });
+        }
+        digest.update(&(path.len() as u64).to_be_bytes());
+        digest.update(path.as_bytes());
+        digest.update(file.content_hash.as_bytes());
+        if index > 0 {
+            prior = Some(&file.logical_path);
+        }
+    }
+    if digest.finalize().to_hex().as_str() != bundle.bundle_digest {
+        return Err(Error::Invalid {
+            message: "OKF export bundle digest is inconsistent".to_owned(),
+        });
+    }
+    Ok(())
+}
+
 fn export_paths(items: &[ExportKnowledge]) -> BTreeMap<KnowledgeItemId, String> {
     let desired: Vec<(KnowledgeItemId, Option<String>)> = items
         .iter()

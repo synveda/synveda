@@ -41,12 +41,13 @@ programme convention established in Prompt 1.
 | Generated-API Skills Library, bindings, exact files/tests/usage and legacy Skill review-screen cutover | CPR-24 | **complete** | `89b5f79` | `07ce9f3` | helpers/components 10/10; shared review 5/5; console 186/186; CLI 151/151; production build PASS | PASS | N/A — console/client-only | no in-app browser exposed; real-component SSR and production bundle PASS | none |
 | Trusted MCP server catalogue, immutable versions/snapshots, exact project bindings, generated configuration and read-only tests | CPR-25 | **complete** | `07ce9f3` | `9845186` | types 5/5; gateway unit 3/3 + public DB 1/1; policy PASS; RLS 1/1; OpenAPI 5/5; console 186/186 | PASS | PASS (`synveda_test_88082`) | official stable MCP 2026-07-28 pinned to `5f5440b`; isolated `demos/cpr-25-tool-registry.sh` PASS; deterministic report is not live-server evidence | none |
 | Generated-API MCP Tools catalogue, immutable evidence comparison, VedaFlow review linkage, exact bindings and secret-safe configuration | CPR-26 | **complete** | `9845186` | `98f5bcd` | helpers/components 10/10; complete console 196/196; production build PASS | PASS | N/A — console/client-only | no in-app browser exposed; real-component SSR and production bundle PASS | none |
-| Versioned OKF v0.2 validation, import planning/candidates and deterministic Knowledge export | CPR-27 | **complete** | `98f5bcd` | next checkpoint | adapter 6/6; types 1/1; store 1/1; gateway 1/1; capture 4/4; OpenAPI 5/5; RLS 1/1; console 197/197 | PASS | PASS (`synveda_test_1177`) | canonical v0.2 pinned to `ad30107`; isolated `demos/cpr-27-okf-v02.sh` PASS; no remote fetch/live-host claim | none |
+| Versioned OKF v0.2 validation, import planning/candidates and deterministic Knowledge export | CPR-27 | **complete** | `98f5bcd` | `0dbf163` | adapter 6/6; types 1/1; store 1/1; gateway 1/1; capture 4/4; OpenAPI 5/5; RLS 1/1; console 197/197 | PASS | PASS (`synveda_test_1177`) | canonical v0.2 pinned to `ad30107`; isolated `demos/cpr-27-okf-v02.sh` PASS; no remote fetch/live-host claim | none |
+| Public-API OKF CLI and generated project-console import/export workflows | CPR-28 | **complete** | `0dbf163` | next checkpoint | adapter 6/6; CLI 150/150; console 207/207; public API 1/1; production build PASS | PASS | N/A — client/pure-validation only | isolated `demos/cpr-28-okf-workflows.sh` PASS: real local fixture + public lifecycle + generated console; no remote-host claim | none |
 
-**Exact next objective:** implement CPR-28's generated public OKF CLI and
-project-console experience over CPR-27's immutable plans, capture candidates
-and deterministic export, preserving unknown types and extensions through a
-round trip and adding no scheduled Git synchronisation.
+**Exact next objective:** complete the repository convergence package: make
+the OpenAPI/server route inventories exact, generate every supported console
+operation, and recut ordinary CLI and generic MCP clients onto the public
+application API before deleting their storage-coupled and handwritten seams.
 
 ### Starting-point objective map
 
@@ -3944,4 +3945,71 @@ frontend changes, deletions, tests, and the resulting commit hash.
 - **Commit.** `feat(okf): add v0.2 knowledge exchange adapter (CPR-27)` on
   `feat/context-platform-mvp`.
 - **Commit hash.** Written by the CPR-28 checkpoint under the programme's
+  next-checkpoint convention.
+
+### Prompt 26 objective — OKF CLI and console (CPR-28)
+
+- **Selected feature and boundary.** **CPR-28** is delivered from `0dbf163`;
+  it records CPR-27's commit as
+  `0dbf163d67dc1aba78de5f79089a47e5c989de48`. Accepted ADR-0087 already fixes
+  one v0.2 adapter, inert-byte public API and candidate-only publication, so
+  this client package adds no ADR, schema, Cedar action or audit action.
+
+- **Filesystem-owning public client.** New `synveda okf
+  validate|inspect|import|export` commands share the exact `synveda-okf` leaf
+  adapter. A directory is enumerated with bounded canonical paths and no
+  `.git` administration bytes; zip, tar and tar-gzip remain bounded inert
+  input; an explicit revision labels an already checked-out tree without
+  running Git. Validate and inspect are local. Import sends canonical bytes to
+  the public project plan operation under a content-derived stable idempotency
+  key and only invokes the separate candidate materialisation operation when
+  not in dry-run mode. Export accepts only a pinned, internally consistent
+  response, then writes a mode-0700 staging tree and atomically renames it to a
+  new output directory; traversal, duplicate/non-bytewise paths, inconsistent
+  hashes/digest and overwrite fail before publication.
+
+- **Generated-contract product surface.** `/console/okf` is the primary
+  project **Import / Export** page. It packages either an explicit folder or
+  one archive, and calls only the generated plan/list/detail/materialise/export
+  operations. It shows validation and source revision, immutable history and
+  progress, additions/updates/duplicates/conflicts, exact artifacts,
+  producer-defined types, unknown extension frontmatter and proposed links.
+  Candidate materialisation links the same New Learnings workflow used by
+  sessions and never claims publication. Export selects current project
+  Knowledge through the generated collection and renders stable logical paths,
+  file/content hashes, exact Markdown downloads and the bundle digest.
+  Project-scope capability forecasts remove unavailable controls while the
+  gateway remains authoritative.
+
+- **Round trip and hard boundary.** The real PulseBoard fixture contains the
+  unknown `pulseboard-practice` type, `x-owner`, `x-retention-class`, an
+  official decision and an internal relation. Pure adapter tests and the
+  database-backed CPR-27 API test prove the type/extensions survive
+  inspect → plan → candidate → VedaFlow accept → export. There is still no
+  server path, Git process, remote fetch, content execution, direct Knowledge
+  publication, scheduled synchronisation, Synveda-only bundle format or
+  compatibility reader.
+
+- **Contract/schema result.** The generated contract remains **106 operations**
+  and **150 schemas**; epoch **2** remains **52 migration files**, **669** SQLx
+  descriptions and **87** forced-RLS tenant tables. No database-backed
+  behavior changed, so `make db-test` is not applicable; the public API
+  lifecycle is nevertheless rerun against a disposable database in the demo.
+  README, beta and install guidance now name the exact CLI and console flows.
+
+- **Tests and exact results.** Pure adapter **6/6**, focused CLI OKF **3/3**,
+  complete CLI **150/150**, console helpers/components/generated request shape
+  **10/10**, complete console **207/207**, clippy, crate layering, generated
+  API, backlog and the **77-script** demo drift gate pass. The production
+  console builds at 68 modules, 402.53 kB JavaScript (113.56 kB gzip) and
+  18.84 kB CSS (4.29 kB gzip). Isolated
+  `demos/cpr-28-okf-workflows.sh` validates and inspects the real local fixture,
+  passes the public import/materialise/accept/export test **1/1** and reruns the
+  generated console acceptance. Complete `make ci` **PASS**. This is local and
+  deterministic public-API evidence, not remote Git-host or live third-party
+  verification.
+
+- **Commit.** `feat(console): add OKF import and export (CPR-28)` on
+  `feat/context-platform-mvp`.
+- **Commit hash.** Written by the next checkpoint under the programme's
   next-checkpoint convention.

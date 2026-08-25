@@ -26,6 +26,7 @@ mod keys;
 mod lapse;
 mod login;
 mod mcp;
+mod okf;
 mod pack;
 mod plugin;
 mod prompt;
@@ -350,6 +351,13 @@ enum Command {
     /// forbids.
     #[command(subcommand)]
     Skill(SkillCommand),
+    /// Open Knowledge Format v0.2 exchange (CPR-28, ADR-0087).
+    ///
+    /// Validation and inspection are local and use the exact pinned adapter.
+    /// Import/export acts use the public project API; the gateway receives
+    /// inert bytes, never a local path or permission to run Git/content.
+    #[command(subcommand)]
+    Okf(OkfCommand),
     /// The durable observation spool (CPR-12, ADR-0078).
     ///
     /// An agent client records what happened into a local spool before it
@@ -630,6 +638,70 @@ enum SkillCommand {
         #[arg(long)]
         dry_run: bool,
         /// Print JSON.
+        #[arg(long)]
+        json: bool,
+        /// Credential profile.
+        #[arg(long)]
+        profile: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum OkfCommand {
+    /// Validate a local OKF v0.2 directory or archive without contacting a gateway.
+    Validate {
+        /// Directory, .zip, .tar, .tar.gz or .tgz bundle.
+        path: std::path::PathBuf,
+        /// Treat a directory as a checked-out Git tree at this explicit revision.
+        #[arg(long)]
+        source_revision: Option<String>,
+        /// Print the complete inspection as JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Inspect artifacts, exact types, extension metadata and proposed mappings locally.
+    Inspect {
+        /// Directory, .zip, .tar, .tar.gz or .tgz bundle.
+        path: std::path::PathBuf,
+        /// Treat a directory as a checked-out Git tree at this explicit revision.
+        #[arg(long)]
+        source_revision: Option<String>,
+        /// Print the complete inspection as JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Plan an import and optionally materialise reviewable candidates.
+    Import {
+        /// Directory, .zip, .tar, .tar.gz or .tgz bundle.
+        path: std::path::PathBuf,
+        /// Project receiving the immutable plan and candidate batch.
+        #[arg(long)]
+        project: synveda_types::ProjectId,
+        /// Persist the immutable plan only; create no capture candidates.
+        #[arg(long)]
+        dry_run: bool,
+        /// Treat a directory as a checked-out Git tree at this explicit revision.
+        #[arg(long)]
+        source_revision: Option<String>,
+        /// Print the public API response as JSON.
+        #[arg(long)]
+        json: bool,
+        /// Credential profile.
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    /// Export current visible project Knowledge as a new deterministic directory.
+    Export {
+        /// Project whose current visible Knowledge enters the bundle.
+        #[arg(long)]
+        project: synveda_types::ProjectId,
+        /// New output directory. Existing paths are never overwritten.
+        #[arg(long)]
+        output: std::path::PathBuf,
+        /// Export only these Knowledge items. Repeatable; empty means all visible current items.
+        #[arg(long = "item")]
+        item_ids: Vec<synveda_types::KnowledgeItemId>,
+        /// Print the completed export summary as JSON.
         #[arg(long)]
         json: bool,
         /// Credential profile.
@@ -2356,6 +2428,44 @@ async fn run(cli: Cli) -> Result<(), String> {
             }
         },
 
+        Command::Okf(command) => match command {
+            OkfCommand::Validate {
+                path,
+                source_revision,
+                json,
+            } => okf::validate(&path, source_revision.as_deref(), json),
+            OkfCommand::Inspect {
+                path,
+                source_revision,
+                json,
+            } => okf::inspect(&path, source_revision.as_deref(), json),
+            OkfCommand::Import {
+                path,
+                project,
+                dry_run,
+                source_revision,
+                json,
+                profile,
+            } => {
+                okf::import(
+                    &profile_name(profile),
+                    &path,
+                    project,
+                    source_revision.as_deref(),
+                    dry_run,
+                    json,
+                )
+                .await
+            }
+            OkfCommand::Export {
+                project,
+                output,
+                item_ids,
+                json,
+                profile,
+            } => okf::export(&profile_name(profile), project, &output, &item_ids, json).await,
+        },
+
         Command::ContextPack(command) => match command {
             ContextPackCommand::List { scope, profile } => {
                 pack::list(&profile_name(profile), scope).await
@@ -2640,5 +2750,34 @@ mod hard_cut_tests {
         .err()
         .expect("the removed memory default must not parse");
         assert!(error.to_string().contains("--channel"), "{error}");
+    }
+
+    #[test]
+    fn okf_public_workflows_have_the_documented_command_shape() {
+        let project = "0198f000-0000-7000-8000-000000000001";
+        for args in [
+            vec!["synveda", "okf", "validate", "bundle"],
+            vec!["synveda", "okf", "inspect", "bundle"],
+            vec![
+                "synveda",
+                "okf",
+                "import",
+                "bundle",
+                "--project",
+                project,
+                "--dry-run",
+            ],
+            vec![
+                "synveda",
+                "okf",
+                "export",
+                "--project",
+                project,
+                "--output",
+                "exported",
+            ],
+        ] {
+            Cli::try_parse_from(args).expect("documented OKF command must parse");
+        }
     }
 }

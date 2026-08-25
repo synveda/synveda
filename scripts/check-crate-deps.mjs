@@ -59,6 +59,10 @@ const ALLOWED = {
   // measurement rather than a claim, and it is worth more computed by the
   // client than trusted from the server — a materialised bundle carries no
   // watermark of its own (force 2), so this hash is its whole provenance.
+  // OKF added with CPR-28 (ADR-0087 decision 8): the CLI owns the user's
+  // selected filesystem path, validates it with the pure leaf adapter and
+  // sends inert bytes through `/v1`; the gateway never receives path or Git
+  // process authority.
   // The eval harness depends on no Synveda crate at all, and this empty
   // set is the enforcement (EVAL-1, ADR-0028 decision 1). An eval that can
   // link the store can seed and read around the PDP and would then report
@@ -78,6 +82,7 @@ const ALLOWED = {
     "synveda-policy",
     "synveda-audit",
     "synveda-vedaflow",
+    "synveda-okf",
   ],
 };
 

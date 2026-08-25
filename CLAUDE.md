@@ -85,6 +85,9 @@ CPR-27, the OKF v0.2 knowledge exchange adapter, is delivered under ADR-0087;
 the canonical specification is pinned to `ad30107`, imports materialise
 reviewable candidates only and deterministic export re-authorises current
 Knowledge.
+CPR-28, the public-API OKF CLI and generated project-console workflow, is
+delivered; local paths never become gateway authority and imports still stop
+at New Learnings.
 **It is a pre-1.0 hard
 cut**: a fresh schema epoch, no old-data migration, no compatibility shims,
 and old databases rejected with a reset instruction. Since CPR-2 that is
@@ -194,7 +197,7 @@ explicitly and say so.
 
 Phases 0, 1 and 2 are complete; SKIL-1 through SKIL-4, OPS-1, CNSL-1, ADPT-2,
 CNSL-2, AUTH-4, AUTH-5, EVAL-3, OPS-2, TEN-3, TEN-4 and OPS-8 are the Phase 3
-features done. 93 of 124 features delivered — see docs/backlog/STATUS.md for
+features done. 94 of 125 features delivered — see docs/backlog/STATUS.md for
 what each one proved and what it left standing. (The total read 86 until
 2026-08-05, when it was corrected to the 88 STATUS.md and `make
 check-backlog` had both said for some time; AUTHZ-7 was filed the same day by
@@ -322,6 +325,13 @@ It was delivered the same day, making it **124 with 93 delivered**: immutable
 dry-run evidence, candidate-only materialisation, normalised provenance and
 PDP-filtered deterministic export share the existing RLS/VedaFlow/audit path;
 the adapter adds no v0.1 fallback, network fetch or execution authority.
+**CPR-28 was filed next**, making it **125 with 93 delivered**: it adds the
+local-path CLI and generated-contract project console over CPR-27 without
+adding another format, publication path or scheduled synchronisation model.
+It was delivered the same day, making it **125 with 94 delivered**: local
+validation/inspection and atomic export share the pinned adapter, while import
+and all governed state changes remain on the public API and existing
+CaptureCandidate/VedaFlow path.
 
 Since CPR-9 a **listing decides per row**. The audit of Prompts 1–7 found that
 `GET /v1/workspaces` and `/v1/me` took one decision at the tenant root and

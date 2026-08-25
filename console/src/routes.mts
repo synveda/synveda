@@ -45,6 +45,7 @@ export type RouteId =
   | "knowledge"
   | "knowledge-item"
   | "learnings"
+  | "okf"
   | "skills"
   | "skill-item"
   | "tools"
@@ -146,6 +147,13 @@ export const ROUTES: readonly RouteDef[] = [
     label: "New Learnings",
     group: "primary",
     blurb: "What your sessions produced and nobody has stood behind yet.",
+  },
+  {
+    id: "okf",
+    segment: "okf",
+    label: "Import / Export",
+    group: "primary",
+    blurb: "Validate, review and exchange project Knowledge as pinned OKF v0.2.",
   },
   {
     id: "skills",

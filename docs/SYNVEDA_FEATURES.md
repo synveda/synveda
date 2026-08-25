@@ -2032,6 +2032,28 @@ CPR-27  OKF v0.2 knowledge exchange adapter (XL)
   audited without content; generated public API, focused fixtures, demo,
   `make ci` and `make db-test` pass. ADR-0087.
 
+CPR-28  OKF import and export product workflows (L)
+  Filed 2026-08-25 by the autonomous continuation. Add the public-API CLI and
+  generated-contract project console over CPR-27's immutable v0.2 plans,
+  candidate-only materialisation and deterministic export. The local CLI owns
+  filesystem traversal and output writes; the gateway continues to receive
+  inert bytes and grants no server-path, Git-process or execution authority.
+  AC: `synveda okf validate <path>` and `inspect <path>` locally apply the
+  exact pinned v0.2 adapter and expose validation, source shape, artifact
+  metadata and unknown fields; `okf import <path> --project <id> --dry-run`
+  creates and renders the immutable public dry-run only, while the non-dry-run
+  form idempotently materialises its reviewable candidates; `okf export
+  --project <id> --output <path>` calls the public export operation and writes
+  its exact stable bundle atomically without path escape or silent overwrite;
+  checked-out Git input retains an explicit source revision and no command is
+  run; a project console surface shows source/validation/revision, additions,
+  updates, duplicates, conflicts, progress/history, resulting candidates and
+  deterministic export selection/status/summary using generated operations and
+  types only; unknown OKF types and extension metadata remain visible and pass
+  an import/export round trip; no scheduled Git sync or competing bundle format
+  is added; focused CLI/component acceptance, production build, demo and
+  `make ci` pass. No ADR; ADR-0087 fixes the boundary.
+
 ──────────────────────────────────────────────
 Sequencing (features → phases)
 ──────────────────────────────────────────────
@@ -2125,7 +2147,7 @@ Phase 4 ecosystem: ADPT-4,5,6,7,8 · PRMT-3 · SKIL-5 · MEM-7 · OPS-5,6,7 · C
    or an evaluation harness — and that is a *when*, not an *if*, since ADPT-1's own demo
    is a script. What it must not become is a warning in a README: the gap is silent,
    returns exit 0, and reads exactly like a session that was observed.)
-Phase 5 context platform (redesign): CPR-1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27
+Phase 5 context platform (redesign): CPR-1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28
    (Added 2026-08-17. Its own phase rather than a slot in Phase 4, because it is not the
    next feature — it is the programme that re-cuts the model every feature above was built
    on, for an audience none of them was: one person, or four sharing agent context, who

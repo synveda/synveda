@@ -374,9 +374,24 @@ current project Knowledge, or all visible current project Knowledge when the
 selection is empty. Every item, provenance source and retained relationship is
 re-authorised before it enters the output. Unknown v0.2 types and extension
 metadata survive; a declared v0.1 bundle is rejected rather than translated.
-The generated OpenAPI document is the exact request/response reference. CLI and
-the dedicated import/export pages arrive in CPR-28; there is no database-seed
-or direct-publication shortcut in the meantime.
+The generated OpenAPI document is the exact request/response reference. The
+filesystem-owning client commands are:
+
+```sh
+synveda okf validate ./knowledge-bundle
+synveda okf inspect ./knowledge-bundle --source-revision release-42
+synveda okf import ./knowledge-bundle --project <project-id> --dry-run
+synveda okf import ./knowledge-bundle --project <project-id>
+synveda okf export --project <project-id> --output ./exported-knowledge
+```
+
+Validation and inspection are local. Import packages inert bytes and calls the
+public project API; omitting `--dry-run` creates New Learnings only. Export
+verifies the server-returned pin, paths and hashes before atomically publishing
+a new local directory and refuses an existing output path. In the console,
+select the project and open **Import / Export** for the same dry-run history,
+classification, candidate and deterministic export views. Neither surface is
+a scheduled Git synchroniser, database seeder or direct-publication shortcut.
 
 ## Choosing an embedder for semantic Knowledge search
 

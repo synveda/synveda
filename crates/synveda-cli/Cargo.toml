@@ -30,6 +30,10 @@ synveda-crypto = { workspace = true }
 # `synveda skill install` recomputes what it wrote against the address the
 # published commit named (SKIL-1, ADR-0051 decision 12).
 synveda-vedaflow = { workspace = true }
+# CPR-28 uses the same pinned leaf adapter as the gateway to validate a local
+# directory/archive before packaging inert bytes for the public API. It has no
+# store, PDP, VedaFlow, audit, process or network authority of its own.
+synveda-okf = { workspace = true }
 
 base64 = { workspace = true }
 chrono = { workspace = true }

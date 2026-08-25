@@ -24,10 +24,10 @@
  * # What it deliberately does not do
  *
  * It does not wrap routes absent from the contract. The document currently
- * covers 101 operations, including the complete immutable Skill and trusted MCP planes. Older
- * governance calls still in `api.mts` remain visibly hand-written until the
- * public-contract convergence package declares them; this facade never makes
- * an undeclared call look generated.
+ * covers 106 operations, including the immutable Skill, trusted MCP and OKF
+ * exchange planes. Older governance calls still in `api.mts` remain visibly
+ * hand-written until the public-contract convergence package declares them;
+ * this facade never makes an undeclared call look generated.
  */
 
 import { call, type Outcome } from "./api.mjs";

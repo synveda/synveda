@@ -197,6 +197,9 @@ Published benchmark scores, and what they do and do not measure:
   candidates only. Accepted candidates still pass through VedaFlow. Export
   re-authorises current project Knowledge and each provenance source before
   producing stable paths, links, metadata and digests.
+  `synveda okf validate|inspect|import|export` owns local paths while the
+  project **Import / Export** console exposes the same generated public API;
+  neither grants the gateway filesystem or Git authority.
 - **A Claude Code integration** — installed hooks plus an MCP recall tool,
   with deterministic session-plane replay in CI and an installed authenticated
   Claude Code 2.1.241 lifecycle gate.

@@ -219,6 +219,15 @@ submitted path, run Git, fetch a source URL, follow links or execute bundle
 content. The current adapter is pinned to upstream `ad30107`; v0.1 fallback
 fields are intentionally not translated.
 
+From a checkout, `synveda okf validate <path>` and `synveda okf inspect
+<path>` apply that exact adapter locally. `synveda okf import <path> --project
+<id> --dry-run` records only the immutable plan; rerun without `--dry-run` to
+create New Learnings. `synveda okf export --project <id> --output <new-path>`
+verifies and atomically writes the deterministic bundle without overwriting an
+existing path. The selected project's **Import / Export** console page exposes
+the same source revision, validation, classifications, candidates, history and
+export evidence through generated operations.
+
 ## 9. Removing it
 
 Fetched the same way as the installer — it is not placed on disk by the

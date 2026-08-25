@@ -33,6 +33,7 @@ test("the primary navigation is the product, in this order, for everybody", () =
       "Sessions",
       "Knowledge",
       "New Learnings",
+      "Import / Export",
       "Skills",
       "Tools",
       "People",

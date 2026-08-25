@@ -183,7 +183,7 @@ fn tar_entries(reader: impl Read) -> Result<Vec<InputEntry>> {
     Ok(output)
 }
 
-fn directory_entries(root: &Path) -> Result<Vec<InputEntry>> {
+pub(crate) fn directory_entries(root: &Path) -> Result<Vec<InputEntry>> {
     let root = fs::canonicalize(root).map_err(|_| Error::Invalid {
         message: "OKF directory cannot be opened".to_owned(),
     })?;
