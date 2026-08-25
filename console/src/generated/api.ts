@@ -310,6 +310,10 @@ export type CaptureBatchView = {
      */
     id: string;
     /**
+     * Source import job, for OKF materialisation.
+     */
+    import_job_id?: string | null;
+    /**
      * Content-free digest of the ordered frozen evidence set.
      */
     input_hash: string;
@@ -326,9 +330,10 @@ export type CaptureBatchView = {
      */
     scope_id: string;
     /**
-     * Source session.
+     * Source session, for session extraction.
      */
-    session_id: string;
+    session_id?: string | null;
+    source_kind: "session" | "okf_import";
     /**
      * First processing instant.
      */
@@ -391,6 +396,10 @@ export type CaptureCandidateView = {
      */
     id: string;
     /**
+     * Source import job, for OKF materialisation.
+     */
+    import_job_id?: string | null;
+    /**
      * Proposed Knowledge type.
      */
     knowledge_type: string;
@@ -432,13 +441,18 @@ export type CaptureCandidateView = {
      */
     resulting_revision_id?: string | null;
     /**
-     * Source session.
+     * Source session, for session extraction.
      */
-    session_id: string;
+    session_id?: string | null;
+    /**
+     * Exact immutable OKF artifacts, for imported candidates.
+     */
+    source_artifact_ids: string[];
     /**
      * Exact immutable source event ids.
      */
     source_event_ids: string[];
+    source_kind: "session" | "okf_import";
     state: "pending" | "accepted" | "edited_and_accepted" | "merged" | "replaced" | "dismissed" | "failed";
   };
 
@@ -1140,6 +1154,17 @@ export type EndSessionBody = {
      * end. Replaces whatever was set at open.
      */
     task_summary?: string | null;
+  };
+
+/**
+ * Explicit current-Knowledge export selection. Empty means all visible
+ * current active/stale Knowledge in the project, bounded at 2000 items.
+ */
+export type ExportOkfBody = {
+    /**
+     * Stable item ids to export.
+     */
+    item_ids?: string[];
   };
 
 /**
@@ -2058,6 +2083,280 @@ export type NewEventBody = {
   };
 
 /**
+ * One immutable admitted artifact.
+ */
+export type OkfArtifactView = {
+    /**
+     * Markdown body after frontmatter.
+     */
+    body_markdown: string;
+    /**
+     * Admitted-byte digest.
+     */
+    content_hash: string;
+    /**
+     * Parsed extension-preserving frontmatter.
+     */
+    frontmatter: Record<string, unknown>;
+    /**
+     * Stable artifact id.
+     */
+    id: string;
+    /**
+     * Concept, index or log.
+     */
+    kind: string;
+    /**
+     * Safe logical path.
+     */
+    logical_path: string;
+    /**
+     * Stable order.
+     */
+    ordinal: number;
+  };
+
+/**
+ * One deterministic OKF output file.
+ */
+export type OkfExportFileView = {
+    /**
+     * Exact UTF-8 Markdown.
+     */
+    content: string;
+    /**
+     * Exact content digest.
+     */
+    content_hash: string;
+    /**
+     * Stable bundle-relative path.
+     */
+    logical_path: string;
+  };
+
+/**
+ * Deterministic export response.
+ */
+export type OkfExportView = {
+    /**
+     * Digest over ordered paths and hashes.
+     */
+    bundle_digest: string;
+    /**
+     * Stable ordered output files.
+     */
+    files: OkfExportFileView[];
+    /**
+     * Exact supported version.
+     */
+    format_version: string;
+    /**
+     * Pinned official specification commit.
+     */
+    specification_commit: string;
+  };
+
+/**
+ * Keyset-paginated import jobs.
+ */
+export type OkfImportJobListView = {
+    /**
+     * Visible jobs.
+     */
+    jobs: OkfImportJobView[];
+    /**
+     * Opaque continuation cursor.
+     */
+    next_cursor?: string | null;
+  };
+
+/**
+ * Import operation summary.
+ */
+export type OkfImportJobView = {
+    /**
+     * Immutable artifact count.
+     */
+    artifact_count: number;
+    /**
+     * Canonical admitted-bundle digest.
+     */
+    bundle_digest: string;
+    /**
+     * Reviewable candidate count.
+     */
+    candidate_count: number;
+    /**
+     * Resulting candidate batch.
+     */
+    capture_batch_id?: string | null;
+    /**
+     * Terminal time.
+     */
+    completed_at?: string | null;
+    /**
+     * Creation time.
+     */
+    created_at: string;
+    /**
+     * Exact adapter format and version.
+     */
+    format: string;
+    /**
+     * Exact implemented format version.
+     */
+    format_version: string;
+    /**
+     * Stable job id.
+     */
+    id: string;
+    /**
+     * Immutable mapping count.
+     */
+    mapping_count: number;
+    /**
+     * Content-free validation notices.
+     */
+    notices: string[];
+    /**
+     * Target project.
+     */
+    project_id: string;
+    /**
+     * Directory, zip, tar or Git.
+     */
+    source_kind: string;
+    /**
+     * Credential-free retained source identity.
+     */
+    source_locator: string;
+    /**
+     * Upstream revision when reported.
+     */
+    source_revision?: string | null;
+    /**
+     * Pinned official specification commit.
+     */
+    specification_commit: string;
+    /**
+     * Planned, materialized or failed.
+     */
+    state: string;
+  };
+
+/**
+ * Complete persisted dry-run plan.
+ */
+export type OkfImportPlanView = {
+    /**
+     * Immutable admitted artifacts.
+     */
+    artifacts: OkfArtifactView[];
+    /**
+     * Operation summary.
+     */
+    job: OkfImportJobView;
+    /**
+     * Immutable proposed mappings.
+     */
+    mappings: OkfMappingView[];
+  };
+
+/**
+ * One inert entry supplied by a local client.
+ */
+export type OkfInputEntryBody = {
+    /**
+     * Exact bytes encoded with standard base64; omitted for directory markers.
+     */
+    content_base64?: string;
+    /**
+     * `file`, `directory`, `symlink` or `special`.
+     */
+    kind: string;
+    /**
+     * Bundle-relative slash-separated path.
+     */
+    logical_path: string;
+  };
+
+/**
+ * One immutable proposed concept mapping.
+ */
+export type OkfMappingView = {
+    /**
+     * Source artifact.
+     */
+    artifact_id: string;
+    /**
+     * Candidate created on materialisation.
+     */
+    candidate_id?: string | null;
+    /**
+     * Addition, update, duplicate or conflict.
+     */
+    classification: string;
+    /**
+     * Complete proposed immutable content.
+     */
+    content: KnowledgeContentBody;
+    /**
+     * Semantic content digest.
+     */
+    content_hash: string;
+    /**
+     * Stable mapping id.
+     */
+    id: string;
+    /**
+     * Proposed Synveda type.
+     */
+    knowledge_type: string;
+    /**
+     * Independently visible match, when any.
+     */
+    matched_item_id?: string | null;
+    /**
+     * Exact visible revision compared.
+     */
+    matched_revision_id?: string | null;
+    /**
+     * Whether external lifecycle permits a candidate.
+     */
+    materializable: boolean;
+    /**
+     * Exact producer-defined type, including unknown values.
+     */
+    okf_type: string;
+    /**
+     * Stable concept order.
+     */
+    ordinal: number;
+    /**
+     * Proposed internal links.
+     */
+    proposed_relations: Record<string, unknown>;
+  };
+
+/**
+ * Candidate-only materialisation result.
+ */
+export type OkfMaterializationView = {
+    /**
+     * Completed capture batch.
+     */
+    batch: CaptureBatchView;
+    /**
+     * Reviewable candidates, never active Knowledge by this response alone.
+     */
+    candidates: CaptureCandidateView[];
+    /**
+     * Terminal job.
+     */
+    job: OkfImportJobView;
+  };
+
+/**
  * The onboarding vocabulary. Closed, so a client's branch is exhaustive and
  * a new state is a compile error somewhere rather than a silently unhandled
  * string.
@@ -2173,6 +2472,36 @@ export type PatchScopeBody = {
      * `active` or `archived`.
      */
     status?: string | null;
+  };
+
+/**
+ * Immutable import-plan request.
+ */
+export type PlanOkfImportBody = {
+    /**
+     * Standard-base64 archive bytes for an archive encoding.
+     */
+    archive_base64?: string | null;
+    /**
+     * `entries`, `zip`, `tar` or `tar_gzip`.
+     */
+    encoding: string;
+    /**
+     * Enumerated inert entries for directory or checked-out Git input.
+     */
+    entries?: OkfInputEntryBody[];
+    /**
+     * Directory, zip, tar or Git source label.
+     */
+    source_kind: string;
+    /**
+     * Credential-free source identity. It is retained, never fetched.
+     */
+    source_locator: string;
+    /**
+     * Required for Git and retained for provenance.
+     */
+    source_revision?: string | null;
   };
 
 /**
@@ -4186,6 +4515,31 @@ export type Operations = {
     readonly response: MeView;
   };
   /**
+   * List visible import jobs with a true keyset cursor.
+   */
+  readonly list_okf_imports: {
+    readonly path: "/v1/okf/imports";
+    readonly method: "GET";
+    readonly response: OkfImportJobListView;
+  };
+  /**
+   * Read one complete immutable dry-run plan.
+   */
+  readonly get_okf_import: {
+    readonly path: "/v1/okf/imports/{id}";
+    readonly method: "GET";
+    readonly response: OkfImportPlanView;
+  };
+  /**
+   * Turn an immutable plan into reviewable candidates only.
+   */
+  readonly materialize_okf_import: {
+    readonly path: "/v1/okf/imports/{id}/materialize";
+    readonly method: "POST";
+    readonly idempotent: true;
+    readonly response: OkfMaterializationView;
+  };
+  /**
    * `GET /v1/projects/{project_id}`.
    */
   readonly get_project: {
@@ -4228,6 +4582,25 @@ export type Operations = {
     readonly path: "/v1/projects/{project_id}/members/{principal_id}";
     readonly method: "DELETE";
     readonly response: void;
+  };
+  /**
+   * Export freshly authorised current Knowledge deterministically as OKF v0.2.
+   */
+  readonly export_okf: {
+    readonly path: "/v1/projects/{project_id}/okf/exports";
+    readonly method: "POST";
+    readonly body: ExportOkfBody;
+    readonly response: OkfExportView;
+  };
+  /**
+   * Plan one bounded OKF v0.2 import. This never creates active Knowledge.
+   */
+  readonly plan_okf_import: {
+    readonly path: "/v1/projects/{project_id}/okf/imports";
+    readonly method: "POST";
+    readonly body: PlanOkfImportBody;
+    readonly idempotent: true;
+    readonly response: OkfImportPlanView;
   };
   /**
    * `GET /v1/projects/{project_id}/repositories`.
@@ -4793,11 +5166,16 @@ export const OPERATIONS = {
   get_knowledge_usage: { path: "/v1/knowledge/{id}/usage", method: "GET" },
   verify_knowledge: { path: "/v1/knowledge/{id}/verify", method: "POST", idempotent: true },
   get_me: { path: "/v1/me", method: "GET" },
+  list_okf_imports: { path: "/v1/okf/imports", method: "GET" },
+  get_okf_import: { path: "/v1/okf/imports/{id}", method: "GET" },
+  materialize_okf_import: { path: "/v1/okf/imports/{id}/materialize", method: "POST", idempotent: true },
   get_project: { path: "/v1/projects/{project_id}", method: "GET" },
   update_project: { path: "/v1/projects/{project_id}", method: "PATCH" },
   list_project_members: { path: "/v1/projects/{project_id}/members", method: "GET" },
   add_project_member: { path: "/v1/projects/{project_id}/members", method: "POST", idempotent: true },
   remove_project_member: { path: "/v1/projects/{project_id}/members/{principal_id}", method: "DELETE" },
+  export_okf: { path: "/v1/projects/{project_id}/okf/exports", method: "POST" },
+  plan_okf_import: { path: "/v1/projects/{project_id}/okf/imports", method: "POST", idempotent: true },
   list_repositories: { path: "/v1/projects/{project_id}/repositories", method: "GET" },
   attach_repository: { path: "/v1/projects/{project_id}/repositories", method: "POST", idempotent: true },
   detach_repository: { path: "/v1/projects/{project_id}/repositories/{repository_id}", method: "DELETE" },

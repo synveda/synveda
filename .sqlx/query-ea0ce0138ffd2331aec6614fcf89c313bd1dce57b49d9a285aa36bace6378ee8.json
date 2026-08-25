@@ -1,0 +1,71 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select id, job_id, ordinal, logical_path, artifact_kind, content_hash,\n               frontmatter, body_markdown, created_at\n        from import_artifacts\n        where tenant_id = $1 and job_id = $2\n        order by ordinal\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "job_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "ordinal",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 3,
+        "name": "logical_path",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "artifact_kind",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "content_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "frontmatter",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 7,
+        "name": "body_markdown",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "ea0ce0138ffd2331aec6614fcf89c313bd1dce57b49d9a285aa36bace6378ee8"
+}

@@ -351,6 +351,33 @@ configuration preview masks opaque secret-reference identifiers, and its
 health section labels the trusted adapter and exact read-only methods behind
 each report. A `passed` row does not mean the gateway executed a tool.
 
+### Exchanging project Knowledge with OKF v0.2
+
+Synveda implements only the canonical Open Knowledge Format **v0.2** contract,
+pinned to `GoogleCloudPlatform/open-knowledge-format@ad30107`. The public API
+accepts already enumerated directory or checked-out Git files, or bounded zip,
+tar and tar-gzip bytes. It never accepts server filesystem authority, runs Git,
+follows a symlink, fetches a frontmatter URL or executes imported content.
+
+The exchange is deliberately two-stage:
+
+1. `POST /v1/projects/{project_id}/okf/imports` validates the bytes and creates
+   an immutable dry-run plan. Supply `Idempotency-Key`; the same source and
+   digest resolves to the same job.
+2. Inspect it with `GET /v1/okf/imports/{id}`, then call
+   `POST /v1/okf/imports/{id}/materialize` with another idempotency key. This
+   creates ordinary capture candidates, not active Knowledge. Review them in
+   **New Learnings**; Accept, Merge or Replace still creates a VedaFlow change.
+
+`POST /v1/projects/{project_id}/okf/exports` deterministically renders selected
+current project Knowledge, or all visible current project Knowledge when the
+selection is empty. Every item, provenance source and retained relationship is
+re-authorised before it enters the output. Unknown v0.2 types and extension
+metadata survive; a declared v0.1 bundle is rejected rather than translated.
+The generated OpenAPI document is the exact request/response reference. CLI and
+the dedicated import/export pages arrive in CPR-28; there is no database-seed
+or direct-publication shortcut in the meantime.
+
 ## Choosing an embedder for semantic Knowledge search
 
 ```sh

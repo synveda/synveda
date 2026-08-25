@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            update import_mappings set candidate_id = $3\n            where tenant_id = $1 and id = $2 and candidate_id is null\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a8a0a9303a9178793391173166ffede8eda4f6eadffc48d8b8eb84d96a498ed1"
+}

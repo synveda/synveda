@@ -1,6 +1,6 @@
 //! Context-platform contract: the OpenAPI document is authoritative
 //! (ADR-0071 decision 7; CPR-17/ADR-0082; CPR-18/ADR-0083;
-//! CPR-23/ADR-0085; CPR-25/ADR-0086).
+//! CPR-23/ADR-0085; CPR-25/ADR-0086; CPR-27/ADR-0087).
 //!
 //! Three things have to be true for that sentence to mean anything, and this
 //! suite is each of them:
@@ -82,9 +82,16 @@ const DECLARED_PATHS: &[&str] = &[
     "/v1/knowledge/{id}/usage",
     "/v1/knowledge/{id}/verify",
     "/v1/me",
+    // CPR-27 (ADR-0087): inert OKF v0.2 plans, candidate materialisation and
+    // deterministic exports. Importing never publishes Knowledge directly.
+    "/v1/okf/imports",
+    "/v1/okf/imports/{id}",
+    "/v1/okf/imports/{id}/materialize",
     "/v1/projects/{project_id}",
     "/v1/projects/{project_id}/members",
     "/v1/projects/{project_id}/members/{principal_id}",
+    "/v1/projects/{project_id}/okf/exports",
+    "/v1/projects/{project_id}/okf/imports",
     "/v1/projects/{project_id}/repositories",
     "/v1/projects/{project_id}/repositories/{repository_id}",
     "/v1/projects/{project_id}/tool-config",
@@ -375,8 +382,8 @@ fn the_document_is_generatable() {
     }
     assert_eq!(
         operation_ids.len(),
-        101,
-        "the 67-operation CPR-20 contract plus CPR-23's 18 Skill and CPR-25's 16 Tool operations: \
+        106,
+        "the 67-operation CPR-20 contract plus CPR-23's 18 Skill, CPR-25's 16 Tool and CPR-27's 5 OKF operations: \
          {operation_ids:?}"
     );
 }

@@ -21,12 +21,14 @@ use synveda_store::capture::{self, NewCaptureCandidate};
 use synveda_store::knowledge::KnowledgeSnapshot;
 use synveda_store::knowledge_search::{self, Filters};
 use synveda_store::{anchors, identities, knowledge, policy_assignments, rls, tenants};
-use synveda_types::capture::{CaptureBatch, CaptureMatch, CaptureMatchKind};
+use synveda_types::capture::{CaptureBatch, CaptureMatch, CaptureMatchKind, CaptureSourceKind};
 use synveda_types::knowledge::{
     KnowledgeLifecycleState, KnowledgeRevisionContent, normalise_knowledge_tags,
     validate_knowledge_revision_content,
 };
-use synveda_types::{Error, IdentityKind, IdentityStatus, Result, ScopeId, Sensitivity, TenantId};
+use synveda_types::{
+    Error, IdentityKind, IdentityStatus, Result, ScopeId, Sensitivity, SessionId, TenantId,
+};
 
 use crate::chain::scope_chain;
 use crate::extraction::{AnyExtractor, ExtractionInput, Extractor};
@@ -148,6 +150,7 @@ async fn process_one(deps: &Deps, config: &Config, tenant_id: TenantId) -> Resul
         claim_tx.rollback().await.map_err(commit_error)?;
         return Ok(ProcessOutcome::Empty);
     };
+    let session_id = capture_session_id(&batch)?;
     let events = capture::frozen_events(&mut *claim_tx, tenant_id, batch.id).await?;
     let session_decision = decide_exact(
         deps,
@@ -157,9 +160,9 @@ async fn process_one(deps: &Deps, config: &Config, tenant_id: TenantId) -> Resul
         batch.scope_id,
         batch.project_id,
         Action::SessionWrite,
-        Resource::Session(batch.session_id),
+        Resource::Session(session_id),
         vec![ResourceEntity::Session {
-            id: batch.session_id,
+            id: session_id,
             scope_id: batch.scope_id,
         }],
         None,
@@ -188,7 +191,7 @@ async fn process_one(deps: &Deps, config: &Config, tenant_id: TenantId) -> Resul
             event_id: event.id,
             tenant_id,
             scope_id: batch.scope_id,
-            session_id: batch.session_id,
+            session_id,
             principal_id: batch.principal_id.clone(),
             event_type: event.event_type,
             payload: event.payload.clone(),
@@ -292,9 +295,9 @@ async fn process_one(deps: &Deps, config: &Config, tenant_id: TenantId) -> Resul
         batch.scope_id,
         batch.project_id,
         Action::SessionWrite,
-        Resource::Session(batch.session_id),
+        Resource::Session(session_id),
         vec![ResourceEntity::Session {
-            id: batch.session_id,
+            id: session_id,
             scope_id: batch.scope_id,
         }],
         None,
@@ -671,6 +674,20 @@ async fn fail_attempt(
     Ok(ProcessOutcome::FailedAttempt)
 }
 
+fn capture_session_id(batch: &CaptureBatch) -> Result<SessionId> {
+    if batch.source_kind != CaptureSourceKind::Session || batch.import_job_id.is_some() {
+        return Err(Error::Internal {
+            message: format!(
+                "session extraction worker claimed non-session batch {}",
+                batch.id
+            ),
+        });
+    }
+    batch.session_id.ok_or_else(|| Error::Internal {
+        message: format!("session capture batch {} has no session", batch.id),
+    })
+}
+
 async fn append_batch_event(
     tx: &mut sqlx::PgConnection,
     batch: &CaptureBatch,
@@ -679,6 +696,7 @@ async fn append_batch_event(
     candidate_count: usize,
     visible_match_count: usize,
 ) -> Result<()> {
+    let session_id = capture_session_id(batch)?;
     synveda_audit::append(
         tx,
         batch.tenant_id,
@@ -686,7 +704,7 @@ async fn append_batch_event(
             occurred_at: Utc::now(),
             actor: Actor::system(ACTOR_COMPONENT),
             action: AuditAction::CaptureBatchCompleted,
-            resource: Resource::Session(batch.session_id).to_string(),
+            resource: Resource::Session(session_id).to_string(),
             outcome: if state == "completed" {
                 Outcome::Success
             } else {
@@ -694,7 +712,7 @@ async fn append_batch_event(
             },
             payload: json!({
                 "batch_id": batch.id,
-                "session_id": batch.session_id,
+                "session_id": session_id,
                 "input_hash": batch.input_hash,
                 "event_count": batch.event_count,
                 "state": state,
@@ -724,6 +742,7 @@ async fn append_system_failure(
     batch: &CaptureBatch,
     code: &str,
 ) -> Result<()> {
+    let session_id = capture_session_id(batch)?;
     synveda_audit::append(
         tx,
         batch.tenant_id,
@@ -731,11 +750,11 @@ async fn append_system_failure(
             occurred_at: Utc::now(),
             actor: Actor::system(ACTOR_COMPONENT),
             action: AuditAction::CaptureBatchCompleted,
-            resource: Resource::Session(batch.session_id).to_string(),
+            resource: Resource::Session(session_id).to_string(),
             outcome: Outcome::Failure,
             payload: json!({
                 "batch_id": batch.id,
-                "session_id": batch.session_id,
+                "session_id": session_id,
                 "input_hash": batch.input_hash,
                 "event_count": batch.event_count,
                 "state": batch.state.as_str(),

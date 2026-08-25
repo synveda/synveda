@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        select id, tenant_id, session_id, scope_id, workspace_id, project_id,\n               principal_id, input_hash, event_count, state, extractor_method,\n               model_version, attempts, candidate_count, error_code,\n               created_at, started_at, completed_at, updated_at\n        from capture_batches where tenant_id = $1 and id = $2\n        ",
+  "query": "\n        insert into capture_batches\n            (id, tenant_id, session_id, scope_id, workspace_id, project_id,\n             principal_id, input_hash, event_count)\n        values ($1, $2, $3, $4, $5, $6, $7, $8, $9)\n        on conflict (tenant_id, session_id, input_hash)\n            where source_kind = 'session'\n        do nothing\n        returning id, tenant_id, source_kind, session_id, import_job_id,\n                  scope_id, workspace_id, project_id,\n                  principal_id, input_hash, event_count, state, extractor_method,\n                  model_version, attempts, candidate_count, error_code,\n                  created_at, started_at, completed_at, updated_at\n        ",
   "describe": {
     "columns": [
       {
@@ -15,86 +15,96 @@
       },
       {
         "ordinal": 2,
+        "name": "source_kind",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
         "name": "session_id",
         "type_info": "Uuid"
       },
       {
-        "ordinal": 3,
-        "name": "scope_id",
-        "type_info": "Uuid"
-      },
-      {
         "ordinal": 4,
-        "name": "workspace_id",
+        "name": "import_job_id",
         "type_info": "Uuid"
       },
       {
         "ordinal": 5,
-        "name": "project_id",
+        "name": "scope_id",
         "type_info": "Uuid"
       },
       {
         "ordinal": 6,
+        "name": "workspace_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 7,
+        "name": "project_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 8,
         "name": "principal_id",
         "type_info": "Text"
       },
       {
-        "ordinal": 7,
+        "ordinal": 9,
         "name": "input_hash",
         "type_info": "Text"
       },
       {
-        "ordinal": 8,
+        "ordinal": 10,
         "name": "event_count",
         "type_info": "Int4"
       },
       {
-        "ordinal": 9,
+        "ordinal": 11,
         "name": "state",
         "type_info": "Text"
       },
       {
-        "ordinal": 10,
+        "ordinal": 12,
         "name": "extractor_method",
         "type_info": "Text"
       },
       {
-        "ordinal": 11,
+        "ordinal": 13,
         "name": "model_version",
         "type_info": "Text"
       },
       {
-        "ordinal": 12,
+        "ordinal": 14,
         "name": "attempts",
         "type_info": "Int4"
       },
       {
-        "ordinal": 13,
+        "ordinal": 15,
         "name": "candidate_count",
         "type_info": "Int4"
       },
       {
-        "ordinal": 14,
+        "ordinal": 16,
         "name": "error_code",
         "type_info": "Text"
       },
       {
-        "ordinal": 15,
+        "ordinal": 17,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 16,
+        "ordinal": 18,
         "name": "started_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 17,
+        "ordinal": 19,
         "name": "completed_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 18,
+        "ordinal": 20,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
@@ -102,13 +112,22 @@
     "parameters": {
       "Left": [
         "Uuid",
-        "Uuid"
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Int4"
       ]
     },
     "nullable": [
       false,
       false,
       false,
+      true,
+      true,
       false,
       false,
       true,
@@ -127,5 +146,5 @@
       false
     ]
   },
-  "hash": "cbe43ffb9e77f4b6634ee51761ed1f5352eeefac4648d3f4852c052feaa1f35a"
+  "hash": "76ca49844966f435804ec9a7c1f39e239da594a35453fb688640d7ad82d1e527"
 }

@@ -20,19 +20,21 @@ use synveda_audit::{AuditAction, Outcome};
 use synveda_policy::{Action, Resource};
 use synveda_store::anchors::AnchorSelection;
 use synveda_store::capture::{self as store, BatchFilter, CandidateFilter};
+use synveda_store::imports;
 use synveda_store::knowledge::{self as knowledge_store, KnowledgeSnapshot};
 use synveda_store::{projects, rls, scopes};
 use synveda_types::capture::{
     CaptureBatch, CaptureBatchState, CaptureCandidate, CaptureCandidateState,
-    CaptureDecisionAction, CaptureDecisionState, CaptureMatch,
+    CaptureDecisionAction, CaptureDecisionState, CaptureMatch, CaptureSourceKind,
 };
 use synveda_types::knowledge::{
     KnowledgeCommand, KnowledgeExpectedRevision, KnowledgeMutationResult, KnowledgeRevisionContent,
     KnowledgeSourceDraft, KnowledgeSourceType,
 };
 use synveda_types::{
-    CaptureBatchId, CaptureCandidateId, Error, KnowledgeItemId, KnowledgeRevisionId, ProjectId,
-    ProposalId, Result, ScopeId, SessionEventId, SessionId, TenantId,
+    CaptureBatchId, CaptureCandidateId, Error, ImportArtifactId, ImportJobId, KnowledgeItemId,
+    KnowledgeRevisionId, ProjectId, ProposalId, Result, ScopeId, SessionEventId, SessionId,
+    TenantId,
 };
 use utoipa::ToSchema;
 
@@ -51,6 +53,10 @@ pub const CAPTURE_API_OPERATIONS_TOTAL: &str = "synveda_capture_api_operations_t
 
 const DEFAULT_LIMIT: i64 = 50;
 const MAX_LIMIT: i64 = 200;
+
+fn capture_source_schema() -> utoipa::openapi::schema::Object {
+    string_enum(CaptureSourceKind::ALL.iter().map(|value| value.as_str()))
+}
 
 fn batch_state_schema() -> utoipa::openapi::schema::Object {
     string_enum(CaptureBatchState::ALL.iter().map(|value| value.as_str()))
@@ -82,9 +88,17 @@ pub struct CaptureBatchView {
     /// Stable batch id.
     #[schema(value_type = String, format = "uuid")]
     pub id: CaptureBatchId,
-    /// Source session.
-    #[schema(value_type = String, format = "uuid")]
-    pub session_id: SessionId,
+    /// Session or OKF import.
+    #[schema(schema_with = capture_source_schema)]
+    pub source_kind: String,
+    /// Source session, for session extraction.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>, format = "uuid")]
+    pub session_id: Option<SessionId>,
+    /// Source import job, for OKF materialisation.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>, format = "uuid")]
+    pub import_job_id: Option<ImportJobId>,
     /// Governed scope copied from the session.
     #[schema(value_type = String, format = "uuid")]
     pub scope_id: ScopeId,
@@ -126,7 +140,9 @@ impl From<CaptureBatch> for CaptureBatchView {
     fn from(batch: CaptureBatch) -> Self {
         Self {
             id: batch.id,
+            source_kind: batch.source_kind.as_str().to_owned(),
             session_id: batch.session_id,
+            import_job_id: batch.import_job_id,
             scope_id: batch.scope_id,
             project_id: batch.project_id,
             input_hash: batch.input_hash,
@@ -183,9 +199,17 @@ pub struct CaptureCandidateView {
     /// Owning batch.
     #[schema(value_type = String, format = "uuid")]
     pub batch_id: CaptureBatchId,
-    /// Source session.
-    #[schema(value_type = String, format = "uuid")]
-    pub session_id: SessionId,
+    /// Session or OKF import.
+    #[schema(schema_with = capture_source_schema)]
+    pub source_kind: String,
+    /// Source session, for session extraction.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>, format = "uuid")]
+    pub session_id: Option<SessionId>,
+    /// Source import job, for OKF materialisation.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>, format = "uuid")]
+    pub import_job_id: Option<ImportJobId>,
     /// Stable position within the batch.
     pub ordinal: i32,
     /// Proposed governing scope.
@@ -212,6 +236,9 @@ pub struct CaptureCandidateView {
     /// Exact immutable source event ids.
     #[schema(value_type = Vec<String>)]
     pub source_event_ids: Vec<SessionEventId>,
+    /// Exact immutable OKF artifacts, for imported candidates.
+    #[schema(value_type = Vec<String>)]
+    pub source_artifact_ids: Vec<ImportArtifactId>,
     /// Only matches that passed a fresh Knowledge read decision for this caller.
     pub matches: Vec<CaptureMatchView>,
     /// VedaFlow change opened by the decision.
@@ -251,7 +278,9 @@ impl From<CaptureCandidate> for CaptureCandidateView {
         Self {
             id: candidate.id,
             batch_id: candidate.batch_id,
+            source_kind: candidate.source_kind.as_str().to_owned(),
             session_id: candidate.session_id,
+            import_job_id: candidate.import_job_id,
             ordinal: candidate.ordinal,
             proposed_scope_id: candidate.proposed_scope_id,
             proposed_project_id: candidate.proposed_project_id,
@@ -274,6 +303,7 @@ impl From<CaptureCandidate> for CaptureCandidateView {
             content_hash: candidate.content_hash,
             state: candidate.state.as_str().to_owned(),
             source_event_ids: candidate.source_event_ids,
+            source_artifact_ids: candidate.source_artifact_ids,
             matches: candidate.matches.into_iter().map(Into::into).collect(),
             resulting_change_id: candidate.resulting_change_id,
             resulting_outcome: candidate
@@ -497,19 +527,139 @@ fn candidate_not_found(id: CaptureCandidateId) -> Error {
     }
 }
 
+fn capture_action(source: CaptureSourceKind, requested: Action) -> Result<Action> {
+    match (source, requested) {
+        (CaptureSourceKind::Session, action @ (Action::SessionRead | Action::SessionWrite)) => {
+            Ok(action)
+        }
+        (CaptureSourceKind::OkfImport, Action::SessionRead) => Ok(Action::KnowledgeRead),
+        (CaptureSourceKind::OkfImport, Action::SessionWrite) => Ok(Action::KnowledgeWrite),
+        _ => Err(Error::Internal {
+            message: format!(
+                "unsupported capture authorization mapping: {} through {}",
+                source.as_str(),
+                requested.as_str()
+            ),
+        }),
+    }
+}
+
+#[derive(Clone, Copy)]
+struct CaptureSourcePlacement {
+    kind: CaptureSourceKind,
+    session_id: Option<SessionId>,
+    import_job_id: Option<ImportJobId>,
+    scope_id: ScopeId,
+    project_id: Option<ProjectId>,
+}
+
+impl From<&CaptureBatch> for CaptureSourcePlacement {
+    fn from(batch: &CaptureBatch) -> Self {
+        Self {
+            kind: batch.source_kind,
+            session_id: batch.session_id,
+            import_job_id: batch.import_job_id,
+            scope_id: batch.scope_id,
+            project_id: batch.project_id,
+        }
+    }
+}
+
+impl From<&CaptureCandidate> for CaptureSourcePlacement {
+    fn from(candidate: &CaptureCandidate) -> Self {
+        Self {
+            kind: candidate.source_kind,
+            session_id: candidate.session_id,
+            import_job_id: candidate.import_job_id,
+            scope_id: candidate.proposed_scope_id,
+            project_id: candidate.proposed_project_id,
+        }
+    }
+}
+
+async fn authorize_source(
+    state: &AppState,
+    tx: &mut sqlx::PgConnection,
+    tenant: TenantId,
+    source: CaptureSourcePlacement,
+    requested: Action,
+) -> Result<(Authorized, Resource, Action)> {
+    let effective = capture_action(source.kind, requested)?;
+    match source.kind {
+        CaptureSourceKind::Session => {
+            let session_id = source.session_id.ok_or_else(|| Error::Internal {
+                message: "session-sourced capture row has no session".to_owned(),
+            })?;
+            if source.import_job_id.is_some() {
+                return Err(Error::Internal {
+                    message: "session-sourced capture row names an import".to_owned(),
+                });
+            }
+            let (_, allowed, resource) =
+                sessions::load(state, tx, tenant, session_id, effective).await?;
+            Ok((allowed, resource, effective))
+        }
+        CaptureSourceKind::OkfImport => {
+            let import_id = source.import_job_id.ok_or_else(|| Error::Internal {
+                message: "OKF-sourced capture row has no import".to_owned(),
+            })?;
+            if source.session_id.is_some() {
+                return Err(Error::Internal {
+                    message: "OKF-sourced capture row names a session".to_owned(),
+                });
+            }
+            let job = imports::get_job(&mut *tx, tenant, import_id)
+                .await?
+                .ok_or_else(|| Error::NotFound {
+                    entity: format!("import job {import_id}"),
+                })?;
+            if job.scope_id != source.scope_id || Some(job.project_id) != source.project_id {
+                return Err(Error::Internal {
+                    message: format!("capture source placement disagrees with import {import_id}"),
+                });
+            }
+            let scope = scopes::get(&mut *tx, tenant, source.scope_id)
+                .await?
+                .ok_or_else(|| Error::NotFound {
+                    entity: format!("scope {}", source.scope_id),
+                })?;
+            let input = authz::gather(
+                state,
+                tx,
+                Some(&scope),
+                AnchorSelection::project(job.project_id),
+                Vec::new(),
+            )
+            .await?;
+            let resource = Resource::Scope(source.scope_id);
+            let allowed = if effective == Action::KnowledgeRead {
+                authz::decide_knowledge_read(
+                    state,
+                    &input,
+                    resource,
+                    synveda_types::Sensitivity::Public,
+                )?
+            } else {
+                authz::decide(state, &input, effective, resource)?
+            };
+            Ok((allowed, resource, effective))
+        }
+    }
+}
+
 async fn load_batch(
     state: &AppState,
     tx: &mut sqlx::PgConnection,
     tenant: TenantId,
     id: CaptureBatchId,
     action: Action,
-) -> Result<(CaptureBatch, Authorized, Resource)> {
+) -> Result<(CaptureBatch, Authorized, Resource, Action)> {
     let batch = store::get_batch(&mut *tx, tenant, id)
         .await?
         .ok_or_else(|| batch_not_found(id))?;
-    let (_, allowed, resource) =
-        sessions::load(state, tx, tenant, batch.session_id, action).await?;
-    Ok((batch, allowed, resource))
+    let (allowed, resource, effective) =
+        authorize_source(state, tx, tenant, (&batch).into(), action).await?;
+    Ok((batch, allowed, resource, effective))
 }
 
 async fn load_candidate(
@@ -518,14 +668,14 @@ async fn load_candidate(
     tenant: TenantId,
     id: CaptureCandidateId,
     action: Action,
-) -> Result<(CaptureCandidate, Authorized, Resource)> {
+) -> Result<(CaptureCandidate, Authorized, Resource, Action)> {
     let candidate = store::get_candidate(&mut *tx, tenant, id)
         .await?
         .ok_or_else(|| candidate_not_found(id))?;
-    let (_, allowed, resource) =
-        sessions::load(state, tx, tenant, candidate.session_id, action).await?;
+    let (allowed, resource, effective) =
+        authorize_source(state, tx, tenant, (&candidate).into(), action).await?;
     authorize_candidate_content(state, tx, tenant, &candidate).await?;
-    Ok((candidate, allowed, resource))
+    Ok((candidate, allowed, resource, effective))
 }
 
 /// Candidate plaintext is governed at its proposed destination as well as by
@@ -596,12 +746,13 @@ async fn listing_gate(
     tenant: TenantId,
     session_id: Option<SessionId>,
     project_id: Option<ProjectId>,
-) -> Result<Option<(Authorized, Resource)>> {
+) -> Result<Option<(Authorized, Resource, Action)>> {
     if let Some(session_id) = session_id {
         let (_, allowed, resource) =
             sessions::load(state, tx, tenant, session_id, Action::SessionRead).await?;
-        return Ok(Some((allowed, resource)));
+        return Ok(Some((allowed, resource, Action::SessionRead)));
     }
+    let project_gate = project_id.is_some();
     let anchor = if let Some(project_id) = project_id {
         let project = projects::get(&mut *tx, tenant, project_id)
             .await?
@@ -624,28 +775,29 @@ async fn listing_gate(
     )
     .await?;
     let resource = Resource::Scope(anchor.id);
-    let allowed = authz::decide(state, &input, Action::SessionRead, resource)?;
-    Ok(Some((allowed, resource)))
+    let action = if project_gate {
+        Action::KnowledgeRead
+    } else {
+        Action::SessionRead
+    };
+    let allowed = if action == Action::KnowledgeRead {
+        authz::decide_knowledge_read(state, &input, resource, synveda_types::Sensitivity::Public)?
+    } else {
+        authz::decide(state, &input, action, resource)?
+    };
+    Ok(Some((allowed, resource, action)))
 }
 
 async fn capture_read_event(
     tx: &mut sqlx::PgConnection,
     tenant: TenantId,
     op: &'static str,
+    action: Action,
     allowed: &Authorized,
     resource: Resource,
     detail: Value,
 ) -> Result<()> {
-    sessions::read_event(
-        tx,
-        tenant,
-        op,
-        Action::SessionRead,
-        allowed,
-        resource,
-        detail,
-    )
-    .await
+    sessions::read_event(tx, tenant, op, action, allowed, resource, detail).await
 }
 
 /// `POST /v1/sessions/{session_id}/capture-batches` — freeze the current
@@ -717,7 +869,7 @@ async fn replay_batch(
     id: CaptureBatchId,
 ) -> Result<CaptureBatch> {
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant).await?;
-    let (batch, _, _) = load_batch(state, &mut tx, tenant, id, Action::SessionWrite).await?;
+    let (batch, _, _, _) = load_batch(state, &mut tx, tenant, id, Action::SessionWrite).await?;
     commit(tx).await?;
     Ok(batch)
 }
@@ -821,17 +973,17 @@ pub(crate) async fn list_batches(
         for batch in scanned {
             consumed += 1;
             last = Some((batch.created_at, batch.id));
-            match sessions::load(
+            match authorize_source(
                 &state,
                 &mut tx,
                 tenant,
-                batch.session_id,
+                (&batch).into(),
                 Action::SessionRead,
             )
             .await
             {
-                Ok((_, allowed, _)) => {
-                    row_allowed.get_or_insert((allowed, Resource::Session(batch.session_id)));
+                Ok((allowed, resource, action)) => {
+                    row_allowed.get_or_insert((allowed, resource, action));
                     kept.push(batch);
                 }
                 Err(Error::PolicyDenied { .. } | Error::NotFound { .. }) => {}
@@ -847,15 +999,17 @@ pub(crate) async fn list_batches(
         } else {
             None
         };
-        let (allowed, resource) = gate.or(row_allowed).ok_or_else(|| Error::PolicyDenied {
-            action: Action::SessionRead.as_str().to_owned(),
-            resource: "capture batches".to_owned(),
-            reason: "the caller has no readable capture anchor".to_owned(),
-        })?;
+        let (allowed, resource, action) =
+            gate.or(row_allowed).ok_or_else(|| Error::PolicyDenied {
+                action: Action::SessionRead.as_str().to_owned(),
+                resource: "capture batches".to_owned(),
+                reason: "the caller has no readable capture anchor".to_owned(),
+            })?;
         capture_read_event(
             &mut tx,
             tenant,
             "capture.batch.list",
+            action,
             &allowed,
             resource,
             json!({"served": kept.len(), "more": next_cursor.is_some()}),
@@ -892,12 +1046,13 @@ pub(crate) async fn get_batch(
     let result = async {
         let tenant = tenant_id()?;
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant).await?;
-        let (batch, allowed, resource) =
+        let (batch, allowed, resource, action) =
             load_batch(&state, &mut tx, tenant, id, Action::SessionRead).await?;
         capture_read_event(
             &mut tx,
             tenant,
             "capture.batch.get",
+            action,
             &allowed,
             resource,
             json!({"batch_id": id, "candidate_count": batch.candidate_count}),
@@ -943,12 +1098,11 @@ pub(crate) async fn list_candidates(
                 id: CaptureCandidateId::from_uuid(id),
             });
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant).await?;
-        let batch_session = if let Some(batch_id) = params.batch_id {
+        let batch_source = if let Some(batch_id) = params.batch_id {
             Some(
                 store::get_batch(&mut *tx, tenant, batch_id)
                     .await?
-                    .ok_or_else(|| batch_not_found(batch_id))?
-                    .session_id,
+                    .ok_or_else(|| batch_not_found(batch_id))?,
             )
         } else {
             None
@@ -957,8 +1111,12 @@ pub(crate) async fn list_candidates(
             &state,
             &mut tx,
             tenant,
-            params.session_id.or(batch_session),
-            params.project_id,
+            params
+                .session_id
+                .or_else(|| batch_source.as_ref().and_then(|batch| batch.session_id)),
+            params
+                .project_id
+                .or_else(|| batch_source.as_ref().and_then(|batch| batch.project_id)),
         )
         .await
         {
@@ -986,24 +1144,23 @@ pub(crate) async fn list_candidates(
         for mut candidate in scanned {
             consumed += 1;
             last = Some((candidate.created_at, candidate.id));
-            match sessions::load(
+            match authorize_source(
                 &state,
                 &mut tx,
                 tenant,
-                candidate.session_id,
+                (&candidate).into(),
                 Action::SessionRead,
             )
             .await
             {
-                Ok((_, allowed, _)) => {
+                Ok((allowed, resource, action)) => {
                     match authorize_candidate_content(&state, &mut tx, tenant, &candidate).await {
                         Ok(_) => {}
                         Err(Error::PolicyDenied { .. } | Error::NotFound { .. }) => continue,
                         Err(error) => return Err(error),
                     }
                     retain_visible_matches(&state, &mut tx, tenant, &mut candidate).await?;
-                    row_allowed
-                        .get_or_insert((allowed, Resource::Session(candidate.session_id)));
+                    row_allowed.get_or_insert((allowed, resource, action));
                     kept.push(candidate);
                 }
                 Err(Error::PolicyDenied { .. } | Error::NotFound { .. }) => {}
@@ -1019,7 +1176,7 @@ pub(crate) async fn list_candidates(
         } else {
             None
         };
-        let (allowed, resource) = gate.or(row_allowed).ok_or_else(|| Error::PolicyDenied {
+        let (allowed, resource, action) = gate.or(row_allowed).ok_or_else(|| Error::PolicyDenied {
             action: Action::SessionRead.as_str().to_owned(),
             resource: "capture candidates".to_owned(),
             reason: "the caller has no readable capture anchor".to_owned(),
@@ -1028,6 +1185,7 @@ pub(crate) async fn list_candidates(
             &mut tx,
             tenant,
             "capture.candidate.list",
+            action,
             &allowed,
             resource,
             json!({
@@ -1049,30 +1207,118 @@ pub(crate) async fn list_candidates(
 
 fn candidate_sources(
     candidate: &CaptureCandidate,
-    source_scope: ScopeId,
+    batch: &CaptureBatch,
+    import_job: Option<&synveda_types::import::ImportJob>,
+    import_artifacts: &[synveda_types::import::ImportArtifact],
 ) -> Result<Vec<KnowledgeSourceDraft>> {
-    if candidate.source_event_ids.len() > 200 {
+    let declared_okf_sources = candidate
+        .content
+        .metadata
+        .get("okf")
+        .and_then(|okf| okf.get("frontmatter"))
+        .and_then(|frontmatter| frontmatter.get("sources"))
+        .and_then(Value::as_array);
+    let declared_count = declared_okf_sources.map_or(0, Vec::len);
+    if candidate.source_event_ids.len() + candidate.source_artifact_ids.len() + declared_count > 200
+    {
         return Err(Error::Invalid {
             message: "a Knowledge revision has at most 200 provenance sources".to_owned(),
         });
     }
-    Ok(candidate
-        .source_event_ids
-        .iter()
-        .map(|event_id| KnowledgeSourceDraft {
-            id: synveda_types::KnowledgeSourceId::new(),
-            scope_id: source_scope,
-            source_type: KnowledgeSourceType::SessionEvent,
-            session_event_id: Some(*event_id),
-            locator: None,
-            source_revision: None,
-            content_hash: None,
-            metadata: json!({
-                "capture_batch_id": candidate.batch_id,
-                "capture_candidate_id": candidate.id,
-            }),
-        })
-        .collect())
+    match candidate.source_kind {
+        CaptureSourceKind::Session => {
+            if candidate.source_event_ids.is_empty()
+                || !candidate.source_artifact_ids.is_empty()
+                || import_job.is_some()
+            {
+                return Err(Error::Internal {
+                    message: "session candidate has invalid provenance shape".to_owned(),
+                });
+            }
+            Ok(candidate
+                .source_event_ids
+                .iter()
+                .map(|event_id| KnowledgeSourceDraft {
+                    id: synveda_types::KnowledgeSourceId::new(),
+                    scope_id: batch.scope_id,
+                    source_type: KnowledgeSourceType::SessionEvent,
+                    session_event_id: Some(*event_id),
+                    locator: None,
+                    source_revision: None,
+                    content_hash: None,
+                    metadata: json!({
+                        "capture_batch_id": candidate.batch_id,
+                        "capture_candidate_id": candidate.id,
+                    }),
+                })
+                .collect())
+        }
+        CaptureSourceKind::OkfImport => {
+            if !candidate.source_event_ids.is_empty() || candidate.source_artifact_ids.is_empty() {
+                return Err(Error::Internal {
+                    message: "OKF candidate has invalid provenance shape".to_owned(),
+                });
+            }
+            let job = import_job.ok_or_else(|| Error::Internal {
+                message: "OKF candidate provenance has no import job".to_owned(),
+            })?;
+            let mut sources = Vec::with_capacity(candidate.source_artifact_ids.len());
+            for artifact_id in &candidate.source_artifact_ids {
+                let artifact = import_artifacts
+                    .iter()
+                    .find(|artifact| artifact.id == *artifact_id)
+                    .ok_or_else(|| Error::Internal {
+                        message: format!("OKF candidate source artifact {artifact_id} is missing"),
+                    })?;
+                sources.push(KnowledgeSourceDraft {
+                    id: synveda_types::KnowledgeSourceId::new(),
+                    scope_id: batch.scope_id,
+                    source_type: KnowledgeSourceType::Okf,
+                    session_event_id: None,
+                    locator: Some(format!("{}#{}", job.source_locator, artifact.logical_path)),
+                    source_revision: job.source_revision.clone(),
+                    content_hash: Some(artifact.content_hash.clone()),
+                    metadata: json!({
+                        "import_job_id": job.id,
+                        "bundle_digest": job.bundle_digest,
+                        "artifact_id": artifact.id,
+                        "logical_path": artifact.logical_path,
+                        "artifact_kind": artifact.kind.as_str(),
+                        "capture_batch_id": candidate.batch_id,
+                        "capture_candidate_id": candidate.id,
+                    }),
+                });
+            }
+            for declared in declared_okf_sources.into_iter().flatten() {
+                let resource = declared
+                    .get("resource")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| Error::Internal {
+                        message: "validated OKF source has no resource".to_owned(),
+                    })?
+                    .to_owned();
+                let lower = resource.to_ascii_lowercase();
+                let source_type = if lower.starts_with("http://") || lower.starts_with("https://") {
+                    KnowledgeSourceType::Url
+                } else if lower.starts_with("git+") || lower.starts_with("repo:") {
+                    KnowledgeSourceType::Repository
+                } else {
+                    KnowledgeSourceType::Document
+                };
+                sources.push(KnowledgeSourceDraft {
+                    id: synveda_types::KnowledgeSourceId::new(),
+                    scope_id: batch.scope_id,
+                    source_type,
+                    session_event_id: None,
+                    locator: Some(resource),
+                    source_revision: None,
+                    content_hash: None,
+                    metadata: json!({"okf": {"source": declared}}),
+                });
+            }
+            Ok(sources)
+        }
+    }
 }
 
 struct CandidateMaterial {
@@ -1170,6 +1416,8 @@ impl DecisionSpec {
 fn command_for(
     candidate: &CaptureCandidate,
     batch: &CaptureBatch,
+    import_job: Option<&synveda_types::import::ImportJob>,
+    import_artifacts: &[synveda_types::import::ImportArtifact],
     spec: &DecisionSpec,
 ) -> Result<Option<KnowledgeCommand>> {
     let command = match spec {
@@ -1184,7 +1432,7 @@ fn command_for(
                 origin: candidate.origin,
                 revision_id: KnowledgeRevisionId::new(),
                 content: value.content,
-                sources: candidate_sources(candidate, batch.scope_id)?,
+                sources: candidate_sources(candidate, batch, import_job, import_artifacts)?,
             }
         }
         DecisionSpec::Merge(body) => {
@@ -1212,7 +1460,7 @@ fn command_for(
                 knowledge_type: value.knowledge_type,
                 origin: candidate.origin,
                 content: value.content,
-                sources: candidate_sources(candidate, batch.scope_id)?,
+                sources: candidate_sources(candidate, batch, import_job, import_artifacts)?,
             }
         }
         DecisionSpec::Replace(body) => {
@@ -1228,7 +1476,7 @@ fn command_for(
                 knowledge_type: value.knowledge_type,
                 origin: candidate.origin,
                 content: value.content,
-                sources: candidate_sources(candidate, batch.scope_id)?,
+                sources: candidate_sources(candidate, batch, import_job, import_artifacts)?,
             }
         }
         DecisionSpec::Dismiss(_) => return Ok(None),
@@ -1251,13 +1499,32 @@ async fn decide_candidate(
     // slot and prevent a corrected request.
     let (command, action_name) = {
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant).await?;
-        let (candidate, _, _) =
+        let (candidate, _, _, _) =
             load_candidate(state, &mut tx, tenant, candidate_id, Action::SessionWrite).await?;
         let batch = store::get_batch(&mut *tx, tenant, candidate.batch_id)
             .await?
             .ok_or_else(|| batch_not_found(candidate.batch_id))?;
+        let import_job =
+            match candidate.import_job_id {
+                Some(id) => Some(imports::get_job(&mut *tx, tenant, id).await?.ok_or_else(
+                    || Error::NotFound {
+                        entity: format!("import job {id}"),
+                    },
+                )?),
+                None => None,
+            };
+        let import_artifacts = match candidate.import_job_id {
+            Some(id) => imports::artifacts(&mut *tx, tenant, id).await?,
+            None => Vec::new(),
+        };
         let action = spec.action(&candidate)?;
-        let command = command_for(&candidate, &batch, &spec)?;
+        let command = command_for(
+            &candidate,
+            &batch,
+            import_job.as_ref(),
+            &import_artifacts,
+            &spec,
+        )?;
         commit(tx).await?;
         (command, action)
     };
@@ -1286,7 +1553,7 @@ async fn decide_candidate(
 
     let (candidate, decision) = {
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant).await?;
-        let (candidate, _, _) =
+        let (candidate, _, _, _) =
             load_candidate(state, &mut tx, tenant, candidate_id, Action::SessionWrite).await?;
         let decision = store::begin_decision(
             &mut tx,
@@ -1344,12 +1611,12 @@ async fn decide_candidate(
 
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant).await?;
     // A decision intent is durable, but it is not cached authority: repeat the
-    // exact session decision immediately before finalising it.
-    let (_, fresh_allowed, fresh_resource) = sessions::load(
+    // exact source decision immediately before finalising it.
+    let (fresh_allowed, fresh_resource, fresh_action) = authorize_source(
         state,
         &mut tx,
         tenant,
-        candidate.session_id,
+        (&candidate).into(),
         Action::SessionWrite,
     )
     .await?;
@@ -1373,7 +1640,9 @@ async fn decide_candidate(
             json!({
                 "candidate_id": candidate_id,
                 "batch_id": candidate.batch_id,
+                "source_kind": candidate.source_kind.as_str(),
                 "session_id": candidate.session_id,
+                "import_job_id": candidate.import_job_id,
                 "action": action_name.as_str(),
                 "decision_id": decision.id,
                 "request_hash": decision.request_hash,
@@ -1381,7 +1650,7 @@ async fn decide_candidate(
                 "resulting_outcome": mutation.as_ref().map(|value| value.outcome.as_str()),
                 "resulting_knowledge_item_id": mutation.as_ref().and_then(|value| value.knowledge_item_id),
                 "resulting_revision_id": mutation.as_ref().and_then(|value| value.revision_id),
-                "authz": audit::decision_context(Action::SessionWrite, &fresh_allowed),
+                "authz": audit::decision_context(fresh_action, &fresh_allowed),
             }),
         )
         .await?;
@@ -1669,7 +1938,7 @@ pub(crate) async fn accept_batch(
         };
         let candidates = {
             let mut tx = rls::begin_tenant_tx(&state.pool, tenant).await?;
-            let (batch, _, _) =
+            let (batch, _, _, _) =
                 load_batch(&state, &mut tx, tenant, id, Action::SessionWrite).await?;
             let candidates = store::list_candidates(
                 &mut tx,

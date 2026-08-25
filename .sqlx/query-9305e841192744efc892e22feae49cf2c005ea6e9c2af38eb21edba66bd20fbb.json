@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        with candidate as (\n            select id\n            from capture_batches\n            where tenant_id = $1\n              and attempts < $2\n              and (state = 'pending'\n                   or (state = 'running' and lease_expires_at <= now()))\n            order by created_at, id\n            for update skip locked\n            limit 1\n        )\n        update capture_batches batch\n           set state = 'running', attempts = attempts + 1,\n               lease_owner = $3,\n               lease_expires_at = now() + make_interval(secs => $4::double precision),\n               started_at = coalesce(started_at, now()), updated_at = now(),\n               error_code = null\n          from candidate\n         where batch.tenant_id = $1 and batch.id = candidate.id\n        returning batch.id, batch.tenant_id, batch.session_id, batch.scope_id,\n                  batch.workspace_id, batch.project_id, batch.principal_id,\n                  batch.input_hash, batch.event_count, batch.state,\n                  batch.extractor_method, batch.model_version, batch.attempts,\n                  batch.candidate_count, batch.error_code, batch.created_at,\n                  batch.started_at, batch.completed_at, batch.updated_at\n        ",
+  "query": "\n        update capture_batches\n           set state = case when $4 then 'failed' else 'pending' end,\n               lease_owner = null, lease_expires_at = null,\n               error_code = $5,\n               completed_at = case when $4 then now() else null end,\n               updated_at = now()\n         where tenant_id = $1 and id = $2 and state = 'running'\n           and lease_owner = $3\n        returning id, tenant_id, source_kind, session_id, import_job_id,\n                  scope_id, workspace_id, project_id,\n                  principal_id, input_hash, event_count, state, extractor_method,\n                  model_version, attempts, candidate_count, error_code,\n                  created_at, started_at, completed_at, updated_at\n        ",
   "describe": {
     "columns": [
       {
@@ -15,86 +15,96 @@
       },
       {
         "ordinal": 2,
+        "name": "source_kind",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
         "name": "session_id",
         "type_info": "Uuid"
       },
       {
-        "ordinal": 3,
-        "name": "scope_id",
-        "type_info": "Uuid"
-      },
-      {
         "ordinal": 4,
-        "name": "workspace_id",
+        "name": "import_job_id",
         "type_info": "Uuid"
       },
       {
         "ordinal": 5,
-        "name": "project_id",
+        "name": "scope_id",
         "type_info": "Uuid"
       },
       {
         "ordinal": 6,
+        "name": "workspace_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 7,
+        "name": "project_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 8,
         "name": "principal_id",
         "type_info": "Text"
       },
       {
-        "ordinal": 7,
+        "ordinal": 9,
         "name": "input_hash",
         "type_info": "Text"
       },
       {
-        "ordinal": 8,
+        "ordinal": 10,
         "name": "event_count",
         "type_info": "Int4"
       },
       {
-        "ordinal": 9,
+        "ordinal": 11,
         "name": "state",
         "type_info": "Text"
       },
       {
-        "ordinal": 10,
+        "ordinal": 12,
         "name": "extractor_method",
         "type_info": "Text"
       },
       {
-        "ordinal": 11,
+        "ordinal": 13,
         "name": "model_version",
         "type_info": "Text"
       },
       {
-        "ordinal": 12,
+        "ordinal": 14,
         "name": "attempts",
         "type_info": "Int4"
       },
       {
-        "ordinal": 13,
+        "ordinal": 15,
         "name": "candidate_count",
         "type_info": "Int4"
       },
       {
-        "ordinal": 14,
+        "ordinal": 16,
         "name": "error_code",
         "type_info": "Text"
       },
       {
-        "ordinal": 15,
+        "ordinal": 17,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 16,
+        "ordinal": 18,
         "name": "started_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 17,
+        "ordinal": 19,
         "name": "completed_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 18,
+        "ordinal": 20,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
@@ -102,15 +112,18 @@
     "parameters": {
       "Left": [
         "Uuid",
-        "Int4",
+        "Uuid",
         "Text",
-        "Float8"
+        "Bool",
+        "Text"
       ]
     },
     "nullable": [
       false,
       false,
       false,
+      true,
+      true,
       false,
       false,
       true,
@@ -129,5 +142,5 @@
       false
     ]
   },
-  "hash": "59b219d2f729cf1d2e455ea1ab57488cc5d8c35b6933d3cec6731c0e5aeaac01"
+  "hash": "9305e841192744efc892e22feae49cf2c005ea6e9c2af38eb21edba66bd20fbb"
 }

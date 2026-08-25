@@ -99,6 +99,7 @@ function candidate(overrides: Partial<CaptureCandidateView> = {}): CaptureCandid
   return {
     id: "candidate-1",
     batch_id: "batch-1",
+    source_kind: "session",
     session_id: "session-1",
     ordinal: 1,
     proposed_scope_id: PROJECT_SCOPE,
@@ -116,6 +117,7 @@ function candidate(overrides: Partial<CaptureCandidateView> = {}): CaptureCandid
     content_hash: "hash-1",
     state: "pending",
     source_event_ids: ["event-1"],
+    source_artifact_ids: [],
     matches: [],
     content_erased: false,
     created_at: "2026-08-24T10:00:00Z",
@@ -126,6 +128,7 @@ function candidate(overrides: Partial<CaptureCandidateView> = {}): CaptureCandid
 function batch(overrides: Partial<CaptureBatchView> = {}): CaptureBatchView {
   return {
     id: "batch-1",
+    source_kind: "session",
     session_id: "session-1",
     scope_id: PROJECT_SCOPE,
     project_id: "project-1",

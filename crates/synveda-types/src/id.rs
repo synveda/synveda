@@ -128,6 +128,24 @@ define_id!(
 );
 
 define_id!(
+    /// Identifies one durable external knowledge-format import plan (CPR-27,
+    /// ADR-0087).
+    ImportJobId
+);
+
+define_id!(
+    /// Identifies one immutable admitted artifact inside an import job
+    /// (CPR-27, ADR-0087).
+    ImportArtifactId
+);
+
+define_id!(
+    /// Identifies one deterministic artifact-to-candidate mapping in an
+    /// import plan (CPR-27, ADR-0087).
+    ImportMappingId
+);
+
+define_id!(
     /// Identifies one durable background operation (CPR-16, ADR-0081).
     ///
     /// The operation is a retry-safe address for work whose transaction may

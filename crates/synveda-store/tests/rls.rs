@@ -229,6 +229,9 @@ const COVERED: &[&str] = &[
     "capture_batches",
     "capture_candidate_decisions",
     "capture_candidate_events",
+    // CPR-27 (ADR-0087): a candidate's immutable OKF artifact evidence is a
+    // separate source family, never a fabricated session event.
+    "capture_candidate_import_artifacts",
     "capture_candidate_matches",
     "capture_candidates",
     // CPR-20 (ADR-0084): policy-visible planner evidence and explicit
@@ -260,6 +263,12 @@ const COVERED: &[&str] = &[
     // that another used a key it guessed.
     "idempotency_records",
     "identities",
+    // CPR-27 (ADR-0087): immutable import plans retain source paths,
+    // extension metadata and proposed Knowledge until a reviewer decides a
+    // candidate. Every row is therefore tenant-confidential.
+    "import_artifacts",
+    "import_jobs",
+    "import_mappings",
     // CPR-15/16 (ADR-0080/0081): stable Knowledge heads, immutable revisions,
     // independently governed sources, explicit relation claims, typed
     // VedaFlow effects and content-free erasure/index evidence. Neither

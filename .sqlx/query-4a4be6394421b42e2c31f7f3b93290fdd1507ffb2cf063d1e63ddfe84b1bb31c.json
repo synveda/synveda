@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        select id, tenant_id, batch_id, session_id, ordinal, proposed_scope_id,\n               proposed_project_id, proposed_owner_principal_id, knowledge_type,\n               origin, title, body_markdown, summary, tags, sensitivity,\n               confidence_permille, valid_from, valid_to, stale_after,\n               verification_metadata, metadata, content_hash, state,\n               resulting_change_id, resulting_outcome,\n               resulting_knowledge_item_id, resulting_revision_id, decided_by,\n               decision_reason, decided_at, content_erased, created_at\n        from capture_candidates\n        where tenant_id = $1\n          and ($2::uuid is null or batch_id = $2)\n          and ($3::uuid is null or session_id = $3)\n          and ($4::uuid is null or proposed_project_id = $4)\n          and ($5::text is null or state = $5)\n          and ($6::timestamptz is null\n               or created_at < $6\n               or (created_at = $6 and id < $7))\n        order by created_at desc, id desc\n        limit $8\n        ",
+  "query": "\n        select id, tenant_id, batch_id, source_kind, session_id, import_job_id,\n               ordinal, proposed_scope_id,\n               proposed_project_id, proposed_owner_principal_id, knowledge_type,\n               origin, title, body_markdown, summary, tags, sensitivity,\n               confidence_permille, valid_from, valid_to, stale_after,\n               verification_metadata, metadata, content_hash, state,\n               resulting_change_id, resulting_outcome,\n               resulting_knowledge_item_id, resulting_revision_id, decided_by,\n               decision_reason, decided_at, content_erased, created_at\n        from capture_candidates where tenant_id = $1 and id = $2\n        ",
   "describe": {
     "columns": [
       {
@@ -20,146 +20,156 @@
       },
       {
         "ordinal": 3,
+        "name": "source_kind",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
         "name": "session_id",
         "type_info": "Uuid"
       },
       {
-        "ordinal": 4,
-        "name": "ordinal",
-        "type_info": "Int4"
-      },
-      {
         "ordinal": 5,
-        "name": "proposed_scope_id",
+        "name": "import_job_id",
         "type_info": "Uuid"
       },
       {
         "ordinal": 6,
+        "name": "ordinal",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 7,
+        "name": "proposed_scope_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 8,
         "name": "proposed_project_id",
         "type_info": "Uuid"
       },
       {
-        "ordinal": 7,
+        "ordinal": 9,
         "name": "proposed_owner_principal_id",
         "type_info": "Text"
       },
       {
-        "ordinal": 8,
+        "ordinal": 10,
         "name": "knowledge_type",
         "type_info": "Text"
       },
       {
-        "ordinal": 9,
+        "ordinal": 11,
         "name": "origin",
         "type_info": "Text"
       },
       {
-        "ordinal": 10,
+        "ordinal": 12,
         "name": "title",
         "type_info": "Text"
       },
       {
-        "ordinal": 11,
+        "ordinal": 13,
         "name": "body_markdown",
         "type_info": "Text"
       },
       {
-        "ordinal": 12,
+        "ordinal": 14,
         "name": "summary",
         "type_info": "Text"
       },
       {
-        "ordinal": 13,
+        "ordinal": 15,
         "name": "tags",
         "type_info": "TextArray"
       },
       {
-        "ordinal": 14,
+        "ordinal": 16,
         "name": "sensitivity",
         "type_info": "Text"
       },
       {
-        "ordinal": 15,
+        "ordinal": 17,
         "name": "confidence_permille",
         "type_info": "Int4"
       },
       {
-        "ordinal": 16,
+        "ordinal": 18,
         "name": "valid_from",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 17,
+        "ordinal": 19,
         "name": "valid_to",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 18,
+        "ordinal": 20,
         "name": "stale_after",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 19,
+        "ordinal": 21,
         "name": "verification_metadata",
         "type_info": "Jsonb"
       },
       {
-        "ordinal": 20,
+        "ordinal": 22,
         "name": "metadata",
         "type_info": "Jsonb"
       },
       {
-        "ordinal": 21,
+        "ordinal": 23,
         "name": "content_hash",
         "type_info": "Text"
       },
       {
-        "ordinal": 22,
+        "ordinal": 24,
         "name": "state",
         "type_info": "Text"
       },
       {
-        "ordinal": 23,
+        "ordinal": 25,
         "name": "resulting_change_id",
         "type_info": "Uuid"
       },
       {
-        "ordinal": 24,
+        "ordinal": 26,
         "name": "resulting_outcome",
         "type_info": "Text"
       },
       {
-        "ordinal": 25,
+        "ordinal": 27,
         "name": "resulting_knowledge_item_id",
         "type_info": "Uuid"
       },
       {
-        "ordinal": 26,
+        "ordinal": 28,
         "name": "resulting_revision_id",
         "type_info": "Uuid"
       },
       {
-        "ordinal": 27,
+        "ordinal": 29,
         "name": "decided_by",
         "type_info": "Text"
       },
       {
-        "ordinal": 28,
+        "ordinal": 30,
         "name": "decision_reason",
         "type_info": "Text"
       },
       {
-        "ordinal": 29,
+        "ordinal": 31,
         "name": "decided_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 30,
+        "ordinal": 32,
         "name": "content_erased",
         "type_info": "Bool"
       },
       {
-        "ordinal": 31,
+        "ordinal": 33,
         "name": "created_at",
         "type_info": "Timestamptz"
       }
@@ -167,13 +177,7 @@
     "parameters": {
       "Left": [
         "Uuid",
-        "Uuid",
-        "Uuid",
-        "Uuid",
-        "Text",
-        "Timestamptz",
-        "Uuid",
-        "Int8"
+        "Uuid"
       ]
     },
     "nullable": [
@@ -181,6 +185,8 @@
       false,
       false,
       false,
+      true,
+      true,
       false,
       false,
       true,
@@ -211,5 +217,5 @@
       false
     ]
   },
-  "hash": "0975981d0ae002dbda0726ae380412f5d50637965a68bf76d9376c8996a23977"
+  "hash": "4a4be6394421b42e2c31f7f3b93290fdd1507ffb2cf063d1e63ddfe84b1bb31c"
 }

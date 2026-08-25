@@ -35,7 +35,17 @@ const ALLOWED = {
   "synveda-vedaflow": [...BASE],
   "synveda-retrieval": [...BASE, ...MIDDLE],
   "synveda-ingest": [...BASE, ...MIDDLE],
-  "synveda-gateway": [...BASE, ...MIDDLE, "synveda-retrieval", "synveda-ingest"],
+  // External knowledge-format adapters are a leaf beside retrieval/ingest:
+  // they understand shared value types but cannot see storage, policy,
+  // VedaFlow, audit or the gateway (CPR-27, ADR-0087 decision 2).
+  "synveda-okf": ["synveda-types"],
+  "synveda-gateway": [
+    ...BASE,
+    ...MIDDLE,
+    "synveda-retrieval",
+    "synveda-ingest",
+    "synveda-okf",
+  ],
   // The CLI is a client of the gateway API, plus direct store/identity access
   // for the dev-bootstrap commands (db migrate, tenant create, token issue)
   // that exist precisely when no usable gateway does. Reviewed in ADR-0008.

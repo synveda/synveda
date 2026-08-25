@@ -40,12 +40,13 @@ programme convention established in Prompt 1.
 | Immutable Agent Skills versions, project/principal bindings, evidence-labelled usage and controlled test runs | CPR-23 | **complete** | `9b8ad04` | `89b5f79` | gateway 1/1; RLS/immutability 1/1 + completeness 1/1; OpenAPI 5/5; policy packs 7/7; CLI 157/157; console 179/179 | PASS | PASS (`synveda_test_80706`) | official unversioned Agent Skills spec pinned to upstream `69ef37e`; isolated `demos/cpr-23-versioned-skills.sh` PASS | none |
 | Generated-API Skills Library, bindings, exact files/tests/usage and legacy Skill review-screen cutover | CPR-24 | **complete** | `89b5f79` | `07ce9f3` | helpers/components 10/10; shared review 5/5; console 186/186; CLI 151/151; production build PASS | PASS | N/A — console/client-only | no in-app browser exposed; real-component SSR and production bundle PASS | none |
 | Trusted MCP server catalogue, immutable versions/snapshots, exact project bindings, generated configuration and read-only tests | CPR-25 | **complete** | `07ce9f3` | `9845186` | types 5/5; gateway unit 3/3 + public DB 1/1; policy PASS; RLS 1/1; OpenAPI 5/5; console 186/186 | PASS | PASS (`synveda_test_88082`) | official stable MCP 2026-07-28 pinned to `5f5440b`; isolated `demos/cpr-25-tool-registry.sh` PASS; deterministic report is not live-server evidence | none |
-| Generated-API MCP Tools catalogue, immutable evidence comparison, VedaFlow review linkage, exact bindings and secret-safe configuration | CPR-26 | **complete** | `9845186` | next checkpoint | helpers/components 10/10; complete console 196/196; production build PASS | PASS | N/A — console/client-only | no in-app browser exposed; real-component SSR and production bundle PASS | none |
+| Generated-API MCP Tools catalogue, immutable evidence comparison, VedaFlow review linkage, exact bindings and secret-safe configuration | CPR-26 | **complete** | `9845186` | `98f5bcd` | helpers/components 10/10; complete console 196/196; production build PASS | PASS | N/A — console/client-only | no in-app browser exposed; real-component SSR and production bundle PASS | none |
+| Versioned OKF v0.2 validation, import planning/candidates and deterministic Knowledge export | CPR-27 | **complete** | `98f5bcd` | next checkpoint | adapter 6/6; types 1/1; store 1/1; gateway 1/1; capture 4/4; OpenAPI 5/5; RLS 1/1; console 197/197 | PASS | PASS (`synveda_test_1177`) | canonical v0.2 pinned to `ad30107`; isolated `demos/cpr-27-okf-v02.sh` PASS; no remote fetch/live-host claim | none |
 
-**Exact next objective:** implement CPR-27, the versioned OKF v0.2 knowledge
-exchange adapter that validates and plans imports into capture candidates and
-exports selected current Knowledge deterministically, never publishing an
-import directly.
+**Exact next objective:** implement CPR-28's generated public OKF CLI and
+project-console experience over CPR-27's immutable plans, capture candidates
+and deterministic export, preserving unknown types and extensions through a
+round trip and adding no scheduled Git synchronisation.
 
 ### Starting-point objective map
 
@@ -3853,4 +3854,94 @@ frontend changes, deletions, tests, and the resulting commit hash.
 - **Commit.** `feat(console): add MCP tool registry experience (CPR-26)` on
   `feat/context-platform-mvp`.
 - **Commit hash.** Written by the CPR-27 checkpoint under the programme's
+  next-checkpoint convention.
+
+### Prompt 25 objective — OKF v0.2 knowledge exchange adapter (CPR-27)
+
+- **Selected feature and specification boundary.** **CPR-27** is delivered
+  from `98f5bcd`; it records CPR-26's commit as
+  `98f5bcdac7d3313c99cd4bd27ecd6243189a6be3`. ADR-0087 is Accepted and pins
+  the still-current canonical Open Knowledge Format v0.2 source to
+  `GoogleCloudPlatform/open-knowledge-format` commit
+  `ad30107c31c06aec8a7d5636e0d1058118604e6f`. The historical
+  `knowledge-catalog/okf` location is frozen and redirects there. This package
+  implements only v0.2 behind a `KnowledgeFormatAdapter`; a v0.1 `format`
+  fallback is a hard validation error, while unknown v0.2 concept types and
+  extension metadata are retained rather than invented into Synveda enums.
+
+- **Pure bounded adapter.** New leaf crate `synveda-okf` validates directory,
+  zip, tar, tar-gzip and explicitly identified checked-out Git-tree bytes with
+  one set of path and size rules. It normalises logical paths, rejects absolute
+  and parent traversal, symlinks/hardlinks/special entries, case collisions,
+  unsupported binary or executable material and archive expansion beyond the
+  documented entry/per-file/total limits. It parses UTF-8 Markdown plus YAML
+  frontmatter, requires a non-empty OKF `type`, inspects reserved v0.2 files
+  without treating them as concepts, retains source revision and extensions,
+  resolves only bounded internal Markdown links, and performs no URL fetch,
+  redirect, Git command, plugin or script execution. Credential-bearing or
+  private-address remote source declarations fail before persistence and never
+  echo their value.
+
+- **Immutable plans and candidate-only materialisation.** Migration
+  `0054_okf_imports.sql` adds `import_jobs`, `import_artifacts`,
+  `import_mappings` and `capture_candidate_import_artifacts`, all tenant-bound,
+  forced-RLS, indexed and protected by immutable-row triggers where history is
+  evidence. An import stores canonical source identity/revision/digest and
+  immutable artifacts, then classifies additions, updates, duplicates and
+  conflicts in a dry-run mapping. Repeating identical source bytes under the
+  same idempotency key returns the same plan. A separate materialise act creates
+  capture candidates and proposed relations only; the source XOR constraint
+  permits either immutable session-event evidence or immutable OKF artifact
+  evidence. Session capture workers claim only session batches. No import path
+  inserts a Knowledge head/revision or changes its current projection.
+
+- **One governed publication and provenance path.** The existing candidate
+  decision commands remain the sole publication boundary: every accepted OKF
+  candidate enters the CPR-16 typed VedaFlow Knowledge effect under a fresh PDP
+  decision, precondition and content-free audit event. Acceptance normalises
+  both the immutable import artifact and declared OKF source references into
+  `KnowledgeSource`; URL/document/repository references therefore retain
+  provenance without turning an external declaration into fetch authority.
+  Internal links map to proposed Knowledge relations only after their target is
+  resolved within the validated artifact set. New audit actions record ids,
+  digests, counts and outcomes, never source or Knowledge content.
+
+- **Public import/export contract.** Five generated operations provide
+  project-scoped plan creation, cursor-paginated job listing, exact job detail,
+  idempotent materialisation and deterministic project export. Every project,
+  job, artifact, candidate, Knowledge item and Knowledge source is owned first
+  and decided at its exact governing scope; foreign ids remain indistinguishable
+  from fictional ids. Export includes only current Knowledge independently
+  authorised through the PDP, assigns stable deterministic paths and ordering,
+  and preserves source, verification, staleness, relation and extension
+  evidence. OpenAPI grows **101 → 106 operations** and **139 → 150 schemas**;
+  generated TypeScript follows it. New Learnings now renders immutable OKF
+  artifact provenance instead of fabricating a session address and forecasts
+  `knowledge.write` at that candidate's destination.
+
+- **Schema, deletion and threat result.** Schema epoch remains **2**; the chain
+  is now **52 migration files**, **669** checked SQLx query descriptions and
+  **87** forced-RLS tenant tables (92 tables and four views in the fresh-schema
+  inventory). Nothing reads, writes or translates the retired record plane.
+  No direct publication, dual write, compatibility format, scheduled Git sync,
+  remote fetch, SSRF-capable redirect, unbounded decompressor, symlink escape,
+  gateway execution seam or content-bearing audit path was added. CPR-28 owns
+  user-facing filesystem CLI and console workflows; this backend accepts inert
+  bytes through the public API rather than granting the gateway host paths.
+
+- **Tests and exact results.** Pure adapter unit/integration **6/6**, shared
+  import types **1/1**, store import persistence **1/1**, public database-backed
+  OKF lifecycle **1/1**, capture regressions **4/4**, OpenAPI **5/5**,
+  forced-RLS completeness **1/1**, complete console **197/197**, SQLx prepare
+  check, crate-dependency, generated-client, backlog and demo-drift checks pass.
+  The isolated `demos/cpr-27-okf-v02.sh` reports one job, three artifacts, two
+  mappings, two reviewable candidates, one VedaFlow-published Knowledge item
+  and two normalised sources. Complete `make ci` **PASS** and full
+  `make db-test` **PASS** against disposable `synveda_test_1177`. The demo is
+  deterministic local archive/API evidence and is not represented as a remote
+  Git host, network-source or live third-party verification.
+
+- **Commit.** `feat(okf): add v0.2 knowledge exchange adapter (CPR-27)` on
+  `feat/context-platform-mvp`.
+- **Commit hash.** Written by the CPR-28 checkpoint under the programme's
   next-checkpoint convention.

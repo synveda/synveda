@@ -17,10 +17,9 @@
 
 use std::collections::HashSet;
 
-use chrono::{DateTime, SecondsFormat, Utc};
+use chrono::{DateTime, Utc};
 use serde_json::Value;
 use sqlx::{PgConnection, PgExecutor};
-use synveda_types::json::canonicalise;
 use synveda_types::knowledge::{
     KnowledgeItem, KnowledgeLifecycleState, KnowledgeOrigin, KnowledgeRelation,
     KnowledgeRelationType, KnowledgeRevision, KnowledgeRevisionContent, KnowledgeSource,
@@ -392,31 +391,13 @@ fn storage_error(err: sqlx::Error) -> Error {
     }
 }
 
-fn canonical_content(content: &KnowledgeRevisionContent) -> Value {
-    canonicalise(&serde_json::json!({
-        "title": content.title,
-        "body_markdown": content.body_markdown,
-        "summary": content.summary,
-        "tags": content.tags,
-        "sensitivity": content.sensitivity,
-        "confidence_permille": content.confidence_permille,
-        "valid_from": content.valid_from.to_rfc3339_opts(SecondsFormat::Micros, true),
-        "valid_to": content.valid_to.map(|value| value.to_rfc3339_opts(SecondsFormat::Micros, true)),
-        "stale_after": content.stale_after.map(|value| value.to_rfc3339_opts(SecondsFormat::Micros, true)),
-        "verification_metadata": content.verification_metadata,
-        "metadata": content.metadata,
-    }))
-}
-
 /// Computes the canonical BLAKE3-256 digest for semantic revision content.
 ///
 /// Actor, ids and transaction time are deliberately excluded: two separately
 /// authored copies of one semantic revision have one content hash.
 #[must_use]
 pub fn revision_content_hash(content: &KnowledgeRevisionContent) -> String {
-    blake3::hash(canonical_content(content).to_string().as_bytes())
-        .to_hex()
-        .to_string()
+    synveda_types::knowledge::knowledge_revision_content_hash(content)
 }
 
 fn canonical_revision(new: &NewKnowledgeRevision) -> Result<NewKnowledgeRevision> {

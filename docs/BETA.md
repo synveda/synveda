@@ -208,6 +208,17 @@ explicitly repinned. The generated configuration masks opaque secret-reference
 identifiers in the browser, and read-only health rows are reports from a named
 trusted adapter rather than a gateway-side execution claim.
 
+Project Knowledge can also cross the boundary as canonical **OKF v0.2**. The
+generated public API creates an immutable dry-run from inert enumerated files
+or bounded archive bytes, then materialises additions, updates and conflicts as
+the same New Learnings candidates session capture uses. An import cannot publish
+directly; accepting one still creates and evaluates a VedaFlow Knowledge
+change. Deterministic export includes only freshly authorised current project
+Knowledge and independently authorised provenance. The gateway does not read a
+submitted path, run Git, fetch a source URL, follow links or execute bundle
+content. The current adapter is pinned to upstream `ad30107`; v0.1 fallback
+fields are intentionally not translated.
+
 ## 9. Removing it
 
 Fetched the same way as the installer — it is not placed on disk by the

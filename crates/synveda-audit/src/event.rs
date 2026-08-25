@@ -208,6 +208,15 @@ pub enum AuditAction {
     /// A person made one terminal candidate decision. Carries the action,
     /// VedaFlow change/result ids and hashes, never candidate content.
     CaptureCandidateDecided,
+    /// A bounded OKF bundle was validated into an immutable dry-run plan.
+    /// Carries counts, version and hashes, never Markdown or frontmatter.
+    OkfImportPlanned,
+    /// One immutable OKF plan became reviewable capture candidates. It does
+    /// not imply that any candidate was published as Knowledge.
+    OkfImportMaterialized,
+    /// Freshly authorised current Knowledge was rendered as deterministic
+    /// OKF output. Carries revision ids and the output digest, never bodies.
+    OkfExported,
     /// A group was created (CPR-5, ADR-0072). The payload carries the
     /// group's handle and whether a directory owns it — a group nobody here
     /// maintains is a different fact from one somebody here made.
@@ -582,7 +591,7 @@ impl AuditAction {
     /// unit test below plus the fact that an action missing from here is
     /// an event `GET /v1/audit/events` cannot filter for. Add the variant
     /// and add it here in the same diff.
-    pub const ALL: [AuditAction; 95] = [
+    pub const ALL: [AuditAction; 98] = [
         AuditAction::AuthzDecision,
         AuditAction::TenantResolutionDenied,
         AuditAction::TokenRejected,
@@ -614,6 +623,9 @@ impl AuditAction {
         AuditAction::CaptureBatchCreated,
         AuditAction::CaptureBatchCompleted,
         AuditAction::CaptureCandidateDecided,
+        AuditAction::OkfImportPlanned,
+        AuditAction::OkfImportMaterialized,
+        AuditAction::OkfExported,
         AuditAction::GroupCreated,
         AuditAction::GroupUpdated,
         AuditAction::AccessGranted,
@@ -714,6 +726,9 @@ impl AuditAction {
             AuditAction::CaptureBatchCreated => "capture.batch.created",
             AuditAction::CaptureBatchCompleted => "capture.batch.completed",
             AuditAction::CaptureCandidateDecided => "capture.candidate.decided",
+            AuditAction::OkfImportPlanned => "okf.import.planned",
+            AuditAction::OkfImportMaterialized => "okf.import.materialized",
+            AuditAction::OkfExported => "okf.exported",
             AuditAction::GroupCreated => "access.group.created",
             AuditAction::GroupUpdated => "access.group.updated",
             AuditAction::AccessGranted => "access.granted",

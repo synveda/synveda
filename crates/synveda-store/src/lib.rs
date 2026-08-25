@@ -56,6 +56,7 @@ pub mod epoch;
 pub mod graph;
 pub mod idempotency;
 pub mod identities;
+pub mod imports;
 pub mod keys;
 pub mod knowledge;
 pub mod knowledge_lifecycle;

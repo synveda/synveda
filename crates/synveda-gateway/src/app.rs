@@ -266,6 +266,24 @@ pub fn router(state: AppState) -> Router {
             "/v1/projects/{project_id}/repositories/{repository_id}",
             axum::routing::delete(crate::workspaces::detach_repository),
         )
+        // OKF v0.2 exchange (CPR-27, ADR-0087): clients submit inert bounded
+        // bytes, immutable plans materialise candidates only, and exports are
+        // rendered from freshly authorised current Knowledge. No URL, Git or
+        // server-filesystem fetch exists on this plane.
+        .route(
+            "/v1/projects/{project_id}/okf/imports",
+            post(crate::okf::plan_import),
+        )
+        .route("/v1/okf/imports", get(crate::okf::list_imports))
+        .route("/v1/okf/imports/{id}", get(crate::okf::get_import))
+        .route(
+            "/v1/okf/imports/{id}/materialize",
+            post(crate::okf::materialize_import),
+        )
+        .route(
+            "/v1/projects/{project_id}/okf/exports",
+            post(crate::okf::export),
+        )
         // The session ledger and runtime API (CPR-10, ADR-0076): what an agent
         // does, as governed records rather than a correlation string. Opening a
         // run and composing context for it take a required `Idempotency-Key`;

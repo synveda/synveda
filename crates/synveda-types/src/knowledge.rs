@@ -16,7 +16,7 @@
 use std::fmt;
 use std::str::FromStr;
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -407,6 +407,31 @@ pub struct KnowledgeRevisionContent {
     pub verification_metadata: Value,
     /// Forward-compatible product metadata, always a JSON object.
     pub metadata: Value,
+}
+
+/// Computes the canonical BLAKE3-256 digest for semantic revision content.
+///
+/// This value-level primitive lives with the shared content type so external
+/// format adapters can produce the exact hash the store will verify without
+/// importing storage. Actor, ids and transaction time are excluded.
+#[must_use]
+pub fn knowledge_revision_content_hash(content: &KnowledgeRevisionContent) -> String {
+    let canonical = crate::json::canonicalise(&serde_json::json!({
+        "title": content.title,
+        "body_markdown": content.body_markdown,
+        "summary": content.summary,
+        "tags": content.tags,
+        "sensitivity": content.sensitivity,
+        "confidence_permille": content.confidence_permille,
+        "valid_from": content.valid_from.to_rfc3339_opts(SecondsFormat::Micros, true),
+        "valid_to": content.valid_to.map(|value| value.to_rfc3339_opts(SecondsFormat::Micros, true)),
+        "stale_after": content.stale_after.map(|value| value.to_rfc3339_opts(SecondsFormat::Micros, true)),
+        "verification_metadata": content.verification_metadata,
+        "metadata": content.metadata,
+    }));
+    blake3::hash(canonical.to_string().as_bytes())
+        .to_hex()
+        .to_string()
 }
 
 /// One stable Knowledge aggregate head.

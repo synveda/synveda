@@ -262,19 +262,29 @@ function BatchGroup({
   me: MeView;
 }) {
   const sessionId = batch?.session_id ?? candidates[0]?.session_id ?? "";
+  const sourceKind = batch?.source_kind ?? candidates[0]?.source_kind ?? "session";
+  const importJobId = batch?.import_job_id ?? candidates[0]?.import_job_id ?? null;
   const project = batch?.project_id
     ? me.projects.find((entry) => entry.id === batch.project_id)
     : null;
   const anchor = batch ? me.anchors.find((entry) => entry.scope_id === batch.scope_id) : null;
-  const mayDecide = anchor?.actions["session.write"] === true;
-  const diagnostics = anchor?.actions["session.diagnostics"] === true;
+  const requiredAction = sourceKind === "okf_import" ? "knowledge.write" : "session.write";
+  const mayDecide = anchor?.actions[requiredAction] === true;
+  const diagnostics =
+    sourceKind === "session" && anchor?.actions["session.diagnostics"] === true;
   return (
     <section className="learning-batch">
       <header>
         <div>
-          <h2>{project ? project.display_name : "Session capture"}</h2>
+          <h2>{project ? project.display_name : sourceKind === "okf_import" ? "OKF import" : "Session capture"}</h2>
           <p className="muted">
-            <Link href={hrefOf("session", { session_id: sessionId })}>Session {shortId(sessionId)}</Link>
+            {sessionId ? (
+              <Link href={hrefOf("session", { session_id: sessionId })}>
+                Session {shortId(sessionId)}
+              </Link>
+            ) : (
+              <>OKF import {shortId(importJobId ?? "unknown")}</>
+            )}
             {batch ? ` · ${stateLabel(batch.state)} · ${whenOf(batch.created_at)}` : ""}
           </p>
         </div>
@@ -290,8 +300,8 @@ function BatchGroup({
       </header>
       {!mayDecide && candidates.some((candidate) => candidate.state === "pending") ? (
         <div className="banner warning" role="status">
-          You may read these candidates, but this run does not currently offer session.write, so no
-          decision control is shown.
+          You may read these candidates, but this source scope does not currently offer{" "}
+          {requiredAction}, so no decision control is shown.
         </div>
       ) : null}
       {candidates.length === 0 ? (
@@ -551,9 +561,50 @@ function SourcePreview({
   candidate: CaptureCandidateView;
   diagnostics: boolean;
 }) {
-  const key = `sessions/timeline/${candidate.session_id}`;
+  if (candidate.source_kind === "okf_import") {
+    return (
+      <section className="source-preview">
+        <h4>Imported OKF provenance</h4>
+        <p>
+          {candidate.source_artifact_ids.length} immutable source artifact(s) from OKF import{" "}
+          {shortId(candidate.import_job_id ?? "unknown")} support this candidate.
+        </p>
+        <p className="muted">
+          Imported content remains review input until this candidate is accepted through the
+          governed Knowledge lifecycle.
+        </p>
+      </section>
+    );
+  }
+  if (!candidate.session_id) {
+    return (
+      <section className="source-preview">
+        <h4>Source evidence</h4>
+        <p className="muted">This candidate has no visible source reference.</p>
+      </section>
+    );
+  }
+  return (
+    <SessionSourcePreview
+      candidate={candidate}
+      diagnostics={diagnostics}
+      sessionId={candidate.session_id}
+    />
+  );
+}
+
+function SessionSourcePreview({
+  candidate,
+  diagnostics,
+  sessionId,
+}: {
+  candidate: CaptureCandidateView;
+  diagnostics: boolean;
+  sessionId: string;
+}) {
+  const key = `sessions/timeline/${sessionId}`;
   const timeline = useQuery(key, () =>
-    request("get_session_timeline", { path: { session_id: candidate.session_id } }),
+    request("get_session_timeline", { path: { session_id: sessionId } }),
   );
   return (
     <section className="source-preview">
@@ -577,7 +628,7 @@ function SourcePreview({
                     <SourceEntry
                       key={entry.id}
                       entry={entry}
-                      sessionId={candidate.session_id}
+                      sessionId={sessionId}
                       diagnostics={diagnostics}
                     />
                   ))}
@@ -590,7 +641,7 @@ function SourcePreview({
                 </p>
               ) : null}
               <p>
-                <Link href={hrefOf("session", { session_id: candidate.session_id })}>
+                <Link href={hrefOf("session", { session_id: sessionId })}>
                   Open the complete session timeline
                 </Link>
               </p>

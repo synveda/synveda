@@ -68,6 +68,7 @@ pub mod knowledge_api;
 pub mod knowledge_index;
 pub mod lapses;
 pub mod me;
+pub mod okf;
 pub mod openapi;
 pub mod packs;
 pub mod policy;

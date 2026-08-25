@@ -116,6 +116,7 @@ function me(
 function batch(overrides: Partial<CaptureBatchView> = {}): CaptureBatchView {
   return {
     id: "batch-1",
+    source_kind: "session",
     session_id: "session-1",
     scope_id: PROJECT_SCOPE,
     project_id: "project-1",
@@ -136,6 +137,7 @@ function candidate(overrides: Partial<CaptureCandidateView> = {}): CaptureCandid
   return {
     id: "candidate-1",
     batch_id: "batch-1",
+    source_kind: "session",
     session_id: "session-1",
     ordinal: 1,
     proposed_scope_id: PROJECT_SCOPE,
@@ -153,6 +155,7 @@ function candidate(overrides: Partial<CaptureCandidateView> = {}): CaptureCandid
     content_hash: "candidate-hash",
     state: "pending",
     source_event_ids: ["event-1"],
+    source_artifact_ids: [],
     matches: [
       {
         knowledge_item_id: "knowledge-old",
@@ -227,10 +230,13 @@ async function seed(key: string, body: unknown): Promise<void> {
   await cache.ensure(key, async () => outcome);
 }
 
-async function seedPage(rows: CaptureCandidateView[]): Promise<void> {
-  await seed(batchKey, { batches: [batch({ candidate_count: rows.length })], next_cursor: null });
+async function seedPage(
+  rows: CaptureCandidateView[],
+  sourceBatch: CaptureBatchView = batch({ candidate_count: rows.length }),
+): Promise<void> {
+  await seed(batchKey, { batches: [sourceBatch], next_cursor: null });
   await seed(candidateKey, { candidates: rows, next_cursor: null });
-  await seed("sessions/timeline/session-1", timeline());
+  if (sourceBatch.session_id) await seed(`sessions/timeline/${sourceBatch.session_id}`, timeline());
   for (const row of rows) {
     for (const match of row.matches) {
       await seed(`knowledge/item/${match.knowledge_item_id}`, existing());
@@ -281,6 +287,35 @@ test("the primary review page groups a batch and exposes evidence, comparisons a
     /suggestions extracted from sessions, not active Knowledge/,
     "the trust boundary is stated before any decision control",
   );
+});
+
+test("an OKF import is review input with artifact provenance, not a fictional session", async () => {
+  await seedPage(
+    [
+      candidate({
+        source_kind: "okf_import",
+        session_id: undefined,
+        import_job_id: "import-1",
+        source_event_ids: [],
+        source_artifact_ids: ["artifact-1"],
+        matches: [],
+      }),
+    ],
+    batch({
+      source_kind: "okf_import",
+      session_id: undefined,
+      import_job_id: "import-1",
+      event_count: 1,
+      candidate_count: 1,
+    }),
+  );
+  const { text, markup } = render(me());
+
+  assert.match(text, /OKF import import-1/);
+  assert.match(text, /1 immutable source artifact/);
+  assert.match(text, /remains review input until this candidate is accepted/);
+  assert.match(text, /Decide this learning/);
+  assert.ok(!markup.includes("/console/sessions/"));
 });
 
 test("a denied destination is absent and the page explains the required scope change", async () => {

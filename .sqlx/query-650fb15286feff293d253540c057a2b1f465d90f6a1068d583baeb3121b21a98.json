@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        update capture_batches\n           set state = 'completed', extractor_method = $4, model_version = $5,\n               candidate_count = $6, lease_owner = null,\n               lease_expires_at = null, completed_at = now(), updated_at = now()\n         where tenant_id = $1 and id = $2 and state = 'running'\n           and lease_owner = $3\n        returning id, tenant_id, session_id, scope_id, workspace_id, project_id,\n                  principal_id, input_hash, event_count, state, extractor_method,\n                  model_version, attempts, candidate_count, error_code,\n                  created_at, started_at, completed_at, updated_at\n        ",
+  "query": "\n        select id, tenant_id, project_id, scope_id, workspace_id, principal_id,\n               format, format_version, specification_commit, source_kind,\n               source_locator, source_revision, bundle_digest, state,\n               artifact_count, mapping_count, candidate_count, capture_batch_id,\n               error_code, notices, created_at, completed_at, updated_at\n        from import_jobs\n        where tenant_id = $1 and project_id = $2 and source_kind = $3\n          and source_locator = $4 and bundle_digest = $5\n        ",
   "describe": {
     "columns": [
       {
@@ -15,7 +15,7 @@
       },
       {
         "ordinal": 2,
-        "name": "session_id",
+        "name": "project_id",
         "type_info": "Uuid"
       },
       {
@@ -30,71 +30,91 @@
       },
       {
         "ordinal": 5,
-        "name": "project_id",
-        "type_info": "Uuid"
-      },
-      {
-        "ordinal": 6,
         "name": "principal_id",
         "type_info": "Text"
       },
       {
+        "ordinal": 6,
+        "name": "format",
+        "type_info": "Text"
+      },
+      {
         "ordinal": 7,
-        "name": "input_hash",
+        "name": "format_version",
         "type_info": "Text"
       },
       {
         "ordinal": 8,
-        "name": "event_count",
-        "type_info": "Int4"
+        "name": "specification_commit",
+        "type_info": "Text"
       },
       {
         "ordinal": 9,
-        "name": "state",
+        "name": "source_kind",
         "type_info": "Text"
       },
       {
         "ordinal": 10,
-        "name": "extractor_method",
+        "name": "source_locator",
         "type_info": "Text"
       },
       {
         "ordinal": 11,
-        "name": "model_version",
+        "name": "source_revision",
         "type_info": "Text"
       },
       {
         "ordinal": 12,
-        "name": "attempts",
-        "type_info": "Int4"
+        "name": "bundle_digest",
+        "type_info": "Text"
       },
       {
         "ordinal": 13,
+        "name": "state",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 14,
+        "name": "artifact_count",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 15,
+        "name": "mapping_count",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 16,
         "name": "candidate_count",
         "type_info": "Int4"
       },
       {
-        "ordinal": 14,
+        "ordinal": 17,
+        "name": "capture_batch_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 18,
         "name": "error_code",
         "type_info": "Text"
       },
       {
-        "ordinal": 15,
+        "ordinal": 19,
+        "name": "notices",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 20,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 16,
-        "name": "started_at",
-        "type_info": "Timestamptz"
-      },
-      {
-        "ordinal": 17,
+        "ordinal": 21,
         "name": "completed_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 18,
+        "ordinal": 22,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
@@ -105,8 +125,7 @@
         "Uuid",
         "Text",
         "Text",
-        "Text",
-        "Int4"
+        "Text"
       ]
     },
     "nullable": [
@@ -115,21 +134,25 @@
       false,
       false,
       false,
-      true,
       false,
       false,
       false,
       false,
-      true,
-      true,
       false,
       false,
       true,
       false,
+      false,
+      false,
+      false,
+      false,
       true,
+      true,
+      false,
+      false,
       true,
       false
     ]
   },
-  "hash": "7015fa01a88dc5f74ee18a4d8a692e147090f9f06e5cd2f08c5f7ddf38ee9fe6"
+  "hash": "650fb15286feff293d253540c057a2b1f465d90f6a1068d583baeb3121b21a98"
 }

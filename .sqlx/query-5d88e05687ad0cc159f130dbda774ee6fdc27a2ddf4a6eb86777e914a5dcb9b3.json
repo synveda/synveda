@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        update import_jobs\n           set state = 'materialized', candidate_count = $3,\n               capture_batch_id = $4, completed_at = $5, updated_at = $5\n         where tenant_id = $1 and id = $2 and state = 'planned'\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Int4",
+        "Uuid",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "5d88e05687ad0cc159f130dbda774ee6fdc27a2ddf4a6eb86777e914a5dcb9b3"
+}

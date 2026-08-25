@@ -12,7 +12,7 @@ use sqlx::{PgConnection, PgExecutor};
 use synveda_types::capture::{
     CaptureBatch, CaptureBatchState, CaptureCandidate, CaptureCandidateDecision,
     CaptureCandidateState, CaptureDecisionAction, CaptureDecisionState, CaptureMatch,
-    MAX_CAPTURE_ATTEMPTS,
+    CaptureSourceKind, MAX_CAPTURE_ATTEMPTS,
 };
 use synveda_types::knowledge::{
     KnowledgeOrigin, KnowledgeRevisionContent, KnowledgeType, normalise_knowledge_tags,
@@ -20,9 +20,9 @@ use synveda_types::knowledge::{
 };
 use synveda_types::session::{Session, SessionEventType};
 use synveda_types::{
-    CaptureBatchId, CaptureCandidateDecisionId, CaptureCandidateId, Error, KnowledgeItemId,
-    KnowledgeRevisionId, ProjectId, ProposalId, Result, ScopeId, SessionEventId, SessionId,
-    TenantId, WorkspaceId,
+    CaptureBatchId, CaptureCandidateDecisionId, CaptureCandidateId, Error, ImportArtifactId,
+    ImportJobId, KnowledgeItemId, KnowledgeRevisionId, ProjectId, ProposalId, Result, ScopeId,
+    SessionEventId, SessionId, TenantId, WorkspaceId,
 };
 use uuid::Uuid;
 
@@ -135,7 +135,9 @@ pub struct CandidateFilter {
 struct BatchRow {
     id: Uuid,
     tenant_id: Uuid,
-    session_id: Uuid,
+    source_kind: String,
+    session_id: Option<Uuid>,
+    import_job_id: Option<Uuid>,
     scope_id: Uuid,
     workspace_id: Uuid,
     project_id: Option<Uuid>,
@@ -161,7 +163,9 @@ impl TryFrom<BatchRow> for CaptureBatch {
         Ok(Self {
             id: CaptureBatchId::from_uuid(row.id),
             tenant_id: TenantId::from_uuid(row.tenant_id),
-            session_id: SessionId::from_uuid(row.session_id),
+            source_kind: stored(&row.source_kind)?,
+            session_id: row.session_id.map(SessionId::from_uuid),
+            import_job_id: row.import_job_id.map(ImportJobId::from_uuid),
             scope_id: ScopeId::from_uuid(row.scope_id),
             workspace_id: WorkspaceId::from_uuid(row.workspace_id),
             project_id: row.project_id.map(ProjectId::from_uuid),
@@ -186,7 +190,9 @@ struct CandidateRow {
     id: Uuid,
     tenant_id: Uuid,
     batch_id: Uuid,
-    session_id: Uuid,
+    source_kind: String,
+    session_id: Option<Uuid>,
+    import_job_id: Option<Uuid>,
     ordinal: i32,
     proposed_scope_id: Uuid,
     proposed_project_id: Option<Uuid>,
@@ -222,7 +228,9 @@ fn candidate_without_links(row: CandidateRow) -> Result<CaptureCandidate> {
         id: CaptureCandidateId::from_uuid(row.id),
         tenant_id: TenantId::from_uuid(row.tenant_id),
         batch_id: CaptureBatchId::from_uuid(row.batch_id),
-        session_id: SessionId::from_uuid(row.session_id),
+        source_kind: stored(&row.source_kind)?,
+        session_id: row.session_id.map(SessionId::from_uuid),
+        import_job_id: row.import_job_id.map(ImportJobId::from_uuid),
         ordinal: row.ordinal,
         proposed_scope_id: ScopeId::from_uuid(row.proposed_scope_id),
         proposed_project_id: row.proposed_project_id.map(ProjectId::from_uuid),
@@ -245,6 +253,7 @@ fn candidate_without_links(row: CandidateRow) -> Result<CaptureCandidate> {
         content_hash: row.content_hash,
         state: stored(&row.state)?,
         source_event_ids: Vec::new(),
+        source_artifact_ids: Vec::new(),
         matches: Vec::new(),
         resulting_change_id: row.resulting_change_id.map(ProposalId::from_uuid),
         resulting_outcome: row.resulting_outcome.as_deref().map(stored).transpose()?,
@@ -357,8 +366,11 @@ pub async fn freeze_batch(conn: &mut PgConnection, session: &Session) -> Result<
             (id, tenant_id, session_id, scope_id, workspace_id, project_id,
              principal_id, input_hash, event_count)
         values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-        on conflict (tenant_id, session_id, input_hash) do nothing
-        returning id, tenant_id, session_id, scope_id, workspace_id, project_id,
+        on conflict (tenant_id, session_id, input_hash)
+            where source_kind = 'session'
+        do nothing
+        returning id, tenant_id, source_kind, session_id, import_job_id,
+                  scope_id, workspace_id, project_id,
                   principal_id, input_hash, event_count, state, extractor_method,
                   model_version, attempts, candidate_count, error_code,
                   created_at, started_at, completed_at, updated_at
@@ -423,7 +435,8 @@ async fn by_snapshot(
     let row = sqlx::query_as!(
         BatchRow,
         r#"
-        select id, tenant_id, session_id, scope_id, workspace_id, project_id,
+        select id, tenant_id, source_kind, session_id, import_job_id,
+               scope_id, workspace_id, project_id,
                principal_id, input_hash, event_count, state, extractor_method,
                model_version, attempts, candidate_count, error_code,
                created_at, started_at, completed_at, updated_at
@@ -449,7 +462,8 @@ pub async fn get_batch(
     let row = sqlx::query_as!(
         BatchRow,
         r#"
-        select id, tenant_id, session_id, scope_id, workspace_id, project_id,
+        select id, tenant_id, source_kind, session_id, import_job_id,
+               scope_id, workspace_id, project_id,
                principal_id, input_hash, event_count, state, extractor_method,
                model_version, attempts, candidate_count, error_code,
                created_at, started_at, completed_at, updated_at
@@ -473,7 +487,8 @@ pub async fn list_batches(
     let rows = sqlx::query_as!(
         BatchRow,
         r#"
-        select id, tenant_id, session_id, scope_id, workspace_id, project_id,
+        select id, tenant_id, source_kind, session_id, import_job_id,
+               scope_id, workspace_id, project_id,
                principal_id, input_hash, event_count, state, extractor_method,
                model_version, attempts, candidate_count, error_code,
                created_at, started_at, completed_at, updated_at
@@ -521,6 +536,7 @@ pub async fn claim_batch(
             select id
             from capture_batches
             where tenant_id = $1
+              and source_kind = 'session'
               and attempts < $2
               and (state = 'pending'
                    or (state = 'running' and lease_expires_at <= now()))
@@ -536,8 +552,9 @@ pub async fn claim_batch(
                error_code = null
           from candidate
          where batch.tenant_id = $1 and batch.id = candidate.id
-        returning batch.id, batch.tenant_id, batch.session_id, batch.scope_id,
-                  batch.workspace_id, batch.project_id, batch.principal_id,
+        returning batch.id, batch.tenant_id, batch.source_kind, batch.session_id,
+                  batch.import_job_id, batch.scope_id, batch.workspace_id,
+                  batch.project_id, batch.principal_id,
                   batch.input_hash, batch.event_count, batch.state,
                   batch.extractor_method, batch.model_version, batch.attempts,
                   batch.candidate_count, batch.error_code, batch.created_at,
@@ -600,6 +617,16 @@ pub async fn complete_batch(
     model_version: &str,
     candidates: &[NewCaptureCandidate],
 ) -> Result<CaptureBatch> {
+    if batch.source_kind != CaptureSourceKind::Session
+        || batch.session_id.is_none()
+        || batch.import_job_id.is_some()
+    {
+        return Err(Error::Invalid {
+            message: "the session extractor can complete only a session-sourced capture batch"
+                .to_owned(),
+        });
+    }
+    let session_id = batch.session_id.expect("session source checked above");
     for candidate in candidates {
         validate_knowledge_principal(
             candidate.proposed_owner_principal_id.as_deref(),
@@ -640,7 +667,7 @@ pub async fn complete_batch(
             candidate.id.as_uuid(),
             batch.tenant_id.as_uuid(),
             batch.id.as_uuid(),
-            batch.session_id.as_uuid(),
+            session_id.as_uuid(),
             candidate.ordinal,
             candidate.proposed_scope_id.as_uuid(),
             candidate.proposed_project_id.map(|value| value.as_uuid()) as Option<Uuid>,
@@ -717,7 +744,8 @@ pub async fn complete_batch(
                lease_expires_at = null, completed_at = now(), updated_at = now()
          where tenant_id = $1 and id = $2 and state = 'running'
            and lease_owner = $3
-        returning id, tenant_id, session_id, scope_id, workspace_id, project_id,
+        returning id, tenant_id, source_kind, session_id, import_job_id,
+                  scope_id, workspace_id, project_id,
                   principal_id, input_hash, event_count, state, extractor_method,
                   model_version, attempts, candidate_count, error_code,
                   created_at, started_at, completed_at, updated_at
@@ -762,7 +790,8 @@ pub async fn fail_batch(
                updated_at = now()
          where tenant_id = $1 and id = $2 and state = 'running'
            and lease_owner = $3
-        returning id, tenant_id, session_id, scope_id, workspace_id, project_id,
+        returning id, tenant_id, source_kind, session_id, import_job_id,
+                  scope_id, workspace_id, project_id,
                   principal_id, input_hash, event_count, state, extractor_method,
                   model_version, attempts, candidate_count, error_code,
                   created_at, started_at, completed_at, updated_at
@@ -800,7 +829,8 @@ pub async fn get_candidate(
     let row = sqlx::query_as!(
         CandidateRow,
         r#"
-        select id, tenant_id, batch_id, session_id, ordinal, proposed_scope_id,
+        select id, tenant_id, batch_id, source_kind, session_id, import_job_id,
+               ordinal, proposed_scope_id,
                proposed_project_id, proposed_owner_principal_id, knowledge_type,
                origin, title, body_markdown, summary, tags, sensitivity,
                confidence_permille, valid_from, valid_to, stale_after,
@@ -843,6 +873,23 @@ async fn hydrate_candidate(
         .into_iter()
         .map(SessionEventId::from_uuid)
         .collect();
+    let artifact_ids = sqlx::query_scalar!(
+        r#"
+        select artifact_id
+        from capture_candidate_import_artifacts
+        where tenant_id = $1 and candidate_id = $2
+        order by ordinal
+        "#,
+        candidate.tenant_id.as_uuid(),
+        candidate.id.as_uuid(),
+    )
+    .fetch_all(&mut *conn)
+    .await
+    .map_err(storage_error)?;
+    candidate.source_artifact_ids = artifact_ids
+        .into_iter()
+        .map(ImportArtifactId::from_uuid)
+        .collect();
     let matches = sqlx::query!(
         r#"
         select knowledge_item_id, knowledge_revision_id, match_kind,
@@ -881,7 +928,8 @@ pub async fn list_candidates(
     let rows = sqlx::query_as!(
         CandidateRow,
         r#"
-        select id, tenant_id, batch_id, session_id, ordinal, proposed_scope_id,
+        select id, tenant_id, batch_id, source_kind, session_id, import_job_id,
+               ordinal, proposed_scope_id,
                proposed_project_id, proposed_owner_principal_id, knowledge_type,
                origin, title, body_markdown, summary, tags, sensitivity,
                confidence_permille, valid_from, valid_to, stale_after,

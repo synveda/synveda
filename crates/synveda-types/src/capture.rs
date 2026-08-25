@@ -18,9 +18,9 @@ use crate::knowledge::{
     KnowledgeMutationOutcome, KnowledgeOrigin, KnowledgeRevisionContent, KnowledgeType,
 };
 use crate::{
-    CaptureBatchId, CaptureCandidateDecisionId, CaptureCandidateId, Error, KnowledgeItemId,
-    KnowledgeRevisionId, ProjectId, ProposalId, Result, ScopeId, SessionEventId, SessionId,
-    TenantId, WorkspaceId,
+    CaptureBatchId, CaptureCandidateDecisionId, CaptureCandidateId, Error, ImportArtifactId,
+    ImportJobId, KnowledgeItemId, KnowledgeRevisionId, ProjectId, ProposalId, Result, ScopeId,
+    SessionEventId, SessionId, TenantId, WorkspaceId,
 };
 
 /// Maximum extraction attempts before a batch becomes failed.
@@ -71,6 +71,12 @@ macro_rules! string_enum {
         }
     };
 }
+
+string_enum!(
+    CaptureSourceKind,
+    [Session => "session", OkfImport => "okf_import"],
+    "capture source kind"
+);
 
 string_enum!(
     CaptureBatchState,
@@ -136,8 +142,12 @@ pub struct CaptureBatch {
     pub id: CaptureBatchId,
     /// Owning tenant.
     pub tenant_id: TenantId,
-    /// Session whose evidence was frozen.
-    pub session_id: SessionId,
+    /// Session snapshot or immutable OKF import artifacts.
+    pub source_kind: CaptureSourceKind,
+    /// Session whose evidence was frozen, for a session-sourced batch.
+    pub session_id: Option<SessionId>,
+    /// Import whose artifacts were mapped, for an OKF-sourced batch.
+    pub import_job_id: Option<ImportJobId>,
     /// Session's governed scope.
     pub scope_id: ScopeId,
     /// Session's workspace.
@@ -197,8 +207,12 @@ pub struct CaptureCandidate {
     pub tenant_id: TenantId,
     /// Batch that produced it.
     pub batch_id: CaptureBatchId,
-    /// Source session.
-    pub session_id: SessionId,
+    /// Session snapshot or immutable OKF import artifacts.
+    pub source_kind: CaptureSourceKind,
+    /// Source session, for a session candidate.
+    pub session_id: Option<SessionId>,
+    /// Source import job, for an OKF candidate.
+    pub import_job_id: Option<ImportJobId>,
     /// Stable position inside the batch.
     pub ordinal: i32,
     /// Proposed governing scope.
@@ -219,6 +233,8 @@ pub struct CaptureCandidate {
     pub state: CaptureCandidateState,
     /// Exact source events, ordered by session sequence.
     pub source_event_ids: Vec<SessionEventId>,
+    /// Exact immutable import artifacts, ordered by mapping evidence.
+    pub source_artifact_ids: Vec<ImportArtifactId>,
     /// Only independently policy-visible current Knowledge neighbours.
     pub matches: Vec<CaptureMatch>,
     /// VedaFlow change opened by a terminal publish action.
@@ -286,6 +302,12 @@ mod tests {
     fn capture_vocabularies_round_trip_and_do_not_call_pending_published() {
         for state in CaptureBatchState::ALL {
             assert_eq!(state.as_str().parse::<CaptureBatchState>().unwrap(), *state);
+        }
+        for source in CaptureSourceKind::ALL {
+            assert_eq!(
+                source.as_str().parse::<CaptureSourceKind>().unwrap(),
+                *source
+            );
         }
         for state in CaptureCandidateState::ALL {
             assert_eq!(

@@ -29,6 +29,10 @@ mod error;
 mod graph;
 mod id;
 mod identity;
+// Durable external-format import plans (CPR-27, ADR-0087). Public because
+// capture provenance, store persistence and the API share this one job/state
+// vocabulary without making OKF a Knowledge domain model.
+pub mod import;
 // Stable Knowledge aggregates and immutable revisions (CPR-15, ADR-0080).
 // Public because these are the product's primary content vocabulary and the
 // store, command, gateway and generated API layers must share one copy.
@@ -101,11 +105,11 @@ pub use id::{
     CapabilitySnapshotId, CaptureBatchId, CaptureCandidateDecisionId, CaptureCandidateId,
     ContextCandidateId, ContextFeedbackId, ContextRunId, ContextSelectionId, DirectoryGroupId,
     DirectoryUserId, DurableOperationId, GrantId, GraphEdgeId, GraphVertexId, GroupId, IdentityId,
-    InviteId, KnowledgeItemId, KnowledgeRelationId, KnowledgeRevisionId, KnowledgeSourceId,
-    LapseId, ProjectId, ProposalId, RecordId, RepositoryId, ScimCredentialId, ScopeId,
-    SessionEventId, SessionId, SkillBindingId, SkillId, SkillTestRunId, SkillUsageEventId,
-    SkillVersionId, TenantId, ToolBindingId, ToolServerId, ToolServerVersionId, ToolTestRunId,
-    WorkspaceId,
+    ImportArtifactId, ImportJobId, ImportMappingId, InviteId, KnowledgeItemId, KnowledgeRelationId,
+    KnowledgeRevisionId, KnowledgeSourceId, LapseId, ProjectId, ProposalId, RecordId, RepositoryId,
+    ScimCredentialId, ScopeId, SessionEventId, SessionId, SkillBindingId, SkillId, SkillTestRunId,
+    SkillUsageEventId, SkillVersionId, TenantId, ToolBindingId, ToolServerId, ToolServerVersionId,
+    ToolTestRunId, WorkspaceId,
 };
 pub use identity::{Identity, IdentityKind, IdentityStatus};
 pub use lapse::{

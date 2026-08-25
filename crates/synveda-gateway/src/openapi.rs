@@ -37,6 +37,7 @@ use crate::capture;
 use crate::context_api;
 use crate::knowledge_api;
 use crate::me;
+use crate::okf;
 use crate::sessions;
 use crate::skills;
 use crate::tool_registry;
@@ -79,6 +80,10 @@ exact project bindings, secret-reference-only configuration and immutable \
 read-only connection-test evidence. Registration, version approval and every \
 binding transition are typed VedaFlow changes; capability descriptions grant \
 no invocation authority and the gateway is not an execution proxy. \
+CPR-27 pins the official Open Knowledge Format v0.2 specification and adds \
+bounded, inert dry-run imports that materialise reviewable candidates only, \
+plus deterministic exports of freshly authorised current Knowledge. The \
+gateway never fetches a supplied locator, runs Git or executes bundle content. \
 Since CPR-12 the session plane is also the **only** runtime plane: \
 `POST /v1/sessions/{session_id}/events` is where observations are admitted and \
 `POST /v1/sessions/{session_id}/context-runs` is where context is composed. \
@@ -167,6 +172,11 @@ revision, and its mutations are last-writer-wins under the PDP.",
         capture::merge_candidate,
         capture::replace_candidate,
         capture::dismiss_candidate,
+        okf::plan_import,
+        okf::list_imports,
+        okf::get_import,
+        okf::materialize_import,
+        okf::export,
         skills::install,
         skills::update,
         skills::list,
@@ -289,6 +299,17 @@ revision, and its mutations are last-writer-wins under the PDP.",
         capture::ReplaceCandidateBody,
         capture::DismissCandidateBody,
         capture::AcceptBatchBody,
+        okf::OkfInputEntryBody,
+        okf::PlanOkfImportBody,
+        okf::OkfArtifactView,
+        okf::OkfMappingView,
+        okf::OkfImportJobView,
+        okf::OkfImportPlanView,
+        okf::OkfImportJobListView,
+        okf::OkfMaterializationView,
+        okf::ExportOkfBody,
+        okf::OkfExportFileView,
+        okf::OkfExportView,
         skills::SkillFileBody,
         skills::SkillProvenanceBody,
         skills::InstallSkillBody,

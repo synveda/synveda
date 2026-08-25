@@ -188,6 +188,15 @@ Published benchmark scores, and what they do and do not measure:
   drift and quarantine, VedaFlow review, exact project bindings, read-only
   adapter evidence and secret-safe generated configuration. Neither surface
   turns declared metadata into execution authority.
+- **Portable Knowledge exchange** — the public API validates the canonical
+  Open Knowledge Format v0.2 contract pinned at upstream commit `ad30107`.
+  Directory/Git clients submit enumerated inert files and archive clients
+  submit bounded bytes; the gateway opens no path, fetches no source URL and
+  executes no content. An immutable dry-run classifies additions, updates,
+  duplicates and conflicts, then materialises ordinary New Learnings
+  candidates only. Accepted candidates still pass through VedaFlow. Export
+  re-authorises current project Knowledge and each provenance source before
+  producing stable paths, links, metadata and digests.
 - **A Claude Code integration** — installed hooks plus an MCP recall tool,
   with deterministic session-plane replay in CI and an installed authenticated
   Claude Code 2.1.241 lifecycle gate.

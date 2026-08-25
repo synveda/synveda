@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            insert into capture_candidate_import_artifacts\n                (tenant_id, candidate_id, import_job_id, artifact_id, ordinal)\n            values ($1, $2, $3, $4, 1)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "057cf96d889092b843afbd88722300359c62a4763ebe1341f534b202c4f5415a"
+}

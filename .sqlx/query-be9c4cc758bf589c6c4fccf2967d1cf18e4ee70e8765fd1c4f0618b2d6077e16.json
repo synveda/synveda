@@ -1,0 +1,37 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                insert into import_mappings\n                    (id, tenant_id, job_id, artifact_id, ordinal, okf_type,\n                     knowledge_type, title, body_markdown, summary, tags,\n                     sensitivity, confidence_permille, valid_from, valid_to,\n                     stale_after, verification_metadata, metadata, content_hash,\n                     classification, matched_item_id, matched_revision_id,\n                     proposed_relations, materializable)\n                values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,\n                        $13, $14, $15, $16, $17, $18, $19, $20, $21, $22,\n                        $23, $24)\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Int4",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "TextArray",
+        "Text",
+        "Int4",
+        "Timestamptz",
+        "Timestamptz",
+        "Timestamptz",
+        "Jsonb",
+        "Jsonb",
+        "Text",
+        "Text",
+        "Uuid",
+        "Uuid",
+        "Jsonb",
+        "Bool"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "be9c4cc758bf589c6c4fccf2967d1cf18e4ee70e8765fd1c4f0618b2d6077e16"
+}
