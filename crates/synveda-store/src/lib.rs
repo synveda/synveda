@@ -2,10 +2,6 @@
 //! bitemporal record tables and, later, the `VectorIndex` trait that isolates
 //! pgvector from the Qdrant scale-out path (tech plan §1.1).
 //!
-//! Knowledge graph (GRPH-1, ADR-0043): indexed adjacency in the same
-//! database, not Apache AGE — the extension stays installed for the
-//! GRPH-4 spike's evidence and is called by nothing. See [`graph`].
-//!
 //! Bitemporal layout (FND-4, ADR-0006): each bitemporal entity is a
 //! current/history table pair. Transaction time is maintained exclusively by
 //! database triggers; valid time is application data. See
@@ -54,7 +50,6 @@ pub mod dedup;
 pub mod directory;
 pub mod directory_sync;
 pub mod epoch;
-pub mod graph;
 pub mod idempotency;
 pub mod identities;
 pub mod imports;

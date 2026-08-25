@@ -28,7 +28,6 @@ pub mod context;
 mod dedup;
 mod directory;
 mod error;
-mod graph;
 mod id;
 mod identity;
 // Durable external-format import plans (CPR-27, ADR-0087). Public because
@@ -101,18 +100,18 @@ pub use composition::{
 };
 pub use context::{
     ContextCandidate, ContextCompletionStatus, ContextFeedback, ContextFeedbackType,
-    ContextReasonCode, ContextSelection, TraceRetentionMode,
+    ContextGraphDirection, ContextGraphStep, ContextReasonCode, ContextSelection,
+    TraceRetentionMode,
 };
 pub use dedup::{DedupConfig, DedupMode, MAX_DEDUP_NEIGHBOURS, permille};
 pub use directory::{DirectoryUser, ScimCredential};
 pub use error::{Error, Result};
-pub use graph::{Depth, Graph};
 pub use id::{
     CapabilitySnapshotId, CaptureBatchId, CaptureCandidateDecisionId, CaptureCandidateId,
     ConfigurationArtifactId, ConfigurationBindingId, ConfigurationVersionId, ConflictMemberId,
     ConflictSetId, ContextCandidateId, ContextFeedbackId, ContextRunId, ContextSelectionId,
-    DirectoryUserId, DurableOperationId, GrantId, GraphEdgeId, GraphVertexId, GroupId, IdentityId,
-    ImportArtifactId, ImportJobId, ImportMappingId, InviteId, KnowledgeItemId, KnowledgeRelationId,
+    DirectoryUserId, DurableOperationId, GrantId, GroupId, IdentityId, ImportArtifactId,
+    ImportJobId, ImportMappingId, InviteId, KnowledgeItemId, KnowledgeRelationId,
     KnowledgeRevisionId, KnowledgeSourceId, ProjectId, ProposalId, RecordId, RelaxationId,
     RelaxationVersionId, RepositoryId, ScimCredentialId, ScopeId, SessionEventId, SessionId,
     SkillBindingId, SkillId, SkillTestRunId, SkillUsageEventId, SkillVersionId, TenantId,

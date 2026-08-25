@@ -8,7 +8,8 @@
 //! item and provenance scope passes the embedded PDP before persistence or
 //! disclosure.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::time::Duration;
 
 use axum::Json;
 use axum::extract::rejection::JsonRejection;
@@ -30,7 +31,8 @@ use synveda_retrieval::{
 use synveda_store::anchors::AnchorSelection;
 use synveda_store::capture::{self as capture_store, CandidateFilter};
 use synveda_store::context::{
-    self as store, NewContextCandidate, NewContextFeedback, NewContextSelection,
+    self as store, NewContextCandidate, NewContextFeedback, NewContextGraphStep,
+    NewContextSelection,
 };
 use synveda_store::knowledge::{self as knowledge, KnowledgeSnapshot};
 use synveda_store::knowledge_freshness;
@@ -40,18 +42,23 @@ use synveda_store::{configuration, policy_assignments, rls, scopes};
 use synveda_types::capture::{CaptureCandidate, CaptureCandidateState};
 use synveda_types::configuration::{
     ConfigurationContextChannel, EffectiveConfiguration, ExternalProvider,
+    GraphRetrievalConfiguration,
 };
-use synveda_types::context::{ContextFeedbackType, ContextReasonCode, TraceRetentionMode};
+use synveda_types::context::{
+    ContextFeedbackType, ContextGraphDirection, ContextReasonCode, TraceRetentionMode,
+};
 use synveda_types::knowledge::{
-    KnowledgeLifecycleState, KnowledgeRevision, KnowledgeSource, KnowledgeType, assess_freshness,
+    KnowledgeLifecycleState, KnowledgeRelation, KnowledgeRelationType, KnowledgeRevision,
+    KnowledgeSource, KnowledgeType, assess_freshness,
 };
 use synveda_types::relaxation::CurrentRelaxation;
 use synveda_types::session::{ContextRun, Session};
 use synveda_types::{
     ArtifactFamily, ArtifactReference, CaptureCandidateId, ContextCandidate, ContextCandidateId,
-    ContextCompletionStatus, ContextFeedback, ContextFeedbackId, ContextRunId, ContextSelection,
-    ContextSelectionId, Error, KnowledgeItemId, KnowledgeRevisionId, PolicyAssignment, ProjectId,
-    Result, ScopeId, Sensitivity, SessionId, TenantId,
+    ContextCompletionStatus, ContextFeedback, ContextFeedbackId, ContextGraphStep, ContextRunId,
+    ContextSelection, ContextSelectionId, Error, KnowledgeItemId, KnowledgeRelationId,
+    KnowledgeRevisionId, PolicyAssignment, ProjectId, Result, ScopeId, Sensitivity, SessionId,
+    TenantId,
 };
 use utoipa::ToSchema;
 
@@ -84,8 +91,11 @@ const PLANNER_CANDIDATE_LIMIT: i64 = 96;
 const TRACE_LIFECYCLE_LIMIT: i64 = 16;
 const UNREVIEWED_CANDIDATE_LIMIT: usize = 24;
 const MAX_QUERY_CHARS: usize = 4_096;
-const RETRIEVAL_VERSION: &str = "knowledge-planner-v1";
+const RETRIEVAL_VERSION: &str = "knowledge-planner-v2";
 const INDEX_VERSION: &str = "knowledge-search-v1";
+const GRAPH_VERSION: &str = "knowledge-relations-v1";
+const MAX_GRAPH_ANCHORS: usize = 10;
+const GRAPH_HOP_PENALTY_MICROS: i32 = 100_000;
 
 /// Integer score components retained for an authorised candidate.
 #[derive(Debug, Clone, Serialize, ToSchema)]
@@ -94,6 +104,12 @@ pub struct ContextScoreView {
     pub keyword_micros: i32,
     /// Semantic contribution, per million.
     pub semantic_micros: i32,
+    /// Ordinary authorised anchor contribution, per million.
+    pub anchor_micros: i32,
+    /// Sum of visible relationship weights on the best path.
+    pub edge_weight_micros: i32,
+    /// Hop penalty subtracted from the path score.
+    pub hop_penalty_micros: i32,
     /// Freshness contribution, per million.
     pub freshness_micros: i32,
     /// Explicit-pin contribution, per million.
@@ -102,6 +118,75 @@ pub struct ContextScoreView {
     pub current_state_micros: i32,
     /// Final deterministic score, per million.
     pub final_micros: i32,
+}
+
+/// One visible step of a candidate's best bounded relationship path.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct ContextGraphStepView {
+    /// Zero-based order within the retained path.
+    pub ordinal: i32,
+    /// One-based hop number.
+    pub hop: u8,
+    /// Exact immutable relation, absent in hashes-only mode.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>, format = "uuid")]
+    pub relation_id: Option<KnowledgeRelationId>,
+    /// Content-free evidence hash.
+    pub relation_hash: String,
+    /// Stable Knowledge relation vocabulary.
+    pub relation_type: String,
+    /// `outbound` or `inbound` relative to traversal.
+    pub direction: String,
+    /// Exact starting item, absent in hashes-only mode.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>, format = "uuid")]
+    pub from_item_id: Option<KnowledgeItemId>,
+    /// Exact starting revision, absent in hashes-only mode.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>, format = "uuid")]
+    pub from_revision_id: Option<KnowledgeRevisionId>,
+    /// Exact reached item, absent in hashes-only mode.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>, format = "uuid")]
+    pub to_item_id: Option<KnowledgeItemId>,
+    /// Exact reached revision, absent in hashes-only mode.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>, format = "uuid")]
+    pub to_revision_id: Option<KnowledgeRevisionId>,
+    /// Revision that asserted the relation, absent in hashes-only mode.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>, format = "uuid")]
+    pub asserting_revision_id: Option<KnowledgeRevisionId>,
+    /// Starting revision digest.
+    pub from_content_hash: String,
+    /// Reached revision digest.
+    pub to_content_hash: String,
+    /// Score contribution; zero for a contradiction warning.
+    pub edge_weight_micros: i32,
+    /// False only for a visible contradiction warning.
+    pub supporting: bool,
+}
+
+impl From<ContextGraphStep> for ContextGraphStepView {
+    fn from(value: ContextGraphStep) -> Self {
+        Self {
+            ordinal: value.ordinal,
+            hop: value.hop,
+            relation_id: value.relation_id,
+            relation_hash: value.relation_hash,
+            relation_type: value.relation_type.as_str().to_owned(),
+            direction: value.direction.as_str().to_owned(),
+            from_item_id: value.from_item_id,
+            from_revision_id: value.from_revision_id,
+            to_item_id: value.to_item_id,
+            to_revision_id: value.to_revision_id,
+            asserting_revision_id: value.asserting_revision_id,
+            from_content_hash: value.from_content_hash,
+            to_content_hash: value.to_content_hash,
+            edge_weight_micros: value.edge_weight_micros,
+            supporting: value.supporting,
+        }
+    }
 }
 
 /// One retained, freshly re-authorised planner candidate.
@@ -139,6 +224,10 @@ pub struct ContextCandidateView {
     /// Full-mode score detail.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub scores: Option<ContextScoreView>,
+    /// Best visible relationship path. Empty means this is an ordinary
+    /// lexical/vector/pinned anchor.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub graph_path: Vec<ContextGraphStepView>,
     /// Exact immutable content, full mode only and freshly authorised.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub revision: Option<KnowledgeRevisionView>,
@@ -157,6 +246,9 @@ pub struct ContextSelectionView {
     /// Selection id.
     #[schema(value_type = String, format = "uuid")]
     pub id: ContextSelectionId,
+    /// Exact retained candidate selected by the planner.
+    #[schema(value_type = String, format = "uuid")]
+    pub context_candidate_id: ContextCandidateId,
     /// One-based delivery rank.
     pub rank: i32,
     /// `current_knowledge` or the visibly unreviewed candidate channel.
@@ -179,6 +271,9 @@ pub struct ContextSelectionView {
     pub token_count: i32,
     /// Why it was selected.
     pub reason_codes: Vec<String>,
+    /// Best visible relationship path inherited from the selected candidate.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub graph_path: Vec<ContextGraphStepView>,
     /// Exact immutable content, full mode only and freshly authorised.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub revision: Option<KnowledgeRevisionView>,
@@ -656,6 +751,9 @@ struct PlannedCandidate {
     sources: Vec<KnowledgeSource>,
     keyword_micros: i32,
     semantic_micros: i32,
+    anchor_micros: i32,
+    edge_weight_micros: i32,
+    hop_penalty_micros: i32,
     freshness_micros: i32,
     pin_micros: i32,
     current_state_micros: i32,
@@ -664,6 +762,52 @@ struct PlannedCandidate {
     exclusion: Option<ContextReasonCode>,
     authorization: Value,
     selected_tokens: Option<i32>,
+    graph_path: Vec<PlannedGraphStep>,
+}
+
+#[derive(Debug, Clone)]
+struct PlannedGraphStep {
+    relation_id: KnowledgeRelationId,
+    relation_hash: String,
+    relation_type: KnowledgeRelationType,
+    direction: ContextGraphDirection,
+    from_item_id: KnowledgeItemId,
+    from_revision_id: KnowledgeRevisionId,
+    to_item_id: KnowledgeItemId,
+    to_revision_id: KnowledgeRevisionId,
+    asserting_revision_id: KnowledgeRevisionId,
+    from_content_hash: String,
+    to_content_hash: String,
+    edge_weight_micros: i32,
+    supporting: bool,
+}
+
+#[derive(Clone)]
+struct GraphFrontier {
+    snapshot: KnowledgeSnapshot,
+    anchor_micros: i32,
+    edge_weight_micros: i32,
+    path_rank_micros: i32,
+    path: Vec<PlannedGraphStep>,
+    visited: Vec<KnowledgeItemId>,
+}
+
+struct ExpandedCandidate {
+    snapshot: KnowledgeSnapshot,
+    anchor_micros: i32,
+    edge_weight_micros: i32,
+    hop_penalty_micros: i32,
+    final_micros: i32,
+    path: Vec<PlannedGraphStep>,
+    exclusion: Option<ContextReasonCode>,
+}
+
+#[derive(Default)]
+struct GraphExpansion {
+    candidates: Vec<ExpandedCandidate>,
+    warnings: HashMap<KnowledgeItemId, Vec<PlannedGraphStep>>,
+    policy_exclusion: bool,
+    degraded: Vec<String>,
 }
 
 impl PlannedCandidate {
@@ -1032,7 +1176,7 @@ fn planned_score(
     principal_id: &str,
     project_id: Option<ProjectId>,
     at: DateTime<Utc>,
-) -> (i32, i32, i32, Vec<ContextReasonCode>) {
+) -> (i32, i32, i32, i32, Vec<ContextReasonCode>) {
     let mut reasons = Vec::new();
     if seed.keyword_micros > 0 {
         reasons.push(ContextReasonCode::KeywordMatch);
@@ -1074,18 +1218,20 @@ fn planned_score(
         reasons.push(ContextReasonCode::PersonalPreference);
     }
     let current = 100_000;
-    let final_score = seed
+    let anchor_score = seed
         .keyword_micros
         .saturating_add(seed.semantic_micros)
-        .saturating_add(freshness)
         .saturating_add(pin)
         .saturating_add(type_boost)
+        .min(5_000_000);
+    let final_score = anchor_score
+        .saturating_add(freshness)
         .saturating_add(current)
         .min(5_000_000);
     if reasons.is_empty() {
         reasons.push(ContextReasonCode::FreshnessBoost);
     }
-    (freshness, pin, final_score, reasons)
+    (freshness, pin, anchor_score, final_score, reasons)
 }
 
 fn unreviewed_score(
@@ -1267,7 +1413,7 @@ async fn collect_planned_candidates(
                 }
                 Err(error) => return Err(error),
             };
-        let (freshness, pin, final_score, mut reasons) = planned_score(
+        let (freshness, pin, anchor, final_score, mut reasons) = planned_score(
             &snapshot,
             seed,
             principal_id,
@@ -1289,6 +1435,9 @@ async fn collect_planned_candidates(
             sources: Vec::new(),
             keyword_micros: seed.keyword_micros,
             semantic_micros: seed.semantic_micros,
+            anchor_micros: anchor,
+            edge_weight_micros: 0,
+            hop_penalty_micros: 0,
             freshness_micros: freshness,
             pin_micros: pin,
             current_state_micros: if exclusion.is_none() { 100_000 } else { 0 },
@@ -1297,6 +1446,7 @@ async fn collect_planned_candidates(
             exclusion,
             authorization,
             selected_tokens: None,
+            graph_path: Vec::new(),
         });
     }
 
@@ -1346,6 +1496,9 @@ async fn collect_planned_candidates(
                 sources: Vec::new(),
                 keyword_micros: keyword,
                 semantic_micros: 0,
+                anchor_micros: keyword,
+                edge_weight_micros: 0,
+                hop_penalty_micros: 0,
                 freshness_micros: freshness,
                 pin_micros: 0,
                 current_state_micros: 0,
@@ -1354,10 +1507,26 @@ async fn collect_planned_candidates(
                 exclusion,
                 authorization,
                 selected_tokens: None,
+                graph_path: Vec::new(),
             });
         }
     }
 
+    rank_and_deduplicate(&mut planned);
+    metrics::counter!(CONTEXT_CANDIDATES_TOTAL, "outcome" => "visible")
+        .increment(planned.len() as u64);
+    Ok((planned, denied))
+}
+
+fn rank_and_deduplicate(planned: &mut [PlannedCandidate]) {
+    for candidate in planned.iter_mut() {
+        if candidate.exclusion == Some(ContextReasonCode::Duplicate) {
+            candidate.exclusion = None;
+            candidate
+                .reasons
+                .retain(|reason| *reason != ContextReasonCode::Duplicate);
+        }
+    }
     planned.sort_by(|left, right| {
         left.exclusion
             .is_some()
@@ -1371,7 +1540,7 @@ async fn collect_planned_candidates(
     // One semantic fact appears once. The lower-ranked duplicate remains a
     // visible, explainable candidate but cannot consume context twice.
     let mut content = HashSet::new();
-    for candidate in &mut planned {
+    for candidate in planned.iter_mut() {
         if candidate.exclusion.is_none() && !content.insert(candidate.content_hash().to_owned()) {
             candidate.exclusion = Some(ContextReasonCode::Duplicate);
             if !candidate.reasons.contains(&ContextReasonCode::Duplicate) {
@@ -1379,9 +1548,479 @@ async fn collect_planned_candidates(
             }
         }
     }
-    metrics::counter!(CONTEXT_CANDIDATES_TOTAL, "outcome" => "visible")
-        .increment(planned.len() as u64);
-    Ok((planned, denied))
+}
+
+fn push_degradation(values: &mut Vec<String>, value: &str) {
+    if !values.iter().any(|held| held == value) {
+        values.push(value.to_owned());
+    }
+}
+
+fn graph_edge_weight(relation_type: KnowledgeRelationType) -> Option<i32> {
+    match relation_type {
+        KnowledgeRelationType::Supports => Some(700_000),
+        KnowledgeRelationType::References => Some(600_000),
+        KnowledgeRelationType::DerivedFrom => Some(650_000),
+        KnowledgeRelationType::Supersedes | KnowledgeRelationType::TransitionsTo => Some(500_000),
+        KnowledgeRelationType::RelatedTo => Some(350_000),
+        KnowledgeRelationType::Contradicts => Some(0),
+        KnowledgeRelationType::Duplicates => None,
+    }
+}
+
+fn graph_step(
+    relation: &KnowledgeRelation,
+    from: &KnowledgeSnapshot,
+    to: &KnowledgeSnapshot,
+) -> PlannedGraphStep {
+    let direction = if relation.source_item_id == from.item.id {
+        ContextGraphDirection::Outbound
+    } else {
+        ContextGraphDirection::Inbound
+    };
+    let edge_weight_micros = graph_edge_weight(relation.relation_type).unwrap_or(0);
+    let relation_hash = blake3::hash(
+        format!(
+            "{}|{}|{}|{}|{}|{}|{}|{}",
+            relation.id,
+            relation.relation_type,
+            direction,
+            from.revision.id,
+            from.revision.content_hash,
+            to.revision.id,
+            to.revision.content_hash,
+            relation.asserting_revision_id,
+        )
+        .as_bytes(),
+    )
+    .to_hex()
+    .to_string();
+    PlannedGraphStep {
+        relation_id: relation.id,
+        relation_hash,
+        relation_type: relation.relation_type,
+        direction,
+        from_item_id: from.item.id,
+        from_revision_id: from.revision.id,
+        to_item_id: to.item.id,
+        to_revision_id: to.revision.id,
+        asserting_revision_id: relation.asserting_revision_id,
+        from_content_hash: from.revision.content_hash.clone(),
+        to_content_hash: to.revision.content_hash.clone(),
+        edge_weight_micros,
+        supporting: relation.relation_type != KnowledgeRelationType::Contradicts,
+    }
+}
+
+fn graph_target(
+    relation: &KnowledgeRelation,
+    frontier: KnowledgeItemId,
+) -> Option<KnowledgeItemId> {
+    if relation.source_item_id == frontier {
+        Some(relation.target_item_id)
+    } else if relation.target_item_id == frontier {
+        Some(relation.source_item_id)
+    } else {
+        None
+    }
+}
+
+fn graph_candidate_tokens(snapshot: &KnowledgeSnapshot) -> u32 {
+    estimated_tokens(&format!(
+        "{}\n{}\n{}",
+        snapshot.revision.content.title,
+        snapshot.revision.content.summary,
+        snapshot.revision.content.body_markdown,
+    ))
+}
+
+async fn graph_expansion_inner(
+    state: &AppState,
+    tenant_id: TenantId,
+    anchors: Vec<GraphFrontier>,
+    configuration: &GraphRetrievalConfiguration,
+    max_sensitivity: Option<Sensitivity>,
+    at: DateTime<Utc>,
+) -> Result<GraphExpansion> {
+    let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
+    let mut expansion = GraphExpansion::default();
+    let mut queue: VecDeque<GraphFrontier> = anchors.into();
+    let mut best: HashMap<KnowledgeItemId, i32> = queue
+        .iter()
+        .map(|anchor| (anchor.snapshot.item.id, i32::MAX))
+        .collect();
+    let mut expanded_index: HashMap<KnowledgeItemId, usize> = HashMap::new();
+    let mut expanded_tokens = 0_u32;
+
+    'frontier: while let Some(frontier) = queue.pop_front() {
+        if !frontier.path.is_empty()
+            && best.get(&frontier.snapshot.item.id).copied() != Some(frontier.path_rank_micros)
+        {
+            continue;
+        }
+        match crate::knowledge_api::authorize_snapshot(
+            state,
+            &mut tx,
+            tenant_id,
+            &frontier.snapshot,
+        )
+        .await
+        {
+            Ok(_) => {}
+            Err(Error::PolicyDenied { .. } | Error::NotFound { .. }) => {
+                expansion.policy_exclusion = true;
+                continue;
+            }
+            Err(error) => return Err(error),
+        }
+        let limit = i64::from(configuration.fan_out_per_node).saturating_add(1);
+        let mut relations = knowledge::bounded_retrieval_relations(
+            &mut *tx,
+            tenant_id,
+            frontier.snapshot.item.id,
+            limit,
+        )
+        .await?;
+        if relations.len() > usize::try_from(configuration.fan_out_per_node).unwrap_or(usize::MAX) {
+            relations
+                .truncate(usize::try_from(configuration.fan_out_per_node).unwrap_or(usize::MAX));
+            push_degradation(&mut expansion.degraded, "graph_fanout_truncated");
+        }
+
+        for relation in relations {
+            let Some(target_id) = graph_target(&relation, frontier.snapshot.item.id) else {
+                continue;
+            };
+            if frontier.visited.contains(&target_id) {
+                continue;
+            }
+            let Some(target) = knowledge::current(&mut *tx, tenant_id, target_id).await? else {
+                continue;
+            };
+            if max_sensitivity.is_some_and(|ceiling| target.revision.content.sensitivity > ceiling)
+            {
+                continue;
+            }
+            match crate::knowledge_api::authorize_snapshot(state, &mut tx, tenant_id, &target).await
+            {
+                Ok(_) => {}
+                Err(Error::PolicyDenied { .. } | Error::NotFound { .. }) => {
+                    expansion.policy_exclusion = true;
+                    continue;
+                }
+                Err(error) => return Err(error),
+            }
+            let step = graph_step(&relation, &frontier.snapshot, &target);
+            if !step.supporting {
+                if frontier.path.is_empty() {
+                    expansion
+                        .warnings
+                        .entry(frontier.snapshot.item.id)
+                        .or_default()
+                        .push(step);
+                }
+                continue;
+            }
+            if matches!(
+                target.item.lifecycle_state,
+                KnowledgeLifecycleState::Transitional
+                    | KnowledgeLifecycleState::Archived
+                    | KnowledgeLifecycleState::ErasurePending
+                    | KnowledgeLifecycleState::Erased
+            ) {
+                continue;
+            }
+
+            let hop = frontier.path.len().saturating_add(1);
+            let hop_penalty = i32::try_from(hop)
+                .unwrap_or(i32::MAX)
+                .saturating_mul(GRAPH_HOP_PENALTY_MICROS);
+            let edge_weight = frontier
+                .edge_weight_micros
+                .saturating_add(step.edge_weight_micros)
+                .min(2_000_000);
+            let freshness = freshness_micros(&target, at);
+            let mut exclusion = match target.item.lifecycle_state {
+                KnowledgeLifecycleState::Stale => Some(ContextReasonCode::Stale),
+                KnowledgeLifecycleState::Superseded => Some(ContextReasonCode::Superseded),
+                _ => None,
+            };
+            if exclusion.is_none() && stale_at(&mut tx, tenant_id, &target, at).await? {
+                exclusion = Some(ContextReasonCode::Stale);
+            }
+            let current = if exclusion.is_none() { 100_000 } else { 0 };
+            let final_micros = frontier
+                .anchor_micros
+                .saturating_add(edge_weight)
+                .saturating_sub(hop_penalty)
+                .saturating_add(freshness)
+                .saturating_add(current)
+                .clamp(0, 5_000_000);
+            if best
+                .get(&target_id)
+                .is_some_and(|held| *held >= final_micros)
+            {
+                continue;
+            }
+
+            let mut path = frontier.path.clone();
+            path.push(step);
+            let candidate = ExpandedCandidate {
+                snapshot: target.clone(),
+                anchor_micros: frontier.anchor_micros,
+                edge_weight_micros: edge_weight,
+                hop_penalty_micros: hop_penalty,
+                final_micros,
+                path: path.clone(),
+                exclusion,
+            };
+            if let Some(index) = expanded_index.get(&target_id).copied() {
+                expansion.candidates[index] = candidate;
+            } else {
+                if expansion.candidates.len()
+                    >= usize::try_from(configuration.max_expanded_candidates).unwrap_or(usize::MAX)
+                {
+                    push_degradation(&mut expansion.degraded, "graph_candidate_budget_exceeded");
+                    break 'frontier;
+                }
+                let tokens = graph_candidate_tokens(&target);
+                if expanded_tokens.saturating_add(tokens) > configuration.token_budget {
+                    push_degradation(&mut expansion.degraded, "graph_token_budget_exceeded");
+                    continue;
+                }
+                expanded_tokens = expanded_tokens.saturating_add(tokens);
+                expanded_index.insert(target_id, expansion.candidates.len());
+                expansion.candidates.push(candidate);
+            }
+            best.insert(target_id, final_micros);
+            if exclusion.is_none() && hop < usize::from(configuration.max_hops) {
+                let mut visited = frontier.visited.clone();
+                visited.push(target_id);
+                queue.push_back(GraphFrontier {
+                    snapshot: target,
+                    anchor_micros: frontier.anchor_micros,
+                    edge_weight_micros: edge_weight,
+                    path_rank_micros: final_micros,
+                    path,
+                    visited,
+                });
+            }
+        }
+    }
+    commit(tx).await?;
+    Ok(expansion)
+}
+
+async fn expand_graph_with_fallback(
+    state: &AppState,
+    tenant_id: TenantId,
+    candidates: &[PlannedCandidate],
+    configuration: &GraphRetrievalConfiguration,
+    max_sensitivity: Option<Sensitivity>,
+    at: DateTime<Utc>,
+) -> Result<(GraphExpansion, bool)> {
+    if !configuration.enabled {
+        return Ok((GraphExpansion::default(), false));
+    }
+    let anchors = candidates
+        .iter()
+        .filter(|candidate| candidate.exclusion.is_none())
+        .filter_map(|candidate| {
+            candidate
+                .knowledge()
+                .cloned()
+                .map(|snapshot| GraphFrontier {
+                    visited: vec![snapshot.item.id],
+                    snapshot,
+                    anchor_micros: candidate.anchor_micros,
+                    edge_weight_micros: 0,
+                    path_rank_micros: candidate.final_micros,
+                    path: Vec::new(),
+                })
+        })
+        .take(MAX_GRAPH_ANCHORS)
+        .collect();
+    let result = tokio::time::timeout(
+        Duration::from_millis(u64::from(configuration.time_budget_ms)),
+        graph_expansion_inner(
+            state,
+            tenant_id,
+            anchors,
+            configuration,
+            max_sensitivity,
+            at,
+        ),
+    )
+    .await;
+    match result {
+        Ok(Ok(expansion)) => Ok((expansion, true)),
+        Ok(Err(Error::Storage { .. })) => {
+            let mut expansion = GraphExpansion::default();
+            push_degradation(&mut expansion.degraded, "graph_unavailable");
+            Ok((expansion, true))
+        }
+        Ok(Err(error)) => Err(error),
+        Err(_) => {
+            let mut expansion = GraphExpansion::default();
+            push_degradation(&mut expansion.degraded, "graph_time_budget_exceeded");
+            Ok((expansion, true))
+        }
+    }
+}
+
+async fn graph_step_is_visible(
+    state: &AppState,
+    tx: &mut sqlx::PgConnection,
+    tenant_id: TenantId,
+    step: &PlannedGraphStep,
+) -> Result<bool> {
+    let Some(relation) = knowledge::relation(&mut *tx, tenant_id, step.relation_id).await? else {
+        return Ok(false);
+    };
+    if relation.relation_type != step.relation_type
+        || relation.asserting_revision_id != step.asserting_revision_id
+    {
+        return Ok(false);
+    }
+    let asserting_item = if relation.source_item_id == step.from_item_id {
+        step.from_item_id
+    } else if relation.source_item_id == step.to_item_id {
+        step.to_item_id
+    } else {
+        return Ok(false);
+    };
+    for (item_id, revision_id) in [
+        (step.from_item_id, step.from_revision_id),
+        (step.to_item_id, step.to_revision_id),
+    ] {
+        let Some(current) = knowledge::current(&mut *tx, tenant_id, item_id).await? else {
+            return Ok(false);
+        };
+        if current.revision.id != revision_id {
+            return Ok(false);
+        }
+    }
+    for (item_id, revision_id) in [
+        (step.from_item_id, step.from_revision_id),
+        (step.to_item_id, step.to_revision_id),
+        (asserting_item, step.asserting_revision_id),
+    ] {
+        if load_visible_revision(state, tx, tenant_id, item_id, revision_id, false)
+            .await?
+            .is_none()
+        {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+async fn merge_graph_expansion(
+    state: &AppState,
+    tx: &mut sqlx::PgConnection,
+    tenant_id: TenantId,
+    candidates: &mut Vec<PlannedCandidate>,
+    expansion: GraphExpansion,
+    at: DateTime<Utc>,
+) -> Result<bool> {
+    let mut policy_exclusion = expansion.policy_exclusion;
+    for candidate in candidates.iter_mut() {
+        let Some(item_id) = candidate.item_id() else {
+            continue;
+        };
+        let Some(warnings) = expansion.warnings.get(&item_id) else {
+            continue;
+        };
+        for warning in warnings {
+            if graph_step_is_visible(state, tx, tenant_id, warning).await? {
+                if candidate.graph_path.is_empty() {
+                    candidate.graph_path.push(warning.clone());
+                }
+                if !candidate
+                    .reasons
+                    .contains(&ContextReasonCode::ContradictionWarning)
+                {
+                    candidate
+                        .reasons
+                        .push(ContextReasonCode::ContradictionWarning);
+                }
+            } else {
+                policy_exclusion = true;
+            }
+        }
+    }
+
+    let existing: HashSet<KnowledgeItemId> = candidates
+        .iter()
+        .filter_map(PlannedCandidate::item_id)
+        .collect();
+    for expanded in expansion.candidates {
+        if existing.contains(&expanded.snapshot.item.id) {
+            continue;
+        }
+        let Some(current) =
+            knowledge::current(&mut *tx, tenant_id, expanded.snapshot.item.id).await?
+        else {
+            continue;
+        };
+        if current.revision.id != expanded.snapshot.revision.id {
+            continue;
+        }
+        let authorization =
+            match crate::knowledge_api::authorize_snapshot(state, tx, tenant_id, &current).await {
+                Ok(allowed) => audit::decision_context(Action::KnowledgeRead, &allowed),
+                Err(Error::PolicyDenied { .. } | Error::NotFound { .. }) => {
+                    policy_exclusion = true;
+                    continue;
+                }
+                Err(error) => return Err(error),
+            };
+        let mut path_visible = true;
+        for step in &expanded.path {
+            if !graph_step_is_visible(state, tx, tenant_id, step).await? {
+                path_visible = false;
+                policy_exclusion = true;
+                break;
+            }
+        }
+        if !path_visible {
+            continue;
+        }
+        let freshness = freshness_micros(&current, at);
+        let current_score = if expanded.exclusion.is_none() {
+            100_000
+        } else {
+            0
+        };
+        let mut reasons = vec![ContextReasonCode::GraphExpansion];
+        if freshness > 0 {
+            reasons.push(ContextReasonCode::FreshnessBoost);
+        }
+        if let Some(reason) = expanded.exclusion {
+            reasons.push(reason);
+        }
+        candidates.push(PlannedCandidate {
+            id: ContextCandidateId::new(),
+            payload: PlannedPayload::Knowledge(current),
+            sources: Vec::new(),
+            keyword_micros: 0,
+            semantic_micros: 0,
+            anchor_micros: expanded.anchor_micros,
+            edge_weight_micros: expanded.edge_weight_micros,
+            hop_penalty_micros: expanded.hop_penalty_micros,
+            freshness_micros: freshness,
+            pin_micros: 0,
+            current_state_micros: current_score,
+            final_micros: expanded.final_micros,
+            reasons,
+            exclusion: expanded.exclusion,
+            authorization,
+            selected_tokens: None,
+            graph_path: expanded.path,
+        });
+    }
+    rank_and_deduplicate(candidates);
+    Ok(policy_exclusion)
 }
 
 async fn stale_at(
@@ -1604,6 +2243,9 @@ async fn persist_trace(
                 lifecycle_state: addresses.lifecycle_state,
                 keyword_score_micros: retained_score(candidate.keyword_micros),
                 semantic_score_micros: retained_score(candidate.semantic_micros),
+                anchor_score_micros: retained_score(candidate.anchor_micros),
+                edge_weight_micros: retained_score(candidate.edge_weight_micros),
+                hop_penalty_micros: retained_score(candidate.hop_penalty_micros),
                 freshness_score_micros: retained_score(candidate.freshness_micros),
                 pin_score_micros: retained_score(candidate.pin_micros),
                 current_state_score_micros: retained_score(candidate.current_state_micros),
@@ -1613,6 +2255,36 @@ async fn persist_trace(
             },
         )
         .await?;
+        for (step_ordinal, step) in candidate.graph_path.iter().enumerate() {
+            let exact = matches!(
+                mode,
+                TraceRetentionMode::Full | TraceRetentionMode::Redacted
+            );
+            store::insert_graph_step(
+                tx,
+                tenant_id,
+                &NewContextGraphStep {
+                    context_run_id: run_id,
+                    context_candidate_id: candidate.id,
+                    ordinal: i32::try_from(step_ordinal).unwrap_or(i32::MAX),
+                    hop: u8::try_from(step_ordinal.saturating_add(1)).unwrap_or(u8::MAX),
+                    relation_id: exact.then_some(step.relation_id),
+                    relation_hash: step.relation_hash.clone(),
+                    relation_type: step.relation_type,
+                    direction: step.direction,
+                    from_item_id: exact.then_some(step.from_item_id),
+                    from_revision_id: exact.then_some(step.from_revision_id),
+                    to_item_id: exact.then_some(step.to_item_id),
+                    to_revision_id: exact.then_some(step.to_revision_id),
+                    asserting_revision_id: exact.then_some(step.asserting_revision_id),
+                    from_content_hash: step.from_content_hash.clone(),
+                    to_content_hash: step.to_content_hash.clone(),
+                    edge_weight_micros: step.edge_weight_micros,
+                    supporting: step.supporting,
+                },
+            )
+            .await?;
+        }
         let Some(tokens) = candidate.selected_tokens else {
             continue;
         };
@@ -1623,6 +2295,7 @@ async fn persist_trace(
             &NewContextSelection {
                 id: ContextSelectionId::new(),
                 context_run_id: run_id,
+                context_candidate_id: candidate.id,
                 rank,
                 channel: addresses.channel,
                 knowledge_item_id: addresses.knowledge_item_id,
@@ -1787,7 +2460,7 @@ async fn plan_context_run(
     let semantic = vector
         .as_deref()
         .map(|value| (state.embedder.model(), value));
-    let (mut candidates, policy_exclusion) = collect_planned_candidates(
+    let (mut candidates, mut policy_exclusion) = collect_planned_candidates(
         state,
         &mut tx,
         tenant_id,
@@ -1801,6 +2474,28 @@ async fn plan_context_run(
         },
     )
     .await?;
+    let graph_started = std::time::Instant::now();
+    let (graph_expansion, graph_attempted) = expand_graph_with_fallback(
+        state,
+        tenant_id,
+        &candidates,
+        &prepared.configuration.document.context.graph,
+        body.max_sensitivity,
+        at,
+    )
+    .await?;
+    let graph_degradation = graph_expansion.degraded.clone();
+    policy_exclusion |= merge_graph_expansion(
+        state,
+        &mut tx,
+        tenant_id,
+        &mut candidates,
+        graph_expansion,
+        at,
+    )
+    .await?;
+    metrics::histogram!(CONTEXT_PLANNER_STAGE_SECONDS, "stage" => "graph_expand")
+        .record(graph_started.elapsed().as_secs_f64());
     if vector.is_some()
         && candidates
             .iter()
@@ -1870,6 +2565,9 @@ async fn plan_context_run(
             .to_owned(),
         );
     }
+    for reason in graph_degradation {
+        push_degradation(&mut degraded, &reason);
+    }
     let run = sessions::record_context_run(
         &mut tx,
         tenant_id,
@@ -1914,7 +2612,7 @@ async fn plan_context_run(
             retrieval_version: RETRIEVAL_VERSION.to_owned(),
             embedding_model,
             index_version: INDEX_VERSION.to_owned(),
-            graph_version: None,
+            graph_version: graph_attempted.then(|| GRAPH_VERSION.to_owned()),
             trace_retention: prepared.plan.trace_retention,
             completion_status: ContextCompletionStatus::Completed,
             policy_exclusion,
@@ -1943,6 +2641,20 @@ async fn plan_context_run(
                     "content_hash": candidate.content_hash(),
                     "reason_codes": reason_names(&candidate.reasons),
                     "exclusion_reason": candidate.exclusion.map(ContextReasonCode::as_str),
+                    "anchor_score_micros": candidate.anchor_micros,
+                    "edge_weight_micros": candidate.edge_weight_micros,
+                    "hop_penalty_micros": candidate.hop_penalty_micros,
+                    "graph_path": candidate.graph_path.iter().map(|step| json!({
+                        "relation_id": step.relation_id,
+                        "relation_hash": step.relation_hash,
+                        "relation_type": step.relation_type,
+                        "direction": step.direction,
+                        "from_revision_id": step.from_revision_id,
+                        "to_revision_id": step.to_revision_id,
+                        "asserting_revision_id": step.asserting_revision_id,
+                        "edge_weight_micros": step.edge_weight_micros,
+                        "supporting": step.supporting,
+                    })).collect::<Vec<_>>(),
                     "authz": &candidate.authorization,
                 })
             })
@@ -1955,6 +2667,15 @@ async fn plan_context_run(
                     "content_hash": candidate.content_hash(),
                     "reason_codes": reason_names(&candidate.reasons),
                     "exclusion_reason": candidate.exclusion.map(ContextReasonCode::as_str),
+                    "graph_path_hashes": candidate.graph_path.iter().map(|step| json!({
+                        "relation_hash": step.relation_hash,
+                        "relation_type": step.relation_type,
+                        "direction": step.direction,
+                        "from_content_hash": step.from_content_hash,
+                        "to_content_hash": step.to_content_hash,
+                        "edge_weight_micros": step.edge_weight_micros,
+                        "supporting": step.supporting,
+                    })).collect::<Vec<_>>(),
                 })
             })
             .collect::<Vec<_>>(),
@@ -2069,6 +2790,8 @@ async fn plan_context_run(
             "retrieval_version": RETRIEVAL_VERSION,
             "embedding_model": run.embedding_model,
             "index_version": INDEX_VERSION,
+            "graph_version": run.graph_version,
+            "graph_bounds": prepared.configuration.document.context.graph,
             "trace_retention_mode": prepared.plan.trace_retention,
             "configuration_version_id": prepared.configuration.version_id,
             "configuration_hash": prepared.configuration.content_hash,
@@ -2137,7 +2860,7 @@ async fn plan_context_run(
             "degraded": run.degraded,
             "retrieval_version": RETRIEVAL_VERSION,
             "index_version": INDEX_VERSION,
-            "graph_version": Value::Null,
+            "graph_version": run.graph_version,
             "idempotency_key": claim.key,
         }),
     )
@@ -2185,6 +2908,9 @@ fn score_view(candidate: &ContextCandidate) -> ContextScoreView {
     ContextScoreView {
         keyword_micros: candidate.keyword_score_micros,
         semantic_micros: candidate.semantic_score_micros,
+        anchor_micros: candidate.anchor_score_micros,
+        edge_weight_micros: candidate.edge_weight_micros,
+        hop_penalty_micros: candidate.hop_penalty_micros,
         freshness_micros: candidate.freshness_score_micros,
         pin_micros: candidate.pin_score_micros,
         current_state_micros: candidate.current_state_score_micros,
@@ -2219,6 +2945,71 @@ async fn load_visible_capture_candidate(
     Ok(Some(candidate))
 }
 
+async fn stored_graph_path_view(
+    state: &AppState,
+    tx: &mut sqlx::PgConnection,
+    tenant_id: TenantId,
+    mode: TraceRetentionMode,
+    steps: Vec<ContextGraphStep>,
+) -> Result<(Option<Vec<ContextGraphStepView>>, bool)> {
+    if matches!(mode, TraceRetentionMode::Disabled) {
+        return Ok((Some(Vec::new()), false));
+    }
+    if mode == TraceRetentionMode::HashesOnly {
+        return Ok((Some(steps.into_iter().map(Into::into).collect()), false));
+    }
+    for step in &steps {
+        let (
+            Some(relation_id),
+            Some(from_item_id),
+            Some(from_revision_id),
+            Some(to_item_id),
+            Some(to_revision_id),
+            Some(asserting_revision_id),
+        ) = (
+            step.relation_id,
+            step.from_item_id,
+            step.from_revision_id,
+            step.to_item_id,
+            step.to_revision_id,
+            step.asserting_revision_id,
+        )
+        else {
+            return Err(Error::Internal {
+                message: "an addressed context graph path lost an exact address".to_owned(),
+            });
+        };
+        let Some(relation) = knowledge::relation(&mut *tx, tenant_id, relation_id).await? else {
+            return Ok((None, true));
+        };
+        if relation.relation_type != step.relation_type
+            || relation.asserting_revision_id != asserting_revision_id
+        {
+            return Ok((None, true));
+        }
+        let asserting_item = if relation.source_item_id == from_item_id {
+            from_item_id
+        } else if relation.source_item_id == to_item_id {
+            to_item_id
+        } else {
+            return Ok((None, true));
+        };
+        for (item_id, revision_id) in [
+            (from_item_id, from_revision_id),
+            (to_item_id, to_revision_id),
+            (asserting_item, asserting_revision_id),
+        ] {
+            if load_visible_revision(state, tx, tenant_id, item_id, revision_id, false)
+                .await?
+                .is_none()
+            {
+                return Ok((None, true));
+            }
+        }
+    }
+    Ok((Some(steps.into_iter().map(Into::into).collect()), false))
+}
+
 async fn candidate_view(
     state: &AppState,
     tx: &mut sqlx::PgConnection,
@@ -2226,6 +3017,7 @@ async fn candidate_view(
     at: DateTime<Utc>,
     mode: TraceRetentionMode,
     candidate: ContextCandidate,
+    graph_path: Vec<ContextGraphStepView>,
 ) -> Result<(Option<ContextCandidateView>, bool)> {
     if mode == TraceRetentionMode::Disabled {
         return Ok((None, false));
@@ -2248,6 +3040,7 @@ async fn candidate_view(
             .map(ContextReasonCode::as_str)
             .map(str::to_owned),
         scores: (mode == TraceRetentionMode::Full).then(|| score_view(&candidate)),
+        graph_path,
         revision,
         sources,
         unreviewed_candidate,
@@ -2321,12 +3114,14 @@ async fn selection_view(
     at: DateTime<Utc>,
     mode: TraceRetentionMode,
     selection: ContextSelection,
+    graph_path: Vec<ContextGraphStepView>,
 ) -> Result<(Option<ContextSelectionView>, bool)> {
     if mode == TraceRetentionMode::Disabled {
         return Ok((None, false));
     }
     let base = |revision, sources, unreviewed_candidate| ContextSelectionView {
         id: selection.id,
+        context_candidate_id: selection.context_candidate_id,
         rank: selection.rank,
         channel: selection.channel.as_str().to_owned(),
         knowledge_item_id: selection.knowledge_item_id,
@@ -2335,6 +3130,7 @@ async fn selection_view(
         content_hash: selection.content_hash.clone(),
         token_count: selection.token_count,
         reason_codes: reason_names(&selection.reason_codes),
+        graph_path,
         revision,
         sources,
         unreviewed_candidate,
@@ -2429,42 +3225,62 @@ pub(crate) async fn timeline_selection_visibility(
     if run.trace_retention == TraceRetentionMode::HashesOnly {
         return Ok((retained.len(), policy_exclusion));
     }
+    let mut graph_steps: HashMap<ContextCandidateId, Vec<ContextGraphStep>> = HashMap::new();
+    for step in store::graph_steps_for_run(&mut *tx, tenant_id, run.id).await? {
+        graph_steps
+            .entry(step.context_candidate_id)
+            .or_default()
+            .push(step);
+    }
 
     let mut visible = 0usize;
     for selection in retained {
-        let allowed = match selection.channel {
-            ConfigurationContextChannel::CurrentKnowledge => {
-                let (Some(item_id), Some(revision_id)) =
-                    (selection.knowledge_item_id, selection.knowledge_revision_id)
-                else {
-                    return Err(Error::Internal {
-                        message: "an addressed Knowledge selection lost its revision address"
-                            .to_owned(),
-                    });
-                };
-                load_visible_revision(state, tx, tenant_id, item_id, revision_id, false)
+        let (path, filtered) = stored_graph_path_view(
+            state,
+            tx,
+            tenant_id,
+            run.trace_retention,
+            graph_steps
+                .get(&selection.context_candidate_id)
+                .cloned()
+                .unwrap_or_default(),
+        )
+        .await?;
+        policy_exclusion |= filtered;
+        let allowed = path.is_some()
+            && match selection.channel {
+                ConfigurationContextChannel::CurrentKnowledge => {
+                    let (Some(item_id), Some(revision_id)) =
+                        (selection.knowledge_item_id, selection.knowledge_revision_id)
+                    else {
+                        return Err(Error::Internal {
+                            message: "an addressed Knowledge selection lost its revision address"
+                                .to_owned(),
+                        });
+                    };
+                    load_visible_revision(state, tx, tenant_id, item_id, revision_id, false)
+                        .await?
+                        .is_some()
+                }
+                ConfigurationContextChannel::UnreviewedCandidates => {
+                    let Some(id) = selection.capture_candidate_id else {
+                        return Err(Error::Internal {
+                            message: "an addressed unreviewed selection lost its capture address"
+                                .to_owned(),
+                        });
+                    };
+                    load_visible_capture_candidate(
+                        state,
+                        tx,
+                        tenant_id,
+                        id,
+                        &selection.content_hash,
+                        false,
+                    )
                     .await?
                     .is_some()
-            }
-            ConfigurationContextChannel::UnreviewedCandidates => {
-                let Some(id) = selection.capture_candidate_id else {
-                    return Err(Error::Internal {
-                        message: "an addressed unreviewed selection lost its capture address"
-                            .to_owned(),
-                    });
-                };
-                load_visible_capture_candidate(
-                    state,
-                    tx,
-                    tenant_id,
-                    id,
-                    &selection.content_hash,
-                    false,
-                )
-                .await?
-                .is_some()
-            }
-        };
+                }
+            };
         if allowed {
             visible += 1;
         } else {
@@ -2494,22 +3310,58 @@ async fn detail_view(
             .is_some_and(|skills| !skills.is_empty());
     let retained_candidates = store::candidates_for_run(&mut *tx, tenant_id, run.id).await?;
     let retained_selections = store::selections_for_run(&mut *tx, tenant_id, run.id).await?;
+    let retained_graph_steps = store::graph_steps_for_run(&mut *tx, tenant_id, run.id).await?;
     let retained_feedback = store::feedback_for_run(&mut *tx, tenant_id, run.id).await?;
+    let mut graph_steps: HashMap<ContextCandidateId, Vec<ContextGraphStep>> = HashMap::new();
+    for step in retained_graph_steps {
+        graph_steps
+            .entry(step.context_candidate_id)
+            .or_default()
+            .push(step);
+    }
     let mut candidates = Vec::new();
     let mut selections = Vec::new();
     let mut policy_exclusion = run.policy_exclusion;
     let mut selection_policy_exclusion = false;
     for candidate in retained_candidates {
+        let (path, path_filtered) = stored_graph_path_view(
+            state,
+            tx,
+            tenant_id,
+            mode,
+            graph_steps.get(&candidate.id).cloned().unwrap_or_default(),
+        )
+        .await?;
+        policy_exclusion |= path_filtered;
+        let Some(path) = path else {
+            continue;
+        };
         let (view, filtered) =
-            candidate_view(state, tx, tenant_id, run.as_of, mode, candidate).await?;
+            candidate_view(state, tx, tenant_id, run.as_of, mode, candidate, path).await?;
         policy_exclusion |= filtered;
         if let Some(view) = view {
             candidates.push(view);
         }
     }
     for selection in retained_selections {
+        let (path, path_filtered) = stored_graph_path_view(
+            state,
+            tx,
+            tenant_id,
+            mode,
+            graph_steps
+                .get(&selection.context_candidate_id)
+                .cloned()
+                .unwrap_or_default(),
+        )
+        .await?;
+        policy_exclusion |= path_filtered;
+        selection_policy_exclusion |= path_filtered;
+        let Some(path) = path else {
+            continue;
+        };
         let (view, filtered) =
-            selection_view(state, tx, tenant_id, run.as_of, mode, selection).await?;
+            selection_view(state, tx, tenant_id, run.as_of, mode, selection, path).await?;
         policy_exclusion |= filtered;
         selection_policy_exclusion |= filtered;
         if let Some(view) = view {

@@ -14,10 +14,10 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::configuration::ConfigurationContextChannel;
-use crate::knowledge::KnowledgeLifecycleState;
+use crate::knowledge::{KnowledgeLifecycleState, KnowledgeRelationType};
 use crate::{
     CaptureCandidateId, ContextCandidateId, ContextFeedbackId, ContextRunId, ContextSelectionId,
-    Error, KnowledgeItemId, KnowledgeRevisionId, Result, ScopeId, TenantId,
+    Error, KnowledgeItemId, KnowledgeRelationId, KnowledgeRevisionId, Result, ScopeId, TenantId,
 };
 
 fn joined(values: impl Iterator<Item = &'static str>) -> String {
@@ -163,11 +163,15 @@ pub enum ContextReasonCode {
     TokenBudget,
     /// Another visible candidate had the same canonical content hash.
     Duplicate,
+    /// An authorised `KnowledgeRelation` path contributed to rank.
+    GraphExpansion,
+    /// A visible contradiction was retained as a warning, never support.
+    ContradictionWarning,
 }
 
 impl ContextReasonCode {
     /// Complete initial reason vocabulary.
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 13] = [
         Self::SemanticMatch,
         Self::KeywordMatch,
         Self::ProjectConvention,
@@ -179,6 +183,8 @@ impl ContextReasonCode {
         Self::OutsideTaskScope,
         Self::TokenBudget,
         Self::Duplicate,
+        Self::GraphExpansion,
+        Self::ContradictionWarning,
     ];
 
     /// Stable stored and wire name.
@@ -196,6 +202,8 @@ impl ContextReasonCode {
             Self::OutsideTaskScope => "outside_task_scope",
             Self::TokenBudget => "token_budget",
             Self::Duplicate => "duplicate",
+            Self::GraphExpansion => "graph_expansion",
+            Self::ContradictionWarning => "contradiction_warning",
         }
     }
 }
@@ -314,6 +322,12 @@ pub struct ContextCandidate {
     pub keyword_score_micros: i32,
     /// Integer semantic contribution, per million.
     pub semantic_score_micros: i32,
+    /// Score of the ordinary authorised anchor from which a graph path began.
+    pub anchor_score_micros: i32,
+    /// Sum of relationship contributions on the best retained path.
+    pub edge_weight_micros: i32,
+    /// Penalty applied for the path's hop count.
+    pub hop_penalty_micros: i32,
     /// Integer freshness contribution, per million.
     pub freshness_score_micros: i32,
     /// Integer explicit-pin contribution, per million.
@@ -339,6 +353,8 @@ pub struct ContextSelection {
     pub tenant_id: TenantId,
     /// Context run that selected it.
     pub context_run_id: ContextRunId,
+    /// Exact retained candidate whose budgeted selection this row records.
+    pub context_candidate_id: ContextCandidateId,
     /// One-based delivery rank.
     pub rank: i32,
     /// Governed content channel through which this row entered the plan.
@@ -356,6 +372,98 @@ pub struct ContextSelection {
     /// Visible selection reasons.
     pub reason_codes: Vec<ContextReasonCode>,
     /// Selection time.
+    pub created_at: DateTime<Utc>,
+}
+
+/// Direction in which an undirected bounded expansion traversed a stored
+/// directed Knowledge relation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ContextGraphDirection {
+    /// From the stored relation source to its target.
+    Outbound,
+    /// From the stored relation target to its source.
+    Inbound,
+}
+
+impl ContextGraphDirection {
+    /// Every stored direction.
+    pub const ALL: [Self; 2] = [Self::Outbound, Self::Inbound];
+
+    /// Stable storage/wire spelling.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Outbound => "outbound",
+            Self::Inbound => "inbound",
+        }
+    }
+}
+
+impl fmt::Display for ContextGraphDirection {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+impl FromStr for ContextGraphDirection {
+    type Err = Error;
+
+    fn from_str(value: &str) -> Result<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|direction| direction.as_str() == value)
+            .ok_or_else(|| Error::Invalid {
+                message: format!("unknown context graph direction: {value:?}"),
+            })
+    }
+}
+
+/// One append-only visible step of a candidate's best bounded graph path.
+///
+/// Exact addresses are absent in hashes-only mode. The hashes and relation
+/// vocabulary are sufficient for offline trace verification without leaking
+/// a Knowledge identifier.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ContextGraphStep {
+    /// Owning tenant.
+    pub tenant_id: TenantId,
+    /// Context run retaining the path.
+    pub context_run_id: ContextRunId,
+    /// Candidate reached by this complete path.
+    pub context_candidate_id: ContextCandidateId,
+    /// Zero-based step position in the path.
+    pub ordinal: i32,
+    /// One-based hop number.
+    pub hop: u8,
+    /// Exact relation, absent in hashes-only mode.
+    pub relation_id: Option<KnowledgeRelationId>,
+    /// Stable hash of the relation identity and endpoint revision hashes.
+    pub relation_hash: String,
+    /// Stored relation vocabulary.
+    pub relation_type: KnowledgeRelationType,
+    /// Traversal direction.
+    pub direction: ContextGraphDirection,
+    /// Exact starting item, absent in hashes-only mode.
+    pub from_item_id: Option<KnowledgeItemId>,
+    /// Exact starting revision, absent in hashes-only mode.
+    pub from_revision_id: Option<KnowledgeRevisionId>,
+    /// Exact reached item, absent in hashes-only mode.
+    pub to_item_id: Option<KnowledgeItemId>,
+    /// Exact reached revision, absent in hashes-only mode.
+    pub to_revision_id: Option<KnowledgeRevisionId>,
+    /// Exact source revision asserting the relation, absent in hashes-only
+    /// mode.
+    pub asserting_revision_id: Option<KnowledgeRevisionId>,
+    /// Content hash of the starting revision.
+    pub from_content_hash: String,
+    /// Content hash of the reached revision.
+    pub to_content_hash: String,
+    /// Relationship contribution in score micros; zero for warnings.
+    pub edge_weight_micros: i32,
+    /// Whether this step contributed supporting evidence.
+    pub supporting: bool,
+    /// Persistence time.
     pub created_at: DateTime<Utc>,
 }
 
@@ -405,6 +513,12 @@ mod tests {
             assert_eq!(
                 feedback.as_str().parse::<ContextFeedbackType>().unwrap(),
                 feedback
+            );
+        }
+        for direction in ContextGraphDirection::ALL {
+            assert_eq!(
+                direction.as_str().parse::<ContextGraphDirection>().unwrap(),
+                direction
             );
         }
     }

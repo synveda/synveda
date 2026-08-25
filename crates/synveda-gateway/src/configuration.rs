@@ -24,7 +24,7 @@ use synveda_types::configuration::{
     ConfigurationCommand, ConfigurationContextChannel, ConfigurationDocument,
     ConfigurationMutationOutcome, ConfigurationMutationResult, ConfigurationTemplate,
     ConfigurationVersion, EffectiveConfiguration, ExternalProvider, FreshnessConfiguration,
-    RelaxationConfiguration,
+    GraphRetrievalConfiguration, RelaxationConfiguration,
 };
 use synveda_types::json::canonicalise;
 use synveda_types::relaxation::RelaxationAction;
@@ -88,6 +88,19 @@ pub(crate) struct ContextConfigurationBody {
     pub channels: Vec<String>,
     #[schema(schema_with = trace_schema)]
     pub trace_retention: String,
+    pub graph: GraphRetrievalConfigurationBody,
+}
+
+/// Bounded anchor-first Knowledge relationship expansion.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct GraphRetrievalConfigurationBody {
+    pub enabled: bool,
+    pub max_hops: u8,
+    pub fan_out_per_node: u32,
+    pub max_expanded_candidates: u32,
+    pub time_budget_ms: u32,
+    pub token_budget: u32,
 }
 
 /// Type-aware implicit staleness intervals in days; zero disables the
@@ -162,6 +175,14 @@ impl TryFrom<ConfigurationDocumentBody> for ConfigurationDocument {
                     .map(|name| name.parse())
                     .collect::<Result<Vec<ConfigurationContextChannel>>>()?,
                 trace_retention: value.context.trace_retention.parse()?,
+                graph: GraphRetrievalConfiguration {
+                    enabled: value.context.graph.enabled,
+                    max_hops: value.context.graph.max_hops,
+                    fan_out_per_node: value.context.graph.fan_out_per_node,
+                    max_expanded_candidates: value.context.graph.max_expanded_candidates,
+                    time_budget_ms: value.context.graph.time_budget_ms,
+                    token_budget: value.context.graph.token_budget,
+                },
             },
             freshness: FreshnessConfiguration {
                 fact_days: value.freshness.fact_days,
@@ -219,6 +240,14 @@ impl From<ConfigurationDocument> for ConfigurationDocumentBody {
                     .map(|channel| channel.as_str().to_owned())
                     .collect(),
                 trace_retention: value.context.trace_retention.as_str().to_owned(),
+                graph: GraphRetrievalConfigurationBody {
+                    enabled: value.context.graph.enabled,
+                    max_hops: value.context.graph.max_hops,
+                    fan_out_per_node: value.context.graph.fan_out_per_node,
+                    max_expanded_candidates: value.context.graph.max_expanded_candidates,
+                    time_budget_ms: value.context.graph.time_budget_ms,
+                    token_budget: value.context.graph.token_budget,
+                },
             },
             freshness: FreshnessConfigurationBody {
                 fact_days: value.freshness.fact_days,

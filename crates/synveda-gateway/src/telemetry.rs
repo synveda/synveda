@@ -613,18 +613,6 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
         metrics::Unit::Seconds,
         "Recall stage latency by stage (plan/embed/search/admit)"
     );
-    // GRPH-1 metrics (ADR-0043): emitted in synveda-store's graph module —
-    // the traversal's own clock, against the slice ADR-0029's 300ms recall
-    // decomposition reserves for graph expansion.
-    metrics::describe_histogram!(
-        synveda_store::graph::GRAPH_EXPANSION_SECONDS,
-        metrics::Unit::Seconds,
-        "Graph expansion latency by graph (entity/episode/provenance) and depth (one/two)"
-    );
-    metrics::describe_counter!(
-        synveda_store::graph::GRAPH_EDGES_TOTAL,
-        "Graph edges asserted by graph (entity/episode/provenance)"
-    );
     // AUTH-1 counters (ADR-0010): emitted in synveda-identity through the
     // facade, described here where the recorder lives (ADR-0007).
     metrics::describe_counter!(

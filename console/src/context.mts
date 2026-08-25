@@ -38,6 +38,8 @@ const REASON_LABELS: Record<string, string> = {
   outside_task_scope: "outside task scope",
   token_budget: "token budget",
   duplicate: "duplicate",
+  graph_expansion: "graph expansion",
+  contradiction_warning: "contradiction warning",
 };
 
 const FEEDBACK_LABELS: Record<FeedbackType, string> = {
@@ -79,6 +81,8 @@ export function candidateForSelection(
   candidates: readonly ContextCandidateView[],
   selection: ContextSelectionView,
 ): ContextCandidateView | null {
+  const retained = candidates.find((candidate) => candidate.id === selection.context_candidate_id);
+  if (retained) return retained;
   const captureCandidateId = selection.capture_candidate_id;
   if (captureCandidateId) {
     const exact = candidates.find(
@@ -112,6 +116,9 @@ export function scoresOf(value: unknown): ContextScoreView | null {
   return typeof candidate.final_micros === "number" &&
     typeof candidate.keyword_micros === "number" &&
     typeof candidate.semantic_micros === "number" &&
+    typeof candidate.anchor_micros === "number" &&
+    typeof candidate.edge_weight_micros === "number" &&
+    typeof candidate.hop_penalty_micros === "number" &&
     typeof candidate.freshness_micros === "number" &&
     typeof candidate.pin_micros === "number" &&
     typeof candidate.current_state_micros === "number"

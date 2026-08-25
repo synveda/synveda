@@ -51,12 +51,14 @@ programme convention established in Prompt 1.
 | Directory push/pull convergence on shared principals, Groups, memberships and grants | CPR-34 | **complete** | `3c61e5e` | `13ba059` | connectors 5/5; store access 30/30 + anchors 13/13 + sync 8/8; gateway access 18/18 + sync 9/9 + SCIM 10/10 + anchors 9/9; OpenAPI 6/6; console 212/212; RLS 83/83 | PASS | PASS (fresh disposable database; removed on success) | isolated `demos/cpr-34-directory-convergence.sh` PASS: 3 shared directory groups, 6 chained transitions, identity-keyed membership, zero mirror tables; 82-script demo gate PASS; Entra/Okta fixtures remain captured/transcribed | no live Entra/Okta tenant available; no live claim made |
 | Stable tenant secret references, fail-closed Tool/directory resolution, DEK re-encryption jobs and Knowledge-native sealed export | CPR-35 | **complete** | `13ba059` | `2e70aaf` | types 214/214; crypto 39/39; store keys 14/14 + Knowledge export + RLS; gateway Tools 2/2 + directory sync 10/10; CLI 158/158 | PASS | PASS (`synveda_test_69956`) | `demos/cpr-35-key-secret-convergence.sh` + re-cut TEN-4 demo PASS; 83-script drift gate PASS | none; no external key-provider claim made |
 | One gateway/schema/contract and forced-RLS runtime login across installed host, Compose and Helm | CPR-36 | **complete** | `2e70aaf` | `ca3730f` | init 19/19 including DB/RLS; deploy checker 4/4; epoch 10/10; OpenAPI 6/6; Helm lint/render PASS | PASS | PASS (`synveda_test_77612`) | isolated `demos/cpr-36-deployment-convergence.sh` PASS; two Compose + Helm renders; repeat-package upgrade check; 84-script drift gate PASS | no kind cluster rerun in this package; existing OPS-2 gate remains authoritative |
-| Durable conflict evidence, governed resolution, evaluated freshness and bitemporal Knowledge query | CPR-37 | **complete** | `ca3730f` | pending (CPR-38 ledger) | Knowledge types 7/7; lifecycle 5/5; capture API 4/4; ingest 2/2; context 3/3; OKF 2/2; RLS 83/83; OpenAPI 6/6; console 215/215 | PASS | PASS (`synveda_test_85309`, removed) | isolated `demos/cpr-37-conflict-freshness.sh` PASS; 85-script drift gate PASS | none |
+| Durable conflict evidence, governed resolution, evaluated freshness and bitemporal Knowledge query | CPR-37 | **complete** | `ca3730f` | `7951d77` | Knowledge types 7/7; lifecycle 5/5; capture API 4/4; ingest 2/2; context 3/3; OKF 2/2; RLS 83/83; OpenAPI 6/6; console 215/215 | PASS | PASS (`synveda_test_85309`, removed) | isolated `demos/cpr-37-conflict-freshness.sh` PASS; 85-script drift gate PASS | none |
+| Anchor-first bounded Knowledge-relation expansion and re-authorised ContextRun paths | CPR-38 | **complete** | `7951d77` | pending (CPR-39 ledger) | types 1/1; Knowledge 6/6; Configuration 1/1; ContextRun 4/4; RLS 79/79; OpenAPI 6/6; console 215/215 | PASS | PASS (`synveda_test_93371`, removed) | isolated `demos/cpr-38-bounded-graph.sh` PASS; graph-disabled miss → two-hop selected path; private endpoint absent; 84-script demo gate PASS | none |
 
-**Exact next objective:** file and complete CPR-38, bounded anchor-first graph
-retrieval integrated into ContextRun: per-boundary PDP decisions, explicit hop,
-fan-out, time and token budgets, visible evidence paths and honest lexical/vector
-degradation without graph-only or unbounded traversal.
+**Exact next objective:** file and complete CPR-39, the client-adapter
+conformance kit and a truthfully classified second real client: derive one
+support registry and matrix from public-API lifecycle evidence, use authentic
+captured frames where a proprietary client is unavailable, and make no
+`verified` claim without the complete live conformance sequence.
 
 ### Starting-point objective map
 
@@ -4733,5 +4735,85 @@ frontend changes, deletions, tests, and the resulting commit hash.
 
 - **Commit.** `feat(memory): add conflict and freshness management (CPR-37)`
   on `feat/context-platform-mvp`.
-- **Commit hash.** Written by CPR-38 under the programme's next-checkpoint
+- **Commit hash.** `7951d770957ad0353a0bf207ba76188588ba74ea`, written by
+  CPR-38 under the programme's next-checkpoint convention.
+
+### Prompt 28 — bounded graph-augmented retrieval (CPR-38)
+
+- **Selected feature and decision.** **CPR-38** is delivered from `7951d77`;
+  it also closes the older **GRPH-3** objective by subsumption. Accepted
+  ADR-0097 supersedes ADR-0043/0044 for runtime use: the sole graph is now the
+  immutable `KnowledgeRelation` aggregate, and graph retrieval is a bounded
+  extension of authorised lexical/semantic anchors rather than a graph-only
+  enumerator or a second Record domain. The planner/version pair is
+  `knowledge-planner-v2` / `knowledge-relations-v1`.
+
+- **Governed bounded planner.** The immutable Configuration document now owns
+  `enabled`, maximum hops, per-frontier fan-out, total expanded candidates,
+  wall-clock and graph-token work. All shipped templates cap traversal at two
+  hops, with progressively tighter team/enterprise work bounds; a disabled
+  document must carry zero work and is not a hidden feature flag. At most ten
+  already-authorised current Knowledge candidates become anchors. Supporting
+  `supports`, `references`, `derived_from`, `supersedes`, `transitions_to` and
+  `related_to` edges have explicit deterministic weights; `contradicts` is a
+  zero-weight warning, and `duplicates` never expands. Rank retains separate
+  anchor, cumulative edge, hop penalty, freshness, current-state and final
+  components. Fan-out, candidate, token and time exhaustion are named
+  degradation modes; a storage failure is `graph_unavailable`. Every case
+  preserves the lexical/vector result.
+
+- **PDP and trace boundary.** Expansion runs in its own tenant-RLS transaction
+  and authorises every frontier and target. The main planning transaction then
+  reloads the current relation and exact current revisions, repeats the
+  Knowledge decision for both endpoints and the asserting revision, and does
+  so again when detail/timeline routes render retained evidence. A denied node
+  suppresses its whole path, address, edge, reason and count; only the existing
+  aggregate policy-exclusion message survives. Stale, superseded,
+  transitional, archived and erasure states cannot become selected current
+  truth through an edge. `context_graph_steps` stores immutable ordered path
+  evidence under enabled/forced RLS. Full and redacted traces retain exact
+  addresses; hashes-only retains relation and endpoint hashes with no address;
+  disabled retains no candidate/path detail. Audit payloads contain only ids,
+  hashes, versions, score evidence and governed bounds, never Knowledge text.
+
+- **Hard cut and schema.** Migration `0062_bounded_graph_retrieval.sql`
+  refuses non-empty Record-graph or pre-native ContextRun data with the reset
+  instruction, drops `graph_vertices`, `graph_edges`, their history view/table
+  and trigger functions, and adds exact candidate/selection/path integrity.
+  `synveda_types::graph`, `synveda_store::graph`, the ingest entity linker and
+  their runtime tests are deleted without translation or dual read. The dead
+  GRPH-1 schema and GRPH-4 spike demos are removed; GRPH-2 now points at the
+  public current acceptance and `demos/cpr-38-bounded-graph.sh` is the complete
+  narrative. Historical migrations remain only until the final Prompt-33
+  schema squash.
+
+- **Contract and Inspector.** The existing public session ContextRun endpoint
+  and query/evaluation lenses are unchanged. Generated detail views add exact
+  candidate-selection linkage, the three new score components and retention-
+  appropriate directed evidence paths. Context Inspector renders anchor,
+  relationship, hop, endpoint and score contributions without hydrating
+  Knowledge content outside full mode. The operation inventory stays **171**;
+  graph configuration and path views grow the schema inventory **272 → 274**.
+
+- **Inventories and tests.** Epoch **2** now has **60 migration files**, **90
+  forced-RLS tenant tables**, **704 SQLx descriptions**, **102 audit actions**
+  and **84 executable demos**. Focused types bounds **1/1**, store Knowledge
+  **6/6**, Configuration API **1/1**, ContextRun **4/4**, forced-RLS **79/79**,
+  OpenAPI **6/6** and console **215/215** pass. The public database acceptance
+  runs one question with graph disabled and enabled, proves the two-hop answer
+  appears only in the bounded run with its exact two-step evidence and scores,
+  then proves another principal's private endpoint leaves no trace; hashes-only
+  retains only verifiable path digests. It also caught and corrected the MVP
+  acceptance's stale planner-version pin and re-recorded the canonical governed
+  Configuration hash through the repository fixture seam.
+  `demos/cpr-38-bounded-graph.sh` and the complete **84-script** drift gate
+  pass. Complete `make ci` **PASS** (the first sandboxed attempt could not bind
+  two existing loopback tests; the permission-correct rerun passed). Full
+  fresh-database `make db-test` **PASS** against `synveda_test_93371`, removed
+  by the harness; the two failed scratch databases and the SQLx preparation
+  database created by this package were removed explicitly.
+
+- **Commit.** `feat(retrieval): add bounded graph expansion (CPR-38)` on
+  `feat/context-platform-mvp`.
+- **Commit hash.** Written by CPR-39 under the programme's next-checkpoint
   convention.

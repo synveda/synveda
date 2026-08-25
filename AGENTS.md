@@ -73,9 +73,9 @@ trustworthiness.
 
 Phase 5 — context platform redesign, since 2026-08-17, on
 `feat/context-platform-mvp`. Phase 3 is paused mid-phase, not finished —
-OPS-9, OPS-10, TEN-5,6, AUD-3,4, GRPH-3, EVAL-6, CTX-7, OPS-3,4, ADPT-3,
+OPS-9, OPS-10, TEN-5,6, AUD-3,4, EVAL-6, CTX-7, OPS-3,4, ADPT-3,
 CTX-6 and FLOW-8 are still open, and no live Entra/Okta tenant or real
-  Cursor frame has been replayed. **134 features filed, 103 delivered**;
+  Cursor frame has been replayed. **135 features filed, 105 delivered**;
 STATUS.md and `make check-backlog` are the authority on the count — the
 headline number has drifted four times, the fourth being this file itself,
 which still read 104/71 after CPR-8 filed the 105th. That is why the
@@ -218,6 +218,16 @@ Load-bearing facts about Phase 5:
   transitional state. The Knowledge Browser exposes comparison, staleness,
   future transition and resolution; the contract has **171 operations / 272
   schemas**.
+- CPR-38 (ADR-0097): immutable `KnowledgeRelation` is the only runtime graph.
+  ContextRun v2 expands at most two hops from already-authorised current
+  lexical/semantic anchors under governed fan-out, candidate, time and token
+  bounds, then re-authorises every endpoint and path before persistence and
+  rendering. Six supporting relation types rank; contradiction is a
+  zero-weight warning. Forced-RLS trace steps retain exact or hashes-only
+  evidence by the existing retention mode, and every failure/bound falls back
+  to lexical/vector results with a named degradation. The Record graph and
+  ingest linker are deleted without translation; GRPH-3 closes by subsumption.
+  The contract remains **171 operations / 274 schemas**.
 - CPR-10 (ADR-0076): **a run is a record**. `sessions`, `session_events` and
   `session_context_runs` replace `session_id: text`; the governed scope a run
   is decided at is derived from its workspace and project by composite keys

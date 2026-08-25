@@ -26,6 +26,14 @@ pub const MAX_CONTEXT_BUDGET_TOKENS: u32 = 100_000;
 pub const MAX_CONFIGURED_CAPTURE_CANDIDATES: u32 = 256;
 /// Maximum default freshness interval. Zero means no implicit staleness date.
 pub const MAX_FRESHNESS_DAYS: u32 = 36_500;
+/// Product ceiling for one Knowledge graph expansion.
+pub const MAX_GRAPH_EXPANDED_CANDIDATES: u32 = 256;
+/// Product ceiling for adjacency rows considered from one frontier item.
+pub const MAX_GRAPH_FAN_OUT: u32 = 32;
+/// Product ceiling for a graph-expansion wall-clock budget.
+pub const MAX_GRAPH_TIME_BUDGET_MS: u32 = 5_000;
+/// Product ceiling for Knowledge content considered during graph expansion.
+pub const MAX_GRAPH_TOKEN_BUDGET: u32 = 20_000;
 
 macro_rules! closed_vocabulary {
     ($name:ident, [$($variant:ident => $wire:literal),+ $(,)?], $what:literal) => {
@@ -172,6 +180,9 @@ pub struct ContextConfiguration {
     pub channels: Vec<ConfigurationContextChannel>,
     /// Diagnostic trace detail retained for a run.
     pub trace_retention: TraceRetentionMode,
+    /// Bounded relationship expansion after ordinary retrieval has found
+    /// authorised anchors.
+    pub graph: GraphRetrievalConfiguration,
 }
 
 impl ContextConfiguration {
@@ -186,6 +197,7 @@ impl ContextConfiguration {
                 message: "context channels must be sorted and unique".to_owned(),
             });
         }
+        self.graph.validate()?;
         Ok(())
     }
 
@@ -193,6 +205,74 @@ impl ContextConfiguration {
     #[must_use]
     pub fn permits(&self, channel: ConfigurationContextChannel) -> bool {
         self.channels.binary_search(&channel).is_ok()
+    }
+}
+
+/// Governed bounds for anchor-first `KnowledgeRelation` expansion.
+///
+/// These values constrain candidate generation only. They grant no read
+/// authority: every anchor, frontier and endpoint still receives an exact PDP
+/// decision before it can influence rank or trace detail.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GraphRetrievalConfiguration {
+    /// Master switch for relationship expansion.
+    pub enabled: bool,
+    /// Maximum relationship hops. The product ceiling is two.
+    pub max_hops: u8,
+    /// Maximum adjacency claims considered for one frontier item.
+    pub fan_out_per_node: u32,
+    /// Maximum distinct non-anchor candidates admitted from the graph.
+    pub max_expanded_candidates: u32,
+    /// Wall-clock budget for the isolated expansion transaction.
+    pub time_budget_ms: u32,
+    /// Maximum estimated content tokens admitted from expansion.
+    pub token_budget: u32,
+}
+
+impl GraphRetrievalConfiguration {
+    fn validate(&self) -> Result<()> {
+        if !self.enabled {
+            if self.max_hops != 0
+                || self.fan_out_per_node != 0
+                || self.max_expanded_candidates != 0
+                || self.time_budget_ms != 0
+                || self.token_budget != 0
+            {
+                return Err(Error::Invalid {
+                    message: "disabled graph retrieval must have zero bounds".to_owned(),
+                });
+            }
+            return Ok(());
+        }
+        if !(1..=2).contains(&self.max_hops) {
+            return Err(Error::Invalid {
+                message: "graph max_hops must be in 1..=2".to_owned(),
+            });
+        }
+        if !(1..=MAX_GRAPH_FAN_OUT).contains(&self.fan_out_per_node) {
+            return Err(Error::Invalid {
+                message: format!("graph fan_out_per_node must be in 1..={MAX_GRAPH_FAN_OUT}"),
+            });
+        }
+        if !(1..=MAX_GRAPH_EXPANDED_CANDIDATES).contains(&self.max_expanded_candidates) {
+            return Err(Error::Invalid {
+                message: format!(
+                    "graph max_expanded_candidates must be in 1..={MAX_GRAPH_EXPANDED_CANDIDATES}"
+                ),
+            });
+        }
+        if !(1..=MAX_GRAPH_TIME_BUDGET_MS).contains(&self.time_budget_ms) {
+            return Err(Error::Invalid {
+                message: format!("graph time_budget_ms must be in 1..={MAX_GRAPH_TIME_BUDGET_MS}"),
+            });
+        }
+        if !(1..=MAX_GRAPH_TOKEN_BUDGET).contains(&self.token_budget) {
+            return Err(Error::Invalid {
+                message: format!("graph token_budget must be in 1..={MAX_GRAPH_TOKEN_BUDGET}"),
+            });
+        }
+        Ok(())
     }
 }
 
@@ -438,6 +518,32 @@ impl ConfigurationDocument {
                     ConfigurationTemplate::Personal => TraceRetentionMode::Full,
                     ConfigurationTemplate::Team => TraceRetentionMode::Redacted,
                     ConfigurationTemplate::Enterprise => TraceRetentionMode::HashesOnly,
+                },
+                graph: match template {
+                    ConfigurationTemplate::Personal => GraphRetrievalConfiguration {
+                        enabled: true,
+                        max_hops: 2,
+                        fan_out_per_node: 8,
+                        max_expanded_candidates: 32,
+                        time_budget_ms: 500,
+                        token_budget: 512,
+                    },
+                    ConfigurationTemplate::Team => GraphRetrievalConfiguration {
+                        enabled: true,
+                        max_hops: 2,
+                        fan_out_per_node: 6,
+                        max_expanded_candidates: 24,
+                        time_budget_ms: 350,
+                        token_budget: 384,
+                    },
+                    ConfigurationTemplate::Enterprise => GraphRetrievalConfiguration {
+                        enabled: true,
+                        max_hops: 2,
+                        fan_out_per_node: 4,
+                        max_expanded_candidates: 16,
+                        time_budget_ms: 250,
+                        token_budget: 256,
+                    },
                 },
             },
             freshness,
@@ -841,5 +947,28 @@ mod tests {
         assert_eq!(document.freshness.days_for(KnowledgeType::Fact), 45);
         assert_eq!(document.freshness.days_for(KnowledgeType::Decision), 0);
         assert_eq!(document.freshness.days_for(KnowledgeType::Warning), 21);
+    }
+
+    #[test]
+    fn graph_bounds_are_closed_and_disabled_is_unambiguous() {
+        let mut document = ConfigurationDocument::template(ConfigurationTemplate::Personal);
+        document.context.graph.max_hops = 3;
+        assert!(document.validate().is_err());
+
+        document = ConfigurationDocument::template(ConfigurationTemplate::Personal);
+        document.context.graph.enabled = false;
+        assert!(
+            document.validate().is_err(),
+            "disabled with live bounds is ambiguous"
+        );
+        document.context.graph = GraphRetrievalConfiguration {
+            enabled: false,
+            max_hops: 0,
+            fan_out_per_node: 0,
+            max_expanded_candidates: 0,
+            time_budget_ms: 0,
+            token_budget: 0,
+        };
+        document.validate().unwrap();
     }
 }

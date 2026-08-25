@@ -41,7 +41,7 @@ Rust workspace + TypeScript adapters. Postgres-first. Governed by VedaFlow.
 
 ## Current phase
 Phase 5 — Context platform redesign, since 2026-08-17. Phase 3 is paused
-mid-phase, not finished: OPS-9, OPS-10, TEN-5,6, AUD-3,4, GRPH-3, EVAL-6,
+mid-phase, not finished: OPS-9, OPS-10, TEN-5,6, AUD-3,4, EVAL-6,
 CTX-7, OPS-3,4, ADPT-3, CTX-6 and FLOW-8 are still open, and the phase's
 demo goal is met except for the two live-tenant claims. What moved is the
 audience. Everything above Phase 5 was built for an organisation — and
@@ -122,6 +122,11 @@ bounded post-PDP write/capture classification records exact forced-RLS
 evidence, ambiguous heads remain transitional until VedaFlow resolution, and
 freshness plus valid/as-known query semantics are evaluated from governed
 Configuration without latest-row-wins.
+CPR-38, bounded graph-augmented retrieval, is delivered under ADR-0097;
+ContextRun v2 expands only authorised current Knowledge anchors through the
+immutable relation graph under governed two-hop/work bounds, freshly
+authorises retained paths, degrades explicitly to lexical/vector retrieval and
+removes the Record graph/linker while closing GRPH-3 by subsumption.
 **It is a pre-1.0 hard
 cut**: a fresh schema epoch, no old-data migration, no compatibility shims,
 and old databases rejected with a reset instruction. Since CPR-2 that is
@@ -234,7 +239,7 @@ explicitly and say so.
 
 Phases 0, 1 and 2 are complete; SKIL-1 through SKIL-4, OPS-1, CNSL-1, ADPT-2,
 CNSL-2, AUTH-4, AUTH-5, EVAL-3, OPS-2, TEN-3, TEN-4 and OPS-8 are the Phase 3
-features done. 103 of 134 features delivered — see docs/backlog/STATUS.md for
+features done. 105 of 135 features delivered — see docs/backlog/STATUS.md for
 what each one proved and what it left standing. (The total read 86 until
 2026-08-05, when it was corrected to the 88 STATUS.md and `make
 check-backlog` had both said for some time; AUTHZ-7 was filed the same day by
@@ -454,6 +459,17 @@ transitional until the same VedaFlow lifecycle resolves them, and the effective
 freshness Configuration is frozen as revision evidence. The generated contract
 is 171 operations / 272 schemas and the Knowledge Browser exposes conflict,
 future-transition and staleness review without denied-member leakage.
+**CPR-38 was filed next**, making it **135 with 103 delivered**: it makes
+immutable Knowledge relations the only runtime graph, bounds anchor-first
+expansion and persists only freshly authorised ContextRun paths; the dead
+Record-era graph/linker is removed without a translation.
+It was delivered the same day, making it **135 with 105 delivered** because it
+also closes GRPH-3 by subsumption: the same public query now proves a two-hop
+quality gain over graph-disabled retrieval, every retained path is freshly
+PDP-authorised and forced-RLS, and a denied endpoint leaves no address, edge,
+reason or count. The contract remains 171 operations and grows 272 → 274
+schemas; epoch 2 has 60 migration files, 90 forced-RLS tenant tables and 704
+SQLx descriptions.
 
 Since CPR-9 a **listing decides per row**. The audit of Prompts 1–7 found that
 `GET /v1/workspaces` and `/v1/me` took one decision at the tenant root and

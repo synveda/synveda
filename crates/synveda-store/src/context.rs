@@ -8,11 +8,12 @@
 use chrono::{DateTime, Utc};
 use sqlx::{PgConnection, PgExecutor};
 use synveda_types::configuration::ConfigurationContextChannel;
-use synveda_types::knowledge::KnowledgeLifecycleState;
+use synveda_types::knowledge::{KnowledgeLifecycleState, KnowledgeRelationType};
 use synveda_types::{
     CaptureCandidateId, ContextCandidate, ContextCandidateId, ContextFeedback, ContextFeedbackId,
-    ContextFeedbackType, ContextReasonCode, ContextRunId, ContextSelection, ContextSelectionId,
-    Error, KnowledgeItemId, KnowledgeRevisionId, Result, ScopeId, SessionId, TenantId,
+    ContextFeedbackType, ContextGraphDirection, ContextGraphStep, ContextReasonCode, ContextRunId,
+    ContextSelection, ContextSelectionId, Error, KnowledgeItemId, KnowledgeRelationId,
+    KnowledgeRevisionId, Result, ScopeId, SessionId, TenantId,
 };
 use uuid::Uuid;
 
@@ -46,6 +47,12 @@ pub struct NewContextCandidate {
     pub keyword_score_micros: i32,
     /// Integer semantic contribution.
     pub semantic_score_micros: i32,
+    /// Ordinary anchor score from which a graph path began.
+    pub anchor_score_micros: i32,
+    /// Relationship contribution on the retained best path.
+    pub edge_weight_micros: i32,
+    /// Hop penalty on the retained best path.
+    pub hop_penalty_micros: i32,
     /// Integer freshness contribution.
     pub freshness_score_micros: i32,
     /// Integer explicit-pin contribution.
@@ -67,6 +74,8 @@ pub struct NewContextSelection {
     pub id: ContextSelectionId,
     /// Context run.
     pub context_run_id: ContextRunId,
+    /// Exact candidate selected.
+    pub context_candidate_id: ContextCandidateId,
     /// One-based rank.
     pub rank: i32,
     /// Governed content channel.
@@ -83,6 +92,46 @@ pub struct NewContextSelection {
     pub token_count: i32,
     /// Selection reasons.
     pub reason_codes: Vec<ContextReasonCode>,
+}
+
+/// Fields for one immutable visible graph path step.
+#[derive(Debug, Clone)]
+pub struct NewContextGraphStep {
+    /// Context run.
+    pub context_run_id: ContextRunId,
+    /// Candidate reached by the complete path.
+    pub context_candidate_id: ContextCandidateId,
+    /// Zero-based path position.
+    pub ordinal: i32,
+    /// One-based hop.
+    pub hop: u8,
+    /// Exact relation, omitted by hashes-only retention.
+    pub relation_id: Option<KnowledgeRelationId>,
+    /// Content-free relation evidence hash.
+    pub relation_hash: String,
+    /// Relation vocabulary.
+    pub relation_type: KnowledgeRelationType,
+    /// Traversal direction.
+    pub direction: ContextGraphDirection,
+    /// Exact start item, omitted by hashes-only retention.
+    pub from_item_id: Option<KnowledgeItemId>,
+    /// Exact start revision, omitted by hashes-only retention.
+    pub from_revision_id: Option<KnowledgeRevisionId>,
+    /// Exact reached item, omitted by hashes-only retention.
+    pub to_item_id: Option<KnowledgeItemId>,
+    /// Exact reached revision, omitted by hashes-only retention.
+    pub to_revision_id: Option<KnowledgeRevisionId>,
+    /// Exact source revision asserting the relation, omitted by hashes-only
+    /// retention.
+    pub asserting_revision_id: Option<KnowledgeRevisionId>,
+    /// Starting revision content hash.
+    pub from_content_hash: String,
+    /// Reached revision content hash.
+    pub to_content_hash: String,
+    /// Supporting contribution or zero for a contradiction warning.
+    pub edge_weight_micros: i32,
+    /// Whether the step contributes supporting evidence.
+    pub supporting: bool,
 }
 
 /// Feedback fields supplied after session and revision decisions.
@@ -137,6 +186,9 @@ struct CandidateRow {
     lifecycle_state: Option<String>,
     keyword_score_micros: i32,
     semantic_score_micros: i32,
+    anchor_score_micros: i32,
+    edge_weight_micros: i32,
+    hop_penalty_micros: i32,
     freshness_score_micros: i32,
     pin_score_micros: i32,
     current_state_score_micros: i32,
@@ -151,6 +203,7 @@ struct SelectionRow {
     id: Uuid,
     tenant_id: Uuid,
     context_run_id: Uuid,
+    context_candidate_id: Uuid,
     rank: i32,
     channel: String,
     knowledge_item_id: Option<Uuid>,
@@ -159,6 +212,29 @@ struct SelectionRow {
     content_hash: String,
     token_count: i32,
     reason_codes: Vec<String>,
+    created_at: DateTime<Utc>,
+}
+
+#[derive(Debug)]
+struct GraphStepRow {
+    tenant_id: Uuid,
+    context_run_id: Uuid,
+    context_candidate_id: Uuid,
+    ordinal: i32,
+    hop: i16,
+    relation_id: Option<Uuid>,
+    relation_hash: String,
+    relation_type: String,
+    direction: String,
+    from_item_id: Option<Uuid>,
+    from_revision_id: Option<Uuid>,
+    to_item_id: Option<Uuid>,
+    to_revision_id: Option<Uuid>,
+    asserting_revision_id: Option<Uuid>,
+    from_content_hash: String,
+    to_content_hash: String,
+    edge_weight_micros: i32,
+    supporting: bool,
     created_at: DateTime<Utc>,
 }
 
@@ -234,6 +310,9 @@ impl TryFrom<CandidateRow> for ContextCandidate {
                 })?,
             keyword_score_micros: row.keyword_score_micros,
             semantic_score_micros: row.semantic_score_micros,
+            anchor_score_micros: row.anchor_score_micros,
+            edge_weight_micros: row.edge_weight_micros,
+            hop_penalty_micros: row.hop_penalty_micros,
             freshness_score_micros: row.freshness_score_micros,
             pin_score_micros: row.pin_score_micros,
             current_state_score_micros: row.current_state_score_micros,
@@ -259,6 +338,7 @@ impl TryFrom<SelectionRow> for ContextSelection {
             id: ContextSelectionId::from_uuid(row.id),
             tenant_id: TenantId::from_uuid(row.tenant_id),
             context_run_id: ContextRunId::from_uuid(row.context_run_id),
+            context_candidate_id: ContextCandidateId::from_uuid(row.context_candidate_id),
             rank: row.rank,
             channel: row.channel.parse().map_err(|error| Error::Internal {
                 message: format!("stored context channel outside vocabulary: {error}"),
@@ -295,6 +375,42 @@ impl TryFrom<FeedbackRow> for ContextFeedback {
     }
 }
 
+impl TryFrom<GraphStepRow> for ContextGraphStep {
+    type Error = Error;
+
+    fn try_from(row: GraphStepRow) -> Result<Self> {
+        Ok(Self {
+            tenant_id: TenantId::from_uuid(row.tenant_id),
+            context_run_id: ContextRunId::from_uuid(row.context_run_id),
+            context_candidate_id: ContextCandidateId::from_uuid(row.context_candidate_id),
+            ordinal: row.ordinal,
+            hop: u8::try_from(row.hop).map_err(|_| Error::Internal {
+                message: format!("stored context graph hop is invalid: {}", row.hop),
+            })?,
+            relation_id: row.relation_id.map(KnowledgeRelationId::from_uuid),
+            relation_hash: row.relation_hash,
+            relation_type: row.relation_type.parse().map_err(|error| Error::Internal {
+                message: format!("stored Knowledge relation outside vocabulary: {error}"),
+            })?,
+            direction: row.direction.parse().map_err(|error| Error::Internal {
+                message: format!("stored context graph direction outside vocabulary: {error}"),
+            })?,
+            from_item_id: row.from_item_id.map(KnowledgeItemId::from_uuid),
+            from_revision_id: row.from_revision_id.map(KnowledgeRevisionId::from_uuid),
+            to_item_id: row.to_item_id.map(KnowledgeItemId::from_uuid),
+            to_revision_id: row.to_revision_id.map(KnowledgeRevisionId::from_uuid),
+            asserting_revision_id: row
+                .asserting_revision_id
+                .map(KnowledgeRevisionId::from_uuid),
+            from_content_hash: row.from_content_hash,
+            to_content_hash: row.to_content_hash,
+            edge_weight_micros: row.edge_weight_micros,
+            supporting: row.supporting,
+            created_at: row.created_at,
+        })
+    }
+}
+
 fn reason_names(values: &[ContextReasonCode]) -> Vec<String> {
     values
         .iter()
@@ -325,15 +441,17 @@ pub async fn insert_candidate(
              knowledge_item_id, knowledge_revision_id, capture_candidate_id,
              content_hash, scope_id, lifecycle_state,
              keyword_score_micros, semantic_score_micros,
+             anchor_score_micros, edge_weight_micros, hop_penalty_micros,
              freshness_score_micros, pin_score_micros,
              current_state_score_micros, final_score_micros, reason_codes,
              exclusion_reason)
         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
-                $14, $15, $16, $17, $18, $19)
+                $14, $15, $16, $17, $18, $19, $20, $21, $22)
         returning id, tenant_id, context_run_id, ordinal, channel,
                   knowledge_item_id, knowledge_revision_id,
                   capture_candidate_id, content_hash, scope_id,
                   lifecycle_state, keyword_score_micros, semantic_score_micros,
+                  anchor_score_micros, edge_weight_micros, hop_penalty_micros,
                   freshness_score_micros, pin_score_micros,
                   current_state_score_micros, final_score_micros,
                   reason_codes as "reason_codes!: Vec<String>",
@@ -352,6 +470,9 @@ pub async fn insert_candidate(
         new.lifecycle_state.map(KnowledgeLifecycleState::as_str),
         new.keyword_score_micros,
         new.semantic_score_micros,
+        new.anchor_score_micros,
+        new.edge_weight_micros,
+        new.hop_penalty_micros,
         new.freshness_score_micros,
         new.pin_score_micros,
         new.current_state_score_micros,
@@ -365,6 +486,71 @@ pub async fn insert_candidate(
     metrics::counter!(
         CONTEXT_MUTATIONS_TOTAL,
         "aggregate" => "candidate",
+        "operation" => "create"
+    )
+    .increment(1);
+    row.try_into()
+}
+
+/// Appends one policy-visible step of a candidate's bounded graph path.
+#[tracing::instrument(
+    name = "store.context.insert_graph_step",
+    skip_all,
+    fields(
+        tenant.id = %tenant_id,
+        context.run.id = %new.context_run_id,
+        context.candidate.id = %new.context_candidate_id,
+        context.graph.hop = new.hop
+    ),
+    err(Display)
+)]
+pub async fn insert_graph_step(
+    conn: &mut PgConnection,
+    tenant_id: TenantId,
+    new: &NewContextGraphStep,
+) -> Result<ContextGraphStep> {
+    let row = sqlx::query_as!(
+        GraphStepRow,
+        r#"
+        insert into context_graph_steps
+            (tenant_id, context_run_id, context_candidate_id, ordinal, hop,
+             relation_id, relation_hash, relation_type, direction,
+             from_item_id, from_revision_id, to_item_id, to_revision_id,
+             asserting_revision_id, from_content_hash, to_content_hash,
+             edge_weight_micros, supporting)
+        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
+                $13, $14, $15, $16, $17, $18)
+        returning tenant_id, context_run_id, context_candidate_id, ordinal,
+                  hop, relation_id, relation_hash, relation_type, direction,
+                  from_item_id, from_revision_id, to_item_id, to_revision_id,
+                  asserting_revision_id, from_content_hash, to_content_hash,
+                  edge_weight_micros, supporting, created_at
+        "#,
+        tenant_id.as_uuid(),
+        new.context_run_id.as_uuid(),
+        new.context_candidate_id.as_uuid(),
+        new.ordinal,
+        i16::from(new.hop),
+        new.relation_id.map(|id| id.as_uuid()),
+        new.relation_hash,
+        new.relation_type.as_str(),
+        new.direction.as_str(),
+        new.from_item_id.map(|id| id.as_uuid()),
+        new.from_revision_id.map(|id| id.as_uuid()),
+        new.to_item_id.map(|id| id.as_uuid()),
+        new.to_revision_id.map(|id| id.as_uuid()),
+        new.asserting_revision_id.map(|id| id.as_uuid()),
+        new.from_content_hash,
+        new.to_content_hash,
+        new.edge_weight_micros,
+        new.supporting,
+    )
+    .fetch_one(&mut *conn)
+    .await
+    .map_err(storage_error)?;
+    metrics::counter!(
+        CONTEXT_MUTATIONS_TOTAL,
+        "aggregate" => "graph_step",
         "operation" => "create"
     )
     .increment(1);
@@ -388,11 +574,11 @@ pub async fn insert_selection(
         SelectionRow,
         r#"
         insert into context_selections
-            (id, tenant_id, context_run_id, rank, channel,
+            (id, tenant_id, context_run_id, context_candidate_id, rank, channel,
              knowledge_item_id, knowledge_revision_id, capture_candidate_id,
              content_hash, token_count, reason_codes)
-        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-        returning id, tenant_id, context_run_id, rank, channel,
+        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+        returning id, tenant_id, context_run_id, context_candidate_id, rank, channel,
                   knowledge_item_id, knowledge_revision_id,
                   capture_candidate_id, content_hash, token_count,
                   reason_codes as "reason_codes!: Vec<String>", created_at
@@ -400,6 +586,7 @@ pub async fn insert_selection(
         new.id.as_uuid(),
         tenant_id.as_uuid(),
         new.context_run_id.as_uuid(),
+        new.context_candidate_id.as_uuid(),
         new.rank,
         new.channel.as_str(),
         new.knowledge_item_id.map(|id| id.as_uuid()),
@@ -434,6 +621,7 @@ pub async fn candidates_for_run(
                knowledge_item_id, knowledge_revision_id, capture_candidate_id,
                content_hash, scope_id, lifecycle_state,
                keyword_score_micros, semantic_score_micros,
+               anchor_score_micros, edge_weight_micros, hop_penalty_micros,
                freshness_score_micros, pin_score_micros,
                current_state_score_micros, final_score_micros,
                reason_codes as "reason_codes!: Vec<String>", exclusion_reason,
@@ -441,6 +629,33 @@ pub async fn candidates_for_run(
         from context_candidates
         where tenant_id = $1 and context_run_id = $2
         order by ordinal
+        "#,
+        tenant_id.as_uuid(),
+        run_id.as_uuid(),
+    )
+    .fetch_all(executor)
+    .await
+    .map_err(storage_error)?;
+    rows.into_iter().map(TryInto::try_into).collect()
+}
+
+/// Reads retained graph paths in candidate/path order.
+pub async fn graph_steps_for_run(
+    executor: impl PgExecutor<'_>,
+    tenant_id: TenantId,
+    run_id: ContextRunId,
+) -> Result<Vec<ContextGraphStep>> {
+    let rows = sqlx::query_as!(
+        GraphStepRow,
+        r#"
+        select tenant_id, context_run_id, context_candidate_id, ordinal, hop,
+               relation_id, relation_hash, relation_type, direction,
+               from_item_id, from_revision_id, to_item_id, to_revision_id,
+               asserting_revision_id, from_content_hash, to_content_hash,
+               edge_weight_micros, supporting, created_at
+        from context_graph_steps
+        where tenant_id = $1 and context_run_id = $2
+        order by context_candidate_id, ordinal
         "#,
         tenant_id.as_uuid(),
         run_id.as_uuid(),
@@ -460,7 +675,7 @@ pub async fn selections_for_run(
     let rows = sqlx::query_as!(
         SelectionRow,
         r#"
-        select id, tenant_id, context_run_id, rank, channel,
+        select id, tenant_id, context_run_id, context_candidate_id, rank, channel,
                knowledge_item_id, knowledge_revision_id, capture_candidate_id,
                content_hash, token_count,
                reason_codes as "reason_codes!: Vec<String>", created_at
@@ -487,7 +702,7 @@ pub async fn selection(
     let row = sqlx::query_as!(
         SelectionRow,
         r#"
-        select id, tenant_id, context_run_id, rank, channel,
+        select id, tenant_id, context_run_id, context_candidate_id, rank, channel,
                knowledge_item_id, knowledge_revision_id, capture_candidate_id,
                content_hash, token_count,
                reason_codes as "reason_codes!: Vec<String>", created_at

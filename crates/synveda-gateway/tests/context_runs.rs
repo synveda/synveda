@@ -18,11 +18,12 @@ use synveda_gateway::app::{AppState, router};
 use synveda_gateway::telemetry;
 use synveda_identity::Hs256Verifier;
 use synveda_policy::Pdp;
-use synveda_store::{access, identities, rls, scopes, tenants};
+use synveda_store::{access, identities, knowledge_conflicts, rls, scopes, tenants};
 use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
+use synveda_types::knowledge::ConflictClassification;
 use synveda_types::{
-    CompositionConfig, GrantId, IdentityId, IdentityKind, PackConfig, ScopeId, TenantId,
-    TenantStatus, TraceRetentionMode,
+    CompositionConfig, ConflictSetId, GrantId, IdentityId, IdentityKind, PackConfig, ProjectId,
+    ScopeId, TenantId, TenantStatus, TraceRetentionMode,
 };
 use tower::ServiceExt;
 
@@ -382,6 +383,59 @@ async fn create_knowledge(
     )
 }
 
+async fn support_relation(
+    world: &World,
+    key: &str,
+    challenger: (&str, &str),
+    current: (&str, &str),
+) -> ConflictSetId {
+    let conflict_id = ConflictSetId::new();
+    let project_id: ProjectId = world.project_id.parse().expect("project id");
+    let mut tx = rls::begin_tenant_tx(&world.state.pool, world.tenant_id)
+        .await
+        .expect("begin controlled conflict evidence fixture");
+    knowledge_conflicts::create(
+        &mut tx,
+        &knowledge_conflicts::NewConflictSet {
+            id: conflict_id,
+            tenant_id: world.tenant_id,
+            scope_id: world.project_scope,
+            project_id: Some(project_id),
+            classification: ConflictClassification::Support,
+            challenger_item_id: Some(challenger.0.parse().expect("challenger item")),
+            challenger_revision_id: Some(challenger.1.parse().expect("challenger revision")),
+            capture_candidate_id: None,
+            matches: &[knowledge_conflicts::MatchedRevision {
+                item_id: current.0.parse().expect("current item"),
+                revision_id: current.1.parse().expect("current revision"),
+                classification: ConflictClassification::Support,
+                similarity_permille: 700,
+                reason_code: "bounded_graph_fixture".to_owned(),
+            }],
+            created_by: ALICE,
+        },
+    )
+    .await
+    .expect("create controlled conflict evidence");
+    tx.commit().await.expect("commit conflict evidence");
+    let (status, result) = call(
+        &world.app,
+        "POST",
+        &format!("/v1/knowledge-conflicts/{conflict_id}/resolve"),
+        &world.alice_token,
+        Some(key),
+        Some(json!({
+            "expected_revision": 1,
+            "resolution": "support",
+            "reason": "CPR-38 governed graph fixture"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{result}");
+    assert_eq!(result["outcome"], "applied", "{result}");
+    conflict_id
+}
+
 struct Corpus {
     active_id: String,
     active_revision: String,
@@ -571,8 +625,9 @@ async fn planner_selects_only_current_knowledge_and_feedback_names_one_revision(
     assert!(rendered.contains("traceparent"), "{rendered}");
     assert!(!rendered.contains("experimental header"), "{rendered}");
     assert!(!rendered.contains("X-Request-Id"), "{rendered}");
-    assert_eq!(run["retrieval_version"], "knowledge-planner-v1");
+    assert_eq!(run["retrieval_version"], "knowledge-planner-v2");
     assert_eq!(run["index_version"], "knowledge-search-v1");
+    assert_eq!(run["graph_version"], "knowledge-relations-v1");
 
     let run_id = run["id"].as_str().expect("run id");
     let before = detail(&world, &world.alice_token, run_id).await;
@@ -750,6 +805,243 @@ async fn planner_selects_only_current_knowledge_and_feedback_names_one_revision(
             .any(|entry| entry["exclusion_reason"] == "token_budget"),
         "token-budget exclusion is not explainable: {budget_detail}"
     );
+}
+
+#[tokio::test]
+async fn bounded_graph_improves_two_hop_recall_and_denied_endpoints_leave_no_trace() {
+    let _guard = serial().await;
+    let Some(world) = admitted_world().await else {
+        return;
+    };
+    let (anchor_id, anchor_revision) = create_knowledge(
+        &world,
+        "cpr38-anchor",
+        world.project_scope,
+        Some(&world.project_id),
+        None,
+        "Quasar Almanac release pointer",
+        "The unique quasar-almanac request is governed by the release playbook.",
+        None,
+    )
+    .await;
+    let (middle_id, middle_revision) = create_knowledge(
+        &world,
+        "cpr38-middle",
+        world.project_scope,
+        Some(&world.project_id),
+        None,
+        "Release playbook owner",
+        "The release playbook delegates the final verification to the deployment checklist.",
+        None,
+    )
+    .await;
+    let (answer_id, answer_revision) = create_knowledge(
+        &world,
+        "cpr38-answer",
+        world.project_scope,
+        Some(&world.project_id),
+        None,
+        "Deployment checklist verification",
+        "The final verification command is cargo test --workspace --locked.",
+        None,
+    )
+    .await;
+    support_relation(
+        &world,
+        "cpr38-middle-supports-answer",
+        (&middle_id, &middle_revision),
+        (&answer_id, &answer_revision),
+    )
+    .await;
+    support_relation(
+        &world,
+        "cpr38-anchor-supports-middle",
+        (&anchor_id, &anchor_revision),
+        (&middle_id, &middle_revision),
+    )
+    .await;
+
+    let root = {
+        let mut tx = rls::begin_tenant_tx(&world.state.pool, world.tenant_id)
+            .await
+            .expect("begin graph configuration");
+        let root = scopes::tenant_root(&mut *tx, world.tenant_id)
+            .await
+            .expect("read tenant root")
+            .expect("tenant root");
+        configuration_support::set_graph_enabled(&mut tx, world.tenant_id, root.id, false).await;
+        tx.commit()
+            .await
+            .expect("disable graph through Configuration");
+        root.id
+    };
+    let baseline = context_run(
+        &world,
+        &world.alice_token,
+        &world.alice_session,
+        "cpr38-vector-only",
+        "quasar-almanac",
+        None,
+    )
+    .await;
+    assert_eq!(baseline["graph_version"], Value::Null, "{baseline}");
+    assert!(
+        !baseline["rendered"]
+            .as_str()
+            .expect("baseline rendered")
+            .contains("cargo test --workspace --locked"),
+        "the enumeration-free baseline unexpectedly found the two-hop answer: {baseline}"
+    );
+
+    let mut tx = rls::begin_tenant_tx(&world.state.pool, world.tenant_id)
+        .await
+        .expect("begin graph enable");
+    configuration_support::set_graph_enabled(&mut tx, world.tenant_id, root, true).await;
+    tx.commit()
+        .await
+        .expect("enable graph through Configuration");
+    let expanded = context_run(
+        &world,
+        &world.alice_token,
+        &world.alice_session,
+        "cpr38-two-hop",
+        "quasar-almanac",
+        None,
+    )
+    .await;
+    assert_eq!(expanded["graph_version"], "knowledge-relations-v1");
+    assert!(
+        expanded["rendered"]
+            .as_str()
+            .expect("expanded rendered")
+            .contains("cargo test --workspace --locked"),
+        "two-hop Knowledge answer was not delivered: {expanded}"
+    );
+    let expanded_detail = detail(
+        &world,
+        &world.alice_token,
+        expanded["id"].as_str().expect("expanded run id"),
+    )
+    .await;
+    let answer = expanded_detail["candidates"]
+        .as_array()
+        .expect("expanded candidates")
+        .iter()
+        .find(|candidate| candidate["knowledge_item_id"] == answer_id)
+        .expect("two-hop answer candidate");
+    assert_eq!(answer["reason_codes"][0], "graph_expansion", "{answer}");
+    assert_eq!(answer["graph_path"].as_array().expect("path").len(), 2);
+    assert_eq!(answer["graph_path"][0]["relation_type"], "supports");
+    assert_eq!(answer["graph_path"][1]["relation_type"], "supports");
+    assert_eq!(answer["scores"]["edge_weight_micros"], 1_400_000);
+    assert_eq!(answer["scores"]["hop_penalty_micros"], 200_000);
+    assert!(
+        expanded_detail["selections"]
+            .as_array()
+            .expect("expanded selections")
+            .iter()
+            .any(|selection| {
+                selection["knowledge_item_id"] == answer_id
+                    && selection["graph_path"]
+                        .as_array()
+                        .is_some_and(|path| path.len() == 2)
+            })
+    );
+
+    let (private_id, private_revision) = create_knowledge(
+        &world,
+        "cpr38-private-endpoint",
+        world.alice_scope,
+        None,
+        Some(ALICE),
+        "Private graph endpoint",
+        "The private graph secret is nebula-seven.",
+        None,
+    )
+    .await;
+    support_relation(
+        &world,
+        "cpr38-anchor-supports-private",
+        (&anchor_id, &anchor_revision),
+        (&private_id, &private_revision),
+    )
+    .await;
+    let bob_run = context_run(
+        &world,
+        &world.bob_token,
+        &world.bob_session,
+        "cpr38-denied-endpoint",
+        "quasar-almanac",
+        None,
+    )
+    .await;
+    let bob_detail = detail(
+        &world,
+        &world.bob_token,
+        bob_run["id"].as_str().expect("Bob run id"),
+    )
+    .await;
+    let disclosure = bob_detail.to_string();
+    for denied in [&private_id, &private_revision, "nebula-seven"] {
+        assert!(
+            !disclosure.contains(denied),
+            "denied graph endpoint leaked: {disclosure}"
+        );
+    }
+    assert!(bob_detail["policy_exclusion_message"].is_string());
+    assert!(
+        bob_detail["candidates"]
+            .as_array()
+            .expect("Bob visible candidates")
+            .iter()
+            .all(|candidate| candidate["knowledge_item_id"] != private_id)
+    );
+
+    let mut tx = rls::begin_tenant_tx(&world.state.pool, world.tenant_id)
+        .await
+        .expect("begin hashes-only graph trace");
+    configuration_support::set_trace_retention(
+        &mut tx,
+        world.tenant_id,
+        root,
+        TraceRetentionMode::HashesOnly,
+    )
+    .await;
+    tx.commit().await.expect("set hashes-only graph trace");
+    let hashes = context_run(
+        &world,
+        &world.alice_token,
+        &world.alice_session,
+        "cpr38-hashes-only",
+        "quasar-almanac",
+        None,
+    )
+    .await;
+    let hashes_detail = detail(
+        &world,
+        &world.alice_token,
+        hashes["id"].as_str().expect("hash run id"),
+    )
+    .await;
+    let hashed_path = hashes_detail["candidates"]
+        .as_array()
+        .expect("hash candidates")
+        .iter()
+        .find(|candidate| {
+            candidate["graph_path"]
+                .as_array()
+                .is_some_and(|path| path.len() == 2)
+        })
+        .and_then(|candidate| candidate["graph_path"].as_array())
+        .expect("hash-only two-hop path");
+    assert!(hashed_path.iter().all(|step| {
+        step["relation_id"].is_null()
+            && step["from_item_id"].is_null()
+            && step["to_item_id"].is_null()
+            && step["relation_hash"]
+                .as_str()
+                .is_some_and(|hash| hash.len() == 64)
+    }));
 }
 
 #[tokio::test]

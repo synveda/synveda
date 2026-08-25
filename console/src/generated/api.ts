@@ -1382,6 +1382,11 @@ export type ContextCandidateView = {
      */
     exclusion_reason?: string | null;
     /**
+     * Best visible relationship path. Empty means this is an ordinary
+     * lexical/vector/pinned anchor.
+     */
+    graph_path?: ContextGraphStepView[];
+    /**
      * Trace-row id.
      */
     id: string;
@@ -1422,6 +1427,7 @@ export type ContextConfigurationBody = {
      * `current_knowledge`, optionally followed by `unreviewed_candidates`.
      */
     channels: string[];
+    graph: GraphRetrievalConfigurationBody;
     token_budget: number;
     trace_retention: "full" | "redacted" | "hashes_only" | "disabled";
   };
@@ -1472,6 +1478,72 @@ export type ContextFeedbackView = {
      * Authenticated subject that supplied it.
      */
     principal_id: string;
+  };
+
+/**
+ * One visible step of a candidate's best bounded relationship path.
+ */
+export type ContextGraphStepView = {
+    /**
+     * Revision that asserted the relation, absent in hashes-only mode.
+     */
+    asserting_revision_id?: string | null;
+    /**
+     * `outbound` or `inbound` relative to traversal.
+     */
+    direction: string;
+    /**
+     * Score contribution; zero for a contradiction warning.
+     */
+    edge_weight_micros: number;
+    /**
+     * Starting revision digest.
+     */
+    from_content_hash: string;
+    /**
+     * Exact starting item, absent in hashes-only mode.
+     */
+    from_item_id?: string | null;
+    /**
+     * Exact starting revision, absent in hashes-only mode.
+     */
+    from_revision_id?: string | null;
+    /**
+     * One-based hop number.
+     */
+    hop: number;
+    /**
+     * Zero-based order within the retained path.
+     */
+    ordinal: number;
+    /**
+     * Content-free evidence hash.
+     */
+    relation_hash: string;
+    /**
+     * Exact immutable relation, absent in hashes-only mode.
+     */
+    relation_id?: string | null;
+    /**
+     * Stable Knowledge relation vocabulary.
+     */
+    relation_type: string;
+    /**
+     * False only for a visible contradiction warning.
+     */
+    supporting: boolean;
+    /**
+     * Reached revision digest.
+     */
+    to_content_hash: string;
+    /**
+     * Exact reached item, absent in hashes-only mode.
+     */
+    to_item_id?: string | null;
+    /**
+     * Exact reached revision, absent in hashes-only mode.
+     */
+    to_revision_id?: string | null;
   };
 
 /**
@@ -1802,9 +1874,17 @@ export type ContextRunView = {
  */
 export type ContextScoreView = {
     /**
+     * Ordinary authorised anchor contribution, per million.
+     */
+    anchor_micros: number;
+    /**
      * Current-state contribution, per million.
      */
     current_state_micros: number;
+    /**
+     * Sum of visible relationship weights on the best path.
+     */
+    edge_weight_micros: number;
     /**
      * Final deterministic score, per million.
      */
@@ -1813,6 +1893,10 @@ export type ContextScoreView = {
      * Freshness contribution, per million.
      */
     freshness_micros: number;
+    /**
+     * Hop penalty subtracted from the path score.
+     */
+    hop_penalty_micros: number;
     /**
      * Lexical contribution, per million.
      */
@@ -1843,6 +1927,14 @@ export type ContextSelectionView = {
      * Canonical content hash.
      */
     content_hash: string;
+    /**
+     * Exact retained candidate selected by the planner.
+     */
+    context_candidate_id: string;
+    /**
+     * Best visible relationship path inherited from the selected candidate.
+     */
+    graph_path?: ContextGraphStepView[];
     /**
      * Selection id.
      */
@@ -2464,6 +2556,18 @@ export type GrantView = {
     scope_id: string;
     source: "owner" | "direct" | "invite" | "directory" | "automation";
     subject_kind: "principal" | "group";
+  };
+
+/**
+ * Bounded anchor-first Knowledge relationship expansion.
+ */
+export type GraphRetrievalConfigurationBody = {
+    enabled: boolean;
+    fan_out_per_node: number;
+    max_expanded_candidates: number;
+    max_hops: number;
+    time_budget_ms: number;
+    token_budget: number;
   };
 
 /**

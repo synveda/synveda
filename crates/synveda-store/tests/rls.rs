@@ -246,6 +246,7 @@ const COVERED: &[&str] = &[
     // feedback are tenant-bound, even when retention keeps hashes only.
     "context_candidates",
     "context_feedback",
+    "context_graph_steps",
     "context_pack_chunks",
     "context_pack_documents",
     "context_packs",
@@ -255,9 +256,6 @@ const COVERED: &[&str] = &[
     // like the effect it executes; a guessed job id must not reveal whether
     // another tenant is erasing anything.
     "durable_operations",
-    "graph_edges",
-    "graph_edges_history",
-    "graph_vertices",
     // CPR-5 (ADR-0072): the access plane. A group is a tenant's own set of
     // principals, and `group_members` is its content — both tenant-bound, both
     // forced, because "who is in engineering" is exactly the kind of fact one
@@ -425,12 +423,10 @@ fn every_tenant_scoped_table_is_covered_and_forced() {
             );
         }
 
-        // Every composed current/as-of surface: the old corpus's (ADR-0006),
-        // the graph's (ADR-0043 decision 3), and CPR-15's Knowledge pair
-        // (ADR-0080 decisions 2 and 6).
+        // Every composed current/as-of surface: the old corpus's (ADR-0006)
+        // and CPR-15's Knowledge pair (ADR-0080 decisions 2 and 6).
         for view in [
             "records_versions",
-            "graph_edges_versions",
             "knowledge_item_versions",
             "knowledge_current",
         ] {
@@ -4528,273 +4524,6 @@ fn staging_disposal_is_scoped_to_its_tenant_and_takes_its_markers_with_it() {
     });
 }
 
-// ── Graph (GRPH-1, ADR-0043) ────────────────────────────────────────────────
-
-/// Seeds a tenant with a two-vertex entity graph and one edge that has
-/// already been superseded once, so `graph_vertices`, `graph_edges`,
-/// `graph_edges_history` and `graph_edges_versions` all hold rows for it.
-/// One vertex is backed by the tenant's record, which is what the cascade
-/// test below pulls on.
-///
-/// Raw SQL because the traversal API is GRPH-1's next commit and this suite
-/// is about the backstop, not about the query surface — the VedaFlow seed
-/// above sets the precedent. Returns (tenant, record, source vertex, edge).
-async fn seed_graph(pool: &PgPool) -> (TenantId, RecordId, uuid::Uuid, uuid::Uuid) {
-    let (tenant, record) = seed_tenant(pool).await;
-    let src = uuid::Uuid::now_v7();
-    let dst = uuid::Uuid::now_v7();
-    let edge = uuid::Uuid::now_v7();
-
-    sqlx::query!(
-        "insert into graph_vertices (id, tenant_id, graph, kind, key, label, record_id)
-         values ($1, $3, 'entity', 'person', 'alice', 'Alice', $4),
-                ($2, $3, 'entity', 'org', 'acme', 'Acme Corp.', null)",
-        src,
-        dst,
-        tenant.as_uuid(),
-        record.as_uuid(),
-    )
-    .execute(pool)
-    .await
-    .expect("seed vertices");
-
-    sqlx::query!(
-        "insert into graph_edges
-             (id, tenant_id, graph, kind, src_id, dst_id, method,
-              confidence_permille, valid_from)
-         values ($1, $2, 'entity', 'works_for', $3, $4, 'deterministic', 900, now())",
-        edge,
-        tenant.as_uuid(),
-        src,
-        dst,
-    )
-    .execute(pool)
-    .await
-    .expect("seed edge");
-
-    // A supersession, so history holds the version this one closed
-    // (ADR-0043 decision 4). The tick makes the replaced version's
-    // transaction period non-empty, exactly as the records fixture does.
-    tick().await;
-    sqlx::query!(
-        "update graph_edges set confidence_permille = 1000 where id = $1",
-        edge,
-    )
-    .execute(pool)
-    .await
-    .expect("supersede edge");
-
-    (tenant, record, src, edge)
-}
-
-/// Rows of `tenant` visible through the graph relations, in the order
-/// (vertices, edges, edge history, edge versions).
-async fn visible_graph_rows(
-    tx: &mut Transaction<'static, Postgres>,
-    tenant: TenantId,
-) -> (i64, i64, i64, i64) {
-    let row = sqlx::query!(
-        r#"select
-             (select count(*) from graph_vertices where tenant_id = $1) as "vertices!",
-             (select count(*) from graph_edges where tenant_id = $1) as "edges!",
-             (select count(*) from graph_edges_history where tenant_id = $1) as "history!",
-             (select count(*) from graph_edges_versions where tenant_id = $1) as "versions!""#,
-        tenant.as_uuid(),
-    )
-    .fetch_one(&mut **tx)
-    .await
-    .expect("count graph rows");
-    (row.vertices, row.edges, row.history, row.versions)
-}
-
-/// The backstop over the graph. An edge is a disclosure that its endpoints
-/// exist and are related, so a graph that leaked across tenants would leak
-/// the shape of another organisation's world without ever showing a record
-/// body — which is why ADR-0043 keeps both the structural guarantee and this
-/// one (decisions 7 and 8).
-#[test]
-fn wrong_tenant_guc_sees_no_graph_rows() {
-    let Some(db) = db() else { return };
-    db.rt.block_on(async {
-        let (victim, ..) = seed_graph(&db.pool).await;
-        let (adversary, ..) = seed_graph(&db.pool).await;
-
-        let mut tx = app_tx(&db.pool, Some(victim)).await;
-        assert_eq!(
-            visible_graph_rows(&mut tx, victim).await,
-            (2, 1, 1, 2),
-            "the victim sees its own graph"
-        );
-        drop(tx);
-
-        let mut tx = app_tx(&db.pool, Some(adversary)).await;
-        assert_eq!(
-            visible_graph_rows(&mut tx, victim).await,
-            (0, 0, 0, 0),
-            "the graph leaked across tenants"
-        );
-        drop(tx);
-
-        // No GUC at all: the connection that forgot to declare its tenant
-        // sees nothing, including through the as-of view.
-        let mut tx = app_tx(&db.pool, None).await;
-        assert_eq!(
-            visible_graph_rows(&mut tx, victim).await,
-            (0, 0, 0, 0),
-            "an undeclared tenant must see no graph rows"
-        );
-    });
-}
-
-/// The write side: a forged tenant trips WITH CHECK on both tables, and an
-/// edge cannot name a vertex outside its own tenant *or* outside its own
-/// named graph — the composite `(tenant_id, graph, id)` foreign keys make
-/// both unrepresentable rather than merely refused (ADR-0043 decisions 6
-/// and 7, answering ADR-0004 option 2's leak-by-omission objection).
-#[test]
-fn graph_writes_cannot_forge_a_tenant_or_cross_a_boundary() {
-    let Some(db) = db() else { return };
-    db.rt.block_on(async {
-        let (victim, _, victim_src, _) = seed_graph(&db.pool).await;
-        let (adversary, _, adversary_src, _) = seed_graph(&db.pool).await;
-
-        let mut tx = app_tx(&db.pool, Some(adversary)).await;
-        let forged = sqlx::query!(
-            "insert into graph_vertices (id, tenant_id, graph, kind, key, label)
-             values ($1, $2, 'entity', 'person', 'mallory', 'Mallory')",
-            uuid::Uuid::now_v7(),
-            victim.as_uuid(),
-        )
-        .execute(&mut *tx)
-        .await;
-        assert!(
-            forged.is_err(),
-            "a forged-tenant vertex write must be rejected"
-        );
-        drop(tx);
-
-        // An edge of the adversary's own tenant, reaching for the victim's
-        // vertex: the composite foreign key has no such row to point at.
-        let mut tx = app_tx(&db.pool, Some(adversary)).await;
-        let cross_tenant = sqlx::query!(
-            "insert into graph_edges
-                 (id, tenant_id, graph, kind, src_id, dst_id, method,
-                  confidence_permille, valid_from)
-             values ($1, $2, 'entity', 'knows', $3, $4, 'deterministic', 500, now())",
-            uuid::Uuid::now_v7(),
-            adversary.as_uuid(),
-            adversary_src,
-            victim_src,
-        )
-        .execute(&mut *tx)
-        .await;
-        assert!(
-            cross_tenant.is_err(),
-            "a cross-tenant edge must be unrepresentable, not merely invisible"
-        );
-        drop(tx);
-
-        // Same tenant, different named graph: an episode vertex is not an
-        // entity vertex, and the discriminator is in the key.
-        let mut tx = app_tx(&db.pool, Some(adversary)).await;
-        let episode = uuid::Uuid::now_v7();
-        sqlx::query!(
-            "insert into graph_vertices (id, tenant_id, graph, kind, key, label)
-             values ($1, $2, 'episode', 'meeting', 'q3-review', 'Q3 review')",
-            episode,
-            adversary.as_uuid(),
-        )
-        .execute(&mut *tx)
-        .await
-        .expect("an episode vertex is ordinary in-tenant data");
-        let cross_graph = sqlx::query!(
-            "insert into graph_edges
-                 (id, tenant_id, graph, kind, src_id, dst_id, method,
-                  confidence_permille, valid_from)
-             values ($1, $2, 'entity', 'attended', $3, $4, 'deterministic', 500, now())",
-            uuid::Uuid::now_v7(),
-            adversary.as_uuid(),
-            adversary_src,
-            episode,
-        )
-        .execute(&mut *tx)
-        .await;
-        assert!(
-            cross_graph.is_err(),
-            "an edge must not join two named graphs"
-        );
-    });
-}
-
-/// Least privilege over the pair. The app role may close an edge's window
-/// and insert its replacement (ADR-0043 decision 4) but may not delete one:
-/// direct authorship or deletion of an edge is reserved for "a new action, a
-/// new grant and a new ADR". History is append-only by grant as well as by
-/// trigger, and destruction past a horizon stays retention's to add.
-#[test]
-fn the_app_role_cannot_delete_edges_or_rewrite_graph_history() {
-    let Some(db) = db() else { return };
-    db.rt.block_on(async {
-        let (tenant, ..) = seed_graph(&db.pool).await;
-
-        for statement in [
-            "delete from graph_edges",
-            "delete from graph_vertices",
-            "delete from graph_edges_history",
-            "update graph_edges_history set confidence_permille = 1",
-        ] {
-            let mut tx = app_tx(&db.pool, Some(tenant)).await;
-            let refused = sqlx::raw_sql(statement).execute(&mut *tx).await;
-            assert!(
-                refused.is_err(),
-                "the app role must not be able to run `{statement}`"
-            );
-        }
-
-        // Truncate is refused even where the grant would allow it, because
-        // it would take rows out without archiving them.
-        let mut tx = app_tx(&db.pool, Some(tenant)).await;
-        let truncated = sqlx::raw_sql("truncate graph_edges")
-            .execute(&mut *tx)
-            .await;
-        assert!(truncated.is_err(), "truncate must not bypass the archive");
-    });
-}
-
-/// The one path rows do leave by: a record destroyed by retention takes its
-/// backed vertex with it, the vertex takes its claims, and every claim lands
-/// in history on the way out. Foreign-key actions bypass grants and RLS by
-/// Postgres semantics, so this is the cascade the missing DELETE grant above
-/// deliberately leaves intact.
-#[test]
-fn destroying_a_record_cascades_through_the_graph_into_history() {
-    let Some(db) = db() else { return };
-    db.rt.block_on(async {
-        let (tenant, record, ..) = seed_graph(&db.pool).await;
-        tick().await;
-
-        let mut tx = app_tx(&db.pool, Some(tenant)).await;
-        assert_eq!(visible_graph_rows(&mut tx, tenant).await, (2, 1, 1, 2));
-        records::delete(&mut *tx, record)
-            .await
-            .expect("delete the backing record");
-
-        let (vertices, edges, history, versions) = visible_graph_rows(&mut tx, tenant).await;
-        assert_eq!(
-            (vertices, edges),
-            (1, 0),
-            "the record's cascade must remove its vertex and that vertex's edges"
-        );
-        assert_eq!(
-            (history, versions),
-            (2, 2),
-            "and the cascaded edge must be archived, not dropped — the \
-             history holds both the superseded version and the closed one"
-        );
-        tx.commit().await.expect("commit");
-    });
-}
-
 // ── PRMT-1: the prompt registry's draft table ────────────────────────────────
 
 /// A tenant with one prompt draft at one scope, seeded on the RLS-exempt
@@ -6335,11 +6064,12 @@ async fn seed_session(pool: &PgPool) -> SessionFixture {
     .await
     .expect("create Knowledge fixture");
     let content_hash = snapshot.revision.content_hash;
+    let context_candidate_id = ContextCandidateId::new();
     context::insert_candidate(
         &mut tx,
         tenant,
         &context::NewContextCandidate {
-            id: ContextCandidateId::new(),
+            id: context_candidate_id,
             context_run_id: run.id,
             ordinal: 0,
             channel: synveda_types::configuration::ConfigurationContextChannel::CurrentKnowledge,
@@ -6351,6 +6081,9 @@ async fn seed_session(pool: &PgPool) -> SessionFixture {
             lifecycle_state: Some(KnowledgeLifecycleState::Active),
             keyword_score_micros: 500_000,
             semantic_score_micros: 0,
+            anchor_score_micros: 500_000,
+            edge_weight_micros: 0,
+            hop_penalty_micros: 0,
             freshness_score_micros: 100_000,
             pin_score_micros: 0,
             current_state_score_micros: 100_000,
@@ -6361,12 +6094,38 @@ async fn seed_session(pool: &PgPool) -> SessionFixture {
     )
     .await
     .expect("record candidate fixture");
+    context::insert_graph_step(
+        &mut tx,
+        tenant,
+        &context::NewContextGraphStep {
+            context_run_id: run.id,
+            context_candidate_id,
+            ordinal: 0,
+            hop: 1,
+            relation_id: None,
+            relation_hash: "2".repeat(64),
+            relation_type: synveda_types::knowledge::KnowledgeRelationType::Contradicts,
+            direction: synveda_types::ContextGraphDirection::Outbound,
+            from_item_id: None,
+            from_revision_id: None,
+            to_item_id: None,
+            to_revision_id: None,
+            asserting_revision_id: None,
+            from_content_hash: "3".repeat(64),
+            to_content_hash: "4".repeat(64),
+            edge_weight_micros: 0,
+            supporting: false,
+        },
+    )
+    .await
+    .expect("record hashes-only graph trace fixture");
     let selection = context::insert_selection(
         &mut tx,
         tenant,
         &context::NewContextSelection {
             id: ContextSelectionId::new(),
             context_run_id: run.id,
+            context_candidate_id,
             rank: 1,
             channel: synveda_types::configuration::ConfigurationContextChannel::CurrentKnowledge,
             knowledge_item_id: Some(item_id),
@@ -6434,11 +6193,11 @@ async fn visible_session_rows(
     (sessions, events, runs)
 }
 
-/// Rows of `tenant` visible through the three CPR-20 trace tables.
+/// Rows of `tenant` visible through the four context trace tables.
 async fn visible_context_rows(
     tx: &mut Transaction<'static, Postgres>,
     tenant: TenantId,
-) -> (i64, i64, i64) {
+) -> (i64, i64, i64, i64) {
     let candidates = sqlx::query_scalar!(
         r#"select count(*) as "count!" from context_candidates where tenant_id = $1"#,
         tenant.as_uuid(),
@@ -6460,7 +6219,14 @@ async fn visible_context_rows(
     .fetch_one(&mut **tx)
     .await
     .expect("count context_feedback");
-    (candidates, selections, feedback)
+    let graph_steps = sqlx::query_scalar!(
+        r#"select count(*) as "count!" from context_graph_steps where tenant_id = $1"#,
+        tenant.as_uuid(),
+    )
+    .fetch_one(&mut **tx)
+    .await
+    .expect("count context_graph_steps");
+    (candidates, selections, feedback, graph_steps)
 }
 
 /// The wrong (or absent) tenant GUC sees zero rows in all three tables; the
@@ -6484,12 +6250,12 @@ fn wrong_tenant_guc_sees_no_session_rows() {
         );
         assert_eq!(
             visible_context_rows(&mut tx, victim.tenant).await,
-            (0, 0, 0),
+            (0, 0, 0, 0),
             "planner trace rows leaked across tenants under the wrong GUC"
         );
         assert_eq!(
             visible_context_rows(&mut tx, adversary.tenant).await,
-            (1, 1, 1)
+            (1, 1, 1, 1)
         );
         // Not a count: the *content*. An event payload is a transcript and a
         // context run holds composed material, so a leak here is the leak this
@@ -6514,7 +6280,7 @@ fn wrong_tenant_guc_sees_no_session_rows() {
         );
         assert_eq!(
             visible_context_rows(&mut tx, victim.tenant).await,
-            (0, 0, 0),
+            (0, 0, 0, 0),
             "planner trace rows visible without any tenant GUC"
         );
     });
@@ -6595,6 +6361,14 @@ fn the_app_role_cannot_rewrite_or_delete_a_transcript() {
                 fixture.run.as_uuid(),
             ),
             (
+                "update context_graph_steps set edge_weight_micros = 1 where context_run_id = $1",
+                fixture.run.as_uuid(),
+            ),
+            (
+                "delete from context_graph_steps where context_run_id = $1",
+                fixture.run.as_uuid(),
+            ),
+            (
                 "update context_selections set token_count = 0 where context_run_id = $1",
                 fixture.run.as_uuid(),
             ),
@@ -6667,6 +6441,8 @@ fn the_database_owner_cannot_rewrite_context_trace_history() {
             "delete from session_context_runs where id = $1",
             "update context_candidates set final_score_micros = 0 where context_run_id = $1",
             "delete from context_candidates where context_run_id = $1",
+            "update context_graph_steps set edge_weight_micros = 1 where context_run_id = $1",
+            "delete from context_graph_steps where context_run_id = $1",
             "update context_selections set token_count = 0 where context_run_id = $1",
             "delete from context_selections where context_run_id = $1",
             "update context_feedback set feedback_type = 'unhelpful' where context_run_id = $1",

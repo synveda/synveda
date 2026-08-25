@@ -24,6 +24,7 @@ import type {
 function selection(overrides: Partial<ContextSelectionView> = {}): ContextSelectionView {
   return {
     id: "selection-1",
+    context_candidate_id: "candidate-1",
     rank: 1,
     channel: "current_knowledge",
     knowledge_item_id: "knowledge-1",

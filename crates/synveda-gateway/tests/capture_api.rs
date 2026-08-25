@@ -1473,7 +1473,7 @@ async fn pulseboard_cross_session_team_knowledge_loop_is_governed_end_to_end() {
     assert_eq!(obsolete["exclusion_reason"], "superseded");
     assert_eq!(
         inspector["run"]["retrieval_version"],
-        "knowledge-planner-v1"
+        "knowledge-planner-v2"
     );
     assert!(inspector["run"]["block_hash"].as_str().is_some());
 

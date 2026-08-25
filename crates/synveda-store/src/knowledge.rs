@@ -1217,6 +1217,74 @@ pub async fn relations(
     rows.into_iter().map(TryInto::try_into).collect()
 }
 
+/// Reads one bounded adjacency page for context graph expansion.
+///
+/// The query admits the six supporting edge types plus `contradicts`, which
+/// is retained only as a zero-weight warning. `duplicates` never expands.
+/// This is candidate generation below authorisation: the gateway must decide
+/// the frontier item before calling it and every endpoint before using a row.
+#[tracing::instrument(
+    name = "store.knowledge.bounded_retrieval_relations",
+    skip_all,
+    fields(tenant.id = %tenant_id, knowledge.item.id = %item_id, limit),
+    err(Display)
+)]
+pub async fn bounded_retrieval_relations(
+    executor: impl PgExecutor<'_>,
+    tenant_id: TenantId,
+    item_id: KnowledgeItemId,
+    limit: i64,
+) -> Result<Vec<KnowledgeRelation>> {
+    let rows = sqlx::query_as!(
+        RelationRow,
+        r#"
+        select id, tenant_id, source_item_id, target_item_id,
+               asserting_revision_id, relation_type, metadata,
+               created_by, created_at
+        from knowledge_relations
+        where tenant_id = $1
+          and (source_item_id = $2 or target_item_id = $2)
+          and relation_type in (
+              'supports', 'contradicts', 'supersedes', 'derived_from',
+              'references', 'related_to', 'transitions_to'
+          )
+        order by relation_type, created_at, id
+        limit $3
+        "#,
+        tenant_id.as_uuid(),
+        item_id.as_uuid(),
+        limit.max(1),
+    )
+    .fetch_all(executor)
+    .await
+    .map_err(storage_error)?;
+    rows.into_iter().map(TryInto::try_into).collect()
+}
+
+/// Reads one exact immutable relationship claim.
+pub async fn relation(
+    executor: impl PgExecutor<'_>,
+    tenant_id: TenantId,
+    relation_id: KnowledgeRelationId,
+) -> Result<Option<KnowledgeRelation>> {
+    let row = sqlx::query_as!(
+        RelationRow,
+        r#"
+        select id, tenant_id, source_item_id, target_item_id,
+               asserting_revision_id, relation_type, metadata,
+               created_by, created_at
+        from knowledge_relations
+        where tenant_id = $1 and id = $2
+        "#,
+        tenant_id.as_uuid(),
+        relation_id.as_uuid(),
+    )
+    .fetch_optional(executor)
+    .await
+    .map_err(storage_error)?;
+    row.map(TryInto::try_into).transpose()
+}
+
 /// Deterministic, tenant-complete Knowledge payload for the local sealed
 /// export boundary (CPR-35, ADR-0094).
 ///

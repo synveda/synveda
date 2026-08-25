@@ -125,19 +125,20 @@ switchers, a People page and the governance surfaces under **Advanced**. See
 | **0 — Foundation** | Workspace, dev environment, types, bitemporal schema, observability | ✅ 6/6 |
 | **1 — The spine** | SSO → provisioned own-scope → append → extraction → compose → audit, live in Claude Code | ✅ 21/21 |
 | **2 — Governance** | VedaFlow, lapses, dedup, decay, recall, graph, audit queries, prompts, context packs, eval gates | ✅ 22/22 |
-| **3 — Enterprise** | SCIM, real IdPs, skills registry, console, Helm, release & distribution, residency, Qdrant | 🚧 14/27 |
+| **3 — Enterprise** | SCIM, real IdPs, skills registry, console, Helm, release & distribution, residency, Qdrant | 🚧 15/27 |
 | **4 — Ecosystem** | SDKs, importers, telemetry, DR, gateway scale | 🚧 2/17 |
-| **5 — Context platform** | The redesign: fresh epoch, governed scopes, sessions, immutable Knowledge, capture, explainable context, Skills, Tools, OKF, one public contract, governed runtime configuration, policy relaxations, offline-verifiable audit export, shared directory access, stable secret custody and one deployment runtime | 🚧 37 packages delivered; programme continues |
+| **5 — Context platform** | The redesign: fresh epoch, governed scopes, sessions, immutable Knowledge, capture, explainable context, Skills, Tools, OKF, one public contract, governed runtime configuration, policy relaxations, offline-verifiable audit export, shared directory access, stable secret custody and one deployment runtime | 🚧 38 packages delivered; programme continues |
 
-One further feature (AUTH-6, session and token hygiene) is unscheduled — **134
-in total, 103 delivered** (`docs/backlog/STATUS.md` is the count `make ci`
+One further feature (AUTH-6, session and token hygiene) is unscheduled — **135
+in total, 105 delivered** (`docs/backlog/STATUS.md` is the count `make ci`
 checks). Phase 5 is the 33-prompt context-platform redesign, in flight on
-`feat/context-platform-mvp`; Phase 3 is paused mid-phase behind it. The fourteen Phase 3 items finished are the skills registry
+`feat/context-platform-mvp`; Phase 3 is paused mid-phase behind it. The fifteen Phase 3 items finished are the skills registry
 and its governance (SKIL-1 through SKIL-4), the installable single binary
 (OPS-1), the admin console's proposals inbox and scope explorer (CNSL-1,
 CNSL-2), the generic MCP server (ADPT-2), the SCIM server with its
 directory-sync fallback (AUTH-4, AUTH-5), the LongMemEval benchmark adapter
-(EVAL-3), the Helm deployment form (OPS-2) — which is where the
+(EVAL-3), bounded graph-augmented recall (GRPH-3), the Helm deployment form
+(OPS-2) — which is where the
 gateway stopped connecting to Postgres as a superuser, so the tenant isolation
 backstop was first enforced against a deployment rather than bypassed by one;
 CPR-36 now enforces the same runtime role in the installed/Compose form — the

@@ -6,7 +6,7 @@
     "binding_scope_id": "0199c000-0000-7000-8000-000000000002",
     "artifact_id": "0199c000-0000-7000-8000-000000000003",
     "version_id": "0199c000-0000-7000-8000-000000000004",
-    "content_hash": "6ffb4d59eb95e51cd87079d4770024297e54cdfc171a23ef7a09155e54e4544a",
+    "content_hash": "617ad3f0d49b8a111b7a1ddcaeaa90ae91b2eae05a8221186b2834da41cdd53f",
     "document": {
       "policy_pack": "eng-pack",
       "capture": {
@@ -21,7 +21,15 @@
         "channels": [
           "current_knowledge"
         ],
-        "trace_retention": "full"
+        "trace_retention": "full",
+        "graph": {
+          "enabled": true,
+          "max_hops": 2,
+          "fan_out_per_node": 8,
+          "max_expanded_candidates": 32,
+          "time_budget_ms": 500,
+          "token_budget": 512
+        }
       },
       "freshness": {
         "fact_days": 60,

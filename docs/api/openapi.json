@@ -15937,6 +15937,13 @@
             ],
             "description": "Why this visible candidate was not selected."
           },
+          "graph_path": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ContextGraphStepView"
+            },
+            "description": "Best visible relationship path. Empty means this is an ordinary\nlexical/vector/pinned anchor."
+          },
           "id": {
             "type": "string",
             "format": "uuid",
@@ -16025,7 +16032,8 @@
         "required": [
           "token_budget",
           "channels",
-          "trace_retention"
+          "trace_retention",
+          "graph"
         ],
         "properties": {
           "channels": {
@@ -16034,6 +16042,9 @@
               "type": "string"
             },
             "description": "`current_knowledge`, optionally followed by `unreviewed_candidates`."
+          },
+          "graph": {
+            "$ref": "#/components/schemas/GraphRetrievalConfigurationBody"
           },
           "token_budget": {
             "type": "integer",
@@ -16117,6 +16128,111 @@
           "principal_id": {
             "type": "string",
             "description": "Authenticated subject that supplied it."
+          }
+        }
+      },
+      "ContextGraphStepView": {
+        "type": "object",
+        "description": "One visible step of a candidate's best bounded relationship path.",
+        "required": [
+          "ordinal",
+          "hop",
+          "relation_hash",
+          "relation_type",
+          "direction",
+          "from_content_hash",
+          "to_content_hash",
+          "edge_weight_micros",
+          "supporting"
+        ],
+        "properties": {
+          "asserting_revision_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Revision that asserted the relation, absent in hashes-only mode."
+          },
+          "direction": {
+            "type": "string",
+            "description": "`outbound` or `inbound` relative to traversal."
+          },
+          "edge_weight_micros": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Score contribution; zero for a contradiction warning."
+          },
+          "from_content_hash": {
+            "type": "string",
+            "description": "Starting revision digest."
+          },
+          "from_item_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Exact starting item, absent in hashes-only mode."
+          },
+          "from_revision_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Exact starting revision, absent in hashes-only mode."
+          },
+          "hop": {
+            "type": "integer",
+            "format": "int32",
+            "description": "One-based hop number.",
+            "minimum": 0
+          },
+          "ordinal": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Zero-based order within the retained path."
+          },
+          "relation_hash": {
+            "type": "string",
+            "description": "Content-free evidence hash."
+          },
+          "relation_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Exact immutable relation, absent in hashes-only mode."
+          },
+          "relation_type": {
+            "type": "string",
+            "description": "Stable Knowledge relation vocabulary."
+          },
+          "supporting": {
+            "type": "boolean",
+            "description": "False only for a visible contradiction warning."
+          },
+          "to_content_hash": {
+            "type": "string",
+            "description": "Reached revision digest."
+          },
+          "to_item_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Exact reached item, absent in hashes-only mode."
+          },
+          "to_revision_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Exact reached revision, absent in hashes-only mode."
           }
         }
       },
@@ -16683,16 +16799,29 @@
         "required": [
           "keyword_micros",
           "semantic_micros",
+          "anchor_micros",
+          "edge_weight_micros",
+          "hop_penalty_micros",
           "freshness_micros",
           "pin_micros",
           "current_state_micros",
           "final_micros"
         ],
         "properties": {
+          "anchor_micros": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Ordinary authorised anchor contribution, per million."
+          },
           "current_state_micros": {
             "type": "integer",
             "format": "int32",
             "description": "Current-state contribution, per million."
+          },
+          "edge_weight_micros": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Sum of visible relationship weights on the best path."
           },
           "final_micros": {
             "type": "integer",
@@ -16703,6 +16832,11 @@
             "type": "integer",
             "format": "int32",
             "description": "Freshness contribution, per million."
+          },
+          "hop_penalty_micros": {
+            "type": "integer",
+            "format": "int32",
+            "description": "Hop penalty subtracted from the path score."
           },
           "keyword_micros": {
             "type": "integer",
@@ -16726,6 +16860,7 @@
         "description": "One retained selected revision.",
         "required": [
           "id",
+          "context_candidate_id",
           "rank",
           "channel",
           "content_hash",
@@ -16748,6 +16883,18 @@
           "content_hash": {
             "type": "string",
             "description": "Canonical content hash."
+          },
+          "context_candidate_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Exact retained candidate selected by the planner."
+          },
+          "graph_path": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ContextGraphStepView"
+            },
+            "description": "Best visible relationship path inherited from the selected candidate."
           },
           "id": {
             "type": "string",
@@ -17939,6 +18086,49 @@
             ]
           }
         }
+      },
+      "GraphRetrievalConfigurationBody": {
+        "type": "object",
+        "description": "Bounded anchor-first Knowledge relationship expansion.",
+        "required": [
+          "enabled",
+          "max_hops",
+          "fan_out_per_node",
+          "max_expanded_candidates",
+          "time_budget_ms",
+          "token_budget"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "fan_out_per_node": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "max_expanded_candidates": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "max_hops": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "time_budget_ms": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "token_budget": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
       },
       "GroupList": {
         "type": "object",

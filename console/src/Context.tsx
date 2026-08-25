@@ -34,6 +34,7 @@ import { hrefOf } from "./routes.mjs";
 import type {
   ContextCandidateView,
   ContextFeedbackView,
+  ContextGraphStepView,
   ContextRunDetailView,
   ContextRunView,
   ContextSelectionView,
@@ -254,6 +255,7 @@ function Selection({
       ) : null}
       <p className="mono muted">Content hash {selection.content_hash}</p>
       <ScoreBreakdown scores={scores} />
+      <GraphPath steps={selection.graph_path ?? []} mode={mode} />
       {proposal ? null : <Sources sources={selection.sources ?? []} mode={mode} />}
       <SelectionFeedback
         selection={selection}
@@ -295,6 +297,9 @@ function ScoreBreakdown({ scores }: { scores: ReturnType<typeof scoresOf> }) {
   const rows = [
     ["Keyword", scores.keyword_micros],
     ["Embedding", scores.semantic_micros],
+    ["Anchor retrieval", scores.anchor_micros],
+    ["Relationship edges", scores.edge_weight_micros],
+    ["Hop penalty", -scores.hop_penalty_micros],
     ["Freshness", scores.freshness_micros],
     ["Explicit pin", scores.pin_micros],
     ["Current state", scores.current_state_micros],
@@ -309,6 +314,40 @@ function ScoreBreakdown({ scores }: { scores: ReturnType<typeof scoresOf> }) {
         </div>
       ))}
     </dl>
+  );
+}
+
+function GraphPath({ steps, mode }: { steps: ContextGraphStepView[]; mode: string }) {
+  return (
+    <section className="context-graph-path">
+      <h5>Anchor and relationship path</h5>
+      {steps.length === 0 ? (
+        <p className="muted">Direct lexical, semantic, pinned or recency anchor; no relationship edge contributed.</p>
+      ) : (
+        <ol>
+          {steps.map((step) => {
+            const from = step.from_item_id
+              ? `Knowledge ${step.from_item_id} @ ${step.from_revision_id}`
+              : `content ${step.from_content_hash}`;
+            const to = step.to_item_id
+              ? `Knowledge ${step.to_item_id} @ ${step.to_revision_id}`
+              : `content ${step.to_content_hash}`;
+            return (
+              <li key={`${step.ordinal}:${step.relation_hash}`}>
+                <strong>Hop {step.hop}: {step.relation_type.replaceAll("_", " ")}</strong>
+                {` · ${step.direction} · ${step.supporting ? scorePercent(step.edge_weight_micros) : "warning only"}`}
+                <br />
+                <span className="mono">{from} → {to}</span>
+                <br />
+                <span className="mono">
+                  {step.relation_id ? `relation ${step.relation_id}` : `${mode} relation hash ${step.relation_hash}`}
+                </span>
+              </li>
+            );
+          })}
+        </ol>
+      )}
+    </section>
   );
 }
 
@@ -436,6 +475,7 @@ function Exclusions({ run, candidates }: { run: ContextRunView; candidates: Cont
                 <p>Excluded because <strong>{reasonLabel(candidate.exclusion_reason as string)}</strong>.</p>
                 {candidate.reason_codes.length > 0 ? <p className="muted">Evidence: {candidate.reason_codes.map(reasonLabel).join(" · ")}</p> : null}
                 <ScoreBreakdown scores={scores} />
+                <GraphPath steps={candidate.graph_path ?? []} mode={run.trace_retention_mode} />
               </li>
             );
           })}

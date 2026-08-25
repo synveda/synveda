@@ -2230,6 +2230,22 @@ CPR-37  Conflict, supersession and freshness engine (XL)
   generated API/console conflict, transition and staleness workflows, audit,
   focused tests, demo, `make ci` and `make db-test` pass. ADR-0096.
 
+CPR-38  Bounded graph-augmented retrieval (XL)
+  Filed 2026-08-25 by the autonomous continuation. Expand only already-
+  authorised current Knowledge anchors over the immutable KnowledgeRelation
+  graph under explicit governed bounds, and retain re-authorised paths as
+  ContextRun evidence rather than hidden score state. AC: at most two hops with
+  bounded anchors, per-node fan-out, total expanded candidates, wall-clock and
+  graph-token work; PDP before anchors/adjacency, after expansion and before
+  trace rendering; six supporting edge types with contradiction as a zero-
+  weight warning; separate anchor, edge, hop, freshness, current-state and final
+  score components; full/redacted/hashes-only/disabled path retention; exact
+  degradation with lexical/vector fallback on graph failure or budget; no
+  stale/superseded/transitional current injection; generated Context Inspector,
+  multi-hop quality fixture, audit, RLS, demo, `make ci` and `make db-test`
+  pass. The dead Record-era graph/linker is deleted without translation and the
+  remaining GRPH-3 product objective is subsumed. ADR-0097.
+
 ──────────────────────────────────────────────
 Sequencing (features → phases)
 ──────────────────────────────────────────────
@@ -2323,7 +2339,7 @@ Phase 4 ecosystem: ADPT-4,5,6,7,8 · PRMT-3 · SKIL-5 · MEM-7 · OPS-5,6,7 · C
    or an evaluation harness — and that is a *when*, not an *if*, since ADPT-1's own demo
    is a script. What it must not become is a warning in a README: the gap is silent,
    returns exit 0, and reads exactly like a session that was observed.)
-Phase 5 context platform (redesign): CPR-1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37
+Phase 5 context platform (redesign): CPR-1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38
    (Added 2026-08-17. Its own phase rather than a slot in Phase 4, because it is not the
    next feature — it is the programme that re-cuts the model every feature above was built
    on, for an audience none of them was: one person, or four sharing agent context, who

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        select id, tenant_id, graph, kind, key, label, record_id, created_at\n        from graph_vertices\n        where tenant_id = $1 and id = any($2)\n        order by id\n        ",
+  "query": "\n        select id, tenant_id, source_item_id, target_item_id,\n               asserting_revision_id, relation_type, metadata,\n               created_by, created_at\n        from knowledge_relations\n        where tenant_id = $1 and id = $2\n        ",
   "describe": {
     "columns": [
       {
@@ -15,31 +15,36 @@
       },
       {
         "ordinal": 2,
-        "name": "graph",
-        "type_info": "Text"
+        "name": "source_item_id",
+        "type_info": "Uuid"
       },
       {
         "ordinal": 3,
-        "name": "kind",
-        "type_info": "Text"
+        "name": "target_item_id",
+        "type_info": "Uuid"
       },
       {
         "ordinal": 4,
-        "name": "key",
-        "type_info": "Text"
+        "name": "asserting_revision_id",
+        "type_info": "Uuid"
       },
       {
         "ordinal": 5,
-        "name": "label",
+        "name": "relation_type",
         "type_info": "Text"
       },
       {
         "ordinal": 6,
-        "name": "record_id",
-        "type_info": "Uuid"
+        "name": "metadata",
+        "type_info": "Jsonb"
       },
       {
         "ordinal": 7,
+        "name": "created_by",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
         "name": "created_at",
         "type_info": "Timestamptz"
       }
@@ -47,10 +52,11 @@
     "parameters": {
       "Left": [
         "Uuid",
-        "UuidArray"
+        "Uuid"
       ]
     },
     "nullable": [
+      false,
       false,
       false,
       false,
@@ -61,5 +67,5 @@
       false
     ]
   },
-  "hash": "7bc0b582636a73dde82d88a36c139f8a0696fd2df31cad19f94c6a52bbd3511d"
+  "hash": "e0c0c7794f39df9058b759945778e87f822d64b30158a5559295b47a487d9fd5"
 }

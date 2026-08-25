@@ -26,6 +26,14 @@ const document: ConfigurationDocumentBody = {
     token_budget: 1500,
     channels: ["current_knowledge"],
     trace_retention: "redacted",
+    graph: {
+      enabled: true,
+      max_hops: 2,
+      fan_out_per_node: 6,
+      max_expanded_candidates: 24,
+      time_budget_ms: 350,
+      token_budget: 384,
+    },
   },
   freshness: {
     fact_days: 30,

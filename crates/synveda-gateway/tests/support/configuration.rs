@@ -316,6 +316,47 @@ pub async fn set_trace_retention(
     select_document(tx, tenant, scope_id, binding, document).await
 }
 
+pub async fn set_graph_enabled(
+    tx: &mut PgConnection,
+    tenant: TenantId,
+    scope_id: ScopeId,
+    enabled: bool,
+) -> Selection {
+    let binding = configuration::bindings(tx, tenant, Some(scope_id), None, 2)
+        .await
+        .expect("read Configuration fixture binding")
+        .into_iter()
+        .next()
+        .expect("Configuration fixture binding exists");
+    let artifact = configuration::artifact(tx, tenant, binding.artifact_id)
+        .await
+        .expect("read Configuration fixture artifact")
+        .expect("Configuration fixture artifact exists");
+    let selected_id = binding
+        .pinned_version_id
+        .unwrap_or(artifact.current_version_id);
+    let current = configuration::version(tx, tenant, selected_id)
+        .await
+        .expect("read Configuration fixture version")
+        .expect("Configuration fixture version exists");
+    let mut document = current.document;
+    document.context.graph = if enabled {
+        ConfigurationDocument::template(ConfigurationTemplate::Personal)
+            .context
+            .graph
+    } else {
+        synveda_types::configuration::GraphRetrievalConfiguration {
+            enabled: false,
+            max_hops: 0,
+            fan_out_per_node: 0,
+            max_expanded_candidates: 0,
+            time_budget_ms: 0,
+            token_budget: 0,
+        }
+    };
+    select_document(tx, tenant, scope_id, binding, document).await
+}
+
 pub async fn set_advertisement(
     tx: &mut PgConnection,
     tenant: TenantId,

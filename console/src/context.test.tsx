@@ -12,6 +12,7 @@ import { toText } from "./text.mjs";
 import type {
   CaptureCandidateView,
   ContextCandidateView,
+  ContextGraphStepView,
   ContextRunDetailView,
   ContextRunView,
   ContextSelectionView,
@@ -109,14 +110,34 @@ function run(overrides: Partial<ContextRunView> = {}): ContextRunView {
     skills: {},
     degraded: ["embedder"],
     as_of: "2026-08-24T10:00:00Z",
-    retrieval_version: "knowledge-planner-v1",
+    retrieval_version: "knowledge-planner-v2",
     embedding_model: "bge-small-en-v1.5",
     index_version: "knowledge-search-v1",
-    graph_version: undefined,
+    graph_version: "knowledge-relations-v1",
     trace_retention_mode: "full",
     completion_status: "completed",
     created_at: "2026-08-24T10:00:01Z",
     ...overrides,
+  };
+}
+
+function graphStep(hashesOnly = false): ContextGraphStepView {
+  return {
+    ordinal: 0,
+    hop: 1,
+    relation_id: hashesOnly ? undefined : "relation-1",
+    relation_hash: "relation-path-hash",
+    relation_type: "supports",
+    direction: "outbound",
+    from_item_id: hashesOnly ? undefined : "knowledge-anchor",
+    from_revision_id: hashesOnly ? undefined : "revision-anchor",
+    to_item_id: hashesOnly ? undefined : "knowledge-current",
+    to_revision_id: hashesOnly ? undefined : "revision-current",
+    asserting_revision_id: hashesOnly ? undefined : "revision-anchor",
+    from_content_hash: "hash-anchor",
+    to_content_hash: "hash-current",
+    edge_weight_micros: 700_000,
+    supporting: true,
   };
 }
 
@@ -133,11 +154,15 @@ function selectedCandidate(): ContextCandidateView {
     scores: {
       keyword_micros: 420_000,
       semantic_micros: 310_000,
+      anchor_micros: 730_000,
+      edge_weight_micros: 700_000,
+      hop_penalty_micros: 100_000,
       freshness_micros: 80_000,
       pin_micros: 0,
       current_state_micros: 100_000,
       final_micros: 910_000,
     },
+    graph_path: [graphStep()],
     revision: revision(),
     sources: [source()],
   };
@@ -162,6 +187,9 @@ function excluded(
     scores: {
       keyword_micros: 250_000,
       semantic_micros: 0,
+      anchor_micros: 250_000,
+      edge_weight_micros: 0,
+      hop_penalty_micros: 0,
       freshness_micros: 0,
       pin_micros: 0,
       current_state_micros: lifecycle === "superseded" ? -1_000_000 : 100_000,
@@ -180,6 +208,7 @@ function excluded(
 function selection(overrides: Partial<ContextSelectionView> = {}): ContextSelectionView {
   return {
     id: "selection-1",
+    context_candidate_id: "candidate-current",
     rank: 1,
     channel: "current_knowledge",
     knowledge_item_id: "knowledge-current",
@@ -189,6 +218,7 @@ function selection(overrides: Partial<ContextSelectionView> = {}): ContextSelect
     reason_codes: ["keyword_match", "freshness_boost"],
     revision: revision(),
     sources: [source()],
+    graph_path: [graphStep()],
     ...overrides,
   };
 }
@@ -245,11 +275,14 @@ test("a full trace explains selection, evidence, scores, exclusions, versions an
     "Source evidence",
     "session event event-17",
     "300 requested · 256 governed · 37 used",
-    "knowledge-planner-v1",
+    "knowledge-planner-v2",
     "knowledge-search-v1",
     "bge-small-en-v1.5",
     "Graph",
-    "not run",
+    "knowledge-relations-v1",
+    "Anchor and relationship path",
+    "Hop 1: supports",
+    "relation relation-1",
     "rendered-hash",
     "Degraded retrieval: embedder",
     "Obsolete X-Request-Id convention",
@@ -305,6 +338,9 @@ test("a configured unreviewed selection stays visibly separate and has no Knowle
     scores: {
       keyword_micros: 600_000,
       semantic_micros: 0,
+      anchor_micros: 600_000,
+      edge_weight_micros: 0,
+      hop_penalty_micros: 0,
       freshness_micros: 50_000,
       pin_micros: 0,
       current_state_micros: 0,
@@ -315,6 +351,7 @@ test("a configured unreviewed selection stays visibly separate and has no Knowle
   };
   const pendingSelection: ContextSelectionView = {
     id: "selection-unreviewed",
+    context_candidate_id: "candidate-unreviewed",
     rank: 1,
     channel: "unreviewed_candidates",
     capture_candidate_id: proposal.id,
@@ -348,6 +385,7 @@ test("hashes-only mode displays hashes and reasons but no address, content, sour
     knowledge_revision_id: undefined,
     revision: undefined,
     sources: [],
+    graph_path: [graphStep(true)],
   });
   const hashCandidate: ContextCandidateView = {
     ...selectedCandidate(),
@@ -357,6 +395,7 @@ test("hashes-only mode displays hashes and reasons but no address, content, sour
     revision: undefined,
     scores: undefined,
     sources: [],
+    graph_path: [graphStep(true)],
   };
   await seed({
     kind: "ok",
@@ -370,6 +409,7 @@ test("hashes-only mode displays hashes and reasons but no address, content, sour
   const { markup, text } = render();
   assert.match(text, /Hashes-only trace/);
   assert.match(text, /Content hash-current/);
+  assert.match(text, /hashes_only relation hash relation-path-hash/);
   assert.match(text, /feedback is unavailable because this trace retained no exact revision address/i);
   assert.ok(!markup.includes("/console/knowledge/knowledge-current"));
   assert.doesNotMatch(text, /Current request correlation/);
