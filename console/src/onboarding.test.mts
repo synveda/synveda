@@ -113,12 +113,28 @@ test("an unknown client falls through to the extensible one rather than to a gue
 
 test("every listed client has an id the CLI would accept", () => {
   // The ids are pasted into `synveda mcp install --client <id>`, which
-  // reads `crates/synveda-cli/src/mcp/clients.jsonc`.
-  const known = ["claude-code", "cursor", "claude-desktop", "zed", "other"];
+  // projects configuration from `adapters/registry.json`.
+  const known = [
+    "claude-code",
+    "cursor",
+    "vscode",
+    "claude-desktop",
+    "zed",
+    "windsurf",
+    "continue",
+    "other",
+  ];
   assert.deepEqual(
     CLIENTS.map((client) => client.id),
     known,
   );
+});
+
+test("connection instructions carry evidence levels without promoting recipes", () => {
+  assert.equal(clientOf("claude-code").supportLevel, "verified");
+  assert.equal(clientOf("cursor").supportLevel, "experimental");
+  assert.equal(clientOf("vscode").supportLevel, "configured");
+  assert.match(clientOf("cursor").note, /No Cursor executable/);
 });
 
 test("the check passes without a repository and fails without a readable project", () => {

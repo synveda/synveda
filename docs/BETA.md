@@ -137,8 +137,12 @@ auditing its own read and can be verified offline without a gateway/database.
 - **Live Entra/Okta:** fixtures are captured/transcribed from vendor contracts.
   No live tenant was available, so no live claim is made.
 - **Second verified proprietary client:** Cursor configuration is documented
-  but no authentic live Cursor lifecycle has been exercised. The later adapter
-  conformance package must label it experimental unless a real client passes.
+  and its current local Hooks v1 contract has the necessary lifecycle shape,
+  but no authentic live Cursor lifecycle has been exercised here. CPR-39
+  therefore labels it `experimental`; installed VS Code is only `configured`
+  because its Preview contract has no SessionEnd and the local profile is not
+  authenticated. The generated [support matrix](CLIENT_SUPPORT.md) carries the
+  exact evidence and is CI-gated.
 - **External key providers:** the shipped key provider is the local KEK. There
   is no cloud KMS, HSM or customer-managed-key implementation.
 - **Release guarantees:** binaries are unsigned, Windows is not shipped,

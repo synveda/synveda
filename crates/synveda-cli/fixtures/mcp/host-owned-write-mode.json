@@ -1,5 +1,5 @@
 {
-  "client": "claude-code",
+  "client": "repository-owned-host-mode",
   "era": "legacy",
   "launch": [
     "mcp",
@@ -8,7 +8,7 @@
   ],
   "provenance": {
     "kind": "authored",
-    "note": "Authored from the MCP specification and Claude Code's documented behaviour, NOT captured from Claude Code — it was not available to record from when this corpus was built. The one case whose launch is fixed by this repository rather than by a vendor: the plugin's entry point execs `--writes host` (ADR-0057 decision 6). Its frames still want capturing, but `--writes host` is ours and is pinned here. Replace `send` with captured frames (see capture.sh) and set kind to `captured`; ADR-0057 decision 11 asks for the real ones."
+    "note": "Synthetic repository-contract case, not attributed to any external client. It pins ADR-0057 decision 6: a host that owns observation launches MCP with `--writes host`, so remember is absent and cannot be called. Authentic vendor evidence belongs in the adapter registry, never in this authored fixture."
   },
   "exchange": [
     {
@@ -20,8 +20,8 @@
           "protocolVersion": "2025-06-18",
           "capabilities": {},
           "clientInfo": {
-            "name": "claude-code",
-            "version": "0.1.0"
+            "name": "synveda-host-owned-contract",
+            "version": "1"
           }
         }
       },

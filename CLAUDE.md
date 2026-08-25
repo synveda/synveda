@@ -127,6 +127,13 @@ ContextRun v2 expands only authorised current Knowledge anchors through the
 immutable relation graph under governed two-hop/work bounds, freshly
 authorises retained paths, degrades explicitly to lexical/vector retrieval and
 removes the Record graph/linker while closing GRPH-3 by subsumption.
+CPR-39, adapter conformance, is implemented under ADR-0098 but remains open on
+the externally unavailable second live client. One strict registry generates
+CLI configuration, console onboarding and the support matrix and distinguishes
+config-only, captured and fully verified evidence. Claude Code 2.1.241 remains
+verified; Cursor is experimental with a now-sufficient Hooks v1 contract but
+no executable, credential or authentic frame here; installed unauthenticated
+VS Code 1.133.0 has no documented SessionEnd and is only configured.
 **It is a pre-1.0 hard
 cut**: a fresh schema epoch, no old-data migration, no compatibility shims,
 and old databases rejected with a reset instruction. Since CPR-2 that is
@@ -239,7 +246,7 @@ explicitly and say so.
 
 Phases 0, 1 and 2 are complete; SKIL-1 through SKIL-4, OPS-1, CNSL-1, ADPT-2,
 CNSL-2, AUTH-4, AUTH-5, EVAL-3, OPS-2, TEN-3, TEN-4 and OPS-8 are the Phase 3
-features done. 105 of 135 features delivered — see docs/backlog/STATUS.md for
+features done. 105 of 136 features delivered — see docs/backlog/STATUS.md for
 what each one proved and what it left standing. (The total read 86 until
 2026-08-05, when it was corrected to the 88 STATUS.md and `make
 check-backlog` had both said for some time; AUTHZ-7 was filed the same day by
@@ -470,6 +477,12 @@ PDP-authorised and forced-RLS, and a denied endpoint leaves no address, edge,
 reason or count. The contract remains 171 operations and grows 272 → 274
 schemas; epoch 2 has 60 migration files, 90 forced-RLS tenant tables and 704
 SQLx descriptions.
+**CPR-39 was filed next**, making it **136 with 105 delivered**: it replaces
+scattered client-support prose and configuration tables with one evidence
+registry and an exact live-lifecycle gate. The implementation is complete but
+the feature remains open: no Cursor executable/authenticated client exists in
+the environment, and installed VS Code's Preview contract lacks SessionEnd.
+The repository records those facts instead of promoting replay or config.
 
 Since CPR-9 a **listing decides per row**. The audit of Prompts 1–7 found that
 `GET /v1/workspaces` and `/v1/me` took one decision at the tenant root and

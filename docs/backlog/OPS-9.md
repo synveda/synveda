@@ -104,7 +104,7 @@ them is the whole of what Alice's first login requires.
 ## Beyond Claude Code
 
 The extension framework already exists and is first-class:
-`crates/synveda-cli/src/mcp/clients.jsonc` is data rather than a `match`,
+`adapters/registry.json` is data rather than a `match`,
 `~/.config/synveda/mcp-clients.jsonc` is read through the identical loader,
 `--print` covers a client we have never heard of and `--config` a layout we
 have not. Seed §2 principle 6 is already honoured. What is missing is breadth

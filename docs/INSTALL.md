@@ -396,7 +396,13 @@ derived during a shared run is not a shared draft.
 > guaranteed is the other half — **nothing that reached the spool is ever
 > lost.**
 
-### Everything else — Claude Desktop, Cursor, Zed
+### Everything else — MCP clients
+
+Connection support and lifecycle verification are different claims. The
+generated [client support matrix](CLIENT_SUPPORT.md) records the exact level,
+tested versions, authentic fixture digests and limitations for every built-in
+client. In particular, Cursor configuration is available but its lifecycle is
+currently experimental and has not been run by a real Cursor client here.
 
 `synveda mcp` serves governed context to any MCP client over stdio: `recall`
 uses the ordinary Knowledge query on the caller's public session, and

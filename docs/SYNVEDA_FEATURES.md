@@ -2246,6 +2246,19 @@ CPR-38  Bounded graph-augmented retrieval (XL)
   pass. The dead Record-era graph/linker is deleted without translation and the
   remaining GRPH-3 product objective is subsumed. ADR-0097.
 
+CPR-39  Adapter conformance and second verified client (L)
+  Filed 2026-08-25 by the autonomous continuation. Replace scattered support
+  claims with one evidence-bearing client registry and mechanically distinguish
+  configured, captured, verified, experimental and unsupported clients. AC:
+  exact ten-criterion real-client verification; digest-pinned authentic
+  fixtures; generated support matrix, console onboarding and CLI MCP config;
+  public APIs only; no authored fixture or config recipe may self-promote;
+  Cursor targeted through its current Hooks v1 contract, with VS Code only an
+  honest fallback; focused forgery/drift, CLI, corpus, adapter and console
+  tests, demo and `make ci` pass. The second live client remains open when no
+  proprietary executable/credential is available and must never be replaced by
+  a replay claim. ADR-0098.
+
 ──────────────────────────────────────────────
 Sequencing (features → phases)
 ──────────────────────────────────────────────
@@ -2339,7 +2352,7 @@ Phase 4 ecosystem: ADPT-4,5,6,7,8 · PRMT-3 · SKIL-5 · MEM-7 · OPS-5,6,7 · C
    or an evaluation harness — and that is a *when*, not an *if*, since ADPT-1's own demo
    is a script. What it must not become is a warning in a README: the gap is silent,
    returns exit 0, and reads exactly like a session that was observed.)
-Phase 5 context platform (redesign): CPR-1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38
+Phase 5 context platform (redesign): CPR-1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39
    (Added 2026-08-17. Its own phase rather than a slot in Phase 4, because it is not the
    next feature — it is the programme that re-cuts the model every feature above was built
    on, for an audience none of them was: one person, or four sharing agent context, who

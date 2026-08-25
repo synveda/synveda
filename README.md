@@ -271,7 +271,10 @@ Being explicit, so nothing here misleads:
   Okta's published tables — nothing has yet handled a frame from a real tenant.
 - **No real Cursor frame either.** The generic MCP server ships as `synveda mcp`
   (ADPT-2), and its acceptance corpus was recorded from Claude Desktop and Zed.
-  Cursor remains an install target rather than a measured one.
+  CPR-39's generated [client support matrix](docs/CLIENT_SUPPORT.md) labels
+  Cursor `experimental`: its current Hooks v1 contract is sufficient in shape,
+  but this environment had no executable, credential or authentic frame. A
+  config recipe and a replay are never presented as a verified lifecycle.
 - **Claude Code's remaining loss window begins before Synveda sees a turn.**
   CPR-14 passed the separately runnable installed-client gate with authenticated
   Claude Code 2.1.241 and plugin 0.2.0: one real context run, four ordered

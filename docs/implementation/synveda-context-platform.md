@@ -52,13 +52,13 @@ programme convention established in Prompt 1.
 | Stable tenant secret references, fail-closed Tool/directory resolution, DEK re-encryption jobs and Knowledge-native sealed export | CPR-35 | **complete** | `13ba059` | `2e70aaf` | types 214/214; crypto 39/39; store keys 14/14 + Knowledge export + RLS; gateway Tools 2/2 + directory sync 10/10; CLI 158/158 | PASS | PASS (`synveda_test_69956`) | `demos/cpr-35-key-secret-convergence.sh` + re-cut TEN-4 demo PASS; 83-script drift gate PASS | none; no external key-provider claim made |
 | One gateway/schema/contract and forced-RLS runtime login across installed host, Compose and Helm | CPR-36 | **complete** | `2e70aaf` | `ca3730f` | init 19/19 including DB/RLS; deploy checker 4/4; epoch 10/10; OpenAPI 6/6; Helm lint/render PASS | PASS | PASS (`synveda_test_77612`) | isolated `demos/cpr-36-deployment-convergence.sh` PASS; two Compose + Helm renders; repeat-package upgrade check; 84-script drift gate PASS | no kind cluster rerun in this package; existing OPS-2 gate remains authoritative |
 | Durable conflict evidence, governed resolution, evaluated freshness and bitemporal Knowledge query | CPR-37 | **complete** | `ca3730f` | `7951d77` | Knowledge types 7/7; lifecycle 5/5; capture API 4/4; ingest 2/2; context 3/3; OKF 2/2; RLS 83/83; OpenAPI 6/6; console 215/215 | PASS | PASS (`synveda_test_85309`, removed) | isolated `demos/cpr-37-conflict-freshness.sh` PASS; 85-script drift gate PASS | none |
-| Anchor-first bounded Knowledge-relation expansion and re-authorised ContextRun paths | CPR-38 | **complete** | `7951d77` | pending (CPR-39 ledger) | types 1/1; Knowledge 6/6; Configuration 1/1; ContextRun 4/4; RLS 79/79; OpenAPI 6/6; console 215/215 | PASS | PASS (`synveda_test_93371`, removed) | isolated `demos/cpr-38-bounded-graph.sh` PASS; graph-disabled miss → two-hop selected path; private endpoint absent; 84-script demo gate PASS | none |
+| Anchor-first bounded Knowledge-relation expansion and re-authorised ContextRun paths | CPR-38 | **complete** | `7951d77` | `12e393a` | types 1/1; Knowledge 6/6; Configuration 1/1; ContextRun 4/4; RLS 79/79; OpenAPI 6/6; console 215/215 | PASS | PASS (`synveda_test_93371`, removed) | isolated `demos/cpr-38-bounded-graph.sh` PASS; graph-disabled miss → two-hop selected path; private endpoint absent; 84-script demo gate PASS | none |
+| Evidence-bearing client registry, conformance kit and second real-client attempt | CPR-39 | **partial — external live criterion** | `12e393a` | pending (CPR-40 ledger) | registry gate 4/4; CLI config 28/28; MCP corpus 5/5; Claude adapter 98/98; console 216/216 + build | PASS | N/A — no schema/store change | isolated `demos/cpr-39-adapter-conformance.sh` PASS; 85-script gate PASS; genuine Claude 2.1.241 evidence retained; Cursor/VS Code live not run | Cursor executable/authenticated client absent; VS Code profile unauthenticated and current Preview contract has no SessionEnd |
 
-**Exact next objective:** file and complete CPR-39, the client-adapter
-conformance kit and a truthfully classified second real client: derive one
-support registry and matrix from public-API lifecycle evidence, use authentic
-captured frames where a proprietary client is unavailable, and make no
-`verified` claim without the complete live conformance sequence.
+**Exact next objective:** finish CPR-39's focused/CI/demo checkpoint, record its
+external second-client blocker and normal push, then immediately file and
+complete CPR-40: the deterministic context-platform product/trust evaluation
+suite and re-enabled Knowledge query benchmarks.
 
 ### Starting-point objective map
 
@@ -4816,4 +4816,52 @@ frontend changes, deletions, tests, and the resulting commit hash.
 - **Commit.** `feat(retrieval): add bounded graph expansion (CPR-38)` on
   `feat/context-platform-mvp`.
 - **Commit hash.** Written by CPR-39 under the programme's next-checkpoint
+  convention: `12e393abb46533a7649f9190664324b4e6fa70f0`.
+
+### Prompt 29 — adapter conformance and second verified client (CPR-39)
+
+- **Selected feature and decision.** **CPR-39** is implemented from
+  `12e393a` under accepted ADR-0098. A single strict
+  `adapters/registry.json` now owns the five support levels, tested versions,
+  configuration projection, lifecycle contract/events, limitations,
+  content-addressed authentic fixtures and exact ten-criterion conformance
+  result. `configured` is a recipe, `captured` is authentic replayable traffic,
+  and only a named real-client lifecycle with persisted/audited outcomes is
+  `verified`.
+
+- **Generated convergence and gate.** The Rust CLI embeds that registry and
+  projects only MCP file/key/syntax/path/restart data; the existing user JSONC
+  extension remains a configuration escape hatch and confers no support
+  claim. Console onboarding and `docs/CLIENT_SUPPORT.md` are generated from the
+  same source. `make check-adapters` checks exact levels/criteria, evidence
+  paths, captured labels and SHA-256 bytes and generated output. Its adversarial
+  suite proves that relabelling Cursor verified, deleting Claude's capture
+  criterion or changing Zed's evidence digest makes the gate red. The authored
+  `claude-code-plugin` MCP case was renamed vendor-neutral
+  `host-owned-write-mode`; repository-owned write-mode semantics remain tested
+  without pretending the input came from Claude Code.
+
+- **Truthful client results.** Claude Code **2.1.241** remains `verified` from
+  CPR-14's genuine installed/authenticated run plus captured replay and outage
+  recovery. Claude Desktop **1.25927.0** and Zed **1.13.2** remain `captured` at
+  the MCP seam. The current official Cursor local Hooks v1 contract exposes
+  session start/end, turns, tools, compact and stop and is therefore a viable
+  `experimental` target, but this environment has no Cursor executable,
+  credential or authentic Cursor frame. Installed VS Code **1.133.0** is not an
+  honest fallback: its Preview hook contract has no SessionEnd, says Stop does
+  not imply inactivity and its local profile is unauthenticated. No replay,
+  fixture or generated config is called a live verification; the second-client
+  criterion remains externally blocked and CPR-39 stays open while independent
+  programme work continues.
+
+- **Tests and evidence.** Registry adversarial gate **4/4**, CLI MCP config
+  **28/28**, MCP corpus **5/5**, Claude adapter **98/98** and console **216/216**
+  plus production build pass. `demos/cpr-39-adapter-conformance.sh`, the
+  complete **85-script** drift gate and complete `make ci` pass. No schema,
+  store, RLS, Cedar, VedaFlow, audit or public-route change occurred, so
+  `make db-test` is not applicable.
+
+- **Commit.** `feat(adapters): add conformance kit and second verified client
+  (CPR-39)` on `feat/context-platform-mvp`.
+- **Commit hash.** Written by CPR-40 under the programme's next-checkpoint
   convention.

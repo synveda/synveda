@@ -1,3 +1,5 @@
+import { GENERATED_AGENT_CLIENTS } from "./generated/adapter-clients.js";
+
 /**
  * First-run onboarding: the model behind the wizard (CPR-8, ADR-0075
  * decision 6).
@@ -141,6 +143,8 @@ export interface AgentClient {
   label: string;
   /** How it is connected: the plugin, or an MCP server entry. */
   via: "plugin" | "mcp";
+  /** Evidence level from the product adapter registry. */
+  supportLevel: "configured" | "captured" | "verified" | "experimental" | "unsupported";
   /** What to say about which surface it gets. */
   note: string;
 }
@@ -152,33 +156,17 @@ export interface AgentClient {
  * never require touching the core" — applies to this list too, which is why
  * the last entry is *any other MCP client* and points at the CLI's own
  * extension path (`~/.config/synveda/mcp-clients.jsonc`) rather than at us.
- * The ids match `crates/synveda-cli/src/mcp/clients.jsonc`, because they are
- * pasted into a command that reads that file.
+ * The ids and support evidence are generated from `adapters/registry.json`,
+ * the same source the CLI projects into connection configuration. Knowing a
+ * config path must never be presented as client verification.
  */
 export const CLIENTS: readonly AgentClient[] = [
-  {
-    id: "claude-code",
-    label: "Claude Code",
-    via: "plugin",
-    note: "Session-start injection and turn observation, through the plugin.",
-  },
-  {
-    id: "cursor",
-    label: "Cursor",
-    via: "mcp",
-    note: "Two tools — recall and remember — over stdio.",
-  },
-  {
-    id: "claude-desktop",
-    label: "Claude Desktop",
-    via: "mcp",
-    note: "Two tools — recall and remember — over stdio.",
-  },
-  { id: "zed", label: "Zed", via: "mcp", note: "Two tools — recall and remember — over stdio." },
+  ...GENERATED_AGENT_CLIENTS,
   {
     id: "other",
     label: "Another MCP client",
     via: "mcp",
+    supportLevel: "unsupported",
     note: "Anything that speaks MCP over stdio. Unknown clients are a config file, not a release.",
   },
 ] as const;
