@@ -131,7 +131,8 @@ what you may do there**:
 ```
 
 Every `actions` entry is a **real PDP decision** taken at that scope under
-that scope's own profile — a forecast of what an act would answer, never a
+that scope's effective immutable Configuration — a forecast of what an act
+would answer, never a
 grant and never a shape read off a plan. Three things follow from the model
 that are worth knowing before you hand somebody a role key:
 
@@ -172,6 +173,43 @@ docker compose -f deploy/compose/docker-compose.yml exec -T postgres \
 
 Every grant after the first goes through `/v1/admin/grants` under the
 PDP.
+
+## Governed runtime configuration
+
+One complete Configuration document selects the Cedar pack and narrows the
+runtime at a governed scope: capture triggers and bounds, context token budget
+and channels, trace retention, type-aware freshness, Skill/Tool advertisement
+and allowed external-provider families. Resolution walks the scope chain
+nearest first. A tenant-root binding is the ordinary tenant selection; with no
+binding, the built-in enterprise document is the conservative fail-safe.
+
+`personal`, `team` and `enterprise` are templates, not editions. Choosing one
+copies its document into an ordinary stable aggregate and immutable version.
+Every create, publish, bind, pin, enable/disable and rollback still opens a
+typed VedaFlow change, passes the PDP and leaves content-free audit evidence.
+A permissive decision may apply it immediately; a stricter one reports
+`pending_review`. Capture batches and context runs retain the exact version ID
+and digest they used, so a later publication cannot rewrite their history.
+
+Inspect and operate the public surface from **Advanced → Configuration**, or
+with the HTTP-only CLI:
+
+```sh
+synveda configuration templates
+synveda configuration effective <scope-id>
+synveda configuration create --scope <scope-id> --name project-runtime --template team
+synveda configuration show <configuration-id>
+synveda configuration compare <configuration-id> --from <version-id> --to <version-id>
+synveda configuration bind --scope <scope-id> --artifact <configuration-id>
+synveda configuration rollback <binding-id> --expected-revision 2 --version <version-id>
+```
+
+Publishing a hand-edited document uses `configuration publish ... --file
+document.json --expected-version <version-id>`. Binding mutations require the
+exact binding revision. The deleted `/v1/policy/default` and per-scope policy
+assignment routes have no aliases; `/v1/policy/packs` remains a read-only Cedar
+source catalogue and local `synveda policy apply|clear` remains documented
+operator break-glass for source installation, not runtime selection.
 
 ## Check it works
 
@@ -535,8 +573,9 @@ metadata, not authorisation; imported commands are never launched by the
 gateway and secret-reference values are masked in ordinary console output.
 
 Governance lives under **Advanced** — Reviews (the proposals inbox), Scopes
-(the scope tree, the pack in force, standing relaxations), Policies, Audit and
-Service identities. Those five appear only if the policy decision point says
+(the scope tree, effective Configuration and standing relaxations),
+Configuration, Audit and Service identities. Those five appear only if the
+policy decision point says
 you may read them, so a viewer who holds no governance role sees no Advanced
 section at all. That is a forecast and not a permission: every act is decided
 again at its own seam, and a page you reach anyway will show you the gateway's

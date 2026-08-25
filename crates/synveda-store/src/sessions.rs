@@ -1215,6 +1215,10 @@ pub struct NewContextRun {
     pub scope_id: ScopeId,
     /// The token subject that asked.
     pub principal_id: String,
+    /// Exact governed runtime version, absent for the built-in fail-safe.
+    pub configuration_version_id: Option<synveda_types::ConfigurationVersionId>,
+    /// Canonical governed runtime document digest.
+    pub configuration_hash: String,
     /// The task, when one was named.
     pub query: Option<String>,
     /// BLAKE3 digest of the query, when present.
@@ -1265,6 +1269,8 @@ struct ContextRunRow {
     project_id: Option<Uuid>,
     scope_id: Uuid,
     principal_id: String,
+    configuration_version_id: Option<Uuid>,
+    configuration_hash: Option<String>,
     query: Option<String>,
     query_hash: Option<String>,
     rendered: String,
@@ -1300,6 +1306,12 @@ impl TryFrom<ContextRunRow> for ContextRun {
             project_id: row.project_id.map(ProjectId::from_uuid),
             scope_id: ScopeId::from_uuid(row.scope_id),
             principal_id: row.principal_id,
+            configuration_version_id: row
+                .configuration_version_id
+                .map(synveda_types::ConfigurationVersionId::from_uuid),
+            configuration_hash: row.configuration_hash.ok_or_else(|| Error::Internal {
+                message: "context run has no governed configuration evidence".to_owned(),
+            })?,
             query: row.query,
             query_hash: row.query_hash,
             rendered: row.rendered,
@@ -1345,17 +1357,19 @@ pub async fn record_context_run(
         r#"
         insert into session_context_runs
             (id, tenant_id, session_id, workspace_id, project_id, scope_id,
-             principal_id, query, query_hash, rendered, block_hash, tokens,
+             principal_id, configuration_version_id, configuration_hash,
+             query, query_hash, rendered, block_hash, tokens,
              budget_tokens, requested_budget_tokens, entry_count,
              candidate_count, selection_count, skills, degraded, as_of,
              retrieval_version, embedding_model, index_version, graph_version,
              trace_retention_mode, completion_status, policy_exclusion)
         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
                 $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24,
-                $25, $26, $27)
+                $25, $26, $27, $28, $29)
         returning id, tenant_id, session_id, workspace_id as "workspace_id!",
                   project_id, scope_id,
-                  principal_id, query, query_hash, rendered, block_hash, tokens,
+                  principal_id, configuration_version_id, configuration_hash,
+                  query, query_hash, rendered, block_hash, tokens,
                   budget_tokens, requested_budget_tokens, entry_count,
                   candidate_count, selection_count, skills, degraded,
                   as_of as "as_of!",
@@ -1372,6 +1386,8 @@ pub async fn record_context_run(
         new.project_id.map(|id| id.as_uuid()),
         new.scope_id.as_uuid(),
         new.principal_id,
+        new.configuration_version_id.map(|id| id.as_uuid()),
+        new.configuration_hash,
         new.query.as_deref() as Option<&str>,
         new.query_hash.as_deref() as Option<&str>,
         new.rendered,
@@ -1423,7 +1439,8 @@ pub async fn context_run(
         r#"
         select id, tenant_id, session_id, workspace_id as "workspace_id!",
                project_id, scope_id,
-               principal_id, query, query_hash, rendered, block_hash, tokens,
+               principal_id, configuration_version_id, configuration_hash,
+               query, query_hash, rendered, block_hash, tokens,
                budget_tokens, requested_budget_tokens, entry_count,
                candidate_count, selection_count, skills, degraded,
                as_of as "as_of!", retrieval_version as "retrieval_version!",
@@ -1466,7 +1483,8 @@ pub async fn context_runs(
         r#"
         select id, tenant_id, session_id, workspace_id as "workspace_id!",
                project_id, scope_id,
-               principal_id, query, query_hash, '' as "rendered!", block_hash,
+               principal_id, configuration_version_id, configuration_hash,
+               query, query_hash, '' as "rendered!", block_hash,
                tokens, budget_tokens, requested_budget_tokens, entry_count,
                candidate_count, selection_count, skills, degraded,
                as_of as "as_of!", retrieval_version as "retrieval_version!",
@@ -1532,7 +1550,8 @@ pub async fn context_run_candidates(
         r#"
         select id, tenant_id, session_id, workspace_id as "workspace_id!",
                project_id, scope_id,
-               principal_id, query, query_hash, rendered, block_hash, tokens,
+               principal_id, configuration_version_id, configuration_hash,
+               query, query_hash, rendered, block_hash, tokens,
                budget_tokens, requested_budget_tokens, entry_count,
                candidate_count, selection_count, skills, degraded,
                as_of as "as_of!", retrieval_version as "retrieval_version!",

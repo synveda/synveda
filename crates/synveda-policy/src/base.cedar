@@ -169,6 +169,8 @@ unless {
     [
         Synveda::Action::"PolicyRead",
         Synveda::Action::"PolicyAssign",
+        Synveda::Action::"ConfigurationRead",
+        Synveda::Action::"ConfigurationWrite",
         Synveda::Action::"ScopeRead",
         Synveda::Action::"ScopeUpdate",
         Synveda::Action::"ServiceIdentityRead",

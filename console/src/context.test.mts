@@ -25,6 +25,7 @@ function selection(overrides: Partial<ContextSelectionView> = {}): ContextSelect
   return {
     id: "selection-1",
     rank: 1,
+    channel: "current_knowledge",
     knowledge_item_id: "knowledge-1",
     knowledge_revision_id: "revision-7",
     content_hash: "hash-current",
@@ -38,6 +39,7 @@ function candidate(overrides: Partial<ContextCandidateView> = {}): ContextCandid
   return {
     id: "candidate-1",
     ordinal: 0,
+    channel: "current_knowledge",
     knowledge_item_id: "knowledge-1",
     knowledge_revision_id: "revision-7",
     content_hash: "hash-current",
@@ -73,6 +75,25 @@ test("feedback names one context selection and its exact immutable revision", ()
 
 test("hashes-only selections cannot manufacture a feedback target", () => {
   const retained = selection({ knowledge_item_id: undefined, knowledge_revision_id: undefined });
+  assert.equal(canGiveFeedback(retained), false);
+  assert.equal(feedbackBody(retained, "helpful"), null);
+});
+
+test("unreviewed candidates match by capture address and cannot receive revision feedback", () => {
+  const retained = selection({
+    channel: "unreviewed_candidates",
+    capture_candidate_id: "capture-9",
+    knowledge_item_id: undefined,
+    knowledge_revision_id: undefined,
+  });
+  const exact = candidate({
+    channel: "unreviewed_candidates",
+    capture_candidate_id: "capture-9",
+    knowledge_item_id: undefined,
+    knowledge_revision_id: undefined,
+  });
+  assert.equal(candidateForSelection([exact], retained)?.id, exact.id);
+  assert.equal(selectionState(exact, null), "unreviewed at planning time");
   assert.equal(canGiveFeedback(retained), false);
   assert.equal(feedbackBody(retained, "helpful"), null);
 });

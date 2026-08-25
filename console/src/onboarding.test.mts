@@ -32,7 +32,7 @@ import {
 test("the shape is a seeding plan and carries no edition", () => {
   const personal = seedPlan("personal");
   const team = seedPlan("team");
-  assert.deepEqual(Object.keys(personal).sort(), ["invitesMembers", "pack", "summary"]);
+  assert.deepEqual(Object.keys(personal).sort(), ["invitesMembers", "summary", "template"]);
   // Two fields that seed, and nothing that brands: no `kind`, no `edition`,
   // no `tier`. A field like that is the branch ADR-0068 decision 1 forbids,
   // arriving through the friendliest possible door.
@@ -41,18 +41,17 @@ test("the shape is a seeding plan and carries no edition", () => {
       assert.ok(!(forbidden in plan), `a seeding plan must not carry ${forbidden}`);
     }
   }
-  assert.notEqual(personal.pack, team.pack, "the two choices seed different policy");
+  assert.notEqual(personal.template, team.template, "the two choices seed different Configuration");
   assert.equal(personal.invitesMembers, false);
   assert.equal(team.invitesMembers, true);
 });
 
-test("both shapes seed a pack this build actually ships", () => {
-  // The names are `synveda_policy::EMBEDDED_PACKS`'. A drift here is a
-  // wizard that assigns a pack the gateway refuses, on the very first act
+test("both shapes seed a Configuration template this build actually ships", () => {
+  // A drift here is a wizard that asks for a template the gateway refuses,
   // somebody takes.
-  const shipped = ["standard", "regulated-strict", "open-collaboration"];
-  assert.ok(shipped.includes(seedPlan("personal").pack));
-  assert.ok(shipped.includes(seedPlan("team").pack));
+  const shipped = ["personal", "team", "enterprise"];
+  assert.ok(shipped.includes(seedPlan("personal").template));
+  assert.ok(shipped.includes(seedPlan("team").template));
 });
 
 test("a refused seeding step names where to finish the job", () => {
@@ -60,16 +59,20 @@ test("a refused seeding step names where to finish the job", () => {
   // exists — the workspace works meanwhile under whatever it inherits.
   const sentence = seedSentence({
     kind: "refused",
-    what: "Assigning the standard policy pack",
-    why: "you hold no role that permits policy.assign here",
+    what: "Creating the team runtime Configuration",
+    why: "you hold no role that permits configuration.write here",
   });
   assert.match(sentence, /was refused/);
-  assert.match(sentence, /Advanced ▸ Policies/);
+  assert.match(sentence, /Advanced ▸ Configuration/);
   assert.match(sentence, /Your workspace works/);
 });
 
 test("an applied seeding step says so plainly", () => {
-  assert.match(seedSentence({ kind: "applied", what: "The standard policy pack" }), /done/);
+  assert.match(seedSentence({ kind: "applied", what: "The team Configuration" }), /done/);
+  assert.match(
+    seedSentence({ kind: "pending", what: "The team Configuration", changeId: "change-1" }),
+    /Advanced Reviews/,
+  );
   assert.match(seedSentence({ kind: "skipped", what: "A group" }), /not needed/);
 });
 

@@ -1,4 +1,4 @@
-// open-collaboration@21 — tenant-wide read (seed §6, ADR-0014, ADR-0015,
+// open-collaboration@22 — tenant-wide read (seed §6, ADR-0014, ADR-0015,
 // ADR-0018, ADR-0020, ADR-0021, ADR-0031, ADR-0032, ADR-0036,
 // ADR-0037, ADR-0038).
 //
@@ -27,6 +27,7 @@ permit (
         Synveda::Action::"ScopeCreate",
         Synveda::Action::"ScopeUpdate",
         Synveda::Action::"PolicyAssign",
+        Synveda::Action::"ConfigurationWrite",
         Synveda::Action::"ServiceIdentityManage",
         // Making and retiring workspaces and projects is structural
         // administration, priced with the rest of it (CPR-4, ADR-0071
@@ -61,6 +62,7 @@ permit (
     action in [
         Synveda::Action::"ScopeRead",
         Synveda::Action::"PolicyRead",
+        Synveda::Action::"ConfigurationRead",
         Synveda::Action::"ServiceIdentityRead",
         Synveda::Action::"AuditRead",
         Synveda::Action::"WorkspaceRead",

@@ -28,18 +28,17 @@ import { renderToStaticMarkup } from "react-dom/server";
 
 import {
   describeEnd,
-  describeOrigin,
   mayDo,
   mayRead,
   deniedCount,
   type Capabilities,
-  type EffectivePack,
   type LapseListing,
 } from "./explorer.mjs";
+import type { EffectiveConfigurationView } from "./generated/api.js";
 import { toText } from "./text.mjs";
 
 const CASES = [
-  "pack-inherited",
+  "configuration-inherited",
   "capabilities-with-denial",
   "lapses-standing-and-ended",
 ] as const;
@@ -65,15 +64,16 @@ function facts(name: string): { must_name: string[]; must_not_name: string[] } {
  */
 function render(name: string, asked: string, payload: unknown): string {
   switch (name) {
-    case "pack-inherited": {
-      const pack = payload as EffectivePack;
+    case "configuration-inherited": {
+      const configuration = payload as EffectiveConfigurationView;
+      const inherited = configuration.binding_scope_id !== asked;
       return toText(
         renderToStaticMarkup(
           <p>
-            <strong>
-              {pack.name}@{pack.version}
-            </strong>{" "}
-            <span>{describeOrigin(pack.origin, asked)}</span>
+            <strong>{configuration.document.policy_pack}</strong>{" "}
+            <span>{configuration.fail_safe ? "enterprise fail-safe" : inherited ? "inherited" : "bound here"}</span>{" "}
+            <span>{configuration.version_id}</span>{" "}
+            <span>{configuration.content_hash}</span>
           </p>,
         ),
       );

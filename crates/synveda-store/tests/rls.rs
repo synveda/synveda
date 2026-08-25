@@ -20,8 +20,8 @@ use sqlx::postgres::PgPoolOptions;
 use sqlx::{PgPool, Postgres, Transaction};
 use synveda_store::records::{self, RecordState};
 use synveda_store::{
-    access, context, idempotency, identities, knowledge, policy_assignments, policy_packs,
-    projects, quarantine, repositories, rls, scopes, sessions, tenants, workspaces,
+    access, configuration, context, idempotency, identities, knowledge, policy_packs, projects,
+    quarantine, repositories, rls, scopes, sessions, tenants, workspaces,
 };
 // The generic scope vocabulary, reached through its module because the old
 // hierarchy still owns the root name until Prompt 6 (CPR-3, ADR-0070).
@@ -234,6 +234,13 @@ const COVERED: &[&str] = &[
     "capture_candidate_import_artifacts",
     "capture_candidate_matches",
     "capture_candidates",
+    // CPR-30 (ADR-0089): Configuration heads, immutable versions, revisioned
+    // bindings and typed VedaFlow effects can reveal policy and runtime
+    // posture, so all four are tenant-bound and forced through RLS.
+    "configuration_artifacts",
+    "configuration_bindings",
+    "configuration_changes",
+    "configuration_versions",
     // CPR-20 (ADR-0084): policy-visible planner evidence and explicit
     // feedback are tenant-bound, even when retention keeps hashes only.
     "context_candidates",
@@ -291,8 +298,6 @@ const COVERED: &[&str] = &[
     // credential, and for the same threat model.
     "pending_invites",
     "policy_lapses",
-    "policy_pack_assignments",
-    "policy_pack_defaults",
     "policy_packs",
     "project_repositories",
     "projects",
@@ -1472,130 +1477,195 @@ fn same_tenant_policy_pack_lifecycle_works_under_rls() {
     });
 }
 
-// ── Policy assignments & defaults (AUTHZ-2, ADR-0014) ───────────────────────
+// ── Governed Configuration (CPR-30, ADR-0089) ─────────────────────────────
 
-/// Admits a tenant with an org root carrying a pack assignment and a
-/// tenant default. Runs on the (RLS-exempt) test connection.
-async fn seed_policy_assignment(pool: &PgPool) -> (TenantId, ScopeId) {
-    let (tenant, root) = seed_scopes(pool).await;
-    policy_assignments::assign(pool, tenant, root, "open-collaboration")
+async fn fixture_configuration_command(
+    tx: &mut sqlx::PgConnection,
+    tenant: TenantId,
+    scope: ScopeId,
+    command: &synveda_types::configuration::ConfigurationCommand,
+) -> configuration::AppliedConfiguration {
+    let proposal = synveda_types::ProposalId::new();
+    let actor = IdentityId::new();
+    sqlx::query!(
+        "insert into vedaflow_proposals
+             (tenant_id, id, target_scope_id, source_scope_id, asset_kind,
+              target_channel, commit_hash, sensitivity, title, proposer_id,
+              proposer_subject)
+         values ($1, $2, $3, $3, 'configuration', 'apply', $4, 'internal',
+                 'RLS Configuration fixture', $5, 'rls-fixture')",
+        tenant.as_uuid(),
+        proposal.as_uuid(),
+        scope.as_uuid(),
+        &[4_u8; 32][..],
+        actor.as_uuid(),
+    )
+    .execute(&mut *tx)
+    .await
+    .expect("open Configuration fixture proposal");
+    let payload_hash = blake3::hash(
+        synveda_types::json::canonicalise(
+            &serde_json::to_value(command).expect("encode Configuration command"),
+        )
+        .to_string()
+        .as_bytes(),
+    )
+    .to_hex()
+    .to_string();
+    configuration::insert_change(&mut *tx, tenant, proposal, command, &payload_hash)
         .await
-        .expect("assign pack");
-    policy_assignments::set_default(pool, tenant, "standard")
+        .expect("store Configuration change");
+    let applied = configuration::apply(&mut *tx, tenant, proposal, "rls-fixture", command)
         .await
-        .expect("set default");
-    (tenant, root)
+        .expect("apply Configuration fixture");
+    configuration::complete_change(&mut *tx, tenant, proposal, applied)
+        .await
+        .expect("complete Configuration fixture");
+    applied
 }
 
-async fn visible_assignment_rows(
+async fn seed_configuration(
+    pool: &PgPool,
+) -> (
+    TenantId,
+    ScopeId,
+    synveda_types::ConfigurationArtifactId,
+    synveda_types::ConfigurationVersionId,
+) {
+    // `seed_vedaflow` supplies genuine immutable object/tree/commit history;
+    // this RLS fixture binds typed Configuration changes to that commit. The
+    // semantic gateway lifecycle is covered by CPR-30's API acceptance test.
+    let (tenant, _) = seed_vedaflow(pool).await;
+    let mut tx = pool.begin().await.expect("begin Configuration seed");
+    let root = scopes::ensure_tenant_root(&mut tx, tenant)
+        .await
+        .expect("create Configuration root");
+    let artifact_id = synveda_types::ConfigurationArtifactId::new();
+    let version_id = synveda_types::ConfigurationVersionId::new();
+    let binding_id = synveda_types::ConfigurationBindingId::new();
+    let document = synveda_types::configuration::ConfigurationDocument::template(
+        synveda_types::configuration::ConfigurationTemplate::Personal,
+    );
+    let content_hash = document.content_hash().expect("hash Configuration");
+    fixture_configuration_command(
+        &mut tx,
+        tenant,
+        root.id,
+        &synveda_types::configuration::ConfigurationCommand::Create {
+            artifact_id,
+            version_id,
+            governing_scope_id: root.id,
+            name: "rls-runtime".to_owned(),
+            document,
+            content_hash,
+            source_template: Some(synveda_types::configuration::ConfigurationTemplate::Personal),
+        },
+    )
+    .await;
+    fixture_configuration_command(
+        &mut tx,
+        tenant,
+        root.id,
+        &synveda_types::configuration::ConfigurationCommand::Bind {
+            binding_id,
+            scope_id: root.id,
+            artifact_id,
+            pinned_version_id: None,
+            enabled: true,
+        },
+    )
+    .await;
+    tx.commit().await.expect("commit Configuration seed");
+    (tenant, root.id, artifact_id, version_id)
+}
+
+async fn visible_configuration_rows(
     tx: &mut Transaction<'static, Postgres>,
     tenant: TenantId,
-) -> (i64, i64) {
-    let assignments = sqlx::query_scalar!(
-        r#"select count(*) as "count!" from policy_pack_assignments where tenant_id = $1"#,
+) -> (i64, i64, i64, i64) {
+    let row = sqlx::query!(
+        r#"select
+             (select count(*) from configuration_artifacts where tenant_id = $1) as "artifacts!",
+             (select count(*) from configuration_versions where tenant_id = $1) as "versions!",
+             (select count(*) from configuration_bindings where tenant_id = $1) as "bindings!",
+             (select count(*) from configuration_changes where tenant_id = $1) as "changes!""#,
         tenant.as_uuid(),
     )
     .fetch_one(&mut **tx)
     .await
-    .expect("count policy_pack_assignments");
-    let defaults = sqlx::query_scalar!(
-        r#"select count(*) as "count!" from policy_pack_defaults where tenant_id = $1"#,
-        tenant.as_uuid(),
-    )
-    .fetch_one(&mut **tx)
-    .await
-    .expect("count policy_pack_defaults");
-    (assignments, defaults)
+    .expect("count Configuration rows");
+    (row.artifacts, row.versions, row.bindings, row.changes)
 }
 
-/// The wrong (or absent) tenant GUC sees zero assignment/default rows —
-/// which pack governs which node is itself tenant-private.
 #[test]
-fn wrong_tenant_guc_sees_no_policy_assignment_rows() {
+fn wrong_or_absent_tenant_guc_sees_no_configuration_rows() {
     let Some(db) = db() else { return };
     db.rt.block_on(async {
-        let (victim, _) = seed_policy_assignment(&db.pool).await;
-        let (adversary, _) = seed_policy_assignment(&db.pool).await;
-
+        let (victim, _, _, _) = seed_configuration(&db.pool).await;
+        let (adversary, _, _, _) = seed_configuration(&db.pool).await;
         let mut tx = app_tx(&db.pool, Some(adversary)).await;
         assert_eq!(
-            visible_assignment_rows(&mut tx, victim).await,
-            (0, 0),
-            "assignment rows leaked across tenants under the wrong GUC"
+            visible_configuration_rows(&mut tx, victim).await,
+            (0, 0, 0, 0)
         );
-        assert_eq!(visible_assignment_rows(&mut tx, adversary).await, (1, 1));
+        assert_eq!(
+            visible_configuration_rows(&mut tx, adversary).await,
+            (1, 1, 1, 2)
+        );
         drop(tx);
-
         let mut tx = app_tx(&db.pool, None).await;
         assert_eq!(
-            visible_assignment_rows(&mut tx, victim).await,
-            (0, 0),
-            "assignment rows visible without any tenant GUC"
+            visible_configuration_rows(&mut tx, victim).await,
+            (0, 0, 0, 0)
         );
     });
 }
 
-/// Writing an assignment or default for another tenant than the GUC's
-/// trips the policy's WITH CHECK — an application defect, surfaced as
-/// internal.
 #[test]
-fn cross_tenant_policy_assignment_write_is_rejected() {
+fn cross_tenant_configuration_write_is_rejected() {
     let Some(db) = db() else { return };
     db.rt.block_on(async {
-        let (tenant, _) = seed_policy_assignment(&db.pool).await;
-        let (other, other_root) = seed_policy_assignment(&db.pool).await;
+        let (tenant, _, _, _) = seed_configuration(&db.pool).await;
+        let (other, other_root, other_artifact, other_version) = seed_configuration(&db.pool).await;
         let mut tx = app_tx(&db.pool, Some(tenant)).await;
-        let forged = policy_assignments::assign(&mut *tx, other, other_root, "standard").await;
+        let forged = sqlx::query(
+            "insert into configuration_bindings
+                 (id, tenant_id, scope_id, artifact_id, pinned_version_id,
+                  enabled, created_by, updated_by)
+             values ($1, $2, $3, $4, $5, true, 'forged', 'forged')",
+        )
+        .bind(uuid::Uuid::now_v7())
+        .bind(other.as_uuid())
+        .bind(other_root.as_uuid())
+        .bind(other_artifact.as_uuid())
+        .bind(other_version.as_uuid())
+        .execute(&mut *tx)
+        .await;
         assert!(
-            matches!(forged, Err(Error::Internal { .. })),
-            "cross-tenant assignment write must be rejected by RLS as an \
-             internal defect, got {forged:?}"
-        );
-        drop(tx);
-        let mut tx = app_tx(&db.pool, Some(tenant)).await;
-        let forged_default = policy_assignments::set_default(&mut *tx, other, "standard").await;
-        assert!(
-            matches!(forged_default, Err(Error::Internal { .. })),
-            "cross-tenant default write must be rejected by RLS as an \
-             internal defect, got {forged_default:?}"
+            forged.as_ref().is_err_and(|error| error
+                .as_database_error()
+                .and_then(|database| database.code())
+                .as_deref()
+                == Some("42501")),
+            "forced RLS must reject a cross-tenant Configuration write: {forged:?}"
         );
     });
 }
 
-/// The full assignment lifecycle — assign (insert and replacing update),
-/// chain lookup, unassign, default set/get/clear — works as `synveda_app`
-/// with the right GUC: the shape the gateway's policy routes take.
 #[test]
-fn same_tenant_policy_assignment_lifecycle_works_under_rls() {
+fn same_tenant_configuration_projection_works_under_rls() {
     let Some(db) = db() else { return };
     db.rt.block_on(async {
-        let (tenant, root) = seed_policy_assignment(&db.pool).await;
+        let (tenant, root, _, _) = seed_configuration(&db.pool).await;
         let mut tx = app_tx(&db.pool, Some(tenant)).await;
-        let replaced = policy_assignments::assign(&mut *tx, tenant, root, "standard")
+        let effective = configuration::effective_at_scope(&mut tx, tenant, root)
             .await
-            .expect("re-assign under RLS");
-        assert_eq!(replaced.pack_name, "standard");
-        let for_chain = policy_assignments::for_scopes(&mut *tx, tenant, &[root])
-            .await
-            .expect("chain lookup under RLS");
-        assert_eq!(for_chain, vec![replaced]);
+            .expect("resolve Configuration under RLS");
+        assert_eq!(effective.document.policy_pack, "open-collaboration");
+        assert!(effective.version_id.is_some());
         assert_eq!(
-            policy_assignments::default_pack(&mut *tx, tenant)
-                .await
-                .expect("read default under RLS"),
-            Some("standard".to_owned())
-        );
-        assert!(
-            policy_assignments::unassign(&mut *tx, tenant, root)
-                .await
-                .expect("unassign under RLS"),
-            "unassign must work in-tenant"
-        );
-        assert!(
-            policy_assignments::clear_default(&mut *tx, tenant)
-                .await
-                .expect("clear default under RLS"),
-            "clearing the default must work in-tenant"
+            visible_configuration_rows(&mut tx, tenant).await,
+            (1, 1, 1, 2)
         );
     });
 }
@@ -6058,6 +6128,10 @@ async fn seed_session(pool: &PgPool) -> SessionFixture {
             project_id: None,
             scope_id: workspace.scope_id,
             principal_id: "rls-agent".to_owned(),
+            configuration_version_id: None,
+            configuration_hash: synveda_types::configuration::ConfigurationDocument::fail_safe()
+                .content_hash()
+                .expect("hash fail-safe Configuration"),
             query: Some("what do we know".to_owned()),
             query_hash: Some(blake3::hash(b"what do we know").to_hex().to_string()),
             rendered: "composed material".to_owned(),
@@ -6143,8 +6217,10 @@ async fn seed_session(pool: &PgPool) -> SessionFixture {
             id: ContextCandidateId::new(),
             context_run_id: run.id,
             ordinal: 0,
+            channel: synveda_types::configuration::ConfigurationContextChannel::CurrentKnowledge,
             knowledge_item_id: Some(item_id),
             knowledge_revision_id: Some(revision_id),
+            capture_candidate_id: None,
             content_hash: content_hash.clone(),
             scope_id: Some(workspace.scope_id),
             lifecycle_state: Some(KnowledgeLifecycleState::Active),
@@ -6167,8 +6243,10 @@ async fn seed_session(pool: &PgPool) -> SessionFixture {
             id: ContextSelectionId::new(),
             context_run_id: run.id,
             rank: 1,
+            channel: synveda_types::configuration::ConfigurationContextChannel::CurrentKnowledge,
             knowledge_item_id: Some(item_id),
             knowledge_revision_id: Some(revision_id),
+            capture_candidate_id: None,
             content_hash,
             token_count: 8,
             reason_codes: vec![ContextReasonCode::KeywordMatch],

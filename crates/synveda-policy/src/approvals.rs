@@ -148,6 +148,12 @@ pub fn regulated_strict() -> ApprovalMatrix {
                 &[(RoleKey::Administrator, 2)],
                 2,
             ),
+            rule(
+                Some(AssetKind::Configuration),
+                None,
+                &[(RoleKey::Administrator, 2)],
+                2,
+            ),
         ],
     }
 }
@@ -199,6 +205,12 @@ pub fn standard() -> ApprovalMatrix {
                 &[(RoleKey::Administrator, 1)],
                 1,
             ),
+            rule(
+                Some(AssetKind::Configuration),
+                None,
+                &[(RoleKey::Administrator, 1)],
+                1,
+            ),
         ],
     }
 }
@@ -245,6 +257,12 @@ pub fn open_collaboration() -> ApprovalMatrix {
             rule(
                 Some(AssetKind::Policy),
                 None,
+                &[(RoleKey::Administrator, 1)],
+                1,
+            ),
+            rule(
+                Some(AssetKind::Configuration),
+                Some(SHARED.to_vec()),
                 &[(RoleKey::Administrator, 1)],
                 1,
             ),

@@ -39,7 +39,7 @@ use synveda_audit::ChainVerification;
 use synveda_gateway::app::{AppState, router};
 use synveda_gateway::telemetry;
 use synveda_identity::{OidcVerifier, parse_issuers};
-use synveda_store::{access, identities, policy_assignments, policy_packs, rls, scopes, tenants};
+use synveda_store::{access, identities, policy_packs, rls, scopes, tenants};
 use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
 use synveda_types::scope::{Scope, ScopeKind};
 use synveda_types::{
@@ -47,6 +47,9 @@ use synveda_types::{
     ScopeId, TenantId, TenantStatus,
 };
 use tower::ServiceExt;
+
+#[path = "support/configuration.rs"]
+mod configuration_support;
 
 const KEY_PEM: &str = include_str!("fixtures/idp_key_a.pem");
 const KEY_JWK: &str = include_str!("fixtures/idp_key_a.jwk.json");
@@ -529,9 +532,7 @@ async fn seeded_secrets_never_reach_storage_in_any_mode() {
 
     // ── Redact mode: standard assigned at the org root. ──
     let mut tx = rls::begin_tenant_tx(&pool, tenant).await.expect("tx");
-    policy_assignments::assign(&mut *tx, tenant, org.id, "standard")
-        .await
-        .expect("assign standard");
+    configuration_support::bind_pack(&mut tx, tenant, org.id, "standard").await;
     tx.commit().await.expect("commit assignment");
     let (status, body) = send(
         &app,
@@ -594,9 +595,7 @@ async fn seeded_secrets_never_reach_storage_in_any_mode() {
     )
     .await
     .expect("store deny pack");
-    policy_assignments::assign(&mut *tx, tenant, org.id, "acme-deny")
-        .await
-        .expect("assign deny pack");
+    configuration_support::bind_pack(&mut tx, tenant, org.id, "acme-deny").await;
     tx.commit().await.expect("commit deny pack");
     synveda_gateway::authz::refresh_tenant_packs(&pool, &pdp, tenant).await;
 
@@ -699,9 +698,7 @@ async fn seeded_secrets_never_reach_storage_in_any_mode() {
     // The deny pack was a minimal member pack without the quarantine
     // plane; unassign it so review decides under the embedded default.
     let mut tx = rls::begin_tenant_tx(&pool, tenant).await.expect("tx");
-    policy_assignments::unassign(&mut *tx, tenant, org.id)
-        .await
-        .expect("unassign deny pack");
+    assert!(configuration_support::disable(&mut tx, tenant, org.id).await);
     tx.commit().await.expect("commit unassign");
     seed_user(&pool, tenant, "stew").await;
     bind_role(&pool, tenant, "stew", RoleKey::Administrator).await;

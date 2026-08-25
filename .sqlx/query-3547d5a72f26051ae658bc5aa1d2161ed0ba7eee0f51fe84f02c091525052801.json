@@ -1,0 +1,98 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        insert into context_selections\n            (id, tenant_id, context_run_id, rank, channel,\n             knowledge_item_id, knowledge_revision_id, capture_candidate_id,\n             content_hash, token_count, reason_codes)\n        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)\n        returning id, tenant_id, context_run_id, rank, channel,\n                  knowledge_item_id, knowledge_revision_id,\n                  capture_candidate_id, content_hash, token_count,\n                  reason_codes as \"reason_codes!: Vec<String>\", created_at\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "tenant_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "context_run_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "rank",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 4,
+        "name": "channel",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "knowledge_item_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 6,
+        "name": "knowledge_revision_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 7,
+        "name": "capture_candidate_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 8,
+        "name": "content_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "token_count",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 10,
+        "name": "reason_codes!: Vec<String>",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 11,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Int4",
+        "Text",
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Int4",
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "3547d5a72f26051ae658bc5aa1d2161ed0ba7eee0f51fe84f02c091525052801"
+}

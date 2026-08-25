@@ -1305,6 +1305,9 @@ async fn apply_inner(state: &AppState, id: ProposalId) -> Result<Json<serde_json
         (AssetKind::Tool, ProposalEffect::Apply) => {
             serde_json::to_value(crate::tool_registry::apply_reviewed(state, id).await?)
         }
+        (AssetKind::Configuration, ProposalEffect::Apply) => {
+            serde_json::to_value(crate::configuration::apply_reviewed(state, id).await?)
+        }
         _ => {
             return Err(Error::Invalid {
                 message: format!(
@@ -2029,6 +2032,9 @@ async fn member_views(
     if proposal.asset == AssetKind::Tool {
         return tool_change_member_views(tx, tenant_id, proposal, &proposed).await;
     }
+    if proposal.asset == AssetKind::Configuration {
+        return configuration_change_member_views(tx, tenant_id, proposal, &proposed).await;
+    }
     if proposal.asset == AssetKind::Prompt {
         return prompt_member_views(tx, tenant_id, proposal, &proposed).await;
     }
@@ -2272,6 +2278,84 @@ async fn tool_change_member_views(
     Ok(vec![MemberView {
         member: member.name.clone(),
         asset: AssetKind::Tool.as_str().to_owned(),
+        object_hash: member.object.to_hex(),
+        unchanged: payload_hash == change.payload_hash
+            && manifest_hash == Some(change.payload_hash.as_str()),
+        sensitivity: Sensitivity::Internal,
+        content: rendered.clone(),
+        effect: MemberEffect::Apply,
+        proposed: rendered,
+        baseline: None,
+    }])
+}
+
+/// [`member_views`] for an immutable typed Configuration/apply command
+/// (CPR-30, ADR-0089). Complete documents are reviewable here; they carry no
+/// credentials, and their canonical hash is bound into the manifest.
+async fn configuration_change_member_views(
+    tx: &mut sqlx::PgConnection,
+    tenant_id: TenantId,
+    proposal: &vedaflow::StoredProposal,
+    proposed: &[vedaflow::ChannelMember],
+) -> Result<Vec<MemberView>> {
+    let [member] = proposed else {
+        return Err(Error::Internal {
+            message: format!(
+                "Configuration change {} has {} members rather than one command",
+                proposal.id,
+                proposed.len()
+            ),
+        });
+    };
+    if member.name != "command" {
+        return Err(Error::Internal {
+            message: format!(
+                "Configuration change {} names member {:?}, expected command",
+                proposal.id, member.name
+            ),
+        });
+    }
+    let change = synveda_store::configuration::change(&mut *tx, tenant_id, proposal.id)
+        .await?
+        .ok_or_else(|| Error::Internal {
+            message: format!("Configuration change {} has no typed effect", proposal.id),
+        })?;
+    let object = vedaflow::read_object(&mut *tx, tenant_id, member.object)
+        .await?
+        .ok_or_else(|| Error::Internal {
+            message: format!(
+                "Configuration change {} names missing manifest object {}",
+                proposal.id,
+                member.object.to_hex()
+            ),
+        })?;
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&object.content).map_err(|error| Error::Internal {
+            message: format!(
+                "Configuration change {} manifest is invalid: {error}",
+                proposal.id
+            ),
+        })?;
+    let manifest_hash = manifest
+        .get("payload_hash")
+        .and_then(serde_json::Value::as_str);
+    let value = synveda_types::json::canonicalise(&serde_json::to_value(&change.command).map_err(
+        |error| Error::Internal {
+            message: format!(
+                "encode Configuration change {} for review: {error}",
+                proposal.id
+            ),
+        },
+    )?);
+    let rendered = serde_json::to_string_pretty(&value).map_err(|error| Error::Internal {
+        message: format!("render Configuration change {}: {error}", proposal.id),
+    })?;
+    let payload_hash = blake3::hash(value.to_string().as_bytes())
+        .to_hex()
+        .to_string();
+    Ok(vec![MemberView {
+        member: member.name.clone(),
+        asset: AssetKind::Configuration.as_str().to_owned(),
         object_hash: member.object.to_hex(),
         unchanged: payload_hash == change.payload_hash
             && manifest_hash == Some(change.payload_hash.as_str()),

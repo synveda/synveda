@@ -45,12 +45,16 @@ pub enum AssetKind {
     /// A policy pack or lapse, flowing through the same propose/review/approve
     /// path as everything else it governs.
     Policy,
+    /// A complete immutable runtime-configuration document or revisioned
+    /// scope binding (CPR-30, ADR-0089). Templates are source data; this is
+    /// the governed artifact that runtime consumers resolve.
+    Configuration,
 }
 
 impl AssetKind {
     /// All asset kinds. Kept in the same order as the `vedaflow_objects.kind`
     /// CHECK constraint (migration 0018).
-    pub const ALL: [AssetKind; 7] = [
+    pub const ALL: [AssetKind; 8] = [
         AssetKind::Memory,
         AssetKind::Knowledge,
         AssetKind::Prompt,
@@ -58,6 +62,7 @@ impl AssetKind {
         AssetKind::Tool,
         AssetKind::ContextPack,
         AssetKind::Policy,
+        AssetKind::Configuration,
     ];
 
     /// Asset kinds represented by VedaFlow channels.
@@ -92,6 +97,7 @@ impl AssetKind {
             AssetKind::Tool => "tool",
             AssetKind::ContextPack => "context-pack",
             AssetKind::Policy => "policy",
+            AssetKind::Configuration => "configuration",
         }
     }
 }

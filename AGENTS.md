@@ -75,7 +75,7 @@ Phase 5 — context platform redesign, since 2026-08-17, on
 `feat/context-platform-mvp`. Phase 3 is paused mid-phase, not finished —
 OPS-9, OPS-10, TEN-5,6, AUD-3,4, GRPH-3, EVAL-6, CTX-7, OPS-3,4, ADPT-3,
 CTX-6 and FLOW-8 are still open, and no live Entra/Okta tenant or real
-Cursor frame has been replayed. **126 features filed, 95 delivered**;
+Cursor frame has been replayed. **127 features filed, 96 delivered**;
 STATUS.md and `make check-backlog` are the authority on the count — the
 headline number has drifted four times, the fourth being this file itself,
 which still read 104/71 after CPR-8 filed the 105th. That is why the
@@ -131,14 +131,25 @@ Load-bearing facts about Phase 5:
   tenant's first grant; a dev-token tenant seeds it by hand once
   (INSTALL.md's SQL).
 - CPR-29 (ADR-0088): the generated OpenAPI contract is the complete
-  authenticated application plane — **156 operations** from `/v1/me` through
-  governance, audit, Knowledge, capture, context, Skills, Tools and OKF. One
+  authenticated application plane — established at 156 operations and
+  extended to **162 operations by CPR-30** — from `/v1/me` through governance,
+  audit, Knowledge, capture, context, Skills, Tools, OKF and Configuration. One
   executable route catalogue builds the router and supplies the inventory an
   exact parity test compares with OpenAPI. The console has no hand-written
   application operations; ordinary service/audit CLI commands and the generic
   MCP adapter are public-API clients. Only documented local bootstrap,
   reset/migration, key custody and break-glass operations retain direct local
   authority.
+- CPR-30 (ADR-0089): runtime configuration is a stable aggregate with
+  immutable content-hashed versions and revisioned nearest-scope bindings.
+  The `personal`, `team` and `enterprise` profiles are canonical documents,
+  not runtime branches. Policy-pack selection, capture rules, context budget
+  and channels, trace retention, type-aware freshness, Skill/Tool
+  advertisement and provider allowlists all resolve from the same exact
+  version. Every mutation is a typed VedaFlow `Configuration/apply` change;
+  capture/context record version evidence; all four tables are forced-RLS.
+  The mutable default/assignment tables and routes are deleted without
+  translation, and no binding falls back to them.
 - CPR-10 (ADR-0076): **a run is a record**. `sessions`, `session_events` and
   `session_context_runs` replace `session_id: text`; the governed scope a run
   is decided at is derived from its workspace and project by composite keys

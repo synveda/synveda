@@ -41,13 +41,16 @@ use synveda_identity::Hs256Verifier;
 use synveda_ingest::embedding::{AnyEmbedder, DeterministicEmbedder};
 use synveda_policy::Pdp;
 use synveda_retrieval::index::SearchIndex;
-use synveda_store::{access, identities, policy_assignments, scopes, tenants};
+use synveda_store::{access, identities, rls, scopes, tenants};
 use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
 use synveda_types::scope::{Scope, ScopeKind};
 use synveda_types::{
     GrantId, IdentityId, IdentityKind, PackConfig, ScopeId, TenantId, TenantStatus,
 };
 use tower::ServiceExt;
+
+#[path = "support/configuration.rs"]
+mod configuration_support;
 
 const SECRET: &[u8] = b"cnsl-2-explorer-secret";
 
@@ -426,9 +429,11 @@ async fn install(w: &World, name: &str, version: i64, source: &str) {
     w.pdp
         .install_source(w.tenant, name, version, source, PackConfig::default())
         .expect("install pack");
-    policy_assignments::set_default(&w.pool, w.tenant, name)
+    let mut tx = rls::begin_tenant_tx(&w.pool, w.tenant)
         .await
-        .expect("set default pack");
+        .expect("begin Configuration selection");
+    configuration_support::bind_tenant_pack(&mut tx, w.tenant, name).await;
+    tx.commit().await.expect("commit Configuration selection");
 }
 
 // ── Plumbing ─────────────────────────────────────────────────────────────────
@@ -825,14 +830,16 @@ async fn the_explorer_parity_corpus_is_what_the_gateway_serves() {
     // never exercised. `vic` is a viewer, so `policy.assign` comes back
     // false and the corpus has the case it is for.
     install(&w, "eng-pack", 7, ROLES_DECIDE).await;
-    policy_assignments::assign(&w.pool, w.tenant, w.eng, "eng-pack")
+    let mut tx = rls::begin_tenant_tx(&w.pool, w.tenant)
         .await
-        .expect("assign at the department");
+        .expect("begin department Configuration");
+    configuration_support::bind_pack(&mut tx, w.tenant, w.eng, "eng-pack").await;
+    tx.commit().await.expect("commit department Configuration");
 
-    let (status, pack) = get(
+    let (status, configuration) = get(
         &w.app,
         &w.sam,
-        &format!("/v1/admin/scopes/{}/policy", w.platform),
+        &format!("/v1/configurations/effective?scope_id={}", w.platform),
     )
     .await;
     assert_eq!(status, StatusCode::OK);
@@ -851,8 +858,8 @@ async fn the_explorer_parity_corpus_is_what_the_gateway_serves() {
     let asked_about = w.platform.to_string();
     for (name, mut payload) in [
         (
-            "pack-inherited",
-            json!({"asked_about": asked_about, "payload": pack}),
+            "configuration-inherited",
+            json!({"asked_about": asked_about, "payload": configuration}),
         ),
         (
             "capabilities-with-denial",
@@ -881,14 +888,14 @@ async fn the_explorer_parity_corpus_is_what_the_gateway_serves() {
 fn facts_for(name: &str, case: &Value) -> Value {
     let payload = &case["payload"];
     match name {
-        "pack-inherited" => json!({
+        "configuration-inherited" => json!({
             "must_name": [
-                payload["name"].as_str().unwrap(),
-                &payload["version"].to_string(),
-                // Not local: the whole reason this case is in the corpus.
+                payload["document"]["policy_pack"].as_str().unwrap(),
+                payload["version_id"].as_str().unwrap(),
+                payload["content_hash"].as_str().unwrap(),
                 "inherited",
             ],
-            "must_not_name": ["assigned here"],
+            "must_not_name": ["bound here", "enterprise fail-safe"],
         }),
         "capabilities-with-denial" => {
             let allowed: Vec<String> = payload["actions"]
@@ -981,9 +988,11 @@ async fn a_reader_without_admin_read_still_learns_what_they_may_do() {
     let Some(w) = world().await else { return };
     // The shipped pack, not a permissive test one — the whole point is what
     // the real packs grant.
-    policy_assignments::set_default(&w.pool, w.tenant, "standard")
+    let mut tx = rls::begin_tenant_tx(&w.pool, w.tenant)
         .await
-        .expect("set default pack");
+        .expect("begin standard Configuration");
+    configuration_support::bind_tenant_pack(&mut tx, w.tenant, "standard").await;
+    tx.commit().await.expect("commit standard Configuration");
 
     // `vic` is a viewer: no `ScopeRead` under `standard`.
     let (status, caps) = get(&w.app, &w.vic, &caps_path(w.platform)).await;

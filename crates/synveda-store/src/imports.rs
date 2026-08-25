@@ -8,6 +8,7 @@ use chrono::{DateTime, Utc};
 use serde_json::Value;
 use sqlx::{PgConnection, PgExecutor};
 use synveda_types::capture::{CaptureBatch, CaptureCandidate, CaptureMatch, CaptureMatchKind};
+use synveda_types::configuration::EffectiveConfiguration;
 use synveda_types::import::{
     ImportArtifact, ImportArtifactKind, ImportJob, ImportJobState, ImportMapping,
     ImportMappingClassification,
@@ -670,6 +671,7 @@ pub async fn materialize(
     conn: &mut PgConnection,
     tenant: TenantId,
     id: ImportJobId,
+    configuration: &EffectiveConfiguration,
 ) -> Result<MaterializedImport> {
     let job = get_job(&mut *conn, tenant, id)
         .await?
@@ -679,6 +681,13 @@ pub async fn materialize(
     if job.state == ImportJobState::Failed {
         return Err(Error::Conflict {
             message: format!("import job {id} is failed"),
+        });
+    }
+    if configuration.scope_id != job.scope_id
+        || configuration.document.content_hash()? != configuration.content_hash
+    {
+        return Err(Error::Invalid {
+            message: "OKF materialisation configuration evidence is invalid".to_owned(),
         });
     }
     if job.state == ImportJobState::Materialized {
@@ -721,11 +730,12 @@ pub async fn materialize(
         r#"
         insert into capture_batches
             (id, tenant_id, source_kind, session_id, import_job_id, scope_id,
-             workspace_id, project_id, principal_id, input_hash, event_count,
+             workspace_id, project_id, principal_id,
+             configuration_version_id, configuration_hash, input_hash, event_count,
              state, extractor_method, model_version, attempts, candidate_count,
              started_at, completed_at, updated_at)
-        values ($1, $2, 'okf_import', null, $3, $4, $5, $6, $7, $8, 0,
-                'completed', 'okf-v0.2', $9, 1, $10, $11, $11, $11)
+        values ($1, $2, 'okf_import', null, $3, $4, $5, $6, $7, $8, $9,
+                $10, 0, 'completed', 'okf-v0.2', $11, 1, $12, $13, $13, $13)
         "#,
         batch_id.as_uuid(),
         tenant.as_uuid(),
@@ -734,6 +744,8 @@ pub async fn materialize(
         job.workspace_id.as_uuid(),
         job.project_id.as_uuid(),
         job.principal_id,
+        configuration.version_id.map(|value| value.as_uuid()) as Option<Uuid>,
+        configuration.content_hash,
         job.bundle_digest,
         job.specification_commit,
         admitted.len() as i32,

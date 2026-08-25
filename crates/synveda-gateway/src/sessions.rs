@@ -336,6 +336,13 @@ pub struct ContextRunView {
     /// The scope it was anchored at.
     #[schema(value_type = String, format = "uuid")]
     pub scope_id: ScopeId,
+    /// Exact immutable runtime configuration, absent for the built-in
+    /// fail-safe.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>, format = "uuid")]
+    pub configuration_version_id: Option<synveda_types::ConfigurationVersionId>,
+    /// Canonical digest of the exact runtime configuration.
+    pub configuration_hash: String,
     /// The task, when one was named.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub query: Option<String>,
@@ -400,6 +407,8 @@ impl From<ContextRun> for ContextRunView {
             workspace_id: run.workspace_id,
             project_id: run.project_id,
             scope_id: run.scope_id,
+            configuration_version_id: run.configuration_version_id,
+            configuration_hash: run.configuration_hash,
             query: run.query,
             query_hash: run.query_hash,
             rendered: Some(run.rendered),
@@ -1765,11 +1774,27 @@ pub(crate) async fn end(
         // cross only the durable session boundary and never wait on a model.
         // `ending` is the first half of the two-phase close, so later events
         // remain eligible until the terminal transition.
-        let frozen = if matches!(
+        let terminal = matches!(
             after.status,
             SessionStatus::Ended | SessionStatus::Abandoned | SessionStatus::Failed
-        ) {
-            Some(capture::freeze_batch(&mut tx, &after).await?)
+        );
+        let configuration = if terminal {
+            Some(
+                synveda_store::configuration::effective_at_scope(
+                    &mut tx,
+                    tenant_id,
+                    after.scope_id,
+                )
+                .await?,
+            )
+        } else {
+            None
+        };
+        let frozen = if let Some(configuration) = &configuration
+            && configuration.document.capture.enabled
+            && configuration.document.capture.on_session_end
+        {
+            Some(capture::freeze_batch(&mut tx, &after, configuration).await?)
         } else {
             None
         };
@@ -1806,6 +1831,8 @@ pub(crate) async fn end(
                     "input_hash": frozen.batch.input_hash,
                     "event_count": frozen.batch.event_count,
                     "trigger": "session_terminal",
+                    "configuration_version_id": frozen.batch.configuration_version_id,
+                    "configuration_hash": frozen.batch.configuration_hash,
                     "authz": audit::decision_context(Action::SessionWrite, &authorized),
                 }),
             )

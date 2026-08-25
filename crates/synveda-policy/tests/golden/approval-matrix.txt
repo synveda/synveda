@@ -138,6 +138,26 @@ regulated-strict   policy restricted org_unit   administrator×2 + 2distinct
 regulated-strict   policy restricted workspace  administrator×2 + 2distinct
 regulated-strict   policy restricted project    administrator×2 + 2distinct
 regulated-strict   policy restricted principal  administrator×2 + 2distinct
+regulated-strict   configuration public tenant     administrator×2 + 2distinct
+regulated-strict   configuration public org_unit   administrator×2 + 2distinct
+regulated-strict   configuration public workspace  administrator×2 + 2distinct
+regulated-strict   configuration public project    administrator×2 + 2distinct
+regulated-strict   configuration public principal  administrator×2 + 2distinct
+regulated-strict   configuration internal tenant     administrator×2 + 2distinct
+regulated-strict   configuration internal org_unit   administrator×2 + 2distinct
+regulated-strict   configuration internal workspace  administrator×2 + 2distinct
+regulated-strict   configuration internal project    administrator×2 + 2distinct
+regulated-strict   configuration internal principal  administrator×2 + 2distinct
+regulated-strict   configuration confidential tenant     administrator×2 + 2distinct
+regulated-strict   configuration confidential org_unit   administrator×2 + 2distinct
+regulated-strict   configuration confidential workspace  administrator×2 + 2distinct
+regulated-strict   configuration confidential project    administrator×2 + 2distinct
+regulated-strict   configuration confidential principal  administrator×2 + 2distinct
+regulated-strict   configuration restricted tenant     administrator×2 + 2distinct
+regulated-strict   configuration restricted org_unit   administrator×2 + 2distinct
+regulated-strict   configuration restricted workspace  administrator×2 + 2distinct
+regulated-strict   configuration restricted project    administrator×2 + 2distinct
+regulated-strict   configuration restricted principal  administrator×2 + 2distinct
 standard           memory public tenant     curator×1 + 1distinct
 standard           memory public org_unit   curator×1 + 1distinct
 standard           memory public workspace  auto
@@ -278,6 +298,26 @@ standard           policy restricted org_unit   administrator×1 + 2distinct
 standard           policy restricted workspace  administrator×1 + 2distinct
 standard           policy restricted project    administrator×1 + 2distinct
 standard           policy restricted principal  administrator×1 + 2distinct
+standard           configuration public tenant     administrator×1 + 1distinct
+standard           configuration public org_unit   administrator×1 + 1distinct
+standard           configuration public workspace  administrator×1 + 1distinct
+standard           configuration public project    administrator×1 + 1distinct
+standard           configuration public principal  administrator×1 + 1distinct
+standard           configuration internal tenant     administrator×1 + 1distinct
+standard           configuration internal org_unit   administrator×1 + 1distinct
+standard           configuration internal workspace  administrator×1 + 1distinct
+standard           configuration internal project    administrator×1 + 1distinct
+standard           configuration internal principal  administrator×1 + 1distinct
+standard           configuration confidential tenant     administrator×1 + 1distinct
+standard           configuration confidential org_unit   administrator×1 + 1distinct
+standard           configuration confidential workspace  administrator×1 + 1distinct
+standard           configuration confidential project    administrator×1 + 1distinct
+standard           configuration confidential principal  administrator×1 + 1distinct
+standard           configuration restricted tenant     administrator×1 + 2distinct
+standard           configuration restricted org_unit   administrator×1 + 2distinct
+standard           configuration restricted workspace  administrator×1 + 2distinct
+standard           configuration restricted project    administrator×1 + 2distinct
+standard           configuration restricted principal  administrator×1 + 2distinct
 open-collaboration memory public tenant     curator×1 + 1distinct
 open-collaboration memory public org_unit   auto
 open-collaboration memory public workspace  auto
@@ -418,3 +458,23 @@ open-collaboration policy restricted org_unit   administrator×1 + 2distinct
 open-collaboration policy restricted workspace  administrator×1 + 2distinct
 open-collaboration policy restricted project    administrator×1 + 2distinct
 open-collaboration policy restricted principal  administrator×1 + 2distinct
+open-collaboration configuration public tenant     administrator×1 + 1distinct
+open-collaboration configuration public org_unit   administrator×1 + 1distinct
+open-collaboration configuration public workspace  auto
+open-collaboration configuration public project    auto
+open-collaboration configuration public principal  auto
+open-collaboration configuration internal tenant     administrator×1 + 1distinct
+open-collaboration configuration internal org_unit   administrator×1 + 1distinct
+open-collaboration configuration internal workspace  auto
+open-collaboration configuration internal project    auto
+open-collaboration configuration internal principal  auto
+open-collaboration configuration confidential tenant     administrator×1 + 1distinct
+open-collaboration configuration confidential org_unit   administrator×1 + 1distinct
+open-collaboration configuration confidential workspace  auto
+open-collaboration configuration confidential project    auto
+open-collaboration configuration confidential principal  auto
+open-collaboration configuration restricted tenant     administrator×1 + 2distinct
+open-collaboration configuration restricted org_unit   administrator×1 + 2distinct
+open-collaboration configuration restricted workspace  administrator×1 + 2distinct
+open-collaboration configuration restricted project    administrator×1 + 2distinct
+open-collaboration configuration restricted principal  administrator×1 + 2distinct

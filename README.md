@@ -95,7 +95,7 @@ bundle code and manifest-declared tools grant no authority.
 ## Project status
 
 **Phases 0–2 are complete. Phase 5 is re-cutting the product while Phase 3 is
-paused.** 82 of 114 filed features are delivered, each with acceptance
+paused.** 96 of 127 filed features are delivered, each with acceptance
 evidence and, where it has a runtime, a runnable script in [`demos/`](demos/).
 
 It installs, on somebody else's machine, with Docker as the only prerequisite:
@@ -119,10 +119,10 @@ switchers, a People page and the governance surfaces under **Advanced**. See
 | **2 — Governance** | VedaFlow, lapses, dedup, decay, recall, graph, audit queries, prompts, context packs, eval gates | ✅ 22/22 |
 | **3 — Enterprise** | SCIM, real IdPs, skills registry, console, Helm, release & distribution, residency, Qdrant | 🚧 14/27 |
 | **4 — Ecosystem** | SDKs, importers, telemetry, DR, gateway scale | 🚧 2/17 |
-| **5 — Context platform** | The redesign: fresh epoch, governed scopes, workspaces, membership, the PDP, the hierarchy cutover, the console shell, the session ledger, durable adapter delivery, governed versioned Knowledge and reviewable capture | 🚧 19/33 |
+| **5 — Context platform** | The redesign: fresh epoch, governed scopes, sessions, immutable Knowledge, capture, explainable context, Skills, Tools, OKF, one public contract and governed runtime configuration | 🚧 30 packages delivered; programme continues |
 
-One further feature (AUTH-6, session and token hygiene) is unscheduled — **116
-in total, 84 delivered** (`docs/backlog/STATUS.md` is the count `make ci`
+One further feature (AUTH-6, session and token hygiene) is unscheduled — **127
+in total, 96 delivered** (`docs/backlog/STATUS.md` is the count `make ci`
 checks). Phase 5 is the 33-prompt context-platform redesign, in flight on
 `feat/context-platform-mvp`; Phase 3 is paused mid-phase behind it. The fourteen Phase 3 items finished are the skills registry
 and its governance (SKIL-1 through SKIL-4), the installable single binary
@@ -145,7 +145,8 @@ Published benchmark scores, and what they do and do not measure:
   mints the user's own principal scope. No YAML before value.
 - **Scopes and policy** — one governed tree (tenant, org unit, workspace,
   project, principal — shapes, not ranks), administered through
-  `/v1/admin/scopes` and `synveda scope`, with policy packs
+  `/v1/admin/scopes` and `synveda scope`, with an immutable effective
+  Configuration selecting policy packs
   (`regulated-strict`, `standard`, `open-collaboration`), six role keys
   granted at a scope and inherited by its subtree (`owner`, `member`,
   `viewer`, `reviewer`, `curator`, `administrator`), ABAC conditions,
@@ -175,6 +176,13 @@ Published benchmark scores, and what they do and do not measure:
 - **VedaFlow end to end** — objects, commits, refs, proposals, an approval matrix,
   auto-promotion rules, cross-scope promotion, rollback and pinning, and a CLI
   review flow that needs no console.
+- **Governed runtime configuration** — stable Configuration aggregates own
+  immutable content-hashed versions. Revisioned nearest-scope bindings select
+  policy, capture rules, context budgets/channels/trace retention, freshness,
+  Skill/Tool advertisement and allowed provider families. Personal, team and
+  enterprise are documents over the same binary and schema. Create, publish,
+  bind, pin, disable and rollback all remain VedaFlow changes; capture batches
+  and context runs cite the exact version and digest they used.
 - **Audit** — a tamper-evident chain, plus a query surface that answers
   *"who could see X on date D"* and *"what did agent A know at time T"*.
 - **Governed assets** — prompt templates, context packs, and an
@@ -250,7 +258,8 @@ Being explicit, so nothing here misleads:
   A host killed before any lifecycle hook writes the in-flight turn can still
   lose that tail; nothing which reached the local spool is lost.
 - **The authenticated application contract is exact.** CPR-29 derives one
-  executable catalogue for all 156 bearer-authenticated `/v1` operations,
+  executable catalogue; with CPR-30 it contains 162 bearer-authenticated
+  `/v1` operations,
   checks it against OpenAPI in both directions, and generates the console
   operation/type table from that document. The console contains no
   hand-written application route wrappers; ordinary service-identity and audit
@@ -286,7 +295,8 @@ make dev-down # stop; state persists in named volumes
 The first `dev-up` builds the Postgres image and downloads the BGE-M3 embedding
 model (~2.3 GB), so allow a few minutes.
 
-The 69 shell demos in [`demos/`](demos/) are intended to be self-contained — one brings up what
+The 79 shell demo and harness files in [`demos/`](demos/) are intended to be
+self-contained — a feature demo brings up what
 it needs, seeds a scratch database, and prints what it proves. Good places to
 start:
 
@@ -298,13 +308,13 @@ sh demos/cpr-5-access.sh          # groups, grants and invitations
 sh demos/cpr-6-anchors.sh         # where a request stands, and what decides it
 sh demos/cpr-17-knowledge-browser.sh # public Knowledge + generated browser contract
 sh demos/cpr-18-session-capture.sh # candidate-only session extraction + VedaFlow review
+sh demos/cpr-30-governed-configuration.sh # immutable versions + scope binding/runtime evidence
 ```
 
-> **The old corpus is not yet all runnable.** 43 of the 65 scripts inventoried
-> by CPR-13 call deleted hierarchy/role/global-runtime surfaces; the four newer
-> Phase 5 demos are current. See `docs/backlog/CPR-13.md`. The programme will
-> re-point the old narratives and add a drift gate after capture and scoped
-> Knowledge retrieval exist, so it does not rewrite them twice.
+`make check-demos` checks every production route and CLI command named by the
+shell corpus against generated OpenAPI and the real CLI help inventory. CPR-13
+re-pointed the retired hierarchy, role-binding and global runtime narratives;
+the old commands are not compatibility aliases.
 
 Other useful targets:
 

@@ -20,10 +20,13 @@ use synveda_gateway::telemetry;
 use synveda_identity::Hs256Verifier;
 use synveda_ingest::capture_worker;
 use synveda_ingest::extraction::{AnyExtractor, DeterministicExtractor};
-use synveda_store::{access, identities, policy_assignments, rls, scopes, tenants};
+use synveda_store::{access, identities, rls, scopes, tenants};
 use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
 use synveda_types::{GrantId, IdentityId, IdentityKind, ScopeId, TenantId, TenantStatus};
 use tower::ServiceExt;
+
+#[path = "support/configuration.rs"]
+mod configuration_support;
 
 const SECRET: &[u8] = b"cpr-18-capture-api";
 const ADMIN: &str = "cpr18-admin";
@@ -161,9 +164,7 @@ async fn admitted_tenant(pack: &str) -> Option<(AppState, TenantId)> {
         .expect("mint tenant root");
     seed_identity(&mut tx, tenant_id, ADMIN).await;
     seed_grant(&mut tx, tenant_id, root.id, ADMIN, RoleKey::Administrator).await;
-    policy_assignments::set_default(&mut *tx, tenant_id, pack)
-        .await
-        .expect("select shipped policy pack");
+    configuration_support::bind_pack(&mut tx, tenant_id, root.id, pack).await;
     tx.commit().await.expect("commit bootstrap");
     Some((state(&url), tenant_id))
 }

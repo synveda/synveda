@@ -1109,9 +1109,11 @@ pub(crate) async fn materialize_import(
             }
         };
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant).await?;
-        let (_, allowed, resource) =
+        let (job, allowed, resource) =
             load_job(&state, &mut tx, tenant, id, Action::KnowledgeWrite).await?;
-        let result = store::materialize(&mut tx, tenant, id).await?;
+        let configuration =
+            synveda_store::configuration::effective_at_scope(&mut tx, tenant, job.scope_id).await?;
+        let result = store::materialize(&mut tx, tenant, id, &configuration).await?;
         if !replayed {
             claim.remember(&mut tx, tenant, id.as_uuid()).await?;
         }
@@ -1128,6 +1130,8 @@ pub(crate) async fn materialize_import(
                     "bundle_digest": result.job.bundle_digest,
                     "capture_batch_id": result.batch.id,
                     "candidate_count": result.candidates.len(),
+                    "configuration_version_id": result.batch.configuration_version_id,
+                    "configuration_hash": result.batch.configuration_hash,
                     "authz": audit::decision_context(Action::KnowledgeWrite, &allowed),
                 }),
             )

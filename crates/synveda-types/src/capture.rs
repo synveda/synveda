@@ -18,9 +18,9 @@ use crate::knowledge::{
     KnowledgeMutationOutcome, KnowledgeOrigin, KnowledgeRevisionContent, KnowledgeType,
 };
 use crate::{
-    CaptureBatchId, CaptureCandidateDecisionId, CaptureCandidateId, Error, ImportArtifactId,
-    ImportJobId, KnowledgeItemId, KnowledgeRevisionId, ProjectId, ProposalId, Result, ScopeId,
-    SessionEventId, SessionId, TenantId, WorkspaceId,
+    CaptureBatchId, CaptureCandidateDecisionId, CaptureCandidateId, ConfigurationVersionId, Error,
+    ImportArtifactId, ImportJobId, KnowledgeItemId, KnowledgeRevisionId, ProjectId, ProposalId,
+    Result, ScopeId, SessionEventId, SessionId, TenantId, WorkspaceId,
 };
 
 /// Maximum extraction attempts before a batch becomes failed.
@@ -157,6 +157,11 @@ pub struct CaptureBatch {
     /// Principal that opened the session and on whose authority extraction
     /// resolves visible neighbours.
     pub principal_id: String,
+    /// Exact immutable runtime document, absent only for the built-in
+    /// fail-safe used before a tenant publishes its first binding.
+    pub configuration_version_id: Option<ConfigurationVersionId>,
+    /// Canonical document hash, always frozen even for the fail-safe.
+    pub configuration_hash: String,
     /// BLAKE3-256 of the ordered eligible evidence tuple set.
     pub input_hash: String,
     /// Number of frozen events.

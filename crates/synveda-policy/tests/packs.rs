@@ -434,7 +434,7 @@ fn assert_pack_golden(pack: &str, version: i64, expected_for_alice: &[&str]) {
 fn golden_regulated_strict() {
     assert_pack_golden(
         REGULATED_STRICT,
-        21,
+        22,
         &["org", "eng", "team-a", "alice-user"],
     );
 }
@@ -448,7 +448,7 @@ fn golden_regulated_strict() {
 /// grant, which `standard_shares_within_what_you_hold` asserts.
 #[test]
 fn golden_standard() {
-    assert_pack_golden(STANDARD, 21, &["org", "eng", "team-a", "alice-user"]);
+    assert_pack_golden(STANDARD, 22, &["org", "eng", "team-a", "alice-user"]);
 }
 
 /// open-collaboration: org-wide — only other people's personal scopes
@@ -458,7 +458,7 @@ fn golden_standard() {
 fn golden_open_collaboration() {
     assert_pack_golden(
         OPEN_COLLABORATION,
-        21,
+        22,
         &[
             "org",
             "eng",

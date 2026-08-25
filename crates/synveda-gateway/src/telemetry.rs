@@ -65,11 +65,9 @@ pub const SESSION_OPERATIONS_TOTAL: &str = "synveda_session_operations_total";
 /// last-good compile in force — ADR-0012 decision 5). AUTHZ-1/AUTHZ-2.
 pub const POLICY_PACK_RELOADS_TOTAL: &str = "synveda_policy_pack_reloads_total";
 
-/// Policy admin operations (AUTHZ-2, ADR-0014 decision 8), labelled by
-/// `op` (packs/get_default/set_default/clear_default/get_node_policy/
-/// assign_node_policy/unassign_node_policy) and `outcome` (`ok`,
-/// `rejected`, `error`). Mutations are an AUD-1 emission point once the
-/// audit log lands.
+/// Policy-source catalogue operations (AUTHZ-2, CPR-30), labelled by `op`
+/// (`packs`) and `outcome` (`ok`, `rejected`, `error`). Runtime selection is
+/// measured separately by the Configuration plane.
 pub const POLICY_OPERATIONS_TOTAL: &str = "synveda_policy_operations_total";
 
 /// JIT provisioning outcomes at login (AUTH-2, ADR-0013): `mapped`,
@@ -441,11 +439,11 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
         POLICY_PACK_RELOADS_TOTAL,
         "Policy pack reloads by outcome (installed/removed/unchanged/error)"
     );
-    // AUTHZ-2 counters (ADR-0014): operations in the gateway's policy
-    // routes; fallbacks in synveda-policy's effective-pack resolution.
+    // AUTHZ-2 counters (ADR-0014): policy-source catalogue reads;
+    // fail-safe resolution in synveda-policy.
     metrics::describe_counter!(
         POLICY_OPERATIONS_TOTAL,
-        "Policy admin operations by op and outcome (ok/rejected/error)"
+        "Policy-source catalogue operations by op and outcome (ok/rejected/error)"
     );
     metrics::describe_counter!(
         synveda_policy::POLICY_PACK_FALLBACKS_TOTAL,

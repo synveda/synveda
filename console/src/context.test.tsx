@@ -10,6 +10,7 @@ import { cache } from "./cache.mjs";
 import { ContextInspector } from "./Context.js";
 import { toText } from "./text.mjs";
 import type {
+  CaptureCandidateView,
   ContextCandidateView,
   ContextRunDetailView,
   ContextRunView,
@@ -54,6 +55,37 @@ function source(): KnowledgeSourceView {
   };
 }
 
+function unreviewedProposal(): CaptureCandidateView {
+  return {
+    id: "capture-pending-1",
+    batch_id: "capture-batch-1",
+    source_kind: "session",
+    session_id: "session-1",
+    ordinal: 0,
+    proposed_scope_id: "scope-project",
+    proposed_project_id: "project-1",
+    knowledge_type: "fact",
+    origin: "observed",
+    content: {
+      title: "Pending delivery convention",
+      body_markdown: "This delivery convention still needs review.",
+      summary: "A proposed delivery convention.",
+      tags: ["pending"],
+      sensitivity: "internal",
+      confidence_permille: 820,
+      verification_metadata: {},
+      metadata: {},
+    },
+    content_hash: "hash-unreviewed",
+    state: "pending",
+    source_event_ids: ["event-pending-1"],
+    source_artifact_ids: [],
+    matches: [],
+    content_erased: false,
+    created_at: "2026-08-24T09:03:00Z",
+  };
+}
+
 function run(overrides: Partial<ContextRunView> = {}): ContextRunView {
   return {
     id: RUN_ID,
@@ -67,6 +99,8 @@ function run(overrides: Partial<ContextRunView> = {}): ContextRunView {
     block_hash: "rendered-hash",
     tokens: 37,
     budget_tokens: 256,
+    configuration_hash: "configuration-hash",
+    configuration_version_id: "configuration-version-1",
     requested_budget_tokens: 300,
     entry_count: 1,
     candidate_count: 3,
@@ -89,6 +123,7 @@ function selectedCandidate(): ContextCandidateView {
   return {
     id: "candidate-current",
     ordinal: 0,
+    channel: "current_knowledge",
     knowledge_item_id: "knowledge-current",
     knowledge_revision_id: "revision-current",
     content_hash: "hash-current",
@@ -116,6 +151,7 @@ function excluded(
   return {
     id,
     ordinal: id === "candidate-old" ? 1 : 2,
+    channel: "current_knowledge",
     knowledge_item_id: `knowledge-${id}`,
     knowledge_revision_id: `revision-${id}`,
     content_hash: `hash-${id}`,
@@ -144,6 +180,7 @@ function selection(overrides: Partial<ContextSelectionView> = {}): ContextSelect
   return {
     id: "selection-1",
     rank: 1,
+    channel: "current_knowledge",
     knowledge_item_id: "knowledge-current",
     knowledge_revision_id: "revision-current",
     content_hash: "hash-current",
@@ -248,11 +285,60 @@ test("redacted mode keeps exact reasons and feedback targets without task or Kno
   const { markup, text } = render();
   assert.match(text, /Redacted trace/);
   assert.match(text, /original task is unavailable/);
-  assert.match(text, /Knowledge content was not retained in this redacted trace/);
+  assert.match(text, /Context content was not retained in this redacted trace/);
   assert.match(text, /Referenced by agent/);
   assert.ok(markup.includes('href="/console/knowledge/knowledge-current"'));
   assert.doesNotMatch(text, /traceparent/);
   assert.doesNotMatch(text, /session event event-17/);
+});
+
+test("a configured unreviewed selection stays visibly separate and has no Knowledge feedback", async () => {
+  const proposal = unreviewedProposal();
+  const pendingCandidate: ContextCandidateView = {
+    id: "candidate-unreviewed",
+    ordinal: 0,
+    channel: "unreviewed_candidates",
+    capture_candidate_id: proposal.id,
+    content_hash: proposal.content_hash,
+    reason_codes: ["keyword_match"],
+    scores: {
+      keyword_micros: 600_000,
+      semantic_micros: 0,
+      freshness_micros: 50_000,
+      pin_micros: 0,
+      current_state_micros: 0,
+      final_micros: 650_000,
+    },
+    unreviewed_candidate: proposal,
+    sources: [],
+  };
+  const pendingSelection: ContextSelectionView = {
+    id: "selection-unreviewed",
+    rank: 1,
+    channel: "unreviewed_candidates",
+    capture_candidate_id: proposal.id,
+    content_hash: proposal.content_hash,
+    token_count: 28,
+    reason_codes: ["keyword_match"],
+    unreviewed_candidate: proposal,
+    sources: [],
+  };
+  await seed({
+    kind: "ok",
+    body: detail({
+      run: run({ candidate_count: 1, selection_count: 1 }),
+      candidates: [pendingCandidate],
+      selections: [pendingSelection],
+      feedback: [],
+    }),
+  });
+  const { text } = render();
+  assert.match(text, /Unreviewed capture candidate/);
+  assert.match(text, /unreviewed at planning time/);
+  assert.match(text, /This delivery convention still needs review/);
+  assert.match(text, /session event event-pending-1/);
+  assert.match(text, /unavailable until this candidate becomes an immutable published Knowledge revision/);
+  assert.doesNotMatch(text, /Referenced by agent/);
 });
 
 test("hashes-only mode displays hashes and reasons but no address, content, source or feedback control", async () => {

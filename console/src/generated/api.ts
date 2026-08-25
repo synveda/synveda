@@ -55,6 +55,15 @@ export type AcceptedInviteView = {
   };
 
 /**
+ * Distribution switches. They narrow already-authorised bindings and grant
+ * no Skill or Tool authority.
+ */
+export type AdvertisementConfigurationBody = {
+    skills: boolean;
+    tools: boolean;
+  };
+
+/**
  * What the caller may do at **one anchor** — a real decision at a real scope,
  * never a shape derived from an edition (CPR-6, ADR-0073 decision 8).
  */
@@ -553,6 +562,15 @@ export type CaptureBatchView = {
      */
     completed_at?: string | null;
     /**
+     * Canonical hash of the frozen runtime document.
+     */
+    configuration_hash: string;
+    /**
+     * Exact immutable Configuration version, absent only for the built-in
+     * fail-safe.
+     */
+    configuration_version_id?: string | null;
+    /**
      * Creation instant.
      */
     created_at: string;
@@ -717,6 +735,17 @@ export type CaptureCandidateView = {
     source_event_ids: string[];
     source_kind: "session" | "okf_import";
     state: "pending" | "accepted" | "edited_and_accepted" | "merged" | "replaced" | "dismissed" | "failed";
+  };
+
+/**
+ * Capture and extraction settings in one immutable document.
+ */
+export type CaptureConfigurationBody = {
+    enabled: boolean;
+    explicit_request: boolean;
+    maximum_candidates_per_batch: number;
+    minimum_confidence_permille: number;
+    on_session_end: boolean;
   };
 
 /**
@@ -1048,10 +1077,129 @@ export type ChannelUnpinResponse = {
     scope_id: string;
   };
 
+export type ConfigurationArtifactListView = {
+    artifacts: ConfigurationArtifactView[];
+    next_cursor?: string | null;
+  };
+
+/**
+ * Stable aggregate metadata.
+ */
+export type ConfigurationArtifactView = {
+    created_at: string;
+    created_by: string;
+    current_version_id: string;
+    governing_scope_id: string;
+    id: string;
+    name: string;
+    updated_at: string;
+    updated_by: string;
+  };
+
+export type ConfigurationBindingListView = {
+    bindings: ConfigurationBindingView[];
+    next_cursor?: string | null;
+  };
+
+/**
+ * Revisioned scope selector.
+ */
+export type ConfigurationBindingView = {
+    artifact_id: string;
+    created_at: string;
+    created_by: string;
+    enabled: boolean;
+    id: string;
+    pinned_version_id?: string | null;
+    revision: number;
+    scope_id: string;
+    updated_at: string;
+    updated_by: string;
+  };
+
+/**
+ * Deterministic field-level comparison of two immutable versions.
+ */
+export type ConfigurationComparisonView = {
+    changed_fields: string[];
+    from_hash: string;
+    from_version_id: string;
+    to_hash: string;
+    to_version_id: string;
+  };
+
+/**
+ * A complete immutable governed runtime document.
+ */
+export type ConfigurationDocumentBody = {
+    advertisement: AdvertisementConfigurationBody;
+    /**
+     * `anthropic`, `vllm`, `tei`, or `remote_mcp`, sorted and unique.
+     */
+    allowed_external_providers: string[];
+    capture: CaptureConfigurationBody;
+    context: ContextConfigurationBody;
+    freshness: FreshnessConfigurationBody;
+    policy_pack: string;
+  };
+
+/**
+ * Stable result envelope for every governed mutation.
+ */
+export type ConfigurationMutationView = {
+    artifact_id?: string | null;
+    binding_id?: string | null;
+    binding_revision?: number | null;
+    change_id: string;
+    outcome: "applied" | "pending_review" | "rejected";
+    version_id?: string | null;
+  };
+
+export type ConfigurationTemplateListView = {
+    templates: ConfigurationTemplateView[];
+  };
+
+/**
+ * Canonical template source. Selecting one creates ordinary version data.
+ */
+export type ConfigurationTemplateView = {
+    content_hash: string;
+    document: ConfigurationDocumentBody;
+    name: "personal" | "team" | "enterprise";
+  };
+
+export type ConfigurationVersionListView = {
+    next_cursor?: number | null;
+    versions: ConfigurationVersionView[];
+  };
+
+/**
+ * One immutable version with its complete runtime document.
+ */
+export type ConfigurationVersionView = {
+    artifact_id: string;
+    change_id: string;
+    content_hash: string;
+    created_at: string;
+    created_by: string;
+    document: ConfigurationDocumentBody;
+    id: string;
+    ordinal: number;
+    source_template?: "personal" | "team" | "enterprise";
+  };
+
 /**
  * One retained, freshly re-authorised planner candidate.
  */
 export type ContextCandidateView = {
+    /**
+     * Pending capture proposal, absent for Knowledge and hashes-only mode.
+     */
+    capture_candidate_id?: string | null;
+    /**
+     * `current_knowledge` or the visibly unreviewed candidate channel.
+     */
+    channel: string;
     /**
      * Canonical content hash.
      */
@@ -1090,6 +1238,19 @@ export type ContextCandidateView = {
      * Independently visible provenance, full mode only.
      */
     sources?: KnowledgeSourceView[];
+    unreviewed_candidate?: null | CaptureCandidateView;
+  };
+
+/**
+ * Budgeted context delivery settings.
+ */
+export type ContextConfigurationBody = {
+    /**
+     * `current_knowledge`, optionally followed by `unreviewed_candidates`.
+     */
+    channels: string[];
+    token_budget: number;
+    trace_retention: "full" | "redacted" | "hashes_only" | "disabled";
   };
 
 /**
@@ -1365,6 +1526,15 @@ export type ContextRunView = {
      */
     completion_status: string;
     /**
+     * Canonical digest of the exact runtime configuration.
+     */
+    configuration_hash: string;
+    /**
+     * Exact immutable runtime configuration, absent for the built-in
+     * fail-safe.
+     */
+    configuration_version_id?: string | null;
+    /**
      * When it was composed.
      */
     created_at: string;
@@ -1489,6 +1659,14 @@ export type ContextScoreView = {
  */
 export type ContextSelectionView = {
     /**
+     * Pending capture proposal, absent for Knowledge and hashes-only mode.
+     */
+    capture_candidate_id?: string | null;
+    /**
+     * `current_knowledge` or the visibly unreviewed candidate channel.
+     */
+    channel: string;
+    /**
      * Canonical content hash.
      */
     content_hash: string;
@@ -1521,6 +1699,27 @@ export type ContextSelectionView = {
      * Estimated tokens charged.
      */
     token_count: number;
+    unreviewed_candidate?: null | CaptureCandidateView;
+  };
+
+/**
+ * Create a scope selector.
+ */
+export type CreateConfigurationBindingBody = {
+    artifact_id: string;
+    enabled?: boolean;
+    pinned_version_id?: string | null;
+    scope_id: string;
+  };
+
+/**
+ * Create an aggregate and its first immutable version.
+ */
+export type CreateConfigurationBody = {
+    document: ConfigurationDocumentBody;
+    governing_scope_id: string;
+    name: string;
+    source_template?: "personal" | "team" | "enterprise";
   };
 
 /**
@@ -1807,18 +2006,6 @@ export type CuratorsResponse = {
     updated_by?: string | null;
   };
 
-export type DefaultResponse = {
-    /**
-     * What applies where nothing is assigned: the stored default, or the
-     * embedded `regulated-strict` (seed §2.1).
-     */
-    effective: string;
-    /**
-     * The stored tenant default, when one exists.
-     */
-    pack_name?: string | null;
-  };
-
 /**
  * `DELETE /v1/knowledge/{id}`. Deletion without a mode is invalid.
  */
@@ -1876,11 +2063,18 @@ export type EditKnowledgeBody = {
     sources?: KnowledgeSourceBody[];
   };
 
-export type EffectiveResponse = {
-    assignment?: null | PolicyAssignmentView;
-    name: string;
-    origin: OriginView;
-    version: number;
+/**
+ * Exact current document and selector evidence at a governed scope.
+ */
+export type EffectiveConfigurationView = {
+    artifact_id?: string | null;
+    binding_id?: string | null;
+    binding_scope_id?: string | null;
+    content_hash: string;
+    document: ConfigurationDocumentBody;
+    fail_safe: boolean;
+    scope_id: string;
+    version_id?: string | null;
   };
 
 /**
@@ -1913,6 +2107,22 @@ export type ExportOkfBody = {
      * Stable item ids to export.
      */
     item_ids?: string[];
+  };
+
+/**
+ * Type-aware implicit staleness intervals in days; zero disables the
+ * implicit date for that type.
+ */
+export type FreshnessConfigurationBody = {
+    convention_days: number;
+    decision_days: number;
+    entity_days: number;
+    episode_days: number;
+    fact_days: number;
+    preference_days: number;
+    procedure_days: number;
+    reference_days: number;
+    warning_days: number;
   };
 
 /**
@@ -3356,13 +3566,8 @@ export type OpenSessionBody = {
   };
 
 /**
- * Where an inherited thing came from.
- *
- * `pub(crate)` since CNSL-2 (ADR-0058 decision 6): the capabilities probe
- * and the effective-roles listing both report an origin, and the whole
- * point of that decision is that the admin planes say "this came from
- * above" in **one** vocabulary rather than three that agree on the day
- * they are written.
+ * Stable API origin vocabulary retained by the capability surface. These
+ * values describe the PDP's derived selector, not a mutable assignment row.
  */
 export type OriginView = {
     kind: string;
@@ -3370,9 +3575,6 @@ export type OriginView = {
   };
 
 export type PackSummary = {
-    /**
-     * `embedded` (compiled into the binary) or `stored` (a tenant row).
-     */
     kind: string;
     name: string;
     updated_at?: string | null;
@@ -3440,12 +3642,6 @@ export type PlanOkfImportBody = {
      * Required for Git and retained for provenance.
      */
     source_revision?: string | null;
-  };
-
-export type PolicyAssignmentView = {
-    pack_name: string;
-    scope_id: string;
-    updated_at: string;
   };
 
 /**
@@ -3953,6 +4149,15 @@ export type ProposalSummary = {
   };
 
 /**
+ * Publish another complete immutable version.
+ */
+export type PublishConfigurationBody = {
+    document: ConfigurationDocumentBody;
+    expected_current_version_id: string;
+    source_template?: "personal" | "team" | "enterprise";
+  };
+
+/**
  * One quarantined event as the API renders it: the redacted payload,
  * the finding summary, and the review state — never raw finding text
  * (there is none anywhere to render, ADR-0021 decision 1).
@@ -4146,6 +4351,14 @@ export type RepositoryView = {
      * When it last changed.
      */
     updated_at: string;
+  };
+
+/**
+ * Pin an older version without mutating history.
+ */
+export type RollbackConfigurationBindingBody = {
+    expected_revision: number;
+    version_id: string;
   };
 
 /**
@@ -4454,10 +4667,6 @@ export type SessionView = {
      * The workspace the run happened in.
      */
     workspace_id: string;
-  };
-
-export type SetPackBody = {
-    name: string;
   };
 
 /**
@@ -5498,6 +5707,17 @@ export type UpdateBody = {
   };
 
 /**
+ * Change a selector under an exact revision precondition.
+ */
+export type UpdateConfigurationBindingBody = {
+    artifact_id: string;
+    enabled: boolean;
+    expected_revision: number;
+    pinned_version_id?: string | null;
+    reason: string;
+  };
+
+/**
  * `PATCH /v1/admin/groups/{group_id}`.
  *
  * `members` is a **full replacement**, not a delta: a membership list has no
@@ -5795,35 +6015,6 @@ export type Operations = {
     readonly response: ChainResponse;
   };
   /**
-   * `GET /v1/admin/scopes/{scope_id}/policy` — the pack effective at the scope
-   * and where it came from (its own assignment, an ancestor's, the tenant
-   * default, or the embedded default).
-   */
-  readonly get_scope_policy: {
-    readonly path: "/v1/admin/scopes/{scope_id}/policy";
-    readonly method: "GET";
-    readonly response: EffectiveResponse;
-  };
-  /**
-   * `PUT /v1/admin/scopes/{scope_id}/policy` — assign a pack at the scope; its
-   * subtree runs it from the next request on.
-   */
-  readonly assign_scope_policy: {
-    readonly path: "/v1/admin/scopes/{scope_id}/policy";
-    readonly method: "PUT";
-    readonly body: SetPackBody;
-    readonly response: PolicyAssignmentView;
-  };
-  /**
-   * `DELETE /v1/admin/scopes/{scope_id}/policy` — remove the scope's
-   * assignment; it falls back to the inherited pack.
-   */
-  readonly unassign_scope_policy: {
-    readonly path: "/v1/admin/scopes/{scope_id}/policy";
-    readonly method: "DELETE";
-    readonly response: void;
-  };
-  /**
    * `GET /v1/audit/disclosures` — "who could see X on date D", as two lists
    * (ADR-0045 decision 4).
    */
@@ -5997,6 +6188,112 @@ export type Operations = {
     readonly method: "POST";
     readonly body: ChannelUnpinBody;
     readonly response: ChannelUnpinResponse;
+  };
+  /**
+   * List revisioned bindings at one exact scope.
+   */
+  readonly list_configuration_bindings: {
+    readonly path: "/v1/configuration-bindings";
+    readonly method: "GET";
+    readonly response: ConfigurationBindingListView;
+  };
+  /**
+   * Create one selector at a governed scope.
+   */
+  readonly create_configuration_binding: {
+    readonly path: "/v1/configuration-bindings";
+    readonly method: "POST";
+    readonly body: CreateConfigurationBindingBody;
+    readonly idempotent: true;
+    readonly response: ConfigurationMutationView;
+  };
+  /**
+   * Change, enable, disable, pin or unpin a binding.
+   */
+  readonly update_configuration_binding: {
+    readonly path: "/v1/configuration-bindings/{id}";
+    readonly method: "PATCH";
+    readonly body: UpdateConfigurationBindingBody;
+    readonly idempotent: true;
+    readonly response: ConfigurationMutationView;
+  };
+  /**
+   * Roll back by pinning one earlier immutable version.
+   */
+  readonly rollback_configuration_binding: {
+    readonly path: "/v1/configuration-bindings/{id}/rollback";
+    readonly method: "POST";
+    readonly body: RollbackConfigurationBindingBody;
+    readonly idempotent: true;
+    readonly response: ConfigurationMutationView;
+  };
+  /**
+   * List canonical source templates. Templates are never effective by name.
+   */
+  readonly list_configuration_templates: {
+    readonly path: "/v1/configuration-templates";
+    readonly method: "GET";
+    readonly response: ConfigurationTemplateListView;
+  };
+  /**
+   * List policy-visible stable aggregates with an opaque keyset cursor.
+   */
+  readonly list_configurations: {
+    readonly path: "/v1/configurations";
+    readonly method: "GET";
+    readonly response: ConfigurationArtifactListView;
+  };
+  /**
+   * Create an immutable governed configuration aggregate.
+   */
+  readonly create_configuration: {
+    readonly path: "/v1/configurations";
+    readonly method: "POST";
+    readonly body: CreateConfigurationBody;
+    readonly idempotent: true;
+    readonly response: ConfigurationMutationView;
+  };
+  /**
+   * Resolve the nearest enabled selector and return exact version evidence.
+   */
+  readonly get_effective_configuration: {
+    readonly path: "/v1/configurations/effective";
+    readonly method: "GET";
+    readonly response: EffectiveConfigurationView;
+  };
+  /**
+   * Read one stable aggregate.
+   */
+  readonly get_configuration: {
+    readonly path: "/v1/configurations/{id}";
+    readonly method: "GET";
+    readonly response: ConfigurationArtifactView;
+  };
+  /**
+   * Compare two versions of one stable aggregate.
+   */
+  readonly compare_configuration_versions: {
+    readonly path: "/v1/configurations/{id}/compare";
+    readonly method: "GET";
+    readonly response: ConfigurationComparisonView;
+  };
+  /**
+   * List immutable versions newest first.
+   */
+  readonly list_configuration_versions: {
+    readonly path: "/v1/configurations/{id}/versions";
+    readonly method: "GET";
+    readonly response: ConfigurationVersionListView;
+  };
+  /**
+   * Publish and select another immutable version.
+   */
+  readonly publish_configuration_version: {
+    readonly path: "/v1/configurations/{id}/versions";
+    readonly method: "POST";
+    readonly body: PublishConfigurationBody;
+    readonly idempotent: true;
+    readonly response: ConfigurationMutationView;
   };
   /**
    * `GET /v1/context-packs?scope_id=…` — the registry at one scope: every
@@ -6249,34 +6546,7 @@ export type Operations = {
     readonly response: OkfMaterializationView;
   };
   /**
-   * `GET /v1/policy/default` — the tenant's default pack.
-   */
-  readonly get_default_policy: {
-    readonly path: "/v1/policy/default";
-    readonly method: "GET";
-    readonly response: DefaultResponse;
-  };
-  /**
-   * `PUT /v1/policy/default` — set the tenant default pack.
-   */
-  readonly set_default_policy: {
-    readonly path: "/v1/policy/default";
-    readonly method: "PUT";
-    readonly body: SetPackBody;
-    readonly response: DefaultResponse;
-  };
-  /**
-   * `DELETE /v1/policy/default` — clear the tenant default; the embedded
-   * `regulated-strict` applies wherever nothing is assigned.
-   */
-  readonly clear_default_policy: {
-    readonly path: "/v1/policy/default";
-    readonly method: "DELETE";
-    readonly response: void;
-  };
-  /**
-   * `GET /v1/policy/packs` — the packs assignable in this tenant: the
-   * embedded product packs and the tenant's stored packs.
+   * List immutable pack sources available to Configuration documents.
    */
   readonly list_policy_packs: {
     readonly path: "/v1/policy/packs";
@@ -7099,9 +7369,6 @@ export const OPERATIONS = {
   get_scope_curators: { path: "/v1/admin/scopes/{scope_id}/curators", method: "GET" },
   put_scope_curators: { path: "/v1/admin/scopes/{scope_id}/curators", method: "PUT" },
   list_scope_descendants: { path: "/v1/admin/scopes/{scope_id}/descendants", method: "GET" },
-  get_scope_policy: { path: "/v1/admin/scopes/{scope_id}/policy", method: "GET" },
-  assign_scope_policy: { path: "/v1/admin/scopes/{scope_id}/policy", method: "PUT" },
-  unassign_scope_policy: { path: "/v1/admin/scopes/{scope_id}/policy", method: "DELETE" },
   list_audit_disclosures: { path: "/v1/audit/disclosures", method: "GET" },
   list_audit_events: { path: "/v1/audit/events", method: "GET" },
   get_audit_knowledge: { path: "/v1/audit/knowledge", method: "GET" },
@@ -7121,6 +7388,18 @@ export const OPERATIONS = {
   publish_channel: { path: "/v1/channels/{scope_id}/publish", method: "POST" },
   rollback_channel: { path: "/v1/channels/{scope_id}/rollback", method: "POST" },
   unpin_channel: { path: "/v1/channels/{scope_id}/unpin", method: "POST" },
+  list_configuration_bindings: { path: "/v1/configuration-bindings", method: "GET" },
+  create_configuration_binding: { path: "/v1/configuration-bindings", method: "POST", idempotent: true },
+  update_configuration_binding: { path: "/v1/configuration-bindings/{id}", method: "PATCH", idempotent: true },
+  rollback_configuration_binding: { path: "/v1/configuration-bindings/{id}/rollback", method: "POST", idempotent: true },
+  list_configuration_templates: { path: "/v1/configuration-templates", method: "GET" },
+  list_configurations: { path: "/v1/configurations", method: "GET" },
+  create_configuration: { path: "/v1/configurations", method: "POST", idempotent: true },
+  get_effective_configuration: { path: "/v1/configurations/effective", method: "GET" },
+  get_configuration: { path: "/v1/configurations/{id}", method: "GET" },
+  compare_configuration_versions: { path: "/v1/configurations/{id}/compare", method: "GET" },
+  list_configuration_versions: { path: "/v1/configurations/{id}/versions", method: "GET" },
+  publish_configuration_version: { path: "/v1/configurations/{id}/versions", method: "POST", idempotent: true },
   list_context_packs: { path: "/v1/context-packs", method: "GET" },
   author_context_pack: { path: "/v1/context-packs", method: "POST" },
   list_context_runs: { path: "/v1/context-runs", method: "GET" },
@@ -7149,9 +7428,6 @@ export const OPERATIONS = {
   list_okf_imports: { path: "/v1/okf/imports", method: "GET" },
   get_okf_import: { path: "/v1/okf/imports/{id}", method: "GET" },
   materialize_okf_import: { path: "/v1/okf/imports/{id}/materialize", method: "POST", idempotent: true },
-  get_default_policy: { path: "/v1/policy/default", method: "GET" },
-  set_default_policy: { path: "/v1/policy/default", method: "PUT" },
-  clear_default_policy: { path: "/v1/policy/default", method: "DELETE" },
   list_policy_packs: { path: "/v1/policy/packs", method: "GET" },
   get_project: { path: "/v1/projects/{project_id}", method: "GET" },
   update_project: { path: "/v1/projects/{project_id}", method: "PATCH" },

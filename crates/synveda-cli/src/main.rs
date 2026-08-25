@@ -19,6 +19,7 @@
 mod api;
 mod audit;
 mod channel;
+mod configuration;
 mod credentials;
 mod diff;
 mod directory;
@@ -358,6 +359,13 @@ enum Command {
     /// forbids.
     #[command(subcommand)]
     Skill(SkillCommand),
+    /// Versioned governed runtime profiles (CPR-30, ADR-0089).
+    ///
+    /// Every mutation calls the public gateway API and returns its VedaFlow
+    /// change outcome. Templates are copied into immutable versions; bindings
+    /// select an exact artifact at a governed scope.
+    #[command(subcommand)]
+    Configuration(ConfigurationCommand),
     /// Open Knowledge Format v0.2 exchange (CPR-28, ADR-0087).
     ///
     /// Validation and inspection are local and use the exact pinned adapter.
@@ -712,6 +720,139 @@ enum OkfCommand {
         #[arg(long)]
         json: bool,
         /// Credential profile.
+        #[arg(long)]
+        profile: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum ConfigurationCommand {
+    /// List the canonical personal, team and enterprise source documents.
+    Templates {
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    /// List stable Configuration aggregates.
+    List {
+        /// Restrict to the scope that governs the aggregate.
+        #[arg(long)]
+        scope: Option<ScopeId>,
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    /// Inspect one aggregate and all visible immutable versions.
+    Show {
+        id: synveda_types::ConfigurationArtifactId,
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    /// Resolve the exact Configuration effective at a scope.
+    Effective {
+        scope: ScopeId,
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    /// Compare two immutable versions of one aggregate.
+    Compare {
+        id: synveda_types::ConfigurationArtifactId,
+        #[arg(long)]
+        from: synveda_types::ConfigurationVersionId,
+        #[arg(long)]
+        to: synveda_types::ConfigurationVersionId,
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    /// Create an aggregate from one template or a complete JSON document.
+    Create {
+        #[arg(long)]
+        scope: ScopeId,
+        #[arg(long)]
+        name: String,
+        #[arg(long, required_unless_present = "file", conflicts_with = "file")]
+        template: Option<synveda_types::configuration::ConfigurationTemplate>,
+        #[arg(
+            long,
+            required_unless_present = "template",
+            conflicts_with = "template"
+        )]
+        file: Option<std::path::PathBuf>,
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    /// Publish a complete document as a new immutable version.
+    Publish {
+        id: synveda_types::ConfigurationArtifactId,
+        #[arg(long)]
+        expected_version: synveda_types::ConfigurationVersionId,
+        #[arg(long)]
+        file: std::path::PathBuf,
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    /// List revisioned bindings written at one exact scope.
+    Bindings {
+        scope: ScopeId,
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    /// Bind an artifact at a scope, following current unless a version is pinned.
+    Bind {
+        #[arg(long)]
+        scope: ScopeId,
+        #[arg(long)]
+        artifact: synveda_types::ConfigurationArtifactId,
+        #[arg(long)]
+        version: Option<synveda_types::ConfigurationVersionId>,
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    /// Enable, disable, pin or unpin a binding under its exact revision.
+    UpdateBinding {
+        id: synveda_types::ConfigurationBindingId,
+        #[arg(long)]
+        expected_revision: u64,
+        #[arg(long)]
+        artifact: synveda_types::ConfigurationArtifactId,
+        #[arg(long)]
+        version: Option<synveda_types::ConfigurationVersionId>,
+        #[arg(long, required_unless_present = "disable", conflicts_with = "disable")]
+        enable: bool,
+        #[arg(long, required_unless_present = "enable", conflicts_with = "enable")]
+        disable: bool,
+        #[arg(long)]
+        reason: String,
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    /// Pin a binding to an older immutable version.
+    Rollback {
+        id: synveda_types::ConfigurationBindingId,
+        #[arg(long)]
+        expected_revision: u64,
+        #[arg(long)]
+        version: synveda_types::ConfigurationVersionId,
+        #[arg(long)]
+        json: bool,
         #[arg(long)]
         profile: Option<String>,
     },
@@ -2297,6 +2438,111 @@ async fn run(cli: Cli) -> Result<(), String> {
                     &client,
                     root.as_deref(),
                     dry_run,
+                    json,
+                )
+                .await
+            }
+        },
+
+        Command::Configuration(command) => match command {
+            ConfigurationCommand::Templates { json, profile } => {
+                configuration::templates(&profile_name(profile), json).await
+            }
+            ConfigurationCommand::List {
+                scope,
+                json,
+                profile,
+            } => configuration::list(&profile_name(profile), scope, json).await,
+            ConfigurationCommand::Show { id, json, profile } => {
+                configuration::show(&profile_name(profile), id, json).await
+            }
+            ConfigurationCommand::Effective {
+                scope,
+                json,
+                profile,
+            } => configuration::effective(&profile_name(profile), scope, json).await,
+            ConfigurationCommand::Compare {
+                id,
+                from,
+                to,
+                json,
+                profile,
+            } => configuration::compare(&profile_name(profile), id, from, to, json).await,
+            ConfigurationCommand::Create {
+                scope,
+                name,
+                template,
+                file,
+                json,
+                profile,
+            } => {
+                configuration::create(
+                    &profile_name(profile),
+                    scope,
+                    &name,
+                    template,
+                    file.as_deref(),
+                    json,
+                )
+                .await
+            }
+            ConfigurationCommand::Publish {
+                id,
+                expected_version,
+                file,
+                json,
+                profile,
+            } => {
+                configuration::publish(&profile_name(profile), id, expected_version, &file, json)
+                    .await
+            }
+            ConfigurationCommand::Bindings {
+                scope,
+                json,
+                profile,
+            } => configuration::bindings(&profile_name(profile), scope, json).await,
+            ConfigurationCommand::Bind {
+                scope,
+                artifact,
+                version,
+                json,
+                profile,
+            } => configuration::bind(&profile_name(profile), scope, artifact, version, json).await,
+            ConfigurationCommand::UpdateBinding {
+                id,
+                expected_revision,
+                artifact,
+                version,
+                enable,
+                disable: _,
+                reason,
+                json,
+                profile,
+            } => {
+                configuration::update_binding(
+                    &profile_name(profile),
+                    id,
+                    expected_revision,
+                    artifact,
+                    version,
+                    enable,
+                    &reason,
+                    json,
+                )
+                .await
+            }
+            ConfigurationCommand::Rollback {
+                id,
+                expected_revision,
+                version,
+                json,
+                profile,
+            } => {
+                configuration::rollback(
+                    &profile_name(profile),
+                    id,
+                    expected_revision,
+                    version,
                     json,
                 )
                 .await

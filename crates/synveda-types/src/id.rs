@@ -328,6 +328,24 @@ define_id!(
 );
 
 define_id!(
+    /// Identifies one stable governed runtime-configuration aggregate
+    /// (CPR-30, ADR-0089).
+    ConfigurationArtifactId
+);
+
+define_id!(
+    /// Identifies one immutable governed runtime-configuration version
+    /// (CPR-30, ADR-0089).
+    ConfigurationVersionId
+);
+
+define_id!(
+    /// Identifies one revisioned governed-scope configuration binding
+    /// (CPR-30, ADR-0089).
+    ConfigurationBindingId
+);
+
+define_id!(
     /// Identifies one context run — one act of composing context for a
     /// session (CPR-10, ADR-0076 decision 7).
     ContextRunId

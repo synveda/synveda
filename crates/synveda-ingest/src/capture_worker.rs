@@ -20,8 +20,11 @@ use synveda_policy::{
 use synveda_store::capture::{self, NewCaptureCandidate};
 use synveda_store::knowledge::KnowledgeSnapshot;
 use synveda_store::knowledge_search::{self, Filters};
-use synveda_store::{anchors, identities, knowledge, policy_assignments, rls, tenants};
+use synveda_store::{
+    anchors, configuration, identities, knowledge, policy_assignments, rls, tenants,
+};
 use synveda_types::capture::{CaptureBatch, CaptureMatch, CaptureMatchKind, CaptureSourceKind};
+use synveda_types::configuration::{ConfigurationDocument, ExternalProvider};
 use synveda_types::knowledge::{
     KnowledgeLifecycleState, KnowledgeRevisionContent, normalise_knowledge_tags,
     validate_knowledge_revision_content,
@@ -152,6 +155,46 @@ async fn process_one(deps: &Deps, config: &Config, tenant_id: TenantId) -> Resul
     };
     let session_id = capture_session_id(&batch)?;
     let events = capture::frozen_events(&mut *claim_tx, tenant_id, batch.id).await?;
+    let runtime_configuration = exact_configuration(&mut claim_tx, &batch).await;
+    let runtime_configuration = match runtime_configuration {
+        Ok(document) => document,
+        Err(error) => {
+            claim_tx.commit().await.map_err(commit_error)?;
+            return fail_attempt(deps, config, &batch, "configuration_invalid", error).await;
+        }
+    };
+    if !runtime_configuration.capture.enabled {
+        claim_tx.commit().await.map_err(commit_error)?;
+        return fail_attempt(
+            deps,
+            config,
+            &batch,
+            "capture_disabled",
+            Error::PolicyDenied {
+                action: "capture.extract".to_owned(),
+                resource: Resource::Session(session_id).to_string(),
+                reason: "the frozen configuration disables capture".to_owned(),
+            },
+        )
+        .await;
+    }
+    if let Some(provider) = extractor_provider(deps.extractor.method())
+        && !runtime_configuration.permits_provider(provider)
+    {
+        claim_tx.commit().await.map_err(commit_error)?;
+        return fail_attempt(
+            deps,
+            config,
+            &batch,
+            "provider_not_allowed",
+            Error::PolicyDenied {
+                action: "capture.extract".to_owned(),
+                resource: Resource::Session(session_id).to_string(),
+                reason: format!("the frozen configuration does not allow provider {provider}"),
+            },
+        )
+        .await;
+    }
     let session_decision = decide_exact(
         deps,
         &mut claim_tx,
@@ -237,6 +280,12 @@ async fn process_one(deps: &Deps, config: &Config, tenant_id: TenantId) -> Resul
             .await;
         }
         for candidate in outcome.candidates {
+            if proposed.len()
+                >= usize::try_from(runtime_configuration.capture.maximum_candidates_per_batch)
+                    .unwrap_or(usize::MAX)
+            {
+                break;
+            }
             let ordinal = match i32::try_from(proposed.len() + 1) {
                 Ok(ordinal) => ordinal,
                 Err(_) => {
@@ -265,7 +314,11 @@ async fn process_one(deps: &Deps, config: &Config, tenant_id: TenantId) -> Resul
                     return fail_attempt(deps, config, &batch, "candidate_invalid", error).await;
                 }
             };
-            proposed.push(prepared);
+            if prepared.content.confidence_permille
+                >= i32::from(runtime_configuration.capture.minimum_confidence_permille)
+            {
+                proposed.push(prepared);
+            }
         }
     }
     if events.is_empty() {
@@ -364,6 +417,43 @@ async fn process_one(deps: &Deps, config: &Config, tenant_id: TenantId) -> Resul
     }
     metrics::counter!(CAPTURE_BATCHES_TOTAL, "outcome" => "completed").increment(1);
     Ok(ProcessOutcome::Completed)
+}
+
+async fn exact_configuration(
+    connection: &mut sqlx::PgConnection,
+    batch: &CaptureBatch,
+) -> Result<ConfigurationDocument> {
+    let document = if let Some(version_id) = batch.configuration_version_id {
+        let version = configuration::version(connection, batch.tenant_id, version_id)
+            .await?
+            .ok_or_else(|| Error::Internal {
+                message: format!(
+                    "capture batch {} references missing configuration version {version_id}",
+                    batch.id
+                ),
+            })?;
+        version.document
+    } else {
+        ConfigurationDocument::fail_safe()
+    };
+    let actual_hash = document.content_hash()?;
+    if actual_hash != batch.configuration_hash {
+        return Err(Error::Internal {
+            message: format!(
+                "capture batch {} configuration hash does not match its frozen document",
+                batch.id
+            ),
+        });
+    }
+    Ok(document)
+}
+
+fn extractor_provider(method: &str) -> Option<ExternalProvider> {
+    match method {
+        "claude-api" => Some(ExternalProvider::Anthropic),
+        "vllm" => Some(ExternalProvider::Vllm),
+        _ => None,
+    }
 }
 
 fn prepare_candidate(
@@ -633,8 +723,8 @@ async fn decide_exact(
         token_scope,
     };
     let chain_ids: Vec<ScopeId> = chain.iter().map(|node| node.id).collect();
-    let assignments = policy_assignments::for_scopes(&mut *tx, tenant_id, &chain_ids).await?;
-    let default_pack = policy_assignments::default_pack(&mut *tx, tenant_id).await?;
+    let assignments = policy_assignments::for_scopes(tx, tenant_id, &chain_ids).await?;
+    let default_pack = policy_assignments::default_pack(tx, tenant_id).await?;
     let selection = project_id.map_or_else(
         anchors::AnchorSelection::none,
         anchors::AnchorSelection::project,
@@ -714,6 +804,8 @@ async fn append_batch_event(
                 "batch_id": batch.id,
                 "session_id": session_id,
                 "input_hash": batch.input_hash,
+                "configuration_version_id": batch.configuration_version_id,
+                "configuration_hash": batch.configuration_hash,
                 "event_count": batch.event_count,
                 "state": state,
                 "attempts": batch.attempts,
@@ -756,6 +848,8 @@ async fn append_system_failure(
                 "batch_id": batch.id,
                 "session_id": session_id,
                 "input_hash": batch.input_hash,
+                "configuration_version_id": batch.configuration_version_id,
+                "configuration_hash": batch.configuration_hash,
                 "event_count": batch.event_count,
                 "state": batch.state.as_str(),
                 "attempts": batch.attempts,

@@ -194,16 +194,24 @@ define_routes! {
     "/v1/admin/scopes/{scope_id}/descendants" => [GET crate::admin_scopes::descendants],
     "/v1/capabilities" => [GET crate::capabilities::batch],
     "/v1/policy/packs" => [GET crate::policy::packs],
-    "/v1/policy/default" => [
-        GET crate::policy::get_default,
-        PUT crate::policy::set_default,
-        DELETE crate::policy::clear_default,
+    "/v1/configuration-templates" => [GET crate::configuration::templates],
+    "/v1/configurations" => [
+        GET crate::configuration::list,
+        POST crate::configuration::create,
     ],
-    "/v1/admin/scopes/{scope_id}/policy" => [
-        GET crate::policy::get_scope_policy,
-        PUT crate::policy::assign_scope_policy,
-        DELETE crate::policy::unassign_scope_policy,
+    "/v1/configurations/effective" => [GET crate::configuration::effective],
+    "/v1/configurations/{id}" => [GET crate::configuration::get],
+    "/v1/configurations/{id}/versions" => [
+        GET crate::configuration::versions,
+        POST crate::configuration::publish,
     ],
+    "/v1/configurations/{id}/compare" => [GET crate::configuration::compare],
+    "/v1/configuration-bindings" => [
+        GET crate::configuration::bindings,
+        POST crate::configuration::create_binding,
+    ],
+    "/v1/configuration-bindings/{id}" => [PATCH crate::configuration::update_binding],
+    "/v1/configuration-bindings/{id}/rollback" => [POST crate::configuration::rollback_binding],
 
     "/v1/quarantine" => [GET crate::quarantine::list],
     "/v1/quarantine/{event_id}/release" => [POST crate::quarantine::release],

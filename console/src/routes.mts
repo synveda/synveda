@@ -14,7 +14,7 @@
  * user asks ("what is this thing?") should have the same answer for all
  * of them.
  *
- * The **advanced** group is governance: reviews, scopes, policies, audit,
+ * The **advanced** group is governance: reviews, scopes, Configuration, audit,
  * service identities. Those are shown only to a caller whose capability
  * probe says they may read the plane behind them. This is not enforcement
  * and cannot be — see the forecast note below — it is the difference
@@ -54,7 +54,7 @@ export type RouteId =
   | "settings"
   | "reviews"
   | "scopes"
-  | "policies"
+  | "configuration"
   | "audit"
   | "service-identities"
   | "welcome";
@@ -214,12 +214,12 @@ export const ROUTES: readonly RouteDef[] = [
     blurb: "The governed scope tree, the pack in force, and what you may do.",
   },
   {
-    id: "policies",
-    segment: "advanced/policies",
-    label: "Policies",
+    id: "configuration",
+    segment: "advanced/configuration",
+    label: "Configuration",
     group: "advanced",
-    capability: "policy.read",
-    blurb: "The packs this tenant can assign, and the relaxations standing.",
+    capability: "configuration.read",
+    blurb: "Versioned runtime profiles, exact scope bindings and immutable history.",
   },
   {
     id: "audit",

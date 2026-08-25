@@ -54,13 +54,14 @@ use synveda_identity::Hs256Verifier;
 use synveda_ingest::embedding::{AnyEmbedder, DeterministicEmbedder};
 use synveda_policy::{Pdp, REGULATED_STRICT};
 use synveda_retrieval::index::SearchIndex;
-use synveda_store::{
-    access, directory, identities, policy_assignments, retention, rls, scopes, tenants,
-};
+use synveda_store::{access, directory, identities, retention, rls, scopes, tenants};
 use synveda_types::access::{GrantSource, GroupSource};
 use synveda_types::scope::{Scope, ScopeKind};
 use synveda_types::{IdentityId, ScimCredentialId, ScopeId, TenantId, TenantStatus};
 use tower::ServiceExt;
+
+#[path = "support/configuration.rs"]
+mod configuration_support;
 
 const SECRET: &[u8] = b"auth-4-scim-secret";
 
@@ -951,9 +952,7 @@ async fn assign(w: &World, scope: ScopeId, pack: &str) {
     let mut tx = rls::begin_tenant_tx(&w.pool, w.tenant)
         .await
         .expect("begin");
-    policy_assignments::assign(&mut *tx, w.tenant, scope, pack)
-        .await
-        .expect("assign pack");
+    configuration_support::bind_pack(&mut tx, w.tenant, scope, pack).await;
     tx.commit().await.expect("commit assignment");
 }
 

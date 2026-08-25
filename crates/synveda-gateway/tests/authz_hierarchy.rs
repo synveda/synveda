@@ -25,10 +25,13 @@ use synveda_gateway::app::{AppState, router};
 use synveda_gateway::{authz, telemetry};
 use synveda_identity::Hs256Verifier;
 use synveda_policy::{Pdp, REGULATED_STRICT};
-use synveda_store::{access, policy_assignments, policy_packs, rls, scopes};
+use synveda_store::{access, policy_packs, rls, scopes};
 use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
 use synveda_types::{GrantId, PackConfig, TenantId};
 use tower::ServiceExt;
+
+#[path = "support/configuration.rs"]
+mod configuration_support;
 
 const SECRET: &[u8] = b"authz-1-test-secret";
 
@@ -225,17 +228,15 @@ async fn clear_pack(pool: &PgPool, tenant: TenantId, name: &str) {
     tx.commit().await.expect("commit clear");
 }
 
-/// The store-level break-glass (ADR-0014): a tenant default naming a pack
-/// that permits no policy admin locks the `/v1/policy` plane; the CLI's
-/// tenant-tx store path clears it.
-async fn break_glass_clear_default(pool: &PgPool, tenant: TenantId) {
+/// Test-only stand-in for the documented local operator break-glass: disable
+/// the revisioned tenant-root Configuration binding. The public application
+/// plane has no mutation path around its own effective PDP.
+async fn break_glass_disable_configuration(pool: &PgPool, tenant: TenantId) {
     let mut tx = rls::begin_tenant_tx(pool, tenant)
         .await
         .expect("begin tenant tx");
-    policy_assignments::clear_default(&mut *tx, tenant)
-        .await
-        .expect("clear default");
-    tx.commit().await.expect("commit clear default");
+    assert!(configuration_support::disable_tenant(&mut tx, tenant).await);
+    tx.commit().await.expect("commit Configuration disable");
 }
 
 fn node_id(body: &Value) -> String {
@@ -324,9 +325,10 @@ async fn stored_packs_gate_the_admin_plane_and_hot_reload() {
         "an unassigned pack must not govern: {probe}"
     );
 
-    // Make it the tenant default through the product route: in force on
-    // the very next request, no reload involved (ADR-0014 decision 3).
-    let (status, set) = api(
+    // The old mutable default route is gone. The governed fixture creates a
+    // typed VedaFlow change, immutable Configuration version and root
+    // binding; that selection is in force on the next request.
+    let (status, old_route) = api(
         &app,
         "PUT",
         "/v1/policy/default",
@@ -335,7 +337,12 @@ async fn stored_packs_gate_the_admin_plane_and_hot_reload() {
         Some(json!({"name": "authz1-readonly"})),
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "{set}");
+    assert_eq!(status, StatusCode::NOT_FOUND, "{old_route}");
+    let mut tx = rls::begin_tenant_tx(&pool, tenant_id)
+        .await
+        .expect("begin governed selection");
+    configuration_support::bind_tenant_pack(&mut tx, tenant_id, "authz1-readonly").await;
+    tx.commit().await.expect("commit governed selection");
 
     // Mutations are denied 403 with the pack version in the denial
     // reason: a create, a rename and an archive — there is no scope
@@ -399,14 +406,15 @@ async fn stored_packs_gate_the_admin_plane_and_hot_reload() {
         );
     }
 
-    // The read-only pack permits no PolicyAssign, so the product route to
-    // undo the default is itself denied — the lockout ADR-0014 documents.
+    // The deleted route stays absent even while the selected pack permits no
+    // ConfigurationWrite. No compatibility mutation path reappears.
     let (status, locked) = api(&app, "DELETE", "/v1/policy/default", &token, None, None).await;
-    assert_eq!(status, StatusCode::FORBIDDEN, "{locked}");
+    assert_eq!(status, StatusCode::NOT_FOUND, "{locked}");
 
-    // Break-glass at the store level, then mutations work again on the
-    // next request — back on the embedded default.
-    break_glass_clear_default(&pool, tenant_id).await;
+    // Local operator break-glass disables the binding; the immutable version
+    // and its policy-pack reference remain. Mutations work again under the
+    // strict fail-safe.
+    break_glass_disable_configuration(&pool, tenant_id).await;
     let (status, team) = api(
         &app,
         "POST",
@@ -421,12 +429,13 @@ async fn stored_packs_gate_the_admin_plane_and_hot_reload() {
     .await;
     assert_eq!(status, StatusCode::CREATED, "{team}");
 
-    // With no references left, the stored pack clears and the reloader
-    // drops the compiled copy.
-    clear_pack(&pool, tenant_id, "authz1-readonly").await;
-    assert_eq!(
-        authz::refresh_tenant_packs(&pool, &pdp, tenant_id).await,
-        "removed"
+    let mut tx = rls::begin_tenant_tx(&pool, tenant_id)
+        .await
+        .expect("begin immutable-reference check");
+    let retained = policy_packs::clear(&mut tx, tenant_id, "authz1-readonly").await;
+    assert!(
+        matches!(retained, Err(synveda_types::Error::Conflict { .. })),
+        "immutable Configuration history must retain the pack: {retained:?}"
     );
 }
 

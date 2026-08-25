@@ -12,8 +12,6 @@ import { test } from "node:test";
 import {
   deniedCount,
   describeEnd,
-  describeOrigin,
-  isInherited,
   lapsesTouching,
   mayDo,
   mayRead,
@@ -24,36 +22,6 @@ import {
 
 const HERE = "0199aa11-1111-7111-8111-111111111111";
 const ABOVE = "0199aa11-2222-7222-8222-222222222222";
-
-test("an origin is described relative to the node asked about", () => {
-  // The same wire value means two different things depending on where the
-  // reader is standing, and telling an administrator their unit has its own pack
-  // when it inherits one is the failure this comparison prevents.
-  assert.equal(describeOrigin({ kind: "assigned", scope_id: HERE }, HERE), "assigned here");
-  assert.equal(describeOrigin({ kind: "assigned", scope_id: ABOVE }, HERE), "inherited");
-  assert.equal(isInherited({ kind: "assigned", scope_id: ABOVE }, HERE), true);
-  assert.equal(isInherited({ kind: "assigned", scope_id: HERE }, HERE), false);
-});
-
-test("a tenant-wide binding is not an inherited one", () => {
-  // Different facts: an ancestor's binding was written about a subtree, a
-  // tenant-wide one was written about everybody. Neither is "here".
-  assert.equal(describeOrigin({ kind: "tenant-wide" }, HERE), "tenant-wide");
-  assert.equal(isInherited({ kind: "tenant-wide" }, HERE), false);
-});
-
-test("a pack that did not compile says so rather than reading as a choice", () => {
-  // `fallback` means the assigned pack failed to compile and this node is
-  // running something nobody chose. A reader who saw "regulated-strict"
-  // with no qualifier would think somebody decided that.
-  assert.match(describeOrigin({ kind: "fallback" }, HERE), /did not compile/);
-});
-
-test("an unknown origin kind is shown rather than swallowed", () => {
-  // A gateway newer than the bundle. Showing the raw kind is worse-looking
-  // and more honest than rendering nothing where a fact belongs.
-  assert.equal(describeOrigin({ kind: "something-new" }, HERE), "something-new");
-});
 
 function capabilities(overrides: Partial<Capabilities> = {}): Capabilities {
   return {

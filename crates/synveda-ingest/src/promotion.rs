@@ -479,8 +479,8 @@ async fn evaluate_scope(
         return Ok(0);
     }
     let chain_ids: Vec<ScopeId> = chain.iter().map(|node| node.id).collect();
-    let assignments = policy_assignments::for_scopes(&mut *tx, tenant_id, &chain_ids).await?;
-    let default_pack = policy_assignments::default_pack(&mut *tx, tenant_id).await?;
+    let assignments = policy_assignments::for_scopes(&mut tx, tenant_id, &chain_ids).await?;
+    let default_pack = policy_assignments::default_pack(&mut tx, tenant_id).await?;
     // The pack is resolved for the *scope*, with no principal in it: which
     // rules run here is a property of the node, not of whoever's material
     // happens to sit on it.
@@ -846,8 +846,8 @@ async fn authorize_owner(
         token_scope,
     };
     let chain_ids: Vec<ScopeId> = scope_chain.iter().map(|node| node.id).collect();
-    let assignments = policy_assignments::for_scopes(&mut *tx, tenant_id, &chain_ids).await?;
-    let default_pack = policy_assignments::default_pack(&mut *tx, tenant_id).await?;
+    let assignments = policy_assignments::for_scopes(tx, tenant_id, &chain_ids).await?;
+    let default_pack = policy_assignments::default_pack(tx, tenant_id).await?;
     let anchor_set = anchors::resolve(
         &mut *tx,
         tenant_id,
@@ -903,8 +903,8 @@ async fn resolve_requirement(
     entries: &[String],
 ) -> Result<synveda_types::ApprovalRequirement> {
     let chain_ids: Vec<ScopeId> = scope_chain.iter().map(|node| node.id).collect();
-    let assignments = policy_assignments::for_scopes(&mut *tx, tenant_id, &chain_ids).await?;
-    let default_pack = policy_assignments::default_pack(&mut *tx, tenant_id).await?;
+    let assignments = policy_assignments::for_scopes(tx, tenant_id, &chain_ids).await?;
+    let default_pack = policy_assignments::default_pack(tx, tenant_id).await?;
     let context = AuthzContext {
         scopes: scope_chain,
         principal_scopes,

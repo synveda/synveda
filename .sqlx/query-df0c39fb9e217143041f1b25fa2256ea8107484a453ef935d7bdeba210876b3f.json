@@ -1,0 +1,160 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select id, tenant_id, source_kind, session_id, import_job_id,\n               scope_id, workspace_id, project_id,\n               principal_id, configuration_version_id, configuration_hash,\n               input_hash, event_count, state, extractor_method,\n               model_version, attempts, candidate_count, error_code,\n               created_at, started_at, completed_at, updated_at\n        from capture_batches\n        where tenant_id = $1\n          and ($2::uuid is null or session_id = $2)\n          and ($3::uuid is null or project_id = $3)\n          and ($4::text is null or state = $4)\n          and ($5::timestamptz is null\n               or created_at < $5\n               or (created_at = $5 and id < $6))\n        order by created_at desc, id desc\n        limit $7\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "tenant_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "source_kind",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "session_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "import_job_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "scope_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 6,
+        "name": "workspace_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 7,
+        "name": "project_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 8,
+        "name": "principal_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "configuration_version_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 10,
+        "name": "configuration_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "input_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 12,
+        "name": "event_count",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 13,
+        "name": "state",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 14,
+        "name": "extractor_method",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 15,
+        "name": "model_version",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 16,
+        "name": "attempts",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 17,
+        "name": "candidate_count",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 18,
+        "name": "error_code",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 19,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 20,
+        "name": "started_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 21,
+        "name": "completed_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 22,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Timestamptz",
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      true,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      true,
+      false,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "df0c39fb9e217143041f1b25fa2256ea8107484a453ef935d7bdeba210876b3f"
+}

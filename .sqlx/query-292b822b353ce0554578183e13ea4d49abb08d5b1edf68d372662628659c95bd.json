@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select version.document ->> 'policy_pack' as \"pack_name!\"\n             from scopes root\n             join configuration_bindings binding\n               on binding.tenant_id = root.tenant_id\n              and binding.scope_id = root.id\n              and binding.enabled\n             join configuration_artifacts artifact\n               on artifact.tenant_id = binding.tenant_id\n              and artifact.id = binding.artifact_id\n             join configuration_versions version\n               on version.tenant_id = binding.tenant_id\n              and version.artifact_id = binding.artifact_id\n              and version.id = coalesce(binding.pinned_version_id,\n                                        artifact.current_version_id)\n            where root.tenant_id = $1 and root.kind = 'tenant'",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "pack_name!",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "292b822b353ce0554578183e13ea4d49abb08d5b1edf68d372662628659c95bd"
+}

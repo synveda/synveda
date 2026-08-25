@@ -1,9 +1,11 @@
 //! Explainable context-planning vocabulary (CPR-20, ADR-0084).
 //!
 //! A context run is a budgeted delivery record. Candidates and selections
-//! cite immutable Knowledge revisions; feedback cites one exact selection.
-//! These types deliberately contain no Knowledge body text: content remains
-//! in its immutable revision and every disclosure re-runs the PDP.
+//! cite either immutable Knowledge revisions or explicitly configured,
+//! visibly unreviewed capture candidates; feedback cites one exact published
+//! Knowledge selection. These types deliberately contain no body text:
+//! content remains in its source aggregate and every disclosure re-runs the
+//! PDP.
 
 use std::fmt;
 use std::str::FromStr;
@@ -11,10 +13,11 @@ use std::str::FromStr;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+use crate::configuration::ConfigurationContextChannel;
 use crate::knowledge::KnowledgeLifecycleState;
 use crate::{
-    ContextCandidateId, ContextFeedbackId, ContextRunId, ContextSelectionId, Error,
-    KnowledgeItemId, KnowledgeRevisionId, Result, ScopeId, TenantId,
+    CaptureCandidateId, ContextCandidateId, ContextFeedbackId, ContextRunId, ContextSelectionId,
+    Error, KnowledgeItemId, KnowledgeRevisionId, Result, ScopeId, TenantId,
 };
 
 fn joined(values: impl Iterator<Item = &'static str>) -> String {
@@ -293,10 +296,14 @@ pub struct ContextCandidate {
     pub context_run_id: ContextRunId,
     /// Stable deterministic position in the considered pool.
     pub ordinal: i32,
+    /// Governed content channel through which this row entered the plan.
+    pub channel: ConfigurationContextChannel,
     /// Stable item, absent in hashes-only mode.
     pub knowledge_item_id: Option<KnowledgeItemId>,
     /// Immutable revision, absent in hashes-only mode.
     pub knowledge_revision_id: Option<KnowledgeRevisionId>,
+    /// Reviewable proposal, absent for Knowledge and in hashes-only mode.
+    pub capture_candidate_id: Option<CaptureCandidateId>,
     /// Canonical revision content hash, retained without plaintext.
     pub content_hash: String,
     /// Governing scope, absent when addresses are not retained.
@@ -334,10 +341,14 @@ pub struct ContextSelection {
     pub context_run_id: ContextRunId,
     /// One-based delivery rank.
     pub rank: i32,
+    /// Governed content channel through which this row entered the plan.
+    pub channel: ConfigurationContextChannel,
     /// Stable item, absent in hashes-only mode.
     pub knowledge_item_id: Option<KnowledgeItemId>,
     /// Immutable revision, absent in hashes-only mode.
     pub knowledge_revision_id: Option<KnowledgeRevisionId>,
+    /// Reviewable proposal, absent for Knowledge and in hashes-only mode.
+    pub capture_candidate_id: Option<CaptureCandidateId>,
     /// Canonical revision content hash.
     pub content_hash: String,
     /// Estimated tokens charged to this selection.

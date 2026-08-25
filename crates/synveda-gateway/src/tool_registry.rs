@@ -24,7 +24,8 @@ use synveda_store::tool_registry::{
     self as store, StoredToolBinding, StoredToolChange, StoredToolServer, StoredToolTestRun,
     StoredToolVersion,
 };
-use synveda_store::{projects, rls, scopes};
+use synveda_store::{configuration as runtime_configuration, projects, rls, scopes};
+use synveda_types::configuration::ExternalProvider;
 use synveda_types::json::canonicalise;
 use synveda_types::{
     AssetKind, CapabilitySnapshotId, Error, IdentityId, NormalizedCapabilities, ProjectId,
@@ -2378,8 +2379,13 @@ pub(crate) async fn generate_config(
             Action::ToolRead,
             Resource::Scope(project.id),
         )?;
-        let candidates =
-            store::bindings(&mut *tx, tenant, Some(project_id), false, None, i64::MAX).await?;
+        let runtime =
+            runtime_configuration::effective_at_scope(&mut tx, tenant, project.id).await?;
+        let candidates = if runtime.document.advertisement.tools {
+            store::bindings(&mut *tx, tenant, Some(project_id), false, None, i64::MAX).await?
+        } else {
+            Vec::new()
+        };
         let mut configuration = Map::new();
         let mut included = Vec::new();
         for binding in candidates
@@ -2403,6 +2409,13 @@ pub(crate) async fn generate_config(
                 .ok_or_else(|| Error::NotFound {
                     entity: format!("approved tool version {}", binding.version_id),
                 })?;
+            if version.descriptor.transport == ToolTransport::StreamableHttp
+                && !runtime
+                    .document
+                    .permits_provider(ExternalProvider::RemoteMcp)
+            {
+                continue;
+            }
             let mut entry = Map::new();
             entry.insert(
                 "transport".to_owned(),
@@ -2447,6 +2460,9 @@ pub(crate) async fn generate_config(
                     "version_id": binding.version_id,
                     "digest": binding.digest,
                 })).collect::<Vec<_>>(),
+                "configuration_version_id": runtime.version_id,
+                "configuration_hash": runtime.content_hash,
+                "advertisement_enabled": runtime.document.advertisement.tools,
                 "authz": audit::decision_context(Action::ToolRead, &project_allowed),
             }),
         )

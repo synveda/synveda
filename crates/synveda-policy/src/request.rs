@@ -430,6 +430,11 @@ pub enum Action {
     /// Assign a pack to the resource node, or set the tenant default
     /// (the tenant resource).
     PolicyAssign,
+    /// Inspect immutable runtime configuration and its effective binding.
+    ConfigurationRead,
+    /// Create, publish, bind, pin, enable, disable or roll back governed
+    /// runtime configuration through VedaFlow (CPR-30, ADR-0089).
+    ConfigurationWrite,
     /// Release or reject one quarantined event at its scope. Never a
 
     /// Read service-identity registrations: one at its anchor node, or
@@ -572,7 +577,7 @@ impl Action {
     /// every action is in exactly one of the four groups, so a new action
     /// that nobody classified fails the build rather than silently going
     /// unanswerable at CNSL-2's probe.
-    pub const ALL: [Action; 48] = [
+    pub const ALL: [Action; 50] = [
         Action::ScopeCreate,
         Action::ScopeRead,
         Action::ScopeUpdate,
@@ -607,6 +612,8 @@ impl Action {
         Action::QuarantineReview,
         Action::PolicyRead,
         Action::PolicyAssign,
+        Action::ConfigurationRead,
+        Action::ConfigurationWrite,
         Action::ServiceIdentityRead,
         Action::ServiceIdentityManage,
         Action::AuditRead,
@@ -638,7 +645,7 @@ impl Action {
     /// a scope resource at all (ADR-0045 decision 2); it appears in
     /// [`Action::PROBED_AT_TENANT`], where the chain it reads actually
     /// lives.
-    pub const PROBED_AT_SCOPE: [Action; 38] = [
+    pub const PROBED_AT_SCOPE: [Action; 40] = [
         Action::ScopeCreate,
         Action::ScopeRead,
         Action::ScopeUpdate,
@@ -666,6 +673,8 @@ impl Action {
         Action::QuarantineReview,
         Action::PolicyRead,
         Action::PolicyAssign,
+        Action::ConfigurationRead,
+        Action::ConfigurationWrite,
         Action::ServiceIdentityRead,
         Action::ServiceIdentityManage,
         Action::ChannelRead,
@@ -685,7 +694,7 @@ impl Action {
     /// much shorter than the scope set and that is the honest shape: most
     /// of this vocabulary is about a node, and an action that is only ever
     /// taken at a node has no tenant-level answer to give.
-    pub const PROBED_AT_TENANT: [Action; 20] = [
+    pub const PROBED_AT_TENANT: [Action; 22] = [
         Action::ScopeCreate,
         Action::ScopeRead,
         Action::ScopeUpdate,
@@ -702,6 +711,8 @@ impl Action {
         Action::QuarantineRead,
         Action::PolicyRead,
         Action::PolicyAssign,
+        Action::ConfigurationRead,
+        Action::ConfigurationWrite,
         Action::ServiceIdentityRead,
         Action::AuditRead,
         Action::DirectoryManage,
@@ -762,6 +773,8 @@ impl Action {
             Action::QuarantineReview => "quarantine.review",
             Action::PolicyRead => "policy.read",
             Action::PolicyAssign => "policy.assign",
+            Action::ConfigurationRead => "configuration.read",
+            Action::ConfigurationWrite => "configuration.write",
             Action::ServiceIdentityRead => "service_identity.read",
             Action::ServiceIdentityManage => "service_identity.manage",
             Action::AuditRead => "audit.read",
@@ -816,6 +829,8 @@ impl Action {
             Action::QuarantineReview => "QuarantineReview",
             Action::PolicyRead => "PolicyRead",
             Action::PolicyAssign => "PolicyAssign",
+            Action::ConfigurationRead => "ConfigurationRead",
+            Action::ConfigurationWrite => "ConfigurationWrite",
             Action::ServiceIdentityRead => "ServiceIdentityRead",
             Action::ServiceIdentityManage => "ServiceIdentityManage",
             Action::AuditRead => "AuditRead",

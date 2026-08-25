@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into configuration_versions\n              (id, tenant_id, artifact_id, proposal_id, ordinal, document,\n               content_hash, source_template, created_by)\n           values ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Int8",
+        "Jsonb",
+        "Bytea",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c1c11da821d21d949feb496bda852c29e4236843b3d4d0905db43615c000fe77"
+}

@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select\n             (select count(*) from configuration_artifacts where tenant_id = $1) as \"artifacts!\",\n             (select count(*) from configuration_versions where tenant_id = $1) as \"versions!\",\n             (select count(*) from configuration_bindings where tenant_id = $1) as \"bindings!\",\n             (select count(*) from configuration_changes where tenant_id = $1) as \"changes!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "artifacts!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "versions!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "bindings!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "changes!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "14ee3a8bdd062963a4e2e53db1d61da6f779f103a633bb23fe37a55510f7de71"
+}

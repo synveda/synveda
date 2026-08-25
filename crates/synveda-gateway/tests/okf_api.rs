@@ -15,10 +15,13 @@ use sqlx::postgres::PgPoolOptions;
 use synveda_gateway::app::{AppState, router};
 use synveda_gateway::telemetry;
 use synveda_identity::Hs256Verifier;
-use synveda_store::{access, identities, policy_assignments, rls, scopes, tenants};
+use synveda_store::{access, identities, rls, scopes, tenants};
 use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
 use synveda_types::{GrantId, IdentityId, IdentityKind, TenantId, TenantStatus};
 use tower::ServiceExt;
+
+#[path = "support/configuration.rs"]
+mod configuration_support;
 
 const SECRET: &[u8] = b"cpr-27-okf-api";
 const ADMIN: &str = "cpr27-admin";
@@ -134,9 +137,7 @@ async fn admitted_tenant() -> Option<(AppState, TenantId)> {
     )
     .await
     .expect("seed administrator grant");
-    policy_assignments::set_default(&mut *tx, tenant_id, synveda_policy::STANDARD)
-        .await
-        .expect("select test policy pack");
+    configuration_support::bind_tenant_pack(&mut tx, tenant_id, synveda_policy::STANDARD).await;
     tx.commit().await.expect("commit bootstrap");
     Some((state(&url), tenant_id))
 }

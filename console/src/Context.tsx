@@ -166,11 +166,11 @@ function Selections({ detail, cacheKey }: { detail: ContextRunDetailView; cacheK
   const mode = detail.run.trace_retention_mode;
   return (
     <section>
-      <h3>Selected Knowledge</h3>
+      <h3>Selected context</h3>
       {mode === "disabled" ? (
         <p className="muted">Selection detail was not retained. This is not a claim that the delivery selected nothing.</p>
       ) : detail.selections.length === 0 ? (
-        <p>No policy-visible Knowledge revision is available in this trace.</p>
+        <p>No policy-visible context selection is available in this trace.</p>
       ) : (
         <ol className="context-selections">
           {detail.selections.map((selection) => (
@@ -206,8 +206,10 @@ function Selection({
   cacheKey: string;
 }) {
   const revision = revisionOf(selection.revision);
+  const proposal = selection.unreviewed_candidate;
   const scores = scoresOf(candidate?.scores);
-  const title = revision?.title ?? `Content ${selection.content_hash.slice(0, 16)}…`;
+  const title = revision?.title ?? proposal?.content.title ?? `Content ${selection.content_hash.slice(0, 16)}…`;
+  const state = selectionState(candidate, revision);
   return (
     <li className="context-selection">
       <header>
@@ -215,8 +217,8 @@ function Selection({
           <span className="eyebrow">Rank {selection.rank} · {selection.token_count} tokens</span>
           <h4>{title}</h4>
         </div>
-        <span className={`tag ${selectionState(candidate, revision).startsWith("current") ? "done" : "warn"}`}>
-          {selectionState(candidate, revision)}
+        <span className={`tag ${state.startsWith("current") ? "done" : "warn"}`}>
+          {state}
         </span>
       </header>
       <p className="context-reasons">
@@ -224,7 +226,19 @@ function Selection({
           <span className="tag" key={reason}>{reasonLabel(reason)}</span>
         ))}
       </p>
-      {revision ? (
+      {proposal ? (
+        <>
+          <div className="banner warning" role="status">
+            Unreviewed capture candidate. This was explicitly admitted by the effective governed configuration and was not published Knowledge at planning time.
+          </div>
+          <p>{proposal.content.summary}</p>
+          <pre className="context-content">{proposal.content.body_markdown}</pre>
+          <p className="muted">
+            Candidate {proposal.id} · {proposal.knowledge_type} · {proposal.content.sensitivity} · confidence {proposal.content.confidence_permille} / 1000 · state now {proposal.state}
+          </p>
+          <UnreviewedEvidence candidate={proposal} mode={mode} />
+        </>
+      ) : revision ? (
         <>
           <p>{revision.summary}</p>
           <pre className="context-content">{revision.body_markdown}</pre>
@@ -233,14 +247,14 @@ function Selection({
           </p>
         </>
       ) : (
-        <p className="muted">Knowledge content was not retained in this {mode} trace.</p>
+        <p className="muted">Context content was not retained in this {mode} trace.</p>
       )}
       {selection.knowledge_item_id ? (
         <p><Link href={hrefOf("knowledge-item", { knowledge_id: selection.knowledge_item_id })}>Open current Knowledge item</Link></p>
       ) : null}
       <p className="mono muted">Content hash {selection.content_hash}</p>
       <ScoreBreakdown scores={scores} />
-      <Sources sources={selection.sources ?? []} mode={mode} />
+      {proposal ? null : <Sources sources={selection.sources ?? []} mode={mode} />}
       <SelectionFeedback
         selection={selection}
         feedback={feedback}
@@ -248,6 +262,29 @@ function Selection({
         cacheKey={cacheKey}
       />
     </li>
+  );
+}
+
+function UnreviewedEvidence({
+  candidate,
+  mode,
+}: {
+  candidate: NonNullable<ContextSelectionView["unreviewed_candidate"]>;
+  mode: string;
+}) {
+  const evidence = [
+    ...candidate.source_event_ids.map((id) => `session event ${id}`),
+    ...candidate.source_artifact_ids.map((id) => `import artifact ${id}`),
+  ];
+  return (
+    <section className="context-sources">
+      <h5>Source evidence</h5>
+      {evidence.length === 0 ? (
+        <p className="muted">Source evidence is unavailable in this {mode} trace.</p>
+      ) : (
+        <ul>{evidence.map((address) => <li key={address}>{address}</li>)}</ul>
+      )}
+    </section>
   );
 }
 
@@ -315,7 +352,13 @@ function SelectionFeedback({
   const [error, setError] = useState<string | null>(null);
 
   if (!canGiveFeedback(selection)) {
-    return <p className="muted">Feedback is unavailable because this trace retained no exact revision address.</p>;
+    return (
+      <p className="muted">
+        {selection.channel === "unreviewed_candidates"
+          ? "Outcome feedback is unavailable until this candidate becomes an immutable published Knowledge revision."
+          : "Feedback is unavailable because this trace retained no exact revision address."}
+      </p>
+    );
   }
   const record = async (feedbackType: FeedbackType): Promise<void> => {
     const body = feedbackBody(selection, feedbackType);
@@ -385,7 +428,7 @@ function Exclusions({ run, candidates }: { run: ContextRunView; candidates: Cont
                 <header>
                   <div>
                     <span className="eyebrow">Candidate {candidate.ordinal + 1}</span>
-                    <h4>{revision?.title ?? `Content ${candidate.content_hash.slice(0, 16)}…`}</h4>
+                    <h4>{revision?.title ?? candidate.unreviewed_candidate?.content.title ?? `Content ${candidate.content_hash.slice(0, 16)}…`}</h4>
                   </div>
                   <span className="tag warn">{reasonLabel(candidate.exclusion_reason as string)}</span>
                 </header>

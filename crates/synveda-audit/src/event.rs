@@ -250,14 +250,9 @@ pub enum AuditAction {
     /// A governed scope was renamed, re-described, archived or moved —
     /// the payload names which, and a move names both ends.
     ScopeUpdated,
-    /// The tenant's default policy pack was set.
-    PolicyDefaultSet,
-    /// The tenant's default policy pack was cleared.
-    PolicyDefaultCleared,
-    /// A policy pack was assigned to a governed scope.
-    PolicyNodeAssigned,
-    /// A scope's policy pack assignment was removed.
-    PolicyNodeUnassigned,
+    /// A scope's VedaFlow curator rules were updated. This is policy source
+    /// governance, not runtime-profile selection (CPR-30, ADR-0089).
+    CuratorRulesUpdated,
     /// A stored policy pack was applied (CLI break-glass; the reviewed
     /// product surface arrives with VedaFlow).
     PolicyPackApplied,
@@ -571,6 +566,15 @@ pub enum AuditAction {
     /// Secret-free client configuration was generated for a project from its
     /// exact approved bindings.
     ToolConfigurationGenerated,
+    /// A typed Configuration/apply VedaFlow change was opened (CPR-30,
+    /// ADR-0089). Carries identifiers, hashes and approval requirements,
+    /// never credentials or configuration-adjacent secret material.
+    ConfigurationChangeOpened,
+    /// An approved Configuration/apply effect published an immutable document
+    /// or changed a revisioned scope selector.
+    ConfigurationChangeApplied,
+    /// A Configuration/apply effect reached a terminal precondition refusal.
+    ConfigurationChangeRejected,
     /// A grant reached the end of its window. Emitted by the sweep under
     /// `actor_kind=system`, and **bookkeeping only** — the grant stopped
     /// deciding anything at `expires_at` whether or not this was ever
@@ -633,10 +637,7 @@ impl AuditAction {
         AuditAction::InviteCreated,
         AuditAction::InviteRevoked,
         AuditAction::InviteAccepted,
-        AuditAction::PolicyDefaultSet,
-        AuditAction::PolicyDefaultCleared,
-        AuditAction::PolicyNodeAssigned,
-        AuditAction::PolicyNodeUnassigned,
+        AuditAction::CuratorRulesUpdated,
         AuditAction::PolicyPackApplied,
         AuditAction::PolicyPackCleared,
         AuditAction::ServiceIdentityRegistered,
@@ -690,6 +691,9 @@ impl AuditAction {
         AuditAction::ToolChangeRejected,
         AuditAction::ToolTestRecorded,
         AuditAction::ToolConfigurationGenerated,
+        AuditAction::ConfigurationChangeOpened,
+        AuditAction::ConfigurationChangeApplied,
+        AuditAction::ConfigurationChangeRejected,
     ];
 
     /// The stable dotted name stored in the `action` column. Renaming an
@@ -738,10 +742,7 @@ impl AuditAction {
             AuditAction::InviteAccepted => "access.invite.accepted",
             AuditAction::ScopeCreated => "scope.created",
             AuditAction::ScopeUpdated => "scope.updated",
-            AuditAction::PolicyDefaultSet => "policy.default.set",
-            AuditAction::PolicyDefaultCleared => "policy.default.cleared",
-            AuditAction::PolicyNodeAssigned => "policy.node.assigned",
-            AuditAction::PolicyNodeUnassigned => "policy.node.unassigned",
+            AuditAction::CuratorRulesUpdated => "policy.curator_rules.updated",
             AuditAction::PolicyPackApplied => "policy.pack.applied",
             AuditAction::PolicyPackCleared => "policy.pack.cleared",
             AuditAction::ServiceIdentityRegistered => "service_identity.registered",
@@ -795,6 +796,9 @@ impl AuditAction {
             AuditAction::ToolChangeRejected => "tool.change.rejected",
             AuditAction::ToolTestRecorded => "tool.test.recorded",
             AuditAction::ToolConfigurationGenerated => "tool.configuration.generated",
+            AuditAction::ConfigurationChangeOpened => "configuration.change.opened",
+            AuditAction::ConfigurationChangeApplied => "configuration.change.applied",
+            AuditAction::ConfigurationChangeRejected => "configuration.change.rejected",
         }
     }
 }

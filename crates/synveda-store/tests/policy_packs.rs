@@ -12,10 +12,14 @@
 
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
-use synveda_store::{policy_assignments, policy_packs, rls, tenants};
+use synveda_store::{configuration, policy_assignments, policy_packs, rls, tenants};
+use synveda_types::configuration::{
+    ConfigurationCommand, ConfigurationDocument, ConfigurationTemplate,
+};
 use synveda_types::scope::ScopeKind;
 use synveda_types::{
-    CompositionConfig, Error, InjectChannels, PackConfig, ScopeId, TenantId, TenantStatus,
+    CompositionConfig, ConfigurationArtifactId, ConfigurationBindingId, ConfigurationVersionId,
+    Error, IdentityId, InjectChannels, PackConfig, ProposalId, ScopeId, TenantId, TenantStatus,
 };
 
 /// Seeding shape the old hierarchy-create calls had, on the governed
@@ -80,6 +84,161 @@ async fn admit_tenant(pool: &PgPool) -> TenantId {
         .await
         .expect("admit tenant");
     id
+}
+
+async fn apply_configuration_command(
+    tx: &mut sqlx::PgConnection,
+    tenant: TenantId,
+    scope: ScopeId,
+    command: &ConfigurationCommand,
+) -> configuration::AppliedConfiguration {
+    let proposal = ProposalId::new();
+    let actor = IdentityId::new();
+    let proposal_uuid = proposal.as_uuid();
+    let nonce = proposal_uuid.as_bytes();
+    let object_hash = blake3::hash(&[b"object".as_slice(), nonce].concat());
+    let tree_hash = blake3::hash(&[b"tree".as_slice(), nonce].concat());
+    let commit_hash = blake3::hash(&[b"commit".as_slice(), nonce].concat());
+    let content = serde_json::to_vec(command).expect("encode Configuration command");
+    sqlx::query!(
+        "insert into vedaflow_objects (tenant_id, hash, kind, content, size_bytes)
+         values ($1, $2, 'configuration', $3, $4)",
+        tenant.as_uuid(),
+        object_hash.as_bytes().as_slice(),
+        &content,
+        i32::try_from(content.len()).expect("command size"),
+    )
+    .execute(&mut *tx)
+    .await
+    .expect("store Configuration command object");
+    sqlx::query!(
+        "insert into vedaflow_trees (tenant_id, hash) values ($1, $2)",
+        tenant.as_uuid(),
+        tree_hash.as_bytes().as_slice(),
+    )
+    .execute(&mut *tx)
+    .await
+    .expect("store Configuration tree");
+    sqlx::query!(
+        "insert into vedaflow_tree_entries (tenant_id, tree_hash, name, object_hash)
+         values ($1, $2, 'command', $3)",
+        tenant.as_uuid(),
+        tree_hash.as_bytes().as_slice(),
+        object_hash.as_bytes().as_slice(),
+    )
+    .execute(&mut *tx)
+    .await
+    .expect("store Configuration tree entry");
+    sqlx::query!(
+        "insert into vedaflow_commits
+             (tenant_id, hash, tree_hash, author_id, message, committed_at,
+              policy_snapshot_hash)
+         values ($1, $2, $3, $4, 'test Configuration command', now(), $5)",
+        tenant.as_uuid(),
+        commit_hash.as_bytes().as_slice(),
+        tree_hash.as_bytes().as_slice(),
+        actor.as_uuid(),
+        &[0_u8; 32][..],
+    )
+    .execute(&mut *tx)
+    .await
+    .expect("store Configuration commit");
+    sqlx::query!(
+        "insert into vedaflow_proposals
+             (tenant_id, id, target_scope_id, source_scope_id, asset_kind,
+              target_channel, commit_hash, sensitivity, title, proposer_id,
+              proposer_subject)
+         values ($1, $2, $3, $3, 'configuration', 'apply', $4, 'internal',
+                 'test Configuration change', $5, 'configuration-fixture')",
+        tenant.as_uuid(),
+        proposal.as_uuid(),
+        scope.as_uuid(),
+        commit_hash.as_bytes().as_slice(),
+        actor.as_uuid(),
+    )
+    .execute(&mut *tx)
+    .await
+    .expect("open Configuration proposal");
+    let payload_hash = blake3::hash(
+        synveda_types::json::canonicalise(
+            &serde_json::to_value(command).expect("encode Configuration command value"),
+        )
+        .to_string()
+        .as_bytes(),
+    )
+    .to_hex()
+    .to_string();
+    configuration::insert_change(&mut *tx, tenant, proposal, command, &payload_hash)
+        .await
+        .expect("bind Configuration command to proposal");
+    let applied =
+        configuration::apply(&mut *tx, tenant, proposal, "configuration-fixture", command)
+            .await
+            .expect("apply Configuration command");
+    configuration::complete_change(&mut *tx, tenant, proposal, applied)
+        .await
+        .expect("record Configuration result");
+    sqlx::query!(
+        "update vedaflow_proposals
+            set state = 'applied', closed_at = now(), closed_by = $3,
+                updated_at = now()
+          where tenant_id = $1 and id = $2",
+        tenant.as_uuid(),
+        proposal.as_uuid(),
+        actor.as_uuid(),
+    )
+    .execute(&mut *tx)
+    .await
+    .expect("close Configuration proposal");
+    applied
+}
+
+async fn create_bound_configuration(
+    tx: &mut sqlx::PgConnection,
+    tenant: TenantId,
+    scope: ScopeId,
+    name: &str,
+    pack: &str,
+) -> (
+    ConfigurationArtifactId,
+    ConfigurationVersionId,
+    ConfigurationBindingId,
+) {
+    let artifact_id = ConfigurationArtifactId::new();
+    let version_id = ConfigurationVersionId::new();
+    let binding_id = ConfigurationBindingId::new();
+    let mut document = ConfigurationDocument::template(ConfigurationTemplate::Personal);
+    document.policy_pack = pack.to_owned();
+    let content_hash = document.content_hash().expect("hash Configuration");
+    apply_configuration_command(
+        tx,
+        tenant,
+        scope,
+        &ConfigurationCommand::Create {
+            artifact_id,
+            version_id,
+            governing_scope_id: scope,
+            name: name.to_owned(),
+            document,
+            content_hash,
+            source_template: None,
+        },
+    )
+    .await;
+    apply_configuration_command(
+        tx,
+        tenant,
+        scope,
+        &ConfigurationCommand::Bind {
+            binding_id,
+            scope_id: scope,
+            artifact_id,
+            pinned_version_id: None,
+            enabled: true,
+        },
+    )
+    .await;
+    (artifact_id, version_id, binding_id)
 }
 
 #[tokio::test]
@@ -247,11 +406,11 @@ async fn composition_config_rides_the_pack_and_clears_on_reapply() {
     );
 }
 
-/// A pack still referenced by an assignment or the tenant default cannot
-/// be cleared (ADR-0014 decision 7): the dangling-name fallback exists for
-/// out-of-band writes, never the product path.
+/// A pack named by immutable Configuration history cannot be cleared. A
+/// rollback may select that exact version again, so retaining only the
+/// currently selected name would turn history into a dangling reference.
 #[tokio::test]
-async fn clear_refuses_while_assignments_reference_the_pack() {
+async fn clear_refuses_while_configuration_history_references_the_pack() {
     let Some(pool) = db().await else { return };
     let tenant = admit_tenant(&pool).await;
     let mut tx = rls::begin_tenant_tx(&pool, tenant)
@@ -278,48 +437,19 @@ async fn clear_refuses_while_assignments_reference_the_pack() {
     .await
     .expect("apply pack");
 
-    // Referenced by a node assignment.
-    policy_assignments::assign(&mut *tx, tenant, root, "authz2-pinned")
-        .await
-        .expect("assign pack");
+    create_bound_configuration(&mut tx, tenant, root, "pinned-runtime", "authz2-pinned").await;
     let refused = policy_packs::clear(&mut tx, tenant, "authz2-pinned").await;
     assert!(
         matches!(refused, Err(Error::Conflict { .. })),
-        "clearing an assigned pack must be Conflict, got {refused:?}"
-    );
-    assert!(
-        policy_assignments::unassign(&mut *tx, tenant, root)
-            .await
-            .expect("unassign")
-    );
-
-    // Referenced by the tenant default.
-    policy_assignments::set_default(&mut *tx, tenant, "authz2-pinned")
-        .await
-        .expect("set default");
-    let refused = policy_packs::clear(&mut tx, tenant, "authz2-pinned").await;
-    assert!(
-        matches!(refused, Err(Error::Conflict { .. })),
-        "clearing the default pack must be Conflict, got {refused:?}"
-    );
-    assert!(
-        policy_assignments::clear_default(&mut *tx, tenant)
-            .await
-            .expect("clear default")
-    );
-
-    // Unreferenced: clear succeeds.
-    assert!(
-        policy_packs::clear(&mut tx, tenant, "authz2-pinned")
-            .await
-            .expect("clear unreferenced")
+        "clearing a pack in immutable Configuration history must be Conflict, got {refused:?}"
     );
 }
 
-/// Assignments and the tenant default follow their own upsert lifecycle,
-/// and cascade with their node (HIER-1 deletes are leaf-only).
+/// Cedar's compact assignment input is a derived view of immutable
+/// Configuration versions and revisioned bindings, not a mutable second
+/// policy-selection model.
 #[tokio::test]
-async fn assignments_upsert_resolve_by_chain_and_cascade() {
+async fn configuration_versions_and_bindings_drive_policy_projection() {
     let Some(pool) = db().await else { return };
     let tenant = admit_tenant(&pool).await;
     let mut tx = rls::begin_tenant_tx(&pool, tenant)
@@ -348,45 +478,55 @@ async fn assignments_upsert_resolve_by_chain_and_cascade() {
     )
     .await;
 
-    let assigned = policy_assignments::assign(&mut *tx, tenant, team, "standard")
-        .await
-        .expect("assign");
-    assert_eq!(assigned.pack_name, "standard");
-    let replaced = policy_assignments::assign(&mut *tx, tenant, team, "open-collaboration")
-        .await
-        .expect("replace assignment");
-    assert_eq!(replaced.pack_name, "open-collaboration");
-
-    // Chain lookup returns only assigned nodes, any of the asked ids.
-    let for_chain = policy_assignments::for_scopes(&mut *tx, tenant, &[team, root])
+    create_bound_configuration(&mut tx, tenant, root, "tenant-runtime", "standard").await;
+    let (artifact_id, first_version_id, _) =
+        create_bound_configuration(&mut tx, tenant, team, "team-runtime", "standard").await;
+    let initial = policy_assignments::for_scopes(&mut tx, tenant, &[team, root])
         .await
         .expect("chain lookup");
-    assert_eq!(for_chain, vec![replaced]);
-
-    // The tenant default has its own lifecycle.
-    assert_eq!(
-        policy_assignments::default_pack(&mut *tx, tenant)
-            .await
-            .expect("empty default"),
-        None
+    assert_eq!(initial.len(), 2);
+    assert!(
+        initial
+            .iter()
+            .all(|assignment| assignment.pack_name == "standard")
     );
-    policy_assignments::set_default(&mut *tx, tenant, "standard")
+
+    let next_version_id = ConfigurationVersionId::new();
+    let mut document = ConfigurationDocument::template(ConfigurationTemplate::Personal);
+    document.policy_pack = "open-collaboration".to_owned();
+    let content_hash = document.content_hash().expect("hash next Configuration");
+    apply_configuration_command(
+        &mut tx,
+        tenant,
+        team,
+        &ConfigurationCommand::Publish {
+            artifact_id,
+            expected_current_version_id: first_version_id,
+            version_id: next_version_id,
+            governing_scope_id: team,
+            document,
+            content_hash,
+            source_template: None,
+        },
+    )
+    .await;
+    let projected = policy_assignments::for_scopes(&mut tx, tenant, &[team])
         .await
-        .expect("set default");
-    assert_eq!(
-        policy_assignments::default_pack(&mut *tx, tenant)
+        .expect("read updated derived projection");
+    assert_eq!(projected.len(), 1);
+    assert_eq!(projected[0].pack_name, "open-collaboration");
+    assert!(
+        configuration::version(&mut tx, tenant, first_version_id)
             .await
-            .expect("read default"),
+            .expect("read immutable first version")
+            .is_some()
+    );
+    assert_eq!(
+        policy_assignments::default_pack(&mut tx, tenant)
+            .await
+            .expect("derive tenant root pack"),
         Some("standard".to_owned())
     );
-
-    // Nothing deletes a governed scope (CPR-7); the assignment survives
-    // until unassigned. The cascade the old model tested is gone with the
-    // verb, so the lookup still finds the row.
-    let post = policy_assignments::for_scopes(&mut *tx, tenant, &[team])
-        .await
-        .expect("post-unassign lookup");
-    assert_eq!(post.len(), 1);
 }
 
 #[tokio::test]
@@ -469,14 +609,4 @@ async fn constraints_map_onto_the_taxonomy() {
         "unknown tenant must be NotFound, got {orphan:?}"
     );
     drop(tx);
-
-    // An assignment to a node of another tenant (or none) is NotFound.
-    let mut tx = rls::begin_tenant_tx(&pool, tenant)
-        .await
-        .expect("begin tenant tx");
-    let foreign = policy_assignments::assign(&mut *tx, tenant, ScopeId::new(), "standard").await;
-    assert!(
-        matches!(foreign, Err(Error::NotFound { .. })),
-        "assigning a ghost scope must be NotFound, got {foreign:?}"
-    );
 }

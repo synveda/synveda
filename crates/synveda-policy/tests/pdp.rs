@@ -129,7 +129,7 @@ fn admin_anchor(kind: synveda_types::scope::ScopeKind, scope_id: ScopeId) -> Sco
 }
 
 /// With nothing stored and nothing assigned, the embedded default decides:
-/// `regulated-strict@2`, strict by default (seed §2.1, ADR-0014
+/// `regulated-strict@22`, strict by default (seed §2.1, ADR-0014
 /// decision 1) — and since AUTHZ-3, its admin plane admits *bound*
 /// admins: a tenant-wide org-admin administers its own tenant
 /// (ADR-0015 decision 4; ADR-0012 decision 3's semantics, role-gated).
@@ -154,7 +154,7 @@ fn the_default_pack_is_regulated_strict_and_admits_bound_admins() {
             .expect("authorize");
         assert!(decision.allowed, "{action} must be allowed on own scope");
         assert_eq!(decision.pack_name, REGULATED_STRICT);
-        assert_eq!(decision.pack_version, 21);
+        assert_eq!(decision.pack_version, 22);
         assert!(
             !decision.determining.is_empty(),
             "an allow must name its permitting policies"
@@ -269,7 +269,7 @@ fn the_default_pack_denies_a_foreign_principal_everything() {
             assert_eq!(action, "scope.read");
             assert_eq!(resource, format!("tenant {victim}"));
             assert!(
-                reason.contains(&format!("{REGULATED_STRICT}@21")),
+                reason.contains(&format!("{REGULATED_STRICT}@22")),
                 "denial must name pack@version, got: {reason}"
             );
         }

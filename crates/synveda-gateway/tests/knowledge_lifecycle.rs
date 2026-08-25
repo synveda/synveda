@@ -19,8 +19,7 @@ use synveda_gateway::{knowledge, telemetry};
 use synveda_identity::{Claims, Hs256Verifier, TenantContext, with_tenant};
 use synveda_ingest::embedding::Embedder as _;
 use synveda_store::{
-    access, identities, knowledge as stored, knowledge_search, policy_assignments, rls, scopes,
-    tenants,
+    access, identities, knowledge as stored, knowledge_search, rls, scopes, tenants,
 };
 use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
 use synveda_types::knowledge::{
@@ -36,6 +35,9 @@ use synveda_types::{
     TenantStatus,
 };
 use tower::ServiceExt;
+
+#[path = "support/configuration.rs"]
+mod configuration_support;
 
 const SECRET: &[u8] = b"cpr-16-knowledge-lifecycle";
 
@@ -203,9 +205,10 @@ async fn use_policy(pool: &PgPool, tenant_id: TenantId, name: &str) {
     let mut tx = rls::begin_tenant_tx(pool, tenant_id)
         .await
         .expect("begin tenant tx");
-    policy_assignments::set_default(&mut *tx, tenant_id, name)
+    scopes::ensure_tenant_root(&mut tx, tenant_id)
         .await
-        .expect("select policy profile");
+        .expect("mint governed Configuration root");
+    configuration_support::bind_tenant_pack(&mut tx, tenant_id, name).await;
     tx.commit().await.expect("commit profile");
 }
 

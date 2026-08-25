@@ -1,0 +1,137 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select id, tenant_id, context_run_id, ordinal, channel,\n               knowledge_item_id, knowledge_revision_id, capture_candidate_id,\n               content_hash, scope_id, lifecycle_state,\n               keyword_score_micros, semantic_score_micros,\n               freshness_score_micros, pin_score_micros,\n               current_state_score_micros, final_score_micros,\n               reason_codes as \"reason_codes!: Vec<String>\", exclusion_reason,\n               created_at\n        from context_candidates\n        where tenant_id = $1 and context_run_id = $2\n        order by ordinal\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "tenant_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "context_run_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "ordinal",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 4,
+        "name": "channel",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "knowledge_item_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 6,
+        "name": "knowledge_revision_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 7,
+        "name": "capture_candidate_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 8,
+        "name": "content_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "scope_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 10,
+        "name": "lifecycle_state",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "keyword_score_micros",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 12,
+        "name": "semantic_score_micros",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 13,
+        "name": "freshness_score_micros",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 14,
+        "name": "pin_score_micros",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 15,
+        "name": "current_state_score_micros",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 16,
+        "name": "final_score_micros",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 17,
+        "name": "reason_codes!: Vec<String>",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 18,
+        "name": "exclusion_reason",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 19,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "d6d4c9aaaf7e4d0493eef0c22e61a7d3fa407f48bf201fcd12922f37c404f116"
+}

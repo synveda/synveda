@@ -18,10 +18,13 @@ use synveda_identity::Hs256Verifier;
 use synveda_ingest::embedding::{AnyEmbedder, DeterministicEmbedder};
 use synveda_policy::Pdp;
 use synveda_retrieval::SearchIndex;
-use synveda_store::{access, identities, policy_assignments, rls, scopes, tenants};
+use synveda_store::{access, identities, rls, scopes, tenants};
 use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
 use synveda_types::{GrantId, IdentityId, IdentityKind, ScopeId, TenantId, TenantStatus};
 use tower::ServiceExt;
+
+#[path = "support/configuration.rs"]
+mod configuration_support;
 
 const SECRET: &[u8] = b"cpr-25-trusted-mcp-registry";
 const PLAINTEXT_FIXTURE: &str = "shh-cpr25-plaintext-token";
@@ -203,9 +206,7 @@ async fn world() -> Option<World> {
     let root = scopes::ensure_tenant_root(&mut tx, tenant)
         .await
         .expect("create tenant root");
-    policy_assignments::set_default(&mut *tx, tenant, synveda_policy::STANDARD)
-        .await
-        .expect("select standard policy");
+    configuration_support::bind_tenant_pack(&mut tx, tenant, synveda_policy::STANDARD).await;
     tx.commit().await.expect("commit tenant bootstrap");
 
     for subject in ["alice", "reviewer", "administrator"] {
@@ -631,6 +632,29 @@ async fn versions_discovery_bindings_config_and_tests_share_one_governed_path() 
     )
     .await;
     assert_eq!(status, StatusCode::BAD_REQUEST, "{execution_refused}");
+
+    let mut tx = rls::begin_tenant_tx(&world.pool, world.tenant)
+        .await
+        .expect("begin Tool-advertisement Configuration change");
+    configuration_support::set_tenant_advertisement(&mut tx, world.tenant, true, false).await;
+    tx.commit()
+        .await
+        .expect("commit Tool-advertisement Configuration change");
+    let (status, suppressed_config) = call(
+        &world.app,
+        Method::GET,
+        &format!("/v1/projects/{}/tool-config", world.project_id),
+        &world.alice,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{suppressed_config}");
+    assert_eq!(suppressed_config["bindings"], json!([]));
+    assert_eq!(
+        suppressed_config["configuration"],
+        json!({"mcpServers": {}})
+    );
 
     let (status, page) = call(
         &world.app,

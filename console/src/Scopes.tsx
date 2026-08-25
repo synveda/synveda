@@ -1,6 +1,6 @@
 /**
  * Advanced ▸ Scopes (CNSL-2; the governed-scope re-cut CPR-7; re-homed by
- * CPR-8) — scopes, packs and standing lapses on one page.
+ * CPR-8) — scopes, effective Configuration and standing lapses on one page.
  *
  * CPR-7 converted this screen off the deleted hierarchy and onto the
  * governed scope plane (`/v1/admin/scopes`), which is where its calls
@@ -35,19 +35,17 @@ import { request } from "./client.mjs";
 import {
   deniedCount,
   describeEnd,
-  describeOrigin,
-  isInherited,
   lapsesTouching,
   mayDo,
   mayRead,
   type Capabilities,
   type CapabilityBatch,
-  type EffectivePack,
   type Lapse,
   type LapseListing,
   type Node,
   type ScopeLevel,
 } from "./explorer.mjs";
+import type { EffectiveConfigurationView } from "./generated/api.js";
 
 export function Scopes() {
   const [root, setRoot] = useState<Outcome | { kind: "loading" }>({ kind: "loading" });
@@ -193,12 +191,14 @@ function Branch({
 
 /** The three panels, for the selected scope. */
 function NodeDetail({ node, lapses }: { node: Node; lapses: Lapse[] }) {
-  const [pack, setPack] = useState<Outcome | { kind: "loading" }>({ kind: "loading" });
+  const [configuration, setConfiguration] = useState<Outcome | { kind: "loading" }>({ kind: "loading" });
   const [caps, setCaps] = useState<Outcome | { kind: "loading" }>({ kind: "loading" });
 
   useEffect(() => {
     void (async () => {
-      setPack(await request("get_scope_policy", { path: { scope_id: node.id } }));
+      setConfiguration(
+        await request("get_effective_configuration", { query: { scope_id: node.id } }),
+      );
       const batch = await request("get_capabilities", { query: { scopes: node.id } });
       // The batch answers a list; this detail asked about one.
       setCaps(
@@ -217,33 +217,46 @@ function NodeDetail({ node, lapses }: { node: Node; lapses: Lapse[] }) {
         {node.display_name} · {node.kind}
       </p>
 
-      <PackPanel state={pack} node={node} />
+      <ConfigurationPanel state={configuration} node={node} />
       <LapsePanel lapses={touching} node={node} />
       <CapabilityPanel state={caps} node={node} />
     </article>
   );
 }
 
-function PackPanel({ state, node }: { state: Outcome | { kind: "loading" }; node: Node }) {
+function ConfigurationPanel({ state, node }: { state: Outcome | { kind: "loading" }; node: Node }) {
   return (
     <section>
-      <h4>policy pack</h4>
+      <h4>runtime Configuration</h4>
       {state.kind === "loading" ? (
         <p className="muted">…</p>
       ) : state.kind !== "ok" ? (
         <PanelFailure state={state} />
       ) : (
         (() => {
-          const pack = state.body as EffectivePack;
+          const configuration = state.body as EffectiveConfigurationView;
+          const inherited =
+            configuration.binding_scope_id !== null &&
+            configuration.binding_scope_id !== undefined &&
+            configuration.binding_scope_id !== node.id;
           return (
-            <p>
-              <strong>
-                {pack.name}@{pack.version}
-              </strong>{" "}
-              <span className={isInherited(pack.origin, node.id) ? "tag inherited" : "tag"}>
-                {describeOrigin(pack.origin, node.id)}
-              </span>
-            </p>
+            <>
+              <p>
+                <strong>{configuration.document.policy_pack}</strong>{" "}
+                <span className={inherited ? "tag inherited" : "tag"}>
+                  {configuration.fail_safe
+                    ? "enterprise fail-safe"
+                    : inherited
+                      ? "inherited"
+                      : "bound here"}
+                </span>
+              </p>
+              <p className="muted">
+                {configuration.version_id
+                  ? `version ${configuration.version_id} · ${configuration.content_hash}`
+                  : `built-in immutable document · ${configuration.content_hash}`}
+              </p>
+            </>
           );
         })()
       )}

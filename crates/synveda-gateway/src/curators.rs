@@ -318,7 +318,7 @@ async fn put_inner(
     audit::record(
         &mut tx,
         tenant_id,
-        AuditAction::PolicyNodeAssigned,
+        AuditAction::CuratorRulesUpdated,
         Resource::Scope(scope_id).to_string(),
         Outcome::Success,
         json!({

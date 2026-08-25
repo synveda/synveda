@@ -51,7 +51,7 @@ import { Settings } from "./Settings.js";
 import { SkillItem, Skills } from "./Skills.js";
 import { ToolServerItem, Tools } from "./Tools.js";
 import { Audit } from "./Audit.js";
-import { Policies } from "./Policies.js";
+import { Configuration } from "./Configuration.js";
 import { ServiceIdentities } from "./ServiceIdentities.js";
 
 /** The key `/v1/me` is cached under. Invalidated by anything that changes it. */
@@ -226,8 +226,8 @@ function Page({ route, me }: { route: RouteMatch | null; me: MeView }) {
       return <Reviews />;
     case "scopes":
       return <Scopes />;
-    case "policies":
-      return <Policies />;
+    case "configuration":
+      return <Configuration />;
     case "audit":
       return <Audit />;
     case "service-identities":

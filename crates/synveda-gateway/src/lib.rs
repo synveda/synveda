@@ -56,6 +56,7 @@ pub mod authz;
 pub mod capabilities;
 pub mod capture;
 pub mod channels;
+pub mod configuration;
 pub mod console;
 pub mod context_api;
 pub mod curators;

@@ -14,15 +14,16 @@ use synveda_types::capture::{
     CaptureCandidateState, CaptureDecisionAction, CaptureDecisionState, CaptureMatch,
     CaptureSourceKind, MAX_CAPTURE_ATTEMPTS,
 };
+use synveda_types::configuration::EffectiveConfiguration;
 use synveda_types::knowledge::{
     KnowledgeOrigin, KnowledgeRevisionContent, KnowledgeType, normalise_knowledge_tags,
     validate_content_hash, validate_knowledge_principal, validate_knowledge_revision_content,
 };
 use synveda_types::session::{Session, SessionEventType};
 use synveda_types::{
-    CaptureBatchId, CaptureCandidateDecisionId, CaptureCandidateId, Error, ImportArtifactId,
-    ImportJobId, KnowledgeItemId, KnowledgeRevisionId, ProjectId, ProposalId, Result, ScopeId,
-    SessionEventId, SessionId, TenantId, WorkspaceId,
+    CaptureBatchId, CaptureCandidateDecisionId, CaptureCandidateId, ConfigurationVersionId, Error,
+    ImportArtifactId, ImportJobId, KnowledgeItemId, KnowledgeRevisionId, ProjectId, ProposalId,
+    Result, ScopeId, SessionEventId, SessionId, TenantId, WorkspaceId,
 };
 use uuid::Uuid;
 
@@ -128,6 +129,8 @@ pub struct CandidateFilter {
     pub project_id: Option<ProjectId>,
     /// One exact review state.
     pub state: Option<CaptureCandidateState>,
+    /// Any of these exact proposed scopes; empty means all scopes.
+    pub scope_ids: Vec<ScopeId>,
     /// Resume after this key.
     pub after: Option<CandidateCursor>,
 }
@@ -142,6 +145,8 @@ struct BatchRow {
     workspace_id: Uuid,
     project_id: Option<Uuid>,
     principal_id: String,
+    configuration_version_id: Option<Uuid>,
+    configuration_hash: Option<String>,
     input_hash: String,
     event_count: i32,
     state: String,
@@ -170,6 +175,12 @@ impl TryFrom<BatchRow> for CaptureBatch {
             workspace_id: WorkspaceId::from_uuid(row.workspace_id),
             project_id: row.project_id.map(ProjectId::from_uuid),
             principal_id: row.principal_id,
+            configuration_version_id: row
+                .configuration_version_id
+                .map(ConfigurationVersionId::from_uuid),
+            configuration_hash: row.configuration_hash.ok_or_else(|| Error::Internal {
+                message: format!("capture batch {} has no configuration hash", row.id),
+            })?,
             input_hash: row.input_hash,
             event_count: row.event_count,
             state: stored(&row.state)?,
@@ -300,9 +311,11 @@ fn storage_error(error: sqlx::Error) -> Error {
 }
 
 /// BLAKE3-256 over unambiguous, length-prefixed evidence tuples.
-fn snapshot_hash(events: &[(Uuid, String, String)]) -> String {
+fn snapshot_hash(events: &[(Uuid, String, String)], configuration_hash: &str) -> String {
     let mut hash = blake3::Hasher::new();
     hash.update(b"synveda.capture.snapshot.v1\0");
+    hash.update(&(configuration_hash.len() as u64).to_be_bytes());
+    hash.update(configuration_hash.as_bytes());
     for (id, event_type, payload_hash) in events {
         hash.update(id.as_bytes());
         hash.update(&(event_type.len() as u64).to_be_bytes());
@@ -315,7 +328,11 @@ fn snapshot_hash(events: &[(Uuid, String, String)]) -> String {
 
 /// Freezes the current eligible event set, replaying the existing batch when
 /// the same immutable snapshot was already requested.
-pub async fn freeze_batch(conn: &mut PgConnection, session: &Session) -> Result<FrozenBatch> {
+pub async fn freeze_batch(
+    conn: &mut PgConnection,
+    session: &Session,
+    configuration: &EffectiveConfiguration,
+) -> Result<FrozenBatch> {
     let events = sqlx::query!(
         r#"
         select event.id, event.event_type, event.payload_hash, event.sequence
@@ -357,21 +374,34 @@ pub async fn freeze_batch(conn: &mut PgConnection, session: &Session) -> Result<
             )
         })
         .collect();
-    let input_hash = snapshot_hash(&evidence);
+    if configuration.scope_id != session.scope_id {
+        return Err(Error::Invalid {
+            message: "capture configuration was resolved for a different scope".to_owned(),
+        });
+    }
+    configuration.document.validate()?;
+    if configuration.document.content_hash()? != configuration.content_hash {
+        return Err(Error::Invalid {
+            message: "capture configuration hash does not match its immutable document".to_owned(),
+        });
+    }
+    let input_hash = snapshot_hash(&evidence, &configuration.content_hash);
     let id = CaptureBatchId::new();
     let inserted = sqlx::query_as!(
         BatchRow,
         r#"
         insert into capture_batches
             (id, tenant_id, session_id, scope_id, workspace_id, project_id,
-             principal_id, input_hash, event_count)
-        values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+             principal_id, configuration_version_id, configuration_hash,
+             input_hash, event_count)
+        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
         on conflict (tenant_id, session_id, input_hash)
             where source_kind = 'session'
         do nothing
         returning id, tenant_id, source_kind, session_id, import_job_id,
                   scope_id, workspace_id, project_id,
-                  principal_id, input_hash, event_count, state, extractor_method,
+                  principal_id, configuration_version_id, configuration_hash,
+                  input_hash, event_count, state, extractor_method,
                   model_version, attempts, candidate_count, error_code,
                   created_at, started_at, completed_at, updated_at
         "#,
@@ -382,6 +412,8 @@ pub async fn freeze_batch(conn: &mut PgConnection, session: &Session) -> Result<
         session.workspace_id.as_uuid(),
         session.project_id.map(|value| value.as_uuid()) as Option<Uuid>,
         session.principal_id,
+        configuration.version_id.map(|value| value.as_uuid()) as Option<Uuid>,
+        configuration.content_hash,
         input_hash,
         events.len() as i32,
     )
@@ -437,7 +469,8 @@ async fn by_snapshot(
         r#"
         select id, tenant_id, source_kind, session_id, import_job_id,
                scope_id, workspace_id, project_id,
-               principal_id, input_hash, event_count, state, extractor_method,
+               principal_id, configuration_version_id, configuration_hash,
+               input_hash, event_count, state, extractor_method,
                model_version, attempts, candidate_count, error_code,
                created_at, started_at, completed_at, updated_at
         from capture_batches
@@ -464,7 +497,8 @@ pub async fn get_batch(
         r#"
         select id, tenant_id, source_kind, session_id, import_job_id,
                scope_id, workspace_id, project_id,
-               principal_id, input_hash, event_count, state, extractor_method,
+               principal_id, configuration_version_id, configuration_hash,
+               input_hash, event_count, state, extractor_method,
                model_version, attempts, candidate_count, error_code,
                created_at, started_at, completed_at, updated_at
         from capture_batches where tenant_id = $1 and id = $2
@@ -489,7 +523,8 @@ pub async fn list_batches(
         r#"
         select id, tenant_id, source_kind, session_id, import_job_id,
                scope_id, workspace_id, project_id,
-               principal_id, input_hash, event_count, state, extractor_method,
+               principal_id, configuration_version_id, configuration_hash,
+               input_hash, event_count, state, extractor_method,
                model_version, attempts, candidate_count, error_code,
                created_at, started_at, completed_at, updated_at
         from capture_batches
@@ -555,6 +590,7 @@ pub async fn claim_batch(
         returning batch.id, batch.tenant_id, batch.source_kind, batch.session_id,
                   batch.import_job_id, batch.scope_id, batch.workspace_id,
                   batch.project_id, batch.principal_id,
+                  batch.configuration_version_id, batch.configuration_hash,
                   batch.input_hash, batch.event_count, batch.state,
                   batch.extractor_method, batch.model_version, batch.attempts,
                   batch.candidate_count, batch.error_code, batch.created_at,
@@ -746,7 +782,8 @@ pub async fn complete_batch(
            and lease_owner = $3
         returning id, tenant_id, source_kind, session_id, import_job_id,
                   scope_id, workspace_id, project_id,
-                  principal_id, input_hash, event_count, state, extractor_method,
+                  principal_id, configuration_version_id, configuration_hash,
+                  input_hash, event_count, state, extractor_method,
                   model_version, attempts, candidate_count, error_code,
                   created_at, started_at, completed_at, updated_at
         "#,
@@ -792,7 +829,8 @@ pub async fn fail_batch(
            and lease_owner = $3
         returning id, tenant_id, source_kind, session_id, import_job_id,
                   scope_id, workspace_id, project_id,
-                  principal_id, input_hash, event_count, state, extractor_method,
+                  principal_id, configuration_version_id, configuration_hash,
+                  input_hash, event_count, state, extractor_method,
                   model_version, attempts, candidate_count, error_code,
                   created_at, started_at, completed_at, updated_at
         "#,
@@ -925,6 +963,11 @@ pub async fn list_candidates(
     tenant_id: TenantId,
     filter: &CandidateFilter,
 ) -> Result<Vec<CaptureCandidate>> {
+    let scope_ids: Vec<Uuid> = filter
+        .scope_ids
+        .iter()
+        .map(|scope_id| scope_id.as_uuid())
+        .collect();
     let rows = sqlx::query_as!(
         CandidateRow,
         r#"
@@ -946,8 +989,9 @@ pub async fn list_candidates(
           and ($6::timestamptz is null
                or created_at < $6
                or (created_at = $6 and id < $7))
+          and (cardinality($8::uuid[]) = 0 or proposed_scope_id = any($8))
         order by created_at desc, id desc
-        limit $8
+        limit $9
         "#,
         tenant_id.as_uuid(),
         filter.batch_id.map(|value| value.as_uuid()) as Option<Uuid>,
@@ -956,6 +1000,7 @@ pub async fn list_candidates(
         filter.state.map(CaptureCandidateState::as_str) as Option<&str>,
         filter.after.map(|value| value.created_at) as Option<DateTime<Utc>>,
         filter.after.map(|value| value.id.as_uuid()) as Option<Uuid>,
+        &scope_ids,
         CAPTURE_SCAN_LIMIT,
     )
     .fetch_all(&mut *conn)
@@ -1203,18 +1248,38 @@ mod tests {
     fn snapshot_hash_is_ordered_and_unambiguous() {
         let a = Uuid::from_u128(1);
         let b = Uuid::from_u128(2);
-        let one = snapshot_hash(&[(a, "message.user".to_owned(), "a".repeat(64))]);
-        let replay = snapshot_hash(&[(a, "message.user".to_owned(), "a".repeat(64))]);
-        let reordered = snapshot_hash(&[
-            (b, "message.user".to_owned(), "b".repeat(64)),
-            (a, "message.user".to_owned(), "a".repeat(64)),
-        ]);
-        let ordered = snapshot_hash(&[
-            (a, "message.user".to_owned(), "a".repeat(64)),
-            (b, "message.user".to_owned(), "b".repeat(64)),
-        ]);
+        let configuration = "c".repeat(64);
+        let one = snapshot_hash(
+            &[(a, "message.user".to_owned(), "a".repeat(64))],
+            &configuration,
+        );
+        let replay = snapshot_hash(
+            &[(a, "message.user".to_owned(), "a".repeat(64))],
+            &configuration,
+        );
+        let reordered = snapshot_hash(
+            &[
+                (b, "message.user".to_owned(), "b".repeat(64)),
+                (a, "message.user".to_owned(), "a".repeat(64)),
+            ],
+            &configuration,
+        );
+        let ordered = snapshot_hash(
+            &[
+                (a, "message.user".to_owned(), "a".repeat(64)),
+                (b, "message.user".to_owned(), "b".repeat(64)),
+            ],
+            &configuration,
+        );
         assert_eq!(one, replay);
         assert_ne!(ordered, reordered);
+        assert_ne!(
+            one,
+            snapshot_hash(
+                &[(a, "message.user".to_owned(), "a".repeat(64))],
+                &"d".repeat(64)
+            )
+        );
         assert_eq!(one.len(), 64);
     }
 }

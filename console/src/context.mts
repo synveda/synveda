@@ -79,6 +79,13 @@ export function candidateForSelection(
   candidates: readonly ContextCandidateView[],
   selection: ContextSelectionView,
 ): ContextCandidateView | null {
+  const captureCandidateId = selection.capture_candidate_id;
+  if (captureCandidateId) {
+    const exact = candidates.find(
+      (candidate) => candidate.capture_candidate_id === captureCandidateId,
+    );
+    if (exact) return exact;
+  }
   const revisionId = selection.knowledge_revision_id;
   if (revisionId) {
     const exact = candidates.find((candidate) => candidate.knowledge_revision_id === revisionId);
@@ -116,6 +123,7 @@ export function selectionState(
   candidate: ContextCandidateView | null,
   revision: KnowledgeRevisionView | null,
 ): string {
+  if (candidate?.channel === "unreviewed_candidates") return "unreviewed at planning time";
   if (candidate?.lifecycle_state === "superseded") return "superseded at planning time";
   if (candidate?.lifecycle_state === "stale" || revision?.stale) return "stale at planning time";
   if (candidate?.lifecycle_state === "active") return "current at planning time";
@@ -143,7 +151,8 @@ export function feedbackBody(
 }
 
 export function canGiveFeedback(selection: ContextSelectionView): boolean {
-  return Boolean(selection.knowledge_item_id && selection.knowledge_revision_id);
+  return selection.channel === "current_knowledge" &&
+    Boolean(selection.knowledge_item_id && selection.knowledge_revision_id);
 }
 
 export function excludedCandidates(

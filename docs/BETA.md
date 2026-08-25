@@ -10,10 +10,12 @@ candidate passes through VedaFlow before it can become an immutable Knowledge
 revision. Policy decides which candidates, revisions and provenance may be
 read, and every governed act is on an audit chain you can verify yourself.
 
-> **Phase 5 branch note (2026-08-24):** install, login and session delivery
-> remain current, but the organisation-seeding walkthrough in sections 4–7 is
-> part of CPR-13's explicitly open demo-corpus debt and must not be represented
-> as runnable. The supported product noun is Knowledge, browsed at
+> **Phase 5 branch note (2026-08-25):** install, login and session delivery
+> remain current, but the release organisation seeder in sections 4–7 still
+> uses a removed product flow and must not be represented as runnable. CPR-13
+> repaired and now gates the feature-demo corpus; the later one-command
+> personal/team walkthrough will replace this release tour through public APIs.
+> The supported product noun is Knowledge, browsed at
 > `/console/knowledge`; the later one-command personal/team walkthrough is
 > rebuilt entirely through public APIs.
 
@@ -115,6 +117,14 @@ are offered only where `/v1/me` forecasts `knowledge.write`; the gateway still
 decides the act. A pending VedaFlow outcome links to Advanced Reviews rather
 than pretending it was published.
 
+Open **Advanced → Configuration** to see the exact immutable runtime document
+selected at a scope. The personal, team and enterprise choices are templates
+over one binary and schema; they are copied into ordinary content-hashed
+versions. Publishing, binding, pinning, disabling or rolling back reports its
+VedaFlow outcome, and a context run records the exact configuration version and
+digest it used. The old default-policy and per-scope assignment routes are not
+available as compatibility shortcuts.
+
 ## 6. Meet the thing the product is actually for
 
 Open **http://127.0.0.1:8120/console/** and sign in with the same operator.
@@ -128,9 +138,10 @@ person holding every key. That refusal is the product working correctly, and it 
 worth showing somebody: the governance is not advisory, and it does not have
 an override for the person who installed it.
 
-While you are in the console, the explorer shows `eng` carrying `standard`
-where `sales` inherits the tenant default — that difference is what decides
-how expensive a publication is.
+While you are in the console, the explorer shows the effective Configuration
+at each scope, including the binding it inherited and the Cedar pack selected
+by that immutable version — that difference is what decides how expensive a
+publication is.
 
 ## 7. Verify the whole thing
 

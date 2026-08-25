@@ -163,10 +163,14 @@ pub const OPEN_COLLABORATION: &str = "open-collaboration";
 /// override. The approval matrix mirrors memory so personal/small-scope
 /// changes can auto-apply under the permissive profiles but still pass
 /// through a real VedaFlow change.
+/// `@22`: CPR-30 adds the governed runtime-configuration read/write plane.
+/// Writes resolve against the inherited selector, so a binding cannot grant
+/// authority to install itself; the shipped packs keep both surfaces
+/// administrative.
 pub const EMBEDDED_PACKS: [(&str, i64); 3] = [
-    (REGULATED_STRICT, 21),
-    (STANDARD, 21),
-    (OPEN_COLLABORATION, 21),
+    (REGULATED_STRICT, 22),
+    (STANDARD, 22),
+    (OPEN_COLLABORATION, 22),
 ];
 
 /// Whether `name` is reserved for the product (ADR-0014 decision 6): the
@@ -788,7 +792,7 @@ impl Pdp {
         // changing a node's governance is authorized by the surrounding
         // governance, never by the pack being replaced — so a restrictive
         // custom pack cannot seal its own node against reassignment.
-        let skip_self = action == Action::PolicyAssign;
+        let skip_self = matches!(action, Action::PolicyAssign | Action::ConfigurationWrite);
         let (pack, origin) = self.resolve_pack(principal.tenant_id, resource, context, skip_self);
         let roles = effective_roles(resource, context);
         let owned;

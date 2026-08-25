@@ -25,12 +25,10 @@
 
 import type {
   BatchResponse,
-  EffectiveResponse,
   LapseListResponse,
   LapseView,
   ListResponse,
   NodeCapabilities,
-  OriginView,
   ScopeView,
 } from "./generated/api.js";
 
@@ -40,11 +38,6 @@ export type Node = ScopeView;
 /** One level of the tree: the parent it hangs from, and its children. */
 export type ScopeLevel = ListResponse;
 
-/** Where an inherited thing came from. One shape, three admin planes. */
-export type Origin = OriginView;
-
-export type EffectivePack = EffectiveResponse;
-
 export type Capabilities = NodeCapabilities;
 
 /** The batch probe's envelope. */
@@ -53,39 +46,6 @@ export type CapabilityBatch = BatchResponse;
 export type Lapse = LapseView;
 
 export type LapseListing = LapseListResponse;
-
-/**
- * An origin in words, relative to the node that was asked about.
- *
- * `askedAbout` is the frame and without it the sentence cannot be written:
- * `{kind: "assigned", scope_id: X}` means "assigned here" or "inherited
- * from X" depending entirely on which node the reader is looking at, and a
- * renderer that dropped the comparison would tell an administrator their unit had
- * its own pack when it does not.
- */
-export function describeOrigin(origin: Origin, askedAbout: string): string {
-  switch (origin.kind) {
-    case "assigned":
-      return origin.scope_id === askedAbout ? "assigned here" : "inherited";
-    case "tenant-wide":
-      return "tenant-wide";
-    case "tenant-default":
-      return "the tenant default";
-    case "default":
-      return "the built-in default";
-    case "fallback":
-      // Worth its own words: the assigned pack did not compile, so this
-      // node is running something nobody chose for it.
-      return "a fallback — the assigned pack did not compile";
-    default:
-      return origin.kind;
-  }
-}
-
-/** Whether an origin points somewhere other than the node asked about. */
-export function isInherited(origin: Origin, askedAbout: string): boolean {
-  return origin.kind === "assigned" && origin.scope_id !== askedAbout;
-}
 
 /**
  * The actions a capability answer says yes to, sorted.

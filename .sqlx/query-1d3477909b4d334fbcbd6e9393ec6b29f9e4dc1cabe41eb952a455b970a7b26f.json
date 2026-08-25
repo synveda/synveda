@@ -1,0 +1,65 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select proposal_id,\n                  payload as \"payload: Json<ConfigurationCommand>\", payload_hash,\n                  resulting_artifact_id, resulting_version_id,\n                  resulting_binding_id, resulting_binding_revision, applied_at\n             from configuration_changes\n            where tenant_id = $1 and proposal_id = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "proposal_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "payload: Json<ConfigurationCommand>",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 2,
+        "name": "payload_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "resulting_artifact_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "resulting_version_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "resulting_binding_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 6,
+        "name": "resulting_binding_revision",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 7,
+        "name": "applied_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "1d3477909b4d334fbcbd6e9393ec6b29f9e4dc1cabe41eb952a455b970a7b26f"
+}

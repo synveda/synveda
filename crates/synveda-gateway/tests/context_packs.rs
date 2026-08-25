@@ -48,13 +48,16 @@ use synveda_identity::Hs256Verifier;
 use synveda_ingest::embedding::{AnyEmbedder, DeterministicEmbedder};
 use synveda_policy::Pdp;
 use synveda_retrieval::index::SearchIndex;
-use synveda_store::{access, identities, policy_assignments, scopes, tenants};
+use synveda_store::{access, identities, scopes, tenants};
 use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
 use synveda_types::scope::{Scope, ScopeKind};
 use synveda_types::{
     GrantId, Identity, IdentityId, IdentityKind, PackConfig, ScopeId, TenantId, TenantStatus,
 };
 use tower::ServiceExt;
+
+#[path = "support/configuration.rs"]
+mod configuration_support;
 
 const SECRET: &[u8] = b"prmt-2-test-secret";
 
@@ -976,9 +979,7 @@ async fn a_reader_with_no_readable_memory_at_a_scope_still_gets_its_conventions(
         )
         .expect("install a pack that grants packs and not memories");
     let mut tx = w.pool.begin().await.expect("begin");
-    policy_assignments::assign(&mut *tx, w.tenant, w.eng, "packs-not-memories")
-        .await
-        .expect("assign the pack at the department");
+    configuration_support::bind_pack(&mut tx, w.tenant, w.eng, "packs-not-memories").await;
     tx.commit().await.expect("commit assignment");
 
     let block = inject(&w, &w.bea, Some("when do we ship")).await;

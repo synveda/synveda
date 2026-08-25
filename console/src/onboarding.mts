@@ -11,12 +11,12 @@
  *
  * This is the decision the whole feature turns on, so it is stated where
  * the code for it is. Choosing "just me" or "a team" **seeds** two things —
- * the policy pack assigned to the new workspace's scope, and whether a
+ * the immutable Configuration template bound to the new workspace, and whether a
  * group and invitations are set up beside it — and then it is over. It does
  * not write an edition anywhere. There is no column recording it, no field
  * on the workspace, nothing downstream branches on it, and a workspace
  * created as personal becomes a team workspace by inviting somebody and
- * (if you want) assigning a different pack.
+ * (if you want) binding a different Configuration version.
  *
  * ADR-0068 decision 1 is the law here: one domain model, one runtime, and a
  * single person and a regulated bank differ in what their configuration
@@ -25,12 +25,12 @@
  *
  * # The seeding is best-effort, and says so
  *
- * A first user may not be forecast to assign a policy pack or manage a
- * group — those are `policy.assign` and `group.manage`, and a brand-new
+ * A first user may not be forecast to publish Configuration or manage a
+ * group — those are `configuration.write` and `group.manage`, and a brand-new
  * tenant's first caller holds an `owner` grant on what they just created
  * and nothing else. So each seeding step reports what happened rather than
  * failing onboarding: the workspace and project are the deliverable, and a
- * refused pack assignment is a sentence pointing at Advanced ▸ Policies,
+ * pending or refused Configuration change points at Advanced ▸ Configuration,
  * not a dead end. Silently skipping it would be the unacceptable option —
  * somebody would believe their workspace was governed the way they chose.
  */
@@ -68,15 +68,11 @@ export type Shape = "personal" | "team";
 /**
  * What a shape seeds.
  *
- * The pack names are the ones this build ships (`synveda_policy`'s
- * `EMBEDDED_PACKS`). The context-platform programme renames the triple to
- * `personal`/`team`/`enterprise` profiles at a later prompt — deletion-map
- * row 3 — and when it does, this table is the one place that changes,
- * which is why the choice resolves through a table at all.
+ * The template names are part of the generated Configuration contract.
  */
 export interface SeedPlan {
-  /** The pack to assign at the new workspace's scope. */
-  pack: string;
+  /** The complete Configuration template to copy and bind. */
+  template: "personal" | "team";
   /** Whether to offer a group and invitations beside it. */
   invitesMembers: boolean;
   /** What the screen tells somebody they are choosing. */
@@ -87,7 +83,7 @@ export function seedPlan(shape: Shape): SeedPlan {
   switch (shape) {
     case "personal":
       return {
-        pack: "open-collaboration",
+        template: "personal",
         invitesMembers: false,
         summary:
           "Your own workspace. Everything you capture is available to you immediately, " +
@@ -95,7 +91,7 @@ export function seedPlan(shape: Shape): SeedPlan {
       };
     case "team":
       return {
-        pack: "standard",
+        template: "team",
         invitesMembers: true,
         summary:
           "A shared workspace. What gets published is reviewed first, and you can invite " +
@@ -107,6 +103,7 @@ export function seedPlan(shape: Shape): SeedPlan {
 /** Whether a seeding step landed, was refused, or was never attempted. */
 export type SeedOutcome =
   | { kind: "applied"; what: string }
+  | { kind: "pending"; what: string; changeId: string }
   | { kind: "refused"; what: string; why: string }
   | { kind: "skipped"; what: string };
 
@@ -115,17 +112,23 @@ export type SeedOutcome =
  *
  * Names the plane the reader can finish the job on, because a refusal with
  * no next step is a dead end and the next step genuinely exists — an
- * administrator assigns the pack under Advanced ▸ Policies, and the
+ * administrator completes the change under Advanced Reviews or adjusts the
+ * binding under Advanced ▸ Configuration, and the
  * workspace works meanwhile under whatever it inherits.
  */
 export function seedSentence(outcome: SeedOutcome): string {
   switch (outcome.kind) {
     case "applied":
       return `${outcome.what} — done.`;
+    case "pending":
+      return (
+        `${outcome.what} is waiting in Advanced Reviews as change ${outcome.changeId}. ` +
+        `Your workspace works under its inherited Configuration until that review applies.`
+      );
     case "refused":
       return (
         `${outcome.what} was refused: ${outcome.why}. Your workspace works; it is running ` +
-        `whatever policy it inherits until an administrator sets one under Advanced ▸ Policies.`
+        `its inherited Configuration until an administrator finishes it under Advanced ▸ Configuration.`
       );
     case "skipped":
       return `${outcome.what} — not needed for this choice.`;

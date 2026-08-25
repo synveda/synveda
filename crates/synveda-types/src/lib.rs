@@ -21,6 +21,8 @@ mod channel;
 // Session-derived, reviewable Knowledge proposals (CPR-18, ADR-0083).
 pub mod capture;
 mod composition;
+/// Immutable governed runtime configuration (CPR-30, ADR-0089).
+pub mod configuration;
 // Explainable Knowledge-backed context planning (CPR-20, ADR-0084).
 pub mod context;
 mod dedup;
@@ -103,9 +105,10 @@ pub use error::{Error, Result};
 pub use graph::{Depth, Graph};
 pub use id::{
     CapabilitySnapshotId, CaptureBatchId, CaptureCandidateDecisionId, CaptureCandidateId,
-    ContextCandidateId, ContextFeedbackId, ContextRunId, ContextSelectionId, DirectoryGroupId,
-    DirectoryUserId, DurableOperationId, GrantId, GraphEdgeId, GraphVertexId, GroupId, IdentityId,
-    ImportArtifactId, ImportJobId, ImportMappingId, InviteId, KnowledgeItemId, KnowledgeRelationId,
+    ConfigurationArtifactId, ConfigurationBindingId, ConfigurationVersionId, ContextCandidateId,
+    ContextFeedbackId, ContextRunId, ContextSelectionId, DirectoryGroupId, DirectoryUserId,
+    DurableOperationId, GrantId, GraphEdgeId, GraphVertexId, GroupId, IdentityId, ImportArtifactId,
+    ImportJobId, ImportMappingId, InviteId, KnowledgeItemId, KnowledgeRelationId,
     KnowledgeRevisionId, KnowledgeSourceId, LapseId, ProjectId, ProposalId, RecordId, RepositoryId,
     ScimCredentialId, ScopeId, SessionEventId, SessionId, SkillBindingId, SkillId, SkillTestRunId,
     SkillUsageEventId, SkillVersionId, TenantId, ToolBindingId, ToolServerId, ToolServerVersionId,

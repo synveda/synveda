@@ -7,11 +7,12 @@
 
 use chrono::{DateTime, Utc};
 use sqlx::{PgConnection, PgExecutor};
+use synveda_types::configuration::ConfigurationContextChannel;
 use synveda_types::knowledge::KnowledgeLifecycleState;
 use synveda_types::{
-    ContextCandidate, ContextCandidateId, ContextFeedback, ContextFeedbackId, ContextFeedbackType,
-    ContextReasonCode, ContextRunId, ContextSelection, ContextSelectionId, Error, KnowledgeItemId,
-    KnowledgeRevisionId, Result, ScopeId, SessionId, TenantId,
+    CaptureCandidateId, ContextCandidate, ContextCandidateId, ContextFeedback, ContextFeedbackId,
+    ContextFeedbackType, ContextReasonCode, ContextRunId, ContextSelection, ContextSelectionId,
+    Error, KnowledgeItemId, KnowledgeRevisionId, Result, ScopeId, SessionId, TenantId,
 };
 use uuid::Uuid;
 
@@ -27,10 +28,14 @@ pub struct NewContextCandidate {
     pub context_run_id: ContextRunId,
     /// Stable position in the bounded pool.
     pub ordinal: i32,
+    /// Governed content channel.
+    pub channel: ConfigurationContextChannel,
     /// Stable item, omitted by hashes-only retention.
     pub knowledge_item_id: Option<KnowledgeItemId>,
     /// Immutable revision, omitted by hashes-only retention.
     pub knowledge_revision_id: Option<KnowledgeRevisionId>,
+    /// Unreviewed proposal, omitted for Knowledge and hashes-only retention.
+    pub capture_candidate_id: Option<CaptureCandidateId>,
     /// Canonical revision digest.
     pub content_hash: String,
     /// Governed scope, omitted with Knowledge addresses.
@@ -64,10 +69,14 @@ pub struct NewContextSelection {
     pub context_run_id: ContextRunId,
     /// One-based rank.
     pub rank: i32,
+    /// Governed content channel.
+    pub channel: ConfigurationContextChannel,
     /// Stable item, omitted by hashes-only retention.
     pub knowledge_item_id: Option<KnowledgeItemId>,
     /// Immutable revision, omitted by hashes-only retention.
     pub knowledge_revision_id: Option<KnowledgeRevisionId>,
+    /// Unreviewed proposal, omitted for Knowledge and hashes-only retention.
+    pub capture_candidate_id: Option<CaptureCandidateId>,
     /// Canonical revision digest.
     pub content_hash: String,
     /// Estimated tokens charged.
@@ -119,8 +128,10 @@ struct CandidateRow {
     tenant_id: Uuid,
     context_run_id: Uuid,
     ordinal: i32,
+    channel: String,
     knowledge_item_id: Option<Uuid>,
     knowledge_revision_id: Option<Uuid>,
+    capture_candidate_id: Option<Uuid>,
     content_hash: String,
     scope_id: Option<Uuid>,
     lifecycle_state: Option<String>,
@@ -141,8 +152,10 @@ struct SelectionRow {
     tenant_id: Uuid,
     context_run_id: Uuid,
     rank: i32,
+    channel: String,
     knowledge_item_id: Option<Uuid>,
     knowledge_revision_id: Option<Uuid>,
+    capture_candidate_id: Option<Uuid>,
     content_hash: String,
     token_count: i32,
     reason_codes: Vec<String>,
@@ -202,10 +215,14 @@ impl TryFrom<CandidateRow> for ContextCandidate {
             tenant_id: TenantId::from_uuid(row.tenant_id),
             context_run_id: ContextRunId::from_uuid(row.context_run_id),
             ordinal: row.ordinal,
+            channel: row.channel.parse().map_err(|error| Error::Internal {
+                message: format!("stored context channel outside vocabulary: {error}"),
+            })?,
             knowledge_item_id: row.knowledge_item_id.map(KnowledgeItemId::from_uuid),
             knowledge_revision_id: row
                 .knowledge_revision_id
                 .map(KnowledgeRevisionId::from_uuid),
+            capture_candidate_id: row.capture_candidate_id.map(CaptureCandidateId::from_uuid),
             content_hash: row.content_hash,
             scope_id: row.scope_id.map(ScopeId::from_uuid),
             lifecycle_state: row
@@ -243,10 +260,14 @@ impl TryFrom<SelectionRow> for ContextSelection {
             tenant_id: TenantId::from_uuid(row.tenant_id),
             context_run_id: ContextRunId::from_uuid(row.context_run_id),
             rank: row.rank,
+            channel: row.channel.parse().map_err(|error| Error::Internal {
+                message: format!("stored context channel outside vocabulary: {error}"),
+            })?,
             knowledge_item_id: row.knowledge_item_id.map(KnowledgeItemId::from_uuid),
             knowledge_revision_id: row
                 .knowledge_revision_id
                 .map(KnowledgeRevisionId::from_uuid),
+            capture_candidate_id: row.capture_candidate_id.map(CaptureCandidateId::from_uuid),
             content_hash: row.content_hash,
             token_count: row.token_count,
             reason_codes: reasons(row.reason_codes)?,
@@ -300,16 +321,18 @@ pub async fn insert_candidate(
         CandidateRow,
         r#"
         insert into context_candidates
-            (id, tenant_id, context_run_id, ordinal, knowledge_item_id,
-             knowledge_revision_id, content_hash, scope_id, lifecycle_state,
+            (id, tenant_id, context_run_id, ordinal, channel,
+             knowledge_item_id, knowledge_revision_id, capture_candidate_id,
+             content_hash, scope_id, lifecycle_state,
              keyword_score_micros, semantic_score_micros,
              freshness_score_micros, pin_score_micros,
              current_state_score_micros, final_score_micros, reason_codes,
              exclusion_reason)
         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
-                $14, $15, $16, $17)
-        returning id, tenant_id, context_run_id, ordinal, knowledge_item_id,
-                  knowledge_revision_id, content_hash, scope_id,
+                $14, $15, $16, $17, $18, $19)
+        returning id, tenant_id, context_run_id, ordinal, channel,
+                  knowledge_item_id, knowledge_revision_id,
+                  capture_candidate_id, content_hash, scope_id,
                   lifecycle_state, keyword_score_micros, semantic_score_micros,
                   freshness_score_micros, pin_score_micros,
                   current_state_score_micros, final_score_micros,
@@ -320,8 +343,10 @@ pub async fn insert_candidate(
         tenant_id.as_uuid(),
         new.context_run_id.as_uuid(),
         new.ordinal,
+        new.channel.as_str(),
         new.knowledge_item_id.map(|id| id.as_uuid()),
         new.knowledge_revision_id.map(|id| id.as_uuid()),
+        new.capture_candidate_id.map(|id| id.as_uuid()),
         new.content_hash,
         new.scope_id.map(|id| id.as_uuid()),
         new.lifecycle_state.map(KnowledgeLifecycleState::as_str),
@@ -363,19 +388,23 @@ pub async fn insert_selection(
         SelectionRow,
         r#"
         insert into context_selections
-            (id, tenant_id, context_run_id, rank, knowledge_item_id,
-             knowledge_revision_id, content_hash, token_count, reason_codes)
-        values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-        returning id, tenant_id, context_run_id, rank, knowledge_item_id,
-                  knowledge_revision_id, content_hash, token_count,
+            (id, tenant_id, context_run_id, rank, channel,
+             knowledge_item_id, knowledge_revision_id, capture_candidate_id,
+             content_hash, token_count, reason_codes)
+        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        returning id, tenant_id, context_run_id, rank, channel,
+                  knowledge_item_id, knowledge_revision_id,
+                  capture_candidate_id, content_hash, token_count,
                   reason_codes as "reason_codes!: Vec<String>", created_at
         "#,
         new.id.as_uuid(),
         tenant_id.as_uuid(),
         new.context_run_id.as_uuid(),
         new.rank,
+        new.channel.as_str(),
         new.knowledge_item_id.map(|id| id.as_uuid()),
         new.knowledge_revision_id.map(|id| id.as_uuid()),
+        new.capture_candidate_id.map(|id| id.as_uuid()),
         new.content_hash,
         new.token_count,
         &reason_codes,
@@ -401,8 +430,9 @@ pub async fn candidates_for_run(
     let rows = sqlx::query_as!(
         CandidateRow,
         r#"
-        select id, tenant_id, context_run_id, ordinal, knowledge_item_id,
-               knowledge_revision_id, content_hash, scope_id, lifecycle_state,
+        select id, tenant_id, context_run_id, ordinal, channel,
+               knowledge_item_id, knowledge_revision_id, capture_candidate_id,
+               content_hash, scope_id, lifecycle_state,
                keyword_score_micros, semantic_score_micros,
                freshness_score_micros, pin_score_micros,
                current_state_score_micros, final_score_micros,
@@ -430,8 +460,9 @@ pub async fn selections_for_run(
     let rows = sqlx::query_as!(
         SelectionRow,
         r#"
-        select id, tenant_id, context_run_id, rank, knowledge_item_id,
-               knowledge_revision_id, content_hash, token_count,
+        select id, tenant_id, context_run_id, rank, channel,
+               knowledge_item_id, knowledge_revision_id, capture_candidate_id,
+               content_hash, token_count,
                reason_codes as "reason_codes!: Vec<String>", created_at
         from context_selections
         where tenant_id = $1 and context_run_id = $2
@@ -456,8 +487,9 @@ pub async fn selection(
     let row = sqlx::query_as!(
         SelectionRow,
         r#"
-        select id, tenant_id, context_run_id, rank, knowledge_item_id,
-               knowledge_revision_id, content_hash, token_count,
+        select id, tenant_id, context_run_id, rank, channel,
+               knowledge_item_id, knowledge_revision_id, capture_candidate_id,
+               content_hash, token_count,
                reason_codes as "reason_codes!: Vec<String>", created_at
         from context_selections
         where tenant_id = $1 and context_run_id = $2 and id = $3

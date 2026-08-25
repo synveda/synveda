@@ -43,13 +43,16 @@ use synveda_identity::Hs256Verifier;
 use synveda_ingest::embedding::{AnyEmbedder, DeterministicEmbedder};
 use synveda_policy::Pdp;
 use synveda_retrieval::index::SearchIndex;
-use synveda_store::{access, identities, policy_assignments, scopes, tenants};
+use synveda_store::{access, identities, rls, scopes, tenants};
 use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
 use synveda_types::scope::{Scope, ScopeKind};
 use synveda_types::{
     GrantId, Identity, IdentityId, IdentityKind, PackConfig, ScopeId, TenantId, TenantStatus,
 };
 use tower::ServiceExt;
+
+#[path = "support/configuration.rs"]
+mod configuration_support;
 
 const SECRET: &[u8] = b"prmt-1-test-secret";
 
@@ -919,9 +922,11 @@ async fn a_pin_freezes_bytes_and_never_authority() {
             PackConfig::default(),
         )
         .expect("install locked pack");
-    policy_assignments::set_default(&w.pool, w.tenant, &locked)
+    let mut tx = rls::begin_tenant_tx(&w.pool, w.tenant)
         .await
-        .expect("set locked pack as default");
+        .expect("begin locked Configuration");
+    configuration_support::bind_tenant_pack(&mut tx, w.tenant, &locked).await;
+    tx.commit().await.expect("commit locked Configuration");
 
     let (status, after) = get(&w.app, &uri, &w.bea).await;
     assert_eq!(

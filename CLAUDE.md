@@ -202,7 +202,7 @@ explicitly and say so.
 
 Phases 0, 1 and 2 are complete; SKIL-1 through SKIL-4, OPS-1, CNSL-1, ADPT-2,
 CNSL-2, AUTH-4, AUTH-5, EVAL-3, OPS-2, TEN-3, TEN-4 and OPS-8 are the Phase 3
-features done. 95 of 126 features delivered — see docs/backlog/STATUS.md for
+features done. 96 of 127 features delivered — see docs/backlog/STATUS.md for
 what each one proved and what it left standing. (The total read 86 until
 2026-08-05, when it was corrected to the 88 STATUS.md and `make
 check-backlog` had both said for some time; AUTHZ-7 was filed the same day by
@@ -346,6 +346,14 @@ catalogue now constructs all 156 authenticated application operations and is
 checked exactly against OpenAPI; the console consumes generated operations,
 while ordinary service/audit CLI and generic MCP/Claude clients reach product
 state only through the public gateway boundary.
+**CPR-30 was filed next**, making it **127 with 95 delivered**: it replaces
+mutable policy assignment and ad-hoc runtime settings with immutable governed
+configuration versions and nearest-scope bindings under ADR-0089.
+It was delivered the same day, making it **127 with 96 delivered**: canonical
+personal/team/enterprise documents now select policy, capture, context,
+freshness, Skill/Tool advertisement and providers through immutable versions;
+every binding/version change enters typed VedaFlow, and the mutable assignment
+tables and routes are gone.
 
 Since CPR-9 a **listing decides per row**. The audit of Prompts 1–7 found that
 `GET /v1/workspaces` and `/v1/me` took one decision at the tenant root and

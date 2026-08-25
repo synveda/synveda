@@ -127,6 +127,8 @@ function batch(overrides: Partial<CaptureBatchView> = {}): CaptureBatchView {
     model_version: "builtin@3",
     attempts: 1,
     candidate_count: 1,
+    configuration_hash: "configuration-hash",
+    configuration_version_id: "configuration-version-1",
     created_at: "2026-08-24T10:00:00Z",
     completed_at: "2026-08-24T10:00:01Z",
     ...overrides,

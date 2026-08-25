@@ -18,11 +18,14 @@ use synveda_identity::Hs256Verifier;
 use synveda_ingest::embedding::{AnyEmbedder, DeterministicEmbedder};
 use synveda_policy::Pdp;
 use synveda_retrieval::SearchIndex;
-use synveda_store::{access, identities, policy_assignments, rls, scopes, tenants};
+use synveda_store::{access, identities, rls, scopes, tenants};
 use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
 use synveda_types::scope::{Scope, ScopeKind};
 use synveda_types::{GrantId, IdentityId, IdentityKind, ScopeId, Tenant, TenantId, TenantStatus};
 use tower::ServiceExt;
+
+#[path = "support/configuration.rs"]
+mod configuration_support;
 
 const SECRET: &[u8] = b"cpr-23-versioned-skills";
 
@@ -203,9 +206,7 @@ async fn world() -> Option<World> {
         "skills-project",
     )
     .await;
-    policy_assignments::set_default(&mut *tx, tenant_id, synveda_policy::STANDARD)
-        .await
-        .expect("select standard policy");
+    configuration_support::bind_tenant_pack(&mut tx, tenant_id, synveda_policy::STANDARD).await;
     tx.commit().await.expect("commit scopes and policy");
 
     for subject in ["alice", "reviewer", "administrator"] {
@@ -611,6 +612,25 @@ async fn immutable_versions_bindings_usage_and_tests_share_one_governed_path() {
     .await;
     assert_eq!(status, StatusCode::OK, "{rolled_back}");
     assert_eq!(rolled_back["skills"][0]["version"]["id"], version_v1);
+
+    let mut tx = rls::begin_tenant_tx(&world.pool, world.tenant.id)
+        .await
+        .expect("begin Skill-advertisement Configuration change");
+    configuration_support::set_tenant_advertisement(&mut tx, world.tenant.id, false, true).await;
+    tx.commit()
+        .await
+        .expect("commit Skill-advertisement Configuration change");
+    let (status, suppressed) = call(
+        &world.app,
+        Method::GET,
+        &format!("/v1/skills/available?scope_id={}", world.project),
+        &world.alice,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{suppressed}");
+    assert_eq!(suppressed["skills"], json!([]));
 
     let second_tenant_id = TenantId::new();
     let second_tenant = tenants::create(

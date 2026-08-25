@@ -55,7 +55,7 @@ test("the advanced navigation is governance, and every item is gated", () => {
     [
       ["Reviews", "proposal.read"],
       ["Scopes", "scope.read"],
-      ["Policies", "policy.read"],
+      ["Configuration", "configuration.read"],
       ["Audit", "audit.read"],
       ["Service identities", "service_identity.read"],
     ],

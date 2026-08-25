@@ -991,216 +991,6 @@
         ]
       }
     },
-    "/v1/admin/scopes/{scope_id}/policy": {
-      "get": {
-        "tags": [
-          "policy"
-        ],
-        "summary": "`GET /v1/admin/scopes/{scope_id}/policy` — the pack effective at the scope\nand where it came from (its own assignment, an ancestor's, the tenant\ndefault, or the embedded default).",
-        "operationId": "get_scope_policy",
-        "parameters": [
-          {
-            "name": "scope_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "The effective pack, origin and direct assignment",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/EffectiveResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "No usable credential",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Policy metadata is not visible to the caller",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "The scope is absent or outside the tenant",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ]
-      },
-      "put": {
-        "tags": [
-          "policy"
-        ],
-        "summary": "`PUT /v1/admin/scopes/{scope_id}/policy` — assign a pack at the scope; its\nsubtree runs it from the next request on.",
-        "operationId": "assign_scope_policy",
-        "parameters": [
-          {
-            "name": "scope_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SetPackBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "The resulting direct policy assignment",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PolicyAssignmentView"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "The pack name is unknown",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "No usable credential",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Policy assignment is not permitted",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "The scope is absent or outside the tenant",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ]
-      },
-      "delete": {
-        "tags": [
-          "policy"
-        ],
-        "summary": "`DELETE /v1/admin/scopes/{scope_id}/policy` — remove the scope's\nassignment; it falls back to the inherited pack.",
-        "operationId": "unassign_scope_policy",
-        "parameters": [
-          {
-            "name": "scope_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "format": "uuid"
-            }
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "The direct policy assignment was removed"
-          },
-          "401": {
-            "description": "No usable credential",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Policy assignment is not permitted",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "The scope or direct assignment does not exist",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ]
-      }
-    },
     "/v1/audit/disclosures": {
       "get": {
         "tags": [
@@ -2949,6 +2739,787 @@
           },
           "404": {
             "description": "The scope or channel is absent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/configuration-bindings": {
+      "get": {
+        "tags": [
+          "configuration"
+        ],
+        "summary": "List revisioned bindings at one exact scope.",
+        "operationId": "list_configuration_bindings",
+        "parameters": [
+          {
+            "name": "scope_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "maximum": 200,
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Binding page",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigurationBindingListView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Scope absent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "configuration"
+        ],
+        "summary": "Create one selector at a governed scope.",
+        "operationId": "create_configuration_binding",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Required; reuse verbatim on retry.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateConfigurationBindingBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Change opened",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigurationMutationView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid selector",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Scope already has a selector",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/configuration-bindings/{id}": {
+      "patch": {
+        "tags": [
+          "configuration"
+        ],
+        "summary": "Change, enable, disable, pin or unpin a binding.",
+        "operationId": "update_configuration_binding",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Required; reuse verbatim on retry.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateConfigurationBindingBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Change opened",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigurationMutationView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Binding absent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Stale revision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/configuration-bindings/{id}/rollback": {
+      "post": {
+        "tags": [
+          "configuration"
+        ],
+        "summary": "Roll back by pinning one earlier immutable version.",
+        "operationId": "rollback_configuration_binding",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Required; reuse verbatim on retry.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RollbackConfigurationBindingBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Rollback change opened",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigurationMutationView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Binding or version absent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Stale revision",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/configuration-templates": {
+      "get": {
+        "tags": [
+          "configuration"
+        ],
+        "summary": "List canonical source templates. Templates are never effective by name.",
+        "operationId": "list_configuration_templates",
+        "responses": {
+          "200": {
+            "description": "Canonical source documents",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigurationTemplateListView"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/configurations": {
+      "get": {
+        "tags": [
+          "configuration"
+        ],
+        "summary": "List policy-visible stable aggregates with an opaque keyset cursor.",
+        "operationId": "list_configurations",
+        "parameters": [
+          {
+            "name": "governing_scope_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "maximum": 200,
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Visible aggregate page",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigurationArtifactListView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid cursor",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "configuration"
+        ],
+        "summary": "Create an immutable governed configuration aggregate.",
+        "operationId": "create_configuration",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Required; reuse verbatim on retry.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateConfigurationBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Change opened",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigurationMutationView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid document",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Denied",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/configurations/effective": {
+      "get": {
+        "tags": [
+          "configuration"
+        ],
+        "summary": "Resolve the nearest enabled selector and return exact version evidence.",
+        "operationId": "get_effective_configuration",
+        "parameters": [
+          {
+            "name": "scope_id",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Effective immutable document",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EffectiveConfigurationView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Scope absent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/configurations/{id}": {
+      "get": {
+        "tags": [
+          "configuration"
+        ],
+        "summary": "Read one stable aggregate.",
+        "operationId": "get_configuration",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Stable aggregate",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigurationArtifactView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Absent or not visible",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/configurations/{id}/compare": {
+      "get": {
+        "tags": [
+          "configuration"
+        ],
+        "summary": "Compare two versions of one stable aggregate.",
+        "operationId": "compare_configuration_versions",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deterministic changed-field set",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigurationComparisonView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Artifact or version absent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/configurations/{id}/versions": {
+      "get": {
+        "tags": [
+          "configuration"
+        ],
+        "summary": "List immutable versions newest first.",
+        "operationId": "list_configuration_versions",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "format": "int64",
+              "maximum": 200,
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Immutable version page",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigurationVersionListView"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Absent or not visible",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      },
+      "post": {
+        "tags": [
+          "configuration"
+        ],
+        "summary": "Publish and select another immutable version.",
+        "operationId": "publish_configuration_version",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Required; reuse verbatim on retry.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PublishConfigurationBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Change opened",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConfigurationMutationView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid document",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Artifact absent",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Stale current-version precondition",
             "content": {
               "application/json": {
                 "schema": {
@@ -5409,169 +5980,12 @@
         ]
       }
     },
-    "/v1/policy/default": {
-      "get": {
-        "tags": [
-          "policy"
-        ],
-        "summary": "`GET /v1/policy/default` — the tenant's default pack.",
-        "operationId": "get_default_policy",
-        "responses": {
-          "200": {
-            "description": "Stored and effective tenant policy defaults",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DefaultResponse"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "No usable credential",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Policy metadata is not visible to the caller",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ]
-      },
-      "put": {
-        "tags": [
-          "policy"
-        ],
-        "summary": "`PUT /v1/policy/default` — set the tenant default pack.",
-        "operationId": "set_default_policy",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SetPackBody"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "The resulting tenant policy default",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/DefaultResponse"
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "The pack name is unknown",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "No usable credential",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Policy assignment is not permitted",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ]
-      },
-      "delete": {
-        "tags": [
-          "policy"
-        ],
-        "summary": "`DELETE /v1/policy/default` — clear the tenant default; the embedded\n`regulated-strict` applies wherever nothing is assigned.",
-        "operationId": "clear_default_policy",
-        "responses": {
-          "204": {
-            "description": "The stored tenant default was cleared"
-          },
-          "401": {
-            "description": "No usable credential",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "Policy assignment is not permitted",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "No stored tenant default exists",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "bearer": []
-          }
-        ]
-      }
-    },
     "/v1/policy/packs": {
       "get": {
         "tags": [
           "policy"
         ],
-        "summary": "`GET /v1/policy/packs` — the packs assignable in this tenant: the\nembedded product packs and the tenant's stored packs.",
+        "summary": "List immutable pack sources available to Configuration documents.",
         "operationId": "list_policy_packs",
         "responses": {
           "200": {
@@ -5584,18 +5998,8 @@
               }
             }
           },
-          "401": {
-            "description": "No usable credential",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ApiErrorBody"
-                }
-              }
-            }
-          },
           "403": {
-            "description": "Policy metadata is not visible to the caller",
+            "description": "Policy metadata is not visible",
             "content": {
               "application/json": {
                 "schema": {
@@ -12177,6 +12581,23 @@
           }
         }
       },
+      "AdvertisementConfigurationBody": {
+        "type": "object",
+        "description": "Distribution switches. They narrow already-authorised bindings and grant\nno Skill or Tool authority.",
+        "required": [
+          "skills",
+          "tools"
+        ],
+        "properties": {
+          "skills": {
+            "type": "boolean"
+          },
+          "tools": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
+      },
       "AnchorCapabilities": {
         "type": "object",
         "description": "What the caller may do at **one anchor** — a real decision at a real scope,\nnever a shape derived from an edition (CPR-6, ADR-0073 decision 8).",
@@ -13010,6 +13431,7 @@
           "id",
           "source_kind",
           "scope_id",
+          "configuration_hash",
           "input_hash",
           "event_count",
           "state",
@@ -13035,6 +13457,18 @@
             ],
             "format": "date-time",
             "description": "Terminal instant."
+          },
+          "configuration_hash": {
+            "type": "string",
+            "description": "Canonical hash of the frozen runtime document."
+          },
+          "configuration_version_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Exact immutable Configuration version, absent only for the built-in\nfail-safe."
           },
           "created_at": {
             "type": "string",
@@ -13346,6 +13780,39 @@
             ]
           }
         }
+      },
+      "CaptureConfigurationBody": {
+        "type": "object",
+        "description": "Capture and extraction settings in one immutable document.",
+        "required": [
+          "enabled",
+          "on_session_end",
+          "explicit_request",
+          "minimum_confidence_permille",
+          "maximum_candidates_per_batch"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          },
+          "explicit_request": {
+            "type": "boolean"
+          },
+          "maximum_candidates_per_batch": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "minimum_confidence_permille": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "on_session_end": {
+            "type": "boolean"
+          }
+        },
+        "additionalProperties": false
       },
       "CaptureDecisionView": {
         "type": "object",
@@ -13913,16 +14380,407 @@
           }
         }
       },
+      "ConfigurationArtifactListView": {
+        "type": "object",
+        "required": [
+          "artifacts"
+        ],
+        "properties": {
+          "artifacts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ConfigurationArtifactView"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      },
+      "ConfigurationArtifactView": {
+        "type": "object",
+        "description": "Stable aggregate metadata.",
+        "required": [
+          "id",
+          "governing_scope_id",
+          "name",
+          "current_version_id",
+          "created_at",
+          "created_by",
+          "updated_at",
+          "updated_by"
+        ],
+        "properties": {
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "created_by": {
+            "type": "string"
+          },
+          "current_version_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "governing_scope_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_by": {
+            "type": "string"
+          }
+        }
+      },
+      "ConfigurationBindingListView": {
+        "type": "object",
+        "required": [
+          "bindings"
+        ],
+        "properties": {
+          "bindings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ConfigurationBindingView"
+            }
+          },
+          "next_cursor": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          }
+        }
+      },
+      "ConfigurationBindingView": {
+        "type": "object",
+        "description": "Revisioned scope selector.",
+        "required": [
+          "id",
+          "scope_id",
+          "artifact_id",
+          "enabled",
+          "revision",
+          "created_at",
+          "created_by",
+          "updated_at",
+          "updated_by"
+        ],
+        "properties": {
+          "artifact_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "created_by": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "pinned_version_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "scope_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "updated_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updated_by": {
+            "type": "string"
+          }
+        }
+      },
+      "ConfigurationComparisonView": {
+        "type": "object",
+        "description": "Deterministic field-level comparison of two immutable versions.",
+        "required": [
+          "from_version_id",
+          "to_version_id",
+          "from_hash",
+          "to_hash",
+          "changed_fields"
+        ],
+        "properties": {
+          "changed_fields": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "from_hash": {
+            "type": "string"
+          },
+          "from_version_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "to_hash": {
+            "type": "string"
+          },
+          "to_version_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "ConfigurationDocumentBody": {
+        "type": "object",
+        "description": "A complete immutable governed runtime document.",
+        "required": [
+          "policy_pack",
+          "capture",
+          "context",
+          "freshness",
+          "advertisement",
+          "allowed_external_providers"
+        ],
+        "properties": {
+          "advertisement": {
+            "$ref": "#/components/schemas/AdvertisementConfigurationBody"
+          },
+          "allowed_external_providers": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "`anthropic`, `vllm`, `tei`, or `remote_mcp`, sorted and unique."
+          },
+          "capture": {
+            "$ref": "#/components/schemas/CaptureConfigurationBody"
+          },
+          "context": {
+            "$ref": "#/components/schemas/ContextConfigurationBody"
+          },
+          "freshness": {
+            "$ref": "#/components/schemas/FreshnessConfigurationBody"
+          },
+          "policy_pack": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "ConfigurationMutationView": {
+        "type": "object",
+        "description": "Stable result envelope for every governed mutation.",
+        "required": [
+          "change_id",
+          "outcome"
+        ],
+        "properties": {
+          "artifact_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "binding_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "binding_revision": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64",
+            "minimum": 0
+          },
+          "change_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "applied",
+              "pending_review",
+              "rejected"
+            ]
+          },
+          "version_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          }
+        }
+      },
+      "ConfigurationTemplateListView": {
+        "type": "object",
+        "required": [
+          "templates"
+        ],
+        "properties": {
+          "templates": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ConfigurationTemplateView"
+            }
+          }
+        }
+      },
+      "ConfigurationTemplateView": {
+        "type": "object",
+        "description": "Canonical template source. Selecting one creates ordinary version data.",
+        "required": [
+          "name",
+          "content_hash",
+          "document"
+        ],
+        "properties": {
+          "content_hash": {
+            "type": "string"
+          },
+          "document": {
+            "$ref": "#/components/schemas/ConfigurationDocumentBody"
+          },
+          "name": {
+            "type": "string",
+            "enum": [
+              "personal",
+              "team",
+              "enterprise"
+            ]
+          }
+        }
+      },
+      "ConfigurationVersionListView": {
+        "type": "object",
+        "required": [
+          "versions"
+        ],
+        "properties": {
+          "next_cursor": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "versions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ConfigurationVersionView"
+            }
+          }
+        }
+      },
+      "ConfigurationVersionView": {
+        "type": "object",
+        "description": "One immutable version with its complete runtime document.",
+        "required": [
+          "id",
+          "artifact_id",
+          "ordinal",
+          "document",
+          "content_hash",
+          "change_id",
+          "created_at",
+          "created_by"
+        ],
+        "properties": {
+          "artifact_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "change_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "content_hash": {
+            "type": "string"
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "created_by": {
+            "type": "string"
+          },
+          "document": {
+            "$ref": "#/components/schemas/ConfigurationDocumentBody"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "ordinal": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "source_template": {
+            "type": "string",
+            "enum": [
+              "personal",
+              "team",
+              "enterprise"
+            ]
+          }
+        }
+      },
       "ContextCandidateView": {
         "type": "object",
         "description": "One retained, freshly re-authorised planner candidate.",
         "required": [
           "id",
           "ordinal",
+          "channel",
           "content_hash",
           "reason_codes"
         ],
         "properties": {
+          "capture_candidate_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Pending capture proposal, absent for Knowledge and hashes-only mode."
+          },
+          "channel": {
+            "type": "string",
+            "description": "`current_knowledge` or the visibly unreviewed candidate channel."
+          },
           "content_hash": {
             "type": "string",
             "description": "Canonical content hash."
@@ -14002,8 +14860,52 @@
               "$ref": "#/components/schemas/KnowledgeSourceView"
             },
             "description": "Independently visible provenance, full mode only."
+          },
+          "unreviewed_candidate": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/CaptureCandidateView",
+                "description": "Freshly authorised proposal detail in full mode. Its state remains\nvisibly distinct from published Knowledge."
+              }
+            ]
           }
         }
+      },
+      "ContextConfigurationBody": {
+        "type": "object",
+        "description": "Budgeted context delivery settings.",
+        "required": [
+          "token_budget",
+          "channels",
+          "trace_retention"
+        ],
+        "properties": {
+          "channels": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "`current_knowledge`, optionally followed by `unreviewed_candidates`."
+          },
+          "token_budget": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "trace_retention": {
+            "type": "string",
+            "enum": [
+              "full",
+              "redacted",
+              "hashes_only",
+              "disabled"
+            ]
+          }
+        },
+        "additionalProperties": false
       },
       "ContextFeedbackBody": {
         "type": "object",
@@ -14455,6 +15357,7 @@
           "session_id",
           "workspace_id",
           "scope_id",
+          "configuration_hash",
           "block_hash",
           "tokens",
           "budget_tokens",
@@ -14493,6 +15396,18 @@
           "completion_status": {
             "type": "string",
             "description": "`pending`, `completed` or `failed`."
+          },
+          "configuration_hash": {
+            "type": "string",
+            "description": "Canonical digest of the exact runtime configuration."
+          },
+          "configuration_version_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Exact immutable runtime configuration, absent for the built-in\nfail-safe."
           },
           "created_at": {
             "type": "string",
@@ -14667,11 +15582,24 @@
         "required": [
           "id",
           "rank",
+          "channel",
           "content_hash",
           "token_count",
           "reason_codes"
         ],
         "properties": {
+          "capture_candidate_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Pending capture proposal, absent for Knowledge and hashes-only mode."
+          },
+          "channel": {
+            "type": "string",
+            "description": "`current_knowledge` or the visibly unreviewed candidate channel."
+          },
           "content_hash": {
             "type": "string",
             "description": "Canonical content hash."
@@ -14731,8 +15659,78 @@
             "type": "integer",
             "format": "int32",
             "description": "Estimated tokens charged."
+          },
+          "unreviewed_candidate": {
+            "oneOf": [
+              {
+                "type": "null"
+              },
+              {
+                "$ref": "#/components/schemas/CaptureCandidateView",
+                "description": "Freshly authorised proposal detail in full mode."
+              }
+            ]
           }
         }
+      },
+      "CreateConfigurationBindingBody": {
+        "type": "object",
+        "description": "Create a scope selector.",
+        "required": [
+          "scope_id",
+          "artifact_id"
+        ],
+        "properties": {
+          "artifact_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "pinned_version_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "scope_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "additionalProperties": false
+      },
+      "CreateConfigurationBody": {
+        "type": "object",
+        "description": "Create an aggregate and its first immutable version.",
+        "required": [
+          "governing_scope_id",
+          "name",
+          "document"
+        ],
+        "properties": {
+          "document": {
+            "$ref": "#/components/schemas/ConfigurationDocumentBody"
+          },
+          "governing_scope_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "source_template": {
+            "type": "string",
+            "enum": [
+              "personal",
+              "team",
+              "enterprise"
+            ]
+          }
+        },
+        "additionalProperties": false
       },
       "CreateContextRunBody": {
         "type": "object",
@@ -15211,25 +16209,6 @@
           }
         }
       },
-      "DefaultResponse": {
-        "type": "object",
-        "required": [
-          "effective"
-        ],
-        "properties": {
-          "effective": {
-            "type": "string",
-            "description": "What applies where nothing is assigned: the stored default, or the\nembedded `regulated-strict` (seed §2.1)."
-          },
-          "pack_name": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "The stored tenant default, when one exists."
-          }
-        }
-      },
       "DeleteKnowledgeBody": {
         "type": "object",
         "description": "`DELETE /v1/knowledge/{id}`. Deletion without a mode is invalid.",
@@ -15319,34 +16298,56 @@
         },
         "additionalProperties": false
       },
-      "EffectiveResponse": {
+      "EffectiveConfigurationView": {
         "type": "object",
+        "description": "Exact current document and selector evidence at a governed scope.",
         "required": [
-          "name",
-          "version",
-          "origin"
+          "scope_id",
+          "content_hash",
+          "document",
+          "fail_safe"
         ],
         "properties": {
-          "assignment": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/PolicyAssignmentView",
-                "description": "The node's own assignment row, when it carries one."
-              }
-            ]
+          "artifact_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
           },
-          "name": {
+          "binding_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "binding_scope_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "content_hash": {
             "type": "string"
           },
-          "origin": {
-            "$ref": "#/components/schemas/OriginView"
+          "document": {
+            "$ref": "#/components/schemas/ConfigurationDocumentBody"
           },
-          "version": {
-            "type": "integer",
-            "format": "int64"
+          "fail_safe": {
+            "type": "boolean"
+          },
+          "scope_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "version_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
           }
         }
       },
@@ -15393,6 +16394,69 @@
               "type": "string"
             },
             "description": "Stable item ids to export."
+          }
+        },
+        "additionalProperties": false
+      },
+      "FreshnessConfigurationBody": {
+        "type": "object",
+        "description": "Type-aware implicit staleness intervals in days; zero disables the\nimplicit date for that type.",
+        "required": [
+          "fact_days",
+          "decision_days",
+          "preference_days",
+          "procedure_days",
+          "entity_days",
+          "episode_days",
+          "convention_days",
+          "warning_days",
+          "reference_days"
+        ],
+        "properties": {
+          "convention_days": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "decision_days": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "entity_days": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "episode_days": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "fact_days": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "preference_days": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "procedure_days": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "reference_days": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
+          },
+          "warning_days": {
+            "type": "integer",
+            "format": "int32",
+            "minimum": 0
           }
         },
         "additionalProperties": false
@@ -17864,7 +18928,7 @@
       },
       "OriginView": {
         "type": "object",
-        "description": "Where an inherited thing came from.\n\n`pub(crate)` since CNSL-2 (ADR-0058 decision 6): the capabilities probe\nand the effective-roles listing both report an origin, and the whole\npoint of that decision is that the admin planes say \"this came from\nabove\" in **one** vocabulary rather than three that agree on the day\nthey are written.",
+        "description": "Stable API origin vocabulary retained by the capability surface. These\nvalues describe the PDP's derived selector, not a mutable assignment row.",
         "required": [
           "kind"
         ],
@@ -17890,8 +18954,7 @@
         ],
         "properties": {
           "kind": {
-            "type": "string",
-            "description": "`embedded` (compiled into the binary) or `stored` (a tenant row)."
+            "type": "string"
           },
           "name": {
             "type": "string"
@@ -18018,27 +19081,6 @@
           }
         },
         "additionalProperties": false
-      },
-      "PolicyAssignmentView": {
-        "type": "object",
-        "required": [
-          "scope_id",
-          "pack_name",
-          "updated_at"
-        ],
-        "properties": {
-          "pack_name": {
-            "type": "string"
-          },
-          "scope_id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "updated_at": {
-            "type": "string",
-            "format": "date-time"
-          }
-        }
       },
       "PrincipalView": {
         "type": "object",
@@ -18989,6 +20031,32 @@
           }
         }
       },
+      "PublishConfigurationBody": {
+        "type": "object",
+        "description": "Publish another complete immutable version.",
+        "required": [
+          "expected_current_version_id",
+          "document"
+        ],
+        "properties": {
+          "document": {
+            "$ref": "#/components/schemas/ConfigurationDocumentBody"
+          },
+          "expected_current_version_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "source_template": {
+            "type": "string",
+            "enum": [
+              "personal",
+              "team",
+              "enterprise"
+            ]
+          }
+        },
+        "additionalProperties": false
+      },
       "QuarantineEventView": {
         "type": "object",
         "description": "One quarantined event as the API renders it: the redacted payload,\nthe finding summary, and the review state — never raw finding text\n(there is none anywhere to render, ADR-0021 decision 1).",
@@ -19340,6 +20408,26 @@
             "description": "When it last changed."
           }
         }
+      },
+      "RollbackConfigurationBindingBody": {
+        "type": "object",
+        "description": "Pin an older version without mutating history.",
+        "required": [
+          "expected_revision",
+          "version_id"
+        ],
+        "properties": {
+          "expected_revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "version_id": {
+            "type": "string",
+            "format": "uuid"
+          }
+        },
+        "additionalProperties": false
       },
       "RollbackSkillBindingBody": {
         "type": "object",
@@ -19900,17 +20988,6 @@
             "type": "string",
             "format": "uuid",
             "description": "The workspace the run happened in."
-          }
-        }
-      },
-      "SetPackBody": {
-        "type": "object",
-        "required": [
-          "name"
-        ],
-        "properties": {
-          "name": {
-            "type": "string"
           }
         }
       },
@@ -21633,6 +22710,41 @@
         },
         "additionalProperties": false
       },
+      "UpdateConfigurationBindingBody": {
+        "type": "object",
+        "description": "Change a selector under an exact revision precondition.",
+        "required": [
+          "expected_revision",
+          "artifact_id",
+          "enabled",
+          "reason"
+        ],
+        "properties": {
+          "artifact_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "format": "int64",
+            "minimum": 0
+          },
+          "pinned_version_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
       "UpdateGroupBody": {
         "type": "object",
         "description": "`PATCH /v1/admin/groups/{group_id}`.\n\n`members` is a **full replacement**, not a delta: a membership list has no\nprecondition of its own, so add/remove pairs race — two callers each\nremoving one person can both succeed and leave a list neither intended. A\nreplacement under `expected_revision` cannot.",
@@ -21984,7 +23096,11 @@
     },
     {
       "name": "policy",
-      "description": "Policy packs, scope assignments and curator requirements"
+      "description": "Cedar policy packs and curator requirements"
+    },
+    {
+      "name": "configuration",
+      "description": "Immutable governed runtime documents and revisioned scope bindings"
     },
     {
       "name": "policy-relaxations",

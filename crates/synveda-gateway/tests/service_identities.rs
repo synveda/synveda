@@ -504,15 +504,23 @@ async fn agent_token_with_team_scope_cannot_call_org_scope_endpoints() {
     assert_eq!(status, StatusCode::OK, "the admin user reaches the org");
 
     // ...but the agent's token stays confined: org-scope endpoints deny.
+    let denied_configuration = json!({
+        "governing_scope_id": org.id,
+        "name": "forbidden-tenant-configuration",
+        "document": synveda_types::configuration::ConfigurationDocument::template(
+            synveda_types::configuration::ConfigurationTemplate::Enterprise,
+        ),
+        "source_template": "enterprise",
+    });
     for (method, uri, body) in [
         (Method::GET, format!("/v1/admin/scopes/{}", org.id), None),
         (Method::GET, format!("/v1/admin/scopes/{}", eng.id), None),
         (Method::GET, "/v1/admin/scopes".to_owned(), None),
         (Method::GET, "/v1/admin/grants".to_owned(), None),
         (
-            Method::PUT,
-            "/v1/policy/default".to_owned(),
-            Some(json!({ "name": "standard" })),
+            Method::POST,
+            "/v1/configurations".to_owned(),
+            Some(denied_configuration),
         ),
         (
             Method::POST,

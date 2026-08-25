@@ -101,16 +101,16 @@ test("everybody gets the same product navigation, whatever they hold", () => {
 test("a caller with no governance capability is shown no Advanced section at all", () => {
   const rendered = shell({});
   assert.ok(!rendered.includes("Advanced"), `an empty Advanced heading was rendered:\n\n${rendered}`);
-  for (const label of ["Reviews", "Scopes", "Policies", "Audit", "Service identities"]) {
+  for (const label of ["Reviews", "Scopes", "Configuration", "Audit", "Service identities"]) {
     assert.ok(!rendered.includes(label), `${label} was offered to a caller with nothing`);
   }
 });
 
 test("the Advanced section carries exactly the planes the forecast offers", () => {
-  const rendered = shell({ "proposal.read": true, "policy.read": true });
+  const rendered = shell({ "proposal.read": true, "configuration.read": true });
   assert.ok(rendered.includes("Advanced"));
   assert.ok(rendered.includes("Reviews"));
-  assert.ok(rendered.includes("Policies"));
+  assert.ok(rendered.includes("Configuration"));
   assert.ok(!rendered.includes("Audit"), `Audit was offered without audit.read:\n\n${rendered}`);
   assert.ok(!rendered.includes("Service identities"));
 });

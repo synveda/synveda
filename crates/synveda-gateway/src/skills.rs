@@ -22,7 +22,7 @@ use synveda_store::skills::{
     self as store, ResolvedBinding, StoredBinding, StoredSkill, StoredTestRun, StoredUsageEvent,
     StoredVersion, StoredVersionFile,
 };
-use synveda_store::{rls, scopes};
+use synveda_store::{configuration, rls, scopes};
 use synveda_types::json::canonicalise;
 use synveda_types::scope::{Scope, ScopeKind};
 use synveda_types::{
@@ -2712,13 +2712,18 @@ pub(crate) async fn available(
             Action::SkillRead,
         )
         .await?;
+        let runtime = configuration::effective_at_scope(&mut tx, tenant, params.scope_id).await?;
         let mut scope_ids = vec![params.scope_id];
         if let Some(personal) = input.principal.scope_id
             && personal != params.scope_id
         {
             scope_ids.push(personal);
         }
-        let candidates = store::resolve_for_scopes(&mut tx, tenant, &scope_ids).await?;
+        let candidates = if runtime.document.advertisement.skills {
+            store::resolve_for_scopes(&mut tx, tenant, &scope_ids).await?
+        } else {
+            Vec::new()
+        };
         let mut names = std::collections::HashSet::new();
         let mut visible = Vec::new();
         let mut policy_excluded = 0_u64;
@@ -2754,6 +2759,9 @@ pub(crate) async fn available(
                     "bundle_digest": skill.version.bundle_digest,
                 })).collect::<Vec<_>>(),
                 "policy_excluded": policy_excluded,
+                "configuration_version_id": runtime.version_id,
+                "configuration_hash": runtime.content_hash,
+                "advertisement_enabled": runtime.document.advertisement.skills,
             }),
         )
         .await?;

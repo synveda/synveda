@@ -579,6 +579,12 @@ pub struct ContextRun {
     pub scope_id: ScopeId,
     /// The token subject that asked.
     pub principal_id: String,
+    /// Exact immutable governed configuration, absent only for the built-in
+    /// fail-safe used before a tenant publishes its first binding.
+    pub configuration_version_id: Option<crate::ConfigurationVersionId>,
+    /// Canonical digest of the exact runtime document, including the
+    /// built-in fail-safe.
+    pub configuration_hash: String,
     /// The task the caller named, when it named one. `None` is the
     /// session-start shape: everything pinned, nothing ranked.
     pub query: Option<String>,

@@ -28,29 +28,35 @@ use synveda_retrieval::{
     estimated_tokens,
 };
 use synveda_store::anchors::AnchorSelection;
+use synveda_store::capture::{self as capture_store, CandidateFilter};
 use synveda_store::context::{
     self as store, NewContextCandidate, NewContextFeedback, NewContextSelection,
 };
 use synveda_store::knowledge::{self as knowledge, KnowledgeSnapshot};
 use synveda_store::knowledge_search::{self as search, Candidate, Filters};
 use synveda_store::sessions::{self, ContextRunCursor, ContextRunFilter, NewContextRun};
-use synveda_store::{policy_assignments, rls, scopes};
+use synveda_store::{configuration, policy_assignments, rls, scopes};
+use synveda_types::capture::{CaptureCandidate, CaptureCandidateState};
+use synveda_types::configuration::{
+    ConfigurationContextChannel, EffectiveConfiguration, ExternalProvider,
+};
 use synveda_types::context::{ContextFeedbackType, ContextReasonCode, TraceRetentionMode};
 use synveda_types::knowledge::{
     KnowledgeLifecycleState, KnowledgeRevision, KnowledgeSource, KnowledgeType,
 };
 use synveda_types::session::{ContextRun, Session};
 use synveda_types::{
-    ContextCandidate, ContextCandidateId, ContextCompletionStatus, ContextFeedback,
-    ContextFeedbackId, ContextRunId, ContextSelection, ContextSelectionId, Error, KnowledgeItemId,
-    KnowledgeRevisionId, PolicyAssignment, ProjectId, Result, ScopeId, Sensitivity, SessionId,
-    TenantId,
+    CaptureCandidateId, ContextCandidate, ContextCandidateId, ContextCompletionStatus,
+    ContextFeedback, ContextFeedbackId, ContextRunId, ContextSelection, ContextSelectionId, Error,
+    KnowledgeItemId, KnowledgeRevisionId, PolicyAssignment, ProjectId, Result, ScopeId,
+    Sensitivity, SessionId, TenantId,
 };
 use utoipa::ToSchema;
 
 use crate::app::AppState;
 use crate::audit;
 use crate::authz::{self, Authorized};
+use crate::capture::CaptureCandidateView;
 use crate::error::ApiError;
 use crate::idempotency::{Claim, Dispatch};
 use crate::knowledge_api::{KnowledgeItemView, KnowledgeRevisionView, KnowledgeSourceView};
@@ -74,6 +80,7 @@ const DEFAULT_QUERY_LIMIT: i64 = 20;
 const MAX_QUERY_LIMIT: i64 = 100;
 const PLANNER_CANDIDATE_LIMIT: i64 = 96;
 const TRACE_LIFECYCLE_LIMIT: i64 = 16;
+const UNREVIEWED_CANDIDATE_LIMIT: usize = 24;
 const MAX_QUERY_CHARS: usize = 4_096;
 const RETRIEVAL_VERSION: &str = "knowledge-planner-v1";
 const INDEX_VERSION: &str = "knowledge-search-v1";
@@ -103,6 +110,8 @@ pub struct ContextCandidateView {
     pub id: ContextCandidateId,
     /// Consideration position.
     pub ordinal: i32,
+    /// `current_knowledge` or the visibly unreviewed candidate channel.
+    pub channel: String,
     /// Stable Knowledge item, absent in hashes-only mode.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schema(value_type = Option<String>, format = "uuid")]
@@ -111,6 +120,10 @@ pub struct ContextCandidateView {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schema(value_type = Option<String>, format = "uuid")]
     pub knowledge_revision_id: Option<KnowledgeRevisionId>,
+    /// Pending capture proposal, absent for Knowledge and hashes-only mode.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>, format = "uuid")]
+    pub capture_candidate_id: Option<CaptureCandidateId>,
     /// Canonical content hash.
     pub content_hash: String,
     /// Lifecycle observed at planning time.
@@ -130,6 +143,10 @@ pub struct ContextCandidateView {
     /// Independently visible provenance, full mode only.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub sources: Vec<KnowledgeSourceView>,
+    /// Freshly authorised proposal detail in full mode. Its state remains
+    /// visibly distinct from published Knowledge.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unreviewed_candidate: Option<CaptureCandidateView>,
 }
 
 /// One retained selected revision.
@@ -140,6 +157,8 @@ pub struct ContextSelectionView {
     pub id: ContextSelectionId,
     /// One-based delivery rank.
     pub rank: i32,
+    /// `current_knowledge` or the visibly unreviewed candidate channel.
+    pub channel: String,
     /// Stable Knowledge item, absent in hashes-only mode.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schema(value_type = Option<String>, format = "uuid")]
@@ -148,6 +167,10 @@ pub struct ContextSelectionView {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schema(value_type = Option<String>, format = "uuid")]
     pub knowledge_revision_id: Option<KnowledgeRevisionId>,
+    /// Pending capture proposal, absent for Knowledge and hashes-only mode.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>, format = "uuid")]
+    pub capture_candidate_id: Option<CaptureCandidateId>,
     /// Canonical content hash.
     pub content_hash: String,
     /// Estimated tokens charged.
@@ -160,6 +183,9 @@ pub struct ContextSelectionView {
     /// Independently visible provenance, full mode only.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub sources: Vec<KnowledgeSourceView>,
+    /// Freshly authorised proposal detail in full mode.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unreviewed_candidate: Option<CaptureCandidateView>,
 }
 
 /// One explicit feedback assertion.
@@ -606,6 +632,8 @@ struct PreparedContext {
     session_resource: Resource,
     plan: synveda_retrieval::CompositionPlan,
     knowledge_scopes: Vec<ScopeId>,
+    unreviewed_scopes: Vec<ScopeId>,
+    configuration: EffectiveConfiguration,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -614,9 +642,14 @@ struct ScoreSeed {
     semantic_micros: i32,
 }
 
+enum PlannedPayload {
+    Knowledge(KnowledgeSnapshot),
+    Unreviewed(CaptureCandidate),
+}
+
 struct PlannedCandidate {
     id: ContextCandidateId,
-    snapshot: KnowledgeSnapshot,
+    payload: PlannedPayload,
     sources: Vec<KnowledgeSource>,
     keyword_micros: i32,
     semantic_micros: i32,
@@ -631,16 +664,67 @@ struct PlannedCandidate {
 }
 
 impl PlannedCandidate {
-    fn item_id(&self) -> KnowledgeItemId {
-        self.snapshot.item.id
+    fn channel(&self) -> ConfigurationContextChannel {
+        match &self.payload {
+            PlannedPayload::Knowledge(_) => ConfigurationContextChannel::CurrentKnowledge,
+            PlannedPayload::Unreviewed(_) => ConfigurationContextChannel::UnreviewedCandidates,
+        }
     }
 
-    fn revision_id(&self) -> KnowledgeRevisionId {
-        self.snapshot.revision.id
+    fn item_id(&self) -> Option<KnowledgeItemId> {
+        match &self.payload {
+            PlannedPayload::Knowledge(snapshot) => Some(snapshot.item.id),
+            PlannedPayload::Unreviewed(_) => None,
+        }
+    }
+
+    fn revision_id(&self) -> Option<KnowledgeRevisionId> {
+        match &self.payload {
+            PlannedPayload::Knowledge(snapshot) => Some(snapshot.revision.id),
+            PlannedPayload::Unreviewed(_) => None,
+        }
+    }
+
+    fn capture_candidate_id(&self) -> Option<CaptureCandidateId> {
+        match &self.payload {
+            PlannedPayload::Knowledge(_) => None,
+            PlannedPayload::Unreviewed(candidate) => Some(candidate.id),
+        }
     }
 
     fn content_hash(&self) -> &str {
-        &self.snapshot.revision.content_hash
+        match &self.payload {
+            PlannedPayload::Knowledge(snapshot) => &snapshot.revision.content_hash,
+            PlannedPayload::Unreviewed(candidate) => &candidate.content_hash,
+        }
+    }
+
+    fn scope_id(&self) -> ScopeId {
+        match &self.payload {
+            PlannedPayload::Knowledge(snapshot) => snapshot.item.scope_id,
+            PlannedPayload::Unreviewed(candidate) => candidate.proposed_scope_id,
+        }
+    }
+
+    fn lifecycle_state(&self) -> Option<KnowledgeLifecycleState> {
+        match &self.payload {
+            PlannedPayload::Knowledge(snapshot) => Some(snapshot.item.lifecycle_state),
+            PlannedPayload::Unreviewed(_) => None,
+        }
+    }
+
+    fn updated_at(&self) -> DateTime<Utc> {
+        match &self.payload {
+            PlannedPayload::Knowledge(snapshot) => snapshot.item.updated_at,
+            PlannedPayload::Unreviewed(candidate) => candidate.created_at,
+        }
+    }
+
+    fn knowledge(&self) -> Option<&KnowledgeSnapshot> {
+        match &self.payload {
+            PlannedPayload::Knowledge(snapshot) => Some(snapshot),
+            PlannedPayload::Unreviewed(_) => None,
+        }
     }
 }
 
@@ -661,7 +745,7 @@ async fn prepare_context(
 
     let principal_ids: Vec<ScopeId> = input.principal_scopes.iter().map(|node| node.id).collect();
     let mut assignments: Vec<PolicyAssignment> = input.assignments.clone();
-    for assignment in policy_assignments::for_scopes(&mut *tx, tenant_id, &principal_ids).await? {
+    for assignment in policy_assignments::for_scopes(&mut tx, tenant_id, &principal_ids).await? {
         if !assignments
             .iter()
             .any(|held| held.scope_id == assignment.scope_id)
@@ -690,7 +774,7 @@ async fn prepare_context(
             assignments: &assignments,
         })
         .collect();
-    let plan = composition_plan(
+    let mut plan = composition_plan(
         &state.pdp,
         &MemoryReadInputs {
             principal: &input.principal,
@@ -704,16 +788,48 @@ async fn prepare_context(
             candidates: &candidate_scopes,
         },
     )?;
+    let configuration =
+        configuration::effective_at_scope(&mut tx, tenant_id, session.scope_id).await?;
+    plan.budget_tokens = plan
+        .budget_tokens
+        .min(configuration.document.context.token_budget);
+    plan.trace_retention = narrower_trace_retention(
+        plan.trace_retention,
+        configuration.document.context.trace_retention,
+    );
+    if !configuration.document.advertisement.skills {
+        for scope in &mut plan.scopes {
+            scope.skill_sensitivities.clear();
+        }
+    }
 
     // Knowledge's candidate universe is about the session task plus the
     // caller's private scope. It does not inherit `MemoryRead`: every exact
     // item gets its own `KnowledgeRead` decision below.
-    let mut knowledge_scopes = Vec::new();
+    let mut content_scopes = Vec::new();
     for scope in session_chain.iter().chain(own_chain.iter()) {
-        if !knowledge_scopes.contains(&scope.id) {
-            knowledge_scopes.push(scope.id);
+        if !content_scopes.contains(&scope.id) {
+            content_scopes.push(scope.id);
         }
     }
+    let knowledge_scopes = if configuration
+        .document
+        .context
+        .permits(ConfigurationContextChannel::CurrentKnowledge)
+    {
+        content_scopes.clone()
+    } else {
+        Vec::new()
+    };
+    let unreviewed_scopes = if configuration
+        .document
+        .context
+        .permits(ConfigurationContextChannel::UnreviewedCandidates)
+    {
+        content_scopes
+    } else {
+        Vec::new()
+    };
     commit(tx).await?;
     Ok(PreparedContext {
         session,
@@ -721,7 +837,29 @@ async fn prepare_context(
         session_resource,
         plan,
         knowledge_scopes,
+        unreviewed_scopes,
+        configuration,
     })
+}
+
+fn trace_retention_rank(mode: TraceRetentionMode) -> u8 {
+    match mode {
+        TraceRetentionMode::Full => 0,
+        TraceRetentionMode::Redacted => 1,
+        TraceRetentionMode::HashesOnly => 2,
+        TraceRetentionMode::Disabled => 3,
+    }
+}
+
+fn narrower_trace_retention(
+    policy: TraceRetentionMode,
+    configuration: TraceRetentionMode,
+) -> TraceRetentionMode {
+    if trace_retention_rank(policy) >= trace_retention_rank(configuration) {
+        policy
+    } else {
+        configuration
+    }
 }
 
 fn context_filters(
@@ -916,6 +1054,67 @@ fn planned_score(
     (freshness, pin, final_score, reasons)
 }
 
+fn unreviewed_score(
+    candidate: &CaptureCandidate,
+    query: Option<&str>,
+    at: DateTime<Utc>,
+) -> (
+    i32,
+    i32,
+    i32,
+    Vec<ContextReasonCode>,
+    Option<ContextReasonCode>,
+) {
+    let terms: HashSet<String> = query
+        .into_iter()
+        .flat_map(|value| value.split(|character: char| !character.is_alphanumeric()))
+        .filter(|term| term.chars().count() >= 2)
+        .map(str::to_lowercase)
+        .collect();
+    let haystack = format!(
+        "{}\n{}\n{}",
+        candidate.content.title, candidate.content.summary, candidate.content.body_markdown
+    )
+    .to_lowercase();
+    let hits = terms
+        .iter()
+        .filter(|term| haystack.contains(term.as_str()))
+        .count();
+    let keyword = if terms.is_empty() {
+        0
+    } else {
+        i32::try_from((hits * 700_000) / terms.len()).unwrap_or(700_000)
+    };
+    let age_days = at
+        .signed_duration_since(candidate.created_at)
+        .num_days()
+        .max(0);
+    let freshness = 50_000_i32
+        .saturating_sub(i32::try_from(age_days.saturating_mul(1_000)).unwrap_or(i32::MAX))
+        .max(0);
+    let mut reasons = Vec::new();
+    if keyword > 0 {
+        reasons.push(ContextReasonCode::KeywordMatch);
+    }
+    if freshness > 0 {
+        reasons.push(ContextReasonCode::FreshnessBoost);
+    }
+    let exclusion = (query.is_some() && hits == 0).then_some(ContextReasonCode::OutsideTaskScope);
+    if let Some(reason) = exclusion {
+        reasons.push(reason);
+    }
+    if reasons.is_empty() {
+        reasons.push(ContextReasonCode::FreshnessBoost);
+    }
+    (
+        keyword,
+        freshness,
+        keyword.saturating_add(freshness),
+        reasons,
+        exclusion,
+    )
+}
+
 struct CandidateCollection<'a> {
     prepared: &'a PreparedContext,
     principal_id: &'a str,
@@ -939,71 +1138,77 @@ async fn collect_planned_candidates(
         max_sensitivity,
         at,
     } = request;
-    let active_filters = context_filters(
-        prepared.knowledge_scopes.clone(),
-        KnowledgeLifecycleState::Active,
-        at,
-    );
-    let (active_ids, active_seeds) = candidate_seeds(
-        tx,
-        tenant_id,
-        &active_filters,
-        query,
-        semantic,
-        PLANNER_CANDIDATE_LIMIT,
-    )
-    .await?;
-
-    let mut pools: Vec<(KnowledgeItemId, ScoreSeed, Option<ContextReasonCode>)> = active_ids
-        .into_iter()
-        .map(|id| (id, active_seeds.get(&id).copied().unwrap_or_default(), None))
-        .collect();
-
-    // A queryless session start is recency-shaped, but an older personal
-    // preference or project convention must not disappear merely because a
-    // busy project produced ninety-six newer facts. Pull each high-signal
-    // type through the same bounded current projection and exact PDP pass.
-    if query.is_none() {
-        for knowledge_type in [KnowledgeType::Preference, KnowledgeType::Convention] {
-            let mut typed = active_filters.clone();
-            typed.knowledge_type = Some(knowledge_type);
-            let (ids, seeds) =
-                candidate_seeds(tx, tenant_id, &typed, None, None, TRACE_LIFECYCLE_LIMIT).await?;
-            pools.extend(
-                ids.into_iter()
-                    .map(|id| (id, seeds.get(&id).copied().unwrap_or_default(), None)),
-            );
-        }
-    }
-
-    // Stale and superseded rows are trace-only. They are bounded separately
-    // and undergo the same exact item decision before any address is retained.
-    for (lifecycle, reason) in [
-        (KnowledgeLifecycleState::Stale, ContextReasonCode::Stale),
-        (
-            KnowledgeLifecycleState::Superseded,
-            ContextReasonCode::Superseded,
-        ),
-    ] {
-        let traced = search::lifecycle_trace_candidates(
+    let mut pools: Vec<(KnowledgeItemId, ScoreSeed, Option<ContextReasonCode>)> = Vec::new();
+    if !prepared.knowledge_scopes.is_empty() {
+        let active_filters = context_filters(
+            prepared.knowledge_scopes.clone(),
+            KnowledgeLifecycleState::Active,
+            at,
+        );
+        let (active_ids, active_seeds) = candidate_seeds(
             tx,
             tenant_id,
-            &prepared.knowledge_scopes,
-            lifecycle,
+            &active_filters,
             query,
-            TRACE_LIFECYCLE_LIMIT,
+            semantic,
+            PLANNER_CANDIDATE_LIMIT,
         )
         .await?;
-        pools.extend(traced.into_iter().map(|candidate| {
+        pools.extend(
+            active_ids
+                .into_iter()
+                .map(|id| (id, active_seeds.get(&id).copied().unwrap_or_default(), None)),
+        );
+
+        // A queryless session start is recency-shaped, but an older personal
+        // preference or project convention must not disappear merely because
+        // a busy project produced ninety-six newer facts. Pull each
+        // high-signal type through the same bounded current projection and
+        // exact PDP pass.
+        if query.is_none() {
+            for knowledge_type in [KnowledgeType::Preference, KnowledgeType::Convention] {
+                let mut typed = active_filters.clone();
+                typed.knowledge_type = Some(knowledge_type);
+                let (ids, seeds) =
+                    candidate_seeds(tx, tenant_id, &typed, None, None, TRACE_LIFECYCLE_LIMIT)
+                        .await?;
+                pools.extend(
+                    ids.into_iter()
+                        .map(|id| (id, seeds.get(&id).copied().unwrap_or_default(), None)),
+                );
+            }
+        }
+
+        // Stale and superseded rows are trace-only. They are bounded
+        // separately and undergo the same exact item decision before any
+        // address is retained.
+        for (lifecycle, reason) in [
+            (KnowledgeLifecycleState::Stale, ContextReasonCode::Stale),
             (
-                candidate.item_id,
-                ScoreSeed {
-                    keyword_micros: score_micros(candidate.score),
-                    semantic_micros: 0,
-                },
-                Some(reason),
+                KnowledgeLifecycleState::Superseded,
+                ContextReasonCode::Superseded,
+            ),
+        ] {
+            let traced = search::lifecycle_trace_candidates(
+                tx,
+                tenant_id,
+                &prepared.knowledge_scopes,
+                lifecycle,
+                query,
+                TRACE_LIFECYCLE_LIMIT,
             )
-        }));
+            .await?;
+            pools.extend(traced.into_iter().map(|candidate| {
+                (
+                    candidate.item_id,
+                    ScoreSeed {
+                        keyword_micros: score_micros(candidate.score),
+                        semantic_micros: 0,
+                    },
+                    Some(reason),
+                )
+            }));
+        }
     }
 
     let mut denied = false;
@@ -1040,18 +1245,13 @@ async fn collect_planned_candidates(
             if !reasons.contains(&reason) {
                 reasons.push(reason);
             }
-        } else if snapshot
-            .revision
-            .content
-            .stale_after
-            .is_some_and(|due| due <= at)
-        {
+        } else if stale_at(&snapshot, &prepared.configuration, at) {
             reasons.push(ContextReasonCode::Stale);
             exclusion = Some(ContextReasonCode::Stale);
         }
         planned.push(PlannedCandidate {
             id: ContextCandidateId::new(),
-            snapshot,
+            payload: PlannedPayload::Knowledge(snapshot),
             sources: Vec::new(),
             keyword_micros: seed.keyword_micros,
             semantic_micros: seed.semantic_micros,
@@ -1066,19 +1266,72 @@ async fn collect_planned_candidates(
         });
     }
 
+    // Pending extraction output is a separately configured channel, never a
+    // shortcut into current Knowledge. The bounded store query narrows by the
+    // session/project chain plus the caller's principal scope; each surviving
+    // row then passes both its source decision and its proposed-destination
+    // KnowledgeRead decision before any address, score or count is retained.
+    if !prepared.unreviewed_scopes.is_empty() {
+        let unreviewed = capture_store::list_candidates(
+            tx,
+            tenant_id,
+            &CandidateFilter {
+                state: Some(CaptureCandidateState::Pending),
+                scope_ids: prepared.unreviewed_scopes.clone(),
+                ..CandidateFilter::default()
+            },
+        )
+        .await?;
+        let mut visible = 0usize;
+        for candidate in unreviewed {
+            if visible == UNREVIEWED_CANDIDATE_LIMIT {
+                break;
+            }
+            if candidate.content_erased
+                || max_sensitivity.is_some_and(|ceiling| candidate.content.sensitivity > ceiling)
+            {
+                continue;
+            }
+            let authorization =
+                match crate::capture::authorize_context_candidate(state, tx, tenant_id, &candidate)
+                    .await
+                {
+                    Ok(allowed) => allowed,
+                    Err(Error::PolicyDenied { .. } | Error::NotFound { .. }) => {
+                        denied = true;
+                        continue;
+                    }
+                    Err(error) => return Err(error),
+                };
+            visible += 1;
+            let (keyword, freshness, final_score, reasons, exclusion) =
+                unreviewed_score(&candidate, query, at);
+            planned.push(PlannedCandidate {
+                id: ContextCandidateId::new(),
+                payload: PlannedPayload::Unreviewed(candidate),
+                sources: Vec::new(),
+                keyword_micros: keyword,
+                semantic_micros: 0,
+                freshness_micros: freshness,
+                pin_micros: 0,
+                current_state_micros: 0,
+                final_micros: final_score,
+                reasons,
+                exclusion,
+                authorization,
+                selected_tokens: None,
+            });
+        }
+    }
+
     planned.sort_by(|left, right| {
         left.exclusion
             .is_some()
             .cmp(&right.exclusion.is_some())
             .then_with(|| right.final_micros.cmp(&left.final_micros))
-            .then_with(|| {
-                right
-                    .snapshot
-                    .item
-                    .updated_at
-                    .cmp(&left.snapshot.item.updated_at)
-            })
+            .then_with(|| right.updated_at().cmp(&left.updated_at()))
             .then_with(|| right.item_id().cmp(&left.item_id()))
+            .then_with(|| right.content_hash().cmp(left.content_hash()))
     });
 
     // One semantic fact appears once. The lower-ranked duplicate remains a
@@ -1097,6 +1350,26 @@ async fn collect_planned_candidates(
     Ok((planned, denied))
 }
 
+fn stale_at(
+    snapshot: &KnowledgeSnapshot,
+    configuration: &EffectiveConfiguration,
+    at: DateTime<Utc>,
+) -> bool {
+    if let Some(due) = snapshot.revision.content.stale_after {
+        return due <= at;
+    }
+    let days = configuration
+        .document
+        .freshness
+        .days_for(snapshot.item.knowledge_type);
+    days > 0
+        && snapshot
+            .revision
+            .transaction_time
+            .checked_add_signed(chrono::Duration::days(i64::from(days)))
+            .is_some_and(|due| due <= at)
+}
+
 fn source_line(source: &KnowledgeSource) -> String {
     let address = source
         .session_event_id
@@ -1107,28 +1380,68 @@ fn source_line(source: &KnowledgeSource) -> String {
 }
 
 fn knowledge_snippet(candidate: &PlannedCandidate) -> String {
-    let revision = &candidate.snapshot.revision;
-    let item = &candidate.snapshot.item;
-    let evidence = if candidate.sources.is_empty() {
-        "source evidence withheld or unavailable".to_owned()
-    } else {
-        candidate
-            .sources
-            .iter()
-            .map(source_line)
-            .collect::<Vec<_>>()
-            .join(", ")
-    };
-    format!(
-        "\n### {}\n{}\n\n_Source: {}; Knowledge {} revision {}; type={}; scope={}_\n",
-        revision.content.title,
-        revision.content.body_markdown,
-        evidence,
-        item.id,
-        revision.id,
-        item.knowledge_type.as_str(),
-        item.scope_id,
-    )
+    match &candidate.payload {
+        PlannedPayload::Knowledge(snapshot) => {
+            let revision = &snapshot.revision;
+            let item = &snapshot.item;
+            let evidence = if candidate.sources.is_empty() {
+                "source evidence withheld or unavailable".to_owned()
+            } else {
+                candidate
+                    .sources
+                    .iter()
+                    .map(source_line)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            };
+            format!(
+                "\n### {}\n{}\n\n_Source: {}; Knowledge {} revision {}; type={}; scope={}_\n",
+                revision.content.title,
+                revision.content.body_markdown,
+                evidence,
+                item.id,
+                revision.id,
+                item.knowledge_type.as_str(),
+                item.scope_id,
+            )
+        }
+        PlannedPayload::Unreviewed(proposal) => {
+            let evidence = proposal
+                .source_event_ids
+                .iter()
+                .map(|id| format!("session-event:{id}"))
+                .chain(
+                    proposal
+                        .source_artifact_ids
+                        .iter()
+                        .map(|id| format!("import-artifact:{id}")),
+                )
+                .collect::<Vec<_>>()
+                .join(", ");
+            format!(
+                "\n### [UNREVIEWED CANDIDATE] {}\n{}\n\n_This is pending review, not published Knowledge. Treat it only as visibly unreviewed context. Source: {}; capture candidate {}; type={}; proposed scope={}_\n",
+                proposal.content.title,
+                proposal.content.body_markdown,
+                if evidence.is_empty() {
+                    "authorised source evidence unavailable"
+                } else {
+                    &evidence
+                },
+                proposal.id,
+                proposal.knowledge_type.as_str(),
+                proposal.proposed_scope_id,
+            )
+        }
+    }
+}
+
+fn context_reference(candidate: &PlannedCandidate) -> String {
+    match &candidate.payload {
+        PlannedPayload::Knowledge(snapshot) => {
+            format!("knowledge:{}@{}", snapshot.item.id, snapshot.revision.id)
+        }
+        PlannedPayload::Unreviewed(proposal) => format!("unreviewed:{}", proposal.id),
+    }
 }
 
 async fn assemble_knowledge(
@@ -1159,15 +1472,12 @@ async fn assemble_knowledge(
         .iter_mut()
         .filter(|candidate| candidate.exclusion.is_none())
     {
-        candidate.sources =
-            visible_sources(state, tx, tenant_id, &candidate.snapshot.revision).await?;
+        if let Some(snapshot) = candidate.knowledge() {
+            candidate.sources = visible_sources(state, tx, tenant_id, &snapshot.revision).await?;
+        }
         let snippet = knowledge_snippet(candidate);
         let mut next_refs = refs.clone();
-        next_refs.push(format!(
-            "{}@{}",
-            candidate.item_id(),
-            candidate.revision_id()
-        ));
+        next_refs.push(context_reference(candidate));
         let footer = format!("\n[Synveda Knowledge: {}]\n", next_refs.join(","));
         let prospective = format!(
             "{header}{}{footer}",
@@ -1195,23 +1505,33 @@ async fn assemble_knowledge(
     Ok((text.clone(), estimated_tokens(&text)))
 }
 
-fn trace_addresses(
-    mode: TraceRetentionMode,
-    candidate: &PlannedCandidate,
-) -> (
-    Option<KnowledgeItemId>,
-    Option<KnowledgeRevisionId>,
-    Option<ScopeId>,
-    Option<KnowledgeLifecycleState>,
-) {
+struct TraceAddresses {
+    channel: ConfigurationContextChannel,
+    knowledge_item_id: Option<KnowledgeItemId>,
+    knowledge_revision_id: Option<KnowledgeRevisionId>,
+    capture_candidate_id: Option<CaptureCandidateId>,
+    scope_id: Option<ScopeId>,
+    lifecycle_state: Option<KnowledgeLifecycleState>,
+}
+
+fn trace_addresses(mode: TraceRetentionMode, candidate: &PlannedCandidate) -> TraceAddresses {
     match mode {
-        TraceRetentionMode::Full | TraceRetentionMode::Redacted => (
-            Some(candidate.item_id()),
-            Some(candidate.revision_id()),
-            Some(candidate.snapshot.item.scope_id),
-            Some(candidate.snapshot.item.lifecycle_state),
-        ),
-        TraceRetentionMode::HashesOnly | TraceRetentionMode::Disabled => (None, None, None, None),
+        TraceRetentionMode::Full | TraceRetentionMode::Redacted => TraceAddresses {
+            channel: candidate.channel(),
+            knowledge_item_id: candidate.item_id(),
+            knowledge_revision_id: candidate.revision_id(),
+            capture_candidate_id: candidate.capture_candidate_id(),
+            scope_id: Some(candidate.scope_id()),
+            lifecycle_state: candidate.lifecycle_state(),
+        },
+        TraceRetentionMode::HashesOnly | TraceRetentionMode::Disabled => TraceAddresses {
+            channel: candidate.channel(),
+            knowledge_item_id: None,
+            knowledge_revision_id: None,
+            capture_candidate_id: None,
+            scope_id: None,
+            lifecycle_state: None,
+        },
     }
 }
 
@@ -1228,7 +1548,7 @@ async fn persist_trace(
     let mut selections = Vec::new();
     let mut rank = 0_i32;
     for (ordinal, candidate) in candidates.iter().enumerate() {
-        let (item_id, revision_id, scope_id, lifecycle) = trace_addresses(mode, candidate);
+        let addresses = trace_addresses(mode, candidate);
         let scores_retained = mode == TraceRetentionMode::Full;
         let retained_score = |score| if scores_retained { score } else { 0 };
         store::insert_candidate(
@@ -1238,11 +1558,13 @@ async fn persist_trace(
                 id: candidate.id,
                 context_run_id: run_id,
                 ordinal: i32::try_from(ordinal).unwrap_or(i32::MAX),
-                knowledge_item_id: item_id,
-                knowledge_revision_id: revision_id,
+                channel: addresses.channel,
+                knowledge_item_id: addresses.knowledge_item_id,
+                knowledge_revision_id: addresses.knowledge_revision_id,
+                capture_candidate_id: addresses.capture_candidate_id,
                 content_hash: candidate.content_hash().to_owned(),
-                scope_id,
-                lifecycle_state: lifecycle,
+                scope_id: addresses.scope_id,
+                lifecycle_state: addresses.lifecycle_state,
                 keyword_score_micros: retained_score(candidate.keyword_micros),
                 semantic_score_micros: retained_score(candidate.semantic_micros),
                 freshness_score_micros: retained_score(candidate.freshness_micros),
@@ -1265,8 +1587,10 @@ async fn persist_trace(
                 id: ContextSelectionId::new(),
                 context_run_id: run_id,
                 rank,
-                knowledge_item_id: item_id,
-                knowledge_revision_id: revision_id,
+                channel: addresses.channel,
+                knowledge_item_id: addresses.knowledge_item_id,
+                knowledge_revision_id: addresses.knowledge_revision_id,
+                capture_candidate_id: addresses.capture_candidate_id,
                 content_hash: candidate.content_hash().to_owned(),
                 token_count: tokens,
                 reason_codes: candidate.reasons.clone(),
@@ -1407,7 +1731,16 @@ async fn plan_context_run(
     let query = body.query.as_deref().map(query_text).transpose()?;
 
     let embed_started = std::time::Instant::now();
-    let (vector, mut semantic_degradation) = semantic_vector(state, query.as_deref()).await;
+    let semantic_allowed = state.embedder.method() != "tei"
+        || prepared
+            .configuration
+            .document
+            .permits_provider(ExternalProvider::Tei);
+    let (vector, mut semantic_degradation) = if semantic_allowed {
+        semantic_vector(state, query.as_deref()).await
+    } else {
+        (None, Some("semantic_provider_disallowed".to_owned()))
+    };
     metrics::histogram!(CONTEXT_PLANNER_STAGE_SECONDS, "stage" => "embed")
         .record(embed_started.elapsed().as_secs_f64());
     let embedding_model = vector.as_ref().map(|_| state.embedder.model().to_owned());
@@ -1510,6 +1843,8 @@ async fn plan_context_run(
             project_id: prepared.session.project_id,
             scope_id: prepared.session.scope_id,
             principal_id: principal_id.to_owned(),
+            configuration_version_id: prepared.configuration.version_id,
+            configuration_hash: prepared.configuration.content_hash.clone(),
             query: query.clone(),
             query_hash: query.as_deref().map(task_hash),
             rendered,
@@ -1564,8 +1899,10 @@ async fn plan_context_run(
             .iter()
             .map(|candidate| {
                 json!({
+                    "channel": candidate.channel(),
                     "knowledge_item_id": candidate.item_id(),
                     "knowledge_revision_id": candidate.revision_id(),
+                    "capture_candidate_id": candidate.capture_candidate_id(),
                     "content_hash": candidate.content_hash(),
                     "reason_codes": reason_names(&candidate.reasons),
                     "exclusion_reason": candidate.exclusion.map(ContextReasonCode::as_str),
@@ -1577,6 +1914,7 @@ async fn plan_context_run(
             .iter()
             .map(|candidate| {
                 json!({
+                    "channel": candidate.channel(),
                     "content_hash": candidate.content_hash(),
                     "reason_codes": reason_names(&candidate.reasons),
                     "exclusion_reason": candidate.exclusion.map(ContextReasonCode::as_str),
@@ -1591,8 +1929,10 @@ async fn plan_context_run(
             .filter_map(|candidate| {
                 candidate.selected_tokens.map(|token_count| {
                     json!({
+                        "channel": candidate.channel(),
                         "knowledge_item_id": candidate.item_id(),
                         "knowledge_revision_id": candidate.revision_id(),
+                        "capture_candidate_id": candidate.capture_candidate_id(),
                         "content_hash": candidate.content_hash(),
                         "reason_codes": reason_names(&candidate.reasons),
                         "token_count": token_count,
@@ -1605,6 +1945,7 @@ async fn plan_context_run(
             .filter_map(|candidate| {
                 candidate.selected_tokens.map(|token_count| {
                     json!({
+                        "channel": candidate.channel(),
                         "content_hash": candidate.content_hash(),
                         "reason_codes": reason_names(&candidate.reasons),
                         "token_count": token_count,
@@ -1629,6 +1970,8 @@ async fn plan_context_run(
             "embedding_model": run.embedding_model,
             "index_version": INDEX_VERSION,
             "trace_retention_mode": prepared.plan.trace_retention,
+            "configuration_version_id": prepared.configuration.version_id,
+            "configuration_hash": prepared.configuration.content_hash,
             "candidates": candidate_refs,
         }),
     )
@@ -1645,6 +1988,8 @@ async fn plan_context_run(
             "requested_budget_tokens": requested,
             "budget_tokens": budget,
             "tokens": tokens,
+            "configuration_version_id": prepared.configuration.version_id,
+            "configuration_hash": prepared.configuration.content_hash,
             "selections": &selection_refs,
         }),
     )
@@ -1680,6 +2025,8 @@ async fn plan_context_run(
             })).collect::<Vec<_>>(),
             "tokens": run.tokens,
             "budget_tokens": run.budget_tokens,
+            "configuration_version_id": prepared.configuration.version_id,
+            "configuration_hash": prepared.configuration.content_hash,
             "degraded": run.degraded,
             "retrieval_version": RETRIEVAL_VERSION,
             "index_version": INDEX_VERSION,
@@ -1738,6 +2085,33 @@ fn score_view(candidate: &ContextCandidate) -> ContextScoreView {
     }
 }
 
+async fn load_visible_capture_candidate(
+    state: &AppState,
+    tx: &mut sqlx::PgConnection,
+    tenant_id: TenantId,
+    id: CaptureCandidateId,
+    content_hash: &str,
+    include_detail: bool,
+) -> Result<Option<CaptureCandidate>> {
+    let Some(mut candidate) = capture_store::get_candidate(&mut *tx, tenant_id, id).await? else {
+        return Ok(None);
+    };
+    if candidate.content_hash != content_hash || candidate.content_erased {
+        return Ok(None);
+    }
+    match crate::capture::authorize_context_candidate(state, tx, tenant_id, &candidate).await {
+        Ok(_) => {}
+        Err(Error::PolicyDenied { .. } | Error::NotFound { .. }) => return Ok(None),
+        Err(error) => return Err(error),
+    }
+    if include_detail {
+        crate::capture::retain_visible_matches(state, tx, tenant_id, &mut candidate).await?;
+    } else {
+        candidate.matches.clear();
+    }
+    Ok(Some(candidate))
+}
+
 async fn candidate_view(
     state: &AppState,
     tx: &mut sqlx::PgConnection,
@@ -1749,11 +2123,13 @@ async fn candidate_view(
     if mode == TraceRetentionMode::Disabled {
         return Ok((None, false));
     }
-    let base = |revision, sources| ContextCandidateView {
+    let base = |revision, sources, unreviewed_candidate| ContextCandidateView {
         id: candidate.id,
         ordinal: candidate.ordinal,
+        channel: candidate.channel.as_str().to_owned(),
         knowledge_item_id: candidate.knowledge_item_id,
         knowledge_revision_id: candidate.knowledge_revision_id,
+        capture_candidate_id: candidate.capture_candidate_id,
         content_hash: candidate.content_hash.clone(),
         lifecycle_state: candidate
             .lifecycle_state
@@ -1767,39 +2143,68 @@ async fn candidate_view(
         scores: (mode == TraceRetentionMode::Full).then(|| score_view(&candidate)),
         revision,
         sources,
+        unreviewed_candidate,
     };
     if mode == TraceRetentionMode::HashesOnly {
-        return Ok((Some(base(None, Vec::new())), false));
+        return Ok((Some(base(None, Vec::new(), None)), false));
     }
-    let (Some(item_id), Some(revision_id)) =
-        (candidate.knowledge_item_id, candidate.knowledge_revision_id)
-    else {
-        return Err(Error::Internal {
-            message: "an addressed context candidate lost its Knowledge address".to_owned(),
-        });
-    };
-    let Some(visible) = load_visible_revision(
-        state,
-        tx,
-        tenant_id,
-        item_id,
-        revision_id,
-        mode == TraceRetentionMode::Full,
-    )
-    .await?
-    else {
-        return Ok((None, true));
-    };
-    let source_policy_exclusion = visible.source_policy_exclusion;
-    let (revision, sources) = if mode == TraceRetentionMode::Full {
-        (
-            Some(KnowledgeRevisionView::from_revision(visible.revision, at)),
-            visible.sources.into_iter().map(Into::into).collect(),
-        )
-    } else {
-        (None, Vec::new())
-    };
-    Ok((Some(base(revision, sources)), source_policy_exclusion))
+    match candidate.channel {
+        ConfigurationContextChannel::CurrentKnowledge => {
+            let (Some(item_id), Some(revision_id)) =
+                (candidate.knowledge_item_id, candidate.knowledge_revision_id)
+            else {
+                return Err(Error::Internal {
+                    message: "an addressed Knowledge candidate lost its revision address"
+                        .to_owned(),
+                });
+            };
+            let Some(visible) = load_visible_revision(
+                state,
+                tx,
+                tenant_id,
+                item_id,
+                revision_id,
+                mode == TraceRetentionMode::Full,
+            )
+            .await?
+            else {
+                return Ok((None, true));
+            };
+            let source_policy_exclusion = visible.source_policy_exclusion;
+            let (revision, sources) = if mode == TraceRetentionMode::Full {
+                (
+                    Some(KnowledgeRevisionView::from_revision(visible.revision, at)),
+                    visible.sources.into_iter().map(Into::into).collect(),
+                )
+            } else {
+                (None, Vec::new())
+            };
+            Ok((Some(base(revision, sources, None)), source_policy_exclusion))
+        }
+        ConfigurationContextChannel::UnreviewedCandidates => {
+            let Some(id) = candidate.capture_candidate_id else {
+                return Err(Error::Internal {
+                    message: "an addressed unreviewed context candidate lost its capture address"
+                        .to_owned(),
+                });
+            };
+            let Some(visible) = load_visible_capture_candidate(
+                state,
+                tx,
+                tenant_id,
+                id,
+                &candidate.content_hash,
+                mode == TraceRetentionMode::Full,
+            )
+            .await?
+            else {
+                return Ok((None, true));
+            };
+            let detail =
+                (mode == TraceRetentionMode::Full).then(|| CaptureCandidateView::from(visible));
+            Ok((Some(base(None, Vec::new(), detail)), false))
+        }
+    }
 }
 
 async fn selection_view(
@@ -1813,49 +2218,80 @@ async fn selection_view(
     if mode == TraceRetentionMode::Disabled {
         return Ok((None, false));
     }
-    let base = |revision, sources| ContextSelectionView {
+    let base = |revision, sources, unreviewed_candidate| ContextSelectionView {
         id: selection.id,
         rank: selection.rank,
+        channel: selection.channel.as_str().to_owned(),
         knowledge_item_id: selection.knowledge_item_id,
         knowledge_revision_id: selection.knowledge_revision_id,
+        capture_candidate_id: selection.capture_candidate_id,
         content_hash: selection.content_hash.clone(),
         token_count: selection.token_count,
         reason_codes: reason_names(&selection.reason_codes),
         revision,
         sources,
+        unreviewed_candidate,
     };
     if mode == TraceRetentionMode::HashesOnly {
-        return Ok((Some(base(None, Vec::new())), false));
+        return Ok((Some(base(None, Vec::new(), None)), false));
     }
-    let (Some(item_id), Some(revision_id)) =
-        (selection.knowledge_item_id, selection.knowledge_revision_id)
-    else {
-        return Err(Error::Internal {
-            message: "an addressed context selection lost its Knowledge address".to_owned(),
-        });
-    };
-    let Some(visible) = load_visible_revision(
-        state,
-        tx,
-        tenant_id,
-        item_id,
-        revision_id,
-        mode == TraceRetentionMode::Full,
-    )
-    .await?
-    else {
-        return Ok((None, true));
-    };
-    let source_policy_exclusion = visible.source_policy_exclusion;
-    let (revision, sources) = if mode == TraceRetentionMode::Full {
-        (
-            Some(KnowledgeRevisionView::from_revision(visible.revision, at)),
-            visible.sources.into_iter().map(Into::into).collect(),
-        )
-    } else {
-        (None, Vec::new())
-    };
-    Ok((Some(base(revision, sources)), source_policy_exclusion))
+    match selection.channel {
+        ConfigurationContextChannel::CurrentKnowledge => {
+            let (Some(item_id), Some(revision_id)) =
+                (selection.knowledge_item_id, selection.knowledge_revision_id)
+            else {
+                return Err(Error::Internal {
+                    message: "an addressed Knowledge selection lost its revision address"
+                        .to_owned(),
+                });
+            };
+            let Some(visible) = load_visible_revision(
+                state,
+                tx,
+                tenant_id,
+                item_id,
+                revision_id,
+                mode == TraceRetentionMode::Full,
+            )
+            .await?
+            else {
+                return Ok((None, true));
+            };
+            let source_policy_exclusion = visible.source_policy_exclusion;
+            let (revision, sources) = if mode == TraceRetentionMode::Full {
+                (
+                    Some(KnowledgeRevisionView::from_revision(visible.revision, at)),
+                    visible.sources.into_iter().map(Into::into).collect(),
+                )
+            } else {
+                (None, Vec::new())
+            };
+            Ok((Some(base(revision, sources, None)), source_policy_exclusion))
+        }
+        ConfigurationContextChannel::UnreviewedCandidates => {
+            let Some(id) = selection.capture_candidate_id else {
+                return Err(Error::Internal {
+                    message: "an addressed unreviewed selection lost its capture address"
+                        .to_owned(),
+                });
+            };
+            let Some(visible) = load_visible_capture_candidate(
+                state,
+                tx,
+                tenant_id,
+                id,
+                &selection.content_hash,
+                mode == TraceRetentionMode::Full,
+            )
+            .await?
+            else {
+                return Ok((None, true));
+            };
+            let detail =
+                (mode == TraceRetentionMode::Full).then(|| CaptureCandidateView::from(visible));
+            Ok((Some(base(None, Vec::new(), detail)), false))
+        }
+    }
 }
 
 /// The Knowledge-selection facts a session timeline may summarise.
@@ -1889,17 +2325,40 @@ pub(crate) async fn timeline_selection_visibility(
 
     let mut visible = 0usize;
     for selection in retained {
-        let (Some(item_id), Some(revision_id)) =
-            (selection.knowledge_item_id, selection.knowledge_revision_id)
-        else {
-            return Err(Error::Internal {
-                message: "an addressed context selection lost its Knowledge address".to_owned(),
-            });
+        let allowed = match selection.channel {
+            ConfigurationContextChannel::CurrentKnowledge => {
+                let (Some(item_id), Some(revision_id)) =
+                    (selection.knowledge_item_id, selection.knowledge_revision_id)
+                else {
+                    return Err(Error::Internal {
+                        message: "an addressed Knowledge selection lost its revision address"
+                            .to_owned(),
+                    });
+                };
+                load_visible_revision(state, tx, tenant_id, item_id, revision_id, false)
+                    .await?
+                    .is_some()
+            }
+            ConfigurationContextChannel::UnreviewedCandidates => {
+                let Some(id) = selection.capture_candidate_id else {
+                    return Err(Error::Internal {
+                        message: "an addressed unreviewed selection lost its capture address"
+                            .to_owned(),
+                    });
+                };
+                load_visible_capture_candidate(
+                    state,
+                    tx,
+                    tenant_id,
+                    id,
+                    &selection.content_hash,
+                    false,
+                )
+                .await?
+                .is_some()
+            }
         };
-        if load_visible_revision(state, tx, tenant_id, item_id, revision_id, false)
-            .await?
-            .is_some()
-        {
+        if allowed {
             visible += 1;
         } else {
             policy_exclusion = true;
@@ -2162,6 +2621,12 @@ async fn feedback_target(
     let selection = store::selection(&mut *tx, tenant_id, run_id, body.context_selection_id)
         .await?
         .ok_or_else(|| selection_not_found(body.context_selection_id))?;
+    if selection.channel == ConfigurationContextChannel::UnreviewedCandidates {
+        return Err(Error::Invalid {
+            message: "feedback requires a published Knowledge revision; this selection was explicitly unreviewed"
+                .to_owned(),
+        });
+    }
     let (Some(item_id), Some(revision_id)) =
         (selection.knowledge_item_id, selection.knowledge_revision_id)
     else {

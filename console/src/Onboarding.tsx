@@ -10,14 +10,14 @@
  *
  * Every step here is a call anybody could make: `POST /v1/workspaces`,
  * `POST /v1/workspaces/{id}/projects`, `POST /v1/projects/{id}/repositories`,
- * `PUT /v1/admin/scopes/{id}/policy`. There is no bootstrap path, no
+ * and the generated Configuration create/bind operations. There is no bootstrap path, no
  * privileged route and nothing that writes behind the decision point — an
  * installer or a wizard runs once, before anybody is watching, which makes
  * it the worst place in a product to keep a shortcut (seed §2.2).
  *
  * # And it never fails on a seeding step
  *
- * The workspace and the project are the deliverable. Assigning a policy pack
+ * The workspace and the project are the deliverable. Creating and binding Configuration
  * and creating a group are **seeding**, and a first caller may not be
  * permitted either — so those are attempted, reported in the reader's own
  * words, and never allowed to block the wizard. Silently skipping them is
@@ -93,19 +93,91 @@ export function Onboarding() {
 
       // Seeding: best-effort, reported either way. See the module note.
       const plan = seedPlan(shape);
-      const assigned = await request("assign_scope_policy", {
-        path: { scope_id: workspace.scope_id },
-        body: { name: plan.pack },
-      });
-      setSeed(
-        assigned.kind === "ok"
-          ? { kind: "applied", what: `The ${plan.pack} policy pack at this workspace` }
-          : {
-              kind: "refused",
-              what: `Assigning the ${plan.pack} policy pack`,
-              why: assigned.kind === "unauthenticated" ? "your session has expired" : assigned.message,
+      const listed = await request("list_configuration_templates", {});
+      const template =
+        listed.kind === "ok"
+          ? listed.body.templates.find((candidate) => candidate.name === plan.template)
+          : undefined;
+      if (!template) {
+        setSeed({
+          kind: "refused",
+          what: `Creating the ${plan.template} runtime Configuration`,
+          why:
+            listed.kind === "unauthenticated"
+              ? "your session has expired"
+              : listed.kind === "ok"
+                ? "the server did not offer that template"
+                : listed.message,
+        });
+      } else {
+        const createdConfiguration = await request("create_configuration", {
+          idempotencyKey: idempotencyKey(),
+          body: {
+            governing_scope_id: workspace.scope_id,
+            name: `${plan.template}-runtime`,
+            source_template: plan.template,
+            document: template.document,
+          },
+        });
+        if (createdConfiguration.kind !== "ok") {
+          setSeed({
+            kind: "refused",
+            what: `Creating the ${plan.template} runtime Configuration`,
+            why:
+              createdConfiguration.kind === "unauthenticated"
+                ? "your session has expired"
+                : createdConfiguration.message,
+          });
+        } else if (createdConfiguration.body.outcome === "pending_review") {
+          setSeed({
+            kind: "pending",
+            what: `The ${plan.template} runtime Configuration`,
+            changeId: createdConfiguration.body.change_id,
+          });
+        } else if (
+          createdConfiguration.body.outcome === "applied" &&
+          createdConfiguration.body.artifact_id
+        ) {
+          const bound = await request("create_configuration_binding", {
+            idempotencyKey: idempotencyKey(),
+            body: {
+              scope_id: workspace.scope_id,
+              artifact_id: createdConfiguration.body.artifact_id,
+              enabled: true,
             },
-      );
+          });
+          setSeed(
+            bound.kind !== "ok"
+              ? {
+                  kind: "refused",
+                  what: `Binding the ${plan.template} runtime Configuration`,
+                  why: bound.kind === "unauthenticated" ? "your session has expired" : bound.message,
+                }
+              : bound.body.outcome === "pending_review"
+                ? {
+                    kind: "pending",
+                    what: `The ${plan.template} runtime Configuration binding`,
+                    changeId: bound.body.change_id,
+                  }
+                : bound.body.outcome === "applied"
+                  ? {
+                      kind: "applied",
+                      what: `The ${plan.template} runtime Configuration at this workspace`,
+                    }
+                  : {
+                      kind: "refused",
+                      what: `Binding the ${plan.template} runtime Configuration`,
+                      why: "the governed change was rejected",
+                    },
+          );
+        } else {
+          setSeed({
+            kind: "refused",
+            what: `Creating the ${plan.template} runtime Configuration`,
+            why: "the governed change was rejected",
+          });
+        }
+      }
       invalidate(ME_KEY);
       setBusy(false);
       setStep(nextStep("workspace"));
@@ -306,7 +378,7 @@ function WorkspaceStep({
       </fieldset>
       <p className="muted">{plan.summary}</p>
       <p className="muted">
-        This choice <strong>seeds</strong> the policy pack assigned here ({plan.pack})
+        This choice <strong>seeds</strong> the immutable runtime Configuration bound here ({plan.template})
         {plan.invitesMembers ? " and sets you up to invite people" : ""}. It is not an edition:
         nothing records it, nothing branches on it, and a workspace made for one person becomes a
         team's by inviting somebody.

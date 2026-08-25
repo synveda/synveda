@@ -7,10 +7,11 @@
 //! and the chain records the exact immutable revisions delivered. The audit
 //! surface then answers from those events and nothing else.
 //!
-//! The suite runs under the **real embedded packs** — `regulated-strict`
-//! is the zero-config default and nothing here installs a permissive one.
-//! That is load-bearing: a blanket pack would grant `AuditRead` to
-//! everyone and make every refusal in this file vacuous.
+//! The suite runs under the **real embedded packs** — a governed test
+//! Configuration binds `regulated-strict` while retaining full trace evidence.
+//! That is load-bearing: a blanket pack would grant `AuditRead` to everyone
+//! and make every refusal in this file vacuous, while the zero-binding
+//! enterprise fail-safe intentionally retains hashes rather than addresses.
 //!
 //! Tests need a live Postgres: they read `DATABASE_URL` and skip with a
 //! message when it is unset (CI has no database), the house convention.
@@ -342,6 +343,8 @@ async fn grant_over_http(
     call(app, request).await.0
 }
 
+#[path = "support/configuration.rs"]
+mod configuration_support;
 #[path = "session_seed.rs"]
 mod session_seed;
 
@@ -413,6 +416,18 @@ async fn world() -> Option<World> {
     // administrator, and it chains as break-glass rather than as a
     // governed act.
     grant(&pool, tenant, "olive", root.id, RoleKey::Administrator).await;
+    // AUD-2 asks address-bearing historical questions, so its runtime
+    // Configuration must retain full trace evidence. Bind that choice through
+    // a typed VedaFlow change; the policy remains regulated-strict.
+    let mut configuration_tx = rls::begin_tenant_tx(&pool, tenant)
+        .await
+        .expect("begin governed Configuration fixture");
+    configuration_support::bind_tenant_pack(&mut configuration_tx, tenant, "regulated-strict")
+        .await;
+    configuration_tx
+        .commit()
+        .await
+        .expect("commit governed Configuration fixture");
     // Membership is a grant now, not a placement: alice and bob hold
     // `member` at platform — the ordinary shape of a person in a unit,
     // kept so the world is not a tenant of strangers, and inert on the

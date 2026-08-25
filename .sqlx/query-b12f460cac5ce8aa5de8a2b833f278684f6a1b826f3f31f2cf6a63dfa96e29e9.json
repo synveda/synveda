@@ -1,0 +1,158 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        update capture_batches\n           set state = case when $4 then 'failed' else 'pending' end,\n               lease_owner = null, lease_expires_at = null,\n               error_code = $5,\n               completed_at = case when $4 then now() else null end,\n               updated_at = now()\n         where tenant_id = $1 and id = $2 and state = 'running'\n           and lease_owner = $3\n        returning id, tenant_id, source_kind, session_id, import_job_id,\n                  scope_id, workspace_id, project_id,\n                  principal_id, configuration_version_id, configuration_hash,\n                  input_hash, event_count, state, extractor_method,\n                  model_version, attempts, candidate_count, error_code,\n                  created_at, started_at, completed_at, updated_at\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "tenant_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "source_kind",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "session_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "import_job_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "scope_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 6,
+        "name": "workspace_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 7,
+        "name": "project_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 8,
+        "name": "principal_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "configuration_version_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 10,
+        "name": "configuration_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "input_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 12,
+        "name": "event_count",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 13,
+        "name": "state",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 14,
+        "name": "extractor_method",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 15,
+        "name": "model_version",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 16,
+        "name": "attempts",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 17,
+        "name": "candidate_count",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 18,
+        "name": "error_code",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 19,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 20,
+        "name": "started_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 21,
+        "name": "completed_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 22,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Bool",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      true,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      true,
+      false,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "b12f460cac5ce8aa5de8a2b833f278684f6a1b826f3f31f2cf6a63dfa96e29e9"
+}

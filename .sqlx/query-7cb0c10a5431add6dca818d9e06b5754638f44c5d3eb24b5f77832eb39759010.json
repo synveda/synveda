@@ -1,0 +1,26 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        insert into capture_batches\n            (id, tenant_id, source_kind, session_id, import_job_id, scope_id,\n             workspace_id, project_id, principal_id,\n             configuration_version_id, configuration_hash, input_hash, event_count,\n             state, extractor_method, model_version, attempts, candidate_count,\n             started_at, completed_at, updated_at)\n        values ($1, $2, 'okf_import', null, $3, $4, $5, $6, $7, $8, $9,\n                $10, 0, 'completed', 'okf-v0.2', $11, 1, $12, $13, $13, $13)\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Int4",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "7cb0c10a5431add6dca818d9e06b5754638f44c5d3eb24b5f77832eb39759010"
+}

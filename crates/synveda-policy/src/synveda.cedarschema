@@ -570,6 +570,16 @@ namespace Synveda {
             context: { roles: Set<String> },
         };
 
+    // Immutable governed runtime documents and their scope selectors
+    // (CPR-30, ADR-0089). Writes resolve from the parent configuration so a
+    // binding cannot authorise the mutation that installs itself.
+    action ConfigurationRead, ConfigurationWrite
+        appliesTo {
+            principal: [Principal],
+            resource: [Tenant, Scope],
+            context: { roles: Set<String> },
+        };
+
     // (The role admin plane — `RoleRead`/`RoleAssign` over role bindings,
     // ADR-0015 decision 7 — is deleted with the bindings: grants are the
     // access plane's actions, a revocation names the grant it is about, and

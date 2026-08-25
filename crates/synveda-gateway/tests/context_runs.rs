@@ -18,13 +18,16 @@ use synveda_gateway::app::{AppState, router};
 use synveda_gateway::telemetry;
 use synveda_identity::Hs256Verifier;
 use synveda_policy::Pdp;
-use synveda_store::{access, identities, policy_assignments, rls, scopes, tenants};
+use synveda_store::{access, identities, rls, scopes, tenants};
 use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
 use synveda_types::{
     CompositionConfig, GrantId, IdentityId, IdentityKind, PackConfig, ScopeId, TenantId,
     TenantStatus, TraceRetentionMode,
 };
 use tower::ServiceExt;
+
+#[path = "support/configuration.rs"]
+mod configuration_support;
 
 const SECRET: &[u8] = b"cpr-20-context-planning";
 const ALICE: &str = "alice-cpr20@pulseboard.test";
@@ -219,9 +222,7 @@ async fn admitted_world() -> Option<World> {
     seed_identity(&mut tx, tenant_id, BOB).await;
     seed_identity(&mut tx, tenant_id, MALLORY).await;
     seed_grant(&mut tx, tenant_id, root.id, ALICE, RoleKey::Administrator).await;
-    policy_assignments::set_default(&mut *tx, tenant_id, synveda_policy::STANDARD)
-        .await
-        .expect("select standard pack");
+    configuration_support::bind_pack(&mut tx, tenant_id, root.id, synveda_policy::STANDARD).await;
     tx.commit().await.expect("commit bootstrap");
 
     let state = state(&url);
@@ -538,9 +539,16 @@ async fn set_trace_mode(world: &World, mode: TraceRetentionMode) {
             },
         )
         .expect("install trace-mode pack");
-    policy_assignments::set_default(&world.state.pool, world.tenant_id, &name)
+    let mut tx = rls::begin_tenant_tx(&world.state.pool, world.tenant_id)
         .await
-        .expect("activate trace-mode pack");
+        .expect("begin trace-mode Configuration");
+    configuration_support::bind_tenant_pack(&mut tx, world.tenant_id, &name).await;
+    let root = scopes::tenant_root(&mut *tx, world.tenant_id)
+        .await
+        .expect("read trace-mode root")
+        .expect("trace-mode root exists");
+    configuration_support::set_trace_retention(&mut tx, world.tenant_id, root.id, mode).await;
+    tx.commit().await.expect("commit trace-mode Configuration");
 }
 
 #[tokio::test]
@@ -978,9 +986,12 @@ async fn retention_modes_and_diagnostic_query_have_distinct_disclosure() {
     assert_eq!(next_status, StatusCode::OK, "{next}");
     assert_eq!(next["as_of"], first["as_of"]);
 
-    policy_assignments::set_default(&world.state.pool, world.tenant_id, synveda_policy::STANDARD)
+    let mut tx = rls::begin_tenant_tx(&world.state.pool, world.tenant_id)
         .await
-        .expect("restore standard pack for diagnostics boundary");
+        .expect("begin diagnostics Configuration");
+    configuration_support::bind_tenant_pack(&mut tx, world.tenant_id, synveda_policy::STANDARD)
+        .await;
+    tx.commit().await.expect("commit diagnostics Configuration");
     let (member_diagnostics, _) = call(
         &world.app,
         "POST",

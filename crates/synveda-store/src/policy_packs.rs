@@ -240,9 +240,10 @@ pub async fn get(
     Ok(row.map(Into::into))
 }
 
-/// Removes a stored pack, refusing while any assignment or the tenant
-/// default still references it (ADR-0014 decision 7: the dangling-name
-/// fallback exists for out-of-band writes, not for the product path).
+/// Removes a stored pack, refusing while any immutable Configuration version
+/// references it. A historical version remains a legal rollback target, so
+/// only looking at current bindings would make deletion corrupt history
+/// (CPR-30, ADR-0089).
 /// Returns whether a row was removed.
 #[tracing::instrument(
     name = "store.policy_packs.clear",
@@ -254,11 +255,8 @@ pub async fn clear(conn: &mut PgConnection, tenant_id: TenantId, name: &str) -> 
     let referenced = sqlx::query_scalar!(
         r#"
         select exists (
-            select 1 from policy_pack_assignments
-            where tenant_id = $1 and pack_name = $2
-            union all
-            select 1 from policy_pack_defaults
-            where tenant_id = $1 and pack_name = $2
+            select 1 from configuration_versions
+            where tenant_id = $1 and document ->> 'policy_pack' = $2
         ) as "referenced!"
         "#,
         tenant_id.as_uuid(),
@@ -269,10 +267,7 @@ pub async fn clear(conn: &mut PgConnection, tenant_id: TenantId, name: &str) -> 
     .map_err(storage_error)?;
     if referenced {
         return Err(Error::Conflict {
-            message: format!(
-                "pack {name:?} is still assigned (or the tenant default); \
-                 reassign those scopes first"
-            ),
+            message: format!("pack {name:?} is referenced by immutable configuration history"),
         });
     }
     let result = sqlx::query!(

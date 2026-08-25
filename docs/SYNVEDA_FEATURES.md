@@ -2079,6 +2079,24 @@ CPR-29  Public contract and client convergence (XL)
   focused gateway/contract/console/CLI/adapter acceptance, `make ci` and the
   relevant database suite pass. ADR-0088.
 
+CPR-30  Governed runtime configuration artifacts (XL)
+  Filed 2026-08-25 by the autonomous continuation. Replace mutable policy-pack
+  assignment and ad-hoc runtime knobs with stable configuration aggregates,
+  immutable content-hashed versions and revisioned nearest-scope bindings.
+  Personal, team and enterprise are canonical documents over one runtime, not
+  editions or branches. AC: complete validated documents cover the policy-pack
+  selector, capture/extraction, context budget/channels/trace retention,
+  type-aware freshness, Skill/Tool advertisement and allowed provider
+  families; create, publish, bind, pin/unpin, enable/disable and rollback are
+  typed VedaFlow Configuration/apply changes with live PDP, payload,
+  version/revision and audit checks; capture and context cite the exact
+  effective version/digest and all runtime consumers enforce it; old default
+  and scope-assignment tables and direct mutation routes are deleted without
+  translation or dual write; generated public API, console and HTTP CLI cover
+  templates, list/show/history/compare/effective/create/publish/bind/rollback;
+  all new tenant tables are forced-RLS; focused tests, demo, `make ci` and
+  `make db-test` pass. ADR-0089.
+
 ──────────────────────────────────────────────
 Sequencing (features → phases)
 ──────────────────────────────────────────────
@@ -2172,7 +2190,7 @@ Phase 4 ecosystem: ADPT-4,5,6,7,8 · PRMT-3 · SKIL-5 · MEM-7 · OPS-5,6,7 · C
    or an evaluation harness — and that is a *when*, not an *if*, since ADPT-1's own demo
    is a script. What it must not become is a warning in a README: the gap is silent,
    returns exit 0, and reads exactly like a session that was observed.)
-Phase 5 context platform (redesign): CPR-1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29
+Phase 5 context platform (redesign): CPR-1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30
    (Added 2026-08-17. Its own phase rather than a slot in Phase 4, because it is not the
    next feature — it is the programme that re-cuts the model every feature above was built
    on, for an audience none of them was: one person, or four sharing agent context, who

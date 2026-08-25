@@ -4,6 +4,8 @@
     "channel.publish",
     "channel.read",
     "channel.rollback",
+    "configuration.read",
+    "configuration.write",
     "context_pack.write",
     "knowledge.forget",
     "knowledge.write",

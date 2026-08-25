@@ -43,12 +43,13 @@ programme convention established in Prompt 1.
 | Generated-API MCP Tools catalogue, immutable evidence comparison, VedaFlow review linkage, exact bindings and secret-safe configuration | CPR-26 | **complete** | `9845186` | `98f5bcd` | helpers/components 10/10; complete console 196/196; production build PASS | PASS | N/A — console/client-only | no in-app browser exposed; real-component SSR and production bundle PASS | none |
 | Versioned OKF v0.2 validation, import planning/candidates and deterministic Knowledge export | CPR-27 | **complete** | `98f5bcd` | `0dbf163` | adapter 6/6; types 1/1; store 1/1; gateway 1/1; capture 4/4; OpenAPI 5/5; RLS 1/1; console 197/197 | PASS | PASS (`synveda_test_1177`) | canonical v0.2 pinned to `ad30107`; isolated `demos/cpr-27-okf-v02.sh` PASS; no remote fetch/live-host claim | none |
 | Public-API OKF CLI and generated project-console import/export workflows | CPR-28 | **complete** | `0dbf163` | `683a17d` | adapter 6/6; CLI 150/150; console 207/207; public API 1/1; production build PASS | PASS | N/A — client/pure-validation only | isolated `demos/cpr-28-okf-workflows.sh` PASS: real local fixture + public lifecycle + generated console; no remote-host claim | none |
-| Exact generated public contract and console/CLI/generic-MCP client convergence | CPR-29 | **complete** | `683a17d` | next checkpoint | OpenAPI 6/6; service 5/5; audit 13/13; CLI 156/156 + corpus 5/5; MCP 44/44; console 208/208; Claude adapter 98/98 | PASS | PASS | isolated `demos/cpr-29-public-contract.sh` PASS; generated API + 78-script demo gate PASS | none |
+| Exact generated public contract and console/CLI/generic-MCP client convergence | CPR-29 | **complete** | `683a17d` | `b33ba51` | OpenAPI 6/6; service 5/5; audit 13/13; CLI 156/156 + corpus 5/5; MCP 44/44; console 208/208; Claude adapter 98/98 | PASS | PASS | isolated `demos/cpr-29-public-contract.sh` PASS; generated API + 78-script demo gate PASS | none |
+| Versioned governed runtime configuration, templates and scope bindings | CPR-30 | **complete** | `b33ba51` | next checkpoint | domain 4/4; API 1/1; capture 4/4; context 3/3; approvals 6/6; packs 7/7; PDP 11/11; RLS 83/83; OpenAPI 6/6; console 210/210 | PASS | PASS | isolated `demos/cpr-30-governed-configuration.sh` PASS: 2 artifacts, 3 versions, 2 bindings, 6 audited applies, zero assignment tables; 79-script demo gate PASS | none |
 
-**Exact next objective:** implement the governed-configuration artifact
-package: allocate the next feature, record the architecture before schema work,
-then replace mutable runtime settings with immutable versioned artifacts,
-bindings and VedaFlow-governed publication/rollback.
+**Exact next objective:** allocate and complete CPR-31, the governed auto-apply
+and relaxation successor: audit every Knowledge, Skill, Tool and Configuration
+mutation for one VedaFlow path, then replace `policy_lapses` with versioned,
+time-boxed relaxations on the current scopes and artifact families.
 
 ### Starting-point objective map
 
@@ -4088,5 +4089,90 @@ frontend changes, deletions, tests, and the resulting commit hash.
 
 - **Commit.** `refactor(api): complete public contract and client cutover
   (CPR-29)` on `feat/context-platform-mvp`.
+- **Commit hash.** Written by the next checkpoint under the programme's
+  next-checkpoint convention.
+
+### Repository programme objective — governed runtime configuration artifacts (CPR-30)
+
+- **Selected feature and decision.** **CPR-30** is delivered from `b33ba51`;
+  it records CPR-29's commit as
+  `b33ba51c0101c171f1be43e209002c1cd21a127a`. Accepted ADR-0089 fixes one
+  model: a stable Configuration aggregate, immutable complete versions and
+  revisioned nearest-scope bindings. `personal`, `team` and `enterprise` are
+  canonical source documents copied into ordinary governed history, never an
+  edition switch or runtime branch. With no binding the immutable enterprise
+  document is the fail-safe, not a mutable hidden row.
+
+- **Schema and hard cut.** Migration `0055_governed_configuration` adds
+  `configuration_artifacts`, `configuration_versions`,
+  `configuration_bindings` and `configuration_changes`, with tenant-qualified
+  ownership, exact current/pinned-version constraints, immutable-version and
+  append-only binding-history triggers, enabled and forced RLS and indexed
+  nearest-scope resolution. It drops `policy_pack_defaults` and
+  `policy_pack_assignments` without reading or translating them. Context
+  candidate/selection rows now identify their configured channel and carry
+  exactly one address family: immutable Knowledge item/revision or reviewable
+  CaptureCandidate. Epoch **2** now has **53 migration files**, **687** checked
+  SQLx descriptions and **91** forced-RLS tenant tables.
+
+- **One governed mutation path.** Create, publish, bind, enable/disable,
+  pin/unpin and rollback are typed `Configuration/apply` VedaFlow changes.
+  Before proposal and again before effect, the gateway checks aggregate/scope
+  ownership, `ConfigurationWrite`, `ProposalOpen`, the live approval matrix,
+  canonical payload hash, expected head and expected binding revision. A
+  permissive matrix may auto-apply, but never skips the proposal, immutable
+  version or audit chain. Four content-free configuration audit actions carry
+  ids, revisions, digests, template provenance and deciding pack. The embedded
+  packs advance to version 22 because their complete action and approval
+  matrices now cover Configuration.
+
+- **Exact runtime evidence.** The complete document selects the Cedar pack;
+  explicit/session-end capture rules and bounds; context budget, channels and
+  trace retention; type-aware freshness; Skill/Tool advertisement; and allowed
+  external-provider families. Capture freezes version/digest with its event
+  snapshot, and workers reload that immutable version. Context planning records
+  the same evidence and obeys its cap and channel set. The optional unreviewed
+  channel separately re-authorises source session/import evidence and proposed
+  destination before retaining an address or text, labels rendered content
+  `[UNREVIEWED CANDIDATE]`, and cannot receive immutable-revision feedback.
+  Disabling current Knowledge really performs no Knowledge search; an empty
+  scope set cannot widen into an unfiltered read.
+
+- **Generated product surfaces and deletions.** Six net operations grow the
+  exact authenticated contract **156 → 162 operations** and **238 → 255
+  schemas**: templates; cursor-paginated artifacts, versions and bindings;
+  comparison; exact effective resolution; and idempotent revision-preconditioned
+  mutations. `synveda configuration templates|list|show|effective|compare|
+  create|publish|bindings|bind|update-binding|rollback` is a public-HTTP client
+  with no store authority. Advanced Configuration and scope-effective detail
+  use generated operations/types. The mutable default/scope assignment API,
+  old Policies screen, assignment fixtures and direct setters are deleted; an
+  in-memory `PolicyAssignment` exists only as the resolved document projected
+  into the embedded PDP.
+
+- **Gate findings.** Full database execution caught four real convergence
+  defects and one incomplete inventory: a shared scope-read audit payload had
+  renamed canonical `op`; address-bearing AUD-2 fixtures relied implicitly on
+  trace retention; three lifecycle fixtures bound before minting their root;
+  service confinement still probed the deleted policy-default route; and the
+  RLS coverage list omitted the four already-forced tables. Each is corrected
+  at its contract boundary and pinned by the focused suite rather than hidden
+  or excluded.
+
+- **Tests and exact results.** Configuration domain **4/4**, public database
+  API **1/1**, capture **4/4**, context **3/3**, policy approvals **6/6**, packs
+  **7/7**, PDP **11/11**, audit events **3/3**, audit queries **13/13**,
+  service identities **5/5**, forced RLS **83/83**, OpenAPI **6/6** and complete
+  console **210/210** pass. Generated API/SQLx, dependency, licence, backlog,
+  ADR and **79-script** demo-drift checks pass. The console production bundle
+  is 418.15 kB JavaScript (116.92 kB gzip) and 18.84 kB CSS (4.29 kB gzip).
+  Isolated `demos/cpr-30-governed-configuration.sh` passes with two artifacts,
+  three versions, two bindings, six audited applications and zero replaced
+  assignment tables. Complete `make ci` and uninterrupted disposable-Postgres
+  `make db-test` **PASS**. This is executable local application evidence, not a
+  live external-provider claim.
+
+- **Commit.** `feat(configuration): version governed runtime profiles
+  (CPR-30)` on `feat/context-platform-mvp`.
 - **Commit hash.** Written by the next checkpoint under the programme's
   next-checkpoint convention.

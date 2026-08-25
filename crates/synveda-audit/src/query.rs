@@ -46,20 +46,18 @@ pub const DISCLOSURE_ACTIONS: [AuditAction; 1] = [AuditAction::SessionContextCom
 ///
 /// Deliberately a list of actions rather than a fold: this module hands
 /// back the events, and the caller that knows the scope tree assembles the
-/// answer. Historical grants, assignments and lapses exist nowhere else —
-/// `scope_grants`, `policy_pack_assignments` and `policy_lapses` are
-/// current-state tables, and a revoked grant leaves no row — so these
+/// answer. Historical grants, Configuration changes and lapses exist nowhere
+/// else — `scope_grants`, `configuration_bindings` and `policy_lapses` are
+/// current-state projections, and a revoked grant leaves no row — so these
 /// events are not merely the tamper-evident record of what governed a scope
 /// in March, they are the only record.
 ///
 /// Pass to [`search`] via [`EventFilter::actions`].
-pub const AUTHORITY_ACTIONS: [AuditAction; 13] = [
+pub const AUTHORITY_ACTIONS: [AuditAction; 11] = [
     AuditAction::AccessGranted,
     AuditAction::AccessRevoked,
-    AuditAction::PolicyDefaultSet,
-    AuditAction::PolicyDefaultCleared,
-    AuditAction::PolicyNodeAssigned,
-    AuditAction::PolicyNodeUnassigned,
+    AuditAction::ConfigurationChangeApplied,
+    AuditAction::CuratorRulesUpdated,
     AuditAction::LapseGranted,
     AuditAction::LapseRevoked,
     AuditAction::LapseExpired,

@@ -1,0 +1,53 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select binding.id as binding_id,\n                  binding.scope_id as binding_scope_id,\n                  binding.artifact_id,\n                  version.id as version_id,\n                  version.document as \"document: Json<ConfigurationDocument>\",\n                  version.content_hash\n             from configuration_bindings binding\n             join configuration_artifacts artifact\n               on artifact.tenant_id = binding.tenant_id\n              and artifact.id = binding.artifact_id\n             join configuration_versions version\n               on version.tenant_id = binding.tenant_id\n              and version.artifact_id = binding.artifact_id\n              and version.id = coalesce(binding.pinned_version_id,\n                                        artifact.current_version_id)\n            where binding.tenant_id = $1\n              and binding.enabled\n              and binding.scope_id = any($2)\n            order by array_position($2::uuid[], binding.scope_id)\n            limit 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "binding_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "binding_scope_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "artifact_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "version_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "document: Json<ConfigurationDocument>",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 5,
+        "name": "content_hash",
+        "type_info": "Bytea"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "2e68eb4ec97a6bff3179701279201f5e411d6f9954b36cff6aba6e142b424d79"
+}

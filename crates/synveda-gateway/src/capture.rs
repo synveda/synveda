@@ -106,6 +106,13 @@ pub struct CaptureBatchView {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schema(value_type = Option<String>, format = "uuid")]
     pub project_id: Option<ProjectId>,
+    /// Exact immutable Configuration version, absent only for the built-in
+    /// fail-safe.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>, format = "uuid")]
+    pub configuration_version_id: Option<synveda_types::ConfigurationVersionId>,
+    /// Canonical hash of the frozen runtime document.
+    pub configuration_hash: String,
     /// Content-free digest of the ordered frozen evidence set.
     pub input_hash: String,
     /// Frozen event count.
@@ -145,6 +152,8 @@ impl From<CaptureBatch> for CaptureBatchView {
             import_job_id: batch.import_job_id,
             scope_id: batch.scope_id,
             project_id: batch.project_id,
+            configuration_version_id: batch.configuration_version_id,
+            configuration_hash: batch.configuration_hash,
             input_hash: batch.input_hash,
             event_count: batch.event_count,
             state: batch.state.as_str().to_owned(),
@@ -702,9 +711,29 @@ async fn authorize_candidate_content(
     )
 }
 
+/// Reusable two-boundary decision for the explicitly configured unreviewed
+/// context channel. The source session/import and the proposed Knowledge
+/// destination must both remain visible before the planner may retain an id,
+/// hash, count, reason or plaintext.
+pub(crate) async fn authorize_context_candidate(
+    state: &AppState,
+    tx: &mut sqlx::PgConnection,
+    tenant: TenantId,
+    candidate: &CaptureCandidate,
+) -> Result<Value> {
+    let (source_allowed, source_resource, source_action) =
+        authorize_source(state, tx, tenant, candidate.into(), Action::SessionRead).await?;
+    let destination_allowed = authorize_candidate_content(state, tx, tenant, candidate).await?;
+    Ok(json!({
+        "source": audit::decision_context(source_action, &source_allowed),
+        "source_resource": source_resource.to_string(),
+        "destination": audit::decision_context(Action::KnowledgeRead, &destination_allowed),
+    }))
+}
+
 /// Remove every comparison the current caller cannot independently read.
 /// The omission includes the item id, revision id, edge and count.
-async fn retain_visible_matches(
+pub(crate) async fn retain_visible_matches(
     state: &AppState,
     tx: &mut sqlx::PgConnection,
     tenant: TenantId,
@@ -883,7 +912,16 @@ async fn freeze_claimed_batch(
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant).await?;
     let (session, allowed, _) =
         sessions::load(state, &mut tx, tenant, session_id, Action::SessionWrite).await?;
-    let frozen = store::freeze_batch(&mut tx, &session).await?;
+    let configuration =
+        synveda_store::configuration::effective_at_scope(&mut tx, tenant, session.scope_id).await?;
+    if !configuration.document.capture.enabled || !configuration.document.capture.explicit_request {
+        return Err(Error::PolicyDenied {
+            action: "capture.extract".to_owned(),
+            resource: Resource::Session(session_id).to_string(),
+            reason: "effective configuration disables explicit capture".to_owned(),
+        });
+    }
+    let frozen = store::freeze_batch(&mut tx, &session, &configuration).await?;
     claim
         .remember(&mut tx, tenant, frozen.batch.id.as_uuid())
         .await?;
@@ -899,6 +937,8 @@ async fn freeze_claimed_batch(
                 "session_id": session_id,
                 "input_hash": frozen.batch.input_hash,
                 "event_count": frozen.batch.event_count,
+                "configuration_version_id": frozen.batch.configuration_version_id,
+                "configuration_hash": frozen.batch.configuration_hash,
                 "authz": audit::decision_context(Action::SessionWrite, &allowed),
             }),
         )
@@ -1132,6 +1172,7 @@ pub(crate) async fn list_candidates(
                 session_id: params.session_id,
                 project_id: params.project_id,
                 state: state_filter,
+                scope_ids: Vec::new(),
                 after,
             },
         )
