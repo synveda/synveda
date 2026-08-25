@@ -49,13 +49,13 @@ programme convention established in Prompt 1.
 | One typed VedaFlow approval lifecycle across Knowledge, Skills, Tools, Configuration, relaxations and OKF publication | CPR-32 | **complete** | `9281951` | `cf52f34` | types 212/212 + serde 50/50; policy 77/77; VedaFlow 73/73 + store 10/10; gateway family suites 27/27; OpenAPI 6/6; console 210/210; store policy packs 5/5 + RLS 83/83 | PASS | PASS (`synveda_test_43866`) | isolated `demos/cpr-32-unified-approvals.sh` PASS: 81 typed proposals, 7 families, 23 exact-commit reviews, regulated three-person separation, zero audited content; 80-script demo gate PASS | none |
 | Policy-authorised context-platform audit questions and deterministic offline-verifiable export | CPR-33 | **complete** | `cf52f34` | `3c61e5e` | audit 23/23 + tamper 7/7; gateway 16/16; terminal refs 5/5; CLI audit 4/4; OpenAPI 6/6; console 212/212; RLS completeness PASS | PASS | PASS (`synveda_test_51591`) | isolated `demos/cpr-33-audit-export.sh` PASS: 7 self-audited export reads, 49 typed artifact events, one payload index; 81-script demo gate PASS | none |
 | Directory push/pull convergence on shared principals, Groups, memberships and grants | CPR-34 | **complete** | `3c61e5e` | `13ba059` | connectors 5/5; store access 30/30 + anchors 13/13 + sync 8/8; gateway access 18/18 + sync 9/9 + SCIM 10/10 + anchors 9/9; OpenAPI 6/6; console 212/212; RLS 83/83 | PASS | PASS (fresh disposable database; removed on success) | isolated `demos/cpr-34-directory-convergence.sh` PASS: 3 shared directory groups, 6 chained transitions, identity-keyed membership, zero mirror tables; 82-script demo gate PASS; Entra/Okta fixtures remain captured/transcribed | no live Entra/Okta tenant available; no live claim made |
-| Stable tenant secret references, fail-closed Tool/directory resolution, DEK re-encryption jobs and Knowledge-native sealed export | CPR-35 | **complete** | `13ba059` | pending (CPR-36 ledger) | types 214/214; crypto 39/39; store keys 14/14 + Knowledge export + RLS; gateway Tools 2/2 + directory sync 10/10; CLI 158/158 | PASS | PASS (`synveda_test_69956`) | `demos/cpr-35-key-secret-convergence.sh` + re-cut TEN-4 demo PASS; 83-script drift gate PASS | none; no external key-provider claim made |
+| Stable tenant secret references, fail-closed Tool/directory resolution, DEK re-encryption jobs and Knowledge-native sealed export | CPR-35 | **complete** | `13ba059` | `2e70aaf` | types 214/214; crypto 39/39; store keys 14/14 + Knowledge export + RLS; gateway Tools 2/2 + directory sync 10/10; CLI 158/158 | PASS | PASS (`synveda_test_69956`) | `demos/cpr-35-key-secret-convergence.sh` + re-cut TEN-4 demo PASS; 83-script drift gate PASS | none; no external key-provider claim made |
+| One gateway/schema/contract and forced-RLS runtime login across installed host, Compose and Helm | CPR-36 | **complete** | `2e70aaf` | pending (CPR-37 ledger) | init 19/19 including DB/RLS; deploy checker 4/4; epoch 10/10; OpenAPI 6/6; Helm lint/render PASS | PASS | PASS (`synveda_test_77612`) | isolated `demos/cpr-36-deployment-convergence.sh` PASS; two Compose + Helm renders; repeat-package upgrade check; 84-script drift gate PASS | no kind cluster rerun in this package; existing OPS-2 gate remains authoritative |
 
-**Exact next objective:** file and complete CPR-36, the single-runtime
-deployment convergence package: reconcile install/bootstrap, Docker Compose
-and Helm around one gateway, schema epoch, public API and PDP/VedaFlow/audit
-path, with profiles differing only through governed Configuration and honest
-infrastructure sizing.
+**Exact next objective:** file and complete CPR-37, the conflict,
+supersession and freshness engine over current Knowledge: explicit governed
+resolution, type-aware policy, bitemporal query semantics and current/history
+console evidence without latest-row-wins or contradictory-current leakage.
 
 ### Starting-point objective map
 
@@ -4574,5 +4574,82 @@ frontend changes, deletions, tests, and the resulting commit hash.
 
 - **Commit.** `refactor(secrets): re-anchor key and secret handling (CPR-35)`
   on `feat/context-platform-mvp`.
+- **Commit hash.** Written by the next checkpoint under the programme's
+  next-checkpoint convention.
+
+### Repository enterprise objective — deployment as configuration (CPR-36)
+
+- **Selected feature and decision.** **CPR-36** is delivered from `2e70aaf`;
+  it records CPR-35's commit as
+  `2e70aaf5a10a74dea6f224e1fefff4e81d798db3`. Accepted ADR-0095 makes
+  installed-host, source/release Compose and Helm infrastructure forms of one
+  gateway/schema/generated contract. Personal, team and enterprise remain
+  immutable CPR-30 Configuration documents and governed bindings; no image,
+  environment setting or chart value selects an edition or bypasses the
+  fail-safe unbound document.
+
+- **Bootstrap and RLS boundary.** `synveda init` still performs only schema
+  migration, audited tenant admission, deployment-key provisioning and IdP
+  setup. It now converges cluster-global `synveda_gateway` under an advisory
+  transaction lock as LOGIN, non-superuser, non-BYPASSRLS and member of the
+  migration-owned NOLOGIN `synveda_app` role, then gives that DSN—not the
+  bootstrap owner—to the host or Compose gateway. The database acceptance
+  proves no tenant GUC yields zero scope rows, the correct GUC admits the
+  tenant root, and a different GUC cannot read it. Helm keeps its generated
+  CloudNativePG application Secret and now verifies login/superuser/BYPASSRLS
+  and membership together before the gateway sentinel can pass.
+
+- **Hard-cut deployment artefacts.** The `init --demo` argument and bundled
+  people/groups are deleted. `deploy/release/demo/seed.sh` and its organisation
+  fixture are removed from source and packaging rather than translated: they
+  invoked the deleted hierarchy, pack-assignment, global observe/recall and
+  Record model. Both Compose manifests, chart values/notes, install script and
+  install/deploy/beta guides describe one runtime and governed Configuration
+  data. The OPS-2 kind client no longer mistakes one unreviewed session event
+  for active Knowledge; its smoke and failover assertions use the unchanged
+  scoped context-run endpoint and leave capture/publication to their own
+  VedaFlow suites.
+
+- **Drift and upgrade gate.** `make check-deploy` has four pure fixtures and
+  renders source Compose, release Compose and full Helm. It rejects an owner
+  gateway DSN, missing runtime-role override, removed routes/tables/seeder
+  assets, changed single-replica/readiness assumptions or rendered known
+  plaintext secret markers. It checks the current OpenAPI/removed global
+  routes and the absent init demo field, packages the release twice into the
+  same destination and proves a deliberately inserted stale file is removed,
+  then inventories the exact archive. CI runs the gate beside strict chart
+  lint. The isolated CPR-36 demo adds a fresh migration plus runtime-role RLS,
+  epoch and OpenAPI smoke.
+
+- **Schema, contract and findings.** There is no migration, table, action or
+  public operation in this package: epoch **2** remains **58 migration files**,
+  **90** forced-RLS tenant tables and **167 operations / 266 schemas**. Six
+  compile-time queries bring the SQLx inventory **710 → 716**. Review found
+  two credential-adjacent deployment defects: a host gateway did not restart
+  when only its database credential rotated, so its non-secret convergence
+  file now fingerprints the DSN without storing it; and ordinary local CLI
+  connection errors echoed the full owner URL, so both init and shared
+  connection diagnostics redact passwords. The first isolated demo attempt
+  also correctly failed because its fresh database had not been migrated;
+  the demo now makes that bootstrap step explicit. The long-lived development
+  database was neither reset nor translated after its old rows refused the
+  hard-cut migrations; all compile and acceptance evidence used fresh epoch-2
+  databases.
+
+- **Tests and exact results.** Init/release convergence **19/19**, including
+  the real runtime-login/RLS transaction; deployment fixtures **4/4**; epoch
+  **10/10**; OpenAPI **6/6**; Helm strict lint/render and source/release Compose
+  render pass. `demos/cpr-36-deployment-convergence.sh` passes on an isolated
+  fresh database, and the complete **84-script** demo-drift gate passes. The
+  full kind cluster was not rebuilt for this package; its existing OPS-2
+  CloudNativePG failover remains the chart's live-cluster evidence, while this
+  checkpoint makes no new HA claim. Complete final-byte `make ci` **PASS**,
+  including strict Clippy, all workspace/console/adapter tests and every
+  repository checker. Full disposable-Postgres `make db-test` **PASS** against
+  `synveda_test_77612`, removed by the harness; the database-backed run also
+  passed the one-thousand-events-per-second append/ack gate.
+
+- **Commit.** `refactor(deploy): run all profiles on one context platform
+  (CPR-36)` on `feat/context-platform-mvp`.
 - **Commit hash.** Written by the next checkpoint under the programme's
   next-checkpoint convention.

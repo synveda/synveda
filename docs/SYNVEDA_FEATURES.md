@@ -868,12 +868,16 @@ ADPT-8 Observation that survives a session that does not wait (M) [Phase 4]
 ──────────────────────────────────────────────
 EPIC OPS — Deployment & operations
 ──────────────────────────────────────────────
-OPS-1  SMB profile (M)
-  Single gateway binary + Postgres + Rauthy + TEI compose; `synveda init` seeds org.
-  AC: laptop → working governed memory in <10 minutes, documented.
-OPS-2  Helm chart / enterprise profile (L)
-  HA Postgres (CloudNativePG), Temporal cluster, optional Qdrant, customer IdP wiring.
-  AC: kind-cluster CI install test.
+OPS-1  Single-node deployment form (M)
+  One gateway binary + Postgres + Rauthy + optional TEI Compose; `synveda init`
+  bootstraps schema, tenant, key material and an RLS-enforced runtime login but
+  no governed product data. AC: laptop → login → working governed context in
+  <10 minutes, documented; CPR-36 is the current acceptance shape.
+OPS-2  Helm deployment form (L)
+  The same gateway/schema/API with CloudNativePG, customer IdP wiring and
+  optional model infrastructure. AC: kind-cluster install, runtime-role,
+  governed session/context and data-plane failover test; one gateway replica
+  remains an explicit limit.
 OPS-3  Residency routing (L)
   Region-pinned data planes; global control plane; cross-region inject returns policy-safe
   summaries only. AC: EU-pinned tenant's embeddings never leave EU plane (verified by
@@ -2193,6 +2197,23 @@ CPR-35  Context-platform key and secret convergence (XL)
   boundaries; RLS, content-free audit, adversarial tests, demo, `make ci` and
   `make db-test` pass. ADR-0094.
 
+CPR-36  One-runtime deployment convergence (L)
+  Filed 2026-08-25 by the autonomous continuation. Converge installed-host,
+  source/release Compose and Helm deployments on one context-platform gateway,
+  schema epoch, generated public API and PDP/VedaFlow/audit path; deployment
+  selects infrastructure while governed Configuration data selects behaviour.
+  AC: every gateway login is non-superuser, non-BYPASSRLS and inherits the
+  migration-owned `synveda_app` capability role, with database acceptance
+  proving tenantless reads fail closed; bootstrap creates only schema, tenant,
+  key boundary and runtime login while product data still enters through the
+  public governed API; `init --demo`, bundled identities and the dead ACME
+  release seeder are deleted rather than shimmed; a CI gate renders both
+  Compose shapes and Helm, checks the current OpenAPI/CLI contract and
+  least-privilege DSNs, and packages twice to catch stale upgrade residue;
+  install/deployment/beta docs state Configuration-as-data and the honest
+  single-gateway, unsigned, non-Windows and restart-shaped limits; focused
+  tests, chart lint, demo, `make ci` and `make db-test` pass. ADR-0095.
+
 ──────────────────────────────────────────────
 Sequencing (features → phases)
 ──────────────────────────────────────────────
@@ -2286,7 +2307,7 @@ Phase 4 ecosystem: ADPT-4,5,6,7,8 · PRMT-3 · SKIL-5 · MEM-7 · OPS-5,6,7 · C
    or an evaluation harness — and that is a *when*, not an *if*, since ADPT-1's own demo
    is a script. What it must not become is a warning in a README: the gap is silent,
    returns exit 0, and reads exactly like a session that was observed.)
-Phase 5 context platform (redesign): CPR-1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35
+Phase 5 context platform (redesign): CPR-1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36
    (Added 2026-08-17. Its own phase rather than a slot in Phase 4, because it is not the
    next feature — it is the programme that re-cuts the model every feature above was built
    on, for an audience none of them was: one person, or four sharing agent context, who

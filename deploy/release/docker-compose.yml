@@ -1,4 +1,5 @@
-# The single-node profile, as a released artefact (OPS-8, ADR-0065).
+# The single-node deployment shape, as a released artefact
+# (OPS-8; CPR-36, ADR-0095).
 #
 # This is what a tester installs: every image is pulled from a public
 # registry and there is no `build:` stanza anywhere, so the machine running
@@ -13,7 +14,7 @@
 # which matters because `synveda init` writes `.env` beside it, and compose
 # reads that same file for substitution.
 #
-# Two services the dev compose has are deliberately absent:
+# One contributor-only service is deliberately absent:
 #
 #   temporal, temporal-admin-tools — VedaFlow runs in Postgres (ADR-0003).
 #     `synveda init` has never started them and nothing in this profile
@@ -113,7 +114,10 @@ services:
       - path: .env
         required: false
     environment:
-      DATABASE_URL: postgres://synveda:synveda-dev@postgres:5432/synveda
+      # `synveda init` provisions this separate least-privilege LOGIN after
+      # migrations. It observes the same forced-RLS path as Helm's generated
+      # application role; the database owner remains bootstrap-only.
+      DATABASE_URL: ${SYNVEDA_GATEWAY_DATABASE_URL:-postgres://synveda_gateway:synveda-dev@postgres:5432/synveda}
       # gRPC, not HTTP: telemetry.rs builds the exporter `.with_tonic()`.
       OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
       RUST_LOG: ${RUST_LOG:-info}

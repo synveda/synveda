@@ -1,5 +1,5 @@
 # Dev Postgres for Synveda: PostgreSQL 17 + pgvector + Apache AGE + PGMQ
-# (tech plan §1.1 — one database engine for records, vectors, graph, queues).
+# (tech plan §1.1 — one database engine for Knowledge, vectors, graph, queues).
 #
 # pgvector comes from the PGDG apt repo already configured in the base image.
 # Apache AGE has no release image for PG17 (only dev snapshots), so it is

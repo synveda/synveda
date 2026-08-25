@@ -281,10 +281,11 @@ case ":${PATH}:" in
 esac
 say "Docker has to be running. Then:"
 say ""
-say "  synveda init --demo                # the stack, one tenant, a demo org"
-say "  synveda login                      # this is where your organisation starts"
+say "  synveda init                       # one runtime, schema and tenant"
+say "  synveda login                      # identity, principal scope, first grant"
 say ""
 say "  http://127.0.0.1:8120/console/     # the admin console"
+say "  Advanced > Configuration           # bind personal, team or enterprise data"
 say ""
 say "To give an AI client your team's governed memory:"
 say ""

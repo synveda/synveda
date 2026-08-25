@@ -19,7 +19,7 @@ export SYNVEDA_TEI_IMAGE
 # and skip when it is unset — CI runs without a database.
 DATABASE_URL ?= postgres://synveda:synveda-dev@localhost:5432/synveda
 
-.PHONY: fmt lint test build deny check-deps check-adr-status check-ann-bench check-api-types check-backlog check-benchmarks check-chart-images check-corpus-licences check-demos check-npm-licences chart-lint ts-build ts-test ci dev-up dev-down smoke db-test claude-acceptance claude-acceptance-live eval eval-check eval-judge eval-read eval-longmemeval eval-longmemeval-full eval-longmemeval-judged eval-extraction-live eval-retrieval eval-security
+.PHONY: fmt lint test build deny check-deps check-adr-status check-ann-bench check-api-types check-backlog check-benchmarks check-chart-images check-corpus-licences check-demos check-deploy check-npm-licences chart-lint ts-build ts-test ci dev-up dev-down smoke db-test claude-acceptance claude-acceptance-live eval eval-check eval-judge eval-read eval-longmemeval eval-longmemeval-full eval-longmemeval-judged eval-extraction-live eval-retrieval eval-security
 
 dev-up:
 	$(COMPOSE) up --build --detach --wait
@@ -284,6 +284,12 @@ chart-lint:
 	helm lint deploy/helm/synveda --strict -f deploy/helm/synveda/ci/full-values.yaml
 	helm template synveda deploy/helm/synveda -f deploy/helm/synveda/ci/full-values.yaml >/dev/null
 
+# CPR-36: source/release Compose, Helm, generated API and the packaged profile
+# are one runtime; a repeat package cannot retain a removed asset.
+check-deploy:
+	node --test scripts/check-deploy-convergence.test.mjs
+	node scripts/check-deploy-convergence.mjs
+
 ts-build:
 	pnpm install --frozen-lockfile
 	pnpm -r build
@@ -292,4 +298,4 @@ ts-build:
 ts-test:
 	pnpm -r test
 
-ci: fmt lint test build deny check-deps check-api-types check-backlog check-demos check-adr-status check-corpus-licences check-chart-images check-benchmarks check-ann-bench chart-lint eval-check ts-build check-npm-licences ts-test
+ci: fmt lint test build deny check-deps check-api-types check-backlog check-demos check-adr-status check-corpus-licences check-chart-images check-benchmarks check-ann-bench chart-lint check-deploy eval-check ts-build check-npm-licences ts-test

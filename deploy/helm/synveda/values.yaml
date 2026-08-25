@@ -1,4 +1,8 @@
-# Synveda enterprise profile (OPS-2, ADR-0062).
+# Synveda Kubernetes deployment (OPS-2; CPR-36, ADR-0095).
+#
+# This chart sizes infrastructure and connects external services. It never
+# selects personal, team or enterprise product behaviour: those are immutable
+# governed Configuration versions and scope bindings in the one runtime.
 #
 # Four values have no default and the chart refuses to render without them:
 # `gateway.publicUrl`, `embedder`, `oidc.existingSecret`, and — if the
@@ -24,7 +28,7 @@ gateway:
   # no-op. One replica is a property of the process, not a starting point:
   # pending logins live in memory (`LoginFlow` — a callback on the wrong pod
   # is a 401 for a login the IdP completed) and the scope-chain cache is
-  # invalidated in-process with no TTL (a hierarchy move handled by one
+  # invalidated in-process with no TTL (a scope move handled by one
   # replica leaves the others composing against the ancestry the mover
   # left). Both fail silently, which is why this is refused rather than
   # discouraged. OPS-7 is the feature that lifts it; ADR-0062 decision 4
@@ -115,12 +119,10 @@ oidc:
   secretKey: SYNVEDA_OIDC_ISSUERS
 
 # ── The embedder: a data decision, not a preference ──────────────────────
-# `record_embeddings` stores a model and a dim and the dense leg filters on
-# both, so a corpus written under one embedder and read under another does
-# not rank badly — it leaves the dense leg entirely and survives on BM25,
-# with no error and no degraded header. There is no re-embed command
-# (ADR-0055's first deferral), so this choice is permanent, and a default
-# that silently becomes permanent is not a default.
+# Knowledge embedding rows retain model and dimension and the dense leg filters
+# on both. A model change converges a separately labelled sidecar; it never
+# reinterprets an old vector as output from a new model. The deterministic
+# implementation is lexical-only and must not be presented as semantic.
 #
 # `deterministic` | `tei`. Required.
 embedder: ""

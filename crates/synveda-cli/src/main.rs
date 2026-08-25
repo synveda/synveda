@@ -68,8 +68,8 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Bring up a single-node deployment and admit its first tenant
-    /// (OPS-1, ADR-0055) — the SMB profile of tech plan §4.
+    /// Bring up the single-node form of the shared runtime and admit its
+    /// first tenant (OPS-1; CPR-36, ADR-0095).
     ///
     /// What it does is deliberately small, because everything else the
     /// product has a governed surface for is created *through* that
@@ -81,8 +81,8 @@ enum Command {
     /// org units are `POST /v1/workspaces` and `synveda scope create` after
     /// that.
     ///
-    /// There is no path in here that writes a scope, an identity, a grant
-    /// or a record behind the PDP's back — an installer runs once, as
+    /// There is no path in here that writes a scope, an identity, a grant,
+    /// Configuration or Knowledge behind the PDP's back — an installer runs once, as
     /// root-equivalent, before anybody is watching, which makes it the
     /// worst place in the product to keep a shortcut (seed §2.2).
     Init {
@@ -94,11 +94,9 @@ enum Command {
         /// Tenant display name; becomes the tenant root scope's name.
         #[arg(long, default_value = "ACME")]
         name: String,
-        /// Which embedder the corpus will be written with. Permanent in
-        /// practice: `record_embeddings` stores the model, embed-or-fail
-        /// is unconditional, and nothing re-embeds a corpus that changed
-        /// its mind (ADR-0055 decision 5). `deterministic` needs no model
-        /// download; `tei` serves BGE-M3 and downloads ~2.3 GB once.
+        /// Which embedder new Knowledge indexes use. `deterministic` needs no
+        /// model download and is lexical-only; `tei` serves BGE-M3 and
+        /// downloads ~2.3 GB once. Index rows retain their model/dimension.
         #[arg(long, value_parser = ["deterministic", "tei"], default_value = "deterministic")]
         embedder: String,
         /// An external OIDC issuer URL. Omitted, the bundled Rauthy is
@@ -107,12 +105,6 @@ enum Command {
         /// (ADR-0055 decision 4).
         #[arg(long)]
         issuer: Option<String>,
-        /// Also build the ACME demo organisation — two departments, three
-        /// teams, four people, and material that arrives through the
-        /// observe → extract → embed pipeline like anybody else's. Never
-        /// use on a deployment that will hold real memory.
-        #[arg(long)]
-        demo: bool,
         /// Print what would happen and change nothing.
         #[arg(long)]
         dry_run: bool,
@@ -1974,7 +1966,6 @@ async fn run(cli: Cli) -> Result<(), String> {
             name,
             embedder,
             issuer,
-            demo,
             dry_run,
         } => {
             init::init(init::Plan {
@@ -1982,7 +1973,6 @@ async fn run(cli: Cli) -> Result<(), String> {
                 name,
                 embedder,
                 issuer,
-                demo,
                 dry_run,
             })
             .await
@@ -3156,8 +3146,9 @@ async fn connect() -> Result<sqlx::PgPool, String> {
         .connect(&url)
         .await
         .map_err(|err| {
+            let safe_url = init::redacted_database_url(&url);
             format!(
-                "connect to {url}: {err}\n\
+                "connect to {safe_url}: {err}\n\
                  (set DATABASE_URL to reach a database other than the one \
                  `synveda init` installs)"
             )
@@ -3180,6 +3171,17 @@ mod hard_cut_tests {
         .expect("the removed command must fail parsing");
         assert!(
             error.to_string().contains("unrecognized subcommand"),
+            "unexpected clap refusal: {error}"
+        );
+    }
+
+    #[test]
+    fn removed_init_demo_flag_is_not_an_alias() {
+        let error = Cli::try_parse_from(["synveda", "init", "--demo"])
+            .err()
+            .expect("the retired packaged seeder must fail parsing");
+        assert!(
+            error.to_string().contains("unexpected argument '--demo'"),
             "unexpected clap refusal: {error}"
         );
     }

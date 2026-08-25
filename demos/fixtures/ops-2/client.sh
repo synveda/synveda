@@ -42,8 +42,8 @@ wait "$LOGIN_PID" || fail "synveda login did not complete" "$(cat "$WORK/login.l
 cat "$WORK/login.log"
 
 # ── who the deployment thinks we are ─────────────────────────────────────
-# The org root, the identity and its role binding were created by that
-# login and by nothing else: `synveda init` has no equivalent here, and the
+# The tenant root, the identity and its administrator grant were created by
+# that login and by nothing else: `synveda init` has no equivalent here, and the
 # chart's install job writes the migrations and one tenant row (ADR-0055
 # decision 1). This is the first assertion because everything after it
 # depends on a scope tree that an installer never touched.
@@ -142,22 +142,21 @@ cat "$WORK/body"; echo
 grep -q '"appended":1' "$WORK/body" ||
   fail "the append admitted nothing new" "$(cat "$WORK/body")"
 
-echo "==> a context run — extraction, embedding and the sidecar, until the memory comes back"
-tries=0
-while :; do
-  status=$(post "/v1/sessions/$session_id/context-runs" \
-    '{"query":"when does the release train leave"}' "ops2-run-$tries-$$")
-  case "$status" in
-  20*) ;;
-  *) fail "the context run answered $status" "$(cat "$WORK/body")" ;;
-  esac
-  grep -q "release train leaves" "$WORK/body" && break
-  tries=$((tries + 1))
-  [ "$tries" -ge 120 ] &&
-    fail "the seeded memory never came back from a context run" "$(cat "$WORK/body")"
-  sleep 1
-done
-echo "    the block carries it after ${tries}s"
+# A session event is source evidence, not active Knowledge. CPR-18 deliberately
+# forbids the old install test's assumption that extraction publishes it and a
+# context run immediately echoes it. This smoke therefore proves composition
+# over the current session endpoint and leaves publication to Capture +
+# VedaFlow, which have their own acceptance suites.
+echo "==> a context run — current public composition path"
+status=$(post "/v1/sessions/$session_id/context-runs" \
+  '{"query":"when does the release train leave"}' "ops2-run-$$")
+case "$status" in
+20*) ;;
+*) fail "the context run answered $status" "$(cat "$WORK/body")" ;;
+esac
+grep -q '"id"' "$WORK/body" ||
+  fail "the context run response has no run identity" "$(cat "$WORK/body")"
+echo "    context composition completed; the unreviewed event was not treated as Knowledge"
 
 # The chain is verified too, but not from here. `synveda audit verify`
 # walks the chain in the database and recomputes every hash — an operator's

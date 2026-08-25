@@ -1,12 +1,12 @@
-# Installing Synveda — the single-node profile
+# Installing Synveda — one runtime, single-node deployment
 
-The SMB profile of tech plan §4: one gateway, Postgres, a bundled OIDC
-provider, and optionally TEI for real embeddings. Laptop to working governed
-memory in under ten minutes (OPS-1; the measured run is 5 seconds once the
-images are present).
+The single-node form of Synveda's context-platform runtime: one gateway,
+Postgres, a bundled OIDC provider and optional TEI. Personal, team and
+enterprise are governed Configuration documents, not different binaries,
+schemas or deployment modes (CPR-36, ADR-0095).
 
-For the enterprise profile — HA Postgres, CloudNativePG, your own IdP, Helm —
-see [the chart](../deploy/helm/synveda) (OPS-2).
+For the same runtime on CloudNativePG with your own IdP, see
+[the chart](../deploy/helm/synveda) (OPS-2).
 
 ## Prerequisites
 
@@ -25,9 +25,18 @@ your `PATH` and the rest under `~/.synveda`. macOS arm64 and Linux x86_64;
 the binaries are unsigned, and the checksums prove a download arrived intact
 rather than who built it (OPS-8, ADR-0065).
 
-`init` starts Postgres, Jaeger and the bundled Rauthy; applies the
-migrations; admits one tenant; registers the OIDC client and your operator
-login; and starts the gateway on `http://127.0.0.1:8120`.
+`init` starts Postgres, Jaeger and bundled Rauthy; applies migrations; admits
+one tenant; converges a non-superuser/non-BYPASSRLS gateway login; registers
+the OIDC client/operator; and starts the gateway on
+`http://127.0.0.1:8120`. The database owner remains bootstrap-only, so the
+same forced-RLS backstop used by Helm is live here too.
+
+An external database operator may set `SYNVEDA_GATEWAY_DATABASE_URL` to a
+separately provisioned application login before running `init`. The named role
+must already be LOGIN, non-superuser, non-BYPASSRLS and a `synveda_app` member;
+init verifies those facts and refuses otherwise. The bootstrap-owner
+`DATABASE_URL` is never handed to the gateway, and both URLs are password-
+redacted in diagnostics.
 
 <details>
 <summary>From a checkout instead</summary>
@@ -58,7 +67,8 @@ and the audit chain contains one break-glass event to say so:
 1  tenant.created  BREAK-GLASS
 ```
 
-There are no scopes, no identities, no grants and no Knowledge items, because
+There are no scopes, identities, grants, Configuration bindings or Knowledge
+items, because
 everything the product has a governed surface for is created *through* that
 surface, by a person the PDP can decide about. An installer runs once, as
 root-equivalent, before anybody is watching — it is the worst place in this
@@ -551,10 +561,7 @@ semantic demonstration.
 
 Vectors are keyed by immutable revision and model, so changing models does not
 reinterpret old vectors. The indexer creates rows for the configured model as
-it converges. The old `record_embeddings` table is not a Knowledge search
-index. No application reader uses it after CPR-20; it remains inert in the
-pre-squash migration chain until the final schema-baseline package deletes the
-replaced record tables.
+it converges; no runtime reader falls back to the replaced aggregate.
 Supported index dimensions remain 16 and 1024 (ADR-0024 decision 5), so adding
 a third model shape requires an explicit schema decision.
 
@@ -624,37 +631,24 @@ is `http://localhost:8100/...` and RFC 6761 makes every resolver answer
 `localhost` with the *container's own* loopback — a container cannot reach
 it, by any configuration. ADR-0055 decision 8 has the measurements.
 
-## A demo organisation to play with
+## Current walkthrough evidence
+
+The removed ACME release seeder is not packaged or aliased: it depended on the
+deleted hierarchy, policy-assignment and global observe/recall surfaces. From a
+checkout, the executable PulseBoard acceptance demonstrates the current path:
 
 ```sh
-synveda init --demo          # adds ACME's people to the bundled IdP
-synveda login                # …then become somebody who can build the org
-~/.synveda/profile/demo/seed.sh
+sh demos/cpr-22-mvp-acceptance.sh
+sh demos/ops-1-smb-profile.sh
 ```
 
-`--demo` adds four users in convention-shaped groups across `eng/platform`,
-`eng/payments` and `sales/emea`, so you can log in as different people and
-watch what each of them can and cannot see.
-
-**It creates no scopes and no memory**, and the seeder is a separate step run
-after you log in, because these are governed objects: creating an org unit is
-an act the PDP decides and the audit chain attributes, and there is no
-operator to attribute it to until somebody has logged in. An installer that
-seeded your organisation would stand the whole tenant under a break-glass
-actor (ADR-0055 decisions 1 and 2).
-
-`seed.sh` builds the org units those groups are named for, assigns
-contrasting policy packs, observes a small corpus through the real extraction
-pipeline, and opens one proposal that needs two people — so the console has
-something in it and the governance has something to refuse. It is safe to
-re-run, takes `--dry-run`, and refuses a tenant that already holds an
-organisation it did not build. From a checkout it lives at
-`deploy/release/demo/seed.sh`, and `init` prints whichever path applies to you.
-
-Never use `--demo`, or the seeder, on a deployment that will hold real memory.
-
-**`docs/BETA.md` is the guided tour** — the same steps with what to look at and
-why, plus the standing list of what does not work yet.
+Both use workspaces/projects, public sessions and events, reviewable capture
+candidates, VedaFlow-published Knowledge, scoped context runs, private/project
+policy decisions and the audit chain. They do not insert product rows directly.
+The later `synveda demo` package will turn that same public-API scenario into
+the packaged personal/team/governed product tour. Until then
+[`docs/BETA.md`](BETA.md) is an honest guided map, not a pointer to a dead
+executable.
 
 ## The admin console
 
@@ -955,11 +949,11 @@ sh demos/ops-1-smb-profile.sh       # from a checkout
 sh demos/ops-8-release-install.sh   # from a downloaded release
 ```
 
-Both run the acceptance criterion end to end on a scratch HOME: install, log
-in, build a scope tree, observe a turn, recall it, and assert the chain shows
-exactly one break-glass event with everything else attributed to a person.
-The OPS-8 one additionally installs from packaged release artefacts with
-`cargo`, `rustc` and `rustup` shadowed by shims that exit 127 — so "no Rust
-toolchain" is a property of the run rather than a claim about it. It wants
-ports 5432, 8100 and 8120 free, and tears its deployment down at the end
-unless you set `OPS8_KEEP=1`.
+The fast feature demos assert the current session/capture/Knowledge/context
+path and generated install contract. The release-install CI job additionally
+installs packaged artefacts with `cargo`, `rustc` and `rustup` shadowed by
+failing shims, so “no Rust toolchain” is evidence rather than prose. CPR-36's
+deployment gate renders Compose and Helm, packages the release twice and proves
+the gateway DSN is never the database owner; the chart's kind job adds a real
+OIDC/public-API round trip, forced-RLS role assertion and CloudNativePG primary
+failover.

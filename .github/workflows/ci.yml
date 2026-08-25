@@ -105,6 +105,10 @@ jobs:
         with:
           version: v4.2.3
       - run: make chart-lint
+      # CPR-36: render both Compose deployment shapes and Helm, assert the
+      # least-privilege runtime DSNs/current API, and package twice so stale
+      # pre-cut assets cannot survive an upgrade-shaped replacement.
+      - run: make check-deploy
       # docs/BENCHMARKS.md's table is generated from evals/scores/*.json
       # (EVAL-3, ADR-0061 decision 11). This asserts they still agree, so
       # a hand-typed cell in the published artefact fails a build rather

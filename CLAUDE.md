@@ -107,6 +107,16 @@ CPR-33, context-platform audit query/export, is delivered under ADR-0092; one
 tenant-complete chain now supports typed artifact/session/context filters,
 distinct valid/as-known Knowledge evidence, exact effective-governance refs
 and frozen-head deterministic exports that verify offline without replay.
+CPR-34, directory convergence, is delivered under ADR-0093; push and pull now
+project onto identities, shared Groups, identity-keyed membership and ordinary
+source-owned scope grants, with captured/transcribed rather than live-vendor
+evidence. CPR-35, key and secret convergence, is delivered under ADR-0094;
+stable scope-bound secret references, durable DEK re-encryption and the
+Knowledge-native sealed export replace the old name/Record shapes. CPR-36,
+one-runtime deployment convergence, is delivered under ADR-0095; installed
+host, Compose and Helm use the same gateway/schema/contract and forced-RLS
+runtime role, while governed Configuration—not a deployment edition—selects
+behaviour. The obsolete init demo and release seeder are deleted.
 **It is a pre-1.0 hard
 cut**: a fresh schema epoch, no old-data migration, no compatibility shims,
 and old databases rejected with a reset instruction. Since CPR-2 that is
@@ -219,7 +229,7 @@ explicitly and say so.
 
 Phases 0, 1 and 2 are complete; SKIL-1 through SKIL-4, OPS-1, CNSL-1, ADPT-2,
 CNSL-2, AUTH-4, AUTH-5, EVAL-3, OPS-2, TEN-3, TEN-4 and OPS-8 are the Phase 3
-features done. 101 of 132 features delivered — see docs/backlog/STATUS.md for
+features done. 102 of 133 features delivered — see docs/backlog/STATUS.md for
 what each one proved and what it left standing. (The total read 86 until
 2026-08-05, when it was corrected to the 88 STATUS.md and `make
 check-backlog` had both said for some time; AUTHZ-7 was filed the same day by
@@ -419,6 +429,16 @@ DEK rotation preserve stable identity and immutable Tool history; and sealed
 exports now carry Knowledge history, provenance and relations under a new
 hard-cut format. Cloud KMS, HSM and customer-managed keys remain honest future
 provider-boundary work rather than support claims.
+**CPR-36 was filed next**, making it **133 with 101 delivered**: it converges
+installed-host, Compose and Helm deployment shapes on the same current
+gateway, schema, contract and forced-RLS runtime boundary, leaving profile
+behaviour to governed Configuration data rather than deployment conditionals.
+It was delivered the same day, making it **133 with 102 delivered**: both
+Compose paths now use a separately provisioned non-superuser/non-BYPASSRLS
+`synveda_gateway` login, Helm verifies the equivalent generated role, and the
+dead `init --demo` identities and ACME release seeder are deleted without a
+compatibility alias. One-gateway and restart-shaped upgrade limits remain
+explicit.
 
 Since CPR-9 a **listing decides per row**. The audit of Prompts 1–7 found that
 `GET /v1/workspaces` and `/v1/me` took one decision at the tenant root and

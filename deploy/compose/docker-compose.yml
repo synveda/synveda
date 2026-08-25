@@ -1,6 +1,9 @@
-# Synveda dev environment (FND-2) — the single-node/SMB profile of tech plan §4:
+# Synveda contributor environment (FND-2; CPR-36, ADR-0095):
 # Postgres 17 (+pgvector +AGE +PGMQ), Rauthy (OIDC), Temporal, TEI (BGE-M3), Jaeger.
 # Dev-only credentials throughout; never reuse them outside local compose.
+# The deployed gateway is the same context-platform binary and contract as the
+# release and Helm forms; personal/team/enterprise behaviour is governed
+# Configuration data, never a Compose profile or environment branch.
 #
 # Lifecycle: `make dev-up` / `make dev-down` (state survives; wipe with `down -v`).
 name: synveda
@@ -84,9 +87,9 @@ services:
     # The two are a drop-in for each other where it counts: the same model
     # at the same dimension, and vectors that agree to float32 rounding
     # (cosine 1.000000000, max |diff| 7e-8 over the same inputs, measured
-    # 2026-07-26). That is the property that matters — `record_embeddings`
-    # stores a model and a dim, and a corpus embedded on one architecture
-    # has to stay comparable to one embedded on the other.
+    # 2026-07-26). That is the property that matters — Knowledge revision
+    # vectors retain model and dimension, and a corpus embedded on one
+    # architecture has to stay comparable to one embedded on the other.
     #
     # `make dev-up` sets SYNVEDA_TEI_IMAGE from `uname -m`; the default here
     # is the amd64 release, which is what CI runs.
@@ -127,8 +130,8 @@ services:
       - "4318:4318" # OTLP HTTP
 
   gateway:
-    # The product itself (OPS-1, ADR-0055) — the "single gateway binary" of
-    # tech plan §4's SMB profile. Not started by `make dev-up`, which is the
+    # The product itself (OPS-1; CPR-36, ADR-0095). Not started by
+    # `make dev-up`, which is the
     # contributor's loop and runs the gateway from `cargo run`; this is what
     # an installed deployment runs, and `synveda init` brings it up.
     profiles: ["deployed"]
@@ -147,7 +150,11 @@ services:
       - path: .env
         required: false
     environment:
-      DATABASE_URL: postgres://synveda:synveda-dev@postgres:5432/synveda
+      # `synveda init` converges this LOGIN as a non-superuser,
+      # non-BYPASSRLS member of the migrations' NOLOGIN `synveda_app` role.
+      # The database owner remains bootstrap-only and never reaches the
+      # gateway process. An explicit deployment DSN can replace the local one.
+      DATABASE_URL: ${SYNVEDA_GATEWAY_DATABASE_URL:-postgres://synveda_gateway:synveda-dev@postgres:5432/synveda}
       # gRPC, not HTTP: telemetry.rs builds the exporter `.with_tonic()`.
       OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
       RUST_LOG: ${RUST_LOG:-info}

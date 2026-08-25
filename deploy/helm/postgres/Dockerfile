@@ -1,4 +1,4 @@
-# Postgres for the enterprise profile (OPS-2, ADR-0062 decision 3).
+# Postgres for the Kubernetes deployment (OPS-2; CPR-36, ADR-0095).
 #
 # CloudNativePG's base image plus the two extensions this product's schema
 # needs: pgvector (migration 0015) and PGMQ (migration 0012). It differs

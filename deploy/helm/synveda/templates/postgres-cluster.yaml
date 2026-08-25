@@ -30,14 +30,9 @@ spec:
       # The extension binaries are in the image; creating them is a
       # bootstrap act because it needs a superuser.
       #
-      # Only PGMQ is here, and the reason is ordering rather than taste
-      # (ADR-0062 decision 3, as amended). Migration 0012 calls
-      # `pgmq.create('observe')`, so the extension has to exist *before*
-      # the migrator runs — and a migration cannot supply it: appended at
-      # the end it runs 25 migrations too late on a fresh database, and
-      # added to 0012 it changes an applied migration's checksum, which
-      # sqlx refuses on every database that already has it. `vector`
-      # (0015) and `btree_gin` (0028) create themselves and are not
+      # PGMQ backs the current durable session-event delivery queue and must
+      # exist before the migration chain reaches its queue definitions.
+      # `vector` and `btree_gin` create themselves in the chain and are not
       # repeated here.
       postInitApplicationSQL:
         - create extension if not exists pgmq;

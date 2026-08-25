@@ -252,8 +252,9 @@ global `/v1/recall` route and no direct-store adapter path.
 - **Graph layer earning its place** → graph features are additive (retrieval works without
   graph-links); degrade gracefully. (Was "AGE maturity"; ADR-0043 removed the engine risk by
   removing the engine, and the mitigation is unchanged — GRPH-3 is feature-flagged.)
-- **Temporal operational weight for SMB** → PGMQ + a simple Rust worker covers SMB mode;
-  Temporal required only for enterprise profile.
+- **Temporal operational weight** → no core path forks by deployment profile:
+  sessions and capture run in the gateway/Postgres runtime; Temporal remains
+  extension infrastructure until a feature proves a workflow needs it.
 - **Extraction quality** (garbage memories poison trust) → derived channel is quarantined by
   design; published channel is the trust boundary; eval harness in Phase 4 measures extraction
   precision continuously.

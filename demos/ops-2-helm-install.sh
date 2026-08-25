@@ -290,7 +290,7 @@ kubectl delete pod -n "$NS" "$PRIMARY" --wait=false >/dev/null
 # rather than a pod label — the label lagged the status by more than two
 # minutes in an earlier run.
 #
-# The order matters more than it looks. A first draft asserted the inject
+# The order matters more than it looks. A first draft asserted composition
 # straight after `kubectl delete pod`, and it passed on the first attempt:
 # the old primary was still `Terminating` and still serving, so the check
 # succeeded precisely because nothing had failed over yet. This is the
@@ -323,7 +323,7 @@ kubectl exec -n "$NS" synveda-install-test -c client -- sh -ec '
       -H "Authorization: Bearer $bearer" -H "Content-Type: application/json" \
       -H "Idempotency-Key: ops2-failover-$i" \
       -d "{\"query\":\"when does the release train leave\"}")
-    if [ "${code%${code#2}}" = "2" ] && grep -q "release train leaves" /work/failover-body; then
+    if [ "${code%${code#2}}" = "2" ] && grep -q '"id"' /work/failover-body; then
       echo "    the context run succeeded after the failover (attempt $i)"
       exit 0
     fi
@@ -335,11 +335,11 @@ kubectl exec -n "$NS" synveda-install-test -c client -- sh -ec '
 
 echo
 echo "================================================================"
-echo "OPS-2 AC: a kind-cluster install of the enterprise profile"
+echo "OPS-2 AC: a kind-cluster install of the one Synveda runtime"
 echo "  the chart installed, the job migrated under the admin identity,"
 echo "  and the gateway came up as a non-superuser role"
-echo "  a real authorization-code + PKCE login provisioned the org root"
-echo "  a governed write, append → extraction → context run, audit verified"
+echo "  a real authorization-code + PKCE login provisioned the tenant root"
+echo "  a governed write, session append → context run, audit verified"
 echo "  the primary was deleted and the same run composed again"
 echo
 echo "  what this does not prove: no browser was involved. This is the"

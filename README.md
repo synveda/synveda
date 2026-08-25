@@ -110,7 +110,7 @@ It installs, on somebody else's machine, with Docker as the only prerequisite:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/synveda/synveda/main/scripts/install.sh | sh
-synveda init --demo
+synveda init --slug acme --name "ACME"
 synveda login
 synveda plugin install            # Claude Code: hooks + MCP, one command
 ```
@@ -127,19 +127,20 @@ switchers, a People page and the governance surfaces under **Advanced**. See
 | **2 — Governance** | VedaFlow, lapses, dedup, decay, recall, graph, audit queries, prompts, context packs, eval gates | ✅ 22/22 |
 | **3 — Enterprise** | SCIM, real IdPs, skills registry, console, Helm, release & distribution, residency, Qdrant | 🚧 14/27 |
 | **4 — Ecosystem** | SDKs, importers, telemetry, DR, gateway scale | 🚧 2/17 |
-| **5 — Context platform** | The redesign: fresh epoch, governed scopes, sessions, immutable Knowledge, capture, explainable context, Skills, Tools, OKF, one public contract, governed runtime configuration, policy relaxations, offline-verifiable audit export, shared directory access and stable secret custody | 🚧 35 packages delivered; programme continues |
+| **5 — Context platform** | The redesign: fresh epoch, governed scopes, sessions, immutable Knowledge, capture, explainable context, Skills, Tools, OKF, one public contract, governed runtime configuration, policy relaxations, offline-verifiable audit export, shared directory access, stable secret custody and one deployment runtime | 🚧 36 packages delivered; programme continues |
 
-One further feature (AUTH-6, session and token hygiene) is unscheduled — **132
-in total, 101 delivered** (`docs/backlog/STATUS.md` is the count `make ci`
+One further feature (AUTH-6, session and token hygiene) is unscheduled — **133
+in total, 102 delivered** (`docs/backlog/STATUS.md` is the count `make ci`
 checks). Phase 5 is the 33-prompt context-platform redesign, in flight on
 `feat/context-platform-mvp`; Phase 3 is paused mid-phase behind it. The fourteen Phase 3 items finished are the skills registry
 and its governance (SKIL-1 through SKIL-4), the installable single binary
 (OPS-1), the admin console's proposals inbox and scope explorer (CNSL-1,
 CNSL-2), the generic MCP server (ADPT-2), the SCIM server with its
 directory-sync fallback (AUTH-4, AUTH-5), the LongMemEval benchmark adapter
-(EVAL-3), the Helm chart and enterprise profile (OPS-2) — which is where the
+(EVAL-3), the Helm deployment form (OPS-2) — which is where the
 gateway stopped connecting to Postgres as a superuser, so the tenant isolation
-backstop is enforced against a deployment rather than bypassed by one — the
+backstop was first enforced against a deployment rather than bypassed by one;
+CPR-36 now enforces the same runtime role in the installed/Compose form — the
 dense-leg retrieval benchmark that declined its own proposal (TEN-3), and
 per-tenant envelope keys (TEN-4).
 

@@ -1,5 +1,5 @@
-# The gateway, as the single binary the SMB profile deploys (OPS-1,
-# ADR-0055). Build context is the repository root.
+# The gateway, as the one runtime every deployment shape uses
+# (OPS-1; CPR-36, ADR-0095). Build context is the repository root.
 #
 # Two stages, and the split is the point: dependencies compile in their own
 # layer so that editing this workspace's own sources does not recompile
@@ -84,7 +84,7 @@ RUN apt-get update \
 # the binary's.
 #
 # The CLI joined the image with OPS-2 (ADR-0062 amendment). In the SMB
-# profile it is on the operator's laptop and only the gateway is a
+# single-node deployment it is on the operator's laptop and only the gateway is a
 # container, so one binary was right; in a cluster there is no laptop with
 # a route to the database, and the two things an enterprise install has to
 # run — `synveda db migrate` under an admin identity, and

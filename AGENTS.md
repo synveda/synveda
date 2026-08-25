@@ -75,7 +75,7 @@ Phase 5 — context platform redesign, since 2026-08-17, on
 `feat/context-platform-mvp`. Phase 3 is paused mid-phase, not finished —
 OPS-9, OPS-10, TEN-5,6, AUD-3,4, GRPH-3, EVAL-6, CTX-7, OPS-3,4, ADPT-3,
 CTX-6 and FLOW-8 are still open, and no live Entra/Okta tenant or real
-  Cursor frame has been replayed. **132 features filed, 101 delivered**;
+  Cursor frame has been replayed. **133 features filed, 102 delivered**;
 STATUS.md and `make check-backlog` are the authority on the count — the
 headline number has drifted four times, the fourth being this file itself,
 which still read 104/71 after CPR-8 filed the 105th. That is why the
@@ -197,6 +197,16 @@ Load-bearing facts about Phase 5:
   immutable history, provenance, relations and audit under
   `synveda-context-export-2`. The old name row, Record export and old archive
   reader are gone; cloud KMS, HSM and customer-managed keys remain unclaimed.
+- CPR-36 (ADR-0095): installed-host, source/release Compose and Helm are
+  infrastructure shapes around one gateway, schema epoch and generated public
+  contract; personal/team/enterprise behaviour remains immutable governed
+  Configuration data. Local init converges `synveda_gateway` as a LOGIN,
+  non-superuser, non-BYPASSRLS member of `synveda_app`, and Helm verifies the
+  same boundary; migration/tenant admission keep the admin identity. The dead
+  `init --demo` people and packaged ACME seeder are deleted without aliases,
+  and `make check-deploy` renders every shape, checks current routes/roles and
+  proves repeat packaging cannot retain removed assets. The chart still pins
+  one gateway replica and release upgrades remain restart-shaped.
 - CPR-10 (ADR-0076): **a run is a record**. `sessions`, `session_events` and
   `session_context_runs` replace `session_id: text`; the governed scope a run
   is decided at is derived from its workspace and project by composite keys

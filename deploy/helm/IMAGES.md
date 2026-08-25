@@ -55,7 +55,7 @@ Makefile.
 
 | Image | Where | Licence | Why it is here |
 |---|---|---|---|
-| `ghcr.io/huggingface/text-embeddings-inference:cpu-arm64-sha-4150561` | `TEI_IMAGE_arm64` | **read on every bump** | Apple Silicon. There are no versioned arm64 tags, so this is pinned by *commit* rather than left on `cpu-arm64-latest` — which means a bump is a deliberate act and the licence at that commit is what applies. It agrees with the amd64 release to float32 rounding (cosine 1.000000000, max abs diff 7e-8, measured 2026-07-26), which is the property that matters when `record_embeddings` stores a model and a dim. |
+| `ghcr.io/huggingface/text-embeddings-inference:cpu-arm64-sha-4150561` | `TEI_IMAGE_arm64` | **read on every bump** | Apple Silicon. There are no versioned arm64 tags, so this is pinned by *commit* rather than left on `cpu-arm64-latest` — which means a bump is a deliberate act and the licence at that commit is what applies. It agrees with the amd64 release to float32 rounding (cosine 1.000000000, max abs diff 7e-8, measured 2026-07-26), which is the property that matters when Knowledge revision vectors retain a model and dimension. |
 
 ## Images the chart runs
 
