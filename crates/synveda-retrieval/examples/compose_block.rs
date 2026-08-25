@@ -74,9 +74,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let chain_ids: Vec<ScopeId> = chain.iter().map(|node| node.id).collect();
     let assignments = policy_assignments::for_scopes(&mut tx, tenant, &chain_ids).await?;
     let default_pack = policy_assignments::default_pack(&mut tx, tenant).await?;
-    let anchor_set =
-        anchors::resolve(&mut tx, tenant, &subject, anchors::AnchorSelection::none()).await?;
-    let groups = anchors::groups_of(&mut *tx, tenant, &subject).await?;
+    let anchor_set = anchors::resolve(
+        &mut tx,
+        tenant,
+        &subject,
+        Some(identity.id),
+        anchors::AnchorSelection::none(),
+    )
+    .await?;
+    let groups = anchors::groups_of(&mut *tx, tenant, Some(identity.id)).await?;
 
     let principal = Principal {
         tenant_id: tenant,

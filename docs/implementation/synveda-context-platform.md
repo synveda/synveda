@@ -47,13 +47,14 @@ programme convention established in Prompt 1.
 | Versioned governed runtime configuration, templates and scope bindings | CPR-30 | **complete** | `b33ba51` | `ed7d233` | domain 4/4; API 1/1; capture 4/4; context 3/3; approvals 6/6; packs 7/7; PDP 11/11; RLS 83/83; OpenAPI 6/6; console 210/210 | PASS | PASS | isolated `demos/cpr-30-governed-configuration.sh` PASS: 2 artifacts, 3 versions, 2 bindings, 6 audited applies, zero assignment tables; 79-script demo gate PASS | none |
 | Governed auto-apply audit and versioned exact-subject policy-relaxation successor | CPR-31 | **complete** | `ed7d233` | `9281951` | types 210/210 + serde 50/50; policy relaxation 3/3; API 2/2; RLS 83/83; OpenAPI 6/6; audit 27/27; CLI 155/155 + MCP 5/5; console 209/209; retrieval 53/53 | PASS | PASS (`synveda_test_35856`) | isolated `demos/cpr-31-governed-relaxations.sh` PASS: 2 aggregates, 3 immutable versions, 5 governed changes, zero predecessor tables; 79-script demo gate PASS | none |
 | One typed VedaFlow approval lifecycle across Knowledge, Skills, Tools, Configuration, relaxations and OKF publication | CPR-32 | **complete** | `9281951` | `cf52f34` | types 212/212 + serde 50/50; policy 77/77; VedaFlow 73/73 + store 10/10; gateway family suites 27/27; OpenAPI 6/6; console 210/210; store policy packs 5/5 + RLS 83/83 | PASS | PASS (`synveda_test_43866`) | isolated `demos/cpr-32-unified-approvals.sh` PASS: 81 typed proposals, 7 families, 23 exact-commit reviews, regulated three-person separation, zero audited content; 80-script demo gate PASS | none |
-| Policy-authorised context-platform audit questions and deterministic offline-verifiable export | CPR-33 | **complete** | `cf52f34` | next checkpoint | audit 23/23 + tamper 7/7; gateway 16/16; terminal refs 5/5; CLI audit 4/4; OpenAPI 6/6; console 212/212; RLS completeness PASS | PASS | PASS (`synveda_test_51591`) | isolated `demos/cpr-33-audit-export.sh` PASS: 7 self-audited export reads, 49 typed artifact events, one payload index; 81-script demo gate PASS | none |
+| Policy-authorised context-platform audit questions and deterministic offline-verifiable export | CPR-33 | **complete** | `cf52f34` | `3c61e5e` | audit 23/23 + tamper 7/7; gateway 16/16; terminal refs 5/5; CLI audit 4/4; OpenAPI 6/6; console 212/212; RLS completeness PASS | PASS | PASS (`synveda_test_51591`) | isolated `demos/cpr-33-audit-export.sh` PASS: 7 self-audited export reads, 49 typed artifact events, one payload index; 81-script demo gate PASS | none |
+| Directory push/pull convergence on shared principals, Groups, memberships and grants | CPR-34 | **complete** | `3c61e5e` | next checkpoint | connectors 5/5; store access 30/30 + anchors 13/13 + sync 8/8; gateway access 18/18 + sync 9/9 + SCIM 10/10 + anchors 9/9; OpenAPI 6/6; console 212/212; RLS 83/83 | PASS | PASS (fresh disposable database; removed on success) | isolated `demos/cpr-34-directory-convergence.sh` PASS: 3 shared directory groups, 6 chained transitions, identity-keyed membership, zero mirror tables; 82-script demo gate PASS; Entra/Okta fixtures remain captured/transcribed | no live Entra/Okta tenant available; no live claim made |
 
-**Exact next objective:** file and complete the directory-adapter convergence
-package from the CPR-33 checkpoint: re-anchor SCIM push and scheduled pull on
-the shared principal, Group, `group_members` and `scope_grants` model; retain
-source ownership and honest captured/live labels; delete superseded directory
-rows and mappings without migrating pre-epoch data.
+**Exact next objective:** file and complete CPR-35 from the CPR-34 checkpoint:
+re-anchor tenant envelope keys and secret references on schema epoch 2 and the
+new Knowledge, Tool, provider, import/export, directory and deployment artifact
+families; prove rotation, stale-reference, cross-tenant and serialization/log
+boundaries without adding customer-managed keys or an HSM claim.
 
 ### Starting-point objective map
 
@@ -4422,5 +4423,78 @@ frontend changes, deletions, tests, and the resulting commit hash.
 
 - **Commit.** `feat(audit): query and export the context platform chain
   (CPR-33)` on `feat/context-platform-mvp`.
+- **Commit hash.** Written by the next checkpoint under the programme's
+  next-checkpoint convention.
+
+### Repository enterprise objective — directory adapter convergence (CPR-34)
+
+- **Selected feature and decision.** **CPR-34** is delivered from `3c61e5e`;
+  it records CPR-33's commit as
+  `3c61e5e0fa35f8e9a0056f1e7d53a19bfe43debc`. Accepted ADR-0093 completes
+  ADR-0059's post-epoch successor: a directory user retains protocol/source
+  attributes around one tenant-owned Identity and principal scope, while a
+  directory group is the shared Group aggregate rather than a second access
+  graph. External directory facts state identity and membership; they grant
+  no product authority until the separately governed assignment command
+  passes `MembershipGrant` at the exact scope.
+
+- **One projection and removal semantics.** `groups` now retains directory
+  source, stable provider resource id and optional protocol external id;
+  `group_members` keys stable `IdentityId`, so membership is complete before
+  first login and the effective-authority query emits only an active identity
+  with a bound principal. SCIM push and scheduled Entra/Okta pull call the same
+  atomic replacement projection. Pull snapshots carry stable group ids and
+  member external ids; a complete pass may retire a missing source-owned
+  Group, while an incomplete pass establishes presence and concludes nothing
+  about absence. Group retirement, membership removal and identity disable
+  therefore withdraw access on the next ordinary anchor resolution with no
+  copied grants, directory policy table or stale cache.
+
+- **Governed assignments and ownership.** Two generated public operations
+  create and revoke source-evidenced, group-subject `scope_grants`. Creation
+  requires `Idempotency-Key`; both directions resolve the owned scope before
+  deciding, use the tenant RLS transaction and chain the existing
+  `access.granted`/`access.revoked` actions without payloads or credentials.
+  Ordinary group and grant mutation routes refuse directory-owned rows by
+  name. Identical external ids are source- and tenant-qualified, and a
+  source-less lookup with multiple matches fails closed rather than choosing
+  one.
+
+- **Hard cut, schema and contract.** Migration
+  `0059_directory_adapter_convergence` refuses affected old directory/group
+  rows with the exact `synveda reset --database --force` instruction, then
+  deletes `scim_groups`, `scim_group_members` and the mirror DTO vocabulary
+  without translation. The migration rebuilds identity-keyed membership,
+  source-qualifies directory users and extends immutable directory evidence on
+  shared Groups and grants. The refusal was proven on a disposable pre-cut
+  database. Schema epoch **2** now has **57 migration files**, **694** checked
+  SQLx descriptions and **89** tenant tables in the forced-RLS completeness
+  inventory. The exact contract grows **165 → 167 operations** and
+  **264 → 266 schemas**; regenerated TypeScript remains the console's only
+  product contract.
+
+- **Gate finding.** The first full database run found one CPR-6 HTTP fixture
+  still placing a token subject in the now-UUID group member body. It was not
+  made compatible: the fixture now provisions the stable Identity, while the
+  group write still traverses the public PDP-governed route. The focused
+  regression and complete nine-test anchor API suite pass. Strict Clippy and
+  the generated-console idempotency inventory also caught and fixed one stale
+  test reference each before the final gates.
+
+- **Tests and exact results.** Identity connector fixtures **5/5**; store
+  access **30/30**, anchors **13/13** and directory sync **8/8**; gateway
+  access **18/18**, directory sync **9/9**, SCIM **10/10** and anchors **9/9**;
+  OpenAPI **6/6**, complete console **212/212**, forced RLS **83/83**, full
+  offline workspace compilation and SQLx prepare/check pass. Isolated
+  `demos/cpr-34-directory-convergence.sh` passes with three shared directory
+  groups, six chained transitions, identity-keyed membership and zero old
+  mirror tables. The complete **82-script** demo-drift gate, final-byte
+  `make ci` and full disposable-Postgres `make db-test` pass; the successful
+  scratch database was removed by the harness. Entra/Okta evidence remains
+  explicitly captured/transcribed fixture evidence because no live vendor
+  tenant was available; this package makes no live-verification claim.
+
+- **Commit.** `refactor(directory): use principals groups and scope grants
+  (CPR-34)` on `feat/context-platform-mvp`.
 - **Commit hash.** Written by the next checkpoint under the programme's
   next-checkpoint convention.

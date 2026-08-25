@@ -10,6 +10,12 @@ size: L
 
 **Epic:** CPR — Context platform redesign · **Phase:** 5 · **Size:** L
 
+> **Successor note (CPR-34, ADR-0093):** the original `directory_ref` and
+> token-subject membership shape below records what CPR-5 shipped. Directory
+> groups now carry source + stable resource id + optional protocol
+> `externalId`, and `group_members` keys stable identities so membership may
+> arrive before first login. Direct groups use that identity-keyed shape too.
+
 ## Description
 
 Prompt 5 of the 33-prompt context-platform programme. CPR-4 gave the platform

@@ -181,6 +181,8 @@ define_routes! {
         POST crate::access::create_grant,
     ],
     "/v1/admin/grants/{grant_id}" => [DELETE crate::access::revoke_grant],
+    "/v1/directory/access-assignments" => [POST crate::access::create_directory_access_assignment],
+    "/v1/directory/access-assignments/{grant_id}" => [DELETE crate::access::revoke_directory_access_assignment],
 
     "/v1/admin/scopes" => [
         GET crate::admin_scopes::list,

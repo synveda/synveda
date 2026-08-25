@@ -1829,7 +1829,7 @@ export type CreateGroupBody = {
      */
     display_name: string;
     /**
-     * Its members at creation, by principal id.
+     * Its members at creation, by stable identity id.
      */
     members?: string[];
     /**
@@ -2109,6 +2109,21 @@ export type DeleteKnowledgeBody = {
   };
 
 /**
+ * `POST /v1/directory/access-assignments`.
+ */
+export type DirectoryAccessAssignmentBody = {
+    /**
+     * A shared Group whose source is `directory`.
+     */
+    group_id: string;
+    role: "owner" | "member" | "viewer" | "reviewer" | "curator" | "administrator";
+    /**
+     * Governed scope at which the directory group receives authority.
+     */
+    scope_id: string;
+  };
+
+/**
  * Report a fresh discovery using the current descriptor.
  */
 export type DiscoverToolServerBody = {
@@ -2270,6 +2285,14 @@ export type GrantView = {
      */
     directory_managed: boolean;
     /**
+     * Stable directory group resource that caused the assignment.
+     */
+    directory_resource_id?: string | null;
+    /**
+     * Owning directory adapter for a directory-managed assignment.
+     */
+    directory_source?: string | null;
+    /**
      * Who granted it, when a caller did.
      */
     granted_by?: string | null;
@@ -2311,6 +2334,21 @@ export type GroupList = {
   };
 
 /**
+ * One group membership. An unbound directory identity intentionally has no
+ * `principal_id` yet; its stable identity still remains visible and usable.
+ */
+export type GroupMemberView = {
+    /**
+     * Stable identity id.
+     */
+    identity_id: string;
+    /**
+     * Verified token subject, once first login binds one.
+     */
+    principal_id?: string | null;
+  };
+
+/**
  * A group, named enough to render without a second call.
  */
 export type GroupRefView = {
@@ -2341,9 +2379,17 @@ export type GroupView = {
      */
     description?: string | null;
     /**
-     * The external id a directory knows it by, when one does.
+     * Optional protocol `externalId`.
      */
-    directory_ref?: string | null;
+    directory_external_id?: string | null;
+    /**
+     * The stable resource id assigned by that directory.
+     */
+    directory_resource_id?: string | null;
+    /**
+     * The adapter/provider that owns this directory-managed group.
+     */
+    directory_source?: string | null;
     /**
      * Display name.
      */
@@ -2353,9 +2399,9 @@ export type GroupView = {
      */
     id: string;
     /**
-     * Its members, by principal id.
+     * Its members, by stable identity with a bound subject when available.
      */
-    members: string[];
+    members: GroupMemberView[];
     /**
      * The revision an update must name as its precondition.
      */
@@ -6500,6 +6546,25 @@ export type Operations = {
     readonly response: ContextFeedbackView;
   };
   /**
+   * `POST /v1/directory/access-assignments` — bind a provider-owned group to a
+   * governed scope without creating a second directory authorisation model.
+   */
+  readonly create_directory_access_assignment: {
+    readonly path: "/v1/directory/access-assignments";
+    readonly method: "POST";
+    readonly body: DirectoryAccessAssignmentBody;
+    readonly idempotent: true;
+    readonly response: GrantView;
+  };
+  /**
+   * `DELETE /v1/directory/access-assignments/{grant_id}`.
+   */
+  readonly revoke_directory_access_assignment: {
+    readonly path: "/v1/directory/access-assignments/{grant_id}";
+    readonly method: "DELETE";
+    readonly response: void;
+  };
+  /**
    * `POST /v1/directory/seal-authorisations`.
    */
   readonly authorise_directory_seals: {
@@ -7585,6 +7650,8 @@ export const OPERATIONS = {
   list_context_runs: { path: "/v1/context-runs", method: "GET" },
   get_context_run: { path: "/v1/context-runs/{id}", method: "GET" },
   create_context_feedback: { path: "/v1/context-runs/{id}/feedback", method: "POST", idempotent: true },
+  create_directory_access_assignment: { path: "/v1/directory/access-assignments", method: "POST", idempotent: true },
+  revoke_directory_access_assignment: { path: "/v1/directory/access-assignments/{grant_id}", method: "DELETE" },
   authorise_directory_seals: { path: "/v1/directory/seal-authorisations", method: "POST" },
   get_directory_sync: { path: "/v1/directory/sync", method: "GET" },
   accept_invite: { path: "/v1/invites/{invite_token}/accept", method: "POST" },

@@ -1,10 +1,8 @@
 //! Microsoft Entra ID, through Microsoft Graph (AUTH-5, ADR-0060).
 //!
 //! Three reads make a pass: every user, every group, and every group's
-//! members. Groups are read for their **display names**, because that is what
-//! the AUTH-2 mapping resolver matches on and what the `synveda-{dept}-{team}`
-//! convention is written against — Graph's group object ids mean nothing to
-//! it.
+//! members. Stable Graph object ids become the shared Group aggregate's
+//! directory address; display names remain mutable presentation.
 //!
 //! Paging is `@odata.nextLink`, which Graph returns as an absolute URL
 //! carrying its own opaque skip token. It is followed as given rather than
@@ -19,11 +17,10 @@
 
 use async_trait::async_trait;
 use serde::Deserialize;
-use std::collections::HashMap;
 
 use super::{
-    DirectoryConnector, DirectorySnapshot, DirectoryUserRecord, Enumeration, Secret, http_client,
-    redact,
+    DirectoryConnector, DirectoryGroupRecord, DirectorySnapshot, DirectoryUserRecord, Enumeration,
+    Secret, http_client, redact,
 };
 
 const GRAPH_BASE: &str = "https://graph.microsoft.com";
@@ -206,9 +203,6 @@ impl DirectoryConnector for EntraConnector {
             self.graph_base
         );
         let (users, failure) = self.walk::<GraphUser>(&token, users_url).await;
-        // Indexed by object id so membership attaches without a second scan
-        // of a list that may hold a hundred thousand people.
-        let mut by_id: HashMap<String, usize> = HashMap::new();
         for user in users {
             // Somebody with no UPN cannot be matched to an identity or
             // addressed over SCIM, so there is nothing this product could do
@@ -216,7 +210,6 @@ impl DirectoryConnector for EntraConnector {
             let Some(user_name) = user.user_principal_name else {
                 continue;
             };
-            by_id.insert(user.id.clone(), snapshot.users.len());
             snapshot.users.push(DirectoryUserRecord {
                 external_id: user.id,
                 user_name,
@@ -225,7 +218,6 @@ impl DirectoryConnector for EntraConnector {
                 given_name: user.given_name,
                 family_name: user.surname,
                 work_email: user.mail,
-                groups: Vec::new(),
             });
         }
         if let Some(failure) = failure {
@@ -247,14 +239,14 @@ impl DirectoryConnector for EntraConnector {
                 self.graph_base, group.id
             );
             let (members, failure) = self.walk::<GraphMember>(&token, members_url).await;
-            for member in members {
-                if let Some(index) = by_id.get(&member.id) {
-                    snapshot.users[*index].groups.push(display_name.clone());
-                }
-            }
             if let Some(failure) = failure {
                 return partial(snapshot, failure);
             }
+            snapshot.groups.push(DirectoryGroupRecord {
+                external_id: group.id,
+                display_name,
+                member_external_ids: members.into_iter().map(|member| member.id).collect(),
+            });
         }
 
         complete(snapshot)

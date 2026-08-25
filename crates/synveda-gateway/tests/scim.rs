@@ -57,7 +57,9 @@ use synveda_retrieval::index::SearchIndex;
 use synveda_store::{access, directory, identities, retention, rls, scopes, tenants};
 use synveda_types::access::{GrantSource, GroupSource};
 use synveda_types::scope::{Scope, ScopeKind};
-use synveda_types::{IdentityId, ScimCredentialId, ScopeId, TenantId, TenantStatus};
+use synveda_types::{
+    DirectoryUserId, IdentityId, ScimCredentialId, ScopeId, TenantId, TenantStatus,
+};
 use tower::ServiceExt;
 
 #[path = "support/configuration.rs"]
@@ -535,7 +537,7 @@ async fn a_provisioning_credential_reaches_this_plane_and_nothing_else() {
     assert_eq!(
         status,
         StatusCode::UNAUTHORIZED,
-        "a provisioning credential reaches no governed route"
+        "a provisioning credential reaches no /v1 product route"
     );
 
     // A credential from another tenant reaches nothing here — not denied so
@@ -600,7 +602,7 @@ async fn a_revoked_credential_stops_authenticating() {
 // ── 9. The directory projects onto the governed access model (CPR-6) ────────
 
 /// A directory group becomes a **`groups` row**, and its members become
-/// `group_members` keyed by each member's token subject (ADR-0073 decision 9).
+/// `group_members` keyed by stable identity before first login (ADR-0093).
 ///
 /// The claim worth testing is the one about tables rather than about SCIM:
 /// there is **no enterprise membership table**. A directory group and a group
@@ -610,8 +612,7 @@ async fn a_revoked_credential_stops_authenticating() {
 ///
 /// It also asserts the two things the projection deliberately does **not** do:
 /// it writes no grants (a directory says who is in a group, never what the
-/// group may do), and it skips a directory user with no subject yet, because a
-/// principal *is* a verified token subject.
+/// group may do), and first login binds a subject without rewriting membership.
 #[tokio::test]
 async fn a_directory_group_becomes_a_governed_group_with_its_members() {
     let Some(w) = world().await else { return };
@@ -625,7 +626,10 @@ async fn a_directory_group_becomes_a_governed_group_with_its_members() {
         .await
         .expect("list governed groups")
         .into_iter()
-        .find(|group| group.directory_ref.as_deref() == Some(group_id.as_str()))
+        .find(|group| {
+            group.directory_source.as_deref() == Some("scim")
+                && group.directory_resource_id.as_deref() == Some(group_id.as_str())
+        })
         .expect("the directory group was projected");
     assert_eq!(group.source, GroupSource::Directory);
     assert_eq!(group.display_name, "synveda-eng-core");
@@ -634,41 +638,31 @@ async fn a_directory_group_becomes_a_governed_group_with_its_members() {
         synveda_types::workspace::LifecycleStatus::Active
     );
 
-    // **Nobody yet.** A directory can create somebody who has never logged in,
-    // and a principal *is* a verified token subject — so a mirror row with no
-    // subject contributes no member rather than being invented one. This is
-    // the case the projection is most likely to get wrong, so it is asserted
-    // before the one that works.
+    // Membership is complete before first login: it names the stable identity,
+    // while the authenticated subject remains absent.
     assert_eq!(
         subject_of(&w, identity).await,
         None,
         "a SCIM-created person has no subject until they log in"
     );
-    assert!(
-        access::group_members(&w.pool, w.tenant, group.id)
-            .await
-            .expect("read members")
-            .is_empty(),
-        "and therefore no membership of the governed group"
-    );
+    let before_login = access::group_members(&w.pool, w.tenant, group.id)
+        .await
+        .expect("read members");
+    assert_eq!(before_login.len(), 1);
+    assert_eq!(before_login[0].identity_id, identity);
+    assert_eq!(before_login[0].principal_id, None);
 
-    // They log in. The next sync puts them in, keyed by the subject their
-    // token carries.
+    // They log in. The same identity and same membership become effective;
+    // no second group update is needed.
     let subject = "dana-subject";
     provision_via_login(&w, subject, "dana@example.test", "synveda-eng-core").await;
-    add_member(&w, &group_id, &user_id).await;
 
     let members = access::group_members(&w.pool, w.tenant, group.id)
         .await
         .expect("read members");
-    assert_eq!(
-        members
-            .iter()
-            .map(|member| member.principal_id.as_str())
-            .collect::<Vec<_>>(),
-        vec![subject],
-        "the member is the person's token subject, not a directory id"
-    );
+    assert_eq!(members.len(), 1);
+    assert_eq!(members[0].identity_id, identity);
+    assert_eq!(members[0].principal_id.as_deref(), Some(subject));
     assert_eq!(members[0].source, GrantSource::Directory);
 
     // No grants **the projection wrote**. A directory says who is
@@ -833,11 +827,11 @@ async fn reactivate(w: &World, user: &str) {
 
 /// The identity a mirror row projected onto.
 async fn linked_identity(w: &World, user: &str) -> Option<IdentityId> {
-    let id = user.parse().expect("directory user id");
+    let id: DirectoryUserId = user.parse().expect("directory user id");
     let mut tx = rls::begin_tenant_tx(&w.pool, w.tenant)
         .await
         .expect("begin");
-    let row = directory::user(&mut *tx, w.tenant, id)
+    let row = directory::user(&mut *tx, w.tenant, "scim", id)
         .await
         .expect("read mirror");
     row.and_then(|row| row.identity_id)

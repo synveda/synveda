@@ -138,6 +138,7 @@ test("the idempotent creations are exactly the ones the document marks", () => {
     "create_configuration_binding",
     "create_context_feedback",
     "create_context_run",
+    "create_directory_access_assignment",
     "create_grant",
     "create_group",
     "create_knowledge",

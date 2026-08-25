@@ -301,9 +301,16 @@ async fn gather_inner(
     // directory or proposal decision that skipped anchor resolution would be a
     // decision the grant model could not reach. The cost is a handful of
     // indexed reads inside a transaction the request already opened.
-    let anchors =
-        anchors::resolve(&mut *conn, tenant_id, &context.claims.subject, selection).await?;
-    let groups = anchors::groups_of(&mut *conn, tenant_id, &context.claims.subject).await?;
+    let identity_id = identity.as_ref().map(|identity| identity.id);
+    let anchors = anchors::resolve(
+        &mut *conn,
+        tenant_id,
+        &context.claims.subject,
+        identity_id,
+        selection,
+    )
+    .await?;
+    let groups = anchors::groups_of(&mut *conn, tenant_id, identity_id).await?;
 
     let principal = Principal {
         tenant_id,

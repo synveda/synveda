@@ -28,17 +28,12 @@
 //! disagrees with the first the day one of them is edited. So this crate
 //! stores the key and the policy layer interprets it.
 //!
-//! ## A principal is a token subject
+//! ## Principals and identities
 //!
-//! [`ScopeGrant::principal_id`] and [`GroupMember::principal_id`] hold a
-//! verified token subject, not a foreign key into `identities`. That is
-//! ADR-0015 decision 2's reasoning, unchanged: the PDP's principal is
-//! `(tenant, subject)`, and a grant that could not precede first login could
-//! not be pre-assigned, could not name a dev subject, and — the reason that
-//! decided it here — could not be written without an `identities` row, which
-//! in this tree still requires a node of the **old** hierarchy. A membership
-//! model that needed the model it replaces would be a synchronisation between
-//! the two, which this programme forbids outright.
+//! A direct [`ScopeGrant`] names the verified token subject the PDP sees.
+//! [`GroupMember`] instead names the stable [`crate::IdentityId`]: directory
+//! membership can therefore arrive before first login, and binding a subject
+//! later activates the already-governed membership without copying it.
 
 use std::fmt;
 use std::str::FromStr;
@@ -46,7 +41,7 @@ use std::str::FromStr;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::{Error, GrantId, GroupId, InviteId, Result, ScopeId, TenantId};
+use crate::{Error, GrantId, GroupId, IdentityId, InviteId, Result, ScopeId, TenantId};
 
 /// Longest principal id (a token subject), in characters. The same bound
 /// `role_bindings.subject` and `identities.subject` carry, because it is the
@@ -57,9 +52,10 @@ pub const MAX_PRINCIPAL_CHARS: usize = 255;
 /// maximum; the value is a label rather than an authentication factor.
 pub const MAX_EMAIL_CHARS: usize = 320;
 
-/// Longest directory reference, in characters — the external id a directory
-/// knows a group by.
-pub const MAX_DIRECTORY_REF_CHARS: usize = 255;
+/// Longest directory-owned resource identifier, in characters.
+pub const MAX_DIRECTORY_ID_CHARS: usize = 255;
+/// Longest stable directory adapter/provider key, in characters.
+pub const MAX_DIRECTORY_SOURCE_CHARS: usize = 64;
 
 /// How long an invitation may stand, at most.
 ///
@@ -398,9 +394,13 @@ pub struct Group {
     pub description: Option<String>,
     /// Whose group it is.
     pub source: GroupSource,
-    /// The external id a directory knows it by; `Some` exactly when
-    /// [`source`](Self::source) is [`GroupSource::Directory`].
-    pub directory_ref: Option<String>,
+    /// The adapter/provider that owns this group (`scim`, `entra`, `okta`, …).
+    /// Present exactly when [`source`](Self::source) is directory-managed.
+    pub directory_source: Option<String>,
+    /// Stable resource id assigned by that directory.
+    pub directory_resource_id: Option<String>,
+    /// Optional protocol `externalId`, kept separately from the resource id.
+    pub directory_external_id: Option<String>,
     /// Whether the group is in use.
     pub status: crate::workspace::LifecycleStatus,
     /// Monotonic; what an update's precondition names.
@@ -420,8 +420,10 @@ pub struct GroupMember {
     pub tenant_id: TenantId,
     /// The group.
     pub group_id: GroupId,
-    /// The principal, by verified token subject.
-    pub principal_id: String,
+    /// The stable identity. This exists before its first authenticated subject.
+    pub identity_id: IdentityId,
+    /// The verified token subject when the identity has bound one.
+    pub principal_id: Option<String>,
     /// How they came to be in it.
     pub source: GrantSource,
     /// Who put them there, when a caller did.
@@ -460,6 +462,10 @@ pub struct ScopeGrant {
     /// The invitation that produced it; `Some` exactly when
     /// [`source`](Self::source) is [`GrantSource::Invite`].
     pub invite_id: Option<InviteId>,
+    /// The owning directory adapter for a directory-managed grant.
+    pub directory_source: Option<String>,
+    /// The directory group resource that caused the assignment.
+    pub directory_resource_id: Option<String>,
     /// Who granted it, when a caller did.
     pub granted_by: Option<String>,
     /// When.
@@ -697,18 +703,37 @@ pub fn validate_email(email: &str) -> Result<()> {
 ///
 /// # Errors
 ///
-/// [`Error::Invalid`] when it is blank or over [`MAX_DIRECTORY_REF_CHARS`].
-pub fn validate_directory_ref(directory_ref: &str) -> Result<()> {
-    if directory_ref.trim().is_empty() {
+/// [`Error::Invalid`] when it is blank or over [`MAX_DIRECTORY_ID_CHARS`].
+pub fn validate_directory_id(directory_id: &str) -> Result<()> {
+    if directory_id.trim().is_empty() {
         return Err(Error::Invalid {
-            message: "a directory reference cannot be blank".to_owned(),
+            message: "a directory identifier cannot be blank".to_owned(),
         });
     }
-    let len = directory_ref.chars().count();
-    if len > MAX_DIRECTORY_REF_CHARS {
+    let len = directory_id.chars().count();
+    if len > MAX_DIRECTORY_ID_CHARS {
         return Err(Error::Invalid {
             message: format!(
-                "a directory reference is at most {MAX_DIRECTORY_REF_CHARS} characters, got {len}"
+                "a directory identifier is at most {MAX_DIRECTORY_ID_CHARS} characters, got {len}"
+            ),
+        });
+    }
+    Ok(())
+}
+
+/// Validates the stable key identifying a directory adapter/provider.
+pub fn validate_directory_source(source: &str) -> Result<()> {
+    if source.trim().is_empty() || source.trim() != source {
+        return Err(Error::Invalid {
+            message: "a directory source must be non-blank with no surrounding whitespace"
+                .to_owned(),
+        });
+    }
+    let len = source.chars().count();
+    if len > MAX_DIRECTORY_SOURCE_CHARS {
+        return Err(Error::Invalid {
+            message: format!(
+                "a directory source is at most {MAX_DIRECTORY_SOURCE_CHARS} characters, got {len}"
             ),
         });
     }
@@ -954,10 +979,17 @@ mod tests {
     }
 
     #[test]
-    fn directory_refs_are_non_blank_and_bounded() {
-        validate_directory_ref("00u1a2b3").unwrap();
-        assert!(validate_directory_ref(" ").is_err());
-        assert!(validate_directory_ref(&"x".repeat(MAX_DIRECTORY_REF_CHARS + 1)).is_err());
+    fn directory_ids_are_non_blank_and_bounded() {
+        validate_directory_id("00u1a2b3").unwrap();
+        assert!(validate_directory_id(" ").is_err());
+        assert!(validate_directory_id(&"x".repeat(MAX_DIRECTORY_ID_CHARS + 1)).is_err());
+    }
+
+    #[test]
+    fn directory_sources_are_trimmed_and_bounded() {
+        validate_directory_source("entra").unwrap();
+        assert!(validate_directory_source(" entra").is_err());
+        assert!(validate_directory_source(&"x".repeat(MAX_DIRECTORY_SOURCE_CHARS + 1)).is_err());
     }
 
     #[test]
@@ -972,6 +1004,8 @@ mod tests {
             role_key: RoleKey::Curator,
             source: GrantSource::Direct,
             invite_id: None,
+            directory_source: None,
+            directory_resource_id: None,
             granted_by: Some("sam".to_owned()),
             created_at: Utc::now(),
         };

@@ -1,0 +1,99 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        insert into scope_grants\n            (id, tenant_id, scope_id, subject_kind, principal_id, role_key, source, invite_id)\n        values ($1, $2, $3, 'principal', $4, $5, 'invite', $6)\n        on conflict do nothing\n        returning id, tenant_id, scope_id, subject_kind, principal_id, group_id,\n                  role_key, source, invite_id, directory_source,\n                  directory_resource_id, granted_by, created_at\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "tenant_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "scope_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "subject_kind",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "principal_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "group_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 6,
+        "name": "role_key",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "source",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "invite_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 9,
+        "name": "directory_source",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "directory_resource_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "granted_by",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 12,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "26a8e0954b35c3e0bbe88510b8c53a68f3a180744deded3df1ba9627443a6ad7"
+}

@@ -15,9 +15,10 @@
 //!    failure, and the answer to "the push plane broke" must not be a silent
 //!    3am handover to a plane that has never enumerated this directory.
 //! 2. **Enumerate.** Full, never a delta feed (decision 6).
-//! 3. **Record presence, always.** Everybody the pass saw is upserted into
-//!    the mirror and reconciled, whether or not the pass completed — seeing
-//!    somebody is not conditional on seeing everybody.
+//! 3. **Record presence, always.** Everybody and every complete group the pass
+//!    saw is projected onto shared identities, groups and memberships, whether
+//!    or not the pass completed — seeing something is not conditional on
+//!    seeing everything.
 //! 4. **Stop here if the pass did not complete.** No absence is counted, no
 //!    completeness is recorded, nobody is sealed. An incomplete pass is not
 //!    evidence about who is gone (decision 3.1), and this is the one step
@@ -40,8 +41,8 @@ use serde_json::json;
 use synveda_audit::{Actor, AuditAction, Outcome};
 use synveda_identity::directory::{DirectoryConnector, Enumeration};
 use synveda_store::directory::UserAttributes;
-use synveda_store::{directory, directory_sync, rls, tenants};
-use synveda_types::{DirectoryGroupId, DirectoryUserId, Result, Tenant, TenantId};
+use synveda_store::{access, directory, directory_sync, rls, tenants};
+use synveda_types::{DirectoryUserId, GroupId, IdentityId, Result, Tenant, TenantId};
 
 use crate::app::AppState;
 use crate::audit;
@@ -79,6 +80,10 @@ impl Default for SyncConfig {
 pub struct PassReport {
     /// Users the enumeration listed.
     pub seen: usize,
+    /// Complete group memberships projected during the pass.
+    pub groups: usize,
+    /// Provider-owned groups archived after a complete pass omitted them.
+    pub groups_archived: usize,
     /// Whether every page answered.
     pub complete: bool,
     /// Mirror rows whose absence count advanced.
@@ -133,7 +138,8 @@ pub async fn run_once(
         && previous.connector != connector.name()
     {
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant.id).await?;
-        let cleared = directory_sync::reset_absences(&mut *tx, tenant.id).await?;
+        let cleared =
+            directory_sync::reset_absences(&mut *tx, tenant.id, &previous.connector).await?;
         tx.commit().await.map_err(storage)?;
         tracing::info!(
             tenant.id = %tenant.id,
@@ -156,7 +162,10 @@ pub async fn run_once(
 
     // Presence, unconditionally. This runs for a partial pass too, because
     // the people it listed were listed.
-    let seen = record_presence(state, tenant, connector.name(), &enumeration).await?;
+    let presence = record_presence(state, tenant, connector.name(), &enumeration).await?;
+    report.groups = presence.groups;
+    report.groups_archived = presence.groups_archived;
+    let seen = presence.users;
 
     let Enumeration::Complete(_) = &enumeration else {
         let failure = match &enumeration {
@@ -177,11 +186,17 @@ pub async fn run_once(
     };
 
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant.id).await?;
-    directory_sync::mark_present(&mut *tx, tenant.id, &seen).await?;
-    report.absent = directory_sync::mark_absent(&mut *tx, tenant.id, &seen).await?;
-    let proposed =
-        directory_sync::absent_at_least(&mut *tx, tenant.id, config.absence_passes).await?;
-    let live = directory::count_users(&mut *tx, tenant.id).await?;
+    directory_sync::mark_present(&mut *tx, tenant.id, connector.name(), &seen).await?;
+    report.absent =
+        directory_sync::mark_absent(&mut *tx, tenant.id, connector.name(), &seen).await?;
+    let proposed = directory_sync::absent_at_least(
+        &mut *tx,
+        tenant.id,
+        connector.name(),
+        config.absence_passes,
+    )
+    .await?;
+    let live = directory::count_users(&mut *tx, tenant.id, connector.name()).await?;
     tx.commit().await.map_err(storage)?;
 
     let proposed_count = i32::try_from(proposed.len()).unwrap_or(i32::MAX);
@@ -341,22 +356,26 @@ fn breaker_trips(proposed: usize, live_users: i64, config: &SyncConfig) -> bool 
     share > config.breaker_fraction
 }
 
-/// Writes everybody the pass saw into the mirror and reconciles them.
-///
-/// Returns the mirror ids of everyone seen, which is what the absence
-/// statements take. Runs for a partial pass as well as a complete one.
+struct PresenceReport {
+    users: Vec<DirectoryUserId>,
+    groups: usize,
+    groups_archived: usize,
+}
+
+/// Projects everything safely established by the pass.
 async fn record_presence(
     state: &AppState,
     tenant: &Tenant,
     connector: &'static str,
     enumeration: &Enumeration,
-) -> Result<Vec<DirectoryUserId>> {
+) -> Result<PresenceReport> {
     let source = DirectorySource::Pull { connector };
     let mut seen = Vec::with_capacity(enumeration.snapshot().users.len());
-    let mut memberships: HashMap<String, Vec<DirectoryUserId>> = HashMap::new();
+    let mut identities_by_external_id: HashMap<String, IdentityId> = HashMap::new();
 
     for record in &enumeration.snapshot().users {
         let attributes = UserAttributes {
+            directory_source: connector.to_owned(),
             external_id: Some(record.external_id.clone()),
             user_name: record.user_name.clone(),
             active: record.active,
@@ -367,7 +386,8 @@ async fn record_presence(
         };
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant.id).await?;
         let existing =
-            directory::user_by_external_id(&mut *tx, tenant.id, &record.external_id).await?;
+            directory::user_by_external_id(&mut *tx, tenant.id, connector, &record.external_id)
+                .await?;
         let user = match existing {
             Some(existing) => {
                 directory::replace_user(&mut *tx, tenant.id, existing.id, &attributes)
@@ -380,54 +400,138 @@ async fn record_presence(
             }
         };
         tx.commit().await.map_err(storage)?;
-        for group in &record.groups {
-            memberships.entry(group.clone()).or_default().push(user.id);
-        }
         seen.push(user.id);
-    }
 
-    sync_groups(state, tenant, &memberships).await?;
-
-    // Reconciled after membership is in place, because the placement
-    // resolver reads the mirror's groups rather than anything passed to it
-    // (ADR-0059 decision 6). Reconciling first would place every joiner in
-    // quarantine and move them out on the following pass.
-    for id in &seen {
+        reconcile::reconcile(state, tenant, source, &user).await?;
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant.id).await?;
-        let user = directory::user(&mut *tx, tenant.id, *id).await?;
+        let projected = directory::user(&mut *tx, tenant.id, connector, user.id).await?;
         tx.commit().await.map_err(storage)?;
-        if let Some(user) = user {
-            reconcile::reconcile(state, tenant, source, &user).await?;
+        if let Some(identity_id) = projected.and_then(|row| row.identity_id) {
+            identities_by_external_id.insert(record.external_id.clone(), identity_id);
         }
     }
-    Ok(seen)
+
+    let (groups, groups_archived) = sync_groups(
+        state,
+        tenant,
+        connector,
+        enumeration,
+        &identities_by_external_id,
+    )
+    .await?;
+    Ok(PresenceReport {
+        users: seen,
+        groups,
+        groups_archived,
+    })
 }
 
-/// Makes the mirror's groups and memberships match what the pass read.
+/// Projects groups onto the shared access graph. A partial pass may upsert
+/// complete group snapshots already read, but only a complete pass may archive
+/// a group it did not see.
 async fn sync_groups(
     state: &AppState,
     tenant: &Tenant,
-    memberships: &HashMap<String, Vec<DirectoryUserId>>,
-) -> Result<()> {
+    connector: &'static str,
+    enumeration: &Enumeration,
+    identities_by_external_id: &HashMap<String, IdentityId>,
+) -> Result<(usize, usize)> {
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant.id).await?;
-    for (name, members) in memberships {
-        let group = match directory::group_by_display_name(&mut *tx, tenant.id, name).await? {
-            Some(group) => group,
-            None => {
-                directory::create_group(&mut *tx, DirectoryGroupId::new(), tenant.id, None, name)
-                    .await?
-            }
-        };
-        let unique: Vec<DirectoryUserId> = members
+    let mut seen_resources = HashSet::new();
+    for record in &enumeration.snapshot().groups {
+        let existing = access::directory_group_by_resource(
+            &mut *tx,
+            tenant.id,
+            connector,
+            &record.external_id,
+        )
+        .await?;
+        let id = existing
+            .as_ref()
+            .map_or_else(GroupId::new, |group| group.id);
+        let members: Vec<IdentityId> = record
+            .member_external_ids
             .iter()
-            .copied()
+            .filter_map(|external_id| identities_by_external_id.get(external_id).copied())
             .collect::<HashSet<_>>()
             .into_iter()
             .collect();
-        directory::replace_members(&mut tx, tenant.id, group.id, &unique).await?;
+        let group = access::sync_directory_group(
+            &mut tx,
+            id,
+            tenant.id,
+            connector,
+            &record.external_id,
+            None,
+            &directory_slug(id, connector),
+            &record.display_name,
+            &members,
+        )
+        .await?;
+        audit::record_as(
+            &mut tx,
+            tenant.id,
+            Actor::system(ACTOR),
+            if existing.is_some() {
+                AuditAction::GroupUpdated
+            } else {
+                AuditAction::GroupCreated
+            },
+            format!("group {}", group.id),
+            Outcome::Success,
+            json!({
+                "source": "pull",
+                "connector": connector,
+                "directory_resource_id": record.external_id,
+                "group_id": group.id,
+                "member_count": members.len(),
+                "revision": group.revision,
+            }),
+        )
+        .await?;
+        seen_resources.insert(record.external_id.clone());
+    }
+
+    let mut archived = 0;
+    if enumeration.is_complete() {
+        for group in access::directory_groups(&mut *tx, tenant.id, connector).await? {
+            let Some(resource_id) = group.directory_resource_id.as_deref() else {
+                continue;
+            };
+            if group.status == synveda_types::workspace::LifecycleStatus::Active
+                && !seen_resources.contains(resource_id)
+                && let Some(retired) =
+                    access::retire_directory_group(&mut tx, tenant.id, connector, resource_id)
+                        .await?
+            {
+                archived += 1;
+                audit::record_as(
+                    &mut tx,
+                    tenant.id,
+                    Actor::system(ACTOR),
+                    AuditAction::GroupUpdated,
+                    format!("group {}", retired.id),
+                    Outcome::Success,
+                    json!({
+                        "source": "pull",
+                        "connector": connector,
+                        "directory_resource_id": resource_id,
+                        "group_id": retired.id,
+                        "operation": "archive_absent",
+                        "revision": retired.revision,
+                    }),
+                )
+                .await?;
+            }
+        }
     }
     tx.commit().await.map_err(storage)?;
-    Ok(())
+    Ok((seen_resources.len(), archived))
+}
+
+fn directory_slug(id: GroupId, connector: &str) -> String {
+    let digest = blake3::hash(connector.as_bytes()).to_hex();
+    format!("dir-{}-{id}", &digest[..8])
 }
 
 /// Seals one person the way the push plane seals them.
@@ -444,6 +548,7 @@ async fn seal(
     user: &synveda_types::DirectoryUser,
 ) -> Result<()> {
     let attributes = UserAttributes {
+        directory_source: user.directory_source.clone(),
         external_id: user.external_id.clone(),
         user_name: user.user_name.clone(),
         active: false,

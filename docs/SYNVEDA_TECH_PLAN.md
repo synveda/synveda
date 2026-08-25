@@ -229,6 +229,11 @@ global `/v1/recall` route and no direct-store adapter path.
 - **Phase 3 — paused enterprise surface**: the delivered skill, directory,
   console, deployment and key-plane foundations are re-anchored by explicit
   Phase 5 packages before the remaining enterprise backlog resumes.
+- **Directory boundary (CPR-34/ADR-0093)**: SCIM push and scheduled pull
+  project onto one identity/principal and the shared Group graph. Membership
+  is identity-keyed; provider source/resource ids remain provenance; only a
+  separately PDP-governed `scope_grants` assignment turns a directory group
+  into product authority. There is no directory-only permission model.
 - **Phase 4 — ecosystem**: SDKs, adapters, import/export, telemetry, DR and
   scale-out work follows the public context-platform contract.
 - **Phase 5 — context platform hard cut (current)**: generic governed scopes;

@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        update scim_users set identity_id = $3, updated_at = now()\n        where tenant_id = $1 and id = $2 and directory_source = $4\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "847f582ae8883dd2fe93c31f1eb8dacd0dea276828c74655bafd22660a1b8999"
+}

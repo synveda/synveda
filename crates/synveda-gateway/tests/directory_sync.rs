@@ -52,7 +52,7 @@ use synveda_gateway::directory_sync::{PassReport, SyncConfig, run_once};
 use synveda_gateway::telemetry;
 use synveda_identity::Hs256Verifier;
 use synveda_identity::directory::{
-    DirectoryConnector, DirectorySnapshot, DirectoryUserRecord, Enumeration,
+    DirectoryConnector, DirectoryGroupRecord, DirectorySnapshot, DirectoryUserRecord, Enumeration,
 };
 use synveda_ingest::embedding::{AnyEmbedder, DeterministicEmbedder};
 use synveda_policy::Pdp;
@@ -98,7 +98,7 @@ impl DirectoryConnector for ScriptedDirectory {
     }
 }
 
-fn person(external_id: &str, user_name: &str, group: &str) -> DirectoryUserRecord {
+fn person(external_id: &str, user_name: &str, _group: &str) -> DirectoryUserRecord {
     DirectoryUserRecord {
         external_id: external_id.to_owned(),
         user_name: user_name.to_owned(),
@@ -107,19 +107,36 @@ fn person(external_id: &str, user_name: &str, group: &str) -> DirectoryUserRecor
         given_name: None,
         family_name: None,
         work_email: Some(user_name.to_owned()),
-        groups: vec![group.to_owned()],
     }
 }
 
 fn complete(users: Vec<DirectoryUserRecord>) -> Enumeration {
-    Enumeration::Complete(DirectorySnapshot { users })
+    let member_external_ids = users.iter().map(|user| user.external_id.clone()).collect();
+    Enumeration::Complete(DirectorySnapshot {
+        users,
+        groups: vec![DirectoryGroupRecord {
+            external_id: "g-eng-core".to_owned(),
+            display_name: "synveda-eng-core".to_owned(),
+            member_external_ids,
+        }],
+    })
 }
 
 fn partial(users: Vec<DirectoryUserRecord>) -> Enumeration {
     Enumeration::Partial {
-        snapshot: DirectorySnapshot { users },
+        snapshot: DirectorySnapshot {
+            users,
+            groups: Vec::new(),
+        },
         failure: "429 from the second page".to_owned(),
     }
+}
+
+fn complete_without_groups(users: Vec<DirectoryUserRecord>) -> Enumeration {
+    Enumeration::Complete(DirectorySnapshot {
+        users,
+        groups: Vec::new(),
+    })
 }
 
 // ── Harness ──────────────────────────────────────────────────────────────────
@@ -378,6 +395,58 @@ async fn an_incomplete_pass_records_presence_and_concludes_nothing() {
         state.passes_completed, passes_completed_before,
         "the completeness proof did not move, which is the mechanism \
          rather than the symptom"
+    );
+}
+
+/// Stable provider group ids project onto the shared access graph. A partial
+/// pass cannot speak about absence, while the next complete pass archives a
+/// group the provider no longer lists.
+#[tokio::test]
+async fn directory_groups_converge_only_on_complete_snapshots() {
+    let Some(w) = world().await else { return };
+    let alice = person("u1", "alice@example.test", "synveda-eng-core");
+    let directory = ScriptedDirectory::new(vec![
+        complete(vec![alice.clone()]),
+        partial(vec![alice.clone()]),
+        complete_without_groups(vec![alice]),
+    ]);
+
+    let first = pass(&w, &directory).await;
+    assert_eq!(first.groups, 1);
+    let groups = access::directory_groups(&w.pool, w.tenant, "scripted")
+        .await
+        .expect("list projected groups");
+    assert_eq!(groups.len(), 1);
+    assert_eq!(
+        groups[0].directory_resource_id.as_deref(),
+        Some("g-eng-core")
+    );
+    let members = access::group_members(&w.pool, w.tenant, groups[0].id)
+        .await
+        .expect("list projected membership");
+    assert_eq!(members.len(), 1);
+    assert_eq!(members[0].principal_id, None, "membership predates login");
+
+    let incomplete = pass(&w, &directory).await;
+    assert!(!incomplete.complete);
+    assert_eq!(incomplete.groups_archived, 0);
+    let still_active = access::directory_groups(&w.pool, w.tenant, "scripted")
+        .await
+        .expect("list after partial pass");
+    assert_eq!(
+        still_active[0].status,
+        synveda_types::workspace::LifecycleStatus::Active
+    );
+
+    let complete = pass(&w, &directory).await;
+    assert!(complete.complete);
+    assert_eq!(complete.groups_archived, 1);
+    let archived = access::directory_groups(&w.pool, w.tenant, "scripted")
+        .await
+        .expect("list after complete pass");
+    assert_eq!(
+        archived[0].status,
+        synveda_types::workspace::LifecycleStatus::Archived
     );
 }
 

@@ -65,8 +65,17 @@ pub struct DirectoryUserRecord {
     /// The work address, which the correspondence rule prefers over
     /// `userName` (ADR-0059 decision 4, as the AUTH-4 demo corrected it).
     pub work_email: Option<String>,
-    /// Group display names, as the AUTH-2 mapping resolver will see them.
-    pub groups: Vec<String>,
+}
+
+/// One group and its complete membership as the directory describes it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DirectoryGroupRecord {
+    /// Stable vendor resource id (Entra object id or Okta group id).
+    pub external_id: String,
+    /// Human-facing directory name.
+    pub display_name: String,
+    /// Stable vendor user ids belonging to the group.
+    pub member_external_ids: Vec<String>,
 }
 
 /// Everything one pass read.
@@ -75,6 +84,8 @@ pub struct DirectorySnapshot {
     /// Every user the enumeration reached, in the order the directory
     /// listed them.
     pub users: Vec<DirectoryUserRecord>,
+    /// Every group reached by the enumeration, including empty groups.
+    pub groups: Vec<DirectoryGroupRecord>,
 }
 
 /// What an enumeration produced, and whether it may be trusted about who is
@@ -335,8 +346,8 @@ mod tests {
                 given_name: None,
                 family_name: None,
                 work_email: None,
-                groups: Vec::new(),
             }],
+            groups: Vec::new(),
         };
         let partial = Enumeration::Partial {
             snapshot: snapshot.clone(),

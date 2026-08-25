@@ -56,13 +56,14 @@ use synveda_store::access::AccessEntry as StoreAccessEntry;
 use synveda_store::anchors::AnchorSelection;
 use synveda_store::{access, projects, rls, scopes, workspaces};
 use synveda_types::access::{
-    DEFAULT_INVITE_TTL_SECS, GrantSource, GrantSubject, Group, GroupSource, InviteStatus,
-    PendingInvite, RoleKey, ScopeGrant, SubjectKind, validate_invite_ttl,
+    DEFAULT_INVITE_TTL_SECS, GrantSource, GrantSubject, Group, GroupMember, GroupSource,
+    InviteStatus, PendingInvite, RoleKey, ScopeGrant, SubjectKind, validate_invite_ttl,
 };
 use synveda_types::scope::Scope;
 use synveda_types::workspace::{LifecycleStatus, Project, Workspace};
 use synveda_types::{
-    Error, GrantId, GroupId, InviteId, ProjectId, Result, ScopeId, TenantId, WorkspaceId,
+    Error, GrantId, GroupId, IdentityId, InviteId, ProjectId, Result, ScopeId, TenantId,
+    WorkspaceId,
 };
 use utoipa::ToSchema;
 
@@ -169,17 +170,23 @@ pub struct GroupView {
     /// Whose group it is.
     #[schema(schema_with = group_source_schema)]
     pub source: GroupSource,
-    /// The external id a directory knows it by, when one does.
+    /// The adapter/provider that owns this directory-managed group.
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub directory_ref: Option<String>,
+    pub directory_source: Option<String>,
+    /// The stable resource id assigned by that directory.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub directory_resource_id: Option<String>,
+    /// Optional protocol `externalId`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub directory_external_id: Option<String>,
     /// Whether the group is in use. An **archived** group confers nothing:
     /// every grant naming it resolves to nobody.
     #[schema(schema_with = lifecycle_status_schema)]
     pub status: LifecycleStatus,
     /// The revision an update must name as its precondition.
     pub revision: i64,
-    /// Its members, by principal id.
-    pub members: Vec<String>,
+    /// Its members, by stable identity with a bound subject when available.
+    pub members: Vec<GroupMemberView>,
     /// Who created it, when a caller did.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub created_by: Option<String>,
@@ -190,20 +197,43 @@ pub struct GroupView {
 }
 
 impl GroupView {
-    fn build(group: Group, members: Vec<String>) -> Self {
+    fn build(group: Group, members: Vec<GroupMember>) -> Self {
         GroupView {
             id: group.id,
             slug: group.slug,
             display_name: group.display_name,
             description: group.description,
             source: group.source,
-            directory_ref: group.directory_ref,
+            directory_source: group.directory_source,
+            directory_resource_id: group.directory_resource_id,
+            directory_external_id: group.directory_external_id,
             status: group.status,
             revision: group.revision,
-            members,
+            members: members.into_iter().map(Into::into).collect(),
             created_by: group.created_by,
             created_at: group.created_at,
             updated_at: group.updated_at,
+        }
+    }
+}
+
+/// One group membership. An unbound directory identity intentionally has no
+/// `principal_id` yet; its stable identity still remains visible and usable.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct GroupMemberView {
+    /// Stable identity id.
+    #[schema(value_type = String, format = "uuid")]
+    pub identity_id: IdentityId,
+    /// Verified token subject, once first login binds one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub principal_id: Option<String>,
+}
+
+impl From<GroupMember> for GroupMemberView {
+    fn from(member: GroupMember) -> Self {
+        Self {
+            identity_id: member.identity_id,
+            principal_id: member.principal_id,
         }
     }
 }
@@ -252,6 +282,12 @@ pub struct GrantView {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schema(value_type = Option<String>, format = "uuid")]
     pub invite_id: Option<InviteId>,
+    /// Owning directory adapter for a directory-managed assignment.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub directory_source: Option<String>,
+    /// Stable directory group resource that caused the assignment.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub directory_resource_id: Option<String>,
     /// Who granted it, when a caller did.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub granted_by: Option<String>,
@@ -273,6 +309,8 @@ impl From<ScopeGrant> for GrantView {
             role: grant.role_key,
             source: grant.source,
             invite_id: grant.invite_id,
+            directory_source: grant.directory_source,
+            directory_resource_id: grant.directory_resource_id,
             granted_by: grant.granted_by,
             directory_managed: grant.source.is_directory_managed(),
             created_at: grant.created_at,
@@ -482,6 +520,21 @@ impl GrantSubjectBody {
     }
 }
 
+/// `POST /v1/directory/access-assignments`.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct DirectoryAccessAssignmentBody {
+    /// Governed scope at which the directory group receives authority.
+    #[schema(value_type = String, format = "uuid")]
+    pub scope_id: ScopeId,
+    /// A shared Group whose source is `directory`.
+    #[schema(value_type = String, format = "uuid")]
+    pub group_id: GroupId,
+    /// Role key interpreted by the active Cedar policy pack.
+    #[schema(schema_with = role_key_schema)]
+    pub role: RoleKey,
+}
+
 /// `POST /v1/admin/groups`.
 #[derive(Debug, Deserialize, ToSchema)]
 #[serde(deny_unknown_fields)]
@@ -493,9 +546,10 @@ pub struct CreateGroupBody {
     /// Optional prose. Blank is refused; omit it instead.
     #[serde(default)]
     pub description: Option<String>,
-    /// Its members at creation, by principal id.
+    /// Its members at creation, by stable identity id.
     #[serde(default)]
-    pub members: Vec<String>,
+    #[schema(value_type = Vec<String>, format = "uuid")]
+    pub members: Vec<IdentityId>,
 }
 
 /// `PATCH /v1/admin/groups/{group_id}`.
@@ -524,7 +578,8 @@ pub struct UpdateGroupBody {
     pub status: Option<LifecycleStatus>,
     /// The complete membership after this update.
     #[serde(default)]
-    pub members: Option<Vec<String>>,
+    #[schema(value_type = Option<Vec<String>>, format = "uuid")]
+    pub members: Option<Vec<IdentityId>>,
 }
 
 /// Distinguishes an absent field from an explicit `null` — the workspace
@@ -784,6 +839,8 @@ fn grant_image(grant: &ScopeGrant) -> serde_json::Value {
         "role": grant.role_key.as_str(),
         "source": grant.source.as_str(),
         "invite_id": grant.invite_id,
+        "directory_source": grant.directory_source,
+        "directory_resource_id": grant.directory_resource_id,
     })
 }
 
@@ -808,6 +865,8 @@ fn group_image(group: &Group) -> serde_json::Value {
         "display_name": group.display_name,
         "description": group.description,
         "source": group.source.as_str(),
+        "directory_source": group.directory_source,
+        "directory_resource_id": group.directory_resource_id,
         "status": group.status.as_str(),
         "revision": group.revision,
     })
@@ -1613,13 +1672,10 @@ pub(crate) async fn list_groups(State(state): State<AppState>) -> Response {
         )
         .await?;
         commit(tx).await?;
-        let mut by_group: std::collections::HashMap<GroupId, Vec<String>> =
+        let mut by_group: std::collections::HashMap<GroupId, Vec<GroupMember>> =
             std::collections::HashMap::new();
         for member in memberships {
-            by_group
-                .entry(member.group_id)
-                .or_default()
-                .push(member.principal_id);
+            by_group.entry(member.group_id).or_default().push(member);
         }
         Ok(Json(GroupList {
             groups: groups
@@ -1726,7 +1782,9 @@ async fn make_group(
             // a later prompt. The column exists so that when it lands, a
             // person's group and a directory's are the same row shape.
             source: GroupSource::Direct,
-            directory_ref: None,
+            directory_source: None,
+            directory_resource_id: None,
+            directory_external_id: None,
             created_by: Some(claim.subject.clone()),
         },
     )
@@ -1794,13 +1852,7 @@ async fn replay_group(
     )
     .await?;
     commit(tx).await?;
-    Ok(GroupView::build(
-        group,
-        members
-            .into_iter()
-            .map(|member| member.principal_id)
-            .collect(),
-    ))
+    Ok(GroupView::build(group, members))
 }
 
 /// `PATCH /v1/admin/groups/{group_id}`.
@@ -1879,13 +1931,7 @@ pub(crate) async fn update_group(
         )
         .await?;
         commit(tx).await?;
-        Ok(Json(GroupView::build(
-            after,
-            after_members
-                .into_iter()
-                .map(|member| member.principal_id)
-                .collect(),
-        )))
+        Ok(Json(GroupView::build(after, after_members)))
     }
     .await;
     respond(&state, "group.update", result).await
@@ -1896,14 +1942,10 @@ fn membership_delta(
     before: &[synveda_types::access::GroupMember],
     after: &[synveda_types::access::GroupMember],
 ) -> serde_json::Value {
-    let before_set: std::collections::BTreeSet<&str> = before
-        .iter()
-        .map(|member| member.principal_id.as_str())
-        .collect();
-    let after_set: std::collections::BTreeSet<&str> = after
-        .iter()
-        .map(|member| member.principal_id.as_str())
-        .collect();
+    let before_set: std::collections::BTreeSet<IdentityId> =
+        before.iter().map(|member| member.identity_id).collect();
+    let after_set: std::collections::BTreeSet<IdentityId> =
+        after.iter().map(|member| member.identity_id).collect();
     json!({
         "before_count": before_set.len(),
         "after_count": after_set.len(),
@@ -2086,14 +2128,20 @@ async fn grant_at(
             entity: format!("scope {scope_id}"),
         });
     }
-    if let GrantSubject::Group { group_id } = subject
-        && access::get_group(&mut *tx, tenant_id, *group_id)
+    if let GrantSubject::Group { group_id } = subject {
+        let group = access::get_group(&mut *tx, tenant_id, *group_id)
             .await?
-            .is_none()
-    {
-        return Err(Error::NotFound {
-            entity: format!("group {group_id}"),
-        });
+            .ok_or_else(|| Error::NotFound {
+                entity: format!("group {group_id}"),
+            })?;
+        if group.source.is_directory_managed() {
+            return Err(Error::Conflict {
+                message: format!(
+                    "group {group_id} is managed by {}; create its access assignment through /v1/directory/access-assignments",
+                    group.directory_source.as_deref().unwrap_or("a directory")
+                ),
+            });
+        }
     }
     let grant = access::create_grant(
         &mut *tx,
@@ -2193,6 +2241,200 @@ pub(crate) async fn revoke_grant(
     respond(&state, "grant.revoke", result).await
 }
 
+/// `POST /v1/directory/access-assignments` — bind a provider-owned group to a
+/// governed scope without creating a second directory authorisation model.
+#[utoipa::path(
+    post,
+    path = "/v1/directory/access-assignments",
+    operation_id = "create_directory_access_assignment",
+    tag = "directory",
+    params(
+        ("Idempotency-Key" = String, Header,
+         description = "Required. A unique value per request, reused verbatim on retry."),
+    ),
+    request_body = DirectoryAccessAssignmentBody,
+    responses(
+        (status = 201, description = "Directory access assigned", body = GrantView),
+        (status = 200, description = "This key already made the assignment", body = GrantView),
+        (status = 400, description = "Malformed body or no `Idempotency-Key`", body = ApiErrorBody),
+        (status = 403, description = "The PDP denied `membership.grant`", body = ApiErrorBody),
+        (status = 404, description = "No such scope or directory group", body = ApiErrorBody),
+        (status = 409, description = "The group is not directory-owned, the assignment exists, or the key was reused", body = ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
+pub(crate) async fn create_directory_access_assignment(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    payload: std::result::Result<Json<DirectoryAccessAssignmentBody>, JsonRejection>,
+) -> Response {
+    let result = async {
+        let body = body(payload)?;
+        let tenant_id = tenant_id()?;
+        let actor = subject()?;
+        let claim = Claim::from_headers(
+            &headers,
+            "directory.access.assign",
+            &actor,
+            &json!({
+                "route": "POST /v1/directory/access-assignments",
+                "scope_id": body.scope_id,
+                "group_id": body.group_id,
+                "role": body.role.as_str(),
+            }),
+        )?;
+        let replayed = match crate::idempotency::dispatch(&state.pool, tenant_id, &claim).await? {
+            Dispatch::Replay(id) => Some(id),
+            Dispatch::Create => match assign_directory_access(&state, tenant_id, &body, &claim)
+                .await
+            {
+                Ok(grant) => return Ok((StatusCode::CREATED, Json(GrantView::from(grant)))),
+                Err(conflict @ Error::Conflict { .. }) => Some(
+                    crate::idempotency::resolve_conflict(&state.pool, tenant_id, &claim, conflict)
+                        .await?,
+                ),
+                Err(other) => return Err(other),
+            },
+        };
+        let id = GrantId::from_uuid(replayed.expect("replay id"));
+        let grant = replay_grant(&state, tenant_id, id, &claim).await?;
+        Ok((StatusCode::OK, Json(GrantView::from(grant))))
+    }
+    .await;
+    respond(&state, "directory.access.assign", result).await
+}
+
+async fn assign_directory_access(
+    state: &AppState,
+    tenant_id: TenantId,
+    body: &DirectoryAccessAssignmentBody,
+    claim: &Claim,
+) -> Result<ScopeGrant> {
+    let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
+    let scope = scopes::get(&mut *tx, tenant_id, body.scope_id)
+        .await?
+        .ok_or_else(|| Error::NotFound {
+            entity: format!("scope {}", body.scope_id),
+        })?;
+    let group = access::get_group(&mut *tx, tenant_id, body.group_id)
+        .await?
+        .ok_or_else(|| Error::NotFound {
+            entity: format!("group {}", body.group_id),
+        })?;
+    if !group.source.is_directory_managed() {
+        return Err(Error::Conflict {
+            message: format!(
+                "group {} is managed directly; grant it through /v1/admin/grants",
+                group.id
+            ),
+        });
+    }
+    let (authorized, _) = require(
+        state,
+        &mut tx,
+        Action::MembershipGrant,
+        tenant_id,
+        Subject::Scope(&scope, None, AnchorSelection::none()),
+    )
+    .await?;
+    let grant = access::create_grant(
+        &mut *tx,
+        &access::NewGrant {
+            id: GrantId::new(),
+            tenant_id,
+            scope_id: body.scope_id,
+            subject: GrantSubject::Group {
+                group_id: body.group_id,
+            },
+            role_key: body.role,
+            source: GrantSource::Directory,
+            invite_id: None,
+            granted_by: Some(claim.subject.clone()),
+        },
+    )
+    .await?;
+    claim
+        .remember(&mut tx, tenant_id, grant.id.as_uuid())
+        .await?;
+    audit::record(
+        &mut tx,
+        tenant_id,
+        AuditAction::AccessGranted,
+        Resource::Scope(body.scope_id).to_string(),
+        Outcome::Success,
+        json!({
+            "authz": audit::decision_context(Action::MembershipGrant, &authorized),
+            "origin": "directory-access-assignment",
+            "grant": grant_image(&grant),
+            "idempotency_key": claim.key,
+        }),
+    )
+    .await?;
+    commit(tx).await?;
+    Ok(grant)
+}
+
+/// `DELETE /v1/directory/access-assignments/{grant_id}`.
+#[utoipa::path(
+    delete,
+    path = "/v1/directory/access-assignments/{grant_id}",
+    operation_id = "revoke_directory_access_assignment",
+    tag = "directory",
+    params(("grant_id" = String, Path, description = "The directory grant's id")),
+    responses(
+        (status = 204, description = "Assignment revoked"),
+        (status = 403, description = "The PDP denied `membership.grant`", body = ApiErrorBody),
+        (status = 404, description = "No such grant in this tenant", body = ApiErrorBody),
+        (status = 409, description = "The grant is not directory-owned", body = ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
+pub(crate) async fn revoke_directory_access_assignment(
+    State(state): State<AppState>,
+    Path(grant_id): Path<GrantId>,
+) -> Response {
+    let result = async {
+        let tenant_id = tenant_id()?;
+        let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
+        let existing = access::get_grant(&mut *tx, tenant_id, grant_id)
+            .await?
+            .ok_or_else(|| Error::NotFound {
+                entity: format!("grant {grant_id}"),
+            })?;
+        let scope = scopes::get(&mut *tx, tenant_id, existing.scope_id)
+            .await?
+            .ok_or_else(|| Error::NotFound {
+                entity: format!("grant {grant_id}"),
+            })?;
+        let (authorized, _) = require(
+            &state,
+            &mut tx,
+            Action::MembershipGrant,
+            tenant_id,
+            Subject::Grant(&existing, &scope),
+        )
+        .await?;
+        let grant = access::revoke_directory_grant(&mut tx, tenant_id, grant_id).await?;
+        audit::record(
+            &mut tx,
+            tenant_id,
+            AuditAction::AccessRevoked,
+            Resource::Scope(grant.scope_id).to_string(),
+            Outcome::Success,
+            json!({
+                "authz": audit::decision_context(Action::MembershipGrant, &authorized),
+                "origin": "directory-access-assignment",
+                "revoked": [grant_image(&grant)],
+            }),
+        )
+        .await?;
+        commit(tx).await?;
+        Ok(StatusCode::NO_CONTENT)
+    }
+    .await;
+    respond(&state, "directory.access.revoke", result).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2285,20 +2527,25 @@ mod tests {
 
     #[test]
     fn a_membership_delta_reports_who_moved_and_not_the_whole_list() {
-        let member = |id: &str| synveda_types::access::GroupMember {
-            tenant_id: TenantId::new(),
-            group_id: GroupId::new(),
-            principal_id: id.to_owned(),
-            source: GrantSource::Direct,
-            added_by: None,
-            created_at: Utc::now(),
-        };
-        let before = vec![member("sam"), member("robin")];
-        let after = vec![member("robin"), member("kim")];
+        let member =
+            |identity_id: IdentityId, principal_id: &str| synveda_types::access::GroupMember {
+                tenant_id: TenantId::new(),
+                group_id: GroupId::new(),
+                identity_id,
+                principal_id: Some(principal_id.to_owned()),
+                source: GrantSource::Direct,
+                added_by: None,
+                created_at: Utc::now(),
+            };
+        let sam = IdentityId::new();
+        let robin = IdentityId::new();
+        let kim = IdentityId::new();
+        let before = vec![member(sam, "sam"), member(robin, "robin")];
+        let after = vec![member(robin, "robin"), member(kim, "kim")];
         let delta = membership_delta(&before, &after);
         assert_eq!(delta["before_count"], 2);
         assert_eq!(delta["after_count"], 2);
-        assert_eq!(delta["added"], json!(["kim"]));
-        assert_eq!(delta["removed"], json!(["sam"]));
+        assert_eq!(delta["added"], json!([kim]));
+        assert_eq!(delta["removed"], json!([sam]));
     }
 }

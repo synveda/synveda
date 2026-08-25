@@ -18,6 +18,8 @@ use synveda_types::{DirectoryUser, DirectoryUserId};
 use super::{ScimAuth, ScimError, ScimJson, base_url, filter, page_bounds, reconcile, wire};
 use crate::app::AppState;
 
+const DIRECTORY_SOURCE: &str = "scim";
+
 /// `?filter=`, `?startIndex=`, `?count=` — RFC 7644 §3.4.2.
 #[derive(Debug, Deserialize)]
 pub struct ListQuery {
@@ -61,16 +63,28 @@ pub async fn list(
             let parsed = filter::parse(text, filter::USER_FILTERABLE).map_err(refuse_filter)?;
             let found = match parsed.attribute.as_str() {
                 "username" => {
-                    directory::user_by_user_name(&mut *tx, tenant_id, &parsed.value).await?
+                    directory::user_by_user_name(
+                        &mut *tx,
+                        tenant_id,
+                        DIRECTORY_SOURCE,
+                        &parsed.value,
+                    )
+                    .await?
                 }
                 "externalid" => {
-                    directory::user_by_external_id(&mut *tx, tenant_id, &parsed.value).await?
+                    directory::user_by_external_id(
+                        &mut *tx,
+                        tenant_id,
+                        DIRECTORY_SOURCE,
+                        &parsed.value,
+                    )
+                    .await?
                 }
                 // An id that is not a uuid is not a resource this server
                 // ever minted, so it matches nothing — which is a correct
                 // empty list rather than a 400.
                 _ => match parsed.value.parse::<DirectoryUserId>() {
-                    Ok(id) => directory::user(&mut *tx, tenant_id, id).await?,
+                    Ok(id) => directory::user(&mut *tx, tenant_id, DIRECTORY_SOURCE, id).await?,
                     Err(_) => None,
                 },
             };
@@ -79,9 +93,9 @@ pub async fn list(
         }
         None => {
             let (start, count) = page_bounds(query.start_index(), query.count());
-            let total = directory::count_users(&mut *tx, tenant_id).await?;
+            let total = directory::count_users(&mut *tx, tenant_id, DIRECTORY_SOURCE).await?;
             (
-                directory::users(&mut *tx, tenant_id, start - 1, count).await?,
+                directory::users(&mut *tx, tenant_id, DIRECTORY_SOURCE, start - 1, count).await?,
                 total,
             )
         }
@@ -107,7 +121,7 @@ pub async fn get(
 ) -> Result<Response, ScimError> {
     let id = parse_id(&id)?;
     let mut tx = synveda_store::rls::begin_tenant_tx(&state.pool, auth.tenant.id).await?;
-    let user = directory::user(&mut *tx, auth.tenant.id, id)
+    let user = directory::user(&mut *tx, auth.tenant.id, DIRECTORY_SOURCE, id)
         .await?
         .ok_or_else(ScimError::not_found)?;
     Ok(ScimJson(
@@ -196,7 +210,7 @@ pub async fn patch(
     let id = parse_id(&id)?;
     let tenant_id = auth.tenant.id;
     let mut tx = synveda_store::rls::begin_tenant_tx(&state.pool, tenant_id).await?;
-    let current = directory::user(&mut *tx, tenant_id, id)
+    let current = directory::user(&mut *tx, tenant_id, DIRECTORY_SOURCE, id)
         .await?
         .ok_or_else(ScimError::not_found)?;
 
@@ -238,7 +252,7 @@ pub async fn delete(
     let id = parse_id(&id)?;
     let tenant_id = auth.tenant.id;
     let mut tx = synveda_store::rls::begin_tenant_tx(&state.pool, tenant_id).await?;
-    let current = directory::user(&mut *tx, tenant_id, id)
+    let current = directory::user(&mut *tx, tenant_id, DIRECTORY_SOURCE, id)
         .await?
         .ok_or_else(ScimError::not_found)?;
     let mut attributes = current_attributes(&current);
@@ -268,11 +282,13 @@ async fn project(
         &user,
     )
     .await?;
-    Ok(directory::user(&state.pool, auth.tenant.id, user.id)
-        .await
-        .ok()
-        .flatten()
-        .unwrap_or(user))
+    Ok(
+        directory::user(&state.pool, auth.tenant.id, DIRECTORY_SOURCE, user.id)
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or(user),
+    )
 }
 
 /// The attributes a body carries, refusing a create with no `userName` —
@@ -287,6 +303,7 @@ fn attributes_of(body: &wire::UserResource) -> Result<UserAttributes, ScimError>
         )
     })?;
     Ok(UserAttributes {
+        directory_source: DIRECTORY_SOURCE.to_owned(),
         external_id: body.external_id.clone(),
         user_name,
         // Absent means active: RFC 7643 defaults it, and reading an
@@ -302,6 +319,7 @@ fn attributes_of(body: &wire::UserResource) -> Result<UserAttributes, ScimError>
 /// A stored row's attributes, as the base a PATCH mutates.
 fn current_attributes(user: &DirectoryUser) -> UserAttributes {
     UserAttributes {
+        directory_source: user.directory_source.clone(),
         external_id: user.external_id.clone(),
         user_name: user.user_name.clone(),
         active: user.active,

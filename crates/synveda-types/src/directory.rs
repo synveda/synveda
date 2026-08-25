@@ -17,7 +17,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::{DirectoryGroupId, DirectoryUserId, IdentityId, TenantId};
+use crate::{DirectoryUserId, IdentityId, TenantId};
 
 /// One person, as the directory describes them.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -26,6 +26,8 @@ pub struct DirectoryUser {
     pub id: DirectoryUserId,
     /// Owning tenant.
     pub tenant_id: TenantId,
+    /// The adapter/provider that owns the row (`scim`, `entra`, `okta`, …).
+    pub directory_source: String,
     /// The directory's own anchor (`externalId`), when it sends one.
     ///
     /// Mutable, because it is the customer's attribute mapping rather than
@@ -49,27 +51,6 @@ pub struct DirectoryUser {
     pub work_email: Option<String>,
     /// The identity this row projects onto, once reconciliation has run.
     pub identity_id: Option<IdentityId>,
-    /// `meta.version` — the ETag, bumped on every write.
-    pub version: i64,
-    /// `meta.created`.
-    pub created_at: DateTime<Utc>,
-    /// `meta.lastModified`.
-    pub updated_at: DateTime<Utc>,
-}
-
-/// One directory group. Its `display_name` is what the AUTH-2 mapping
-/// resolver sees — the same `group_mappings`-then-convention resolution a
-/// token's `groups` claim goes through (ADR-0013 decision 3).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct DirectoryGroup {
-    /// The resource id a provisioning agent addresses this row by.
-    pub id: DirectoryGroupId,
-    /// Owning tenant.
-    pub tenant_id: TenantId,
-    /// The directory's own anchor (`externalId`), when it sends one.
-    pub external_id: Option<String>,
-    /// `displayName` — the group name placement resolves against.
-    pub display_name: String,
     /// `meta.version` — the ETag, bumped on every write.
     pub version: i64,
     /// `meta.created`.

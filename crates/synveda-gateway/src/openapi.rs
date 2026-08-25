@@ -252,6 +252,8 @@ revision, and its mutations are last-writer-wins under the PDP.",
         access::list_grants,
         access::create_grant,
         access::revoke_grant,
+        access::create_directory_access_assignment,
+        access::revoke_directory_access_assignment,
     ),
     components(schemas(
         crate::app::WhoamiResponse,

@@ -30,7 +30,7 @@ use sqlx::postgres::PgPoolOptions;
 use synveda_gateway::app::{AppState, router};
 use synveda_gateway::telemetry;
 use synveda_identity::Hs256Verifier;
-use synveda_types::TenantId;
+use synveda_types::{IdentityId, IdentityKind, TenantId};
 use tower::ServiceExt;
 
 const SECRET: &[u8] = b"cpr-6-anchors-test-secret";
@@ -82,6 +82,29 @@ fn state(url: &str) -> AppState {
 
 fn issue(subject: &str, tenant_id: TenantId) -> String {
     Hs256Verifier::new(SECRET).issue(subject, tenant_id, Duration::from_secs(300))
+}
+
+async fn provision_identity(state: &AppState, tenant_id: TenantId, subject: &str) -> String {
+    let mut tx = synveda_store::rls::begin_tenant_tx(&state.pool, tenant_id)
+        .await
+        .expect("begin identity fixture");
+    let scope = synveda_store::scopes::ensure_principal_scope(&mut tx, tenant_id, subject, subject)
+        .await
+        .expect("create principal scope");
+    let identity = synveda_store::identities::create(
+        &mut tx,
+        IdentityId::new(),
+        tenant_id,
+        Some(subject),
+        IdentityKind::User,
+        None,
+        Some(subject),
+        scope.id,
+    )
+    .await
+    .expect("create identity");
+    tx.commit().await.expect("commit identity fixture");
+    identity.id.to_string()
 }
 
 /// A tenant with **no role binding of any kind**, and exactly one grant: the
@@ -430,10 +453,15 @@ async fn a_group_grant_reaches_its_members_and_stops_when_they_leave() {
     let Some((state, tenant)) = admitted_tenant().await else {
         return;
     };
-    let app = router(state);
+    let app = router(state.clone());
     let founder = issue(FOUNDER, tenant);
     let contractor = issue(CONTRACTOR, tenant);
     let (workspace, project) = seed(&app, &founder).await;
+
+    // Group membership names the stable Identity aggregate, not a mutable
+    // principal subject. The fixture mirrors identity provisioning before it
+    // exercises the governed group mutation.
+    let contractor_identity = provision_identity(&state, tenant, CONTRACTOR).await;
 
     let (status, group) = call(
         &app,
@@ -444,7 +472,7 @@ async fn a_group_grant_reaches_its_members_and_stops_when_they_leave() {
         Some(json!({
             "slug": "reviewers",
             "display_name": "Reviewers",
-            "members": [CONTRACTOR],
+            "members": [contractor_identity],
         })),
     )
     .await;

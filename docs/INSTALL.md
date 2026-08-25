@@ -572,9 +572,29 @@ agent sends, so the default (`sub`) would match nothing and a person who
 logged in before the directory reached them would end up with a second
 identity. Okta needs no change.
 
-What synchronisation then does is placement and lifecycle only: it can put a
-person, move them, and seal them. It cannot name a scope, a
-record, a role or a pack — those are not in the wire format.
+Synchronisation projects users onto stable identities and principal scopes,
+and directory groups onto the same Group and identity-keyed membership rows
+used by the rest of the product. It can join, disable, rehire and change group
+membership; it cannot name a scope, role, policy pack or governed artifact —
+those are not in the wire format.
+
+To let one directory group act in a governed subtree, an authorised operator
+uses the dedicated public application command:
+
+```http
+POST /v1/directory/access-assignments
+Idempotency-Key: <unique retry key>
+
+{"scope_id":"<scope uuid>","group_id":"<directory Group uuid>","role":"member"}
+```
+
+That creates an ordinary source-bearing `scope_grants` row after the same
+`membership.grant` Cedar decision used for manual access. Removing a member,
+disabling their identity or archiving the directory group withdraws effective
+access on the next request. Ordinary group/grant mutation routes refuse
+directory-owned rows and tell the operator to change the directory or use the
+dedicated assignment route. No live Entra or Okta verification is claimed by
+the repository fixtures; they remain labelled captured or transcribed.
 
 With a real issuer the gateway runs as the compose `gateway` container. With
 the bundled one it runs as a host process, because the bundled issuer's URL

@@ -75,7 +75,7 @@ Phase 5 — context platform redesign, since 2026-08-17, on
 `feat/context-platform-mvp`. Phase 3 is paused mid-phase, not finished —
 OPS-9, OPS-10, TEN-5,6, AUD-3,4, GRPH-3, EVAL-6, CTX-7, OPS-3,4, ADPT-3,
 CTX-6 and FLOW-8 are still open, and no live Entra/Okta tenant or real
-  Cursor frame has been replayed. **130 features filed, 99 delivered**;
+  Cursor frame has been replayed. **131 features filed, 100 delivered**;
 STATUS.md and `make check-backlog` are the authority on the count — the
 headline number has drifted four times, the fourth being this file itself,
 which still read 104/71 after CPR-8 filed the 105th. That is why the
@@ -132,7 +132,7 @@ Load-bearing facts about Phase 5:
   (INSTALL.md's SQL).
 - CPR-29 (ADR-0088): the generated OpenAPI contract is the complete
   authenticated application plane — established at 156 operations and
-  extended to **164 operations by CPR-31** — from `/v1/me` through governance,
+  extended to **167 operations by CPR-34** — from `/v1/me` through governance,
   audit, Knowledge, capture, context, Skills, Tools, OKF and Configuration. One
   executable route catalogue builds the router and supplies the inventory an
   exact parity test compares with OpenAPI. The console has no hand-written
@@ -174,7 +174,20 @@ Load-bearing facts about Phase 5:
   behind tenant-root `AuditRead`. Frozen-head cursor export contains every
   canonical hash input and verifies offline; its own reads land after the
   frozen prefix. Hashes-only evidence stays explicitly unresolved without an
-  invented address. The public contract has **165 operations**.
+  invented address. The public contract had **165 operations** at that
+  checkpoint.
+- CPR-34 (ADR-0093): directory users retain source-owned adapter attributes
+  while projecting one-to-one onto identities and principal scopes;
+  directory groups are the shared Group aggregate and membership keys stable
+  identities before login. SCIM push and complete/partial Entra/Okta pull use
+  one idempotent projection with stable provider ids and complete-pass-only
+  retirement. Directory access assignments are ordinary source-bearing group
+  grants behind `MembershipGrant`, RLS and the access audit chain; the wire
+  cannot name one. Removing membership, disabling an identity or archiving a
+  group withdraws authority at the next ordinary Cedar decision. The old SCIM
+  group graph is deleted without translation. Fixtures are deterministic
+  captured/transcribed evidence, not live vendor verification. The public
+  contract has **167 operations**.
 - CPR-10 (ADR-0076): **a run is a record**. `sessions`, `session_events` and
   `session_context_runs` replace `session_id: text`; the governed scope a run
   is decided at is derived from its workspace and project by composite keys

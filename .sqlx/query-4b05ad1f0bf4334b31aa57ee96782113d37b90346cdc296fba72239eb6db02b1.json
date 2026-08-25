@@ -1,0 +1,103 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        insert into scope_grants\n            (id, tenant_id, scope_id, subject_kind, principal_id, group_id,\n             role_key, source, invite_id, directory_source,\n             directory_resource_id, granted_by)\n        values ($1, $2, $3, $4, $5, $6, $7, $8, $9,\n                case when $8 = 'directory' then\n                    (select directory_source from groups\n                     where tenant_id = $2 and id = $6 and source = 'directory')\n                end,\n                case when $8 = 'directory' then\n                    (select directory_resource_id from groups\n                     where tenant_id = $2 and id = $6 and source = 'directory')\n                end,\n                $10)\n        returning id, tenant_id, scope_id, subject_kind, principal_id, group_id,\n                  role_key, source, invite_id, directory_source,\n                  directory_resource_id, granted_by, created_at\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "tenant_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "scope_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "subject_kind",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "principal_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "group_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 6,
+        "name": "role_key",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "source",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "invite_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 9,
+        "name": "directory_source",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "directory_resource_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "granted_by",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 12,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Uuid",
+        "Text",
+        "Text",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "4b05ad1f0bf4334b31aa57ee96782113d37b90346cdc296fba72239eb6db02b1"
+}

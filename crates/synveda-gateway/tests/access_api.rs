@@ -27,7 +27,7 @@ use synveda_gateway::app::{AppState, router};
 use synveda_gateway::telemetry;
 use synveda_identity::Hs256Verifier;
 use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
-use synveda_types::{GrantId, TenantId};
+use synveda_types::{GrantId, GroupId, IdentityId, IdentityKind, TenantId};
 use tower::ServiceExt;
 
 const SECRET: &[u8] = b"cpr-5-access-test-secret";
@@ -191,6 +191,50 @@ async fn call(
         serde_json::from_slice(&bytes).unwrap_or(Value::Null)
     };
     (status, value)
+}
+
+async fn provision_identity(state: &AppState, tenant_id: TenantId, subject: &str) -> String {
+    let mut tx = synveda_store::rls::begin_tenant_tx(&state.pool, tenant_id)
+        .await
+        .expect("begin identity fixture");
+    let scope = synveda_store::scopes::ensure_principal_scope(&mut tx, tenant_id, subject, subject)
+        .await
+        .expect("create principal scope");
+    let identity = synveda_store::identities::create(
+        &mut tx,
+        IdentityId::new(),
+        tenant_id,
+        Some(subject),
+        IdentityKind::User,
+        None,
+        Some(subject),
+        scope.id,
+    )
+    .await
+    .expect("create identity");
+    tx.commit().await.expect("commit identity fixture");
+    identity.id.to_string()
+}
+
+async fn seed_directory_group(state: &AppState, tenant_id: TenantId) -> GroupId {
+    let mut tx = synveda_store::rls::begin_tenant_tx(&state.pool, tenant_id)
+        .await
+        .expect("begin directory group fixture");
+    let group = synveda_store::access::sync_directory_group(
+        &mut tx,
+        GroupId::new(),
+        tenant_id,
+        "entra",
+        "entra-group-engineering",
+        Some("protocol-external-engineering"),
+        "entra-engineering",
+        "Engineering",
+        &[],
+    )
+    .await
+    .expect("create directory group fixture");
+    tx.commit().await.expect("commit directory group fixture");
+    group.id
 }
 
 /// A workspace with one project, through the API.
@@ -747,6 +791,9 @@ async fn a_group_grant_reaches_its_members_and_says_so() {
     let app = router(state.clone());
     let token = issue(ADMIN, tenant_id);
     let (workspace_id, project_id) = seed(&app, &token).await;
+    let robin = provision_identity(&state, tenant_id, "cpr5-robin").await;
+    let kim = provision_identity(&state, tenant_id, "cpr5-kim").await;
+    let sam = provision_identity(&state, tenant_id, "cpr5-sam").await;
 
     let (status, group) = call(
         &app,
@@ -757,7 +804,7 @@ async fn a_group_grant_reaches_its_members_and_says_so() {
         Some(json!({
             "slug": "engineering",
             "display_name": "Engineering",
-            "members": ["cpr5-robin", "cpr5-kim"],
+            "members": [robin, kim],
         })),
     )
     .await;
@@ -820,7 +867,7 @@ async fn a_group_grant_reaches_its_members_and_says_so() {
         None,
         Some(json!({
             "expected_revision": 1,
-            "members": ["cpr5-robin", "cpr5-kim", "cpr5-sam"],
+            "members": [robin, kim, sam],
         })),
     )
     .await;
@@ -859,7 +906,97 @@ async fn a_group_grant_reaches_its_members_and_says_so() {
         );
     }
     let chain = chain_text(&state, tenant_id).await;
-    assert!(chain.contains(r#""added":["cpr5-sam"]"#), "{chain}");
+    assert!(chain.contains(&format!(r#""added":["{sam}"]"#)), "{chain}");
+}
+
+/// Directory-owned group authority has one public mutation surface. It is
+/// idempotent, carries stable provider evidence, and the ordinary grant route
+/// cannot create or revoke the same row behind the adapter's back.
+#[tokio::test]
+async fn a_directory_access_assignment_is_governed_and_source_owned() {
+    let _guard = serial().await;
+    let Some((state, tenant_id)) = admitted_tenant().await else {
+        return;
+    };
+    let app = router(state.clone());
+    let token = issue(ADMIN, tenant_id);
+    let (workspace_id, _) = seed(&app, &token).await;
+    let group_id = seed_directory_group(&state, tenant_id).await;
+    let (_, workspace) = call(
+        &app,
+        "GET",
+        &format!("/v1/workspaces/{workspace_id}"),
+        Some(&token),
+        None,
+        None,
+    )
+    .await;
+    let scope_id = workspace["scope_id"].as_str().expect("scope id");
+    let body = json!({"scope_id": scope_id, "group_id": group_id, "role": "member"});
+
+    let (status, refused) = call(
+        &app,
+        "POST",
+        "/v1/admin/grants",
+        Some(&token),
+        Some("ordinary-directory-grant"),
+        Some(body.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+
+    let (status, created) = call(
+        &app,
+        "POST",
+        "/v1/directory/access-assignments",
+        Some(&token),
+        Some("directory-assignment-1"),
+        Some(body.clone()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    assert_eq!(created["source"], "directory");
+    assert_eq!(created["directory_source"], "entra");
+    assert_eq!(created["directory_resource_id"], "entra-group-engineering");
+    let grant_id = created["id"].as_str().expect("grant id");
+
+    let (status, replay) = call(
+        &app,
+        "POST",
+        "/v1/directory/access-assignments",
+        Some(&token),
+        Some("directory-assignment-1"),
+        Some(body),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{replay}");
+    assert_eq!(replay["id"], grant_id);
+
+    let (status, refused) = call(
+        &app,
+        "DELETE",
+        &format!("/v1/admin/grants/{grant_id}"),
+        Some(&token),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::CONFLICT, "{refused}");
+
+    let (status, body) = call(
+        &app,
+        "DELETE",
+        &format!("/v1/directory/access-assignments/{grant_id}"),
+        Some(&token),
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
+
+    let chain = chain_text(&state, tenant_id).await;
+    assert!(chain.contains("directory-access-assignment"), "{chain}");
+    assert!(chain.contains("entra-group-engineering"), "{chain}");
 }
 
 /// A stale `expected_revision` is a 409 that writes nothing — membership
@@ -870,6 +1007,7 @@ async fn a_stale_group_precondition_is_a_conflict_that_writes_nothing() {
     let Some((state, tenant_id)) = admitted_tenant().await else {
         return;
     };
+    let robin = provision_identity(&state, tenant_id, "cpr5-robin").await;
     let app = router(state);
     let token = issue(ADMIN, tenant_id);
 
@@ -879,7 +1017,7 @@ async fn a_stale_group_precondition_is_a_conflict_that_writes_nothing() {
         "/v1/admin/groups",
         Some(&token),
         Some("grp-stale"),
-        Some(json!({"slug": "eng", "display_name": "Eng", "members": ["cpr5-robin"]})),
+        Some(json!({"slug": "eng", "display_name": "Eng", "members": [robin]})),
     )
     .await;
     let group_id = group["id"].as_str().expect("id").to_owned();

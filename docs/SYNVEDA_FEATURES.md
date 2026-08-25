@@ -2156,6 +2156,24 @@ CPR-33  Context-platform audit query and deterministic export (XL)
   query branches and misleading storage-coupled audit claims are deleted;
   focused tests, demo, `make ci` and `make db-test` pass. ADR-0092.
 
+CPR-34  Directory adapter convergence (XL)
+  Filed 2026-08-25 by the autonomous continuation. Re-anchor SCIM push and
+  scheduled Entra/Okta pull on the current principal, shared Group,
+  `group_members` and `scope_grants` model rather than repairing the deleted
+  hierarchy placement or retaining two membership graphs. AC: directory users
+  map one-to-one to identities/principal scopes with tenant-qualified external
+  ids and source ownership; directory groups are shared Group aggregates and
+  membership is identity-keyed so pre-login principals are representable; one
+  idempotent replacement projection serves push and pull, with stable vendor
+  group ids and complete-pass-only retirement; directory access assignments
+  are source-bearing group grants created/revoked through the same PDP, RLS and
+  audit path as manual access while ordinary direct routes refuse them; group
+  deletion, user disable and membership removal withdraw effective authority
+  immediately; superseded SCIM group/member tables are deleted without row
+  translation; durable sync state, cross-tenant isolation, authentic-fixture
+  labels, generated contract, focused tests, demo, `make ci` and `make db-test`
+  pass. ADR-0093.
+
 ──────────────────────────────────────────────
 Sequencing (features → phases)
 ──────────────────────────────────────────────
@@ -2249,7 +2267,7 @@ Phase 4 ecosystem: ADPT-4,5,6,7,8 · PRMT-3 · SKIL-5 · MEM-7 · OPS-5,6,7 · C
    or an evaluation harness — and that is a *when*, not an *if*, since ADPT-1's own demo
    is a script. What it must not become is a warning in a README: the gap is silent,
    returns exit 0, and reads exactly like a session that was observed.)
-Phase 5 context platform (redesign): CPR-1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33
+Phase 5 context platform (redesign): CPR-1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34
    (Added 2026-08-17. Its own phase rather than a slot in Phase 4, because it is not the
    next feature — it is the programme that re-cuts the model every feature above was built
    on, for an audience none of them was: one person, or four sharing agent context, who

@@ -51,12 +51,12 @@ use chrono::{DateTime, Utc};
 use sqlx::{PgConnection, PgExecutor};
 use synveda_types::access::{
     GrantSource, GrantSubject, Group, GroupMember, GroupSource, InviteStatus, PendingInvite,
-    RoleKey, ScopeGrant, SubjectKind, validate_directory_ref, validate_email,
-    validate_principal_id,
+    RoleKey, ScopeGrant, SubjectKind, validate_directory_id, validate_directory_source,
+    validate_email, validate_principal_id,
 };
 use synveda_types::scope::{validate_display_name, validate_slug};
 use synveda_types::workspace::{LifecycleStatus, validate_description};
-use synveda_types::{Error, GrantId, GroupId, InviteId, Result, ScopeId, TenantId};
+use synveda_types::{Error, GrantId, GroupId, IdentityId, InviteId, Result, ScopeId, TenantId};
 use uuid::Uuid;
 
 /// Counter: access-plane mutations, labelled `object` = `group` | `membership`
@@ -145,7 +145,9 @@ struct GroupRow {
     display_name: String,
     description: Option<String>,
     source: String,
-    directory_ref: Option<String>,
+    directory_source: Option<String>,
+    directory_resource_id: Option<String>,
+    directory_external_id: Option<String>,
     status: String,
     revision: i64,
     created_by: Option<String>,
@@ -172,7 +174,9 @@ impl TryFrom<GroupRow> for Group {
             display_name: row.display_name,
             description: row.description,
             source: decoded::<GroupSource>(&row.source)?,
-            directory_ref: row.directory_ref,
+            directory_source: row.directory_source,
+            directory_resource_id: row.directory_resource_id,
+            directory_external_id: row.directory_external_id,
             status: decoded::<LifecycleStatus>(&row.status)?,
             revision: row.revision,
             created_by: row.created_by,
@@ -192,6 +196,8 @@ struct GrantRow {
     role_key: String,
     source: String,
     invite_id: Option<Uuid>,
+    directory_source: Option<String>,
+    directory_resource_id: Option<String>,
     granted_by: Option<String>,
     created_at: DateTime<Utc>,
 }
@@ -210,6 +216,8 @@ impl TryFrom<GrantRow> for ScopeGrant {
             role_key: decoded::<RoleKey>(&row.role_key)?,
             source: decoded::<GrantSource>(&row.source)?,
             invite_id: row.invite_id.map(InviteId::from_uuid),
+            directory_source: row.directory_source,
+            directory_resource_id: row.directory_resource_id,
             granted_by: row.granted_by,
             created_at: row.created_at,
         })
@@ -269,10 +277,14 @@ pub struct NewGroup {
     pub display_name: String,
     /// Optional prose.
     pub description: Option<String>,
-    /// Whose group it is. A directory group carries its external reference.
+    /// Whose group it is.
     pub source: GroupSource,
-    /// The external id, required for a directory group and refused otherwise.
-    pub directory_ref: Option<String>,
+    /// The owning directory adapter, for a directory-managed group.
+    pub directory_source: Option<String>,
+    /// Stable resource id assigned by the directory.
+    pub directory_resource_id: Option<String>,
+    /// Optional protocol `externalId`.
+    pub directory_external_id: Option<String>,
     /// The subject creating it, when a caller is.
     pub created_by: Option<String>,
 }
@@ -299,7 +311,7 @@ pub struct GroupUpdate {
     /// New lifecycle status. An archived group resolves to nobody.
     pub status: Option<LifecycleStatus>,
     /// The complete membership after this update, when replacing it.
-    pub members: Option<Vec<String>>,
+    pub members: Option<Vec<IdentityId>>,
 }
 
 impl GroupUpdate {
@@ -316,8 +328,8 @@ impl GroupUpdate {
 
 /// Creates a group.
 ///
-/// Fails with [`Error::Invalid`] for a malformed slug, name, description or
-/// directory reference, and [`Error::Conflict`] when the slug is taken.
+/// Fails with [`Error::Invalid`] for malformed fields and
+/// [`Error::Conflict`] when the slug or directory resource is taken.
 #[tracing::instrument(
     name = "store.access.create_group",
     skip_all,
@@ -328,21 +340,12 @@ pub async fn create_group(executor: impl PgExecutor<'_>, new: &NewGroup) -> Resu
     validate_slug(&new.slug)?;
     validate_display_name(&new.display_name)?;
     validate_description(new.description.as_deref())?;
-    match (new.source, new.directory_ref.as_deref()) {
-        (GroupSource::Directory, Some(reference)) => validate_directory_ref(reference)?,
-        (GroupSource::Directory, None) => {
-            return Err(Error::Invalid {
-                message: "a directory group carries the reference its directory knows it by"
-                    .to_owned(),
-            });
-        }
-        (GroupSource::Direct, Some(_)) => {
-            return Err(Error::Invalid {
-                message: "only a directory group carries a directory reference".to_owned(),
-            });
-        }
-        (GroupSource::Direct, None) => {}
-    }
+    validate_group_directory_shape(
+        new.source,
+        new.directory_source.as_deref(),
+        new.directory_resource_id.as_deref(),
+        new.directory_external_id.as_deref(),
+    )?;
     if let Some(created_by) = &new.created_by {
         validate_principal_id(created_by)?;
     }
@@ -351,11 +354,13 @@ pub async fn create_group(executor: impl PgExecutor<'_>, new: &NewGroup) -> Resu
         GroupRow,
         r#"
         insert into groups
-            (id, tenant_id, slug, display_name, description, source, directory_ref,
+            (id, tenant_id, slug, display_name, description, source,
+             directory_source, directory_resource_id, directory_external_id,
              status, created_by)
-        values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
         returning id, tenant_id, slug, display_name, description, source,
-                  directory_ref, status, revision, created_by, created_at, updated_at
+                  directory_source, directory_resource_id, directory_external_id,
+                  status, revision, created_by, created_at, updated_at
         "#,
         new.id.as_uuid(),
         new.tenant_id.as_uuid(),
@@ -363,7 +368,9 @@ pub async fn create_group(executor: impl PgExecutor<'_>, new: &NewGroup) -> Resu
         new.display_name,
         new.description.as_deref() as Option<&str>,
         new.source.as_str(),
-        new.directory_ref.as_deref() as Option<&str>,
+        new.directory_source.as_deref() as Option<&str>,
+        new.directory_resource_id.as_deref() as Option<&str>,
+        new.directory_external_id.as_deref() as Option<&str>,
         LifecycleStatus::Active.as_str(),
         new.created_by.as_deref() as Option<&str>,
     )
@@ -378,6 +385,32 @@ pub async fn create_group(executor: impl PgExecutor<'_>, new: &NewGroup) -> Resu
     )
     .increment(1);
     row.try_into()
+}
+
+fn validate_group_directory_shape(
+    source: GroupSource,
+    directory_source: Option<&str>,
+    directory_resource_id: Option<&str>,
+    directory_external_id: Option<&str>,
+) -> Result<()> {
+    match (source, directory_source, directory_resource_id) {
+        (GroupSource::Directory, Some(provider), Some(resource)) => {
+            validate_directory_source(provider)?;
+            validate_directory_id(resource)?;
+            if let Some(external) = directory_external_id {
+                validate_directory_id(external)?;
+            }
+            Ok(())
+        }
+        (GroupSource::Directory, _, _) => Err(Error::Invalid {
+            message: "a directory group names its directory source and stable resource id"
+                .to_owned(),
+        }),
+        (GroupSource::Direct, None, None) if directory_external_id.is_none() => Ok(()),
+        (GroupSource::Direct, _, _) => Err(Error::Invalid {
+            message: "only a directory-managed group carries directory identifiers".to_owned(),
+        }),
+    }
 }
 
 /// Fetches one group.
@@ -396,7 +429,8 @@ pub async fn get_group(
         GroupRow,
         r#"
         select id, tenant_id, slug, display_name, description, source,
-               directory_ref, status, revision, created_by, created_at, updated_at
+               directory_source, directory_resource_id, directory_external_id,
+               status, revision, created_by, created_at, updated_at
         from groups
         where tenant_id = $1 and id = $2
         "#,
@@ -423,7 +457,8 @@ pub async fn list_groups(executor: impl PgExecutor<'_>, tenant_id: TenantId) -> 
         GroupRow,
         r#"
         select id, tenant_id, slug, display_name, description, source,
-               directory_ref, status, revision, created_by, created_at, updated_at
+               directory_source, directory_resource_id, directory_external_id,
+               status, revision, created_by, created_at, updated_at
         from groups
         where tenant_id = $1
         order by slug
@@ -436,7 +471,7 @@ pub async fn list_groups(executor: impl PgExecutor<'_>, tenant_id: TenantId) -> 
     rows.into_iter().map(TryInto::try_into).collect()
 }
 
-/// The members of one group, by principal id.
+/// The members of one group, by stable identity.
 #[tracing::instrument(
     name = "store.access.group_members",
     skip_all,
@@ -450,10 +485,13 @@ pub async fn group_members(
 ) -> Result<Vec<GroupMember>> {
     let rows = sqlx::query!(
         r#"
-        select tenant_id, group_id, principal_id, source, added_by, created_at
-        from group_members
-        where tenant_id = $1 and group_id = $2
-        order by principal_id
+        select gm.tenant_id, gm.group_id, gm.identity_id, i.subject as principal_id,
+               gm.source, gm.added_by, gm.created_at
+        from group_members gm
+        join identities i
+          on i.tenant_id = gm.tenant_id and i.id = gm.identity_id
+        where gm.tenant_id = $1 and gm.group_id = $2
+        order by i.display_name nulls last, gm.identity_id
         "#,
         tenant_id.as_uuid(),
         group_id.as_uuid(),
@@ -466,6 +504,7 @@ pub async fn group_members(
             Ok(GroupMember {
                 tenant_id: TenantId::from_uuid(row.tenant_id),
                 group_id: GroupId::from_uuid(row.group_id),
+                identity_id: IdentityId::from_uuid(row.identity_id),
                 principal_id: row.principal_id,
                 source: decoded::<GrantSource>(&row.source)?,
                 added_by: row.added_by,
@@ -493,10 +532,13 @@ pub async fn all_group_members(
 ) -> Result<Vec<GroupMember>> {
     let rows = sqlx::query!(
         r#"
-        select tenant_id, group_id, principal_id, source, added_by, created_at
-        from group_members
-        where tenant_id = $1
-        order by group_id, principal_id
+        select gm.tenant_id, gm.group_id, gm.identity_id, i.subject as principal_id,
+               gm.source, gm.added_by, gm.created_at
+        from group_members gm
+        join identities i
+          on i.tenant_id = gm.tenant_id and i.id = gm.identity_id
+        where gm.tenant_id = $1
+        order by gm.group_id, i.display_name nulls last, gm.identity_id
         "#,
         tenant_id.as_uuid(),
     )
@@ -508,6 +550,7 @@ pub async fn all_group_members(
             Ok(GroupMember {
                 tenant_id: TenantId::from_uuid(row.tenant_id),
                 group_id: GroupId::from_uuid(row.group_id),
+                identity_id: IdentityId::from_uuid(row.identity_id),
                 principal_id: row.principal_id,
                 source: decoded::<GrantSource>(&row.source)?,
                 added_by: row.added_by,
@@ -517,7 +560,7 @@ pub async fn all_group_members(
         .collect()
 }
 
-/// Sets a group's membership at creation, returning the principals stored.
+/// Sets a group's membership at creation, returning the identities stored.
 ///
 /// The same replacement [`update_group`] performs, exposed for the one caller
 /// that has no revision to precondition on because it just minted the row.
@@ -532,12 +575,9 @@ pub async fn set_group_members(
     conn: &mut PgConnection,
     tenant_id: TenantId,
     group_id: GroupId,
-    members: &[String],
+    members: &[IdentityId],
     actor: Option<&str>,
-) -> Result<Vec<String>> {
-    for member in members {
-        validate_principal_id(member)?;
-    }
+) -> Result<Vec<GroupMember>> {
     replace_members(
         &mut *conn,
         tenant_id,
@@ -547,11 +587,7 @@ pub async fn set_group_members(
         actor,
     )
     .await?;
-    Ok(group_members(&mut *conn, tenant_id, group_id)
-        .await?
-        .into_iter()
-        .map(|member| member.principal_id)
-        .collect())
+    group_members(&mut *conn, tenant_id, group_id).await
 }
 
 /// Applies an update under a revision precondition, replacing the membership
@@ -593,12 +629,6 @@ pub async fn update_group(
     if let Some(description) = &update.description {
         validate_description(description.as_deref())?;
     }
-    if let Some(members) = &update.members {
-        for member in members {
-            validate_principal_id(member)?;
-        }
-    }
-
     // Ownership and provenance before the write, so a directory group is
     // refused for what it is rather than for a revision it happens to be at.
     let current = get_group(&mut *conn, tenant_id, id)
@@ -619,7 +649,8 @@ pub async fn update_group(
                updated_at   = now()
          where tenant_id = $1 and id = $2 and revision = $3
         returning id, tenant_id, slug, display_name, description, source,
-                  directory_ref, status, revision, created_by, created_at, updated_at
+                  directory_source, directory_resource_id, directory_external_id,
+                  status, revision, created_by, created_at, updated_at
         "#,
         tenant_id.as_uuid(),
         id.as_uuid(),
@@ -674,7 +705,7 @@ async fn replace_members(
     conn: &mut PgConnection,
     tenant_id: TenantId,
     group_id: GroupId,
-    members: &[String],
+    members: &[IdentityId],
     source: GrantSource,
     actor: Option<&str>,
 ) -> Result<()> {
@@ -690,19 +721,19 @@ async fn replace_members(
     if members.is_empty() {
         return Ok(());
     }
-    // One statement for the whole set: `unnest` over the principal array,
+    // One statement for the whole set: `unnest` over the identity array,
     // `on conflict do nothing` so a caller that listed somebody twice gets one
     // membership rather than an error about their own duplicate.
     sqlx::query!(
         r#"
-        insert into group_members (tenant_id, group_id, principal_id, source, added_by)
-        select $1, $2, principal, $4, $5
-        from unnest($3::text[]) as principal
+        insert into group_members (tenant_id, group_id, identity_id, source, added_by)
+        select $1, $2, identity, $4, $5
+        from unnest($3::uuid[]) as identity
         on conflict do nothing
         "#,
         tenant_id.as_uuid(),
         group_id.as_uuid(),
-        members,
+        &members.iter().map(IdentityId::as_uuid).collect::<Vec<_>>(),
         source.as_str(),
         actor as Option<&str>,
     )
@@ -768,10 +799,21 @@ pub async fn create_grant(executor: impl PgExecutor<'_>, new: &NewGrant) -> Resu
         r#"
         insert into scope_grants
             (id, tenant_id, scope_id, subject_kind, principal_id, group_id,
-             role_key, source, invite_id, granted_by)
-        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+             role_key, source, invite_id, directory_source,
+             directory_resource_id, granted_by)
+        values ($1, $2, $3, $4, $5, $6, $7, $8, $9,
+                case when $8 = 'directory' then
+                    (select directory_source from groups
+                     where tenant_id = $2 and id = $6 and source = 'directory')
+                end,
+                case when $8 = 'directory' then
+                    (select directory_resource_id from groups
+                     where tenant_id = $2 and id = $6 and source = 'directory')
+                end,
+                $10)
         returning id, tenant_id, scope_id, subject_kind, principal_id, group_id,
-                  role_key, source, invite_id, granted_by, created_at
+                  role_key, source, invite_id, directory_source,
+                  directory_resource_id, granted_by, created_at
         "#,
         new.id.as_uuid(),
         new.tenant_id.as_uuid(),
@@ -810,6 +852,11 @@ fn validate_new_grant(new: &NewGrant) -> Result<()> {
                 .to_owned(),
         });
     }
+    if new.source == GrantSource::Directory && new.subject.kind() != SubjectKind::Group {
+        return Err(Error::Invalid {
+            message: "a directory access assignment names a directory-managed group".to_owned(),
+        });
+    }
     Ok(())
 }
 
@@ -829,7 +876,8 @@ pub async fn get_grant(
         GrantRow,
         r#"
         select id, tenant_id, scope_id, subject_kind, principal_id, group_id,
-               role_key, source, invite_id, granted_by, created_at
+               role_key, source, invite_id, directory_source,
+               directory_resource_id, granted_by, created_at
         from scope_grants
         where tenant_id = $1 and id = $2
         "#,
@@ -872,7 +920,8 @@ pub async fn list_grants(
         GrantRow,
         r#"
         select id, tenant_id, scope_id, subject_kind, principal_id, group_id,
-               role_key, source, invite_id, granted_by, created_at
+               role_key, source, invite_id, directory_source,
+               directory_resource_id, granted_by, created_at
         from scope_grants
         where tenant_id = $1
           and ($2::uuid is null or scope_id = $2)
@@ -927,6 +976,51 @@ pub async fn revoke_grant(
         return Err(grant_not_found(id));
     }
 
+    metrics::counter!(
+        ACCESS_MUTATIONS_TOTAL,
+        "object" => "grant",
+        "operation" => "revoke",
+    )
+    .increment(1);
+    Ok(grant)
+}
+
+/// Revokes one directory-owned access assignment through the directory
+/// management surface. Ordinary grant deletion deliberately refuses the same
+/// row, so adapter reconciliation cannot be bypassed by a generic admin call.
+#[tracing::instrument(
+    name = "store.access.revoke_directory_grant",
+    skip_all,
+    fields(tenant.id = %tenant_id, grant.id = %id),
+    err(Display)
+)]
+pub async fn revoke_directory_grant(
+    conn: &mut PgConnection,
+    tenant_id: TenantId,
+    id: GrantId,
+) -> Result<ScopeGrant> {
+    let grant = get_grant(&mut *conn, tenant_id, id)
+        .await?
+        .ok_or_else(|| grant_not_found(id))?;
+    if !grant.source.is_directory_managed() {
+        return Err(Error::Conflict {
+            message: format!(
+                "grant {id} is not a directory access assignment; revoke it through the ordinary access API"
+            ),
+        });
+    }
+    let deleted = sqlx::query!(
+        "delete from scope_grants where tenant_id = $1 and id = $2 and source = 'directory'",
+        tenant_id.as_uuid(),
+        id.as_uuid(),
+    )
+    .execute(&mut *conn)
+    .await
+    .map_err(storage_error)?
+    .rows_affected();
+    if deleted == 0 {
+        return Err(grant_not_found(id));
+    }
     metrics::counter!(
         ACCESS_MUTATIONS_TOTAL,
         "object" => "grant",
@@ -1116,7 +1210,7 @@ pub async fn members_of(
                g.role_key          as "role_key!",
                g.source            as "source!",
                g.created_at        as "granted_at!",
-               coalesce(g.principal_id, gm.principal_id) as "principal_id!",
+               coalesce(g.principal_id, i.subject) as "principal_id!",
                grp.id              as "group_id?",
                grp.slug            as "group_slug?"
         from chain ch
@@ -1126,8 +1220,11 @@ pub async fn members_of(
           on grp.tenant_id = $1 and grp.id = g.group_id and grp.status = 'active'
         left join group_members gm
           on gm.tenant_id = $1 and gm.group_id = grp.id
-        where g.subject_kind = 'principal' or gm.principal_id is not null
-        order by ch.distance, coalesce(g.principal_id, gm.principal_id), g.role_key, g.id
+        left join identities i
+          on i.tenant_id = gm.tenant_id and i.id = gm.identity_id
+         and i.status = 'active' and i.subject is not null
+        where g.subject_kind = 'principal' or i.subject is not null
+        order by ch.distance, coalesce(g.principal_id, i.subject), g.role_key, g.id
         "#,
         tenant_id.as_uuid(),
         scope_id.as_uuid(),
@@ -1165,83 +1262,76 @@ pub async fn members_of(
 
 // ── The directory projection ─────────────────────────────────────────────────
 
-/// Projects one directory group onto the governed access model (CPR-6,
-/// ADR-0073 decision 9): a [`Group`] with [`GroupSource::Directory`], and its
-/// membership replaced from the subjects the directory named.
+/// Projects one provider-owned group onto the shared access graph.
 ///
-/// **This introduces no enterprise membership table**, and that is the whole
-/// point of the function existing here rather than beside `scim_groups`. A
-/// directory group and a group somebody typed are the *same row shape* in the
-/// *same table*, differing in one column — `source` — which decides only
-/// whether the product refuses to edit it
-/// ([`GrantSource::is_directory_managed`]). Everything downstream — the anchor
-/// resolver, `members_of`, the PDP's `Group` entity — reads one table and
-/// cannot tell the difference, which is ADR-0068 decision 1 applied to
-/// membership: one runtime, and the directory is an adapter into it.
-///
-/// The projection is a **replacement**, not a delta, for [`GroupUpdate`]'s
-/// reason: a membership list has no natural precondition, so an add/remove
-/// pair races and a full replacement cannot. It is also what a directory
-/// actually sends.
-///
-/// `directory_ref` is the external id the directory knows the group by — the
-/// key this upserts on, so a rename in the directory renames the group here
-/// rather than creating a second one.
-///
-/// Grants are deliberately untouched. A directory says who is *in* a group; it
-/// does not say what the group may do, and a sync that invented grants would
-/// be a directory writing policy. What a group confers is a `scope_grants` row
-/// somebody in this product wrote, naming it.
-///
-/// Must run inside a transaction: the upsert and the membership replacement
-/// are separate statements.
+/// `directory_resource_id` is the provider's stable address (the SCIM resource
+/// id, Entra object id, or Okta group id); `directory_external_id` is merely an
+/// optional protocol attribute. Membership is replaced by stable identities,
+/// including identities whose authenticated subject has not been bound yet.
 #[tracing::instrument(
     name = "store.access.sync_directory_group",
     skip_all,
-    fields(tenant.id = %tenant_id, group.directory_ref = %directory_ref, members = members.len()),
+    fields(
+        tenant.id = %tenant_id,
+        directory.source = directory_source,
+        directory.resource_id = directory_resource_id,
+        members = members.len(),
+    ),
     err(Display)
 )]
+#[allow(clippy::too_many_arguments)]
 pub async fn sync_directory_group(
     conn: &mut PgConnection,
+    id: GroupId,
     tenant_id: TenantId,
-    directory_ref: &str,
+    directory_source: &str,
+    directory_resource_id: &str,
+    directory_external_id: Option<&str>,
     slug: &str,
     display_name: &str,
-    members: &[String],
+    members: &[IdentityId],
 ) -> Result<Group> {
     validate_slug(slug)?;
     validate_display_name(display_name)?;
-    validate_directory_ref(directory_ref)?;
-    for principal_id in members {
-        validate_principal_id(principal_id)?;
-    }
+    validate_group_directory_shape(
+        GroupSource::Directory,
+        Some(directory_source),
+        Some(directory_resource_id),
+        directory_external_id,
+    )?;
 
     let row = sqlx::query_as!(
         GroupRow,
         r#"
         insert into groups
-            (id, tenant_id, slug, display_name, description, source, directory_ref,
+            (id, tenant_id, slug, display_name, description, source,
+             directory_source, directory_resource_id, directory_external_id,
              status, revision, created_by)
-        values ($1, $2, $3, $4, null, 'directory', $5, 'active', 1, null)
-        on conflict (tenant_id, directory_ref) where directory_ref is not null
+        values ($1, $2, $3, $4, null, 'directory', $5, $6, $7,
+                'active', 1, null)
+        on conflict (tenant_id, directory_source, directory_resource_id)
+            where directory_source is not null and directory_resource_id is not null
         do update set display_name = excluded.display_name,
+                      directory_external_id = excluded.directory_external_id,
                       status = 'active',
                       revision = groups.revision + 1,
                       updated_at = now()
         returning id, tenant_id, slug, display_name, description, source,
-                  directory_ref, status, revision, created_by, created_at, updated_at
+                  directory_source, directory_resource_id, directory_external_id,
+                  status, revision, created_by, created_at, updated_at
         "#,
-        GroupId::new().as_uuid(),
+        id.as_uuid(),
         tenant_id.as_uuid(),
         slug,
         display_name,
-        directory_ref,
+        directory_source,
+        directory_resource_id,
+        directory_external_id,
     )
     .fetch_one(&mut *conn)
     .await
     .map_err(storage_error)?;
     let group: Group = row.try_into()?;
-
     replace_members(
         &mut *conn,
         tenant_id,
@@ -1260,53 +1350,94 @@ pub async fn sync_directory_group(
     Ok(group)
 }
 
-/// Retires a directory group the directory has deleted.
-///
-/// Archived rather than deleted, for the reason every lifecycle in this
-/// product is a status transition: a grant may name it, and a grant naming a
-/// row that stopped existing is a grant nobody can review. An archived group
-/// resolves to **nobody** — `members_of` and the anchor resolver both join on
-/// `status = 'active'` — so retiring one takes its access away on the next
-/// request without taking the record away.
-///
-/// Returns `None` when the tenant has no group with that reference.
-#[tracing::instrument(
-    name = "store.access.retire_directory_group",
-    skip_all,
-    fields(tenant.id = %tenant_id, group.directory_ref = %directory_ref),
-    err(Display)
-)]
+/// Finds one provider-owned group by its stable directory address.
+pub async fn directory_group_by_resource(
+    executor: impl PgExecutor<'_>,
+    tenant_id: TenantId,
+    directory_source: &str,
+    directory_resource_id: &str,
+) -> Result<Option<Group>> {
+    let row = sqlx::query_as!(
+        GroupRow,
+        r#"
+        select id, tenant_id, slug, display_name, description, source,
+               directory_source, directory_resource_id, directory_external_id,
+               status, revision, created_by, created_at, updated_at
+        from groups
+        where tenant_id = $1 and source = 'directory'
+          and directory_source = $2 and directory_resource_id = $3
+        "#,
+        tenant_id.as_uuid(),
+        directory_source,
+        directory_resource_id,
+    )
+    .fetch_optional(executor)
+    .await
+    .map_err(storage_error)?;
+    row.map(TryInto::try_into).transpose()
+}
+
+/// Lists all groups owned by one directory adapter, including archived rows.
+pub async fn directory_groups(
+    executor: impl PgExecutor<'_>,
+    tenant_id: TenantId,
+    directory_source: &str,
+) -> Result<Vec<Group>> {
+    let rows = sqlx::query_as!(
+        GroupRow,
+        r#"
+        select id, tenant_id, slug, display_name, description, source,
+               directory_source, directory_resource_id, directory_external_id,
+               status, revision, created_by, created_at, updated_at
+        from groups
+        where tenant_id = $1 and source = 'directory' and directory_source = $2
+        order by directory_resource_id
+        "#,
+        tenant_id.as_uuid(),
+        directory_source,
+    )
+    .fetch_all(executor)
+    .await
+    .map_err(storage_error)?;
+    rows.into_iter().map(TryInto::try_into).collect()
+}
+
+/// Retires a directory group and therefore withdraws every grant it confers.
 pub async fn retire_directory_group(
     conn: &mut PgConnection,
     tenant_id: TenantId,
-    directory_ref: &str,
+    directory_source: &str,
+    directory_resource_id: &str,
 ) -> Result<Option<Group>> {
     let row = sqlx::query_as!(
         GroupRow,
         r#"
         update groups
            set status = 'archived', revision = revision + 1, updated_at = now()
-         where tenant_id = $1 and directory_ref = $2 and source = 'directory'
+         where tenant_id = $1 and source = 'directory'
+           and directory_source = $2 and directory_resource_id = $3
+           and status <> 'archived'
         returning id, tenant_id, slug, display_name, description, source,
-                  directory_ref, status, revision, created_by, created_at, updated_at
+                  directory_source, directory_resource_id, directory_external_id,
+                  status, revision, created_by, created_at, updated_at
         "#,
         tenant_id.as_uuid(),
-        directory_ref,
+        directory_source,
+        directory_resource_id,
     )
     .fetch_optional(&mut *conn)
     .await
     .map_err(storage_error)?;
-    let Some(row) = row else {
-        return Ok(None);
-    };
-    let group: Group = row.try_into()?;
-    metrics::counter!(
-        ACCESS_MUTATIONS_TOTAL,
-        "object" => "group",
-        "operation" => "update",
-    )
-    .increment(1);
-    Ok(Some(group))
+    let group = row.map(TryInto::try_into).transpose()?;
+    if group.is_some() {
+        metrics::counter!(
+            ACCESS_MUTATIONS_TOTAL,
+            "object" => "group",
+            "operation" => "update",
+        )
+        .increment(1);
+    }
+    Ok(group)
 }
 
 // ── Invitations ──────────────────────────────────────────────────────────────
@@ -1663,7 +1794,8 @@ pub async fn accept_invite(
         values ($1, $2, $3, 'principal', $4, $5, 'invite', $6)
         on conflict do nothing
         returning id, tenant_id, scope_id, subject_kind, principal_id, group_id,
-                  role_key, source, invite_id, granted_by, created_at
+                  role_key, source, invite_id, directory_source,
+                  directory_resource_id, granted_by, created_at
         "#,
         GrantId::new().as_uuid(),
         tenant_id.as_uuid(),
@@ -1714,7 +1846,8 @@ async fn grant_of_invite(
         GrantRow,
         r#"
         select id, tenant_id, scope_id, subject_kind, principal_id, group_id,
-               role_key, source, invite_id, granted_by, created_at
+               role_key, source, invite_id, directory_source,
+               directory_resource_id, granted_by, created_at
         from scope_grants
         where tenant_id = $1 and invite_id = $2
         "#,
@@ -1739,7 +1872,8 @@ async fn held_grant(
         GrantRow,
         r#"
         select id, tenant_id, scope_id, subject_kind, principal_id, group_id,
-               role_key, source, invite_id, granted_by, created_at
+               role_key, source, invite_id, directory_source,
+               directory_resource_id, granted_by, created_at
         from scope_grants
         where tenant_id = $1 and scope_id = $2 and principal_id = $3 and role_key = $4
         "#,
@@ -1833,7 +1967,7 @@ mod tests {
     /// like a permission problem, or the next thing they do is ask for more
     /// permission.
     #[test]
-    fn the_directory_refusal_says_where_to_make_the_change() {
+    fn the_directory_owned_refusal_says_where_to_make_the_change() {
         let error = directory_managed("group engineering");
         let message = error.to_string();
         assert!(message.contains("directory"), "{message}");

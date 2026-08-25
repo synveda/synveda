@@ -729,8 +729,9 @@ async fn decide_exact(
         anchors::AnchorSelection::none,
         anchors::AnchorSelection::project,
     );
-    let anchor_set = anchors::resolve(&mut *tx, tenant_id, subject, selection).await?;
-    let groups = anchors::groups_of(&mut *tx, tenant_id, subject).await?;
+    let anchor_set =
+        anchors::resolve(&mut *tx, tenant_id, subject, Some(identity.id), selection).await?;
+    let groups = anchors::groups_of(&mut *tx, tenant_id, Some(identity.id)).await?;
     let context = AuthzContext {
         scopes: &chain,
         principal_scopes: &principal_chain,

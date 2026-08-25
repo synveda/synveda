@@ -62,6 +62,14 @@ pub enum DirectorySource {
 }
 
 impl DirectorySource {
+    /// Stable adapter key stored with directory-owned users and groups.
+    pub const fn key(self) -> &'static str {
+        match self {
+            DirectorySource::Scim(_) => "scim",
+            DirectorySource::Pull { connector } => connector,
+        }
+    }
+
     /// The audit payload fragment naming this source.
     ///
     /// `credential_id` keeps the key and the shape AUTH-4's consumers already
@@ -156,7 +164,6 @@ pub async fn reconcile(
     let (outcome, structural) = if !user.active {
         (seal(&mut tx, tenant, source, existing).await?, true)
     } else {
-        let groups = directory::group_names_for_user(&mut *tx, tenant.id, user.id).await?;
         // A departed identity is never resurrected (ADR-0059 decision 12).
         // `active: true` on somebody the directory previously deactivated is
         // a **rehire**, and a rehire is a new person: a new identity, a new
@@ -169,16 +176,20 @@ pub async fn reconcile(
         // reactivation could undo is not a retention hold.
         let existing = existing.filter(|identity| !identity.sealed());
         match existing {
-            None => (
-                place(state, &mut tx, tenant, source, user, &groups).await?,
-                true,
-            ),
+            None => (place(state, &mut tx, tenant, source, user).await?, true),
             Some(identity) => {
                 // The link is written even when nothing else changes: an
                 // adopted JIT identity has to stop being findable only by
                 // the fallback that found it once.
                 if user.identity_id != Some(identity.id) {
-                    directory::link_identity(&mut *tx, tenant.id, user.id, identity.id).await?;
+                    directory::link_identity(
+                        &mut *tx,
+                        tenant.id,
+                        user.directory_source.as_str(),
+                        user.id,
+                        identity.id,
+                    )
+                    .await?;
                 }
                 // Group-driven placement is gone with the hierarchy (CPR-7,
                 // ADR-0074 decision 3): the identity stays at its own
@@ -282,6 +293,7 @@ pub async fn conflicting_record(
     let candidate = DirectoryUser {
         id: synveda_types::DirectoryUserId::new(),
         tenant_id: tenant.id,
+        directory_source: attributes.directory_source.clone(),
         external_id: attributes.external_id.clone(),
         user_name: attributes.user_name.clone(),
         active: attributes.active,
@@ -355,7 +367,6 @@ async fn place(
     tenant: &Tenant,
     source: DirectorySource,
     user: &DirectoryUser,
-    groups: &[String],
 ) -> Result<Reconciled> {
     let identity_id = IdentityId::new();
     let display_name = user
@@ -370,9 +381,10 @@ async fn place(
     // externalId when the customer's mapping sends one, else the mirror
     // row's stable resource id — because this person has no token subject
     // yet. First login adopts the identity through the correspondence rule
-    // (ADR-0059 decision 4), and the anchor resolver reads the identity
-    // row before any subject-keyed scope, so the directory's key and the
-    // login's key are one scope, not two (CPR-7, ADR-0074 decision 3).
+    // (ADR-0059 decision 4), and the anchor resolver reads the identity's
+    // stable scope before attempting a token-subject lookup, so the
+    // directory's key and the login's key are one scope, not two (CPR-7,
+    // ADR-0074 decision 3).
     let mut directory_anchor = user
         .external_id
         .clone()
@@ -418,7 +430,14 @@ async fn place(
         scope.id,
     )
     .await?;
-    directory::link_identity(&mut **tx, tenant.id, user.id, identity.id).await?;
+    directory::link_identity(
+        &mut **tx,
+        tenant.id,
+        user.directory_source.as_str(),
+        user.id,
+        identity.id,
+    )
+    .await?;
     // The same action and the same payload shape JIT provisioning chains
     // (ADR-0013), because the two doors produce the same thing and a chain
     // consumer should not have to know which one was used. `origin` is the
@@ -435,7 +454,6 @@ async fn place(
                 "placement": "own-scope",
                 "identity": {"id": identity.id, "subject": identity.subject},
                 "scope": {"id": scope.id, "slug": scope.slug, "kind": scope.kind},
-                "groups": groups,
                 "origin": "scim",
             }),
             source,

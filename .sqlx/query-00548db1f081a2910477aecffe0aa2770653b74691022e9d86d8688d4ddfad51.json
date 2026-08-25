@@ -1,0 +1,43 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select tgt.id      as \"anchor_id!\",\n               g.scope_id  as \"granted_at!\",\n               g.role_key  as \"role_key!\",\n               grp.id      as \"group_id?\"\n        from scopes tgt\n        join scope_closure c\n          on c.tenant_id = tgt.tenant_id\n         and c.descendant_id = tgt.id\n         -- Principal-private scope isolation: a `principal` scope is somebody's\n         -- own, and nothing above it reaches in. The same predicate\n         -- `access::members_of` carries, in the same place — the query — so no\n         -- caller can apply one of the three rules and forget this one.\n         and (c.distance = 0 or tgt.kind <> 'principal')\n        join scope_grants g\n          on g.tenant_id = tgt.tenant_id and g.scope_id = c.ancestor_id\n        left join groups grp\n          on grp.tenant_id = g.tenant_id and grp.id = g.group_id and grp.status = 'active'\n        left join group_members gm\n          on gm.tenant_id = g.tenant_id and gm.group_id = grp.id and gm.identity_id = $3\n        where tgt.tenant_id = $1\n          and tgt.id = any($4::uuid[])\n          and ((g.subject_kind = 'principal' and g.principal_id = $2)\n               or (g.subject_kind = 'group' and gm.identity_id is not null))\n        order by c.distance, g.role_key, g.id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "anchor_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "granted_at!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "role_key!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "group_id?",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Uuid",
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "00548db1f081a2910477aecffe0aa2770653b74691022e9d86d8688d4ddfad51"
+}

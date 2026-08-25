@@ -48,7 +48,9 @@ use sqlx::PgConnection;
 use synveda_types::access::RoleKey;
 use synveda_types::anchor::{AnchorSet, AnchorSource, ScopeAnchor};
 use synveda_types::scope::{Scope, ScopeKind};
-use synveda_types::{Error, GroupId, ProjectId, Result, ScopeId, TenantId, WorkspaceId};
+use synveda_types::{
+    Error, GroupId, IdentityId, ProjectId, Result, ScopeId, TenantId, WorkspaceId,
+};
 use uuid::Uuid;
 
 /// Counter: anchor resolutions, labelled `outcome` = `resolved` | `empty`.
@@ -121,6 +123,7 @@ pub async fn resolve(
     conn: &mut PgConnection,
     tenant_id: TenantId,
     principal_id: &str,
+    identity_id: Option<IdentityId>,
     selection: AnchorSelection,
 ) -> Result<AnchorSet> {
     let mut candidates: Vec<Candidate> = Vec::new();
@@ -185,7 +188,7 @@ pub async fn resolve(
     //    makes project-only access work: somebody granted one project inside a
     //    workspace they cannot otherwise see still has that project as an
     //    anchor.
-    for scope in granted_scopes(&mut *conn, tenant_id, principal_id).await? {
+    for scope in granted_scopes(&mut *conn, tenant_id, principal_id, identity_id).await? {
         candidates.push(Candidate {
             scope,
             source: AnchorSource::Grant,
@@ -203,7 +206,7 @@ pub async fn resolve(
         .map(|candidate| candidate.scope.id)
         .collect();
     let depths = depths_of(&mut *conn, tenant_id, &ids).await?;
-    let roles = roles_at(&mut *conn, tenant_id, principal_id, &ids).await?;
+    let roles = roles_at(&mut *conn, tenant_id, principal_id, identity_id, &ids).await?;
 
     let anchors: Vec<ScopeAnchor> = candidates
         .into_iter()
@@ -258,6 +261,7 @@ async fn granted_scopes(
     conn: &mut PgConnection,
     tenant_id: TenantId,
     principal_id: &str,
+    identity_id: Option<IdentityId>,
 ) -> Result<Vec<Scope>> {
     let rows = sqlx::query!(
         r#"
@@ -280,13 +284,14 @@ async fn granted_scopes(
         left join groups grp
           on grp.tenant_id = g.tenant_id and grp.id = g.group_id and grp.status = 'active'
         left join group_members gm
-          on gm.tenant_id = g.tenant_id and gm.group_id = grp.id and gm.principal_id = $2
+          on gm.tenant_id = g.tenant_id and gm.group_id = grp.id and gm.identity_id = $3
         where g.tenant_id = $1
           and ((g.subject_kind = 'principal' and g.principal_id = $2)
-               or (g.subject_kind = 'group' and gm.principal_id is not null))
+               or (g.subject_kind = 'group' and gm.identity_id is not null))
         "#,
         tenant_id.as_uuid(),
         principal_id,
+        identity_id.map(|id| id.as_uuid()) as Option<Uuid>,
     )
     .fetch_all(&mut *conn)
     .await
@@ -354,6 +359,7 @@ async fn roles_at(
     conn: &mut PgConnection,
     tenant_id: TenantId,
     principal_id: &str,
+    identity_id: Option<IdentityId>,
     ids: &[ScopeId],
 ) -> Result<BTreeMap<ScopeId, Held>> {
     let raw: Vec<Uuid> = ids.iter().map(ScopeId::as_uuid).collect();
@@ -377,15 +383,16 @@ async fn roles_at(
         left join groups grp
           on grp.tenant_id = g.tenant_id and grp.id = g.group_id and grp.status = 'active'
         left join group_members gm
-          on gm.tenant_id = g.tenant_id and gm.group_id = grp.id and gm.principal_id = $2
+          on gm.tenant_id = g.tenant_id and gm.group_id = grp.id and gm.identity_id = $3
         where tgt.tenant_id = $1
-          and tgt.id = any($3::uuid[])
+          and tgt.id = any($4::uuid[])
           and ((g.subject_kind = 'principal' and g.principal_id = $2)
-               or (g.subject_kind = 'group' and gm.principal_id is not null))
+               or (g.subject_kind = 'group' and gm.identity_id is not null))
         order by c.distance, g.role_key, g.id
         "#,
         tenant_id.as_uuid(),
         principal_id,
+        identity_id.map(|id| id.as_uuid()) as Option<Uuid>,
         &raw,
     )
     .fetch_all(&mut *conn)
@@ -422,7 +429,7 @@ async fn roles_at(
 pub async fn groups_of(
     executor: impl sqlx::PgExecutor<'_>,
     tenant_id: TenantId,
-    principal_id: &str,
+    identity_id: Option<IdentityId>,
 ) -> Result<Vec<GroupId>> {
     let rows = sqlx::query_scalar!(
         r#"
@@ -430,11 +437,11 @@ pub async fn groups_of(
         from group_members gm
         join groups grp
           on grp.tenant_id = gm.tenant_id and grp.id = gm.group_id and grp.status = 'active'
-        where gm.tenant_id = $1 and gm.principal_id = $2
+        where gm.tenant_id = $1 and gm.identity_id = $2
         order by grp.slug
         "#,
         tenant_id.as_uuid(),
-        principal_id,
+        identity_id.map(|id| id.as_uuid()) as Option<Uuid>,
     )
     .fetch_all(executor)
     .await

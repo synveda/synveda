@@ -4083,6 +4083,163 @@
         ]
       }
     },
+    "/v1/directory/access-assignments": {
+      "post": {
+        "tags": [
+          "directory"
+        ],
+        "summary": "`POST /v1/directory/access-assignments` — bind a provider-owned group to a\ngoverned scope without creating a second directory authorisation model.",
+        "operationId": "create_directory_access_assignment",
+        "parameters": [
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "description": "Required. A unique value per request, reused verbatim on retry.",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DirectoryAccessAssignmentBody"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "This key already made the assignment",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GrantView"
+                }
+              }
+            }
+          },
+          "201": {
+            "description": "Directory access assigned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GrantView"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Malformed body or no `Idempotency-Key`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "The PDP denied `membership.grant`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such scope or directory group",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The group is not directory-owned, the assignment exists, or the key was reused",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
+    "/v1/directory/access-assignments/{grant_id}": {
+      "delete": {
+        "tags": [
+          "directory"
+        ],
+        "summary": "`DELETE /v1/directory/access-assignments/{grant_id}`.",
+        "operationId": "revoke_directory_access_assignment",
+        "parameters": [
+          {
+            "name": "grant_id",
+            "in": "path",
+            "description": "The directory grant's id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Assignment revoked"
+          },
+          "403": {
+            "description": "The PDP denied `membership.grant`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such grant in this tenant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "The grant is not directory-owned",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiErrorBody"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearer": []
+          }
+        ]
+      }
+    },
     "/v1/directory/seal-authorisations": {
       "post": {
         "tags": [
@@ -16217,9 +16374,10 @@
           "members": {
             "type": "array",
             "items": {
-              "type": "string"
+              "type": "string",
+              "format": "uuid"
             },
-            "description": "Its members at creation, by principal id."
+            "description": "Its members at creation, by stable identity id."
           },
           "slug": {
             "type": "string",
@@ -16725,6 +16883,39 @@
         },
         "additionalProperties": false
       },
+      "DirectoryAccessAssignmentBody": {
+        "type": "object",
+        "description": "`POST /v1/directory/access-assignments`.",
+        "required": [
+          "scope_id",
+          "group_id",
+          "role"
+        ],
+        "properties": {
+          "group_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "A shared Group whose source is `directory`."
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "owner",
+              "member",
+              "viewer",
+              "reviewer",
+              "curator",
+              "administrator"
+            ]
+          },
+          "scope_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Governed scope at which the directory group receives authority."
+          }
+        },
+        "additionalProperties": false
+      },
       "DiscoverToolServerBody": {
         "type": "object",
         "description": "Report a fresh discovery using the current descriptor.",
@@ -17031,6 +17222,20 @@
             "type": "boolean",
             "description": "Whether a directory manages it, and it therefore cannot be revoked\nhere."
           },
+          "directory_resource_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Stable directory group resource that caused the assignment."
+          },
+          "directory_source": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Owning directory adapter for a directory-managed assignment."
+          },
           "granted_by": {
             "type": [
               "string",
@@ -17117,6 +17322,27 @@
           }
         }
       },
+      "GroupMemberView": {
+        "type": "object",
+        "description": "One group membership. An unbound directory identity intentionally has no\n`principal_id` yet; its stable identity still remains visible and usable.",
+        "required": [
+          "identity_id"
+        ],
+        "properties": {
+          "identity_id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Stable identity id."
+          },
+          "principal_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Verified token subject, once first login binds one."
+          }
+        }
+      },
       "GroupRefView": {
         "type": "object",
         "description": "A group, named enough to render without a second call.",
@@ -17170,12 +17396,26 @@
             ],
             "description": "Optional prose."
           },
-          "directory_ref": {
+          "directory_external_id": {
             "type": [
               "string",
               "null"
             ],
-            "description": "The external id a directory knows it by, when one does."
+            "description": "Optional protocol `externalId`."
+          },
+          "directory_resource_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The stable resource id assigned by that directory."
+          },
+          "directory_source": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The adapter/provider that owns this directory-managed group."
           },
           "display_name": {
             "type": "string",
@@ -17189,9 +17429,9 @@
           "members": {
             "type": "array",
             "items": {
-              "type": "string"
+              "$ref": "#/components/schemas/GroupMemberView"
             },
-            "description": "Its members, by principal id."
+            "description": "Its members, by stable identity with a bound subject when available."
           },
           "revision": {
             "type": "integer",
@@ -23556,7 +23796,8 @@
               "null"
             ],
             "items": {
-              "type": "string"
+              "type": "string",
+              "format": "uuid"
             },
             "description": "The complete membership after this update."
           },

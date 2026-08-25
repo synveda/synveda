@@ -25,14 +25,15 @@ use std::sync::OnceLock;
 use chrono::{Duration, Utc};
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{PgPool, Postgres, Transaction};
-use synveda_store::{access, projects, scopes, tenants, workspaces};
+use synveda_store::{access, identities, projects, scopes, tenants, workspaces};
 use synveda_types::access::{
     GrantSource, GrantSubject, GroupSource, InviteStatus, RoleKey, SubjectKind,
 };
 use synveda_types::scope::ScopeKind;
 use synveda_types::workspace::LifecycleStatus;
 use synveda_types::{
-    Error, GrantId, GroupId, InviteId, ProjectId, ScopeId, TenantId, TenantStatus, WorkspaceId,
+    Error, GrantId, GroupId, IdentityId, IdentityKind, InviteId, ProjectId, ScopeId, TenantId,
+    TenantStatus, WorkspaceId,
 };
 
 // ── Harness ──────────────────────────────────────────────────────────────────
@@ -209,18 +210,93 @@ async fn new_group(pool: &PgPool, tenant: TenantId, slug: &str, members: &[&str]
             display_name: slug.to_owned(),
             description: None,
             source: GroupSource::Direct,
-            directory_ref: None,
+            directory_source: None,
+            directory_resource_id: None,
+            directory_external_id: None,
             created_by: Some("granter".to_owned()),
         },
     )
     .await
     .expect("create group");
-    let owned: Vec<String> = members.iter().map(|m| (*m).to_owned()).collect();
+    let mut owned = Vec::with_capacity(members.len());
+    for member in members {
+        let identity_id = IdentityId::new();
+        let root = scopes::ensure_tenant_root(&mut tx, tenant)
+            .await
+            .expect("create tenant root");
+        let scope = scopes::create(
+            &mut tx,
+            &scopes::NewScope {
+                id: ScopeId::new(),
+                tenant_id: tenant,
+                kind: ScopeKind::Principal,
+                parent_scope_id: Some(root.id),
+                slug: format!("member-{}", identity_id.as_uuid().simple()),
+                display_name: (*member).to_owned(),
+                attributes: serde_json::json!({}),
+                principal_id: Some((*member).to_owned()),
+                created_by: None,
+            },
+        )
+        .await
+        .expect("create member scope");
+        let identity = identities::create(
+            &mut tx,
+            identity_id,
+            tenant,
+            Some(member),
+            IdentityKind::User,
+            None,
+            Some(member),
+            scope.id,
+        )
+        .await
+        .expect("create member identity");
+        owned.push(identity.id);
+    }
     access::set_group_members(&mut tx, tenant, group.id, &owned, Some("granter"))
         .await
         .expect("set members");
     tx.commit().await.expect("commit group");
     group.id
+}
+
+async fn new_identity(pool: &PgPool, tenant: TenantId, subject: &str) -> IdentityId {
+    let mut tx = begin(pool).await;
+    let identity_id = IdentityId::new();
+    let root = scopes::ensure_tenant_root(&mut tx, tenant)
+        .await
+        .expect("create tenant root");
+    let scope = scopes::create(
+        &mut tx,
+        &scopes::NewScope {
+            id: ScopeId::new(),
+            tenant_id: tenant,
+            kind: ScopeKind::Principal,
+            parent_scope_id: Some(root.id),
+            slug: format!("identity-{}", identity_id.as_uuid().simple()),
+            display_name: subject.to_owned(),
+            attributes: serde_json::json!({}),
+            principal_id: Some(subject.to_owned()),
+            created_by: None,
+        },
+    )
+    .await
+    .expect("create member scope");
+    let identity = identities::create(
+        &mut tx,
+        identity_id,
+        tenant,
+        Some(subject),
+        IdentityKind::User,
+        None,
+        Some(subject),
+        scope.id,
+    )
+    .await
+    .expect("create member identity");
+    tx.commit().await.expect("commit identity");
+    identity.id
 }
 
 async fn members_at(pool: &PgPool, tenant: TenantId, scope: ScopeId) -> Vec<access::AccessEntry> {
@@ -474,14 +550,22 @@ fn a_group_grant_resolves_to_its_members_and_follows_them() {
         }
 
         // A third person joins the group; nothing is written on the grant.
+        let sam = new_identity(&db.pool, tree.tenant, "sam").await;
         let mut tx = begin(&db.pool).await;
+        let mut members: Vec<IdentityId> = access::group_members(&mut *tx, tree.tenant, group)
+            .await
+            .expect("current members")
+            .into_iter()
+            .map(|member| member.identity_id)
+            .collect();
+        members.push(sam);
         access::update_group(
             &mut tx,
             tree.tenant,
             group,
             1,
             &access::GroupUpdate {
-                members: Some(vec!["robin".to_owned(), "kim".to_owned(), "sam".to_owned()]),
+                members: Some(members),
                 ..Default::default()
             },
             Some("granter"),
@@ -590,7 +674,15 @@ fn a_membership_replacement_is_the_whole_list() {
     let Some(db) = db() else { return };
     db.rt.block_on(async {
         let tree = seed_tree(&db.pool).await;
-        let group = new_group(&db.pool, tree.tenant, "eng", &["robin", "kim"]).await;
+        let group = new_group(&db.pool, tree.tenant, "eng", &["robin", "kim", "sam"]).await;
+
+        let sam = access::group_members(&db.pool, tree.tenant, group)
+            .await
+            .expect("members")
+            .into_iter()
+            .find(|member| member.principal_id.as_deref() == Some("sam"))
+            .expect("sam")
+            .identity_id;
 
         let mut tx = begin(&db.pool).await;
         access::update_group(
@@ -599,7 +691,7 @@ fn a_membership_replacement_is_the_whole_list() {
             group,
             1,
             &access::GroupUpdate {
-                members: Some(vec!["sam".to_owned(), "sam".to_owned()]),
+                members: Some(vec![sam, sam]),
                 ..Default::default()
             },
             Some("granter"),
@@ -612,7 +704,7 @@ fn a_membership_replacement_is_the_whole_list() {
             .await
             .expect("read members");
         assert_eq!(members.len(), 1, "a duplicate is one membership");
-        assert_eq!(members[0].principal_id, "sam");
+        assert_eq!(members[0].principal_id.as_deref(), Some("sam"));
     });
 }
 
@@ -693,17 +785,21 @@ fn an_empty_group_update_is_refused() {
     });
 }
 
-/// A directory group carries the reference its directory knows it by, and a
+/// A directory group carries its provider and stable resource address, and a
 /// group this product owns carries none — both ways round, in the type layer
 /// and behind it in a CHECK.
 #[test]
-fn a_directory_group_carries_its_reference_and_a_direct_one_does_not() {
+fn a_directory_group_carries_source_identity_and_a_direct_one_does_not() {
     let Some(db) = db() else { return };
     db.rt.block_on(async {
         let tenant = admit(&db.pool).await;
-        for (source, reference) in [
-            (GroupSource::Directory, None),
-            (GroupSource::Direct, Some("00u1a2b3".to_owned())),
+        for (source, directory_source, resource_id) in [
+            (GroupSource::Directory, None, None),
+            (
+                GroupSource::Direct,
+                Some("okta".to_owned()),
+                Some("00u1a2b3".to_owned()),
+            ),
         ] {
             let result = access::create_group(
                 &db.pool,
@@ -714,7 +810,9 @@ fn a_directory_group_carries_its_reference_and_a_direct_one_does_not() {
                     display_name: "Eng".to_owned(),
                     description: None,
                     source,
-                    directory_ref: reference,
+                    directory_source,
+                    directory_resource_id: resource_id,
+                    directory_external_id: None,
                     created_by: None,
                 },
             )
@@ -728,8 +826,9 @@ fn a_directory_group_carries_its_reference_and_a_direct_one_does_not() {
         // And the CHECK holds against direct SQL, for a writer that never went
         // through the service.
         let err = sqlx::query(
-            "insert into groups (id, tenant_id, slug, display_name, source, directory_ref) \
-             values ($1, $2, 'forged', 'Forged', 'directory', null)",
+            "insert into groups (id, tenant_id, slug, display_name, source, \
+             directory_source, directory_resource_id) \
+             values ($1, $2, 'forged', 'Forged', 'directory', null, null)",
         )
         .bind(GroupId::new().as_uuid())
         .bind(tenant.as_uuid())
@@ -759,7 +858,9 @@ fn a_directory_group_cannot_be_edited_here() {
                 display_name: "Engineering".to_owned(),
                 description: None,
                 source: GroupSource::Directory,
-                directory_ref: Some("00u1a2b3".to_owned()),
+                directory_source: Some("okta".to_owned()),
+                directory_resource_id: Some("00u1a2b3".to_owned()),
+                directory_external_id: None,
                 created_by: None,
             },
         )
@@ -773,7 +874,7 @@ fn a_directory_group_cannot_be_edited_here() {
             group.id,
             1,
             &access::GroupUpdate {
-                members: Some(vec!["intruder".to_owned()]),
+                members: Some(vec![IdentityId::new()]),
                 ..Default::default()
             },
             Some("someone"),
@@ -1014,11 +1115,27 @@ fn a_directory_grant_cannot_be_revoked_here() {
     let Some(db) = db() else { return };
     db.rt.block_on(async {
         let tree = seed_tree(&db.pool).await;
+        let robin = new_identity(&db.pool, tree.tenant, "robin").await;
+        let mut tx = begin(&db.pool).await;
+        let group = access::sync_directory_group(
+            &mut tx,
+            GroupId::new(),
+            tree.tenant,
+            "entra",
+            "entra-group-eng",
+            None,
+            "entra-engineering",
+            "Engineering",
+            &[robin],
+        )
+        .await
+        .expect("project directory group");
+        tx.commit().await.expect("commit directory group");
         let managed = grant(
             &db.pool,
             tree.tenant,
             tree.workspace_scope,
-            principal("robin"),
+            GrantSubject::Group { group_id: group.id },
             RoleKey::Member,
             GrantSource::Directory,
         )
@@ -1035,6 +1152,17 @@ fn a_directory_grant_cannot_be_revoked_here() {
         // button the API will refuse.
         let members = members_at(&db.pool, tree.tenant, tree.workspace_scope).await;
         assert!(members[0].directory_managed);
+
+        let mut tx = begin(&db.pool).await;
+        let revoked = access::revoke_directory_grant(&mut tx, tree.tenant, managed.id)
+            .await
+            .expect("directory surface revokes its own assignment");
+        tx.commit().await.expect("commit directory revocation");
+        assert_eq!(revoked.directory_source.as_deref(), Some("entra"));
+        assert_eq!(
+            revoked.directory_resource_id.as_deref(),
+            Some("entra-group-eng")
+        );
     });
 }
 

@@ -24,12 +24,15 @@ use std::sync::OnceLock;
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{PgPool, Postgres, Transaction};
 use synveda_store::anchors::{self, AnchorSelection};
-use synveda_store::{access, projects, scopes, tenants, workspaces};
+use synveda_store::{access, identities, projects, scopes, tenants, workspaces};
 use synveda_types::access::{GrantSource, GrantSubject, GroupSource, RoleKey};
 use synveda_types::anchor::{AnchorSet, AnchorSource};
 use synveda_types::scope::ScopeKind;
 use synveda_types::workspace::LifecycleStatus;
-use synveda_types::{GrantId, GroupId, ProjectId, ScopeId, TenantId, TenantStatus, WorkspaceId};
+use synveda_types::{
+    GrantId, GroupId, IdentityId, IdentityKind, ProjectId, ScopeId, TenantId, TenantStatus,
+    WorkspaceId,
+};
 
 // ── Harness ──────────────────────────────────────────────────────────────────
 
@@ -223,7 +226,11 @@ async fn resolve(
     selection: AnchorSelection,
 ) -> AnchorSet {
     let mut tx = begin(pool).await;
-    let set = anchors::resolve(&mut tx, tree.tenant, principal_id, selection)
+    let identity_id = identities::by_subject(&mut *tx, tree.tenant, principal_id)
+        .await
+        .expect("look up identity")
+        .map(|identity| identity.id);
+    let set = anchors::resolve(&mut tx, tree.tenant, principal_id, identity_id, selection)
         .await
         .expect("resolve anchors");
     tx.commit().await.expect("commit resolution");
@@ -605,6 +612,21 @@ fn a_group_grant_follows_its_membership() {
     db.rt.block_on(async {
         let tree = seed(&db.pool).await;
         let mut tx = begin(&db.pool).await;
+        let carol_scope = scopes::ensure_principal_scope(&mut tx, tree.tenant, "carol", "Carol")
+            .await
+            .expect("create Carol's scope");
+        let carol = identities::create(
+            &mut tx,
+            IdentityId::new(),
+            tree.tenant,
+            Some("carol"),
+            IdentityKind::User,
+            None,
+            Some("Carol"),
+            carol_scope.id,
+        )
+        .await
+        .expect("create Carol's identity");
         let group = access::create_group(
             &mut *tx,
             &access::NewGroup {
@@ -614,13 +636,15 @@ fn a_group_grant_follows_its_membership() {
                 display_name: "Reviewers".to_owned(),
                 description: None,
                 source: GroupSource::Direct,
-                directory_ref: None,
+                directory_source: None,
+                directory_resource_id: None,
+                directory_external_id: None,
                 created_by: None,
             },
         )
         .await
         .expect("create group");
-        access::set_group_members(&mut tx, tree.tenant, group.id, &["carol".to_owned()], None)
+        access::set_group_members(&mut tx, tree.tenant, group.id, &[carol.id], None)
             .await
             .expect("set members");
         tx.commit().await.expect("commit group");
@@ -645,7 +669,7 @@ fn a_group_grant_follows_its_membership() {
         assert_eq!(project.roles, vec![RoleKey::Curator]);
         assert_eq!(project.via_groups, vec![group.id], "the group is recorded");
         assert_eq!(
-            anchors::groups_of(&db.pool, tree.tenant, "carol")
+            anchors::groups_of(&db.pool, tree.tenant, Some(carol.id))
                 .await
                 .expect("groups"),
             vec![group.id]
@@ -685,7 +709,7 @@ fn a_group_grant_follows_its_membership() {
             "an archived group confers nothing"
         );
         assert!(
-            anchors::groups_of(&db.pool, tree.tenant, "carol")
+            anchors::groups_of(&db.pool, tree.tenant, Some(carol.id))
                 .await
                 .expect("groups")
                 .is_empty(),
@@ -786,7 +810,7 @@ fn another_tenants_rows_are_absent_from_a_resolution() {
             "and their grant reaches nothing here"
         );
         assert!(
-            anchors::groups_of(&db.pool, ours.tenant, "alice")
+            anchors::groups_of(&db.pool, ours.tenant, None)
                 .await
                 .expect("groups")
                 .is_empty()

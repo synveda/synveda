@@ -4,8 +4,10 @@
 //! choose — AUTH-3 exists because short-lived scoped tokens are better — and
 //! is the credential Entra can be configured to send for a non-gallery
 //! application. Confinement does the work instead: the token authenticates
-//! the `/scim/v2` plane and nothing else, and that plane reaches no governed
-//! asset.
+//! the `/scim/v2` plane and nothing else. That plane may state directory-owned
+//! identity and group facts, but cannot name a scope, role or grant; the
+//! separately PDP-governed directory access-assignment command is the only
+//! bridge from a group to product authority (CPR-34, ADR-0093).
 //!
 //! ## The shape, and why the tenant is inside it
 //!

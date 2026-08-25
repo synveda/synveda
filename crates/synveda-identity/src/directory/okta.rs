@@ -18,11 +18,10 @@
 
 use async_trait::async_trait;
 use serde::Deserialize;
-use std::collections::HashMap;
 
 use super::{
-    DirectoryConnector, DirectorySnapshot, DirectoryUserRecord, Enumeration, Secret, http_client,
-    redact,
+    DirectoryConnector, DirectoryGroupRecord, DirectorySnapshot, DirectoryUserRecord, Enumeration,
+    Secret, http_client, redact,
 };
 
 /// Okta's page ceiling for the users collection.
@@ -188,14 +187,12 @@ impl DirectoryConnector for OktaConnector {
 
         let users_url = format!("{}/api/v1/users?limit={PAGE_SIZE}", self.org_url);
         let (users, failure) = self.walk::<OktaUser>(users_url).await;
-        let mut by_id: HashMap<String, usize> = HashMap::new();
         for user in users {
             // No login is Okta's equivalent of Entra's missing UPN: nothing
             // this product can address or match on.
             let Some(user_name) = user.profile.login else {
                 continue;
             };
-            by_id.insert(user.id.clone(), snapshot.users.len());
             snapshot.users.push(DirectoryUserRecord {
                 external_id: user.id,
                 user_name,
@@ -204,7 +201,6 @@ impl DirectoryConnector for OktaConnector {
                 given_name: user.profile.first_name,
                 family_name: user.profile.last_name,
                 work_email: user.profile.email,
-                groups: Vec::new(),
             });
         }
         if let Some(failure) = failure {
@@ -226,14 +222,14 @@ impl DirectoryConnector for OktaConnector {
                 self.org_url, group.id
             );
             let (members, failure) = self.walk::<OktaUser>(members_url).await;
-            for member in members {
-                if let Some(index) = by_id.get(&member.id) {
-                    snapshot.users[*index].groups.push(name.clone());
-                }
-            }
             if let Some(failure) = failure {
                 return partial(snapshot, failure);
             }
+            snapshot.groups.push(DirectoryGroupRecord {
+                external_id: group.id,
+                display_name: name,
+                member_external_ids: members.into_iter().map(|member| member.id).collect(),
+            });
         }
 
         complete(snapshot)

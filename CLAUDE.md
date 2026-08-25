@@ -166,10 +166,11 @@ the committed file and the tree disagree, and `console/src/generated/api.ts`
 is generated from that file (`make check-api-types`). **Never hand-edit
 either.** To refresh both: `SYNVEDA_WRITE_OPENAPI=1 cargo test -p
 synveda-gateway --test openapi` then `node scripts/generate-api-types.mjs`.
-The document covers the complete authenticated application plane — **164
+The document covers the complete authenticated application plane — **167
 operations** from `/v1/me` through workspaces/projects/repositories, access,
 governance, policy, audit, sessions, Knowledge, capture, context, immutable
-Skills, trusted MCP Tools, OKF, Configuration and policy relaxations. Since
+Skills, trusted MCP Tools, OKF, Configuration, policy relaxations and
+directory access assignments. Since
 CPR-29 one route catalogue constructs
 the executable router and exposes the method/path inventory that the OpenAPI
 test compares exactly in both directions; the console has no hand-written
@@ -218,7 +219,7 @@ explicitly and say so.
 
 Phases 0, 1 and 2 are complete; SKIL-1 through SKIL-4, OPS-1, CNSL-1, ADPT-2,
 CNSL-2, AUTH-4, AUTH-5, EVAL-3, OPS-2, TEN-3, TEN-4 and OPS-8 are the Phase 3
-features done. 99 of 130 features delivered — see docs/backlog/STATUS.md for
+features done. 100 of 131 features delivered — see docs/backlog/STATUS.md for
 what each one proved and what it left standing. (The total read 86 until
 2026-08-05, when it was corrected to the 88 STATUS.md and `make
 check-backlog` had both said for some time; AUTHZ-7 was filed the same day by
@@ -397,6 +398,16 @@ terminal artifact and effective-governance evidence now reaches the one
 content-free chain; hashes-only delivery remains honestly unresolved; and a
 public cursor walk freezes, assembles and verifies every canonical hash input
 offline while its own audited reads stay beyond the snapshot.
+**CPR-34 was filed next**, making it **131 with 99 delivered**: it re-anchors
+SCIM push and scheduled pull on identities/principal scopes, shared Groups,
+identity-keyed membership and ordinary directory-owned scope grants, deleting
+the second directory group graph without translating it.
+It was delivered the same day, making it **131 with 100 delivered**: stable
+provider ids and source ownership survive push/pull; pre-login membership is
+complete; only a separately `MembershipGrant`-decided assignment binds a
+directory group to authority; and removal, disable or group retirement reaches
+the same RLS/Cedar resolution as manual access. Entra/Okta evidence remains
+honestly captured/transcribed rather than live.
 
 Since CPR-9 a **listing decides per row**. The audit of Prompts 1–7 found that
 `GET /v1/workspaces` and `/v1/me` took one decision at the tenant root and

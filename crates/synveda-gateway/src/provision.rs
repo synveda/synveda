@@ -374,12 +374,12 @@ async fn adopt_directory_identity(
 ) -> Result<Option<Identity>> {
     let mut candidate = None;
     if let Some(anchor) = claims.external_id.as_deref() {
-        candidate = directory::user_by_external_id(&mut **tx, tenant.id, anchor).await?;
+        candidate = directory::unique_user_by_external_id(&mut **tx, tenant.id, anchor).await?;
     }
     if candidate.is_none()
         && let Some(email) = claims.email.as_deref()
     {
-        candidate = directory::user_by_user_name(&mut **tx, tenant.id, email).await?;
+        candidate = directory::unique_user_by_user_name(&mut **tx, tenant.id, email).await?;
     }
     let Some(row) = candidate else {
         return Ok(None);

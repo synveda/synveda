@@ -866,10 +866,11 @@ async fn authorize_owner(
         &mut *tx,
         tenant_id,
         &subject,
+        Some(identity.id),
         anchors::AnchorSelection::none(),
     )
     .await?;
-    let groups = anchors::groups_of(&mut *tx, tenant_id, &subject).await?;
+    let groups = anchors::groups_of(&mut *tx, tenant_id, Some(identity.id)).await?;
     let context = AuthzContext {
         scopes: scope_chain,
         principal_scopes: &principal_chain,

@@ -314,8 +314,6 @@ const COVERED: &[&str] = &[
     "records",
     "records_history",
     "scim_credentials",
-    "scim_group_members",
-    "scim_groups",
     "scim_users",
     // CPR-3 (ADR-0070): the generic scope substrate, and since CPR-7
     // (ADR-0074) the only scope tree there is — `hierarchy_nodes`,
@@ -1056,6 +1054,8 @@ struct AccessFixture {
     group: GroupId,
     grant: GrantId,
     invite: InviteId,
+    member: IdentityId,
+    second_member: IdentityId,
 }
 
 /// Admits a tenant with a workspace, a group holding one member, a grant to
@@ -1087,6 +1087,43 @@ async fn seed_access(pool: &PgPool) -> AccessFixture {
     )
     .await
     .expect("create workspace");
+    let root = scopes::tenant_root(&mut *tx, tenant)
+        .await
+        .expect("read tenant root")
+        .expect("workspace created root");
+    let mut member_ids = Vec::new();
+    for (subject, display_name) in [("rls-member", "RLS Member"), ("rls-second", "RLS Second")] {
+        let identity_id = IdentityId::new();
+        let principal_scope = scopes::create(
+            &mut tx,
+            &scopes::NewScope {
+                id: ScopeId::new(),
+                tenant_id: tenant,
+                kind: scope::ScopeKind::Principal,
+                parent_scope_id: Some(root.id),
+                slug: format!("member-{}", identity_id.as_uuid().simple()),
+                display_name: display_name.to_owned(),
+                attributes: serde_json::json!({}),
+                principal_id: Some(subject.to_owned()),
+                created_by: None,
+            },
+        )
+        .await
+        .expect("create member scope");
+        identities::create(
+            &mut tx,
+            identity_id,
+            tenant,
+            Some(subject),
+            IdentityKind::User,
+            None,
+            Some(display_name),
+            principal_scope.id,
+        )
+        .await
+        .expect("create member identity");
+        member_ids.push(identity_id);
+    }
     let group = access::create_group(
         &mut *tx,
         &access::NewGroup {
@@ -1096,7 +1133,9 @@ async fn seed_access(pool: &PgPool) -> AccessFixture {
             display_name: "Engineering".to_owned(),
             description: None,
             source: GroupSource::Direct,
-            directory_ref: None,
+            directory_source: None,
+            directory_resource_id: None,
+            directory_external_id: None,
             created_by: Some("rls-subject".to_owned()),
         },
     )
@@ -1106,7 +1145,7 @@ async fn seed_access(pool: &PgPool) -> AccessFixture {
         &mut tx,
         tenant,
         group.id,
-        &["rls-member".to_owned()],
+        &member_ids[..1],
         Some("rls-subject"),
     )
     .await
@@ -1148,6 +1187,8 @@ async fn seed_access(pool: &PgPool) -> AccessFixture {
         group: group.id,
         grant: grant.id,
         invite: invite.id,
+        member: member_ids[0],
+        second_member: member_ids[1],
     }
 }
 
@@ -1280,7 +1321,7 @@ fn same_tenant_access_lifecycle_works_under_rls() {
             fixture.group,
             1,
             &access::GroupUpdate {
-                members: Some(vec!["rls-member".to_owned(), "rls-second".to_owned()]),
+                members: Some(vec![fixture.member, fixture.second_member]),
                 ..Default::default()
             },
             Some("rls-subject"),
@@ -5407,8 +5448,8 @@ fn versioned_skills_are_tenant_isolated_and_immutable() {
 
 // ── AUTH-4: the directory mirror and the provisioning credential ────────────
 
-/// Seeds a tenant with a mirror row, a group, a membership and a
-/// credential — the four tables migration 0036 adds.
+/// Seeds a tenant with a directory user, a shared group membership and a
+/// provisioning credential.
 async fn seed_directory(pool: &PgPool) -> (TenantId, synveda_types::ScimCredentialId) {
     let tenant = seed_identity(pool).await;
     let mut tx = rls::begin_tenant_tx(pool, tenant)
@@ -5419,6 +5460,7 @@ async fn seed_directory(pool: &PgPool) -> (TenantId, synveda_types::ScimCredenti
         synveda_types::DirectoryUserId::new(),
         tenant,
         &synveda_store::directory::UserAttributes {
+            directory_source: "scim".to_owned(),
             external_id: Some("ext-1".to_owned()),
             user_name: "person@example.test".to_owned(),
             active: true,
@@ -5430,18 +5472,26 @@ async fn seed_directory(pool: &PgPool) -> (TenantId, synveda_types::ScimCredenti
     )
     .await
     .expect("create mirror user");
-    let group = synveda_store::directory::create_group(
-        &mut *tx,
-        synveda_types::DirectoryGroupId::new(),
+    let identity = identities::by_subject(&mut *tx, tenant, "alice")
+        .await
+        .expect("read identity")
+        .expect("fixture identity");
+    synveda_store::directory::link_identity(&mut *tx, tenant, "scim", user.id, identity.id)
+        .await
+        .expect("link directory user");
+    access::sync_directory_group(
+        &mut tx,
+        GroupId::new(),
         tenant,
+        "scim",
+        "group-1",
         None,
         "synveda-eng-core",
+        "synveda-eng-core",
+        &[identity.id],
     )
     .await
-    .expect("create mirror group");
-    synveda_store::directory::add_member(&mut *tx, tenant, group.id, user.id)
-        .await
-        .expect("add member");
+    .expect("project shared group");
     let credential_id = synveda_types::ScimCredentialId::new();
     // A distinct hash per tenant, because `scim_credentials_hash_unique` is
     // **global**: one presented token identifies at most one credential
@@ -5475,19 +5525,21 @@ async fn visible_directory_rows(
     .await
     .expect("count scim_users");
     let groups = sqlx::query_scalar!(
-        r#"select count(*) as "count!" from scim_groups where tenant_id = $1"#,
+        r#"select count(*) as "count!" from groups
+            where tenant_id = $1 and source = 'directory'"#,
         tenant.as_uuid(),
     )
     .fetch_one(&mut **tx)
     .await
-    .expect("count scim_groups");
+    .expect("count directory groups");
     let members = sqlx::query_scalar!(
-        r#"select count(*) as "count!" from scim_group_members where tenant_id = $1"#,
+        r#"select count(*) as "count!" from group_members
+            where tenant_id = $1 and source = 'directory'"#,
         tenant.as_uuid(),
     )
     .fetch_one(&mut **tx)
     .await
-    .expect("count scim_group_members");
+    .expect("count directory memberships");
     let credentials = sqlx::query_scalar!(
         r#"select count(*) as "count!" from scim_credentials where tenant_id = $1"#,
         tenant.as_uuid(),
@@ -5556,8 +5608,8 @@ fn cross_tenant_directory_write_is_rejected() {
         let mut tx = app_tx(&db.pool, Some(adversary)).await;
         let forged = sqlx::query!(
             r#"
-            insert into scim_users (id, tenant_id, user_name)
-            values ($1, $2, 'forged@example.test')
+            insert into scim_users (id, tenant_id, directory_source, user_name)
+            values ($1, $2, 'scim', 'forged@example.test')
             "#,
             uuid::Uuid::now_v7(),
             victim.as_uuid(),
@@ -5642,10 +5694,15 @@ async fn seed_sync_state(pool: &PgPool) -> (TenantId, synveda_types::DirectoryUs
     let mut tx = rls::begin_tenant_tx(pool, tenant)
         .await
         .expect("begin tenant tx");
-    let user = synveda_store::directory::user_by_user_name(&mut *tx, tenant, "person@example.test")
-        .await
-        .expect("read mirror user")
-        .expect("the directory fixture's user");
+    let user = synveda_store::directory::user_by_user_name(
+        &mut *tx,
+        tenant,
+        "scim",
+        "person@example.test",
+    )
+    .await
+    .expect("read directory user")
+    .expect("the directory fixture's user");
     sqlx::query!(
         r#"
         insert into directory_sync_state

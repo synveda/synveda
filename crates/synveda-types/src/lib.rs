@@ -101,19 +101,19 @@ pub use context::{
     ContextReasonCode, ContextSelection, TraceRetentionMode,
 };
 pub use dedup::{DedupConfig, DedupMode, MAX_DEDUP_NEIGHBOURS, permille};
-pub use directory::{DirectoryGroup, DirectoryUser, ScimCredential};
+pub use directory::{DirectoryUser, ScimCredential};
 pub use error::{Error, Result};
 pub use graph::{Depth, Graph};
 pub use id::{
     CapabilitySnapshotId, CaptureBatchId, CaptureCandidateDecisionId, CaptureCandidateId,
     ConfigurationArtifactId, ConfigurationBindingId, ConfigurationVersionId, ContextCandidateId,
-    ContextFeedbackId, ContextRunId, ContextSelectionId, DirectoryGroupId, DirectoryUserId,
-    DurableOperationId, GrantId, GraphEdgeId, GraphVertexId, GroupId, IdentityId, ImportArtifactId,
-    ImportJobId, ImportMappingId, InviteId, KnowledgeItemId, KnowledgeRelationId,
-    KnowledgeRevisionId, KnowledgeSourceId, ProjectId, ProposalId, RecordId, RelaxationId,
-    RelaxationVersionId, RepositoryId, ScimCredentialId, ScopeId, SessionEventId, SessionId,
-    SkillBindingId, SkillId, SkillTestRunId, SkillUsageEventId, SkillVersionId, TenantId,
-    ToolBindingId, ToolServerId, ToolServerVersionId, ToolTestRunId, WorkspaceId,
+    ContextFeedbackId, ContextRunId, ContextSelectionId, DirectoryUserId, DurableOperationId,
+    GrantId, GraphEdgeId, GraphVertexId, GroupId, IdentityId, ImportArtifactId, ImportJobId,
+    ImportMappingId, InviteId, KnowledgeItemId, KnowledgeRelationId, KnowledgeRevisionId,
+    KnowledgeSourceId, ProjectId, ProposalId, RecordId, RelaxationId, RelaxationVersionId,
+    RepositoryId, ScimCredentialId, ScopeId, SessionEventId, SessionId, SkillBindingId, SkillId,
+    SkillTestRunId, SkillUsageEventId, SkillVersionId, TenantId, ToolBindingId, ToolServerId,
+    ToolServerVersionId, ToolTestRunId, WorkspaceId,
 };
 pub use identity::{Identity, IdentityKind, IdentityStatus};
 pub use mover::{MoverConfig, PersonalMemory};

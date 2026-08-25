@@ -196,12 +196,6 @@ define_id!(
     DirectoryUserId
 );
 define_id!(
-    /// Identifies a directory group — one row of the SCIM mirror, whose
-    /// `displayName` is what the AUTH-2 mapping resolver sees (AUTH-4,
-    /// ADR-0059 decision 6).
-    DirectoryGroupId
-);
-define_id!(
     /// Identifies a provisioning credential — the static bearer a SCIM
     /// client authenticates with (AUTH-4, ADR-0059 decision 13).
     ScimCredentialId

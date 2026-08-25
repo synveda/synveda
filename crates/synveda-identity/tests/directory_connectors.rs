@@ -117,7 +117,7 @@ fn entra_router(base: Arc<Mutex<String>>, seen: Seen, fail_second_page: bool) ->
 }
 
 #[tokio::test]
-async fn entra_pages_users_and_attaches_group_names() {
+async fn entra_pages_users_and_preserves_stable_group_membership() {
     let base = Arc::new(Mutex::new(String::new()));
     let seen: Seen = Arc::new(Mutex::new(Vec::new()));
     let url = spawn(entra_router(Arc::clone(&base), Arc::clone(&seen), false)).await;
@@ -146,19 +146,17 @@ async fn entra_pages_users_and_attaches_group_names() {
     assert_eq!(alice.user_name, "alice@example.test");
     assert!(alice.active);
     assert_eq!(alice.work_email.as_deref(), Some("alice.ng@example.test"));
-    assert_eq!(
-        alice.groups,
-        vec!["synveda-eng-core"],
-        "membership attaches by object id, and the group's display name is \
-         what the AUTH-2 resolver will match on"
-    );
+    let groups = &enumeration.snapshot().groups;
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0].external_id, "g1");
+    assert_eq!(groups[0].display_name, "synveda-eng-core");
+    assert_eq!(groups[0].member_external_ids, vec!["u1", "u-unknown"]);
 
-    // `accountEnabled: false` is an act and survives as one. A member id
-    // naming somebody outside the enumeration attaches to nobody rather
-    // than panicking.
+    // `accountEnabled: false` is an act and survives as one. Membership is
+    // retained by stable external id even when a referenced user was not in
+    // this enumeration; projection decides whether the identity exists.
     let bob = &users[1];
     assert!(!bob.active);
-    assert!(bob.groups.is_empty());
 
     let grant = seen
         .lock()
@@ -324,7 +322,12 @@ async fn okta_follows_the_link_header_and_maps_its_statuses() {
 
     assert_eq!(users[0].user_name, "alice@example.test");
     assert!(users[0].active, "ACTIVE is here");
-    assert_eq!(users[0].groups, vec!["synveda-eng-core"]);
+    assert_eq!(enumeration.snapshot().groups.len(), 1);
+    assert_eq!(enumeration.snapshot().groups[0].external_id, "g1");
+    assert_eq!(
+        enumeration.snapshot().groups[0].member_external_ids,
+        vec!["u1"]
+    );
     assert!(!users[1].active, "DEPROVISIONED is Okta's leaver");
     assert_eq!(users[1].family_name.as_deref(), Some("Stone"));
 
