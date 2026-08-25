@@ -965,6 +965,35 @@ async fn authorize_server_read(
     authorize_read_at(state, tx, &scope).await
 }
 
+async fn require_active_internal_secret(
+    tx: &mut PgConnection,
+    tenant: TenantId,
+    scope_id: ScopeId,
+    descriptor: &ToolServerDescriptor,
+) -> Result<()> {
+    let Some(reference) = descriptor.secret_reference.as_deref() else {
+        return Ok(());
+    };
+    let Some(id) = synveda_types::secret::parse_tenant_secret_reference(reference)? else {
+        return Ok(());
+    };
+    if synveda_store::tenant_secrets::reference_is_active(
+        &mut *tx,
+        tenant,
+        id,
+        synveda_types::secret::TenantSecretKind::ToolServer,
+        scope_id,
+    )
+    .await?
+    {
+        Ok(())
+    } else {
+        Err(Error::Invalid {
+            message: "tool server credential reference is unavailable".to_owned(),
+        })
+    }
+}
+
 async fn authorize_command(
     state: &AppState,
     tx: &mut PgConnection,
@@ -990,11 +1019,18 @@ async fn authorize_command(
     )?;
 
     match command {
-        ToolCommand::Register { .. } => {}
+        ToolCommand::Register {
+            governing_scope_id,
+            descriptor,
+            ..
+        } => {
+            require_active_internal_secret(tx, tenant, *governing_scope_id, descriptor).await?;
+        }
         ToolCommand::StageVersion {
             server_id,
             expected_current_version_id,
             governing_scope_id,
+            descriptor,
             ..
         } => {
             let server = store::server(&mut *tx, tenant, *server_id)
@@ -1007,8 +1043,9 @@ async fn authorize_command(
                     message: format!(
                         "tool server {server_id} no longer has expected version {expected_current_version_id}"
                     ),
-                })?;
+            })?;
             authorize_server_read(state, tx, tenant, &server).await?;
+            require_active_internal_secret(tx, tenant, *governing_scope_id, descriptor).await?;
         }
         ToolCommand::Bind {
             project_id,
@@ -1039,8 +1076,14 @@ async fn authorize_command(
                 .ok_or_else(|| Error::NotFound {
                     entity: format!("approved tool version {version_id}"),
                 })?;
-            let _ = version;
             authorize_server_read(state, tx, tenant, &server).await?;
+            require_active_internal_secret(
+                tx,
+                tenant,
+                server.governing_scope_id,
+                &version.descriptor,
+            )
+            .await?;
         }
         ToolCommand::SetBinding {
             binding_id,
@@ -1048,6 +1091,7 @@ async fn authorize_command(
             scope_id,
             expected_revision,
             version_id,
+            state: binding_state,
             ..
         } => {
             let binding = store::binding(&mut *tx, tenant, *binding_id)
@@ -1067,7 +1111,7 @@ async fn authorize_command(
                 .ok_or_else(|| Error::NotFound {
                     entity: format!("tool server {}", binding.server_id),
                 })?;
-            store::version(&mut *tx, tenant, *version_id)
+            let version = store::version(&mut *tx, tenant, *version_id)
                 .await?
                 .filter(|version| {
                     version.server_id == binding.server_id
@@ -1077,6 +1121,18 @@ async fn authorize_command(
                     entity: format!("approved tool version {version_id}"),
                 })?;
             authorize_server_read(state, tx, tenant, &server).await?;
+            // A revoked credential must fail closed for activation, but it
+            // must never become a trap that prevents an operator removing
+            // the binding which cites it.
+            if *binding_state != ToolBindingState::Removed {
+                require_active_internal_secret(
+                    tx,
+                    tenant,
+                    server.governing_scope_id,
+                    &version.descriptor,
+                )
+                .await?;
+            }
         }
     }
     Ok(CommandAuthorization {
@@ -2469,6 +2525,13 @@ pub(crate) async fn generate_config(
                 .ok_or_else(|| Error::NotFound {
                     entity: format!("approved tool version {}", binding.version_id),
                 })?;
+            require_active_internal_secret(
+                &mut tx,
+                tenant,
+                server.governing_scope_id,
+                &version.descriptor,
+            )
+            .await?;
             if version.descriptor.transport == ToolTransport::StreamableHttp
                 && !runtime
                     .document

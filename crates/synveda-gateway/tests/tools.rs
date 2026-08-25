@@ -18,9 +18,12 @@ use synveda_identity::Hs256Verifier;
 use synveda_ingest::embedding::{AnyEmbedder, DeterministicEmbedder};
 use synveda_policy::Pdp;
 use synveda_retrieval::SearchIndex;
-use synveda_store::{access, identities, rls, scopes, tenants};
+use synveda_store::{access, identities, rls, scopes, tenant_secrets, tenants};
 use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
-use synveda_types::{GrantId, IdentityId, IdentityKind, ScopeId, TenantId, TenantStatus};
+use synveda_types::secret::{TenantSecretKind, tenant_secret_reference};
+use synveda_types::{
+    GrantId, IdentityId, IdentityKind, ScopeId, TenantId, TenantSecretId, TenantStatus,
+};
 use tower::ServiceExt;
 
 #[path = "support/configuration.rs"]
@@ -28,6 +31,8 @@ mod configuration_support;
 
 const SECRET: &[u8] = b"cpr-25-trusted-mcp-registry";
 const PLAINTEXT_FIXTURE: &str = "shh-cpr25-plaintext-token";
+const CPR35_PLAINTEXT: &[u8] = b"never-log-cpr35-tool-token";
+const TEST_KEK: &str = "1111111111111111111111111111111111111111111111111111111111111111";
 
 async fn serial() -> tokio::sync::MutexGuard<'static, ()> {
     static LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
@@ -281,6 +286,57 @@ fn descriptor() -> Value {
     })
 }
 
+fn descriptor_with_secret(reference: &str) -> Value {
+    let mut value = descriptor();
+    value["secret_reference"] = json!(reference);
+    value
+}
+
+async fn put_tool_secret(
+    pool: &PgPool,
+    tenant: TenantId,
+    scope_id: ScopeId,
+    id: TenantSecretId,
+    plaintext: &[u8],
+) -> u64 {
+    let ring = synveda_store::keys::KeyRing::new(synveda_crypto::Kms::Local(
+        synveda_crypto::LocalKms::from_hex(TEST_KEK, "local:test").expect("test KEK"),
+    ));
+    let key_scope = synveda_crypto::KeyScope::Tenant(tenant);
+    ring.provision(pool, key_scope)
+        .await
+        .expect("provision tenant key");
+    let key = ring
+        .sealing_key(pool, key_scope)
+        .await
+        .expect("tenant sealing key");
+    let sealed = key
+        .seal(
+            synveda_crypto::Purpose::TenantSecret,
+            synveda_crypto::RowKey::Uuid(id.as_uuid()),
+            plaintext,
+        )
+        .expect("seal Tool credential");
+    let mut tx = rls::begin_tenant_tx(pool, tenant)
+        .await
+        .expect("begin Tool-secret transaction");
+    let stored = tenant_secrets::put(
+        &mut tx,
+        id,
+        tenant,
+        scope_id,
+        TenantSecretKind::ToolServer,
+        "pulseboard.mcp",
+        Some("remote_mcp"),
+        key.version(),
+        &sealed,
+    )
+    .await
+    .expect("put Tool secret");
+    tx.commit().await.expect("commit Tool secret");
+    stored.value_revision
+}
+
 fn capabilities(version: u8) -> Value {
     let mut tools = vec![json!({
         "name": "lookup_issue",
@@ -311,7 +367,7 @@ fn capabilities(version: u8) -> Value {
     })
 }
 
-async fn approve_and_apply(world: &World, change_id: &str) -> Value {
+async fn approve(world: &World, change_id: &str) -> Value {
     let (status, proposal) = call(
         &world.app,
         Method::GET,
@@ -347,7 +403,11 @@ async fn approve_and_apply(world: &World, change_id: &str) -> Value {
         .await;
         assert_eq!(status, StatusCode::OK, "approval failed: {reviewed}");
     }
-    let (status, applied) = call(
+    proposal
+}
+
+async fn apply(world: &World, change_id: &str) -> (StatusCode, Value) {
+    call(
         &world.app,
         Method::POST,
         &format!("/v1/proposals/{change_id}/apply"),
@@ -355,7 +415,12 @@ async fn approve_and_apply(world: &World, change_id: &str) -> Value {
         None,
         None,
     )
-    .await;
+    .await
+}
+
+async fn approve_and_apply(world: &World, change_id: &str) -> Value {
+    approve(world, change_id).await;
+    let (status, applied) = apply(world, change_id).await;
     assert_eq!(status, StatusCode::OK, "apply failed: {applied}");
     applied
 }
@@ -787,4 +852,305 @@ async fn versions_discovery_bindings_config_and_tests_share_one_governed_path() 
     .expect("scan audit payloads");
     assert_eq!(plaintext_leaks, 0);
     tx.commit().await.expect("commit verification");
+}
+
+#[tokio::test]
+async fn stable_tool_secret_references_fail_closed_rotate_without_rewriting_versions_and_can_be_removed()
+ {
+    let _serial = serial().await;
+    let Some(world) = world().await else { return };
+    let unavailable = "tool server credential reference is unavailable";
+
+    let missing_id = TenantSecretId::new();
+    let missing_reference = tenant_secret_reference(missing_id);
+    let (status, missing) = call(
+        &world.app,
+        Method::POST,
+        "/v1/tool-servers",
+        &world.alice,
+        Some(json!({
+            "governing_scope_id": world.project_scope,
+            "name": "missing-secret",
+            "descriptor": descriptor_with_secret(&missing_reference),
+            "capabilities": capabilities(1)
+        })),
+        Some("cpr35-missing-secret"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{missing}");
+    assert_eq!(missing["message"], unavailable);
+    assert!(!missing.to_string().contains(&missing_id.to_string()));
+
+    let other_tenant = TenantId::new();
+    tenants::create(
+        &world.pool,
+        other_tenant,
+        &format!("cpr35-other-{}", other_tenant.as_uuid().simple()),
+        "CPR-35 cross-tenant secret",
+        TenantStatus::Active,
+    )
+    .await
+    .expect("create other tenant");
+    let mut other_tx = rls::begin_tenant_tx(&world.pool, other_tenant)
+        .await
+        .expect("begin other tenant root");
+    let other_root = scopes::ensure_tenant_root(&mut other_tx, other_tenant)
+        .await
+        .expect("other tenant root");
+    other_tx.commit().await.expect("commit other root");
+    let foreign_id = TenantSecretId::new();
+    put_tool_secret(
+        &world.pool,
+        other_tenant,
+        other_root.id,
+        foreign_id,
+        CPR35_PLAINTEXT,
+    )
+    .await;
+    let foreign_reference = tenant_secret_reference(foreign_id);
+    let (status, foreign) = call(
+        &world.app,
+        Method::POST,
+        "/v1/tool-servers",
+        &world.alice,
+        Some(json!({
+            "governing_scope_id": world.project_scope,
+            "name": "foreign-secret",
+            "descriptor": descriptor_with_secret(&foreign_reference),
+            "capabilities": capabilities(1)
+        })),
+        Some("cpr35-foreign-secret"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{foreign}");
+    assert_eq!(foreign["message"], unavailable);
+    assert!(!foreign.to_string().contains(&foreign_id.to_string()));
+
+    let secret_id = TenantSecretId::new();
+    let secret_reference = tenant_secret_reference(secret_id);
+    assert_eq!(
+        put_tool_secret(
+            &world.pool,
+            world.tenant,
+            world.project_scope,
+            secret_id,
+            CPR35_PLAINTEXT,
+        )
+        .await,
+        1
+    );
+
+    // Admission succeeds while the reference is live, but application
+    // rechecks it so an approval cannot race revocation.
+    let (status, raced) = call(
+        &world.app,
+        Method::POST,
+        "/v1/tool-servers",
+        &world.alice,
+        Some(json!({
+            "governing_scope_id": world.project_scope,
+            "name": "revoked-before-apply",
+            "descriptor": descriptor_with_secret(&secret_reference),
+            "capabilities": capabilities(1)
+        })),
+        Some("cpr35-revoked-before-apply"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{raced}");
+    let raced_change = raced["change_id"].as_str().expect("raced change");
+    approve(&world, raced_change).await;
+    let mut tx = rls::begin_tenant_tx(&world.pool, world.tenant)
+        .await
+        .expect("begin revocation");
+    tenant_secrets::revoke(&mut tx, world.tenant, secret_id)
+        .await
+        .expect("revoke")
+        .expect("active secret");
+    tx.commit().await.expect("commit revocation");
+    let (status, refused_apply) = apply(&world, raced_change).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{refused_apply}");
+    assert_eq!(refused_apply["message"], unavailable);
+    assert!(!refused_apply.to_string().contains(&secret_id.to_string()));
+
+    assert_eq!(
+        put_tool_secret(
+            &world.pool,
+            world.tenant,
+            world.project_scope,
+            secret_id,
+            CPR35_PLAINTEXT,
+        )
+        .await,
+        3,
+        "reactivation advances the logical credential revision"
+    );
+    let (status, opened) = call(
+        &world.app,
+        Method::POST,
+        "/v1/tool-servers",
+        &world.alice,
+        Some(json!({
+            "governing_scope_id": world.project_scope,
+            "name": "stable-secret-tools",
+            "descriptor": descriptor_with_secret(&secret_reference),
+            "capabilities": capabilities(1)
+        })),
+        Some("cpr35-register-live-secret"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{opened}");
+    let server_id = opened["server_id"].as_str().expect("server id");
+    let version_id = opened["version_id"].as_str().expect("version id");
+    approve_and_apply(
+        &world,
+        opened["change_id"].as_str().expect("registration change"),
+    )
+    .await;
+    let (status, version_before) = call(
+        &world.app,
+        Method::GET,
+        &format!("/v1/tool-servers/{server_id}/versions/{version_id}"),
+        &world.alice,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{version_before}");
+    let immutable_digest = version_before["digest"].clone();
+
+    let (status, binding) = call(
+        &world.app,
+        Method::POST,
+        "/v1/tool-bindings",
+        &world.alice,
+        Some(json!({
+            "project_id": world.project_id,
+            "server_id": server_id,
+            "version_id": version_id,
+            "state": "enabled"
+        })),
+        Some("cpr35-bind-live-secret"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{binding}");
+    let binding_id = binding["binding_id"].as_str().expect("binding id");
+    approve_and_apply(
+        &world,
+        binding["change_id"].as_str().expect("binding change"),
+    )
+    .await;
+    let (status, config) = call(
+        &world.app,
+        Method::GET,
+        &format!("/v1/projects/{}/tool-config", world.project_id),
+        &world.alice,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{config}");
+    assert_eq!(
+        config["configuration"]["mcpServers"]["stable-secret-tools"]["secretReference"],
+        secret_reference
+    );
+    assert!(
+        !config
+            .to_string()
+            .contains(std::str::from_utf8(CPR35_PLAINTEXT).unwrap())
+    );
+
+    assert_eq!(
+        put_tool_secret(
+            &world.pool,
+            world.tenant,
+            world.project_scope,
+            secret_id,
+            b"never-log-cpr35-rotated-token",
+        )
+        .await,
+        4
+    );
+    let (status, version_after) = call(
+        &world.app,
+        Method::GET,
+        &format!("/v1/tool-servers/{server_id}/versions/{version_id}"),
+        &world.alice,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{version_after}");
+    assert_eq!(version_after["digest"], immutable_digest);
+    assert_eq!(version_after["id"], version_before["id"]);
+
+    let mut tx = rls::begin_tenant_tx(&world.pool, world.tenant)
+        .await
+        .expect("begin stale-reference revocation");
+    tenant_secrets::revoke(&mut tx, world.tenant, secret_id)
+        .await
+        .expect("revoke rotated secret")
+        .expect("rotated active secret");
+    tx.commit()
+        .await
+        .expect("commit stale-reference revocation");
+    let (status, stale_config) = call(
+        &world.app,
+        Method::GET,
+        &format!("/v1/projects/{}/tool-config", world.project_id),
+        &world.alice,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST, "{stale_config}");
+    assert_eq!(stale_config["message"], unavailable);
+
+    let (status, remove) = call(
+        &world.app,
+        Method::PATCH,
+        &format!("/v1/tool-bindings/{binding_id}"),
+        &world.alice,
+        Some(json!({
+            "expected_revision": 1,
+            "version_id": version_id,
+            "state": "removed",
+            "reason": "remove"
+        })),
+        Some("cpr35-remove-stale-binding"),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{remove}");
+    approve_and_apply(
+        &world,
+        remove["change_id"].as_str().expect("removal change"),
+    )
+    .await;
+    let (status, removed_config) = call(
+        &world.app,
+        Method::GET,
+        &format!("/v1/projects/{}/tool-config", world.project_id),
+        &world.alice,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{removed_config}");
+    assert_eq!(removed_config["bindings"], json!([]));
+    assert_eq!(removed_config["configuration"], json!({"mcpServers": {}}));
+
+    let mut tx = rls::begin_tenant_tx(&world.pool, world.tenant)
+        .await
+        .expect("begin secret leak sweep");
+    let leak_count: i64 = sqlx::query_scalar!(
+        r#"select count(*) as "count!" from audit_log
+           where tenant_id = $1
+             and (payload::text like '%never-log-cpr35-tool-token%'
+                  or payload::text like '%never-log-cpr35-rotated-token%')"#,
+        world.tenant.as_uuid(),
+    )
+    .fetch_one(&mut *tx)
+    .await
+    .expect("scan audit payloads");
+    assert_eq!(leak_count, 0, "audit metadata exposed Tool plaintext");
+    tx.commit().await.expect("commit leak sweep");
 }

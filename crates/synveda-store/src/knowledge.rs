@@ -1217,6 +1217,230 @@ pub async fn relations(
     rows.into_iter().map(TryInto::try_into).collect()
 }
 
+/// Deterministic, tenant-complete Knowledge payload for the local sealed
+/// export boundary (CPR-35, ADR-0094).
+///
+/// This is intentionally not a public read service: it performs no per-item
+/// PDP decision and may expose plaintext. The sole caller is the documented
+/// local operator export, which serialises these values only inside a
+/// tenant-bound envelope. Every field is selected explicitly so an archive
+/// cannot change because a storage struct gained an incidental field.
+pub struct TenantKnowledgeExport {
+    /// Current and closed aggregate-head transaction intervals.
+    pub head_history: Value,
+    /// Every remaining immutable content revision.
+    pub revisions: Value,
+    /// Every remaining normalised provenance source.
+    pub sources: Value,
+    /// Ordered immutable revision/source links.
+    pub revision_sources: Value,
+    /// Explicit Knowledge relation claims.
+    pub relations: Value,
+    /// Stable aggregate count.
+    pub item_count: u64,
+    /// Immutable revision count.
+    pub revision_count: u64,
+    /// Provenance source count.
+    pub source_count: u64,
+    /// Relation count.
+    pub relation_count: u64,
+}
+
+/// Read the complete Knowledge aggregate/history for a sealed tenant export.
+#[tracing::instrument(
+    name = "store.knowledge.export_tenant",
+    skip_all,
+    fields(tenant.id = %tenant_id),
+    err(Display)
+)]
+pub async fn export_tenant(
+    conn: &mut PgConnection,
+    tenant_id: TenantId,
+) -> Result<TenantKnowledgeExport> {
+    let head_history = sqlx::query_scalar!(
+        r#"
+        select jsonb_agg(row.payload order by row.item_id, row.tx_from)
+        from (
+            select current.id as item_id, current.tx_from,
+                   jsonb_build_object(
+                       'id', current.id,
+                       'scope_id', current.scope_id,
+                       'project_id', current.project_id,
+                       'owner_principal_id', current.owner_principal_id,
+                       'knowledge_type', current.knowledge_type,
+                       'origin', current.origin,
+                       'lifecycle_state', current.lifecycle_state,
+                       'current_revision_id', current.current_revision_id,
+                       'created_by', current.created_by,
+                       'updated_by', current.updated_by,
+                       'created_at', current.created_at,
+                       'updated_at', current.updated_at,
+                       'transaction_from', current.tx_from,
+                       'transaction_to', current.tx_to
+                   ) as payload
+              from knowledge_items current
+             where current.tenant_id = $1
+            union all
+            select history.id as item_id, history.tx_from,
+                   jsonb_build_object(
+                       'id', history.id,
+                       'scope_id', history.scope_id,
+                       'project_id', history.project_id,
+                       'owner_principal_id', history.owner_principal_id,
+                       'knowledge_type', history.knowledge_type,
+                       'origin', history.origin,
+                       'lifecycle_state', history.lifecycle_state,
+                       'current_revision_id', history.current_revision_id,
+                       'created_by', history.created_by,
+                       'updated_by', history.updated_by,
+                       'created_at', history.created_at,
+                       'updated_at', history.updated_at,
+                       'transaction_from', history.tx_from,
+                       'transaction_to', history.tx_to
+                   ) as payload
+              from knowledge_items_history history
+             where history.tenant_id = $1
+        ) row
+        "#,
+        tenant_id.as_uuid(),
+    )
+    .fetch_one(&mut *conn)
+    .await
+    .map_err(storage_error)?
+    .unwrap_or_else(|| serde_json::json!([]));
+
+    let revisions = sqlx::query_scalar!(
+        r#"
+        select jsonb_agg(
+                   jsonb_build_object(
+                       'id', revision.id,
+                       'knowledge_item_id', revision.knowledge_item_id,
+                       'revision_number', revision.revision_number,
+                       'title', revision.title,
+                       'body_markdown', revision.body_markdown,
+                       'summary', revision.summary,
+                       'tags', revision.tags,
+                       'sensitivity', revision.sensitivity,
+                       'confidence_permille', revision.confidence_permille,
+                       'valid_from', revision.valid_from,
+                       'valid_to', revision.valid_to,
+                       'stale_after', revision.stale_after,
+                       'verification_metadata', revision.verification_metadata,
+                       'content_hash', revision.content_hash,
+                       'metadata', revision.metadata,
+                       'created_by', revision.created_by,
+                       'transaction_time', revision.transaction_time
+                   ) order by revision.knowledge_item_id, revision.revision_number
+               )
+          from knowledge_revisions revision
+         where revision.tenant_id = $1
+        "#,
+        tenant_id.as_uuid(),
+    )
+    .fetch_one(&mut *conn)
+    .await
+    .map_err(storage_error)?
+    .unwrap_or_else(|| serde_json::json!([]));
+
+    let sources = sqlx::query_scalar!(
+        r#"
+        select jsonb_agg(
+                   jsonb_build_object(
+                       'id', source.id,
+                       'scope_id', source.scope_id,
+                       'source_type', source.source_type,
+                       'session_event_id', source.session_event_id,
+                       'locator', source.locator,
+                       'source_revision', source.source_revision,
+                       'content_hash', source.content_hash,
+                       'metadata', source.metadata,
+                       'created_by', source.created_by,
+                       'created_at', source.created_at
+                   ) order by source.id
+               )
+          from knowledge_sources source
+         where source.tenant_id = $1
+        "#,
+        tenant_id.as_uuid(),
+    )
+    .fetch_one(&mut *conn)
+    .await
+    .map_err(storage_error)?
+    .unwrap_or_else(|| serde_json::json!([]));
+
+    let revision_sources = sqlx::query_scalar!(
+        r#"
+        select jsonb_agg(
+                   jsonb_build_object(
+                       'knowledge_revision_id', link.knowledge_revision_id,
+                       'knowledge_source_id', link.knowledge_source_id,
+                       'ordinal', link.ordinal,
+                       'linked_at', link.linked_at
+                   ) order by link.knowledge_revision_id, link.ordinal
+               )
+          from knowledge_revision_sources link
+         where link.tenant_id = $1
+        "#,
+        tenant_id.as_uuid(),
+    )
+    .fetch_one(&mut *conn)
+    .await
+    .map_err(storage_error)?
+    .unwrap_or_else(|| serde_json::json!([]));
+
+    let relations = sqlx::query_scalar!(
+        r#"
+        select jsonb_agg(
+                   jsonb_build_object(
+                       'id', relation.id,
+                       'source_item_id', relation.source_item_id,
+                       'target_item_id', relation.target_item_id,
+                       'asserting_revision_id', relation.asserting_revision_id,
+                       'relation_type', relation.relation_type,
+                       'metadata', relation.metadata,
+                       'created_by', relation.created_by,
+                       'created_at', relation.created_at
+                   ) order by relation.created_at, relation.id
+               )
+          from knowledge_relations relation
+         where relation.tenant_id = $1
+        "#,
+        tenant_id.as_uuid(),
+    )
+    .fetch_one(&mut *conn)
+    .await
+    .map_err(storage_error)?
+    .unwrap_or_else(|| serde_json::json!([]));
+
+    let counts = sqlx::query!(
+        r#"select
+              (select count(*) from knowledge_items where tenant_id = $1) as "items!",
+              (select count(*) from knowledge_revisions where tenant_id = $1) as "revisions!",
+              (select count(*) from knowledge_sources where tenant_id = $1) as "sources!",
+              (select count(*) from knowledge_relations where tenant_id = $1) as "relations!""#,
+        tenant_id.as_uuid(),
+    )
+    .fetch_one(&mut *conn)
+    .await
+    .map_err(storage_error)?;
+    let count = |value: i64, name: &str| {
+        u64::try_from(value).map_err(|_| Error::Internal {
+            message: format!("negative Knowledge export {name} count"),
+        })
+    };
+    Ok(TenantKnowledgeExport {
+        head_history,
+        revisions,
+        sources,
+        revision_sources,
+        relations,
+        item_count: count(counts.items, "item")?,
+        revision_count: count(counts.revisions, "revision")?,
+        source_count: count(counts.sources, "source")?,
+        relation_count: count(counts.relations, "relation")?,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

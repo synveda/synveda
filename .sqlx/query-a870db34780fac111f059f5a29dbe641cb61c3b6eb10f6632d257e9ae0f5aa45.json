@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select jsonb_agg(row.payload order by row.item_id, row.tx_from)\n        from (\n            select current.id as item_id, current.tx_from,\n                   jsonb_build_object(\n                       'id', current.id,\n                       'scope_id', current.scope_id,\n                       'project_id', current.project_id,\n                       'owner_principal_id', current.owner_principal_id,\n                       'knowledge_type', current.knowledge_type,\n                       'origin', current.origin,\n                       'lifecycle_state', current.lifecycle_state,\n                       'current_revision_id', current.current_revision_id,\n                       'created_by', current.created_by,\n                       'updated_by', current.updated_by,\n                       'created_at', current.created_at,\n                       'updated_at', current.updated_at,\n                       'transaction_from', current.tx_from,\n                       'transaction_to', current.tx_to\n                   ) as payload\n              from knowledge_items current\n             where current.tenant_id = $1\n            union all\n            select history.id as item_id, history.tx_from,\n                   jsonb_build_object(\n                       'id', history.id,\n                       'scope_id', history.scope_id,\n                       'project_id', history.project_id,\n                       'owner_principal_id', history.owner_principal_id,\n                       'knowledge_type', history.knowledge_type,\n                       'origin', history.origin,\n                       'lifecycle_state', history.lifecycle_state,\n                       'current_revision_id', history.current_revision_id,\n                       'created_by', history.created_by,\n                       'updated_by', history.updated_by,\n                       'created_at', history.created_at,\n                       'updated_at', history.updated_at,\n                       'transaction_from', history.tx_from,\n                       'transaction_to', history.tx_to\n                   ) as payload\n              from knowledge_items_history history\n             where history.tenant_id = $1\n        ) row\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "jsonb_agg",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "a870db34780fac111f059f5a29dbe641cb61c3b6eb10f6632d257e9ae0f5aa45"
+}

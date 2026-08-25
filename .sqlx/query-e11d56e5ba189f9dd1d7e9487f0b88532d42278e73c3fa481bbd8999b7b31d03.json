@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select jsonb_agg(\n                   jsonb_build_object(\n                       'knowledge_revision_id', link.knowledge_revision_id,\n                       'knowledge_source_id', link.knowledge_source_id,\n                       'ordinal', link.ordinal,\n                       'linked_at', link.linked_at\n                   ) order by link.knowledge_revision_id, link.ordinal\n               )\n          from knowledge_revision_sources link\n         where link.tenant_id = $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "jsonb_agg",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "e11d56e5ba189f9dd1d7e9487f0b88532d42278e73c3fa481bbd8999b7b31d03"
+}

@@ -1476,8 +1476,9 @@ enum DirectoryCommand {
         #[arg(long)]
         config: std::path::PathBuf,
     },
-    /// Destroy this tenant's stored directory configuration. The sweep then
-    /// falls back to the deployment's, if it has one for this tenant.
+    /// Revoke this tenant's stored directory configuration. Its stable
+    /// reference remains fail-closed and does not fall back to deployment
+    /// configuration.
     ClearCredential {
         /// Tenant UUID.
         #[arg(long)]
@@ -1647,7 +1648,10 @@ enum TenantCommand {
     /// A tenant's encryption keys (TEN-4, ADR-0064).
     #[command(subcommand)]
     Key(TenantKeyCommand),
-    /// Write a sealed archive of a tenant's records and audit chain.
+    /// Stable, scope-bound sealed tenant-secret references (CPR-35).
+    #[command(subcommand)]
+    Secret(TenantSecretCommand),
+    /// Write a sealed archive of a tenant's Knowledge history and audit chain.
     ///
     /// The AC's artefact: unreadable without that tenant's key. Sealed under
     /// a fresh per-archive key wrapped by the tenant's, so handing somebody
@@ -1685,12 +1689,8 @@ enum TenantKeyCommand {
         #[arg(long)]
         tenant: TenantId,
     },
-    /// Retire the current data key and mint the next generation.
-    ///
-    /// Re-seals nothing: payloads under the retired key keep opening under
-    /// it and move forward when their rows are next written, so this
-    /// returning does not mean every ciphertext is on the new key
-    /// (ADR-0064 decision 6).
+    /// Retire the current data key, mint the next generation and durably
+    /// re-encrypt active tenant-secret envelopes.
     Rotate {
         #[arg(long)]
         tenant: TenantId,
@@ -1699,6 +1699,38 @@ enum TenantKeyCommand {
     Status {
         #[arg(long)]
         tenant: TenantId,
+    },
+}
+
+#[derive(Subcommand)]
+enum TenantSecretCommand {
+    /// Store or rotate one stable local secret from a file or stdin.
+    Put {
+        #[arg(long)]
+        tenant: TenantId,
+        /// Exact governing scope. Immutable after the reference is minted.
+        #[arg(long)]
+        scope: ScopeId,
+        /// Consumer family: directory, tool_server, model_provider or import_export.
+        #[arg(long)]
+        kind: synveda_types::secret::TenantSecretKind,
+        /// Credential-free dotted-lowercase operator label.
+        #[arg(long)]
+        label: String,
+        /// Credential-free provider identifier such as entra or anthropic.
+        #[arg(long)]
+        provider: Option<String>,
+        /// File containing the secret value, or `-` for stdin. Values are
+        /// never accepted in argv.
+        #[arg(long)]
+        from: std::path::PathBuf,
+    },
+    /// Revoke one stable reference and destroy its current envelope.
+    Revoke {
+        #[arg(long)]
+        tenant: TenantId,
+        /// Stable secret UUID printed by `put` and `tenant key status`.
+        id: synveda_types::TenantSecretId,
     },
 }
 
@@ -2247,6 +2279,30 @@ async fn run(cli: Cli) -> Result<(), String> {
         Command::Tenant(TenantCommand::Key(TenantKeyCommand::Status { tenant })) => {
             let pool = connect_current_epoch().await?;
             keys::status(&pool, tenant).await
+        }
+        Command::Tenant(TenantCommand::Secret(TenantSecretCommand::Put {
+            tenant,
+            scope,
+            kind,
+            label,
+            provider,
+            from,
+        })) => {
+            let pool = connect_current_epoch().await?;
+            keys::put_tenant_secret_from_path(
+                &pool,
+                tenant,
+                scope,
+                kind,
+                &label,
+                provider.as_deref(),
+                &from,
+            )
+            .await
+        }
+        Command::Tenant(TenantCommand::Secret(TenantSecretCommand::Revoke { tenant, id })) => {
+            let pool = connect_current_epoch().await?;
+            keys::revoke_tenant_secret(&pool, tenant, id).await
         }
         Command::Tenant(TenantCommand::Export { tenant, out }) => {
             let pool = connect_current_epoch().await?;

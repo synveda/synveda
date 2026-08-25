@@ -594,12 +594,14 @@ async fn stored_connector(
     tenant_id: TenantId,
 ) -> Result<Option<Box<dyn DirectoryConnector>>> {
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
-    let stored = synveda_store::tenant_secrets::get(
+    let stored = synveda_store::tenant_secrets::by_label(
         &mut *tx,
         tenant_id,
+        synveda_types::secret::TenantSecretKind::Directory,
         synveda_identity::directory::CREDENTIAL_SECRET_NAME,
     )
     .await?;
+    let root = synveda_store::scopes::tenant_root(&mut *tx, tenant_id).await?;
     tx.commit()
         .await
         .map_err(|err| synveda_types::Error::Storage {
@@ -608,25 +610,38 @@ async fn stored_connector(
     let Some(stored) = stored else {
         return Ok(None);
     };
+    if stored.state != synveda_types::secret::TenantSecretState::Active
+        || root.as_ref().map(|scope| scope.id) != Some(stored.scope_id)
+    {
+        return Err(synveda_types::Error::Invalid {
+            message: "the tenant's stored directory credential reference is unavailable".to_owned(),
+        });
+    }
+    let sealed = stored
+        .sealed
+        .as_deref()
+        .ok_or_else(|| synveda_types::Error::Invalid {
+            message: "the tenant's stored directory credential reference is unavailable".to_owned(),
+        })?;
 
     let opened = state
         .keys
         .opening_key(
             &state.pool,
             synveda_crypto::KeyScope::Tenant(tenant_id),
-            &stored.sealed,
+            sealed,
         )
         .await?
         .open(
-            synveda_crypto::Purpose::DirectoryCredential,
-            synveda_crypto::RowKey::Name(synveda_identity::directory::CREDENTIAL_SECRET_NAME),
-            &stored.sealed,
+            synveda_crypto::Purpose::TenantSecret,
+            synveda_crypto::RowKey::Uuid(stored.id.as_uuid()),
+            sealed,
         )
         .inspect_err(|_| {
             metrics::counter!(
                 synveda_store::keys::KEY_OPEN_FAILURES_TOTAL,
                 "scope" => "tenant",
-                "purpose" => synveda_crypto::Purpose::DirectoryCredential.as_str(),
+                "purpose" => synveda_crypto::Purpose::TenantSecret.as_str(),
             )
             .increment(1);
         })?;
@@ -638,6 +653,15 @@ async fn stored_connector(
                       configuration this build understands"
                 .to_string(),
         })?;
+    let connector_name = match &config {
+        synveda_identity::directory::DirectorySyncConfig::Entra { .. } => "entra",
+        synveda_identity::directory::DirectorySyncConfig::Okta { .. } => "okta",
+    };
+    if stored.provider.as_deref() != Some(connector_name) {
+        return Err(synveda_types::Error::Invalid {
+            message: "the tenant's stored directory credential reference is unavailable".to_owned(),
+        });
+    }
     synveda_identity::directory::connector(&config).map(Some)
 }
 

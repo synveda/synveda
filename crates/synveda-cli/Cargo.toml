@@ -70,3 +70,4 @@ tokio = { workspace = true, features = ["net", "io-util"] }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 url = { workspace = true }
+zeroize = { workspace = true }

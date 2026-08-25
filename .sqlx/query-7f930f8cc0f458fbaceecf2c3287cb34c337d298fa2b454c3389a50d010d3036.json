@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select count(*) as \"count!\" from audit_log\n           where tenant_id = $1\n             and (payload::text like '%never-log-cpr35-tool-token%'\n                  or payload::text like '%never-log-cpr35-rotated-token%')",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "7f930f8cc0f458fbaceecf2c3287cb34c337d298fa2b454c3389a50d010d3036"
+}

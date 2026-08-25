@@ -327,6 +327,9 @@ pub enum AuditAction {
     TenantSecretStored,
     /// A tenant's sealed secret was destroyed.
     TenantSecretCleared,
+    /// Active tenant-secret envelopes were advanced to a new DEK generation.
+    /// Carries one durable job id, generations and counts, never ciphertext.
+    TenantSecretsReencrypted,
     /// An inject composed a context block — one event per inject with
     /// the block's watermark and the per-scope `MemoryRead` decisions
     /// aggregated, never one row per candidate (CTX-3, ADR-0026
@@ -586,7 +589,7 @@ impl AuditAction {
     /// unit test below plus the fact that an action missing from here is
     /// an event `GET /v1/audit/events` cannot filter for. Add the variant
     /// and add it here in the same diff.
-    pub const ALL: [AuditAction; 99] = [
+    pub const ALL: [AuditAction; 100] = [
         AuditAction::AuthzDecision,
         AuditAction::TenantResolutionDenied,
         AuditAction::TokenRejected,
@@ -645,6 +648,7 @@ impl AuditAction {
         AuditAction::TenantExported,
         AuditAction::TenantSecretStored,
         AuditAction::TenantSecretCleared,
+        AuditAction::TenantSecretsReencrypted,
         AuditAction::ContextInjected,
         AuditAction::ContextRecalled,
         AuditAction::ChannelPublished,
@@ -751,6 +755,7 @@ impl AuditAction {
             AuditAction::TenantExported => "tenant.exported",
             AuditAction::TenantSecretStored => "tenant.secret.stored",
             AuditAction::TenantSecretCleared => "tenant.secret.cleared",
+            AuditAction::TenantSecretsReencrypted => "tenant.secrets.reencrypted",
             AuditAction::ContextInjected => "context.injected",
             AuditAction::ContextRecalled => "context.recalled",
             AuditAction::ChannelPublished => "vedaflow.channel.published",

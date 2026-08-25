@@ -154,6 +154,21 @@ define_id!(
 );
 
 define_id!(
+    /// Identifies one stable tenant-secret aggregate (CPR-35, ADR-0094).
+    ///
+    /// Credential and data-key rotation preserve this address so immutable
+    /// artifacts can cite it without embedding or being rewritten with the
+    /// secret value.
+    TenantSecretId
+);
+
+define_id!(
+    /// Identifies one durable tenant-secret DEK re-encryption job (CPR-35,
+    /// ADR-0094).
+    TenantSecretReencryptionJobId
+);
+
+define_id!(
     /// Identifies a VedaFlow proposal — one governed request to move a
     /// reviewed set of assets onto a scope's published channel (FLOW-3,
     /// ADR-0032).

@@ -216,7 +216,7 @@ global `/v1/recall` route and no direct-store adapter path.
 | Footprint | `docker compose up`: gateway binary, Postgres (pgvector+AGE+PGMQ), Rauthy, TEI | Helm: HA Postgres (Patroni/CloudNativePG), Qdrant option, Temporal cluster, customer IdP, regional data planes |
 | Policy pack | `standard`, single-approver | `regulated-strict`, dual approval, published-only injection |
 | Residency | single region | control plane global, data planes pinned per division/region |
-| Keys | single KMS key | per-tenant keys, HSM/KMS pluggable, WORM audit export |
+| Keys | local deployment KEK wrapping deployment and per-tenant DEKs | the same shipped local provider; cloud KMS/HSM/CMK and WORM custody are extension points, not current support |
 
 ---
 

@@ -75,7 +75,7 @@ Phase 5 — context platform redesign, since 2026-08-17, on
 `feat/context-platform-mvp`. Phase 3 is paused mid-phase, not finished —
 OPS-9, OPS-10, TEN-5,6, AUD-3,4, GRPH-3, EVAL-6, CTX-7, OPS-3,4, ADPT-3,
 CTX-6 and FLOW-8 are still open, and no live Entra/Okta tenant or real
-  Cursor frame has been replayed. **131 features filed, 100 delivered**;
+  Cursor frame has been replayed. **132 features filed, 101 delivered**;
 STATUS.md and `make check-backlog` are the authority on the count — the
 headline number has drifted four times, the fourth being this file itself,
 which still read 104/71 after CPR-8 filed the 105th. That is why the
@@ -188,6 +188,15 @@ Load-bearing facts about Phase 5:
   group graph is deleted without translation. Fixtures are deterministic
   captured/transcribed evidence, not live vendor verification. The public
   contract has **167 operations**.
+- CPR-35 (ADR-0094): a local tenant secret is a stable UUIDv7 aggregate with
+  governing scope, closed kind, logical revision, key generation and
+  active/revoked state. Internal Tool and directory references resolve the
+  same forced-RLS row and fail closed on every use; value or DEK rotation does
+  not rewrite immutable Tool history. Durable re-encryption jobs advance only
+  envelopes, while the hard-cut sealed export now carries Knowledge heads,
+  immutable history, provenance, relations and audit under
+  `synveda-context-export-2`. The old name row, Record export and old archive
+  reader are gone; cloud KMS, HSM and customer-managed keys remain unclaimed.
 - CPR-10 (ADR-0076): **a run is a record**. `sessions`, `session_events` and
   `session_context_runs` replace `session_id: text`; the governed scope a run
   is decided at is derived from its workspace and project by composite keys

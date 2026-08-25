@@ -2174,6 +2174,25 @@ CPR-34  Directory adapter convergence (XL)
   labels, generated contract, focused tests, demo, `make ci` and `make db-test`
   pass. ADR-0093.
 
+CPR-35  Context-platform key and secret convergence (XL)
+  Filed 2026-08-25 by the autonomous continuation. Re-anchor the existing
+  deployment/tenant envelope-key boundary on stable, scope-bound secret
+  references and the current Knowledge, Tool, directory and deployment
+  families rather than adding a second vault or retaining the Record export.
+  AC: local tenant secrets have stable UUIDv7 identity, closed kind, scope,
+  logical value revision, key generation and active/revoked state; rotation
+  preserves identity and immutable artifact history while revocation removes
+  ciphertext; old name-keyed rows are refused and deleted without translation;
+  Synveda Tool references are validated by tenant, scope, kind and liveness at
+  stage/apply/render and fail closed without an oracle, while external opaque
+  references grant nothing; directory custody converges on the same aggregate;
+  tenant DEK rotation drives a durable retryable re-encryption job; a new
+  hard-cut sealed export contains Knowledge heads/history/revisions,
+  provenance, relations and audit with no Record section or old reader;
+  deployment provider secrets and credential-free OKF retain their honest
+  boundaries; RLS, content-free audit, adversarial tests, demo, `make ci` and
+  `make db-test` pass. ADR-0094.
+
 ──────────────────────────────────────────────
 Sequencing (features → phases)
 ──────────────────────────────────────────────
@@ -2267,7 +2286,7 @@ Phase 4 ecosystem: ADPT-4,5,6,7,8 · PRMT-3 · SKIL-5 · MEM-7 · OPS-5,6,7 · C
    or an evaluation harness — and that is a *when*, not an *if*, since ADPT-1's own demo
    is a script. What it must not become is a warning in a README: the gap is silent,
    returns exit 0, and reads exactly like a session that was observed.)
-Phase 5 context platform (redesign): CPR-1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34
+Phase 5 context platform (redesign): CPR-1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35
    (Added 2026-08-17. Its own phase rather than a slot in Phase 4, because it is not the
    next feature — it is the programme that re-cuts the model every feature above was built
    on, for an audience none of them was: one person, or four sharing agent context, who

@@ -1,0 +1,97 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into tenant_secret_reencryption_jobs\n               (id, tenant_id, from_key_version, to_key_version)\n           values ($1, $2, $3, $4)\n           on conflict (tenant_id, from_key_version, to_key_version) do update\n               set updated_at = tenant_secret_reencryption_jobs.updated_at\n        returning id, tenant_id, from_key_version, to_key_version, state,\n                  secrets_total, secrets_reencrypted, attempt, failure_code,\n                  created_at, started_at, completed_at, updated_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "tenant_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "from_key_version",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 3,
+        "name": "to_key_version",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 4,
+        "name": "state",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "secrets_total",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 6,
+        "name": "secrets_reencrypted",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 7,
+        "name": "attempt",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 8,
+        "name": "failure_code",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 10,
+        "name": "started_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 11,
+        "name": "completed_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 12,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Int4",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "5f077920e2e6937a75361076222023229c4bc7a59752d386303bd80b8871dc7d"
+}

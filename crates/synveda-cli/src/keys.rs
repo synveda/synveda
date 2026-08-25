@@ -1,11 +1,12 @@
 //! The operator's half of the key plane (TEN-4, ADR-0064).
 //!
-//! Four things an operator does with keys, and one of them is the AC:
+//! The operator-facing key and secret custody boundary:
 //!
 //!   * mint a KEK (`synveda kms keygen`), because the alternative to a
 //!     generated key is somebody typing one;
 //!   * provision and rotate a tenant's data key;
-//!   * store a tenant's directory credential sealed under it (decision 9);
+//!   * store stable scope-bound directory, Tool and provider references;
+//!   * re-encrypt active secret envelopes after tenant-key rotation;
 //!   * export a tenant, sealed, and open that export again — which is where
 //!     "tenant export is unreadable without that tenant's key" stops being a
 //!     sentence and becomes a command that fails without the key.
@@ -16,17 +17,19 @@
 //! break-glass precedent (`db migrate`, `tenant create`, `audit verify`) is
 //! the one this follows.
 
-use std::io::Write as _;
+use std::io::{Read as _, Write as _};
 
 use synveda_crypto::{
     DataKey, KeyManagement, KeyScope, KeyVersion, Kms, LocalKms, Purpose, RowKey, SealingKey,
 };
 use synveda_store::keys::KeyRing;
-use synveda_types::TenantId;
+use synveda_types::secret::{TenantSecretKind, TenantSecretState, tenant_secret_reference};
+use synveda_types::{ScopeId, TenantId, TenantSecretId, TenantSecretReencryptionJobId};
+use zeroize::Zeroizing;
 
 /// The archive's first bytes. Versioned from the first byte because an
 /// export is the one artefact here that outlives the build that wrote it.
-const ARCHIVE_MAGIC: &[u8; 8] = b"SVEXPRT1";
+const ARCHIVE_MAGIC: &[u8; 8] = b"SVCTXEX2";
 
 /// Builds the KMS from the environment, the gateway's rules exactly.
 ///
@@ -120,38 +123,238 @@ pub async fn provision(pool: &sqlx::PgPool, tenant: TenantId) -> Result<(), Stri
 
 /// Retires a tenant's current data key and mints the next generation.
 ///
-/// Nothing is re-sealed. Payloads under the retired key keep opening under
-/// it, and move forward when their rows are next written (ADR-0064
-/// decision 6) — so this command is fast, and finishing does not mean every
-/// ciphertext is on the new key.
+/// Active database-owned tenant-secret envelopes are advanced by a durable
+/// re-encryption job. Retired generations remain available for external
+/// archives and other payloads the job does not own (ADR-0094 decision 6).
 ///
 /// # Errors
 /// If no KEK is configured, or the tenant has no key to rotate.
 pub async fn rotate(pool: &sqlx::PgPool, tenant: TenantId) -> Result<(), String> {
     let ring = ring()?;
+    let mut tx = synveda_store::rls::begin_tenant_tx(pool, tenant)
+        .await
+        .map_err(|err| err.to_string())?;
+    let previous = synveda_store::keys::tenant_current(&mut *tx, tenant)
+        .await
+        .map_err(|err| err.to_string())?
+        .ok_or_else(|| format!("current key for tenant {tenant} was not found"))?
+        .version;
+    tx.commit().await.map_err(|err| err.to_string())?;
     let version = ring
         .rotate(pool, KeyScope::Tenant(tenant))
         .await
         .map_err(|err| err.to_string())?;
-    chain(
-        pool,
+    let job_id = TenantSecretReencryptionJobId::new();
+    let mut tx = synveda_store::rls::begin_tenant_tx(pool, tenant)
+        .await
+        .map_err(|err| err.to_string())?;
+    let job = synveda_store::tenant_secrets::create_reencryption_job(
+        &mut tx, job_id, tenant, previous, version,
+    )
+    .await
+    .map_err(|err| err.to_string())?;
+    crate::record_break_glass(
+        &mut tx,
         tenant,
         synveda_audit::AuditAction::TenantKeyRotated,
         format!("tenant {tenant} key"),
-        serde_json::json!({ "version": version.get(), "kek_ref": ring.kms().key_ref() }),
+        serde_json::json!({
+            "from_version": previous.get(),
+            "version": version.get(),
+            "kek_ref": ring.kms().key_ref(),
+            "reencryption_job_id": job.id,
+        }),
     )
     .await?;
+    tx.commit().await.map_err(|err| err.to_string())?;
+    let job = reencrypt_tenant_secrets(pool, &ring, tenant, job).await?;
     println!(
         "{}",
         serde_json::json!({
             "tenant": tenant.to_string(),
             "version": version.get(),
             "kek_ref": ring.kms().key_ref(),
-            "note": "existing payloads still open under the retired generation; \
-                     they move forward when their rows are next written",
+            "reencryption_job": {
+                "id": job.id,
+                "state": job.state,
+                "secrets_total": job.secrets_total,
+                "secrets_reencrypted": job.secrets_reencrypted,
+            },
+            "note": "active tenant secrets were re-encrypted; retired generations remain for old external archives",
         })
     );
     Ok(())
+}
+
+async fn reencrypt_tenant_secrets(
+    pool: &sqlx::PgPool,
+    ring: &KeyRing,
+    tenant: TenantId,
+    job: synveda_store::tenant_secrets::SecretReencryptionJob,
+) -> Result<synveda_store::tenant_secrets::SecretReencryptionJob, String> {
+    if job.state == "completed" {
+        return Ok(job);
+    }
+    let mut tx = synveda_store::rls::begin_tenant_tx(pool, tenant)
+        .await
+        .map_err(|err| err.to_string())?;
+    let secrets = synveda_store::tenant_secrets::active_for_key_generation(
+        &mut *tx,
+        tenant,
+        job.from_key_version,
+    )
+    .await
+    .map_err(|err| err.to_string())?;
+    let running = synveda_store::tenant_secrets::start_reencryption_job(
+        &mut tx,
+        tenant,
+        job.id,
+        secrets.len() as u64,
+    )
+    .await
+    .map_err(|err| err.to_string())?
+    .ok_or_else(|| {
+        format!(
+            "tenant-secret re-encryption job {} is already complete",
+            job.id
+        )
+    })?;
+    tx.commit().await.map_err(|err| err.to_string())?;
+
+    let mut progress = 0_u64;
+    let work: Result<(), (&'static str, String)> = async {
+        let target = ring
+            .sealing_key(pool, KeyScope::Tenant(tenant))
+            .await
+            .map_err(|err| ("target_key", err.to_string()))?;
+        if target.version() != running.to_key_version {
+            return Err((
+                "stale_target_key",
+                "the current tenant key changed while re-encryption started".to_owned(),
+            ));
+        }
+        for secret in secrets {
+            let sealed = secret.sealed.as_deref().ok_or_else(|| {
+                (
+                    "missing_envelope",
+                    "an active secret has no envelope".to_owned(),
+                )
+            })?;
+            let opened = ring
+                .opening_key(pool, KeyScope::Tenant(tenant), sealed)
+                .await
+                .map_err(|err| ("source_key", err.to_string()))?
+                .open(
+                    Purpose::TenantSecret,
+                    RowKey::Uuid(secret.id.as_uuid()),
+                    sealed,
+                )
+                .map_err(|err| ("envelope_open", err.to_string()))?;
+            let resealed = target
+                .seal(
+                    Purpose::TenantSecret,
+                    RowKey::Uuid(secret.id.as_uuid()),
+                    &opened,
+                )
+                .map_err(|err| ("envelope_seal", err.to_string()))?;
+            let mut tx = synveda_store::rls::begin_tenant_tx(pool, tenant)
+                .await
+                .map_err(|err| ("storage", err.to_string()))?;
+            let replaced = synveda_store::tenant_secrets::replace_envelope(
+                &mut tx,
+                tenant,
+                secret.id,
+                secret.value_revision,
+                running.from_key_version,
+                running.to_key_version,
+                &resealed,
+            )
+            .await
+            .map_err(|err| ("storage", err.to_string()))?;
+            if !replaced {
+                return Err((
+                    "stale_secret",
+                    format!("tenant-secret {} changed during re-encryption", secret.id),
+                ));
+            }
+            tx.commit()
+                .await
+                .map_err(|err| ("storage", err.to_string()))?;
+            progress += 1;
+        }
+        Ok(())
+    }
+    .await;
+
+    match work {
+        Ok(()) => {
+            let mut tx = synveda_store::rls::begin_tenant_tx(pool, tenant)
+                .await
+                .map_err(|err| err.to_string())?;
+            let completed_job = synveda_store::tenant_secrets::complete_reencryption_job(
+                &mut tx, tenant, running.id, progress,
+            )
+            .await
+            .map_err(|err| err.to_string())?
+            .ok_or_else(|| {
+                format!(
+                    "tenant-secret re-encryption job {} changed before completion",
+                    running.id
+                )
+            })?;
+            crate::record_break_glass(
+                &mut tx,
+                tenant,
+                synveda_audit::AuditAction::TenantSecretsReencrypted,
+                format!("tenant {tenant} secret re-encryption {}", running.id),
+                serde_json::json!({
+                    "job_id": running.id,
+                    "from_key_version": running.from_key_version.get(),
+                    "to_key_version": running.to_key_version.get(),
+                    "secrets_reencrypted": progress,
+                    "attempt": completed_job.attempt,
+                }),
+            )
+            .await?;
+            tx.commit().await.map_err(|err| err.to_string())?;
+            Ok(completed_job)
+        }
+        Err((code, detail)) => {
+            let mut tx = synveda_store::rls::begin_tenant_tx(pool, tenant)
+                .await
+                .map_err(|err| err.to_string())?;
+            synveda_store::tenant_secrets::fail_reencryption_job(
+                &mut tx, tenant, running.id, progress, code,
+            )
+            .await
+            .map_err(|err| err.to_string())?;
+            tx.commit().await.map_err(|err| err.to_string())?;
+            Err(format!(
+                "tenant key rotated, but secret re-encryption job {} failed ({code}): {detail}",
+                running.id
+            ))
+        }
+    }
+}
+
+fn secret_metadata(
+    secret: &synveda_store::tenant_secrets::StoredTenantSecret,
+) -> serde_json::Value {
+    serde_json::json!({
+        "id": secret.id,
+        "reference": tenant_secret_reference(secret.id),
+        "scope_id": secret.scope_id,
+        "kind": secret.kind.as_str(),
+        "label": secret.label,
+        "provider": secret.provider,
+        "state": secret.state.as_str(),
+        "value_revision": secret.value_revision,
+        "key_version": secret.key_version.map(|version| version.get()),
+        "created_at": secret.created_at,
+        "rotated_at": secret.rotated_at,
+        "updated_at": secret.updated_at,
+        "revoked_at": secret.revoked_at,
+    })
 }
 
 /// What keys a tenant has, and which is current.
@@ -165,7 +368,10 @@ pub async fn status(pool: &sqlx::PgPool, tenant: TenantId) -> Result<(), String>
     let current = synveda_store::keys::tenant_current(&mut *tx, tenant)
         .await
         .map_err(|err| err.to_string())?;
-    let names = synveda_store::tenant_secrets::names(&mut *tx, tenant)
+    let secrets = synveda_store::tenant_secrets::list(&mut *tx, tenant)
+        .await
+        .map_err(|err| err.to_string())?;
+    let jobs = synveda_store::tenant_secrets::reencryption_jobs(&mut *tx, tenant)
         .await
         .map_err(|err| err.to_string())?;
     tx.commit().await.map_err(|err| err.to_string())?;
@@ -176,7 +382,20 @@ pub async fn status(pool: &sqlx::PgPool, tenant: TenantId) -> Result<(), String>
             "tenant": tenant.to_string(),
             "current_version": current.as_ref().map(|key| key.version.get()),
             "kek_ref": current.as_ref().map(|key| key.kek_ref.clone()),
-            "sealed_secrets": names,
+            "secrets": secrets.iter().map(secret_metadata).collect::<Vec<_>>(),
+            "reencryption_jobs": jobs.iter().map(|job| serde_json::json!({
+                "id": job.id,
+                "from_key_version": job.from_key_version.get(),
+                "to_key_version": job.to_key_version.get(),
+                "state": job.state,
+                "secrets_total": job.secrets_total,
+                "secrets_reencrypted": job.secrets_reencrypted,
+                "attempt": job.attempt,
+                "failure_code": job.failure_code,
+                "created_at": job.created_at,
+                "started_at": job.started_at,
+                "completed_at": job.completed_at,
+            })).collect::<Vec<_>>(),
         })
     );
     Ok(())
@@ -184,7 +403,7 @@ pub async fn status(pool: &sqlx::PgPool, tenant: TenantId) -> Result<(), String>
 
 // ── The export ──────────────────────────────────────────────────────────────
 
-/// Writes a sealed archive of a tenant's records and audit chain.
+/// Writes a sealed archive of a tenant's Knowledge history and audit chain.
 ///
 /// **Sealed under a fresh per-archive key, itself sealed under the tenant's**
 /// (ADR-0064 decision 8). Two reasons, and the second is the one that matters:
@@ -209,45 +428,34 @@ pub async fn export(
     let mut tx = synveda_store::rls::begin_tenant_tx(pool, tenant)
         .await
         .map_err(|err| err.to_string())?;
-    let records = synveda_store::records::export_current(&mut *tx, tenant)
+    let knowledge = synveda_store::knowledge::export_tenant(&mut tx, tenant)
         .await
         .map_err(|err| err.to_string())?;
-    tx.commit().await.map_err(|err| err.to_string())?;
-
-    let mut conn = pool.acquire().await.map_err(|err| err.to_string())?;
     // `tail` newest-first over the whole chain, reversed: `since` needs an
     // explicit action filter, and an export that silently omitted an action
-    // nobody had added to a list would be an export that looks complete.
-    let mut events = synveda_audit::tail(&mut conn, tenant, i64::MAX)
+    // nobody had added to a list would be an export that looks complete. It
+    // shares the Knowledge transaction so the archive is one database
+    // snapshot rather than two individually valid views separated by a race.
+    let mut events = synveda_audit::tail(&mut tx, tenant, i64::MAX)
         .await
         .map_err(|err| err.to_string())?;
-    drop(conn);
     events.reverse();
+    tx.commit().await.map_err(|err| err.to_string())?;
 
     // Mapped field by field rather than derived from the internal structs.
     // An archive format outlives the build that wrote it, so what goes in it
     // is a decision each time rather than whatever a struct happens to hold
     // after the next refactor.
     let body = serde_json::json!({
-        "format": "synveda-export-1",
+        "format": "synveda-context-export-2",
         "tenant": tenant.to_string(),
-        "records": records
-            .iter()
-            .map(|record| serde_json::json!({
-                "id": record.id.to_string(),
-                "scope_id": record.state.scope_id.to_string(),
-                "owner_id": record.state.owner_id.to_string(),
-                "kind": record.state.kind.as_str(),
-                "class": record.state.class.as_str(),
-                "content": record.state.content,
-                "sensitivity": record.state.sensitivity.as_str(),
-                "provenance": record.state.provenance,
-                "valid_from": record.state.valid_from,
-                "valid_to": record.state.valid_to,
-                "tx_from": record.tx_from,
-                "tx_to": record.tx_to,
-            }))
-            .collect::<Vec<_>>(),
+        "knowledge": {
+            "head_history": knowledge.head_history,
+            "revisions": knowledge.revisions,
+            "sources": knowledge.sources,
+            "revision_sources": knowledge.revision_sources,
+            "relations": knowledge.relations,
+        },
         "audit": events
             .iter()
             .map(|event| serde_json::json!({
@@ -282,10 +490,13 @@ pub async fn export(
         .map_err(|err| err.to_string())?;
 
     let header = serde_json::to_vec(&serde_json::json!({
-        "format": "synveda-export-1",
+        "format": "synveda-context-export-2",
         "tenant": tenant.to_string(),
         "tenant_key_version": tenant_key.version().get(),
-        "records": records.len(),
+        "knowledge_items": knowledge.item_count,
+        "knowledge_revisions": knowledge.revision_count,
+        "knowledge_sources": knowledge.source_count,
+        "knowledge_relations": knowledge.relation_count,
         "audit_events": events.len(),
     }))
     .map_err(|err| err.to_string())?;
@@ -314,7 +525,10 @@ pub async fn export(
         synveda_audit::AuditAction::TenantExported,
         format!("tenant {tenant} export"),
         serde_json::json!({
-            "records": records.len() as i64,
+            "knowledge_items": knowledge.item_count as i64,
+            "knowledge_revisions": knowledge.revision_count as i64,
+            "knowledge_sources": knowledge.source_count as i64,
+            "knowledge_relations": knowledge.relation_count as i64,
             "audit_events": events.len() as i64,
             "bytes": archive.len() as i64,
             "tenant_key_version": tenant_key.version().get(),
@@ -326,7 +540,10 @@ pub async fn export(
         serde_json::json!({
             "path": out.display().to_string(),
             "bytes": archive.len(),
-            "records": records.len(),
+            "knowledge_items": knowledge.item_count,
+            "knowledge_revisions": knowledge.revision_count,
+            "knowledge_sources": knowledge.source_count,
+            "knowledge_relations": knowledge.relation_count,
             "audit_events": events.len(),
             "tenant_key_version": tenant_key.version().get(),
         })
@@ -467,10 +684,163 @@ fn split_archive(bytes: &[u8]) -> Result<ArchiveParts<'_>, String> {
     ))
 }
 
-// ── Sealed per-tenant secrets ───────────────────────────────────────────────
+// ── Stable sealed per-tenant secrets ───────────────────────────────────────
 
-/// Seals a tenant's directory configuration into `tenant_secrets`
-/// (ADR-0064 decision 9).
+/// Read and custody one arbitrary tenant-secret value from a file or stdin.
+/// The value never appears in argv, stdout, audit or a store DTO.
+pub async fn put_tenant_secret_from_path(
+    pool: &sqlx::PgPool,
+    tenant: TenantId,
+    scope: ScopeId,
+    kind: TenantSecretKind,
+    label: &str,
+    provider: Option<&str>,
+    from: &std::path::Path,
+) -> Result<(), String> {
+    let bytes = if from == std::path::Path::new("-") {
+        let mut bytes = Vec::new();
+        std::io::stdin()
+            .take(65_537)
+            .read_to_end(&mut bytes)
+            .map_err(|err| format!("read secret from stdin: {err}"))?;
+        bytes
+    } else {
+        let metadata =
+            std::fs::metadata(from).map_err(|err| format!("inspect {}: {err}", from.display()))?;
+        if metadata.len() > 65_536 {
+            return Err("tenant-secret value exceeds 65536 bytes".to_owned());
+        }
+        std::fs::read(from).map_err(|err| format!("read {}: {err}", from.display()))?
+    };
+    let bytes = Zeroizing::new(bytes);
+    let secret = store_secret_value(pool, tenant, scope, kind, label, provider, &bytes).await?;
+    println!("{}", secret_metadata(&secret));
+    Ok(())
+}
+
+async fn store_secret_value(
+    pool: &sqlx::PgPool,
+    tenant: TenantId,
+    scope: ScopeId,
+    kind: TenantSecretKind,
+    label: &str,
+    provider: Option<&str>,
+    plaintext: &[u8],
+) -> Result<synveda_store::tenant_secrets::StoredTenantSecret, String> {
+    if plaintext.is_empty() || plaintext.len() > 65_536 {
+        return Err("tenant-secret value must contain 1..=65536 bytes".to_owned());
+    }
+    let mut tx = synveda_store::rls::begin_tenant_tx(pool, tenant)
+        .await
+        .map_err(|err| err.to_string())?;
+    let existing = synveda_store::tenant_secrets::by_label(&mut *tx, tenant, kind, label)
+        .await
+        .map_err(|err| err.to_string())?;
+    tx.commit().await.map_err(|err| err.to_string())?;
+    let id = existing
+        .as_ref()
+        .map_or_else(TenantSecretId::new, |secret| secret.id);
+    let ring = ring()?;
+    let key = ring
+        .sealing_key(pool, KeyScope::Tenant(tenant))
+        .await
+        .map_err(|err| err.to_string())?;
+    let sealed = key
+        .seal(Purpose::TenantSecret, RowKey::Uuid(id.as_uuid()), plaintext)
+        .map_err(|err| err.to_string())?;
+
+    let mut tx = synveda_store::rls::begin_tenant_tx(pool, tenant)
+        .await
+        .map_err(|err| err.to_string())?;
+    let stored = synveda_store::tenant_secrets::put(
+        &mut tx,
+        id,
+        tenant,
+        scope,
+        kind,
+        label,
+        provider,
+        key.version(),
+        &sealed,
+    )
+    .await
+    .map_err(|err| err.to_string())?;
+    crate::record_break_glass(
+        &mut tx,
+        tenant,
+        synveda_audit::AuditAction::TenantSecretStored,
+        format!("tenant-secret:{}", stored.id),
+        serde_json::json!({
+            "secret_id": stored.id,
+            "reference": tenant_secret_reference(stored.id),
+            "scope_id": stored.scope_id,
+            "kind": stored.kind.as_str(),
+            "label": stored.label,
+            "provider": stored.provider,
+            "value_revision": stored.value_revision,
+            "key_version": stored.key_version.map(|version| version.get()),
+        }),
+    )
+    .await?;
+    tx.commit().await.map_err(|err| err.to_string())?;
+    Ok(stored)
+}
+
+/// Revoke one stable tenant-secret reference and destroy its envelope.
+pub async fn revoke_tenant_secret(
+    pool: &sqlx::PgPool,
+    tenant: TenantId,
+    id: TenantSecretId,
+) -> Result<(), String> {
+    let revoked = revoke_secret_value(pool, tenant, id).await?;
+    println!(
+        "{}",
+        serde_json::json!({
+            "tenant": tenant,
+            "secret_id": id,
+            "reference": tenant_secret_reference(id),
+            "revoked": revoked.is_some(),
+            "value_revision": revoked.as_ref().map(|secret| secret.value_revision),
+        })
+    );
+    Ok(())
+}
+
+async fn revoke_secret_value(
+    pool: &sqlx::PgPool,
+    tenant: TenantId,
+    id: TenantSecretId,
+) -> Result<Option<synveda_store::tenant_secrets::StoredTenantSecret>, String> {
+    let mut tx = synveda_store::rls::begin_tenant_tx(pool, tenant)
+        .await
+        .map_err(|err| err.to_string())?;
+    let revoked = synveda_store::tenant_secrets::revoke(&mut tx, tenant, id)
+        .await
+        .map_err(|err| err.to_string())?;
+    if let Some(secret) = &revoked {
+        crate::record_break_glass(
+            &mut tx,
+            tenant,
+            synveda_audit::AuditAction::TenantSecretCleared,
+            format!("tenant-secret:{}", secret.id),
+            serde_json::json!({
+                "secret_id": secret.id,
+                "reference": tenant_secret_reference(secret.id),
+                "scope_id": secret.scope_id,
+                "kind": secret.kind.as_str(),
+                "label": secret.label,
+                "provider": secret.provider,
+                "value_revision": secret.value_revision,
+            }),
+        )
+        .await?;
+    }
+    tx.commit().await.map_err(|err| err.to_string())?;
+    Ok(revoked)
+}
+
+/// Seals a tenant's directory configuration into its stable root-scope
+/// tenant-secret aggregate (ADR-0094 decision 5).
 ///
 /// The whole configuration is sealed, not only its secret, so a tenant's
 /// credential and the host it is presented to cannot disagree. It is
@@ -498,55 +868,45 @@ pub async fn set_directory_credential(
         )
     })?;
 
-    let ring = ring()?;
     let name = synveda_identity::directory::CREDENTIAL_SECRET_NAME;
-    let sealed = ring
-        .sealing_key(pool, KeyScope::Tenant(tenant))
-        .await
-        .map_err(|err| err.to_string())?
-        .seal(
-            Purpose::DirectoryCredential,
-            RowKey::Name(name),
-            config_json.as_bytes(),
-        )
-        .map_err(|err| err.to_string())?;
-
     let mut tx = synveda_store::rls::begin_tenant_tx(pool, tenant)
         .await
         .map_err(|err| err.to_string())?;
-    synveda_store::tenant_secrets::put(&mut *tx, tenant, name, &sealed)
+    let root = synveda_store::scopes::ensure_tenant_root(&mut tx, tenant)
         .await
         .map_err(|err| err.to_string())?;
-    // In the same transaction as the write it describes, the house rule for
-    // a break-glass act: a stored credential and the record of storing it
-    // commit together or not at all.
-    crate::record_break_glass(
-        &mut tx,
+    tx.commit().await.map_err(|err| err.to_string())?;
+    let stored = store_secret_value(
+        pool,
         tenant,
-        synveda_audit::AuditAction::TenantSecretStored,
-        format!("tenant {tenant} secret {name}"),
-        serde_json::json!({ "name": name, "connector": connector_name(&config) }),
+        root.id,
+        TenantSecretKind::Directory,
+        name,
+        Some(connector_name(&config)),
+        config_json.as_bytes(),
     )
     .await?;
-    tx.commit().await.map_err(|err| err.to_string())?;
 
     println!(
         "{}",
         serde_json::json!({
             "tenant": tenant.to_string(),
-            "secret": name,
+            "secret_id": stored.id,
+            "reference": tenant_secret_reference(stored.id),
+            "secret": stored.label,
             "connector": connector_name(&config),
-            "sealed_bytes": sealed.len(),
+            "value_revision": stored.value_revision,
+            "key_version": stored.key_version.map(|version| version.get()),
         })
     );
     Ok(())
 }
 
-/// Destroys a tenant's stored directory credential. The sweep then falls back
-/// to the deployment's configuration, if it has one for this tenant.
+/// Revokes a tenant's stored directory credential. Its stable row prevents a
+/// stale reference from falling back to deployment configuration.
 ///
 /// # Errors
-/// If the row cannot be deleted.
+/// If the row cannot be read or revoked.
 pub async fn clear_directory_credential(
     pool: &sqlx::PgPool,
     tenant: TenantId,
@@ -555,23 +915,29 @@ pub async fn clear_directory_credential(
     let mut tx = synveda_store::rls::begin_tenant_tx(pool, tenant)
         .await
         .map_err(|err| err.to_string())?;
-    let removed = synveda_store::tenant_secrets::delete(&mut *tx, tenant, name)
-        .await
-        .map_err(|err| err.to_string())?;
-    if removed {
-        crate::record_break_glass(
-            &mut tx,
-            tenant,
-            synveda_audit::AuditAction::TenantSecretCleared,
-            format!("tenant {tenant} secret {name}"),
-            serde_json::json!({ "name": name }),
-        )
-        .await?;
-    }
+    let stored = synveda_store::tenant_secrets::by_label(
+        &mut *tx,
+        tenant,
+        TenantSecretKind::Directory,
+        name,
+    )
+    .await
+    .map_err(|err| err.to_string())?;
     tx.commit().await.map_err(|err| err.to_string())?;
+    let revoked = match stored {
+        Some(secret) if secret.state == TenantSecretState::Active => {
+            revoke_secret_value(pool, tenant, secret.id).await?
+        }
+        _ => None,
+    };
     println!(
         "{}",
-        serde_json::json!({ "tenant": tenant.to_string(), "secret": name, "removed": removed })
+        serde_json::json!({
+            "tenant": tenant.to_string(),
+            "secret": name,
+            "secret_id": revoked.as_ref().map(|secret| secret.id),
+            "revoked": revoked.is_some(),
+        })
     );
     Ok(())
 }
@@ -598,5 +964,21 @@ impl ClassifyForOperator for serde_json::Error {
             self.line(),
             self.column()
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_record_era_archive_magic_is_not_a_compatibility_reader() {
+        let mut old = Vec::from(&b"SVTENEX1"[..]);
+        old.extend_from_slice(&0_u32.to_be_bytes());
+        old.extend_from_slice(&0_u32.to_be_bytes());
+        assert_eq!(
+            split_archive(&old).expect_err("old archive must be refused"),
+            "not a synveda export archive"
+        );
     }
 }

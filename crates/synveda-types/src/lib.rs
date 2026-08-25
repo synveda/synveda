@@ -72,6 +72,9 @@ mod sensitivity;
 // `workspace`'s reason: a "session" is an ordinary word, and the module path
 // is what says this one is an agent run recorded by Synveda rather than a
 // login session, a console session or an HTTP one.
+/// Stable tenant-secret references and their content-free vocabulary
+/// (CPR-35, ADR-0094).
+pub mod secret;
 pub mod session;
 mod skill;
 mod skill_registry;
@@ -112,8 +115,9 @@ pub use id::{
     ImportMappingId, InviteId, KnowledgeItemId, KnowledgeRelationId, KnowledgeRevisionId,
     KnowledgeSourceId, ProjectId, ProposalId, RecordId, RelaxationId, RelaxationVersionId,
     RepositoryId, ScimCredentialId, ScopeId, SessionEventId, SessionId, SkillBindingId, SkillId,
-    SkillTestRunId, SkillUsageEventId, SkillVersionId, TenantId, ToolBindingId, ToolServerId,
-    ToolServerVersionId, ToolTestRunId, WorkspaceId,
+    SkillTestRunId, SkillUsageEventId, SkillVersionId, TenantId, TenantSecretId,
+    TenantSecretReencryptionJobId, ToolBindingId, ToolServerId, ToolServerVersionId, ToolTestRunId,
+    WorkspaceId,
 };
 pub use identity::{Identity, IdentityKind, IdentityStatus};
 pub use mover::{MoverConfig, PersonalMemory};

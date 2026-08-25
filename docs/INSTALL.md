@@ -448,6 +448,28 @@ an opaque secret reference only. Do not put a token, header value or environment
 credential in an imported manifest or client configuration: the API rejects
 it and generated configuration never resolves the reference.
 
+For a Synveda-custodied Tool credential, mint a stable local reference at the
+Tool server's governing scope. Values come from a file or stdin—never argv:
+
+```sh
+synveda tenant secret put \
+  --tenant <tenant-uuid> \
+  --scope <governing-scope-uuid> \
+  --kind tool_server \
+  --label pulseboard.mcp \
+  --provider remote_mcp \
+  --from ./private-token
+```
+
+The command prints `synveda-secret://<uuid>`. Put that reference, not the
+credential, in `secret_reference`. Registration, VedaFlow application and
+every generated configuration recheck the exact tenant, scope, kind and active
+state. A missing, revoked or foreign reference has one non-oracular refusal.
+External references remain opaque adapter metadata and grant no permission.
+Revoke a local reference with `synveda tenant secret revoke --tenant
+<tenant-uuid> <secret-uuid>`; a revoked binding can still be removed, but it
+cannot be rendered or re-enabled.
+
 Local stdio commands are untrusted executable metadata. The gateway never runs
 an imported command. A trusted local adapter may perform MCP `server/discover`
 and the three list operations on the user's machine and report that bounded
@@ -708,8 +730,7 @@ merge, replace, change scope or dismiss. Private, project and workspace choices
 are named distinctly and a scope you cannot publish into is not offered. An
 applied decision links to its Knowledge item; a stricter profile's pending
 change links to Advanced Reviews and remains explicitly unpublished. Raw source
-payloads still require `session.diagnostics` at the run. Tools is the one
-remaining honest placeholder and names its later registry package.
+payloads still require `session.diagnostics` at the run.
 
 Signing in needs a **key plane**, because a console session seals its tokens
 under the deployment's encryption key (TEN-4). `init` mints one at
@@ -719,6 +740,27 @@ up**, since every tenant key in the database is wrapped by it. Set
 checkout it needs `pnpm --filter @synveda/console build` first, and without a
 bundle the route 404s rather than failing the boot, because a static asset
 must not be a dependency of the audit log (CNSL-1, ADR-0056).
+
+Each tenant has its own versioned data key. `synveda tenant key status
+--tenant <uuid>` lists only credential-free secret metadata and durable
+re-encryption jobs. `synveda tenant key rotate --tenant <uuid>` retains the
+old generation for external archives, creates a retryable job, and advances
+every active database-owned secret envelope without changing the secret's
+stable identity or logical value revision. Directory configuration uses the
+same aggregate through `synveda directory set-credential`; clearing it revokes
+the stable row, so a stale credential cannot silently fall back to a deployment
+directory.
+
+`synveda tenant export --tenant <uuid> --out tenant.svexp` writes the hard-cut
+context export: Knowledge heads and head history, immutable revisions,
+normalised sources and relations, plus the audit chain. Its body is sealed
+under a fresh archive key wrapped by that tenant's key. There is no Record
+section, old-format reader, re-import or tenant-erasure claim.
+
+The shipped provider is the local `SYNVEDA_KMS_KEY` boundary. Keep it outside
+the database and back it up. The provider interface leaves room for later
+custody integrations, but this release does not support cloud KMS, an HSM,
+customer-managed keys or secret-manager resolution inside the gateway.
 
 ## Upgrading
 
@@ -843,7 +885,8 @@ purge remains the only whole-tenant wipe. That is a deployment-level wipe, not
 a GDPR erasure certificate.
 
 `~/.synveda/data/kms.key` goes with a default uninstall even though the data
-stays. Records are not sealed under it and remain readable, but console
+stays. Searchable Knowledge is not application-sealed under it and remains
+readable, but console
 sessions, tenant secrets and any `synveda tenant export` archive cannot be
 opened again without it — copy it first if you intend to come back to the
 same volumes.

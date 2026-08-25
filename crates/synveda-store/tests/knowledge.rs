@@ -615,3 +615,74 @@ fn lifecycle_changes_preserve_content_and_head_history() {
         );
     });
 }
+
+#[test]
+fn sealed_export_projection_contains_complete_knowledge_history_and_provenance() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let (tenant_id, root_scope_id) = new_tenant(&db.pool).await;
+        let source = manual_source(tenant_id, root_scope_id);
+        let former = item(tenant_id, root_scope_id, KnowledgeType::Convention);
+        let current = item(tenant_id, root_scope_id, KnowledgeType::Convention);
+        let former_revision = revision("Request id", "Use `X-Request-Id`.");
+        let current_revision = revision("Trace context", "Use `traceparent`.");
+        let mut tx = db.pool.begin().await.expect("begin export fixture");
+        knowledge::create_source(&mut tx, &source)
+            .await
+            .expect("create export source");
+        create_item(&mut tx, &former, &former_revision, source.id).await;
+        create_item(&mut tx, &current, &current_revision, source.id).await;
+        let amended = revision(
+            "Trace context everywhere",
+            "Use `traceparent` on public APIs.",
+        );
+        knowledge::append_revision(
+            &mut tx,
+            tenant_id,
+            current.id,
+            current_revision.id,
+            &amended,
+            &[source.id],
+        )
+        .await
+        .expect("append export revision")
+        .expect("current item");
+        knowledge::add_relation(
+            &mut tx,
+            &NewKnowledgeRelation {
+                id: KnowledgeRelationId::new(),
+                tenant_id,
+                source_item_id: current.id,
+                target_item_id: former.id,
+                asserting_revision_id: amended.id,
+                relation_type: KnowledgeRelationType::Supersedes,
+                metadata: serde_json::json!({}),
+                created_by: Some("test:knowledge".to_owned()),
+            },
+        )
+        .await
+        .expect("create export relation");
+        tx.commit().await.expect("commit export fixture");
+
+        let mut tx = rls::begin_tenant_tx(&db.pool, tenant_id)
+            .await
+            .expect("begin export snapshot");
+        let exported = knowledge::export_tenant(&mut tx, tenant_id)
+            .await
+            .expect("export Knowledge snapshot");
+        tx.commit().await.expect("commit export snapshot");
+
+        assert_eq!(exported.item_count, 2);
+        assert_eq!(exported.revision_count, 3);
+        assert_eq!(exported.source_count, 1);
+        assert_eq!(exported.relation_count, 1);
+        assert_eq!(exported.head_history.as_array().map(Vec::len), Some(3));
+        assert_eq!(exported.revisions.as_array().map(Vec::len), Some(3));
+        assert_eq!(exported.sources.as_array().map(Vec::len), Some(1));
+        assert_eq!(exported.revision_sources.as_array().map(Vec::len), Some(3));
+        assert_eq!(exported.relations.as_array().map(Vec::len), Some(1));
+        let encoded = serde_json::to_string(&exported.revisions).expect("encode revisions");
+        assert!(encoded.contains("X-Request-Id"));
+        assert!(encoded.contains("traceparent"));
+    });
+}

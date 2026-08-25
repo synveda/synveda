@@ -10,11 +10,11 @@
 # What it asserts, in order:
 #
 #   1. A tenant is admitted **with** a data key, in one command.
-#   2. Its records and audit chain export into one sealed archive.
+#   2. Its Knowledge history and audit chain export into one sealed archive.
 #   3. The archive's cleartext header names the tenant and the generation —
 #      a backup vault full of anonymous blobs is not a backup.
-#   4. The archive opens under this deployment's key and the body is the
-#      records that went in.
+#   4. The archive opens under this deployment's key and carries only the
+#      context-platform Knowledge contract (no Record compatibility body).
 #   5. **It does not open under another deployment's KEK.** The AC.
 #   6. **It does not open under another tenant's key.** The AC's other half:
 #      "that tenant's" is doing work in the sentence.
@@ -122,7 +122,14 @@ step "4. It opens under this deployment's key"
 "$BIN" tenant export-open --archive "$WORK/tenant.svexp" >"$WORK/body.json"
 BODY_TENANT="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["tenant"])' "$WORK/body.json")"
 [ "$BODY_TENANT" = "$TENANT" ] || fail "the body is for ${BODY_TENANT}"
-ok "opened, and the body is this tenant's"
+python3 - "$WORK/body.json" <<'PY' || fail "the opened archive is not the Knowledge-only contract"
+import json, sys
+body = json.load(open(sys.argv[1]))
+assert body["format"] == "synveda-context-export-2"
+assert set(body["knowledge"]) == {"head_history", "revisions", "sources", "revision_sources", "relations"}
+assert "records" not in body and "record_history" not in body
+PY
+ok "opened as the Knowledge-only context export, with no Record compatibility body"
 
 step "5. It does NOT open under another deployment's KEK — the AC"
 if SYNVEDA_KMS_KEY="$KEK_THEIRS" "$BIN" tenant export-open \
@@ -164,9 +171,11 @@ ok "refused: a relabelled archive does not open under the tenant it names"
 step "7. Nothing plaintext reached the database"
 # Asserted from SQL rather than from the application that wrote the rows:
 # the claim is about what a dumped table contains.
-"$BIN" directory set-credential --tenant "$TENANT" --config - <<'JSON' >/dev/null
+"$BIN" directory set-credential --tenant "$TENANT" --config - <<'JSON' >"$WORK/directory-secret.json"
 {"connector":"okta","org_url":"https://example.okta.com","api_token":"s3cr3t-token-value"}
 JSON
+SECRET_ID="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["secret_id"])' "$WORK/directory-secret.json")"
+SECRET_REVISION="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["value_revision"])' "$WORK/directory-secret.json")"
 LEAKED="$(psql_db -c "select count(*) from tenant_secrets where encode(sealed, 'escape') like '%s3cr3t%'")"
 [ "$LEAKED" = "0" ] || fail "the credential is readable in tenant_secrets"
 SEALED="$(psql_db -c "select octet_length(sealed) from tenant_secrets where tenant_id = '${TENANT}'")"
@@ -185,6 +194,14 @@ NEW_VERSION="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["
     || fail "an archive sealed under generation 1 stopped opening after a rotation"
 ok "generation ${NEW_VERSION} is current, and the generation-1 archive still opens"
 
+SECRET_KEY_VERSION="$(psql_db -c "select key_version from tenant_secrets where tenant_id = '${TENANT}' and id = '${SECRET_ID}'")"
+SECRET_REVISION_AFTER="$(psql_db -c "select value_revision from tenant_secrets where tenant_id = '${TENANT}' and id = '${SECRET_ID}'")"
+JOB_STATE="$(psql_db -c "select state from tenant_secret_reencryption_jobs where tenant_id = '${TENANT}' order by created_at desc limit 1")"
+[ "$SECRET_KEY_VERSION" = "2" ] || fail "the active secret stayed on key generation ${SECRET_KEY_VERSION}"
+[ "$SECRET_REVISION_AFTER" = "$SECRET_REVISION" ] || fail "DEK re-encryption changed logical revision ${SECRET_REVISION} to ${SECRET_REVISION_AFTER}"
+[ "$JOB_STATE" = "completed" ] || fail "the durable re-encryption job ended ${JOB_STATE}"
+ok "the durable job re-encrypted the secret without changing its stable id or logical revision"
+
 CURRENT="$(psql_db -c "select count(*) from tenant_keys where tenant_id = '${TENANT}' and retired_at is null")"
 [ "$CURRENT" = "1" ] || fail "expected exactly one current key, found ${CURRENT}"
 TOTAL="$(psql_db -c "select count(*) from tenant_keys where tenant_id = '${TENANT}'")"
@@ -192,11 +209,11 @@ TOTAL="$(psql_db -c "select count(*) from tenant_keys where tenant_id = '${TENAN
 ok "one current key, one retired and kept — a dropped key is data made unreadable"
 
 step "9. The acts are on the chain, and the chain verifies"
-for action in tenant.key.provisioned tenant.exported tenant.key.rotated tenant.secret.stored; do
+for action in tenant.key.provisioned tenant.exported tenant.key.rotated tenant.secret.stored tenant.secrets.reencrypted; do
     COUNT="$(psql_db -c "select count(*) from audit_log where tenant_id = '${TENANT}' and action = '${action}'")"
     [ "$COUNT" -ge 1 ] || fail "no ${action} event on the chain"
 done
-ok "provisioned, exported, rotated and secret-stored are all chained"
+ok "provisioned, exported, rotated, secret-stored and re-encryption are all chained"
 
 LEAKS="$(psql_db -c "select count(*) from audit_log where tenant_id = '${TENANT}' and payload::text like '%s3cr3t%'")"
 [ "$LEAKS" = "0" ] || fail "a credential reached an audit payload"

@@ -238,21 +238,17 @@ impl fmt::Debug for Secret {
     }
 }
 
-/// The name a tenant's sealed directory credential is stored under
-/// (TEN-4, ADR-0064 decision 9).
-///
-/// Part of the sealed payload's AAD as well as its key, so renaming it makes
-/// existing ciphertext unopenable rather than silently re-pointing it — the
-/// safe direction.
+/// The stable operator label of a tenant's directory secret aggregate
+/// (CPR-35, ADR-0094). Its UUID, rather than this label, binds the envelope
+/// and is the immutable reference identity.
 pub const CREDENTIAL_SECRET_NAME: &str = "directory.credential";
 
 /// How a deployment configures the pull sync for one issuer.
 ///
-/// **Two sources since TEN-4, and the per-tenant one wins** (ADR-0064
-/// decision 9). A tenant with a sealed `directory.credential` in
-/// `tenant_secrets` is pulled with that; a tenant without one falls back to
-/// this, configured beside the issuer it syncs in the same environment JSON
-/// that carries `SYNVEDA_OIDC_ISSUERS`.
+/// **Two sources since TEN-4, and the per-tenant one wins.** A tenant that has
+/// never created a `directory.credential` aggregate may fall back to this,
+/// configured beside the issuer in `SYNVEDA_OIDC_ISSUERS`. A revoked or
+/// unusable stable aggregate fails closed and does not fall back (ADR-0094).
 ///
 /// ADR-0060 decision 7 put the credential here alone and named the cost: one
 /// deployment could not pull two tenants from two directories, because one

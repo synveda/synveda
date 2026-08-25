@@ -1,0 +1,101 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update tenant_secrets\n              set state = 'revoked', value_revision = value_revision + 1,\n                  key_version = null, sealed = null,\n                  updated_at = clock_timestamp(), revoked_at = clock_timestamp()\n            where tenant_id = $1 and id = $2 and state = 'active'\n        returning id, tenant_id, scope_id, kind, label, provider, state,\n                  value_revision, key_version, sealed, created_at, rotated_at,\n                  updated_at, revoked_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "tenant_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "scope_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "kind",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "label",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "provider",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "state",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "value_revision",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 8,
+        "name": "key_version",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 9,
+        "name": "sealed",
+        "type_info": "Bytea"
+      },
+      {
+        "ordinal": 10,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 11,
+        "name": "rotated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 12,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 13,
+        "name": "revoked_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "002ad5abc209204d364fe7117a1d28f6244073ca433d024b71553871a60a9c89"
+}

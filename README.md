@@ -103,7 +103,7 @@ only through its original PDP- and revision-checked command path.
 ## Project status
 
 **Phases 0–2 are complete. Phase 5 is re-cutting the product while Phase 3 is
-paused.** 100 of 131 filed features are delivered, each with acceptance
+paused.** 101 of 132 filed features are delivered, each with acceptance
 evidence and, where it has a runtime, a runnable script in [`demos/`](demos/).
 
 It installs, on somebody else's machine, with Docker as the only prerequisite:
@@ -127,10 +127,10 @@ switchers, a People page and the governance surfaces under **Advanced**. See
 | **2 — Governance** | VedaFlow, lapses, dedup, decay, recall, graph, audit queries, prompts, context packs, eval gates | ✅ 22/22 |
 | **3 — Enterprise** | SCIM, real IdPs, skills registry, console, Helm, release & distribution, residency, Qdrant | 🚧 14/27 |
 | **4 — Ecosystem** | SDKs, importers, telemetry, DR, gateway scale | 🚧 2/17 |
-| **5 — Context platform** | The redesign: fresh epoch, governed scopes, sessions, immutable Knowledge, capture, explainable context, Skills, Tools, OKF, one public contract, governed runtime configuration, policy relaxations, offline-verifiable audit export and shared directory access | 🚧 34 packages delivered; programme continues |
+| **5 — Context platform** | The redesign: fresh epoch, governed scopes, sessions, immutable Knowledge, capture, explainable context, Skills, Tools, OKF, one public contract, governed runtime configuration, policy relaxations, offline-verifiable audit export, shared directory access and stable secret custody | 🚧 35 packages delivered; programme continues |
 
-One further feature (AUTH-6, session and token hygiene) is unscheduled — **131
-in total, 100 delivered** (`docs/backlog/STATUS.md` is the count `make ci`
+One further feature (AUTH-6, session and token hygiene) is unscheduled — **132
+in total, 101 delivered** (`docs/backlog/STATUS.md` is the count `make ci`
 checks). Phase 5 is the 33-prompt context-platform redesign, in flight on
 `feat/context-platform-mvp`; Phase 3 is paused mid-phase behind it. The fourteen Phase 3 items finished are the skills registry
 and its governance (SKIL-1 through SKIL-4), the installable single binary
@@ -353,6 +353,7 @@ make eval        # the eval harness against a live stack, gated by baselines
 ```
 crates/
   synveda-types       domain types, IDs, errors — depends on no other crate
+  synveda-crypto      envelope keys, stable AAD and local KMS provider boundary
   synveda-policy      the Cedar PDP facade, policy packs, roles, lapses
   synveda-store       Postgres: Knowledge, sessions, scopes, audit, versions
   synveda-vedaflow    objects, trees, commits, refs, proposals
@@ -369,14 +370,14 @@ sdks/                 rust, typescript, python — stubs, Phase 4
 policies/             Cedar policy packs
 deploy/compose/       the dev environment
 console/              the admin console (React); served from the gateway's origin
-demos/                69 runnable acceptance demos, one per runtime feature
+demos/                83 runnable acceptance demos and drift-checked narratives
 evals/                corpora, scenarios, and the committed baselines CI gates on
-docs/                 the seed, tech plan, backlog, and 82 numbered ADRs
+docs/                 the seed, tech plan, backlog, and 94 numbered ADRs
 docs/api/openapi.json the API contract — generated from the gateway's handlers
 ```
 
-**Dependency rule:** `types ← {policy, store, identity, audit} ← retrieval/ingest
-← gateway`. Nothing imports upward; adapters and SDKs depend only on the public
+**Dependency rule:** `types ← crypto ← {policy, store, identity, audit, vedaflow}
+← retrieval/ingest ← gateway`. Nothing imports upward; adapters and SDKs depend only on the public
 API. `make check-deps` enforces it.
 
 ---

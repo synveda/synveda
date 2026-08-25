@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select\n              (select count(*) from knowledge_items where tenant_id = $1) as \"items!\",\n              (select count(*) from knowledge_revisions where tenant_id = $1) as \"revisions!\",\n              (select count(*) from knowledge_sources where tenant_id = $1) as \"sources!\",\n              (select count(*) from knowledge_relations where tenant_id = $1) as \"relations!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "items!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "revisions!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "sources!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "relations!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "e64436dfefcada8ea56e9eefa74fbcb4bc49db31a8677218eb0230210af8f1f7"
+}

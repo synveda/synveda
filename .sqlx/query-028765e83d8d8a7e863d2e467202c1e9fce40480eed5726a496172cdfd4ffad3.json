@@ -1,0 +1,25 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select exists(\n               select 1 from tenant_secrets\n                where tenant_id = $1 and id = $2 and kind = $3\n                  and scope_id = $4 and state = 'active'\n           ) as \"active!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "active!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "028765e83d8d8a7e863d2e467202c1e9fce40480eed5726a496172cdfd4ffad3"
+}

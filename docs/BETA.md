@@ -244,6 +244,15 @@ explicitly repinned. The generated configuration masks opaque secret-reference
 identifiers in the browser, and read-only health rows are reports from a named
 trusted adapter rather than a gateway-side execution claim.
 
+A local `synveda-secret://<uuid>` reference is a stable, scope-bound aggregate,
+not a credential string. Create one with `synveda tenant secret put ... --from
+<file|->`; the Tool catalogue rechecks tenant, scope, kind and liveness when a
+version is admitted/applied and whenever project configuration is rendered.
+Value rotation preserves the Tool version digest. Revocation destroys the
+envelope and fails closed, while the stale binding remains removable. Directory
+credentials use the same aggregate and do not fall back after revocation or a
+failed open.
+
 Project Knowledge can also cross the boundary as canonical **OKF v0.2**. The
 generated public API creates an immutable dry-run from inert enumerated files
 or bounded archive bytes, then materialises additions, updates and conflicts as
@@ -303,6 +312,14 @@ sealed under that deployment key —
 but console sessions, tenant secrets and any `synveda tenant export` archive
 can never be opened again without that file. Copy it first if you might come
 back to the same volumes.
+
+Tenant-key rotation also drives a durable re-encryption job for active local
+secret envelopes; `synveda tenant key status --tenant <uuid>` reports its
+content-free state and counts. A sealed tenant export is now the
+Knowledge-native `synveda-context-export-2` format—heads/history, immutable
+revisions, provenance, relations and audit—and deliberately has no reader for
+the old Record-era archive. The only shipped key provider is the local KEK;
+cloud KMS, HSM and customer-managed-key support are not claimed.
 
 ---
 

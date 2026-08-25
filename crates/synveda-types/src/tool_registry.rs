@@ -303,6 +303,10 @@ fn bounded_secret_ref(value: &str) -> Result<()> {
                 .to_owned(),
         });
     }
+    // External references remain opaque adapter metadata. A value claiming
+    // Synveda's local scheme must be canonical now, so a malformed internal
+    // reference cannot survive as an accidentally external one.
+    crate::secret::parse_tenant_secret_reference(value)?;
     Ok(())
 }
 

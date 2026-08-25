@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update tenant_secrets\n              set key_version = $1, sealed = $2, updated_at = clock_timestamp()\n            where tenant_id = $3 and id = $4 and state = 'active'\n              and value_revision = $5 and key_version = $6",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Int4",
+        "Bytea",
+        "Uuid",
+        "Uuid",
+        "Int8",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "88718d24559c7517878c82fa450ba6dcdc9faffb8bf946dc29d86db16a1993f9"
+}

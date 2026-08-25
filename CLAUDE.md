@@ -219,7 +219,7 @@ explicitly and say so.
 
 Phases 0, 1 and 2 are complete; SKIL-1 through SKIL-4, OPS-1, CNSL-1, ADPT-2,
 CNSL-2, AUTH-4, AUTH-5, EVAL-3, OPS-2, TEN-3, TEN-4 and OPS-8 are the Phase 3
-features done. 100 of 131 features delivered — see docs/backlog/STATUS.md for
+features done. 101 of 132 features delivered — see docs/backlog/STATUS.md for
 what each one proved and what it left standing. (The total read 86 until
 2026-08-05, when it was corrected to the 88 STATUS.md and `make
 check-backlog` had both said for some time; AUTHZ-7 was filed the same day by
@@ -408,6 +408,17 @@ complete; only a separately `MembershipGrant`-decided assignment binds a
 directory group to authority; and removal, disable or group retirement reaches
 the same RLS/Cedar resolution as manual access. Entra/Okta evidence remains
 honestly captured/transcribed rather than live.
+**CPR-35 was filed next**, making it **132 with 100 delivered**: it keeps the
+existing two-scope envelope-key boundary while giving tenant secrets stable,
+scope-bound identity, fail-closed Tool/directory resolution and durable DEK
+re-encryption, and replaces the last Record-shaped sealed export without an old
+archive reader.
+It was delivered the same day, making it **132 with 101 delivered**: local
+references are tenant/scope/kind/live checked through forced RLS; logical and
+DEK rotation preserve stable identity and immutable Tool history; and sealed
+exports now carry Knowledge history, provenance and relations under a new
+hard-cut format. Cloud KMS, HSM and customer-managed keys remain honest future
+provider-boundary work rather than support claims.
 
 Since CPR-9 a **listing decides per row**. The audit of Prompts 1–7 found that
 `GET /v1/workspaces` and `/v1/me` took one decision at the tenant root and

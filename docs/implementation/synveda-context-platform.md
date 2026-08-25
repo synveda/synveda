@@ -48,13 +48,14 @@ programme convention established in Prompt 1.
 | Governed auto-apply audit and versioned exact-subject policy-relaxation successor | CPR-31 | **complete** | `ed7d233` | `9281951` | types 210/210 + serde 50/50; policy relaxation 3/3; API 2/2; RLS 83/83; OpenAPI 6/6; audit 27/27; CLI 155/155 + MCP 5/5; console 209/209; retrieval 53/53 | PASS | PASS (`synveda_test_35856`) | isolated `demos/cpr-31-governed-relaxations.sh` PASS: 2 aggregates, 3 immutable versions, 5 governed changes, zero predecessor tables; 79-script demo gate PASS | none |
 | One typed VedaFlow approval lifecycle across Knowledge, Skills, Tools, Configuration, relaxations and OKF publication | CPR-32 | **complete** | `9281951` | `cf52f34` | types 212/212 + serde 50/50; policy 77/77; VedaFlow 73/73 + store 10/10; gateway family suites 27/27; OpenAPI 6/6; console 210/210; store policy packs 5/5 + RLS 83/83 | PASS | PASS (`synveda_test_43866`) | isolated `demos/cpr-32-unified-approvals.sh` PASS: 81 typed proposals, 7 families, 23 exact-commit reviews, regulated three-person separation, zero audited content; 80-script demo gate PASS | none |
 | Policy-authorised context-platform audit questions and deterministic offline-verifiable export | CPR-33 | **complete** | `cf52f34` | `3c61e5e` | audit 23/23 + tamper 7/7; gateway 16/16; terminal refs 5/5; CLI audit 4/4; OpenAPI 6/6; console 212/212; RLS completeness PASS | PASS | PASS (`synveda_test_51591`) | isolated `demos/cpr-33-audit-export.sh` PASS: 7 self-audited export reads, 49 typed artifact events, one payload index; 81-script demo gate PASS | none |
-| Directory push/pull convergence on shared principals, Groups, memberships and grants | CPR-34 | **complete** | `3c61e5e` | next checkpoint | connectors 5/5; store access 30/30 + anchors 13/13 + sync 8/8; gateway access 18/18 + sync 9/9 + SCIM 10/10 + anchors 9/9; OpenAPI 6/6; console 212/212; RLS 83/83 | PASS | PASS (fresh disposable database; removed on success) | isolated `demos/cpr-34-directory-convergence.sh` PASS: 3 shared directory groups, 6 chained transitions, identity-keyed membership, zero mirror tables; 82-script demo gate PASS; Entra/Okta fixtures remain captured/transcribed | no live Entra/Okta tenant available; no live claim made |
+| Directory push/pull convergence on shared principals, Groups, memberships and grants | CPR-34 | **complete** | `3c61e5e` | `13ba059` | connectors 5/5; store access 30/30 + anchors 13/13 + sync 8/8; gateway access 18/18 + sync 9/9 + SCIM 10/10 + anchors 9/9; OpenAPI 6/6; console 212/212; RLS 83/83 | PASS | PASS (fresh disposable database; removed on success) | isolated `demos/cpr-34-directory-convergence.sh` PASS: 3 shared directory groups, 6 chained transitions, identity-keyed membership, zero mirror tables; 82-script demo gate PASS; Entra/Okta fixtures remain captured/transcribed | no live Entra/Okta tenant available; no live claim made |
+| Stable tenant secret references, fail-closed Tool/directory resolution, DEK re-encryption jobs and Knowledge-native sealed export | CPR-35 | **complete** | `13ba059` | pending (CPR-36 ledger) | types 214/214; crypto 39/39; store keys 14/14 + Knowledge export + RLS; gateway Tools 2/2 + directory sync 10/10; CLI 158/158 | PASS | PASS (`synveda_test_69956`) | `demos/cpr-35-key-secret-convergence.sh` + re-cut TEN-4 demo PASS; 83-script drift gate PASS | none; no external key-provider claim made |
 
-**Exact next objective:** file and complete CPR-35 from the CPR-34 checkpoint:
-re-anchor tenant envelope keys and secret references on schema epoch 2 and the
-new Knowledge, Tool, provider, import/export, directory and deployment artifact
-families; prove rotation, stale-reference, cross-tenant and serialization/log
-boundaries without adding customer-managed keys or an HSM claim.
+**Exact next objective:** file and complete CPR-36, the single-runtime
+deployment convergence package: reconcile install/bootstrap, Docker Compose
+and Helm around one gateway, schema epoch, public API and PDP/VedaFlow/audit
+path, with profiles differing only through governed Configuration and honest
+infrastructure sizing.
 
 ### Starting-point objective map
 
@@ -4496,5 +4497,82 @@ frontend changes, deletions, tests, and the resulting commit hash.
 
 - **Commit.** `refactor(directory): use principals groups and scope grants
   (CPR-34)` on `feat/context-platform-mvp`.
+- **Commit hash.** Written by the next checkpoint under the programme's
+  next-checkpoint convention.
+
+### Repository enterprise objective — key and secret convergence (CPR-35)
+
+- **Selected feature and decision.** **CPR-35** is delivered from `13ba059`;
+  it records CPR-34's commit as
+  `13ba0596c75f46f30d77e605c4f7548ae44af425`. Accepted ADR-0094 retains the
+  existing deployment-key/tenant-DEK boundary but gives every locally held
+  tenant secret a stable UUIDv7 identity, governing scope, closed kind,
+  credential-free provider/label metadata, logical value revision, key
+  generation and active/revoked state. The canonical internal address is
+  `synveda-secret://<uuid>`; it is identity, never authority or plaintext.
+
+- **Hard-cut persistence and custody.** Migration
+  `0060_context_secret_plane` refuses non-empty old name-keyed secret rows with
+  the exact reset instruction, then rebuilds the aggregate without translating
+  them. `tenant_secrets` and durable retryable
+  `tenant_secret_reencryption_jobs` are tenant-leading, enabled/forced-RLS and
+  in the completeness inventory. One `tenant.secret` AAD purpose binds tenant,
+  stable secret id and envelope generation. Revocation destroys ciphertext but
+  retains content-free identity; value rotation increments the logical
+  revision, while DEK re-encryption changes only ciphertext/key generation.
+  Tenant-key rotation creates and completes a durable job and emits
+  `tenant.secrets.reencrypted` with ids/generations/counts only.
+
+- **Fail-closed consumers.** A Synveda Tool reference is revalidated for
+  tenant, governing scope, `tool_server` kind and liveness when registered,
+  staged, applied and rendered; all failures share one non-oracular result.
+  External opaque references remain adapter metadata and grant nothing. A
+  binding can still be removed after its referenced secret is revoked, but it
+  cannot activate or render. Directory credentials resolve the same stable
+  root-scope aggregate: rotation preserves the address, and a revoked or
+  corrupt stored value suppresses deployment fallback. The extractor's model
+  key remains an explicitly deployment-scoped secret because no tenant model
+  provider selection exists; OKF remains credential-free.
+
+- **Knowledge-native sealed export and operator surface.** Archive magic
+  `SVCTXEX2` / format `synveda-context-export-2` freezes Knowledge heads and
+  head history, immutable revisions, normalised sources and revision links,
+  relations and the tenant audit chain in one database snapshot, then seals
+  every plaintext byte with the tenant key. The clear header carries only
+  identifiers, key generation and counts. There is no Record section,
+  translation or reader for the previous magic. `synveda tenant secret
+  put|revoke`, `tenant key rotate|status` and `tenant export|open` remain the
+  documented local operator custody boundary; secret input is bounded,
+  zeroized and accepted by file/stdin rather than argv. Cloud KMS, HSM,
+  customer-managed keys, tenant re-import and deletion remain unclaimed.
+
+- **Schema, metadata and gate findings.** Epoch **2** now has **58 migration
+  files**, **710** checked SQLx query descriptions and **90** tenant tables in
+  the forced-RLS completeness inventory. The authenticated application
+  contract remains **167 operations / 266 schemas** because custody is not an
+  ordinary product API. An adversarial Tool regression found that validating a
+  revoked reference before every binding mutation also prevented safe
+  removal; removal now authorises and deletes the binding without resolving
+  plaintext, while activation/render remain fail-closed. The first sandboxed
+  CI invocation could not bind two existing loopback listener tests; the exact
+  unchanged gate passed with local-loopback permission. No assertion was
+  weakened or excluded.
+
+- **Tests and exact results.** Types **214/214** plus serde **50/50**, crypto
+  **39/39**, store keys **14/14**, complete Knowledge export projection,
+  gateway Tools **2/2**, directory sync **10/10**, forced-RLS completeness,
+  CLI **158/158**, OpenAPI **6/6** and console **212/212** pass. Generated
+  SQLx/API, dependency, licence, backlog, ADR and **83-script** demo-drift
+  checks pass. Isolated `demos/cpr-35-key-secret-convergence.sh` passes the
+  stable-reference, AAD, re-encryption, consumer and hard-cut archive suite;
+  the re-cut `demos/ten-4-envelope-keys.sh` passes with ciphertext-only
+  storage, generation 2, a completed durable job, stable identity/revision and
+  a valid seven-event audit chain. Complete final-byte `make ci` and full
+  disposable-Postgres `make db-test` **PASS**, the latter against
+  `synveda_test_69956`, removed by the harness. This is deterministic local
+  evidence and adds no external key-provider claim.
+
+- **Commit.** `refactor(secrets): re-anchor key and secret handling (CPR-35)`
+  on `feat/context-platform-mvp`.
 - **Commit hash.** Written by the next checkpoint under the programme's
   next-checkpoint convention.

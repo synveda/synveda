@@ -32,7 +32,7 @@
 //! Tests need a live Postgres: they read `DATABASE_URL` and skip with a
 //! message when it is unset (CI has no database), the house convention.
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -57,9 +57,14 @@ use synveda_identity::directory::{
 use synveda_ingest::embedding::{AnyEmbedder, DeterministicEmbedder};
 use synveda_policy::Pdp;
 use synveda_retrieval::index::SearchIndex;
-use synveda_store::{access, directory, directory_sync, identities, rls, scopes, tenants};
+use synveda_store::{
+    access, directory, directory_sync, identities, rls, scopes, tenant_secrets, tenants,
+};
 use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
-use synveda_types::{GrantId, ScimCredentialId, ScopeId, Tenant, TenantId, TenantStatus};
+use synveda_types::secret::TenantSecretKind;
+use synveda_types::{
+    GrantId, ScimCredentialId, ScopeId, Tenant, TenantId, TenantSecretId, TenantStatus,
+};
 
 const SECRET: &[u8] = b"auth-5-directory-sync-suite-secret";
 
@@ -605,6 +610,107 @@ async fn a_tenant_the_push_plane_owns_is_not_pulled() {
         placed_at(&w, "alice@example.test").await.is_none(),
         "and nothing was read, so nothing was written"
     );
+}
+
+/// A stable stored credential is an authority boundary, including when its
+/// value is unusable. Revocation and corruption both skip the tenant rather
+/// than silently handing it to a deployment fallback connector.
+#[tokio::test]
+async fn an_unusable_stable_credential_never_falls_back_to_deployment_configuration() {
+    let Some(w) = world().await else { return };
+    let scope = synveda_crypto::KeyScope::Tenant(w.tenant);
+    w.state
+        .keys
+        .provision(&w.pool, scope)
+        .await
+        .expect("provision tenant key");
+    let key = w
+        .state
+        .keys
+        .sealing_key(&w.pool, scope)
+        .await
+        .expect("tenant sealing key");
+    let id = TenantSecretId::new();
+    let valid = br#"{"connector":"okta","org_url":"https://directory.example.test","api_token":"never-log-cpr35"}"#;
+    let sealed = key
+        .seal(
+            synveda_crypto::Purpose::TenantSecret,
+            synveda_crypto::RowKey::Uuid(id.as_uuid()),
+            valid,
+        )
+        .expect("seal connector");
+    let mut tx = rls::begin_tenant_tx(&w.pool, w.tenant)
+        .await
+        .expect("begin secret setup");
+    let root = scopes::ensure_tenant_root(&mut tx, w.tenant)
+        .await
+        .expect("tenant root");
+    tenant_secrets::put(
+        &mut tx,
+        id,
+        w.tenant,
+        root.id,
+        TenantSecretKind::Directory,
+        synveda_identity::directory::CREDENTIAL_SECRET_NAME,
+        Some("okta"),
+        key.version(),
+        &sealed,
+    )
+    .await
+    .expect("store connector");
+    tenant_secrets::revoke(&mut tx, w.tenant, id)
+        .await
+        .expect("revoke connector")
+        .expect("active connector");
+    tx.commit().await.expect("commit revoked connector");
+
+    // This connector has no scripted pass. Any fallback calls `enumerate`
+    // and panics, making this a positive assertion rather than an absence.
+    let mut fallbacks: HashMap<TenantId, Box<dyn DirectoryConnector>> = HashMap::new();
+    fallbacks.insert(w.tenant, Box::new(ScriptedDirectory::new(Vec::new())));
+    synveda_gateway::directory_sync::sweep(&w.state, &fallbacks, &SyncConfig::default())
+        .await
+        .expect("revoked credential sweep");
+
+    let corrupt = key
+        .seal(
+            synveda_crypto::Purpose::TenantSecret,
+            synveda_crypto::RowKey::Uuid(id.as_uuid()),
+            b"not a directory configuration; never-log-cpr35-corrupt",
+        )
+        .expect("seal corrupt connector");
+    let mut tx = rls::begin_tenant_tx(&w.pool, w.tenant)
+        .await
+        .expect("begin corrupt setup");
+    tenant_secrets::put(
+        &mut tx,
+        id,
+        w.tenant,
+        root.id,
+        TenantSecretKind::Directory,
+        synveda_identity::directory::CREDENTIAL_SECRET_NAME,
+        Some("okta"),
+        key.version(),
+        &corrupt,
+    )
+    .await
+    .expect("reactivate corrupt connector");
+    tx.commit().await.expect("commit corrupt connector");
+    synveda_gateway::directory_sync::sweep(&w.state, &fallbacks, &SyncConfig::default())
+        .await
+        .expect("corrupt credential sweep");
+
+    let mut tx = rls::begin_tenant_tx(&w.pool, w.tenant)
+        .await
+        .expect("begin state check");
+    assert!(
+        directory_sync::state(&mut *tx, w.tenant)
+            .await
+            .expect("directory state")
+            .is_none(),
+        "neither unusable stored credential reached a fallback pass"
+    );
+    tx.commit().await.expect("commit state check");
 }
 
 // ── Harness plumbing ────────────────────────────────────────────────────────

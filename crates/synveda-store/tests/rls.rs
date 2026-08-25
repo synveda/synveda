@@ -344,6 +344,7 @@ const COVERED: &[&str] = &[
     // needed — the same structural satisfaction `console_sessions` has, and
     // for the same reason (decision 5).
     "tenant_keys",
+    "tenant_secret_reencryption_jobs",
     "tenant_secrets",
     "tool_bindings",
     "tool_changes",
