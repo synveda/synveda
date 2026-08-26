@@ -16,6 +16,12 @@
 # instance, six blocks came back empty, and the suite reported a retrieval
 # recall that was really a throughput measurement.
 #
+# The full supported-API seed plus that post-seed wait can exceed the
+# product's default one-hour service-token ceiling. This disposable run mints
+# only its lme-* actors with a two-hour lifetime and configures its gateway to
+# enforce the same explicit ceiling. Ordinary evaluation and production runs
+# retain the one-hour default; no signing material enters the report.
+#
 # EVAL_LONGMEMEVAL_JUDGED=1 adds the model-judged tier: each block is read
 # by SYNVEDA_READER and the answer graded by SYNVEDA_JUDGE, against
 # evals/baseline-longmemeval-judged.json. That tier is the published
@@ -33,7 +39,9 @@ cd "$(dirname "$0")/.."
 
 EVAL_LONGMEMEVAL_INSTANCES=${EVAL_LONGMEMEVAL_INSTANCES:-10}
 EVAL_LONGMEMEVAL_ACTORS=$EVAL_LONGMEMEVAL_INSTANCES
+EVAL_LONGMEMEVAL_TOKEN_TTL_SECS=${EVAL_LONGMEMEVAL_TOKEN_TTL_SECS:-7200}
 export EVAL_LONGMEMEVAL_INSTANCES EVAL_LONGMEMEVAL_ACTORS
+export EVAL_LONGMEMEVAL_TOKEN_TTL_SECS
 
 trap eval_down EXIT INT TERM
 eval_up

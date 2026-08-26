@@ -196,9 +196,15 @@ pub struct QuestionOutcome {
     /// which is the condition under which what the block *did* carry is a
     /// ranking decision rather than a restatement of the corpus size —
     /// and it is what `retrieval_precision` reads (ADR-0047 decision 8).
-    /// Exact rather than declared, so a corpus cannot opt a question into
-    /// or out of the axis by mistake.
+    /// Exact rather than declared, so a corpus cannot claim a ranking probe
+    /// whose block did not actually bind.
     pub bound: bool,
+    /// Whether the corpus deliberately supplied a narrower caller budget.
+    /// `retrieval_precision` requires this as well as `bound`: the structured
+    /// Knowledge evidence envelope can make the ordinary product default bind,
+    /// but those far-scope questions measure the scope gradient rather than
+    /// within-scope ranking.
+    pub explicit_budget: bool,
     pub tokens: u32,
     pub budget_tokens: u32,
     /// What a real BPE tokenizer counts for the same text. CTX-2 ships

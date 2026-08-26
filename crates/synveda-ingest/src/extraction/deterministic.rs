@@ -24,8 +24,10 @@ const KEYWORD_CONFIDENCE: f64 = 0.6;
 
 /// The ruleset version recorded as `model_version` in provenance. Bump
 /// whenever a rule changes: provenance must name what actually ran.
-/// `@2` added entity mentions (GRPH-2, ADR-0044 decision 2).
-const RULESET_VERSION: &str = "builtin@3";
+/// `@2` added entity mentions (GRPH-2, ADR-0044 decision 2); `@4` recognises
+/// explicit imperative and architectural-choice forms after the session-plane
+/// cut removed the caller-supplied Record kind.
+const RULESET_VERSION: &str = "builtin@4";
 
 static PREFERENCE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)\b(prefers?|always use|never use|i like|we like|favou?rite)\b")
@@ -34,10 +36,21 @@ static PREFERENCE: LazyLock<Regex> = LazyLock::new(|| {
 static DECISION: LazyLock<Regex> = LazyLock::new(|| {
     // `chose`/`chosen` bare, not only `we chose`: the pronoun was never the
     // signal, and requiring it meant "Chose BLAKE3 over SHA-256" read as a
-    // fact. Found when the observe cutover removed `ObserveKind::Decision`
-    // and the keyword path had to carry cases the client used to classify.
-    Regex::new(r"(?i)\b(decided|decision|chose|chosen|we picked|agreed to|going with|settled on)\b")
-        .expect("static decision pattern compiles")
+    // fact. Imperative choices, `thing-first:` architecture shorthand,
+    // bounded "only … licences/core path" constraints, and "stays the …
+    // substrate" are the other explicit choice forms the labelled capture
+    // corpus uses. They are narrow on purpose: a generic `must` or `use`
+    // would turn procedures and warnings into decisions.
+    Regex::new(
+        r"(?ix)
+          \b(decided|decision|chose|chosen|we\ picked|agreed\ to|going\ with|settled\ on)\b
+          | ^\s*(ship|cut|adopt|choose|keep|retain|standardise|standardize|pin)\b
+          | ^\s*[a-z][a-z0-9_-]*-first\s*:
+          | ^\s*only\b[^\n]*(licen[cs]es?|core\ path)\b
+          | \bstays\ the\b[^.;]*\bsubstrate\b
+        ",
+    )
+    .expect("static decision pattern compiles")
 });
 static PROCEDURE: LazyLock<Regex> = LazyLock::new(|| {
     // `first,` carries its own comma boundary: `\b` cannot sit between a
@@ -539,6 +552,40 @@ mod tests {
             classify(SessionEventType::MemoryAsserted, "the sky is a colour").0,
             KnowledgeType::Fact,
             "the default"
+        );
+    }
+
+    #[test]
+    fn explicit_choice_forms_are_decisions_without_swallowing_procedures() {
+        for text in [
+            "Ship the scanner as pure regex.",
+            "Cut the Temporal SDK from phase one.",
+            "Postgres-first: one engine for rows and vectors.",
+            "Only MIT and Apache-2.0 licences in the core path.",
+            "Indexed adjacency stays the graph substrate.",
+        ] {
+            assert_eq!(
+                classify(SessionEventType::MessageAssistant, text).0,
+                KnowledgeType::Decision,
+                "explicit choice was not classified as a decision: {text}"
+            );
+        }
+        assert_eq!(
+            classify(
+                SessionEventType::MessageUser,
+                "How to deploy: then run make release"
+            )
+            .0,
+            KnowledgeType::Procedure
+        );
+        assert_eq!(
+            classify(
+                SessionEventType::MessageUser,
+                "I keep my editor on two-space indentation"
+            )
+            .0,
+            KnowledgeType::Fact,
+            "an incidental first-person verb is not an imperative choice"
         );
     }
 }

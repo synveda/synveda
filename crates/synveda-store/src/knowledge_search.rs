@@ -13,6 +13,7 @@
 
 use chrono::{DateTime, Utc};
 use sqlx::PgConnection;
+use std::collections::BTreeSet;
 use synveda_types::knowledge::{
     KnowledgeLifecycleState, KnowledgeOrigin, KnowledgeSourceType, KnowledgeType,
 };
@@ -303,6 +304,7 @@ pub async fn lexical_candidates(
     query: &str,
     limit: i64,
 ) -> Result<Vec<Candidate>> {
+    let query = lexical_websearch_query(query);
     let rows = sqlx::query!(
         r#"
         select current.id as "item_id!",
@@ -423,6 +425,71 @@ pub async fn lexical_candidates(
         .collect())
 }
 
+/// Turns ordinary task prose into a recall-oriented `websearch_to_tsquery`
+/// expression. PostgreSQL's `simple` dictionary intentionally preserves
+/// product terms, identifiers and commands, but it also preserves question
+/// furniture (`what`, `did`, `about`). Requiring every such token made a
+/// natural question match only prose that repeated the question verbatim.
+///
+/// Explicit web-search syntax is left intact while it is within the same
+/// complexity bound. Plain prose keeps its meaningful terms and joins them
+/// with `OR`; ranking still favours revisions matching several terms, while
+/// one changed tense cannot erase an otherwise exact lexical hit. Overlong
+/// explicit input degrades to those bounded plain terms rather than handing an
+/// attacker—or a large captured transcript—an unbounded PostgreSQL expression.
+/// The resulting string remains a bound SQL parameter.
+fn lexical_websearch_query(query: &str) -> String {
+    let explicit = query.contains('"')
+        || query.split_whitespace().any(|part| part == "OR")
+        || query.split_whitespace().any(|part| part.starts_with('-'));
+    if explicit
+        && query.chars().any(char::is_alphanumeric)
+        && query.chars().count() <= MAX_EXPLICIT_LEXICAL_CHARS
+        && query.split_whitespace().count() <= MAX_LEXICAL_TERMS
+    {
+        return query.to_owned();
+    }
+
+    let mut seen = BTreeSet::new();
+    let mut terms = Vec::new();
+    for raw in query.split(|character: char| !character.is_alphanumeric() && character != '_') {
+        let term = raw
+            .to_lowercase()
+            .chars()
+            .take(MAX_LEXICAL_TERM_CHARS)
+            .collect::<String>();
+        if term.len() <= 1
+            || LEXICAL_STOP_WORDS.contains(&term.as_str())
+            || !seen.insert(term.clone())
+        {
+            continue;
+        }
+        terms.push(term);
+        if terms.len() == MAX_LEXICAL_TERMS {
+            break;
+        }
+    }
+    if terms.is_empty() {
+        EMPTY_LEXICAL_QUERY.to_owned()
+    } else {
+        terms.join(" OR ")
+    }
+}
+
+/// PostgreSQL can represent much larger queries, but its tsquery parser uses a
+/// finite expression stack. Thirty-two unique terms leaves generous headroom
+/// for the `OR` nodes and bounds matching cost independently of API text size.
+const MAX_LEXICAL_TERMS: usize = 32;
+const MAX_LEXICAL_TERM_CHARS: usize = 64;
+const MAX_EXPLICIT_LEXICAL_CHARS: usize = 256;
+const EMPTY_LEXICAL_QUERY: &str = "synveda_no_lexical_terms";
+
+const LEXICAL_STOP_WORDS: &[&str] = &[
+    "a", "about", "an", "and", "are", "at", "be", "before", "did", "do", "does", "for", "from",
+    "how", "i", "in", "is", "it", "my", "of", "on", "or", "our", "the", "to", "was", "we", "what",
+    "when", "where", "which", "with",
+];
+
 /// Bounded trace-only candidates for a non-current lifecycle.
 ///
 /// Supersession normally closes valid time, so the ordinary current query is
@@ -446,6 +513,7 @@ pub async fn lifecycle_trace_candidates(
     limit: i64,
 ) -> Result<Vec<Candidate>> {
     let scope_ids: Vec<uuid::Uuid> = scope_ids.iter().map(|id| id.as_uuid()).collect();
+    let query = query.map(lexical_websearch_query);
     let rows = sqlx::query!(
         r#"
         select current.id as "item_id!",
@@ -469,7 +537,7 @@ pub async fn lifecycle_trace_candidates(
         limit $5
         "#,
         tenant_id.as_uuid(),
-        query,
+        query.as_deref(),
         lifecycle.as_str(),
         &scope_ids,
         limit.max(1),
@@ -740,5 +808,67 @@ mod tests {
         assert_eq!(filters.origin_name(), Some("authored"));
         assert_eq!(filters.lifecycle_name(), Some("archived"));
         assert_eq!(filters.source_name(), Some("repository"));
+    }
+
+    #[test]
+    fn ordinary_task_prose_is_recall_oriented_without_question_furniture() {
+        assert_eq!(
+            lexical_websearch_query("what did we decide about payment retries"),
+            "decide OR payment OR retries"
+        );
+        assert_eq!(
+            lexical_websearch_query("which command do I run before pushing a branch"),
+            "command OR run OR pushing OR branch"
+        );
+    }
+
+    #[test]
+    fn explicit_websearch_syntax_is_preserved() {
+        assert_eq!(
+            lexical_websearch_query("\"payment retries\" OR jitter"),
+            "\"payment retries\" OR jitter"
+        );
+        assert_eq!(
+            lexical_websearch_query("payment -vacuum"),
+            "payment -vacuum"
+        );
+    }
+
+    #[test]
+    fn lexical_queries_are_bounded_and_deduplicated_before_postgres_parses_them() {
+        let oversized = (0..200)
+            .map(|index| format!("term{index}"))
+            .collect::<Vec<_>>()
+            .join(" ");
+        let bounded = lexical_websearch_query(&oversized);
+        assert_eq!(bounded.split(" OR ").count(), MAX_LEXICAL_TERMS);
+        assert!(bounded.starts_with("term0 OR term1 OR term2"));
+        assert!(bounded.ends_with("term31"));
+
+        assert_eq!(
+            lexical_websearch_query("payment payment payment retries retries"),
+            "payment OR retries"
+        );
+        assert_eq!(
+            lexical_websearch_query(&format!("{} useful", "x".repeat(200))),
+            format!("{} OR useful", "x".repeat(MAX_LEXICAL_TERM_CHARS))
+        );
+    }
+
+    #[test]
+    fn oversized_explicit_or_empty_queries_degrade_to_safe_terms() {
+        let oversized = (0..80)
+            .map(|index| format!("\"term{index}\""))
+            .collect::<Vec<_>>()
+            .join(" OR ");
+        let bounded = lexical_websearch_query(&oversized);
+        assert_eq!(bounded.split(" OR ").count(), MAX_LEXICAL_TERMS);
+        assert!(!bounded.contains('"'));
+
+        assert_eq!(
+            lexical_websearch_query("what did we do and where"),
+            EMPTY_LEXICAL_QUERY
+        );
+        assert_eq!(lexical_websearch_query("---"), EMPTY_LEXICAL_QUERY);
     }
 }

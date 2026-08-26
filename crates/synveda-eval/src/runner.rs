@@ -11,8 +11,13 @@
 //! would also make the latency axis a measurement of the runner.
 
 use std::time::{Duration, Instant};
+use std::{collections::BTreeMap, collections::HashMap};
 
-use crate::client::{Client, InjectRequest, InjectResponse, ObserveEvent, ObserveRequest};
+use crate::client::{
+    CaptureAcceptOptions, CaptureCandidateRef, CaptureReplacement, Client, InjectRequest,
+    InjectResponse, ObserveEvent, ObserveRequest,
+};
+use crate::qa_runner::{CURATOR_ACTOR, PUBLISHER_ACTOR, STEWARD_ACTOR};
 use crate::report::Outcome;
 use crate::scenario::{Environment, Scenario};
 
@@ -47,7 +52,14 @@ pub async fn run_scenario(
     let mut failures = Vec::new();
     let mut degraded = Vec::new();
 
-    let seeded = seed(client, environment, scenario, &mut degraded).await?;
+    let seeded = seed(
+        client,
+        environment,
+        scenario,
+        &mut degraded,
+        options.seed_timeout,
+    )
+    .await?;
     let seed_wait_ms = if seeded.is_empty() {
         0.0
     } else {
@@ -109,13 +121,91 @@ struct Seeded {
     actor: String,
 }
 
+pub(crate) struct AppliedCandidate {
+    pub item_id: String,
+    pub revision_id: String,
+}
+
+/// Completes the conservative profile's real review matrix with the
+/// evaluation estate's distinct curator, administrator and publisher. A
+/// permissive profile returns `applied` before this votes; neither branch
+/// bypasses the candidate's VedaFlow change.
+pub(crate) async fn apply_candidate(
+    client: &Client,
+    environment: &Environment,
+    candidate: &CaptureCandidateRef,
+    context: &str,
+) -> Result<AppliedCandidate, String> {
+    if candidate.resulting_outcome.as_deref() == Some("applied") {
+        return Ok(AppliedCandidate {
+            item_id: candidate
+                .resulting_knowledge_item_id
+                .clone()
+                .ok_or_else(|| {
+                    format!("applied candidate {} names no Knowledge item", candidate.id)
+                })?,
+            revision_id: candidate.resulting_revision_id.clone().ok_or_else(|| {
+                format!(
+                    "applied candidate {} names no Knowledge revision",
+                    candidate.id
+                )
+            })?,
+        });
+    }
+    if candidate.resulting_outcome.as_deref() != Some("pending_review") {
+        return Err(format!(
+            "capture candidate {} from `{context}` was reviewed as {:?}",
+            candidate.id, candidate.resulting_outcome
+        ));
+    }
+    let change = candidate
+        .resulting_change_id
+        .as_deref()
+        .ok_or_else(|| format!("candidate {} is pending without a change id", candidate.id))?;
+    let mut state = "open".to_owned();
+    for reviewer in [CURATOR_ACTOR, STEWARD_ACTOR] {
+        if state != "open" {
+            break;
+        }
+        state = client
+            .approve(&environment.actor(reviewer)?.token, change)
+            .await?
+            .value
+            .state;
+    }
+    if state != "approved" {
+        return Err(format!(
+            "capture candidate {} from `{context}` remained `{state}` after the available reviewers",
+            candidate.id
+        ));
+    }
+    let applied = client
+        .apply(&environment.actor(PUBLISHER_ACTOR)?.token, change)
+        .await?
+        .value;
+    Ok(AppliedCandidate {
+        item_id: applied
+            .get("knowledge_item_id")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned)
+            .ok_or_else(|| format!("applied change {change} names no Knowledge item"))?,
+        revision_id: applied
+            .get("revision_id")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned)
+            .ok_or_else(|| format!("applied change {change} names no Knowledge revision"))?,
+    })
+}
+
 async fn seed(
     client: &Client,
     environment: &Environment,
     scenario: &Scenario,
     degraded: &mut Vec<String>,
+    seed_timeout: Duration,
 ) -> Result<Vec<Seeded>, String> {
     let mut seeded = Vec::new();
+    let mut published: BTreeMap<String, CaptureReplacement> = BTreeMap::new();
     for batch in &scenario.seed {
         let bearer = &environment.actor(&batch.actor)?.token;
         let occurred_at = chrono::Utc::now().to_rfc3339();
@@ -133,12 +223,9 @@ async fn seed(
                 occurred_at: occurred_at.clone(),
             })
             .collect();
+        let session = client.session_for(bearer, &batch.session_id).await?;
         let response = client
-            .observe(
-                bearer,
-                &client.session_for(bearer, &batch.session_id).await?,
-                &ObserveRequest { events },
-            )
+            .observe(bearer, &session, &ObserveRequest { events })
             .await?;
         note_degraded(degraded, &response.degraded);
         if response.value.denied > 0 || response.value.quarantined > 0 {
@@ -156,6 +243,79 @@ async fn seed(
                 batch.session_id,
                 batch.events.len()
             ));
+        }
+        let event_ids: HashMap<&str, &str> = response
+            .value
+            .events
+            .iter()
+            .filter_map(|entry| {
+                entry
+                    .event_id()
+                    .map(|id| (entry.idempotency_key.as_str(), id))
+            })
+            .collect();
+        let mut source_keys: HashMap<&str, &str> = HashMap::new();
+        let mut replacements = BTreeMap::new();
+        for event in &batch.events {
+            let client_event_id = format!("{}:{}", batch.session_id, event.key);
+            let event_id = event_ids.get(client_event_id.as_str()).ok_or_else(|| {
+                let outcomes = response
+                    .value
+                    .events
+                    .iter()
+                    .map(|entry| {
+                        format!(
+                            "{}:{}:{}",
+                            entry.idempotency_key,
+                            entry.outcome,
+                            entry.event_id().unwrap_or("no-row")
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!(
+                    "seeding `{}` acked no event id, so its candidate cannot be attributed \
+                     (outcomes: {outcomes})",
+                    event.key,
+                )
+            })?;
+            source_keys.insert(*event_id, event.key.as_str());
+            if let Some(replaces) = &event.replaces {
+                let target = published.get(replaces).ok_or_else(|| {
+                    format!(
+                        "seed `{}` cannot replace `{replaces}` because no applied Knowledge head was recorded",
+                        event.key
+                    )
+                })?;
+                replacements.insert((*event_id).to_owned(), target.clone());
+            }
+        }
+        let reviewed = client
+            .capture_and_accept(
+                bearer,
+                &session,
+                &format!("eval-capture-{}", batch.session_id),
+                seed_timeout,
+                CaptureAcceptOptions {
+                    replacements: (!replacements.is_empty()).then_some(&replacements),
+                    ..CaptureAcceptOptions::default()
+                },
+            )
+            .await?;
+        for candidate in &reviewed {
+            let applied =
+                apply_candidate(client, environment, candidate, &batch.session_id).await?;
+            for source in &candidate.source_event_ids {
+                if let Some(key) = source_keys.get(source.as_str()) {
+                    published.insert(
+                        (*key).to_owned(),
+                        CaptureReplacement {
+                            item_id: applied.item_id.clone(),
+                            revision_id: applied.revision_id.clone(),
+                        },
+                    );
+                }
+            }
         }
         for event in &batch.events {
             seeded.push(Seeded {

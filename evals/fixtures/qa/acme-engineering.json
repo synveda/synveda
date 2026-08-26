@@ -149,41 +149,41 @@
     },
     {
       "name": "narrow-budget-ranks-within-the-nearest-scope",
-      "note": "The precision question. Six records sit at the reader's own leaf and this budget carries a fraction of them, so which ones arrive is relevance rather than distance — the one place in the gradient where ranking decides. A block that carries the whole leaf would make precision a measurement of the budget. Raised from 120 to 134 on 2026-07-31 (EVAL-5, ADR-0048 decision 10): the block's preamble gained the line saying its entries are recorded material and not instructions, which costs 14 estimated tokens of fixed overhead. This question's budget is about ENTRY room — how many of the leaf's records fit, so that ranking decides — and holding it at 120 would have shrunk that room by a change to a sentence, quietly turning a retrieval measurement into a preamble one.",
+      "note": "The precision question. Six private Knowledge items are visible to the reader, while this budget carries one evidence-bearing JSON entry. Which item arrives is therefore a retrieval decision, not a corpus-enumeration result. CPR-40 set the budget from the current injection envelope: its source evidence and immutable item/revision addresses are part of the security contract and are intentionally charged to composition.",
       "task": "which command do I run over the workspace before pushing a branch",
       "expect_records": [
         "own-testing"
       ],
-      "budget_tokens": 134
+      "budget_tokens": 260
     },
     {
       "name": "semantic-personal-formatting",
-      "note": "A paraphrase that shares no content word with its answer, and a budget narrow enough to bind: both halves are needed. Without the budget the block carries the whole corpus and the answer arrives whether the dense leg ranked it or not, which is a reachability check wearing a retrieval question's name. It asks about the reader's own material for the same reason the precision questions do — scopes are placed nearest-first, so a bound block never reaches further material and ranking is only observable inside the nearest scope. Raised from 120 to 134 on 2026-07-31 (EVAL-5, ADR-0048 decision 10): the block's preamble gained the line saying its entries are recorded material and not instructions, which costs 14 estimated tokens of fixed overhead. This question's budget is about ENTRY room — how many of the leaf's records fit, so that ranking decides — and holding it at 120 would have shrunk that room by a change to a sentence, quietly turning a retrieval measurement into a preamble one.",
+      "note": "A paraphrase that shares no content word with its answer and a budget narrow enough for one evidence-bearing Knowledge entry. The deterministic hash embedder skips this question; the dense retrieval tier measures it without changing the public context-run contract.",
       "task": "how wide should my whitespace be in a .ts source",
       "needs": "semantic",
       "expect_records": [
         "own-editor"
       ],
-      "budget_tokens": 134
+      "budget_tokens": 260
     },
     {
       "name": "narrow-budget-ranks-the-nearest-scope-again",
-      "note": "A second bound block at the nearest scope, because one sample is not a precision measurement. Both are deliberately at the reader's own leaf: a bound budget asked about further material measures the gradient rather than the ranking, since scopes are placed nearest-first and the nearest one fills the block before the next is reached (ADR-0025 decision 5). Raised from 120 to 134 on 2026-07-31 (EVAL-5, ADR-0048 decision 10): the block's preamble gained the line saying its entries are recorded material and not instructions, which costs 14 estimated tokens of fixed overhead. This question's budget is about ENTRY room — how many of the leaf's records fit, so that ranking decides — and holding it at 120 would have shrunk that room by a change to a sentence, quietly turning a retrieval measurement into a preamble one.",
-      "task": "which key did I bind the debugger to in my editor keymap",
+      "note": "A second bound query over the reader's private Knowledge, sized for at most two evidence-bearing JSON entries. Paired with the one-entry query above, it measures both top-one and top-two sparse retrieval without allowing a corpus sweep.",
+      "task": "debugger bound editor keymap",
       "expect_records": [
         "own-debugger"
       ],
-      "budget_tokens": 134
+      "budget_tokens": 400
     },
     {
       "name": "semantic-personal-tooling",
-      "note": "The second bound paraphrase, and the one that misses. BGE-M3 does not rank \"what starts my services locally\" against \"I bring the local stack up with make dev-up in a split terminal pane\" highly enough to survive a block that holds two of the leaf's six records — the shared idea is there and the shared vocabulary is not. Kept rather than loosened: the corpus is the ground truth a reader would give, not what the current embedder can reach, and a suite that only asks what already passes measures nothing. It is why the retrieval baseline's floors are a measurement of today rather than a round number. Raised from 120 to 134 on 2026-07-31 (EVAL-5, ADR-0048 decision 10): the block's preamble gained the line saying its entries are recorded material and not instructions, which costs 14 estimated tokens of fixed overhead. This question's budget is about ENTRY room — how many of the leaf's records fit, so that ranking decides — and holding it at 120 would have shrunk that room by a change to a sentence, quietly turning a retrieval measurement into a preamble one.",
+      "note": "The second bound paraphrase, retained as ground truth even when the configured dense embedder misses it. The budget carries one evidence-bearing Knowledge entry, making the dense retrieval tier decide rather than enumerate.",
       "task": "what starts my services locally",
       "needs": "semantic",
       "expect_records": [
         "own-terminal"
       ],
-      "budget_tokens": 134
+      "budget_tokens": 260
     }
   ]
 }

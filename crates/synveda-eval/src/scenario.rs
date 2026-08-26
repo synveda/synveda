@@ -48,6 +48,14 @@ pub struct Actor {
     /// boundary a leak crossed.
     #[serde(default)]
     pub tenant: Option<String>,
+    /// Exact public workspace used for this actor's evaluation sessions.
+    /// Environments may omit it for older external harnesses, in which case
+    /// the client selects the first visible workspace from `/v1/me`.
+    #[serde(default)]
+    pub workspace_id: Option<String>,
+    /// Exact project used for this actor's evaluation sessions.
+    #[serde(default)]
+    pub project_id: Option<String>,
 }
 
 impl Environment {
@@ -76,34 +84,6 @@ impl Environment {
             .tenant
             .as_deref()
             .unwrap_or(&self.tenant_id))
-    }
-
-    /// The auditor whose bearer can read *that* tenant's chain.
-    ///
-    /// One per tenant, and the first run of EVAL-5's cross-tenant half is
-    /// what made that necessary: `AuditRead` declares `resource: [Tenant]`
-    /// and an audit answer covers one chain or is refused (ADR-0045
-    /// decision 2), so a corpus spanning two admitted tenants asked the
-    /// wrong chain about half its material and reported the pipeline
-    /// unfinished for a record that had extracted fine. The convention is
-    /// the actor name's prefix, stated here rather than guessed at the
-    /// call site.
-    pub fn auditor_for(&self, tenant_id: &str) -> Result<&Actor, String> {
-        self.actors
-            .iter()
-            .find(|(name, actor)| {
-                name.starts_with(crate::extraction::AUDITOR_ACTOR)
-                    && actor.tenant.as_deref().unwrap_or(&self.tenant_id) == tenant_id
-            })
-            .map(|(_, actor)| actor)
-            .ok_or_else(|| {
-                format!(
-                    "no `{}*` actor whose bearer carries tenant {tenant_id}; an audit answer \
-                     covers one tenant's chain and no other, so a corpus that spans tenants needs \
-                     one auditor per tenant",
-                    crate::extraction::AUDITOR_ACTOR
-                )
-            })
     }
 
     pub fn scope(&self, name: &str) -> Result<&str, String> {
@@ -170,6 +150,11 @@ pub struct SeedEvent {
     /// scenarios that seed prose set it explicitly.
     #[serde(default)]
     pub marker: Option<String>,
+    /// Earlier seed key this candidate explicitly supersedes. This drives
+    /// the public candidate replacement action; wording similarity alone
+    /// never changes current state.
+    #[serde(default)]
+    pub replaces: Option<String>,
 }
 
 impl SeedEvent {
@@ -311,14 +296,22 @@ fn validate(scenario: &Scenario) -> Result<(), String> {
             ));
         }
     }
-    let keys: Vec<&str> = scenario
-        .seed
-        .iter()
-        .flat_map(|batch| batch.events.iter())
-        .map(|event| event.key.as_str())
-        .collect();
+    let mut seen = std::collections::BTreeSet::new();
+    for event in scenario.seed.iter().flat_map(|batch| batch.events.iter()) {
+        if !seen.insert(event.key.as_str()) {
+            return Err(format!("seed key `{}` is repeated", event.key));
+        }
+        if let Some(replaces) = &event.replaces
+            && !seen.contains(replaces.as_str())
+        {
+            return Err(format!(
+                "seed `{}` replaces `{replaces}`, which is not an earlier seed",
+                event.key
+            ));
+        }
+    }
     for key in &scenario.expect.records {
-        if !keys.contains(&key.as_str()) {
+        if !seen.contains(key.as_str()) {
             return Err(format!("expect.records names `{key}`, which nothing seeds"));
         }
     }
@@ -395,6 +388,27 @@ mod tests {
         let json = MINIMAL.replace(r#""records": ["deploy"]"#, r#""records": ["ghost"]"#);
         let err = parse(&json).expect_err("dangling key must not validate");
         assert!(err.contains("ghost"), "unhelpful error: {err}");
+    }
+
+    #[test]
+    fn replacement_must_name_an_earlier_unique_seed() {
+        let forward = MINIMAL.replace(
+            r#""key": "deploy", "text"#,
+            r#""key": "deploy", "replaces": "later", "text"#,
+        );
+        assert!(parse(&forward).is_err());
+
+        let valid = MINIMAL.replace(
+            r#""events": [{"key": "deploy", "text": "Deploys go through make deploy.","#,
+            r#""events": [{"key": "before", "text": "Deploys used to go through scripts/deploy.", "marker": "scripts/deploy"}, {"key": "deploy", "replaces": "before", "text": "Deploys go through make deploy.","#,
+        );
+        assert!(parse(&valid).is_ok());
+
+        let duplicate = MINIMAL.replace(
+            r#""events": [{"key": "deploy", "text": "Deploys go through make deploy.","#,
+            r#""events": [{"key": "deploy", "text": "old"}, {"key": "deploy", "text": "Deploys go through make deploy.","#,
+        );
+        assert!(parse(&duplicate).is_err());
     }
 
     #[test]

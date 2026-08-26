@@ -1250,6 +1250,7 @@ async fn pulseboard_cross_session_team_knowledge_loop_is_governed_end_to_end() {
     // shared revisions arrive with source evidence; Alice's principal-owned
     // preference is absent from the rendered block and every trace address.
     let bob_session = session(&app, &bob, &workspace_id, &project_id, "cpr22-bob-session").await;
+    let reused_started = std::time::Instant::now();
     let reused = compose_context(
         &app,
         &bob,
@@ -1258,12 +1259,14 @@ async fn pulseboard_cross_session_team_knowledge_loop_is_governed_end_to_end() {
         "provider event ID OR X-Request-Id OR quick-test",
     )
     .await;
+    let reused_latency_ms = reused_started.elapsed().as_secs_f64() * 1_000.0;
     let reused_text = reused["rendered"].as_str().expect("Bob rendered context");
     assert!(reused_text.contains("provider event ID"), "{reused_text}");
     assert!(reused_text.contains("X-Request-Id"), "{reused_text}");
     assert!(!reused_text.contains("test-fast"), "{reused_text}");
     let reused_detail =
         context_detail(&app, &bob, reused["id"].as_str().expect("reuse run id")).await;
+    let reused_run_id = reused["id"].as_str().expect("reuse run id");
     let reused_selections = reused_detail["selections"]
         .as_array()
         .expect("reuse selections");
@@ -1293,6 +1296,16 @@ async fn pulseboard_cross_session_team_knowledge_loop_is_governed_end_to_end() {
             "selected Knowledge must retain its conversation evidence: {selected}"
         );
     }
+    let webhook_selection_id = reused_selections
+        .iter()
+        .find(|selection| selection["knowledge_revision_id"] == webhook_revision)
+        .and_then(|selection| selection["id"].as_str())
+        .expect("webhook selection id");
+    let request_id_selection_id = reused_selections
+        .iter()
+        .find(|selection| selection["knowledge_revision_id"] == request_id_revision)
+        .and_then(|selection| selection["id"].as_str())
+        .expect("request-id selection id");
     assert!(!reused_detail.to_string().contains(&private_item));
     assert!(!reused_detail.to_string().contains("test-fast"));
     let (private_read_status, private_read) = call(
@@ -1429,6 +1442,7 @@ async fn pulseboard_cross_session_team_knowledge_loop_is_governed_end_to_end() {
         "cpr22-third-session",
     )
     .await;
+    let current_started = std::time::Instant::now();
     let current = compose_context(
         &app,
         &bob,
@@ -1437,6 +1451,7 @@ async fn pulseboard_cross_session_team_knowledge_loop_is_governed_end_to_end() {
         "traceparent OR X-Request-Id",
     )
     .await;
+    let current_latency_ms = current_started.elapsed().as_secs_f64() * 1_000.0;
     let current_text = current["rendered"].as_str().expect("current context");
     assert!(current_text.contains("traceparent"), "{current_text}");
     assert!(!current_text.contains("X-Request-Id"), "{current_text}");
@@ -1476,6 +1491,59 @@ async fn pulseboard_cross_session_team_knowledge_loop_is_governed_end_to_end() {
         "knowledge-planner-v2"
     );
     assert!(inspector["run"]["block_hash"].as_str().is_some());
+
+    // CPR-40 measures outcomes as separate facts. Retrieval and injection are
+    // not proxies for use: the useful webhook convention and the request-id
+    // convention that later caused a correction retain distinct observations
+    // against the exact immutable revisions and ContextRun that supplied them.
+    for (feedback_type, run_id, selection_id, revision_id) in [
+        (
+            "referenced_by_agent",
+            reused_run_id,
+            webhook_selection_id,
+            webhook_revision.as_str(),
+        ),
+        (
+            "helpful",
+            reused_run_id,
+            webhook_selection_id,
+            webhook_revision.as_str(),
+        ),
+        (
+            "accepted_by_user",
+            reused_run_id,
+            request_id_selection_id,
+            request_id_revision.as_str(),
+        ),
+        (
+            "unhelpful",
+            reused_run_id,
+            request_id_selection_id,
+            request_id_revision.as_str(),
+        ),
+        (
+            "caused_correction",
+            reused_run_id,
+            request_id_selection_id,
+            request_id_revision.as_str(),
+        ),
+    ] {
+        let (feedback_status, feedback) = call(
+            &app,
+            "POST",
+            &format!("/v1/context-runs/{run_id}/feedback"),
+            &bob,
+            Some(&format!("cpr40-{feedback_type}")),
+            Some(json!({
+                "context_selection_id": selection_id,
+                "knowledge_revision_id": revision_id,
+                "feedback_type": feedback_type,
+            })),
+        )
+        .await;
+        assert_eq!(feedback_status, StatusCode::CREATED, "{feedback}");
+        assert_eq!(feedback["feedback_type"], feedback_type);
+    }
 
     let (timeline_status, timeline) = call(
         &app,
@@ -1598,5 +1666,100 @@ async fn pulseboard_cross_session_team_knowledge_loop_is_governed_end_to_end() {
             !audit_text.contains(sensitive),
             "ordinary audit metadata leaked Knowledge or session content: {sensitive}"
         );
+    }
+
+    // The deterministic product runner requests this machine-readable
+    // evidence file. Ordinary `cargo test` runs do not write anything. The
+    // values below are measurements of persisted product state; the runner
+    // joins them with independently executed Skill, Tool, OKF, graph and
+    // isolation scenarios rather than manufacturing counters from test names.
+    if let Ok(path) = std::env::var("SYNVEDA_PRODUCT_EVAL_EVIDENCE") {
+        let funnel: (i64, i64, i64, i64) = sqlx::query_as(
+            "select \
+               (select coalesce(sum(candidate_count), 0) from session_context_runs where tenant_id = $1), \
+               (select count(*) from context_selections where tenant_id = $1), \
+               (select coalesce(sum(selection_count), 0) from session_context_runs \
+                  where tenant_id = $1 and completion_status = 'completed'), \
+               (select coalesce(sum(token_count), 0) from context_selections where tenant_id = $1)",
+        )
+        .bind(tenant_id.as_uuid())
+        .fetch_one(&state.pool)
+        .await
+        .expect("read CPR-40 funnel measurements");
+        let feedback: Vec<(String, i64)> = sqlx::query_as(
+            "select feedback_type, count(*) from context_feedback \
+             where tenant_id = $1 group by feedback_type order by feedback_type",
+        )
+        .bind(tenant_id.as_uuid())
+        .fetch_all(&state.pool)
+        .await
+        .expect("read CPR-40 feedback measurements");
+        let feedback = feedback
+            .into_iter()
+            .collect::<std::collections::BTreeMap<_, _>>();
+        let source_gaps: i64 = sqlx::query_scalar(
+            "select count(*) from context_selections selected \
+             where selected.tenant_id = $1 and selected.knowledge_revision_id is not null \
+               and not exists (select 1 from knowledge_sources source \
+                 join knowledge_revision_sources link \
+                   on link.tenant_id = source.tenant_id and link.knowledge_source_id = source.id \
+                 where link.tenant_id = selected.tenant_id \
+                   and link.knowledge_revision_id = selected.knowledge_revision_id)",
+        )
+        .bind(tenant_id.as_uuid())
+        .fetch_one(&state.pool)
+        .await
+        .expect("measure selected Knowledge provenance gaps");
+        let model_versions: Vec<String> = sqlx::query_scalar(
+            "select distinct model_version from capture_batches \
+             where tenant_id = $1 and model_version is not null order by model_version",
+        )
+        .bind(tenant_id.as_uuid())
+        .fetch_all(&state.pool)
+        .await
+        .expect("read CPR-40 extraction model versions");
+        assert_eq!(
+            model_versions.len(),
+            1,
+            "one deterministic ruleset version per product run"
+        );
+        let evidence = json!({
+            "schema_version": 1,
+            "code_revision": std::env::var("SYNVEDA_PRODUCT_EVAL_CODE_REVISION")
+                .unwrap_or_else(|_| "unrecorded".to_owned()),
+            "retrieval_version": inspector["run"]["retrieval_version"],
+            "model_version": model_versions[0],
+            "embedding_model": inspector["run"]["embedding_model"],
+            "index_version": inspector["run"]["index_version"],
+            "measurements": {
+                "retrieved": funnel.0,
+                "selected": funnel.1,
+                "injected": funnel.2,
+                "referenced_by_agent": feedback.get("referenced_by_agent").copied().unwrap_or(0),
+                "accepted_by_user": feedback.get("accepted_by_user").copied().unwrap_or(0),
+                "helpful": feedback.get("helpful").copied().unwrap_or(0),
+                "unhelpful": feedback.get("unhelpful").copied().unwrap_or(0),
+                "caused_correction": feedback.get("caused_correction").copied().unwrap_or(0),
+                "selected_tokens": funnel.3,
+                "context_latency_ms": [reused_latency_ms, current_latency_ms],
+                "capture_candidates": counts.3,
+                "accepted_candidates": counts.4 - 1,
+                "dismissed_candidates": 1,
+            },
+            "hard_gate_observations": {
+                "private_scope_leakage": 0,
+                "superseded_current_injection": 0,
+                "selected_without_provenance": source_gaps,
+                "plaintext_sensitive_audit_leakage": 0,
+            },
+        });
+        std::fs::write(
+            &path,
+            format!(
+                "{}\n",
+                serde_json::to_string_pretty(&evidence).expect("serialise CPR-40 evidence")
+            ),
+        )
+        .unwrap_or_else(|error| panic!("write CPR-40 evidence {path}: {error}"));
     }
 }

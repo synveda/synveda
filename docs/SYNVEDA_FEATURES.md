@@ -2259,6 +2259,24 @@ CPR-39  Adapter conformance and second verified client (L)
   proprietary executable/credential is available and must never be replaced by
   a replay claim. ADR-0098.
 
+CPR-40  Context-platform product and trust evaluation (XL)
+  Filed 2026-08-25 by the autonomous continuation. Re-cut the deterministic
+  evaluation estate onto public sessions, capture candidates, immutable
+  Knowledge, scoped query/evaluation and ContextRun, then add one declarative
+  product suite spanning capture, reuse, isolation, conflicts, supersession,
+  temporal query, provenance, budgets, graph, Skills, MCP, OKF and adapter
+  recovery. AC: eighteen exact evidence scenarios; retrieved, selected,
+  injected, referenced, accepted, helpful, unhelpful and correction outcomes
+  remain separate; revision/model/retrieval/embedding/index versions, latency,
+  tokens and candidate quality are recorded; tenant/private/superseded/
+  provenance/version/secret trust counts are gated at zero; the inherited
+  deterministic scenario, extraction, QA and security questions execute on
+  product scopes without a Record translator or ContextRun enumeration; safe
+  JSON context entries prevent structural-line attribution forgery; specialised
+  BGE-M3/model/10k/Stage-H tiers remain honest and separate; focused tests,
+  demo, `make eval-product`, `make eval`, `make ci` and `make db-test` pass.
+  ADR-0099.
+
 ──────────────────────────────────────────────
 Sequencing (features → phases)
 ──────────────────────────────────────────────
@@ -2352,7 +2370,7 @@ Phase 4 ecosystem: ADPT-4,5,6,7,8 · PRMT-3 · SKIL-5 · MEM-7 · OPS-5,6,7 · C
    or an evaluation harness — and that is a *when*, not an *if*, since ADPT-1's own demo
    is a script. What it must not become is a warning in a README: the gap is silent,
    returns exit 0, and reads exactly like a session that was observed.)
-Phase 5 context platform (redesign): CPR-1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39
+Phase 5 context platform (redesign): CPR-1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40
    (Added 2026-08-17. Its own phase rather than a slot in Phase 4, because it is not the
    next feature — it is the programme that re-cuts the model every feature above was built
    on, for an audience none of them was: one person, or four sharing agent context, who

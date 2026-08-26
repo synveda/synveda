@@ -19,7 +19,7 @@ export SYNVEDA_TEI_IMAGE
 # and skip when it is unset — CI runs without a database.
 DATABASE_URL ?= postgres://synveda:synveda-dev@localhost:5432/synveda
 
-.PHONY: fmt lint test build deny check-deps check-adr-status check-adapters check-ann-bench check-api-types check-backlog check-benchmarks check-chart-images check-corpus-licences check-demos check-deploy check-npm-licences chart-lint ts-build ts-test ci dev-up dev-down smoke db-test claude-acceptance claude-acceptance-live eval eval-check eval-judge eval-read eval-longmemeval eval-longmemeval-full eval-longmemeval-judged eval-extraction-live eval-retrieval eval-security
+.PHONY: fmt lint test build deny check-deps check-adr-status check-adapters check-ann-bench check-api-types check-backlog check-benchmarks check-chart-images check-corpus-licences check-demos check-deploy check-npm-licences check-product-eval chart-lint ts-build ts-test ci dev-up dev-down smoke db-test claude-acceptance claude-acceptance-live eval eval-check eval-product eval-judge eval-read eval-longmemeval eval-longmemeval-full eval-longmemeval-judged eval-extraction-live eval-retrieval eval-security
 
 dev-up:
 	$(COMPOSE) up --build --detach --wait
@@ -88,6 +88,22 @@ eval-extraction-live:
 # nothing or a fixture whose label can never match.
 eval-check:
 	cargo run -q -p synveda-eval -- check
+	node scripts/product-evaluation.mjs --check
+	node --test scripts/product-evaluation.test.mjs
+
+# CPR-40's deterministic product/trust suite. It executes exact
+# database-backed acceptance cases on a fresh migrated scratch database,
+# rejects skipped DB tests, and writes one machine-readable and one
+# human-readable report under target/. The existing corpus targets below
+# remain separate because semantic/model measurements are not comparable with
+# the deterministic path.
+eval-product:
+	SYNVEDA_DB_TEST_TASK=product-evaluation \
+		DATABASE_URL="$(DATABASE_URL)" bash scripts/db-test.sh
+
+check-product-eval:
+	node scripts/product-evaluation.mjs --check
+	node --test scripts/product-evaluation.test.mjs
 
 # The judge measured before it measures (EVAL-3, ADR-0061 decision 4):
 # the configured judge over the labelled sets, with no gateway and no

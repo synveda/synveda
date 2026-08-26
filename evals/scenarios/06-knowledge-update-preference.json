@@ -21,6 +21,7 @@
       "events": [
         {
           "key": "roast-after",
+          "replaces": "roast-before",
           "event_type": "message.user",
           "text": "I prefer light-roast coffee before the morning stand-up.",
           "marker": "light-roast"

@@ -80,7 +80,11 @@ fn index_root() -> std::path::PathBuf {
 fn state_with(url: &str, search_index: Arc<SearchIndex>, pdp: Arc<Pdp>) -> AppState {
     AppState {
         pool: PgPoolOptions::new()
-            .max_connections(4)
+            // Each test owns one app and issues its requests sequentially. A
+            // larger pool only multiplies the suite's potential connection
+            // footprint by the 16 tests Rust runs concurrently; on the full
+            // dev stack Temporal already holds its own Postgres pool.
+            .max_connections(1)
             .acquire_timeout(Duration::from_secs(5))
             .connect_lazy(url)
             .expect("parse database url"),
@@ -121,7 +125,9 @@ async fn admitted_tenant() -> Option<(PgPool, TenantId)> {
         }
     };
     let pool = PgPoolOptions::new()
-        .max_connections(4)
+        // Fixture writes are sequential within one world. Keep the 16 worlds
+        // concurrent without reserving another four connections apiece.
+        .max_connections(1)
         .connect(&url)
         .await
         .expect("connect to DATABASE_URL");

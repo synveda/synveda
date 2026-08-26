@@ -25,12 +25,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::time::{Duration, Instant};
 
 use crate::client::{
-    Client, InjectRequest, KnowledgeQueryRequest, KnowledgeSweepRequest, ObserveEvent,
-    ObserveRequest, ProposalRequest,
+    CaptureAcceptOptions, Client, InjectRequest, KnowledgeQueryRequest, KnowledgeSweepRequest,
+    ObserveEvent, ObserveRequest,
 };
-use crate::extraction::{AUDITOR_ACTOR, read_committed};
 use crate::qa::{Corpus, Question, TIERS};
 use crate::report::{QaOutcome, QuestionOutcome, TierCounts};
+use crate::runner::apply_candidate;
 use crate::scenario::Environment;
 
 /// The reviewers every promotion goes through. Fixed names rather than
@@ -39,18 +39,12 @@ use crate::scenario::Environment;
 /// the approval matrix instead of exercising it.
 pub const CURATOR_ACTOR: &str = "qa-curator";
 pub const STEWARD_ACTOR: &str = "qa-steward";
+pub const PUBLISHER_ACTOR: &str = "qa-publisher";
 
 /// What a sweep asks for, matching EVAL-2's: the surface caps a sweep
 /// here, so asking for exactly it and receiving exactly it is the
 /// ambiguity ADR-0046 decision 3 refuses to measure through.
 const SWEEP_LIMIT: usize = 32;
-
-/// How many approvals to try before giving up on a proposal. The pack
-/// asks for at most two distinct approvers on any memory publication
-/// (the FLOW-3 matrix golden); a third pass means the requirement is
-/// something this harness does not understand, and looping would hide
-/// that.
-const MAX_APPROVALS: usize = 3;
 
 const POLL: Duration = Duration::from_millis(500);
 
@@ -74,23 +68,9 @@ pub async fn run_corpus(
 ) -> Result<QaOutcome, String> {
     let mut outcome = QaOutcome::new(corpus);
     let reader = &environment.actor(&corpus.reader)?.token;
-    let auditor = &environment
-        .actors
-        .get(AUDITOR_ACTOR)
-        .ok_or_else(|| {
-            format!(
-                "the environment names no `{AUDITOR_ACTOR}` actor; the Q&A suite waits on \
-                 `GET /v1/audit/events` for the pipeline to be done with every seeded event"
-            )
-        })?
-        .token;
-
     let started = Instant::now();
-    let seeded = seed(client, environment, corpus).await?;
-    wait_for_pipeline(client, auditor, &seeded, options, &mut outcome).await?;
-    let placed = locate(client, environment, corpus, &seeded, &mut outcome).await?;
+    let placed = seed(client, environment, corpus, options, &mut outcome).await?;
     wait_for_index(client, environment, corpus, &placed, options, &mut outcome).await?;
-    promote(client, environment, corpus, &placed, &mut outcome).await?;
     outcome.served_records = served_total(client, reader, corpus).await?;
     outcome.seed_wait_ms = round(started.elapsed().as_secs_f64() * 1000.0);
 
@@ -137,20 +117,13 @@ pub async fn run_corpus(
     Ok(outcome)
 }
 
-/// One seeded event, and where its records ended up.
-struct Seeded {
-    key: String,
-    event_id: String,
-    /// The batch's index, so a promotion knows which records are its own.
-    batch: usize,
-}
-
-/// A seed key's records, once the sweep has found them.
+/// A seed key's immutable Knowledge revisions, as returned by the governed
+/// candidate decision itself. Publication is the authority for this mapping;
+/// rediscovering it through a later query would make an indexing or policy
+/// result masquerade as a write-side outcome.
 #[derive(Default)]
 struct Placed {
     record_ids: Vec<String>,
-    /// The author's own leaf: a climb's `source_scope_id`.
-    scope_id: String,
     /// The seeded text, used as its own retrieval query while waiting for
     /// the sparse index — an exact readiness condition, and deliberately
     /// not the question's own task (see `wait_for_index`).
@@ -164,9 +137,11 @@ async fn seed(
     client: &Client,
     environment: &Environment,
     corpus: &Corpus,
-) -> Result<Vec<Seeded>, String> {
-    let mut seeded = Vec::new();
-    for (index, batch) in corpus.seed.iter().enumerate() {
+    options: &Options,
+    outcome: &mut QaOutcome,
+) -> Result<BTreeMap<String, Placed>, String> {
+    let mut placed = BTreeMap::new();
+    for batch in &corpus.seed {
         let bearer = &environment.actor(&batch.actor)?.token;
         let occurred_at = chrono::Utc::now().to_rfc3339();
         let events: Vec<ObserveEvent<'_>> = batch
@@ -179,12 +154,9 @@ async fn seed(
                 occurred_at: occurred_at.clone(),
             })
             .collect();
+        let session = client.session_for(bearer, &batch.session_id).await?;
         let response = client
-            .observe(
-                bearer,
-                &client.session_for(bearer, &batch.session_id).await?,
-                &ObserveRequest { events },
-            )
+            .observe(bearer, &session, &ObserveRequest { events })
             .await?;
         let acked = &response.value;
         if acked.denied > 0 || acked.quarantined > 0 {
@@ -194,6 +166,7 @@ async fn seed(
                 batch.session_id, acked.denied, acked.quarantined
             ));
         }
+        let mut by_event = BTreeMap::new();
         for event in &batch.events {
             let key = format!("{}:{}", batch.session_id, event.key);
             let event_id = acked
@@ -208,284 +181,67 @@ async fn seed(
                         event.key
                     )
                 })?;
-            seeded.push(Seeded {
-                key: event.key.clone(),
-                event_id,
-                batch: index,
-            });
+            by_event.insert(event_id, (event.key.clone(), event.text.clone()));
         }
-    }
-    Ok(seeded)
-}
-
-/// Waits for the pipeline to be *done*, which the chain states exactly:
-/// every seeded event appears in a `memory.extracted` payload whether it
-/// produced records or not. Polling the sweep instead would be waiting for
-/// an unknown number of records to appear, which is downstream of the
-/// thing under measurement (the EVAL-2 rule).
-async fn wait_for_pipeline(
-    client: &Client,
-    auditor: &str,
-    seeded: &[Seeded],
-    options: &Options,
-    outcome: &mut QaOutcome,
-) -> Result<(), String> {
-    let started = Instant::now();
-    loop {
-        let committed = read_committed(client, auditor).await?;
-        let missing: Vec<&str> = seeded
-            .iter()
-            .filter(|entry| !committed.contains_key(entry.event_id.as_str()))
-            .map(|entry| entry.key.as_str())
-            .collect();
-        if missing.is_empty() {
-            for entry in seeded {
-                if committed
-                    .get(entry.event_id.as_str())
-                    .is_some_and(|committed| committed.dead_lettered)
-                {
-                    outcome.failures.push(format!(
-                        "the pipeline dead-lettered `{}`: the event was lost rather than found \
-                         empty, and grading its questions would blame the corpus for a broken \
-                         pipeline",
-                        entry.key
-                    ));
-                }
-            }
-            return Ok(());
-        }
-        if started.elapsed() >= options.seed_timeout {
-            outcome.failures.push(format!(
-                "the pipeline never finished with {} event(s) within {}s: {}",
-                missing.len(),
-                options.seed_timeout.as_secs(),
-                missing.join(", ")
-            ));
-            return Ok(());
-        }
-        tokio::time::sleep(POLL).await;
-    }
-}
-
-/// Finds every seeded event's records by sweeping as each *author*, which
-/// is the only caller that can see its own leaf: the privacy floor closes
-/// another principal's personal scope to everyone (ADR-0037/ADR-0038), and
-/// that is exactly what makes a promotion mean something later.
-async fn locate(
-    client: &Client,
-    environment: &Environment,
-    corpus: &Corpus,
-    seeded: &[Seeded],
-    outcome: &mut QaOutcome,
-) -> Result<BTreeMap<String, Placed>, String> {
-    let mut placed: BTreeMap<String, Placed> = BTreeMap::new();
-    let by_event: BTreeMap<&str, &Seeded> = seeded
-        .iter()
-        .map(|entry| (entry.event_id.as_str(), entry))
-        .collect();
-
-    // The instant is deliberately ahead of now, for ADR-0046 decision 1's
-    // reason: the surface reads `as_of < now` as a rewind, and a rewind
-    // applies no retention horizon, so a client's own `now` measures the
-    // historical read rather than the live one.
-    let as_of = (chrono::Utc::now() + chrono::Duration::seconds(60)).to_rfc3339();
-    let authors: BTreeSet<&str> = corpus
-        .seed
-        .iter()
-        .map(|batch| batch.actor.as_str())
-        .collect();
-
-    for author in authors {
-        let bearer = &environment.actor(author)?.token;
-        let swept = client
-            .knowledge_sweep(
+        let target = batch
+            .promote_to
+            .as_deref()
+            .map(|name| environment.scope(name))
+            .transpose()?;
+        let reviewed = client
+            .capture_and_accept(
                 bearer,
-                &KnowledgeSweepRequest {
-                    as_of: &as_of,
-                    session_id: &format!("eval:qa:locate:{}", corpus.corpus),
-                    limit: SWEEP_LIMIT,
+                &session,
+                &format!("eval-qa-{}-{}", corpus.corpus, batch.session_id),
+                options.seed_timeout,
+                CaptureAcceptOptions {
+                    scope_id: target,
+                    sensitivity: None,
+                    ..CaptureAcceptOptions::default()
                 },
             )
             .await?;
-        let sweep = swept.value;
-        if sweep.mode != "sweep" {
-            outcome.failures.push(format!(
-                "the surface answered `{author}`'s enumeration in `{}` mode, not `sweep`: this is \
-                 a measurement of a different question",
-                sweep.mode
-            ));
-        }
-        if sweep.truncated {
-            outcome.failures.push(format!(
-                "`{author}`'s sweep truncated its scope universe at {} of {} scopes; where the \
-                 corpus lives cannot be established from a bounded answer",
-                sweep.scopes_decided, sweep.scopes_considered
-            ));
-        }
-        if sweep.entries.len() >= SWEEP_LIMIT {
-            outcome.failures.push(format!(
-                "`{author}`'s sweep returned {} records against a requested limit of \
-                 {SWEEP_LIMIT}: a full page and a truncated one are indistinguishable from here, \
-                 so this corpus cannot be located — split it across more actors rather than \
-                 raising the limit",
-                sweep.entries.len()
-            ));
-        }
-
-        for entry in &sweep.entries {
-            let Some(event_id) = entry.source_event_id() else {
-                continue;
-            };
-            let Some(seed) = by_event.get(event_id) else {
-                // Another corpus's material in the same actor's scope. Not
-                // a leak — the corpora share a stack — and not this
-                // corpus's to grade either.
-                continue;
-            };
-            let batch = &corpus.seed[seed.batch];
-            let slot = placed.entry(seed.key.clone()).or_insert_with(|| Placed {
-                record_ids: Vec::new(),
-                scope_id: entry.scope_id.clone(),
-                text: batch
-                    .events
-                    .iter()
-                    .find(|event| event.key == seed.key)
-                    .map(|event| event.text.clone())
-                    .unwrap_or_default(),
-                actor: batch.actor.clone(),
-            });
-            // Records that a climb has to carry together must live
-            // together; a split would make `source_scope_id` a guess.
-            if slot.scope_id != entry.scope_id {
+        for candidate in &reviewed {
+            let applied =
+                apply_candidate(client, environment, candidate, &batch.session_id).await?;
+            let mut attributed = false;
+            for source in &candidate.source_event_ids {
+                let Some((key, text)) = by_event.get(source) else {
+                    continue;
+                };
+                attributed = true;
+                let slot = placed.entry(key.clone()).or_insert_with(|| Placed {
+                    record_ids: Vec::new(),
+                    text: text.clone(),
+                    actor: batch.actor.clone(),
+                });
+                if !slot.record_ids.contains(&applied.item_id) {
+                    slot.record_ids.push(applied.item_id.clone());
+                }
+            }
+            if !attributed {
                 outcome.failures.push(format!(
-                    "seed key `{}` produced records at two scopes ({} and {}), so a promotion \
-                     cannot name where its material is",
-                    seed.key, slot.scope_id, entry.scope_id
+                    "candidate {} for `{}` cites no event in its capture batch",
+                    candidate.id, batch.session_id
                 ));
             }
-            slot.record_ids.push(entry.record_id.clone());
         }
-    }
-
-    for entry in seeded {
-        if !placed.contains_key(&entry.key) {
-            outcome.failures.push(format!(
-                "seed key `{}` produced no record its own author can see, so no question can be \
-                 graded on it",
-                entry.key
+        for event in &batch.events {
+            if !placed.contains_key(&event.key) {
+                outcome.failures.push(format!(
+                    "seed key `{}` produced no applied Knowledge item, so no question can be graded on it",
+                    event.key
+                ));
+            }
+        }
+        if let Some(scope_id) = target {
+            outcome.promotions.push(format!(
+                "{} ({}) → {} as governed Knowledge",
+                batch.session_id, batch.tier, scope_id
             ));
         }
     }
     Ok(placed)
-}
-
-/// Climbs every batch that declares a target, through the product's own
-/// review: open, approve until the pack says nothing is outstanding, then
-/// run the effect. This is the only way material reaches a scope above a
-/// leaf, and it is why a per-scope answer rate asserts FLOW-5 as well as
-/// CTX-2 (decision 3).
-async fn promote(
-    client: &Client,
-    environment: &Environment,
-    corpus: &Corpus,
-    placed: &BTreeMap<String, Placed>,
-    outcome: &mut QaOutcome,
-) -> Result<(), String> {
-    let curator = &environment.actor(CURATOR_ACTOR)?.token;
-    let steward = &environment.actor(STEWARD_ACTOR)?.token;
-
-    for batch in &corpus.seed {
-        let Some(target) = &batch.promote_to else {
-            continue;
-        };
-        let scope_id = environment.scope(target)?;
-        let author = &environment.actor(&batch.actor)?.token;
-
-        let mut record_ids = Vec::new();
-        let mut source = String::new();
-        for event in &batch.events {
-            let Some(slot) = placed.get(&event.key) else {
-                continue;
-            };
-            source.clone_from(&slot.scope_id);
-            record_ids.extend(slot.record_ids.iter().cloned());
-        }
-        if record_ids.is_empty() {
-            outcome.failures.push(format!(
-                "batch `{}` has nothing to promote to `{target}`: none of its events produced a \
-                 record",
-                batch.session_id
-            ));
-            continue;
-        }
-
-        let opened = client
-            .propose(
-                author,
-                &ProposalRequest {
-                    scope_id,
-                    source_scope_id: &source,
-                    record_ids,
-                    title: format!("eval: {} to {target}", corpus.corpus),
-                    effect: None,
-                    sensitivity: None,
-                },
-            )
-            .await?;
-        let proposal = opened.value;
-
-        // Approve until the pack says nothing is outstanding. Which roles
-        // and how many distinct approvers is the target scope's answer
-        // (ADR-0032), so the harness reads the requirement rather than
-        // restating it: a pack that asks for a different set is followed.
-        let mut state = proposal.state.clone();
-        let mut approvals = 0;
-        while state == "open" && approvals < MAX_APPROVALS {
-            let bearer = if approvals == 0 { curator } else { steward };
-            let voted = client.approve(bearer, &proposal.id).await?;
-            state.clone_from(&voted.value.state);
-            approvals += 1;
-            if state == "open" && voted.value.outstanding.is_empty() {
-                outcome.failures.push(format!(
-                    "the climb to `{target}` stayed open and the surface named nothing \
-                     outstanding, so this harness cannot tell what it still needs"
-                ));
-                break;
-            }
-        }
-        if state != "approved" {
-            outcome.failures.push(format!(
-                "the climb to `{target}` ended `{state}` after {approvals} approval(s) rather \
-                 than approved, so its tier has no material and every question about it would \
-                 measure the review rather than the composition"
-            ));
-            continue;
-        }
-
-        // The curator runs the effect, never the steward: publishing takes
-        // `MemoryRead` too, and nobody publishes what they cannot read
-        // (ADR-0031 decision 12).
-        let published = client.publish(curator, &proposal.id).await?;
-        // Checked rather than assumed: a publication that landed
-        // somewhere else would put the material outside the reader's
-        // chain, and every question about that tier would then measure a
-        // misdirected climb while reporting a composition number.
-        if published.value.scope_id != scope_id {
-            outcome.failures.push(format!(
-                "the climb to `{target}` published at scope {} rather than {scope_id}",
-                published.value.scope_id
-            ));
-        }
-        outcome.promotions.push(format!(
-            "{} ({}) → {} : {} record(s) at commit {}",
-            batch.session_id,
-            batch.tier,
-            proposal.target_scope_path,
-            published.value.added,
-            published.value.commit.chars().take(12).collect::<String>()
-        ));
-    }
-    Ok(())
 }
 
 /// Waits until the corpus is *retrievable*, not merely served: the sparse
@@ -625,6 +381,7 @@ fn skipped(question: &Question) -> QuestionOutcome {
         index_entries: 0,
         index_tokens: 0,
         bound: false,
+        explicit_budget: question.budget_tokens.is_some(),
         tokens: 0,
         budget_tokens: 0,
         reference_tokens: 0,
@@ -722,6 +479,7 @@ fn grade(
         index_entries: block.index_entries,
         index_tokens: block.index_tokens,
         bound: block.record_ids.len() < served_records,
+        explicit_budget: question.budget_tokens.is_some(),
         tokens: block.tokens,
         budget_tokens: block.budget_tokens,
         reference_tokens: reference.encode_ordinary(&block.text).len(),
@@ -812,7 +570,7 @@ pub fn metrics(outcomes: &[QaOutcome]) -> BTreeMap<String, f64> {
     // reports corpus size under the name of precision and moves whenever
     // a fixture is added.
     let ranked: Vec<&QuestionOutcome> = measured()
-        .filter(|question| question.task.is_some() && question.bound)
+        .filter(|question| question.task.is_some() && question.explicit_budget && question.bound)
         .collect();
     let carried: usize = ranked.iter().map(|question| question.block_records).sum();
     if carried > 0 {
@@ -905,6 +663,7 @@ mod tests {
             index_entries: 0,
             index_tokens: 0,
             bound: task,
+            explicit_budget: task,
             tokens: 0,
             budget_tokens: 1500,
             reference_tokens: 0,

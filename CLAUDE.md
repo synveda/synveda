@@ -134,6 +134,16 @@ config-only, captured and fully verified evidence. Claude Code 2.1.241 remains
 verified; Cursor is experimental with a now-sufficient Hooks v1 contract but
 no executable, credential or authentic frame here; installed unauthenticated
 VS Code 1.133.0 has no documented SessionEnd and is only configured.
+CPR-40, product and trust evaluation, is delivered under ADR-0099. Eighteen exact scenarios retain
+eight separate outcome signals and six zero-count trust gates; the inherited
+suite now drives sessions, capture, VedaFlow, immutable Knowledge and the
+scoped query/evaluation lenses over product scopes. Safe JSON context entries
+close structural attribution forgery, ruleset `builtin@4` measures 0.983/0.914
+extraction precision/recall, and the default gate passes all QA tiers plus
+1,276 security probes with every leak count zero. BGE-M3 and the 10k security
+tier pass. Stage-H delivers 4,927 authentic turns and measures all ten
+instances with zero empty/unattributed blocks, 0.643 retrieval recall and
+explicit per-session sparse-index misses after its fixed 1,800-second wait.
 **It is a pre-1.0 hard
 cut**: a fresh schema epoch, no old-data migration, no compatibility shims,
 and old databases rejected with a reset instruction. Since CPR-2 that is
@@ -246,7 +256,7 @@ explicitly and say so.
 
 Phases 0, 1 and 2 are complete; SKIL-1 through SKIL-4, OPS-1, CNSL-1, ADPT-2,
 CNSL-2, AUTH-4, AUTH-5, EVAL-3, OPS-2, TEN-3, TEN-4 and OPS-8 are the Phase 3
-features done. 105 of 136 features delivered — see docs/backlog/STATUS.md for
+features done. 106 of 137 features delivered — see docs/backlog/STATUS.md for
 what each one proved and what it left standing. (The total read 86 until
 2026-08-05, when it was corrected to the 88 STATUS.md and `make
 check-backlog` had both said for some time; AUTHZ-7 was filed the same day by
@@ -483,6 +493,16 @@ registry and an exact live-lifecycle gate. The implementation is complete but
 the feature remains open: no Cursor executable/authenticated client exists in
 the environment, and installed VS Code's Preview contract lacks SessionEnd.
 The repository records those facts instead of promoting replay or config.
+**CPR-40 was filed and delivered next**, making it **137 with 106 delivered**:
+it replaces the Record-era evaluator assumptions with a declarative product
+suite and current public session/capture/Knowledge/query/context paths. The
+default run passes six scenarios, all 50 extraction fixtures, all four product
+scope tiers and 1,276 security probes over 400 variants; the six hard trust
+counts and structural-attribution count are zero. BGE-M3 retrieval and the 10k
+security tier pass. The corrected Stage-H run delivers all 4,927 turns and
+measures all ten instances with zero empty/unattributed blocks, 0.643 retrieval
+recall and explicit sparse-index readiness misses. Model extraction alone
+remains unmeasured because no credential or vLLM endpoint is available.
 
 Since CPR-9 a **listing decides per row**. The audit of Prompts 1–7 found that
 `GET /v1/workspaces` and `/v1/me` took one decision at the tenant root and

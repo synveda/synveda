@@ -21,9 +21,12 @@
 //! a *reader is served*, `GET /v1/audit/events` says what the *pipeline
 //! committed*, and only the second of those two lenses still has a route.
 
+use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
+
+use crate::scenario::Environment;
 
 /// Generous next to inject's 150ms SLO: a deadline here is meant to end a
 /// hung run, not to be the thing under measurement. The latency axis
@@ -33,6 +36,13 @@ const TIMEOUT: Duration = Duration::from_secs(30);
 pub struct Client {
     gateway_url: String,
     http: reqwest::Client,
+    session_selections: BTreeMap<String, SessionSelection>,
+}
+
+#[derive(Clone)]
+struct SessionSelection {
+    workspace_id: String,
+    project_id: Option<String>,
 }
 
 /// A random discriminator for an idempotency key.
@@ -67,17 +77,11 @@ pub struct InjectRequest<'a> {
 /// are how a demotion is told from an absence, and the staleness scores,
 /// which are MEM-6's unvalidated heuristic (ADR-0040) measured for the
 /// first time.
-/// The composed block.
-///
-/// **Four fields the response no longer carries.** `/v1/inject` served
-/// `record_ids`, `tiers`, `index_entries`, `index_tokens` and
-/// `staleness_permille` as fields; a context run's body is deliberately
-/// minimal (ADR-0076 decision 7) and serves the rendered block. `record_ids`
-/// is recovered from the block's own watermark line, which is where a block
-/// names what it composed; the other four have no substitute here and are
-/// left empty, which grades every per-tier and staleness assertion as a miss
-/// rather than as a pass. EVAL-4's tier axis therefore needs Prompt 18 before
-/// it measures anything again.
+/// The composed block. A ContextRun renders selected Knowledge bodies only;
+/// the retired progressive Record index tier has no current equivalent.
+/// Addresses are recovered from the block's own watermark and each rendered
+/// selection is therefore graded as `body`. Index counters remain zero and
+/// staleness remains absent rather than being invented.
 #[derive(Debug, Deserialize)]
 pub struct InjectResponse {
     #[serde(rename = "rendered")]
@@ -112,13 +116,6 @@ impl InjectResponse {
     /// Called once, on the way out of the client, so every caller reads the
     /// same field it always read.
     fn hydrate(&mut self) {
-        if let Some(marker) = self.text.split("records=").nth(1) {
-            let ids = marker.split("-->").next().unwrap_or_default().trim();
-            if !ids.is_empty() && ids != "none" {
-                self.record_ids = ids.split(',').map(|id| id.trim().to_owned()).collect();
-                return;
-            }
-        }
         let Some((_, marker)) = self.text.rsplit_once("[Synveda Knowledge: ") else {
             return;
         };
@@ -128,10 +125,12 @@ impl InjectResponse {
         }
         self.record_ids = ids
             .split(',')
-            .filter_map(|address| address.trim().split('@').next())
+            .filter_map(|address| address.trim().strip_prefix("knowledge:"))
+            .filter_map(|address| address.split('@').next())
             .filter(|id| !id.is_empty())
             .map(str::to_owned)
             .collect();
+        self.tiers = vec!["body".to_owned(); self.record_ids.len()];
     }
 }
 
@@ -188,6 +187,7 @@ pub struct ObserveResponse {
 pub struct ObserveEventOutcome {
     #[serde(rename = "client_event_id")]
     pub idempotency_key: String,
+    pub outcome: String,
     /// The stored row, absent for a denied event: nothing was persisted.
     #[serde(default)]
     pub event: Option<StoredEventRef>,
@@ -210,11 +210,39 @@ impl ObserveEventOutcome {
 pub struct MeResponse {
     #[serde(default)]
     pub workspaces: Vec<MeWorkspace>,
+    #[serde(default)]
+    pub projects: Vec<MeProject>,
+    #[serde(default)]
+    pub anchors: Vec<MeAnchor>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct MeWorkspace {
     pub id: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct MeProject {
+    pub id: String,
+    pub workspace_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct MeAnchor {
+    pub scope_id: String,
+    pub source: String,
+}
+
+impl MeResponse {
+    fn principal_scope_id(&self) -> Result<&str, String> {
+        self.anchors
+            .iter()
+            .find(|anchor| anchor.source == "principal_scope")
+            .map(|anchor| anchor.scope_id.as_str())
+            .ok_or_else(|| {
+                "/v1/me named no principal scope for private evaluation Knowledge".to_owned()
+            })
+    }
 }
 
 /// `POST /v1/workspaces`.
@@ -228,6 +256,8 @@ pub struct NewWorkspaceRequest<'a> {
 #[derive(Debug, Serialize)]
 pub struct OpenSessionRequest<'a> {
     pub workspace_id: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<&'a str>,
     pub client_name: &'a str,
     pub external_session_id: &'a str,
 }
@@ -237,6 +267,64 @@ pub struct OpenSessionRequest<'a> {
 #[derive(Debug, Deserialize)]
 pub struct SessionRef {
     pub id: String,
+}
+
+/// One explicit session-capture job. Evaluation never treats extraction as
+/// publication: it waits for this candidate-only batch and then reviews the
+/// candidates through the same public VedaFlow-backed action as the product.
+#[derive(Debug, Clone, Deserialize)]
+pub struct CaptureBatchRef {
+    pub id: String,
+    pub state: String,
+    pub candidate_count: i32,
+    #[serde(default)]
+    pub error_code: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct CaptureCandidateRef {
+    pub id: String,
+    pub state: String,
+    pub proposed_scope_id: String,
+    pub content: serde_json::Value,
+    pub source_event_ids: Vec<String>,
+    #[serde(default)]
+    pub resulting_change_id: Option<String>,
+    #[serde(default)]
+    pub resulting_outcome: Option<String>,
+    #[serde(default)]
+    pub resulting_knowledge_item_id: Option<String>,
+    #[serde(default)]
+    pub resulting_revision_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CaptureCandidatePage {
+    candidates: Vec<CaptureCandidateRef>,
+    next_cursor: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CaptureDecisionRef {
+    candidate: CaptureCandidateRef,
+}
+
+/// Optional governed edits made while accepting a candidate. This is how the
+/// Q&A/security corpora place their premise through the current Knowledge
+/// mutation path; it is not a database fixture or a post-publication move.
+#[derive(Debug, Clone)]
+pub struct CaptureReplacement {
+    pub item_id: String,
+    pub revision_id: String,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CaptureAcceptOptions<'a> {
+    pub scope_id: Option<&'a str>,
+    pub sensitivity: Option<&'a str>,
+    /// Source event id to the exact current Knowledge head it supersedes.
+    /// The candidate API, not the extractor, performs the governed change.
+    pub replacements: Option<&'a BTreeMap<String, CaptureReplacement>>,
 }
 
 /// Diagnostic, cursor-paginated enumeration over one session's Knowledge
@@ -284,7 +372,6 @@ struct KnowledgeQueryEntry {
 #[derive(Debug, Deserialize)]
 struct KnowledgeWireItem {
     id: String,
-    scope_id: String,
     knowledge_type: String,
     current_revision: KnowledgeWireRevision,
 }
@@ -307,6 +394,11 @@ impl KnowledgeQueryResponse {
             .items
             .into_iter()
             .map(|entry| {
+                let source_event_ids = entry
+                    .sources
+                    .iter()
+                    .filter_map(|source| source.session_event_id.clone())
+                    .collect::<Vec<_>>();
                 let mut provenance = entry
                     .sources
                     .first()
@@ -324,9 +416,9 @@ impl KnowledgeQueryResponse {
                 }
                 RecallEntry {
                     record_id: entry.knowledge.id,
-                    scope_id: entry.knowledge.scope_id,
                     class: entry.knowledge.knowledge_type,
                     content: entry.knowledge.current_revision.body_markdown,
+                    source_event_ids,
                     provenance,
                 }
             })
@@ -364,11 +456,6 @@ pub struct RecallResponse {
 #[derive(Debug, Deserialize)]
 pub struct RecallEntry {
     pub record_id: String,
-    /// Where the record lives. EVAL-4 needs it as a promotion's
-    /// `source_scope_id`: material sits at its author's personal leaf, and
-    /// naming that leaf is how a climb says where it is coming from
-    /// (ADR-0034 decision 2).
-    pub scope_id: String,
     pub class: String,
     /// Untruncated: recall does not elide what the caller named
     /// (ADR-0041 decision 7).
@@ -377,6 +464,11 @@ pub struct RecallEntry {
     /// (seed §4.2). The attribution key and the model identity both live
     /// here.
     pub provenance: serde_json::Value,
+    /// Every exact session-event source authorised on this Knowledge result.
+    /// A revision may merge provenance; retaining only the first source would
+    /// make the evaluation join silently lose evidence.
+    #[serde(default)]
+    pub source_event_ids: Vec<String>,
 }
 
 impl RecallEntry {
@@ -385,7 +477,17 @@ impl RecallEntry {
     /// material written by a path that did not record it would be
     /// attributed to nothing rather than to the wrong fixture.
     pub fn source_event_id(&self) -> Option<&str> {
-        self.provenance.get("event_id")?.as_str()
+        self.source_event_ids
+            .first()
+            .map(String::as_str)
+            .or_else(|| self.provenance.get("event_id")?.as_str())
+    }
+
+    /// All exact source events, preserving the public response's provenance
+    /// order. Callers doing attribution must use this rather than assuming a
+    /// revision has only one source.
+    pub fn source_event_ids(&self) -> impl Iterator<Item = &str> {
+        self.source_event_ids.iter().map(String::as_str)
     }
 
     pub fn source_session_id(&self) -> Option<&str> {
@@ -399,79 +501,12 @@ impl RecallEntry {
     }
 }
 
-/// `POST /v1/proposals` (FLOW-3/FLOW-5, ADR-0032/ADR-0034) — a climb.
-///
-/// EVAL-4 needs this because nothing else can put material above a leaf:
-/// observe writes land at the caller's home scope (ADR-0020) and a service
-/// identity's home is a `principal`-shaped scope under its anchor (ADR-0018
-/// decision 2), so a corpus that spans scope tiers is a corpus that was
-/// promoted through review (ADR-0047 decision 3).
-#[derive(Debug, Serialize)]
-pub struct ProposalRequest<'a> {
-    /// The scope whose published channel would move. Requirements resolve
-    /// here and only here.
-    pub scope_id: &'a str,
-    /// Where the material is now — the author's own leaf. Must be the
-    /// target or a descendant of it.
-    pub source_scope_id: &'a str,
-    pub record_ids: Vec<String>,
-    pub title: String,
-    /// What running this proposal would do. Absent is `published`, which
-    /// is what a climb is. `classify` is EVAL-5's (ADR-0048 decision 7):
-    /// the only mechanism in the product that installs a tier above the
-    /// working one, and therefore the only way a leak suite can have
-    /// `restricted` material whose premise is real.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub effect: Option<&'a str>,
-    /// The tier a `classify` proposal installs. Required for that effect
-    /// and refused for any other — a publication does not move a tier.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub sensitivity: Option<&'a str>,
-}
-
 #[derive(Debug, Deserialize)]
 pub struct Proposal {
-    pub id: String,
     /// Exact immutable commit a verdict must echo.
     pub commit: String,
     /// `open` | `approved` | `rejected` | `withdrawn` | `published`.
     pub state: String,
-    /// What the proposal still lacks, in the pack's own words. The runner
-    /// approves until this says `nothing` rather than hard-coding the
-    /// approval matrix, so a pack that asks for a different set is
-    /// followed rather than fought (ADR-0032).
-    #[serde(default)]
-    pub outstanding: String,
-    #[serde(default)]
-    pub target_scope_path: String,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct Published {
-    pub scope_id: String,
-    pub commit: String,
-    /// How many records the publication added to the channel.
-    pub added: usize,
-}
-
-/// `GET /v1/audit/events` (AUD-2, ADR-0045 decision 3).
-#[derive(Debug, Deserialize)]
-pub struct AuditEventsResponse {
-    pub events: Vec<AuditEvent>,
-    pub truncated: bool,
-    pub next_cursor: Option<i64>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct AuditEvent {
-    /// The chain position this fact was read at, so an attribution number
-    /// names the range it came from rather than floating free.
-    pub seq: i64,
-    /// `success` or `failure`. A failed `memory.extracted` is a
-    /// dead-lettered event — a different fact from "extracted no records",
-    /// and one that must not read as the latter.
-    pub outcome: String,
-    pub payload: serde_json::Value,
 }
 
 /// A call's result and what it cost, because the cost is a measurement.
@@ -485,15 +520,31 @@ pub struct Timed<T> {
 }
 
 impl Client {
-    pub fn new(gateway_url: &str) -> Result<Self, String> {
+    pub fn new(environment: &Environment) -> Result<Self, String> {
         let http = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(5))
             .timeout(TIMEOUT)
             .build()
             .map_err(|err| format!("build the HTTP client: {err}"))?;
+        let session_selections = environment
+            .actors
+            .values()
+            .filter_map(|actor| {
+                actor.workspace_id.as_ref().map(|workspace_id| {
+                    (
+                        actor.token.clone(),
+                        SessionSelection {
+                            workspace_id: workspace_id.clone(),
+                            project_id: actor.project_id.clone(),
+                        },
+                    )
+                })
+            })
+            .collect();
         Ok(Self {
-            gateway_url: gateway_url.trim_end_matches('/').to_owned(),
+            gateway_url: environment.gateway_url.trim_end_matches('/').to_owned(),
             http,
+            session_selections,
         })
     }
 
@@ -509,27 +560,38 @@ impl Client {
     /// and keys its calls on the real id. Idempotent, so a scenario re-run
     /// lands on the run it opened last time.
     pub async fn session_for(&self, bearer: &str, label: &str) -> Result<String, String> {
-        let me = self.me(bearer).await?;
-        let workspace = match me.workspaces.first() {
-            Some(workspace) => workspace.id.clone(),
-            None => {
-                self.create_workspace(
-                    bearer,
-                    &NewWorkspaceRequest {
-                        slug: "eval",
-                        display_name: "eval",
-                    },
-                )
-                .await?
-                .value
-                .id
-            }
+        let (workspace, project) = if let Some(selection) = self.session_selections.get(bearer) {
+            (selection.workspace_id.clone(), selection.project_id.clone())
+        } else {
+            let me = self.me(bearer).await?;
+            let workspace = match me.workspaces.first() {
+                Some(workspace) => workspace.id.clone(),
+                None => {
+                    self.create_workspace(
+                        bearer,
+                        &NewWorkspaceRequest {
+                            slug: "eval",
+                            display_name: "eval",
+                        },
+                    )
+                    .await?
+                    .value
+                    .id
+                }
+            };
+            let project = me
+                .projects
+                .iter()
+                .find(|project| project.workspace_id == workspace)
+                .map(|project| project.id.clone());
+            (workspace, project)
         };
         Ok(self
             .open_session(
                 bearer,
                 &OpenSessionRequest {
                     workspace_id: &workspace,
+                    project_id: project.as_deref(),
                     client_name: "synveda-eval",
                     external_session_id: label,
                 },
@@ -592,6 +654,134 @@ impl Client {
     ) -> Result<Timed<ObserveResponse>, String> {
         self.post(&format!("/v1/sessions/{session}/events"), bearer, request)
             .await
+    }
+
+    /// Freeze, await and review one session snapshot through the public
+    /// capture and Knowledge/VedaFlow APIs. A deterministic rerun resolves to
+    /// the same batch and terminal decisions through idempotency.
+    pub async fn capture_and_accept(
+        &self,
+        bearer: &str,
+        session: &str,
+        key: &str,
+        timeout: Duration,
+        options: CaptureAcceptOptions<'_>,
+    ) -> Result<Vec<CaptureCandidateRef>, String> {
+        let path = format!("/v1/sessions/{session}/capture-batches");
+        let started: Timed<CaptureBatchRef> = self
+            .post_idempotent(&path, bearer, &serde_json::json!({}), key)
+            .await?;
+        let batch_id = started.value.id;
+        let began = Instant::now();
+        let batch = loop {
+            let batch: CaptureBatchRef = self
+                .get(&format!("/v1/capture-batches/{batch_id}"), bearer, &[])
+                .await?;
+            match batch.state.as_str() {
+                "completed" => break batch,
+                "failed" => {
+                    return Err(format!(
+                        "capture batch {batch_id} failed: {}",
+                        batch.error_code.as_deref().unwrap_or("unknown")
+                    ));
+                }
+                _ if began.elapsed() >= timeout => {
+                    return Err(format!(
+                        "capture batch {batch_id} did not complete within {}s",
+                        timeout.as_secs()
+                    ));
+                }
+                _ => tokio::time::sleep(Duration::from_millis(250)).await,
+            }
+        };
+        let page: CaptureCandidatePage = self
+            .get(
+                "/v1/capture-candidates",
+                bearer,
+                &[
+                    ("batch_id".to_owned(), batch_id.clone()),
+                    ("limit".to_owned(), "200".to_owned()),
+                ],
+            )
+            .await?;
+        if page.next_cursor.is_some() || page.candidates.len() != batch.candidate_count as usize {
+            return Err(format!(
+                "capture batch {batch_id} reports {} candidates but its one bounded page served {}{}",
+                batch.candidate_count,
+                page.candidates.len(),
+                if page.next_cursor.is_some() {
+                    " with another page"
+                } else {
+                    ""
+                }
+            ));
+        }
+
+        // A generic corpus seed is private to its author. Shared Q&A and
+        // security fixtures name their governed target explicitly below; an
+        // omitted target must not silently publish into the session workspace
+        // and turn a deterministic eval into an outstanding review queue.
+        let private_scope = if options.scope_id.is_none() {
+            let me = self.me(bearer).await?;
+            Some(me.principal_scope_id()?.to_owned())
+        } else {
+            None
+        };
+        let target_scope = options.scope_id.or(private_scope.as_deref());
+
+        let mut accepted = Vec::with_capacity(page.candidates.len());
+        for candidate in page.candidates {
+            if candidate.state != "pending" {
+                accepted.push(candidate);
+                continue;
+            }
+            let mut edits = serde_json::json!({});
+            if let Some(scope_id) = target_scope {
+                edits["scope_id"] = serde_json::Value::String(scope_id.to_owned());
+                // A project association is valid only at that project's own
+                // governing scope. Moving a session candidate to its author's
+                // private scope, a workspace, or the tenant must explicitly
+                // clear the session project; omission means "retain" on this
+                // tri-state API.
+                if scope_id != candidate.proposed_scope_id {
+                    edits["project_id"] = serde_json::Value::Null;
+                }
+            }
+            if let Some(sensitivity) = options.sensitivity {
+                let mut content = candidate.content.clone();
+                content["sensitivity"] = serde_json::Value::String(sensitivity.to_owned());
+                edits["content"] = content;
+            }
+            let replacement = options.replacements.and_then(|replacements| {
+                candidate
+                    .source_event_ids
+                    .iter()
+                    .find_map(|event_id| replacements.get(event_id))
+            });
+            let (action, body) = replacement.map_or_else(
+                || ("accept", edits.clone()),
+                |target| {
+                    (
+                        "replace",
+                        serde_json::json!({
+                            "item_id": target.item_id,
+                            "expected_revision_id": target.revision_id,
+                            "replacement": edits,
+                        }),
+                    )
+                },
+            );
+            let decision: Timed<CaptureDecisionRef> = self
+                .post_idempotent(
+                    &format!("/v1/capture-candidates/{}/{action}", candidate.id),
+                    bearer,
+                    &body,
+                    &format!("eval-{action}-{}", candidate.id),
+                )
+                .await?;
+            accepted.push(decision.value.candidate);
+        }
+        Ok(accepted)
     }
 
     /// Enumerates the current visible Knowledge corpus through the diagnostic
@@ -731,14 +921,6 @@ impl Client {
         })
     }
 
-    pub async fn propose(
-        &self,
-        bearer: &str,
-        request: &ProposalRequest<'_>,
-    ) -> Result<Timed<Proposal>, String> {
-        self.post("/v1/proposals", bearer, request).await
-    }
-
     /// One approver's verdict. The caller repeats this with a different
     /// bearer until the proposal leaves `open`, because how many distinct
     /// approvers and which roles is the pack's answer, not the harness's.
@@ -754,39 +936,20 @@ impl Client {
         .await
     }
 
-    /// Runs the approved proposal's effect. Takes `MemoryRead` as well as
-    /// the review authority — nobody publishes what they cannot read
-    /// (ADR-0031 decision 12) — so it is the curator's call and never the
-    /// steward's.
-    pub async fn publish(&self, bearer: &str, proposal: &str) -> Result<Timed<Published>, String> {
+    /// Applies an approved typed VedaFlow change. Unlike `publish`, this is
+    /// the current aggregate-command route used by Knowledge, Skills, Tools
+    /// and governed Configuration.
+    pub async fn apply(
+        &self,
+        bearer: &str,
+        proposal: &str,
+    ) -> Result<Timed<serde_json::Value>, String> {
         self.post(
-            &format!("/v1/proposals/{proposal}/publish"),
+            &format!("/v1/proposals/{proposal}/apply"),
             bearer,
             &serde_json::json!({}),
         )
         .await
-    }
-
-    /// One page of the chain, filtered to a single action. Paging is the
-    /// caller's — `next_cursor` back in as `after` — because a helper that
-    /// swallowed the pages would also swallow `truncated`, and a truncation
-    /// nobody sees is the failure this whole surface refuses (ADR-0045
-    /// decision 9).
-    pub async fn audit_events(
-        &self,
-        bearer: &str,
-        action: &str,
-        after: Option<i64>,
-        limit: usize,
-    ) -> Result<AuditEventsResponse, String> {
-        let mut query = vec![
-            ("action".to_owned(), action.to_owned()),
-            ("limit".to_owned(), limit.to_string()),
-        ];
-        if let Some(after) = after {
-            query.push(("after".to_owned(), after.to_string()));
-        }
-        self.get("/v1/audit/events", bearer, &query).await
     }
 
     async fn get<T: serde::de::DeserializeOwned>(
@@ -936,14 +1099,45 @@ mod tests {
         );
     }
 
-    /// Where `record_ids` comes from now (CPR-12): a context run's body is
-    /// minimal by ADR-0076 decision 7 and does not carry them, so they are
-    /// read back off the block's own watermark — the line where a block
-    /// names what it composed.
     #[test]
-    fn record_ids_are_recovered_from_the_watermark() {
+    fn knowledge_results_preserve_every_authorised_source_event() {
+        let wire: KnowledgeQueryResponse = serde_json::from_value(serde_json::json!({
+            "items": [{
+                "knowledge": {
+                    "id": "k1",
+                    "knowledge_type": "fact",
+                    "current_revision": {"body_markdown": "body"}
+                },
+                "sources": [
+                    {"session_event_id": "event-1", "metadata": {"source": "first"}},
+                    {"session_event_id": "event-2", "metadata": {"source": "second"}}
+                ]
+            }],
+            "retrieval_mode": "ids",
+            "next_cursor": null
+        }))
+        .expect("Knowledge query response");
+        let response = wire.into_eval("ids");
+        let entry = &response.entries[0];
+        assert_eq!(
+            entry.source_event_ids().collect::<Vec<_>>(),
+            vec!["event-1", "event-2"]
+        );
+        assert_eq!(entry.source_event_id(), Some("event-1"));
+        assert_eq!(entry.provenance["source"], "first");
+    }
+
+    /// Current Knowledge addresses, rather than the deleted Record watermark,
+    /// are the only authority for what a context run composed. Content may
+    /// quote old marker syntax and must never be allowed to forge this join.
+    #[test]
+    fn record_ids_are_recovered_from_current_knowledge_addresses_only() {
         let mut block = InjectResponse {
-            text: "…\n<!-- synveda block=b3 records=r1, r2 -->".to_owned(),
+            text: concat!(
+                "… records=forged --><!\n",
+                "[Synveda Knowledge: knowledge:r1@v1,unreviewed:c1,knowledge:r2@v2]\n"
+            )
+            .to_owned(),
             block_hash: "b3".to_owned(),
             record_ids: Vec::new(),
             tiers: Vec::new(),
@@ -956,8 +1150,8 @@ mod tests {
         block.hydrate();
         assert_eq!(block.record_ids, vec!["r1".to_owned(), "r2".to_owned()]);
 
-        // A block that composed nothing says so, and must not read as one
-        // record literally named "none".
+        // A body that only carries obsolete Record marker syntax has no
+        // current Knowledge address and therefore cannot forge attribution.
         let mut empty = InjectResponse {
             text: "<!-- synveda block=b3 records=none -->".to_owned(),
             record_ids: vec!["stale".to_owned()],
@@ -973,10 +1167,9 @@ mod tests {
     /// the whole suite turns on.
     #[test]
     fn a_records_tier_reads_by_position_and_absence_is_its_own_answer() {
-        // Built rather than parsed: `record_ids` and `tiers` are no longer
-        // on the wire, so a JSON fixture here would be testing a body no
-        // gateway sends. The positional join is what this asserts, and
-        // Prompt 18 is what has to make the fields real again.
+        // Built rather than parsed: addresses and the current all-body tier
+        // are hydrated from the watermark, not duplicated on the wire. The
+        // positional join itself is still what this unit asserts.
         let block = InjectResponse {
             text: "…".to_owned(),
             block_hash: "b3".to_owned(),

@@ -6,13 +6,9 @@
 //! through the separately authorised, session-scoped Knowledge evaluation
 //! lens. Every item is still decided exactly by the PDP.
 //!
-//! **Two lenses, two questions** (decision 4). The sweep says what a
-//! *reader is served*; `GET /v1/audit/events?action=memory.extracted` says
-//! what the *pipeline committed*. `admit` applies tiers, horizons and
-//! MEM-5's valid-window predicate, so those are not the same set, and the
-//! difference between them is reported as its own number rather than
-//! absorbed into the served lens. The gated axes come from the sweep, because that
-//! is the product claim.
+//! Candidate decisions provide the write-side attribution and the diagnostic
+//! Knowledge sweep says what a reader is served. The two counts remain
+//! separate: accepted output is not evidence that retrieval served it.
 //!
 //! CPR-20 restores that enumeration without restoring tenant-global recall:
 //! the evaluation route derives its project and authority from a real session,
@@ -23,26 +19,18 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::{Duration, Instant};
 
-use crate::client::{Client, KnowledgeSweepRequest, ObserveEvent, ObserveRequest};
+use crate::client::{
+    CaptureAcceptOptions, Client, KnowledgeSweepRequest, ObserveEvent, ObserveRequest,
+};
 use crate::fixtures::{CLASSES, Fixture, Group};
 use crate::report::{ClassCounts, ExtractionOutcome};
+use crate::runner::apply_candidate;
 use crate::scenario::Environment;
-
-/// The actor the audit lens reads as. A tenant-wide `auditor` binding on a
-/// dev-mode *subject* — never a service identity, which AUTH-3's
-/// confinement forbid denies the tenant plane however it is bound
-/// (ADR-0045).
-pub const AUDITOR_ACTOR: &str = "auditor";
 
 /// What one sweep asks for. The surface caps a sweep at this, so asking
 /// for exactly it and receiving exactly it is the ambiguity decision 3
 /// refuses to measure through.
 const SWEEP_LIMIT: usize = 32;
-
-/// How many chain rows a page of the audit lens asks for.
-const AUDIT_PAGE: usize = 500;
-
-const POLL: Duration = Duration::from_millis(500);
 
 pub struct Options {
     pub seed_timeout: Duration,
@@ -59,21 +47,13 @@ pub async fn run_group(
 ) -> Result<ExtractionOutcome, String> {
     let mut outcome = ExtractionOutcome::new(group);
     let bearer = &environment.actor(&group.actor)?.token;
-    let auditor = &environment
-        .actors
-        .get(AUDITOR_ACTOR)
-        .ok_or_else(|| {
-            format!(
-                "the environment names no `{AUDITOR_ACTOR}` actor; the extraction suite reads \
-                 `GET /v1/audit/events` to attribute what the pipeline committed (ADR-0046 \
-                 decision 4)"
-            )
-        })?
-        .token;
 
-    // Seed. One call per fixture, because a run is the fixture's own label —
-    // opened here rather than sent as a string (CPR-12, ADR-0078).
+    // Seed and explicitly review. Extraction creates candidates only; this
+    // harness accepts them through the public VedaFlow-backed action before
+    // asking the separately authorised Knowledge evaluation lens.
     let mut event_ids: BTreeMap<String, String> = BTreeMap::new();
+    let mut materialised: BTreeMap<String, Materialised> = BTreeMap::new();
+    let capture_started = Instant::now();
     for fixture in &group.fixtures {
         let session = client
             .session_for(bearer, &fixture.input.session_id)
@@ -113,14 +93,29 @@ pub async fn run_group(
                 )
             })?;
         event_ids.insert(event_id, fixture.name.clone());
+        let reviewed = client
+            .capture_and_accept(
+                bearer,
+                &session,
+                &format!("eval-extraction-{}", fixture.name),
+                options.seed_timeout,
+                CaptureAcceptOptions::default(),
+            )
+            .await?;
+        for candidate in reviewed {
+            if let Err(error) =
+                apply_candidate(client, environment, &candidate, &fixture.name).await
+            {
+                outcome.failures.push(error);
+                continue;
+            }
+            for source in candidate.source_event_ids {
+                let slot = materialised.entry(source).or_default();
+                slot.records += 1;
+            }
+        }
     }
-
-    // Wait for the pipeline to be *done*, which the chain states exactly:
-    // every seeded event appears in a `memory.extracted` payload whether it
-    // produced records or not. Polling the sweep instead would be waiting
-    // for an unknown number of records to appear, which is the thing under
-    // measurement.
-    let committed = wait_for_pipeline(client, auditor, &event_ids, options, &mut outcome).await?;
+    outcome.seed_wait_ms = round(capture_started.elapsed().as_secs_f64() * 1000.0);
 
     // Sweep, as the group's own actor.
     //
@@ -290,30 +285,25 @@ pub async fn run_group(
         }
     }
 
-    // The attribution column: what the pipeline committed against what the
-    // reader was served, and the merges that explain part of any gap.
+    // The attribution column: what candidate review materialised against
+    // what the reader was served.
     for (event_id, name) in &event_ids {
-        match committed.get(event_id.as_str()) {
+        match materialised.get(event_id.as_str()) {
             Some(entry) => {
                 outcome.committed_records += entry.records;
-                outcome.merged_records += entry.merged;
-                if entry.dead_lettered {
-                    outcome.failures.push(format!(
-                        "the pipeline dead-lettered `{name}` at chain seq {}: the event was lost \
-                         rather than found empty, and grading it as a miss would blame the \
-                         corpus for a broken pipeline",
-                        entry.seq
-                    ));
-                }
-                outcome.chain_from = match outcome.chain_from {
-                    0 => entry.seq,
-                    lowest => lowest.min(entry.seq),
-                };
-                outcome.chain_to = outcome.chain_to.max(entry.seq);
+            }
+            None if group
+                .fixtures
+                .iter()
+                .find(|fixture| &fixture.name == name)
+                .is_some_and(|fixture| fixture.expected.is_empty()) =>
+            {
+                // Zero candidates is the asserted write-side outcome for a
+                // fixture whose ground truth contains no durable Knowledge.
             }
             None => outcome.failures.push(format!(
-                "the chain records no extraction for `{name}`, so what the pipeline did with it \
-                 is unknown"
+                "candidate review materialised no Knowledge for `{name}`, so the write-side \
+                 outcome is unknown"
             )),
         }
     }
@@ -322,102 +312,10 @@ pub async fn run_group(
     Ok(outcome)
 }
 
-/// What one `memory.extracted` payload says about one observe event.
+/// What accepted capture candidates materialised for one source event.
 #[derive(Clone, Copy, Default)]
-pub struct Committed {
+struct Materialised {
     pub records: usize,
-    pub merged: usize,
-    /// The event reached a `failure` outcome — retries exhausted, and the
-    /// pipeline gave up on it. Deliberately distinct from "committed zero
-    /// records": one is a legal outcome and the other is a lost event, and
-    /// a suite that conflated them would grade a broken pipeline as a
-    /// corpus the extractor found nothing in.
-    pub dead_lettered: bool,
-    /// Where on the chain this was read, so the attribution names its
-    /// source (ADR-0045 decision 9's discipline, from the consumer's side).
-    pub seq: i64,
-}
-
-/// Polls the chain until every seeded event has been extracted — or the
-/// timeout, at which point the group is graded anyway and fails on a named
-/// reason. A stuck pipeline should read as "quality collapsed", because to
-/// the person whose session it is, that is what happened.
-async fn wait_for_pipeline(
-    client: &Client,
-    auditor: &str,
-    event_ids: &BTreeMap<String, String>,
-    options: &Options,
-    outcome: &mut ExtractionOutcome,
-) -> Result<BTreeMap<String, Committed>, String> {
-    let started = Instant::now();
-    loop {
-        let committed = read_committed(client, auditor).await?;
-        let missing: Vec<&str> = event_ids
-            .iter()
-            .filter(|(event_id, _)| !committed.contains_key(event_id.as_str()))
-            .map(|(_, name)| name.as_str())
-            .collect();
-        if missing.is_empty() {
-            outcome.seed_wait_ms = round(started.elapsed().as_secs_f64() * 1000.0);
-            return Ok(committed);
-        }
-        if started.elapsed() >= options.seed_timeout {
-            outcome.failures.push(format!(
-                "the pipeline never finished with {} event(s) within {}s: {}",
-                missing.len(),
-                options.seed_timeout.as_secs(),
-                missing.join(", ")
-            ));
-            outcome.seed_wait_ms = round(started.elapsed().as_secs_f64() * 1000.0);
-            return Ok(committed);
-        }
-        tokio::time::sleep(POLL).await;
-    }
-}
-
-/// Every `memory.extracted` entry on the chain, keyed by observe event.
-/// Pages explicitly: a helper that swallowed `truncated` would report a
-/// partial chain as a complete one.
-pub async fn read_committed(
-    client: &Client,
-    auditor: &str,
-) -> Result<BTreeMap<String, Committed>, String> {
-    let mut found: BTreeMap<String, Committed> = BTreeMap::new();
-    let mut after: Option<i64> = None;
-    loop {
-        let page = client
-            .audit_events(auditor, "memory.extracted", after, AUDIT_PAGE)
-            .await?;
-        for event in &page.events {
-            let entries = event
-                .payload
-                .get("events")
-                .and_then(serde_json::Value::as_array);
-            for entry in entries.into_iter().flatten() {
-                let Some(event_id) = entry.get("event_id").and_then(serde_json::Value::as_str)
-                else {
-                    continue;
-                };
-                let records = entry
-                    .get("records")
-                    .and_then(serde_json::Value::as_u64)
-                    .unwrap_or(0) as usize;
-                let merged = entry
-                    .get("merged")
-                    .and_then(serde_json::Value::as_array)
-                    .map_or(0, Vec::len);
-                let slot = found.entry(event_id.to_owned()).or_default();
-                slot.records += records;
-                slot.merged += merged;
-                slot.dead_lettered |= event.outcome != "success";
-                slot.seq = event.seq;
-            }
-        }
-        match page.next_cursor {
-            Some(cursor) if page.truncated => after = Some(cursor),
-            _ => return Ok(found),
-        }
-    }
 }
 
 /// The extraction axes, reduced over every group (decision 5 and 6).

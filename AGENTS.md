@@ -75,7 +75,7 @@ Phase 5 — context platform redesign, since 2026-08-17, on
 `feat/context-platform-mvp`. Phase 3 is paused mid-phase, not finished —
 OPS-9, OPS-10, TEN-5,6, AUD-3,4, EVAL-6, CTX-7, OPS-3,4, ADPT-3,
 CTX-6 and FLOW-8 are still open, and no live Entra/Okta tenant or real
-  Cursor frame has been replayed. **136 features filed, 105 delivered**;
+  Cursor frame has been replayed. **137 features filed, 106 delivered**;
 STATUS.md and `make check-backlog` are the authority on the count — the
 headline number has drifted four times, the fourth being this file itself,
 which still read 104/71 after CPR-8 filed the 105th. That is why the
@@ -239,6 +239,22 @@ Load-bearing facts about Phase 5:
   VS Code 1.133.0 is not a substitute: its Preview contract has no SessionEnd
   and the profile is unauthenticated. No replay or config recipe is called
   live verification.
+- CPR-40 (ADR-0099) is delivered: the deterministic product/trust suite has eighteen exact
+  cases, eight separate delivery/use/outcome signals and six zero-count trust
+  gates. The inherited evaluation path now uses sessions, governed capture,
+  immutable Knowledge and separately authorised query/evaluation lenses over
+  principal/project/workspace/tenant scopes. One-line JSON context entries and
+  current Knowledge addresses prevent supplied Markdown from forging
+  structural attribution. The default run passes 6 scenarios, 50 extraction
+  fixtures, every QA tier and 1,276 security probes/400 variants with all leak
+  and unattributed-line counts zero; ruleset `builtin@4` measures 0.983 macro
+  precision and 0.914 recall. BGE-M3 and 10k security pass. The authentic
+  Stage-H slice delivers all 4,927 turns and measures all ten instances with
+  zero empty or unattributed blocks; retrieval recall is 0.643 and every
+  evidence session still absent after the fixed 1,800-second readiness window
+  is reported by name. Its disposable `lme-*` actors use an explicitly
+  enforced two-hour lifetime; every ordinary run retains the one-hour default.
+  Model extraction remains unmeasured without a credential or vLLM endpoint.
 - CPR-10 (ADR-0076): **a run is a record**. `sessions`, `session_events` and
   `session_context_runs` replace `session_id: text`; the governed scope a run
   is decided at is derived from its workspace and project by composite keys

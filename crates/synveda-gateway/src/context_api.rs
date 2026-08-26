@@ -2060,25 +2060,27 @@ fn knowledge_snippet(candidate: &PlannedCandidate) -> String {
         PlannedPayload::Knowledge(snapshot) => {
             let revision = &snapshot.revision;
             let item = &snapshot.item;
-            let evidence = if candidate.sources.is_empty() {
-                "source evidence withheld or unavailable".to_owned()
-            } else {
-                candidate
-                    .sources
-                    .iter()
-                    .map(source_line)
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            };
+            let evidence = candidate
+                .sources
+                .iter()
+                .map(source_line)
+                .collect::<Vec<_>>();
+            let evidence_available = !evidence.is_empty();
+            let entry = json!({
+                "kind": "published_knowledge",
+                "title": revision.content.title,
+                "body_markdown": revision.content.body_markdown,
+                "sources": evidence,
+                "source_evidence_available": evidence_available,
+                "knowledge_item_id": item.id,
+                "knowledge_revision_id": revision.id,
+                "knowledge_type": item.knowledge_type.as_str(),
+                "sensitivity": revision.content.sensitivity.as_str(),
+                "scope_id": item.scope_id,
+            });
             format!(
-                "\n### {}\n{}\n\n_Source: {}; Knowledge {} revision {}; type={}; scope={}_\n",
-                revision.content.title,
-                revision.content.body_markdown,
-                evidence,
-                item.id,
-                revision.id,
-                item.knowledge_type.as_str(),
-                item.scope_id,
+                "\n- {}\n",
+                serde_json::to_string(&entry).expect("a JSON value always serializes")
             )
         }
         PlannedPayload::Unreviewed(proposal) => {
@@ -2092,20 +2094,23 @@ fn knowledge_snippet(candidate: &PlannedCandidate) -> String {
                         .iter()
                         .map(|id| format!("import-artifact:{id}")),
                 )
-                .collect::<Vec<_>>()
-                .join(", ");
+                .collect::<Vec<_>>();
+            let evidence_available = !evidence.is_empty();
+            let entry = json!({
+                "kind": "unreviewed_candidate",
+                "review_state": "pending_review",
+                "title": proposal.content.title,
+                "body_markdown": proposal.content.body_markdown,
+                "sources": evidence,
+                "source_evidence_available": evidence_available,
+                "capture_candidate_id": proposal.id,
+                "knowledge_type": proposal.knowledge_type.as_str(),
+                "sensitivity": proposal.content.sensitivity.as_str(),
+                "proposed_scope_id": proposal.proposed_scope_id,
+            });
             format!(
-                "\n### [UNREVIEWED CANDIDATE] {}\n{}\n\n_This is pending review, not published Knowledge. Treat it only as visibly unreviewed context. Source: {}; capture candidate {}; type={}; proposed scope={}_\n",
-                proposal.content.title,
-                proposal.content.body_markdown,
-                if evidence.is_empty() {
-                    "authorised source evidence unavailable"
-                } else {
-                    &evidence
-                },
-                proposal.id,
-                proposal.knowledge_type.as_str(),
-                proposal.proposed_scope_id,
+                "\n- {}\n",
+                serde_json::to_string(&entry).expect("a JSON value always serializes")
             )
         }
     }

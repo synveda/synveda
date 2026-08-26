@@ -595,9 +595,8 @@ async fn immutable_versions_bindings_and_runtime_evidence_share_one_governed_pat
     assert_eq!(run["configuration_version_id"], second_version);
     assert_eq!(run["configuration_hash"], configuration_hash);
     assert!(
-        run["rendered"]
-            .as_str()
-            .is_some_and(|rendered| rendered.contains("[UNREVIEWED CANDIDATE]")),
+        run["rendered"].as_str().is_some_and(|rendered| rendered
+            .contains(r#""kind":"unreviewed_candidate","review_state":"pending_review""#)),
         "configured candidate channel was not rendered: {run}"
     );
     assert!(

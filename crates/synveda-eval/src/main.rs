@@ -455,7 +455,7 @@ async fn run(cli: Cli) -> Result<bool, String> {
                 })
             });
             let baseline = Baseline::load(&baseline_file)?;
-            let client = Client::new(&environment.gateway_url)?;
+            let client = Client::new(&environment)?;
             let options = longmemeval_runner::Options {
                 seed_timeout: Duration::from_secs(seed_timeout_secs),
                 budget_tokens,
@@ -561,8 +561,11 @@ async fn run(cli: Cli) -> Result<bool, String> {
                     .push(longmemeval_runner::seed_instance(&suite, instance, &pool[index]).await?);
             }
             eprintln!(
-                "synveda-eval: longmemeval waiting for the pipeline to finish with {} turn(s)",
-                seeded.iter().map(|entry| entry.events.len()).sum::<usize>()
+                "synveda-eval: longmemeval waiting for accepted Knowledge from {} turn(s) to become rankable",
+                seeded
+                    .iter()
+                    .map(|entry| entry.outcome.turns - entry.outcome.empty_turns)
+                    .sum::<usize>()
             );
             longmemeval_runner::wait_for_all(&suite, &picked, &mut seeded, seeding).await?;
 
@@ -578,6 +581,7 @@ async fn run(cli: Cli) -> Result<bool, String> {
                     &suite,
                     instance,
                     &pool[index],
+                    &entry.source_events,
                     &mut entry.outcome,
                     &mut tallies,
                 )
@@ -788,7 +792,7 @@ async fn run(cli: Cli) -> Result<bool, String> {
             let boundaries = security::load_corpora(&security_dir)?;
             let baseline_file = baseline;
             let baseline = Baseline::load(&baseline_file)?;
-            let client = Client::new(&environment.gateway_url)?;
+            let client = Client::new(&environment)?;
             let seed_timeout = Duration::from_secs(seed_timeout_secs);
             let options = Options { seed_timeout };
 

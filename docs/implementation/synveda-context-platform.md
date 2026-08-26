@@ -53,12 +53,13 @@ programme convention established in Prompt 1.
 | One gateway/schema/contract and forced-RLS runtime login across installed host, Compose and Helm | CPR-36 | **complete** | `2e70aaf` | `ca3730f` | init 19/19 including DB/RLS; deploy checker 4/4; epoch 10/10; OpenAPI 6/6; Helm lint/render PASS | PASS | PASS (`synveda_test_77612`) | isolated `demos/cpr-36-deployment-convergence.sh` PASS; two Compose + Helm renders; repeat-package upgrade check; 84-script drift gate PASS | no kind cluster rerun in this package; existing OPS-2 gate remains authoritative |
 | Durable conflict evidence, governed resolution, evaluated freshness and bitemporal Knowledge query | CPR-37 | **complete** | `ca3730f` | `7951d77` | Knowledge types 7/7; lifecycle 5/5; capture API 4/4; ingest 2/2; context 3/3; OKF 2/2; RLS 83/83; OpenAPI 6/6; console 215/215 | PASS | PASS (`synveda_test_85309`, removed) | isolated `demos/cpr-37-conflict-freshness.sh` PASS; 85-script drift gate PASS | none |
 | Anchor-first bounded Knowledge-relation expansion and re-authorised ContextRun paths | CPR-38 | **complete** | `7951d77` | `12e393a` | types 1/1; Knowledge 6/6; Configuration 1/1; ContextRun 4/4; RLS 79/79; OpenAPI 6/6; console 215/215 | PASS | PASS (`synveda_test_93371`, removed) | isolated `demos/cpr-38-bounded-graph.sh` PASS; graph-disabled miss → two-hop selected path; private endpoint absent; 84-script demo gate PASS | none |
-| Evidence-bearing client registry, conformance kit and second real-client attempt | CPR-39 | **partial — external live criterion** | `12e393a` | pending (CPR-40 ledger) | registry gate 4/4; CLI config 28/28; MCP corpus 5/5; Claude adapter 98/98; console 216/216 + build | PASS | N/A — no schema/store change | isolated `demos/cpr-39-adapter-conformance.sh` PASS; 85-script gate PASS; genuine Claude 2.1.241 evidence retained; Cursor/VS Code live not run | Cursor executable/authenticated client absent; VS Code profile unauthenticated and current Preview contract has no SessionEnd |
+| Evidence-bearing client registry, conformance kit and second real-client attempt | CPR-39 | **partial — external live criterion** | `12e393a` | `0958d69` | registry gate 4/4; CLI config 28/28; MCP corpus 5/5; Claude adapter 98/98; console 216/216 + build | PASS | N/A — no schema/store change | isolated `demos/cpr-39-adapter-conformance.sh` PASS; 85-script gate PASS; genuine Claude 2.1.241 evidence retained; Cursor/VS Code live not run | Cursor executable/authenticated client absent; VS Code profile unauthenticated and current Preview contract has no SessionEnd |
+| Deterministic context-platform product/trust evaluation and re-enabled Knowledge benchmarks | CPR-40 | **complete** | `0958d69` | pending (CPR-41 ledger) | eval 162/162; product gate 6/6; store lexical 5/5; LongMemEval 14/14; audit query 16/16; capture/config focused suites PASS | PASS | PASS (fresh disposable database; removed on success) | product 18/18 and six zero gates; default 6/6 + 50 fixtures + all QA + 1,276 probes; 10k security PASS; BGE-M3 10/10 at 0.800 bounded precision; authentic Stage H delivered 4,927 turns and measured all ten instances with zero empty/unattributed blocks and 0.643 retrieval recall | no extraction-model credential or local vLLM; that separately labelled live tier remains unmeasured |
 
-**Exact next objective:** finish CPR-39's focused/CI/demo checkpoint, record its
-external second-client blocker and normal push, then immediately file and
-complete CPR-40: the deterministic context-platform product/trust evaluation
-suite and re-enabled Knowledge query benchmarks.
+**Exact next objective:** complete and checkpoint CPR-41, the one-command
+realistic personal/team/governed PulseBoard demo. Revisit CPR-39's externally
+blocked second-client live run before programme close; do not substitute a
+configuration or replay for that evidence.
 
 ### Starting-point objective map
 
@@ -4864,4 +4865,86 @@ frontend changes, deletions, tests, and the resulting commit hash.
 - **Commit.** `feat(adapters): add conformance kit and second verified client
   (CPR-39)` on `feat/context-platform-mvp`.
 - **Commit hash.** Written by CPR-40 under the programme's next-checkpoint
+  convention.
+
+### Prompt 30 — context-platform product and trust evaluation (CPR-40)
+
+- **Selected feature and decision.** **CPR-40** starts from `0958d69` under
+  accepted ADR-0099. `evals/product/suite.json` is the single declarative
+  inventory of eighteen exact product cases, eight distinct delivery/use/
+  outcome signals and six hard zero-count trust gates. Its checker refuses a
+  missing outcome, a non-zero trust tolerance or a stale evidence test name;
+  JSON and Markdown reports name the code revision, runtime and extractor,
+  retrieval, embedding and index versions rather than presenting an
+  environment-free score.
+
+- **Current-domain cutover.** The inherited evaluator now opens real public
+  sessions in explicit product workspaces/projects, appends current
+  `message.user`/`message.assistant` events, creates candidate-only capture
+  batches, reviews candidates through VedaFlow and queries immutable current
+  Knowledge through the ordinary session query lens or the separately
+  authorised evaluation lens. Principal, project, workspace and tenant tiers
+  are real product scopes with grants; a ContextRun is never used as an
+  enumeration sweep. One-line JSON context entries carry exact Knowledge and
+  revision addresses plus authorised evidence, so supplied Markdown and an old
+  Record watermark cannot forge structure or attribution. The deterministic
+  extractor advances to `builtin@4`; lexical task queries are capped at 32
+  unique bounded terms before PostgreSQL parses them.
+
+- **Measured evidence.** The final default deterministic run passes all **6**
+  scenarios, **50** extraction fixtures (**49** governed outputs) and every QA
+  tier, with extraction macro precision/recall **0.983/0.914**, retrieval
+  precision **0.667**, p50/p95 **32.386/83.841 ms**, mean answer size **260**
+  tokens and **1,276** security probes over **400** variants; tenant, scope,
+  sensitivity, unattributed-line and watermark-gap counts are all zero. The
+  fresh-database product report passes **18/18**, records retrieved **4**,
+  selected/injected **3/3**, one of each feedback outcome, **374** selected
+  tokens, five capture candidates, four accepted and one dismissed (candidate
+  precision **0.8**), two measured ContextRun requests at **45.948** and
+  **32.005 ms**, and all six hard trust counts zero. The 10,000-variant tier
+  passes **10,876** probes and all
+  **9** controls with zero leaks, unattributed lines or watermark gaps (p50/p95
+  **31.335/79.427 ms**). Local BAAI/bge-m3 is admitted by an
+  immutable two-reviewer VedaFlow Configuration rather than an environment
+  fast path; it answers **10/10**, holds all four scope tiers at **1.0**, and
+  measures explicitly bounded retrieval precision **0.800** (final p50/p95
+  **78.170/174.550 ms**, **726.846** tokens per answer).
+
+- **Stage-H findings and honest boundary.** The authentic 264.5 MiB
+  LongMemEval slice (`blake3 cd766d50fe98`) exposed three stale harness/product
+  seams: the seeder still named deleted `transcript_delta` events; an unbounded
+  lexical expansion failed at 897 Knowledge items with `tsquery stack too
+  small`; and readiness time was counted from the start of the long seed while
+  attribution trusted removed session metadata. Current speaker events, a
+  bounded store query, a post-seed readiness clock and an exact append-ack
+  event→corpus join are now pinned by **14** LongMemEval, **5** client and **5**
+  store tests. The final corrected run delivers all **4,927** turns and
+  measures all ten instances. Its correctness gate passes: every composition
+  bound holds, with zero empty context blocks and zero unattributed records.
+  The intentionally ungated quality axes report retrieval recall **0.643**,
+  per-type score **0.577**, complete-instance rate **0.375**, p95
+  **549.277 ms** and mean context size **1,433.8** tokens. Exact evidence
+  sessions that did not become rankable within the fixed **1,800-second**
+  readiness window are named per instance rather than concealed or converted
+  into a passing score. The first post-seed attempt expired its inherited
+  one-hour token and produced no score; the fixed harness grants two hours only
+  to disposable `lme-*` actors and the successful run proves the server
+  enforces that bound. Model extraction remains separately unmeasured because
+  no Anthropic credential or local vLLM endpoint exists.
+
+- **Checkpoint gates.** Evaluator **162/162**, product checker **6/6**, store
+  lexical **5/5**, LongMemEval **14/14**, ordinary-concurrency audit query
+  **16/16**, static `make eval-check`, focused capture/configuration suites,
+  the default product, default deterministic, 10k security, BGE-M3 and
+  authentic Stage-H runs pass their declared gates. `make eval-product` owns a
+  fresh migrated scratch database and removes it on success, so a pre-hard-cut
+  developer database cannot contaminate the result. `make ci` and the complete
+  fresh-scratch `make db-test` pass on the final package tree. The audit-query
+  harness now gives each concurrent test a one-connection application and seed
+  pool, retaining normal 16-way test concurrency without exhausting the same
+  Postgres instance as Temporal.
+
+- **Commit.** `test(evaluation): add context platform benchmark suite
+  (CPR-40)` on `feat/context-platform-mvp`.
+- **Commit hash.** Written by CPR-41 under the programme's next-checkpoint
   convention.

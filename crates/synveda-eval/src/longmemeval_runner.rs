@@ -24,9 +24,9 @@
 //! Two measurement decisions the ADR left open, both recorded here because
 //! both move numbers.
 //!
-//! **One event per turn, batched one call per session.** The first version
-//! of this seeded a whole session as a single `transcript_delta`, on the
-//! argument that a delta is a batch of turns. A live run refuted it:
+//! **One event per turn, batched one call per session.** An early version
+//! collapsed a whole session into one synthetic transcript event. A live
+//! run refuted it:
 //! `DeterministicExtractor` emits exactly one record per event and
 //! truncates its content at `MAX_CONTENT_CHARS` (300), so a
 //! forty-turn session arrives as three hundred characters and the evidence
@@ -55,11 +55,12 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 
 use crate::client::{
-    Client, InjectRequest, KnowledgeIdsRequest, KnowledgeQueryRequest, ObserveEvent, ObserveRequest,
+    CaptureAcceptOptions, Client, InjectRequest, KnowledgeIdsRequest, KnowledgeQueryRequest,
+    ObserveEvent, ObserveRequest,
 };
-use crate::extraction::{AUDITOR_ACTOR, read_committed};
 use crate::longmemeval::{Instance, Session, parse_date};
 use crate::report::Gate;
+use crate::runner::apply_candidate;
 use crate::scenario::Environment;
 
 /// The actor pool's naming convention. `evals/lib.sh` registers one
@@ -71,9 +72,6 @@ pub const ACTOR_PREFIX: &str = "lme-";
 /// Every seeded session id starts here, so a run's material is
 /// recognisable in an audit chain shared with four other suites.
 const SESSION_PREFIX: &str = "lme";
-
-/// What a haystack session is observed as.
-const KIND: &str = "transcript_delta";
 
 /// A conservative chunk below the Knowledge evaluation lens's public
 /// 100-id bound. Chunked rather than asked past it: ADR-0046 decision 3 and
@@ -264,8 +262,11 @@ pub fn actors(environment: &Environment) -> Vec<String> {
 /// One instance seeded and not yet measured.
 pub struct Seeded {
     pub outcome: InstanceOutcome,
-    /// Every acked event id, mapped to the haystack session it came from.
-    pub events: BTreeMap<String, String>,
+    /// Exact public source-event id to the upstream haystack session it came
+    /// from. Knowledge provenance exposes the former; the corpus expectation
+    /// names the latter. Keeping this join from the append acknowledgements
+    /// avoids depending on private session metadata or an old label field.
+    pub source_events: BTreeMap<String, String>,
 }
 
 /// Plants one instance's haystack as one actor, and stops there.
@@ -289,7 +290,7 @@ pub async fn seed_instance(
     instance: &Instance,
     actor: &str,
 ) -> Result<Seeded, String> {
-    let (client, environment) = (suite.client, suite.environment);
+    let environment = suite.environment;
     let bearer = &environment.actor(actor)?.token;
 
     let mut outcome = InstanceOutcome {
@@ -328,9 +329,21 @@ pub async fn seed_instance(
     outcome.clock_offset_hours = offset.num_hours();
 
     let started = Instant::now();
-    let events = seed(client, bearer, instance, offset, &mut outcome).await?;
+    let mut source_events = BTreeMap::new();
+    seed(
+        suite,
+        bearer,
+        instance,
+        offset,
+        &mut outcome,
+        &mut source_events,
+    )
+    .await?;
     outcome.seed_ms = round(started.elapsed().as_secs_f64() * 1000.0);
-    Ok(Seeded { outcome, events })
+    Ok(Seeded {
+        outcome,
+        source_events,
+    })
 }
 
 /// Waits for the pipeline to be done with **every** instance's events, in
@@ -339,43 +352,24 @@ pub async fn wait_for_all(
     suite: &Suite<'_>,
     instances: &[&Instance],
     seeded: &mut [Seeded],
-    started: Instant,
+    seed_started: Instant,
 ) -> Result<(), String> {
-    let auditor = &suite
-        .environment
-        .actors
-        .get(AUDITOR_ACTOR)
-        .ok_or_else(|| {
-            format!(
-                "the environment names no `{AUDITOR_ACTOR}` actor; this suite waits on \
-                 `GET /v1/audit/events` for the pipeline to be done with every seeded turn"
-            )
-        })?
-        .token;
-    let all: BTreeMap<String, String> = seeded
-        .iter()
-        .flat_map(|entry| entry.events.iter().map(|(id, s)| (id.clone(), s.clone())))
-        .collect();
-    let mut shared = Vec::new();
-    wait_for_pipeline(suite.client, auditor, &all, suite.options, &mut shared).await?;
-    // A pipeline that never finished is every instance's problem, so it is
-    // recorded on every instance rather than on whichever one was asked
-    // last.
-    for entry in seeded.iter_mut() {
-        entry.outcome.failures.extend(shared.iter().cloned());
-    }
-
-    // …and then one index catch-up for the whole run, for the same reason
-    // the pipeline wait is shared. The sparse leg is a sidecar sweeping on
+    // Candidate materialisation and review happen synchronously while each
+    // session is seeded. What remains asynchronous is one index catch-up for
+    // the whole run. The sparse leg is a sidecar sweeping on
     // a one-second timer (ADR-0024), and after ~5,000 new records every
     // instance is waiting on the *same* sweeper to catch up. Waiting per
     // instance made ten sequential waits out of one shared condition: the
     // first real run spent two minutes seeding and then twenty-six minutes
     // here, about 2.6 per instance, while the injects it was waiting to
     // make totalled 0.6 seconds.
-    wait_for_index(suite, instances, seeded, started).await?;
+    // The readiness budget begins after seeding. Starting it at
+    // `seed_started` made a corpus whose governed writes legitimately took
+    // longer than the wait budget expire before its first readiness probe.
+    let readiness_started = Instant::now();
+    wait_for_index(suite, instances, seeded, readiness_started).await?;
     for entry in seeded.iter_mut() {
-        entry.outcome.seed_ms = round(started.elapsed().as_secs_f64() * 1000.0);
+        entry.outcome.seed_ms = round(seed_started.elapsed().as_secs_f64() * 1000.0);
     }
     Ok(())
 }
@@ -385,6 +379,7 @@ pub async fn measure_instance(
     suite: &Suite<'_>,
     instance: &Instance,
     actor: &str,
+    source_events: &BTreeMap<String, String>,
     outcome: &mut InstanceOutcome,
     tallies: &mut Tallies,
 ) -> Result<(), String> {
@@ -417,7 +412,15 @@ pub async fn measure_instance(
     outcome.block_hash = block.block_hash.clone();
     outcome.latency_ms = round(probe.elapsed_ms);
 
-    let bound = bound_sessions(client, bearer, instance, &block.record_ids, outcome).await?;
+    let bound = bound_sessions(
+        client,
+        bearer,
+        instance,
+        &block.record_ids,
+        source_events,
+        outcome,
+    )
+    .await?;
     outcome.block_sessions = bound.len();
     // An empty block trivially carries fewer sessions than its haystack,
     // so the first version of this reported `bound = true` for six blocks
@@ -587,17 +590,18 @@ pub fn served_models(outcomes: &[InstanceOutcome]) -> BTreeMap<String, String> {
         .collect()
 }
 
-/// Every haystack session, observed as one call carrying one event per
-/// turn. Returns the acked event ids, each mapped to the haystack session
-/// it belongs to.
+/// Every haystack session, observed as one call carrying one event per turn,
+/// then materialised and accepted through the public capture workflow.
 async fn seed(
-    client: &Client,
+    suite: &Suite<'_>,
     bearer: &str,
     instance: &Instance,
     offset: chrono::TimeDelta,
     outcome: &mut InstanceOutcome,
-) -> Result<BTreeMap<String, String>, String> {
-    let mut seeded: BTreeMap<String, String> = BTreeMap::new();
+    source_events: &mut BTreeMap<String, String>,
+) -> Result<(), String> {
+    let (client, environment) = (suite.client, suite.environment);
+    let seed_timeout = suite.options.seed_timeout;
     let mut planted: BTreeSet<&str> = BTreeSet::new();
     for session in instance.sessions() {
         // The real corpus repeats thirteen session ids across
@@ -627,22 +631,25 @@ async fn seed(
             .map(|(index, _)| index)
             .collect();
         outcome.empty_turns += session.turns.len() - sent.len();
-        let events: Vec<ObserveEvent<'_>> = sent
+        let events: Result<Vec<ObserveEvent<'_>>, String> = sent
             .iter()
             .map(|&index| (index, &session.turns[index]))
-            .map(|(index, turn)| ObserveEvent {
-                idempotency_key: turn_key(session.session_id, index),
-                kind: KIND,
-                payload: serde_json::json!({
-                    "text": format!("{}: {}", turn.role, turn.content),
-                }),
-                // A minute apart, so the turns of one session keep their
-                // order under any recency rule. The corpus dates a session
-                // and not a turn, and inventing the same instant for ten
-                // turns would make their order the database's to choose.
-                occurred_at: (started + chrono::Duration::minutes(index as i64)).to_rfc3339(),
+            .map(|(index, turn)| {
+                Ok(ObserveEvent {
+                    idempotency_key: turn_key(session.session_id, index),
+                    kind: turn_event_type(&turn.role)?,
+                    payload: serde_json::json!({
+                        "text": format!("{}: {}", turn.role, turn.content),
+                    }),
+                    // A minute apart, so the turns of one session keep their
+                    // order under any recency rule. The corpus dates a session
+                    // and not a turn, and inventing the same instant for ten
+                    // turns would make their order the database's to choose.
+                    occurred_at: (started + chrono::Duration::minutes(index as i64)).to_rfc3339(),
+                })
             })
             .collect();
+        let events = events?;
         let run = client.session_for(bearer, &session_id).await?;
         let response = client
             .observe(bearer, &run, &ObserveRequest { events })
@@ -673,10 +680,34 @@ async fn seed(
                 ));
                 continue;
             };
-            seeded.insert(event_id, session.session_id.to_owned());
+            if let Some(previous) =
+                source_events.insert(event_id.clone(), session.session_id.to_owned())
+                && previous != session.session_id
+            {
+                return Err(format!(
+                    "source event `{event_id}` was acknowledged for both `{previous}` and `{}`",
+                    session.session_id
+                ));
+            }
+        }
+        let reviewed = client
+            .capture_and_accept(
+                bearer,
+                &run,
+                &format!("eval-lme-capture-{run}"),
+                seed_timeout,
+                CaptureAcceptOptions::default(),
+            )
+            .await?;
+        for candidate in reviewed {
+            if let Err(error) =
+                apply_candidate(client, environment, &candidate, session.session_id).await
+            {
+                outcome.failures.push(error);
+            }
         }
     }
-    Ok(seeded)
+    Ok(())
 }
 
 /// One turn's idempotency key, unique within its observe call.
@@ -684,55 +715,17 @@ fn turn_key(session_id: &str, index: usize) -> String {
     format!("{session_id}:{index}")
 }
 
-/// Waits for the pipeline to be *done* with every seeded session, which
-/// the audit chain states exactly (the EVAL-2 rule): a `memory.extracted`
-/// payload names each event whether it produced records or not. Polling
-/// for records instead would be waiting on the thing under measurement.
-async fn wait_for_pipeline(
-    client: &Client,
-    auditor: &str,
-    seeded: &BTreeMap<String, String>,
-    options: &Options,
-    failures: &mut Vec<String>,
-) -> Result<(), String> {
-    let started = Instant::now();
-    loop {
-        let committed = read_committed(client, auditor).await?;
-        let missing: Vec<&str> = seeded
-            .iter()
-            .filter(|(event_id, _)| !committed.contains_key(event_id.as_str()))
-            .map(|(_, session)| session.as_str())
-            .collect();
-        if missing.is_empty() {
-            for (event_id, session) in seeded {
-                if committed
-                    .get(event_id.as_str())
-                    .is_some_and(|entry| entry.dead_lettered)
-                {
-                    failures.push(format!(
-                        "the pipeline dead-lettered session `{session}`: the event was lost \
-                         rather than found empty, and grading this instance would blame \
-                         retrieval for a broken pipeline"
-                    ));
-                }
-            }
-            return Ok(());
-        }
-        if started.elapsed() >= options.seed_timeout {
-            // Turns, not sessions: `seeded` is keyed by event and an
-            // event is one turn. The first real run said "544 of 560
-            // session(s)" for a 47-session instance, which is how a
-            // message can be both alarming and wrong.
-            failures.push(format!(
-                "the pipeline never finished with {} of {} turn(s) within {}s — every block \
-                 composed now is missing material the corpus planted",
-                missing.len(),
-                seeded.len(),
-                options.seed_timeout.as_secs()
-            ));
-            return Ok(());
-        }
-        tokio::time::sleep(POLL).await;
+/// Maps the two roles the upstream corpus specifies onto the public session
+/// event vocabulary. Keep this closed even though corpus validation already
+/// checks the roles: a runner called without validation must fail rather than
+/// silently attributing a new speaker to the wrong side of the conversation.
+fn turn_event_type(role: &str) -> Result<&'static str, String> {
+    match role {
+        "user" => Ok("message.user"),
+        "assistant" => Ok("message.assistant"),
+        unknown => Err(format!(
+            "LongMemEval turn role `{unknown}` has no public session event type"
+        )),
     }
 }
 
@@ -788,7 +781,13 @@ async fn wait_for_index(
             else {
                 continue;
             };
-            let planted = seeded_id(instance, session_id);
+            let expected_events = seeded[index]
+                .source_events
+                .iter()
+                .filter_map(|(event_id, source_session_id)| {
+                    (source_session_id == session_id).then_some(event_id.clone())
+                })
+                .collect::<BTreeSet<_>>();
             let index_run = suite
                 .client
                 .session_for(
@@ -807,11 +806,11 @@ async fn wait_for_index(
                     },
                 )
                 .await?;
-            let indexed = found
-                .value
-                .entries
-                .iter()
-                .any(|entry| entry.source_session_id() == Some(planted.as_str()));
+            let indexed = found.value.entries.iter().any(|entry| {
+                entry
+                    .source_event_ids()
+                    .any(|event_id| expected_events.contains(event_id))
+            });
             if !indexed {
                 still.push((index, session_id));
             }
@@ -843,10 +842,11 @@ async fn bound_sessions(
     bearer: &str,
     instance: &Instance,
     record_ids: &[String],
+    source_events: &BTreeMap<String, String>,
     outcome: &mut InstanceOutcome,
 ) -> Result<BTreeSet<String>, String> {
     let mut bound = BTreeSet::new();
-    let mut attributed = 0usize;
+    outcome.unattributed_records = 0;
     for chunk in record_ids.chunks(MAX_KNOWLEDGE_IDS) {
         let answered = client
             .knowledge_ids(
@@ -864,40 +864,44 @@ async fn bound_sessions(
                 answered.value.mode
             ));
         }
-        for entry in &answered.value.entries {
-            let Some(session) = entry.source_session_id() else {
-                continue;
-            };
-            let Some(haystack) = haystack_id(instance, session) else {
-                continue;
-            };
-            attributed += 1;
-            bound.insert(haystack.to_owned());
+        let (chunk_bound, unattributed) =
+            attributed_sessions(&answered.value.entries, source_events);
+        bound.extend(chunk_bound);
+        outcome.unattributed_records += unattributed;
+    }
+    Ok(bound)
+}
+
+/// Joins public Knowledge provenance to the exact append acknowledgements the
+/// harness observed. The API intentionally exposes source event ids, not a
+/// private session label; retaining the event-to-corpus mapping is therefore
+/// the only attribution that neither invents metadata nor reaches into the
+/// store. One revision counts as attributed once even when it merged several
+/// sources.
+fn attributed_sessions(
+    entries: &[crate::client::RecallEntry],
+    source_events: &BTreeMap<String, String>,
+) -> (BTreeSet<String>, usize) {
+    let mut sessions = BTreeSet::new();
+    let mut unattributed = 0;
+    for entry in entries {
+        let mut attributed = false;
+        for event_id in entry.source_event_ids() {
+            if let Some(session_id) = source_events.get(event_id) {
+                attributed = true;
+                sessions.insert(session_id.clone());
+            }
+        }
+        if !attributed {
+            unattributed += 1;
         }
     }
-    outcome.unattributed_records = record_ids.len().saturating_sub(attributed);
-    Ok(bound)
+    (sessions, unattributed)
 }
 
 /// The session id a haystack session is seeded under.
 fn seeded_id(instance: &Instance, session_id: &str) -> String {
     format!("{SESSION_PREFIX}:{}:{session_id}", instance.question_id)
-}
-
-/// The inverse, and it checks the instance rather than merely stripping a
-/// prefix: another instance's material reaching this actor would otherwise
-/// be counted as this haystack's, and the recall would be over a corpus
-/// the run did not seed.
-fn haystack_id<'a>(instance: &Instance, seeded: &'a str) -> Option<&'a str> {
-    let rest = seeded.strip_prefix(SESSION_PREFIX)?.strip_prefix(':')?;
-    let rest = rest
-        .strip_prefix(instance.question_id.as_str())?
-        .strip_prefix(':')?;
-    instance
-        .haystack_session_ids
-        .iter()
-        .any(|id| id == rest)
-        .then_some(rest)
 }
 
 /// A session's opening turns as one string — the readiness query, and
@@ -1407,28 +1411,38 @@ mod tests {
         outcome
     }
 
-    /// The join is the whole tier. A record from another instance's
-    /// material must not count as this haystack's, or the recall is over a
-    /// corpus the run did not seed.
+    /// The join is the whole tier. It follows exact source-event ids from
+    /// append acknowledgements and preserves every source on a merged
+    /// revision; old or forged session metadata is not an authority.
     #[test]
-    fn a_session_id_round_trips_and_a_foreign_one_does_not() {
+    fn source_events_attribute_only_acknowledged_haystack_sessions() {
         let instance = instance("aa11", "multi-session", &["s1"]);
         let seeded = seeded_id(&instance, "s1");
         assert_eq!(seeded, "lme:aa11:s1");
-        assert_eq!(haystack_id(&instance, &seeded), Some("s1"));
 
-        assert_eq!(
-            haystack_id(&instance, "lme:bb22:s1"),
-            None,
-            "another instance"
-        );
-        assert_eq!(
-            haystack_id(&instance, "lme:aa11:s9"),
-            None,
-            "not in this haystack"
-        );
-        assert_eq!(haystack_id(&instance, "qa:acme:own"), None, "another suite");
-        assert_eq!(haystack_id(&instance, "lme:aa11"), None, "no session part");
+        let entries = vec![
+            crate::client::RecallEntry {
+                record_id: "k1".to_owned(),
+                class: "fact".to_owned(),
+                content: "body".to_owned(),
+                provenance: serde_json::json!({"session_id": "forged"}),
+                source_event_ids: vec!["event-a".to_owned(), "event-b".to_owned()],
+            },
+            crate::client::RecallEntry {
+                record_id: "k2".to_owned(),
+                class: "fact".to_owned(),
+                content: "body".to_owned(),
+                provenance: serde_json::json!({}),
+                source_event_ids: vec!["foreign-event".to_owned()],
+            },
+        ];
+        let source_events = BTreeMap::from([
+            ("event-a".to_owned(), "s1".to_owned()),
+            ("event-b".to_owned(), "s2".to_owned()),
+        ]);
+        let (sessions, unattributed) = attributed_sessions(&entries, &source_events);
+        assert_eq!(sessions, BTreeSet::from(["s1".to_owned(), "s2".to_owned()]));
+        assert_eq!(unattributed, 1, "the foreign source must remain visible");
     }
 
     /// Turns are seeded as separate events, so their idempotency keys have
@@ -1450,13 +1464,23 @@ mod tests {
     }
 
     #[test]
+    fn corpus_speakers_map_to_current_session_events_and_unknown_roles_fail() {
+        assert_eq!(turn_event_type("user"), Ok("message.user"));
+        assert_eq!(turn_event_type("assistant"), Ok("message.assistant"));
+        assert_eq!(
+            turn_event_type("tool"),
+            Err("LongMemEval turn role `tool` has no public session event type".to_owned())
+        );
+    }
+
+    #[test]
     fn a_session_renders_with_its_speakers_kept_and_within_the_surfaces_bound() {
         let instance = instance("aa11", "single-session-preference", &["s1"]);
         let session = instance.sessions().next().expect("a session");
         assert_eq!(render(&session), "user: packing\nassistant: noted");
 
         // The bound the first real run died on: a 47-session instance's
-        // turns run far past `POST /v1/recall`'s 4,000-character cap.
+        // turns run far past the session Knowledge query's 4,000-character cap.
         let long = serde_json::from_value::<crate::longmemeval::Instance>(serde_json::json!({
             "question_id": "aa11", "question_type": "multi-session",
             "question": "q", "answer": "a",

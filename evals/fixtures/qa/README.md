@@ -108,11 +108,15 @@ gateway — `make ci` runs it on every pull request.
 
 Two things are needed, and the first version of this corpus had neither.
 
-**It must be bound.** A question whose block carried everything the reader is
-served made no ranking decision — its answer arrived because there was room,
-not because anything ranked it. `retrieval_precision` reads only bound blocks,
-and the predicate is measured (`block_records < served_records`) rather than
-declared, so a corpus cannot opt a question in or out by mistake.
+**It must request a narrow budget and bind in fact.** A question whose block
+carried everything the reader is served made no ranking decision — its answer
+arrived because there was room, not because anything ranked it.
+`retrieval_precision` therefore requires both an explicit `budget_tokens` and
+the measured predicate `block_records < served_records`. The first separates
+deliberate within-scope probes from ordinary default-budget questions; the
+second prevents a declared narrow budget that did not bind from entering the
+axis. This distinction matters now that immutable addresses and source
+evidence make even a normal 1,500-token block smaller than the whole corpus.
 
 **It must ask about the reader's own leaf.** Scopes are placed nearest-first
 and totally ordered (seed §4.4, ADR-0025 decision 5), so a bound block spends

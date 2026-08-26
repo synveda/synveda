@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# `make db-test` — the workspace suite against a database of its own.
+# `make db-test` — a database-backed repository task against a database of
+# its own. The default task is the workspace suite; CPR-40 reuses the same
+# hard-cut-safe lifecycle for its exact product acceptance cases.
 #
 # # Why a scratch database
 #
@@ -126,7 +128,23 @@ echo "db-test: $TEST_DB (scratch, migrated)"
 trap 'drop_test_db' INT TERM
 
 status=0
-DATABASE_URL="$TEST_URL" cargo test --workspace "$@" || status=$?
+case "${SYNVEDA_DB_TEST_TASK:-workspace}" in
+  workspace)
+    DATABASE_URL="$TEST_URL" cargo test --workspace "$@" || status=$?
+    ;;
+  product-evaluation)
+    if [ "$#" -ne 0 ]; then
+      echo "db-test: product-evaluation takes no cargo-test arguments" >&2
+      status=2
+    else
+      DATABASE_URL="$TEST_URL" node scripts/product-evaluation.mjs || status=$?
+    fi
+    ;;
+  *)
+    echo "db-test: unknown SYNVEDA_DB_TEST_TASK '${SYNVEDA_DB_TEST_TASK}'" >&2
+    status=2
+    ;;
+esac
 
 if [ "$status" -eq 0 ] && [ -z "${KEEP_TEST_DB:-}" ]; then
   drop_test_db

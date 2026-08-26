@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "note": "CPR-40 deterministic floors. Zero-tolerance trust gates are invariant bounds; product-quality floors are intentionally small exact counts from the PulseBoard acceptance, not scores copied from the retired Record corpus. Raise them only from a reproducible report whose revision and runtime versions are recorded.",
+  "minimum": {
+    "retrieved": 2,
+    "selected": 2,
+    "injected": 2,
+    "referenced_by_agent": 1,
+    "accepted_by_user": 1,
+    "helpful": 1,
+    "unhelpful": 1,
+    "caused_correction": 1,
+    "capture_candidate_precision": 0.75,
+    "adapter_delivery": 1
+  },
+  "maximum": {
+    "cross_tenant_leakage": 0,
+    "private_scope_leakage": 0,
+    "superseded_current_injection": 0,
+    "selected_without_provenance": 0,
+    "unversioned_skill_or_tool_activation": 0,
+    "plaintext_secret_leakage": 0
+  }
+}
