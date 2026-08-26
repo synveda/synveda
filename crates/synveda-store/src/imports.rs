@@ -258,6 +258,7 @@ struct MappingRow {
     matched_revision_id: Option<Uuid>,
     proposed_relations: Value,
     materializable: bool,
+    content_erased: bool,
     candidate_id: Option<Uuid>,
     created_at: DateTime<Utc>,
 }
@@ -292,6 +293,7 @@ impl TryFrom<MappingRow> for ImportMapping {
             matched_revision_id: row.matched_revision_id.map(KnowledgeRevisionId::from_uuid),
             proposed_relations: row.proposed_relations,
             materializable: row.materializable,
+            content_erased: row.content_erased,
             candidate_id: row.candidate_id.map(CaptureCandidateId::from_uuid),
             created_at: row.created_at,
         })
@@ -626,7 +628,8 @@ pub async fn mappings(
                sensitivity, confidence_permille, valid_from, valid_to,
                stale_after, verification_metadata, metadata, content_hash,
                classification, matched_item_id, matched_revision_id,
-               proposed_relations, materializable, candidate_id, created_at
+               proposed_relations, materializable, content_erased, candidate_id,
+               created_at
         from import_mappings
         where tenant_id = $1 and job_id = $2
         order by ordinal
@@ -920,6 +923,7 @@ mod tests {
             matched_revision_id: None,
             proposed_relations: serde_json::json!([]),
             materializable: true,
+            content_erased: false,
             candidate_id: None,
             created_at: Utc::now(),
         };

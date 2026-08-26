@@ -20004,7 +20004,8 @@
           "content_hash",
           "classification",
           "proposed_relations",
-          "materializable"
+          "materializable",
+          "content_erased"
         ],
         "properties": {
           "artifact_id": {
@@ -20027,6 +20028,10 @@
           "content": {
             "$ref": "#/components/schemas/KnowledgeContentBody",
             "description": "Complete proposed immutable content."
+          },
+          "content_erased": {
+            "type": "boolean",
+            "description": "Whether derived plaintext and live Knowledge addresses were erased."
           },
           "content_hash": {
             "type": "string",

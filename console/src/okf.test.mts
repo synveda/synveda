@@ -43,6 +43,7 @@ function mapping(classification: string): OkfMappingView {
     classification,
     proposed_relations: {},
     materializable: classification !== "duplicate",
+    content_erased: false,
   };
 }
 

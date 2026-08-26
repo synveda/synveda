@@ -15,14 +15,20 @@ use serde_json::{Value, json};
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 use synveda_gateway::app::{AppState, router};
-use synveda_gateway::{knowledge, telemetry};
+use synveda_gateway::{knowledge, okf, telemetry};
 use synveda_identity::{Claims, Hs256Verifier, TenantContext, with_tenant};
 use synveda_ingest::embedding::Embedder as _;
 use synveda_store::{
-    access, identities, knowledge as stored, knowledge_conflicts, knowledge_search, rls, scopes,
-    tenants,
+    access, context as context_store, identities, imports as import_store, knowledge as stored,
+    knowledge_conflicts, knowledge_search, projects, rls, scopes, sessions, tenants, workspaces,
 };
 use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
+use synveda_types::configuration::ConfigurationContextChannel;
+use synveda_types::context::{
+    ContextCompletionStatus, ContextFeedbackType, ContextGraphDirection, ContextReasonCode,
+    TraceRetentionMode,
+};
+use synveda_types::import::{ImportArtifactKind, ImportMappingClassification};
 use synveda_types::knowledge::{
     ConflictClassification, ConflictResolutionKind, ConflictSetStatus, KnowledgeCommand,
     KnowledgeExpectedRevision, KnowledgeLifecycleState, KnowledgeMutationOutcome,
@@ -32,9 +38,11 @@ use synveda_types::knowledge::{
 use synveda_types::operation::OperationState;
 use synveda_types::scope::{Scope, ScopeKind};
 use synveda_types::{
-    Error, GrantId, Identity, IdentityId, IdentityKind, KnowledgeItemId, KnowledgeRevisionId,
-    KnowledgeSourceId, ProposalId, ProposalState, ScopeId, Sensitivity, Tenant, TenantId,
-    TenantStatus,
+    ConflictSetId, ContextCandidateId, ContextFeedbackId, ContextRunId, ContextSelectionId, Error,
+    GrantId, Identity, IdentityId, IdentityKind, ImportArtifactId, ImportJobId, ImportMappingId,
+    KnowledgeItemId, KnowledgeRelationId, KnowledgeRevisionId, KnowledgeSourceId, ProjectId,
+    ProposalId, ProposalState, ScopeId, Sensitivity, SessionId, Tenant, TenantId, TenantStatus,
+    WorkspaceId,
 };
 use tower::ServiceExt;
 
@@ -2047,4 +2055,520 @@ async fn conflicts_are_transitional_governed_and_temporally_queryable() {
         challenger_revision,
         resolved.revision_id.expect("resolved revision")
     );
+}
+
+#[tokio::test]
+async fn forget_scrubs_later_context_import_and_conflict_references() {
+    let _guard = serial().await;
+    let Some((state, tenant)) = admitted_tenant().await else {
+        return;
+    };
+    let alice = seed_user(&state.pool, tenant.id, "alice-erasure@pulseboard.test").await;
+    let subject = alice.subject.as_deref().expect("subject");
+    use_standard(&state.pool, tenant.id).await;
+
+    let target_plaintext = "ERASE-ME-CPR44-KNOWLEDGE";
+    let (target_command, target_id, target_revision_id, _) = create_command(
+        alice.scope_id,
+        Some(subject),
+        "Disposable downstream evidence",
+        target_plaintext,
+        json!({"private_detail": target_plaintext}),
+    );
+    command_as(&state, &tenant, subject, target_command)
+        .await
+        .expect("create target Knowledge");
+    let (peer_command, peer_id, peer_revision_id, _) = create_command(
+        alice.scope_id,
+        Some(subject),
+        "Retained peer",
+        "This peer remains after the target is erased.",
+        json!({}),
+    );
+    command_as(&state, &tenant, subject, peer_command)
+        .await
+        .expect("create retained peer");
+    let (other_command, other_id, other_revision_id, _) = create_command(
+        alice.scope_id,
+        Some(subject),
+        "Unrelated retained peer",
+        "This peer belongs only to an unrelated conflict set.",
+        json!({}),
+    );
+    command_as(&state, &tenant, subject, other_command)
+        .await
+        .expect("create unrelated retained peer");
+
+    let target = snapshot(&state.pool, tenant.id, target_id)
+        .await
+        .expect("target snapshot");
+    let peer = snapshot(&state.pool, tenant.id, peer_id)
+        .await
+        .expect("peer snapshot");
+    let context_plaintext = "ERASE-ME-CPR44-RENDERED-CONTEXT";
+    let mapping_plaintext = "ERASE-ME-CPR44-DERIVED-IMPORT";
+    let artifact_plaintext = "CPR44-INDEPENDENT-SOURCE-EVIDENCE";
+
+    let mut tx = rls::begin_tenant_tx(&state.pool, tenant.id)
+        .await
+        .expect("begin downstream evidence fixture");
+    let workspace = workspaces::create(
+        &mut tx,
+        &workspaces::NewWorkspace {
+            id: WorkspaceId::new(),
+            tenant_id: tenant.id,
+            slug: format!("erase-{}", WorkspaceId::new().as_uuid().simple()),
+            display_name: "Erasure evidence".to_owned(),
+            description: None,
+            created_by: None,
+        },
+    )
+    .await
+    .expect("create fixture workspace");
+    let project = projects::create(
+        &mut tx,
+        &projects::NewProject {
+            id: ProjectId::new(),
+            tenant_id: tenant.id,
+            workspace_id: workspace.id,
+            slug: format!("erase-{}", ProjectId::new().as_uuid().simple()),
+            display_name: "Erasure evidence".to_owned(),
+            description: None,
+            created_by: None,
+        },
+    )
+    .await
+    .expect("create fixture project");
+    let session = sessions::create(
+        &mut tx,
+        &sessions::NewSession {
+            id: SessionId::new(),
+            tenant_id: tenant.id,
+            workspace_id: workspace.id,
+            project_id: Some(project.id),
+            principal_id: subject.to_owned(),
+            client_name: "cpr44-erasure-test".to_owned(),
+            client_version: None,
+            client_installation_id: None,
+            external_session_id: None,
+            agent_name: None,
+            model_name: None,
+            repository_id: None,
+            branch: None,
+            task_summary: Some("prove downstream erasure".to_owned()),
+            metadata: json!({}),
+        },
+    )
+    .await
+    .expect("create fixture session");
+    let effective =
+        synveda_store::configuration::effective_at_scope(&mut tx, tenant.id, project.scope_id)
+            .await
+            .expect("resolve fixture Configuration");
+    let run_id = ContextRunId::new();
+    let candidate_id = ContextCandidateId::new();
+    let selection_id = ContextSelectionId::new();
+    sessions::record_context_run(
+        &mut tx,
+        tenant.id,
+        &sessions::NewContextRun {
+            id: run_id,
+            session_id: session.id,
+            workspace_id: workspace.id,
+            project_id: Some(project.id),
+            scope_id: session.scope_id,
+            principal_id: subject.to_owned(),
+            configuration_version_id: effective.version_id,
+            configuration_hash: effective.content_hash.clone(),
+            query: Some("find the disposable evidence".to_owned()),
+            query_hash: Some(
+                blake3::hash(b"find the disposable evidence")
+                    .to_hex()
+                    .to_string(),
+            ),
+            rendered: context_plaintext.to_owned(),
+            block_hash: blake3::hash(context_plaintext.as_bytes())
+                .to_hex()
+                .to_string(),
+            tokens: 8,
+            budget_tokens: 256,
+            requested_budget_tokens: Some(256),
+            entry_count: 1,
+            candidate_count: 1,
+            selection_count: 1,
+            skills: json!([]),
+            degraded: Vec::new(),
+            as_of: Utc::now(),
+            retrieval_version: "knowledge-planner-v2".to_owned(),
+            embedding_model: None,
+            index_version: "postgres-fts-v1".to_owned(),
+            graph_version: Some("knowledge-relations-v1".to_owned()),
+            trace_retention: TraceRetentionMode::Full,
+            completion_status: ContextCompletionStatus::Completed,
+            policy_exclusion: false,
+        },
+    )
+    .await
+    .expect("record fixture context run");
+    context_store::insert_candidate(
+        &mut tx,
+        tenant.id,
+        &context_store::NewContextCandidate {
+            id: candidate_id,
+            context_run_id: run_id,
+            ordinal: 0,
+            channel: ConfigurationContextChannel::CurrentKnowledge,
+            knowledge_item_id: Some(target_id),
+            knowledge_revision_id: Some(target_revision_id),
+            capture_candidate_id: None,
+            content_hash: target.revision.content_hash.clone(),
+            scope_id: Some(alice.scope_id),
+            lifecycle_state: Some(KnowledgeLifecycleState::Active),
+            keyword_score_micros: 500_000,
+            semantic_score_micros: 0,
+            anchor_score_micros: 500_000,
+            edge_weight_micros: 0,
+            hop_penalty_micros: 0,
+            freshness_score_micros: 100_000,
+            pin_score_micros: 0,
+            current_state_score_micros: 100_000,
+            final_score_micros: 700_000,
+            reason_codes: vec![ContextReasonCode::KeywordMatch],
+            exclusion_reason: None,
+        },
+    )
+    .await
+    .expect("record fixture candidate");
+    let relation_id = KnowledgeRelationId::new();
+    stored::add_relation(
+        &mut tx,
+        &stored::NewKnowledgeRelation {
+            id: relation_id,
+            tenant_id: tenant.id,
+            source_item_id: target_id,
+            target_item_id: peer_id,
+            asserting_revision_id: target_revision_id,
+            relation_type: KnowledgeRelationType::Supports,
+            metadata: json!({}),
+            created_by: Some(subject.to_owned()),
+        },
+    )
+    .await
+    .expect("record fixture Knowledge relation");
+    context_store::insert_graph_step(
+        &mut tx,
+        tenant.id,
+        &context_store::NewContextGraphStep {
+            context_run_id: run_id,
+            context_candidate_id: candidate_id,
+            ordinal: 0,
+            hop: 1,
+            relation_id: Some(relation_id),
+            relation_hash: blake3::hash(relation_id.to_string().as_bytes())
+                .to_hex()
+                .to_string(),
+            relation_type: KnowledgeRelationType::Supports,
+            direction: ContextGraphDirection::Outbound,
+            from_item_id: Some(target_id),
+            from_revision_id: Some(target_revision_id),
+            to_item_id: Some(peer_id),
+            to_revision_id: Some(peer_revision_id),
+            asserting_revision_id: Some(target_revision_id),
+            from_content_hash: target.revision.content_hash.clone(),
+            to_content_hash: peer.revision.content_hash.clone(),
+            edge_weight_micros: 500_000,
+            supporting: true,
+        },
+    )
+    .await
+    .expect("record fixture graph step");
+    context_store::insert_selection(
+        &mut tx,
+        tenant.id,
+        &context_store::NewContextSelection {
+            id: selection_id,
+            context_run_id: run_id,
+            context_candidate_id: candidate_id,
+            rank: 1,
+            channel: ConfigurationContextChannel::CurrentKnowledge,
+            knowledge_item_id: Some(target_id),
+            knowledge_revision_id: Some(target_revision_id),
+            capture_candidate_id: None,
+            content_hash: target.revision.content_hash.clone(),
+            token_count: 8,
+            reason_codes: vec![ContextReasonCode::KeywordMatch],
+        },
+    )
+    .await
+    .expect("record fixture selection");
+    context_store::insert_feedback(
+        &mut tx,
+        tenant.id,
+        &context_store::NewContextFeedback {
+            id: ContextFeedbackId::new(),
+            context_run_id: run_id,
+            context_selection_id: selection_id,
+            knowledge_revision_id: target_revision_id,
+            feedback_type: ContextFeedbackType::Helpful,
+            principal_id: subject.to_owned(),
+            idempotency_key: "cpr44-erasure-feedback".to_owned(),
+        },
+    )
+    .await
+    .expect("record fixture feedback");
+
+    let import_job_id = ImportJobId::new();
+    let artifact_id = ImportArtifactId::new();
+    let mapping_content = content(
+        "Derived import mapping",
+        mapping_plaintext,
+        json!({"derived_detail": mapping_plaintext}),
+    );
+    let mapping_hash = synveda_types::knowledge::knowledge_revision_content_hash(&mapping_content);
+    import_store::create_plan(
+        &mut tx,
+        &import_store::NewImportPlan {
+            id: import_job_id,
+            tenant_id: tenant.id,
+            project_id: project.id,
+            scope_id: project.scope_id,
+            workspace_id: workspace.id,
+            principal_id: subject.to_owned(),
+            format: "okf".to_owned(),
+            format_version: "0.2".to_owned(),
+            specification_commit: "ad30107c31c06aec8a7d5636e0d1058118604e6f".to_owned(),
+            source_kind: "directory".to_owned(),
+            source_locator: "cpr44-erasure-source".to_owned(),
+            source_revision: None,
+            bundle_digest: blake3::hash(b"cpr44-erasure-bundle").to_hex().to_string(),
+            notices: Vec::new(),
+            artifacts: vec![import_store::NewImportArtifact {
+                id: artifact_id,
+                ordinal: 1,
+                logical_path: "concepts/source.md".to_owned(),
+                kind: ImportArtifactKind::Concept,
+                content_hash: blake3::hash(artifact_plaintext.as_bytes())
+                    .to_hex()
+                    .to_string(),
+                frontmatter: json!({"source_evidence": true}),
+                body_markdown: artifact_plaintext.to_owned(),
+            }],
+            mappings: vec![import_store::NewImportMapping {
+                id: ImportMappingId::new(),
+                artifact_id,
+                ordinal: 1,
+                okf_type: "concept".to_owned(),
+                knowledge_type: KnowledgeType::Convention,
+                content: mapping_content,
+                content_hash: mapping_hash.clone(),
+                classification: ImportMappingClassification::Conflict,
+                matched_item_id: Some(target_id),
+                matched_revision_id: Some(target_revision_id),
+                proposed_relations: json!([{"type": "related_to", "target": "peer"}]),
+                materializable: true,
+            }],
+        },
+    )
+    .await
+    .expect("record fixture import plan");
+
+    let target_conflict_id = ConflictSetId::new();
+    let target_matches = [knowledge_conflicts::MatchedRevision {
+        item_id: peer_id,
+        revision_id: peer_revision_id,
+        classification: ConflictClassification::Contradiction,
+        similarity_permille: 700,
+        reason_code: "cpr44_target_conflict".to_owned(),
+    }];
+    knowledge_conflicts::create(
+        &mut tx,
+        &knowledge_conflicts::NewConflictSet {
+            id: target_conflict_id,
+            tenant_id: tenant.id,
+            scope_id: alice.scope_id,
+            project_id: None,
+            classification: ConflictClassification::Contradiction,
+            challenger_item_id: Some(target_id),
+            challenger_revision_id: Some(target_revision_id),
+            capture_candidate_id: None,
+            matches: &target_matches,
+            created_by: subject,
+        },
+    )
+    .await
+    .expect("record target conflict set");
+    assert!(
+        knowledge_conflicts::members(&mut tx, tenant.id, target_conflict_id)
+            .await
+            .expect("read target conflict members")
+            .iter()
+            .any(|member| {
+                member.role.as_str() == "challenger" && member.knowledge_item_id == Some(target_id)
+            }),
+        "the erased item is represented by the persisted challenger member"
+    );
+    let unrelated_conflict_id = ConflictSetId::new();
+    let unrelated_matches = [knowledge_conflicts::MatchedRevision {
+        item_id: other_id,
+        revision_id: other_revision_id,
+        classification: ConflictClassification::Contradiction,
+        similarity_permille: 650,
+        reason_code: "cpr44_unrelated_conflict".to_owned(),
+    }];
+    knowledge_conflicts::create(
+        &mut tx,
+        &knowledge_conflicts::NewConflictSet {
+            id: unrelated_conflict_id,
+            tenant_id: tenant.id,
+            scope_id: alice.scope_id,
+            project_id: None,
+            classification: ConflictClassification::Contradiction,
+            challenger_item_id: Some(peer_id),
+            challenger_revision_id: Some(peer_revision_id),
+            capture_candidate_id: None,
+            matches: &unrelated_matches,
+            created_by: subject,
+        },
+    )
+    .await
+    .expect("record unrelated conflict set");
+    tx.commit()
+        .await
+        .expect("commit downstream evidence fixture");
+
+    let forgotten = command_as(
+        &state,
+        &tenant,
+        subject,
+        KnowledgeCommand::Forget {
+            item_id: target_id,
+            expected_revision_id: target_revision_id,
+            reason: "CPR-44 downstream erasure regression".to_owned(),
+        },
+    )
+    .await
+    .expect("forget Knowledge referenced by later subsystems");
+    assert_eq!(forgotten.outcome, KnowledgeMutationOutcome::Applied);
+    assert!(snapshot(&state.pool, tenant.id, target_id).await.is_none());
+
+    let mut tx = rls::begin_tenant_tx(&state.pool, tenant.id)
+        .await
+        .expect("begin downstream scrub verification");
+    let run = sessions::context_run(&mut *tx, tenant.id, run_id)
+        .await
+        .expect("read scrubbed context run")
+        .expect("context run retained");
+    assert_eq!(run.rendered, "");
+    assert_eq!(
+        run.block_hash,
+        blake3::hash(context_plaintext.as_bytes())
+            .to_hex()
+            .to_string(),
+        "content-free delivery hash remains"
+    );
+    let candidates = context_store::candidates_for_run(&mut *tx, tenant.id, run_id)
+        .await
+        .expect("read scrubbed candidates");
+    assert_eq!(candidates.len(), 1);
+    assert_eq!(candidates[0].knowledge_item_id, None);
+    assert_eq!(candidates[0].knowledge_revision_id, None);
+    assert_eq!(candidates[0].scope_id, None);
+    assert_eq!(candidates[0].content_hash, target.revision.content_hash);
+    let selections = context_store::selections_for_run(&mut *tx, tenant.id, run_id)
+        .await
+        .expect("read scrubbed selections");
+    assert_eq!(selections.len(), 1);
+    assert_eq!(selections[0].knowledge_item_id, None);
+    assert_eq!(selections[0].knowledge_revision_id, None);
+    assert_eq!(selections[0].content_hash, target.revision.content_hash);
+    let graph_steps = context_store::graph_steps_for_run(&mut *tx, tenant.id, run_id)
+        .await
+        .expect("read scrubbed graph steps");
+    assert_eq!(graph_steps.len(), 1);
+    assert_eq!(graph_steps[0].relation_id, None);
+    assert_eq!(graph_steps[0].from_item_id, None);
+    assert_eq!(graph_steps[0].from_revision_id, None);
+    assert_eq!(graph_steps[0].to_item_id, None);
+    assert_eq!(graph_steps[0].to_revision_id, None);
+    assert_eq!(graph_steps[0].asserting_revision_id, None);
+    assert!(
+        context_store::feedback_for_run(&mut *tx, tenant.id, run_id)
+            .await
+            .expect("read feedback after erasure")
+            .is_empty(),
+        "feedback's non-null revision address cannot survive erasure"
+    );
+
+    let mappings = import_store::mappings(&mut *tx, tenant.id, import_job_id)
+        .await
+        .expect("read scrubbed import mapping");
+    assert_eq!(mappings.len(), 1);
+    assert_eq!(mappings[0].content.title, "");
+    assert_eq!(mappings[0].content.body_markdown, "");
+    assert_eq!(mappings[0].content.summary, "");
+    assert_eq!(mappings[0].content.metadata, json!({}));
+    assert_eq!(mappings[0].matched_item_id, None);
+    assert_eq!(mappings[0].matched_revision_id, None);
+    assert!(!mappings[0].materializable);
+    assert!(mappings[0].content_erased);
+    assert_eq!(mappings[0].content_hash, mapping_hash);
+    let public_mapping = serde_json::to_value(okf::OkfMappingView::from(mappings[0].clone()))
+        .expect("serialize scrubbed public mapping");
+    assert_eq!(public_mapping["content_erased"], true);
+    let artifacts = import_store::artifacts(&mut *tx, tenant.id, import_job_id)
+        .await
+        .expect("read independent import artifact");
+    assert_eq!(artifacts.len(), 1);
+    assert_eq!(artifacts[0].body_markdown, artifact_plaintext);
+    assert_eq!(artifacts[0].frontmatter, json!({"source_evidence": true}));
+
+    assert!(
+        knowledge_conflicts::get(&mut tx, tenant.id, target_conflict_id)
+            .await
+            .expect("read erased target conflict")
+            .is_none()
+    );
+    assert!(
+        knowledge_conflicts::members(&mut tx, tenant.id, target_conflict_id)
+            .await
+            .expect("read erased target conflict members")
+            .is_empty()
+    );
+    assert!(
+        knowledge_conflicts::get(&mut tx, tenant.id, unrelated_conflict_id)
+            .await
+            .expect("read unrelated conflict")
+            .is_some()
+    );
+    assert_eq!(
+        knowledge_conflicts::members(&mut tx, tenant.id, unrelated_conflict_id)
+            .await
+            .expect("read unrelated conflict members")
+            .len(),
+        2,
+        "erasure removes no member from an unrelated set"
+    );
+    assert!(
+        stored::relation(&mut *tx, tenant.id, relation_id)
+            .await
+            .expect("read erased relation")
+            .is_none()
+    );
+
+    let effective =
+        synveda_store::configuration::effective_at_scope(&mut tx, tenant.id, project.scope_id)
+            .await
+            .expect("resolve materialization Configuration");
+    let materialized = import_store::materialize(&mut tx, tenant.id, import_job_id, &effective)
+        .await
+        .expect("materialize scrubbed import plan");
+    assert!(
+        materialized.candidates.is_empty(),
+        "a scrubbed mapping can never publish a candidate"
+    );
+    tx.commit()
+        .await
+        .expect("commit downstream scrub verification");
+    assert!(snapshot(&state.pool, tenant.id, peer_id).await.is_some());
+    assert!(snapshot(&state.pool, tenant.id, other_id).await.is_some());
 }

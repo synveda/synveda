@@ -346,7 +346,9 @@ export function PlanEvidence({
       <ul className="session-list">
         {plan.mappings.map((mapping) => (
           <li key={mapping.id}>
-            <strong>{mapping.content.title}</strong>{" "}
+            <strong>
+              {mapping.content_erased ? "Derived mapping content erased" : mapping.content.title}
+            </strong>{" "}
             <span className={`tag ${mapping.classification === "duplicate" ? "done" : "warn"}`}>
               {mapping.classification}
             </span>
@@ -355,13 +357,30 @@ export function PlanEvidence({
               <code>{mapping.knowledge_type}</code>
             </p>
             <p className="muted">
-              {mapping.content.summary} · {mapping.materializable ? "reviewable" : "retained only"}
-              {mapping.matched_item_id ? ` · compared with ${mapping.matched_item_id}` : ""}
+              {mapping.content_erased ? (
+                <>
+                  Derived plaintext and live Knowledge addresses erased · content hash{" "}
+                  <code>{mapping.content_hash}</code> · source artifact{" "}
+                  <code>{mapping.artifact_id}</code>
+                </>
+              ) : (
+                <>
+                  {mapping.content.summary} · {mapping.materializable ? "reviewable" : "retained only"}
+                  {mapping.matched_item_id ? ` · compared with ${mapping.matched_item_id}` : ""}
+                </>
+              )}
             </p>
-            <details>
-              <summary>Preserved metadata and proposed relations</summary>
-              <pre>{displayJson({ metadata: mapping.content.metadata, relations: mapping.proposed_relations })}</pre>
-            </details>
+            {!mapping.content_erased && (
+              <details>
+                <summary>Preserved metadata and proposed relations</summary>
+                <pre>
+                  {displayJson({
+                    metadata: mapping.content.metadata,
+                    relations: mapping.proposed_relations,
+                  })}
+                </pre>
+              </details>
+            )}
           </li>
         ))}
       </ul>

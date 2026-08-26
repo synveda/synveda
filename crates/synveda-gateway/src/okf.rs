@@ -156,6 +156,8 @@ pub struct OkfMappingView {
     pub proposed_relations: Value,
     /// Whether external lifecycle permits a candidate.
     pub materializable: bool,
+    /// Whether derived plaintext and live Knowledge addresses were erased.
+    pub content_erased: bool,
     /// Candidate created on materialisation.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schema(value_type = Option<String>, format = "uuid")]
@@ -190,6 +192,7 @@ impl From<ImportMapping> for OkfMappingView {
             matched_revision_id: mapping.matched_revision_id,
             proposed_relations: mapping.proposed_relations,
             materializable: mapping.materializable,
+            content_erased: mapping.content_erased,
             candidate_id: mapping.candidate_id,
         }
     }

@@ -3698,6 +3698,10 @@ export type OkfMappingView = {
      */
     content: KnowledgeContentBody;
     /**
+     * Whether derived plaintext and live Knowledge addresses were erased.
+     */
+    content_erased: boolean;
+    /**
      * Semantic content digest.
      */
     content_hash: string;

@@ -464,7 +464,58 @@ $$;
 CREATE FUNCTION public.synveda_context_trace_immutable() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
+declare
+    new_row jsonb;
+    old_row jsonb;
 begin
+    if current_setting('synveda.knowledge_erasure', true) = 'on' then
+        if tg_table_name = 'context_feedback' and tg_op = 'DELETE' then
+            return old;
+        end if;
+        if tg_op = 'UPDATE' then
+            new_row := to_jsonb(new);
+            old_row := to_jsonb(old);
+            if tg_table_name = 'session_context_runs'
+               and new_row ->> 'rendered' = ''
+               and (new_row - 'rendered') = (old_row - 'rendered') then
+                return new;
+            end if;
+            if tg_table_name = 'context_candidates'
+               and new_row -> 'knowledge_item_id' = 'null'::jsonb
+               and new_row -> 'knowledge_revision_id' = 'null'::jsonb
+               and new_row -> 'scope_id' = 'null'::jsonb
+               and (new_row - array['knowledge_item_id', 'knowledge_revision_id', 'scope_id'])
+                   = (old_row - array['knowledge_item_id', 'knowledge_revision_id', 'scope_id']) then
+                return new;
+            end if;
+            if tg_table_name = 'context_selections'
+               and new_row -> 'knowledge_item_id' = 'null'::jsonb
+               and new_row -> 'knowledge_revision_id' = 'null'::jsonb
+               and (new_row - array['knowledge_item_id', 'knowledge_revision_id'])
+                   = (old_row - array['knowledge_item_id', 'knowledge_revision_id']) then
+                return new;
+            end if;
+            if tg_table_name = 'context_graph_steps'
+               and new_row -> 'relation_id' = 'null'::jsonb
+               and new_row -> 'from_item_id' = 'null'::jsonb
+               and new_row -> 'from_revision_id' = 'null'::jsonb
+               and new_row -> 'to_item_id' = 'null'::jsonb
+               and new_row -> 'to_revision_id' = 'null'::jsonb
+               and new_row -> 'asserting_revision_id' = 'null'::jsonb
+               and (new_row - array[
+                       'relation_id', 'from_item_id', 'from_revision_id',
+                       'to_item_id', 'to_revision_id', 'asserting_revision_id'
+                   ])
+                   = (old_row - array[
+                       'relation_id', 'from_item_id', 'from_revision_id',
+                       'to_item_id', 'to_revision_id', 'asserting_revision_id'
+                   ]) then
+                return new;
+            end if;
+        end if;
+        raise exception '% has an invalid Knowledge erasure scrub', tg_table_name
+            using errcode = '23514';
+    end if;
     raise exception '% is immutable (CPR-20, ADR-0084)', tg_table_name;
 end
 $$;
@@ -523,7 +574,9 @@ CREATE FUNCTION public.synveda_erase_knowledge(wanted_tenant uuid, wanted_item u
     AS $_$
 declare
     revision_evidence jsonb;
+    revision_ids uuid[];
     source_ids uuid[];
+    conflict_ids uuid[];
 begin
     if wanted_tenant <> synveda_current_tenant() then
         raise exception 'cross-tenant Knowledge erasure refused'
@@ -580,8 +633,9 @@ begin
                jsonb_agg(jsonb_build_object('id', id, 'hash', content_hash)
                          order by revision_number),
                '[]'::jsonb
-           )
-    into revision_evidence
+           ),
+           coalesce(array_agg(id order by revision_number), '{}'::uuid[])
+    into revision_evidence, revision_ids
     from (
         select distinct id, content_hash, revision_number
         from knowledge_revisions
@@ -607,6 +661,83 @@ begin
      where tenant_id = wanted_tenant
        and target_item_ids @> array[wanted_item]::uuid[]
        and payload is not null;
+    update session_context_runs run
+       set rendered = ''
+      from (
+          select distinct selection.tenant_id, selection.context_run_id
+          from context_selections selection
+          where selection.tenant_id = wanted_tenant
+            and selection.knowledge_item_id = wanted_item
+      ) affected
+     where run.tenant_id = affected.tenant_id
+       and run.id = affected.context_run_id
+       and run.rendered <> '';
+    delete from context_feedback feedback
+     using context_selections selection
+     where feedback.tenant_id = wanted_tenant
+       and selection.tenant_id = feedback.tenant_id
+       and selection.id = feedback.context_selection_id
+       and selection.context_run_id = feedback.context_run_id
+       and selection.knowledge_item_id = wanted_item;
+    update context_graph_steps step
+       set relation_id = null,
+           from_item_id = null,
+           from_revision_id = null,
+           to_item_id = null,
+           to_revision_id = null,
+           asserting_revision_id = null
+      from (
+          select relation.tenant_id, relation.id
+          from knowledge_relations relation
+          where relation.tenant_id = wanted_tenant
+            and relation.source_item_id = wanted_item
+          union
+          select relation.tenant_id, relation.id
+          from knowledge_relations relation
+          where relation.tenant_id = wanted_tenant
+            and relation.target_item_id = wanted_item
+      ) affected
+     where step.tenant_id = affected.tenant_id
+       and step.relation_id = affected.id;
+    update context_selections
+       set knowledge_item_id = null, knowledge_revision_id = null
+     where tenant_id = wanted_tenant and knowledge_item_id = wanted_item;
+    update context_candidates
+       set knowledge_item_id = null, knowledge_revision_id = null, scope_id = null
+     where tenant_id = wanted_tenant
+       and knowledge_revision_id = any(revision_ids);
+    update import_mappings
+       set title = '', body_markdown = '', summary = '', tags = '{}'::text[],
+           verification_metadata = '{}'::jsonb, metadata = '{}'::jsonb,
+           proposed_relations = '[]'::jsonb, matched_item_id = null,
+           matched_revision_id = null, materializable = false,
+           content_erased = true
+     where tenant_id = wanted_tenant
+       and matched_item_id = wanted_item
+       and not content_erased;
+    update import_mappings mapping
+       set title = '', body_markdown = '', summary = '', tags = '{}'::text[],
+           verification_metadata = '{}'::jsonb, metadata = '{}'::jsonb,
+           proposed_relations = '[]'::jsonb, matched_item_id = null,
+           matched_revision_id = null, materializable = false,
+           content_erased = true
+      from capture_candidates candidate
+     where candidate.tenant_id = wanted_tenant
+       and candidate.resulting_knowledge_item_id = wanted_item
+       and mapping.tenant_id = candidate.tenant_id
+       and mapping.candidate_id = candidate.id
+       and not mapping.content_erased;
+    select coalesce(array_agg(distinct member.conflict_set_id), '{}'::uuid[])
+      into conflict_ids
+      from knowledge_conflict_members member
+     where member.tenant_id = wanted_tenant
+       and member.knowledge_item_id = wanted_item;
+    delete from knowledge_conflict_members member
+     where member.tenant_id = wanted_tenant
+       and member.conflict_set_id = any(conflict_ids);
+    delete from knowledge_conflict_sets conflict
+     where conflict.tenant_id = wanted_tenant
+       and conflict.id = any(conflict_ids);
     delete from knowledge_relations
      where tenant_id = wanted_tenant
        and (source_item_id = wanted_item or target_item_id = wanted_item);
@@ -825,6 +956,33 @@ CREATE FUNCTION public.synveda_import_mapping_transition() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
 begin
+    if current_setting('synveda.knowledge_erasure', true) = 'on' then
+        if not new.content_erased or old.content_erased
+           or new.title <> '' or new.body_markdown <> '' or new.summary <> ''
+           or new.tags <> '{}'::text[]
+           or new.verification_metadata <> '{}'::jsonb
+           or new.metadata <> '{}'::jsonb
+           or new.proposed_relations <> '[]'::jsonb
+           or new.materializable
+           or new.matched_item_id is not null
+           or new.matched_revision_id is not null
+           or (to_jsonb(new) - array[
+                   'title', 'body_markdown', 'summary', 'tags',
+                   'verification_metadata', 'metadata', 'proposed_relations',
+                   'matched_item_id', 'matched_revision_id', 'materializable',
+                   'content_erased'
+               ])
+               <> (to_jsonb(old) - array[
+                   'title', 'body_markdown', 'summary', 'tags',
+                   'verification_metadata', 'metadata', 'proposed_relations',
+                   'matched_item_id', 'matched_revision_id', 'materializable',
+                   'content_erased'
+               ]) then
+            raise exception 'import mapping has an invalid Knowledge erasure scrub'
+                using errcode = '23514';
+        end if;
+        return new;
+    end if;
     if new.id <> old.id or new.tenant_id <> old.tenant_id
        or new.job_id <> old.job_id or new.artifact_id <> old.artifact_id
        or new.ordinal <> old.ordinal or new.okf_type <> old.okf_type
@@ -966,6 +1124,10 @@ CREATE FUNCTION public.synveda_knowledge_conflict_member_immutable() RETURNS tri
     LANGUAGE plpgsql
     AS $$
 begin
+    if tg_op = 'DELETE'
+       and current_setting('synveda.knowledge_erasure', true) = 'on' then
+        return null;
+    end if;
     raise exception 'Knowledge conflict members are immutable'
         using errcode = '23514';
 end
@@ -980,6 +1142,13 @@ CREATE FUNCTION public.synveda_knowledge_conflict_set_transition() RETURNS trigg
     LANGUAGE plpgsql
     AS $$
 begin
+    if tg_op = 'DELETE' then
+        if current_setting('synveda.knowledge_erasure', true) = 'on' then
+            return old;
+        end if;
+        raise exception 'Knowledge conflict sets are durable evidence'
+            using errcode = '23514';
+    end if;
     if new.id <> old.id
        or new.tenant_id <> old.tenant_id
        or new.scope_id <> old.scope_id
@@ -2849,22 +3018,24 @@ CREATE TABLE public.import_mappings (
     proposed_relations jsonb DEFAULT '[]'::jsonb NOT NULL,
     materializable boolean NOT NULL,
     candidate_id uuid,
+    content_erased boolean DEFAULT false NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT import_mappings_body_check CHECK (((btrim(body_markdown) <> ''::text) AND (octet_length(body_markdown) <= 131072))),
+    CONSTRAINT import_mappings_body_check CHECK ((((NOT content_erased) AND (btrim(body_markdown) <> ''::text) AND (octet_length(body_markdown) <= 131072)) OR (content_erased AND (body_markdown = ''::text)))),
     CONSTRAINT import_mappings_classification_check CHECK ((classification = ANY (ARRAY['addition'::text, 'update'::text, 'duplicate'::text, 'conflict'::text]))),
     CONSTRAINT import_mappings_confidence_check CHECK (((confidence_permille >= 0) AND (confidence_permille <= 1000))),
     CONSTRAINT import_mappings_hash_check CHECK ((content_hash ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT import_mappings_knowledge_type_check CHECK ((knowledge_type = ANY (ARRAY['fact'::text, 'decision'::text, 'preference'::text, 'procedure'::text, 'entity'::text, 'episode'::text, 'convention'::text, 'warning'::text, 'reference'::text]))),
-    CONSTRAINT import_mappings_match_shape_check CHECK ((((classification = 'addition'::text) AND (matched_item_id IS NULL) AND (matched_revision_id IS NULL)) OR ((classification <> 'addition'::text) AND (matched_item_id IS NOT NULL) AND (matched_revision_id IS NOT NULL)))),
+    CONSTRAINT import_mappings_erasure_check CHECK (((NOT content_erased) OR ((title = ''::text) AND (body_markdown = ''::text) AND (summary = ''::text) AND (tags = '{}'::text[]) AND (verification_metadata = '{}'::jsonb) AND (metadata = '{}'::jsonb) AND (proposed_relations = '[]'::jsonb) AND (matched_item_id IS NULL) AND (matched_revision_id IS NULL) AND (NOT materializable)))),
+    CONSTRAINT import_mappings_match_shape_check CHECK ((content_erased OR (((classification = 'addition'::text) AND (matched_item_id IS NULL) AND (matched_revision_id IS NULL)) OR ((classification <> 'addition'::text) AND (matched_item_id IS NOT NULL) AND (matched_revision_id IS NOT NULL))))),
     CONSTRAINT import_mappings_metadata_check CHECK (((jsonb_typeof(metadata) = 'object'::text) AND (octet_length((metadata)::text) <= 16384))),
     CONSTRAINT import_mappings_okf_type_check CHECK (((btrim(okf_type) <> ''::text) AND (char_length(okf_type) <= 200))),
     CONSTRAINT import_mappings_ordinal_check CHECK (((ordinal >= 1) AND (ordinal <= 2000))),
     CONSTRAINT import_mappings_relations_check CHECK (((jsonb_typeof(proposed_relations) = 'array'::text) AND (octet_length((proposed_relations)::text) <= 65536))),
     CONSTRAINT import_mappings_sensitivity_check CHECK ((sensitivity = ANY (ARRAY['public'::text, 'internal'::text, 'confidential'::text, 'restricted'::text]))),
     CONSTRAINT import_mappings_stale_time_check CHECK (((stale_after IS NULL) OR ((stale_after > valid_from) AND ((valid_to IS NULL) OR (stale_after <= valid_to))))),
-    CONSTRAINT import_mappings_summary_check CHECK (((btrim(summary) <> ''::text) AND (char_length(summary) <= 2000))),
-    CONSTRAINT import_mappings_tags_check CHECK (public.synveda_knowledge_tags_canonical(tags)),
-    CONSTRAINT import_mappings_title_check CHECK (((btrim(title) <> ''::text) AND (char_length(title) <= 300))),
+    CONSTRAINT import_mappings_summary_check CHECK ((((NOT content_erased) AND (btrim(summary) <> ''::text) AND (char_length(summary) <= 2000)) OR (content_erased AND (summary = ''::text)))),
+    CONSTRAINT import_mappings_tags_check CHECK ((((NOT content_erased) AND public.synveda_knowledge_tags_canonical(tags)) OR (content_erased AND (tags = '{}'::text[])))),
+    CONSTRAINT import_mappings_title_check CHECK ((((NOT content_erased) AND (btrim(title) <> ''::text) AND (char_length(title) <= 300)) OR (content_erased AND (title = ''::text)))),
     CONSTRAINT import_mappings_valid_time_check CHECK (((valid_to IS NULL) OR (valid_to > valid_from))),
     CONSTRAINT import_mappings_verification_check CHECK (((jsonb_typeof(verification_metadata) = 'object'::text) AND (octet_length((verification_metadata)::text) <= 16384)))
 );
@@ -6289,6 +6460,13 @@ CREATE INDEX import_mappings_by_classification ON public.import_mappings USING b
 
 
 --
+-- Name: import_mappings_by_candidate; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX import_mappings_by_candidate ON public.import_mappings USING btree (tenant_id, candidate_id) WHERE (candidate_id IS NOT NULL);
+
+
+--
 -- Name: import_mappings_by_match; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -7125,7 +7303,7 @@ CREATE TRIGGER knowledge_conflict_member_immutable BEFORE DELETE OR UPDATE OR TR
 -- Name: knowledge_conflict_sets knowledge_conflict_set_transition; Type: TRIGGER; Schema: public; Owner: -
 --
 
-CREATE TRIGGER knowledge_conflict_set_transition BEFORE UPDATE ON public.knowledge_conflict_sets FOR EACH ROW EXECUTE FUNCTION public.synveda_knowledge_conflict_set_transition();
+CREATE TRIGGER knowledge_conflict_set_transition BEFORE DELETE OR UPDATE ON public.knowledge_conflict_sets FOR EACH ROW EXECUTE FUNCTION public.synveda_knowledge_conflict_set_transition();
 
 
 --

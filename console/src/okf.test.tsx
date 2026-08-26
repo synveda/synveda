@@ -116,6 +116,7 @@ function mapping(
     matched_revision_id: classification === "addition" ? null : `revision-${ordinal}`,
     proposed_relations: { links: [{ target: "decision.md", relation: "related_to" }] },
     materializable: classification !== "duplicate",
+    content_erased: false,
   };
 }
 
@@ -196,6 +197,37 @@ test("a dry-run exposes every classification unknown metadata and resulting cand
   ]) {
     assert.match(text, new RegExp(expected), text);
   }
+});
+
+test("an erased mapping names the state without reconstructing deleted content", () => {
+  const erased = mapping(4, "conflict");
+  erased.content = {
+    ...erased.content,
+    title: "",
+    body_markdown: "",
+    summary: "",
+    tags: [],
+    metadata: {},
+  };
+  erased.matched_item_id = null;
+  erased.matched_revision_id = null;
+  erased.proposed_relations = {};
+  erased.materializable = false;
+  erased.content_erased = true;
+  const evidence = plan();
+  evidence.mappings = [erased];
+
+  const text = toText(renderToStaticMarkup(<PlanEvidence plan={evidence} />));
+  for (const expected of [
+    "Derived mapping content erased",
+    "conflict",
+    "Derived plaintext and live Knowledge addresses erased",
+    erased.content_hash,
+    erased.artifact_id,
+  ]) {
+    assert.match(text, new RegExp(expected), text);
+  }
+  assert.doesNotMatch(text, /retained only|compared with|Preserved metadata and proposed relations/);
 });
 
 test("the project page offers source planning history selection and export status", async () => {

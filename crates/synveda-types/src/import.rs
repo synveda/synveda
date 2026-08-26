@@ -185,6 +185,8 @@ pub struct ImportMapping {
     pub proposed_relations: Value,
     /// Whether external lifecycle permits a candidate.
     pub materializable: bool,
+    /// Whether derived plaintext and live Knowledge addresses were erased.
+    pub content_erased: bool,
     /// Candidate created by the one materialisation, when applicable.
     pub candidate_id: Option<CaptureCandidateId>,
     /// Creation time.
