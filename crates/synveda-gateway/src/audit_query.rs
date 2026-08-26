@@ -909,23 +909,22 @@ pub(crate) async fn verify(State(state): State<AppState>) -> Response {
         let tenant_id = tenant_id()?;
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
         let authorized = gate(&state, &mut tx).await?;
-        let verification = synveda_audit::verify(&mut tx, tenant_id).await?;
-        let frame = synveda_audit::frame(&mut tx, tenant_id).await?;
+        let report = synveda_audit::verify_report(&mut tx, tenant_id).await?;
 
-        let response = match verification {
+        let response = match report.verification {
             ChainVerification::Valid { events } => VerifyResponse {
                 valid: true,
                 events,
-                head_seq: frame.head_seq,
-                head_hash: hex(&frame.head_hash),
+                head_seq: report.head_seq,
+                head_hash: hex(&report.head_hash),
                 broken_at: None,
                 reason: None,
             },
             ChainVerification::Broken { seq, reason } => VerifyResponse {
                 valid: false,
-                events: frame.head_seq,
-                head_seq: frame.head_seq,
-                head_hash: hex(&frame.head_hash),
+                events: report.head_seq,
+                head_seq: report.head_seq,
+                head_hash: hex(&report.head_hash),
                 broken_at: Some(seq),
                 reason: Some(reason.to_string()),
             },

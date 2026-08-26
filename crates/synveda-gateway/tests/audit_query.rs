@@ -1158,7 +1158,14 @@ async fn the_chain_verifies_over_everything_this_suite_wrote() {
         Some(true),
         "the chain this suite built verifies: {body}"
     );
-    assert!(body["events"].as_i64().expect("events") > 0);
+    let events = body["events"].as_i64().expect("events");
+    assert!(events > 0);
+    assert_eq!(body["head_seq"].as_i64(), Some(events));
+    assert_eq!(
+        body["head_hash"].as_str().map(str::len),
+        Some(64),
+        "the response carries the exact verified BLAKE3 head: {body}"
+    );
     assert!(body["broken_at"].is_null(), "nothing is broken: {body}");
 }
 

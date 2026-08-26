@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select head.seq as \"head_seq?\",\n                  head.head_hash as \"head_hash?\",\n                  coalesce(log.max_seq, 0) as \"max_seq!\"\n             from (\n                    select max(seq) as max_seq\n                      from audit_log\n                     where tenant_id = $1\n                  ) log\n             left join audit_chain_heads head on head.tenant_id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "head_seq?",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "head_hash?",
+        "type_info": "Bytea"
+      },
+      {
+        "ordinal": 2,
+        "name": "max_seq!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      true,
+      true,
+      null
+    ]
+  },
+  "hash": "988f3b61333e0de837871755b8ef60df833e27d05430645438d9c2f9797c5d0a"
+}
