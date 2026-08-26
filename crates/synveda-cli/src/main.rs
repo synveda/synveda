@@ -21,6 +21,7 @@ mod audit;
 mod channel;
 mod configuration;
 mod credentials;
+mod demo;
 mod diff;
 mod directory;
 mod init;
@@ -394,6 +395,61 @@ enum Command {
         quiet: bool,
         #[arg(long)]
         profile: Option<String>,
+    },
+    /// Run the public-API PulseBoard product walkthrough (CPR-41, ADR-0100).
+    ///
+    /// `start` is resumable and creates only governed product data. It assumes
+    /// this one runtime is already initialised and that `synveda login` has
+    /// stored the acting user's credential. `--profile` selects a canonical
+    /// governed Configuration document; it is not an edition or deployment
+    /// switch.
+    #[command(subcommand)]
+    Demo(DemoCommand),
+}
+
+#[derive(Subcommand)]
+enum DemoCommand {
+    /// Create or resume the realistic PulseBoard walkthrough.
+    Start {
+        /// Governed product profile copied into an immutable Configuration.
+        #[arg(long, value_enum)]
+        profile: demo::DemoProfile,
+        /// Alice's stored credential profile. Defaults to SYNVEDA_PROFILE,
+        /// else `default`.
+        #[arg(long)]
+        credentials: Option<String>,
+        /// A separately logged-in Bob profile for the genuine teammate leg.
+        /// In team mode the command also discovers a stored profile named
+        /// `bob`; otherwise it issues a one-time invitation and runs the clean
+        /// reuse leg as Alice without impersonating another person.
+        #[arg(long)]
+        bob_credentials: Option<String>,
+        /// Print the final manifest summary as JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show the public resources named by the local demo receipt.
+    Status {
+        /// Stored credential profile. Defaults to SYNVEDA_PROFILE, else
+        /// `default`.
+        #[arg(long)]
+        credentials: Option<String>,
+        /// Print machine-readable JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Archive the active PulseBoard workspace and private demo Knowledge.
+    ///
+    /// Immutable revisions, proposals, capture evidence and audit events stay
+    /// as history. This never resets the database or touches non-demo data.
+    Reset {
+        /// Required: without it no mutation is attempted.
+        #[arg(long)]
+        force: bool,
+        /// Stored credential profile. Defaults to SYNVEDA_PROFILE, else
+        /// `default`.
+        #[arg(long)]
+        credentials: Option<String>,
     },
 }
 
@@ -2969,6 +3025,26 @@ async fn run(cli: Cli) -> Result<(), String> {
                 quiet,
             )
             .await
+        }
+        Command::Demo(DemoCommand::Start {
+            profile,
+            credentials,
+            bob_credentials,
+            json,
+        }) => {
+            demo::start(
+                profile,
+                &profile_name(credentials),
+                bob_credentials.as_deref(),
+                json,
+            )
+            .await
+        }
+        Command::Demo(DemoCommand::Status { credentials, json }) => {
+            demo::status(&profile_name(credentials), json).await
+        }
+        Command::Demo(DemoCommand::Reset { force, credentials }) => {
+            demo::reset(&profile_name(credentials), force).await
         }
         Command::Channel(command) => match command {
             ChannelCommand::Status {

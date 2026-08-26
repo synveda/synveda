@@ -2277,6 +2277,20 @@ CPR-40  Context-platform product and trust evaluation (XL)
   demo, `make eval-product`, `make eval`, `make ci` and `make db-test` pass.
   ADR-0099.
 
+CPR-41  One-command realistic product demo (XL)
+  Filed 2026-08-26 by the autonomous continuation. Package the PulseBoard
+  personal/team/governed walkthrough as a resumable authenticated public-API
+  client, never another seeder or service layer. AC: current command tree;
+  workspace/project/repository plus complete session/capture/review/Knowledge/
+  context/supersession lifecycle; private/project and real-principal team
+  boundaries; governed Skill, MCP and OKF examples; one-time invitations and
+  mode-0600 receipt contain no persisted bearer material; reset archives only
+  receipt-owned current objects; deterministic hashing is labelled
+  lexical-only; fresh-tenant adoption allows exactly the first canonical
+  Configuration and binding through transaction-serialised PDP/VedaFlow/audit;
+  focused CLI, configuration-race and MVP acceptance, demo, `make ci` and
+  `make db-test` pass. ADR-0100.
+
 ──────────────────────────────────────────────
 Sequencing (features → phases)
 ──────────────────────────────────────────────
@@ -2370,7 +2384,7 @@ Phase 4 ecosystem: ADPT-4,5,6,7,8 · PRMT-3 · SKIL-5 · MEM-7 · OPS-5,6,7 · C
    or an evaluation harness — and that is a *when*, not an *if*, since ADPT-1's own demo
    is a script. What it must not become is a warning in a README: the gap is silent,
    returns exit 0, and reads exactly like a session that was observed.)
-Phase 5 context platform (redesign): CPR-1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40
+Phase 5 context platform (redesign): CPR-1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41
    (Added 2026-08-17. Its own phase rather than a slot in Phase 4, because it is not the
    next feature — it is the programme that re-cuts the model every feature above was built
    on, for an audience none of them was: one person, or four sharing agent context, who

@@ -112,7 +112,9 @@ async fn call(
     (status, value)
 }
 
-async fn admitted() -> Option<(AppState, Router, TenantId, ScopeId, String)> {
+async fn admitted_with_pack(
+    bind_initial_pack: bool,
+) -> Option<(AppState, Router, TenantId, ScopeId, String)> {
     let Ok(url) = std::env::var("DATABASE_URL") else {
         eprintln!(
             "skipping CPR-30 configuration API test: DATABASE_URL is not set \
@@ -176,16 +178,327 @@ async fn admitted() -> Option<(AppState, Router, TenantId, ScopeId, String)> {
     )
     .await
     .expect("grant administrator");
-    // Fixture bootstrap itself remains a typed VedaFlow change. It gives the
-    // local project scope the permissive profile needed to prove auto-apply;
-    // the public mutations below are the acceptance subject.
-    configuration_support::bind_pack(&mut tx, tenant, root.id, synveda_policy::OPEN_COLLABORATION)
+    if bind_initial_pack {
+        // Fixture bootstrap itself remains a typed VedaFlow change. It gives
+        // the local project scope the permissive profile needed to prove
+        // auto-apply; the public mutations below are the acceptance subject.
+        configuration_support::bind_pack(
+            &mut tx,
+            tenant,
+            root.id,
+            synveda_policy::OPEN_COLLABORATION,
+        )
         .await;
+    }
     tx.commit().await.expect("commit bootstrap");
     let state = state(&url);
     let app = router(state.clone());
     let token = Hs256Verifier::new(SECRET).issue(ADMIN, tenant, Duration::from_secs(300));
     Some((state, app, tenant, root.id, token))
+}
+
+async fn admitted() -> Option<(AppState, Router, TenantId, ScopeId, String)> {
+    admitted_with_pack(true).await
+}
+
+#[tokio::test]
+async fn first_exact_profile_adoption_is_governed_and_closes_after_one_binding() {
+    let _guard = serial().await;
+    let Some((state, app, tenant, _root, token)) = admitted_with_pack(false).await else {
+        return;
+    };
+
+    let (status, workspace) = call(
+        &app,
+        "POST",
+        "/v1/workspaces",
+        &token,
+        Some("cpr41-profile-workspace"),
+        Some(json!({"slug": "pulseboard", "display_name": "PulseBoard"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{workspace}");
+    let scope_id = workspace["scope_id"].as_str().expect("workspace scope");
+
+    let (status, templates) = call(
+        &app,
+        "GET",
+        "/v1/configuration-templates",
+        &token,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{templates}");
+    let enterprise = templates["templates"]
+        .as_array()
+        .expect("templates")
+        .iter()
+        .find(|entry| entry["name"] == "enterprise")
+        .expect("enterprise template");
+
+    let (status, created) = call(
+        &app,
+        "POST",
+        "/v1/configurations",
+        &token,
+        Some("cpr41-first-profile"),
+        Some(json!({
+            "governing_scope_id": scope_id,
+            "name": "pulseboard-governed",
+            "document": enterprise["document"],
+            "source_template": "enterprise"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{created}");
+    assert_eq!(created["outcome"], "applied", "{created}");
+    let artifact_id = created["artifact_id"].as_str().expect("artifact id");
+    let change_id = created["change_id"].as_str().expect("change id");
+
+    let (status, proposal) = call(
+        &app,
+        "GET",
+        &format!("/v1/proposals/{change_id}"),
+        &token,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{proposal}");
+    assert_eq!(proposal["state"], "applied", "{proposal}");
+    assert_eq!(
+        proposal["artifact_references"][0]["family"],
+        "configuration"
+    );
+
+    let (status, bound) = call(
+        &app,
+        "POST",
+        "/v1/configuration-bindings",
+        &token,
+        Some("cpr41-first-binding"),
+        Some(json!({
+            "scope_id": scope_id,
+            "artifact_id": artifact_id,
+            "enabled": true
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{bound}");
+    assert_eq!(bound["outcome"], "applied", "{bound}");
+
+    let (status, effective) = call(
+        &app,
+        "GET",
+        &format!("/v1/configurations/effective?scope_id={scope_id}"),
+        &token,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{effective}");
+    assert_eq!(effective["artifact_id"], artifact_id, "{effective}");
+    assert_eq!(effective["document"], enterprise["document"], "{effective}");
+
+    // Once a binding exists, even a byte-for-byte canonical profile follows
+    // the configured approval matrix. The bootstrap exception cannot be used
+    // as a general mutation fast path.
+    let (status, second) = call(
+        &app,
+        "POST",
+        "/v1/configurations",
+        &token,
+        Some("cpr41-second-profile"),
+        Some(json!({
+            "governing_scope_id": scope_id,
+            "name": "second-governed",
+            "document": enterprise["document"],
+            "source_template": "enterprise"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{second}");
+    assert_eq!(second["outcome"], "pending_review", "{second}");
+    let pending_artifact = second["artifact_id"]
+        .as_str()
+        .expect("pending command reserves an aggregate id");
+    let (status, _) = call(
+        &app,
+        "GET",
+        &format!("/v1/configurations/{pending_artifact}"),
+        &token,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(
+        status,
+        StatusCode::NOT_FOUND,
+        "pending review must not materialise its reserved aggregate"
+    );
+
+    let opened = sqlx::query_scalar!(
+        r#"select count(*) as "count!" from audit_log
+           where tenant_id = $1 and action = 'configuration.change.opened'"#,
+        tenant.as_uuid(),
+    )
+    .fetch_one(&state.pool)
+    .await
+    .expect("count Configuration audit opens");
+    let applied = sqlx::query_scalar!(
+        r#"select count(*) as "count!" from audit_log
+           where tenant_id = $1 and action = 'configuration.change.applied'"#,
+        tenant.as_uuid(),
+    )
+    .fetch_one(&state.pool)
+    .await
+    .expect("count Configuration audit applications");
+    assert_eq!(opened, 3, "every attempt retains a VedaFlow change");
+    assert_eq!(
+        applied, 2,
+        "only the first exact create and bind auto-apply"
+    );
+}
+
+#[tokio::test]
+async fn edited_document_cannot_claim_the_first_profile_adoption() {
+    let _guard = serial().await;
+    let Some((_state, app, _tenant, root, token)) = admitted_with_pack(false).await else {
+        return;
+    };
+    let (status, templates) = call(
+        &app,
+        "GET",
+        "/v1/configuration-templates",
+        &token,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{templates}");
+    let mut document = templates["templates"]
+        .as_array()
+        .expect("templates")
+        .iter()
+        .find(|entry| entry["name"] == "personal")
+        .expect("personal template")["document"]
+        .clone();
+    document["context"]["token_budget"] = json!(1234);
+
+    let (status, result) = call(
+        &app,
+        "POST",
+        "/v1/configurations",
+        &token,
+        Some("cpr41-edited-first-profile"),
+        Some(json!({
+            "governing_scope_id": root,
+            "name": "not-the-canonical-profile",
+            "document": document
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{result}");
+    assert_eq!(result["outcome"], "pending_review", "{result}");
+    let pending_artifact = result["artifact_id"]
+        .as_str()
+        .expect("pending command reserves an aggregate id");
+    let (status, _) = call(
+        &app,
+        "GET",
+        &format!("/v1/configurations/{pending_artifact}"),
+        &token,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn concurrent_first_profile_requests_have_exactly_one_winner() {
+    let _guard = serial().await;
+    let Some((_state, app, _tenant, _root, token)) = admitted_with_pack(false).await else {
+        return;
+    };
+    let (status, workspace) = call(
+        &app,
+        "POST",
+        "/v1/workspaces",
+        &token,
+        Some("cpr41-race-workspace"),
+        Some(json!({"slug": "profile-race", "display_name": "Profile race"})),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{workspace}");
+    let scope_id = workspace["scope_id"].as_str().expect("workspace scope");
+    let (status, templates) = call(
+        &app,
+        "GET",
+        "/v1/configuration-templates",
+        &token,
+        None,
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "{templates}");
+    let document = templates["templates"]
+        .as_array()
+        .expect("templates")
+        .iter()
+        .find(|entry| entry["name"] == "personal")
+        .expect("personal template")["document"]
+        .clone();
+    let left_body = json!({
+        "governing_scope_id": scope_id,
+        "name": "left-profile",
+        "document": document,
+        "source_template": "personal"
+    });
+    let right_body = json!({
+        "governing_scope_id": scope_id,
+        "name": "right-profile",
+        "document": document,
+        "source_template": "personal"
+    });
+    let (left, right) = tokio::join!(
+        call(
+            &app,
+            "POST",
+            "/v1/configurations",
+            &token,
+            Some("cpr41-race-left"),
+            Some(left_body),
+        ),
+        call(
+            &app,
+            "POST",
+            "/v1/configurations",
+            &token,
+            Some("cpr41-race-right"),
+            Some(right_body),
+        )
+    );
+    assert_eq!(left.0, StatusCode::CREATED, "{}", left.1);
+    assert_eq!(right.0, StatusCode::CREATED, "{}", right.1);
+    let outcomes = [left.1["outcome"].as_str(), right.1["outcome"].as_str()];
+    assert_eq!(
+        outcomes
+            .iter()
+            .filter(|outcome| **outcome == Some("applied"))
+            .count(),
+        1,
+        "only one concurrent request may be first: {outcomes:?}"
+    );
+    assert_eq!(
+        outcomes
+            .iter()
+            .filter(|outcome| **outcome == Some("pending_review"))
+            .count(),
+        1,
+        "the loser follows the configured matrix: {outcomes:?}"
+    );
 }
 
 #[tokio::test]

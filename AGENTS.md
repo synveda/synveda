@@ -75,7 +75,7 @@ Phase 5 — context platform redesign, since 2026-08-17, on
 `feat/context-platform-mvp`. Phase 3 is paused mid-phase, not finished —
 OPS-9, OPS-10, TEN-5,6, AUD-3,4, EVAL-6, CTX-7, OPS-3,4, ADPT-3,
 CTX-6 and FLOW-8 are still open, and no live Entra/Okta tenant or real
-  Cursor frame has been replayed. **137 features filed, 106 delivered**;
+  Cursor frame has been replayed. **138 features filed, 107 delivered**;
 STATUS.md and `make check-backlog` are the authority on the count — the
 headline number has drifted four times, the fourth being this file itself,
 which still read 104/71 after CPR-8 filed the 105th. That is why the
@@ -255,6 +255,16 @@ Load-bearing facts about Phase 5:
   is reported by name. Its disposable `lme-*` actors use an explicitly
   enforced two-hour lifetime; every ordinary run retains the one-hour default.
   Model extraction remains unmeasured without a credential or vLLM endpoint.
+- CPR-41 (ADR-0100) is delivered: `synveda demo start --profile
+  personal|team|governed`, `status` and force-explicit archival reset package
+  PulseBoard as a resumable authenticated public-API client. It creates no
+  product row directly and never turns a pending Skill/Tool review into an
+  activation claim. A real Bob credential proves teammate reuse; otherwise a
+  one-time invite is returned and the command says reuse ran as Alice. The
+  first exact canonical Configuration and its first matching binding can
+  auto-apply for a root administrator only through the ordinary typed
+  VedaFlow/PDP/audit path; a tenant-root transaction lock makes that exception
+  one-winner under concurrency.
 - CPR-10 (ADR-0076): **a run is a record**. `sessions`, `session_events` and
   `session_context_runs` replace `session_id: text`; the governed scope a run
   is decided at is derived from its workspace and project by composite keys

@@ -144,6 +144,14 @@ extraction precision/recall, and the default gate passes all QA tiers plus
 tier pass. Stage-H delivers 4,927 authentic turns and measures all ten
 instances with zero empty/unattributed blocks, 0.643 retrieval recall and
 explicit per-session sparse-index misses after its fixed 1,800-second wait.
+CPR-41, the one-command product demo, is delivered under ADR-0100. The
+personal/team/governed PulseBoard walkthrough is a resumable authenticated
+public-API client with two-phase sessions, reviewable capture, governed
+Knowledge/supersession, Skill/MCP/OKF evidence and archival reset. It
+fabricates no teammate or semantic claim. A transaction-serialised,
+administrator-only first exact canonical Configuration and matching binding
+close the fresh-tenant cycle without skipping VedaFlow, PDP effect checks or
+audit.
 **It is a pre-1.0 hard
 cut**: a fresh schema epoch, no old-data migration, no compatibility shims,
 and old databases rejected with a reset instruction. Since CPR-2 that is
@@ -256,7 +264,7 @@ explicitly and say so.
 
 Phases 0, 1 and 2 are complete; SKIL-1 through SKIL-4, OPS-1, CNSL-1, ADPT-2,
 CNSL-2, AUTH-4, AUTH-5, EVAL-3, OPS-2, TEN-3, TEN-4 and OPS-8 are the Phase 3
-features done. 106 of 137 features delivered — see docs/backlog/STATUS.md for
+features done. 107 of 138 features delivered — see docs/backlog/STATUS.md for
 what each one proved and what it left standing. (The total read 86 until
 2026-08-05, when it was corrected to the 88 STATUS.md and `make
 check-backlog` had both said for some time; AUTHZ-7 was filed the same day by
@@ -503,6 +511,15 @@ security tier pass. The corrected Stage-H run delivers all 4,927 turns and
 measures all ten instances with zero empty/unattributed blocks, 0.643 retrieval
 recall and explicit sparse-index readiness misses. Model extraction alone
 remains unmeasured because no credential or vLLM endpoint is available.
+
+**CPR-41 was filed and delivered next**, making it **138 with 107 delivered**:
+it packages the PulseBoard loop as `synveda demo start --profile
+personal|team|governed`, with public-API-only resumability and archival reset.
+The first exact profile adoption is still a typed, audited VedaFlow change and
+is serialised at the tenant root so concurrent requests cannot both be first;
+all later or edited configuration follows the live matrix. Team reuse names a
+real second principal only when a distinct credential exists, and
+deterministic hashing remains explicitly lexical-only.
 
 Since CPR-9 a **listing decides per row**. The audit of Prompts 1–7 found that
 `GET /v1/workspaces` and `/v1/me` took one decision at the tenant root and

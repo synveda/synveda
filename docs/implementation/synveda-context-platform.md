@@ -54,11 +54,12 @@ programme convention established in Prompt 1.
 | Durable conflict evidence, governed resolution, evaluated freshness and bitemporal Knowledge query | CPR-37 | **complete** | `ca3730f` | `7951d77` | Knowledge types 7/7; lifecycle 5/5; capture API 4/4; ingest 2/2; context 3/3; OKF 2/2; RLS 83/83; OpenAPI 6/6; console 215/215 | PASS | PASS (`synveda_test_85309`, removed) | isolated `demos/cpr-37-conflict-freshness.sh` PASS; 85-script drift gate PASS | none |
 | Anchor-first bounded Knowledge-relation expansion and re-authorised ContextRun paths | CPR-38 | **complete** | `7951d77` | `12e393a` | types 1/1; Knowledge 6/6; Configuration 1/1; ContextRun 4/4; RLS 79/79; OpenAPI 6/6; console 215/215 | PASS | PASS (`synveda_test_93371`, removed) | isolated `demos/cpr-38-bounded-graph.sh` PASS; graph-disabled miss → two-hop selected path; private endpoint absent; 84-script demo gate PASS | none |
 | Evidence-bearing client registry, conformance kit and second real-client attempt | CPR-39 | **partial — external live criterion** | `12e393a` | `0958d69` | registry gate 4/4; CLI config 28/28; MCP corpus 5/5; Claude adapter 98/98; console 216/216 + build | PASS | N/A — no schema/store change | isolated `demos/cpr-39-adapter-conformance.sh` PASS; 85-script gate PASS; genuine Claude 2.1.241 evidence retained; Cursor/VS Code live not run | Cursor executable/authenticated client absent; VS Code profile unauthenticated and current Preview contract has no SessionEnd |
-| Deterministic context-platform product/trust evaluation and re-enabled Knowledge benchmarks | CPR-40 | **complete** | `0958d69` | pending (CPR-41 ledger) | eval 162/162; product gate 6/6; store lexical 5/5; LongMemEval 14/14; audit query 16/16; capture/config focused suites PASS | PASS | PASS (fresh disposable database; removed on success) | product 18/18 and six zero gates; default 6/6 + 50 fixtures + all QA + 1,276 probes; 10k security PASS; BGE-M3 10/10 at 0.800 bounded precision; authentic Stage H delivered 4,927 turns and measured all ten instances with zero empty/unattributed blocks and 0.643 retrieval recall | no extraction-model credential or local vLLM; that separately labelled live tier remains unmeasured |
+| Deterministic context-platform product/trust evaluation and re-enabled Knowledge benchmarks | CPR-40 | **complete** | `0958d69` | `036eab7` | eval 162/162; product gate 6/6; store lexical 5/5; LongMemEval 14/14; audit query 16/16; capture/config focused suites PASS | PASS | PASS (fresh disposable database; removed on success) | product 18/18 and six zero gates; default 6/6 + 50 fixtures + all QA + 1,276 probes; 10k security PASS; BGE-M3 10/10 at 0.800 bounded precision; authentic Stage H delivered 4,927 turns and measured all ten instances with zero empty/unattributed blocks and 0.643 retrieval recall | no extraction-model credential or local vLLM; that separately labelled live tier remains unmeasured |
+| Resumable one-command personal/team/governed PulseBoard walkthrough over public APIs | CPR-41 | **complete** | `036eab7` | pending (CPR-42 ledger) | CLI demo 4/4; configuration/bootstrap concurrency 4/4; PulseBoard team loop 1/1 | PASS | PASS (`synveda_test_44030`, removed) | isolated `demos/cpr-41-one-command-demo.sh` PASS; 87-script drift gate PASS; packaged command not called live without a reachable gateway/current Alice+Bob credentials | no current authenticated gateway, distinct Bob credential or separately authenticated semantic provider; no live claim made |
 
-**Exact next objective:** complete and checkpoint CPR-41, the one-command
-realistic personal/team/governed PulseBoard demo. Revisit CPR-39's externally
-blocked second-client live run before programme close; do not substitute a
+**Exact next objective:** implement and checkpoint CPR-42, the adversarial
+security and product-integrity audit. Revisit CPR-39's externally blocked
+second-client live run before programme close; do not substitute a
 configuration or replay for that evidence.
 
 ### Starting-point objective map
@@ -4865,7 +4866,7 @@ frontend changes, deletions, tests, and the resulting commit hash.
 - **Commit.** `feat(adapters): add conformance kit and second verified client
   (CPR-39)` on `feat/context-platform-mvp`.
 - **Commit hash.** Written by CPR-40 under the programme's next-checkpoint
-  convention.
+  convention: `0958d6936c4bbaf6b14a3ab69bc0d5cd48eec5a9`.
 
 ### Prompt 30 — context-platform product and trust evaluation (CPR-40)
 
@@ -4947,4 +4948,64 @@ frontend changes, deletions, tests, and the resulting commit hash.
 - **Commit.** `test(evaluation): add context platform benchmark suite
   (CPR-40)` on `feat/context-platform-mvp`.
 - **Commit hash.** Written by CPR-41 under the programme's next-checkpoint
+  convention: `036eab7a4672189d4e2e6490f1d0ed90cf5a21e1`.
+
+### Prompt 31 — one-command realistic product demo (CPR-41)
+
+- **Selected feature and decision.** **CPR-41** starts from `036eab7` under
+  accepted ADR-0100. `synveda demo start --profile personal|team|governed`,
+  `demo status` and force-explicit `demo reset` are one resumable ordinary
+  HTTP client over the generated public application contract. The three names
+  select immutable governed Configuration templates; they do not select a
+  binary, schema, gateway or edition branch.
+
+- **Complete PulseBoard path.** The walkthrough creates its workspace,
+  project and canonical repository, records and closes three sessions,
+  extracts reviewable candidates, publishes two project items while retaining
+  a private preference, dismisses incidental content, proves clean-session
+  reuse, records `traceparent` as an explicit governed supersession of
+  `X-Request-Id`, and checks that only the current revision reaches the final
+  trace. It then traverses the existing Skill, trusted MCP and OKF v0.2 public
+  flows. Pending governance remains labelled pending; it is never called an
+  activation, binding or publication. A deterministic hash embedder is
+  labelled lexical-only and the output names TEI as the semantic deployment
+  option.
+
+- **Identity, bootstrap and local state.** Team mode uses a separately
+  authenticated Bob profile when one is supplied. Without one it returns a
+  one-time invitation once, strips token and accept URL before the atomic
+  mode-0600 XDG receipt is written, runs reuse as Alice and says exactly that.
+  It never mints an identity or token. A fresh tenant's otherwise circular
+  approval bootstrap is narrowed to a live tenant-root administrator's first
+  exact canonical Configuration artifact and matching first binding. Both are
+  still typed, content-hashed VedaFlow changes with proposal/effect PDP
+  decisions and hash-chained audit. A checked tenant-root row lock serialises
+  the absence test; an edited document, non-root grant, second artifact,
+  second binding or concurrent loser follows the ordinary live matrix.
+
+- **Reset and deletions.** Reset is an idempotent public-API archival walk over
+  only resource addresses in the receipt. It reads current revisions before
+  each preconditioned mutation, revokes a still-pending invitation, retains
+  immutable revisions/proposals/audit and does not claim success after a
+  failed public mutation. The old init-demo flag, hierarchy seed, direct
+  product SQL and database-reset disguise remain absent. The release packager
+  no longer promises a separate demo asset because the command is compiled
+  into the CLI.
+
+- **Evidence and honest boundary.** CLI demo tests **4/4**, Configuration
+  public-API/bootstrap/concurrency tests **4/4**, and the consolidated
+  PulseBoard team loop **1/1** pass. The isolated
+  `demos/cpr-41-one-command-demo.sh`, complete **87-script** drift gate,
+  complete `make ci` and fresh-scratch `make db-test` pass; the database suite
+  used `synveda_test_44030`, removed by its harness on success. The first CI
+  attempt inside the filesystem sandbox could not bind existing loopback
+  tests; its permission-correct rerun passed. This workstation had no
+  reachable gateway, its sole stored profile expired on 2026-08-13, and it had
+  neither a distinct Bob credential nor an authenticated semantic-provider
+  deployment. Therefore the hermetic public-domain acceptance is not labelled
+  a packaged live walkthrough.
+
+- **Commit.** `feat(demo): add realistic personal and team walkthrough
+  (CPR-41)` on `feat/context-platform-mvp`.
+- **Commit hash.** Written by CPR-42 under the programme's next-checkpoint
   convention.

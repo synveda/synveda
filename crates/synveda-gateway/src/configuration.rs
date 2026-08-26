@@ -1030,7 +1030,20 @@ async fn open_command(
         },
     )
     .await?;
-    let outstanding = requirement.outstanding(&[]);
+    // A fresh deployment otherwise deadlocks on its conservative fail-safe:
+    // `regulated-strict` asks for two administrators before the first profile
+    // can be selected, while first login can have created only one. The one
+    // narrow bootstrap is still a typed, hashed, audited VedaFlow change: a
+    // root administrator may auto-apply the tenant's first exact canonical
+    // profile artifact and its first binding. Any edited document, second
+    // artifact/binding or non-administrator uses the ordinary live matrix.
+    let initial_profile_adoption =
+        initial_profile_adoption(tx, tenant, command, authorization).await?;
+    let outstanding = if initial_profile_adoption {
+        synveda_types::Outstanding::default()
+    } else {
+        requirement.outstanding(&[])
+    };
     audit::record(
         tx,
         tenant,
@@ -1048,6 +1061,7 @@ async fn open_command(
             "binding_id": command.binding_id(),
             "authz": audit::decision_context(Action::ProposalOpen, &authorization.proposal_allowed),
             "approvals": approvals::audit_context(&requirement, &outstanding),
+            "initial_profile_adoption": initial_profile_adoption,
         }),
     )
     .await?;
@@ -1074,6 +1088,84 @@ async fn open_command(
     };
     claim.remember(tx, tenant, proposal.id.as_uuid()).await?;
     Ok(result)
+}
+
+/// Whether this is the one canonical profile adoption that makes a fresh
+/// tenant operable without inventing a second bootstrap authority path.
+async fn initial_profile_adoption(
+    tx: &mut PgConnection,
+    tenant: TenantId,
+    command: &ConfigurationCommand,
+    authorization: &CommandAuthorization,
+) -> Result<bool> {
+    if !authorization
+        .write_allowed
+        .roles
+        .iter()
+        .any(|role| role == "administrator")
+    {
+        return Ok(false);
+    }
+
+    // The absence checks below are one tenant-wide compare-and-apply. Two
+    // workspaces can otherwise race through them and each become "first".
+    // The root is immutable and already exists before an administrator can
+    // reach this path, so it is the natural transaction-scoped mutex.
+    let root = scopes::tenant_root(&mut *tx, tenant)
+        .await?
+        .ok_or_else(|| Error::Internal {
+            message: format!("tenant {tenant} has no root scope"),
+        })?;
+    let root_administrator = authorization
+        .input
+        .anchors
+        .get(root.id)
+        .is_some_and(|anchor| {
+            anchor
+                .roles
+                .iter()
+                .any(|role| role.as_str() == "administrator")
+                && anchor.granted_at.contains(&root.id)
+        });
+    if !root_administrator {
+        return Ok(false);
+    }
+    scopes::lock_for_update(&mut *tx, tenant, root.id).await?;
+    if !store::bindings(tx, tenant, None, None, 1).await?.is_empty() {
+        return Ok(false);
+    }
+
+    match command {
+        ConfigurationCommand::Create {
+            document,
+            source_template: Some(template),
+            ..
+        } => Ok(store::list_artifacts(tx, tenant, None, None, 1)
+            .await?
+            .is_empty()
+            && *document == ConfigurationDocument::template(*template)),
+        ConfigurationCommand::Bind {
+            scope_id,
+            artifact_id,
+            ..
+        } => {
+            let artifacts = store::list_artifacts(tx, tenant, None, None, 2).await?;
+            let [artifact] = artifacts.as_slice() else {
+                return Ok(false);
+            };
+            if artifact.id != *artifact_id || artifact.governing_scope_id != *scope_id {
+                return Ok(false);
+            }
+            let Some(version) = store::version(tx, tenant, artifact.current_version_id).await?
+            else {
+                return Ok(false);
+            };
+            Ok(version.source_template.is_some_and(|template| {
+                version.document == ConfigurationDocument::template(template)
+            }))
+        }
+        _ => Ok(false),
+    }
 }
 
 async fn apply_loaded(

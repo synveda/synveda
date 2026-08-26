@@ -217,6 +217,17 @@ impl Api {
         .await
     }
 
+    /// `DELETE path` with a JSON body.
+    ///
+    /// Knowledge distinguishes archive from governed erasure and requires an
+    /// exact revision precondition, so an empty DELETE cannot express that
+    /// command. Keeping the transport here prevents a product client from
+    /// reaching for the store merely because HTTP DELETE may carry a body.
+    pub async fn delete_with_body(&self, path: &str, body: Value) -> Result<Value, String> {
+        let request = self.http.delete(format!("{}{path}", self.base)).json(&body);
+        self.send(request, "DELETE", path).await
+    }
+
     /// `PATCH path` with a required idempotency key.
     pub async fn patch_idempotent(
         &self,

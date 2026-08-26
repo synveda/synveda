@@ -103,7 +103,7 @@ only through its original PDP- and revision-checked command path.
 ## Project status
 
 **Phases 0–2 are complete. Phase 5 is re-cutting the product while Phase 3 is
-paused.** 101 of 132 filed features are delivered, each with acceptance
+paused.** 107 of 138 filed features are delivered, each with acceptance
 evidence and, where it has a runtime, a runnable script in [`demos/`](demos/).
 
 It installs, on somebody else's machine, with Docker as the only prerequisite:
@@ -113,6 +113,7 @@ curl -fsSL https://raw.githubusercontent.com/synveda/synveda/main/scripts/instal
 synveda init --slug acme --name "ACME"
 synveda login
 synveda plugin install            # Claude Code: hooks + MCP, one command
+synveda demo start --profile personal
 ```
 
 An admin console comes with it, at `http://127.0.0.1:8120/console/` — since
@@ -127,10 +128,10 @@ switchers, a People page and the governance surfaces under **Advanced**. See
 | **2 — Governance** | VedaFlow, lapses, dedup, decay, recall, graph, audit queries, prompts, context packs, eval gates | ✅ 22/22 |
 | **3 — Enterprise** | SCIM, real IdPs, skills registry, console, Helm, release & distribution, residency, Qdrant | 🚧 15/27 |
 | **4 — Ecosystem** | SDKs, importers, telemetry, DR, gateway scale | 🚧 2/17 |
-| **5 — Context platform** | The redesign: fresh epoch, governed scopes, sessions, immutable Knowledge, capture, explainable context, Skills, Tools, OKF, one public contract, governed runtime configuration, policy relaxations, offline-verifiable audit export, shared directory access, stable secret custody and one deployment runtime | 🚧 38 packages delivered; programme continues |
+| **5 — Context platform** | The redesign: fresh epoch, governed scopes, sessions, immutable Knowledge, capture, explainable context, Skills, Tools, OKF, one public contract, governed runtime configuration, policy relaxations, offline-verifiable audit export, shared directory access, stable secret custody, one deployment runtime and a public-API PulseBoard walkthrough | 🚧 40 packages delivered; programme continues |
 
-One further feature (AUTH-6, session and token hygiene) is unscheduled — **135
-in total, 105 delivered** (`docs/backlog/STATUS.md` is the count `make ci`
+One further feature (AUTH-6, session and token hygiene) is unscheduled — **138
+in total, 107 delivered** (`docs/backlog/STATUS.md` is the count `make ci`
 checks). Phase 5 is the 33-prompt context-platform redesign, in flight on
 `feat/context-platform-mvp`; Phase 3 is paused mid-phase behind it. The fifteen Phase 3 items finished are the skills registry
 and its governance (SKIL-1 through SKIL-4), the installable single binary

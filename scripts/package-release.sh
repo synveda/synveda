@@ -54,8 +54,8 @@ if grep -qE '^\s*build:' "$stage/docker-compose.yml"; then
 fi
 # CPR-36's hard cut: the retired ACME seeder called deleted runtime routes.
 # The release bundle must not retain it as a known-dead executable or grow a
-# compatibility shim. The PulseBoard product demo is packaged separately once
-# its public-API implementation exists.
+# compatibility shim. The PulseBoard walkthrough is compiled into the same
+# public-API CLI binary; it has no release-bundle seeder or data directory.
 if find "$stage" -type f -path '*/demo/*' -print -quit | grep -q .; then
   echo "package-release: a retired demo asset entered the runtime profile" >&2
   exit 1

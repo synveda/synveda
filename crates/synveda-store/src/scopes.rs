@@ -210,6 +210,28 @@ async fn lock_scope(
     row.map(TryInto::try_into).transpose()
 }
 
+/// Locks one known scope for the caller's transaction and returns it.
+///
+/// Structural writers normally call the private [`lock_scope`] inside a
+/// larger operation. Cross-subsystem tenant-wide invariants use this narrow
+/// primitive to serialise on the tenant root without duplicating its checked
+/// query or introducing an advisory-lock namespace.
+#[tracing::instrument(
+    name = "store.scopes.lock_for_update",
+    skip_all,
+    fields(tenant.id = %tenant_id, scope.id = %id),
+    err(Display)
+)]
+pub async fn lock_for_update(
+    conn: &mut PgConnection,
+    tenant_id: TenantId,
+    id: ScopeId,
+) -> Result<Scope> {
+    lock_scope(conn, tenant_id, id)
+        .await?
+        .ok_or_else(|| not_found(id))
+}
+
 /// Locks a scope and every scope beneath it, in a deterministic order.
 ///
 /// [`move_scope`] takes this rather than the one row lock its subject needs,

@@ -637,24 +637,33 @@ is `http://localhost:8100/...` and RFC 6761 makes every resolver answer
 `localhost` with the *container's own* loopback — a container cannot reach
 it, by any configuration. ADR-0055 decision 8 has the measurements.
 
-## Current walkthrough evidence
+## PulseBoard product walkthrough
 
 The removed ACME release seeder is not packaged or aliased: it depended on the
-deleted hierarchy, policy-assignment and global observe/recall surfaces. From a
-checkout, the executable PulseBoard acceptance demonstrates the current path:
+deleted hierarchy, policy-assignment and global observe/recall surfaces. Once
+the runtime is initialised and the acting user has completed `synveda login`,
+the packaged tour uses only the public application API:
 
 ```sh
-sh demos/cpr-22-mvp-acceptance.sh
-sh demos/ops-1-smb-profile.sh
+synveda demo start --profile personal
+synveda demo status
+synveda demo reset --force
 ```
 
-Both use workspaces/projects, public sessions and events, reviewable capture
-candidates, VedaFlow-published Knowledge, scoped context runs, private/project
-policy decisions and the audit chain. They do not insert product rows directly.
-The later `synveda demo` package will turn that same public-API scenario into
-the packaged personal/team/governed product tour. Until then
-[`docs/BETA.md`](BETA.md) is an honest guided map, not a pointer to a dead
-executable.
+`--profile team` uses a separately logged-in `bob` credential when one exists,
+or `--bob-credentials <profile>` when explicitly supplied. With no second
+credential it returns a one-time invitation, does not store its token and says
+that clean-session reuse ran as Alice. `--profile governed` selects the
+canonical enterprise Configuration on the same binary/schema and reports
+pending review honestly. The first exact canonical Configuration and matching
+binding still create and apply typed VedaFlow changes; this is not an edition
+switch or a bootstrap bypass.
+
+The mode-0600 XDG receipt makes an interrupted run resumable. Reset archives
+receipt-owned objects through public routes and preserves immutable/audit
+history. For repository acceptance evidence, run
+`sh demos/cpr-41-one-command-demo.sh`; it combines the CLI contract with the
+database-backed Profile and PulseBoard scenarios.
 
 ## The admin console
 

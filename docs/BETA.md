@@ -73,17 +73,35 @@ Open <http://127.0.0.1:8120/console/> with the operator credentials printed by
    retrieval/index versions, degradation mode and rendered-context hash. A
    denied candidate contributes no id/title/edge/count side channel.
 
-From a checkout, the executable PulseBoard evidence for that loop is:
+After `synveda init` and `synveda login`, the packaged walkthrough creates the
+same synthetic PulseBoard story through the public application API:
 
 ```sh
-sh demos/cpr-22-mvp-acceptance.sh
-sh demos/ops-1-smb-profile.sh
+synveda demo start --profile personal
+synveda demo status
+synveda demo reset --force
 ```
 
-These scripts use the current public/runtime model and assert database, PDP,
-VedaFlow, audit, capture, Knowledge and context state. The packaged
-`synveda demo start --profile ...` experience is a later programme package;
-until it lands, no release script pretends to be it.
+Use `--profile team` for the same runtime with the team Configuration. When a
+distinct login is stored as `bob` (or named with `--bob-credentials`), Bob is
+granted project membership and performs the clean-session reuse/correction
+legs. Without it, Synveda returns a one-time invitation and explicitly says
+that reuse ran as Alice; it never manufactures teammate evidence. `--profile
+governed` copies the enterprise template and leaves changes in Advanced >
+Reviews wherever that matrix requires distinct reviewers.
+
+The command is resumable. Its private XDG receipt is atomically written with
+mode 0600 and never retains the one-time invitation token. Reset archives only
+the demo's current objects; immutable revisions, proposals and audit history
+remain. A deployment using the deterministic embedder is labelled lexical-only
+in the result—use the documented TEI/BGE-M3 option for a semantic demo.
+
+From a checkout, the hermetic acceptance evidence remains:
+
+```sh
+sh demos/cpr-41-one-command-demo.sh
+sh demos/cpr-22-mvp-acceptance.sh
+```
 
 ## Advanced governed surfaces
 
