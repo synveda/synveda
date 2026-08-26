@@ -444,12 +444,46 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// Ctrl-C covers dev on every platform; SIGTERM handling arrives with the
-/// deployment profiles (OPS-1).
 async fn shutdown_signal() {
-    if let Err(err) = tokio::signal::ctrl_c().await {
-        tracing::error!(error = %err, "failed to install the Ctrl-C handler");
+    #[cfg(unix)]
+    tokio::select! {
+        () = wait_for_ctrl_c() => tracing::info!(signal = "SIGINT", "shutdown requested"),
+        () = wait_for_sigterm() => tracing::info!(signal = "SIGTERM", "shutdown requested"),
     }
+
+    #[cfg(not(unix))]
+    {
+        wait_for_ctrl_c().await;
+        tracing::info!(signal = "SIGINT", "shutdown requested");
+    }
+}
+
+async fn wait_for_ctrl_c() {
+    if let Err(error) = tokio::signal::ctrl_c().await {
+        tracing::error!(%error, "failed to install the Ctrl-C handler");
+        std::future::pending::<()>().await;
+    }
+}
+
+#[cfg(unix)]
+async fn wait_for_sigterm() {
+    let mut signal = match install_sigterm() {
+        Ok(signal) => signal,
+        Err(error) => {
+            tracing::error!(%error, "failed to install the SIGTERM handler");
+            std::future::pending::<()>().await;
+            return;
+        }
+    };
+    if signal.recv().await.is_none() {
+        tracing::error!("SIGTERM handler closed without receiving a signal");
+        std::future::pending::<()>().await;
+    }
+}
+
+#[cfg(unix)]
+fn install_sigterm() -> std::io::Result<tokio::signal::unix::Signal> {
+    tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
 }
 
 /// Builds the KMS from `SYNVEDA_KMS_KEY` (64 hex characters) and
@@ -697,6 +731,24 @@ mod tests {
     use super::*;
     use synveda_identity::directory::{DirectorySyncConfig, Secret};
 
+    #[cfg(unix)]
+    use std::process::{Child, Command, Stdio};
+    #[cfg(unix)]
+    use std::thread;
+    #[cfg(unix)]
+    use std::time::Instant;
+
+    #[cfg(unix)]
+    struct ChildGuard(Child);
+
+    #[cfg(unix)]
+    impl Drop for ChildGuard {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+
     fn issuer(tenant: synveda_identity::TenantBinding) -> synveda_identity::IssuerConfig {
         let json = r#"[{"issuer":"https://idp.example","client_id":"c"}]"#;
         let mut parsed = synveda_identity::parse_issuers(json).expect("parse");
@@ -771,6 +823,78 @@ mod tests {
         second.directory_sync = Some(okta());
         let refused = build_directory_connectors(&[first, second]);
         assert!(refused.is_err(), "one tenant, one directory authority");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sigterm_is_delivered_to_the_gateway_handler() {
+        const CHILD_READY: &str = "SYNVEDA_SIGTERM_TEST_READY";
+        if let Some(path) = std::env::var_os(CHILD_READY) {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("build signal test runtime");
+            runtime.block_on(async {
+                let mut signal = install_sigterm().expect("install SIGTERM handler");
+                std::fs::write(path, b"ready").expect("publish handler readiness");
+                assert!(signal.recv().await.is_some(), "receive SIGTERM");
+            });
+            return;
+        }
+
+        let ready = std::env::temp_dir().join(format!(
+            "synveda-sigterm-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let child = Command::new(std::env::current_exe().expect("locate test binary"))
+            .args([
+                "--exact",
+                "tests::sigterm_is_delivered_to_the_gateway_handler",
+                "--nocapture",
+            ])
+            .env(CHILD_READY, &ready)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("start signal test child");
+        let mut child = ChildGuard(child);
+        let ready_deadline = Instant::now() + Duration::from_secs(5);
+        while !ready.exists() {
+            if let Some(status) = child.0.try_wait().expect("read child status") {
+                panic!("signal test child exited before readiness: {status}");
+            }
+            assert!(
+                Instant::now() < ready_deadline,
+                "signal handler was not ready"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+
+        let pid = child.0.id().to_string();
+        let sent = Command::new("kill")
+            .args(["-TERM", pid.as_str()])
+            .status()
+            .expect("send SIGTERM");
+        assert!(sent.success(), "kill -TERM failed");
+
+        let exit_deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            match child.0.try_wait().expect("read child status") {
+                Some(status) => {
+                    let _ = std::fs::remove_file(&ready);
+                    assert!(status.success(), "signal test child exited with {status}");
+                    break;
+                }
+                None if Instant::now() < exit_deadline => {
+                    thread::sleep(Duration::from_millis(10));
+                }
+                None => panic!("signal test child did not exit after SIGTERM"),
+            }
+        }
     }
 
     #[test]
