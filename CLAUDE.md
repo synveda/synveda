@@ -158,7 +158,7 @@ spool/diagnostic defects: automatic hash validation, refused-state
 preservation, gateway-origin pinning and raw-exception/payload redaction. The
 focused demo, complete CI/database suites, 18-case product gate and full
 10,000-variant security gate pass; `docs/SECURITY.md` records residual limits.
-CPR-43, the final hard cut, is delivered from `9bda16b`. The 60-file
+CPR-43, the final hard cut, is delivered from `9bda16b` in `2f468cd`. The 60-file
 development migration chain is one epoch-3 `0001_context_platform.sql`; its 87
 tables include 83 tenant tables under enabled and forced RLS, beside two
 current views. Record storage/search/promotion/retention, Tantivy, PGMQ, AGE

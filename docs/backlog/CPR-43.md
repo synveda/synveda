@@ -110,5 +110,5 @@ reachable authenticated gateway and distinct credentials; their hermetic
 public-domain acceptance and profile tests pass, but are not called live
 walkthroughs.
 
-The feature commit is recorded by the final bookkeeping commit, following the
-programme's no-self-hash convention.
+Feature commit: `2f468cdc73738450d1e29abd4d16bd2bcde81938`, recorded by
+the final bookkeeping commit under the programme's no-self-hash convention.

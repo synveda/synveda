@@ -57,11 +57,12 @@ programme convention established in Prompt 1.
 | Deterministic context-platform product/trust evaluation and re-enabled Knowledge benchmarks | CPR-40 | **complete** | `0958d69` | `036eab7` | eval 162/162; product gate 6/6; store lexical 5/5; LongMemEval 14/14; audit query 16/16; capture/config focused suites PASS | PASS | PASS (fresh disposable database; removed on success) | product 18/18 and six zero gates; default 6/6 + 50 fixtures + all QA + 1,276 probes; 10k security PASS; BGE-M3 10/10 at 0.800 bounded precision; authentic Stage H delivered 4,927 turns and measured all ten instances with zero empty/unattributed blocks and 0.643 retrieval recall | no extraction-model credential or local vLLM; that separately labelled live tier remains unmeasured |
 | Resumable one-command personal/team/governed PulseBoard walkthrough over public APIs | CPR-41 | **complete** | `036eab7` | `8a4b944` | CLI demo 4/4; configuration/bootstrap concurrency 4/4; PulseBoard team loop 1/1 | PASS | PASS (`synveda_test_44030`, removed) | isolated `demos/cpr-41-one-command-demo.sh` PASS; 87-script drift gate PASS; packaged command not called live without a reachable gateway/current Alice+Bob credentials | no current authenticated gateway, distinct Bob credential or separately authenticated semantic provider; no live claim made |
 | Adversarial security and product-integrity audit over every completed context-platform boundary | CPR-42 | **complete** | `8a4b944` | `9bda16b` | security gate 5/5 + 27 boundaries; adapter 103/103; CLI 2/2; OKF 5/5; Skill 12/12 | PASS | PASS (`synveda_test_49069`, removed) | isolated `demos/cpr-42-security-integrity.sh` PASS; product 18/18 with six zero gates; 10k security 10,876 probes, 9/9 controls and every leak/gap count zero | live Entra/Okta and second-client evidence remain external boundaries; no replay promoted |
-| Final compatibility purge, epoch-3 baseline squash and programme-close verification | CPR-43 | **complete** | `9bda16b` | pending — final bookkeeping | hard-cut 3/3; epoch 10/10; forced-RLS inventory 1/1; OpenAPI 6/6; CLI hard-cut 4/4; console 216/216 | PASS | PASS (`synveda_test_74163`, removed) | CPR-2 + CPR-43 demos PASS; product 18/18; default, BGE-M3, 10k-security and 4,927-turn Stage-H gates PASS; deterministic Claude 1/1 | real second client absent; proprietary Claude rerun refused by execution approval; no model-extraction credential |
+| Final compatibility purge, epoch-3 baseline squash and programme-close verification | CPR-43 | **complete** | `9bda16b` | `2f468cd` | hard-cut 3/3; epoch 10/10; forced-RLS inventory 1/1; OpenAPI 6/6; CLI hard-cut 4/4; console 216/216 | PASS | PASS (`synveda_test_74163`, removed) | CPR-2 + CPR-43 demos PASS; product 18/18; default, BGE-M3, 10k-security and 4,927-turn Stage-H gates PASS; deterministic Claude 1/1 | real second client absent; proprietary Claude rerun refused by execution approval; no model-extraction credential |
 
-**Exact next objective:** commit and normally push CPR-43, then make the final
-bookkeeping commit that records its SHA and verify the remote branch and clean
-worktree. CPR-39's real second-client live criterion remains externally
+**Exact next objective:** no in-scope implementation package remains. Verify
+the final bookkeeping commit is the remote branch tip and leave the worktree
+clean for human review. CPR-39's real second-client live criterion, a fresh
+proprietary Claude rerun and model-backed extraction remain externally
 blocked; do not substitute configuration or replay evidence.
 
 ### Starting-point objective map
@@ -5173,5 +5174,5 @@ frontend changes, deletions, tests, and the resulting commit hash.
 
 - **Commit.** `refactor!: complete context platform hard cut (CPR-43)` on
   `feat/context-platform-mvp`.
-- **Commit hash.** Written by the final bookkeeping commit under the
-  programme's no-self-hash convention.
+- **Commit hash.** `2f468cdc73738450d1e29abd4d16bd2bcde81938`, written by
+  the final bookkeeping commit under the programme's no-self-hash convention.
