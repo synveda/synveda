@@ -17,7 +17,7 @@ use synveda_gateway::telemetry;
 use synveda_identity::Hs256Verifier;
 use synveda_store::{access, identities, rls, scopes, tenants};
 use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
-use synveda_types::{GrantId, IdentityId, IdentityKind, TenantId, TenantStatus};
+use synveda_types::{CaptureBatchId, GrantId, IdentityId, IdentityKind, TenantId, TenantStatus};
 use tower::ServiceExt;
 
 #[path = "support/configuration.rs"]
@@ -348,6 +348,27 @@ async fn okf_plan_materialization_vedaflow_provenance_export_and_isolation() {
     assert_eq!(materialized["batch"]["source_kind"], "okf_import");
     assert_eq!(materialized["batch"]["event_count"], 0);
     assert_eq!(materialized["candidates"].as_array().map(Vec::len), Some(2));
+    let batch_id = CaptureBatchId::from_uuid(
+        uuid::Uuid::parse_str(
+            materialized["batch"]["id"]
+                .as_str()
+                .expect("materialized batch id"),
+        )
+        .expect("materialized batch uuid"),
+    );
+    let mut tx = rls::begin_tenant_tx(&state.pool, tenant)
+        .await
+        .expect("begin batch timestamp verification");
+    let stored_batch = synveda_store::capture::get_batch(&mut *tx, tenant, batch_id)
+        .await
+        .expect("read materialized batch")
+        .expect("materialized batch exists");
+    assert_eq!(stored_batch.started_at, Some(stored_batch.created_at));
+    assert_eq!(stored_batch.completed_at, Some(stored_batch.created_at));
+    assert_eq!(stored_batch.updated_at, stored_batch.created_at);
+    tx.commit()
+        .await
+        .expect("commit batch timestamp verification");
     let candidate = materialized["candidates"]
         .as_array()
         .expect("candidates")

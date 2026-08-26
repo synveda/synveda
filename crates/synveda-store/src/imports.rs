@@ -728,7 +728,6 @@ pub async fn materialize(
         })
         .collect();
     let batch_id = CaptureBatchId::new();
-    let now = Utc::now();
     sqlx::query!(
         r#"
         insert into capture_batches
@@ -736,9 +735,11 @@ pub async fn materialize(
              workspace_id, project_id, principal_id,
              configuration_version_id, configuration_hash, input_hash, event_count,
              state, extractor_method, model_version, attempts, candidate_count,
-             started_at, completed_at, updated_at)
+             created_at, started_at, completed_at, updated_at)
         values ($1, $2, 'okf_import', null, $3, $4, $5, $6, $7, $8, $9,
-                $10, 0, 'completed', 'okf-v0.2', $11, 1, $12, $13, $13, $13)
+                $10, 0, 'completed', 'okf-v0.2', $11, 1, $12,
+                transaction_timestamp(), transaction_timestamp(),
+                transaction_timestamp(), transaction_timestamp())
         "#,
         batch_id.as_uuid(),
         tenant.as_uuid(),
@@ -752,7 +753,6 @@ pub async fn materialize(
         job.bundle_digest,
         job.specification_commit,
         admitted.len() as i32,
-        now,
     )
     .execute(&mut *conn)
     .await
@@ -847,6 +847,7 @@ pub async fn materialize(
         .await
         .map_err(storage_error)?;
     }
+    let now = Utc::now();
     sqlx::query!(
         r#"
         update import_jobs
