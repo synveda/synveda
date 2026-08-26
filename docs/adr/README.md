@@ -123,4 +123,4 @@ The template is intentionally excluded. Every other ADR appears exactly once.
 | [ADR-0098](adr-0098-client-adapter-conformance.md) | Evidence-based client support | Accepted | Current | CPR-39 | — |
 | [ADR-0099](adr-0099-context-platform-product-evaluation.md) | Product delivery, use and trust evaluation | Accepted | Current | CPR-40 | Incorporates the earlier evaluation gates under one outcome model. |
 | [ADR-0100](adr-0100-public-api-pulseboard-demo.md) | Resumable public-API demo | Accepted | Current | CPR-41 | Partially supersedes ADR-0066's demo shape. |
-| [ADR-0101](adr-0101-production-hardening-boundary.md) | Production-hardening boundary | Proposed | Current | CPR-44 | — |
+| [ADR-0101](adr-0101-production-hardening-boundary.md) | Production-hardening boundary | Accepted | Current | CPR-44 | — |

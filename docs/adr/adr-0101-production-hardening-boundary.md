@@ -1,6 +1,6 @@
 # ADR-0101: hardening preserves trust boundaries and makes failure bounds explicit
 
-- **Status**: Proposed
+- **Status**: Accepted
 - **Date**: 2026-08-26
 - **Feature(s)**: CPR-44
 - **Deciders**: Production-hardening review
