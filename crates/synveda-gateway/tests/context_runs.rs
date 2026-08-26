@@ -117,6 +117,7 @@ async fn seed_grant(
 }
 
 struct World {
+    database_url: String,
     state: AppState,
     app: Router,
     tenant_id: TenantId,
@@ -295,6 +296,7 @@ async fn admitted_world() -> Option<World> {
     let bob_session = open(BOB, &bob_token, "cpr20-bob-session").await;
 
     Some(World {
+        database_url: url,
         state,
         app,
         tenant_id,
@@ -309,6 +311,17 @@ async fn admitted_world() -> Option<World> {
         alice_session,
         bob_session,
     })
+}
+
+fn replace_gateway_pool(world: &mut World, max_connections: u32) {
+    let mut state = world.state.clone();
+    state.pool = PgPoolOptions::new()
+        .max_connections(max_connections)
+        .acquire_timeout(Duration::from_secs(5))
+        .connect_lazy(&world.database_url)
+        .expect("parse database url");
+    world.app = router(state.clone());
+    world.state = state;
 }
 
 fn content(title: &str, body: &str, stale_after: Option<&str>) -> Value {
@@ -1034,6 +1047,156 @@ async fn bounded_graph_improves_two_hop_recall_and_denied_endpoints_leave_no_tra
                 .as_str()
                 .is_some_and(|hash| hash.len() == 64)
     }));
+}
+
+#[tokio::test]
+async fn graph_expansion_reuses_the_planner_connection_when_the_pool_has_one_slot() {
+    let _guard = serial().await;
+    let Some(mut world) = admitted_world().await else {
+        return;
+    };
+    let (anchor_id, anchor_revision) = create_knowledge(
+        &world,
+        "cpr44-single-pool-anchor",
+        world.project_scope,
+        Some(&world.project_id),
+        None,
+        "Single-pool comet pointer",
+        "The unique single-pool-comet request points to a governed checklist.",
+        None,
+    )
+    .await;
+    let (answer_id, answer_revision) = create_knowledge(
+        &world,
+        "cpr44-single-pool-answer",
+        world.project_scope,
+        Some(&world.project_id),
+        None,
+        "Governed checklist response",
+        "The checklist answer is connection-snapshot-preserved.",
+        None,
+    )
+    .await;
+    support_relation(
+        &world,
+        "cpr44-single-pool-relation",
+        (&anchor_id, &anchor_revision),
+        (&answer_id, &answer_revision),
+    )
+    .await;
+
+    replace_gateway_pool(&mut world, 1);
+    let run = tokio::time::timeout(
+        Duration::from_secs(5),
+        context_run(
+            &world,
+            &world.alice_token,
+            &world.alice_session,
+            "cpr44-single-pool-run",
+            "single-pool-comet",
+            None,
+        ),
+    )
+    .await
+    .expect("one-connection graph planning completes");
+    assert_eq!(run["graph_version"], "knowledge-relations-v1", "{run}");
+    assert!(
+        run["rendered"]
+            .as_str()
+            .expect("rendered context")
+            .contains("connection-snapshot-preserved"),
+        "the graph answer was lost to a nested pool wait: {run}"
+    );
+    assert!(
+        run["degraded"]
+            .as_array()
+            .expect("degradation list")
+            .iter()
+            .all(|value| { value != "graph_time_budget_exceeded" && value != "graph_unavailable" }),
+        "single-connection graph planning degraded: {run}"
+    );
+    let run_detail = detail(
+        &world,
+        &world.alice_token,
+        run["id"].as_str().expect("context run id"),
+    )
+    .await;
+    let answer = run_detail["candidates"]
+        .as_array()
+        .expect("context candidates")
+        .iter()
+        .find(|candidate| candidate["knowledge_item_id"] == answer_id)
+        .expect("graph-expanded answer candidate");
+    assert_eq!(
+        answer["graph_path"].as_array().expect("graph path").len(),
+        1,
+        "{answer}"
+    );
+}
+
+#[tokio::test]
+async fn graph_time_budget_degrades_to_anchor_results_and_the_planner_transaction_continues() {
+    let _guard = serial().await;
+    let Some(world) = admitted_world().await else {
+        return;
+    };
+    create_knowledge(
+        &world,
+        "cpr44-time-budget-anchor",
+        world.project_scope,
+        Some(&world.project_id),
+        None,
+        "Graph timeout fallback marker",
+        "The lexical anchor remains available as timeout-fallback-anchor.",
+        None,
+    )
+    .await;
+    let mut tx = rls::begin_tenant_tx(&world.state.pool, world.tenant_id)
+        .await
+        .expect("begin graph time-budget Configuration");
+    let root = scopes::tenant_root(&mut *tx, world.tenant_id)
+        .await
+        .expect("read tenant root")
+        .expect("tenant root");
+    configuration_support::set_graph_time_budget(&mut tx, world.tenant_id, root.id, 1).await;
+    tx.commit()
+        .await
+        .expect("commit graph time-budget Configuration");
+
+    let run = tokio::time::timeout(
+        Duration::from_secs(5),
+        context_run(
+            &world,
+            &world.alice_token,
+            &world.alice_session,
+            "cpr44-time-budget-run",
+            "timeout-fallback-anchor",
+            None,
+        ),
+    )
+    .await
+    .expect("timed-out graph stage rolls back its savepoint");
+    assert!(
+        run["degraded"]
+            .as_array()
+            .expect("degradation list")
+            .iter()
+            .any(|value| value == "graph_time_budget_exceeded"),
+        "the graph timeout was not reported: {run}"
+    );
+    assert!(
+        run["rendered"]
+            .as_str()
+            .expect("rendered context")
+            .contains("timeout-fallback-anchor"),
+        "the lexical fallback disappeared after graph timeout: {run}"
+    );
+    detail(
+        &world,
+        &world.alice_token,
+        run["id"].as_str().expect("persisted context run id"),
+    )
+    .await;
 }
 
 #[tokio::test]

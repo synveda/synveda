@@ -356,6 +356,34 @@ pub async fn set_graph_enabled(
     select_document(tx, tenant, scope_id, binding, document).await
 }
 
+pub async fn set_graph_time_budget(
+    tx: &mut PgConnection,
+    tenant: TenantId,
+    scope_id: ScopeId,
+    time_budget_ms: u32,
+) -> Selection {
+    let binding = configuration::bindings(tx, tenant, Some(scope_id), None, 2)
+        .await
+        .expect("read Configuration fixture binding")
+        .into_iter()
+        .next()
+        .expect("Configuration fixture binding exists");
+    let artifact = configuration::artifact(tx, tenant, binding.artifact_id)
+        .await
+        .expect("read Configuration fixture artifact")
+        .expect("Configuration fixture artifact exists");
+    let selected_id = binding
+        .pinned_version_id
+        .unwrap_or(artifact.current_version_id);
+    let current = configuration::version(tx, tenant, selected_id)
+        .await
+        .expect("read Configuration fixture version")
+        .expect("Configuration fixture version exists");
+    let mut document = current.document;
+    document.context.graph.time_budget_ms = time_budget_ms;
+    select_document(tx, tenant, scope_id, binding, document).await
+}
+
 pub async fn set_advertisement(
     tx: &mut PgConnection,
     tenant: TenantId,

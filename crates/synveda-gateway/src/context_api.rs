@@ -21,6 +21,7 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use sqlx::{Acquire, PgConnection};
 use synveda_audit::{AuditAction, Outcome};
 use synveda_ingest::embedding::Embedder as _;
 use synveda_policy::{Action, Resource, ResourceEntity, ScopeNode};
@@ -1636,13 +1637,13 @@ fn graph_candidate_tokens(snapshot: &KnowledgeSnapshot) -> u32 {
 
 async fn graph_expansion_inner(
     state: &AppState,
+    tx: &mut PgConnection,
     tenant_id: TenantId,
     anchors: Vec<GraphFrontier>,
     configuration: &GraphRetrievalConfiguration,
     max_sensitivity: Option<Sensitivity>,
     at: DateTime<Utc>,
 ) -> Result<GraphExpansion> {
-    let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
     let mut expansion = GraphExpansion::default();
     let mut queue: VecDeque<GraphFrontier> = anchors.into();
     let mut best: HashMap<KnowledgeItemId, i32> = queue
@@ -1658,13 +1659,8 @@ async fn graph_expansion_inner(
         {
             continue;
         }
-        match crate::knowledge_api::authorize_snapshot(
-            state,
-            &mut tx,
-            tenant_id,
-            &frontier.snapshot,
-        )
-        .await
+        match crate::knowledge_api::authorize_snapshot(state, tx, tenant_id, &frontier.snapshot)
+            .await
         {
             Ok(_) => {}
             Err(Error::PolicyDenied { .. } | Error::NotFound { .. }) => {
@@ -1701,8 +1697,7 @@ async fn graph_expansion_inner(
             {
                 continue;
             }
-            match crate::knowledge_api::authorize_snapshot(state, &mut tx, tenant_id, &target).await
-            {
+            match crate::knowledge_api::authorize_snapshot(state, tx, tenant_id, &target).await {
                 Ok(_) => {}
                 Err(Error::PolicyDenied { .. } | Error::NotFound { .. }) => {
                     expansion.policy_exclusion = true;
@@ -1745,7 +1740,7 @@ async fn graph_expansion_inner(
                 KnowledgeLifecycleState::Superseded => Some(ContextReasonCode::Superseded),
                 _ => None,
             };
-            if exclusion.is_none() && stale_at(&mut tx, tenant_id, &target, at).await? {
+            if exclusion.is_none() && stale_at(tx, tenant_id, &target, at).await? {
                 exclusion = Some(ContextReasonCode::Stale);
             }
             let current = if exclusion.is_none() { 100_000 } else { 0 };
@@ -1807,12 +1802,12 @@ async fn graph_expansion_inner(
             }
         }
     }
-    commit(tx).await?;
     Ok(expansion)
 }
 
 async fn expand_graph_with_fallback(
     state: &AppState,
+    tx: &mut PgConnection,
     tenant_id: TenantId,
     candidates: &[PlannedCandidate],
     configuration: &GraphRetrievalConfiguration,
@@ -1840,10 +1835,14 @@ async fn expand_graph_with_fallback(
         })
         .take(MAX_GRAPH_ANCHORS)
         .collect();
+    let mut graph_tx = tx.begin().await.map_err(|error| Error::Storage {
+        message: format!("begin context graph savepoint: {error}"),
+    })?;
     let result = tokio::time::timeout(
         Duration::from_millis(u64::from(configuration.time_budget_ms)),
         graph_expansion_inner(
             state,
+            &mut graph_tx,
             tenant_id,
             anchors,
             configuration,
@@ -1853,14 +1852,33 @@ async fn expand_graph_with_fallback(
     )
     .await;
     match result {
-        Ok(Ok(expansion)) => Ok((expansion, true)),
+        Ok(Ok(expansion)) => {
+            graph_tx.commit().await.map_err(|error| Error::Storage {
+                message: format!("commit context graph savepoint: {error}"),
+            })?;
+            Ok((expansion, true))
+        }
         Ok(Err(Error::Storage { .. })) => {
+            graph_tx.rollback().await.map_err(|error| Error::Storage {
+                message: format!("roll back failed context graph expansion: {error}"),
+            })?;
             let mut expansion = GraphExpansion::default();
             push_degradation(&mut expansion.degraded, "graph_unavailable");
             Ok((expansion, true))
         }
-        Ok(Err(error)) => Err(error),
+        Ok(Err(error)) => {
+            graph_tx
+                .rollback()
+                .await
+                .map_err(|rollback| Error::Storage {
+                    message: format!("roll back rejected context graph expansion: {rollback}"),
+                })?;
+            Err(error)
+        }
         Err(_) => {
+            graph_tx.rollback().await.map_err(|error| Error::Storage {
+                message: format!("roll back timed-out context graph expansion: {error}"),
+            })?;
             let mut expansion = GraphExpansion::default();
             push_degradation(&mut expansion.degraded, "graph_time_budget_exceeded");
             Ok((expansion, true))
@@ -2482,6 +2500,7 @@ async fn plan_context_run(
     let graph_started = std::time::Instant::now();
     let (graph_expansion, graph_attempted) = expand_graph_with_fallback(
         state,
+        &mut tx,
         tenant_id,
         &candidates,
         &prepared.configuration.document.context.graph,
