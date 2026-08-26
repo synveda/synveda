@@ -1,31 +1,9 @@
 /**
- * Advanced ▸ Scopes (CNSL-2; the governed-scope re-cut CPR-7; re-homed by
- * CPR-8; relaxation successor CPR-31) — scopes, effective Configuration and
- * governed relaxations on one page.
+ * Governed scopes, effective Configuration and policy relaxations.
  *
- * CPR-7 converted this screen off the deleted hierarchy and onto the
- * governed scope plane (`/v1/admin/scopes`), which is where its calls
- * already point. CPR-8 moved it out of the application\'s entry point and
- * onto its own route behind `scope.read`, and renamed it after the thing it
- * is actually about.
- *
- * The screen exists because those three facts are one question. "How is
- * this scope governed" is answered by a pack, the grants standing across
- * it, and where each of those came from — and before this feature
- * answering it took calls that did not exist.
- *
- * # The tree is lazy, and that is a correctness property
- *
- * Children on expand, never `descendants` from the root (ADR-0058 decision
- * 5). A sidebar that fetched a subtree would pull all of it and then probe
- * every scope in it, and the probe is a PDP fan-out. What the reader opens
- * is what gets asked about.
- *
- * # Nothing here is a permission
- *
- * The capability panel is a forecast (ADR-0058 decision 2). This bundle
- * never uses it to decide whether an act is allowed — only whether to offer
- * it — and the gateway decides again at the act's own seam.
+ * Children load only when expanded, which bounds both listing and PDP work.
+ * Capabilities control presentation only; every action is decided again at
+ * its own gateway seam (ADR-0058).
  */
 
 import { useCallback, useEffect, useState } from "react";
@@ -41,18 +19,20 @@ import {
   type Capabilities,
   type CapabilityBatch,
   type Node,
-  type Relaxation,
   type RelaxationListing,
   type ScopeLevel,
 } from "./explorer.mjs";
 import type { EffectiveConfigurationView } from "./generated/api.js";
 
+type PanelState = Outcome | { kind: "loading" };
+
 export function Scopes() {
-  const [root, setRoot] = useState<Outcome | { kind: "loading" }>({ kind: "loading" });
+  const [root, setRoot] = useState<PanelState>({ kind: "loading" });
   const [selected, setSelected] = useState<Node | null>(null);
-  const [relaxations, setRelaxations] = useState<Relaxation[]>([]);
+  const [relaxations, setRelaxations] = useState<PanelState>({ kind: "loading" });
 
   const load = useCallback(async () => {
+    setRelaxations({ kind: "loading" });
     const outcome = await request("list_scopes", { query: {} });
     setRoot(outcome);
     if (outcome.kind === "ok") {
@@ -62,9 +42,7 @@ export function Scopes() {
     // The scope-free listing is already a per-row PDP-filtered set, so read
     // it once and select the exact governed target locally.
     const governed = await request("list_relaxations", { query: { limit: "200" } });
-    if (governed.kind === "ok") {
-      setRelaxations((governed.body as RelaxationListing).relaxations ?? []);
-    }
+    setRelaxations(governed);
   }, []);
 
   useEffect(() => {
@@ -99,7 +77,7 @@ export function Scopes() {
           ))}
         </div>
         {selected ? (
-          <NodeDetail key={selected.id} node={selected} relaxations={relaxations} />
+          <NodeDetail key={selected.id} node={selected} relaxationState={relaxations} />
         ) : (
           <p className="muted">Choose a scope.</p>
         )}
@@ -188,9 +166,9 @@ function Branch({
 }
 
 /** The three panels, for the selected scope. */
-function NodeDetail({ node, relaxations }: { node: Node; relaxations: Relaxation[] }) {
-  const [configuration, setConfiguration] = useState<Outcome | { kind: "loading" }>({ kind: "loading" });
-  const [caps, setCaps] = useState<Outcome | { kind: "loading" }>({ kind: "loading" });
+function NodeDetail({ node, relaxationState }: { node: Node; relaxationState: PanelState }) {
+  const [configuration, setConfiguration] = useState<PanelState>({ kind: "loading" });
+  const [caps, setCaps] = useState<PanelState>({ kind: "loading" });
 
   useEffect(() => {
     void (async () => {
@@ -207,7 +185,6 @@ function NodeDetail({ node, relaxations }: { node: Node; relaxations: Relaxation
     })();
   }, [node.id]);
 
-  const governedHere = relaxationsAt(relaxations, node.id);
   return (
     <article className="node-detail">
       <h3>{node.slug}</h3>
@@ -216,13 +193,13 @@ function NodeDetail({ node, relaxations }: { node: Node; relaxations: Relaxation
       </p>
 
       <ConfigurationPanel state={configuration} node={node} />
-      <RelaxationPanel relaxations={governedHere} />
+      <RelaxationPanel state={relaxationState} scopeId={node.id} />
       <CapabilityPanel state={caps} node={node} />
     </article>
   );
 }
 
-function ConfigurationPanel({ state, node }: { state: Outcome | { kind: "loading" }; node: Node }) {
+function ConfigurationPanel({ state, node }: { state: PanelState; node: Node }) {
   return (
     <section>
       <h4>runtime Configuration</h4>
@@ -262,15 +239,39 @@ function ConfigurationPanel({ state, node }: { state: Outcome | { kind: "loading
   );
 }
 
-function RelaxationPanel({ relaxations }: { relaxations: Relaxation[] }) {
+export function RelaxationPanel({ state, scopeId }: { state: PanelState; scopeId: string }) {
+  if (state.kind === "loading") {
+    return (
+      <section>
+        <h4>governed relaxations</h4>
+        <p className="muted">…</p>
+      </section>
+    );
+  }
+  if (state.kind !== "ok") {
+    return (
+      <section>
+        <h4>governed relaxations</h4>
+        <PanelFailure state={state} />
+      </section>
+    );
+  }
+  const listing = state.body as RelaxationListing;
+  const relaxations = relaxationsAt(listing.relaxations ?? [], scopeId);
+  const hasMore = listing.next_cursor !== null && listing.next_cursor !== undefined;
   return (
     <section>
       <h4>governed relaxations</h4>
       {relaxations.length === 0 ? (
-        <p className="muted">nothing is relaxed here</p>
+        <p className="muted">
+          {hasMore
+            ? "none for this scope in the first visible page; more results are available"
+            : "nothing is relaxed here"}
+        </p>
       ) : (
-        <ul className="relaxations">
-          {relaxations.map((relaxation) => (
+        <>
+          <ul className="relaxations">
+            {relaxations.map((relaxation) => (
               <li key={relaxation.id}>
                 <span className={`tag ${relaxation.status}`}>{relaxation.status}</span>{" "}
                 <strong>{relaxation.current.action}</strong> for {relaxation.current.subject}
@@ -286,8 +287,10 @@ function RelaxationPanel({ relaxations }: { relaxations: Relaxation[] }) {
                     : `${relaxation.current.approver_ids.length} recorded approver(s)`}
                 </div>
               </li>
-          ))}
-        </ul>
+            ))}
+          </ul>
+          {hasMore ? <p className="muted">more visible results are available</p> : null}
+        </>
       )}
     </section>
   );
@@ -300,7 +303,7 @@ function RelaxationPanel({ relaxations }: { relaxations: Relaxation[] }) {
  * permission, and it is not one — so the panel says which pack decided and
  * that every act decides again (ADR-0058 decision 2).
  */
-function CapabilityPanel({ state, node }: { state: Outcome | { kind: "loading" }; node: Node }) {
+function CapabilityPanel({ state, node }: { state: PanelState; node: Node }) {
   return (
     <section className="capabilities">
       <h4>what you may do here</h4>

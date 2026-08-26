@@ -53,6 +53,8 @@ type Listener = () => void;
 interface Slot {
   entry: Entry;
   loader: Loader;
+  /** Identifies the request allowed to settle this key. */
+  generation: number;
   /** The in-flight request, so two askers share one. */
   inflight: Promise<void> | null;
   /** How many mounted readers are watching. Drives rule 3. */
@@ -65,6 +67,7 @@ const LOADING: Entry = { status: "loading" };
 export class QueryCache {
   private readonly slots = new Map<string, Slot>();
   private readonly listeners = new Set<Listener>();
+  private generation = 0;
   /** Injected so a test can assert `loadedAt` without waiting on a clock. */
   constructor(private readonly now: () => number = () => Date.now()) {}
 
@@ -149,22 +152,24 @@ export class QueryCache {
 
   private run(key: string, loader: Loader): Promise<void> {
     const previous = this.slots.get(key);
+    const generation = ++this.generation;
     const slot: Slot = {
       entry: previous?.entry ?? LOADING,
       loader,
+      generation,
       inflight: null,
       watchers: previous?.watchers ?? 0,
     };
     this.slots.set(key, slot);
     const inflight = loader()
       .then((outcome) => {
-        this.settle(key, { status: "ready", outcome, loadedAt: this.now() });
+        this.settle(key, generation, { status: "ready", outcome, loadedAt: this.now() });
       })
       .catch((cause: unknown) => {
         // A loader that throws is a bug in a page, not a gateway failure —
         // but a cache entry stuck on `loading` forever is worse than an
         // honest error, so it is recorded as one the console can render.
-        this.settle(key, {
+        this.settle(key, generation, {
           status: "ready",
           outcome: {
             kind: "unavailable",
@@ -178,9 +183,11 @@ export class QueryCache {
     return inflight;
   }
 
-  private settle(key: string, entry: Entry): void {
+  private settle(key: string, generation: number, entry: Entry): void {
     const slot = this.slots.get(key);
-    if (!slot) return;
+    // Invalidation may have started a newer request while this one was in
+    // flight. Only the newest generation may replace the visible answer.
+    if (!slot || slot.generation !== generation) return;
     // Replaced rather than mutated (rule 2).
     this.slots.set(key, { ...slot, entry, inflight: null });
     this.announce();

@@ -17,6 +17,17 @@ import { QueryCache } from "./cache.mjs";
 
 const ok = (body: unknown): Outcome => ({ kind: "ok", body });
 
+function deferred<T>(): {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+} {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((settle) => {
+    resolve = settle;
+  });
+  return { promise, resolve };
+}
+
 test("a key never asked for reads as loading", () => {
   const cache = new QueryCache();
   assert.deepEqual(cache.read("workspaces"), { status: "loading" });
@@ -98,6 +109,34 @@ test("invalidating a watched key refetches it", async () => {
   assert.equal(calls, 2);
   const entry = cache.read("workspaces/w-1/members");
   assert.deepEqual(entry.status === "ready" ? entry.outcome : null, ok(2));
+  unwatch();
+});
+
+test("an older in-flight generation cannot overwrite an invalidated refetch", async () => {
+  const cache = new QueryCache();
+  const first = deferred<Outcome>();
+  const second = deferred<Outcome>();
+  let calls = 0;
+  const loader = () => {
+    calls += 1;
+    return calls === 1 ? first.promise : second.promise;
+  };
+
+  const initialLoad = cache.ensure("workspaces/w-1", loader);
+  const unwatch = cache.watch("workspaces/w-1");
+  cache.invalidate("workspaces/w-1");
+  assert.equal(calls, 2, "invalidation starts a new generation immediately");
+
+  second.resolve(ok("newer"));
+  await second.promise;
+  await Promise.resolve();
+  let entry = cache.read("workspaces/w-1");
+  assert.deepEqual(entry.status === "ready" ? entry.outcome : null, ok("newer"));
+
+  first.resolve(ok("older"));
+  await initialLoad;
+  entry = cache.read("workspaces/w-1");
+  assert.deepEqual(entry.status === "ready" ? entry.outcome : null, ok("newer"));
   unwatch();
 });
 

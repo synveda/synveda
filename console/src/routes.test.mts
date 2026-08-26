@@ -183,6 +183,17 @@ test("a path this console does not have matches nothing", () => {
   assert.equal(matchRoute("/consoleish/people"), null);
 });
 
+test("a malformed encoded route parameter is not a router crash", () => {
+  for (const pathname of [
+    "/console/sessions/%",
+    "/console/context-runs/%E0%A4%A",
+    "/console/knowledge/%C0%AF",
+  ]) {
+    assert.doesNotThrow(() => matchRoute(pathname), pathname);
+    assert.equal(matchRoute(pathname), null, pathname);
+  }
+});
+
 test("the advanced routes live under one prefix, and the primary ones do not", () => {
   // Not cosmetic: the segment is what a bookmark and a shared link carry,
   // and "advanced/" is what makes a governance URL legible as one.

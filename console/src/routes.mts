@@ -326,7 +326,12 @@ export function matchRoute(pathname: string): RouteMatch | null {
           matched = false;
           break;
         }
-        params[part.slice(1)] = decodeURIComponent(actual);
+        try {
+          params[part.slice(1)] = decodeURIComponent(actual);
+        } catch {
+          matched = false;
+          break;
+        }
       } else if (part !== actual) {
         matched = false;
         break;

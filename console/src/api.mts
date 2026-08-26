@@ -76,13 +76,15 @@ export async function call(
   }
 
   let body: unknown = null;
-  const text = await response.text();
-  if (text.length > 0) {
-    try {
+  try {
+    const text = await response.text();
+    if (text.length > 0) {
       body = JSON.parse(text);
-    } catch {
-      body = null;
     }
+  } catch {
+    // Status is still authoritative when a proxy returns an empty/non-JSON
+    // body or the body stream itself cannot be read.
+    body = null;
   }
   return classify(response.status, body);
 }
