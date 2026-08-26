@@ -9,6 +9,7 @@ import type { Outcome } from "./api.mjs";
 import { cache } from "./cache.mjs";
 import { AppProvider, type AppContextValue } from "./Shell.js";
 import { SkillItem, Skills } from "./Skills.js";
+import { applyMutationOutcome, type MutationNotice } from "./skills/ui.js";
 import { toText } from "./text.mjs";
 import type {
   AnchorCapabilities,
@@ -156,7 +157,7 @@ async function seed(key: string, body: unknown): Promise<void> {
   await cache.ensure(key, async (): Promise<Outcome> => ({ kind: "ok", body }));
 }
 
-async function seedDetail(): Promise<void> {
+async function seedDetail({ empty = false }: { empty?: boolean } = {}): Promise<void> {
   const current = skill();
   const versions: SkillVersionListView = { versions: [version(2), version(1)] };
   const personal = binding("binding-personal", PERSONAL_SCOPE, true, OLD_ID);
@@ -184,7 +185,7 @@ async function seedDetail(): Promise<void> {
     ],
   };
   const files: SkillVersionFileListView = {
-    files: [
+    files: empty ? [] : [
       {
         path: "SKILL.md",
         object_hash: "object-manifest",
@@ -200,7 +201,7 @@ async function seedDetail(): Promise<void> {
     ],
   };
   const tests: SkillTestRunListView = {
-    runs: [
+    runs: empty ? [] : [
       {
         id: "test-validation",
         version_id: CURRENT_ID,
@@ -228,7 +229,7 @@ async function seedDetail(): Promise<void> {
     ],
   };
   const usage: SkillUsageListView = {
-    events: [
+    events: empty ? [] : [
       {
         id: "usage-host",
         binding_id: personal.id,
@@ -260,17 +261,27 @@ async function seedDetail(): Promise<void> {
   await Promise.all([
     seed(`skills/item/${SKILL_ID}`, current),
     seed(`skills/item/${SKILL_ID}/versions`, versions),
-    seed(`skills/bindings/${PERSONAL_SCOPE}`, { bindings: [personal] }),
-    seed(`skills/bindings/${PROJECT_SCOPE}`, { bindings: [project] }),
-    seed(`skills/available/${PERSONAL_SCOPE}`, personalAvailable),
-    seed(`skills/available/${PROJECT_SCOPE}`, projectAvailable),
+    seed(`skills/bindings/${PERSONAL_SCOPE}`, { bindings: empty ? [] : [personal] }),
+    seed(`skills/bindings/${PROJECT_SCOPE}`, { bindings: empty ? [] : [project] }),
+    seed(
+      `skills/available/${PERSONAL_SCOPE}`,
+      empty ? { scope_id: PERSONAL_SCOPE, skills: [] } : personalAvailable,
+    ),
+    seed(
+      `skills/available/${PROJECT_SCOPE}`,
+      empty ? { scope_id: PROJECT_SCOPE, skills: [] } : projectAvailable,
+    ),
     seed(`skills/item/${SKILL_ID}/versions/${CURRENT_ID}/files`, files),
-    seed(`skills/item/${SKILL_ID}/versions/${CURRENT_ID}/files/SKILL.md`, {
-      version_id: CURRENT_ID,
-      path: "SKILL.md",
-      object_hash: "object-manifest",
-      content: "# Release check\n\nRun the fixture in the controlled release harness.",
-    }),
+    ...(empty
+      ? []
+      : [
+          seed(`skills/item/${SKILL_ID}/versions/${CURRENT_ID}/files/SKILL.md`, {
+            version_id: CURRENT_ID,
+            path: "SKILL.md",
+            object_hash: "object-manifest",
+            content: "# Release check\n\nRun the fixture in the controlled release harness.",
+          }),
+        ]),
     seed(`skills/item/${SKILL_ID}/versions/${CURRENT_ID}/tests`, tests),
     seed(`skills/item/${SKILL_ID}/versions/${CURRENT_ID}/usage`, usage),
   ]);
@@ -393,4 +404,41 @@ test("write forecasts hide every mutation while leaving governed evidence readab
       action,
     );
   }
+});
+
+test("capability and evidence boundaries preserve honest empty states", async () => {
+  await seedDetail({ empty: true });
+  const markup = renderToStaticMarkup(
+    <AppProvider value={context(false)}>
+      <SkillItem skillId={SKILL_ID} />
+    </AppProvider>,
+  );
+  const text = toText(markup);
+  assert.equal((text.match(/policy does not offer creation here/gi) ?? []).length, 2);
+  assert.match(text, /This version contains no visible files/i);
+  assert.match(text, /No controlled test evidence has been recorded/i);
+  assert.match(text, /No usage evidence has been recorded/i);
+  assert.doesNotMatch(markup, />Run validation sandbox<\/button>/i);
+});
+
+test("only an applied governed outcome invalidates state or navigates", () => {
+  const invalidations: string[][] = [];
+  const navigations: string[] = [];
+  const sideEffects = {
+    invalidate: (...prefixes: string[]) => invalidations.push(prefixes),
+    navigateToSkill: (skillId: string) => navigations.push(skillId),
+  };
+  const notice = (outcome: "applied" | "pending_review" | "rejected"): MutationNotice => ({
+    kind: "result",
+    result: { change_id: `change-${outcome}`, outcome, skill_id: SKILL_ID },
+  });
+
+  applyMutationOutcome(notice("pending_review"), ["skills"], sideEffects);
+  applyMutationOutcome(notice("rejected"), ["skills"], sideEffects);
+  assert.deepEqual(invalidations, []);
+  assert.deepEqual(navigations, []);
+
+  applyMutationOutcome(notice("applied"), ["skills"], sideEffects);
+  assert.deepEqual(invalidations, [["skills"]]);
+  assert.deepEqual(navigations, [SKILL_ID]);
 });
