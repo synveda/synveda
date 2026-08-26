@@ -14,6 +14,7 @@
 import { randomBytes } from "node:crypto";
 
 import type { AdapterConfig } from "./config.mjs";
+import { diagnostic } from "./log.mjs";
 import type {
   AppendEventsRequest,
   AppendEventsResponse,
@@ -166,5 +167,5 @@ function traceparent(): string {
 
 function reasonFor(error: unknown): string {
   if (error instanceof Error && error.name === "TimeoutError") return "deadline expired";
-  return String(error);
+  return diagnostic(error);
 }

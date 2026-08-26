@@ -19,7 +19,7 @@ export SYNVEDA_TEI_IMAGE
 # and skip when it is unset — CI runs without a database.
 DATABASE_URL ?= postgres://synveda:synveda-dev@localhost:5432/synveda
 
-.PHONY: fmt lint test build deny check-deps check-adr-status check-adapters check-ann-bench check-api-types check-backlog check-benchmarks check-chart-images check-corpus-licences check-demos check-deploy check-npm-licences check-product-eval chart-lint ts-build ts-test ci dev-up dev-down smoke db-test claude-acceptance claude-acceptance-live eval eval-check eval-product eval-judge eval-read eval-longmemeval eval-longmemeval-full eval-longmemeval-judged eval-extraction-live eval-retrieval eval-security
+.PHONY: fmt lint test build deny check-deps check-adr-status check-adapters check-ann-bench check-api-types check-backlog check-benchmarks check-chart-images check-context-security check-corpus-licences check-demos check-deploy check-npm-licences check-product-eval chart-lint ts-build ts-test ci dev-up dev-down smoke db-test claude-acceptance claude-acceptance-live eval eval-check eval-product eval-judge eval-read eval-longmemeval eval-longmemeval-full eval-longmemeval-judged eval-extraction-live eval-retrieval eval-security
 
 dev-up:
 	$(COMPOSE) up --build --detach --wait
@@ -246,6 +246,14 @@ check-adapters:
 	node --test scripts/check-adapter-conformance.test.mjs
 	node scripts/check-adapter-conformance.mjs
 
+# CPR-42: the Rust/TypeScript suites execute each adversarial case; this
+# inventory prevents a refactor from deleting a whole security boundary while
+# leaving unrelated tests green, and enforces the non-execution/client/logging
+# seams that are visible directly in source.
+check-context-security:
+	node --test scripts/check-context-security.test.mjs
+	node scripts/check-context-security.mjs
+
 # check-backlog reconciles those three files with each other and never
 # reads an ADR header; this closes that gap in the one direction worth
 # gating — an ADR still reading `Proposed` after its feature shipped. The
@@ -321,4 +329,4 @@ ts-build:
 ts-test:
 	pnpm -r test
 
-ci: fmt lint test build deny check-deps check-api-types check-backlog check-demos check-adapters check-adr-status check-corpus-licences check-chart-images check-benchmarks check-ann-bench chart-lint check-deploy eval-check ts-build check-npm-licences ts-test
+ci: fmt lint test build deny check-deps check-api-types check-backlog check-demos check-adapters check-context-security check-adr-status check-corpus-licences check-chart-images check-benchmarks check-ann-bench chart-lint check-deploy eval-check ts-build check-npm-licences ts-test

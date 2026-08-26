@@ -18,7 +18,7 @@ import { closeSync, openSync, readFileSync, writeSync } from "node:fs";
 import { join } from "node:path";
 
 import { configDir, ensureDir } from "./paths.mjs";
-import { log } from "./log.mjs";
+import { diagnostic, log } from "./log.mjs";
 
 /** The file holding it. */
 function installationFile(): string {
@@ -60,7 +60,7 @@ export function installationId(): string {
       const existing = readFileSync(path, "utf8").trim();
       if (existing.length > 0) return existing.slice(0, 200);
     } catch (error) {
-      log("installation.unwritable", { error: String(error) });
+      log("installation.unwritable", { error: diagnostic(error) });
     }
     return minted;
   }

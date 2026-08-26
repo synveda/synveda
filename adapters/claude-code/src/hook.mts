@@ -22,7 +22,7 @@ import { isAbsolute, join } from "node:path";
 
 import { loadConfig } from "./config.mjs";
 import { turn } from "./turn.mjs";
-import { log } from "./log.mjs";
+import { diagnostic, log } from "./log.mjs";
 import { ensureDir } from "./paths.mjs";
 import { sessionStart } from "./session-start.mjs";
 import { syncSkills } from "./skills.mjs";
@@ -42,11 +42,11 @@ const WATCHDOG_MS = 10_000;
 type Mode = "start" | "turn" | "skills" | "none";
 
 process.on("uncaughtException", (error: unknown) => {
-  log("hook.uncaught", { error: String(error) });
+  log("hook.uncaught", { error: diagnostic(error) });
   process.exit(0);
 });
 process.on("unhandledRejection", (reason: unknown) => {
-  log("hook.unhandled_rejection", { reason: String(reason) });
+  log("hook.unhandled_rejection", { reason: diagnostic(reason) });
   process.exit(0);
 });
 
@@ -96,7 +96,7 @@ async function main(): Promise<void> {
       emit(mode === "start" ? await sessionStart(input, config) : await turn(input, config));
     }
   } catch (error) {
-    log("hook.failed", { hook: input.hook_event_name, error: String(error) });
+    log("hook.failed", { hook: input.hook_event_name, error: diagnostic(error) });
   }
   log("hook.done", {
     hook: input.hook_event_name,
@@ -153,7 +153,7 @@ async function readInput(): Promise<HookInput | undefined> {
     process.stdin.setEncoding("utf8");
     for await (const piece of process.stdin) raw += String(piece);
   } catch (error) {
-    log("hook.stdin_failed", { error: String(error) });
+    log("hook.stdin_failed", { error: diagnostic(error) });
     return undefined;
   }
   try {
@@ -198,7 +198,7 @@ function captureInput(raw: string, input: HookInput): void {
     }
     log("fixture.captured", { event, bytes: Buffer.byteLength(raw) });
   } catch (error) {
-    log("fixture.capture_failed", { error: String(error) });
+    log("fixture.capture_failed", { error: diagnostic(error) });
   }
 }
 

@@ -75,7 +75,7 @@ Phase 5 — context platform redesign, since 2026-08-17, on
 `feat/context-platform-mvp`. Phase 3 is paused mid-phase, not finished —
 OPS-9, OPS-10, TEN-5,6, AUD-3,4, EVAL-6, CTX-7, OPS-3,4, ADPT-3,
 CTX-6 and FLOW-8 are still open, and no live Entra/Okta tenant or real
-  Cursor frame has been replayed. **138 features filed, 107 delivered**;
+  Cursor frame has been replayed. **139 features filed, 108 delivered**;
 STATUS.md and `make check-backlog` are the authority on the count — the
 headline number has drifted four times, the fourth being this file itself,
 which still read 104/71 after CPR-8 filed the 105th. That is why the
@@ -265,6 +265,12 @@ Load-bearing facts about Phase 5:
   auto-apply for a root administrator only through the ordinary typed
   VedaFlow/PDP/audit path; a tenant-root transaction lock makes that exception
   one-winner under concurrency.
+- CPR-42 is delivered from `8a4b944`: 27 named adversarial boundaries now have
+  a CI inventory, and four Claude spool/diagnostic defects are closed — hash
+  validation on automatic retry, refused-state preservation, deployment
+  pinning and exception/payload redaction. The focused demo, complete CI and
+  database suites, 18-case product gate and 10,000-variant security gate pass;
+  `docs/SECURITY.md` records the residual host/database/live-client limits.
 - CPR-10 (ADR-0076): **a run is a record**. `sessions`, `session_events` and
   `session_context_runs` replace `session_id: text`; the governed scope a run
   is decided at is derived from its workspace and project by composite keys

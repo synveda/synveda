@@ -77,6 +77,11 @@ pub async fn flush(profile: &str, dir: Option<PathBuf>, verbose: bool) -> Result
         if spool.pending_count() == 0 {
             continue;
         }
+        if let Err(message) = pin_gateway(&mut spool.gateway_url, api.gateway()) {
+            failed += 1;
+            eprintln!("  {}: {message}", name(&path));
+            continue;
+        }
         // A run whose session was never opened has nowhere to deliver. The
         // adapter opens it at the next SessionStart, which is also the hook
         // that knows the workspace; a CLI flush guessing at one would open a
@@ -145,6 +150,24 @@ pub async fn flush(profile: &str, dir: Option<PathBuf>, verbose: bool) -> Result
     };
     println!("Delivered {sent} event(s).{held}");
     Ok(())
+}
+
+/// Binds a pre-session spool once and refuses to reinterpret a stored run id
+/// at another deployment.
+///
+/// The URL is deliberately absent from the error: a malformed profile must
+/// not turn user-info or another credential-bearing URL into diagnostics.
+fn pin_gateway(bound: &mut Option<String>, current: &str) -> Result<(), &'static str> {
+    match bound {
+        Some(existing) if existing != current => {
+            Err("spool belongs to a different gateway; held without sending or rebinding")
+        }
+        Some(_) => Ok(()),
+        None => {
+            *bound = Some(current.to_owned());
+            Ok(())
+        }
+    }
 }
 
 /// Sends one session's pending entries, in batches, marking what came back.
@@ -409,6 +432,15 @@ fn name(path: &std::path::Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_spool_is_pinned_to_one_gateway() {
+        let mut bound = None;
+        pin_gateway(&mut bound, "https://one.example").unwrap();
+        pin_gateway(&mut bound, "https://one.example").unwrap();
+        assert!(pin_gateway(&mut bound, "https://two.example").is_err());
+        assert_eq!(bound.as_deref(), Some("https://one.example"));
+    }
 
     /// The guard that makes `--acknowledged` mean something. Without the flag
     /// the command refuses and touches nothing.

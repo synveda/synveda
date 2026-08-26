@@ -30,9 +30,9 @@ import { recordDelta, retryBacklog, deliver } from "./deliver.mjs";
 import { installationId } from "./install-id.mjs";
 import { log } from "./log.mjs";
 import {
+  bindGateway,
   claimDisclosure,
-  loadSpool,
-  newSpool,
+  loadOrCreateSpool,
   removeLegacyState,
   saveSpool,
   type Spool,
@@ -59,8 +59,8 @@ export async function sessionStart(
   removeLegacyState();
 
   const externalId = harnessSessionId(input.session_id);
-  const spool =
-    loadSpool(externalId) ?? newSpool(externalId, CLIENT_NAME, installationId());
+  const spool = loadOrCreateSpool(externalId, CLIENT_NAME, installationId());
+  if (spool === undefined) return {};
   // Placement is fixed before the first open. Once a run exists, its
   // workspace/project pair is server-owned and a later config edit cannot
   // move it; `resolveRun` returns early for that case.
@@ -81,7 +81,10 @@ export async function sessionStart(
     return { systemMessage: SIGN_IN_MESSAGE };
   }
   const config = resolveGateway(configured, bearer);
-  spool.gateway_url = config.gatewayUrl;
+  if (!bindGateway(spool, config.gatewayUrl)) {
+    log("spool.held", { session: externalId, reason: "gateway_mismatch", corrupt: 0 });
+    return {};
+  }
 
   // 1. The run.
   const opened = await resolveRun(spool, config, bearer.token, input);

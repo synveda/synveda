@@ -31,7 +31,13 @@ import { closeRun, deliver, recordDelta } from "./deliver.mjs";
 import { CLIENT_NAME } from "./client.mjs";
 import { installationId } from "./install-id.mjs";
 import { log } from "./log.mjs";
-import { loadSpool, newSpool, pending, retireIfComplete, saveSpool } from "./spool.mjs";
+import {
+  bindGateway,
+  loadOrCreateSpool,
+  pending,
+  retireIfComplete,
+  saveSpool,
+} from "./spool.mjs";
 import { harnessSessionId } from "./session-start.mjs";
 import type { HookInput, HookOutput } from "./types.mjs";
 
@@ -52,7 +58,8 @@ export async function turn(input: HookInput, configured: AdapterConfig): Promise
   const hookStarted = Date.now();
   if (!configured.observe) return {};
   const externalId = harnessSessionId(input.session_id);
-  const spool = loadSpool(externalId) ?? newSpool(externalId, CLIENT_NAME, installationId());
+  const spool = loadOrCreateSpool(externalId, CLIENT_NAME, installationId());
+  if (spool === undefined) return {};
   if (input.transcript_path !== undefined) spool.transcript_path = input.transcript_path;
 
   // Record first, always, and persist before anything touches the network.
@@ -90,7 +97,10 @@ export async function turn(input: HookInput, configured: AdapterConfig): Promise
   // recorded regardless and go out when a credential exists.
   if (bearer === undefined) return {};
   const config = resolveGateway(configured, bearer);
-  spool.gateway_url = config.gatewayUrl;
+  if (!bindGateway(spool, config.gatewayUrl)) {
+    log("spool.held", { session: externalId, reason: "gateway_mismatch", corrupt: 0 });
+    return {};
+  }
 
   const ending = input.hook_event_name === "SessionEnd";
   const budget = ending ? END_FLUSH_BUDGET_MS : FALLBACK_DELIVERY_BUDGET_MS;

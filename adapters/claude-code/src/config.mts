@@ -9,7 +9,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import type { Bearer } from "./credentials.mjs";
-import { log } from "./log.mjs";
+import { diagnostic, log } from "./log.mjs";
 
 /** The gateway's own default listen address (`SYNVEDA_LISTEN_ADDR`). */
 const DEFAULT_GATEWAY = "http://127.0.0.1:8120";
@@ -109,7 +109,7 @@ export function resolveGateway(config: AdapterConfig, bearer: Bearer): AdapterCo
   if (bearer.source !== "cli" || credentialed === undefined) return config;
   const gatewayUrl = trimSlash(credentialed);
   if (gatewayUrl === config.gatewayUrl) return config;
-  log("gateway.from_credential", { configured: config.gatewayUrl, credential: gatewayUrl });
+  log("gateway.from_credential", { source: "stored_profile" });
   return { ...config, gatewayUrl };
 }
 
@@ -119,7 +119,7 @@ function readProjectConfig(cwd: string | undefined): ProjectConfig {
   try {
     raw = readFileSync(join(cwd, ".synveda", "config.json"), "utf8");
   } catch (error) {
-    if (!missing(error)) log("config.unreadable", { error: String(error) });
+    if (!missing(error)) log("config.unreadable", { error: diagnostic(error) });
     return {};
   }
   try {
@@ -128,8 +128,8 @@ function readProjectConfig(cwd: string | undefined): ProjectConfig {
       return parsed as ProjectConfig;
     }
     log("config.invalid", { reason: "not a JSON object" });
-  } catch (error) {
-    log("config.invalid", { error: String(error) });
+  } catch {
+    log("config.invalid", { reason: "invalid_json" });
   }
   return {};
 }

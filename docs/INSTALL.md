@@ -346,7 +346,8 @@ plugin reads it per call. There is no other configuration.
 
 #### What happens when the gateway is unreachable
 
-Nothing is lost, and you do not have to do anything about it.
+Valid spooled events survive a gateway outage, and ordinary outage recovery is
+automatic.
 
 Every event the plugin records is written to a **local spool** first — one
 file per session under `$XDG_STATE_HOME/synveda/spool/` (or
@@ -373,6 +374,21 @@ synveda session spool purge --acknowledged  # reclaim the delivered
 `purge` **requires** `--acknowledged` and there is no `--all`. It will not
 delete an observation the gateway has not confirmed.
 
+The adapter validates the spool version, structure, event ordering and each
+payload hash before either automatic or manual delivery. A malformed,
+unreadable, future-version or hash-mismatched file is **held in place** rather
+than treated as absent, overwritten or sent. A spool is also pinned on first
+authenticated use to its canonical gateway origin; changing profiles to a
+different gateway holds the old run rather than sending its transcript across
+deployments. `synveda session spool status` reports held state, and the
+adapter log records only a fixed reason class — never the rejected payload or
+credential-bearing exception text.
+
+The SHA-256 payload hash detects accidental local corruption. It is not a MAC
+and does not protect against a process that already has arbitrary write access
+to your account and can replace both payload and hash. Synveda does not claim
+to preserve trustworthy client evidence after full local-account compromise.
+
 Once events reach the gateway, a terminal session freezes the exact eligible
 event snapshot as a durable capture batch. An explicit client can request the
 same operation with
@@ -393,8 +409,9 @@ derived during a shared run is not a shared draft.
 > Claude Code fires `Stop` at the end of every turn, so the window is one
 > turn, not one session: usually seconds. Closing it entirely would mean
 > writing to disk on every token, which costs more than it saves. What is
-> guaranteed is the other half — **nothing that reached the spool is ever
-> lost.**
+> guaranteed is the other half — **a valid event that reached the spool is
+> retained until the gateway acknowledges it.** Refused spool bytes are held
+> for explicit recovery; they are not silently discarded or delivered.
 
 ### Everything else — MCP clients
 

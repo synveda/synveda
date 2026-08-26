@@ -37,6 +37,8 @@
       "limitations": [
         "Stop and PreCompact cross only the atomic local-spool boundary synchronously; SessionEnd or the next SessionStart delivers them.",
         "A host killed before any hook cannot be observed.",
+        "A spool is pinned to its first authenticated gateway origin; a profile switch to another deployment holds the run instead of sending it.",
+        "Payload hashes detect accidental corruption but do not authenticate local state against an attacker with arbitrary write access to the same account.",
         "Skill execution evidence remains host-observed at the sync/advertisement seam; a model statement alone never counts."
       ],
       "authentic_fixtures": [

@@ -31,7 +31,7 @@
 import { execFile } from "node:child_process";
 import { join } from "node:path";
 
-import { log } from "./log.mjs";
+import { diagnostic, log } from "./log.mjs";
 
 /**
  * How long the sync gets. Above the 3s per-call deadline the inject path
@@ -89,15 +89,15 @@ export async function syncSkills(): Promise<void> {
     // way — this session's skills are whatever the last successful sync
     // left on the disk, which is the degrade-never-fail posture applied to
     // a directory instead of a block.
-    log("skills.unavailable", { reason: String(error) });
+    log("skills.unavailable", { reason: diagnostic(error) });
     return;
   }
 
   let parsed: SyncResult;
   try {
     parsed = JSON.parse(stdout) as SyncResult;
-  } catch (error) {
-    log("skills.unparsed", { error: String(error) });
+  } catch {
+    log("skills.unparsed", { reason: "invalid_json" });
     return;
   }
   log("skills.synced", {

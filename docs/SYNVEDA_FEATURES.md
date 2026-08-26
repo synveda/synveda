@@ -2291,6 +2291,18 @@ CPR-41  One-command realistic product demo (XL)
   focused CLI, configuration-race and MVP acceptance, demo, `make ci` and
   `make db-test` pass. ADR-0100.
 
+CPR-42  Context-platform security and product-integrity audit (XL)
+  Filed 2026-08-26 by the autonomous continuation. Adversarially audit every
+  completed context-platform boundary rather than trusting feature-local
+  happy paths. AC: forced-RLS completeness; PDP ordering and non-disclosure
+  through retrieval/graph/context; scope/grant/invitation/session/capture/
+  source/forget attacks; Skill, MCP, OKF, adapter-spool, UI-capability and audit
+  sensitivity tests; governed Configuration/relaxation/directory/key/deploy and
+  generated-contract coverage; a repeatable repository security gate for
+  credentials, logs, bounds, direct product-store clients, post-load authz and
+  permissive errors; every confirmed issue fixed with regression evidence;
+  focused audit/demo/evaluation, `make ci` and `make db-test` pass.
+
 ──────────────────────────────────────────────
 Sequencing (features → phases)
 ──────────────────────────────────────────────
@@ -2384,7 +2396,7 @@ Phase 4 ecosystem: ADPT-4,5,6,7,8 · PRMT-3 · SKIL-5 · MEM-7 · OPS-5,6,7 · C
    or an evaluation harness — and that is a *when*, not an *if*, since ADPT-1's own demo
    is a script. What it must not become is a warning in a README: the gap is silent,
    returns exit 0, and reads exactly like a session that was observed.)
-Phase 5 context platform (redesign): CPR-1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41
+Phase 5 context platform (redesign): CPR-1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42
    (Added 2026-08-17. Its own phase rather than a slot in Phase 4, because it is not the
    next feature — it is the programme that re-cuts the model every feature above was built
    on, for an audience none of them was: one person, or four sharing agent context, who

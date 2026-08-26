@@ -25,7 +25,9 @@ import { after, before, describe, test } from "node:test";
 import {
   acknowledge,
   allSpools,
+  bindGateway,
   loadSpool,
+  loadOrCreateSpool,
   newSpool,
   payloadHash,
   pending,
@@ -125,6 +127,14 @@ describe("the spool", () => {
     assert.notEqual(payloadHash({ b: [2, 3] }), payloadHash({ b: [3, 2] }));
   });
 
+  test("a spool is pinned to its first authenticated gateway", () => {
+    const spool = fresh("gateway-pin");
+    assert.equal(bindGateway(spool, "https://one.example"), true);
+    assert.equal(bindGateway(spool, "https://one.example"), true);
+    assert.equal(bindGateway(spool, "https://two.example"), false);
+    assert.equal(spool.gateway_url, "https://one.example");
+  });
+
   /**
    * Acknowledgement is keyed by the client's own id, so a batch whose answers
    * come back in a different order still marks the right rows.
@@ -219,8 +229,44 @@ describe("the spool", () => {
 
   test("an unknown spool version is refused rather than guessed at", () => {
     const path = spoolFile("harness-future");
-    writeFileSync(path, JSON.stringify({ ...fresh("harness-future"), spool_version: 99 }));
+    const future = JSON.stringify({ ...fresh("harness-future"), spool_version: 99 });
+    writeFileSync(path, future);
     assert.equal(readSpool(path), undefined);
+    assert.equal(
+      loadOrCreateSpool("harness-future", "claude-code", "install-1"),
+      undefined,
+      "a hook must hold unknown state instead of treating it as a missing spool",
+    );
+    assert.equal(readFileSync(path, "utf8"), future, "the refused bytes remain untouched");
+    rmSync(path, { force: true });
+  });
+
+  test("a tampered payload is held and never replaced by a fresh spool", () => {
+    const spool = fresh("harness-tampered");
+    record(spool, [
+      {
+        event_type: "message.user",
+        client_event_id: "u-tampered",
+        occurred_at: "2026-08-25T10:00:00Z",
+        payload: { text: "approved bytes" },
+      },
+    ]);
+    assert.equal(saveSpool(spool), true);
+    const path = spoolFile("harness-tampered");
+    const changed = JSON.parse(readFileSync(path, "utf8")) as {
+      entries: { payload: unknown }[];
+    };
+    if (changed.entries[0] === undefined) throw new Error("fixture has no event");
+    changed.entries[0].payload = { text: "forged bytes" };
+    const tampered = JSON.stringify(changed);
+    writeFileSync(path, tampered);
+
+    assert.equal(readSpool(path), undefined, "the payload hash must be checked on automatic reads");
+    assert.equal(
+      loadOrCreateSpool("harness-tampered", "claude-code", "install-1"),
+      undefined,
+    );
+    assert.equal(readFileSync(path, "utf8"), tampered, "recovery evidence must stay in place");
     rmSync(path, { force: true });
   });
 

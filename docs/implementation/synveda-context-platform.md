@@ -55,12 +55,13 @@ programme convention established in Prompt 1.
 | Anchor-first bounded Knowledge-relation expansion and re-authorised ContextRun paths | CPR-38 | **complete** | `7951d77` | `12e393a` | types 1/1; Knowledge 6/6; Configuration 1/1; ContextRun 4/4; RLS 79/79; OpenAPI 6/6; console 215/215 | PASS | PASS (`synveda_test_93371`, removed) | isolated `demos/cpr-38-bounded-graph.sh` PASS; graph-disabled miss → two-hop selected path; private endpoint absent; 84-script demo gate PASS | none |
 | Evidence-bearing client registry, conformance kit and second real-client attempt | CPR-39 | **partial — external live criterion** | `12e393a` | `0958d69` | registry gate 4/4; CLI config 28/28; MCP corpus 5/5; Claude adapter 98/98; console 216/216 + build | PASS | N/A — no schema/store change | isolated `demos/cpr-39-adapter-conformance.sh` PASS; 85-script gate PASS; genuine Claude 2.1.241 evidence retained; Cursor/VS Code live not run | Cursor executable/authenticated client absent; VS Code profile unauthenticated and current Preview contract has no SessionEnd |
 | Deterministic context-platform product/trust evaluation and re-enabled Knowledge benchmarks | CPR-40 | **complete** | `0958d69` | `036eab7` | eval 162/162; product gate 6/6; store lexical 5/5; LongMemEval 14/14; audit query 16/16; capture/config focused suites PASS | PASS | PASS (fresh disposable database; removed on success) | product 18/18 and six zero gates; default 6/6 + 50 fixtures + all QA + 1,276 probes; 10k security PASS; BGE-M3 10/10 at 0.800 bounded precision; authentic Stage H delivered 4,927 turns and measured all ten instances with zero empty/unattributed blocks and 0.643 retrieval recall | no extraction-model credential or local vLLM; that separately labelled live tier remains unmeasured |
-| Resumable one-command personal/team/governed PulseBoard walkthrough over public APIs | CPR-41 | **complete** | `036eab7` | pending (CPR-42 ledger) | CLI demo 4/4; configuration/bootstrap concurrency 4/4; PulseBoard team loop 1/1 | PASS | PASS (`synveda_test_44030`, removed) | isolated `demos/cpr-41-one-command-demo.sh` PASS; 87-script drift gate PASS; packaged command not called live without a reachable gateway/current Alice+Bob credentials | no current authenticated gateway, distinct Bob credential or separately authenticated semantic provider; no live claim made |
+| Resumable one-command personal/team/governed PulseBoard walkthrough over public APIs | CPR-41 | **complete** | `036eab7` | `8a4b944` | CLI demo 4/4; configuration/bootstrap concurrency 4/4; PulseBoard team loop 1/1 | PASS | PASS (`synveda_test_44030`, removed) | isolated `demos/cpr-41-one-command-demo.sh` PASS; 87-script drift gate PASS; packaged command not called live without a reachable gateway/current Alice+Bob credentials | no current authenticated gateway, distinct Bob credential or separately authenticated semantic provider; no live claim made |
+| Adversarial security and product-integrity audit over every completed context-platform boundary | CPR-42 | **complete** | `8a4b944` | pending (CPR-43 ledger) | security gate 5/5 + 27 boundaries; adapter 103/103; CLI 2/2; OKF 5/5; Skill 12/12 | PASS | PASS (`synveda_test_49069`, removed) | isolated `demos/cpr-42-security-integrity.sh` PASS; product 18/18 with six zero gates; 10k security 10,876 probes, 9/9 controls and every leak/gap count zero | live Entra/Okta and second-client evidence remain external boundaries; no replay promoted |
 
-**Exact next objective:** implement and checkpoint CPR-42, the adversarial
-security and product-integrity audit. Revisit CPR-39's externally blocked
-second-client live run before programme close; do not substitute a
-configuration or replay for that evidence.
+**Exact next objective:** implement and checkpoint CPR-43, the final
+compatibility purge and clean-baseline schema squash. Revisit CPR-39's
+externally blocked second-client live run before programme close; do not
+substitute a configuration or replay for that evidence.
 
 ### Starting-point objective map
 
@@ -5008,4 +5009,71 @@ frontend changes, deletions, tests, and the resulting commit hash.
 - **Commit.** `feat(demo): add realistic personal and team walkthrough
   (CPR-41)` on `feat/context-platform-mvp`.
 - **Commit hash.** Written by CPR-42 under the programme's next-checkpoint
+  convention: `8a4b944fcf9ee8b7b1b033fd567d1416a9d84c3b`.
+
+### Prompt 32 — context-platform security and product-integrity audit (CPR-42)
+
+- **Selected feature and audit surface.** **CPR-42** starts from `8a4b944` and
+  amends accepted ADR-0078. The audit follows every completed boundary from
+  forced RLS and Cedar ordering through VedaFlow effects, sessions, capture,
+  Knowledge/source/trace disclosure, erasure, Skills, MCP, OKF, the generated
+  clients, governed Configuration/relaxations, directory credentials, key
+  custody and deployment convergence. `docs/SECURITY.md` is the durable threat
+  model and evidence inventory; it distinguishes tamper-evident audit from
+  WORM and local corruption detection from hostile-host authentication.
+
+- **Four confirmed adapter defects.** Automatic Claude retries trusted a
+  stored `payload_hash` without checking it; corrupt, unreadable and
+  future-version state was returned as absence and could be overwritten; a
+  stored run could be flushed through a different gateway origin after a
+  profile switch; and raw parser/subprocess exception messages could reach
+  adapter diagnostics with quoted credential or transcript input. No tenant,
+  PDP, VedaFlow, RLS, graph, import or server-side secret bypass was confirmed.
+
+- **Fail-closed durable state.** TypeScript spool reads now validate the whole
+  versioned shape, unique ids, increasing client sequence and every payload
+  hash before any automatic send. The write path distinguishes `missing`,
+  `ready` and `held`; only genuine absence creates a file, so refused bytes
+  remain untouched. First authenticated use pins the gateway origin and both
+  hooks and CLI refuse a different deployment without logging either URL.
+  Diagnostics keep allowlisted error classes, recursively redact payload and
+  secret fields, and truncate deep objects instead of serialising them. The
+  SHA-256 hash remains explicitly a corruption check rather than a MAC: a
+  process controlling the same local account can alter and rehash the file.
+
+- **Repeatable cross-layer gate.** `make check-context-security`, now in
+  `make ci`, pins **27** named executable boundaries. Its own **5/5** mutation
+  tests prove it notices a deleted adversarial test, raw exception logging, a
+  gateway metadata process-execution seam, an expanded MCP method set, or a
+  removed spool guard. It also scans **16** production adapter files and **58**
+  ordinary client files for raw diagnostic/storage coupling, keeps gateway
+  Skill/Tool/OKF metadata handlers non-executing and holds the exact four MCP
+  discovery methods. The generated support matrix now states gateway pinning
+  and the honest local-hash limit. The focused acceptance demo runs this gate,
+  the CLI pin tests and all **103** adapter tests.
+
+- **Adversarial and evaluation evidence.** Focused CLI **2/2**, OKF **5/5**,
+  Skill path/bounds **12/12**, adapter **103/103**, the isolated
+  `demos/cpr-42-security-integrity.sh`, the complete **88-script** drift gate,
+  `make ci` and fresh-scratch `make db-test` pass; the database suite used
+  `synveda_test_49069` and removed it on success. `make eval-product` passes
+  all **18** scenarios with six zero-count trust gates, four retrieved, three
+  selected/injected and **0.8** capture-candidate precision. The full
+  `make eval-security` run asks **10,000** of 11,680 deterministic variants:
+  **10,876** probes, **9/9** controls and zero tenant, scope, sensitivity,
+  unattributed-line or watermark-gap findings; median/p95 request latency is
+  **28.450/82.823 ms**. The one content string resembling a marker remains an
+  explicitly reported, ungated content fact from ADR-0048, not a disclosure.
+
+- **Hard-cut discipline and external boundary.** This package changes no
+  schema, public route, Cedar action or audit action and adds no speculative
+  enterprise mechanism. It deletes the remaining README product use of
+  `lapse`, qualifies over-broad outage/tamper wording and records held-spool
+  recovery. Live Entra/Okta and a real Cursor lifecycle remain unavailable;
+  authentic/replayed/configuration evidence keeps its existing label and is
+  not represented as a live rerun.
+
+- **Commit.** `test(security): harden context platform boundaries (CPR-42)` on
+  `feat/context-platform-mvp`.
+- **Commit hash.** Written by CPR-43 under the programme's next-checkpoint
   convention.

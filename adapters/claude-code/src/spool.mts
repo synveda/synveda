@@ -51,7 +51,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 
-import { log } from "./log.mjs";
+import { diagnostic, log } from "./log.mjs";
 import { ensureDir, legacySessionDir, spoolDir } from "./paths.mjs";
 import type { SessionEventType } from "./types.mjs";
 
@@ -143,6 +143,64 @@ export function spoolFile(externalSessionId: string): string {
   return join(spoolDir(), `${readable}-${digest}.json`);
 }
 
+type HeldReason =
+  | "unreadable"
+  | "invalid_json"
+  | "unsupported_version"
+  | "invalid_shape"
+  | "payload_hash";
+
+type SpoolRead =
+  | { status: "missing" }
+  | { status: "ready"; spool: Spool }
+  | { status: "held"; reason: HeldReason; corrupt: number };
+
+/**
+ * Opens the exact state for a hook, creating it only when no file exists.
+ *
+ * `readSpool` deliberately maps every refused file to `undefined`, which is a
+ * useful read-only answer but an unsafe write-path answer: treating a corrupt
+ * or future-version file as absent lets the next `saveSpool` replace bytes
+ * this build did not understand. Hooks use this function so refused state is
+ * held in place and the transcript remains available for a later recovery.
+ */
+export function loadOrCreateSpool(
+  externalSessionId: string,
+  clientName: string,
+  installationId: string,
+): Spool | undefined {
+  const state = inspectSpool(spoolFile(externalSessionId));
+  if (state.status === "missing") return newSpool(externalSessionId, clientName, installationId);
+  if (state.status === "held") {
+    log("spool.held", {
+      session: externalSessionId,
+      reason: state.reason,
+      corrupt: state.corrupt,
+    });
+    return undefined;
+  }
+  if (state.spool.external_session_id !== externalSessionId) {
+    log("spool.held", { session: externalSessionId, reason: "session_mismatch", corrupt: 0 });
+    return undefined;
+  }
+  return state.spool;
+}
+
+/**
+ * Pins a spool to the deployment that opened it.
+ *
+ * A stored session id is meaningful only at that gateway. Reusing it against
+ * another deployment can put transcript events into an unrelated run if an
+ * id is known there, so a credential/profile switch holds the spool instead
+ * of silently rebinding it. A pre-session spool has no gateway yet and is
+ * bound on its first authenticated start.
+ */
+export function bindGateway(spool: Spool, gatewayUrl: string): boolean {
+  if (spool.gateway_url !== undefined && spool.gateway_url !== gatewayUrl) return false;
+  spool.gateway_url = gatewayUrl;
+  return true;
+}
+
 /**
  * Reads one spool, or `undefined` when there is none this build can read.
  *
@@ -156,23 +214,114 @@ export function loadSpool(externalSessionId: string): Spool | undefined {
 
 /** Reads a spool by path. */
 export function readSpool(path: string): Spool | undefined {
+  const state = inspectSpool(path);
+  if (state.status === "held") {
+    log("spool.held", { reason: state.reason, corrupt: state.corrupt });
+  }
+  return state.status === "ready" ? state.spool : undefined;
+}
+
+function inspectSpool(path: string): SpoolRead {
+  let raw: string;
+  try {
+    raw = readFileSync(path, "utf8");
+  } catch (error) {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      (error as { code?: unknown }).code === "ENOENT"
+    ) {
+      return { status: "missing" };
+    }
+    return { status: "held", reason: "unreadable", corrupt: 0 };
+  }
+
   let parsed: unknown;
   try {
-    parsed = JSON.parse(readFileSync(path, "utf8"));
+    parsed = JSON.parse(raw);
   } catch {
-    // No spool yet, or unreadable. Either way a hook has nothing to do about
-    // it: a fresh spool loses no events, because the events it would have
-    // held were never delivered either.
-    return undefined;
+    // Do not include the parser's message: recent runtimes may quote a slice
+    // of the payload, and diagnostics are not a second transcript store.
+    return { status: "held", reason: "invalid_json", corrupt: 0 };
   }
-  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return { status: "held", reason: "invalid_shape", corrupt: 0 };
+  }
   const spool = parsed as Spool;
   if (spool.spool_version !== SPOOL_VERSION) {
-    log("spool.unknown_version", { path, version: spool.spool_version });
-    return undefined;
+    return { status: "held", reason: "unsupported_version", corrupt: 0 };
   }
-  if (!Array.isArray(spool.entries)) spool.entries = [];
-  return spool;
+  if (!validSpool(spool)) {
+    return { status: "held", reason: "invalid_shape", corrupt: 0 };
+  }
+  const corrupt = spool.entries.filter((entry) => !entryIntact(entry)).length;
+  if (corrupt > 0) return { status: "held", reason: "payload_hash", corrupt };
+  return { status: "ready", spool };
+}
+
+/** Whether the payload bytes still match the digest recorded at capture. */
+export function entryIntact(entry: SpoolEntry): boolean {
+  return /^[0-9a-f]{64}$/.test(entry.payload_hash) && payloadHash(entry.payload) === entry.payload_hash;
+}
+
+function validSpool(spool: Spool): boolean {
+  if (
+    !nonEmpty(spool.client_installation_id) ||
+    !nonEmpty(spool.client_name) ||
+    !nonEmpty(spool.external_session_id) ||
+    !optionalString(spool.session_id) ||
+    !optionalString(spool.workspace_id) ||
+    !optionalString(spool.project_id) ||
+    !optionalString(spool.gateway_url) ||
+    !optionalString(spool.recorded_through) ||
+    !optionalString(spool.end_reason) ||
+    !optionalString(spool.transcript_path) ||
+    !optionalString(spool.model) ||
+    typeof spool.close_requested !== "boolean" ||
+    typeof spool.created_at !== "string" ||
+    typeof spool.updated_at !== "string" ||
+    !Array.isArray(spool.entries)
+  ) {
+    return false;
+  }
+
+  const ids = new Set<string>();
+  let priorSequence = 0;
+  for (const entry of spool.entries) {
+    if (!validEntry(entry) || ids.has(entry.client_event_id) || entry.sequence <= priorSequence) {
+      return false;
+    }
+    ids.add(entry.client_event_id);
+    priorSequence = entry.sequence;
+  }
+  return true;
+}
+
+function validEntry(entry: SpoolEntry): boolean {
+  return (
+    entry !== null &&
+    typeof entry === "object" &&
+    nonEmpty(entry.client_event_id) &&
+    Number.isSafeInteger(entry.sequence) &&
+    entry.sequence > 0 &&
+    nonEmpty(entry.event_type) &&
+    typeof entry.occurred_at === "string" &&
+    Object.prototype.hasOwnProperty.call(entry, "payload") &&
+    typeof entry.payload_hash === "string" &&
+    Number.isSafeInteger(entry.delivery_attempts) &&
+    entry.delivery_attempts >= 0 &&
+    optionalString(entry.last_attempt_at) &&
+    typeof entry.acknowledged === "boolean" &&
+    optionalString(entry.outcome)
+  );
+}
+
+function nonEmpty(value: unknown): value is string {
+  return typeof value === "string" && value.length > 0;
+}
+
+function optionalString(value: unknown): value is string | undefined {
+  return value === undefined || typeof value === "string";
 }
 
 /** A fresh spool for a harness session. */
@@ -230,7 +379,10 @@ export function saveSpool(spool: Spool, path?: string): boolean {
     renameSync(temporary, target);
     return true;
   } catch (error) {
-    log("spool.write_failed", { session: spool.external_session_id, error: String(error) });
+    log("spool.write_failed", {
+      session: spool.external_session_id,
+      error: diagnostic(error),
+    });
     try {
       unlinkSync(temporary);
     } catch {
@@ -252,8 +404,11 @@ export function allSpools(): { path: string; spool: Spool }[] {
   for (const name of names.sort()) {
     if (!name.endsWith(".json")) continue;
     const path = join(spoolDir(), name);
-    const spool = readSpool(path);
-    if (spool !== undefined) found.push({ path, spool });
+    const state = inspectSpool(path);
+    if (state.status === "ready") found.push({ path, spool: state.spool });
+    else if (state.status === "held") {
+      log("spool.held", { reason: state.reason, corrupt: state.corrupt });
+    }
   }
   return found;
 }

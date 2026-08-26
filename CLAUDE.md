@@ -152,6 +152,12 @@ fabricates no teammate or semantic claim. A transaction-serialised,
 administrator-only first exact canonical Configuration and matching binding
 close the fresh-tenant cycle without skipping VedaFlow, PDP effect checks or
 audit.
+CPR-42, the adversarial security and product-integrity audit, is delivered
+from `8a4b944`. It pins 27 cross-layer boundaries in CI and closes four Claude
+spool/diagnostic defects: automatic hash validation, refused-state
+preservation, gateway-origin pinning and raw-exception/payload redaction. The
+focused demo, complete CI/database suites, 18-case product gate and full
+10,000-variant security gate pass; `docs/SECURITY.md` records residual limits.
 **It is a pre-1.0 hard
 cut**: a fresh schema epoch, no old-data migration, no compatibility shims,
 and old databases rejected with a reset instruction. Since CPR-2 that is
@@ -264,7 +270,7 @@ explicitly and say so.
 
 Phases 0, 1 and 2 are complete; SKIL-1 through SKIL-4, OPS-1, CNSL-1, ADPT-2,
 CNSL-2, AUTH-4, AUTH-5, EVAL-3, OPS-2, TEN-3, TEN-4 and OPS-8 are the Phase 3
-features done. 107 of 138 features delivered — see docs/backlog/STATUS.md for
+features done. 108 of 139 features delivered — see docs/backlog/STATUS.md for
 what each one proved and what it left standing. (The total read 86 until
 2026-08-05, when it was corrected to the 88 STATUS.md and `make
 check-backlog` had both said for some time; AUTHZ-7 was filed the same day by
@@ -520,6 +526,14 @@ is serialised at the tenant root so concurrent requests cannot both be first;
 all later or edited configuration follows the live matrix. Team reuse names a
 real second principal only when a distinct credential exists, and
 deterministic hashing remains explicitly lexical-only.
+
+**CPR-42 was filed and delivered next**, making it **139 with 108 delivered**:
+the audit covers the full context-platform RLS/PDP/VedaFlow/audit, integrity,
+executable-artifact, external-format, secret, adapter, client and deployment
+boundary. It fixes automatic spool integrity enforcement, refused-state
+preservation, deployment binding and diagnostic redaction; 27 named
+adversarial seams are now a CI gate, and the focused, complete database,
+product and 10,000-variant security evidence passes before the final hard cut.
 
 Since CPR-9 a **listing decides per row**. The audit of Prompts 1–7 found that
 `GET /v1/workspaces` and `/v1/me` took one decision at the tenant root and

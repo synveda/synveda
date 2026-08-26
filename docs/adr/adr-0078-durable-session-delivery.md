@@ -1,9 +1,43 @@
 # ADR-0078: Durable session delivery and the observe/inject/recall cutover
 
-- **Status**: Accepted, amended 2026-08-24 by CPR-14
+- **Status**: Accepted, amended 2026-08-24 by CPR-14 and 2026-08-26 by CPR-42
 - **Date**: 2026-08-25
-- **Feature(s)**: CPR-12
+- **Feature(s)**: CPR-12, CPR-42
 - **Deciders**: Prompt 12 of the CPR programme
+
+## Amendment (2026-08-26): refused spool state is not absence
+
+CPR-42 found that the format promised integrity checks but only the explicit
+CLI flush enforced them. Automatic retry could send an entry whose payload no
+longer matched `payload_hash`; a corrupt, unreadable or future-version file
+was returned as `undefined`, which hook callers interpreted as a missing file
+and could overwrite; and an authenticated profile switch could deliver an old
+spool to a different gateway origin. Adapter diagnostics also propagated raw
+exception messages from configuration and subprocess parsers, whose rejected
+input can contain credentials or transcript fragments.
+
+The durable boundary is therefore tightened in four places:
+
+1. every reader validates the complete versioned shape, unique event ids,
+   increasing client sequences and every payload hash before any automatic or
+   manual send;
+2. reads have three results — `missing`, `ready` and `held` — and only a truly
+   missing file may be created. Unreadable, malformed, future-version and
+   hash-mismatched bytes remain in place for explicit diagnosis or recovery;
+3. the first authenticated use pins a spool to the canonical gateway origin.
+   A later profile whose origin differs holds the spool without sending or
+   silently rebinding it; and
+4. diagnostic records contain stable error classes and recursively redact
+   secret-, payload- and transcript-bearing fields. Raw exception messages
+   are not a diagnostic API.
+
+`payload_hash` remains a corruption detector, not a MAC. A hostile process
+with arbitrary write access to the same local account can replace a payload
+and recompute SHA-256; defending a fully compromised host would require a
+separate local key boundary that this adapter does not claim. The server still
+redacts, authenticates, authorises and assigns the authoritative event digest
+on admission. These decisions and their adversarial evidence are inventoried
+in `docs/SECURITY.md`.
 
 ## Amendment (2026-08-24): Stop and PreCompact end at the spool
 

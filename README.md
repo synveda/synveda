@@ -91,19 +91,19 @@ only through its original PDP- and revision-checked command path.
   harness to storage that goes around it, not even in tests.
 - **Strict by default, relaxable by design.** The default pack assumes a
   regulated environment. An administrator can grant a scoped, reasoned,
-  time-boxed *lapse* ("let team X read team Y's procedures for 30 days —
+  time-boxed *relaxation* ("let team X read team Y's procedures for 30 days —
   joint incident review"), with dual approval and automatic expiry. That mechanism is why one
   product can serve both a 10-person shop and a multi-region bank.
 - **Audit is an output, not a log file.** Every decision, composition,
   write and policy change lands in a hash-chained log that detects tampering
-  even by an attacker holding database credentials.
+  even by an attacker holding ordinary application database credentials.
 
 ---
 
 ## Project status
 
 **Phases 0–2 are complete. Phase 5 is re-cutting the product while Phase 3 is
-paused.** 107 of 138 filed features are delivered, each with acceptance
+paused.** 108 of 139 filed features are delivered, each with acceptance
 evidence and, where it has a runtime, a runnable script in [`demos/`](demos/).
 
 It installs, on somebody else's machine, with Docker as the only prerequisite:
@@ -125,13 +125,13 @@ switchers, a People page and the governance surfaces under **Advanced**. See
 |---|---|---|
 | **0 — Foundation** | Workspace, dev environment, types, bitemporal schema, observability | ✅ 6/6 |
 | **1 — The spine** | SSO → provisioned own-scope → append → extraction → compose → audit, live in Claude Code | ✅ 21/21 |
-| **2 — Governance** | VedaFlow, lapses, dedup, decay, recall, graph, audit queries, prompts, context packs, eval gates | ✅ 22/22 |
+| **2 — Governance** | VedaFlow, relaxations, dedup, decay, recall, graph, audit queries, prompts, context packs, eval gates | ✅ 22/22 |
 | **3 — Enterprise** | SCIM, real IdPs, skills registry, console, Helm, release & distribution, residency, Qdrant | 🚧 15/27 |
 | **4 — Ecosystem** | SDKs, importers, telemetry, DR, gateway scale | 🚧 2/17 |
-| **5 — Context platform** | The redesign: fresh epoch, governed scopes, sessions, immutable Knowledge, capture, explainable context, Skills, Tools, OKF, one public contract, governed runtime configuration, policy relaxations, offline-verifiable audit export, shared directory access, stable secret custody, one deployment runtime and a public-API PulseBoard walkthrough | 🚧 40 packages delivered; programme continues |
+| **5 — Context platform** | The redesign: fresh epoch, governed scopes, sessions, immutable Knowledge, capture, explainable context, Skills, Tools, OKF, one public contract, governed runtime configuration, policy relaxations, offline-verifiable audit export, shared directory access, stable secret custody, one deployment runtime, a public-API PulseBoard walkthrough and an adversarial integrity gate | 🚧 41 packages delivered; final hard cut remains |
 
-One further feature (AUTH-6, session and token hygiene) is unscheduled — **138
-in total, 107 delivered** (`docs/backlog/STATUS.md` is the count `make ci`
+One further feature (AUTH-6, session and token hygiene) is unscheduled — **139
+in total, 108 delivered** (`docs/backlog/STATUS.md` is the count `make ci`
 checks). Phase 5 is the 33-prompt context-platform redesign, in flight on
 `feat/context-platform-mvp`; Phase 3 is paused mid-phase behind it. The fifteen Phase 3 items finished are the skills registry
 and its governance (SKIL-1 through SKIL-4), the installable single binary
@@ -282,7 +282,9 @@ Being explicit, so nothing here misleads:
   user/tool/assistant events, normal SessionEnd, timeline and verifying audit
   evidence. Deterministic replay covers outage and duplicate recovery in CI.
   A host killed before any lifecycle hook writes the in-flight turn can still
-  lose that tail; nothing which reached the local spool is lost.
+  lose that tail. Valid spool state survives gateway outages; corrupt,
+  future-version or cross-gateway state is held in place rather than sent or
+  silently overwritten.
 - **The authenticated application contract is exact.** CPR-29 derives one
   executable catalogue; with CPR-31 it contains 164 bearer-authenticated
   `/v1` operations,
@@ -448,6 +450,9 @@ Read in this order:
    reset instruction — with the decisions locked in
    [ADR-0068](docs/adr/adr-0068-context-platform-domain-and-epoch.md). Nothing
    on `main` has changed yet.
+8. **[docs/SECURITY.md](docs/SECURITY.md)** — the implemented trust boundaries,
+   CPR-42 findings, repeatable adversarial evidence and the limits Synveda
+   deliberately does not claim away.
 
 ---
 

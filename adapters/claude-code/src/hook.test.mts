@@ -15,7 +15,7 @@
 import assert from "node:assert/strict";
 import { once } from "node:events";
 import { spawn } from "node:child_process";
-import { mkdtempSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -35,7 +35,7 @@ process.env.SYNVEDA_CLI = join(stateHome, "no-cli-here");
 
 const { turn: turnHook } = await import("./turn.mjs");
 const { sessionStart } = await import("./session-start.mjs");
-const { loadSpool, pending } = await import("./spool.mjs");
+const { loadSpool, pending, spoolFile } = await import("./spool.mjs");
 type AdapterConfig = (typeof import("./config.mjs"))["loadConfig"] extends (
   cwd: string | undefined,
 ) => infer T
@@ -434,48 +434,39 @@ test("a second stop with nothing new sends nothing", async () => {
  */
 test("a stopped turn stays pending and the next start sends it", async () => {
   const path = transcript([entry("u1", "the ask")]);
-  // A run first, so the failure under test is the *delivery* failing rather
-  // than there being nowhere to deliver to.
-  const opening = await gateway(ok);
+  // Stop never touches the network, so the same deployment can stand in for
+  // an outage that recovered before the next SessionStart. Replacing it with
+  // another mock origin would now (correctly) exercise the gateway pin instead
+  // of backlog delivery.
+  const recovered = await gateway(ok);
   try {
     await sessionStart(
       { hook_event_name: "SessionStart", session_id: "f3", source: "startup" },
-      config(opening.url, { inject: false }),
+      config(recovered.url, { inject: false }),
     );
-  } finally {
-    await opening.close();
-  }
-
-  const failing = await gateway(
-    script((request) =>
-      request.path.endsWith("/events") ? { status: 503, body: { message: "unavailable" } } : undefined,
-    ),
-  );
-  try {
+    const appendsBeforeStop = recovered.requests.filter((request) =>
+      request.path.endsWith("/events"),
+    ).length;
     await turnHook(
       { hook_event_name: "Stop", session_id: "f3", transcript_path: path },
-      config(failing.url),
+      config(recovered.url),
     );
     const held = loadSpool("f3");
     assert.ok(held, "the spool exists before anything is delivered");
     assert.equal(pending(held).length, 1, "the event is held, not lost");
     assert.equal(held.entries[0]?.delivery_attempts, 0, "Stop does not contact the failed gateway");
     assert.equal(
-      failing.requests.some((request) => request.path.endsWith("/events")),
-      false,
+      recovered.requests.filter((request) => request.path.endsWith("/events")).length,
+      appendsBeforeStop,
       "gateway availability is outside Stop's durable boundary",
     );
-  } finally {
-    await failing.close();
-  }
-
-  const recovered = await gateway(ok);
-  try {
     await sessionStart(
       { hook_event_name: "SessionStart", session_id: "f3", source: "resume", transcript_path: path },
       config(recovered.url, { inject: false }),
     );
-    const append = recovered.requests.find((request) => request.path.endsWith("/events"));
+    const append = recovered.requests
+      .filter((request) => request.path.endsWith("/events"))
+      .at(-1);
     assert.ok(append, "the backlog is delivered at the next start");
     const events = append.body.events as { client_event_id: string }[];
     assert.equal(events[0]?.client_event_id, "u1");
@@ -484,6 +475,76 @@ test("a stopped turn stays pending and the next start sends it", async () => {
     assert.equal(pending(drained).length, 0, "the backlog is gone once it lands");
   } finally {
     await recovered.close();
+  }
+});
+
+test("a tampered spool is held and the automatic retry sends nothing", async () => {
+  const path = transcript([entry("tamper-u1", "the original turn")]);
+  const opening = await gateway(ok);
+  try {
+    await sessionStart(
+      { hook_event_name: "SessionStart", session_id: "f3-tamper", source: "startup" },
+      config(opening.url, { inject: false }),
+    );
+    await turnHook(
+      { hook_event_name: "Stop", session_id: "f3-tamper", transcript_path: path },
+      config(opening.url),
+    );
+  } finally {
+    await opening.close();
+  }
+
+  const heldPath = spoolFile("f3-tamper");
+  const changed = JSON.parse(readFileSync(heldPath, "utf8")) as {
+    entries: { payload: unknown }[];
+  };
+  if (changed.entries[0] === undefined) throw new Error("fixture has no spooled event");
+  changed.entries[0].payload = { text: "forged after capture" };
+  const tampered = JSON.stringify(changed);
+  writeFileSync(heldPath, tampered);
+
+  const retry = await gateway(ok);
+  try {
+    await sessionStart(
+      { hook_event_name: "SessionStart", session_id: "f3-tamper", source: "resume" },
+      config(retry.url, { inject: false }),
+    );
+    assert.equal(retry.requests.length, 0, "corrupt local state must not reach any API route");
+    assert.equal(readFileSync(heldPath, "utf8"), tampered, "the hook must not overwrite it");
+  } finally {
+    await retry.close();
+  }
+});
+
+test("a spool never crosses from one gateway deployment to another", async () => {
+  const path = transcript([entry("gateway-u1", "deployment one only")]);
+  const first = await gateway(ok);
+  try {
+    await sessionStart(
+      { hook_event_name: "SessionStart", session_id: "f3-gateway", source: "startup" },
+      config(first.url, { inject: false }),
+    );
+    await turnHook(
+      { hook_event_name: "Stop", session_id: "f3-gateway", transcript_path: path },
+      config(first.url),
+    );
+  } finally {
+    await first.close();
+  }
+
+  const second = await gateway(ok);
+  try {
+    await sessionStart(
+      { hook_event_name: "SessionStart", session_id: "f3-gateway", source: "resume" },
+      config(second.url, { inject: false }),
+    );
+    assert.equal(second.requests.length, 0, "a stored run id has no meaning at another gateway");
+    const held = loadSpool("f3-gateway");
+    assert.ok(held);
+    assert.equal(pending(held).length, 1);
+    assert.equal(held.gateway_url, first.url);
+  } finally {
+    await second.close();
   }
 });
 
