@@ -2,11 +2,10 @@
 //! behind tenant resolution, uniform-404 ownership, and the PDP
 //! (`ContextPackWrite` to author, `ContextPackRead` to see a shelf).
 //!
-//! Two surfaces here, and **neither is the one that matters most**. A
-//! prompt is fetched by name through its own route; a pack's content
-//! arrives through `inject`, as pinned records the composition engine
-//! ranks (ADR-0050 decision 2). So this module authors and lists, and the
-//! read path lives in `synveda_retrieval::compose`.
+//! Authoring stores scanned immutable `context_pack_chunks`; VedaFlow
+//! publication selects which version is current. A ContextRun resolves those
+//! published chunks as separately authorised authored input, outside the
+//! Knowledge semantic index.
 //!
 //! - **author** (`POST /v1/context-packs`) — it scans and chunks a bundle in
 //!   one request. It moves nothing a session reads, which is the whole of "a
@@ -15,11 +14,6 @@
 //! - **list** (`GET /v1/context-packs?scope_id=…`) — the registry view at
 //!   one scope: what is drafted, what is published, and whether they are
 //!   the same bytes.
-//!
-//! The epoch-3 hard cut stores scanned authored chunks directly. They are
-//! not Knowledge and do not enter the semantic Knowledge index. Publication
-//! and rewind remain cheap VedaFlow ref moves over immutable document
-//! addresses.
 //!
 //! # Re-authoring an unchanged document costs nothing
 //!
@@ -52,7 +46,6 @@ use synveda_vedaflow::{self as vedaflow, ContextPackAsset};
 use crate::app::AppState;
 use crate::audit;
 use crate::authz::{self, DecisionInput};
-use crate::error::ApiError;
 use crate::request::{body, commit, found, tenant_id};
 use crate::telemetry::CONTEXT_PACK_OPERATIONS_TOTAL;
 
@@ -63,26 +56,9 @@ async fn respond<T: IntoResponse>(
     op: &'static str,
     result: Result<T>,
 ) -> Response {
-    let outcome = match &result {
-        Ok(_) => "ok",
-        Err(
-            Error::Unauthenticated { .. }
-            | Error::PolicyDenied { .. }
-            | Error::NotFound { .. }
-            | Error::Invalid { .. }
-            | Error::Conflict { .. }
-            | Error::RateLimited { .. },
-        ) => "rejected",
-        Err(_) => "error",
-    };
+    let outcome = crate::response::outcome(&result);
     metrics::counter!(CONTEXT_PACK_OPERATIONS_TOTAL, "op" => op, "outcome" => outcome).increment(1);
-    match result {
-        Ok(response) => response.into_response(),
-        Err(error) => {
-            audit::record_rejection(state, op, &error).await;
-            ApiError(error).into_response()
-        }
-    }
+    crate::response::finish(state, op, result).await
 }
 
 // ── Author ─────────────────────────────────────────────────────────────

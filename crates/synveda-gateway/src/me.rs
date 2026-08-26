@@ -30,7 +30,7 @@
 //! a documented way around it is not one.
 
 use axum::extract::State;
-use axum::response::{IntoResponse, Json, Response};
+use axum::response::{Json, Response};
 use serde::Serialize;
 use serde_json::json;
 use synveda_audit::{AuditAction, Outcome};
@@ -43,7 +43,6 @@ use utoipa::ToSchema;
 use crate::app::AppState;
 use crate::audit;
 use crate::capabilities::{AnchorCapabilities, TenantCapabilities};
-use crate::error::ApiError;
 use crate::request::{commit, tenant_id};
 use crate::telemetry::WORKSPACE_OPERATIONS_TOTAL;
 use crate::workspaces::{ProjectView, WorkspaceView};
@@ -217,27 +216,10 @@ impl OnboardingState {
     security(("bearer" = [])),
 )]
 pub(crate) async fn get(State(state): State<AppState>) -> Response {
-    let result = get_inner(&state).await;
-    let outcome = match &result {
-        Ok(_) => "ok",
-        Err(
-            Error::Unauthenticated { .. }
-            | Error::PolicyDenied { .. }
-            | Error::NotFound { .. }
-            | Error::Invalid { .. }
-            | Error::Conflict { .. }
-            | Error::RateLimited { .. },
-        ) => "rejected",
-        Err(_) => "error",
-    };
+    let result = get_inner(&state).await.map(Json);
+    let outcome = crate::response::outcome(&result);
     metrics::counter!(WORKSPACE_OPERATIONS_TOTAL, "op" => "me", "outcome" => outcome).increment(1);
-    match result {
-        Ok(view) => Json(view).into_response(),
-        Err(error) => {
-            audit::record_rejection(&state, "me", &error).await;
-            ApiError(error).into_response()
-        }
-    }
+    crate::response::finish(&state, "me", result).await
 }
 
 async fn get_inner(state: &AppState) -> Result<MeView> {

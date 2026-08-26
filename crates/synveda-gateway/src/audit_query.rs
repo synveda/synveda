@@ -52,7 +52,6 @@ use synveda_types::{
 use crate::app::AppState;
 use crate::audit;
 use crate::authz;
-use crate::error::ApiError;
 use crate::request::{commit, tenant_id};
 use crate::telemetry::AUDIT_QUERY_OPERATIONS_TOTAL;
 
@@ -73,26 +72,9 @@ async fn respond<T: IntoResponse>(
     op: &'static str,
     result: Result<T>,
 ) -> Response {
-    let outcome = match &result {
-        Ok(_) => "ok",
-        Err(
-            Error::Unauthenticated { .. }
-            | Error::PolicyDenied { .. }
-            | Error::NotFound { .. }
-            | Error::Invalid { .. }
-            | Error::Conflict { .. }
-            | Error::RateLimited { .. },
-        ) => "rejected",
-        Err(_) => "error",
-    };
+    let outcome = crate::response::outcome(&result);
     metrics::counter!(AUDIT_QUERY_OPERATIONS_TOTAL, "op" => op, "outcome" => outcome).increment(1);
-    match result {
-        Ok(response) => response.into_response(),
-        Err(error) => {
-            audit::record_rejection(state, op, &error).await;
-            ApiError(error).into_response()
-        }
-    }
+    crate::response::finish(state, op, result).await
 }
 
 /// Where the chain stood when the answer was taken, and what the answer

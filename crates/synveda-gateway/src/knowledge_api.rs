@@ -44,7 +44,6 @@ use utoipa::ToSchema;
 use crate::app::AppState;
 use crate::audit;
 use crate::authz::{self, Authorized};
-use crate::error::ApiError;
 use crate::idempotency::{Claim, Dispatch};
 use crate::request::{commit, tenant_id};
 use crate::workspaces::{ApiErrorBody, string_enum, subject};
@@ -1258,27 +1257,10 @@ pub(crate) async fn respond<T: IntoResponse>(
     op: &'static str,
     result: Result<T>,
 ) -> Response {
-    let outcome = match &result {
-        Ok(_) => "ok",
-        Err(
-            Error::Unauthenticated { .. }
-            | Error::PolicyDenied { .. }
-            | Error::NotFound { .. }
-            | Error::Invalid { .. }
-            | Error::Conflict { .. }
-            | Error::RateLimited { .. },
-        ) => "rejected",
-        Err(_) => "error",
-    };
+    let outcome = crate::response::outcome(&result);
     metrics::counter!(KNOWLEDGE_API_OPERATIONS_TOTAL, "op" => op, "outcome" => outcome)
         .increment(1);
-    match result {
-        Ok(value) => value.into_response(),
-        Err(error) => {
-            audit::record_rejection(state, op, &error).await;
-            ApiError(error).into_response()
-        }
-    }
+    crate::response::finish(state, op, result).await
 }
 
 #[derive(Debug, Clone, Copy)]
