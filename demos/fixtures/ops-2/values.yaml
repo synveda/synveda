@@ -26,6 +26,11 @@ oidc:
   # rather than one that invents an issuer.
   existingSecret: synveda-oidc
 
+kms:
+  # Created by the demo before Helm renders the gateway pod. It is a
+  # disposable test-only key; production custody remains an operator action.
+  existingSecret: synveda-kms
+
 # Deterministic, so CI never downloads 2.3 GB of BGE-M3. That is a real
 # choice about a corpus and not a shortcut around one: this deployment
 # lives for the length of one job.

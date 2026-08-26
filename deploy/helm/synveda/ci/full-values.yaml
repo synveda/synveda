@@ -13,6 +13,8 @@ ingress:
       hosts: [synveda.example.com]
 oidc:
   existingSecret: synveda-oidc
+kms:
+  existingSecret: synveda-kms
 embedder: tei
 tei:
   enabled: true

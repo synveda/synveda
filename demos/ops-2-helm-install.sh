@@ -154,6 +154,12 @@ ISSUER=$(node "$FIXTURES/idp-bootstrap.mjs" http://127.0.0.1:18080 "$PUBLIC_URL"
 echo "    issuer, as the discovery document states it: $ISSUER"
 
 # ── the chart ────────────────────────────────────────────────────────────
+echo "==> the disposable key plane"
+kubectl create secret generic synveda-kms -n "$NS" \
+  --from-literal=SYNVEDA_KMS_KEY=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef \
+  --from-literal=SYNVEDA_KMS_KEY_REF=local:ops-2-test \
+  --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+
 echo "==> helm install"
 helm upgrade --install "$RELEASE" deploy/helm/synveda \
   --namespace "$NS" -f "$FIXTURES/values.yaml" --wait=false ||

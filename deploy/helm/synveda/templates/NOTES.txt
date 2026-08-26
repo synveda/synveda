@@ -22,6 +22,12 @@ Synveda {{ .Chart.AppVersion }} — one context-platform runtime (CPR-36, ADR-00
    they are created and audited under the first `synveda-admins` member who
    logs in.
 
+   The gateway reads its local KMS key from `{{ .Values.kms.existingSecret }}`.
+   This chart does not create or own that Secret. Back it up outside Postgres
+   and test restoring it: losing the key makes wrapped tenant keys and console
+   sessions unrecoverable. The stable key reference is evidence metadata, not
+   a cloud KMS/HSM custody integration.
+
 {{ if not .Values.install.tenant.slug }}3. Admit a tenant with the admin credential. Tenant admission is the retained
    bootstrap boundary and is intentionally unavailable to the gateway role:
 
@@ -56,8 +62,10 @@ OPERATIONAL LIMITS
   multi-replica criterion, so a gateway upgrade has a brief outage. The chart
   refuses a replicas key instead of accepting a configuration it cannot honour.
 
-  Provider credentials remain Kubernetes Secret references. Rendered
-  diagnostics, ordinary APIs and audit rows do not contain their values.
+  Provider credentials and the local KMS key remain Kubernetes Secret
+  references. Rendered diagnostics, ordinary APIs and audit rows do not
+  contain their values. Key rotation and restore are operator procedures that
+  this chart does not automate or prove.
 
   `deterministic` embeddings are lexical-only. Select `tei` for meaningful
   semantic retrieval. Knowledge index rows retain model and dimension, and a

@@ -306,13 +306,13 @@ check-chart-images:
 
 # The enterprise chart renders, in both of the shapes CI covers: the
 # minimum a real install must state, and every optional path at once.
-# Needs helm. The chart's defaults deliberately do not render — four values
+# Needs helm. The chart's defaults deliberately do not render — five values
 # have no default because each is a decision somebody has to make on
 # purpose — so the lint values are also the list of those decisions.
 chart-lint:
 	helm lint deploy/helm/synveda --strict -f deploy/helm/synveda/ci/lint-values.yaml
 	helm lint deploy/helm/synveda --strict -f deploy/helm/synveda/ci/full-values.yaml
-	helm template synveda deploy/helm/synveda -f deploy/helm/synveda/ci/full-values.yaml >/dev/null
+	node scripts/check-helm-contract.mjs
 
 # CPR-36: source/release Compose, Helm, generated API and the packaged profile
 # are one runtime; a repeat package cannot retain a removed asset. CPR-44's

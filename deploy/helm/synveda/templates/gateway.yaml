@@ -98,6 +98,16 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.oidc.existingSecret }}
                   key: {{ .Values.oidc.secretKey }}
+            - name: SYNVEDA_KMS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.kms.existingSecret }}
+                  key: {{ .Values.kms.secretKey }}
+            - name: SYNVEDA_KMS_KEY_REF
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.kms.existingSecret }}
+                  key: {{ .Values.kms.keyRefSecretKey }}
             - name: SYNVEDA_EMBEDDER
               value: {{ .Values.embedder | quote }}
             {{- with .Values.embedderModel }}

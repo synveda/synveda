@@ -4,10 +4,11 @@
 # selects personal, team or enterprise product behaviour: those are immutable
 # governed Configuration versions and scope bindings in the one runtime.
 #
-# Four values have no default and the chart refuses to render without them:
-# `gateway.publicUrl`, `embedder`, `oidc.existingSecret`, and — if the
-# embedder is `tei` — one of `tei.enabled` or `tei.url`. Each is a decision
-# somebody has to make on purpose; a default would make it silently.
+# Five values have no default and the chart refuses to render without them:
+# `gateway.publicUrl`, `embedder`, `oidc.existingSecret`,
+# `kms.existingSecret`, and — if the embedder is `tei` — one of
+# `tei.enabled` or `tei.url`. Each is a decision somebody has to make on
+# purpose; a default would make it silently.
 
 # ── The product image ────────────────────────────────────────────────────
 # Carries both binaries: the gateway serves, and the `synveda` CLI is what
@@ -108,6 +109,23 @@ oidc:
   existingSecret: ""
   secretKey: SYNVEDA_OIDC_ISSUERS
 
+# ── Local key custody ────────────────────────────────────────────────────
+kms:
+  # Name of an existing Secret holding the local KMS key and its stable
+  # reference. The chart wires custody into the gateway but never creates,
+  # prints or owns the key. Losing it makes every wrapped tenant key
+  # unrecoverable; back up and restore this Secret outside the database.
+  #
+  #   kubectl create secret generic synveda-kms \
+  #     --from-literal=SYNVEDA_KMS_KEY="$(synveda kms keygen)" \
+  #     --from-literal=SYNVEDA_KMS_KEY_REF=local:production
+  #
+  # Required. This proves only that startup names a custody source; it does
+  # not provide cloud KMS/HSM integration or a rotation/restore procedure.
+  existingSecret: ""
+  secretKey: SYNVEDA_KMS_KEY
+  keyRefSecretKey: SYNVEDA_KMS_KEY_REF
+
 # ── The embedder: a data decision, not a preference ──────────────────────
 # Knowledge embedding rows retain model and dimension and the dense leg filters
 # on both. A model change converges a separately labelled sidecar; it never
@@ -141,10 +159,11 @@ tei:
 # Changing it changes what future extraction produces and invalidates
 # nothing already written.
 extractor:
-  # `deterministic` | `claude` | `vllm` | `off`
+  # `deterministic` | `claude` | `vllm`
   kind: deterministic
   model: ""
-  # For `claude`: a Secret with key ANTHROPIC_API_KEY. For `vllm`: baseUrl.
+  # For `claude`: a Secret with key ANTHROPIC_API_KEY. For `vllm`: both
+  # baseUrl and model are required.
   existingSecret: ""
   baseUrl: ""
 

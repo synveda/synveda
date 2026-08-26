@@ -130,6 +130,18 @@ silent if the chart rendered it anyway.
 {{- fail "oidc.existingSecret is required: the name of a Secret holding SYNVEDA_OIDC_ISSUERS.\n  The chart never generates it — an issuer configuration names your directory, and a chart that writes one has invented a trust relationship. Create it with:\n    kubectl create secret generic synveda-oidc --from-file=SYNVEDA_OIDC_ISSUERS=./issuers.json" -}}
 {{- end -}}
 
+{{- /* The runtime starts without a KMS only to support local bootstrap and
+       diagnostics. A deployed console cannot establish a session that way. */ -}}
+{{- if not .Values.kms.existingSecret -}}
+{{- fail "kms.existingSecret is required: the name of a Secret holding SYNVEDA_KMS_KEY and SYNVEDA_KMS_KEY_REF.\n  The chart never generates or owns the key. Create it separately, back it up outside the database, and test its restore before relying on encrypted tenant data." -}}
+{{- end -}}
+{{- if not .Values.kms.secretKey -}}
+{{- fail "kms.secretKey must name the Secret key containing the 64-hex-character local KMS key" -}}
+{{- end -}}
+{{- if not .Values.kms.keyRefSecretKey -}}
+{{- fail "kms.keyRefSecretKey must name the Secret key containing the stable KMS key reference" -}}
+{{- end -}}
+
 {{- /* Decision 10. The embedder is a property of the corpus. */ -}}
 {{- if not .Values.embedder -}}
 {{- fail "embedder is required and has no default: `deterministic` or `tei`.\n  Knowledge embedding rows retain model and dimension; a different model converges a separately labelled sidecar rather than reinterpreting old vectors. `deterministic` is lexical-only and must not be labelled semantic." -}}
@@ -150,14 +162,17 @@ silent if the chart rendered it anyway.
 {{- end -}}
 
 {{- /* The extractor's own credential, which is not optional for `claude`. */ -}}
-{{- if not (has .Values.extractor.kind (list "deterministic" "claude" "vllm" "off")) -}}
-{{- fail (printf "extractor.kind must be one of deterministic|claude|vllm|off, got %q" .Values.extractor.kind) -}}
+{{- if not (has .Values.extractor.kind (list "deterministic" "claude" "vllm")) -}}
+{{- fail (printf "extractor.kind must be one of deterministic|claude|vllm, got %q" .Values.extractor.kind) -}}
 {{- end -}}
 {{- if and (eq .Values.extractor.kind "claude") (not .Values.extractor.existingSecret) -}}
 {{- fail "extractor.kind is `claude` but extractor.existingSecret is empty: name a Secret with an ANTHROPIC_API_KEY key" -}}
 {{- end -}}
 {{- if and (eq .Values.extractor.kind "vllm") (not .Values.extractor.baseUrl) -}}
 {{- fail "extractor.kind is `vllm` but extractor.baseUrl is empty" -}}
+{{- end -}}
+{{- if and (eq .Values.extractor.kind "vllm") (not .Values.extractor.model) -}}
+{{- fail "extractor.kind is `vllm` but extractor.model is empty" -}}
 {{- end -}}
 
 {{- /* Decision 2's arithmetic, stated where somebody can act on it. */ -}}
