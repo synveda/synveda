@@ -23,6 +23,31 @@ use synveda_types::{Error, Result, TenantId};
 
 type HmacSha256 = Hmac<Sha256>;
 
+/// Clock skew allowed when an issuer's `iat` is marginally ahead of the
+/// verifier. The same bound is used by dev/service and OIDC verification so
+/// one token authority cannot admit a time shape the other refuses.
+pub(crate) const FUTURE_IAT_LEEWAY: Duration = Duration::from_secs(30);
+
+/// Validates ordered token times and returns the issued lifetime when `iat`
+/// is present. Missing `iat` remains an unknown lifetime for the service-
+/// identity enforcement seam; a malformed one is never disguised as a zero
+/// lifetime.
+pub(crate) fn issued_lifetime(exp: u64, iat: Option<u64>, now: u64) -> Result<Option<Duration>> {
+    let Some(iat) = iat else {
+        return Ok(None);
+    };
+    let seconds = exp.checked_sub(iat).ok_or_else(|| Error::Unauthenticated {
+        message: "token issued-at is after its expiry".to_owned(),
+    })?;
+    let latest = now.saturating_add(FUTURE_IAT_LEEWAY.as_secs());
+    if iat > latest {
+        return Err(Error::Unauthenticated {
+            message: "token issued-at is too far in the future".to_owned(),
+        });
+    }
+    Ok(Some(Duration::from_secs(seconds)))
+}
+
 /// The verified claims a token resolves to.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Claims {
@@ -190,7 +215,8 @@ impl TokenVerifier for Hs256Verifier {
             .ok()
             .and_then(|bytes| serde_json::from_slice(&bytes).ok())
             .ok_or_else(|| reject("token is missing required claims (sub, tid, exp)"))?;
-        if claims.exp <= now().as_secs() {
+        let verified_at = now().as_secs();
+        if claims.exp <= verified_at {
             return Err(reject("token expired"));
         }
         let tenant_id: TenantId = claims
@@ -198,15 +224,15 @@ impl TokenVerifier for Hs256Verifier {
             .parse()
             .map_err(|_| reject("tid claim is not a UUID"))?;
 
+        let lifetime = issued_lifetime(claims.exp, claims.iat, verified_at)?;
+
         Ok(Claims {
             subject: claims.sub,
             tenant_id,
             // Dev-mode subjects are out-of-band: no IdP stands behind them,
             // so they carry no provisioning claims (ADR-0013 decision 1).
             provisioning: None,
-            lifetime: claims
-                .iat
-                .map(|iat| Duration::from_secs(claims.exp.saturating_sub(iat))),
+            lifetime,
         })
     }
 }
@@ -223,6 +249,15 @@ mod tests {
 
     fn verifier() -> Hs256Verifier {
         Hs256Verifier::new(b"test-secret")
+    }
+
+    fn signed(v: &Hs256Verifier, claims: &RawClaims) -> String {
+        let header = URL_SAFE_NO_PAD.encode(r#"{"alg":"HS256","typ":"JWT"}"#);
+        let payload = URL_SAFE_NO_PAD.encode(serde_json::to_vec(claims).expect("claims"));
+        let mut mac = v.mac();
+        mac.update(format!("{header}.{payload}").as_bytes());
+        let signature = URL_SAFE_NO_PAD.encode(mac.finalize().into_bytes());
+        format!("{header}.{payload}.{signature}")
     }
 
     fn assert_unauthenticated(result: Result<Claims>, containing: &str) {
@@ -282,6 +317,61 @@ mod tests {
     async fn expired_token_is_rejected() {
         let token = verifier().issue("alice", TenantId::new(), Duration::ZERO);
         assert_unauthenticated(verifier().verify(&token).await, "expired");
+    }
+
+    #[tokio::test]
+    async fn issued_at_after_expiry_is_rejected_without_a_zero_lifetime() {
+        let v = verifier();
+        let current = now().as_secs();
+        let token = signed(
+            &v,
+            &RawClaims {
+                sub: "service".to_owned(),
+                tid: TenantId::new().to_string(),
+                exp: current + 60,
+                iat: Some(current + 61),
+            },
+        );
+        assert_unauthenticated(v.verify(&token).await, "after its expiry");
+    }
+
+    #[tokio::test]
+    async fn issued_at_beyond_future_skew_is_rejected() {
+        let v = verifier();
+        let current = now().as_secs();
+        let token = signed(
+            &v,
+            &RawClaims {
+                sub: "service".to_owned(),
+                tid: TenantId::new().to_string(),
+                exp: current + 120,
+                iat: Some(current + FUTURE_IAT_LEEWAY.as_secs() + 1),
+            },
+        );
+        assert_unauthenticated(v.verify(&token).await, "future");
+    }
+
+    #[tokio::test]
+    async fn issued_at_on_the_future_skew_boundary_remains_valid() {
+        let v = verifier();
+        let current = now().as_secs();
+        let issued_at = current + FUTURE_IAT_LEEWAY.as_secs();
+        let expires_at = issued_at + 60;
+        let token = signed(
+            &v,
+            &RawClaims {
+                sub: "service".to_owned(),
+                tid: TenantId::new().to_string(),
+                exp: expires_at,
+                iat: Some(issued_at),
+            },
+        );
+        let claims = v.verify(&token).await.expect("boundary-valid token");
+        assert_eq!(claims.lifetime, Some(Duration::from_secs(60)));
+        assert_eq!(
+            issued_lifetime(1_090, Some(1_030), 1_000).expect("exact boundary"),
+            Some(Duration::from_secs(60))
+        );
     }
 
     #[tokio::test]

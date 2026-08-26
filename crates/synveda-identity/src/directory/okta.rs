@@ -18,10 +18,12 @@
 
 use async_trait::async_trait;
 use serde::Deserialize;
+use url::Url;
 
 use super::{
-    DirectoryConnector, DirectoryGroupRecord, DirectorySnapshot, DirectoryUserRecord, Enumeration,
-    Secret, http_client, redact,
+    ApiOrigin, DirectoryConnector, DirectoryGroupRecord, DirectoryItemKind, DirectorySnapshot,
+    DirectoryUserRecord, Enumeration, EnumerationBudget, EnumerationLimits, Secret, bounded_json,
+    http_client, redact,
 };
 
 /// Okta's page ceiling for the users collection.
@@ -31,7 +33,9 @@ const PAGE_SIZE: usize = 200;
 pub struct OktaConnector {
     http: reqwest::Client,
     org_url: String,
+    api_origin: ApiOrigin,
     api_token: Secret,
+    limits: EnumerationLimits,
 }
 
 #[derive(Deserialize)]
@@ -112,11 +116,20 @@ impl OktaConnector {
     /// # Errors
     /// If the shared HTTP client cannot be constructed.
     pub fn new(org_url: String, api_token: Secret) -> synveda_types::Result<Self> {
+        let org_url = org_url.trim_end_matches('/').to_owned();
         Ok(Self {
             http: http_client()?,
-            org_url: org_url.trim_end_matches('/').to_owned(),
+            api_origin: ApiOrigin::parse(&org_url, "Okta org URL")?,
+            org_url,
             api_token,
+            limits: EnumerationLimits::DEFAULT,
         })
+    }
+
+    #[cfg(test)]
+    fn with_limits(mut self, limits: EnumerationLimits) -> Self {
+        self.limits = limits;
+        self
     }
 
     /// Walks one paged collection to its end, or to its first failure,
@@ -125,13 +138,26 @@ impl OktaConnector {
     async fn walk<T: serde::de::DeserializeOwned>(
         &self,
         first: String,
+        kind: DirectoryItemKind,
+        budget: &mut EnumerationBudget,
     ) -> (Vec<T>, Option<String>) {
         let mut collected = Vec::new();
         let mut next = Some(first);
-        while let Some(url) = next {
+        let mut current_page: Option<Url> = None;
+        while let Some(continuation) = next {
+            let url = match self
+                .api_origin
+                .resolve(current_page.as_ref(), &continuation)
+            {
+                Ok(url) => url,
+                Err(failure) => return (collected, Some(failure)),
+            };
+            if let Err(failure) = budget.begin_page(&url) {
+                return (collected, Some(failure));
+            }
             let response = match self
                 .http
-                .get(&url)
+                .get(url.clone())
                 .header(
                     reqwest::header::AUTHORIZATION,
                     format!("SSWS {}", self.api_token.expose()),
@@ -151,17 +177,16 @@ impl OktaConnector {
                 .get(reqwest::header::LINK)
                 .and_then(|value| value.to_str().ok())
                 .map(str::to_owned);
-            let page: Vec<T> = match response.json().await {
+            let page: Vec<T> = match bounded_json(response, budget, &url).await {
                 Ok(page) => page,
-                Err(err) => {
-                    return (
-                        collected,
-                        Some(self.scrub(&format!("decoding {url}: {err}"))),
-                    );
-                }
+                Err(err) => return (collected, Some(self.scrub(&err))),
             };
+            if let Err(failure) = budget.retain(kind, page.len()) {
+                return (collected, Some(failure));
+            }
             collected.extend(page);
             next = next_link(link.as_deref());
+            current_page = Some(url);
         }
         (collected, None)
     }
@@ -184,9 +209,12 @@ impl DirectoryConnector for OktaConnector {
     )]
     async fn enumerate(&self) -> Enumeration {
         let mut snapshot = DirectorySnapshot::default();
+        let mut budget = EnumerationBudget::with_limits(self.limits);
 
         let users_url = format!("{}/api/v1/users?limit={PAGE_SIZE}", self.org_url);
-        let (users, failure) = self.walk::<OktaUser>(users_url).await;
+        let (users, failure) = self
+            .walk::<OktaUser>(users_url, DirectoryItemKind::Users, &mut budget)
+            .await;
         for user in users {
             // No login is Okta's equivalent of Entra's missing UPN: nothing
             // this product can address or match on.
@@ -208,7 +236,9 @@ impl DirectoryConnector for OktaConnector {
         }
 
         let groups_url = format!("{}/api/v1/groups?limit={PAGE_SIZE}", self.org_url);
-        let (groups, failure) = self.walk::<OktaGroup>(groups_url).await;
+        let (groups, failure) = self
+            .walk::<OktaGroup>(groups_url, DirectoryItemKind::Groups, &mut budget)
+            .await;
         if let Some(failure) = failure {
             return partial(snapshot, failure);
         }
@@ -221,7 +251,9 @@ impl DirectoryConnector for OktaConnector {
                 "{}/api/v1/groups/{}/users?limit={PAGE_SIZE}",
                 self.org_url, group.id
             );
-            let (members, failure) = self.walk::<OktaUser>(members_url).await;
+            let (members, failure) = self
+                .walk::<OktaUser>(members_url, DirectoryItemKind::Members, &mut budget)
+                .await;
             if let Some(failure) = failure {
                 return partial(snapshot, failure);
             }
@@ -252,6 +284,15 @@ fn complete(snapshot: DirectorySnapshot) -> Enumeration {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use axum::Router;
+    use axum::extract::State;
+    use axum::response::Json;
+    use axum::routing::get;
+    use serde_json::{Value, json};
+
     use super::*;
 
     #[test]
@@ -285,5 +326,118 @@ mod tests {
         // wrong guess in that direction leaves access somebody already had,
         // and a wrong guess the other way seals a scope that does not lift.
         assert!(is_active("SOME_FUTURE_STATUS"));
+    }
+
+    async fn bounded_connector(
+        limits: EnumerationLimits,
+        large_member_body: bool,
+    ) -> (OktaConnector, Arc<AtomicUsize>) {
+        async fn users() -> Json<Value> {
+            Json(json!([{
+                "id": "u1", "status": "ACTIVE",
+                "profile": {"login": "alice@example.test"}
+            }]))
+        }
+        async fn groups() -> Json<Value> {
+            Json(json!([{"id": "g1", "profile": {"name": "core"}}]))
+        }
+        async fn members(State((hits, large)): State<(Arc<AtomicUsize>, bool)>) -> Json<Value> {
+            hits.fetch_add(1, Ordering::SeqCst);
+            Json(if large {
+                json!([{
+                    "id": "u1", "status": "ACTIVE",
+                    "profile": {
+                        "login": "alice@example.test",
+                        "padding": "x".repeat(2_048)
+                    }
+                }])
+            } else {
+                json!([{
+                    "id": "u1", "status": "ACTIVE",
+                    "profile": {"login": "alice@example.test"}
+                }])
+            })
+        }
+
+        let hits = Arc::new(AtomicUsize::new(0));
+        let router = Router::new()
+            .route("/api/v1/users", get(users))
+            .route("/api/v1/groups", get(groups))
+            .route("/api/v1/groups/{group}/users", get(members))
+            .with_state((Arc::clone(&hits), large_member_body));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind mock");
+        let addr = listener.local_addr().expect("mock addr");
+        tokio::spawn(async move {
+            axum::serve(listener, router).await.expect("mock serve");
+        });
+        let connector =
+            OktaConnector::new(format!("http://{addr}"), Secret::new("bounded-test-token"))
+                .expect("connector")
+                .with_limits(limits);
+        (connector, hits)
+    }
+
+    #[tokio::test]
+    async fn the_page_bound_is_shared_across_users_groups_and_members() {
+        let (connector, member_hits) = bounded_connector(
+            EnumerationLimits {
+                pages: 2,
+                ..EnumerationLimits::DEFAULT
+            },
+            false,
+        )
+        .await;
+        let Enumeration::Partial { snapshot, failure } = connector.enumerate().await else {
+            panic!("the third pass-wide page must be refused");
+        };
+        assert_eq!(snapshot.users.len(), 1, "earlier presence is retained");
+        assert!(failure.contains("page bound"), "got {failure:?}");
+        assert_eq!(
+            member_hits.load(Ordering::SeqCst),
+            0,
+            "the over-budget authenticated request is never sent"
+        );
+    }
+
+    #[tokio::test]
+    async fn the_total_item_bound_returns_partial_with_earlier_presence() {
+        let (connector, member_hits) = bounded_connector(
+            EnumerationLimits {
+                items: 2,
+                ..EnumerationLimits::DEFAULT
+            },
+            false,
+        )
+        .await;
+        let Enumeration::Partial { snapshot, failure } = connector.enumerate().await else {
+            panic!("the third retained item must make the pass partial");
+        };
+        assert_eq!(snapshot.users.len(), 1);
+        assert!(failure.contains("item bound"), "got {failure:?}");
+        assert_eq!(member_hits.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test]
+    async fn the_decoded_byte_bound_returns_partial_without_body_in_the_error() {
+        let (connector, member_hits) = bounded_connector(
+            EnumerationLimits {
+                bytes: 512,
+                ..EnumerationLimits::DEFAULT
+            },
+            true,
+        )
+        .await;
+        let Enumeration::Partial { snapshot, failure } = connector.enumerate().await else {
+            panic!("the oversized decoded response must make the pass partial");
+        };
+        assert_eq!(snapshot.users.len(), 1);
+        assert!(failure.contains("byte response bound"), "got {failure:?}");
+        assert!(
+            !failure.contains(&"x".repeat(32)),
+            "response bytes must not be copied into an error: {failure}"
+        );
+        assert_eq!(member_hits.load(Ordering::SeqCst), 1);
     }
 }

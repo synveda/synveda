@@ -24,7 +24,7 @@ use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode, decode_header};
 use serde::Deserialize;
 use synveda_types::{Error, Result, TenantId};
 
-use crate::token::{Claims, ProvisioningClaims, TokenVerifier};
+use crate::token::{Claims, ProvisioningClaims, TokenVerifier, issued_lifetime};
 
 /// Token verifications by issuer and outcome (`ok`, `rejected`, `error`).
 /// Emitted here, described by the gateway's recorder (ADR-0007 layering).
@@ -486,13 +486,7 @@ impl OidcVerifier {
         // spec, so a token without it has an unknown lifetime — the seam
         // fails closed on that for service identities (ADR-0018
         // decision 5).
-        let lifetime = match (
-            claims.get("exp").and_then(serde_json::Value::as_u64),
-            claims.get("iat").and_then(serde_json::Value::as_u64),
-        ) {
-            (Some(exp), Some(iat)) => Some(Duration::from_secs(exp.saturating_sub(iat))),
-            _ => None,
-        };
+        let lifetime = oidc_lifetime(&claims, now().as_secs())?;
 
         Ok(Claims {
             subject,
@@ -718,6 +712,22 @@ fn provisioning_claims(
         display_name: text("name"),
         external_id: text(external_id_claim),
     }
+}
+
+fn oidc_lifetime(claims: &serde_json::Value, now: u64) -> Result<Option<Duration>> {
+    let exp = claims
+        .get("exp")
+        .and_then(serde_json::Value::as_u64)
+        .ok_or_else(|| unauthenticated("token expiry is not a valid timestamp"))?;
+    let iat = match claims.get("iat") {
+        Some(value) => Some(
+            value
+                .as_u64()
+                .ok_or_else(|| unauthenticated("token issued-at is not a valid timestamp"))?,
+        ),
+        None => None,
+    };
+    issued_lifetime(exp, iat, now)
 }
 
 /// Collapses jsonwebtoken's error detail into caller-safe messages.
@@ -946,5 +956,35 @@ mod tests {
             .await
             .expect_err("unknown issuer must be rejected");
         assert!(matches!(err, Error::Unauthenticated { .. }), "got {err:?}");
+    }
+
+    #[test]
+    fn oidc_time_claims_are_ordered_and_future_bounded() {
+        let after_expiry = oidc_lifetime(&serde_json::json!({"exp": 1_060, "iat": 1_061}), 1_000)
+            .expect_err("iat after exp must be rejected");
+        assert!(matches!(after_expiry, Error::Unauthenticated { .. }));
+
+        let too_future = oidc_lifetime(&serde_json::json!({"exp": 1_120, "iat": 1_031}), 1_000)
+            .expect_err("iat beyond skew must be rejected");
+        assert!(matches!(too_future, Error::Unauthenticated { .. }));
+
+        assert_eq!(
+            oidc_lifetime(&serde_json::json!({"exp": 1_090, "iat": 1_030}), 1_000)
+                .expect("the skew boundary is valid"),
+            Some(Duration::from_secs(60))
+        );
+        assert_eq!(
+            oidc_lifetime(&serde_json::json!({"exp": 1_090}), 1_000)
+                .expect("missing iat keeps an unknown lifetime"),
+            None
+        );
+        for malformed in [
+            serde_json::json!({"exp": "1090", "iat": 1_000}),
+            serde_json::json!({"exp": 1_090, "iat": -1}),
+        ] {
+            let failure = oidc_lifetime(&malformed, 1_000)
+                .expect_err("present malformed timestamps must fail closed");
+            assert!(matches!(failure, Error::Unauthenticated { .. }));
+        }
     }
 }
