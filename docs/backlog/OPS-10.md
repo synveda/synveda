@@ -40,12 +40,11 @@ or `$SYNVEDA_HOME/bin/synveda` when the sudo path fell back), plus
 `$SYNVEDA_HOME/{bin,console,profile,plugin}`. `init` adds `$SYNVEDA_HOME/data`
 — the pidfile, the log, the rendered environment, and **`kms.key`**.
 
-**The deployment, which holds the memory.** Containers and four named volumes
-(`pg-data`, `rauthy-data`, `tei-cache`, `gateway-search`). Stopping is safe;
-removing the volumes is not, and it is the **only** way to remove a tenant's
-memory, because TEN-5 means the tenant row itself cannot be deleted. So the
-default stops and keeps, `--purge` removes, and the message says that memory
-is what it is removing.
+**The deployment, which holds the memory and its key.** Containers and three
+named volumes (`pg-data`, `rauthy-data`, `tei-cache`) plus
+`$SYNVEDA_HOME/data/kms.key`. Stopping is safe; removing the volumes or their
+only local KEK is not. So the default stops and keeps both, `--purge` removes
+both, and the message says that memory and its key are what it is removing.
 
 **Somebody else's, and therefore surgical.** A `synveda` key inside Claude
 Desktop's, Cursor's, Zed's, VS Code's, Windsurf's or Continue's own config,
@@ -68,12 +67,14 @@ installer placed and reports anything of ours still on `PATH`.
 ## Acceptance criteria
 
 - From a scratch HOME with an installed release: after `uninstall.sh`,
-  nothing of ours is on `PATH`, nothing is left under `$SYNVEDA_HOME`, and no
-  container of ours is running.
-- **The data volumes survive by default** and are named in the output, with
-  the command that would remove them.
-- `--purge` removes them and says in the same breath that a tenant's memory
-  is what it just removed, and that TEN-5 is why there was no smaller unit.
+  nothing of ours is on `PATH`, only the deliberately retained
+  `data/kms.key` remains under `$SYNVEDA_HOME`, and no container of ours is
+  running.
+- **The data volumes and their KEK survive by default** and are named in the
+  output, with the command that would remove them.
+- `--purge` removes the volumes and KEK and says in the same breath that a
+  tenant's memory is what it just removed, and that TEN-5 is why there was no
+  smaller unit.
 - `synveda mcp uninstall --client <c>` removes exactly the `synveda` entry:
   an adjacent MCP server survives, and a JSONC config's comments and layout
   are byte-identical afterwards.
@@ -84,4 +85,5 @@ installer placed and reports anything of ours still on `PATH`.
 - Everything is **idempotent**: a second run finds nothing, says so, and
   exits 0 rather than failing on what it already removed.
 - `uninstall.sh --dry-run` lists every path and container it would touch and
-  changes nothing.
+  changes nothing; combined with `--purge`, it names both volume and key
+  destruction without performing either.

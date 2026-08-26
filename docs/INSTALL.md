@@ -882,7 +882,7 @@ ended on; start a new Claude Code session to pick it up.
 
 ```sh
 docker compose -f ~/.synveda/profile/docker-compose.yml down     # state persists in volumes
-docker compose -f ~/.synveda/profile/docker-compose.yml down -v  # wipe everything
+docker compose -f ~/.synveda/profile/docker-compose.yml down -v  # wipe persistent volumes; kms.key remains
 ```
 
 To remove the product rather than stop it, see **Uninstalling** below.
@@ -908,23 +908,28 @@ checkout it is `scripts/uninstall.sh`.
 
 It stops the gateway and the containers, and removes exactly what the
 installer wrote — the CLI from wherever the sudo fallback put it, plus
-`~/.synveda/{bin,console,profile,plugin,data}`. `--dry-run` lists every path
-and container it would touch and changes nothing.
+`~/.synveda/{bin,console,profile,plugin}` and the transient entries under
+`~/.synveda/data/`. A default uninstall deliberately leaves
+`~/.synveda/data/kms.key`. `--dry-run` lists every path and container it would
+touch, states when the key would be retained, and changes nothing.
 
-**Your data survives by default.** The four named volumes stay, and the
-output names them and the command that would remove them. `--purge` destroys
-them. A governed Knowledge `forget` removes one authorised item's plaintext,
-sources and index state while retaining content-free audit evidence; it does
-not delete a tenant. A tenant row still cannot be deleted (TEN-5), so a volume
-purge remains the only whole-tenant wipe. That is a deployment-level wipe, not
-a GDPR erasure certificate.
+**Your data and its key survive by default.** The three named volumes stay,
+and so does the local KEK at `~/.synveda/data/kms.key`; the output names both
+and the command that would remove them. Reinstalling and running `synveda
+init` reuses that key rather than minting one that cannot open the retained
+database. A governed Knowledge `forget` removes one authorised item's
+plaintext, sources and index state while retaining content-free audit
+evidence; it does not delete a tenant. A tenant row still cannot be deleted
+(TEN-5), so a volume purge remains the only whole-tenant wipe. That is a
+deployment-level wipe, not a GDPR erasure certificate.
 
-`~/.synveda/data/kms.key` goes with a default uninstall even though the data
-stays. Searchable Knowledge is not application-sealed under it and remains
-readable, but console
-sessions, tenant secrets and any `synveda tenant export` archive cannot be
-opened again without it — copy it first if you intend to come back to the
-same volumes.
+`--purge` is the irreversible coupled path: it runs `docker compose down -v`
+and removes `~/.synveda/data/kms.key` with the rest of the install state.
+`--purge --dry-run` reports both destructions and performs neither. Losing the
+key while retaining a database would make console sessions, tenant secrets
+and sealed tenant exports unrecoverable, so a warning is not treated as
+consent to delete it. If Compose cannot confirm that the volumes were removed,
+purge exits non-zero and keeps the key.
 
 **It touches no editor or AI client config**, mirroring the promise the
 installer makes. Undo those explicitly, before removing the CLI:

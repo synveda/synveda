@@ -975,8 +975,9 @@ OPS-10 Uninstall & cleanup (M)
   a script — the footprint spans three tiers with different owners. What `install.sh`
   wrote is ours and removable exactly (`$SYNVEDA_HOME/{bin,console,profile,plugin}` and
   the CLI, wherever the sudo fallback put it). What `init` created is a **deployment** —
-  containers and four named volumes — and destroying those volumes is the only way to
-  remove a tenant's memory, because TEN-5 means a tenant row cannot be deleted; so the
+  containers and three named volumes plus the local deployment KEK — and destroying those
+  volumes is the only way to remove a tenant's memory, because TEN-5 means a tenant row
+  cannot be deleted; so the
   data is the one thing uninstall must never take by default, and the flag that takes it
   says what it is. And what the operator later asked us to write into *somebody else's*
   config — a `synveda` key in Claude Desktop, Cursor, Zed, VS Code, Windsurf or Continue,
@@ -984,10 +985,11 @@ OPS-10 Uninstall & cleanup (M)
   of `mcp install`: take out the one key we own and write every other byte back as found.
   That mirror is the feature's real content, because a shell script cannot do it: it is
   the same CST splice, and it belongs in the CLI beside the verb that made the mess.
-  AC: after `uninstall.sh`, nothing of ours is on PATH or under `$SYNVEDA_HOME` and no
-  container of ours is running, asserted from a scratch HOME; the data volumes survive by
-  default and are named in the output, with `--purge` removing them and saying that memory
-  is what it removed; `synveda mcp uninstall --client <c>` removes exactly the `synveda`
+  AC: after `uninstall.sh`, nothing of ours is on PATH, only the deliberately retained
+  `data/kms.key` remains under `$SYNVEDA_HOME`, and no container of ours is running,
+  asserted from a scratch HOME; the data volumes and their KEK survive by default and are
+  named in the output, with `--purge` removing both and saying that memory and its key are
+  what it removed; `synveda mcp uninstall --client <c>` removes exactly the `synveda`
   entry and leaves an adjacent server, comments and layout byte-identical; `plugin
   uninstall` leaves `claude plugin list` without ours; and the whole thing is idempotent —
   a second run finds nothing and exits 0 rather than failing on what it already removed.

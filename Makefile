@@ -315,9 +315,12 @@ chart-lint:
 	helm template synveda deploy/helm/synveda -f deploy/helm/synveda/ci/full-values.yaml >/dev/null
 
 # CPR-36: source/release Compose, Helm, generated API and the packaged profile
-# are one runtime; a repeat package cannot retain a removed asset.
+# are one runtime; a repeat package cannot retain a removed asset. CPR-44's
+# scratch-HOME test keeps the local KEK exactly when this deployment keeps its
+# volumes, and proves the explicit purge and dry-run paths separately.
 check-deploy:
 	node --test scripts/check-deploy-convergence.test.mjs
+	node --test scripts/uninstall.test.mjs
 	node scripts/check-deploy-convergence.mjs
 
 ts-build:
