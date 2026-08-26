@@ -1,60 +1,48 @@
----
-title: "CPR-39: Adapter conformance and second verified client"
-labels:
-  - epic:CPR
-  - phase:5
-size: L
----
+# CPR-39: Second verified client
 
-# CPR-39: Adapter conformance and second verified client
+## Problem and evidence
 
-**Epic:** CPR — Context-platform redesign · **Phase:** 5 · **Size:** L
+ADR-0098's conformance model is already implemented: `adapters/registry.json` is authoritative, CI checks it, and generated onboarding/support views distinguish configured, captured, experimental, unsupported, and verified evidence. Claude Code 2.1.241 is the only verified lifecycle. Claude Desktop 1.25927.0 and Zed 1.13.2 are captured tool protocols only. Cursor is experimental because its Hooks v1 contract appears sufficient, but this environment has no Cursor executable, authenticated account, or authentic frame; VS Code 1.133 Preview lacks `SessionEnd` and documents that `Stop` is not session inactivity. A second verified client remains externally blocked.
 
-## Description
+## Scope
 
-Make client support an evidence-bearing data model rather than prose scattered
-between installers, fixtures and the console. Verify a second real client only
-when a named version completes the full public-API lifecycle.
+- Acquire one named non-Claude-Code client/version with a credible complete lifecycle; Cursor local IDE is the current candidate, while any substitute must satisfy the same registry criteria.
+- Capture authentic versioned client frames, digest-pin them, implement the adapter without inventing missing events, and retain exact limitations.
+- Run the real client through session creation, event delivery, context request, capture, session end, retry/idempotency, available Skill/Tool seams, cross-session Knowledge reuse, and persisted audited outcomes over public APIs.
+- Update the authoritative registry and regenerate projections only from that evidence; keep unavailable criteria `not_applicable`, failed, or incomplete with reasons.
+- Keep the existing conformance checker, generated support matrix/onboarding, and Claude/captured evidence current while completing the live run.
+
+## Non-goals
+
+- Treating MCP configuration, authored/mock frames, protocol replay, vendor documentation, or installed-but-unauthenticated software as live verification.
+- Weakening or deleting a conformance criterion to upgrade a client.
+- Relabelling Claude Desktop/Zed tool-only captures or VS Code's incomplete lifecycle as verified.
+- Claiming cloud and local editions share lifecycle evidence without testing the exact edition/version.
+
+## Architecture seam
+
+The client-specific adapter is a public-API client and declares host-versus-MCP write ownership. `adapters/registry.json` remains the sole support authority; generated documentation and console onboarding are projections. Authentic fixtures are immutable digest-pinned inputs to replay, while the live result records the named binary version, timestamp, environment, and persisted server/audit outcomes.
 
 ## Acceptance criteria
 
-- One data registry defines `configured`, `captured`, `verified`,
-  `experimental` and `unsupported`; tested versions, configuration generator,
-  lifecycle mechanism/events, limitations, authentic digest-pinned fixtures
-  and criterion-level conformance evidence are explicit.
-- `verified` is mechanically refused unless one named real version passed
-  session creation, events, context delivery, capture, end, retry/idempotency,
-  available Skill/Tool seams, cross-session Knowledge reuse and persisted,
-  hash-chained audit outcomes through public APIs.
-- CLI MCP configuration, generated console onboarding and the public support
-  matrix project the same registry. A connection recipe or authored fixture
-  cannot upgrade a support level. Stale vendor conditionals and fixtures that
-  borrow an external client's name are deleted.
-- Authentic Claude Code, Claude Desktop and Zed evidence remains labelled and
-  digest-pinned. Cursor is run live and becomes verified if the actual client
-  passes; otherwise the exact unavailable or insufficient criterion is
-  retained and no replay is described as live. VS Code is the fallback only if
-  its actual lifecycle passes the same gate.
-- Focused registry forgery/drift, CLI config, MCP corpus, adapter and console
-  tests pass; the gate runs in `make ci`; a runnable demo prints the generated
-  matrix and the external live-client result.
+- A second named real client version completes every applicable ADR-0098 criterion in one authentic lifecycle and is recorded as `verified` with criterion-level evidence.
+- Session creation/events/context/capture/end and retry/idempotency produce the expected persisted, tenant-isolated, hash-chained outcomes without duplicate writes.
+- Available Skill/Tool seams are tested honestly; a missing trustworthy callback remains `not_applicable` with a reason and is never inferred from model text.
+- Cross-session authorized Knowledge reuse is demonstrated through public APIs, with deny/revoke and outage/recovery evidence.
+- Registry validation, generated support matrix/onboarding, authentic-fixture digests, deterministic replay, and the runnable live-result demo agree on client/version/status.
 
-## Current evidence and blocker
+## Required tests
 
-Implemented 2026-08-25 from `12e393a` under ADR-0098. The single
-`adapters/registry.json` authority, generated support matrix/onboarding,
-configuration projection and CI truthfulness gate are present. Claude Code
-2.1.241 remains the only `verified` lifecycle, based on CPR-14's genuine live
-run plus deterministic outage evidence. Claude Desktop 1.25927.0 and Zed
-1.13.2 remain `captured`, not lifecycle-verified.
+- Registry forgery/drift, support-level invariant, generated projection, and fixture-digest checks in CI.
+- Authentic-frame replay for every exposed lifecycle boundary, malformed/reordered/duplicate frames, and write-owner configuration.
+- Database-backed adapter lifecycle with ordinary tenant transactions, Cedar allow/deny/revoke, forced RLS, audit, and cross-tenant isolation.
+- Installed authenticated live-client run pinned to the exact binary/version, plus outage, restart, retry, capture, and cross-session probes.
+- Negative test proving a configured/captured/incomplete client cannot be promoted to `verified`.
 
-The official Cursor Hooks v1 local-IDE contract now exposes the required start,
-turn, tool, compact, stop and end boundaries, so Cursor is a viable
-`experimental` target rather than structurally unsupported. No Cursor
-executable or authenticated Cursor client is available in this environment and
-there is no authentic Cursor frame to replay. Installed VS Code 1.133.0 is not
-an honest substitute: its Preview hook reference has no SessionEnd event and
-states that Stop does not mean the session is inactive; the local profile also
-has no authenticated agent. The second-live-client criterion therefore remains
-externally blocked and this feature stays open. No replay or generated config
-is represented as live verification.
+## Rollout and rollback
+
+Move the candidate only through experimental/configured to captured and then verified as evidence accumulates; generated views must never lead the registry. Canary the adapter for the exact tested version. On vendor drift or failed revalidation, lower the support level and state the failing criterion while retaining prior dated evidence and fixtures.
+
+## Dependencies
+
+Completion requires externally supplied access to a proprietary candidate executable, authenticated account/credential, and a stable local lifecycle contract. The owner must choose and provision that client and approve the tested edition/version. If Cursor remains unavailable or its live hooks fail, another client must independently meet the full gate; VS Code's currently documented lifecycle is not an acceptable fallback.

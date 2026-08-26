@@ -34,32 +34,34 @@ RAG pipeline product. It is the memory/context/skills control plane that any har
    invents a fixed organisation from IdP shape. No YAML before value.
 2. **Policy is enforced, never advisory.** Every read and write passes through a Policy Decision
    Point (PDP). There is no code path from harness to storage that bypasses it.
-3. **Strict by default, relaxable by design.** The default policy pack assumes a regulated
-   environment (deny-first, full audit, no cross-team reads). Administrators can *lapse* controls
-   per org/department/team through explicit, audited, time-boxable policy relaxations — never by
-   editing code.
+3. **Strict by default, relaxable by design.** The default policy is deny-first
+   and fully audited. A relaxation names one provisioned subject, exact
+   non-personal scope, permission, tier and hard expiry; it is a governed,
+   audited VedaFlow change and Configuration may only narrow it.
 4. **Separation of concerns is architectural, not stylistic.** Transport adapters know nothing of
    policy. Policy knows nothing of storage. Storage knows nothing of identity. Each layer is
    independently testable and replaceable.
-5. **Audit is a first-class output.** Every decision (allow/deny), injection, recall, write, and
-   policy change is recorded in a tamper-evident log. Synveda should be the *easiest* system in
-   the estate to take through an audit.
+5. **Audit is a first-class output.** Decisions, context delivery and query,
+   writes and policy changes produce content-minimised evidence in the
+   tamper-evident tenant audit chain.
 6. **The harness is a guest.** Claude Code, MCP clients, LangGraph, custom SDKs — all consume the
    same three primitives. Supporting a new harness must never require touching the core.
-7. **Data residency is a routing concern.** Multi-region orgs pin data to regions by policy;
-   the control plane is global, the data plane is regional.
+7. **Data residency is a placement and routing constraint, not a label.** The
+   current runtime is single-region and makes no residency-routing claim. Any
+   future regional control plane must enforce tenant placement under the same
+   PDP, RLS, audit and key boundaries.
 
 ---
 
-## 3. The three primitives
+## 3. The three integration capabilities
 
 Every harness integration reduces to:
 
-| Primitive   | Direction | Description |
+| Capability | Direction | Description |
 |-------------|-----------|-------------|
-| `inject`    | read      | "Give me a token-budgeted context block for this identity + session + task." Entered through the session-scoped context-run API. Silent, fast (<150ms p99 target). |
-| `recall`    | read      | Explicit deep query: hybrid retrieval + bounded graph traversal, richer and slower. Exposed only through a project- or session-scoped application API and adapters over it. |
-| `observe`   | write     | "Here is what happened" (transcript deltas, tool results, decisions). Entered as idempotent immutable session events and processed async — never blocks the session. |
+| Session context | read | Compose a token-budgeted block for an authenticated session/task through a session-scoped context run. |
+| Scoped Knowledge query | read | Query current or temporal Knowledge through a project- or session-scoped, independently authorised API. |
+| Session events | write | Append idempotent immutable transcript/tool/decision events; downstream capture never blocks the append. |
 
 ---
 
@@ -147,55 +149,59 @@ forbid always overrides a wider permit.
   `authorize(subject, action, resource, context)` seam. No policy sidecar or
   second permission mapping participates in a decision.
 - **Policy packs** — versioned bundles applied per governed scope:
-  - `regulated-strict` (default): deny-first; no cross-team read without explicit grant; all
-    writes classified; export blocked; retention enforced; PII redaction on ingest.
-  - `standard`: team-shares-by-default within department; lighter classification.
-  - `open-collaboration`: org-wide read for non-restricted content.
+  - `regulated-strict` (default): own-chain or explicitly granted reads;
+    confidential content needs an explicit content role and restricted content
+    needs a governed relaxation. Strict capture scanning/redaction is the
+    matching Configuration default.
+  - `standard`: working-tier reads extend one governed-scope step around the
+    caller's actual grants; no organisational rank is inferred.
+  - `open-collaboration`: tenant-wide non-personal reads below the restricted
+    tier; the personal-scope privacy floor still applies.
 - **Controlled relaxations**: a subject may request an exact scoped, reasoned,
   time-boxed policy change. It is a governed artifact with hard expiry,
   approvals and audit, never a second authorisation path.
-- **Residency policies**: data-plane region pinning per node; cross-region `inject` returns only
-  metadata-safe summaries unless policy allows replication.
-- **Redaction pipeline**: configurable PII/secret detection on `observe` before persistence
-  (deny, redact, or quarantine-for-review).
+- **Residency policies**: a future hosting control-plane concern tracked by
+  OPS-3. The current deployment is single-region and makes no cross-region
+  routing claim.
+- **Redaction pipeline**: session capture scans bounded event evidence before
+  creating reviewable candidates. Session-event persistence and candidate
+  admission are separate policy boundaries.
 
 ---
 
 ## 7. Architecture
 
 ```
-┌──────────────── Harness adapters (thin, stateless) ────────────────┐
-│ claude-code adapter (TS: hooks + MCP)  │  generic MCP server        │
-│ REST/gRPC SDKs (Rust, TS, Python)      │  LangGraph/OpenAI shims    │
+┌──────────────── Harness adapters (public-API clients) ────────────┐
+│ Claude Code adapter (TS hooks + spool) │ `synveda mcp` (Rust CLI)  │
 └────────────────────────────┬───────────────────────────────────────┘
-                             │  three primitives only
+                             │  sessions, Knowledge and context APIs
 ┌────────────────────────────▼───────────────────────────────────────┐
 │ GATEWAY (Rust, axum)                                                │
-│  AuthN (OIDC/JWT) → tenant resolution → PDP check → rate limits     │
-│  → audit event emission (every request, every decision)             │
+│  AuthN → tenant resolution → ownership → Cedar PDP → RLS transaction│
+│  → typed effect and content-minimised audit                         │
 └────────────────────────────┬───────────────────────────────────────┘
 ┌────────────────────────────▼───────────────────────────────────────┐
 │ CORE (Rust)                                                         │
 │  read: Knowledge search + budgeted context planning                 │
 │        hybrid retrieval (dense + sparse + bounded graph)            │
-│  write: immutable session events; typed VedaFlow commands           │
+│  write: immutable session events + typed VedaFlow commands          │
 └──────┬──────────────────────────────────────────┬──────────────────┘
 ┌──────▼──────────────┐                 ┌─────────▼──────────────────┐
-│ STORAGE             │                 │ ASYNC PLANE (Temporal)      │
-│ Postgres: Knowledge,│                 │ capture candidates, index   │
-│  sessions, scopes,  │                 │ convergence, durable erase  │
-│  audit + versions   │                 │ directory/import jobs       │
-│ pgvector (default)  │                 │ consolidation, decay/TTL,   │
-│ Qdrant (scale-out)  │                 │ re-embedding, directory sync│
-│ indexed graph edges │                 └─────────────────────────────┘
-└─────────────────────┘
+│ POSTGRES 17         │                 │ LEASED DATABASE WORKERS     │
+│ Knowledge, sessions,│                 │ capture, index convergence, │
+│ scopes, versions,   │                 │ import and re-encryption     │
+│ audit, jobs, FTS,   │                 │ run in the gateway process   │
+│ pgvector, relations │                 │ and remain restart-safe      │
+└─────────────────────┘                 └─────────────────────────────┘
 Cross-cutting: embedded Cedar PDP · standards-based OIDC · OTel traces/metrics
-Deploy: single binary + Postgres for SMB │ Helm chart, regional data planes for enterprise
+Deploy: source/installed Compose or Helm, currently one gateway replica
 ```
 
 **Language decisions**: core/gateway in **Rust** (single static binary, on-prem friendly,
-latency-critical read path). Claude Code adapter in **TypeScript** (hooks ecosystem). SDKs:
-Rust, TS, Python. Admin console: React (later phase; API-first until then).
+latency-critical read path). Claude Code adapter in **TypeScript** (hooks ecosystem).
+The admin console is React and uses the generated OpenAPI client. Public Rust,
+TypeScript and Python SDKs remain open work; deleted stubs are not support.
 
 > **Footnote, added by ADPT-2 (ADR-0057, amended 2026-08-05).** The *generic MCP
 > server* in the adapters row ships as `synveda mcp`, a subcommand of the Rust CLI,
@@ -209,9 +215,11 @@ Rust, TS, Python. Admin console: React (later phase; API-first until then).
 > on any reference to a core crate. The `claude-code` adapter no longer speaks MCP
 > itself either; its `mcpServers` entry launches the same binary.
 
-**Licensing/stack constraint**: permissive or self-hostable OSS only — PostgreSQL, pgvector,
-Apache AGE, Qdrant, OPA, OpenFGA, Temporal, Keycloak-compatible OIDC. No cloud-locked services
-in the core path.
+**Dependency licensing/stack constraint**: the shipped core path admits only
+the repository's approved permissive dependency licences. PostgreSQL,
+pgvector, Cedar, Rauthy and the Rust/TypeScript runtime are current; optional
+engines and hosting services require a separate accepted decision. This
+constraint does not choose a licence for Synveda itself.
 
 ---
 
@@ -227,25 +235,29 @@ synveda/
 │   ├── synveda-policy       # embedded Cedar facade + policy pack loader
 │   ├── synveda-store        # Postgres/pgvector Knowledge and platform state
 │   ├── synveda-retrieval    # hybrid search, rerank, composition engine
-│   ├── synveda-ingest       # extraction, redaction, dedup, summarisation (Temporal activities)
+│   ├── synveda-ingest       # extraction, redaction, embeddings and capture worker logic
 │   ├── synveda-audit        # tamper-evident audit log (hash-chained), export
 │   ├── synveda-vedaflow     # immutable objects, commits, refs and proposals
 │   ├── synveda-identity     # OIDC, SCIM and directory adapters
-│   ├── synveda-gateway      # axum HTTP/gRPC; the ONLY binary that speaks to the outside
-│   └── synveda-cli          # admin/dev CLI (synveda init, synveda policy apply, ...)
+│   ├── synveda-okf          # pure bounded OKF v0.2 exchange adapter
+│   ├── synveda-gateway      # axum HTTP application plane and DB-leased workers
+│   ├── synveda-cli          # admin/dev CLI (synveda init, synveda policy apply, ...)
 │                            #   + `synveda mcp`: the generic MCP server (see §7 footnote)
+│   └── synveda-eval         # unprivileged public-API evaluation client
 ├── adapters/
 │   └── claude-code/         # TS: SessionStart/PreCompact/Stop hooks; its MCP
 │                            #   entry launches `synveda mcp` (ADR-0057 decision 4)
-├── sdks/ (rust, typescript, python)
+├── console/                 # React application generated from OpenAPI
 ├── policies/                # Cedar policy packs
-├── deploy/ (docker-compose single-node, helm multi-region)
+├── deploy/                  # Compose and single-region Helm shapes
 └── docs/ (ADRs — every architectural decision gets an ADR from day one)
 ```
 
 Dependency rule: `types ← crypto ← {policy, store, identity, audit, vedaflow}
-← retrieval/ingest ← gateway`.
-Nothing imports "upward". Adapters and SDKs depend only on the public API, never on crates.
+← retrieval/ingest ← gateway`; `synveda-okf` is a types-only format leaf.
+Nothing imports "upward". Adapters and future SDKs depend only on the public
+API, never on crates. The check enumerates the CLI's local bootstrap exceptions
+and keeps the evaluation crate dependency-free.
 
 ---
 
@@ -261,51 +273,54 @@ fixed hierarchy, global observe/inject/recall routes and record aggregate from
 that slice are deleted by the pre-1.0 Phase 5 cut; their invariants survive on
 governed scopes, sessions and Knowledge.
 
-**Phase 2 — Governance depth (weeks 5–8)**
-Policy packs, lapses with approval + expiry, sensitivity classification, redaction pipeline,
-auditor role + audit export, pinned assets (context packs), bitemporal queries ("what did the
-agent know on date X" — the killer regulated-industry demo).
+**Phase 2 — Governance depth (delivered, later re-cut)**
+Policy packs, governed relaxations, sensitivity, redaction, audit query,
+authored context packs and bitemporal Knowledge queries survive on the current
+scope/Knowledge model.
 
-**Phase 3 — Enterprise surface (weeks 9–12)**
-SCIM, real IdP integrations (Entra/Okta), skills + prompt registries with approval workflow,
-admin console v1, Qdrant scale-out option, multi-region data plane routing, Helm chart.
+**Phase 3 — Enterprise surface (paused, partially delivered)**
+SCIM, directory projection, Skills, Tools, the console and Helm foundations are
+implemented. Live Entra/Okta evidence, scale-out, tenancy operations and
+regional routing remain open in the backlog.
 
-**Phase 4 — Ecosystem**
-Python/TS SDKs polished, LangGraph/OpenAI shims, benchmark suite (injection latency, retrieval
-quality), migration importers (claude-mem, Cognee, mem0 export formats).
+**Phase 4 — Ecosystem (open)**
+SDKs, importers and additional harness adapters are not current product claims.
+The committed evaluation suite covers the implemented context platform.
 
-**Phase 5 — Context platform hard cut (in progress)**
+**Phase 5 — Context platform hard cut (current runtime)**
 One scope tree and role vocabulary; workspace/project/session runtime; stable
 Knowledge with immutable revisions and provenance; capture candidates;
 explainable context planning; versioned skills/tools/configuration; public API
-and generated clients; adversarial acceptance; one clean pre-1.0 schema.
+and generated console client; adversarial acceptance; one clean pre-1.0 schema.
+The second verified client remains externally blocked under CPR-39.
 
 ---
 
 ## 10. Non-functional requirements
 
-- `inject` p99 < 150ms at 1K concurrent sessions (excluding first-call cold cache)
-- `observe` ack < 20ms (enqueue only); pipeline lag SLO < 60s
-- Audit log: append-only, hash-chained, exportable to WORM storage
-- All data encrypted at rest (per-tenant keys, KMS-pluggable) and in transit (mTLS internal)
+- Current engineering budgets are context p99 below 150 ms, session-event ack
+  below 20 ms and capture lag below 60 seconds under their documented local
+  test conditions. They size timeouts, buckets and regression tests; they are
+  not production SLOs. EVAL-6 must establish supported workload, hardware and
+  production p50/p95/p99 objectives before any service claim.
+- Audit is append-only and hash-chained in Postgres. WORM custody and SIEM
+  delivery remain AUD-3/AUD-4 work.
+- Tenant envelope keys protect the implemented secret/content paths. Complete
+  storage encryption, KMS/HSM custody and restore ceremonies remain readiness
+  requirements rather than current claims.
 - Pre-1.0 schema-epoch hard cuts are explicit: old databases are refused with
   a reset instruction, with no data migrator or compatibility reader. After
   1.0, migration/compatibility policy requires its own accepted ADR.
-- SOC 2 / ISO 27001 control mapping documented from Phase 2 (design for it, don't retrofit)
-- Test bar: policy engine and composition engine at 100% branch coverage; property-based tests
-  for conflict resolution; every PDP decision path has a golden test
+- SOC 2 / ISO 27001 mapping remains open as AUD-5.
+- PDP, RLS, VedaFlow, erasure and context selection require adversarial and
+  behaviour-level tests. Coverage percentages are reported only when measured.
 
 ---
 
 ## 11. Instructions to the coding agent
 
-1. Read this document fully before any code. Ask clarifying questions only where two sections
-   conflict; otherwise proceed.
-2. Start with Phase 0. Produce the workspace scaffold exactly per §8, with compiling empty
-   crates, CI (fmt, clippy -D warnings, test), and docker-compose.
-3. Write ADR-0001 summarising §2 and §7 decisions. Every subsequent architectural choice gets
-   its own numbered ADR.
-4. Never introduce a path around the PDP, even in tests — use a test policy pack instead.
-5. Prefer boring technology and explicit code over cleverness. This system's selling point is
-   trustworthiness.
-6. Each phase ends with a runnable demo script under `demos/` proving the slice works.
+Follow `AGENTS.md`, the current feature record and the accepted ADRs for the
+area being changed. Do not restart the historical build order. When prose
+conflicts with executable code, generated contracts or current accepted ADRs,
+fix the prose or raise the decision before implementation; §2 remains the
+product invariant.

@@ -476,9 +476,8 @@ pub async fn list(
     tenant_id: TenantId,
     filter: &SessionFilter,
 ) -> Result<(Vec<Session>, bool)> {
-    // One statement with nullable predicates rather than a built string: a
-    // compile-time checked query is the rule (CLAUDE.md), and every `is null
-    // or` below is a filter the caller did not name.
+    // Nullable predicates keep every filter combination in one
+    // compile-time-checked statement.
     let rows = sqlx::query_as!(
         SessionRow,
         r#"
@@ -873,7 +872,7 @@ pub async fn append_events(
     //
     // A batch of two hundred used to be two hundred round trips, and on the
     // dev-database link that is ~35ms of ack for a full batch — nearly twice
-    // seed §10's <20ms enqueue-only budget, which
+    // the <20ms local ack budget in seed §10, which
     // `session_ingest_load.rs::append_ack_sustains_1k_events_per_second`
     // measures. The public batch append is therefore one `unnest` insert.
     //

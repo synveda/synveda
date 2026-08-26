@@ -110,8 +110,7 @@ async fn metrics_exposes_the_tokens_per_context_run_contract() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
     let body = body_text(response).await;
-    // Registered at startup, before any inject exists (ADR-0007): the SLO
-    // metric must be scrapeable from boot, not from first use.
+    // Registered at startup so the budget metric is scrapeable before first use.
     assert!(
         body.contains("# TYPE synveda_tokens_per_context_run histogram"),
         "tokens_per_context_run histogram missing from exposition:\n{body}"

@@ -80,11 +80,10 @@ write, or selects a previous schema/API implementation.
 
 ## Historical documentation and negative proof
 
-Accepted ADRs, feature/backlog ledgers, the Phase 5 running record, and the
-historical portions of `AGENTS.md`/`CLAUDE.md` retain superseded nouns so the
-decision and deletion trail remains auditable. `SYNVEDA_FEATURES.md` likewise
-retains delivered feature specifications as the acceptance history; current
-stack decisions are in `SYNVEDA_TECH_PLAN.md` and the CPR-43 ledger.
+Git history and accepted ADRs retain superseded nouns so the decision and
+deletion trail remains auditable. Current stack decisions are in
+`SYNVEDA_TECH_PLAN.md`, ADR-0069 and this inventory; open implementation work
+is linked from `docs/backlog/STATUS.md`.
 
 Negative tests deliberately name retired material to prove:
 

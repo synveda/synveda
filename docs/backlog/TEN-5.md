@@ -10,55 +10,86 @@ size: M
 
 **Epic:** TEN — Multi-tenancy (functional requirement) · **Phase:** 3 · **Size:** M
 
-## Description
+## Problem and evidence
 
-Create/suspend/export/delete workflows (Temporal); delete produces signed destruction certificate; export = portable archive (records+assets+audit).
+The epoch-3 store admits and resolves tenants, and suspended tenants fail
+resolution, but there is no complete public/operator suspend-resume workflow,
+portable import or ordered populated-tenant erasure. The sealed tenant export
+contains current Knowledge history and audit evidence but is assembled in
+memory and has no restore path. Knowledge forget is aggregate erasure, not a
+tenant lifecycle. The P1 gap is recorded in
+[production readiness](../PRODUCTION_READINESS.md).
 
-## What is missing today, measured (2026-08-12, found by OPS-8)
+## Scope
 
-**There is no way to remove one tenant.** `tenants` is referenced by **32
-foreign keys**, every one `ON DELETE NO ACTION`:
+- Inventory every epoch-3 table, view, derived index and external object that
+  can reference or contain tenant data.
+- Add audited suspend/resume and a restart-safe lifecycle operation with
+  explicit states, progress, idempotency and dry-run inventory.
+- Stream a versioned, bounded export and import it into an empty admitted
+  tenant/deployment while preserving immutable revisions, VedaFlow and
+  canonical audit evidence.
+- Erase a populated tenant in a reviewed dependency order, honoring retention
+  holds and retaining only owner-approved content-free evidence.
+- Produce a verifiable destruction certificate derived from measured effects,
+  not a promised cascade.
 
-```
-context_pack_chunks   context_packs        directory_sync_state  graph_vertices
-group_mappings        hierarchy_nodes      identities            memory_usage
-observe_events        observe_quarantine   policy_lapses         policy_pack_assignments
-policy_pack_defaults  policy_packs         promotion_watermarks  prompts
-role_bindings         scim_credentials     scim_group_members    scim_groups
-scim_users            skill_quality_overrides  skill_reviews     skills
-tenant_keys           tenant_secrets       vedaflow_commits      vedaflow_objects
-vedaflow_proposal_approvals  vedaflow_proposals  vedaflow_refs   vedaflow_trees
-```
+## Non-goals
 
-So `delete from tenants where …` succeeds only for a tenant that holds
-nothing — never one somebody has logged into, because the login alone writes
-`hierarchy_nodes`, `identities` and `role_bindings`.
+- No deployment-volume purge presented as tenant erasure.
+- No crypto-shredding claim for plaintext or substrate-encrypted rows.
+- No direct SQL shortcut around Cedar, forced RLS, VedaFlow or audit on
+  application-owned lifecycle actions.
+- No invented legal-hold, retention or certificate semantics.
+- No requirement to introduce Temporal or a second job system.
 
-`demos/ops-1-smb-profile.sh` printed that `delete` as its teardown
-instruction from OPS-1 until 2026-08-12, immediately after building a
-hierarchy and observing a turn. It cannot have worked once. Corrected to say
-so and to name the two things that do work: `synveda tenant export` (TEN-4)
-to keep the data, and `docker compose down -v` to wipe **every** tenant.
+## Architecture seam
 
-**This is a design input, not just a bug.** `NO ACTION` everywhere is the
-right default for a system whose whole claim is that memory does not
-disappear quietly, so erasure is a *deliberate ordered traversal* rather than
-a cascade somebody could trigger by accident. Two consequences for this
-feature:
-
-- the order is not free — `tenant_keys` and `tenant_secrets` are TEN-4's, and
-  destroying a key before the rows it seals leaves ciphertext nobody can read
-  but the row count still says exists;
-- **crypto-shredding is not erasure** (ADR-0064 decision 7): `records`,
-  `record_embeddings` and the Tantivy sidecars are not sealed, so this
-  feature deletes rows rather than throwing away a key.
+Tenant admission remains a local administrative exception; ordinary lifecycle
+requests use an explicit operator/support authority and audit chain. Durable
+operations and tenant-bound transactions coordinate bounded work. The existing
+sealed export/key envelope from
+[ADR-0094](../adr/adr-0094-context-platform-key-and-secret-plane.md) is the
+format seam, but import and streaming require a separately versioned contract.
+Knowledge forget remains the lower-level aggregate primitive.
 
 ## Acceptance criteria
 
-GDPR-style erasure E2E test; export re-imports into a fresh instance.
+- A populated tenant can be suspended and resumed, with new and existing
+  credentials failing closed during suspension on every replica.
+- Export streams within declared file/byte/time bounds and restores into a
+  clean instance with identical immutable Knowledge/VedaFlow evidence and a
+  verified frozen audit prefix.
+- Interrupted export, import and erasure resume without duplicate effects.
+- Erasure leaves zero unapproved tenant references across the generated schema
+  inventory, derived indexes, jobs, archives and caches.
+- Active holds block the affected step with a stable state and content-free
+  audit event.
+- The certificate names operation/version, table or artifact counts, hashes
+  and completion time without including content.
 
-Plus, from the measurement above: removing one tenant leaves **zero** rows
-referencing it across all 32 tables, and the destruction certificate names
-what was removed from each. A test that deletes a tenant which was only ever
-created — never logged into — would pass against today's schema and prove
-nothing.
+## Required tests
+
+- Schema-driven property test that fails when a new tenant-bearing table is
+  absent from lifecycle coverage.
+- Populated end-to-end export/import/erase across Sessions, capture, Knowledge,
+  context, Skills, Tools, Configuration, directory, secrets and audit.
+- Cross-tenant canary rows proving no lifecycle step touches another tenant.
+- Crash/restart, concurrent request, hold, wrong-key, corrupt archive and
+  oversized export tests.
+- Restore and audit verification against a fresh database.
+
+## Rollout and rollback
+
+Begin with dry-run inventory and suspend/resume, then export/import, and enable
+erasure only after restore and hold semantics are approved. Preserve the source
+tenant until import verification completes. Erasure is force-explicit and
+irreversible; rollback before execution clears suspension, while interruption
+after execution resumes forward.
+
+## Dependencies
+
+Privacy/legal owners must decide retention, legal holds, certificate contents
+and support authority. OPS-5 supplies recoverability; AUD-3 supplies external
+retention; OPS-7 supplies multi-replica propagation; key custody and export
+format changes require an accepted ADR.

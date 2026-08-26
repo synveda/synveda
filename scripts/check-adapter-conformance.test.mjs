@@ -3,7 +3,11 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { resolve } from "node:path";
 
-import { validateRegistry } from "./check-adapter-conformance.mjs";
+import {
+  readmeSupportFindings,
+  readmeSupportStatement,
+  validateRegistry,
+} from "./check-adapter-conformance.mjs";
 
 const root = resolve(import.meta.dirname, "..");
 const source = JSON.parse(readFileSync(resolve(root, "adapters/registry.json"), "utf8"));
@@ -11,6 +15,19 @@ const copy = () => structuredClone(source);
 
 test("the shipped registry is internally truthful", () => {
   assert.deepEqual(validateRegistry(copy(), root), []);
+  assert.deepEqual(
+    readmeSupportFindings(readFileSync(resolve(root, "README.md"), "utf8"), copy()),
+    [],
+  );
+  assert.match(readmeSupportStatement(copy()), /Claude Code 2\.1\.241/u);
+});
+
+test("a competing README lifecycle summary is rejected", () => {
+  const readme = readFileSync(resolve(root, "README.md"), "utf8").replace(
+    "## Known production gaps",
+    "A different client is also verified.\n\n## Known production gaps",
+  );
+  assert.match(readmeSupportFindings(readme, copy()).join("\n"), /must match/u);
 });
 
 test("a configured recipe cannot be promoted to verified without a real lifecycle", () => {

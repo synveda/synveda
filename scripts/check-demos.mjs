@@ -350,13 +350,19 @@ function cliFinding(file, line, words, start, inventory) {
   return null;
 }
 
-export function checkCorpus({ demoDir, routes, cliInventory }) {
+export function checkCorpus({ demoDir, routes, cliInventory, repositoryRoot = resolve(demoDir, "..") }) {
   const findings = [];
   const matchers = routes.map((path) => [path, routeMatcher(path)]);
   const files = shellScripts(demoDir);
   for (const path of files) {
     const file = relative(demoDir, path);
     const source = readFileSync(path, "utf8");
+    for (const match of source.matchAll(/\bdocs\/[A-Za-z0-9_./-]+\.(?:md|json)\b/gu)) {
+      if (!existsSync(resolve(repositoryRoot, match[0]))) {
+        const line = source.slice(0, match.index).split("\n").length;
+        findings.push(`${file}:${line}: ${match[0]}: absent from the current repository`);
+      }
+    }
     for (const logical of logicalLines(source)) {
       for (const segment of commandSegments(logical.text)) {
         const words = shellWords(segment);

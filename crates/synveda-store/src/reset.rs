@@ -16,8 +16,8 @@
 //!
 //! ## The one place this crate builds SQL from a string
 //!
-//! CLAUDE.md's rule is compile-time checked queries only, and it holds
-//! everywhere a value is involved. `DROP DATABASE` takes an *identifier*,
+//! Queries are compile-time checked everywhere a value is involved.
+//! `DROP DATABASE` takes an *identifier*,
 //! which no protocol placeholder can carry — there is no parameterised form of
 //! this statement in Postgres. So the name is validated against a deliberately
 //! narrow grammar ([`is_safe_identifier`]), double-quoted, and used; the

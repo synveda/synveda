@@ -12,8 +12,7 @@
 //!    member's grant reaches a scope while it lives in the granted
 //!    subtree and stops the moment an admin moves it out — chains
 //!    resolved through the store, decisions through the same embedded
-//!    facade, `standard`'s content-role rule as the probe. Never a PDP
-//!    bypass (CLAUDE.md).
+//!    facade, `standard`'s content-role rule as the probe. Never a PDP bypass.
 //!
 //! Tests that need a live Postgres read `DATABASE_URL` and skip with a
 //! message when it is unset (CI has no database); run them locally with

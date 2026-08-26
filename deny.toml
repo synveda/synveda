@@ -1,5 +1,5 @@
-# Licence and supply-chain policy for the core path (CLAUDE.md: MIT/Apache-2.0/PostgreSQL
-# only). Any addition to the allow list is a reviewed diff with justification.
+# Licence and supply-chain policy for the core path. Any addition to the allow
+# list is a reviewed diff with justification.
 
 [licenses]
 version = 2

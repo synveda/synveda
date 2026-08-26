@@ -10,80 +10,73 @@ size: M
 
 **Epic:** OPS — Deployment & operations · **Phase:** 3 · **Size:** M
 
-## Description
+## Problem and evidence
 
-The mirror of OPS-8. `scripts/uninstall.sh` removes what the installer wrote
-and stops what `init` started; `synveda mcp uninstall` and `synveda plugin
-uninstall` remove what the operator later asked us to write into somebody
-else's configuration. Data survives by default, and the flag that takes it
-says so.
+The implementation now includes scripts/uninstall.sh, surgical MCP client
+removal and Claude plugin removal. Unit tests cover idempotency, symlink
+refusal and the rule that a default uninstall keeps both persistent volumes
+and data/kms.key. The remaining gap is end-to-end evidence against an actual
+installed release and the vendor-owned client/plugin state. The governing
+boundary is [ADR-0067](../adr/adr-0067-uninstall-and-cleanup.md).
 
-## Why this exists
+## Scope
 
-Filed 2026-08-13. OPS-8 made the product installable by somebody else and
-gave them no way to remove it. There is no `uninstall.sh`, no `mcp
-uninstall`, no `plugin uninstall`; `grep -rn uninstall` over the CLI and the
-scripts matches only a comment inside `plugin.rs` describing how *Claude
-Code* replaces a plugin.
+- Remove only files placed by the installer and stop only the selected Synveda
+  deployment.
+- Preserve Postgres volumes and the matching local KMS key by default.
+- Make purge an explicit coupled destruction of deployment data and key, with
+  a dry-run that names every target.
+- Remove only Synveda-owned entries from supported client configuration and
+  confirm plugin unload through the vendor CLI.
 
-A beta asks people to run something on a machine they own. "How do I get rid
-of this" is a question that has to be answered before it is asked, and
-answering it in prose does not count — the footprint has three tiers with
-three different owners, and only one of them is safe to delete without
-thinking.
+## Non-goals
 
-## The three tiers, and why they are not one command
+- No tenant or data-subject erasure claim; that is TEN-5.
+- No deletion of shared images, hand-written client configuration or binaries
+  copied outside the installer footprint.
+- No automatic client-config or plugin mutation by the shell uninstaller.
+- No claim that destroying a key alone is erasure.
 
-**Ours, and exactly removable.** `install.sh` documents its own footprint in
-its header and keeps to it: `$SYNVEDA_BIN/synveda` (default `/usr/local/bin`,
-or `$SYNVEDA_HOME/bin/synveda` when the sudo path fell back), plus
-`$SYNVEDA_HOME/{bin,console,profile,plugin}`. `init` adds `$SYNVEDA_HOME/data`
-— the pidfile, the log, the rendered environment, and **`kms.key`**.
+## Architecture seam
 
-**The deployment, which holds the memory and its key.** Containers and three
-named volumes (`pg-data`, `rauthy-data`, `tei-cache`) plus
-`$SYNVEDA_HOME/data/kms.key`. Stopping is safe; removing the volumes or their
-only local KEK is not. So the default stops and keeps both, `--purge` removes
-both, and the message says that memory and its key are what it is removing.
-
-**Somebody else's, and therefore surgical.** A `synveda` key inside Claude
-Desktop's, Cursor's, Zed's, VS Code's, Windsurf's or Continue's own config,
-and a plugin inside a cache Claude Code owns. `install.sh` deliberately
-touches none of this and says so; uninstall must not either. Removal is the
-exact mirror of `mcp install` — take out the one key we own, write every
-other byte back as found, keep comments and layout — which is the same CST
-splice and therefore belongs in the CLI beside the verb that wrote it, not in
-a shell script that would have to reimplement it.
-
-## What it deliberately does not do
-
-It does not delete a tenant, because nothing can (TEN-5). It does not remove
-Docker images, which are shared and cheap to re-pull. It does not touch a
-config the operator wrote by hand from `mcp install --print`, because the
-product never knew about it. And it makes no attempt to find a copy of the
-CLI somebody moved somewhere of their own choosing — it removes what the
-installer placed and reports anything of ours still on `PATH`.
+The shell script mirrors the release installer and Compose profile. Client
+configuration removal stays in the CLI parser that wrote the entry. Plugin
+removal stays behind the Claude CLI. Persistent database data and KMS material
+are one recovery unit; default cleanup must not separate them.
 
 ## Acceptance criteria
 
-- From a scratch HOME with an installed release: after `uninstall.sh`,
-  nothing of ours is on `PATH`, only the deliberately retained
-  `data/kms.key` remains under `$SYNVEDA_HOME`, and no container of ours is
-  running.
-- **The data volumes and their KEK survive by default** and are named in the
-  output, with the command that would remove them.
-- `--purge` removes the volumes and KEK and says in the same breath that a
-  tenant's memory is what it just removed, and that TEN-5 is why there was no
-  smaller unit.
-- `synveda mcp uninstall --client <c>` removes exactly the `synveda` entry:
-  an adjacent MCP server survives, and a JSONC config's comments and layout
-  are byte-identical afterwards.
-- `synveda plugin uninstall` leaves `claude plugin list` without ours, read
-  back from the vendor's own CLI rather than from the filesystem — the ADPT-1
-  lesson (ADR-0065 amendment 2): installing and loading are different events,
-  and so are removing and unloading.
-- Everything is **idempotent**: a second run finds nothing, says so, and
-  exits 0 rather than failing on what it already removed.
-- `uninstall.sh --dry-run` lists every path and container it would touch and
-  changes nothing; combined with `--purge`, it names both volume and key
-  destruction without performing either.
+- On every claimed installed platform, default uninstall stops the deployment,
+  removes installer-owned program files, retains the named volumes and KMS key,
+  and reports remaining client entries.
+- Reinstallation against retained data and key can sign in and open previously
+  sealed tenant data.
+- Purge removes volumes and key only after explicit confirmation; if volume
+  removal fails, the key survives and the command exits non-zero.
+- MCP removal preserves adjacent servers and JSONC layout byte-for-byte.
+- Plugin removal is confirmed by the vendor CLI.
+- Default, purge and client/plugin removal are idempotent; every dry-run writes
+  nothing and lists exact targets.
+
+## Required tests
+
+- Keep scripts/uninstall.test.mjs and CLI MCP/plugin unit tests.
+- Add an installed-release test using a scratch home, isolated Compose project
+  and retained-data reinstall.
+- Add fault injection for failed Compose teardown and unwritable/linked paths.
+- Run the plugin assertion only when an authenticated supported Claude CLI is
+  available; otherwise record the prerequisite, not a pass.
+
+## Rollout and rollback
+
+Ship removal alongside the installer version whose footprint it understands.
+Retain compatibility with one supported installed footprint. A failed default
+uninstall is rerunnable and preserves data/key material; purge is irreversible
+and has no rollback beyond independently tested backups.
+
+## Dependencies
+
+TEN-5 owns per-tenant erasure. OPS-5 owns recoverability before purge can be
+recommended operationally. Release owners must define supported installer
+versions, confirmation UX and whether system package-manager integration is
+needed.

@@ -68,20 +68,19 @@ jobs:
       # is the TypeScript half, and it lives here because it needs node and
       # nothing else.
       - run: node scripts/generate-api-types.mjs --check
-      # SYNVEDA_FEATURES.md, docs/backlog/<ID>.md and STATUS.md describe one
-      # feature set; this asserts they agree. It replaced the generator that
-      # used to write all three (removed 2026-08-05 — regenerating discarded
-      # STATUS.md's hand-written narrative), so nothing writes them now and
-      # a feature added to one file and forgotten in another fails here.
-      - run: node scripts/check-backlog.mjs
-      # check-backlog reconciles those three files with each other and
-      # never reads an ADR header. Two ADRs drifted through that gap —
-      # still reading `Proposed` after their features shipped — and this
-      # closes it in that one direction. The mirror check is deliberately
-      # absent: CLAUDE.md requires the ADR before implementation, so
-      # `Accepted` ahead of delivery is the normal state.
+      # STATUS is the feature inventory. Open work must have one
+      # implementation-ready brief; delivered history stays in git.
+      - run: make check-backlog
+      # check-backlog does not read ADR headers. This closes the useful half
+      # of that gap: a delivered feature must not retain a Proposed ADR. The
+      # reverse is intentionally allowed because AGENTS.md requires the ADR
+      # before implementation.
       - run: node scripts/check-adr-status.mjs
-      # CLAUDE.md's licence rule on the corpus side (EVAL-3, ADR-0061).
+      # Current documents/open briefs must resolve internal links and paths;
+      # historical ADR/spike prose remains link-checked without becoming a
+      # current product claim.
+      - run: make check-docs
+      # The repository licence rule on the corpus side (EVAL-3, ADR-0061).
       # cargo-deny governs crates and check-npm-licences governs packages;
       # a corpus is data, which is how a CC BY-NC one reached a feature
       # specification and the phase demo goal before anybody read its
@@ -290,16 +289,8 @@ jobs:
 
   typescript:
     runs-on: ubuntu-latest
-    # This job used to never finish: it stalled and was killed six hours
-    # later by GitHub's default ceiling, which is why it read `cancelled`
-    # rather than `failed` and went unseen by every survey of what was
-    # failing. --test-timeout in the adapter's own script named the file,
-    # `dist/log.test.mjs`, and the cause under it turned out to be the
-    # product's: `mkdirSync(recursive)` spins forever — not blocks — on a
-    # path under /proc, which is where that suite pointed $XDG_STATE_HOME
-    # to get an unwritable directory. Fixed 2026-08-01 (paths.ensureDir).
-    # Both bounds stay: together they are what turns six hours of silence
-    # into a failure carrying a filename.
+    # Keep a job bound in addition to each package's test timeout so a wedged
+    # runtime reports promptly instead of consuming the runner indefinitely.
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
@@ -310,9 +301,7 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm -r build
-      # CLAUDE.md's licence rule on the npm side (CNSL-1, ADR-0056
-      # decision 8) — the gate cargo-deny gives the Rust side. After the
-      # install, because it reads the resolved tree.
+      # The npm counterpart to cargo-deny; it reads the resolved install.
       - run: node scripts/check-npm-licences.mjs
       # The adapter suites (ADPT-1) and the console's (CNSL-1); packages
       # without a test script are skipped.

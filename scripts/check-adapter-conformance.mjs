@@ -11,6 +11,7 @@ import { pathToFileURL } from "node:url";
 
 const ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const DEFAULT_REGISTRY = resolve(ROOT, "adapters/registry.json");
+const DEFAULT_README = resolve(ROOT, "README.md");
 const DEFAULT_MATRIX = resolve(ROOT, "docs/CLIENT_SUPPORT.md");
 const DEFAULT_TYPESCRIPT = resolve(ROOT, "console/src/generated/adapter-clients.ts");
 const LEVELS = new Set(["configured", "captured", "verified", "experimental", "unsupported"]);
@@ -125,6 +126,40 @@ export function renderTypescript(registry) {
   return `// Generated from adapters/registry.json by scripts/check-adapter-conformance.mjs.\n// Do not edit by hand: support claims and connection choices share one authority.\n\nexport const GENERATED_AGENT_CLIENTS = ${JSON.stringify(clients, null, 2)} as const;\n\nexport type GeneratedAgentClient = (typeof GENERATED_AGENT_CLIENTS)[number];\n`;
 }
 
+export function readmeSupportStatement(registry) {
+  const verified = registry.clients.filter((client) => client.support_level === "verified");
+  if (verified.length === 0) return "No client lifecycle is currently verified.";
+  const names = verified.map(
+    (client) => `${client.display_name} ${client.conformance.tested_version}`,
+  );
+  if (names.length === 1) return `${names[0]} is the only verified lifecycle.`;
+  return `Verified client lifecycles: ${names.join(", ")}.`;
+}
+
+export function renderReadmeSupportSection(registry) {
+  return `## Client support
+
+\`adapters/registry.json\` is the support authority. The
+[generated client-support matrix](docs/CLIENT_SUPPORT.md) is its checked
+projection and distinguishes configuration, authentic captured frames,
+deterministic replay and live verification.
+
+${readmeSupportStatement(registry)} Other clients remain at
+their evidenced registry level; a connection recipe or generic MCP
+configuration is not lifecycle support.
+
+`;
+}
+
+export function readmeSupportFindings(readme, registry) {
+  const section = readme.match(/^## Client support\n[\s\S]*?(?=^## )/mu)?.[0];
+  if (!section) return ["README.md: missing bounded Client support section"];
+  if (section !== renderReadmeSupportSection(registry)) {
+    return ["README.md: Client support section must match adapters/registry.json"];
+  }
+  return [];
+}
+
 function checkOrWrite(path, expected, write, failures) {
   if (write) {
     writeFileSync(path, expected);
@@ -134,10 +169,12 @@ function checkOrWrite(path, expected, write, failures) {
   if (actual !== expected) failures.push(`${path}: generated output drift; run node scripts/check-adapter-conformance.mjs --write`);
 }
 
-export function run({ registryPath = DEFAULT_REGISTRY, root = ROOT, write = false, matrixPath = DEFAULT_MATRIX, typescriptPath = DEFAULT_TYPESCRIPT } = {}) {
+export function run({ registryPath = DEFAULT_REGISTRY, root = ROOT, write = false, readmePath = DEFAULT_README, matrixPath = DEFAULT_MATRIX, typescriptPath = DEFAULT_TYPESCRIPT } = {}) {
   const registry = JSON.parse(readFileSync(registryPath, "utf8"));
   const failures = validateRegistry(registry, root);
   if (failures.length === 0) {
+    const readme = existsSync(readmePath) ? readFileSync(readmePath, "utf8") : "";
+    failures.push(...readmeSupportFindings(readme, registry));
     checkOrWrite(matrixPath, renderMatrix(registry), write, failures);
     checkOrWrite(typescriptPath, renderTypescript(registry), write, failures);
   }

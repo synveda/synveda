@@ -295,7 +295,7 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
         .map_err(|err| internal(format!("metric buckets: {err}")))?
         .set_buckets_for_metric(
             Matcher::Full(HTTP_REQUEST_DURATION_SECONDS.to_owned()),
-            // The inject SLO is p99 < 150ms (seed §10); buckets bracket it.
+            // Buckets bracket the 150ms context engineering budget (seed §10).
             &[0.005, 0.01, 0.025, 0.05, 0.1, 0.15, 0.25, 0.5, 1.0, 2.5],
         )
         .map_err(|err| internal(format!("metric buckets: {err}")))?

@@ -23,7 +23,7 @@
 //! That is not fastidiousness. An installer runs once, as root-equivalent,
 //! before anybody is watching, and whatever it writes becomes the tenant's
 //! history — so it is the single worst place in this product to keep a
-//! shortcut past the PDP (seed §2.2, CLAUDE.md). It is also why the
+//! shortcut past the PDP. It is also why the
 //! bootstrap this replaces needed a *second gateway* running with
 //! `SYNVEDA_DEV_JWT_SECRET` just to create three nodes, and why nothing
 //! here does: the gateway starts once, in OIDC mode, and the dev secret

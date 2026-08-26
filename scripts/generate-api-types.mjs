@@ -14,7 +14,7 @@
 // reasons, neither of them "not invented here". The document is *ours* — it
 // comes out of one generator, so it uses a narrow, known subset of JSON Schema
 // rather than the whole of it — and the console's dependency list is a thing
-// CLAUDE.md's licence rule and scripts/check-npm-licences.mjs both police, so a
+// scripts/check-npm-licences.mjs polices the console dependency list, so a
 // build-time dependency is a reviewed diff either way. If the document ever
 // grows shapes this cannot express, it says so and exits non-zero rather than
 // emitting something plausible: an unreadable failure beats a silently wrong

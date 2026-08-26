@@ -45,6 +45,29 @@ export function hasRetiredDemoField(source) {
   return /^\s*demo:\s*bool,/m.test(source);
 }
 
+export function releaseNoteFindings(source) {
+  const block = source.match(/cat > notes\.md <<NOTES\r?\n([\s\S]*?)^[ \t]*NOTES[ \t]*$/mu);
+  if (!block) return ["release-note block is missing"];
+  const notes = block[1];
+  const findings = [];
+  if (notes.includes("synveda init --demo")) {
+    findings.push("retired synveda init --demo command");
+  }
+  const commands = [
+    "synveda init --slug pulseboard --name PulseBoard --embedder tei",
+    "synveda login",
+    "synveda demo start --profile personal",
+  ];
+  let previous = -1;
+  for (const command of commands) {
+    const index = notes.indexOf(command);
+    if (index < 0) findings.push(`${command} is missing`);
+    else if (index <= previous) findings.push(`${command} is out of order`);
+    previous = Math.max(previous, index);
+  }
+  return findings;
+}
+
 function fail(message) {
   throw new Error(`deployment convergence: ${message}`);
 }
@@ -133,6 +156,13 @@ function checkPublicContract() {
   }
 }
 
+function checkReleaseNotes() {
+  const findings = releaseNoteFindings(read(".github/workflows/release.yml"));
+  if (findings.length > 0) {
+    fail(`release notes contain ${findings.join(", ")}`);
+  }
+}
+
 function checkReleaseUpgradeShape() {
   const scratch = mkdtempSync(join(tmpdir(), "synveda-deploy-check-"));
   try {
@@ -173,6 +203,7 @@ export function main() {
   checkCompose("deploy/release/docker-compose.yml", true);
   checkHelm();
   checkPublicContract();
+  checkReleaseNotes();
   checkReleaseUpgradeShape();
   console.log(
     "deployment convergence holds: 2 Compose renders, Helm render, current OpenAPI, " +

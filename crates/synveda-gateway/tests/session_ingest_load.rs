@@ -537,7 +537,7 @@ async fn append_ack_sustains_1k_events_per_second() {
         "1k events/s must be sustained, got {rate:.0}/s over {elapsed:.2?}"
     );
 
-    // The ack half: <20ms enqueue-only (seed §10) plus the measured link
+    // The ack half: the <20ms local budget (seed §10) plus the measured link
     // tax. Round trips on the ack path: tenant resolution, BEGIN,
     // set_config, identity, assignments, default pack, bindings, the
     // batch insert, send_batch, the three audit-append statements, and
@@ -546,8 +546,8 @@ async fn append_ack_sustains_1k_events_per_second() {
     // hardware: every commit here fsyncs WAL through Docker Desktop's
     // virtual disk, whose periodic 30–100ms stalls own the upper
     // percentiles — a tail assertion would measure the hypervisor, not
-    // the ack path. p95/p99 are reported; percentile-complete SLO
-    // enforcement on production-shaped IO is EVAL-6's charter.
+    // the ack path. p95/p99 are reported; production objectives and
+    // production-shaped IO are EVAL-6's charter.
     const ACK_ROUND_TRIPS: u32 = 13;
     let budget = Duration::from_millis(20) + ACK_ROUND_TRIPS * baseline_median;
     eprintln!(
@@ -571,7 +571,7 @@ async fn append_ack_sustains_1k_events_per_second() {
     } else {
         assert!(
             p50 <= budget,
-            "the ack budget is <20ms enqueue-only (seed §10) plus the link \
+            "the local ack budget is <20ms (seed §10) plus the link \
              tax: median {p50:.2?} > {budget:.2?} \
              (select-1 baseline {baseline_median:.2?})"
         );

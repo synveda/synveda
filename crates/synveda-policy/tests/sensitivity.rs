@@ -7,7 +7,7 @@
 //!
 //! Every case runs through the ordinary `authorize` facade with
 //! caller-supplied rows, the shape the gateway feeds it; there is no bypass
-//! here and no direct policy evaluation (CLAUDE.md, seed §2.2).
+//! or direct policy evaluation.
 //!
 //! The fixture is `packs.rs`'s because the
 //! question is what the *same* golden decisions do once a tier is named:

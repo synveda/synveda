@@ -14,15 +14,12 @@ half-read, or silently accepted."* This ADR is the mechanism, and it exists
 because the decision as stated has three holes an implementation has to close
 before the rest of the programme can lean on it.
 
-**Nothing in the database says which model its rows are in.** The base commit
-has 38 migrations, `sqlx::migrate!()`, and no marker of any kind
-(`docs/implementation/synveda-context-platform.md` §1.2: *"There is no
-down-migration, no reset guard, and no epoch marker: a database at any prefix
-of this sequence is accepted and brought forward"*). A binary pointed at an
-old database cannot tell it from a new one, and `MIGRATOR.run` will happily
-advance it — which is the silent acceptance the decision forbids, available
-today by running the command the documentation already tells operators to
-run.
+**Nothing in the database said which model its rows were in.** At base commit
+`92ffa890ee330eb31bce71d5fba08624dcd88a22`, the repository had 38 migrations,
+`sqlx::migrate!()`, and no down-migration, reset guard or epoch marker. A binary
+pointed at an old database could not distinguish it from a new one, and
+`MIGRATOR.run` would advance it silently. The preserved CPR-1 inventory is the
+git object `db01e5e:docs/implementation/synveda-context-platform.md`.
 
 **`_sqlx_migrations` is not that marker, and using it would be worse than
 having none.** It answers "which of *this binary's* migrations have been

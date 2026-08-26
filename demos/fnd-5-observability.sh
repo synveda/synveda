@@ -2,8 +2,7 @@
 # FND-5 acceptance demo: a single trace visible in Jaeger spanning an
 # end-to-end request — gateway→core→store→Postgres — plus the Prometheus
 # contract (synveda_tokens_per_context_run) on /metrics.
-# AC (docs/backlog/FND-5.md): single trace visible in Jaeger spanning an
-# end-to-end request.
+# Acceptance: one end-to-end request is visible as a single Jaeger trace.
 # On Windows, run via Git Bash. Needs the postgres and jaeger services, not
 # the full dev stack.
 set -eu

@@ -16,7 +16,7 @@ const DEFAULT_GATEWAY = "http://127.0.0.1:8120";
 
 /**
  * The per-call deadline (ADR-0027 decision 3): two decimal orders above
- * inject's 150ms SLO, sized to absorb a cold cache — not to wait out a
+ * the 150ms context engineering budget, sized to absorb a cold cache—not to wait out a
  * broken dependency.
  */
 const DEFAULT_TIMEOUT_MS = 3000;

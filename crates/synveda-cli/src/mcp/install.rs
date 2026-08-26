@@ -1127,7 +1127,7 @@ mod tests {
     /// The clients OPS-9 added parse and resolve a path (ADR-0066
     /// decision 7). This asserts they are *reachable*, not that they are
     /// correct: none has been replayed against a running client, which
-    /// `adapters/registry.json` and BETA.md both state that limitation.
+    /// The client-support registry states that limitation.
     #[test]
     fn the_clients_ops_9_added_resolve_somewhere() {
         for client in ["vscode", "windsurf", "continue"] {

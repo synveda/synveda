@@ -52,10 +52,12 @@ would make the readiness record less trustworthy.
    conceptual cycle or give pure logic a direct test. Repeated response and
    request-bound mechanics become narrow gateway helpers. No generic workflow
    framework or new cross-crate domain layer is introduced.
-7. **Current evidence has one owner.** Per-feature files retain acceptance and
-   evidence; generated or concise indexes may point to them. The completed
-   prompt journal and copied phase narratives are deleted after current risks
-   and decisions move to their owning ADR, open feature or readiness record.
+7. **Current evidence has one owner.** `docs/backlog/STATUS.md` is the concise
+   feature inventory, and only open work retains an implementation brief.
+   Delivered contracts live in executable tests, generated artefacts, accepted
+   ADRs and current operator documents; git retains their implementation
+   history. The duplicate feature catalogue, completed briefs, prompt journal
+   and copied phase narratives are deleted rather than moved to an archive.
 8. **Readiness is a release property, not a test synonym.** Remaining artifact,
    KMS, backup, HA, abuse-control, signing, upgrade and external-verification
    gaps stay Not ready with explicit acceptance criteria. CPR-44 cannot label

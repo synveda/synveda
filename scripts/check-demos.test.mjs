@@ -90,3 +90,17 @@ BIN=target/debug/synveda
   assert.equal(findings.length, 1, findings.join("\n"));
   assert.match(findings[0], /synveda hierarchy/);
 });
+
+test("comments cannot retain references to deleted documentation", () => {
+  const directory = fixture(`#!/bin/sh
+# AC (docs/backlog/DELETED.md): stale acceptance diary.
+synveda scope list
+`);
+  const findings = checkCorpus({
+    demoDir: directory,
+    routes: [],
+    cliInventory: inventory(),
+  });
+  assert.equal(findings.length, 1, findings.join("\n"));
+  assert.match(findings[0], /docs\/backlog\/DELETED\.md/u);
+});

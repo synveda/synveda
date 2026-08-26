@@ -10,55 +10,80 @@ size: M
 
 **Epic:** AUTHZ — Authorisation & policy (functional requirement) · **Phase:** 4 · **Size:** M
 
-## Description
+## Problem and evidence
 
-Pack assignment and role binding are direct `PUT`s (AUTHZ-2, AUTHZ-3) while every
-content act is proposal-gated. Decide whether they gain an approval-matrix cell of
-their own, and record the answer either way.
+Configuration and policy relaxation effects already use typed VedaFlow
+changes, while current scope, group, grant, invite and directory-access
+administration is applied directly after PDP, ownership, RLS, idempotency and
+audit checks. The old pack-assignment/role-binding description is obsolete.
+The open question is narrower: which current authority-increasing or
+large-blast-radius admin actions require review/separation of duties, and which
+must remain immediate, especially revocation.
 
-## Why this exists
+## Scope
 
-Filed 2026-08-05 by CNSL-2 (ADR-0058 decision 9), which found it by building the
-screen that renders a pack, its origin, the roles under it and the grants over it
-on one page — at which point the next question a reader asks is who changed any of
-it, and under what review.
+- Inventory current public admin mutations and classify authority gained/lost,
+  subtree blast radius, reversibility and emergency timing.
+- Decide in an ADR which actions remain direct and which enter the common typed
+  proposal/review/effect lifecycle from
+  [ADR-0091](../adr/adr-0091-unified-artifact-approvals.md).
+- If gated, define immutable references, expected revision/head, reviewer
+  matrix, expiry/cancel and effect-time live re-authorisation.
+- Preserve immediate fail-closed revocation, identity disable and emergency
+  containment unless the accepted decision proves another safe path.
+- Expose pending effects through the existing artifact-neutral review surface.
 
-All three packs grant `PolicyAssign` to `steward` and `org-admin` over the bound
-subtree, and the decision deliberately skips the node's own assignment (ADR-0014
-decision 4) so a restrictive pack cannot seal its own node. Together those mean
-**one steward replaces a team's pack with one call and one signature,
-permanently** — while the **lapse** that relaxes far less requires a reasoned,
-time-boxed, dual-approved proposal that expires on its own (AUTHZ-4, ADR-0037).
+## Non-goals
 
-Seed §2.3 has controls relaxed "through explicit, audited, time-boxable policy
-relaxations". A pack assignment is explicit and audited (`policy.node.assigned`).
-It is neither of the other two.
+- No proposal around every administrative write.
+- No parallel access vocabulary or permission table.
+- No bypass of Cedar, forced RLS, ownership checks or content-free audit.
+- No change to Configuration/relaxation governance already delivered.
+- No email delivery or generic workflow engine.
 
-## What bounds it
+## Architecture seam
 
-Both bounds were verified when the finding was recorded, and both hold:
-
-- **A pack flip cannot widen anyone's candidate universe.** The universe is the
-  caller's placement chain and it widens by lapse and by nothing else (ADR-0037
-  decision 13) — which is exactly why EVAL-5's governed-relaxation demo had to be
-  a lapse rather than a pack flip.
-- **A pack cannot reach below the invariant floor** (ADR-0032 decision 4,
-  ADR-0051 decision 18, ADR-0052 decision 3).
-
-What a pack assignment *does* move, for a whole subtree: approval counts,
-sensitivity ceilings, scan thresholds and quality bars.
-
-That is why this is filed as a governance question rather than as a hole, and why
-it sits in Phase 4. If either bound is ever found not to hold, it belongs in front
-of the Phase 3 procurement block rather than behind it.
+The current access and admin-scope handlers remain boundary validation and
+PDP seams. Gated effects use VedaFlow's typed references and stale-head
+preconditions, then call the same store mutation inside one tenant transaction.
+[ADR-0072](../adr/adr-0072-groups-grants-and-invitations.md) remains the
+grant/group vocabulary; the common review lifecycle owns review, not access.
 
 ## Acceptance criteria
 
-- The decision recorded as an ADR **before** any implementation, per the standing
-  rule that architectural choices get an ADR first.
-- **If gated:** the admin-plane cell joins the role×action and approval golden
-  tests under all three packs; `policy.node.assigned` and `role.bound` become
-  proposal effects; and the explorer gains the write path CNSL-2 declined
-  (ADR-0058 decision 9).
-- **If left direct:** the seed §2.3 reading that permits it is written down, and
-  the compensating control is named rather than assumed.
+- An accepted ADR records every current admin mutation, risk class and direct
+  or reviewed decision before code changes.
+- Gated actions cannot be self-authored/reviewed/effected where separation is
+  required; stale state and lost authority refuse at effect time.
+- Retries create one proposal/effect/audit result and disclose no denied
+  subject/scope counts.
+- Direct actions have an explicit compensating control, bounded authority and
+  behavioural test.
+- Revocation/disable remains effective on the next ordinary decision and is
+  not blocked behind unavailable reviewers.
+- OpenAPI, CLI and console distinguish pending review from applied effect
+  without optimistic success.
+
+## Required tests
+
+- Golden mutation matrix across all current role keys and test policy packs.
+- Self-review, stale-head, reviewer/effect-actor, revoke-during-review and
+  concurrent-effect tests.
+- Cross-tenant/foreign-identifier oracle tests for proposals and effects.
+- Idempotency/audit-chain assertions for direct and governed outcomes.
+- Console/CLI behaviour tests using generated operations only.
+
+## Rollout and rollback
+
+First emit a non-authoritative would-require-review classification metric with
+bounded labels and inspect real operations. Enable one mutation family at a
+time through governed Configuration. Rollback binds the prior rule/version;
+already applied effects remain auditable and are reversed only by the ordinary
+inverse action.
+
+## Dependencies
+
+Security/product owners must set separation-of-duties thresholds, emergency
+revocation guarantees and reviewer roles. Any new review matrix is an
+architectural decision. AUTH-6 and OPS-7 affect revocation propagation but do
+not block the classification ADR.

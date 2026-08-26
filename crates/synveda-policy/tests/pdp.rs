@@ -4,8 +4,7 @@
 //! reserved names, compile rejection with last-good semantics, and the
 //! decision metadata (pack name + version + determining policies) every
 //! call carries. Restrictive behaviour is exercised through *test policy
-//! packs* installed via the same path the reloader uses — never a PDP
-//! bypass (CLAUDE.md, seed §2.2).
+//! packs* installed via the same path the reloader uses — never a PDP bypass.
 
 use chrono::Utc;
 use synveda_policy::{

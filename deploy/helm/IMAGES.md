@@ -20,7 +20,7 @@ read, here.
 
 ## Why this file exists
 
-CLAUDE.md's licence rule is enforced by `cargo-deny` over crates,
+The repository licence rule is enforced by `cargo-deny` over crates,
 `check-npm-licences` over packages and — since ADR-0061 —
 `check-corpus-licences` over corpora. A Helm chart introduces a fourth
 kind of artefact, and until this file nothing in the repository looked at

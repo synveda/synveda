@@ -1,62 +1,82 @@
----
-title: "CPR-44: Production hardening and maintainability cut"
-labels:
-  - epic:CPR
-  - phase:5
-size: XL
----
-
 # CPR-44: Production hardening and maintainability cut
 
-**Epic:** CPR — Context-platform redesign · **Phase:** 5 · **Size:** XL
+## Problem and evidence
 
-## Description
+The fetched context-platform head passed its existing gates but retained
+reproduced correctness defects, high-coupling modules, misleading operational
+and client claims, duplicate project memory and no consolidated production
+readiness decision. The review started from
+`37fd12b1aa0504d18f02cd72ce7b284f672ef12f`; ADR-0101 records the fixed
+architectural boundary and `docs/PRODUCTION_READINESS.md` records gaps that a
+refactor cannot honestly close.
 
-Rescan the fetched context-platform head and harden the product after the MVP.
-This feature removes demonstrated maintenance burden, closes bounded defects,
-and leaves an evidence-based readiness register. It does not redesign Cedar,
-RLS, VedaFlow, audit, cryptography, the schema epoch or the public product
-vocabulary merely because those boundaries are repetitive or large.
+## Scope
+
+- Fix reproduced bounded-work, token, audit, erasure, database-connection,
+  uninstall-key, console-state, metric-cardinality and shutdown defects.
+- Extract cohesive context, Knowledge, Skill, Tool and response-finishing
+  responsibilities without changing their trust boundaries.
+- Reduce accidental public Rust surface, confirmed dead code, stale comments,
+  duplicate response shells and obsolete SDK/documentation placeholders.
+- Consolidate feature state and current documentation, add focused drift
+  checks, and leave an evidence-backed readiness register.
+
+## Non-goals
+
+- No replacement for Cedar, forced RLS, VedaFlow, the audit chain, key model or
+  schema epoch.
+- No generic workflow/service framework, arbitrary line-count split, public API
+  redesign, provider implementation, licence choice or unsupported readiness
+  claim.
+- No relabelling of deterministic fixtures as live client or recovery evidence.
+
+## Architecture seam
+
+Changes stay within current feature modules and public contracts. Gateway
+handlers continue to decide through Cedar and transact under forced RLS;
+governed mutations continue through VedaFlow and content-free audit. Persistence
+semantics remain in `synveda-store`, generated API artefacts remain derived,
+and operational gaps map to current open briefs rather than new runtime layers.
 
 ## Acceptance criteria
 
-- Record the exact source head, baseline inventory and unchanged-tree results
-  for `make ci`, `make db-test` and deterministic Claude acceptance. Distinguish
-  unavailable live systems from failures.
-- Fix reproduced security and durability defects with adversarial tests:
-  directory continuations cannot cross origins or exceed a pass-wide budget;
-  service-token time claims are ordered; audit verification uses one frozen
-  prefix; Knowledge erasure removes downstream plaintext and live addresses;
-  context planning does not reacquire the pool while holding a transaction;
-  and a data-preserving uninstall preserves the deployment key.
-- Split only responsibility boundaries supported by a map and behaviour tests.
-  Generated OpenAPI, PDP decisions, forced RLS, VedaFlow transitions, audit
-  actions, idempotency, telemetry meaning and persisted schema remain stable
-  unless a separately documented defect requires a change.
-- Remove confirmed dead code, stale current-model comments, speculative SDK
-  placeholders, duplicate response/validation shells and unbounded metric
-  labels. Preserve intentional protocol compatibility and checked invariant
-  failures.
-- Repair frontend request-generation races and dishonest loading/failure
-  states, then extract components by independent user capability rather than
-  line count. Generated API operations remain authoritative.
-- Consolidate current documentation without an archive directory. Agent
-  instructions become concise, stale open features use current nouns, the
-  completed prompt journal is removed after unique current facts move to their
-  owners, and lightweight checks prevent the same drift.
-- `docs/PRODUCTION_READINESS.md` records Ready/Conditional/Not ready evidence
-  and implementation-ready acceptance criteria for every remaining P0/P1.
-  Missing released Helm artifacts, Helm KMS wiring, tested PITR, gateway HA,
-  signing, licence ownership and external live clients are not represented by
-  deterministic or local evidence.
-- Focused tests pass after each commit. Final workspace, database, deployment,
-  documentation, adapter, evaluation and deterministic acceptance gates pass;
-  the OpenAPI and CLI contract differences are reported exactly.
+- Baseline source, inventory and authoritative gate results are recorded, with
+  unavailable external prerequisites distinguished from product failures.
+- Every reproduced defect has a behaviour or adversarial regression test.
+- Structural extracts reduce a demonstrated responsibility/coupling boundary;
+  OpenAPI operations/schemas, CLI behaviour, persisted schema, PDP/RLS,
+  VedaFlow, audit, idempotency and telemetry semantics remain stable except for
+  the documented Knowledge-erasure response correction.
+- Current documentation has one feature inventory, open briefs use this shape,
+  completed diaries and the prompt ledger are deleted, and internal links plus
+  executable release/support claims are checked.
+- The final readiness verdict remains honest while every P0/P1 gap has a scoped
+  acceptance slice and owner/external dependency.
+- The final working tree is clean and the complete requested gate set passes.
 
-## Evidence
+## Required tests
 
-In progress from fetched source head
-`37fd12b1aa0504d18f02cd72ce7b284f672ef12f` on branch
-`refactor/production-hardening-nasa`. ADR-0101 records the accepted change
-boundary. Completion evidence and commit SHAs will be added only after the
-final gates pass.
+- Focused Rust/TypeScript/database regressions for each semantic fix and
+  extracted capability.
+- OpenAPI/client parity, documentation/backlog/ADR, adapter, deployment,
+  tenancy/security and demo drift checks.
+- Full workspace format, Clippy, build/test, dependency/licence, evaluation,
+  database and deterministic Claude acceptance gates.
+- Live acceptance only with an installed authenticated proprietary client;
+  otherwise record the missing prerequisite without substitution.
+
+## Rollout and rollback
+
+Land one concern per reviewable commit. Structural commits must be reversible
+without data migration; semantic fixes retain their prior tests plus focused
+regressions. Do not change benchmark floors to accept regressions. The branch
+does not merge to main or publish until final verification; normal git revert
+is the rollback for each isolated commit.
+
+## Dependencies
+
+Final completion depends on local Docker/Postgres/Helm/Node/Rust prerequisites
+for the requested gates and normal remote push access. Live client evidence
+depends on a valid proprietary-client credential. Release signing, key custody,
+backup/PITR, availability/SLO, platform support and licence decisions remain
+with the owners named in `docs/PRODUCTION_READINESS.md`.

@@ -22,7 +22,7 @@
  *    created.
  * 3. **It is off the inject hook's critical path.** A second `SessionStart`
  *    entry, `async: true`, so N bundle writes never sit inside a call whose
- *    SLO is 150ms. The consequence is stated rather than hidden: a client
+ *    design budget is 150ms. The consequence is stated rather than hidden: a client
  *    reads its skills folder when it starts, so what this writes is loaded
  *    by the *next* session — which is the gap the block's own skills
  *    section exists to cover (ADR-0054 force 2).

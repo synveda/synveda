@@ -189,10 +189,8 @@ pub async fn search(
             .collect()
     });
 
-    // One statement with nullable predicates rather than SQL assembled from
-    // parts: compile-time checked queries only (CLAUDE.md), and a filter
-    // combination that never runs is still a filter combination the
-    // compiler has verified.
+    // Nullable predicates keep every filter combination in one
+    // compile-time-checked statement.
     let events = sqlx::query_as!(
         StoredEvent,
         r#"select seq, occurred_at, actor_kind, actor_subject, action,

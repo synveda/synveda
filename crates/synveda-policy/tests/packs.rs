@@ -4,8 +4,8 @@
 //! uniform: own home only, role-free; the content-role write grant lives
 //! in tests/roles.rs), the shared admin-plane semantics, and the
 //! cross-cutting invariants (quarantine, unplaced principals, foreign
-//! tenants). Packs are applied through the same assignment-resolution
-//! path production uses — never a PDP bypass (CLAUDE.md, seed §2.2).
+//! tenants). Packs use the same assignment-resolution path as production,
+//! never a PDP bypass.
 //!
 //! The fixture:
 //!

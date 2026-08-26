@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Enforces CLAUDE.md's licence rule on the npm side (CNSL-1, ADR-0056
+// Enforces the repository licence rule on the npm side (CNSL-1, ADR-0056
 // decision 8) — the gate `cargo deny` has given the Rust side since FND-3.
 //
 // The Claude adapter has build-only dependencies. The console is the package
@@ -13,8 +13,7 @@
 // Two lists, because they answer different questions.
 //
 //   * SHIPPED — what reaches a deployment. Held to exactly deny.toml's
-//     allowlist, with no exception mechanism at all. This is CLAUDE.md's
-//     "core path" applied literally: a dependency whose bytes a customer
+//     allowlist, with no exception mechanism: a dependency whose bytes a customer
 //     runs is governed by the product's licence policy, full stop.
 //
 //   * BUILD — what turns source into that bundle and never leaves CI or a
@@ -73,7 +72,7 @@ for (const [name, found] of shipped) {
     if (!SHIPPED.includes(licence)) {
       console.error(
         `FAIL: ${name} is ${licence} and reaches a deployment — the core path is ` +
-          `${SHIPPED.join(" / ")} only (CLAUDE.md). There is no exception list for ` +
+          `${SHIPPED.join(" / ")} only. There is no exception list for ` +
           `shipped dependencies: replace it, or move it to a devDependency if it ` +
           `is genuinely build-time.`,
       );

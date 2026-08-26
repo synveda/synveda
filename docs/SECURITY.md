@@ -149,6 +149,6 @@ make eval-security
 
 `make ci` also checks RLS coverage, dependency direction, generated OpenAPI and
 console clients, audit-action completeness, migration/schema epoch rules,
-demo drift, licenses and the deterministic product gate. Database-backed and
-live-client results are recorded in the active CPR queue rather than inferred
-from a unit replay.
+demo drift, licences and the deterministic product gate. Database-backed and
+live-client evidence is recorded in current open feature briefs and generated
+client-support surfaces; deterministic replay is never relabelled as live.

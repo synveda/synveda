@@ -2,8 +2,7 @@
 //! fragments to warm decisions, and a chain reshaped by a hierarchy move
 //! is never answered from stale entities — the decision flips with the
 //! supplied chain, both directions. The pack is applied through the same
-//! assignment-resolution path production uses — never a PDP bypass
-//! (CLAUDE.md, seed §2.2).
+//! assignment-resolution path production uses — never a PDP bypass.
 //!
 //! The fixture mirrors the AC: two org units, a principal in a team of one,
 //! and the team that moves between them.

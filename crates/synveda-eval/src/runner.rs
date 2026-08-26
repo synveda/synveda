@@ -23,7 +23,7 @@ use crate::report::Outcome;
 use crate::scenario::{Environment, Scenario};
 
 /// How long seeded material gets to become composable before the scenario
-/// is graded anyway. The pipeline's own SLO is 60s (seed §10), and a
+/// is graded anyway. The local capture-lag budget is 60s (seed §10), and a
 /// scenario that times out fails on its axes rather than crashing the
 /// run — a stuck pipeline should read as "quality collapsed", because to
 /// the person whose session it is, that is what happened.

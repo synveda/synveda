@@ -8,22 +8,23 @@ propose/review/approve workflow for all knowledge assets.
 
 ## 1. Stack decisions
 
-Guiding rules: (a) Postgres is the system of record for everything until proven otherwise,
-(b) prefer Rust-native components, (c) permissive licences (MIT/Apache-2.0) in the core path;
-anything AGPL/BSL is opt-in and isolated behind a trait.
+Guiding rules: (a) Postgres is the system of record until evidence supports a
+change, (b) prefer Rust-native components, and (c) admit only the approved
+permissive licences in the core path. A different source/licence requires an
+accepted ADR and repository-policy change; an imagined adapter is not enough.
 
 ### 1.1 Core data platform — PostgreSQL 17
 
-One database engine for Knowledge, sessions, scopes, audit, versioning, durable jobs, and (initially) vectors
-and graph. This is a feature: one backup story, one HA story, one thing to explain to a bank's
-infrastructure review board.
+One database engine for Knowledge, sessions, scopes, audit, versioning, durable
+jobs, vectors and relations. This keeps the future backup/HA boundary coherent;
+it does not substitute for the still-open restore and failover evidence.
 
 | Concern | Choice | Licence | Rationale / scale-out path |
 |---|---|---|---|
 | System of record | **PostgreSQL 17** | PostgreSQL | Boring, auditable, runs anywhere incl. air-gapped |
-| Vector search | **pgvector** (HNSW) | PostgreSQL | Fine to ~10–50M vectors per tenant shard. Scale-out: **Qdrant** (Rust, Apache-2.0) behind the same `VectorIndex` trait. Note: VectorChord/pgvecto.rs is Rust and faster but AGPL — optional adapter only |
+| Vector search | **pgvector** (HNSW) | PostgreSQL | Current dense leg. Its production support envelope and plan stability remain open; Qdrant is an unimplemented OPS-4 option, not a shipped adapter. |
 | Sparse / lexical | Tenant-bound **Postgres FTS** | PostgreSQL | Lexical rank stays transactionally aligned with current Knowledge revisions; hybrid fusion with pgvector uses RRF in the gateway |
-| Graph | **Indexed adjacency in plain Postgres** (bitemporal edge pair; named graphs as a mandatory discriminator) | — | Amended 2026-07-27 by GRPH-1/ADR-0043, was **Apache AGE**: the GRPH-4 spike measured adjacency 3–8× faster at 2.5× less storage. Relationship claims remain transactional with Knowledge. Ladder: materialised bounded expansion, then a dedicated engine with its own ADR and a licence exception (candidates: **IndraDB**, Rust, MPL; avoid SurrealDB/Memgraph — BSL) |
+| Graph | Immutable **KnowledgeRelation** rows in plain Postgres | — | Current ContextRun expansion starts from authorised Knowledge anchors, is bounded to two hops, and re-authorises every endpoint/path. Apache AGE and the Record graph are removed; a different engine requires new evidence and an ADR. |
 | Governed scopes | Plain Postgres (`scopes` + closure table) | — | Five parent-shapes, no organisational rank and no graph DB needed for tenancy |
 | Durable jobs | Leased tenant-bound Postgres tables | PostgreSQL | Capture, erasure, import/export, skill/tool tests and re-encryption share one observable idempotent operation model |
 | Workflow (complex) | **Temporal** | MIT | Optional boundary for future long-running cross-service workflows; current product mutations remain in the database-backed job model |
@@ -34,7 +35,7 @@ infrastructure review board.
 | Concern | Choice | Licence | Rationale |
 |---|---|---|---|
 | Authorisation (PDP) | **Cedar** (embedded) | Apache-2.0 | Amazon's policy language, **pure Rust, in-process** — no network hop on the hot read path; formally verified evaluator; policies-as-data suits VedaFlow versioning |
-| Relationship checks | Cedar entity hierarchy (first choice); **OpenFGA** (Apache-2.0) adapter if ReBAC outgrows Cedar | Apache-2.0 | Start with one engine. The `authorize()` facade hides the choice |
+| Relationship checks | Cedar entities and governed scope ancestry | Apache-2.0 | The current runtime has one authority engine. AUTHZ-6 tracks an OpenFGA spike; no adapter is implemented or claimed. |
 | Why not OPA | Rego is powerful but adds a Go sidecar + network hop on every context decision; Cedar embeds in the gateway binary | | OPA remains a possible adapter for shops that mandate it, not a shipped runtime |
 | OIDC provider (bundled dev/SMB) | **Rauthy** (Rust, Apache-2.0) | Apache-2.0 | Single-binary Rust OIDC server for SMB "batteries included" mode |
 | Enterprise IdP | Bring-your-own: Entra ID, Okta, Keycloak, Zitadel — standard OIDC + SCIM 2.0 | — | Synveda is an OIDC *client*, never the source of truth for identity |
@@ -44,19 +45,19 @@ infrastructure review board.
 
 | Component | Tech |
 |---|---|
-| Gateway/API | **axum** + tonic (gRPC), tower middleware for authN/PDP/rate-limit/audit |
+| Gateway/API | **axum** REST with generated OpenAPI; explicit authN, tenant, ownership, PDP, audit and input-boundary layers. General rate limiting is not yet implemented. |
 | ORM/queries | **sqlx** (compile-time checked SQL — auditability again) |
-| Embeddings serving | **text-embeddings-inference** (Hugging Face, Apache-2.0, Rust) serving **BGE-M3** (dense+sparse) or **Qwen3-Embedding**; per-tenant model pinning, re-embed workflow on model change |
+| Embeddings serving | Optional **text-embeddings-inference** serving BGE-M3 for the measured dense path. Production model support, generation cutover and re-embedding remain open. |
 | Summarisation/extraction LLM | Pluggable: Claude API, or self-hosted via vLLM for air-gapped; behind `Extractor` trait |
 | Observability | OpenTelemetry on session, capture, Knowledge and ContextRun paths; Prometheus; Grafana/Jaeger |
-| Packaging | Single static gateway binary + Postgres = SMB mode. Helm chart with regional data planes = enterprise mode |
+| Packaging | One gateway runtime in source/installed Compose and Helm. Helm currently enforces one gateway replica and makes no regional-data-plane claim. |
 
 ### 1.4 Explicit non-choices
 
-- **No Elasticsearch/OpenSearch** (JVM estate; Postgres FTS is the current lexical leg), **no Redis** initially
-  (Postgres + moka in-process cache), **no Kafka** (leased Postgres jobs, with Temporal as an extension point), **no Neo4j** (licence),
-  **no SurrealDB/Memgraph** (BSL). Every one of these is a door left open behind a trait, not a
-  dependency taken today.
+- **No Elasticsearch/OpenSearch** (Postgres FTS is the current lexical leg),
+  **no Redis**, **no Kafka** (leased Postgres jobs), and **no Neo4j,
+  SurrealDB or Memgraph** in the current runtime. A future engine needs an
+  evidenced feature and accepted ADR; no speculative trait is promised here.
 
 ---
 
@@ -74,7 +75,8 @@ policy checks, audit chaining, and row-level tenant isolation must be transactio
 content. (A `git bridge` using **gitoxide** (Rust, MIT/Apache-2.0) mirrors published branches to
 real repos for teams who want GitHub/GitLab visibility — export first, import later.)
 
-Core tables (all content-addressed, BLAKE3):
+Conceptual VedaFlow storage (the epoch-3 migration is authoritative; proposal
+references are validated typed JSON, not free-form source/target strings):
 
 ```
 objects   (hash, tenant, kind, content, size)          -- immutable blobs
@@ -82,8 +84,9 @@ trees     (hash, entries[])                            -- directory-like groupin
 commits   (hash, tree, parents[], author_identity,
            message, signature, policy_snapshot_hash)   -- every commit records WHICH policy
 refs      (tenant, scope, name, commit_hash)           --   pack was in force when created
-proposals (id, scope, source_ref, target_ref, state, commit_hash,
-           typed_artifact_references[], proposer, close_actor)
+proposals (id, source_scope, target_scope, asset_kind, target_channel,
+           state, commit_hash, typed_artifact_references[], proposer,
+           close_actor)
 proposal_approvals (proposal, commit_hash, approver, verdict, roles)
 ```
 
@@ -213,9 +216,9 @@ global `/v1/recall` route and no direct-store adapter path.
 
 | | SMB ("one command") | Enterprise regulated |
 |---|---|---|
-| Footprint | `docker compose up`: gateway binary, Postgres + pgvector, Rauthy, TEI and optional Temporal | Helm: one gateway replica, CloudNativePG + pgvector, optional TEI/Temporal, customer IdP |
-| Policy pack | `standard`, single-approver | `regulated-strict`, dual approval, published-only context |
-| Residency | single region | control plane global, data planes pinned per division/region |
+| Footprint | `docker compose up`: gateway binary, Postgres + pgvector, Rauthy, TEI and optional Temporal | Helm: one gateway replica, CloudNativePG + pgvector, optional TEI, customer IdP |
+| Product behaviour | Governed Configuration documents select policy, capture and context behaviour; deployment shape does not. | The same runtime and Configuration model; no edition branch. |
+| Residency | Single deployment region | Single deployment region; OPS-3 regional routing is not implemented. |
 | Keys | local deployment KEK wrapping deployment and per-tenant DEKs | the same shipped local provider; cloud KMS/HSM/CMK and WORM custody are extension points, not current support |
 
 ---
@@ -246,15 +249,20 @@ global `/v1/recall` route and no direct-store adapter path.
 
 ## 6. Key risks & mitigations
 
-- **pgvector ceiling** → trait-isolated from day one; Qdrant adapter is Phase 3, not a rewrite.
-- **Cedar ReBAC limits** at deep hierarchies → `authorize()` facade; OpenFGA adapter path proven
-  by a spike in Phase 2, before it's needed.
+- **pgvector ceiling** → establish the supported plan/scale envelope first.
+  OPS-4 may introduce a measured Qdrant seam; no `VectorIndex` trait exists
+  today.
+- **Cedar ReBAC limits** → the explicit authorisation facade and adversarial
+  tests constrain the current implementation. AUTHZ-6 is an open spike, not
+  evidence of an OpenFGA adapter.
 - **Graph layer earning its place** → graph features are additive (retrieval works without
   graph-links); degrade gracefully. (Was "AGE maturity"; ADR-0043 removed the engine risk by
-  removing the engine, and the mitigation is unchanged — GRPH-3 is feature-flagged.)
+  removing the engine. Governed Configuration can set the graph budget to zero;
+  there is no Cargo feature flag or second graph runtime.)
 - **Temporal operational weight** → no core path forks by deployment profile:
   sessions and capture run in the gateway/Postgres runtime; Temporal remains
   extension infrastructure until a feature proves a workflow needs it.
-- **Extraction quality** (garbage memories poison trust) → derived channel is quarantined by
-  design; published channel is the trust boundary; eval harness in Phase 4 measures extraction
-  precision continuously.
+- **Extraction quality** → capture creates reviewable candidates only;
+  acceptance enters the typed Knowledge/VedaFlow boundary. The deterministic
+  evaluation suite measures extraction quality, while model-backed evidence is
+  reported only when its endpoint/credential exists.

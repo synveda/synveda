@@ -4,7 +4,7 @@
 //! tenant default (or an assignment) — request-time data, in force on the
 //! next request. Restrictive behaviour comes from a *test policy pack*
 //! applied through the same store + reload + assignment paths the product
-//! uses — never a PDP bypass (CLAUDE.md, seed §2.2).
+//! uses — never a PDP bypass.
 //!
 //! Tests that need a live Postgres read `DATABASE_URL` and skip with a
 //! message when it is unset (CI has no database); run them locally with

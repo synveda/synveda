@@ -10,7 +10,7 @@
 // file and this script keep their chart-shaped names — renaming both plus
 // every reference is churn against OPS-2's artefacts for no reading.
 //
-// Why (OPS-2, ADR-0062 decision 11): CLAUDE.md's licence rule is enforced
+// Why (OPS-2, ADR-0062 decision 11): the repository licence rule is enforced
 // by cargo-deny over crates, check-npm-licences over packages and
 // check-corpus-licences over corpora. A chart introduces a fourth artefact
 // class — container images — that none of those look at. This is the same

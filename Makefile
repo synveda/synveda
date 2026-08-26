@@ -19,7 +19,7 @@ export SYNVEDA_TEI_IMAGE
 # and skip when it is unset — CI runs without a database.
 DATABASE_URL ?= postgres://synveda:synveda-dev@localhost:5432/synveda
 
-.PHONY: fmt lint test build deny check-deps check-adr-status check-adapters check-api-types check-backlog check-benchmarks check-chart-images check-context-hard-cut check-context-security check-corpus-licences check-demos check-deploy check-npm-licences check-product-eval chart-lint ts-build ts-test ci dev-up dev-down smoke db-test claude-acceptance claude-acceptance-live eval eval-check eval-product eval-judge eval-read eval-longmemeval eval-longmemeval-full eval-longmemeval-judged eval-extraction-live eval-retrieval eval-security
+.PHONY: fmt lint test build deny check-deps check-adr-status check-adapters check-api-types check-backlog check-benchmarks check-chart-images check-context-hard-cut check-context-security check-corpus-licences check-demos check-deploy check-docs check-npm-licences check-product-eval chart-lint ts-build ts-test ci dev-up dev-down smoke db-test claude-acceptance claude-acceptance-live eval eval-check eval-product eval-judge eval-read eval-longmemeval eval-longmemeval-full eval-longmemeval-judged eval-extraction-live eval-retrieval eval-security
 
 dev-up:
 	$(COMPOSE) up --build --detach --wait
@@ -228,10 +228,11 @@ check-deps:
 check-api-types:
 	node scripts/generate-api-types.mjs --check
 
-# SYNVEDA_FEATURES.md, docs/backlog/<ID>.md and STATUS.md describe one feature
-# set; this asserts they agree. Writes nothing — it replaced a generator that
-# wrote all three and discarded their hand-written narrative doing it.
+# STATUS.md is the concise feature inventory. This enforces unique IDs/counts
+# and requires an implementation-ready brief for open work only; delivered
+# history stays in git rather than duplicate Markdown diaries.
 check-backlog:
+	node --test scripts/check-backlog.test.mjs
 	node scripts/check-backlog.mjs
 
 # Demos are executable documentation. CPR-13 derives the accepted command
@@ -244,7 +245,7 @@ check-demos:
 
 # CPR-39: a config recipe, captured protocol and a fully verified client are
 # deliberately different support levels. This also checks the fixture hashes
-# and the generated public support/onboarding surfaces.
+# and the generated public support/onboarding surfaces plus README summary.
 check-adapters:
 	node --test scripts/check-adapter-conformance.test.mjs
 	node scripts/check-adapter-conformance.mjs
@@ -264,15 +265,20 @@ check-context-hard-cut:
 	node --test scripts/check-context-hard-cut.test.mjs
 	node scripts/check-context-hard-cut.mjs
 
-# check-backlog reconciles those three files with each other and never
-# reads an ADR header; this closes that gap in the one direction worth
-# gating — an ADR still reading `Proposed` after its feature shipped. The
-# mirror check would fire on every feature in flight, because CLAUDE.md
-# requires the ADR first.
+# check-backlog does not read ADR headers. This closes the useful half of that
+# gap: a delivered feature must not retain a Proposed ADR. Accepted decisions
+# may precede delivery because ADRs are written first.
 check-adr-status:
 	node scripts/check-adr-status.mjs
 
-# CLAUDE.md's licence rule on the npm side (CNSL-1, ADR-0056 decision 8).
+# Current documentation, including open briefs, must resolve repository-local
+# links and code-path references. Historical ADR/spike prose stays link-checked
+# without becoming a claim about the current product.
+check-docs:
+	node --test scripts/check-docs.test.mjs
+	node scripts/check-docs.mjs
+
+# The repository licence rule on the npm side (CNSL-1, ADR-0056 decision 8).
 # Needs the workspace installed, so it runs after ts-build in `ci`.
 check-npm-licences:
 	node scripts/check-npm-licences.mjs
@@ -280,7 +286,7 @@ check-npm-licences:
 # The same rule on the corpus side (EVAL-3, ADR-0061 compliance notes).
 # `cargo deny` governs crates and check-npm-licences governs packages; a
 # corpus is data, which is how a CC BY-NC one reached a feature
-# specification, the phase demo goal and CLAUDE.md before anyone read its
+# specification, the phase demo goal and AGENTS.md before anyone read its
 # LICENSE.txt. Needs nothing but node, so it runs early in `ci` — and it
 # also fires on a developer's machine that fetched a corpus, which is
 # where the licence file actually lands.
@@ -331,4 +337,4 @@ ts-build:
 ts-test:
 	pnpm -r test
 
-ci: fmt lint test build deny check-deps check-api-types check-backlog check-demos check-adapters check-context-security check-context-hard-cut check-adr-status check-corpus-licences check-chart-images check-benchmarks chart-lint check-deploy eval-check ts-build check-npm-licences ts-test
+ci: fmt lint test build deny check-deps check-api-types check-backlog check-demos check-adapters check-context-security check-context-hard-cut check-adr-status check-docs check-corpus-licences check-chart-images check-benchmarks chart-lint check-deploy eval-check ts-build check-npm-licences ts-test
