@@ -712,12 +712,9 @@ pub struct ListParams {
 
 /// Encodes a keyset cursor for the wire (CPR-11, ADR-0077 decision 1).
 ///
-/// `base64url(<rfc3339>|<uuid>)`. Opaque by intent rather than by encryption:
-/// what it carries is a row's own start instant and id, both of which the
-/// client was just served, so there is nothing in it to hide. The encoding
-/// exists so that a client cannot *construct* one by hand and come to depend
-/// on its shape — the day this becomes a sort key over something else, a
-/// hand-built cursor is a client that breaks.
+/// `base64url(<rfc3339>|<uuid>)`. Opaque by contract, not authenticated: it
+/// carries only the served row's start instant and id. Clients pass it back
+/// unchanged so its representation can evolve.
 fn encode_cursor(cursor: &sessions::SessionCursor) -> String {
     URL_SAFE_NO_PAD.encode(format!("{}|{}", cursor.started_at.to_rfc3339(), cursor.id))
 }
@@ -727,7 +724,7 @@ fn encode_cursor(cursor: &sessions::SessionCursor) -> String {
 /// forever is how that becomes an infinite scroll nobody notices.
 fn decode_cursor(raw: &str) -> Result<sessions::SessionCursor> {
     let invalid = || Error::Invalid {
-        message: "`cursor` is not one this listing issued".to_owned(),
+        message: "`cursor` is not a well-formed session cursor".to_owned(),
     };
     let bytes = URL_SAFE_NO_PAD.decode(raw).map_err(|_| invalid())?;
     let decoded = String::from_utf8(bytes).map_err(|_| invalid())?;

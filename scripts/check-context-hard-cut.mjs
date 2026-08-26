@@ -59,6 +59,11 @@ function productionFiles() {
       /\/src\/.*\.(?:ts|mts)$/u.test(path) && !/\.test\.(?:ts|mts)$/u.test(path),
     ),
   );
+  files.push(
+    ...walk(join(ROOT, "sdks"), (path) =>
+      /\.(?:rs|py|ts|mts)$/u.test(path) || /(?:Cargo\.toml|package\.json)$/u.test(path),
+    ),
+  );
   files.push(...walk(join(ROOT, "console", "src"), (path) => /\.(?:ts|mts|tsx)$/u.test(path)));
   files.push(
     ...walk(join(ROOT, "deploy"), (path) =>
@@ -117,6 +122,12 @@ export function main() {
   for (const path of productionFiles()) {
     const source = readFileSync(path, "utf8");
     findings.push(...retiredProductionFindings(source, relative(ROOT, path)));
+    for (const match of source.matchAll(/migrations\/(\d{4}_[A-Za-z0-9_-]+\.sql)/gu)) {
+      if (match[1] !== "0001_context_platform.sql") {
+        const line = source.slice(0, match.index).split("\n").length;
+        findings.push(`${relative(ROOT, path)}:${line}: references absent migration ${match[1]}`);
+      }
+    }
   }
 
   for (const path of RETIRED_PATHS) {

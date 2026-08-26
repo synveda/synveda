@@ -2,38 +2,11 @@
 //! project, the groups authority is handed to, and the invitations that hand
 //! it out.
 //!
-//! Fourteen operations across ten paths, behind tenant resolution like every
-//! `/v1` route, behind the PDP like every governed one, and chaining an audit
-//! event for every mutation.
-//!
-//! # Where these decisions are taken
-//!
-//! Every decision here named `Resource::Tenant` until CPR-6, and ADR-0072
-//! decision 9 recorded that as a stated debt rather than a design. It is paid:
-//! a membership read or a grant names the **scope** it is about — the
-//! workspace, the project, or the scope a tenant-wide grant route was given —
-//! curating a group names the **group**, and revoking names **the grant**,
-//! which is what lets a pack price taking away a directory-managed grant
-//! differently from taking away one somebody typed (ADR-0073 decision 3).
-//!
-//! The two that stay on the tenant plane stay there for reasons rather than
-//! for want of a resource: creating a group has no group to name yet, and
-//! redeeming an invitation must work for somebody who holds nothing anywhere.
-//! Both are decided at the tenant **root scope** when the tenant has one.
-//!
-//! # Grants are a PDP input
-//!
-//! This plane records who holds which **role key** where, and since CPR-6 the
-//! PDP reads them: `synveda_store::anchors` resolves the caller's grants into
-//! an ordered anchor set, and the role keys that reach the resource arrive in
-//! `context.roles` beside the old hierarchy's binding roles (ADR-0073
-//! decision 5). A workspace `owner` therefore administers their workspace with
-//! no tenant-wide role bound anywhere, and a project-only grantee reaches the
-//! project and not the workspace above it.
-//!
-//! Nothing translates between the two vocabularies, and nothing needs to: the
-//! two trees are disjoint, so a grant's scope is never a hierarchy node and a
-//! node binding is never at a governed scope.
+//! Membership and grant decisions name the governed scope, group or grant they
+//! concern. Creating a group and accepting an invitation are decided at the
+//! tenant root because no narrower resource exists yet. The anchor resolver
+//! supplies inherited grant keys to Cedar; there is one scope and role
+//! vocabulary (ADR-0073, ADR-0074).
 //!
 //! # Creation is idempotent; the group update carries a precondition
 //!
@@ -1775,10 +1748,9 @@ async fn make_group(
             slug: body.slug.clone(),
             display_name: body.display_name.clone(),
             description: body.description.clone(),
-            // Nothing on this plane creates a directory group: a directory
-            // group is created by a directory, and the adapter that does it is
-            // a later prompt. The column exists so that when it lands, a
-            // person's group and a directory's are the same row shape.
+            // Direct creation never claims directory ownership. Directory
+            // projection uses the same aggregate through its source-specific
+            // path (ADR-0093).
             source: GroupSource::Direct,
             directory_source: None,
             directory_resource_id: None,

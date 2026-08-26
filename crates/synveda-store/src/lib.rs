@@ -4,7 +4,7 @@
 //!
 //! Tenant isolation backstop (TEN-2, ADR-0009): tenant-scoped tables carry
 //! forced RLS policies keyed to a transaction-local GUC. Reach them through
-//! [`rls::begin_tenant_tx`]; see `migrations/0003_tenant_rls.sql`.
+//! [`rls::begin_tenant_tx`]; the epoch baseline defines every tenant policy.
 //!
 //! Audit chain tables (AUD-1, ADR-0019): `audit_log` and `audit_chain_heads`
 //! are migrated here with the rest of the schema, but their queries live in

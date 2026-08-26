@@ -6,8 +6,8 @@
 //! [`ScopeKind`] decides which kinds may be a scope's *parent* and nothing
 //! else, `org_unit` nests inside itself to arbitrary depth, and a deployment
 //! with one person has a tenant root and a principal rather than an
-//! organisation containing a team. See `migrations/0040_scopes.sql` for where
-//! each structural rule is enforced — most of them are database facts, and
+//! organisation containing a team. The epoch baseline enforces each
+//! structural rule — most of them are database facts, and
 //! this module is the layer that turns the two which need the parent row into
 //! errors with a sentence in them.
 //!
@@ -1010,7 +1010,7 @@ pub async fn rename(
 /// scope's kind permits; and the destination is not the scope itself or
 /// anything beneath it. The last of those is what makes a cycle an error with
 /// a sentence in it — the closure's own CHECK makes it impossible either way
-/// (`migrations/0040_scopes.sql`).
+/// (the `scopes` cycle constraint in the epoch baseline).
 ///
 /// A [`ScopeKind::Principal`] passes all five only when the destination is the
 /// tenant root, which is where it already is: its move is a no-op by

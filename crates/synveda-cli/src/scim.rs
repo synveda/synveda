@@ -27,11 +27,6 @@ pub struct CredentialView {
     revoked_at: Option<DateTime<Utc>>,
     #[serde(default)]
     last_used_at: Option<DateTime<Utc>>,
-    /// Kept for the `--json` form, where an operator reconciling a
-    /// rotation wants to know when each one was issued. The table renders
-    /// expiry and last use, which are what a rotation decision turns on.
-    #[allow(dead_code)]
-    created_at: DateTime<Utc>,
     created_by: String,
 }
 
@@ -202,7 +197,6 @@ mod tests {
             expires_at,
             revoked_at: revoked.then(Utc::now),
             last_used_at: None,
-            created_at: Utc::now(),
             created_by: "alice@example.test".to_owned(),
         }
     }

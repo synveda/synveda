@@ -10,9 +10,9 @@
 //! via `synveda_store::rls::begin_tenant_tx` and pass its connection to
 //! [`append`], so the event commits atomically with the action it records.
 //!
-//! The schema lives in `crates/synveda-store/migrations/0011_audit_log.sql`
-//! (one embedded migrator for the workspace); the chain semantics live
-//! here.
+//! The `audit_log` and `audit_chain_heads` schema lives in the epoch baseline
+//! at `crates/synveda-store/migrations/0001_context_platform.sql`; chain
+//! semantics live here.
 
 #![forbid(unsafe_code)]
 #![warn(missing_docs)]

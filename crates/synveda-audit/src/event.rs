@@ -1,7 +1,7 @@
 //! The audit event vocabulary (AUD-1, ADR-0019).
 //!
 //! An [`AuditEvent`] is what a seam hands to [`crate::append`]; the chain
-//! columns it becomes are described in `migrations/0011_audit_log.sql`.
+//! columns it becomes are defined in the epoch baseline's `audit_log` table.
 //! Actions are a closed enum in-process so a typo cannot mint a new event
 //! type silently, while the column stays open text so later features add
 //! actions without schema churn.

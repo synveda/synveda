@@ -458,7 +458,6 @@ demos/          runnable acceptance demos, one per feature — a feature is not
                 done without one
 evals/          corpora, scenarios, and the committed baselines CI gates on
 docs/           the seed, tech plan, features, backlog/, adr/, api/, implementation/
-sdks/           rust, typescript, python — Phase 4 stubs
 scripts/        install, packaging, and the CI checkers (check-backlog,
                 check-adr-status, check-deps, generate-api-types, ...)
 ```

@@ -381,7 +381,6 @@ crates/
   synveda-eval        the eval harness and its gates
 adapters/
   claude-code/        hooks (TypeScript); its MCP entry launches `synveda mcp`
-sdks/                 rust, typescript, python — stubs, Phase 4
 policies/             Cedar policy packs
 deploy/compose/       the dev environment
 console/              the admin console (React); served from the gateway's origin

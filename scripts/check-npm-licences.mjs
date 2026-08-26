@@ -2,11 +2,9 @@
 // Enforces CLAUDE.md's licence rule on the npm side (CNSL-1, ADR-0056
 // decision 8) — the gate `cargo deny` has given the Rust side since FND-3.
 //
-// It has not mattered until now: adapters/claude-code and sdks/typescript
-// between them declare typescript and @types/node as devDependencies and no
-// runtime dependency at all. The console is the first package in this repo
-// with a real runtime dependency tree, so it is the first one where the rule
-// has anything to enforce against.
+// The Claude adapter has build-only dependencies. The console is the package
+// with a shipped runtime dependency tree, so it is where the core-path rule
+// has bytes to enforce against.
 //
 // (adapters/mcp-server was a third such package until ADPT-2 removed it —
 // ADR-0057 decision 1 put the generic MCP server in the Rust CLI, where

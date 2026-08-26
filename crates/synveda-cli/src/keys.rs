@@ -864,7 +864,7 @@ pub async fn set_directory_credential(
         format!(
             "that is not a directory configuration this build understands \
              ({}): expected {{\"connector\": \"entra\"|\"okta\", ...}}",
-            err.classify_for_operator()
+            classify_json_error(&err)
         )
     })?;
 
@@ -952,19 +952,13 @@ fn connector_name(config: &synveda_identity::directory::DirectorySyncConfig) -> 
 /// serde's error text quotes the input it failed on, and here the input is a
 /// credential. This keeps the shape of the complaint (which field, which
 /// line) and drops the value.
-trait ClassifyForOperator {
-    fn classify_for_operator(&self) -> String;
-}
-
-impl ClassifyForOperator for serde_json::Error {
-    fn classify_for_operator(&self) -> String {
-        format!(
-            "{:?} at line {} column {}",
-            self.classify(),
-            self.line(),
-            self.column()
-        )
-    }
+fn classify_json_error(error: &serde_json::Error) -> String {
+    format!(
+        "{:?} at line {} column {}",
+        error.classify(),
+        error.line(),
+        error.column()
+    )
 }
 
 #[cfg(test)]

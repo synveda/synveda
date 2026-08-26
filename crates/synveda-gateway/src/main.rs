@@ -61,25 +61,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let database_url = std::env::var("DATABASE_URL")
         .map_err(|_| "DATABASE_URL must be set (dev default is in the Makefile)")?;
-    // Eight was the number from the first day and it is still the default;
-    // what changed is that it can no longer only be changed by recompiling.
-    //
-    // 233bca9 added this setting on the finding that EVAL-3's LongMemEval
-    // run had wedged the gateway on a pool the background workers share
-    // with the request handlers. **29ae21f withdrew that finding.** The
-    // machine was sleeping — unattended runs, `pmset` `sleep 1` — the VM
-    // froze with it, and `acquire` timed out while no code was running at
-    // all; two observers on opposite sides of the container boundary froze
-    // in lockstep for 7m45s and resumed to report a healthy database. A
-    // larger pool "helped" only by coasting longer on connections opened
-    // before the freeze. There is no evidence in this repository that this
-    // pool wedges under sustained ingestion.
-    //
-    // The setting stays on its own merits. The workers and the handlers do
-    // draw from one pool, and a deployment-shaped number an operator can
-    // only change by recompiling is one that will be wrong where nobody
-    // can look — OPS-2 (ADR-0062 decision 6) makes it a chart value, sized
-    // against the server's own `max_connections`.
+    // Workers and request handlers share this bounded pool. Deployment
+    // profiles size it against Postgres `max_connections` (ADR-0062).
     let max_connections = std::env::var("SYNVEDA_DB_MAX_CONNECTIONS")
         .ok()
         .map(|raw| {
@@ -305,17 +288,15 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    // The configured extractor only emits reviewable candidates; the
-    // configured embedder remains available to Knowledge search and context
-    // paths. The old extraction, promotion and retention loops are not
-    // started: all three mutate the retired record aggregate.
+    // Extraction emits reviewable candidates; the embedder serves Knowledge
+    // search and context planning.
     let capture_extractor = Arc::new(extractor_from_env()?);
     let embedder = Arc::new(embedder_from_env()?);
     tracing::info!(
         extractor = capture_extractor.method(),
         embedder = embedder.method(),
         embedding_model = embedder.model(),
-        "capture extractor and Knowledge embedder ready; retired record writers are disabled"
+        "capture extractor and Knowledge embedder ready"
     );
 
     // Governed relaxation expiry bookkeeping (CPR-31, ADR-0090). Database

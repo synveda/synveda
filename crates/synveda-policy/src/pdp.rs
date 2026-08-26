@@ -1,15 +1,9 @@
 //! The embedded Cedar engine behind the facade (ADR-0002, ADR-0012,
 //! ADR-0014).
 //!
-//! Everything Cedar stays inside this crate: packs compile (parse +
-//! schema-validate, on top of the invariant base layer) at install time,
-//! the effective pack resolves nearest-ancestor-first from caller-supplied
-//! assignment rows, decisions evaluate against entities served from the
-//! entity store's prebuilt fragments (HIER-3, ADR-0017) — rebuilt from
-//! the caller-supplied chains whenever a hierarchy mutation reshaped
-//! them — and every call logs its decision with the policy pack version
-//! in force (the AUTHZ-1 AC; an AUD-1 emission point until the
-//! hash-chained log lands).
+//! Packs compile against the invariant base layer, resolve nearest-scope-first,
+//! and evaluate against entities assembled for the current governed scope
+//! chain. Every decision reports the exact pack version in force.
 
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -44,129 +38,9 @@ pub const STANDARD: &str = "standard";
 /// Org-wide read, personal scopes excluded (seed §6).
 pub const OPEN_COLLABORATION: &str = "open-collaboration";
 
-/// The embedded product packs and their versions — hand-bumped constants,
-/// changed whenever the corresponding source changes (ADR-0014
-/// decision 1). `@2`: AUTHZ-3 narrowed the admin planes to roles and
-/// added the content-role read grant (ADR-0015 decision 4). `@3`: AUTH-3
-/// added the service-identity plane to the admin permits (ADR-0018
-/// decision 3). `@4`: MEM-1 added the `KnowledgeWrite` own-home floor and
-/// content-role write grant (ADR-0020 decision 3). `@5`: MEM-2 added the
-/// quarantine review plane (ADR-0021 decision 6). `@6`: FLOW-2 added the
-/// channel plane (ADR-0031 decision 12). `@7`: FLOW-3 added the proposal
-/// plane and each pack's approval matrix (ADR-0032 decisions 3 and 16).
-/// `@8`: FLOW-7 added the rewind and pin actions (ADR-0036 decision 3).
-/// `@9`: AUTHZ-4 added the retired time-boxed record grant (ADR-0037
-/// decisions 7 and 15). `@10`: AUTHZ-5 made sensitivity a policy
-/// attribute — every `KnowledgeRead` permit names the tiers it covers, the base
-/// layer forbids `restricted` outright unless that reviewed grant declared it, and the
-/// classification plane joined (ADR-0038 decisions 4, 5 and 9). `@11`: AUD-2
-/// added `AuditRead` to the read-only admin permit every pack has carried
-/// since AUTHZ-2 — the line whose comment named this feature — which makes
-/// `auditor` a role with a live action rather than a marker row in the
-/// golden matrix (ADR-0045 decision 1). `@12`: PRMT-1 added the prompt
-/// registry's two seams — `PromptRead`, mirroring each pack's own KnowledgeRead
-/// shape tier for tier, and `PromptWrite`, mirroring its write floor — and
-/// the base layer's confinement carve-out gained `PromptRead` beside
-/// `KnowledgeRead`, because a team-anchored agent is the consumer prompts exist
-/// for and the org's are on its own chain (ADR-0049 decision 4). `@13`:
-/// PRMT-2 added the context-pack registry's two seams on the same shape —
-/// `ContextPackRead` is what admits pack chunks into a composed block, so
-/// the confinement carve-out gained it too — and re-priced
-/// `regulated-strict`'s `context-pack` approval cell, which FLOW-3 had left
-/// at one curator at every scope kind and nothing could reach until now
-/// (ADR-0050 decisions 7, 8 and 15). `@14`: SKIL-1 added the skills
-/// registry's two seams — `SkillRead`, on the context-pack plane's shape
-/// and in the confinement carve-out beside it, because an agent that cannot
-/// resolve the org's skills cannot do the work they were published for, and
-/// `SkillWrite`, separate because a skill is executable — and corrected the
-/// **invariant floor's** skill rule, which had required the
-/// `security-reviewer` role at one distinct approver, so under `standard`
-/// and `open-collaboration` one person holding both roles published
-/// executable code alone (ADR-0051 decisions 10 and 18). `@15`: AUTH-4
-/// added the base layer's second forbid — a sealed scope is nobody's to
-/// act on — and the `Scope` entity attribute it stands on, which is the
-/// mirror of the quarantine rule these packs have carried since ADR-0013:
-/// quarantine says this caller may do nothing, a seal says nothing may be
-/// done to this material. Every pack's own policies are **byte-identical**
-/// across this bump, which is what makes the golden diff checkable: the
-/// only cells that move are the ones a seal turns off (ADR-0059
-/// decisions 8 and 9). `@16`: AUTH-5 added `DirectorySealAuthorise`, the
-/// human release of a pull sync's circuit breaker, as its **own** action
-/// rather than widening `DirectoryManage` — one hands out a provisioning
-/// token, the other authorises irreversible bulk sealing, and a tenant that
-/// wants those two held by two people could not say so while they shared an
-/// action (ADR-0060 decision 10). All three packs grant it to `org-admin`,
-/// so the golden diff is exactly one new row per pack per scope kind and
-/// nothing else moves: the separation's value is what a *stored* pack can
-/// now express, not what these three say differently. `@17`: CPR-6 re-cut the
-/// entity model over governed scopes (ADR-0073) and every pack moved with it,
-/// in three ways. `principal.home` became `principal.own_scope` and
-/// `resource.kind != "user"` became `resource.kind != "principal"` — the same
-/// rules, in the shape vocabulary that replaced the rank one. Every role list
-/// gained the grant keys beside the binding roles it already named, so a
-/// workspace `owner` administers their workspace and a `member` contributes to
-/// it without anybody minting a legacy binding. And `standard`'s sharing
-/// default stopped reading `principal.department`, which is gone: it now
-/// shares within `principal.anchors`, the scopes a grant actually reaches this
-/// caller at, so the default follows what somebody was given rather than where
-/// an org chart put them. `@18`: CPR-7 finished the cut (ADR-0074). The
-/// binding vocabulary left every role list — `steward`, `org-admin`,
-/// `auditor`, `contributor`, `security-reviewer` and `compliance` are
-/// gone, and the six grant keys are the whole of `context.roles` — and
-/// the `Hierarchy*` actions became `ScopeCreate`/`ScopeRead`/
-/// `ScopeUpdate` (no delete: retiring a scope is a status transition).
-/// The base layer lost the role-binding escalation guard with the action
-/// it guarded. No permit changed who it lets in beyond that rename: the
-/// keys these packs already named since `@17` are the keys that remain.
-/// Four rules did move, and each is a hole the re-vocabulary opened rather
-/// than a widening anybody wanted: the approval matrix's SHARED cell got
-/// the **tenant root** back (it fell out of both cells and made the widest
-/// publication in the tenant the cheapest one); `DirectoryManage` and
-/// `DirectorySealAuthorise` got `administrator` back (the old `org-admin`
-/// was mapped to `owner` alone, which locked every directory operator
-/// out); `ProposalOpen`'s membership floor climbs by `principal.ambit`
-/// (ADR-0074 decision 8 — anchors are not entity parents, so
-/// `principal in resource` no longer reached the scope above); and the
-/// quarantine review plane decides at the tenant (decision 7).
-/// `@19`: CPR-10 added the session ledger (ADR-0076). Two actions —
-/// `SessionRead` and `SessionWrite` — and nothing else moved. Reading a
-/// run is priced with the **content** reads rather than with
-/// `ProjectRead`, because a project's name discloses nothing and a
-/// session's timeline is a transcript of what somebody and their agent
-/// did, said, read and changed; writing is the usual pack-uniform floor,
-/// own scope role-free and a content key beyond it. `standard` shares
-/// runs across `principal.ambit` exactly as it shares memory, and
-/// `open-collaboration` reads tenant-wide and still writes on the
-/// uniform floor. The membership floor is two clauses in every pack
-/// rather than one, and each says why: `principal in resource` walks
-/// *up* from the caller's own scope and can never reach a `Session`,
-/// which hangs *below* one.
-/// `@20`: CPR-11 split the raw payload off the timeline (ADR-0077
-/// decision 3). One action — `SessionDiagnostics` — and nothing else
-/// moved. It is **strictly narrower than each pack's own
-/// `SessionRead`**, which is the property the split exists for: under
-/// `regulated-strict` and `standard` it is the membership floor plus a
-/// governance key (`reviewer`, `owner`, `administrator`) where reading a
-/// timeline also admits `viewer`, `curator` and `member`, and `standard`
-/// deliberately does **not** extend it by `principal.ambit` — sharing one
-/// step outward is a decision about a reading surface, and a neighbouring
-/// project's raw prompts are not a default under any pack. Under
-/// `open-collaboration`, which reads runs tenant-wide role-free, it takes
-/// any grant at all: somebody holding nothing can see that a run happened
-/// and cannot read what was said in it.
-/// `@21`: CPR-16 adds the stable Knowledge aggregate's three actions
-/// (`KnowledgeRead`, `KnowledgeWrite`, `KnowledgeForget`) and exact item
-/// entity (ADR-0081). Read/write reach mirrors each pack's existing content
-/// shape, while irreversible forget is own-home role-free and otherwise
-/// owner/administrator-only. Knowledge does not inherit the retired grant
-/// override. The approval matrix mirrors memory so personal/small-scope
-/// changes can auto-apply under the permissive profiles but still pass
-/// through a real VedaFlow change.
-/// `@23`: CPR-31 replaces that mutable model with typed, versioned Policy/apply
-/// relaxations and makes `context.relaxed` part of the Knowledge decision.
-/// Writes resolve against the inherited selector, so a binding cannot grant
-/// authority to install itself; the shipped packs keep both surfaces
-/// administrative.
+/// Stable addresses of the embedded Cedar sources. Bump a version whenever
+/// its source changes; audit and decision evidence use the exact pair
+/// (ADR-0014). The accepted ADRs retain the version history.
 pub const EMBEDDED_PACKS: [(&str, i64); 3] = [
     (REGULATED_STRICT, 23),
     (STANDARD, 23),
