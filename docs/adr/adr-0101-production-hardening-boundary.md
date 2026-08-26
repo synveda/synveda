@@ -15,10 +15,12 @@ transport shells in large gateway modules, dishonest frontend failure states,
 and current documentation that contradicts executable evidence.
 
 Several release blockers are real but cannot be closed by a refactor alone:
-the Helm package does not yet have a complete published artifact set or KMS
-wiring, no backup/PITR restore drill exists, and legal ownership has not chosen
-a project licence. Treating a local test or prose update as closure would make
-the readiness record less trustworthy.
+the Helm package does not yet have a complete published artifact set, no
+backup/PITR restore drill exists, and legal ownership has not chosen a project
+licence. The chart's missing reference to the already shipped local KMS
+provider is code-local and can be fixed, but a reference is not evidence of
+external custody or recovery. Treating a local test or prose update as closure
+would make the readiness record less trustworthy.
 
 ## Decision
 
@@ -58,6 +60,15 @@ the readiness record less trustworthy.
    KMS, backup, HA, abuse-control, signing, upgrade and external-verification
    gaps stay Not ready with explicit acceptance criteria. CPR-44 cannot label
    the product production-ready while any release-blocking gap remains.
+9. **Helm accepts only configurations the gateway can start.** Extractor
+   validation mirrors the gateway's closed implementation set and requires
+   every setting that implementation needs. The chart requires an existing
+   Kubernetes Secret containing the deployment KEK and stable key reference;
+   it never generates, copies into values, prints or owns that material. The
+   reference closes the missing configuration seam for the shipped local KMS,
+   not external custody, rotation or restore evidence. Gateway and CNPG image
+   names may change only with matching release build/publish automation; local
+   image preloading is not publication evidence.
 
 ## Options considered
 
