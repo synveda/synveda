@@ -501,6 +501,19 @@ async fn errors_are_scim_errors_and_unsupported_filters_are_501() {
     let (status, _) = scim_get(&w, "/scim/v2/Users?filter=userName").await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
 
+    let absent = DirectoryUserId::new();
+    let (status, body) = scim_patch(
+        &w,
+        &format!("/scim/v2/Users/{absent}"),
+        json!({
+            "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
+            "Operations": [{"op": "replace", "path": "active", "value": false}]
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(body["scimType"], json!("invalidSyntax"));
+
     // The filter both clients send works, and answers a ListResponse even
     // when it matches nothing.
     let (status, body) = scim_get(

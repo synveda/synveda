@@ -159,6 +159,21 @@ impl ScimError {
     }
 }
 
+fn require_patch_schema(body: &wire::PatchRequest) -> Result<(), ScimError> {
+    if body
+        .schemas
+        .iter()
+        .any(|schema| schema == wire::PATCH_OP_SCHEMA)
+    {
+        return Ok(());
+    }
+    Err(ScimError::typed(
+        StatusCode::BAD_REQUEST,
+        "invalidSyntax",
+        "schemas must include the SCIM PatchOp URN",
+    ))
+}
+
 impl From<Error> for ScimError {
     fn from(error: Error) -> Self {
         ScimError::from_taxonomy(&error)

@@ -132,11 +132,7 @@ pub(crate) async fn issue(
         )
         .await?;
 
-        let days = request
-            .expires_in_days
-            .unwrap_or(DEFAULT_LIFETIME_DAYS)
-            .clamp(1, MAX_LIFETIME_DAYS);
-        let expires_at = Utc::now() + Duration::days(days);
+        let expires_at = resolved_expiry(Utc::now(), request.expires_in_days);
         let minted = synveda_identity::scim::mint(tenant_id)?;
         let subject = synveda_identity::current_tenant()
             .map(|context| context.claims.subject.clone())
@@ -313,10 +309,8 @@ async fn respond<T: IntoResponse>(
     }
 }
 
-/// The window a caller's request resolves to, exposed for the test that
-/// pins the cap.
 #[must_use]
-pub fn resolved_expiry(now: DateTime<Utc>, requested_days: Option<i64>) -> DateTime<Utc> {
+fn resolved_expiry(now: DateTime<Utc>, requested_days: Option<i64>) -> DateTime<Utc> {
     now + Duration::days(
         requested_days
             .unwrap_or(DEFAULT_LIFETIME_DAYS)

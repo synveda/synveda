@@ -39,17 +39,7 @@ use crate::app::AppState;
 use crate::audit;
 use crate::telemetry::SCIM_RECONCILES_TOTAL;
 
-/// Which door a directory fact arrived through.
-///
-/// AUTH-4 threaded a `ScimCredentialId` here because there was one plane and
-/// it always had one. AUTH-5's pull sync has no credential — it holds an
-/// outbound one, which is a different thing and must never appear in an audit
-/// payload (ADR-0060 decision 7) — so the parameter becomes the *source*.
-///
-/// This is ADR-0060 decision 2 made concrete: the two planes produce the same
-/// lifecycle through the same reconciler, and the only thing that
-/// distinguishes them on the chain is which one it was. A chain consumer that
-/// asked "who deprovisioned this person" still gets an answer from either.
+/// The authenticated push or configured pull source of a directory fact.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DirectorySource {
     /// A provisioning agent pushed it, authenticated by this credential.
@@ -62,19 +52,7 @@ pub enum DirectorySource {
 }
 
 impl DirectorySource {
-    /// Stable adapter key stored with directory-owned users and groups.
-    pub const fn key(self) -> &'static str {
-        match self {
-            DirectorySource::Scim(_) => "scim",
-            DirectorySource::Pull { connector } => connector,
-        }
-    }
-
-    /// The audit payload fragment naming this source.
-    ///
-    /// `credential_id` keeps the key and the shape AUTH-4's consumers already
-    /// read, and is `null` for a pull. Dropping the key on one plane would
-    /// make a chain query that filters on it silently miss half the events.
+    /// The content-free audit fragment identifying the source boundary.
     fn payload(self) -> serde_json::Value {
         match self {
             DirectorySource::Scim(id) => json!({"source": "scim", "credential_id": id}),
@@ -85,11 +63,6 @@ impl DirectorySource {
     }
 }
 
-/// Folds a source's identifying fields into an event payload.
-///
-/// A function rather than a repeated literal so the two planes cannot drift
-/// into describing themselves differently — which is the whole content of
-/// "the chain cannot tell the two doors apart" (ADR-0060 decision 2).
 fn with_source(mut payload: serde_json::Value, source: DirectorySource) -> serde_json::Value {
     let fragment = source.payload();
     if let (Some(payload), Some(fragment)) = (payload.as_object_mut(), fragment.as_object()) {
@@ -100,11 +73,7 @@ fn with_source(mut payload: serde_json::Value, source: DirectorySource) -> serde
     payload
 }
 
-/// What a reconciliation did — the metric label, and what the caller logs.
-///
-/// Named for the result rather than for the verb so it does not read as a
-/// second [`synveda_audit::Outcome`], which every audited path here also
-/// carries.
+/// The closed outcome vocabulary shared by logs and metrics.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Reconciled {
     /// A first placement: a new identity and a new personal scope.
@@ -112,11 +81,6 @@ pub enum Reconciled {
     /// An existing identity was linked to this mirror row rather than
     /// duplicated — the correspondence rule doing its job.
     Adopted,
-    /// The person's placement changed and their scope moved with them.
-    Moved,
-    /// The person's placement changed across a policy boundary and the
-    /// source pack said their material stays where it was written.
-    MovedAndSealed,
     /// `active: false`: the personal scope is sealed.
     Sealed,
     /// Nothing the directory sent changes anything here.
@@ -128,8 +92,6 @@ impl Reconciled {
         match self {
             Reconciled::Provisioned => "provisioned",
             Reconciled::Adopted => "adopted",
-            Reconciled::Moved => "moved",
-            Reconciled::MovedAndSealed => "moved_and_sealed",
             Reconciled::Sealed => "sealed",
             Reconciled::Unchanged => "unchanged",
         }

@@ -178,6 +178,7 @@ pub async fn patch(
     Json(body): Json<wire::PatchRequest>,
 ) -> Result<Response, ScimError> {
     let id = parse_id(&id)?;
+    super::require_patch_schema(&body)?;
     let tenant_id = auth.tenant.id;
     let mut tx = synveda_store::rls::begin_tenant_tx(&state.pool, tenant_id).await?;
     let current = scim_group(&mut tx, tenant_id, id).await?;
