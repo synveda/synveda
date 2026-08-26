@@ -389,3 +389,25 @@ test("the catalogue is honest when no project is selected", async () => {
   assert.doesNotMatch(text, /Import MCP server/i);
   assert.doesNotMatch(text, /Generated client configuration/i);
 });
+
+test("a server with no visible version stops before trust binding and connectivity work", async () => {
+  await Promise.all([
+    seed(`tools/server/${SERVER_ID}`, server()),
+    seed(`tools/server/${SERVER_ID}/versions`, { versions: [] }),
+  ]);
+  const text = toText(
+    renderToStaticMarkup(
+      <AppProvider value={context()}>
+        <ToolServerItem serverId={SERVER_ID} />
+      </AppProvider>,
+    ),
+  );
+  assert.match(text, /No policy-visible immutable version exists/i);
+  for (const unavailableCapability of [
+    "Report stateless discovery",
+    "Read-only connectivity evidence",
+    "Project binding",
+  ]) {
+    assert.doesNotMatch(text, new RegExp(unavailableCapability, "i"));
+  }
+});
