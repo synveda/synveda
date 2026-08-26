@@ -282,13 +282,19 @@ async fn project(
         &user,
     )
     .await?;
-    Ok(
-        directory::user(&state.pool, auth.tenant.id, DIRECTORY_SOURCE, user.id)
-            .await
-            .ok()
-            .flatten()
-            .unwrap_or(user),
-    )
+    // Reconciliation may link the mirror row to a newly provisioned identity.
+    // Forced RLS requires the committed reread to carry tenant context.
+    let mut tx = synveda_store::rls::begin_tenant_tx(&state.pool, auth.tenant.id).await?;
+    directory::user(&mut *tx, auth.tenant.id, DIRECTORY_SOURCE, user.id)
+        .await?
+        .ok_or_else(|| {
+            ScimError::from_taxonomy(&synveda_types::Error::Internal {
+                message: format!(
+                    "directory user {} disappeared after successful reconciliation",
+                    user.id
+                ),
+            })
+        })
 }
 
 /// The attributes a body carries, refusing a create with no `userName` —

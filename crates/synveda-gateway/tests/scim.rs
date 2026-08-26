@@ -220,6 +220,75 @@ async fn one_person_never_becomes_two_identities() {
     assert_eq!(identity_count(&w, "fay@example.test").await, 1);
 }
 
+/// The response reflects the committed identity link under the runtime RLS
+/// role; an unscoped read remains invisible.
+#[tokio::test]
+async fn reconciliation_response_reads_the_projected_row_under_forced_rls() {
+    let Some(mut w) = world().await else { return };
+    let url = std::env::var("DATABASE_URL").expect("world already read DATABASE_URL");
+    let runtime_pool = PgPoolOptions::new()
+        .max_connections(4)
+        .after_connect(|connection, _| {
+            Box::pin(async move {
+                sqlx::query("set role synveda_app")
+                    .execute(&mut *connection)
+                    .await?;
+                Ok(())
+            })
+        })
+        .connect(&url)
+        .await
+        .expect("connect as the RLS-enforced application role");
+    let pdp = Arc::new(Pdp::new().expect("build the embedded PDP"));
+    w.state = state_with_pool(runtime_pool, pdp);
+    w.app = router(w.state.clone());
+
+    let (status, created) = scim_post(
+        &w,
+        "/scim/v2/Users",
+        json!({
+            "schemas": ["urn:ietf:params:scim:schemas:core:2.0:User"],
+            "userName": "rls-projection@example.test",
+            "externalId": "ext-rls-projection",
+            "displayName": "RLS Projection",
+            "active": true
+        }),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "SCIM create failed: {created}");
+
+    let user_id: DirectoryUserId = created["id"]
+        .as_str()
+        .expect("created user id")
+        .parse()
+        .expect("directory user id");
+    let outside = directory::user(&w.state.pool, w.tenant, "scim", user_id)
+        .await
+        .expect("an unscoped RLS read fails closed as absence");
+    assert!(
+        outside.is_none(),
+        "the test must exercise a role for which a bare-pool tenant read is invisible"
+    );
+
+    let mut tx = rls::begin_tenant_tx(&w.state.pool, w.tenant)
+        .await
+        .expect("begin scoped verification read");
+    let projected = directory::user(&mut *tx, w.tenant, "scim", user_id)
+        .await
+        .expect("read projected user under RLS")
+        .expect("reconciliation retained its mirror row");
+    assert!(
+        projected.identity_id.is_some(),
+        "the returned projection must have completed its identity link"
+    );
+    assert_eq!(
+        created["meta"]["lastModified"],
+        json!(projected.updated_at),
+        "the route must render the committed post-reconciliation row; a suppressed RLS \
+         miss renders the stale pre-link timestamp instead"
+    );
+}
+
 /// A second live directory record for one person is refused, and refused
 /// **before anything is written**.
 ///
@@ -969,12 +1038,17 @@ fn metrics_handle() -> PrometheusHandle {
 }
 
 fn state(url: &str, pdp: Arc<Pdp>) -> AppState {
+    let pool = PgPoolOptions::new()
+        .max_connections(4)
+        .acquire_timeout(Duration::from_secs(5))
+        .connect_lazy(url)
+        .expect("parse database url");
+    state_with_pool(pool, pdp)
+}
+
+fn state_with_pool(pool: PgPool, pdp: Arc<Pdp>) -> AppState {
     AppState {
-        pool: PgPoolOptions::new()
-            .max_connections(4)
-            .acquire_timeout(Duration::from_secs(5))
-            .connect_lazy(url)
-            .expect("parse database url"),
+        pool,
         metrics: metrics_handle(),
         verifier: Arc::new(Hs256Verifier::new(SECRET)),
         login: None,
