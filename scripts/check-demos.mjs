@@ -254,6 +254,15 @@ function parseHelpCommands(help) {
   return commands;
 }
 
+function parseHelpOptions(help) {
+  const options = new Set();
+  for (const line of help.split(/\r?\n/)) {
+    const match = line.match(/^\s+(?:-[A-Za-z],\s+)?(--[a-z][a-z0-9-]*)\b/);
+    if (match) options.add(match[1]);
+  }
+  return options;
+}
+
 function helpText(path) {
   const args = [...path, "--help"];
   if (existsSync(DEFAULT_BINARY)) {
@@ -281,8 +290,12 @@ function buildCli() {
 export function generatedCliInventory(readHelp = helpText) {
   const children = new Map();
   const visit = (path) => {
-    const commands = parseHelpCommands(readHelp(path));
-    children.set(path.join(" "), new Set(commands));
+    const help = readHelp(path);
+    const commands = parseHelpCommands(help);
+    children.set(path.join(" "), {
+      commands: new Set(commands),
+      options: parseHelpOptions(help),
+    });
     for (const command of commands) visit([...path, command]);
   };
   visit([]);
@@ -326,6 +339,42 @@ function shellScripts(directory) {
   return output;
 }
 
+function yamlFiles(directory) {
+  const output = [];
+  for (const entry of readdirSync(directory).sort()) {
+    const path = join(directory, entry);
+    if (statSync(path).isDirectory()) {
+      output.push(...yamlFiles(path));
+    } else if (entry.endsWith(".yaml") || entry.endsWith(".yml")) {
+      output.push(path);
+    }
+  }
+  return output;
+}
+
+function yamlCommandArrays(source) {
+  const output = [];
+  const matcher = /^\s*(?:command|args):\s*(\[[^\n]*\])\s*$/gmu;
+  for (const match of source.matchAll(matcher)) {
+    try {
+      const words = JSON.parse(match[1]);
+      if (Array.isArray(words) && words.every((word) => typeof word === "string")) {
+        output.push({ line: source.slice(0, match.index).split("\n").length, words });
+      }
+    } catch {
+      // YAML permits more than JSON. Non-JSON command forms remain the shell
+      // script's responsibility; only exact arrays can be checked safely here.
+    }
+  }
+  return output;
+}
+
+function inventoryEntry(inventory, path) {
+  const entry = inventory.get(path);
+  if (entry instanceof Set) return { commands: entry, options: new Set() };
+  return entry ?? { commands: new Set(), options: new Set() };
+}
+
 function cliFinding(file, line, words, start, inventory) {
   if (start < 0 || !isSynvedaCommand(words[start])) return null;
   let parent = "";
@@ -334,7 +383,7 @@ function cliFinding(file, line, words, start, inventory) {
   while (cursor < words.length) {
     const token = words[cursor];
     if (token.startsWith("-") || token.includes("=") || token.startsWith("$")) break;
-    const available = inventory.get(parent) ?? new Set();
+    const available = inventoryEntry(inventory, parent).commands;
     if (!available.has(token)) {
       if (available.size === 0) break;
       const attempted = [...accepted, token].join(" ");
@@ -346,6 +395,17 @@ function cliFinding(file, line, words, start, inventory) {
   }
   if (accepted.length === 0) {
     return `${file}:${line}: synveda ${words[start + 1] ?? "<missing>"}: absent from generated --help inventory`;
+  }
+  const options = new Set([
+    ...inventoryEntry(inventory, "").options,
+    ...inventoryEntry(inventory, parent).options,
+  ]);
+  for (const token of words.slice(cursor)) {
+    if (!token.startsWith("--") || token === "--" || token.includes("$")) continue;
+    const option = token.split("=", 1)[0];
+    if (!options.has(option)) {
+      return `${file}:${line}: synveda ${accepted.join(" ")} ${option}: absent from generated --help options`;
+    }
   }
   return null;
 }
@@ -380,6 +440,15 @@ export function checkCorpus({ demoDir, routes, cliInventory, repositoryRoot = re
           }
         }
       }
+    }
+  }
+  for (const path of yamlFiles(demoDir)) {
+    const file = relative(demoDir, path);
+    const source = readFileSync(path, "utf8");
+    for (const invocation of yamlCommandArrays(source)) {
+      const start = commandStart(invocation.words);
+      const cli = cliFinding(file, invocation.line, invocation.words, start, cliInventory);
+      if (cli) findings.push(cli);
     }
   }
   return findings;

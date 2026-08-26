@@ -11,10 +11,10 @@ afterEach(() => {
   while (temporary.length > 0) rmSync(temporary.pop(), { recursive: true, force: true });
 });
 
-function fixture(source) {
+function fixture(source, name = "fixture.sh") {
   const directory = mkdtempSync(join(tmpdir(), "synveda-check-demos-"));
   temporary.push(directory);
-  writeFileSync(join(directory, "fixture.sh"), source);
+  writeFileSync(join(directory, name), source);
   return directory;
 }
 
@@ -103,4 +103,19 @@ synveda scope list
   });
   assert.equal(findings.length, 1, findings.join("\n"));
   assert.match(findings[0], /docs\/backlog\/DELETED\.md/u);
+});
+
+test("container command arrays cannot hide a removed CLI option", () => {
+  const directory = fixture(
+    'command: ["/usr/local/bin/synveda", "audit", "verify", "--tenant", "abc"]\n',
+    "job.yaml",
+  );
+  const cliInventory = new Map([
+    ["", { commands: new Set(["audit"]), options: new Set() }],
+    ["audit", { commands: new Set(["verify"]), options: new Set() }],
+    ["audit verify", { commands: new Set(), options: new Set(["--json", "--profile"]) }],
+  ]);
+  const findings = checkCorpus({ demoDir: directory, routes: [], cliInventory });
+  assert.equal(findings.length, 1, findings.join("\n"));
+  assert.match(findings[0], /audit verify --tenant/u);
 });

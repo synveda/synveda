@@ -19,10 +19,8 @@ WORKDIR /src
 RUN corepack enable
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY console/package.json console/
-# Adapters and SDKs are workspace members the lockfile resolves against;
-# their manifests have to exist for a frozen install to succeed.
+# The adapter is a workspace member the lockfile resolves against.
 COPY adapters/claude-code/package.json adapters/claude-code/
-COPY sdks/typescript/package.json      sdks/typescript/
 RUN pnpm install --frozen-lockfile --filter @synveda/console...
 COPY tsconfig.base.json ./
 COPY console console
@@ -42,10 +40,12 @@ COPY rust-toolchain.toml ./
 COPY Cargo.toml Cargo.lock ./
 COPY crates/synveda-audit/Cargo.toml       crates/synveda-audit/
 COPY crates/synveda-cli/Cargo.toml         crates/synveda-cli/
+COPY crates/synveda-crypto/Cargo.toml      crates/synveda-crypto/
 COPY crates/synveda-eval/Cargo.toml        crates/synveda-eval/
 COPY crates/synveda-gateway/Cargo.toml     crates/synveda-gateway/
 COPY crates/synveda-identity/Cargo.toml    crates/synveda-identity/
 COPY crates/synveda-ingest/Cargo.toml      crates/synveda-ingest/
+COPY crates/synveda-okf/Cargo.toml         crates/synveda-okf/
 COPY crates/synveda-policy/Cargo.toml      crates/synveda-policy/
 COPY crates/synveda-retrieval/Cargo.toml   crates/synveda-retrieval/
 COPY crates/synveda-store/Cargo.toml       crates/synveda-store/
@@ -63,10 +63,11 @@ RUN set -eux; \
 # sqlx macros compile against the committed query cache; this image has no
 # database, exactly like CI.
 ENV SQLX_OFFLINE=true
-RUN cargo build --release -p synveda-gateway -p synveda-cli || true
+RUN cargo build --release -p synveda-gateway -p synveda-cli
 
 # The real sources. Touching them invalidates only from here down.
 COPY .sqlx .sqlx
+COPY adapters/registry.json adapters/registry.json
 COPY crates crates
 RUN set -eux; \
     find crates -name '*.rs' -newermt '1970-01-01' -exec touch {} +; \

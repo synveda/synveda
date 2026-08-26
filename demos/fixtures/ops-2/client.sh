@@ -158,11 +158,15 @@ grep -q '"id"' "$WORK/body" ||
   fail "the context run response has no run identity" "$(cat "$WORK/body")"
 echo "    context composition completed; the unreviewed event was not treated as Knowledge"
 
-# The chain is verified too, but not from here. `synveda audit verify`
-# walks the chain in the database and recomputes every hash — an operator's
-# check with a database connection, not an API call — and this container
-# deliberately holds no database credential: everything above went through
-# `/v1` under a bearer. The demo runs it in a pod of its own.
+# The same authenticated public plane verifies the complete tenant audit
+# chain. The client still holds no database credential.
+echo "==> audit verify — through /v1 under the operator bearer"
+audit_json=$(synveda audit verify --json) || fail "the audit chain did not verify"
+printf '%s\n' "$audit_json"
+case "$audit_json" in
+*'"valid": true'*) ;;
+*) fail "audit verification returned no valid result" "$audit_json" ;;
+esac
 
 echo "ready" >"$WORK/status"
 echo

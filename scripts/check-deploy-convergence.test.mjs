@@ -3,10 +3,42 @@ import test from "node:test";
 
 import {
   hasRetiredDemoField,
+  missingLocalDockerCopySources,
+  missingWorkspaceManifestCopies,
   releaseNoteFindings,
   retiredFindings,
   serviceBlock,
+  suppressesCargoBuildFailure,
 } from "./check-deploy-convergence.mjs";
+
+test("a gateway image cannot copy a deleted workspace manifest", () => {
+  const dockerfile = `
+COPY package.json pnpm-lock.yaml ./
+COPY sdks/typescript/package.json sdks/typescript/
+COPY --from=build /src/target/release/synveda /usr/local/bin/synveda
+`;
+  const present = new Set(["package.json", "pnpm-lock.yaml"]);
+  assert.deepEqual(
+    missingLocalDockerCopySources(dockerfile, (path) => present.has(path)),
+    ["sdks/typescript/package.json"],
+  );
+});
+
+test("the image cache stage names every crate and fails closed", () => {
+  const dockerfile = `
+COPY crates/alpha/Cargo.toml crates/alpha/
+RUN cargo build --release
+`;
+  assert.deepEqual(
+    missingWorkspaceManifestCopies(dockerfile, [
+      "crates/alpha/Cargo.toml",
+      "crates/beta/Cargo.toml",
+    ]),
+    ["crates/beta/Cargo.toml"],
+  );
+  assert.equal(suppressesCargoBuildFailure(dockerfile), false);
+  assert.equal(suppressesCargoBuildFailure("RUN cargo build --release || true\n"), true);
+});
 
 test("extracts only the requested compose service", () => {
   const compose = `

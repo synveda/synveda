@@ -5,7 +5,14 @@
 // the release profile twice so an upgrade-shaped stale file cannot survive.
 
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  readdirSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -66,6 +73,31 @@ export function releaseNoteFindings(source) {
     previous = Math.max(previous, index);
   }
   return findings;
+}
+
+export function localDockerCopySources(source) {
+  const sources = [];
+  for (const line of source.split("\n")) {
+    const instruction = line.trim();
+    if (!instruction.startsWith("COPY ") || instruction.startsWith("COPY --from=")) continue;
+    const fields = instruction.slice("COPY ".length).trim().split(/\s+/);
+    if (fields.length < 2 || fields.some((field) => field.includes("$"))) continue;
+    sources.push(...fields.slice(0, -1).filter((field) => !field.startsWith("--")));
+  }
+  return sources;
+}
+
+export function missingLocalDockerCopySources(source, pathExists) {
+  return localDockerCopySources(source).filter((path) => !pathExists(path));
+}
+
+export function missingWorkspaceManifestCopies(source, manifests) {
+  const copied = new Set(localDockerCopySources(source));
+  return manifests.filter((manifest) => !copied.has(manifest));
+}
+
+export function suppressesCargoBuildFailure(source) {
+  return /cargo build[^\n]*\|\|\s*true/.test(source);
 }
 
 function fail(message) {
@@ -163,6 +195,32 @@ function checkReleaseNotes() {
   }
 }
 
+function checkGatewayImageInputs() {
+  const relative = "deploy/compose/gateway/Dockerfile";
+  const source = read(relative);
+  const missing = missingLocalDockerCopySources(source, (path) =>
+    existsSync(join(ROOT, path)),
+  );
+  if (missing.length > 0) {
+    fail(`${relative} copies missing build inputs: ${missing.join(", ")}`);
+  }
+  const manifests = readdirSync(join(ROOT, "crates"), { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => `crates/${entry.name}/Cargo.toml`)
+    .filter((path) => existsSync(join(ROOT, path)))
+    .sort();
+  const omitted = missingWorkspaceManifestCopies(source, manifests);
+  if (omitted.length > 0) {
+    fail(`${relative} omits workspace manifests from its cache stage: ${omitted.join(", ")}`);
+  }
+  if (!localDockerCopySources(source).includes("adapters/registry.json")) {
+    fail(`${relative} omits the CLI's embedded adapters/registry.json`);
+  }
+  if (suppressesCargoBuildFailure(source)) {
+    fail(`${relative} suppresses a dependency-cache cargo build failure`);
+  }
+}
+
 function checkReleaseUpgradeShape() {
   const scratch = mkdtempSync(join(tmpdir(), "synveda-deploy-check-"));
   try {
@@ -202,12 +260,13 @@ export function main() {
   checkCompose("deploy/compose/docker-compose.yml", false);
   checkCompose("deploy/release/docker-compose.yml", true);
   checkHelm();
+  checkGatewayImageInputs();
   checkPublicContract();
   checkReleaseNotes();
   checkReleaseUpgradeShape();
   console.log(
-    "deployment convergence holds: 2 Compose renders, Helm render, current OpenAPI, " +
-      "least-privilege runtime DSNs and repeatable release replacement",
+    "deployment convergence holds: 2 Compose renders, Helm render, gateway image inputs, " +
+      "current OpenAPI, least-privilege runtime DSNs and repeatable release replacement",
   );
 }
 

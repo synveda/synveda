@@ -257,17 +257,6 @@ kubectl logs -n "$NS" synveda-install-test -c client --tail=100 2>/dev/null | se
 [ "$status" = "ready" ] || fail "the governed round trip did not complete" \
   "$(kubectl logs -n "$NS" synveda-install-test --all-containers --tail=60 2>&1 || true)"
 
-# ── and the chain over all of it ─────────────────────────────────────────
-echo "==> audit verify — under the gateway's own least-privilege role"
-kubectl delete job audit-verify -n "$NS" --ignore-not-found >/dev/null
-sed -e "s/__TENANT_ID__/$TENANT_ID/" -e "s/__IMAGE_TAG__/$IMAGE_TAG/" \
-  "$FIXTURES/audit-verify-job.yaml" |
-  kubectl apply -f - >/dev/null
-kubectl wait --for=condition=complete --timeout=120s -n "$NS" job/audit-verify >/dev/null 2>&1 ||
-  fail "the audit chain did not verify" \
-    "$(kubectl logs -n "$NS" job/audit-verify --tail=20 2>&1 || true)"
-kubectl logs -n "$NS" job/audit-verify --tail=5 | sed 's/^/    /'
-
 # ── assertion 2: the failover ────────────────────────────────────────────
 # The gateway's pool is `connect_lazy` so that a database outage is a
 # /readyz report rather than a crash-loop. Nothing has ever tested that
