@@ -662,7 +662,7 @@ mod tests {
 
     fn memory_rule() -> ApprovalRule {
         ApprovalRule {
-            asset: Some(AssetKind::Memory),
+            asset: Some(AssetKind::Knowledge),
             min_sensitivity: Sensitivity::Public,
             scope_kinds: None,
             roles: vec![RoleRequirement::new(RoleKey::Curator, 1)],
@@ -677,7 +677,7 @@ mod tests {
     #[test]
     fn the_floor_survives_an_empty_matrix() {
         let requirement = ApprovalMatrix::empty().resolve(
-            AssetKind::Memory,
+            AssetKind::Knowledge,
             Sensitivity::Restricted,
             ScopeKind::OrgUnit,
         );
@@ -697,7 +697,7 @@ mod tests {
             rules: vec![memory_rule()],
         };
         let requirement = matrix.resolve(
-            AssetKind::Memory,
+            AssetKind::Knowledge,
             Sensitivity::Restricted,
             ScopeKind::OrgUnit,
         );
@@ -721,7 +721,7 @@ mod tests {
     #[test]
     fn below_restricted_the_floor_asks_nothing_of_a_memory() {
         let requirement = ApprovalMatrix::empty().resolve(
-            AssetKind::Memory,
+            AssetKind::Knowledge,
             Sensitivity::Confidential,
             ScopeKind::OrgUnit,
         );
@@ -758,8 +758,11 @@ mod tests {
                 },
             ],
         };
-        let requirement =
-            matrix.resolve(AssetKind::Memory, Sensitivity::Internal, ScopeKind::OrgUnit);
+        let requirement = matrix.resolve(
+            AssetKind::Knowledge,
+            Sensitivity::Internal,
+            ScopeKind::OrgUnit,
+        );
         assert_eq!(
             requirement.roles,
             vec![RoleRequirement::new(RoleKey::Curator, 2)],
@@ -771,7 +774,7 @@ mod tests {
     #[test]
     fn scope_kinds_and_min_sensitivity_both_gate_a_rule() {
         let rule = ApprovalRule {
-            asset: Some(AssetKind::Memory),
+            asset: Some(AssetKind::Knowledge),
             min_sensitivity: Sensitivity::Confidential,
             scope_kinds: Some(vec![ScopeKind::OrgUnit, ScopeKind::Tenant]),
             roles: vec![RoleRequirement::new(RoleKey::Administrator, 1)],
@@ -780,13 +783,17 @@ mod tests {
             separate_effect_actor: false,
         };
         assert!(rule.matches(
-            AssetKind::Memory,
+            AssetKind::Knowledge,
             Sensitivity::Restricted,
             ScopeKind::Tenant
         ));
-        assert!(!rule.matches(AssetKind::Memory, Sensitivity::Internal, ScopeKind::Tenant));
         assert!(!rule.matches(
-            AssetKind::Memory,
+            AssetKind::Knowledge,
+            Sensitivity::Internal,
+            ScopeKind::Tenant
+        ));
+        assert!(!rule.matches(
+            AssetKind::Knowledge,
             Sensitivity::Restricted,
             ScopeKind::Principal
         ));
@@ -806,7 +813,7 @@ mod tests {
             rules: vec![memory_rule()],
         }
         .resolve(
-            AssetKind::Memory,
+            AssetKind::Knowledge,
             Sensitivity::Restricted,
             ScopeKind::OrgUnit,
         );
@@ -829,7 +836,11 @@ mod tests {
         let requirement = ApprovalMatrix {
             rules: vec![memory_rule()],
         }
-        .resolve(AssetKind::Memory, Sensitivity::Internal, ScopeKind::OrgUnit);
+        .resolve(
+            AssetKind::Knowledge,
+            Sensitivity::Internal,
+            ScopeKind::OrgUnit,
+        );
         assert!(requirement.satisfied_by(&[approval(1, &[RoleKey::Curator])]));
         assert!(!requirement.satisfied_by(&[approval(1, &[RoleKey::Viewer])]));
     }
@@ -846,7 +857,11 @@ mod tests {
                 ..memory_rule()
             }],
         }
-        .resolve(AssetKind::Memory, Sensitivity::Internal, ScopeKind::OrgUnit);
+        .resolve(
+            AssetKind::Knowledge,
+            Sensitivity::Internal,
+            ScopeKind::OrgUnit,
+        );
 
         assert!(!requirement.allows_review_by(author, author));
         assert!(requirement.allows_review_by(author, reviewer.identity));
@@ -862,7 +877,7 @@ mod tests {
     #[test]
     fn a_named_subject_must_approve_and_raises_the_distinct_floor() {
         let mut requirement = ApprovalMatrix::empty().resolve(
-            AssetKind::Memory,
+            AssetKind::Knowledge,
             Sensitivity::Internal,
             ScopeKind::OrgUnit,
         );
@@ -885,7 +900,11 @@ mod tests {
         let requirement = ApprovalMatrix {
             rules: vec![memory_rule()],
         }
-        .resolve(AssetKind::Memory, Sensitivity::Internal, ScopeKind::OrgUnit);
+        .resolve(
+            AssetKind::Knowledge,
+            Sensitivity::Internal,
+            ScopeKind::OrgUnit,
+        );
         let outstanding = requirement.outstanding(&[]);
         assert!(
             outstanding.advanced_by(&approval(1, &[RoleKey::Viewer])),
@@ -972,7 +991,7 @@ mod tests {
     #[test]
     fn outstanding_describes_itself_for_a_reviewer() {
         let requirement = ApprovalMatrix::empty().resolve(
-            AssetKind::Memory,
+            AssetKind::Knowledge,
             Sensitivity::Restricted,
             ScopeKind::OrgUnit,
         );

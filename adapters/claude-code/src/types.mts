@@ -7,9 +7,8 @@
  * another program (ADR-0027 decision 9), so the adapter declares only the
  * fields it uses and treats the rest as opaque.
  *
- * The three global primitives these types used to describe — `/v1/observe`,
- * `/v1/inject` and `/v1/recall` — are deleted. What replaced them names the
- * run it belongs to, which is why every request shape below carries a session.
+ * Every runtime request names the server-owned run it belongs to; the adapter
+ * carries no parallel application model.
  */
 
 /** The subset of a Claude Code hook payload the adapter reads. */

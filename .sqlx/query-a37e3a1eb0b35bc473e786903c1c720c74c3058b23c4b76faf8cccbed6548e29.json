@@ -1,0 +1,76 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select tenant_id, name, version, source, redaction, composition,\n               approvals, scan, quality,\n               updated_at\n        from policy_packs where tenant_id = $1\n        order by name\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "tenant_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "version",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "source",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "redaction",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 5,
+        "name": "composition",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 6,
+        "name": "approvals",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 7,
+        "name": "scan",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 8,
+        "name": "quality",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 9,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "a37e3a1eb0b35bc473e786903c1c720c74c3058b23c4b76faf8cccbed6548e29"
+}

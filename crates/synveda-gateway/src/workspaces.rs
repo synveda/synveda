@@ -3,9 +3,8 @@
 //! every `/v1` route, behind the PDP like every governed one, and chaining an
 //! audit event for every mutation.
 //!
-//! Nothing is synchronised to make this work: no row of `hierarchy_nodes`
-//! becomes a scope, and no scope is mirrored into the hierarchy (ADR-0068
-//! decision 3).
+//! Scope identity is native: each workspace and project owns exactly one
+//! governed scope, with no parallel placement model (ADR-0068 decision 3).
 //!
 //! # Creation is idempotent; updates carry a precondition
 //!
@@ -28,8 +27,7 @@
 //! The consequence a reader should expect: the ownership check now runs
 //! *before* the decision on every per-object route, because deciding about a
 //! workspace requires having fetched it. That is the order ADR-0012 decision 7
-//! sets and the hierarchy plane has always used — a foreign object is a 404,
-//! never a policy-denial oracle.
+//! sets — a foreign object is a 404, never a policy-denial oracle.
 
 use axum::Json;
 use axum::extract::rejection::JsonRejection;

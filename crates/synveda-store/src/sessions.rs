@@ -875,8 +875,7 @@ pub async fn append_events(
     // dev-database link that is ~35ms of ack for a full batch — nearly twice
     // seed §10's <20ms enqueue-only budget, which
     // `session_ingest_load.rs::append_ack_sustains_1k_events_per_second`
-    // measures. `/v1/observe` was one `unnest` insert and this is what
-    // replaced it, so it is one too.
+    // measures. The public batch append is therefore one `unnest` insert.
     //
     // Duplicates are found **before** the insert rather than by
     // `ON CONFLICT DO NOTHING`, and that is not a style choice: positions are
@@ -937,8 +936,7 @@ pub async fn append_events(
             .collect();
         // Nullable elements cannot ride a typed vec; `redactions` goes over as
         // a jsonb array whose elements are the per-event summary or json null
-        // (mapped back to a SQL null in the insert) — `/v1/observe`'s device,
-        // for its reason.
+        // (mapped back to a SQL null in the insert).
         let redactions = serde_json::Value::Array(
             fresh
                 .iter()

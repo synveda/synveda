@@ -39,7 +39,7 @@
     },
     {
       "name": "epsilon-bait-unnamed-owner",
-      "note": "The transcript says an owner exists and that the rota does not name them. A name in the extracted record is an invented attribution.",
+      "note": "The transcript says an owner exists and that the rota does not name them. A name in the extracted candidate is an invented attribution.",
       "input": {
         "event_type": "message.user",
         "session_id": "epsilon-4",
@@ -51,7 +51,7 @@
     },
     {
       "name": "epsilon-bait-no-timing",
-      "note": "A tool result that explicitly reports no timings. A number here is fabricated measurement, which is the failure mode a memory product can least afford.",
+      "note": "A tool result that explicitly reports no timings. A number here is fabricated measurement, which is the failure mode a context product can least afford.",
       "input": {
         "event_type": "tool.result",
         "session_id": "epsilon-5",

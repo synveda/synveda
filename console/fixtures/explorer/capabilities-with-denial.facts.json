@@ -11,8 +11,6 @@
     "knowledge.write",
     "membership.grant",
     "membership.read",
-    "memory.classify",
-    "memory.write",
     "policy.read",
     "project.create",
     "project.read",

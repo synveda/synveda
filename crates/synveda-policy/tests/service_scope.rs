@@ -2,7 +2,7 @@
 //! A service identity's decisions are bounded by its anchor subtree
 //! *regardless of bound roles* — a tenant-wide org-admin binding on an
 //! agent subject cannot escape — with exactly one carve-out: the
-//! role-free membership floor (own-chain `MemoryRead`), so a team agent
+//! role-free membership floor (own-chain `KnowledgeRead`), so a team agent
 //! still composes team → department → org. Tenant-plane resources are
 //! unreachable outright. Users carry no `token_scope` and are untouched.
 //!
@@ -232,7 +232,7 @@ fn token_scope_confines_the_admin_plane_regardless_of_roles() {
     ));
 }
 
-/// The carve-out is exactly the membership floor: own-chain `MemoryRead`
+/// The carve-out is exactly the membership floor: own-chain `KnowledgeRead`
 /// survives confinement (a team agent composes team → dept → org on
 /// inject like any placed member), while roles that would widen reads
 /// beyond the subtree are clamped.
@@ -246,14 +246,14 @@ fn memory_read_keeps_the_own_chain_floor_and_nothing_more() {
     // zero-config default pack).
     for target in ["agent-user", "team-a", "eng", "org"] {
         assert!(
-            decide(&pdp, &fx, &agent, Action::MemoryRead, Some(target), &[]),
-            "own-chain MemoryRead on {target} must survive confinement"
+            decide(&pdp, &fx, &agent, Action::KnowledgeRead, Some(target), &[]),
+            "own-chain KnowledgeRead on {target} must survive confinement"
         );
     }
     for target in ["team-b", "team-c", "sales", "carol-user"] {
         assert!(
-            !decide(&pdp, &fx, &agent, Action::MemoryRead, Some(target), &[]),
-            "off-chain MemoryRead on {target} must be denied"
+            !decide(&pdp, &fx, &agent, Action::KnowledgeRead, Some(target), &[]),
+            "off-chain KnowledgeRead on {target} must be denied"
         );
     }
 
@@ -265,7 +265,7 @@ fn memory_read_keeps_the_own_chain_floor_and_nothing_more() {
         &pdp,
         &fx,
         &agent,
-        Action::MemoryRead,
+        Action::KnowledgeRead,
         Some("team-a"),
         &anchors,
     ));
@@ -274,11 +274,11 @@ fn memory_read_keeps_the_own_chain_floor_and_nothing_more() {
             &pdp,
             &fx,
             &agent,
-            Action::MemoryRead,
+            Action::KnowledgeRead,
             Some("team-b"),
             &anchors,
         ),
-        "a role must not widen MemoryRead beyond the token scope"
+        "a role must not widen KnowledgeRead beyond the token scope"
     );
 
     // Contrast: the same principal shape without a token scope (a user)
@@ -294,7 +294,7 @@ fn memory_read_keeps_the_own_chain_floor_and_nothing_more() {
         &pdp,
         &fx,
         &user,
-        Action::MemoryRead,
+        Action::KnowledgeRead,
         Some("team-b"),
         &anchors
     ));
@@ -316,7 +316,7 @@ fn memory_write_lands_at_home_and_confinement_clamps_the_grant() {
             &pdp,
             &fx,
             &agent,
-            Action::MemoryWrite,
+            Action::KnowledgeWrite,
             Some("agent-user"),
             &[]
         ),
@@ -324,8 +324,8 @@ fn memory_write_lands_at_home_and_confinement_clamps_the_grant() {
     );
     for target in ["team-a", "eng", "org", "team-b", "team-c", "carol-user"] {
         assert!(
-            !decide(&pdp, &fx, &agent, Action::MemoryWrite, Some(target), &[]),
-            "role-free MemoryWrite on {target} must be denied"
+            !decide(&pdp, &fx, &agent, Action::KnowledgeWrite, Some(target), &[]),
+            "role-free KnowledgeWrite on {target} must be denied"
         );
     }
 
@@ -337,7 +337,7 @@ fn memory_write_lands_at_home_and_confinement_clamps_the_grant() {
             &pdp,
             &fx,
             &agent,
-            Action::MemoryWrite,
+            Action::KnowledgeWrite,
             Some("team-a"),
             &anchors
         ),
@@ -349,11 +349,11 @@ fn memory_write_lands_at_home_and_confinement_clamps_the_grant() {
                 &pdp,
                 &fx,
                 &agent,
-                Action::MemoryWrite,
+                Action::KnowledgeWrite,
                 Some(target),
                 &anchors
             ),
-            "a role must not widen MemoryWrite beyond the token scope ({target})"
+            "a role must not widen KnowledgeWrite beyond the token scope ({target})"
         );
     }
 
@@ -368,7 +368,7 @@ fn memory_write_lands_at_home_and_confinement_clamps_the_grant() {
         &pdp,
         &fx,
         &user,
-        Action::MemoryWrite,
+        Action::KnowledgeWrite,
         Some("team-b"),
         &anchors
     ));
@@ -380,7 +380,7 @@ fn memory_write_lands_at_home_and_confinement_clamps_the_grant() {
 ///
 /// A headless agent is the consumer prompts exist for, and the org's
 /// `house-style` sits two levels above the anchor — so without `PromptRead`
-/// beside `MemoryRead` in the base layer's confinement forbid, the registry
+/// beside `KnowledgeRead` in the base layer's confinement forbid, the registry
 /// would be unreadable by exactly the callers it is for. `ContextPackRead`
 /// is there for a stronger version of the same reason: pack material
 /// composes through `inject`, off the same plan walk that already reaches

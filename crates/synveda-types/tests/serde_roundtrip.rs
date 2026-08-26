@@ -7,8 +7,8 @@ use serde::Serialize;
 use serde::de::DeserializeOwned;
 use synveda_types::session::SessionEventType;
 use synveda_types::{
-    CompositionConfig, Error, IdentityId, InjectChannels, RecordClass, RecordId, RecordKind,
-    RedactionConfig, RedactionMode, ScopeId, Sensitivity, Tenant, TenantId, TenantStatus,
+    CompositionConfig, Error, IdentityId, RedactionConfig, RedactionMode, ScopeId, Sensitivity,
+    Tenant, TenantId, TenantStatus,
 };
 
 fn json_roundtrip<T>(value: &T) -> T
@@ -67,7 +67,6 @@ macro_rules! id_tests {
 id_tests!(tenant_id, TenantId);
 id_tests!(scope_id, ScopeId);
 id_tests!(identity_id, IdentityId);
-id_tests!(record_id, RecordId);
 
 // ── Sensitivity ──────────────────────────────────────────────────────────────
 
@@ -162,22 +161,6 @@ fn redaction_config_rejects_unknown_fields() {
 // ── Composition config ───────────────────────────────────────────────────────
 
 #[test]
-fn inject_channels_roundtrip_kebab_case() {
-    for channels in InjectChannels::ALL {
-        json_roundtrip(&channels);
-        let json = serde_json::to_string(&channels).expect("serialize");
-        assert_eq!(json, format!("\"{}\"", channels.as_str()));
-        assert_eq!(
-            InjectChannels::from_str(channels.as_str()).unwrap(),
-            channels
-        );
-    }
-    assert!(serde_json::from_str::<InjectChannels>("\"derived-only\"").is_err());
-    assert!(InjectChannels::PublishedAndDerived.includes_derived());
-    assert!(!InjectChannels::PublishedOnly.includes_derived());
-}
-
-#[test]
 fn composition_config_roundtrips_and_defaults_to_the_product_config() {
     json_roundtrip(&CompositionConfig::DEFAULT);
     assert_eq!(
@@ -187,10 +170,6 @@ fn composition_config_roundtrips_and_defaults_to_the_product_config() {
          (ADR-0025 decision 3 — the config only ever narrows)"
     );
     assert_eq!(CompositionConfig::DEFAULT.budget_tokens, 1_500, "seed §4.4");
-    assert_eq!(
-        CompositionConfig::DEFAULT.channels,
-        InjectChannels::PublishedAndDerived
-    );
 }
 
 #[test]
@@ -199,42 +178,10 @@ fn composition_config_rejects_unknown_fields() {
     // loudly, never silently compose under a default it didn't choose.
     assert!(
         serde_json::from_str::<CompositionConfig>(
-            r#"{"budget_tokens":900,"channels":"published-only","chanels":"published-only"}"#
+            r#"{"budget_tokens":900,"summary_chars":240,"channels":"published-only"}"#
         )
         .is_err()
     );
-}
-
-// ── Record kind & class ──────────────────────────────────────────────────────
-
-#[test]
-fn record_kind_all_roundtrip_and_match_as_str() {
-    for kind in RecordKind::ALL {
-        json_roundtrip(&kind);
-        let json = serde_json::to_string(&kind).expect("serialize");
-        assert_eq!(json, format!("\"{}\"", kind.as_str()));
-        assert_eq!(RecordKind::from_str(kind.as_str()).unwrap(), kind);
-        assert_eq!(kind.to_string(), kind.as_str());
-    }
-}
-
-#[test]
-fn record_class_all_roundtrip_and_match_as_str() {
-    for class in RecordClass::ALL {
-        json_roundtrip(&class);
-        let json = serde_json::to_string(&class).expect("serialize");
-        assert_eq!(json, format!("\"{}\"", class.as_str()));
-        assert_eq!(RecordClass::from_str(class.as_str()).unwrap(), class);
-        assert_eq!(class.to_string(), class.as_str());
-    }
-}
-
-#[test]
-fn record_kind_and_class_reject_unknown_values() {
-    assert!(serde_json::from_str::<RecordKind>("\"canonical\"").is_err());
-    assert!(RecordKind::from_str("Pinned").is_err(), "lowercase only");
-    assert!(serde_json::from_str::<RecordClass>("\"note\"").is_err());
-    assert!(RecordClass::from_str("Fact").is_err(), "lowercase only");
 }
 
 // ── Session event type (CPR-10, ADR-0076; CPR-12, ADR-0078) ─────────────────

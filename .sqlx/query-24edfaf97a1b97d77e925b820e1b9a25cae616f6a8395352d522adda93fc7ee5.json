@@ -1,0 +1,84 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select id, scope_id, pack_name, document_name, title, sensitivity,\n                  document_hash, ordinal, heading, content, content_hash\n           from context_pack_chunks\n           where tenant_id = $1 and scope_id = $2 and document_hash = $3\n           order by ordinal",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "scope_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "pack_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "document_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "title",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "sensitivity",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "document_hash",
+        "type_info": "Bytea"
+      },
+      {
+        "ordinal": 7,
+        "name": "ordinal",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 8,
+        "name": "heading",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "content",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "content_hash",
+        "type_info": "Bytea"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Bytea"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "24edfaf97a1b97d77e925b820e1b9a25cae616f6a8395352d522adda93fc7ee5"
+}

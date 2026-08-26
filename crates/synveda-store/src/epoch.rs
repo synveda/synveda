@@ -32,19 +32,15 @@ use sqlx::PgPool;
 
 /// The schema epoch this build serves.
 ///
-/// Epoch 1 is the context platform's founding marker; epoch 2 is the
-/// hierarchy cutover (CPR-7, ADR-0074) — the chain was rewritten in place
-/// (the scope substrate moved to `0004`, `role_bindings` and the hierarchy
-/// tables left it), so a database at epoch 1 holds a schema this build can
-/// neither read nor migrate, and is refused with the reset instruction.
-/// Everything before epoch 1 — the 38-migration enterprise-memory schema
-/// this programme cuts from — carries no marker at all, which is how a
-/// pre-cut database presents to [`verify`]: not as epoch 0, but as
-/// [`SchemaEpochError::Missing`].
+/// Epoch 3 is the clean context-platform baseline (CPR-43, ADR-0069). Epochs
+/// 1 and 2 were development epochs of the redesign; their migration chain is
+/// deliberately absent, so either marker is refused before sqlx can compare
+/// checksums. Databases from before the epoch mechanism carry no marker and
+/// present as [`SchemaEpochError::Missing`].
 ///
 /// Bump this only when the model underneath changes incompatibly. Adding a
 /// migration is not that; every ordinary release leaves this number alone.
-pub const CURRENT_EPOCH: i32 = 2;
+pub const CURRENT_EPOCH: i32 = 3;
 
 /// The exact command that makes a refused database usable again. Quoted
 /// verbatim by every refusal below, and by the gateway, the CLI and the
@@ -251,7 +247,10 @@ pub async fn preflight(pool: &PgPool) -> Result<(), SchemaEpochError> {
     .await
     .map_err(classify)?;
 
-    if row.has_tables && !row.has_marker {
+    if row.has_marker {
+        return verify(pool).await.map(|_| ());
+    }
+    if row.has_tables {
         return Err(SchemaEpochError::Missing);
     }
     Ok(())

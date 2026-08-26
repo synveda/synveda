@@ -28,6 +28,6 @@
     "budget_tokens": 200
   },
   "expect": {
-    "records": ["retries"]
+    "knowledge": ["retries"]
   }
 }

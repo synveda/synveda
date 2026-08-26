@@ -36,9 +36,8 @@ use chrono::{DateTime, Utc};
 use sqlx::PgConnection;
 use synveda_types::access::RoleKey;
 use synveda_types::{
-    ArtifactFamily, ArtifactReference, AssetKind, CastApproval, Error, IdentityId,
-    PromotionEvidence, ProposalEffect, ProposalId, ProposalState, Result, ScopeId, Sensitivity,
-    TenantId, Verdict,
+    ArtifactFamily, ArtifactReference, AssetKind, CastApproval, Error, IdentityId, ProposalEffect,
+    ProposalId, ProposalState, Result, ScopeId, Sensitivity, TenantId, Verdict,
 };
 use uuid::Uuid;
 
@@ -102,16 +101,6 @@ pub struct NewProposal<'a> {
     pub committed_at: DateTime<Utc>,
     /// The pack in force, as the caller resolved it.
     pub policy_snapshot: &'a PolicySnapshot,
-    /// Why a rule opened this, when one did (FLOW-4, ADR-0033 decision
-    /// 12). `None` on every human-opened proposal, which is the honest
-    /// value — no rule fired.
-    ///
-    /// Written in the insert rather than set afterwards: the transition
-    /// trigger permits a proposal row exactly one update, open → closed,
-    /// so evidence either arrives with the row or cannot arrive at all.
-    /// That is the right shape anyway — it is a fact about why the
-    /// proposal was opened.
-    pub evidence: Option<&'a PromotionEvidence>,
     /// Content-free typed domain addresses under review. Stored on the
     /// common lifecycle row so every artifact family has one queue contract.
     pub artifact_references: &'a [ArtifactReference],
@@ -153,9 +142,6 @@ pub struct StoredProposal {
     pub closed_by: Option<IdentityId>,
     /// Why it closed — always present on a rejection.
     pub close_reason: Option<String>,
-    /// Why a rule opened it, when one did (FLOW-4, ADR-0033 decision
-    /// 12). `None` on a human's proposal.
-    pub evidence: Option<PromotionEvidence>,
     /// Canonically ordered typed domain addresses under review.
     pub artifact_references: Vec<ArtifactReference>,
 }
@@ -313,20 +299,12 @@ pub async fn open(
     .await?;
 
     let id = ProposalId::new();
-    let evidence = new
-        .evidence
-        .map(|evidence| {
-            serde_json::to_value(evidence).map_err(|err| Error::Internal {
-                message: format!("serialise promotion evidence: {err}"),
-            })
-        })
-        .transpose()?;
     let row = sqlx::query!(
         r#"insert into vedaflow_proposals
                (tenant_id, id, target_scope_id, source_scope_id, asset_kind,
                 target_channel, commit_hash, sensitivity, title, proposer_id,
-                proposer_subject, evidence, artifact_references)
-           values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+                proposer_subject, artifact_references)
+           values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
            returning created_at, updated_at"#,
         tenant.as_uuid(),
         id.as_uuid(),
@@ -339,7 +317,6 @@ pub async fn open(
         new.title,
         new.proposer.as_uuid(),
         new.proposer_subject,
-        evidence,
         artifact_references_json,
     )
     .fetch_one(&mut *conn)
@@ -367,7 +344,6 @@ pub async fn open(
         closed_at: None,
         closed_by: None,
         close_reason: None,
-        evidence: new.evidence.cloned(),
         artifact_references,
     })
 }
@@ -383,7 +359,7 @@ pub async fn read(
         ProposalRow,
         r#"select id, target_scope_id, source_scope_id, asset_kind, target_channel,
                   commit_hash, sensitivity, state, title, proposer_id, proposer_subject,
-                  created_at, updated_at, closed_at, closed_by, close_reason, evidence,
+                  created_at, updated_at, closed_at, closed_by, close_reason,
                   artifact_references
            from vedaflow_proposals
            where tenant_id = $1 and id = $2"#,
@@ -421,7 +397,7 @@ pub async fn list(
         ProposalRow,
         r#"select id, target_scope_id, source_scope_id, asset_kind, target_channel,
                   commit_hash, sensitivity, state, title, proposer_id, proposer_subject,
-                  created_at, updated_at, closed_at, closed_by, close_reason, evidence,
+                  created_at, updated_at, closed_at, closed_by, close_reason,
                   artifact_references
            from vedaflow_proposals
            where tenant_id = $1
@@ -724,7 +700,6 @@ struct ProposalRow {
     closed_at: Option<DateTime<Utc>>,
     closed_by: Option<Uuid>,
     close_reason: Option<String>,
-    evidence: Option<serde_json::Value>,
     artifact_references: serde_json::Value,
 }
 
@@ -749,22 +724,6 @@ impl TryFrom<ProposalRow> for StoredProposal {
             closed_at: row.closed_at,
             closed_by: row.closed_by.map(IdentityId::from_uuid),
             close_reason: row.close_reason,
-            // Stored by this crate on the way in, so unparseable json can
-            // only come from an out-of-band write. Fail safe and loud:
-            // report the proposal without its evidence rather than
-            // refusing to render a real proposal at all.
-            evidence: row.evidence.and_then(|value| {
-                serde_json::from_value(value)
-                    .inspect_err(|err: &serde_json::Error| {
-                        tracing::warn!(
-                            proposal.id = %row.id,
-                            error = %err,
-                            "stored promotion evidence does not parse; \
-                             rendering the proposal without it"
-                        );
-                    })
-                    .ok()
-            }),
             artifact_references: parse_artifact_references(row.id, row.artifact_references)?,
         })
     }

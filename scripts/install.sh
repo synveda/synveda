@@ -100,7 +100,7 @@ if [ -z "$version" ]; then
   version="$(fetch_stdout "https://api.github.com/repos/$REPO/releases/latest" \
     | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -n 1)"
   [ -n "$version" ] || die "could not determine the latest release of $REPO.
-  Pick one explicitly:  SYNVEDA_VERSION=v0.1.0 sh install.sh"
+  Pick one explicitly:  SYNVEDA_VERSION=v0.2.0 sh install.sh"
 fi
 # Assets are named by the version without its leading `v`, matching the
 # crate version `synveda init` compares a profile against.

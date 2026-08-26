@@ -1,10 +1,10 @@
 //! The scenario format (EVAL-1, ADR-0028 decision 2).
 //!
-//! Scenarios are data, not code: a file names its actors, seeds memory
-//! through `/v1/observe`, probes through `/v1/inject`, and declares what
-//! the block must and must not contain. Adding coverage is adding a file,
-//! which is what lets EVAL-2, EVAL-4, and EVAL-5 grow this suite without
-//! touching the runner.
+//! Scenarios are data, not code: a file names its actors, appends session
+//! events, reviews capture candidates, requests a ContextRun, and declares
+//! what the rendered context must and must not contain. Adding coverage is
+//! adding a file, which is what lets EVAL-2, EVAL-4, and EVAL-5 grow this
+//! suite without touching the runner.
 //!
 //! Every struct here refuses unknown fields. A silently-ignored
 //! expectation is an eval that passes for the wrong reason — the one
@@ -24,10 +24,11 @@ pub struct Environment {
     /// carries one (ADR-0008).
     pub tenant_id: String,
     pub actors: BTreeMap<String, Actor>,
-    /// Hierarchy nodes by name, for the one thing a corpus has to say in
-    /// UUIDs: where a promotion lands (EVAL-4, ADR-0047 decision 3). A
-    /// fixture names `payments`; the bootstrap knows what that is. Empty
-    /// for an environment that runs no Q&A corpus.
+    /// Governed scope aliases by name, for the one thing a corpus has to say
+    /// in UUIDs: where accepted Knowledge is published (EVAL-4, ADR-0047
+    /// decision 3). A fixture names `payments`; the bootstrap knows which
+    /// current scope that denotes. Empty for an environment that runs no
+    /// Q&A corpus.
     #[serde(default)]
     pub scopes: BTreeMap<String, String>,
 }
@@ -49,8 +50,8 @@ pub struct Actor {
     #[serde(default)]
     pub tenant: Option<String>,
     /// Exact public workspace used for this actor's evaluation sessions.
-    /// Environments may omit it for older external harnesses, in which case
-    /// the client selects the first visible workspace from `/v1/me`.
+    /// Review-only and audit-only actors may omit it; an actor that opens a
+    /// session must name it explicitly.
     #[serde(default)]
     pub workspace_id: Option<String>,
     /// Exact project used for this actor's evaluation sessions.
@@ -89,8 +90,8 @@ impl Environment {
     pub fn scope(&self, name: &str) -> Result<&str, String> {
         self.scopes.get(name).map(String::as_str).ok_or_else(|| {
             format!(
-                "no scope `{name}` in this environment; the Q&A corpus promotes into named \
-                 hierarchy nodes and `evals/lib.sh` is what names them"
+                "no scope `{name}` in this environment; the Q&A corpus publishes into named \
+                 governed scopes and `evals/lib.sh` is what names them"
             )
         })
     }
@@ -124,7 +125,7 @@ pub struct Scenario {
     pub expect: Expect,
 }
 
-/// One `/v1/observe` call, as one actor.
+/// One session-event batch followed by candidate review, as one actor.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SeedBatch {
@@ -167,7 +168,7 @@ fn default_event_type() -> String {
     "message.user".to_owned()
 }
 
-/// The `/v1/inject` call under measurement.
+/// The session-scoped ContextRun under measurement.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Probe {
@@ -197,12 +198,12 @@ pub struct Expect {
     /// Seed keys whose material must reach the block. This is the recall
     /// axis: the fraction of these whose marker appears.
     #[serde(default)]
-    pub records: Vec<String>,
+    pub knowledge: Vec<String>,
     /// Phrases that must appear, beyond the seeded keys.
     #[serde(default)]
     pub must_contain: Vec<String>,
-    /// Phrases that must not — an irrelevant record that ranked anyway,
-    /// or another identity's memory that leaked.
+    /// Phrases that must not — irrelevant Knowledge that ranked anyway, or
+    /// another principal's private Knowledge that leaked.
     #[serde(default)]
     pub must_not_contain: Vec<String>,
     /// The block must compose nothing at all. A memory system that
@@ -249,7 +250,7 @@ pub fn load_suite(dir: &Path) -> Result<Vec<Scenario>, String> {
 /// Metric names the reduction always produces. A category may not take one
 /// of them: the category's mean would overwrite the suite's axis, and the
 /// gate would then bound something other than what its name says.
-const RESERVED_METRICS: [&str; 12] = [
+const RESERVED_METRICS: [&str; 11] = [
     "accuracy",
     "recall",
     "abstention",
@@ -262,7 +263,6 @@ const RESERVED_METRICS: [&str; 12] = [
     "tokens_per_answer",
     "retrieval_precision",
     "estimator_bias_p95",
-    "staleness_p50_permille",
 ];
 
 /// Suites that own a whole namespace rather than a fixed list, because
@@ -310,16 +310,18 @@ fn validate(scenario: &Scenario) -> Result<(), String> {
             ));
         }
     }
-    for key in &scenario.expect.records {
+    for key in &scenario.expect.knowledge {
         if !seen.contains(key.as_str()) {
-            return Err(format!("expect.records names `{key}`, which nothing seeds"));
+            return Err(format!(
+                "expect.knowledge names `{key}`, which nothing seeds"
+            ));
         }
     }
-    if scenario.expect.abstain && !scenario.expect.records.is_empty() {
-        return Err("a scenario cannot both abstain and expect records".to_owned());
+    if scenario.expect.abstain && !scenario.expect.knowledge.is_empty() {
+        return Err("a scenario cannot both abstain and expect Knowledge".to_owned());
     }
     if !scenario.expect.abstain
-        && scenario.expect.records.is_empty()
+        && scenario.expect.knowledge.is_empty()
         && scenario.expect.must_contain.is_empty()
         && scenario.expect.must_not_contain.is_empty()
     {
@@ -344,7 +346,7 @@ mod tests {
                   "events": [{"key": "deploy", "text": "Deploys go through make deploy.",
                               "marker": "make deploy"}]}],
         "probe": {"actor": "curator", "session_id": "p1"},
-        "expect": {"records": ["deploy"]}
+        "expect": {"knowledge": ["deploy"]}
     }"#;
 
     #[test]
@@ -364,7 +366,7 @@ mod tests {
                 "seed": [{"actor": "curator", "session_id": "s1",
                           "events": [{"key": "deploy", "text": "Deploys go through make deploy."}]}],
                 "probe": {"actor": "curator", "session_id": "p1"},
-                "expect": {"records": ["deploy"]}
+                "expect": {"knowledge": ["deploy"]}
             }"#,
         )
         .expect("parses");
@@ -378,14 +380,14 @@ mod tests {
     fn an_unknown_field_is_refused_rather_than_ignored() {
         // The failure mode this guards: a typo'd expectation that reads
         // as "no expectation" and turns the scenario green.
-        let json = MINIMAL.replace(r#""records": ["deploy"]"#, r#""recods": ["deploy"]"#);
+        let json = MINIMAL.replace(r#""knowledge": ["deploy"]"#, r#""knowlege": ["deploy"]"#);
         let err = parse(&json).expect_err("unknown field must not parse");
-        assert!(err.contains("recods"), "unhelpful error: {err}");
+        assert!(err.contains("knowlege"), "unhelpful error: {err}");
     }
 
     #[test]
     fn expectations_must_refer_to_something_the_scenario_seeds() {
-        let json = MINIMAL.replace(r#""records": ["deploy"]"#, r#""records": ["ghost"]"#);
+        let json = MINIMAL.replace(r#""knowledge": ["deploy"]"#, r#""knowledge": ["ghost"]"#);
         let err = parse(&json).expect_err("dangling key must not validate");
         assert!(err.contains("ghost"), "unhelpful error: {err}");
     }
@@ -437,8 +439,8 @@ mod tests {
             "extraction precision macro",
             "extraction-recall-fact",
             // EVAL-4's namespace and its axes outside it (ADR-0047).
-            "qa answer rate",
-            "qa-scope-department",
+            "qa selection rate",
+            "qa-scope-workspace",
             "tokens per answer",
             "retrieval precision",
             // EVAL-5's namespace (ADR-0048).
@@ -461,10 +463,10 @@ mod tests {
     }
 
     #[test]
-    fn abstaining_and_expecting_records_is_a_contradiction() {
+    fn abstaining_and_expecting_knowledge_is_a_contradiction() {
         let json = MINIMAL.replace(
-            r#""records": ["deploy"]"#,
-            r#""records": ["deploy"], "abstain": true"#,
+            r#""knowledge": ["deploy"]"#,
+            r#""knowledge": ["deploy"], "abstain": true"#,
         );
         let err = parse(&json).expect_err("contradiction must not validate");
         assert!(err.contains("abstain"), "unhelpful error: {err}");

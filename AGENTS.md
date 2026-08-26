@@ -75,7 +75,7 @@ Phase 5 — context platform redesign, since 2026-08-17, on
 `feat/context-platform-mvp`. Phase 3 is paused mid-phase, not finished —
 OPS-9, OPS-10, TEN-5,6, AUD-3,4, EVAL-6, CTX-7, OPS-3,4, ADPT-3,
 CTX-6 and FLOW-8 are still open, and no live Entra/Okta tenant or real
-  Cursor frame has been replayed. **139 features filed, 108 delivered**;
+  Cursor frame has been replayed. **140 features filed, 109 delivered**;
 STATUS.md and `make check-backlog` are the authority on the count — the
 headline number has drifted four times, the fourth being this file itself,
 which still read 104/71 after CPR-8 filed the 105th. That is why the
@@ -87,9 +87,13 @@ Load-bearing facts about Phase 5:
 - **Pre-1.0 hard cut** (ADR-0068/0069): a fresh schema epoch, no old-data
   migration, no compatibility shims. Old databases are refused with a
   reset instruction — **your dev database will be refused**; reset it
-  (`synveda reset --database --force`). Since CPR-7 the epoch is **2**
-  and the chain was rewritten in place (the scope substrate sits at
-  `0004`; 43 → 41 migrations). The chain is not squashed yet (Prompt 33).
+  (`synveda reset --database --force`). Since CPR-43 the branch serves the
+  **epoch-3 single baseline** at `0001_context_platform.sql`: 87 tables, two
+  current views and 83 tenant tables under enabled and forced RLS. Epoch-1,
+  epoch-2 and markerless databases are refused before checksum comparison;
+  no old-data migrator exists. The Record runtime, Tantivy, PGMQ, AGE and the
+  60-file development chain are deleted, and the generated public contract is
+  171 operations / 272 schemas.
 - **One tree, one vocabulary** since CPR-7 (ADR-0074): the old hierarchy,
   role bindings, the rank vocabulary, `/v1/hierarchy/*`, `synveda
   hierarchy`, `synveda role bind` and the placement conventions are
@@ -431,7 +435,7 @@ Load-bearing facts about Phase 5:
 
 ## Commands
 
-- `make dev-up` — start Postgres(+pgvector+PGMQ), Rauthy, Temporal, TEI, Jaeger
+- `make dev-up` — start Postgres(+pgvector), Rauthy, Temporal, TEI, Jaeger
 - `make smoke` — end-to-end health check
 - `make dev-down` — stop; state persists in named volumes
 - `make ci` — exactly what .github/workflows/ci.yml runs; green here == green there

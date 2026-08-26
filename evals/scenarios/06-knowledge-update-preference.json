@@ -35,7 +35,7 @@
     "task": "what coffee do I prefer before stand-up"
   },
   "expect": {
-    "records": ["roast-after"],
+    "knowledge": ["roast-after"],
     "must_not_contain": ["dark-roast"]
   }
 }

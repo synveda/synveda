@@ -1,6 +1,6 @@
 [package]
 name = "synveda-retrieval"
-description = "Hybrid search, rerank, and the composition engine"
+description = "Governed authored-context planning and composition"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,7 +10,7 @@ publish.workspace = true
 synveda-policy = { workspace = true }
 synveda-store = { workspace = true }
 synveda-types = { workspace = true }
-# Channel membership and the memory content address composition checks
+# Channel membership and the immutable content address composition checks
 # published material against (FLOW-2, ADR-0031 decisions 5 and 9).
 synveda-vedaflow = { workspace = true }
 
@@ -20,7 +20,6 @@ metrics = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sqlx = { workspace = true }
-tantivy = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true }

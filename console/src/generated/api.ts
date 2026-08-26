@@ -1640,12 +1640,6 @@ export type ContextPackDocumentView = {
      * How many chunks it cut into.
      */
     chunks: number;
-    /**
-     * How many of those this request actually embedded. Zero for a
-     * document whose bytes did not move, which is the observable half of
-     * "re-authoring an unchanged document re-embeds nothing".
-     */
-    embedded: number;
     name: string;
     /**
      * The draft's content address — what a proposal would bind.
@@ -1656,6 +1650,11 @@ export type ContextPackDocumentView = {
     title: string;
     updated_at: string;
     updated_by: string;
+    /**
+     * How many immutable chunk rows this request wrote. Zero means the
+     * exact document version already existed.
+     */
+    written_chunks: number;
   };
 
 export type ContextPackListEntry = {
@@ -4015,24 +4014,6 @@ export type ProjectView = {
     workspace_id: string;
   };
 
-export type PromotionEvidenceSchema = {
-    actions: string[];
-    from_seq: number;
-    members: PromotionMemberEvidenceSchema[];
-    pack_name: string;
-    pack_version: number;
-    rule: string;
-    to_seq: number;
-  };
-
-export type PromotionMemberEvidenceSchema = {
-    distinct_members: number;
-    first_recall_at: string;
-    last_recall_at: string;
-    recalls: number;
-    record_id: string;
-  };
-
 export type PromptAuthorBody = {
     /**
      * One line, read in a listing and at review.
@@ -4440,7 +4421,6 @@ export type ProposalSummary = {
      * What it still lacks, in one line a reviewer reads.
      */
     outstanding: string;
-    promotion?: null | PromotionEvidenceSchema;
     proposer_id: string;
     proposer_subject: string;
     /**

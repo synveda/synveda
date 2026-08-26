@@ -35,7 +35,6 @@
 //! Tests need a live Postgres: they read `DATABASE_URL` and skip with a
 //! message when it is unset (CI has no database), the house convention.
 
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -53,8 +52,7 @@ use synveda_gateway::telemetry;
 use synveda_identity::Hs256Verifier;
 use synveda_ingest::embedding::{AnyEmbedder, DeterministicEmbedder};
 use synveda_policy::{Pdp, REGULATED_STRICT};
-use synveda_retrieval::index::SearchIndex;
-use synveda_store::{access, directory, identities, retention, rls, scopes, tenants};
+use synveda_store::{access, directory, identities, rls, scopes, tenants};
 use synveda_types::access::{GrantSource, GroupSource};
 use synveda_types::scope::{Scope, ScopeKind};
 use synveda_types::{
@@ -137,14 +135,11 @@ async fn world() -> Option<World> {
     })
 }
 
-// ── 1. The AC: a mover's memories re-scope per policy ────────────────────────
+// ── 1. A directory seal closes both enforcement layers ──────────────────────
 
-// ── 2. The seal, in three layers ─────────────────────────────────────────────
-
-/// Decision 8, asserted layer by layer — and the third layer is the one that
-/// no comment could have established.
+/// Decision 8, asserted at the token and governed-scope layers.
 #[tokio::test]
-async fn a_seal_stops_the_token_the_reads_and_the_retention_sweep() {
+async fn a_seal_stops_the_token_and_governed_reads() {
     let Some(w) = world().await else { return };
     assign(&w, w.eng, REGULATED_STRICT).await;
 
@@ -154,15 +149,6 @@ async fn a_seal_stops_the_token_the_reads_and_the_retention_sweep() {
     // token layer has something to refuse.
     let identity = identity_at(&w, home).await;
     bind_subject(&w, identity, "dee-subject").await;
-
-    // Layer 3's precondition: the scope is enumerable by the sweep while
-    // the person is here. Asserted *before* the seal so the assertion
-    // after it is a change rather than a coincidence.
-    seed_record(&w, home, identity).await;
-    assert!(
-        swept_scopes(&w).await.contains(&home),
-        "a live scope is in the sweep's work list"
-    );
 
     // The directory says they have left.
     deactivate(&w, &dee_user).await;
@@ -182,14 +168,6 @@ async fn a_seal_stops_the_token_the_reads_and_the_retention_sweep() {
     assert!(sealed(&w, home).await);
     let (read, _) = get(&w.app, &token, &format!("/v1/admin/scopes/{home}")).await;
     assert_eq!(read, StatusCode::FORBIDDEN);
-
-    // Layer 3: the retention sweep no longer sees the scope at all. This is
-    // the "retention-held" half — a hold whose purpose is to outlive a
-    // schedule must not be implemented as one.
-    assert!(
-        !swept_scopes(&w).await.contains(&home),
-        "a sealed scope is exempt from every horizon"
-    );
 }
 
 // ── 3. One person never becomes two ──────────────────────────────────────────
@@ -932,16 +910,6 @@ async fn provision_via_login(w: &World, subject: &str, email: &str, group: &str)
         .id
 }
 
-/// The scopes the MEM-6 sweep would enumerate — the third layer's assertion.
-async fn swept_scopes(w: &World) -> Vec<ScopeId> {
-    let mut tx = rls::begin_tenant_tx(&w.pool, w.tenant)
-        .await
-        .expect("begin");
-    retention::populated_scopes(&mut *tx, w.tenant)
-        .await
-        .expect("enumerate")
-}
-
 async fn assign(w: &World, scope: ScopeId, pack: &str) {
     let mut tx = rls::begin_tenant_tx(&w.pool, w.tenant)
         .await
@@ -992,47 +960,12 @@ async fn unit(
     .expect("create org unit")
 }
 
-async fn seed_record(w: &World, scope: ScopeId, owner: IdentityId) {
-    let mut tx = rls::begin_tenant_tx(&w.pool, w.tenant)
-        .await
-        .expect("begin");
-    synveda_store::records::insert(
-        &mut *tx,
-        synveda_types::RecordId::new(),
-        w.tenant,
-        &synveda_store::records::RecordState {
-            scope_id: scope,
-            owner_id: owner,
-            kind: synveda_types::RecordKind::Derived,
-            class: synveda_types::RecordClass::Fact,
-            content: "a fact written before somebody left".to_owned(),
-            sensitivity: synveda_types::Sensitivity::Internal,
-            provenance: json!({"source": "auth-4 suite"}),
-            valid_from: Utc::now(),
-            valid_to: None,
-        },
-        &synveda_store::records::RecordEmbedding {
-            model: "hash@1".to_owned(),
-            vector: vec![0.1; 8],
-        },
-    )
-    .await
-    .expect("seed record");
-    tx.commit().await.expect("commit record");
-}
-
 fn metrics_handle() -> PrometheusHandle {
     use std::sync::OnceLock;
     static HANDLE: OnceLock<PrometheusHandle> = OnceLock::new();
     HANDLE
         .get_or_init(|| telemetry::init_metrics().expect("install prometheus recorder"))
         .clone()
-}
-
-fn index_root() -> PathBuf {
-    std::env::temp_dir()
-        .join("synveda-auth4-scim")
-        .join(TenantId::new().to_string())
 }
 
 fn state(url: &str, pdp: Arc<Pdp>) -> AppState {
@@ -1048,9 +981,8 @@ fn state(url: &str, pdp: Arc<Pdp>) -> AppState {
         public_origin: "http://127.0.0.1:8120".to_owned(),
         pdp,
         service_token_max_ttl: Duration::from_secs(3600),
-        search_index: Arc::new(SearchIndex::open(index_root()).expect("open sidecar")),
         embedder: Arc::new(AnyEmbedder::Deterministic(DeterministicEmbedder::new())),
-        inject_embed_timeout: Duration::from_millis(100),
+        context_embed_timeout: Duration::from_millis(100),
         // TEN-4 (ADR-0064): a fixed test KEK, so a suite that touches a
         // sealed column seals rather than skipping. `Kms::Disabled` is the
         // production default when no key is configured.

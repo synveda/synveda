@@ -118,7 +118,7 @@ fn the_packs_differ_where_the_tech_plan_says_they_do() {
     // shape vocabulary, priced one notch higher).
     let local = |matrix: &ApprovalMatrix| {
         matrix.resolve(
-            AssetKind::Memory,
+            AssetKind::Knowledge,
             Sensitivity::Internal,
             ScopeKind::Workspace,
         )
@@ -136,14 +136,22 @@ fn the_packs_differ_where_the_tech_plan_says_they_do() {
     // Reaching past a team: two people under regulated-strict, one curator
     // under standard, and under open-collaboration only at the org.
     let dept = |matrix: &ApprovalMatrix| {
-        matrix.resolve(AssetKind::Memory, Sensitivity::Internal, ScopeKind::OrgUnit)
+        matrix.resolve(
+            AssetKind::Knowledge,
+            Sensitivity::Internal,
+            ScopeKind::OrgUnit,
+        )
     };
     assert_eq!(dept(&strict).distinct_approvers, 2);
     assert_eq!(dept(&standard).distinct_approvers, 1);
     assert!(dept(&open).is_empty());
     assert_eq!(
-        open.resolve(AssetKind::Memory, Sensitivity::Internal, ScopeKind::Tenant)
-            .roles,
+        open.resolve(
+            AssetKind::Knowledge,
+            Sensitivity::Internal,
+            ScopeKind::Tenant
+        )
+        .roles,
         vec![RoleRequirement::new(RoleKey::Curator, 1)],
         "open-collaboration reviews at the one boundary that reaches everybody"
     );
@@ -254,7 +262,7 @@ fn a_stored_packs_matrix_rides_its_effective_pack() {
     let tenant = TenantId::new();
     let matrix = ApprovalMatrix {
         rules: vec![ApprovalRule {
-            asset: Some(AssetKind::Memory),
+            asset: Some(AssetKind::Knowledge),
             min_sensitivity: Sensitivity::Public,
             scope_kinds: None,
             roles: vec![RoleRequirement::new(RoleKey::Administrator, 2)],
@@ -289,7 +297,11 @@ fn a_stored_packs_matrix_rides_its_effective_pack() {
     assert_eq!(
         effective
             .approvals
-            .resolve(AssetKind::Memory, Sensitivity::Internal, ScopeKind::OrgUnit)
+            .resolve(
+                AssetKind::Knowledge,
+                Sensitivity::Internal,
+                ScopeKind::OrgUnit
+            )
             .roles,
         vec![RoleRequirement::new(RoleKey::Administrator, 2)]
     );
@@ -317,7 +329,7 @@ fn a_stored_packs_matrix_rides_its_effective_pack() {
         plain
             .approvals
             .resolve(
-                AssetKind::Memory,
+                AssetKind::Knowledge,
                 Sensitivity::Restricted,
                 ScopeKind::OrgUnit
             )

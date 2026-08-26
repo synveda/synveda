@@ -2,7 +2,7 @@
 //!
 //! All identifiers are UUID version 7 (ADR-0005): time-ordered for b-tree
 //! locality in Postgres, mintable anywhere without coordination. Per-concept
-//! newtypes exist so a `RecordId` can never be passed where a `TenantId` is
+//! newtypes exist so a `KnowledgeItemId` can never be passed where a `TenantId` is
 //! expected; on the wire all of them are canonical hyphenated UUID strings.
 
 use std::fmt;
@@ -97,9 +97,9 @@ define_id!(
 );
 
 define_id!(
-    /// Identifies a memory record, the atomic unit of stored knowledge
-    /// (seed §4.2).
-    RecordId
+    /// Identifies one immutable, scanned chunk of an authored context-pack
+    /// document (CPR-43, ADR-0050's epoch-3 amendment).
+    ContextPackChunkId
 );
 
 define_id!(

@@ -17,8 +17,6 @@ gateway:
   # client, which is the property this whole test turns on.
   publicUrl: http://synveda.synveda-test.svc.cluster.local:8120
   dbMaxConnections: 10
-  searchIndex:
-    size: 1Gi
 
 oidc:
   # Written by the demo *after* the install job admits the tenant: a trust

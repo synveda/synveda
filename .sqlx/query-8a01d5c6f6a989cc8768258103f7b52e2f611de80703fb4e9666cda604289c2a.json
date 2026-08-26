@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update vedaflow_refs set commit_hash = $4, updated_at = now(), updated_by = $5\n             where tenant_id = $1 and scope_id = $2 and name = 'prompt/published' and commit_hash = $3",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Bytea",
+        "Bytea",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "8a01d5c6f6a989cc8768258103f7b52e2f611de80703fb4e9666cda604289c2a"
+}

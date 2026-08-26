@@ -20,7 +20,7 @@
 // that resource's chain, subject to principal privacy (ADR-0073 decision 5).
 //
 // ABAC context arrived with AUTHZ-5 (ADR-0038) and is one attribute:
-// `context.sensitivity` on MemoryRead. Channel stays the pack's
+// `context.sensitivity` on KnowledgeRead. Channel stays the pack's
 // composition config — one rule, one place (decision 14); residency waits
 // for a second region and may turn out to be a composition rule rather
 // than a permit (decision 15); time-of-day would be a second clock in a
@@ -259,7 +259,7 @@ namespace Synveda {
     // can end.
     //
     // Composing context for a session takes `SessionWrite` **here** and
-    // `MemoryRead` at every scope that contributes, decided by the same
+    // `KnowledgeRead` at every scope that contributes, decided by the same
     // composition walk `inject` runs — so this action admits no material of its
     // own. It is the authority to *ask*, never the authority to *receive*.
     //
@@ -364,59 +364,6 @@ namespace Synveda {
             context: { roles: Set<String> },
         };
 
-    // The composition seam (AUTHZ-2, ADR-0014 decision 5): may this
-    // principal's inject/recall composition include memories attached to
-    // this scope? CTX-1/2/3 ask exactly this question per candidate scope.
-    //
-    // Since AUTHZ-5 it asks per candidate scope *and tier* (ADR-0038
-    // decision 1). `sensitivity` is one of `public`, `internal`,
-    // `confidential`, `restricted` — a closed, ordered vocabulary, which is
-    // precisely why a per-record attribute can be decided here at all: the
-    // seam holds no record, but it can be asked about each of four tiers
-    // before any record is fetched. A pack names the tiers it permits
-    // (`["public", "internal"].contains(context.sensitivity)`) rather than
-    // comparing an encoding, because with four values the enumeration is the
-    // documentation and there is no arithmetic to get wrong.
-    //
-    action MemoryRead
-        appliesTo {
-            principal: [Principal],
-            resource: [Scope],
-            context: { roles: Set<String>, sensitivity: String },
-        };
-
-    // Reclassification (AUTHZ-5, ADR-0038 decision 9): may this principal
-    // run a classification proposal's effect at this scope — moving records
-    // to the sensitivity their proposed versions carry?
-    //
-    // Its own action rather than MemoryWrite, on ChannelRollback's
-    // separability rule: the write floor grants every principal MemoryWrite
-    // at its own home, and a pack must be able to say "you may write here"
-    // without saying "you may classify here".
-    //
-    // It carries no sensitivity attribute, and that is not an oversight: how
-    // much authority a reclassification needs is the approval matrix's
-    // arithmetic, resolved at the maximum of the current and proposed tiers,
-    // and duplicating that as a Cedar condition would put the rule in two
-    // places that can disagree.
-    action MemoryClassify
-        appliesTo {
-            principal: [Principal],
-            resource: [Scope],
-            context: { roles: Set<String> },
-        };
-
-    // The write seam (MEM-1, ADR-0020 decision 3): may this principal
-    // land memory content at this scope? observe asks it for the
-    // caller's personal scope; richer write surfaces (FLOW) will ask the
-    // same question at shared scopes.
-    action MemoryWrite
-        appliesTo {
-            principal: [Principal],
-            resource: [Scope],
-            context: { roles: Set<String> },
-        };
-
     // Knowledge reads carry the exact immutable revision's sensitivity and a
     // required PDP-computed relaxation match. `relaxed` is never a caller
     // claim; omitting it makes the request invalid rather than dropping the
@@ -439,7 +386,7 @@ namespace Synveda {
     // this principal be served a prompt attached to this scope, and may it
     // author one there?
     //
-    // `PromptRead` carries `sensitivity` for MemoryRead's reason: with four
+    // `PromptRead` carries `sensitivity` for KnowledgeRead's reason: with four
     // values the seam can be asked about a tier before any content is
     // fetched, so a pack prices a `confidential` prompt exactly as it prices
     // confidential memory. It deliberately carries no relaxation input:
@@ -450,9 +397,9 @@ namespace Synveda {
     // for an authored asset — migration 0029's CHECK is where that is
     // structural (ADR-0049 decision 5).
     //
-    // `PromptWrite` is the authoring seam and mirrors `MemoryWrite`: the
+    // `PromptWrite` is the authoring seam and mirrors `KnowledgeWrite`: the
     // home floor role-free, bound content roles beyond it. Separate from
-    // `MemoryWrite` on `ChannelRollback`'s separability rule — every placed
+    // `KnowledgeWrite` on `ChannelRollback`'s separability rule — every placed
     // principal holds the memory write floor at its own home, and a pack
     // must be able to say "observe here" without saying "author governed
     // assets here".
@@ -481,7 +428,7 @@ namespace Synveda {
     // one difference that is the whole of ADR-0050 decision 8:
     // `ContextPackRead` is taken per scope inside the *composition* plan
     // walk, so it is the action that admits pack chunks into a block.
-    // `MemoryRead` never admits one and this never admits a memory, which
+    // `KnowledgeRead` never admits one and this never admits a memory, which
     // is what lets a scope distribute conventions to readers holding no
     // readable memory there.
     //

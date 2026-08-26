@@ -111,12 +111,11 @@ BIN="./target/debug/synveda"
 GATEWAY="./target/debug/synveda-gateway"
 
 psql_admin -c "create database ${DB}" >/dev/null
-psql_db -c "create extension if not exists vector; create extension if not exists pgmq;" >/dev/null
+psql_db -c "create extension if not exists vector; create extension if not exists btree_gin;" >/dev/null
 
 export DATABASE_URL="$URL"
 export SYNVEDA_LISTEN_ADDR="127.0.0.1:${PORT}"
 export SYNVEDA_PUBLIC_URL="$GATEWAY_URL"
-export SYNVEDA_SEARCH_INDEX_DIR="$WORK/search-index"
 # The dev HS256 mode (ADR-0008): this demo is about the workspace plane, and a
 # real IdP would be a second thing to get right.
 export SYNVEDA_DEV_JWT_SECRET="cpr4-demo-secret"

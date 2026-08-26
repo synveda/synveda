@@ -26,8 +26,9 @@ const KEYWORD_CONFIDENCE: f64 = 0.6;
 /// whenever a rule changes: provenance must name what actually ran.
 /// `@2` added entity mentions (GRPH-2, ADR-0044 decision 2); `@4` recognises
 /// explicit imperative and architectural-choice forms after the session-plane
-/// cut removed the caller-supplied Record kind.
-const RULESET_VERSION: &str = "builtin@4";
+/// cut removed the caller-supplied Record kind; `@5` recognises short
+/// definitional noun phrases without requiring a capitalised one-word name.
+const RULESET_VERSION: &str = "builtin@5";
 
 static PREFERENCE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)\b(prefers?|always use|never use|i like|we like|favou?rite)\b")
@@ -58,8 +59,9 @@ static PROCEDURE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)\b(step \d|how to|procedure|then run|run the following)\b|(?i)\bfirst,")
         .expect("static procedure pattern compiles")
 });
-static ENTITY: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^[A-Z][A-Za-z0-9_-]* is (a|an|the|our) ").expect("static entity pattern compiles")
+static ENTITY_DEFINITION: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)^([a-z][a-z0-9_-]*(?: [a-z][a-z0-9_-]*){0,3}) is (?:a|an|the|our) ")
+        .expect("static entity-definition pattern compiles")
 });
 /// The opaque spans MEM-2 leaves behind (ADR-0021). Removed before
 /// mention detection so `REDACTED` never reads as a proper noun — the
@@ -275,13 +277,28 @@ fn classify(event_type: SessionEventType, text: &str) -> (KnowledgeType, f64) {
                 (KnowledgeType::Decision, KEYWORD_CONFIDENCE)
             } else if PROCEDURE.is_match(text) {
                 (KnowledgeType::Procedure, KEYWORD_CONFIDENCE)
-            } else if ENTITY.is_match(text) {
+            } else if is_entity_definition(text) {
                 (KnowledgeType::Entity, KEYWORD_CONFIDENCE)
             } else {
                 (KnowledgeType::Fact, KEYWORD_CONFIDENCE)
             }
         }
     }
+}
+
+/// Recognises a compact copular definition such as `pgvector is the …` or
+/// `Postgres full-text search is the …`. The old rule accepted only one
+/// capitalised token, so ordinary lower-case technical names and multi-word
+/// terms became facts. Leading sentence grammar stays excluded: `the sky is a
+/// colour` is a statement about a subject, not an entity definition signal.
+fn is_entity_definition(text: &str) -> bool {
+    let Some(captures) = ENTITY_DEFINITION.captures(text) else {
+        return false;
+    };
+    captures
+        .get(1)
+        .and_then(|subject| subject.as_str().split_whitespace().next())
+        .is_some_and(|first| !SENTENCE_OPENERS.contains(&bare(first).as_str()))
 }
 
 /// A deterministic title from the first sentence/line, bounded below the
@@ -586,6 +603,26 @@ mod tests {
             .0,
             KnowledgeType::Fact,
             "an incidental first-person verb is not an imperative choice"
+        );
+    }
+
+    #[test]
+    fn short_definitional_noun_phrases_are_entities() {
+        for text in [
+            "pgvector is the Postgres extension for vectors.",
+            "Postgres full-text search is the lexical retrieval leg.",
+            "Acme Corp is the customer.",
+        ] {
+            assert_eq!(
+                classify(SessionEventType::MessageUser, text).0,
+                KnowledgeType::Entity,
+                "definition was not classified as an entity: {text}"
+            );
+        }
+        assert_eq!(
+            classify(SessionEventType::MessageUser, "The sky is a colour").0,
+            KnowledgeType::Fact,
+            "a sentence-opening article is not an entity name"
         );
     }
 }

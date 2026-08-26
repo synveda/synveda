@@ -1,0 +1,39 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into vedaflow_proposals\n               (tenant_id, id, target_scope_id, source_scope_id, asset_kind,\n                target_channel, commit_hash, sensitivity, title, proposer_id,\n                proposer_subject, artifact_references)\n           values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)\n           returning created_at, updated_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 1,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Bytea",
+        "Text",
+        "Text",
+        "Uuid",
+        "Text",
+        "Jsonb"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "6757630d545b1662cefdd117492e5853feac3f49b4e041b632cf3312ca7ef7c0"
+}

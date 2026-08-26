@@ -237,7 +237,7 @@ fn reads(
         sensitivity: Some(tier),
         ..ask.context()
     };
-    pdp.authorize(principal, Action::MemoryRead, resource, &context)
+    pdp.authorize(principal, Action::KnowledgeRead, resource, &context)
         .expect("the decision must evaluate")
         .allowed
 }
@@ -290,7 +290,7 @@ fn nobody_reaches_into_somebody_elses_own_scope() {
             );
         }
         for action in [
-            Action::MemoryWrite,
+            Action::KnowledgeWrite,
             Action::MembershipRead,
             Action::MembershipGrant,
             Action::PolicyAssign,
@@ -342,7 +342,7 @@ fn your_own_scope_is_yours() {
         allows(
             &pdp,
             &bob,
-            Action::MemoryWrite,
+            Action::KnowledgeWrite,
             Resource::Scope(tree.bob_scope.id),
             &probe
         ),
@@ -1031,7 +1031,7 @@ fn a_spliced_chain_cannot_launder_a_foreign_scope() {
         !allows(
             &pdp,
             &alice,
-            Action::MemoryWrite,
+            Action::KnowledgeWrite,
             Resource::Scope(theirs.payments.id),
             &probe
         ),

@@ -17,7 +17,7 @@ trap cleanup EXIT HUP INT TERM
 $COMPOSE up --detach --wait postgres
 $COMPOSE exec -T postgres createdb -U synveda "$DEMO_DB"
 $COMPOSE exec -T postgres psql -v ON_ERROR_STOP=1 -U synveda -d "$DEMO_DB" -c \
-  "create extension if not exists vector; create extension if not exists age; create extension if not exists pgmq" \
+  "create extension if not exists vector; create extension if not exists btree_gin" \
   >/dev/null
 
 DATABASE_URL="postgres://synveda:synveda-dev@localhost:5432/$DEMO_DB"
@@ -46,15 +46,15 @@ runs=$($COMPOSE exec -T postgres psql -At -U synveda -d "$DEMO_DB" -c \
   "select count(*) from session_context_runs")
 selections=$($COMPOSE exec -T postgres psql -At -U synveda -d "$DEMO_DB" -c \
   "select count(*) from context_selections")
-old_records=$($COMPOSE exec -T postgres psql -At -U synveda -d "$DEMO_DB" -c \
-  "select count(*) from records")
+retired_table=$($COMPOSE exec -T postgres psql -At -U synveda -d "$DEMO_DB" -c \
+  "select (to_regclass('records') is not null)::int")
 
 if [ "$sessions" -ne 3 ] || [ "$candidates" -ne 5 ] || [ "$changes" -ne 4 ] || \
    [ "$active" -ne 3 ] || [ "$superseded" -ne 1 ] || [ "$runs" -ne 2 ] || \
-   [ "$selections" -eq 0 ] || [ "$old_records" -ne 0 ]; then
-  echo "CPR-22 loop failed: sessions=$sessions candidates=$candidates changes=$changes active=$active superseded=$superseded runs=$runs selections=$selections records=$old_records" >&2
+   [ "$selections" -eq 0 ] || [ "$retired_table" -ne 0 ]; then
+  echo "CPR-22 loop failed: sessions=$sessions candidates=$candidates changes=$changes active=$active superseded=$superseded runs=$runs selections=$selections retired_table=$retired_table" >&2
   exit 1
 fi
 
 echo ""
-echo "CPR-22 MVP: $sessions clean session records, $candidates reviewed candidates, $active current Knowledge items, $superseded explicit supersession, $runs explainable context runs, $selections immutable selections and zero old records; acceptance criteria pass."
+echo "CPR-22 MVP: $sessions clean sessions, $candidates reviewed candidates, $active current Knowledge items, $superseded explicit supersession, $runs explainable context runs, $selections immutable selections and no retired Record table; acceptance criteria pass."

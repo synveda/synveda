@@ -1,23 +1,3 @@
-regulated-strict   memory public tenant     curator×1 + administrator×1 + 2distinct
-regulated-strict   memory public org_unit   curator×1 + administrator×1 + 2distinct
-regulated-strict   memory public workspace  curator×1 + 1distinct
-regulated-strict   memory public project    curator×1 + 1distinct
-regulated-strict   memory public principal  curator×1 + 1distinct
-regulated-strict   memory internal tenant     curator×1 + administrator×1 + 2distinct
-regulated-strict   memory internal org_unit   curator×1 + administrator×1 + 2distinct
-regulated-strict   memory internal workspace  curator×1 + 1distinct
-regulated-strict   memory internal project    curator×1 + 1distinct
-regulated-strict   memory internal principal  curator×1 + 1distinct
-regulated-strict   memory confidential tenant     curator×1 + administrator×1 + 2distinct
-regulated-strict   memory confidential org_unit   curator×1 + administrator×1 + 2distinct
-regulated-strict   memory confidential workspace  curator×1 + 1distinct
-regulated-strict   memory confidential project    curator×1 + 1distinct
-regulated-strict   memory confidential principal  curator×1 + 1distinct
-regulated-strict   memory restricted tenant     curator×1 + administrator×1 + 2distinct
-regulated-strict   memory restricted org_unit   curator×1 + administrator×1 + 2distinct
-regulated-strict   memory restricted workspace  curator×1 + administrator×1 + 2distinct
-regulated-strict   memory restricted project    curator×1 + administrator×1 + 2distinct
-regulated-strict   memory restricted principal  curator×1 + administrator×1 + 2distinct
 regulated-strict   knowledge public tenant     curator×1 + administrator×1 + 2distinct
 regulated-strict   knowledge public org_unit   curator×1 + administrator×1 + 2distinct
 regulated-strict   knowledge public workspace  curator×1 + 1distinct
@@ -158,26 +138,6 @@ regulated-strict   configuration restricted org_unit   administrator×2 + 2disti
 regulated-strict   configuration restricted workspace  administrator×2 + 2distinct
 regulated-strict   configuration restricted project    administrator×2 + 2distinct
 regulated-strict   configuration restricted principal  administrator×2 + 2distinct
-standard           memory public tenant     curator×1 + 1distinct
-standard           memory public org_unit   curator×1 + 1distinct
-standard           memory public workspace  auto
-standard           memory public project    auto
-standard           memory public principal  auto
-standard           memory internal tenant     curator×1 + 1distinct
-standard           memory internal org_unit   curator×1 + 1distinct
-standard           memory internal workspace  auto
-standard           memory internal project    auto
-standard           memory internal principal  auto
-standard           memory confidential tenant     curator×1 + 1distinct
-standard           memory confidential org_unit   curator×1 + 1distinct
-standard           memory confidential workspace  auto
-standard           memory confidential project    auto
-standard           memory confidential principal  auto
-standard           memory restricted tenant     curator×1 + administrator×1 + 2distinct
-standard           memory restricted org_unit   curator×1 + administrator×1 + 2distinct
-standard           memory restricted workspace  administrator×1 + 2distinct
-standard           memory restricted project    administrator×1 + 2distinct
-standard           memory restricted principal  administrator×1 + 2distinct
 standard           knowledge public tenant     curator×1 + 1distinct
 standard           knowledge public org_unit   curator×1 + 1distinct
 standard           knowledge public workspace  auto
@@ -318,26 +278,6 @@ standard           configuration restricted org_unit   administrator×1 + 2disti
 standard           configuration restricted workspace  administrator×1 + 2distinct
 standard           configuration restricted project    administrator×1 + 2distinct
 standard           configuration restricted principal  administrator×1 + 2distinct
-open-collaboration memory public tenant     curator×1 + 1distinct
-open-collaboration memory public org_unit   auto
-open-collaboration memory public workspace  auto
-open-collaboration memory public project    auto
-open-collaboration memory public principal  auto
-open-collaboration memory internal tenant     curator×1 + 1distinct
-open-collaboration memory internal org_unit   auto
-open-collaboration memory internal workspace  auto
-open-collaboration memory internal project    auto
-open-collaboration memory internal principal  auto
-open-collaboration memory confidential tenant     curator×1 + 1distinct
-open-collaboration memory confidential org_unit   auto
-open-collaboration memory confidential workspace  auto
-open-collaboration memory confidential project    auto
-open-collaboration memory confidential principal  auto
-open-collaboration memory restricted tenant     curator×1 + administrator×1 + 2distinct
-open-collaboration memory restricted org_unit   administrator×1 + 2distinct
-open-collaboration memory restricted workspace  administrator×1 + 2distinct
-open-collaboration memory restricted project    administrator×1 + 2distinct
-open-collaboration memory restricted principal  administrator×1 + 2distinct
 open-collaboration knowledge public tenant     curator×1 + 1distinct
 open-collaboration knowledge public org_unit   auto
 open-collaboration knowledge public workspace  auto

@@ -1,5 +1,5 @@
 //! FND-5 tests: the ops routes respond, the Prometheus contract (including
-//! `synveda_tokens_per_inject`) renders from boot, and one readiness request
+//! `synveda_tokens_per_context_run`) renders from boot, and one readiness request
 //! produces the gateway→core→store span chain the Jaeger AC relies on.
 //!
 //! The span-chain test needs a live Postgres: it reads `DATABASE_URL` and
@@ -53,18 +53,10 @@ fn state(url: &str) -> AppState {
         verifier: std::sync::Arc::new(synveda_identity::DisabledVerifier),
         login: None,
         public_origin: "http://127.0.0.1:8120".to_owned(),
-        search_index: Arc::new(
-            synveda_retrieval::SearchIndex::open(
-                std::env::temp_dir()
-                    .join("synveda-gateway-tests")
-                    .join(synveda_types::TenantId::new().to_string()),
-            )
-            .expect("open search index"),
-        ),
         embedder: Arc::new(synveda_ingest::embedding::AnyEmbedder::Deterministic(
             synveda_ingest::embedding::DeterministicEmbedder::new(),
         )),
-        inject_embed_timeout: std::time::Duration::from_millis(100),
+        context_embed_timeout: std::time::Duration::from_millis(100),
         // TEN-4 (ADR-0064): a fixed test KEK, so a suite that touches a
         // sealed column seals rather than skipping. `Kms::Disabled` is the
         // production default when no key is configured.
@@ -102,7 +94,7 @@ async fn healthz_is_alive_without_a_database() {
 }
 
 #[tokio::test]
-async fn metrics_exposes_the_tokens_per_inject_contract() {
+async fn metrics_exposes_the_tokens_per_context_run_contract() {
     let _serial = serial().await;
     // The middleware records after a response completes; serve one request
     // first so the labelled HTTP series exist in the exposition.
@@ -121,8 +113,8 @@ async fn metrics_exposes_the_tokens_per_inject_contract() {
     // Registered at startup, before any inject exists (ADR-0007): the SLO
     // metric must be scrapeable from boot, not from first use.
     assert!(
-        body.contains("# TYPE synveda_tokens_per_inject histogram"),
-        "tokens_per_inject histogram missing from exposition:\n{body}"
+        body.contains("# TYPE synveda_tokens_per_context_run histogram"),
+        "tokens_per_context_run histogram missing from exposition:\n{body}"
     );
     assert!(
         body.contains("synveda_http_requests_total"),

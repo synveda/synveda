@@ -242,7 +242,7 @@ fn render_item(
     paths: &BTreeMap<KnowledgeItemId, String>,
 ) -> Result<String> {
     let mut frontmatter = preserved_frontmatter(&item.content.metadata);
-    // v0.1 fallback fields are intentionally not carried by this hard-cut
+    // v0.1-only fields are intentionally not carried by this hard-cut
     // adapter, even when they arrived as otherwise unknown metadata.
     for key in [
         "timestamp",

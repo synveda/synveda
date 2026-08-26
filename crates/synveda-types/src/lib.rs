@@ -25,7 +25,6 @@ mod composition;
 pub mod configuration;
 // Explainable Knowledge-backed context planning (CPR-20, ADR-0084).
 pub mod context;
-mod dedup;
 mod directory;
 mod error;
 mod id;
@@ -42,16 +41,13 @@ pub mod knowledge;
 // **caller-supplied** object and neither is in this crate: the gateway's
 // idempotency digest and the session ledger's payload hash.
 pub mod json;
-mod mover;
 // Reusable durable operation vocabulary (CPR-16, ADR-0081).
 pub mod operation;
 mod pack;
 mod policy;
-mod promotion;
 mod prompt;
 mod proposal;
 mod quarantine;
-mod record;
 mod redaction;
 /// Immutable, governed policy relaxations (CPR-31, ADR-0090).
 pub mod relaxation;
@@ -59,7 +55,6 @@ pub mod relaxation;
 // module so `repository::identify` reads as what it is at every call site —
 // the one place two clients agree on what "the same repository" means.
 pub mod repository;
-mod retention;
 // The governed scope model (CPR-3, ADR-0070) — public as a module because
 // `ScopeKind` and `Scope` are the tree every other type hangs off. Until the
 // hierarchy cutover (CPR-7, ADR-0074) a second `ScopeKind` lived at the
@@ -95,31 +90,27 @@ pub use approval::{
 };
 pub use asset::AssetKind;
 pub use channel::Channel;
-pub use composition::{
-    CompositionConfig, DEFAULT_INDEX_ENTRY_CHARS, EntryTier, IndexTier, InjectChannels, SkillIndex,
-};
+pub use composition::{CompositionConfig, DEFAULT_SUMMARY_CHARS, EntryTier, SkillIndex};
 pub use context::{
     ContextCandidate, ContextCompletionStatus, ContextFeedback, ContextFeedbackType,
     ContextGraphDirection, ContextGraphStep, ContextReasonCode, ContextSelection,
     TraceRetentionMode,
 };
-pub use dedup::{DedupConfig, DedupMode, MAX_DEDUP_NEIGHBOURS, permille};
 pub use directory::{DirectoryUser, ScimCredential};
 pub use error::{Error, Result};
 pub use id::{
     CapabilitySnapshotId, CaptureBatchId, CaptureCandidateDecisionId, CaptureCandidateId,
     ConfigurationArtifactId, ConfigurationBindingId, ConfigurationVersionId, ConflictMemberId,
-    ConflictSetId, ContextCandidateId, ContextFeedbackId, ContextRunId, ContextSelectionId,
-    DirectoryUserId, DurableOperationId, GrantId, GroupId, IdentityId, ImportArtifactId,
-    ImportJobId, ImportMappingId, InviteId, KnowledgeItemId, KnowledgeRelationId,
-    KnowledgeRevisionId, KnowledgeSourceId, ProjectId, ProposalId, RecordId, RelaxationId,
+    ConflictSetId, ContextCandidateId, ContextFeedbackId, ContextPackChunkId, ContextRunId,
+    ContextSelectionId, DirectoryUserId, DurableOperationId, GrantId, GroupId, IdentityId,
+    ImportArtifactId, ImportJobId, ImportMappingId, InviteId, KnowledgeItemId, KnowledgeRelationId,
+    KnowledgeRevisionId, KnowledgeSourceId, ProjectId, ProposalId, RelaxationId,
     RelaxationVersionId, RepositoryId, ScimCredentialId, ScopeId, SessionEventId, SessionId,
     SkillBindingId, SkillId, SkillTestRunId, SkillUsageEventId, SkillVersionId, TenantId,
     TenantSecretId, TenantSecretReencryptionJobId, ToolBindingId, ToolServerId,
     ToolServerVersionId, ToolTestRunId, WorkspaceId,
 };
 pub use identity::{Identity, IdentityKind, IdentityStatus};
-pub use mover::{MoverConfig, PersonalMemory};
 pub use pack::{
     CHUNK_CHARS, ContextPackChannel, ContextPackName, DocumentChunk, DocumentName, DocumentPath,
     MAX_DOCUMENT_CHARS, MAX_DOCUMENT_CHUNKS, MAX_DOCUMENT_NAME_CHARS, MAX_DOCUMENT_NAME_SEGMENTS,
@@ -127,10 +118,6 @@ pub use pack::{
     MAX_PACK_SEGMENT_CHARS, PackDocument, chunk,
 };
 pub use policy::{PackConfig, PolicyAssignment};
-pub use promotion::{
-    MAX_PROMOTION_RULES, MAX_RULE_NAME, MemberEvidence, PromotionConfig, PromotionEvidence,
-    PromotionRule, UsageFacts,
-};
 pub use prompt::{
     MAX_DEFAULT_CHARS, MAX_DESCRIPTION_CHARS, MAX_NAME_CHARS, MAX_NAME_SEGMENTS, MAX_SEGMENT_CHARS,
     MAX_TEMPLATE_CHARS, MAX_VARIABLES, PromptChannel, PromptName, PromptTemplate, PromptVariable,
@@ -139,14 +126,10 @@ pub use proposal::{
     ArtifactFamily, ArtifactReference, ProposalEffect, ProposalState, ProposalView, Verdict,
 };
 pub use quarantine::QuarantineState;
-pub use record::{RecordClass, RecordKind};
 pub use redaction::{RedactionConfig, RedactionMode};
 pub use relaxation::{
     CurrentRelaxation, Relaxation, RelaxationAction, RelaxationCommand, RelaxationMutationOutcome,
     RelaxationMutationResult, RelaxationStatus, RelaxationTerms, RelaxationVersion,
-};
-pub use retention::{
-    ClassTtl, MAX_RETENTION_DAYS, MIN_STAGING_DAYS, RetentionConfig, RetentionMode,
 };
 pub use sensitivity::{ScopeTier, Sensitivity};
 pub use skill::{

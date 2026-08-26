@@ -24,12 +24,8 @@ use crate::Error;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum AssetKind {
-    /// A memory record's content — derived by the pipeline or authored
-    /// (seed §4.2).
-    Memory,
     /// A stable Knowledge aggregate revision or governed mutation
-    /// (CPR-16, ADR-0081). Distinct from the pre-cut `memory` record asset:
-    /// neither vocabulary reads or writes the other's persistence model.
+    /// (CPR-16, ADR-0081).
     Knowledge,
     /// A versioned prompt template (PRMT-1).
     Prompt,
@@ -54,8 +50,7 @@ pub enum AssetKind {
 impl AssetKind {
     /// All asset kinds. Kept in the same order as the `vedaflow_objects.kind`
     /// CHECK constraint (migration 0018).
-    pub const ALL: [AssetKind; 8] = [
-        AssetKind::Memory,
+    pub const ALL: [AssetKind; 7] = [
         AssetKind::Knowledge,
         AssetKind::Prompt,
         AssetKind::Skill,
@@ -72,16 +67,12 @@ impl AssetKind {
     /// (CPR-16, ADR-0081). Policy effects likewise write governed rows, not
     /// refs. Keeping this list separate from [`Self::ALL`] prevents either
     /// non-channelled kind from acquiring a shadow `*/published` truth.
-    pub const CHANNELLED: [AssetKind; 3] =
-        [AssetKind::Memory, AssetKind::Prompt, AssetKind::ContextPack];
+    pub const CHANNELLED: [AssetKind; 2] = [AssetKind::Prompt, AssetKind::ContextPack];
 
     /// Whether this asset family has VedaFlow channel refs.
     #[must_use]
     pub const fn has_channels(self) -> bool {
-        matches!(
-            self,
-            AssetKind::Memory | AssetKind::Prompt | AssetKind::ContextPack
-        )
+        matches!(self, AssetKind::Prompt | AssetKind::ContextPack)
     }
 
     /// Stable wire name, identical to the serde form and to the stored
@@ -90,7 +81,6 @@ impl AssetKind {
     #[must_use]
     pub const fn as_str(&self) -> &'static str {
         match self {
-            AssetKind::Memory => "memory",
             AssetKind::Knowledge => "knowledge",
             AssetKind::Prompt => "prompt",
             AssetKind::Skill => "skill",

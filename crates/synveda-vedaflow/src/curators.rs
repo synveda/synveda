@@ -3,7 +3,7 @@
 //!
 //! A curator file names, per scope, who must **additionally** approve a
 //! proposal touching matching assets. It is the per-scope half of the
-//! approval matrix: the pack says what a `restricted` memory needs
+//! approval matrix: the pack says what `restricted` Knowledge needs
 //! anywhere, the file says that in *this* team a deployment procedure
 //! also needs the person who owns deployments.
 //!
@@ -38,7 +38,7 @@
 //!
 //! ```text
 //! # Platform team curators (FLOW-3)
-//! memory/*        @alice-subject role:administrator
+//! knowledge/*     @alice-subject role:administrator
 //! skill/deploy-*  @bob-subject
 //! *               @head-of-eng
 //! ```
@@ -531,7 +531,7 @@ mod tests {
 
     const SAMPLE: &str = "\
 # Platform team curators (FLOW-3)
-memory/*         @alice role:administrator
+knowledge/*      @alice role:administrator
 skill/deploy-*   @bob
 
 *                @head-of-eng   # everything, always
@@ -546,7 +546,7 @@ skill/deploy-*   @bob
         let file = CuratorFile::parse(SAMPLE).unwrap();
         assert_eq!(file.source(), SAMPLE, "the authored bytes are the asset");
         assert_eq!(file.rules().len(), 3);
-        assert_eq!(file.rules()[0].pattern, "memory/*");
+        assert_eq!(file.rules()[0].pattern, "knowledge/*");
         assert_eq!(
             file.rules()[0].approvers,
             vec![
@@ -565,21 +565,24 @@ skill/deploy-*   @bob
 
     #[test]
     fn a_rule_naming_nobody_is_a_parse_error() {
-        assert!(CuratorFile::parse("memory/*").is_err());
-        assert!(CuratorFile::parse("memory/*   # @alice").is_err());
+        assert!(CuratorFile::parse("knowledge/*").is_err());
+        assert!(CuratorFile::parse("knowledge/*   # @alice").is_err());
     }
 
     #[test]
     fn approvers_are_subjects_or_roles_and_nothing_else() {
-        assert!(CuratorFile::parse("memory/* alice").is_err(), "no sigil");
+        assert!(CuratorFile::parse("knowledge/* alice").is_err(), "no sigil");
         assert!(
-            CuratorFile::parse("memory/* role:wizard").is_err(),
+            CuratorFile::parse("knowledge/* role:wizard").is_err(),
             "no such role"
         );
-        assert!(CuratorFile::parse("memory/* @").is_err(), "empty subject");
-        assert!(CuratorFile::parse("memory/* role:administrator").is_ok());
+        assert!(
+            CuratorFile::parse("knowledge/* @").is_err(),
+            "empty subject"
+        );
+        assert!(CuratorFile::parse("knowledge/* role:administrator").is_ok());
         // The binding vocabulary fails by name (CPR-7, ADR-0074 decision 6).
-        assert!(CuratorFile::parse("memory/* role:steward").is_err());
+        assert!(CuratorFile::parse("knowledge/* role:steward").is_err());
     }
 
     #[test]
@@ -588,13 +591,13 @@ skill/deploy-*   @bob
         assert!(CuratorFile::parse(&big).is_err());
 
         let many_rules = (0..=MAX_CURATOR_RULES)
-            .map(|index| format!("memory/{index} @alice"))
+            .map(|index| format!("knowledge/{index} @alice"))
             .collect::<Vec<_>>()
             .join("\n");
         assert!(CuratorFile::parse(&many_rules).is_err());
 
         let many_approvers = format!(
-            "memory/* {}",
+            "knowledge/* {}",
             (0..=MAX_RULE_APPROVERS)
                 .map(|index| format!("@person-{index}"))
                 .collect::<Vec<_>>()
@@ -605,19 +608,19 @@ skill/deploy-*   @bob
 
     #[test]
     fn the_one_wildcard_anchors_at_both_ends() {
-        assert!(glob_matches("memory/*", "memory/abc"));
-        assert!(glob_matches("memory/*", "memory/"));
-        assert!(!glob_matches("memory/*", "prompt/abc"));
+        assert!(glob_matches("knowledge/*", "knowledge/abc"));
+        assert!(glob_matches("knowledge/*", "knowledge/"));
+        assert!(!glob_matches("knowledge/*", "prompt/abc"));
         assert!(glob_matches("*", "anything/at/all"));
         assert!(glob_matches("skill/deploy-*", "skill/deploy-prod"));
         assert!(!glob_matches("skill/deploy-*", "skill/build-prod"));
-        assert!(glob_matches("memory/*-prod", "memory/deploy-prod"));
-        assert!(!glob_matches("memory/*-prod", "memory/deploy-prod-2"));
+        assert!(glob_matches("knowledge/*-prod", "knowledge/deploy-prod"));
+        assert!(!glob_matches("knowledge/*-prod", "knowledge/deploy-prod-2"));
         assert!(glob_matches("a*b*c", "axxbyyc"));
         assert!(!glob_matches("a*b*c", "axxbyy"));
         // No wildcard: exact match, not prefix match.
-        assert!(glob_matches("memory/abc", "memory/abc"));
-        assert!(!glob_matches("memory/abc", "memory/abcd"));
+        assert!(glob_matches("knowledge/abc", "knowledge/abc"));
+        assert!(!glob_matches("knowledge/abc", "knowledge/abcd"));
         // Overlapping segments must not be counted twice.
         assert!(!glob_matches("a*a*a", "aa"));
     }
@@ -627,14 +630,14 @@ skill/deploy-*   @bob
     #[test]
     fn a_file_adds_to_the_matrix_it_composes_with() {
         let mut requirement = ApprovalMatrix::empty().resolve(
-            AssetKind::Memory,
+            AssetKind::Knowledge,
             Sensitivity::Restricted,
             ScopeKind::OrgUnit,
         );
         let floor_roles = requirement.roles.clone();
         CuratorFile::parse(SAMPLE).unwrap().apply(
             scope(),
-            AssetKind::Memory,
+            AssetKind::Knowledge,
             &["abc".to_owned()],
             &mut requirement,
         );
@@ -659,11 +662,11 @@ skill/deploy-*   @bob
     /// reviewed as a set.
     #[test]
     fn one_matching_member_pulls_its_owner_into_the_whole_review() {
-        let file = CuratorFile::parse("memory/deploy-* @bob\n").unwrap();
+        let file = CuratorFile::parse("knowledge/deploy-* @bob\n").unwrap();
         let mut requirement = ApprovalRequirement::default();
         file.apply(
             scope(),
-            AssetKind::Memory,
+            AssetKind::Knowledge,
             &["unrelated".to_owned(), "deploy-runbook".to_owned()],
             &mut requirement,
         );
@@ -672,7 +675,7 @@ skill/deploy-*   @bob
         let mut none = ApprovalRequirement::default();
         file.apply(
             scope(),
-            AssetKind::Memory,
+            AssetKind::Knowledge,
             &["unrelated".to_owned()],
             &mut none,
         );
@@ -680,14 +683,14 @@ skill/deploy-*   @bob
     }
 
     /// Patterns are matched against `{asset-kind}/{entry}`, so a rule for
-    /// skills never governs a memory.
+    /// skills never governs Knowledge.
     #[test]
     fn patterns_are_scoped_by_asset_kind() {
         let file = CuratorFile::parse("skill/* @security\n").unwrap();
         let mut requirement = ApprovalRequirement::default();
         file.apply(
             scope(),
-            AssetKind::Memory,
+            AssetKind::Knowledge,
             &["anything".to_owned()],
             &mut requirement,
         );

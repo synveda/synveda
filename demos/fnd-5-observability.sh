@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 # FND-5 acceptance demo: a single trace visible in Jaeger spanning an
 # end-to-end request — gateway→core→store→Postgres — plus the Prometheus
-# contract (synveda_tokens_per_inject) on /metrics.
+# contract (synveda_tokens_per_context_run) on /metrics.
 # AC (docs/backlog/FND-5.md): single trace visible in Jaeger spanning an
 # end-to-end request.
 # On Windows, run via Git Bash. Needs the postgres and jaeger services, not
@@ -59,15 +59,15 @@ echo "    readyz: OK"
 
 echo "==> /metrics exposes the Prometheus contract"
 metrics=$(curl -fsS http://127.0.0.1:8120/metrics)
-echo "$metrics" | grep -q '^# TYPE synveda_tokens_per_inject histogram' || {
-  echo "demo FAILED: synveda_tokens_per_inject histogram missing from /metrics" >&2
+echo "$metrics" | grep -q '^# TYPE synveda_tokens_per_context_run histogram' || {
+  echo "demo FAILED: synveda_tokens_per_context_run histogram missing from /metrics" >&2
   exit 1
 }
 echo "$metrics" | grep -q 'synveda_http_requests_total' || {
   echo "demo FAILED: synveda_http_requests_total missing from /metrics" >&2
   exit 1
 }
-echo "    metrics: OK (tokens_per_inject registered before any inject exists)"
+echo "    metrics: OK (tokens_per_context_run registered before any run exists)"
 
 # ADR-0007's deferred clause, landed 2026-08-05: a caller that arrives with
 # a W3C `traceparent` continues *its* trace rather than starting a new one

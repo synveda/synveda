@@ -3,7 +3,7 @@
 #
 # Two stages, and the split is the point: dependencies compile in their own
 # layer so that editing this workspace's own sources does not recompile
-# Cedar, Tantivy and sqlx. A cold build is minutes and is what ADR-0055
+# Cedar and sqlx. A cold build is minutes and is what ADR-0055
 # decision 6 puts *outside* the acceptance criterion's clock — a release
 # ships this image, and the operator being timed pulls it.
 
@@ -99,12 +99,6 @@ COPY --from=build /src/target/release/synveda /usr/local/bin/synveda
 # above is where it lived, and the runtime is still one process.
 COPY --from=console /src/console/dist /usr/share/synveda/console
 ENV SYNVEDA_CONSOLE_DIR=/usr/share/synveda/console
-
-# The Tantivy sidecar (CTX-1). A named volume mounts here so an index
-# survives a container replacement rather than being rebuilt on every
-# restart by the indexer's sweep.
-ENV SYNVEDA_SEARCH_INDEX_DIR=/var/lib/synveda/search
-RUN mkdir -p /var/lib/synveda/search
 
 WORKDIR /app
 EXPOSE 8120

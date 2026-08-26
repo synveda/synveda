@@ -893,27 +893,6 @@ pub fn state_dir() -> Option<PathBuf> {
     Profile::discover().ok().map(|profile| profile.state_dir())
 }
 
-/// Where the gateway keeps its Tantivy sidecars (CTX-1, ADR-0024), resolved
-/// the way the gateway itself resolves them: `SYNVEDA_SEARCH_INDEX_DIR`, then
-/// the deployment's own working directory, then the relative default.
-///
-/// Needed by `synveda reset`, because the sidecar is *derived* from the
-/// database. Left behind, it would be a lexical index over record ids that no
-/// longer exist — a fresh database that is not fresh, in the one leg of
-/// retrieval that does not read Postgres directly.
-pub fn search_index_dir() -> PathBuf {
-    if let Some(explicit) = std::env::var("SYNVEDA_SEARCH_INDEX_DIR")
-        .ok()
-        .filter(|value| !value.is_empty())
-    {
-        return PathBuf::from(explicit);
-    }
-    Profile::discover().map_or_else(
-        |_| PathBuf::from("./data/search-index"),
-        |profile| profile.working_dir().join("data/search-index"),
-    )
-}
-
 /// What the gateway binary is, for the convergence fingerprint.
 ///
 /// Modification time and length rather than a digest: this runs on every
@@ -1608,7 +1587,7 @@ mod tests {
         let logfile = dir.join("gateway.log");
         std::fs::write(
             &logfile,
-            "INFO search indexer starting\n\
+            "INFO gateway starting\n\
              Error: Os { code: 48, kind: AddrInUse, message: \"Address already in use\" }\n",
         )
         .unwrap();

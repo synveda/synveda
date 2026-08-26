@@ -31,18 +31,9 @@
 //! cannot open a session as somebody else or in somebody else's tenant even
 //! by accident.
 //!
-//! ## `session_id: String` was not this
-//!
-//! Until CPR-10 a "session" was an opaque string on
-//! `observe_events.session_id`, and `/v1/inject` and `/v1/recall` copied it
-//! into an audit payload. It meant a session an agent only *read* in did not
-//! exist — which ADPT-8 measured against a headless Claude Code run: three
-//! runs, three `inject.ok`, **zero** `observe.done`.
-//!
-//! **That plane is gone.** CPR-12 (ADR-0078) deleted `/v1/observe`,
-//! `/v1/inject`, `/v1/recall`, `observe_events` and the correlation string
-//! with them, and re-anchored the extraction pipeline on these tables. There
-//! is one runtime write path and it is `POST /v1/sessions/{id}/events`.
+//! There is one runtime write path: `POST /v1/sessions/{id}/events`. The
+//! aggregate id is server-owned and is the root for capture, context and
+//! audit evidence.
 
 use std::fmt;
 use std::str::FromStr;

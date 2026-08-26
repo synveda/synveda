@@ -236,7 +236,7 @@ mod tests {
     fn the_asset_kind_is_part_of_the_address() {
         let bytes = asset("print('ok')").canonical_bytes();
         for other in [
-            AssetKind::Memory,
+            AssetKind::Knowledge,
             AssetKind::Prompt,
             AssetKind::ContextPack,
             AssetKind::Policy,

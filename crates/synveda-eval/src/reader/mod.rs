@@ -40,16 +40,16 @@ pub use extractive::ExtractiveReader;
 
 /// One question and the block it must be answered out of.
 ///
-/// Borrowed rather than owned, the `client::ObserveRequest` idiom — a run
+/// Borrowed rather than owned, the `client::SessionEventBatchRequest` idiom — a run
 /// holds each block once and reads out of it.
 #[derive(Debug, Clone, Copy)]
 pub struct ReaderInput<'a> {
     /// The instance's question.
     pub question: &'a str,
-    /// The governed block, exactly as `/v1/inject` served it — scope
-    /// headings, entry lines, legend, watermark and all. Passed verbatim
-    /// because trimming it here would measure a block the product does
-    /// not serve.
+    /// The governed block, exactly as a session ContextRun served it —
+    /// current JSON Knowledge payloads, safety notice and address footer.
+    /// Passed verbatim because trimming it here would measure a block the
+    /// product does not serve.
     pub block: &'a str,
 }
 
@@ -59,7 +59,7 @@ pub struct ReaderInput<'a> {
 pub struct Answer {
     /// The free-text answer the judge will grade. When the reader
     /// abstained this is its decline, in words — a reference that says
-    /// the record holds no answer has to be gradeable against something.
+    /// the block holds no answer has to be gradeable against something.
     pub text: String,
     /// Whether the reader declined because the block does not support an
     /// answer. First-class rather than inferred from `text` (EVAL-1

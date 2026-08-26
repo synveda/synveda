@@ -134,8 +134,19 @@ function commandFor(scenario, byId) {
 }
 
 function git(args) {
-  const result = spawnSync("git", args, { cwd: ROOT, encoding: "utf8" });
-  if (result.status !== 0) throw new Error(`git ${args.join(" ")} failed`);
+  // A baseline squash legitimately makes a pre-commit patch much larger than
+  // Node's spawnSync default buffer. Dirty-tree provenance is a supported
+  // evaluator mode, so hash the complete patch instead of failing at the
+  // package boundary that most needs it.
+  const result = spawnSync("git", args, {
+    cwd: ROOT,
+    encoding: "utf8",
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  if (result.status !== 0) {
+    const detail = result.error?.message ?? result.stderr?.trim();
+    throw new Error(`git ${args.join(" ")} failed${detail ? `: ${detail}` : ""}`);
+  }
   return result.stdout;
 }
 

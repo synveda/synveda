@@ -43,17 +43,6 @@ export function spoolDir(): string {
 }
 
 /**
- * Where the pre-cut per-session cursors lived (ADR-0027 decision 7).
- *
- * Named only so it can be **removed**. Nothing reads it: the old format held a
- * cursor into somebody else's transcript file and no events, so there is
- * nothing in one to migrate.
- */
-export function legacySessionDir(): string {
-  return join(stateDir(), "sessions");
-}
-
-/**
  * Where `synveda login` will write the credentials file (ADR-0027
  * decision 6). ADPT-1 step 2 fills this in; step 1 resolves its bearer
  * through the seam in `credentials.mts`.

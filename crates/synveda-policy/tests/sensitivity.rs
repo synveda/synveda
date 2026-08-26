@@ -143,7 +143,7 @@ fn read(pdp: &Pdp, fx: &Fixture, ask: &Ask<'_>) -> bool {
     let principal_scopes = fx.chain(ask.placement);
     pdp.authorize(
         ask.principal,
-        Action::MemoryRead,
+        Action::KnowledgeRead,
         Resource::Scope(fx.node(ask.target).id),
         &AuthzContext {
             scopes: &scopes,
@@ -412,7 +412,7 @@ fn standard_shares_what_you_hold_at_the_working_tiers_only() {
     );
 }
 
-/// A `MemoryRead` decided without naming a tier is refused, not defaulted:
+/// A `KnowledgeRead` decided without naming a tier is refused, not defaulted:
 /// the `grant`-on-`RoleAssign` discipline, applied to the attribute the
 /// base layer's `restricted` forbid stands on (decision 2).
 #[test]
@@ -426,7 +426,7 @@ fn a_read_decided_without_a_tier_fails_closed_rather_than_defaulting() {
     let err = pdp
         .authorize(
             &alice,
-            Action::MemoryRead,
+            Action::KnowledgeRead,
             Resource::Scope(fx.node("team-a").id),
             &AuthzContext {
                 scopes: &scopes,
@@ -446,7 +446,7 @@ fn a_read_decided_without_a_tier_fails_closed_rather_than_defaulting() {
 /// the top one is reachable by nothing (PRMT-1, ADR-0049 decisions 4 and 5).
 ///
 /// The first half is a transcription check with teeth: each pack's
-/// `PromptRead` permits were written by copying its own `MemoryRead`
+/// `PromptRead` permits were written by copying its own `KnowledgeRead`
 /// permits, and this asks both seams the same four questions at the same
 /// scopes and requires identical answers.
 ///

@@ -822,7 +822,7 @@ with a message rather than serving rows in a model it does not implement:
 
 ```
 this database carries no Synveda schema epoch marker, so it was written
-before the context platform (epoch 1).
+before the context platform (epoch 3).
 
 Synveda is pre-1.0 and the context-platform redesign is a hard cut: there is
 no migration from the previous schema, no compatibility path, and nothing that

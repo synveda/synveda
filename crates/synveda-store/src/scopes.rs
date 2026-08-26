@@ -609,16 +609,9 @@ pub async fn get(
 /// and name if it is not there yet.
 ///
 /// The root is the one scope nobody asks for: a person creating their first
-/// workspace has no reason to have created a tenant scope first, and asking
-/// them to is the "declare an organisation before the product will hold a
-/// record" this whole programme exists to remove. So the first thing that
-/// needs a parent mints it.
-///
-/// **Nothing is read from the old hierarchy to do this** (ADR-0068 decision 3;
-/// ADR-0070's "synchronises nothing"). The slug and the display name come
-/// from the `tenants` row — the isolation boundary both models share and
-/// neither owns — so no row of `hierarchy_nodes` is consulted, translated or
-/// mirrored, then or ever.
+/// workspace has no reason to create a tenant root first. The first operation
+/// that needs a parent therefore mints it from the tenant isolation boundary
+/// (ADR-0068 decision 3; ADR-0070).
 ///
 /// Concurrency: two callers racing both try the insert and the
 /// one-root-per-tenant unique index admits one. The loser sees

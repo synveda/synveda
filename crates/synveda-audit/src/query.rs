@@ -34,9 +34,8 @@ use crate::event::{AuditAction, Outcome};
 ///
 /// This is exactly the predicate of migration 0028's partial GIN index; a
 /// query that widens it stops using that index.
-/// `session.context.composed` joined the set with the observe cutover
-/// (CPR-12, ADR-0078 decision 5): `/v1/inject` and `/v1/recall` are deleted, so
-/// a context run is the **only** way material reaches an agent, and a
+/// `session.context.composed` is the set (CPR-12, ADR-0078 decision 5): a
+/// ContextRun is the **only** way material reaches an agent, and a
 /// disclosure query that did not count it would answer "nobody was served
 /// anything" about every deployment on the new plane.
 pub const DISCLOSURE_ACTIONS: [AuditAction; 1] = [AuditAction::SessionContextComposed];
@@ -52,14 +51,13 @@ pub const DISCLOSURE_ACTIONS: [AuditAction; 1] = [AuditAction::SessionContextCom
 /// are the transaction-time record.
 ///
 /// Pass to [`search`] via [`EventFilter::actions`].
-pub const AUTHORITY_ACTIONS: [AuditAction; 10] = [
+pub const AUTHORITY_ACTIONS: [AuditAction; 9] = [
     AuditAction::AccessGranted,
     AuditAction::AccessRevoked,
     AuditAction::ConfigurationChangeApplied,
     AuditAction::CuratorRulesUpdated,
     AuditAction::RelaxationChangeApplied,
     AuditAction::RelaxationExpired,
-    AuditAction::MemoryClassified,
     AuditAction::ChannelPublished,
     AuditAction::ChannelRolledBack,
     AuditAction::ChannelPinned,

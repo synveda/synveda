@@ -6,10 +6,8 @@
 //! seam**, and both name the run they belong to: `POST
 //! /v1/sessions/{id}/events` admits batched events — scanned for secrets,
 //! staged under RLS, signalled to the extraction pipeline — and `POST
-//! /v1/sessions/{id}/context-runs` composes context for one. The three global
-//! primitives they replaced (`/v1/observe`, `/v1/inject`, `/v1/recall`) are
-//! deleted, along with the opaque correlation string that was the only thing
-//! joining them. Also here: the FND-5 observability baseline (OTel tracing
+//! /v1/sessions/{id}/context-runs` composes context for one. Also here: the
+//! FND-5 observability baseline (OTel tracing
 //! gateway→core→store, Prometheus `/metrics`, ops probes — ADR-0007) and
 //! the TEN-1 tenant plane (bearer-token → tenant resolution middleware
 //! guarding `/v1`, task-local context, `tenant.id` on every request

@@ -670,7 +670,7 @@ struct RememberArgs {
 /// `remember` — one model-composed fact into the caller's own home scope.
 ///
 /// The route takes **no scope parameter**: the write lands at the caller's
-/// own home scope and only there, gated by `MemoryWrite`, the role-free
+/// own home scope and only there, gated by `KnowledgeWrite`, the role-free
 /// own-home floor every placed principal holds (seed §2.1). A model calling
 /// this cannot write into a team, a department, or another person's memory
 /// *because the request has nowhere to say so* — which is the only reason

@@ -22,7 +22,6 @@ use synveda_gateway::telemetry;
 use synveda_identity::Hs256Verifier;
 use synveda_ingest::embedding::{AnyEmbedder, DeterministicEmbedder};
 use synveda_policy::Pdp;
-use synveda_retrieval::index::SearchIndex;
 use synveda_store::{access, identities, rls, scopes, tenants};
 use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
 use synveda_types::{GrantId, IdentityId, IdentityKind, ScopeId, TenantId, TenantStatus};
@@ -63,16 +62,8 @@ fn state(url: &str) -> AppState {
         public_origin: "http://127.0.0.1:8120".to_owned(),
         pdp: Arc::new(Pdp::new().expect("build embedded PDP")),
         service_token_max_ttl: Duration::from_secs(3_600),
-        search_index: Arc::new(
-            SearchIndex::open(
-                std::env::temp_dir()
-                    .join("synveda-cpr31-tests")
-                    .join(TenantId::new().to_string()),
-            )
-            .expect("open search sidecar"),
-        ),
         embedder: Arc::new(AnyEmbedder::Deterministic(DeterministicEmbedder::new())),
-        inject_embed_timeout: Duration::from_millis(100),
+        context_embed_timeout: Duration::from_millis(100),
         keys: Arc::new(synveda_store::keys::KeyRing::new(
             synveda_crypto::Kms::Local(
                 synveda_crypto::LocalKms::from_hex(&"31".repeat(32), "local:cpr31")
@@ -462,11 +453,23 @@ async fn personal_auto_apply_uses_vedaflow_and_immutable_versions() {
         untyped_terminal, 0,
         "terminal relaxation evidence lost its typed address"
     );
-    let old_table = sqlx::query_scalar!(r#"select to_regclass('policy_lapses')::text as "name?""#)
-        .fetch_one(&world.state.pool)
-        .await
-        .expect("inspect retired table");
-    assert!(old_table.is_none(), "policy_lapses survived the hard cut");
+    let retired_table_exists = sqlx::query_scalar!(
+        r#"
+        select exists (
+            select 1
+            from information_schema.tables
+            where table_schema = 'public' and table_name = $1
+        ) as "exists!"
+        "#,
+        "policy_lapses",
+    )
+    .fetch_one(&world.state.pool)
+    .await
+    .expect("inspect retired table");
+    assert!(
+        !retired_table_exists,
+        "retired relaxation table survived the hard cut"
+    );
 }
 
 #[tokio::test]

@@ -1,19 +1,7 @@
-//! The read path: hybrid retrieval (pgvector ANN + Tantivy BM25, RRF
-//! fusion — CTX-1, ADR-0024) and the composition engine (scope
-//! gradient, pinned-first, token budget, channel rules — CTX-2,
-//! ADR-0025). No LLM calls on this path (tech plan §3): the crate's
-//! only network peer is Postgres, and the query embedding is the
-//! caller's input.
-//!
-//! Retrieval is policy-shaped before it touches an index: the engine's
-//! only entry takes an allowed `(scope, tier)` pair set, produced in the
-//! product paths by [`authz::permitted_chain_scopes`] — one PDP
-//! `MemoryRead` decision per candidate scope *and tier* (seed §2.2 is never
-//! bypassed). Since AUTHZ-5 that is the whole of the sensitivity rule here:
-//! this crate holds no ceiling of its own, because a clamp is a decision
-//! nobody took (ADR-0038 decision 3). The Tantivy sidecar is maintained by
-//! [`indexer`]; Postgres current truth decides what hydrates, so a lagging
-//! sidecar can only miss, never leak.
+//! The context read boundary. Knowledge lexical, semantic and graph
+//! retrieval lives on immutable Knowledge revisions in the store/gateway;
+//! this crate plans and composes the separately governed authored context
+//! families (context packs and Skill advertisements) under a token budget.
 //!
 //! The crate also carries the read path's readiness probe — the "core"
 //! leg of the gateway→core→store trace (FND-5, ADR-0007).
@@ -23,53 +11,24 @@
 
 pub mod authz;
 pub mod compose;
-pub mod hybrid;
-pub mod index;
-pub mod indexer;
 
 pub use authz::{
-    CandidateScope, CompositionPlan, MemoryReadInputs, ScopeDecision, composition_plan,
-    permitted_chain_scopes,
+    AuthoredReadInputs, CandidateScope, CompositionPlan, ScopeDecision, composition_plan,
 };
 pub use compose::{
-    Admission, Admitted, AdvertisedSkill, COMPOSED_ENTRIES_TOTAL, Candidate, ChannelWatermark,
-    ComposeRequest, ComposeScope, ComposedBlock, ComposedEntry, INDEX_TIER_TOKENS,
-    MAX_ADVERTISED_SKILLS, SKILL_INDEX_TOKENS, admit, compose, compose_authored,
-    conflict_precedence, estimated_tokens,
+    AUTHORED_SUMMARY_TOKENS, AdvertisedSkill, COMPOSED_ENTRIES_TOTAL, ChannelWatermark,
+    ComposeRequest, ComposeScope, ComposedBlock, ComposedEntry, MAX_ADVERTISED_SKILLS,
+    SKILL_INDEX_TOKENS, compose_authored, estimated_tokens,
 };
-pub use hybrid::{QueryVector, RetrievedRecord, SearchFilter, SearchRequest, hybrid_search};
-pub use index::{SEARCH_SCHEMA_VERSION, SearchIndex, SparseHit};
-pub use indexer::{IndexerConfig, SweepSummary, TenantSweep};
 
 use sqlx::PgPool;
 use synveda_types::Result;
 
-/// Counter: sidecar sweeps per tenant, labelled `outcome` =
-/// `updated` | `empty` | `error`. Emitted here, described by the
-/// gateway where the recorder lives (ADR-0007).
-pub const SEARCH_INDEX_SWEEPS_TOTAL: &str = "synveda_search_index_sweeps_total";
-
-/// Counter: sidecar document operations, labelled `op` =
-/// `upsert` | `delete`.
-pub const SEARCH_INDEX_DOCS_TOTAL: &str = "synveda_search_index_docs_total";
-
-/// Counter: hybrid searches, labelled `mode` = `hybrid` |
-/// `sparse_only` | `dense_only` | `empty_filter`.
-pub const RETRIEVAL_SEARCHES_TOTAL: &str = "synveda_retrieval_searches_total";
-
-/// Histogram: estimated tokens per composed inject block (CTX-2,
-/// ADR-0025 decision 8). The name FND-5 pre-registered with
-/// budget-shaped buckets; emitted here by [`compose::compose`] on every
-/// call — an inject that composed nothing records 0 — and described by
-/// the gateway where the recorder lives (ADR-0007).
-pub const TOKENS_PER_INJECT: &str = "synveda_tokens_per_inject";
-
-/// Histogram: per-leg latency, labelled `leg` = `dense` | `sparse` |
-/// `hydrate`.
-pub const RETRIEVAL_LEG_SECONDS: &str = "synveda_retrieval_leg_duration_seconds";
+/// Histogram: estimated tokens per authored-context block.
+pub const TOKENS_PER_CONTEXT_RUN: &str = "synveda_tokens_per_context_run";
 
 /// Verifies the read path can reach its storage backend. Ops-plane only: no
-/// records are read, so nothing here needs (or may bypass) the PDP (seed §2.2).
+/// domain rows are read, so nothing here needs (or may bypass) the PDP.
 #[tracing::instrument(name = "retrieval.readiness", skip_all, err(Display))]
 pub async fn readiness(pool: &PgPool) -> Result<()> {
     synveda_store::ping(pool).await

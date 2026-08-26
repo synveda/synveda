@@ -86,7 +86,7 @@
     },
     {
       "name": "alpha-decision-and-preference-pgvector",
-      "note": "Two claims in one utterance. The deterministic ruleset emits one record per event and tests the preference pattern first, so it can reach at most one of these — a recall miss with a named cause (ADR-0022 decision 3), not a mislabelled fixture.",
+      "note": "Two claims in one utterance. The deterministic ruleset emits one candidate per event and tests the preference pattern first, so it can reach at most one of these — a recall miss with a named cause (ADR-0022 decision 3), not a mislabelled fixture.",
       "input": {
         "event_type": "message.user",
         "session_id": "alpha-9",
@@ -104,7 +104,7 @@
         "event_type": "message.user",
         "session_id": "alpha-10",
         "occurred_at": "2026-07-20T10:09:00Z",
-        "payload": { "text": "The default composition budget is 1500 estimated tokens per inject." }
+        "payload": { "text": "The default composition budget is 1500 estimated tokens per context run." }
       },
       "expected": [{ "class": "fact", "content_contains": "1500" }]
     }

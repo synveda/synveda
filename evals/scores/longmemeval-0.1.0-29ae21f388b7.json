@@ -60,6 +60,6 @@
     "longmemeval_qa_ungraded": 0,
     "longmemeval_retrieval_recall": 0.357,
     "longmemeval_tokens_mean": 973,
-    "longmemeval_unattributed_records": 0
+    "longmemeval_unattributed_knowledge": 0
   }
 }

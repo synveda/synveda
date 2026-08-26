@@ -19,7 +19,7 @@ export SYNVEDA_TEI_IMAGE
 # and skip when it is unset — CI runs without a database.
 DATABASE_URL ?= postgres://synveda:synveda-dev@localhost:5432/synveda
 
-.PHONY: fmt lint test build deny check-deps check-adr-status check-adapters check-ann-bench check-api-types check-backlog check-benchmarks check-chart-images check-context-security check-corpus-licences check-demos check-deploy check-npm-licences check-product-eval chart-lint ts-build ts-test ci dev-up dev-down smoke db-test claude-acceptance claude-acceptance-live eval eval-check eval-product eval-judge eval-read eval-longmemeval eval-longmemeval-full eval-longmemeval-judged eval-extraction-live eval-retrieval eval-security
+.PHONY: fmt lint test build deny check-deps check-adr-status check-adapters check-api-types check-backlog check-benchmarks check-chart-images check-context-hard-cut check-context-security check-corpus-licences check-demos check-deploy check-npm-licences check-product-eval chart-lint ts-build ts-test ci dev-up dev-down smoke db-test claude-acceptance claude-acceptance-live eval eval-check eval-product eval-judge eval-read eval-longmemeval eval-longmemeval-full eval-longmemeval-judged eval-extraction-live eval-retrieval eval-security
 
 dev-up:
 	$(COMPOSE) up --build --detach --wait
@@ -166,7 +166,7 @@ eval-longmemeval-judged:
 
 # The reader measured against its probes, graded by the configured judge
 # (EVAL-3, ADR-0061 decision 6). The blocks come from a file rather than
-# from /v1/inject, so this measures the reader and the judge and NOT
+# from a live ContextRun, so this measures the reader and the judge and NOT
 # Synveda — the axes are named probe_* rather than qa_* to keep that
 # impossible to mistake. SYNVEDA_READER=claude plus ANTHROPIC_API_KEY
 # runs the model reader; the default selects a line and costs nothing.
@@ -183,11 +183,14 @@ db-test:
 # CPR-14's deterministic tier: authentic Claude Code frames through the built
 # hook, the real gateway/PDP/schema, persisted events, timeline and audit chain.
 # A fresh scratch database is created and dropped by db-test.sh.
+CLAUDE_ACCEPTANCE_TEST := a_claude_code_session_is_a_governed_run_from_start_to_end
 claude-acceptance:
 	pnpm --filter @synveda/claude-code-adapter build
+	cargo test -q -p synveda-gateway --test claude_lifecycle -- --list | \
+		grep -Fqx '$(CLAUDE_ACCEPTANCE_TEST): test'
 	DATABASE_URL=$(DATABASE_URL) bash scripts/db-test.sh \
 		-p synveda-gateway --test claude_lifecycle \
-		a_claude_code_session_is_a_governed_record_from_start_to_end \
+		$(CLAUDE_ACCEPTANCE_TEST) \
 		-- --exact --nocapture --test-threads=1
 
 # Tier 3 is never substituted by replay. The wrapper exits 77, with the exact
@@ -254,6 +257,13 @@ check-context-security:
 	node --test scripts/check-context-security.test.mjs
 	node scripts/check-context-security.mjs
 
+# CPR-43: active runtime code/config carries no retired route, aggregate,
+# table, sidecar, hidden alias or old telemetry name; storage is exactly one
+# epoch-3 baseline with the pgvector-only extension shape.
+check-context-hard-cut:
+	node --test scripts/check-context-hard-cut.test.mjs
+	node scripts/check-context-hard-cut.mjs
+
 # check-backlog reconciles those three files with each other and never
 # reads an ADR header; this closes that gap in the one direction worth
 # gating — an ADR still reading `Proposed` after its feature shipped. The
@@ -284,17 +294,6 @@ check-corpus-licences:
 # publish a row: `node scripts/publish-benchmark.mjs <report.json>`.
 check-benchmarks:
 	node scripts/publish-benchmark.mjs
-
-# TEN-3's dense-leg rows (ADR-0063 decision 1), which are engineering
-# evidence for a gate rather than a published claim — hence a sibling of
-# check-benchmarks and not a branch inside it. What it asserts is narrower
-# and comes from that ADR's own history: every row carries the commit, the
-# pgvector version and the corpus it was measured over, and no row is a
-# single run. ADR-0063's first table was n=1 in every row, and three of its
-# four findings were withdrawn. To publish a sweep:
-# `node scripts/publish-ann-bench.mjs <run-dir>`.
-check-ann-bench:
-	node scripts/publish-ann-bench.mjs
 
 # The same rule again, one artefact class further out (OPS-2, ADR-0062
 # decision 11). cargo-deny governs crates, check-npm-licences packages and
@@ -329,4 +328,4 @@ ts-build:
 ts-test:
 	pnpm -r test
 
-ci: fmt lint test build deny check-deps check-api-types check-backlog check-demos check-adapters check-context-security check-adr-status check-corpus-licences check-chart-images check-benchmarks check-ann-bench chart-lint check-deploy eval-check ts-build check-npm-licences ts-test
+ci: fmt lint test build deny check-deps check-api-types check-backlog check-demos check-adapters check-context-security check-context-hard-cut check-adr-status check-corpus-licences check-chart-images check-benchmarks chart-lint check-deploy eval-check ts-build check-npm-licences ts-test

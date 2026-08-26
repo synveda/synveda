@@ -19,8 +19,8 @@ use synveda_types::configuration::{
 use synveda_types::scope::ScopeKind;
 use synveda_types::{
     ArtifactFamily, ArtifactReference, CompositionConfig, ConfigurationArtifactId,
-    ConfigurationBindingId, ConfigurationVersionId, Error, IdentityId, InjectChannels, PackConfig,
-    ProposalId, ScopeId, TenantId, TenantStatus,
+    ConfigurationBindingId, ConfigurationVersionId, Error, IdentityId, PackConfig, ProposalId,
+    ScopeId, TenantId, TenantStatus,
 };
 
 /// Seeding shape the old hierarchy-create calls had, on the governed
@@ -396,7 +396,7 @@ async fn composition_config_rides_the_pack_and_clears_on_reapply() {
 
     let config = CompositionConfig {
         budget_tokens: 900,
-        channels: InjectChannels::PublishedOnly,
+        summary_chars: 240,
         ..CompositionConfig::DEFAULT
     };
     let stored = policy_packs::apply(

@@ -3,7 +3,7 @@
 # (deploy/compose). Run via `make smoke` after `make dev-up`.
 #
 # Every check exercises the service, not just the port: SQL round-trips for
-# pgvector/AGE/PGMQ, an OIDC health probe, a Temporal cluster-health RPC, a
+# pgvector and the epoch-3 baseline, an OIDC health probe, a Temporal cluster-health RPC, a
 # real embedding, and an OTLP ingest. Retries are generous because on a cold
 # cache TEI first downloads BGE-M3 (~2.3 GB).
 set -euo pipefail
@@ -47,44 +47,16 @@ psql_synveda() {
   compose exec -T postgres psql -U synveda -d synveda -v ON_ERROR_STOP=1 -qAt "$@"
 }
 
-echo "==> postgres: server + extensions"
+echo "==> postgres: server + epoch-3 extensions"
 retry postgres 120 "postgres" compose exec -T postgres pg_isready -U synveda -d synveda
 psql_synveda -c "SELECT '    ' || extname || ' ' || extversion FROM pg_extension
-                 WHERE extname IN ('vector','age','pgmq') ORDER BY extname"
-count=$(psql_synveda -c "SELECT count(*) FROM pg_extension WHERE extname IN ('vector','age','pgmq')")
-[ "$count" = "3" ] || fail "expected extensions vector+age+pgmq, found $count of 3"
+                 WHERE extname IN ('vector','btree_gin') ORDER BY extname"
+count=$(psql_synveda -c "SELECT count(*) FROM pg_extension WHERE extname IN ('vector','btree_gin')")
+[ "$count" = "2" ] || fail "expected extensions vector+btree_gin, found $count of 2"
 
 echo "==> postgres: pgvector distance query"
 psql_synveda -c "SELECT '[1,2,3]'::vector <-> '[1,2,4]'::vector" >/dev/null
 echo "    vector: OK"
-
-echo "==> postgres: AGE cypher round-trip"
-age_out=$(psql_synveda <<'SQL'
-LOAD 'age';
-SET search_path = ag_catalog, "$user", public;
-SELECT drop_graph('smoke_graph', true) WHERE EXISTS
-  (SELECT 1 FROM ag_graph WHERE name = 'smoke_graph');
-SELECT create_graph('smoke_graph');
-SELECT * FROM cypher('smoke_graph', $$ CREATE (n:Service {name: 'synveda'}) RETURN n $$) AS (n agtype);
-SELECT * FROM cypher('smoke_graph', $$ MATCH (n:Service) RETURN count(n) $$) AS (c agtype);
-SELECT drop_graph('smoke_graph', true);
-SQL
-)
-echo "$age_out" | grep -q 'synveda' || fail "AGE cypher round-trip did not return the created node"
-echo "    age: OK"
-
-echo "==> postgres: PGMQ send/read round-trip"
-pgmq_out=$(psql_synveda <<'SQL'
-SELECT pgmq.drop_queue('smoke_queue') WHERE EXISTS
-  (SELECT 1 FROM pgmq.list_queues() WHERE queue_name = 'smoke_queue');
-SELECT pgmq.create('smoke_queue');
-SELECT pgmq.send('smoke_queue', '{"ping": "fnd-2"}');
-SELECT message->>'ping' FROM pgmq.read('smoke_queue', 30, 1);
-SELECT pgmq.drop_queue('smoke_queue');
-SQL
-)
-echo "$pgmq_out" | grep -q 'fnd-2' || fail "PGMQ round-trip did not return the sent message"
-echo "    pgmq: OK"
 
 echo "==> rauthy: OIDC provider health"
 retry rauthy 120 "rauthy" http_ok http://localhost:8100/auth/v1/health

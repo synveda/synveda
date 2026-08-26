@@ -56,12 +56,13 @@ programme convention established in Prompt 1.
 | Evidence-bearing client registry, conformance kit and second real-client attempt | CPR-39 | **partial — external live criterion** | `12e393a` | `0958d69` | registry gate 4/4; CLI config 28/28; MCP corpus 5/5; Claude adapter 98/98; console 216/216 + build | PASS | N/A — no schema/store change | isolated `demos/cpr-39-adapter-conformance.sh` PASS; 85-script gate PASS; genuine Claude 2.1.241 evidence retained; Cursor/VS Code live not run | Cursor executable/authenticated client absent; VS Code profile unauthenticated and current Preview contract has no SessionEnd |
 | Deterministic context-platform product/trust evaluation and re-enabled Knowledge benchmarks | CPR-40 | **complete** | `0958d69` | `036eab7` | eval 162/162; product gate 6/6; store lexical 5/5; LongMemEval 14/14; audit query 16/16; capture/config focused suites PASS | PASS | PASS (fresh disposable database; removed on success) | product 18/18 and six zero gates; default 6/6 + 50 fixtures + all QA + 1,276 probes; 10k security PASS; BGE-M3 10/10 at 0.800 bounded precision; authentic Stage H delivered 4,927 turns and measured all ten instances with zero empty/unattributed blocks and 0.643 retrieval recall | no extraction-model credential or local vLLM; that separately labelled live tier remains unmeasured |
 | Resumable one-command personal/team/governed PulseBoard walkthrough over public APIs | CPR-41 | **complete** | `036eab7` | `8a4b944` | CLI demo 4/4; configuration/bootstrap concurrency 4/4; PulseBoard team loop 1/1 | PASS | PASS (`synveda_test_44030`, removed) | isolated `demos/cpr-41-one-command-demo.sh` PASS; 87-script drift gate PASS; packaged command not called live without a reachable gateway/current Alice+Bob credentials | no current authenticated gateway, distinct Bob credential or separately authenticated semantic provider; no live claim made |
-| Adversarial security and product-integrity audit over every completed context-platform boundary | CPR-42 | **complete** | `8a4b944` | pending (CPR-43 ledger) | security gate 5/5 + 27 boundaries; adapter 103/103; CLI 2/2; OKF 5/5; Skill 12/12 | PASS | PASS (`synveda_test_49069`, removed) | isolated `demos/cpr-42-security-integrity.sh` PASS; product 18/18 with six zero gates; 10k security 10,876 probes, 9/9 controls and every leak/gap count zero | live Entra/Okta and second-client evidence remain external boundaries; no replay promoted |
+| Adversarial security and product-integrity audit over every completed context-platform boundary | CPR-42 | **complete** | `8a4b944` | `9bda16b` | security gate 5/5 + 27 boundaries; adapter 103/103; CLI 2/2; OKF 5/5; Skill 12/12 | PASS | PASS (`synveda_test_49069`, removed) | isolated `demos/cpr-42-security-integrity.sh` PASS; product 18/18 with six zero gates; 10k security 10,876 probes, 9/9 controls and every leak/gap count zero | live Entra/Okta and second-client evidence remain external boundaries; no replay promoted |
+| Final compatibility purge, epoch-3 baseline squash and programme-close verification | CPR-43 | **complete** | `9bda16b` | pending — final bookkeeping | hard-cut 3/3; epoch 10/10; forced-RLS inventory 1/1; OpenAPI 6/6; CLI hard-cut 4/4; console 216/216 | PASS | PASS (`synveda_test_74163`, removed) | CPR-2 + CPR-43 demos PASS; product 18/18; default, BGE-M3, 10k-security and 4,927-turn Stage-H gates PASS; deterministic Claude 1/1 | real second client absent; proprietary Claude rerun refused by execution approval; no model-extraction credential |
 
-**Exact next objective:** implement and checkpoint CPR-43, the final
-compatibility purge and clean-baseline schema squash. Revisit CPR-39's
-externally blocked second-client live run before programme close; do not
-substitute a configuration or replay for that evidence.
+**Exact next objective:** commit and normally push CPR-43, then make the final
+bookkeeping commit that records its SHA and verify the remote branch and clean
+worktree. CPR-39's real second-client live criterion remains externally
+blocked; do not substitute configuration or replay evidence.
 
 ### Starting-point objective map
 
@@ -5077,3 +5078,100 @@ frontend changes, deletions, tests, and the resulting commit hash.
   `feat/context-platform-mvp`.
 - **Commit hash.** Written by CPR-43 under the programme's next-checkpoint
   convention.
+
+### Prompt 33 — final compatibility purge and schema squash (CPR-43)
+
+- **Selected feature and start.** **CPR-43** starts from
+  `9bda16bc5bf471b6de2359a1396522cee42cc62d`. The opening inventory found 60
+  development migrations and confirmed that the final cut must remove both
+  historical DDL residue and the disabled Record-era modules still compiled
+  beside the Knowledge runtime. ADR-0069 is amended before implementation;
+  epoch 3 and one pure-DDL baseline are the locked boundary.
+- **One baseline and one runtime.** The 60-file development chain is deleted
+  and replaced by pure-DDL `0001_context_platform.sql`: **87 tables**, two
+  current-state views, **83** tenant-bound tables with enabled and forced RLS,
+  and the `vector` plus `btree_gin` extensions. Epoch **3** refuses markerless,
+  epoch-1 and epoch-2 databases before checksum comparison and names the
+  destructive reset; no old row is inspected or moved. The checked sqlx cache
+  is regenerated to **605** current descriptions.
+
+- **Deleted production residue.** The Record aggregate, Record revision and
+  embedding/signature stores, promotion/retention paths, old queue and
+  quarantine writers, Tantivy sidecar, PGMQ and AGE dependencies, legacy graph
+  tables, global observe/inject/recall DTOs and evaluation tombstones leave
+  the product. Context packs resolve their own immutable published chunks;
+  Knowledge revisions, sources, relations, capture and ContextRun are the only
+  retrieval model. Compose, Helm and release images carry one Postgres shape
+  and no removed extension, volume or search-directory setting.
+
+- **Contract and classified residue.** The generated OpenAPI contract remains
+  **171 operations / 272 schemas** and matches the mounted router exactly; the
+  generated console client is current. Negative tests retain the retired
+  routes, fields and CLI nouns only to assert rejection. The new
+  `make check-context-hard-cut` gate scans **375** active files plus the
+  baseline, OpenAPI and sqlx cache, requires one migration, and rejects dead
+  routes, tables, DTOs, aliases, sidecars and dependencies; its mutation suite
+  is **3/3**. `docs/implementation/context-hard-cut-inventory.md` classifies
+  the remaining words as current semantic defaults, external adapter
+  requirements, bounded degradation or historical/negative evidence.
+
+- **Bugs found by closeout, not hidden by the squash.** Cross-scope Context
+  Pack composition had joined a published chunk through the requester's scope
+  instead of its immutable document address; the lookup is now tenant/address
+  keyed and the ten-case suite pins the shared path. The old RLS seeder still
+  proposed a deleted VedaFlow artifact kind, and `pg_dump` disabled row
+  security in the fresh-schema check; both now use the current Knowledge path
+  and prove the actual application-role boundary. The deterministic extractor
+  missed short definitional entity statements used by the re-cut QA corpus;
+  `builtin@5` adds the bounded noun-phrase form without swallowing sentence
+  openers and measures 0.983/0.914 precision/recall. The security fixture had
+  granted a child project and expected authority to flow upward; it now places
+  the same principals under the workspace and proves sensitivity policy on a
+  structurally visible row. Finally, the Claude Make target named a deleted
+  test and silently ran zero tests; it now lists and exact-matches the current
+  lifecycle test before running it.
+
+- **Clean bootstrap and complete gates.** The CPR-2 real-binary demo passes all
+  nine steps at epoch 3 / migration `0001`: fresh migrate and readiness,
+  markerless populated-database refusal before mutation, no-force safety,
+  destructive reset with no carried tenant, idempotent second reset and final
+  readiness. The CPR-43 demo passes hard-cut **3/3**, epoch **10/10**, exact
+  forced-RLS coverage **1/1**, OpenAPI **6/6** and CLI hard-cut **4/4**.
+  Console **216/216**, Claude adapter **102/102**, full `make ci` and full
+  `make db-test` pass; the database suite used disposable
+  `synveda_test_74163` and removed it. Clippy denies warnings, cargo-deny,
+  dependency direction, licences, chart/deployment renders, demo drift,
+  generated API/SQLx and ADR/backlog gates are all in that CI result.
+
+- **Evaluation and performance.** The product/trust gate passes **18/18** and
+  all six zero-count invariants. The default suite passes six scenarios, all
+  50 extraction fixtures at **0.983/0.914**, ten QA questions with every scope
+  axis **1.0**, and 1,276 security probes with **9/9** controls and zero
+  tenant/scope/sensitivity/attribution/watermark gaps. BGE-M3 passes 10/10 at
+  **0.800** bounded precision and **152.014 ms p95**. The full security tier
+  passes 10,000 variants / 10,876 probes and 9/9 controls with every leak count
+  zero. The authentic Stage-H rerun delivers all **4,927** turns and measures
+  all ten instances: **0.643** retrieval recall, **0.577** per type, **0.375**
+  complete-instance rate, **580.503 ms p95**, and zero empty/unattributed
+  Knowledge blocks. Labelled evidence sessions still miss the sparse sidecar
+  after the fixed 1,800-second barrier; the registered gate holds, but the
+  result is not represented as complete evidence-session coverage.
+
+- **Live evidence and external blockers.** The exact deterministic Claude
+  lifecycle passes **1/1** through the built hook, gateway, PDP, current
+  Postgres, timeline and audit. Genuine Claude Code 2.1.241 evidence from
+  2026-08-24 remains the live tier; the closeout rerun was refused by the
+  execution approval layer because it could transmit repository/task data via
+  an existing authenticated proprietary client, so no rerun is claimed. No
+  extraction-model key or local vLLM endpoint is available. CPR-39 remains
+  partial on one external criterion: no Cursor or VS Code executable and
+  authenticated lifecycle is available, and the inspected VS Code Preview
+  contract has no SessionEnd. The personal/team/governed packaged commands
+  likewise need a reachable authenticated gateway and distinct credentials;
+  hermetic public-domain profile and PulseBoard acceptance passes, but is not
+  called a live walkthrough.
+
+- **Commit.** `refactor!: complete context platform hard cut (CPR-43)` on
+  `feat/context-platform-mvp`.
+- **Commit hash.** Written by the final bookkeeping commit under the
+  programme's no-self-hash convention.

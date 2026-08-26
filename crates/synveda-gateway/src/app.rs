@@ -57,17 +57,12 @@ pub struct AppState {
     /// lifetime (`exp − iat`) is unknown or exceeds this.
     /// `SYNVEDA_SERVICE_TOKEN_MAX_TTL_SECS`, default 3600.
     pub service_token_max_ttl: Duration,
-    /// The search-index sidecar (CTX-1, ADR-0024): the inject route's
-    /// lexical leg (CTX-3, ADR-0026); the indexer task converges it.
-    pub search_index: Arc<synveda_retrieval::SearchIndex>,
-    /// The MEM-4 embedder seam (ADR-0023): the inject route's
-    /// query-embedding call and the pipeline worker's record vectors
-    /// share one config-declared model identity (ADR-0026 decision 3).
+    /// The Knowledge embedder seam. Context queries and the immutable
+    /// Knowledge-revision indexing worker share one declared model identity.
     pub embedder: Arc<synveda_ingest::embedding::AnyEmbedder>,
-    /// The inject route's embed deadline (ADR-0026 decision 3):
-    /// `SYNVEDA_INJECT_EMBED_TIMEOUT_MS`, default 100. Expiry drops the
-    /// dense leg (sparse-only, marked degraded), never the request.
-    pub inject_embed_timeout: Duration,
+    /// Context-query embedding deadline. Expiry degrades to lexical
+    /// Knowledge retrieval and is recorded on the ContextRun.
+    pub context_embed_timeout: Duration,
     /// The key plane (TEN-4, ADR-0064): materialises the sealing keys the
     /// console session columns and the per-tenant secrets need. Backed by
     /// `Kms::Disabled` when `SYNVEDA_KMS_KEY` is unset, in which case the
@@ -418,9 +413,9 @@ fn parent_context(headers: &axum::http::HeaderMap) -> Option<opentelemetry::Cont
 ///
 /// ADR-0027's observability note promises this header from the Claude Code
 /// adapter, and the adapter has sent it since it shipped — but nothing here
-/// read it, so the gateway could not tell an inject from a hook, a `synveda
-/// recall` from a console click, or a human's command from a model's tool
-/// call. That is the attribution the tenant and the route cannot supply,
+/// read it, so the gateway could not tell a context request from a hook, a
+/// Knowledge query from a console click, or a human's command from a model's
+/// tool call. That is the attribution the tenant and route cannot supply,
 /// and now it is a span field beside them.
 ///
 /// # Bounded, because a caller controls it

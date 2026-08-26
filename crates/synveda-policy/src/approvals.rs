@@ -16,8 +16,8 @@
 //!
 //! | | `regulated-strict` | `standard` | `open-collaboration` |
 //! |---|---|---|---|
-//! | memory → workspace/project/own | 1 × curator | — (auto) | — (auto) |
-//! | memory → tenant root / org unit | curator + administrator, 2 distinct | 1 × curator | 1 × curator at the tenant root |
+//! | knowledge → workspace/project/own | 1 × curator | — (auto) | — (auto) |
+//! | knowledge → tenant root / org unit | curator + administrator, 2 distinct | 1 × curator | 1 × curator at the tenant root |
 //! | prompt | administrator + curator, 2 distinct | 1 × curator | 1 × curator |
 //! | context pack → workspace/project/own | 1 × curator | 1 × curator | 1 × curator |
 //! | context pack → tenant root / org unit | curator + administrator, 2 distinct | 1 × curator | 1 × curator |
@@ -41,7 +41,7 @@
 //! row for them at all. FLOW-3 filled the cell at one curator everywhere,
 //! nothing could open a `context-pack` proposal until PRMT-2, and reading
 //! the matrix this feature makes resolvable turned up what that had done:
-//! under `regulated-strict` a *memory* published at a department took two
+//! under `regulated-strict` a Knowledge item published at an org unit took two
 //! distinct people while a whole *bundle* published at the org took one, so
 //! the cheapest thing to publish into every session in the company was the
 //! largest one. ADR-0050 decision 15 re-prices it to match memory's own
@@ -75,18 +75,6 @@ pub fn regulated_strict() -> ApprovalMatrix {
     let mut matrix = ApprovalMatrix {
         rules: vec![
             rule(
-                Some(AssetKind::Memory),
-                Some(LOCAL.to_vec()),
-                &[(RoleKey::Curator, 1)],
-                1,
-            ),
-            rule(
-                Some(AssetKind::Memory),
-                Some(SHARED.to_vec()),
-                &[(RoleKey::Curator, 1), (RoleKey::Administrator, 1)],
-                2,
-            ),
-            rule(
                 Some(AssetKind::Knowledge),
                 Some(LOCAL.to_vec()),
                 &[(RoleKey::Curator, 1)],
@@ -106,11 +94,11 @@ pub fn regulated_strict() -> ApprovalMatrix {
                 &[(RoleKey::Administrator, 1), (RoleKey::Curator, 1)],
                 2,
             ),
-            // The `SHARED`/`LOCAL` split memory has had since FLOW-3, given
+            // The Knowledge `SHARED`/`LOCAL` split, given
             // to context packs by ADR-0050 decision 15. Its blast radius is
-            // strictly wider than the memory row above it: a published pack
+            // strictly wider than the Knowledge row above it: a published pack
             // composes into *every* session at and below the publishing
-            // scope, so pricing it below a single memory record at the same
+            // scope, so pricing it below a single Knowledge item at the same
             // scope was an inversion, not a discount.
             rule(
                 Some(AssetKind::ContextPack),
@@ -175,12 +163,6 @@ pub fn standard() -> ApprovalMatrix {
     let mut matrix = ApprovalMatrix {
         rules: vec![
             rule(
-                Some(AssetKind::Memory),
-                Some(SHARED.to_vec()),
-                &[(RoleKey::Curator, 1)],
-                1,
-            ),
-            rule(
                 Some(AssetKind::Knowledge),
                 Some(SHARED.to_vec()),
                 &[(RoleKey::Curator, 1)],
@@ -227,18 +209,12 @@ pub fn standard() -> ApprovalMatrix {
 
 /// `open-collaboration`: share by default, review at the org boundary.
 ///
-/// The only memory publication that takes a review is one onto the org's
+/// The only Knowledge publication that takes a review is one onto the tenant's
 /// own channel — the one place a publication reaches everybody.
 #[must_use]
 pub fn open_collaboration() -> ApprovalMatrix {
     ApprovalMatrix {
         rules: vec![
-            rule(
-                Some(AssetKind::Memory),
-                Some(vec![ScopeKind::Tenant]),
-                &[(RoleKey::Curator, 1)],
-                1,
-            ),
             rule(
                 Some(AssetKind::Knowledge),
                 Some(vec![ScopeKind::Tenant]),
@@ -326,11 +302,12 @@ mod tests {
         }
     }
 
-    /// Every scope kind is governed by exactly one memory rule per pack,
+    /// Every scope kind is governed by exactly one Knowledge rule in the
+    /// strict pack,
     /// so no cell falls through to "auto-approve" by accident rather than
     /// by decision.
     #[test]
-    fn memory_rules_partition_the_scope_kinds() {
+    fn knowledge_rules_partition_the_scope_kinds() {
         for kind in [
             ScopeKind::Tenant,
             ScopeKind::OrgUnit,
@@ -341,7 +318,7 @@ mod tests {
             let matching = regulated_strict()
                 .rules
                 .iter()
-                .filter(|rule| rule.matches(AssetKind::Memory, Sensitivity::Internal, kind))
+                .filter(|rule| rule.matches(AssetKind::Knowledge, Sensitivity::Internal, kind))
                 .count();
             assert_eq!(matching, 1, "regulated-strict leaves {kind:?} to chance");
         }
@@ -354,7 +331,7 @@ mod tests {
         assert!(
             !matrix
                 .resolve(
-                    AssetKind::Memory,
+                    AssetKind::Knowledge,
                     Sensitivity::Restricted,
                     ScopeKind::OrgUnit
                 )

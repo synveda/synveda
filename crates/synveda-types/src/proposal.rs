@@ -36,13 +36,11 @@ pub enum ArtifactFamily {
     Prompt,
     /// Authored context-pack document.
     ContextPack,
-    /// Pre-cut authored Memory proposal retained only until the final hard cut.
-    Memory,
 }
 
 impl ArtifactFamily {
     /// Every supported common-review family.
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 9] = [
         Self::Knowledge,
         Self::Skill,
         Self::ToolServer,
@@ -52,7 +50,6 @@ impl ArtifactFamily {
         Self::OkfImport,
         Self::Prompt,
         Self::ContextPack,
-        Self::Memory,
     ];
 
     /// Stable wire/storage name.
@@ -68,7 +65,6 @@ impl ArtifactFamily {
             Self::OkfImport => "okf_import",
             Self::Prompt => "prompt",
             Self::ContextPack => "context_pack",
-            Self::Memory => "memory",
         }
     }
 }
@@ -294,9 +290,9 @@ impl fmt::Display for ProposalView {
 
 /// What running a proposal's effect would do.
 ///
-/// The column retains its historical `target_channel` name, but this is the
-/// effect vocabulary: publication writes a channel, classification changes
-/// record state, and apply executes a typed governed command.
+/// The column retains its storage name, but this is the effect vocabulary:
+/// publication writes an authored-artifact channel and apply executes a
+/// typed governed command.
 ///
 /// There is no `Default`: what a proposal would *do* is the first thing a
 /// reviewer needs to know.
@@ -306,20 +302,6 @@ pub enum ProposalEffect {
     /// Publish the members onto the target scope's published channel
     /// (FLOW-3). The only effect there was until AUTHZ-4.
     Published,
-    /// Move the members to the sensitivity their proposed versions carry
-    /// (AUTHZ-5, ADR-0038 decision 9) — the only path to `restricted`, and
-    /// the only path back down from it.
-    ///
-    /// It writes no channel either: a reclassification changes what a record
-    /// *is*, not where it is published, and a record can be reclassified
-    /// without ever having crossed the trust boundary.
-    ///
-    /// Its requirement resolves at the **maximum of the current and proposed
-    /// tiers**, which is the whole reason it is its own effect: taking only
-    /// the proposed side would price a declassification at the tier it is
-    /// leaving for, and the one direction that removes a control would be
-    /// the cheap one.
-    Classify,
     /// Apply a typed Knowledge aggregate mutation (CPR-16, ADR-0081).
     ///
     /// The reviewed VedaFlow object binds a content-free command manifest and
@@ -329,11 +311,7 @@ pub enum ProposalEffect {
 
 impl ProposalEffect {
     /// Every effect.
-    pub const ALL: [ProposalEffect; 3] = [
-        ProposalEffect::Published,
-        ProposalEffect::Classify,
-        ProposalEffect::Apply,
-    ];
+    pub const ALL: [ProposalEffect; 2] = [ProposalEffect::Published, ProposalEffect::Apply];
 
     /// Stable wire name, identical to the serde form and to the stored
     /// column (whose CHECK constraint mirrors this list).
@@ -341,21 +319,19 @@ impl ProposalEffect {
     pub const fn as_str(&self) -> &'static str {
         match self {
             ProposalEffect::Published => "published",
-            ProposalEffect::Classify => "classify",
             ProposalEffect::Apply => "apply",
         }
     }
 
     /// The channel this effect writes, when it writes one.
     ///
-    /// `None` for reclassification and typed application, which is the honest
-    /// answer rather than a stand-in: their effects are state changes, and a caller
-    /// that needs a channel here has taken a wrong turn.
+    /// `None` for typed application, which is a domain state change rather
+    /// than a channel movement.
     #[must_use]
     pub const fn channel(&self) -> Option<Channel> {
         match self {
             ProposalEffect::Published => Some(Channel::Published),
-            ProposalEffect::Classify | ProposalEffect::Apply => None,
+            ProposalEffect::Apply => None,
         }
     }
 }

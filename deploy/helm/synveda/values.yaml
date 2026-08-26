@@ -46,14 +46,6 @@ gateway:
   # else connects to the cluster, has to fit.
   dbMaxConnections: 20
 
-  # The Tantivy BM25 sidecar (CTX-1). A cache, not a system of record — it
-  # carries a watermark and heals from Postgres, and deleting a tenant's
-  # directory is the documented rebuild — but losing it means re-indexing
-  # every tenant's corpus on the next sweep, so it gets a volume.
-  searchIndex:
-    size: 20Gi
-    storageClass: ""
-
   logLevel: info
   resources:
     requests:
@@ -84,10 +76,8 @@ ingress:
 # The operator is not installed by this chart (ADR-0062 decision 1); this
 # renders a Cluster for an operator that is already there.
 postgres:
-  # Built from deploy/helm/postgres/Dockerfile: the CNPG base plus pgvector
-  # and PGMQ. No AGE — nothing in `crates/*/src` calls `cypher()`, it needs
-  # shared_preload_libraries, and it has no PG17 release (ADR-0062
-  # decision 3).
+  # Built from deploy/helm/postgres/Dockerfile: the CNPG base plus pgvector.
+  # Epoch 3 has no queue or graph-extension dependency.
   image: synveda/enterprise-postgres:17
   instances: 3
   storage:

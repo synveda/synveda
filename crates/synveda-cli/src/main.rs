@@ -55,9 +55,8 @@ use sqlx::postgres::PgPoolOptions;
 use synveda_audit::{Actor, AuditAction, AuditEvent, Outcome};
 use synveda_identity::Hs256Verifier;
 use synveda_types::{
-    CompositionConfig, DedupConfig, DedupMode, IdentityId, IndexTier, InjectChannels, PackConfig,
-    PromotionConfig, ProposalId, ProposalState, RedactionConfig, RedactionMode, RetentionConfig,
-    ScanSeverity, ScopeId, SkillIndex, SkillScanConfig, TenantId, TenantStatus,
+    CompositionConfig, IdentityId, PackConfig, ProposalId, ProposalState, RedactionConfig,
+    RedactionMode, ScanSeverity, ScopeId, SkillIndex, SkillScanConfig, TenantId, TenantStatus,
 };
 
 #[derive(Parser)]
@@ -1147,7 +1146,7 @@ enum ProposalCommand {
     },
     /// Run an approved proposal's effect: move the target's published
     /// channel. A separate act from the deciding approval by design
-    /// (ADR-0032 decision 9) — it takes `ChannelPublish` and `MemoryRead`
+    /// (ADR-0032 decision 9) — it takes `ChannelPublish` and `KnowledgeRead`
     /// at the target, which the deciding reviewer may not hold.
     Publish {
         /// The proposal UUID.
@@ -1805,39 +1804,20 @@ enum PolicyCommand {
         /// reserved (ADR-0014).
         #[arg(long)]
         name: String,
-        /// Redaction mode for secret findings on observe ingest
+        /// Redaction mode for secret findings on session-event ingest
         /// (deny/redact/quarantine — MEM-2, ADR-0021). Both redaction
         /// flags must be given together or neither; unconfigured packs
         /// get the strict default (secrets quarantine, PII redact).
         #[arg(long, requires = "redaction_pii")]
         redaction_secrets: Option<RedactionMode>,
-        /// Redaction mode for PII findings on observe ingest.
+        /// Redaction mode for PII findings on session-event ingest.
         #[arg(long, requires = "redaction_secrets")]
         redaction_pii: Option<RedactionMode>,
-        /// Estimated-token inject budget at scopes this pack governs
-        /// (CTX-2, ADR-0025). Both composition flags must be given
-        /// together or neither; unconfigured packs get the product
-        /// default (1500, published-and-derived).
-        #[arg(long, requires = "composition_channels")]
+        /// Estimated-token authored-context budget at scopes this pack
+        /// governs (CTX-2, ADR-0025). Unconfigured packs use 1,500.
+        #[arg(long)]
         composition_budget: Option<u32>,
-        /// Inject channel rule (published-and-derived/published-only —
-        /// published-only is the bank-mode switch).
-        #[arg(long, requires = "composition_budget")]
-        composition_channels: Option<InjectChannels>,
-        /// What happens to material that does not fit the budget
-        /// (off/demote — CTX-4, ADR-0041). `demote` names it and hands the
-        /// reader a recall handle; `off` drops it in silence, which is how
-        /// composition behaved before CTX-4. Omitted keeps the product
-        /// config, which demotes. Only meaningful alongside the
-        /// composition pair.
-        #[arg(long, requires = "composition_budget")]
-        composition_index_tier: Option<IndexTier>,
-        /// How wide an index line's content is, in characters (default
-        /// 320 — the feature's "~80 tokens each" through the chars/4
-        /// estimator). Lower it where the corpus is short: a record is
-        /// only ever named instead of shown when naming it is genuinely
-        /// cheaper, so a width near the median record length turns the
-        /// tier off in practice.
+        /// How wide a compact authored-context summary is, in characters.
         #[arg(long, requires = "composition_budget")]
         composition_index_chars: Option<u32>,
         /// Whether a block names the skills this identity may install
@@ -1857,39 +1837,6 @@ enum PolicyCommand {
         /// `critical` — that band is not a pack's to move.
         #[arg(long)]
         scan_block_at: Option<ScanSeverity>,
-        /// Path to a JSON file of auto-promotion rules (FLOW-4,
-        /// ADR-0033): `{"rules":[{"name":..., "min_recalls":...,
-        /// "min_distinct_members":..., "max_sensitivity":...}]}`. A file
-        /// rather than flags because a rule set is a list, not a scalar.
-        /// Omitted means the pack carries no rules and nothing
-        /// auto-promotes at the scopes it governs — a trigger's fail-safe
-        /// is silence.
-        #[arg(long)]
-        promotion: Option<std::path::PathBuf>,
-        /// What the ingestion pipeline does with a restatement or a
-        /// contradiction at scopes this pack governs (off/merge/supersede
-        /// — MEM-5, ADR-0039). Omitted keeps the product config, which
-        /// supersedes; the thresholds are product constants and are tuned
-        /// through `--dedup-config` rather than one flag each.
-        #[arg(long)]
-        dedup_mode: Option<DedupMode>,
-        /// Path to a JSON file holding a full `DedupConfig` — the mode
-        /// plus the three thresholds in per mille and the nomination
-        /// depth. Takes precedence over `--dedup-mode`; a file rather than
-        /// five flags for the reason `--promotion` is one.
-        #[arg(long, conflicts_with = "dedup_mode")]
-        dedup_config: Option<std::path::PathBuf>,
-        /// Path to a JSON file holding a full `RetentionConfig` (MEM-6,
-        /// ADR-0040): the mode, the per-class record horizons in days,
-        /// the destruction and staging horizons, and the staleness
-        /// half-life. A file rather than a flag per class for the reason
-        /// `--promotion` is one — a schedule is a table, not a scalar.
-        ///
-        /// Omitted keeps the product config, whose record horizons are
-        /// all unset: nothing this CLI does by default can expire or
-        /// destroy a tenant's memory.
-        #[arg(long)]
-        retention: Option<std::path::PathBuf>,
         /// Path to the Cedar policy source file.
         file: std::path::PathBuf,
     },
@@ -2376,15 +2323,9 @@ async fn run(cli: Cli) -> Result<(), String> {
             redaction_secrets,
             redaction_pii,
             composition_budget,
-            composition_channels,
-            composition_index_tier,
             composition_index_chars,
             composition_skill_index,
             scan_block_at,
-            promotion,
-            dedup_mode,
-            dedup_config,
-            retention,
             file,
         }) => {
             let source = std::fs::read_to_string(&file)
@@ -2394,83 +2335,18 @@ async fn run(cli: Cli) -> Result<(), String> {
             synveda_policy::Pdp::new()
                 .and_then(|pdp| pdp.compile_check(&name, &source))
                 .map_err(|err| err.to_string())?;
-            // clap's `requires` makes each config's flags all-or-nothing.
             let redaction = redaction_secrets
                 .zip(redaction_pii)
                 .map(|(secrets, pii)| RedactionConfig { secrets, pii });
-            let composition =
-                composition_budget
-                    .zip(composition_channels)
-                    .map(|(budget_tokens, channels)| CompositionConfig {
-                        budget_tokens,
-                        channels,
-                        // Omitted keeps the product config's tier rather
-                        // than turning the index off: a flag nobody passed
-                        // must not silently remove a rendering the pack it
-                        // replaces was serving (ADR-0041 decision 11).
-                        index_tier: composition_index_tier
-                            .unwrap_or(CompositionConfig::DEFAULT.index_tier),
-                        index_entry_chars: composition_index_chars
-                            .unwrap_or(CompositionConfig::DEFAULT.index_entry_chars),
-                        // Same rule as the tier above, and it matters more
-                        // here: omitting the flag must not silently stop a
-                        // fleet being told which skills it may install.
-                        skill_index: composition_skill_index
-                            .unwrap_or(CompositionConfig::DEFAULT.skill_index),
-                        trace_retention: CompositionConfig::DEFAULT.trace_retention,
-                    });
+            let composition = composition_budget.map(|budget_tokens| CompositionConfig {
+                budget_tokens,
+                summary_chars: composition_index_chars
+                    .unwrap_or(CompositionConfig::DEFAULT.summary_chars),
+                skill_index: composition_skill_index
+                    .unwrap_or(CompositionConfig::DEFAULT.skill_index),
+                trace_retention: CompositionConfig::DEFAULT.trace_retention,
+            });
             let scan = scan_block_at.map(|block_at| SkillScanConfig { block_at });
-            // Validated here as well as at install: a rule that asks for
-            // zero recalls, or names an asset with no usage signal, is
-            // refused when it is written rather than discovered when a
-            // sweep silently does nothing (ADR-0033 decision 6).
-            let promotion = promotion
-                .map(|path| {
-                    let raw = std::fs::read_to_string(&path)
-                        .map_err(|err| format!("read {}: {err}", path.display()))?;
-                    let config: PromotionConfig = serde_json::from_str(&raw)
-                        .map_err(|err| format!("parse {}: {err}", path.display()))?;
-                    config
-                        .validate()
-                        .map_err(|err| format!("{}: {err}", path.display()))?;
-                    Ok::<_, String>(config)
-                })
-                .transpose()?;
-            // A threshold outside `0..=1` makes a band unreachable, which
-            // reads as "dedup is off" without the pack ever saying so —
-            // refused here as well as at install (ADR-0039 decision 12).
-            let dedup = match dedup_config {
-                Some(path) => {
-                    let raw = std::fs::read_to_string(&path)
-                        .map_err(|err| format!("read {}: {err}", path.display()))?;
-                    let config: DedupConfig = serde_json::from_str(&raw)
-                        .map_err(|err| format!("parse {}: {err}", path.display()))?;
-                    config
-                        .validate()
-                        .map_err(|err| format!("{}: {err}", path.display()))?;
-                    Some(config)
-                }
-                None => dedup_mode.map(|mode| DedupConfig {
-                    mode,
-                    ..DedupConfig::DEFAULT
-                }),
-            };
-            // A schedule written in seconds, or a staging horizon that
-            // would spend MEM-1's idempotency guarantee for nothing, is
-            // refused here as well as at install — before it destroys
-            // something, rather than after (ADR-0040 decision 7).
-            let retention = retention
-                .map(|path| {
-                    let raw = std::fs::read_to_string(&path)
-                        .map_err(|err| format!("read {}: {err}", path.display()))?;
-                    let config: RetentionConfig = serde_json::from_str(&raw)
-                        .map_err(|err| format!("parse {}: {err}", path.display()))?;
-                    config
-                        .validate()
-                        .map_err(|err| format!("{}: {err}", path.display()))?;
-                    Ok::<_, String>(config)
-                })
-                .transpose()?;
             let pool = connect_current_epoch().await?;
             let mut tx = synveda_store::rls::begin_tenant_tx(&pool, tenant)
                 .await
@@ -2483,9 +2359,6 @@ async fn run(cli: Cli) -> Result<(), String> {
                 &PackConfig {
                     redaction,
                     composition,
-                    promotion,
-                    dedup,
-                    retention,
                     scan,
                     ..Default::default()
                 },
@@ -2503,8 +2376,6 @@ async fn run(cli: Cli) -> Result<(), String> {
                     "redaction": pack.config.redaction,
                     "composition": pack.config.composition,
                     "scan": pack.config.scan,
-                    "promotion": pack.config.promotion,
-                    "retention": pack.config.retention,
                 }),
             )
             .await?;

@@ -83,7 +83,7 @@ impl DecisionInput {
     /// this input was gathered at.
     ///
     /// A cross-scope promotion decides at two scopes (FLOW-5, ADR-0034
-    /// decision 12): `MemoryRead` at the source and `ProposalOpen` at an
+    /// decision 12): `KnowledgeRead` at the source and `ProposalOpen` at an
     /// ancestor of it. Gathering at the deeper node reads assignments and
     /// role bindings for a chain that already contains the ancestor's, so
     /// the second decision needs a slice rather than a second gather —
@@ -101,7 +101,7 @@ impl DecisionInput {
             default_pack: self.default_pack.as_deref(),
             relaxations: &self.relaxations,
             // Named per decision by [`decide_read`], which is the only way
-            // to ask `MemoryRead` here: a read decided without a tier is
+            // to ask `KnowledgeRead` here: a read decided without a tier is
             // refused by the PDP rather than defaulted (AUTHZ-5, ADR-0038
             // decision 2).
             sensitivity: None,
@@ -422,7 +422,7 @@ pub(crate) async fn require(
 /// collapses a deny into the taxonomy, and keeps the allow's context for
 /// the caller's audit event.
 ///
-/// Not for [`Action::MemoryRead`]: that one names a tier, through
+/// Not for [`Action::KnowledgeRead`]: that one names a tier, through
 /// [`decide_read`].
 pub(crate) fn decide(
     state: &AppState,
@@ -472,7 +472,7 @@ pub(crate) fn decide_knowledge_read(
 /// [`decide_read`] for `PromptRead` (PRMT-1, ADR-0049 decision 4).
 ///
 /// The second action that names a tier, and the reason [`decide_inner`]
-/// takes one rather than [`Action::MemoryRead`] assuming it. It is a
+/// takes one rather than [`Action::KnowledgeRead`] assuming it. It is a
 /// separate wrapper rather than a parameter on [`decide_read`] for that
 /// function's own stated reason: which seam is being asked is not something
 /// a call site should be able to get wrong by passing the wrong constant.

@@ -23,18 +23,10 @@
 //! `http://localhost:8110`) and honours `SYNVEDA_EMBEDDER_MODEL`
 //! (default `BAAI/bge-m3`).
 //!
-//! The search index sidecar (CTX-1, ADR-0024) lives under
-//! `SYNVEDA_SEARCH_INDEX_DIR` (default `./data/search-index`; one
-//! subdirectory per tenant — deleting a tenant's directory is the
-//! rebuild procedure, and the directory must share the database's
-//! encryption-at-rest story). Its indexer task polls every
-//! `SYNVEDA_SEARCH_POLL_MS` (default 1000), which bounds BM25
-//! visibility lag; the dense leg reads Postgres directly and never lags.
-//!
-//! The inject route (CTX-3, ADR-0026) embeds the caller's task through
-//! the same configured embedder under `SYNVEDA_INJECT_EMBED_TIMEOUT_MS`
-//! (default 100): expiry or failure degrades that inject to the sparse
-//! leg (marked in `X-Synveda-Degraded`), never fails it.
+//! Context planning embeds the caller's task through
+//! the same configured embedder under `SYNVEDA_CONTEXT_EMBED_TIMEOUT_MS`
+//! (default 100): expiry or failure degrades the run to lexical Knowledge
+//! search and is persisted, never hidden.
 //!
 //! The directory pull sync (AUTH-5, ADR-0060) runs only for issuers that
 //! carry a `directory_sync` entry in `SYNVEDA_OIDC_ISSUERS`, and only when
@@ -340,32 +332,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Duration::from_secs(relaxation_sweep_secs.max(1)),
     );
 
-    // The search index sidecar and its indexer (CTX-1, ADR-0024): a
-    // boot failure here means the index root is unusable — refuse to
-    // boot rather than serve a read path whose lexical leg can never
-    // converge.
-    let index_root = std::env::var("SYNVEDA_SEARCH_INDEX_DIR")
-        .ok()
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| "./data/search-index".to_owned());
-    let search_index = Arc::new(synveda_retrieval::SearchIndex::open(&index_root)?);
-    let indexer_config = synveda_retrieval::IndexerConfig {
-        poll_interval: std::env::var("SYNVEDA_SEARCH_POLL_MS")
-            .ok()
-            .and_then(|value| value.parse::<u64>().ok())
-            .filter(|ms| *ms > 0)
-            .map(Duration::from_millis)
-            .unwrap_or(synveda_retrieval::IndexerConfig::default().poll_interval),
-        ..synveda_retrieval::IndexerConfig::default()
-    };
-    tracing::info!(
-        index_root,
-        poll_ms = indexer_config.poll_interval.as_millis() as u64,
-        "search indexer starting (CTX-1, ADR-0024)"
-    );
-    let search_indexer =
-        synveda_retrieval::indexer::spawn(pool.clone(), Arc::clone(&search_index), indexer_config);
-
     // CPR-17's Knowledge revision sidecar. Unlike the retired record worker,
     // this is index maintenance rather than a domain mutation: immutable
     // revision text is embedded outside a transaction and the derivative row
@@ -397,8 +363,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         knowledge_index_config,
     );
 
-    // The inject route's embed deadline (CTX-3, ADR-0026 decision 3).
-    let inject_embed_timeout_ms = std::env::var("SYNVEDA_INJECT_EMBED_TIMEOUT_MS")
+    // The context planner's embedding deadline. Failure is an explicit
+    // lexical degradation recorded on the ContextRun.
+    let context_embed_timeout_ms = std::env::var("SYNVEDA_CONTEXT_EMBED_TIMEOUT_MS")
         .ok()
         .and_then(|value| value.parse::<u64>().ok())
         .filter(|ms| *ms > 0)
@@ -416,9 +383,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         public_origin,
         pdp,
         service_token_max_ttl: Duration::from_secs(service_token_max_ttl_secs),
-        search_index,
         embedder,
-        inject_embed_timeout: Duration::from_millis(inject_embed_timeout_ms),
+        context_embed_timeout: Duration::from_millis(context_embed_timeout_ms),
         keys,
     };
 
@@ -485,7 +451,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_graceful_shutdown(shutdown_signal())
         .await?;
     refresher.abort();
-    search_indexer.abort();
     knowledge_indexer.abort();
     capture_worker.abort();
     relaxation_sweep.abort();

@@ -65,14 +65,14 @@
       "expected": [{ "class": "procedure", "content_contains": "ADR" }]
     },
     {
-      "name": "beta-entity-pgmq",
+      "name": "beta-entity-pgvector",
       "input": {
         "event_type": "message.user",
         "session_id": "beta-7",
         "occurred_at": "2026-07-21T09:06:00Z",
-        "payload": { "text": "PGMQ is a queue extension living inside Postgres itself." }
+        "payload": { "text": "pgvector is the Postgres extension that stores semantic Knowledge embeddings." }
       },
-      "expected": [{ "class": "entity", "content_contains": "PGMQ" }]
+      "expected": [{ "class": "entity", "content_contains": "pgvector" }]
     },
     {
       "name": "beta-fact-dev-image",
@@ -80,7 +80,7 @@
         "event_type": "message.user",
         "session_id": "beta-8",
         "occurred_at": "2026-07-21T09:07:00Z",
-        "payload": { "text": "The dev compose image ships Postgres 17 with pgvector and AGE preloaded." }
+        "payload": { "text": "The dev compose image ships Postgres 17 with pgvector preloaded." }
       },
       "expected": [{ "class": "fact", "content_contains": "Postgres 17" }]
     },
@@ -96,7 +96,7 @@
     },
     {
       "name": "beta-procedure-and-fact-windows",
-      "note": "A procedure and the fact that explains why it exists. One record per event means at most one of the two lands.",
+      "note": "A procedure and the fact that explains why it exists. One candidate per event means at most one of the two lands.",
       "input": {
         "event_type": "message.user",
         "session_id": "beta-10",

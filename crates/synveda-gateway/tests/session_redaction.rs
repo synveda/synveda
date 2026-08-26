@@ -163,18 +163,10 @@ fn state(url: &str, issuer: &str, tenant: TenantId) -> AppState {
         public_origin: "http://127.0.0.1:8120".to_owned(),
         pdp: Arc::new(synveda_policy::Pdp::new().expect("build the embedded PDP")),
         service_token_max_ttl: Duration::from_secs(3600),
-        search_index: Arc::new(
-            synveda_retrieval::SearchIndex::open(
-                std::env::temp_dir()
-                    .join("synveda-gateway-tests")
-                    .join(synveda_types::TenantId::new().to_string()),
-            )
-            .expect("open search index"),
-        ),
         embedder: Arc::new(synveda_ingest::embedding::AnyEmbedder::Deterministic(
             synveda_ingest::embedding::DeterministicEmbedder::new(),
         )),
-        inject_embed_timeout: std::time::Duration::from_millis(100),
+        context_embed_timeout: std::time::Duration::from_millis(100),
         // TEN-4 (ADR-0064): a fixed test KEK, so a suite that touches a
         // sealed column seals rather than skipping. `Kms::Disabled` is the
         // production default when no key is configured.
@@ -568,8 +560,8 @@ async fn seeded_secrets_never_reach_storage_in_any_mode() {
         permit (
             principal,
             action in [
-                Synveda::Action::"MemoryRead",
-                Synveda::Action::"MemoryWrite",
+                Synveda::Action::"KnowledgeRead",
+                Synveda::Action::"KnowledgeWrite",
                 Synveda::Action::"SessionRead",
                 Synveda::Action::"SessionWrite"
             ],
@@ -822,7 +814,7 @@ async fn seeded_secrets_never_reach_storage_in_any_mode() {
     assert!(
         events
             .iter()
-            .any(|event| event.action == "memory.quarantine.released"
+            .any(|event| event.action == "session.quarantine.released"
                 && event.payload["reason"]
                     .as_str()
                     .is_some_and(|reason| reason.contains("AWS docs example"))),
@@ -936,7 +928,7 @@ async fn quarantine_review_contract_holds() {
     assert!(
         events
             .iter()
-            .any(|event| event.action == "memory.quarantine.rejected"),
+            .any(|event| event.action == "session.quarantine.rejected"),
         "the rejection must chain"
     );
     drop(tx);

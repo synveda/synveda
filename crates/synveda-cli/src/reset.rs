@@ -15,12 +15,6 @@
 //! volume as ours (`deploy/compose/docker-compose.yml`), which is exactly why
 //! this drops a *database* rather than a volume.
 //!
-//! What it does remove besides the database is the search index sidecar, and
-//! that is not an exception to the rule above: the sidecar is derived from the
-//! rows that are about to stop existing (CTX-1, ADR-0024), so leaving it would
-//! leave a lexical index over record ids nobody can resolve — a fresh database
-//! that is not fresh in the one retrieval leg that does not read Postgres.
-
 use std::time::Instant;
 
 use sqlx::postgres::PgConnectOptions;
@@ -87,17 +81,7 @@ pub async fn reset(plan: Plan) -> Result<(), String> {
         }
     );
     for extension in &outcome.extensions {
-        if let Some(refusal) = &extension.refusal {
-            // Only the optional ones reach here; a required one is a hard
-            // error from `recreate`. Reported rather than swallowed, because
-            // "the graph spike will not run on this server" is a fact worth
-            // knowing once.
-            println!(
-                "    extension  {} unavailable on this server ({refusal}) — the \
-                 product does not use it",
-                extension.name
-            );
-        }
+        println!("    extension  {} ready", extension.name);
     }
     println!(
         "    schema     epoch {} at migration {} ({} — {})",
@@ -106,23 +90,6 @@ pub async fn reset(plan: Plan) -> Result<(), String> {
         outcome.metadata.created_by_version,
         outcome.metadata.created_at.to_rfc3339(),
     );
-
-    // The derived sidecar. Idempotent in both directions: absent is fine, and
-    // a failure to remove it is reported rather than fatal — the database is
-    // already fresh at this point, and a half-reset that stops here would be
-    // worse than one that says what is left to do.
-    let index = init::search_index_dir();
-    match std::fs::remove_dir_all(&index) {
-        Ok(()) => println!("    sidecar    removed {}", index.display()),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-            println!("    sidecar    none at {}", index.display());
-        }
-        Err(err) => println!(
-            "    sidecar    COULD NOT REMOVE {} ({err}) — delete it by hand \
-             before starting the gateway; it indexes records that no longer exist",
-            index.display()
-        ),
-    }
 
     println!();
     println!("synveda: reset in {}s", started.elapsed().as_secs());

@@ -25,7 +25,7 @@ use synveda_audit::{AuditAction, Outcome};
 use synveda_ingest::embedding::Embedder as _;
 use synveda_policy::{Action, Resource, ResourceEntity, ScopeNode};
 use synveda_retrieval::{
-    CandidateScope, ComposeRequest, MemoryReadInputs, compose_authored, composition_plan,
+    AuthoredReadInputs, CandidateScope, ComposeRequest, compose_authored, composition_plan,
     estimated_tokens,
 };
 use synveda_store::anchors::AnchorSelection;
@@ -914,7 +914,7 @@ async fn prepare_context(
         .collect();
     let mut plan = composition_plan(
         &state.pdp,
-        &MemoryReadInputs {
+        &AuthoredReadInputs {
             principal: &input.principal,
             chain: &own_chain,
             anchors: input.anchors.as_slice(),
@@ -940,7 +940,7 @@ async fn prepare_context(
     }
 
     // Knowledge's candidate universe is about the session task plus the
-    // caller's private scope. It does not inherit `MemoryRead`: every exact
+    // caller's private scope. It does not inherit `KnowledgeRead`: every exact
     // item gets its own `KnowledgeRead` decision below.
     let mut content_scopes = Vec::new();
     for scope in session_chain.iter().chain(own_chain.iter()) {
@@ -1100,7 +1100,7 @@ async fn semantic_vector(
         );
     }
     match tokio::time::timeout(
-        state.inject_embed_timeout,
+        state.context_embed_timeout,
         state.embedder.embed(&[query.to_owned()]),
     )
     .await

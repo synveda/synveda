@@ -1,27 +1,23 @@
 {
   "note": "CPR-40's live dense-retrieval gate over the current session/capture/Knowledge/ContextRun path (ADR-0099) — `make eval-retrieval`. Each disposable tenant creates an immutable regulated-strict Configuration version, admits only the local TEI provider, clears two distinct reviewers and a separate effect actor through VedaFlow, and binds that version at the tenant root. Exporting SYNVEDA_EMBEDDER=tei alone confers no provider authority. BAAI/bge-m3 is pinned by the compose image and model declaration, so this tier is reproducible but remains separate from the deterministic merge gate.\n\nThe 2026-08-25 remeasurement served all ten labelled questions, including both semantic paraphrases: every scope tier measured 1.0 and is floored at 0.98. Retrieval precision is measured only over questions with an explicit caller budget whose resulting block actually bound. This is not an opt-in assertion: both facts are emitted per question and checked together. The distinction became load-bearing when immutable addresses and source evidence made the ordinary 1,500-token product budget bind on far-scope questions; including those would measure the nearest-first scope gradient under the name of within-scope ranking. The four deliberate private-scope probes selected five revisions, four relevant, for 0.800 precision and a 0.770 floor.\n\nThe evidence-bearing JSON envelope is part of the security contract and its cost is not hidden. The same run measured 726.846 tokens per complete expected answer because the six ordinary questions each composed a near-full evidence block; the 840 ceiling retains roughly 15.6% non-regression headroom. Median/p95 context latency measured 79.832/160.773 ms on the local BGE-M3 service; the 800 ms p95 ceiling remains a shape detector rather than an SLO. Scenario and deterministic-extraction metrics are reported but gated by their own merge baseline. Hallucination remains zero-tolerance here too.",
   "metrics": {
-    "qa_answer_rate": {
+    "qa_selection_rate": {
       "min": 0.98,
       "slack": 0.02
     },
-    "qa_body_rate": {
+    "qa_scope_principal": {
       "min": 0.98,
       "slack": 0.02
     },
-    "qa_scope_user": {
+    "qa_scope_project": {
       "min": 0.98,
       "slack": 0.02
     },
-    "qa_scope_team": {
+    "qa_scope_workspace": {
       "min": 0.98,
       "slack": 0.02
     },
-    "qa_scope_department": {
-      "min": 0.98,
-      "slack": 0.02
-    },
-    "qa_scope_org": {
+    "qa_scope_tenant": {
       "min": 0.98,
       "slack": 0.02
     },

@@ -17,7 +17,6 @@ use synveda_gateway::telemetry;
 use synveda_identity::Hs256Verifier;
 use synveda_ingest::embedding::{AnyEmbedder, DeterministicEmbedder};
 use synveda_policy::Pdp;
-use synveda_retrieval::SearchIndex;
 use synveda_store::{access, identities, rls, scopes, tenants};
 use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
 use synveda_types::scope::{Scope, ScopeKind};
@@ -54,16 +53,8 @@ fn state(url: &str) -> AppState {
         public_origin: "http://127.0.0.1:8120".to_owned(),
         pdp: Arc::new(Pdp::new().expect("build embedded PDP")),
         service_token_max_ttl: Duration::from_secs(3600),
-        search_index: Arc::new(
-            SearchIndex::open(
-                std::env::temp_dir()
-                    .join("synveda-cpr23-tests")
-                    .join(TenantId::new().to_string()),
-            )
-            .expect("open search sidecar"),
-        ),
         embedder: Arc::new(AnyEmbedder::Deterministic(DeterministicEmbedder::new())),
-        inject_embed_timeout: Duration::from_millis(100),
+        context_embed_timeout: Duration::from_millis(100),
         keys: Arc::new(synveda_store::keys::KeyRing::new(
             synveda_crypto::Kms::Disabled,
         )),

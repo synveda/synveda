@@ -24,14 +24,14 @@
       "expected": [{ "class": "entity", "content_contains": "Jaeger" }]
     },
     {
-      "name": "gamma-entity-tantivy",
+      "name": "gamma-entity-postgres-fts",
       "input": {
         "event_type": "message.user",
         "session_id": "gamma-3",
         "occurred_at": "2026-07-22T11:02:00Z",
-        "payload": { "text": "Tantivy is the per-tenant lexical sidecar behind the sparse retrieval leg." }
+        "payload": { "text": "Postgres full-text search is the tenant-bound lexical leg for current Knowledge revisions." }
       },
-      "expected": [{ "class": "entity", "content_contains": "Tantivy" }]
+      "expected": [{ "class": "entity", "content_contains": "Postgres" }]
     },
     {
       "name": "gamma-procedure-pack-apply",
@@ -94,17 +94,17 @@
       "expected": [{ "class": "fact", "content_contains": "BYPASSRLS" }]
     },
     {
-      "name": "gamma-entity-and-fact-pgmq",
-      "note": "A definition and a property of the thing defined. Both are true of the utterance; one record per event reaches one.",
+      "name": "gamma-entity-and-fact-capture-batch",
+      "note": "A definition and a property of the thing defined. Both are true of the utterance; one candidate per event reaches one.",
       "input": {
         "event_type": "message.user",
         "session_id": "gamma-10",
         "occurred_at": "2026-07-22T11:09:00Z",
-        "payload": { "text": "PGMQ is our queue substrate; the observe queue carries content-free signals and never a payload." }
+        "payload": { "text": "CaptureBatch is the idempotent extraction job; it names one session and produces reviewable candidates without publishing them." }
       },
       "expected": [
-        { "class": "entity", "content_contains": "PGMQ" },
-        { "class": "fact", "content_contains": "content-free" }
+        { "class": "entity", "content_contains": "CaptureBatch" },
+        { "class": "fact", "content_contains": "without publishing" }
       ]
     }
   ]

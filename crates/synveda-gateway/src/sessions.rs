@@ -1533,8 +1533,8 @@ pub(crate) async fn append_events(
         let (session, authorized, _, input) =
             load_with_input(&state, &mut tx, tenant_id, id, Action::SessionWrite).await?;
 
-        // ── The scan seam (MEM-2, ADR-0021 decision 1; moved here from
-        // `/v1/observe` by CPR-12, ADR-0078 decision 1) ──
+        // ── The scan seam (MEM-2, ADR-0021 decision 1; CPR-12,
+        // ADR-0078 decision 1) ──
         //
         // Every payload is scanned and redacted **before anything persists**,
         // and the effective pack's redaction config picks each event's

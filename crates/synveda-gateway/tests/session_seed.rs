@@ -53,7 +53,7 @@ pub struct SeededRun {
 /// `slug` must be unique per tenant; suites derive it from whatever they
 /// already use to keep fixtures apart. `principal` is the token subject the
 /// run is attributed to — the same subject the suite's bearer carries, because
-/// extraction re-decides `MemoryWrite` for it at commit time.
+/// extraction re-decides `KnowledgeWrite` for it at commit time.
 pub async fn seed_run(pool: &PgPool, tenant: TenantId, slug: &str, principal: &str) -> SeededRun {
     let mut tx = pool.begin().await.expect("begin session fixture");
     let workspace = workspaces::create(

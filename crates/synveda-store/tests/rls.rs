@@ -18,7 +18,6 @@ use std::sync::OnceLock;
 
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{PgPool, Postgres, Transaction};
-use synveda_store::records::{self, RecordState};
 use synveda_store::{
     access, configuration, context, idempotency, identities, knowledge, policy_packs, projects,
     quarantine, relaxations, repositories, rls, scopes, sessions, tenants, workspaces,
@@ -35,11 +34,11 @@ use synveda_types::scope;
 use synveda_types::session::{SessionEventType, SessionStatus};
 use synveda_types::{
     ArtifactFamily, ArtifactReference, ContextCandidateId, ContextCompletionStatus,
-    ContextFeedbackId, ContextFeedbackType, ContextReasonCode, ContextRunId, ContextSelectionId,
-    Error, GrantId, GroupId, IdentityId, IdentityKind, InviteId, KnowledgeItemId,
-    KnowledgeRevisionId, KnowledgeSourceId, PackConfig, ProjectId, ProposalId, RecordClass,
-    RecordId, RecordKind, RelaxationId, RelaxationVersionId, RepositoryId, ScopeId, Sensitivity,
-    SessionId, TenantId, TenantStatus, TraceRetentionMode, WorkspaceId,
+    ContextFeedbackId, ContextFeedbackType, ContextPackChunkId, ContextReasonCode, ContextRunId,
+    ContextSelectionId, Error, GrantId, GroupId, IdentityId, IdentityKind, InviteId,
+    KnowledgeItemId, KnowledgeRevisionId, KnowledgeSourceId, PackConfig, ProjectId, ProposalId,
+    RelaxationId, RelaxationVersionId, RepositoryId, ScopeId, Sensitivity, SessionId, TenantId,
+    TenantStatus, TraceRetentionMode, WorkspaceId,
 };
 
 // ── Harness ──────────────────────────────────────────────────────────────────
@@ -84,78 +83,6 @@ fn db() -> Option<&'static Db> {
     .as_ref()
 }
 
-/// Guarantees the next statement runs at a strictly later `now()`, so the
-/// archive trigger records a non-empty transaction period (same rationale as
-/// the FND-4 tests; 5ms is ample for microsecond resolution).
-async fn tick() {
-    tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-}
-
-fn state(content: &str) -> RecordState {
-    RecordState {
-        scope_id: ScopeId::new(),
-        owner_id: IdentityId::new(),
-        kind: RecordKind::Derived,
-        class: RecordClass::Fact,
-        content: content.to_owned(),
-        sensitivity: Sensitivity::Internal,
-        provenance: serde_json::json!({"source": "ten-2 acceptance test"}),
-        valid_from: chrono::Utc::now(),
-        valid_to: None,
-    }
-}
-
-/// A fixed embedding for every write: this suite exercises tenant
-/// isolation, not vectors, but embed-or-fail (MEM-4, ADR-0023) makes an
-/// embedding-less write unrepresentable.
-fn embed() -> records::RecordEmbedding {
-    records::RecordEmbedding {
-        model: "test@1".to_owned(),
-        vector: vec![0.25, -0.5, 0.75],
-    }
-}
-
-/// [`records::insert`] with the fixed test embedding.
-async fn insert(
-    executor: impl sqlx::PgExecutor<'_>,
-    id: RecordId,
-    tenant: TenantId,
-    state: &RecordState,
-) -> synveda_types::Result<records::RecordVersion> {
-    records::insert(executor, id, tenant, state, &embed()).await
-}
-
-/// [`records::update`] with the fixed test embedding.
-async fn update(
-    executor: impl sqlx::PgExecutor<'_>,
-    id: RecordId,
-    state: &RecordState,
-) -> synveda_types::Result<Option<records::RecordVersion>> {
-    records::update(executor, id, state, &embed()).await
-}
-
-/// Admits a fresh tenant and seeds one record with one archived version, so
-/// `records`, `records_history`, and `records_versions` all hold rows for
-/// it. Runs on the (RLS-exempt) test connection — the fixture is the world
-/// the backstop must then hide.
-async fn seed_tenant(pool: &PgPool) -> (TenantId, RecordId) {
-    let tenant = TenantId::new();
-    let slug = format!("rls-{}", tenant.as_uuid().simple());
-    tenants::create(pool, tenant, &slug, "RLS fixture", TenantStatus::Active)
-        .await
-        .expect("create tenant");
-    let record = RecordId::new();
-    insert(pool, record, tenant, &state("v1"))
-        .await
-        .expect("insert record");
-    tick().await;
-    update(pool, record, &state("v2"))
-        .await
-        .expect("update record")
-        .expect("record is current");
-    (tenant, record)
-}
-
 /// Begins a transaction with the GUC set for `tenant` (unset when `None`),
 /// then demotes it to `synveda_app` for the rest of the transaction. `SET
 /// LOCAL ROLE` reverts with the transaction, like the GUC itself.
@@ -171,36 +98,6 @@ async fn app_tx(pool: &PgPool, tenant: Option<TenantId>) -> Transaction<'static,
         .await
         .expect("SET ROLE synveda_app (the test connection must be allowed to)");
     tx
-}
-
-/// Rows of `tenant` visible through each tenant-scoped relation, in the
-/// order (records, records_history, records_versions).
-async fn visible_rows(
-    tx: &mut Transaction<'static, Postgres>,
-    tenant: TenantId,
-) -> (i64, i64, i64) {
-    let current = sqlx::query_scalar!(
-        r#"select count(*) as "count!" from records where tenant_id = $1"#,
-        tenant.as_uuid(),
-    )
-    .fetch_one(&mut **tx)
-    .await
-    .expect("count records");
-    let history = sqlx::query_scalar!(
-        r#"select count(*) as "count!" from records_history where tenant_id = $1"#,
-        tenant.as_uuid(),
-    )
-    .fetch_one(&mut **tx)
-    .await
-    .expect("count records_history");
-    let versions = sqlx::query_scalar!(
-        r#"select count(*) as "count!" from records_versions where tenant_id = $1"#,
-        tenant.as_uuid(),
-    )
-    .fetch_one(&mut **tx)
-    .await
-    .expect("count records_versions");
-    (current, history, versions)
 }
 
 // ── Completeness guard ───────────────────────────────────────────────────────
@@ -295,7 +192,6 @@ const COVERED: &[&str] = &[
     "knowledge_revision_sources",
     "knowledge_revisions",
     "knowledge_sources",
-    "memory_usage",
     // CPR-5 (ADR-0072): an outstanding invitation is a live credential's
     // shadow. Tenant-bound so a hash lookup runs inside one tenant's own row
     // policy — the shape ADR-0059 decision 13 set for the provisioning
@@ -309,13 +205,7 @@ const COVERED: &[&str] = &[
     "policy_relaxations",
     "project_repositories",
     "projects",
-    "promotion_watermarks",
     "prompts",
-    "record_embeddings",
-    "record_signatures",
-    "record_supersessions",
-    "records",
-    "records_history",
     "scim_credentials",
     "scim_users",
     // CPR-3 (ADR-0070): the generic scope substrate, and since CPR-7
@@ -423,13 +313,8 @@ fn every_tenant_scoped_table_is_covered_and_forced() {
             );
         }
 
-        // Every composed current/as-of surface: the old corpus's (ADR-0006)
-        // and CPR-15's Knowledge pair (ADR-0080 decisions 2 and 6).
-        for view in [
-            "records_versions",
-            "knowledge_item_versions",
-            "knowledge_current",
-        ] {
+        // Every composed Knowledge current/as-of surface.
+        for view in ["knowledge_item_versions", "knowledge_current"] {
             let invoker = sqlx::query_scalar!(
                 r#"
                 select coalesce((
@@ -1588,20 +1473,20 @@ fn fixture_configuration_reference(
     .expect("valid Configuration fixture reference")
 }
 
-fn fixture_memory_references(
+fn fixture_knowledge_references(
     proposal: uuid::Uuid,
     operation: &str,
     commit_hash: [u8; 32],
 ) -> serde_json::Value {
     encoded_artifact_reference(
         ArtifactReference::new(
-            ArtifactFamily::Memory,
+            ArtifactFamily::Knowledge,
             proposal.to_string(),
             operation,
             blake3::Hash::from_bytes(commit_hash).to_hex().to_string(),
             None,
         )
-        .expect("valid Memory fixture reference"),
+        .expect("valid Knowledge fixture reference"),
     )
 }
 
@@ -1973,469 +1858,6 @@ fn same_tenant_identity_lifecycle_works_under_rls() {
     });
 }
 
-/// A connection that never set the GUC sees nothing at all: the backstop
-/// fails closed, it does not fall open.
-#[test]
-fn unset_guc_returns_zero_rows() {
-    let Some(db) = db() else { return };
-    db.rt.block_on(async {
-        let (tenant, _) = seed_tenant(&db.pool).await;
-        let mut tx = app_tx(&db.pool, None).await;
-        assert_eq!(
-            visible_rows(&mut tx, tenant).await,
-            (0, 0, 0),
-            "rows visible without any tenant GUC"
-        );
-    });
-}
-
-/// A malformed GUC value makes tenant-scoped queries error — fail closed —
-/// rather than being treated as "no tenant" or, worse, admitting rows.
-#[test]
-fn malformed_guc_fails_closed() {
-    let Some(db) = db() else { return };
-    db.rt.block_on(async {
-        let (_, record) = seed_tenant(&db.pool).await;
-        let mut tx = app_tx(&db.pool, None).await;
-        sqlx::query_scalar!(
-            "select set_config('synveda.tenant_id', $1, true)",
-            "not-a-uuid",
-        )
-        .fetch_one(&mut *tx)
-        .await
-        .expect("set a malformed GUC");
-        let result = records::current(&mut *tx, record).await;
-        assert!(
-            matches!(result, Err(Error::Storage { .. })),
-            "a malformed tenant GUC must error, got {result:?}"
-        );
-    });
-}
-
-/// Writes are checked too: inserting a row for another tenant than the GUC's
-/// trips the policy's WITH CHECK (SQLSTATE 42501), surfaced as the internal
-/// application-defect error.
-#[test]
-fn cross_tenant_insert_is_rejected() {
-    let Some(db) = db() else { return };
-    db.rt.block_on(async {
-        let (tenant, _) = seed_tenant(&db.pool).await;
-        let (other, _) = seed_tenant(&db.pool).await;
-        let mut tx = app_tx(&db.pool, Some(tenant)).await;
-        let result = insert(&mut *tx, RecordId::new(), other, &state("forged")).await;
-        assert!(
-            matches!(result, Err(Error::Internal { .. })),
-            "cross-tenant insert must be rejected by RLS as an internal \
-             defect, got {result:?}"
-        );
-    });
-}
-
-/// Another tenant's record is invisible to update, delete, and every read —
-/// the store reports "no such current version", indistinguishable from a
-/// record that never existed (no existence oracle across tenants).
-#[test]
-fn cross_tenant_update_delete_and_reads_see_nothing() {
-    let Some(db) = db() else { return };
-    db.rt.block_on(async {
-        let (tenant, _) = seed_tenant(&db.pool).await;
-        let (_, foreign_record) = seed_tenant(&db.pool).await;
-
-        let mut tx = app_tx(&db.pool, Some(tenant)).await;
-        let current = records::current(&mut *tx, foreign_record).await.unwrap();
-        assert_eq!(current, None, "cross-tenant read leaked a record");
-        let updated = update(&mut *tx, foreign_record, &state("hijack"))
-            .await
-            .unwrap();
-        assert_eq!(updated, None, "cross-tenant update found a row");
-        let deleted = records::delete(&mut *tx, foreign_record).await.unwrap();
-        assert!(!deleted, "cross-tenant delete removed a row");
-        let as_of = records::as_of(&mut *tx, foreign_record, chrono::Utc::now())
-            .await
-            .unwrap();
-        assert_eq!(as_of, None, "cross-tenant as-of leaked history");
-    });
-}
-
-/// The backstop must not break legitimate use: the full record lifecycle —
-/// including the trigger that archives into `records_history` under the
-/// caller's rights — works as `synveda_app`. One tenant transaction per
-/// step, the shape a data-path request takes (and `now()` is frozen inside
-/// a transaction, so history can only accrue across them).
-#[test]
-fn same_tenant_lifecycle_works_under_rls() {
-    let Some(db) = db() else { return };
-    db.rt.block_on(async {
-        let tenant = TenantId::new();
-        let slug = format!("rls-{}", tenant.as_uuid().simple());
-        tenants::create(
-            &db.pool,
-            tenant,
-            &slug,
-            "RLS lifecycle",
-            TenantStatus::Active,
-        )
-        .await
-        .expect("create tenant");
-        let record = RecordId::new();
-
-        let mut tx = app_tx(&db.pool, Some(tenant)).await;
-        insert(&mut *tx, record, tenant, &state("v1"))
-            .await
-            .expect("insert under RLS");
-        tx.commit().await.expect("commit insert");
-        tick().await;
-
-        let mut tx = app_tx(&db.pool, Some(tenant)).await;
-        update(&mut *tx, record, &state("v2"))
-            .await
-            .expect("update under RLS (archive trigger runs as synveda_app)")
-            .expect("record is current");
-        tx.commit().await.expect("commit update");
-        tick().await;
-
-        let mut tx = app_tx(&db.pool, Some(tenant)).await;
-        let versions = records::versions(&mut *tx, record)
-            .await
-            .expect("versions under RLS");
-        assert_eq!(versions.len(), 2, "history must accrue under RLS");
-        assert!(
-            records::delete(&mut *tx, record).await.expect("delete"),
-            "delete must work in-tenant"
-        );
-        tx.commit().await.expect("commit delete");
-
-        // Deleted from the present, still in history: the as-of surface keeps
-        // working for the tenant that owns it.
-        let mut tx = app_tx(&db.pool, Some(tenant)).await;
-        let current = records::current(&mut *tx, record).await.expect("re-read");
-        assert_eq!(current, None);
-        let versions = records::versions(&mut *tx, record)
-            .await
-            .expect("versions after delete");
-        assert_eq!(versions.len(), 2);
-    });
-}
-
-// ── Record embeddings (MEM-4, ADR-0023) ─────────────────────────────────────
-
-/// Embeddings are content-derived vectors and sit squarely under the
-/// backstop: the wrong tenant GUC sees zero rows, a forged-tenant write
-/// trips WITH CHECK, and the app role holds no DELETE — an embedding
-/// leaves only through its record's FK cascade (which fires under the
-/// app role because FK actions bypass RLS by Postgres semantics).
-#[test]
-fn record_embeddings_are_tenant_isolated_and_undeletable_by_the_app_role() {
-    let Some(db) = db() else { return };
-    db.rt.block_on(async {
-        let (victim, victim_record) = seed_tenant(&db.pool).await;
-        let (adversary, _) = seed_tenant(&db.pool).await;
-
-        // Cross-tenant reads see nothing — the raw table and the store
-        // surface agree.
-        let mut tx = app_tx(&db.pool, Some(adversary)).await;
-        let visible = sqlx::query_scalar!(
-            r#"select count(*) as "count!" from record_embeddings
-               where tenant_id = $1"#,
-            victim.as_uuid(),
-        )
-        .fetch_one(&mut *tx)
-        .await
-        .expect("count embeddings");
-        assert_eq!(visible, 0, "embedding rows leaked across tenants");
-        assert_eq!(
-            records::embedding_meta(&mut *tx, victim_record)
-                .await
-                .expect("embedding meta across tenants"),
-            None,
-            "cross-tenant embedding metadata leaked"
-        );
-        drop(tx);
-
-        // A forged-tenant write trips the policy's WITH CHECK.
-        let mut tx = app_tx(&db.pool, Some(adversary)).await;
-        let forged = sqlx::query!(
-            r#"insert into record_embeddings
-                   (record_id, tenant_id, model, dim, embedding)
-               values ($1, $2, 'test@1', 3, '[1,0,0]'::vector)"#,
-            RecordId::new().as_uuid(),
-            victim.as_uuid(),
-        )
-        .execute(&mut *tx)
-        .await;
-        assert!(
-            forged.is_err(),
-            "a forged-tenant embedding write must be rejected"
-        );
-        drop(tx);
-
-        // No DELETE grant, even in-tenant: deleting an embedding while
-        // its record lives would strand the record embedding-less.
-        let mut tx = app_tx(&db.pool, Some(victim)).await;
-        let delete = sqlx::raw_sql("delete from record_embeddings")
-            .execute(&mut *tx)
-            .await;
-        assert!(
-            delete.is_err(),
-            "the app role must not hold DELETE on record_embeddings"
-        );
-        drop(tx);
-
-        // In-tenant the surface works, and the record's temporal delete
-        // cascades the embedding away under the app role.
-        let mut tx = app_tx(&db.pool, Some(victim)).await;
-        let meta = records::embedding_meta(&mut *tx, victim_record)
-            .await
-            .expect("read own embedding meta")
-            .expect("the seeded record is embedded");
-        assert_eq!(meta.model, "test@1");
-        assert_eq!(meta.dim, 3);
-        assert!(
-            records::delete(&mut *tx, victim_record)
-                .await
-                .expect("delete record"),
-            "delete must work in-tenant"
-        );
-        let orphaned = sqlx::query_scalar!(
-            r#"select count(*) as "count!" from record_embeddings
-               where record_id = $1"#,
-            victim_record.as_uuid(),
-        )
-        .fetch_one(&mut *tx)
-        .await
-        .expect("count after cascade");
-        assert_eq!(
-            orphaned, 0,
-            "the record's cascade must remove its embedding"
-        );
-        tx.commit().await.expect("commit");
-    });
-}
-
-// ── Dedup & supersession (MEM-5, ADR-0039) ──────────────────────────────────
-
-/// The signature sidecar is content-derived and sits under the backstop
-/// exactly as the embedding does: the wrong tenant GUC nominates nothing,
-/// a forged-tenant write trips WITH CHECK, and no DELETE grant exists — a
-/// signature leaves through its record's cascade.
-///
-/// The nomination *leak* is the interesting one. LSH buckets are a
-/// similarity oracle: if a band query crossed tenants, a competitor could
-/// learn that somebody else holds a document like theirs without ever
-/// reading a row. The band the two tenants share here is identical by
-/// construction, so a leak would be certain rather than probable.
-#[test]
-fn record_signatures_are_tenant_isolated_and_nominate_nothing_across_tenants() {
-    let Some(db) = db() else { return };
-    db.rt.block_on(async {
-        let (victim, victim_record) = seed_tenant(&db.pool).await;
-        let (adversary, _) = seed_tenant(&db.pool).await;
-        // Both fixtures store the same content, so their bands are equal.
-        let bands = synveda_store::dedup::signature("v2").bands;
-        // The victim's *own* group, so nothing but the backstop is left to
-        // stop the nomination — a query filtered to a scope the adversary
-        // guessed wrong would prove nothing.
-        let placement = sqlx::query!(
-            "select scope_id, owner_id from records where id = $1",
-            victim_record.as_uuid(),
-        )
-        .fetch_one(&db.pool)
-        .await
-        .expect("read the victim's placement");
-
-        let mut tx = app_tx(&db.pool, Some(adversary)).await;
-        let visible = sqlx::query_scalar!(
-            r#"select count(*) as "count!" from record_signatures where tenant_id = $1"#,
-            victim.as_uuid(),
-        )
-        .fetch_one(&mut *tx)
-        .await
-        .expect("count signatures");
-        assert_eq!(visible, 0, "signature rows leaked across tenants");
-
-        let nominated = synveda_store::dedup::nominate_lexical(
-            &mut tx,
-            &synveda_store::dedup::CandidateGroup {
-                tenant_id: victim,
-                scope_id: ScopeId::from_uuid(placement.scope_id),
-                owner_id: IdentityId::from_uuid(placement.owner_id),
-                class: RecordClass::Fact,
-                at: chrono::Utc::now() - chrono::Duration::days(365),
-            },
-            &bands,
-            16,
-        )
-        .await
-        .expect("nominate across tenants");
-        assert!(
-            nominated.is_empty(),
-            "the LSH nominator is a similarity oracle; it must not answer \
-             for another tenant's corpus"
-        );
-        drop(tx);
-
-        let mut tx = app_tx(&db.pool, Some(adversary)).await;
-        let forged = sqlx::query!(
-            r#"insert into record_signatures (record_id, tenant_id, signature, bands)
-               values ($1, $2, array[1::bigint], array[1::bigint])"#,
-            RecordId::new().as_uuid(),
-            victim.as_uuid(),
-        )
-        .execute(&mut *tx)
-        .await;
-        assert!(
-            forged.is_err(),
-            "a forged-tenant signature write must be rejected"
-        );
-        drop(tx);
-
-        let mut tx = app_tx(&db.pool, Some(victim)).await;
-        let delete = sqlx::raw_sql("delete from record_signatures")
-            .execute(&mut *tx)
-            .await;
-        assert!(
-            delete.is_err(),
-            "the app role must not hold DELETE on record_signatures"
-        );
-        drop(tx);
-
-        // In-tenant it works, and the record's cascade takes it away.
-        let mut tx = app_tx(&db.pool, Some(victim)).await;
-        let own = sqlx::query_scalar!(
-            r#"select count(*) as "count!" from record_signatures where record_id = $1"#,
-            victim_record.as_uuid(),
-        )
-        .fetch_one(&mut *tx)
-        .await
-        .expect("count own signature");
-        assert_eq!(own, 1, "every record written through the API is signed");
-        records::delete(&mut *tx, victim_record)
-            .await
-            .expect("delete record");
-        let orphaned = sqlx::query_scalar!(
-            r#"select count(*) as "count!" from record_signatures where record_id = $1"#,
-            victim_record.as_uuid(),
-        )
-        .fetch_one(&mut *tx)
-        .await
-        .expect("count after cascade");
-        assert_eq!(
-            orphaned, 0,
-            "the record's cascade must remove its signature"
-        );
-        tx.commit().await.expect("commit");
-    });
-}
-
-/// Supersession edges say which of a tenant's facts replaced which — a
-/// change log of what an organisation believed and when. Isolated like
-/// every other tenant-scoped table, and append-only by grant: an edge is a
-/// record of a decision that was taken, and a decision that can be deleted
-/// is one an auditor cannot rely on.
-#[test]
-fn record_supersessions_are_tenant_isolated_and_append_only() {
-    let Some(db) = db() else { return };
-    db.rt.block_on(async {
-        let (victim, victim_record) = seed_tenant(&db.pool).await;
-        let (adversary, adversary_record) = seed_tenant(&db.pool).await;
-
-        let edge = |superseded, superseding| synveda_store::dedup::Supersession {
-            superseded_id: superseded,
-            superseding_id: superseding,
-            method: "deterministic".to_owned(),
-            reason: "contradiction".to_owned(),
-            jaccard_permille: Some(600),
-            cosine_permille: None,
-            closed_at: chrono::Utc::now(),
-        };
-
-        // A second record to point at, in the victim's own tenant.
-        let mut tx = app_tx(&db.pool, Some(victim)).await;
-        let successor = RecordId::new();
-        insert(&mut *tx, successor, victim, &state("v3"))
-            .await
-            .expect("insert successor");
-        synveda_store::dedup::record_supersession(&mut tx, victim, &edge(victim_record, successor))
-            .await
-            .expect("record the edge in-tenant");
-        tx.commit().await.expect("commit edge");
-
-        // The adversary sees nothing, through the raw table or the surface.
-        let mut tx = app_tx(&db.pool, Some(adversary)).await;
-        let visible = sqlx::query_scalar!(
-            r#"select count(*) as "count!" from record_supersessions where tenant_id = $1"#,
-            victim.as_uuid(),
-        )
-        .fetch_one(&mut *tx)
-        .await
-        .expect("count edges");
-        assert_eq!(visible, 0, "supersession edges leaked across tenants");
-        assert!(
-            synveda_store::dedup::supersessions_for(&mut tx, victim, victim_record)
-                .await
-                .expect("read edges across tenants")
-                .is_empty(),
-            "and the read surface agrees"
-        );
-
-        // A forged-tenant edge trips WITH CHECK.
-        let forged = synveda_store::dedup::record_supersession(
-            &mut tx,
-            victim,
-            &edge(adversary_record, adversary_record),
-        )
-        .await;
-        assert!(
-            forged.is_err(),
-            "a forged-tenant edge write must be rejected"
-        );
-        drop(tx);
-
-        // Append-only: no DELETE, no UPDATE.
-        let mut tx = app_tx(&db.pool, Some(victim)).await;
-        assert!(
-            sqlx::raw_sql("delete from record_supersessions")
-                .execute(&mut *tx)
-                .await
-                .is_err(),
-            "the app role must not hold DELETE on record_supersessions"
-        );
-        drop(tx);
-        let mut tx = app_tx(&db.pool, Some(victim)).await;
-        assert!(
-            sqlx::raw_sql("update record_supersessions set reason = 'near-duplicate'")
-                .execute(&mut *tx)
-                .await
-                .is_err(),
-            "nor UPDATE: an edge records a decision that was taken"
-        );
-        drop(tx);
-
-        // In-tenant the surface reads its own, and the record's cascade
-        // takes the edge with it.
-        let mut tx = app_tx(&db.pool, Some(victim)).await;
-        let edges = synveda_store::dedup::supersessions_for(&mut tx, victim, victim_record)
-            .await
-            .expect("read own edges");
-        assert_eq!(edges.len(), 1);
-        assert_eq!(edges[0].superseding_id, successor);
-        assert_eq!(edges[0].jaccard_permille, Some(600));
-        records::delete(&mut *tx, victim_record)
-            .await
-            .expect("delete record");
-        let orphaned = sqlx::query_scalar!(
-            r#"select count(*) as "count!" from record_supersessions
-               where superseded_id = $1"#,
-            victim_record.as_uuid(),
-        )
-        .fetch_one(&mut *tx)
-        .await
-        .expect("count after cascade");
-        assert_eq!(orphaned, 0, "the record's cascade must remove its edges");
-        tx.commit().await.expect("commit");
-    });
-}
-
 // ── Session ingestion (CPR-12, ADR-0078) ────────────────────────────────────
 //
 // The observe staging buffer and its review queue lived here until the observe
@@ -2640,7 +2062,7 @@ fn same_tenant_session_admission_works_under_rls() {
             ],
         )
         .await
-        .expect("append under RLS (pgmq grants included)");
+        .expect("append under forced RLS");
         assert_eq!(
             admitted
                 .iter()
@@ -3109,7 +2531,7 @@ async fn seed_vedaflow(pool: &PgPool) -> (TenantId, ScopeId) {
 
     sqlx::query!(
         "insert into vedaflow_objects (tenant_id, hash, kind, content, size_bytes)
-         values ($1, $2, 'memory', $3, 3)",
+         values ($1, $2, 'knowledge', $3, 3)",
         tenant.as_uuid(),
         &[1u8; 32][..],
         &b"abc"[..],
@@ -3163,7 +2585,7 @@ async fn seed_vedaflow(pool: &PgPool) -> (TenantId, ScopeId) {
     .expect("seed commit parent");
     sqlx::query!(
         "insert into vedaflow_refs (tenant_id, scope_id, name, commit_hash, updated_by)
-         values ($1, $2, 'published', $3, $4)",
+         values ($1, $2, 'prompt/published', $3, $4)",
         tenant.as_uuid(),
         scope.as_uuid(),
         &[4u8; 32][..],
@@ -3248,7 +2670,7 @@ fn cross_tenant_vedaflow_write_is_rejected() {
         let mut tx = app_tx(&db.pool, Some(adversary)).await;
         let forged = sqlx::query!(
             "insert into vedaflow_objects (tenant_id, hash, kind, content, size_bytes)
-             values ($1, $2, 'memory', $3, 3)",
+             values ($1, $2, 'knowledge', $3, 3)",
             victim.as_uuid(),
             &[9u8; 32][..],
             &b"xyz"[..],
@@ -3421,7 +2843,7 @@ fn only_pins_can_be_deleted_and_only_in_their_own_tenant() {
         for (tenant, scope) in [(tenant, scope), (other_tenant, other_scope)] {
             sqlx::query!(
                 "insert into vedaflow_refs (tenant_id, scope_id, name, commit_hash, updated_by)
-                 values ($1, $2, 'pin/memory/published', $3, $4)",
+                 values ($1, $2, 'pin/prompt/published', $3, $4)",
                 tenant.as_uuid(),
                 scope.as_uuid(),
                 &[4u8; 32][..],
@@ -3450,7 +2872,7 @@ fn only_pins_can_be_deleted_and_only_in_their_own_tenant() {
         // Another tenant's pin: the ordinary isolation, still in force on
         // the one path that can now remove a row.
         let forged = sqlx::query!(
-            "delete from vedaflow_refs where tenant_id = $1 and name = 'pin/memory/published'",
+            "delete from vedaflow_refs where tenant_id = $1 and name = 'pin/prompt/published'",
             other_tenant.as_uuid(),
         )
         .execute(&mut *tx)
@@ -3461,7 +2883,7 @@ fn only_pins_can_be_deleted_and_only_in_their_own_tenant() {
 
         // Its own pin: released.
         let released = sqlx::query!(
-            "delete from vedaflow_refs where scope_id = $1 and name = 'pin/memory/published'",
+            "delete from vedaflow_refs where scope_id = $1 and name = 'pin/prompt/published'",
             scope.as_uuid(),
         )
         .execute(&mut *tx)
@@ -3488,7 +2910,7 @@ fn only_pins_can_be_deleted_and_only_in_their_own_tenant() {
         // superuser pool deleting a channel pointer must raise rather than
         // silently succeed.
         let raised = sqlx::query!(
-            "delete from vedaflow_refs where tenant_id = $1 and name = 'published'",
+            "delete from vedaflow_refs where tenant_id = $1 and name = 'prompt/published'",
             tenant.as_uuid(),
         )
         .execute(&db.pool)
@@ -3568,7 +2990,7 @@ fn same_tenant_vedaflow_lifecycle_works_under_rls() {
         // The ref moves — the one UPDATE the app role holds on this schema.
         let moved = sqlx::query!(
             "update vedaflow_refs set commit_hash = $4, updated_at = now(), updated_by = $5
-             where tenant_id = $1 and scope_id = $2 and name = 'published' and commit_hash = $3",
+             where tenant_id = $1 and scope_id = $2 and name = 'prompt/published' and commit_hash = $3",
             tenant.as_uuid(),
             scope.as_uuid(),
             &[4u8; 32][..],
@@ -3600,13 +3022,13 @@ async fn seed_proposal(pool: &PgPool) -> (TenantId, ScopeId, uuid::Uuid) {
     let (tenant, scope) = seed_vedaflow(pool).await;
     let proposal = uuid::Uuid::now_v7();
     let approver = IdentityId::new();
-    let artifact_references = fixture_memory_references(proposal, "publish", [4_u8; 32]);
+    let artifact_references = fixture_knowledge_references(proposal, "apply", [4_u8; 32]);
     sqlx::query!(
         "insert into vedaflow_proposals
              (tenant_id, id, target_scope_id, source_scope_id, asset_kind,
               target_channel, commit_hash, sensitivity, title, proposer_id,
               proposer_subject, artifact_references)
-         values ($1, $2, $3, $3, 'memory', 'published', $4, 'internal',
+         values ($1, $2, $3, $3, 'knowledge', 'apply', $4, 'internal',
                  'rls fixture proposal', $5, 'rls-fixture', $6)",
         tenant.as_uuid(),
         proposal,
@@ -3698,13 +3120,14 @@ fn cross_tenant_proposal_write_is_rejected() {
 
         let mut tx = app_tx(&db.pool, Some(adversary)).await;
         let forged_proposal = uuid::Uuid::now_v7();
-        let artifact_references = fixture_memory_references(forged_proposal, "publish", [4_u8; 32]);
+        let artifact_references =
+            fixture_knowledge_references(forged_proposal, "apply", [4_u8; 32]);
         let forged = sqlx::query!(
             "insert into vedaflow_proposals
                  (tenant_id, id, target_scope_id, source_scope_id, asset_kind,
                   target_channel, commit_hash, sensitivity, title, proposer_id,
                   proposer_subject, artifact_references)
-             values ($1, $2, $3, $3, 'memory', 'published', $4, 'internal',
+             values ($1, $2, $3, $3, 'knowledge', 'apply', $4, 'internal',
                      'forged', $5, 'intruder', $6)",
             victim.as_uuid(),
             forged_proposal,
@@ -3746,7 +3169,7 @@ fn cross_tenant_proposal_write_is_rejected() {
         let mut tx = app_tx(&db.pool, Some(adversary)).await;
         let closed = sqlx::query!(
             "update vedaflow_proposals
-             set state = 'published', closed_at = now(), closed_by = $3
+             set state = 'applied', closed_at = now(), closed_by = $3
              where tenant_id = $1 and id = $2",
             victim.as_uuid(),
             victim_proposal,
@@ -3818,7 +3241,7 @@ fn the_proposal_review_log_is_append_only_and_the_row_closes_once() {
         // ...and never again, whatever the state column is set to.
         let mut tx = app_tx(&db.pool, Some(tenant)).await;
         let reopened = sqlx::query!(
-            "update vedaflow_proposals set state = 'published'
+            "update vedaflow_proposals set state = 'applied'
              where tenant_id = $1 and id = $2",
             tenant.as_uuid(),
             proposal,
@@ -3841,7 +3264,7 @@ fn same_tenant_proposal_lifecycle_works_under_rls() {
         let (tenant, scope, _) = seed_proposal(&db.pool).await;
         let proposal = uuid::Uuid::now_v7();
         let proposer = IdentityId::new();
-        let artifact_references = fixture_memory_references(proposal, "publish", [3_u8; 32]);
+        let artifact_references = fixture_knowledge_references(proposal, "apply", [3_u8; 32]);
 
         let mut tx = app_tx(&db.pool, Some(tenant)).await;
         sqlx::query!(
@@ -3849,7 +3272,7 @@ fn same_tenant_proposal_lifecycle_works_under_rls() {
                  (tenant_id, id, target_scope_id, source_scope_id, asset_kind,
                   target_channel, commit_hash, sensitivity, title, proposer_id,
                   proposer_subject, artifact_references)
-             values ($1, $2, $3, $3, 'memory', 'published', $4, 'restricted',
+             values ($1, $2, $3, $3, 'knowledge', 'apply', $4, 'restricted',
                      'own proposal', $5, 'own-subject', $6)",
             tenant.as_uuid(),
             proposal,
@@ -3886,7 +3309,7 @@ fn same_tenant_proposal_lifecycle_works_under_rls() {
 
         let closed = sqlx::query!(
             "update vedaflow_proposals
-             set state = 'published', closed_at = now(), closed_by = $3
+             set state = 'applied', closed_at = now(), closed_by = $3
              where tenant_id = $1 and id = $2 and state = 'open'",
             tenant.as_uuid(),
             proposal,
@@ -3894,183 +3317,9 @@ fn same_tenant_proposal_lifecycle_works_under_rls() {
         )
         .execute(&mut *tx)
         .await
-        .expect("publish own proposal");
+        .expect("apply own proposal");
         assert_eq!(closed.rows_affected(), 1);
         tx.commit().await.expect("commit the lifecycle");
-    });
-}
-
-// ── FLOW-4: the usage projection and the sweeper's watermark ─────────────────
-
-/// Seeds one tenant with a usage row and a watermark. The projection is
-/// deliberately un-FK'd on `records` (migration 0020), so a bare record id
-/// is a faithful fixture: the sweeper folds ids out of the audit chain
-/// before anything checks whether they still exist.
-async fn seed_usage(pool: &PgPool) -> (TenantId, uuid::Uuid) {
-    let (tenant, _) = seed_tenant(pool).await;
-    let record = uuid::Uuid::now_v7();
-    sqlx::query!(
-        "insert into memory_usage
-             (tenant_id, record_id, subject, recalls, first_recall_at, last_recall_at)
-         values ($1, $2, 'rls-fixture', 3, now(), now())",
-        tenant.as_uuid(),
-        record,
-    )
-    .execute(pool)
-    .await
-    .expect("seed usage");
-    sqlx::query!(
-        "insert into promotion_watermarks (tenant_id, last_seq) values ($1, 7)",
-        tenant.as_uuid(),
-    )
-    .execute(pool)
-    .await
-    .expect("seed watermark");
-    (tenant, record)
-}
-
-/// Rows of `tenant` visible through the promotion tables, in the order
-/// (usage, watermarks).
-async fn visible_promotion_rows(
-    tx: &mut Transaction<'static, Postgres>,
-    tenant: TenantId,
-) -> (i64, i64) {
-    let row = sqlx::query!(
-        r#"select
-             (select count(*) from memory_usage where tenant_id = $1) as "usage!",
-             (select count(*) from promotion_watermarks where tenant_id = $1)
-                 as "watermarks!""#,
-        tenant.as_uuid(),
-    )
-    .fetch_one(&mut **tx)
-    .await
-    .expect("count promotion rows");
-    (row.usage, row.watermarks)
-}
-
-/// Who recalled what is a behavioural record of named people. It leaks
-/// nothing across a tenant boundary, and nothing at all without a GUC.
-#[test]
-fn wrong_tenant_guc_sees_no_promotion_rows() {
-    let Some(db) = db() else { return };
-    db.rt.block_on(async {
-        let (victim, _) = seed_usage(&db.pool).await;
-        let (adversary, _) = seed_usage(&db.pool).await;
-
-        let mut tx = app_tx(&db.pool, Some(victim)).await;
-        assert_eq!(
-            visible_promotion_rows(&mut tx, victim).await,
-            (1, 1),
-            "a tenant must see its own usage projection and watermark"
-        );
-        drop(tx);
-
-        let mut tx = app_tx(&db.pool, Some(adversary)).await;
-        assert_eq!(
-            visible_promotion_rows(&mut tx, victim).await,
-            (0, 0),
-            "another tenant's usage leaked — which names who recalled what"
-        );
-        drop(tx);
-
-        let mut tx = app_tx(&db.pool, None).await;
-        assert_eq!(
-            visible_promotion_rows(&mut tx, victim).await,
-            (0, 0),
-            "an unset GUC must see nothing at all"
-        );
-    });
-}
-
-/// A forged tenant id trips each policy's WITH CHECK, and a cross-tenant
-/// watermark advance affects zero rows — which matters more here than it
-/// looks: rewinding a victim's watermark would refold their chain and
-/// double every count in their evidence.
-#[test]
-fn cross_tenant_promotion_write_is_rejected() {
-    let Some(db) = db() else { return };
-    db.rt.block_on(async {
-        let (victim, victim_record) = seed_usage(&db.pool).await;
-        let (adversary, _) = seed_usage(&db.pool).await;
-
-        let mut tx = app_tx(&db.pool, Some(adversary)).await;
-        let forged = sqlx::query!(
-            "insert into memory_usage
-                 (tenant_id, record_id, subject, recalls, first_recall_at, last_recall_at)
-             values ($1, $2, 'forged', 99, now(), now())",
-            victim.as_uuid(),
-            uuid::Uuid::now_v7(),
-        )
-        .execute(&mut *tx)
-        .await;
-        assert!(
-            forged.is_err(),
-            "an adversary wrote a usage row into another tenant's projection"
-        );
-        drop(tx);
-
-        let mut tx = app_tx(&db.pool, Some(adversary)).await;
-        let rewound = sqlx::query!(
-            "update promotion_watermarks set last_seq = 0 where tenant_id = $1",
-            victim.as_uuid(),
-        )
-        .execute(&mut *tx)
-        .await
-        .expect("the statement runs; RLS makes it match nothing");
-        assert_eq!(
-            rewound.rows_affected(),
-            0,
-            "an adversary rewound another tenant's sweep watermark"
-        );
-        let inflated = sqlx::query!(
-            "update memory_usage set recalls = 10_000 where tenant_id = $1 and record_id = $2",
-            victim.as_uuid(),
-            victim_record,
-        )
-        .execute(&mut *tx)
-        .await
-        .expect("the statement runs; RLS makes it match nothing");
-        assert_eq!(
-            inflated.rows_affected(),
-            0,
-            "an adversary inflated another tenant's promotion evidence"
-        );
-    });
-}
-
-/// The projection is derived state, and the app role holds the DELETE that
-/// says so: ADR-0033 decision 3's rebuild has to be an operation the
-/// product can actually perform, unlike the governed-history tables beside
-/// it, where the same grant is deliberately absent.
-#[test]
-fn the_projection_is_rebuildable_by_the_app_role() {
-    let Some(db) = db() else { return };
-    db.rt.block_on(async {
-        let (tenant, _) = seed_usage(&db.pool).await;
-
-        let mut tx = app_tx(&db.pool, Some(tenant)).await;
-        let cleared = sqlx::query!(
-            "delete from memory_usage where tenant_id = $1",
-            tenant.as_uuid()
-        )
-        .execute(&mut *tx)
-        .await
-        .expect("the app role may discard the projection");
-        assert_eq!(cleared.rows_affected(), 1);
-        let cleared = sqlx::query!(
-            "delete from promotion_watermarks where tenant_id = $1",
-            tenant.as_uuid(),
-        )
-        .execute(&mut *tx)
-        .await
-        .expect("the app role may discard the watermark");
-        assert_eq!(cleared.rows_affected(), 1);
-        assert_eq!(
-            visible_promotion_rows(&mut tx, tenant).await,
-            (0, 0),
-            "a reset leaves nothing to refold from"
-        );
-        tx.commit().await.expect("commit the reset");
     });
 }
 
@@ -4324,206 +3573,6 @@ fn relaxation_expiry_is_authoritative_and_chained_once() {
     });
 }
 
-// ── MEM-6: the destruction path (ADR-0040 decision 6) ───────────────────────
-
-/// The one statement in the product that removes recorded content, and the
-/// three things that must stay true of it.
-///
-/// Migration 0025 opens `records_history` to DELETE only while a named
-/// flag is set, because migration 0001's own comment says the append-only
-/// trigger "is not a security boundary … defence in depth against
-/// application bugs". The boundary that *is* one is RLS, and this test is
-/// what says so: with the flag on and the app role's new grant in hand, a
-/// purge still cannot reach another tenant's history — however the flag is
-/// set, and whatever tenant the statement names.
-#[test]
-fn a_purge_is_flag_gated_scoped_to_its_tenant_and_never_a_rewrite() {
-    let Some(db) = db() else { return };
-    db.rt.block_on(async {
-        let (victim, _) = seed_tenant(&db.pool).await;
-        let (adversary, _) = seed_tenant(&db.pool).await;
-        // Each fixture's update archived one version.
-        let archived = |tenant: TenantId| async move {
-            sqlx::query_scalar!(
-                r#"select count(*) as "count!" from records_history where tenant_id = $1"#,
-                tenant.as_uuid(),
-            )
-            .fetch_one(&db.pool)
-            .await
-            .expect("count history")
-        };
-        assert_eq!(archived(victim).await, 1);
-        assert_eq!(archived(adversary).await, 1);
-
-        // 1. Without the flag, the grant buys nothing: the trigger refuses.
-        let mut tx = app_tx(&db.pool, Some(adversary)).await;
-        let unflagged = sqlx::query!(
-            "delete from records_history where tenant_id = $1",
-            adversary.as_uuid(),
-        )
-        .execute(&mut *tx)
-        .await;
-        assert!(
-            unflagged.is_err(),
-            "history is append-only until something deliberately says otherwise"
-        );
-        drop(tx);
-
-        // 2. With the flag, a purge naming the victim's tenant is a legal
-        //    statement that matches nothing. This is the attack: the
-        //    adversary knows the flag, holds the grant, and names the rows.
-        let mut tx = app_tx(&db.pool, Some(adversary)).await;
-        sqlx::query_scalar!("select set_config('synveda.retention_purge', 'on', true)")
-            .fetch_one(&mut *tx)
-            .await
-            .expect("set the purge flag");
-        let reached = sqlx::query!(
-            "delete from records_history where tenant_id = $1",
-            victim.as_uuid(),
-        )
-        .execute(&mut *tx)
-        .await
-        .expect("cross-tenant purge runs")
-        .rows_affected();
-        assert_eq!(
-            reached, 0,
-            "another tenant's history must be unreachable — the flag opens the \
-             trigger, never the isolation policy"
-        );
-        // Unqualified, it destroys exactly its own.
-        let own = sqlx::query!("delete from records_history")
-            .execute(&mut *tx)
-            .await
-            .expect("own purge runs")
-            .rows_affected();
-        assert_eq!(
-            own, 1,
-            "the adversary can only ever destroy its own history"
-        );
-        tx.commit().await.expect("commit purge");
-        assert_eq!(archived(victim).await, 1, "the victim's history stands");
-        assert_eq!(archived(adversary).await, 0);
-
-        // 3. The flag opens a DELETE and nothing else: a rewrite of history
-        //    is refused with the flag on, which is what keeps "destroyed"
-        //    and "altered" different words.
-        let (rewriter, _) = seed_tenant(&db.pool).await;
-        let mut tx = app_tx(&db.pool, Some(rewriter)).await;
-        sqlx::query_scalar!("select set_config('synveda.retention_purge', 'on', true)")
-            .fetch_one(&mut *tx)
-            .await
-            .expect("set the purge flag");
-        let rewritten = sqlx::query!(
-            "update records_history set content = 'never happened' where tenant_id = $1",
-            rewriter.as_uuid(),
-        )
-        .execute(&mut *tx)
-        .await;
-        assert!(
-            rewritten.is_err(),
-            "retention destroys rows; it never edits one"
-        );
-    });
-}
-
-/// The ingestion plane's DELETE grants (migration 0046), under the same
-/// adversarial reading: disposal is per tenant, and the marker cannot outlive
-/// the row it points at.
-#[test]
-fn staging_disposal_is_scoped_to_its_tenant_and_takes_its_markers_with_it() {
-    let Some(db) = db() else { return };
-    db.rt.block_on(async {
-        let (victim, _, victim_event) = seed_quarantined(&db.pool).await;
-        let (adversary, _, _) = seed_quarantined(&db.pool).await;
-
-        // A disposal naming another tenant's staging rows matches nothing.
-        let mut tx = app_tx(&db.pool, Some(adversary)).await;
-        sqlx::query_scalar!("select set_config('synveda.retention_purge', 'on', true)")
-            .fetch_one(&mut *tx)
-            .await
-            .expect("declare the disposal");
-        let reached = sqlx::query!(
-            "delete from session_event_quarantine where tenant_id = $1",
-            victim.as_uuid(),
-        )
-        .execute(&mut *tx)
-        .await
-        .expect("cross-tenant marker disposal runs")
-        .rows_affected();
-        assert_eq!(reached, 0);
-        let reached = sqlx::query!(
-            "delete from session_events where tenant_id = $1",
-            victim.as_uuid(),
-        )
-        .execute(&mut *tx)
-        .await
-        .expect("cross-tenant staging disposal runs")
-        .rows_affected();
-        assert_eq!(reached, 0, "another tenant's payloads are unreachable");
-        drop(tx);
-
-        // And the FK is the order: the staging row cannot go first, which
-        // is why the sweep disposes of markers before payloads (ADR-0040
-        // decision 7).
-        let mut tx = app_tx(&db.pool, Some(victim)).await;
-        let orphaned = sqlx::query!(
-            "delete from session_events where tenant_id = $1 and id = $2",
-            victim.as_uuid(),
-            victim_event.as_uuid(),
-        )
-        .execute(&mut *tx)
-        .await;
-        assert!(
-            orphaned.is_err(),
-            "a quarantine marker must never point at a payload that is gone"
-        );
-        drop(tx);
-
-        // Migration 0046's trigger refuses a marker delete outright until the
-        // transaction says it is a retention disposal — the same flag the
-        // history purge sets, and the reason a handler cannot retire a pending
-        // review by accident.
-        let mut tx = app_tx(&db.pool, Some(victim)).await;
-        let undeclared = sqlx::query!(
-            "delete from session_event_quarantine where tenant_id = $1 and event_id = $2",
-            victim.as_uuid(),
-            victim_event.as_uuid(),
-        )
-        .execute(&mut *tx)
-        .await;
-        assert!(
-            undeclared.is_err(),
-            "a marker delete outside a declared disposal must raise"
-        );
-        drop(tx);
-
-        let mut tx = app_tx(&db.pool, Some(victim)).await;
-        sqlx::query_scalar!("select set_config('synveda.retention_purge', 'on', true)")
-            .fetch_one(&mut *tx)
-            .await
-            .expect("declare the disposal");
-        sqlx::query!(
-            "delete from session_event_quarantine where tenant_id = $1 and event_id = $2",
-            victim.as_uuid(),
-            victim_event.as_uuid(),
-        )
-        .execute(&mut *tx)
-        .await
-        .expect("dispose of the marker");
-        let disposed = sqlx::query!(
-            "delete from session_events where tenant_id = $1 and id = $2",
-            victim.as_uuid(),
-            victim_event.as_uuid(),
-        )
-        .execute(&mut *tx)
-        .await
-        .expect("dispose of the payload")
-        .rows_affected();
-        assert_eq!(disposed, 1, "marker first, then the payload it named");
-        tx.commit().await.expect("commit disposal");
-    });
-}
-
 // ── PRMT-1: the prompt registry's draft table ────────────────────────────────
 
 /// A tenant with one prompt draft at one scope, seeded on the RLS-exempt
@@ -4553,7 +3602,7 @@ async fn seed_prompt(pool: &PgPool) -> (TenantId, ScopeId) {
     (tenant, scope)
 }
 
-/// The attacks an authored asset invites, which are not memory's: a draft
+/// The attacks an authored asset invites, which are distinct from Knowledge: a draft
 /// forged into another tenant, a draft *moved* to a scope whose
 /// `PromptWrite` decision never admitted it, a rename that would leave a
 /// published channel entry pointing at content nobody reviewed under that
@@ -4656,7 +3705,7 @@ fn a_draft_cannot_be_forged_moved_renamed_or_raised_to_restricted() {
 
         // 3. The tier nothing can mint (ADR-0049 decision 5). The refusal is
         //    structural rather than a handler's good manners, because the
-        //    read side of `restricted` is forbidden for MemoryRead alone —
+        //    read side of `restricted` is forbidden for KnowledgeRead alone —
         //    so a restricted prompt would be a row nothing could read back.
         let mut tx = app_tx(&db.pool, Some(adversary)).await;
         let raised = sqlx::query!(
@@ -4714,17 +3763,12 @@ fn a_draft_cannot_be_forged_moved_renamed_or_raised_to_restricted() {
     });
 }
 
-// ── PRMT-2: the context-pack registry and its chunk mapping ─────────────────
+// ── Authored context-pack chunks (CPR-43) ──────────────────────────────────
 
-/// A tenant with one pack, one document, one pinned record, and the chunk
-/// row that ties the record to the document address it was cut from.
-///
-/// The object is `seed_vedaflow`'s for migration 0029's reason, and the
-/// record is a real `records::insert` — a fixture that faked either would be
-/// testing a table the product cannot produce.
-async fn seed_context_pack(pool: &PgPool) -> (TenantId, ScopeId, RecordId) {
+async fn seed_context_pack(pool: &PgPool) -> (TenantId, ScopeId, ContextPackChunkId) {
     let (tenant, scope) = seed_vedaflow(pool).await;
     let author = IdentityId::new();
+    let chunk = ContextPackChunkId::new();
     sqlx::query!(
         "insert into context_packs
              (tenant_id, scope_id, name, description, created_by, updated_by)
@@ -4750,47 +3794,33 @@ async fn seed_context_pack(pool: &PgPool) -> (TenantId, ScopeId, RecordId) {
     .execute(pool)
     .await
     .expect("seed document");
-
-    let record = RecordId::new();
-    let mut chunk = state("Escalate refunds over £500.");
-    chunk.scope_id = scope;
-    // A pack chunk is a pinned record — that is the decision the whole
-    // feature hangs on (ADR-0050 decision 2), and it is also what makes the
-    // FK below safe: the retention sweep's own SQL exempts `pinned`.
-    chunk.kind = RecordKind::Pinned;
-    insert(pool, record, tenant, &chunk)
-        .await
-        .expect("seed chunk record");
+    let content_hash = blake3::hash(b"Escalate refunds over \xC2\xA3500.");
     sqlx::query!(
         "insert into context_pack_chunks
-             (tenant_id, record_id, scope_id, pack_name, document_name, title,
-              document_hash, ordinal, heading)
+             (tenant_id, id, scope_id, pack_name, document_name, title,
+              sensitivity, document_hash, ordinal, heading, content, content_hash)
          values ($1, $2, $3, 'payments', 'runbooks/refunds.md', 'Refunds runbook',
-                 $4, 0, 'Refunds')",
+                 'internal', $4, 0, 'Refunds', $5, $6)",
         tenant.as_uuid(),
-        record.as_uuid(),
+        chunk.as_uuid(),
         scope.as_uuid(),
         &[1u8; 32][..],
+        "Escalate refunds over £500.",
+        content_hash.as_bytes(),
     )
     .execute(pool)
     .await
-    .expect("seed chunk mapping");
-    (tenant, scope, record)
+    .expect("seed immutable authored chunk");
+    (tenant, scope, chunk)
 }
 
-/// The attacks a pack invites, which are the prompt registry's plus one
-/// that is entirely new: **the chunk mapping decides what composes as
-/// published**, so a forged or edited chunk row is a way to put unreviewed
-/// text into somebody's session under a reviewed document's name
-/// (ADR-0050 decision 3).
 #[test]
-fn a_pack_cannot_be_forged_moved_renamed_raised_or_have_its_chunks_relabelled() {
+fn authored_chunks_are_tenant_isolated_address_bound_and_immutable() {
     let Some(db) = db() else { return };
     db.rt.block_on(async {
-        let (victim, victim_scope, victim_record) = seed_context_pack(&db.pool).await;
-        let (adversary, adversary_scope, _) = seed_context_pack(&db.pool).await;
+        let (victim, victim_scope, _) = seed_context_pack(&db.pool).await;
+        let (adversary, adversary_scope, adversary_chunk) = seed_context_pack(&db.pool).await;
 
-        // 1. Isolation across all three tables.
         let mut tx = app_tx(&db.pool, Some(adversary)).await;
         for table in [
             "context_packs",
@@ -4803,162 +3833,62 @@ fn a_pack_cannot_be_forged_moved_renamed_raised_or_have_its_chunks_relabelled() 
             .bind(victim.as_uuid())
             .fetch_one(&mut *tx)
             .await
-            .expect("count another tenant's rows");
-            assert_eq!(seen, 0, "another tenant's {table} rows must be invisible");
+            .expect("count another tenant's authored rows");
+            assert_eq!(seen, 0, "another tenant's {table} rows leaked");
         }
-
         let forged = sqlx::query!(
-            "insert into context_packs
-                 (tenant_id, scope_id, name, description, created_by, updated_by)
-             values ($1, $2, 'forged', 'forged', $3, $3)",
-            victim.as_uuid(),
-            victim_scope.as_uuid(),
-            IdentityId::new().as_uuid(),
-        )
-        .execute(&mut *tx)
-        .await;
-        assert!(
-            forged.is_err(),
-            "a forged-tenant pack must be rejected: it would author content \
-             into a tenant no ContextPackWrite decision was taken in"
-        );
-        drop(tx);
-
-        // 2. Identity is immutable, content is not.
-        let mut tx = app_tx(&db.pool, Some(adversary)).await;
-        sqlx::query!(
-            "update context_pack_documents set title = 'Refunds runbook (v2)'
-             where tenant_id = $1 and scope_id = $2",
-            adversary.as_uuid(),
-            adversary_scope.as_uuid(),
-        )
-        .execute(&mut *tx)
-        .await
-        .expect("editing your own document is the authoring act");
-
-        let moved = sqlx::query!(
-            "update context_packs set scope_id = $3 where tenant_id = $1 and scope_id = $2",
-            adversary.as_uuid(),
-            adversary_scope.as_uuid(),
-            ScopeId::new().as_uuid(),
-        )
-        .execute(&mut *tx)
-        .await;
-        assert!(
-            moved.is_err(),
-            "a pack cannot change scope: ContextPackWrite was decided at the \
-             one it was authored in"
-        );
-        drop(tx);
-
-        let mut tx = app_tx(&db.pool, Some(adversary)).await;
-        let renamed = sqlx::query!(
-            "update context_pack_documents set document_name = 'runbooks/other.md'
-             where tenant_id = $1 and scope_id = $2",
-            adversary.as_uuid(),
-            adversary_scope.as_uuid(),
-        )
-        .execute(&mut *tx)
-        .await;
-        assert!(
-            renamed.is_err(),
-            "a rename is a different document, not an edit: a published entry \
-             would otherwise name content nobody reviewed under that name"
-        );
-        drop(tx);
-
-        // 3. The tier nothing can mint (ADR-0050 decision 12).
-        let mut tx = app_tx(&db.pool, Some(adversary)).await;
-        let raised = sqlx::query!(
-            "update context_pack_documents set sensitivity = 'restricted'
-             where tenant_id = $1 and scope_id = $2",
-            adversary.as_uuid(),
-            adversary_scope.as_uuid(),
-        )
-        .execute(&mut *tx)
-        .await;
-        assert!(
-            raised.is_err(),
-            "no path in the product mints `restricted` for an authored asset"
-        );
-        drop(tx);
-
-        // 4. **The new attack.** A chunk row's `document_hash` is what
-        //    decides whether its record composes as published, so relabelling
-        //    one would move unreviewed text under a reviewed document's
-        //    address. There is no UPDATE grant and a trigger behind it, which
-        //    is one step stricter than the draft tables because nothing about
-        //    a chunk mapping can legitimately change.
-        let mut tx = app_tx(&db.pool, Some(adversary)).await;
-        let relabelled = sqlx::query!(
-            "update context_pack_chunks set document_hash = $2 where tenant_id = $1",
-            adversary.as_uuid(),
-            &[3u8; 32][..],
-        )
-        .execute(&mut *tx)
-        .await;
-        assert!(
-            relabelled.is_err(),
-            "a chunk cannot be re-pointed at another document version: that is \
-             how unreviewed text would compose under a reviewed address"
-        );
-        drop(tx);
-
-        // 5. A chunk pointed at another tenant's record composes nothing.
-        //    `records_pk` is the id alone, so the FK does not carry a tenant
-        //    and the insert is accepted — the mapping is a claim, and what
-        //    makes the claim worthless is that composition resolves it
-        //    against `records` inside this tenant's transaction, where the
-        //    victim's row is invisible (ADR-0009). The chunk is a name for a
-        //    record, never a capability over one; this is that sentence
-        //    tested rather than asserted.
-        let mut tx = app_tx(&db.pool, Some(adversary)).await;
-        sqlx::query!(
             "insert into context_pack_chunks
-                 (tenant_id, record_id, scope_id, pack_name, document_name, title,
-                  document_hash, ordinal)
-             values ($1, $2, $3, 'payments', 'runbooks/forged.md', 'f', $4, 7)",
-            adversary.as_uuid(),
-            victim_record.as_uuid(),
-            adversary_scope.as_uuid(),
+                 (tenant_id, id, scope_id, pack_name, document_name, title,
+                  sensitivity, document_hash, ordinal, content, content_hash)
+             values ($1, $2, $3, 'payments', 'forged.md', 'forged', 'internal',
+                     $4, 7, 'forged', $5)",
+            victim.as_uuid(),
+            ContextPackChunkId::new().as_uuid(),
+            victim_scope.as_uuid(),
             &[1u8; 32][..],
+            &[2u8; 32][..],
         )
         .execute(&mut *tx)
-        .await
-        .expect("the mapping table cannot check another tenant's records");
+        .await;
+        assert!(forged.is_err(), "a forged tenant chunk was accepted");
+        drop(tx);
+
+        let mut tx = app_tx(&db.pool, Some(adversary)).await;
+        let rewritten = sqlx::query!(
+            "update context_pack_chunks set content = 'rewritten'
+             where tenant_id = $1 and id = $2",
+            adversary.as_uuid(),
+            adversary_chunk.as_uuid(),
+        )
+        .execute(&mut *tx)
+        .await;
         assert!(
-            records::current(&mut *tx, victim_record)
-                .await
-                .expect("resolve the pointed-at record")
-                .is_none(),
-            "the record a forged chunk names must stay unreadable, so the \
-             chunk resolves to nothing"
+            rewritten.is_err(),
+            "an immutable authored chunk was rewritten"
         );
         drop(tx);
 
         let mut tx = app_tx(&db.pool, Some(adversary)).await;
         let dangling = sqlx::query!(
             "insert into context_pack_chunks
-                 (tenant_id, record_id, scope_id, pack_name, document_name, title,
-                  document_hash, ordinal)
-             values ($1, $2, $3, 'payments', 'runbooks/dangling.md', 'd', $4, 9)",
+                 (tenant_id, id, scope_id, pack_name, document_name, title,
+                  sensitivity, document_hash, ordinal, content, content_hash)
+             values ($1, $2, $3, 'payments', 'dangling.md', 'dangling', 'internal',
+                     $4, 9, 'dangling', $5)",
             adversary.as_uuid(),
-            RecordId::new().as_uuid(),
+            ContextPackChunkId::new().as_uuid(),
             adversary_scope.as_uuid(),
             &[9u8; 32][..],
+            &[3u8; 32][..],
         )
         .execute(&mut *tx)
         .await;
         assert!(
             dangling.is_err(),
-            "a chunk naming a record or an address the store does not hold \
-             must be rejected"
+            "a chunk without its VedaFlow object was accepted"
         );
         drop(tx);
 
-        // 6. The app role holds no DELETE on any of the three (ADR-0050
-        //    decision 14): retracting a published pack is FLOW-7's rewind,
-        //    and replacing a draft is an overwrite.
         for table in [
             "context_packs",
             "context_pack_documents",
@@ -4969,10 +3899,7 @@ fn a_pack_cannot_be_forged_moved_renamed_raised_or_have_its_chunks_relabelled() 
                 .bind(adversary.as_uuid())
                 .execute(&mut *tx)
                 .await;
-            assert!(
-                deleted.is_err(),
-                "the app role must hold no DELETE on {table}"
-            );
+            assert!(deleted.is_err(), "the app role can delete {table}");
         }
     });
 }

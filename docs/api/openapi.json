@@ -16364,7 +16364,7 @@
           "sensitivity",
           "object_hash",
           "chunks",
-          "embedded",
+          "written_chunks",
           "updated_at",
           "updated_by"
         ],
@@ -16373,12 +16373,6 @@
             "type": "integer",
             "format": "int32",
             "description": "How many chunks it cut into.",
-            "minimum": 0
-          },
-          "embedded": {
-            "type": "integer",
-            "format": "int32",
-            "description": "How many of those this request actually embedded. Zero for a\ndocument whose bytes did not move, which is the observable half of\n\"re-authoring an unchanged document re-embeds nothing\".",
             "minimum": 0
           },
           "name": {
@@ -16411,6 +16405,12 @@
           "updated_by": {
             "type": "string",
             "format": "uuid"
+          },
+          "written_chunks": {
+            "type": "integer",
+            "format": "int32",
+            "description": "How many immutable chunk rows this request wrote. Zero means the\nexact document version already existed.",
+            "minimum": 0
           }
         }
       },
@@ -20526,84 +20526,6 @@
           }
         }
       },
-      "PromotionEvidenceSchema": {
-        "type": "object",
-        "required": [
-          "rule",
-          "pack_name",
-          "pack_version",
-          "actions",
-          "from_seq",
-          "to_seq",
-          "members"
-        ],
-        "properties": {
-          "actions": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "from_seq": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "members": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/PromotionMemberEvidenceSchema"
-            }
-          },
-          "pack_name": {
-            "type": "string"
-          },
-          "pack_version": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "rule": {
-            "type": "string"
-          },
-          "to_seq": {
-            "type": "integer",
-            "format": "int64"
-          }
-        }
-      },
-      "PromotionMemberEvidenceSchema": {
-        "type": "object",
-        "required": [
-          "record_id",
-          "recalls",
-          "distinct_members",
-          "first_recall_at",
-          "last_recall_at"
-        ],
-        "properties": {
-          "distinct_members": {
-            "type": "integer",
-            "format": "int64",
-            "minimum": 0
-          },
-          "first_recall_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "last_recall_at": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "recalls": {
-            "type": "integer",
-            "format": "int64",
-            "minimum": 0
-          },
-          "record_id": {
-            "type": "string",
-            "format": "uuid"
-          }
-        }
-      },
       "PromptAuthorBody": {
         "type": "object",
         "required": [
@@ -21351,17 +21273,6 @@
           "outstanding": {
             "type": "string",
             "description": "What it still lacks, in one line a reviewer reads."
-          },
-          "promotion": {
-            "oneOf": [
-              {
-                "type": "null"
-              },
-              {
-                "$ref": "#/components/schemas/PromotionEvidenceSchema",
-                "description": "Why a rule opened this, when one did (FLOW-4, ADR-0033 decision\n12): the counts, the actions counted, and the audit range they\nwere folded from — so a reviewer can check the claim against the\nchain rather than trust it. Absent on a human's proposal."
-              }
-            ]
           },
           "proposer_id": {
             "type": "string",

@@ -17,7 +17,6 @@
 
 import type {
   ApprovalRequirementView,
-  PromotionEvidenceSchema,
   ProposalApprovalView,
   ProposalDetail as GeneratedProposalDetail,
   ProposalMemberView,
@@ -26,7 +25,6 @@ import type {
 
 export type Proposal = ProposalSummary;
 export type Requirement = ApprovalRequirementView;
-export type Promotion = PromotionEvidenceSchema;
 export type ProposalDetail = GeneratedProposalDetail;
 export type Member = ProposalMemberView;
 export type Approval = ProposalApprovalView;

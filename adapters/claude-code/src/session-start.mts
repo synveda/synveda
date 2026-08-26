@@ -33,7 +33,6 @@ import {
   bindGateway,
   claimDisclosure,
   loadOrCreateSpool,
-  removeLegacyState,
   saveSpool,
   type Spool,
 } from "./spool.mjs";
@@ -54,10 +53,6 @@ export async function sessionStart(
   input: HookInput,
   configured: AdapterConfig,
 ): Promise<HookOutput> {
-  // The old per-session cursor directory, removed once. Not a migration: it
-  // held a cursor and no events (ADR-0078 decision 6).
-  removeLegacyState();
-
   const externalId = harnessSessionId(input.session_id);
   const spool = loadOrCreateSpool(externalId, CLIENT_NAME, installationId());
   if (spool === undefined) return {};

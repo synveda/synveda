@@ -33,7 +33,6 @@
 //! message when it is unset (CI has no database), the house convention.
 
 use std::collections::{HashMap, VecDeque};
-use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -56,7 +55,6 @@ use synveda_identity::directory::{
 };
 use synveda_ingest::embedding::{AnyEmbedder, DeterministicEmbedder};
 use synveda_policy::Pdp;
-use synveda_retrieval::index::SearchIndex;
 use synveda_store::{
     access, directory, directory_sync, identities, rls, scopes, tenant_secrets, tenants,
 };
@@ -722,12 +720,6 @@ fn metrics_handle() -> PrometheusHandle {
         .clone()
 }
 
-fn index_root() -> PathBuf {
-    let root = std::env::temp_dir().join(format!("synveda-auth5-{}", ScopeId::new().as_uuid()));
-    std::fs::create_dir_all(&root).expect("create index root");
-    root
-}
-
 /// The `AppState` a test drives, over the pool that test already opened.
 ///
 /// Sharing the pool by clone rather than opening a second is what keeps the
@@ -751,9 +743,8 @@ fn app_state(pool: PgPool, pdp: Arc<Pdp>) -> AppState {
         public_origin: "http://127.0.0.1:8120".to_owned(),
         pdp,
         service_token_max_ttl: Duration::from_secs(3600),
-        search_index: Arc::new(SearchIndex::open(index_root()).expect("open sidecar")),
         embedder: Arc::new(AnyEmbedder::Deterministic(DeterministicEmbedder::new())),
-        inject_embed_timeout: Duration::from_millis(100),
+        context_embed_timeout: Duration::from_millis(100),
         // TEN-4 (ADR-0064): a fixed test KEK, so a suite that touches a
         // sealed column seals rather than skipping. `Kms::Disabled` is the
         // production default when no key is configured.

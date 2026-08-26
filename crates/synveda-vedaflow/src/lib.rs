@@ -8,8 +8,8 @@
 //! stands in front of it. FLOW-1 shipped the object store: content
 //! addressing, immutable history, and compare-and-swap ref updates.
 //! FLOW-2 ([`channels`], ADR-0031) gives ref names meaning —
-//! `{asset-kind}/{channel}` per scope, published and staged carrying their
-//! whole membership and derived carrying a log of what each commit added.
+//! `{asset-kind}/{channel}` per scope, with published and staged carrying
+//! their complete authored-artifact membership.
 //! FLOW-3 ([`proposals`] and [`curators`], ADR-0032) adds the governed
 //! request that moves content onto a published channel: a commit holding
 //! exactly what is reviewed, an append-only log of who approved it under
@@ -25,7 +25,7 @@
 //! Every function takes the caller's `&mut PgConnection`, never a pool. The
 //! transaction was opened by `synveda_store::rls::begin_tenant_tx` for the
 //! same tenant, which is what makes ADR-0003's central claim true: a commit,
-//! the records it describes, and the audit event attesting to it either all
+//! the artifacts it describes, and the audit event attesting to it either all
 //! land or none do. A caller who skipped that step writes zero rows — forced
 //! RLS with an unset GUC matches nothing (ADR-0009).
 //!
@@ -91,8 +91,7 @@ pub mod verify;
 pub use channels::{
     ChannelCommit, ChannelHistoryEntry, ChannelMember, ChannelPin, ChannelRef, ChannelRewind,
     ChannelRolledBack, ChannelSnapshot, ChannelStatus, ChannelWrite, MAX_CHANNEL_MEMBERS,
-    MemoryAsset, MemoryChannel, PIN_PREFIX, append, history, pin, publish, put_memory,
-    read_members, read_memory_members, read_pin, rollback, scopes_naming, scopes_with_channel,
+    PIN_PREFIX, history, pin, publish, read_members, read_pin, rollback, scopes_with_channel,
     unpin,
 };
 pub use commits::{

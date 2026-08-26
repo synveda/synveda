@@ -79,7 +79,7 @@ impl Scratch {
             drop(admin);
 
             let pool = connect_pool(&options).await;
-            for extension in ["vector", "pgmq"] {
+            for extension in ["vector", "btree_gin"] {
                 sqlx::query(&format!("create extension if not exists {extension}"))
                     .execute(&pool)
                     .await
@@ -152,22 +152,14 @@ async fn tenant_count(pool: &PgPool) -> i64 {
         .expect("count tenants")
 }
 
-/// Turns a current-epoch database back into one from before the cut.
-///
-/// This is what an operator's existing v0.2.0 database *is*: the whole schema,
-/// data in it, and no marker — because the marker did not exist when it was
-/// built. Reproduced by removing the marker and the migrator's record of the
-/// migration that creates it, which is exactly the two things a pre-cut
-/// database lacks.
-async fn rewind_to_before_the_cut(pool: &PgPool) {
+/// Removes the marker while leaving product data in place. This is the shape
+/// a pre-epoch database presents to the guard; the migration ledger is left
+/// deliberately irrelevant because preflight must refuse before sqlx reads it.
+async fn remove_epoch_marker(pool: &PgPool) {
     sqlx::query("drop table schema_metadata")
         .execute(pool)
         .await
         .expect("drop the marker");
-    sqlx::query("delete from _sqlx_migrations where version >= 39")
-        .execute(pool)
-        .await
-        .expect("forget the epoch migration");
 }
 
 // ── a fresh database ─────────────────────────────────────────────────────
@@ -272,7 +264,7 @@ fn a_database_from_before_the_cut_is_refused_and_not_touched() {
         let pool = connect_pool(&scratch.options).await;
         synveda_store::migrate(&pool).await.expect("migrate");
         admit_a_tenant(&pool).await;
-        rewind_to_before_the_cut(&pool).await;
+        remove_epoch_marker(&pool).await;
 
         // The startup guard.
         let refusal = epoch::verify(&pool).await.expect_err("a pre-cut database");
@@ -390,12 +382,9 @@ fn a_marker_this_build_cannot_read_is_refused() {
 /// An epoch this build has moved past is refused, and one it has not caught
 /// up to is refused differently.
 ///
-/// Since CPR-7 the older direction is not hypothetical: `CURRENT_EPOCH` is
-/// 2, so `CURRENT_EPOCH - 1` is exactly the epoch every pre-cutover
-/// database carries, and this is the refusal an operator upgrading past
-/// the hierarchy cutover actually meets. The newer direction still is
-/// hypothetical, and is pinned here so the two never collapse into one
-/// message: an old database is reset, a newer one is a binary to upgrade.
+/// Epoch 2 is the immediately preceding development epoch and therefore a
+/// concrete refusal, while a newer epoch still means the binary must move
+/// forward rather than telling an operator to destroy readable data.
 #[test]
 fn an_epoch_that_is_not_this_one_is_refused_in_both_directions() {
     let Some(server) = server() else { return };
@@ -418,6 +407,13 @@ fn an_epoch_that_is_not_this_one_is_refused_in_both_directions() {
         );
         let message = older.to_string();
         assert!(message.contains(RESET_COMMAND), "{message}");
+        let migrate_error = synveda_store::migrate(&pool)
+            .await
+            .expect_err("epoch 2 must be refused before checksum comparison");
+        assert!(
+            migrate_error.to_string().contains(RESET_COMMAND),
+            "{migrate_error}"
+        );
 
         // The other direction is not a reset. A database from a newer build
         // holds data this one cannot read, so telling its operator to destroy
@@ -456,7 +452,7 @@ fn reset_creates_a_working_current_epoch_database_and_is_idempotent() {
         let pool = connect_pool(&scratch.options).await;
         synveda_store::migrate(&pool).await.expect("migrate");
         admit_a_tenant(&pool).await;
-        rewind_to_before_the_cut(&pool).await;
+        remove_epoch_marker(&pool).await;
         assert!(
             epoch::verify(&pool).await.is_err(),
             "the fixture is refused"
@@ -469,15 +465,12 @@ fn reset_creates_a_working_current_epoch_database_and_is_idempotent() {
         assert!(first.existed_before, "there was a database to destroy");
         assert_eq!(first.metadata.epoch, CURRENT_EPOCH);
         assert_eq!(first.metadata.created_by_version, env!("CARGO_PKG_VERSION"));
-        for extension in &first.extensions {
-            if extension.name == "vector" || extension.name == "pgmq" {
-                assert!(
-                    extension.refusal.is_none(),
-                    "{} is required and was not installed",
-                    extension.name
-                );
-            }
-        }
+        let extension_names: Vec<_> = first
+            .extensions
+            .iter()
+            .map(|extension| extension.name)
+            .collect();
+        assert_eq!(extension_names, ["vector", "btree_gin"]);
 
         // Working: the guard accepts it, the schema is there, and it takes a
         // write.
@@ -497,12 +490,15 @@ fn reset_creates_a_working_current_epoch_database_and_is_idempotent() {
         // backstop would be a worse outcome than the refusal it replaced.
         let forced: bool = sqlx::query_scalar(
             "select relrowsecurity and relforcerowsecurity
-             from pg_class where relname = 'records'",
+             from pg_class where relname = 'knowledge_items'",
         )
         .fetch_one(&pool)
         .await
         .expect("read the RLS flags");
-        assert!(forced, "the fresh database has no forced RLS on `records`");
+        assert!(
+            forced,
+            "the fresh database has no forced RLS on `knowledge_items`"
+        );
         pool.close().await;
 
         // Idempotent: the same command again leaves the same database, with
@@ -586,77 +582,46 @@ fn reset_refuses_a_database_name_it_will_not_quote() {
 
 // ── no old-to-new migrator ───────────────────────────────────────────────
 
-/// There is no translator from the previous model to this one, and this is
-/// the structural half of saying so — the behavioural half is
-/// `a_database_from_before_the_cut_is_refused_and_not_touched` (a refusal
-/// writes nothing) and
-/// `reset_creates_a_working_current_epoch_database_and_is_idempotent` (a
-/// reset carries nothing).
-///
-/// Three facts, all checkable without a database:
-///
-/// 1. **The epoch migration is pure DDL.** It is the one file a translator
-///    would live in — the moment the schema learns about the epoch is the
-///    moment somebody would be tempted to carry rows over it — so it is
-///    asserted to read nothing at all.
-/// 2. **There are no down-migrations.** sqlx's reversible pairs are the other
-///    place a translation hides, and a `.down.sql` would also imply the epoch
-///    is reversible, which it is not.
-/// 3. **The whole chain carries no DML but the three inherited statements
-///    named below** (CPR-9). Fact 1 checked exactly one file, which is the
-///    file a translator written *today* would go in — and left the other
-///    forty unchecked, which is where the ones written *before* the cut
-///    already were. The foundation audit found three, all of them in-place
-///    upgrade steps from the pre-epoch chain.
-///
-/// # Why those three are inherited rather than deleted
-///
-/// They are **unreachable**. A database from before the cut never reaches the
-/// migrator at all — `epoch::preflight` refuses it first, which is what
-/// `a_database_from_before_the_cut_is_refused_and_not_touched` asserts — so
-/// the only databases that run migration 8 or 38 are fresh ones, where the
-/// tables those statements touch are empty at that point in the chain. They
-/// cannot translate anything, because on every database the product accepts
-/// there is nothing there to translate.
-///
-/// Deleting them is not free: editing an applied migration changes its
-/// checksum, so every existing epoch-2 database would fail its next migrate
-/// with `migration 8 was previously applied but has been modified` — a
-/// checksum error instead of the reset instruction the guard exists to give
-/// (ADR-0069 decision 3). Doing it properly means bumping the epoch, which is
-/// a reset for every deployment in exchange for removing statements that
-/// cannot run. Prompt 33 squashes the chain and they go with it.
-///
-/// So they are pinned by name here instead. The value of this list is not the
-/// three entries; it is that a **fourth** fails the build.
+/// Epoch 3 is one schema-only baseline: no predecessor chain, no reversible
+/// pair and no top-level statement that can carry or seed data. Function
+/// bodies may of course mutate current tables at runtime; the scanner removes
+/// every PostgreSQL dollar-quoted body before classifying top-level verbs.
 #[test]
 fn no_old_to_new_data_migrator_exists() {
     let migrations = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("migrations");
 
-    let mut down = Vec::new();
-    let mut epoch_migration = None;
-    for entry in std::fs::read_dir(&migrations).expect("read the migrations directory") {
-        let path = entry.expect("a directory entry").path();
-        let name = path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or_default()
-            .to_owned();
-        if name.ends_with(".down.sql") {
-            down.push(name.clone());
-        }
-        if name.contains("schema_epoch") {
-            epoch_migration = Some(path);
-        }
-    }
+    let mut files: Vec<_> = std::fs::read_dir(&migrations)
+        .expect("read the migrations directory")
+        .map(|entry| entry.expect("a directory entry").path())
+        .filter(|path| path.extension().is_some_and(|extension| extension == "sql"))
+        .collect();
+    files.sort();
+    let names: Vec<_> = files
+        .iter()
+        .map(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .expect("UTF-8 migration name")
+        })
+        .collect();
+    assert_eq!(
+        names,
+        ["0001_context_platform.sql"],
+        "epoch 3 is exactly one clean baseline"
+    );
+
+    let down: Vec<_> = names
+        .iter()
+        .filter(|name| name.ends_with(".down.sql"))
+        .collect();
     assert!(
         down.is_empty(),
         "a down-migration would make the epoch look reversible and is where a \
          translation would hide: {down:?}"
     );
 
-    let path = epoch_migration.expect("the epoch migration is in the chain");
-    let source = std::fs::read_to_string(&path).expect("read the epoch migration");
+    let path = &files[0];
+    let source = std::fs::read_to_string(path).expect("read the epoch migration");
     for statement in top_level_statements(&source) {
         let verb = statement.split_whitespace().next().unwrap_or_default();
         assert!(
@@ -664,110 +629,81 @@ fn no_old_to_new_data_migrator_exists() {
                 verb,
                 "select" | "insert" | "update" | "delete" | "copy" | "with"
             ),
-            "{} runs a `{verb}` statement. The epoch migration creates the marker \
-             and reads nothing: a statement here that touched a pre-epoch row \
-             would be the data migrator ADR-0068 decision 3 refuses.\n  {}",
+            "{} runs top-level `{verb}`. The baseline creates schema only; a \
+             statement here could carry or seed data outside the PDP.\n  {}",
             path.display(),
             statement.trim(),
         );
     }
 
-    // Fact 3: the rest of the chain. The three inherited statements, by the
-    // file they are in and the words that identify them.
-    const INHERITED: &[(&str, &str)] = &[
-        // AUTHZ-1's stored packs took names AUTHZ-2 reserved. Renames rows
-        // that a fresh database has none of.
-        ("0008_policy_pack_assignments.sql", "update policy_packs"),
-        // AUTHZ-1's one tenant-wide pack becomes the tenant default. Selects
-        // from the table the statement above just failed to find anything in.
-        (
-            "0008_policy_pack_assignments.sql",
-            "insert into policy_pack_defaults",
-        ),
-        // TEN-4 could not seal a plaintext it had no key for, so every open
-        // console session ended. A fresh database has none open.
-        ("0038_envelope_keys.sql", "delete from console_sessions"),
-    ];
-
-    let mut found: Vec<String> = Vec::new();
-    let mut files: Vec<std::path::PathBuf> = std::fs::read_dir(&migrations)
-        .expect("read the migrations directory")
-        .map(|entry| entry.expect("a directory entry").path())
-        .filter(|path| path.extension().is_some_and(|ext| ext == "sql"))
-        .collect();
-    files.sort();
-    for path in files {
-        let name = path
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or_default()
-            .to_owned();
-        let source = std::fs::read_to_string(&path).expect("read a migration");
-        for statement in top_level_statements(&source) {
-            let verb = statement.split_whitespace().next().unwrap_or_default();
-            if !matches!(verb, "insert" | "update" | "delete" | "copy") {
-                continue;
-            }
-            let head: String = statement
-                .split_whitespace()
-                .take(3)
-                .collect::<Vec<_>>()
-                .join(" ");
-            if INHERITED
-                .iter()
-                .any(|(file, prefix)| *file == name && head.starts_with(prefix))
-            {
-                found.push(format!("{name}: {head}"));
-                continue;
-            }
-            panic!(
-                "{name} runs a `{verb}` statement outside a function body:\n  {}\n\n\
-                 A migration that writes rows is either seeding the product (which \
-                 belongs behind the PDP, not in DDL — seed §2.2) or carrying pre-cut \
-                 data forward (which ADR-0068 decision 3 refuses). If it is neither, \
-                 add it to INHERITED with the reason it cannot run.",
-                statement.trim(),
-            );
-        }
+    for retired in [
+        "create table public.records",
+        "records_versions",
+        "memory_usage",
+        "policy_lapses",
+        "role_bindings",
+        "'prompt', 'context_pack', 'memory'",
+        "new.evidence is distinct from old.evidence",
+        "create extension if not exists age",
+        "create extension if not exists pgmq",
+        "set row_security = off",
+    ] {
+        assert!(
+            !source.to_lowercase().contains(retired),
+            "the clean baseline retained `{retired}`"
+        );
     }
-    assert_eq!(
-        found.len(),
-        INHERITED.len(),
-        "the inherited-DML list names {} statements and the chain has {}: {found:?}. \
-         A statement that left the chain should leave this list with it.",
-        INHERITED.len(),
-        found.len(),
-    );
 }
 
-/// A migration's statements, comments stripped and **function bodies
-/// skipped**.
-///
-/// The bodies matter: `0001` and `0026` define trigger functions whose
-/// `insert into ..._history` lines are the history mechanism itself, written
-/// once as DDL and executed per row forever after. A scanner that could not
-/// tell a `create function` body from a top-level statement would either miss
-/// real DML or condemn every audit trigger in the schema.
+/// A migration's statements, comments stripped and every dollar-quoted body
+/// skipped. PostgreSQL permits both `$$` and tagged forms such as `$_$`.
 fn top_level_statements(source: &str) -> Vec<String> {
-    let stripped: String = source
+    let without_bodies = strip_dollar_quoted(source);
+    let stripped: String = without_bodies
         .lines()
         .map(str::trim)
         .filter(|line| !line.starts_with("--"))
         .collect::<Vec<_>>()
         .join("\n")
         .to_lowercase();
-    // `$$` opens and closes a dollar-quoted body; everything between is the
-    // function's, not the migration's.
-    let mut top = String::with_capacity(stripped.len());
-    for (index, part) in stripped.split("$$").enumerate() {
-        if index % 2 == 0 {
-            top.push_str(part);
-        }
-    }
-    top.split(';')
+    stripped
+        .split(';')
         .map(|statement| statement.trim().to_owned())
         .filter(|statement| !statement.is_empty())
         .collect()
+}
+
+fn strip_dollar_quoted(source: &str) -> String {
+    let mut remaining = source;
+    let mut stripped = String::with_capacity(source.len());
+    while let Some(open) = remaining.find('$') {
+        stripped.push_str(&remaining[..open]);
+        let candidate = &remaining[open..];
+        let Some(tag_tail) = candidate[1..].find('$') else {
+            stripped.push_str(candidate);
+            return stripped;
+        };
+        let tag_end = tag_tail + 1;
+        let name = &candidate[1..tag_end];
+        if !name
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric() || character == '_')
+        {
+            stripped.push('$');
+            remaining = &candidate[1..];
+            continue;
+        }
+        let delimiter = &candidate[..=tag_end];
+        let body = &candidate[delimiter.len()..];
+        let Some(close) = body.find(delimiter) else {
+            stripped.push_str(candidate);
+            return stripped;
+        };
+        stripped.push(' ');
+        remaining = &body[close + delimiter.len()..];
+    }
+    stripped.push_str(remaining);
+    stripped
 }
 
 async fn has_marker(pool: &PgPool) -> bool {

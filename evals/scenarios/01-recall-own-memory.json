@@ -26,6 +26,6 @@
     "session_id": "eval:recall:probe"
   },
   "expect": {
-    "records": ["deploy", "rollout"]
+    "knowledge": ["deploy", "rollout"]
   }
 }

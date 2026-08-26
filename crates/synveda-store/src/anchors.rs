@@ -20,15 +20,6 @@
 //! ([`AnchorSet::new`]), so one scope is one anchor however many ways it
 //! became applicable.
 //!
-//! ## What this replaces
-//!
-//! [`crate::hierarchy::chain`] — a single path from a person's placement node
-//! to the `org` root, on the assumption that a caller stands in exactly one
-//! place and that the places nest. Both halves of that assumption are wrong in
-//! the governed scope model: a caller can hold a project in one workspace and
-//! a whole other workspace beside it, and neither contains the other. Nothing
-//! here reads `hierarchy_nodes`, and nothing here writes to it.
-//!
 //! ## Principal privacy is applied while the set is built
 //!
 //! A grant at an ancestor does not reach a `principal`-shaped scope

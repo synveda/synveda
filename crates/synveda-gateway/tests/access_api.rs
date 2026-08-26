@@ -70,18 +70,10 @@ fn state(url: &str) -> AppState {
         public_origin: "http://127.0.0.1:8120".to_owned(),
         pdp: Arc::new(synveda_policy::Pdp::new().expect("build the embedded PDP")),
         service_token_max_ttl: Duration::from_secs(3600),
-        search_index: Arc::new(
-            synveda_retrieval::SearchIndex::open(
-                std::env::temp_dir()
-                    .join("synveda-cpr5-tests")
-                    .join(TenantId::new().to_string()),
-            )
-            .expect("open search index"),
-        ),
         embedder: Arc::new(synveda_ingest::embedding::AnyEmbedder::Deterministic(
             synveda_ingest::embedding::DeterministicEmbedder::new(),
         )),
-        inject_embed_timeout: Duration::from_millis(100),
+        context_embed_timeout: Duration::from_millis(100),
         keys: Arc::new(synveda_store::keys::KeyRing::new(
             synveda_crypto::Kms::Disabled,
         )),

@@ -11,7 +11,7 @@
 //! for: **artefacts that leave the database** (a tenant export) and
 //! **secrets we have to read back** (an outbound directory credential, a
 //! console session's tokens). They deliberately do **not** cover
-//! `records.content`, `record_embeddings` or the Tantivy sidecars —
+//! Knowledge content, embeddings or retrieval projections —
 //! application-level encryption there removes the lexical leg and the dense
 //! leg, which is ADR-0024 in its entirety. Encryption at rest for the
 //! retrieval substrate is the volume's, and ADR-0064 decision 7 is where

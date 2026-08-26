@@ -587,19 +587,22 @@ fn answer_for(
         actions.insert(action.as_str(), decision.allowed);
     }
 
-    // Three of the four tiered reads come back from one pack resolution;
-    // `PromptRead` is asked separately because `PermittedTiers` serves the
-    // composition path and is not this surface's to widen.
+    // Authored context-pack and Skill tiers come back from one pack
+    // resolution. Knowledge and Prompt are asked separately because their
+    // application surfaces authorize exact domain objects independently.
     let tiers = state
         .pdp
         .permitted_read_tiers(&batch, &input.principal, node.id, &context)?;
     let mut read_tiers = BTreeMap::new();
-    read_tiers.insert(Action::MemoryRead.as_str(), tiers.memory);
     read_tiers.insert(Action::ContextPackRead.as_str(), tiers.context_pack);
     read_tiers.insert(Action::SkillRead.as_str(), tiers.skill);
     read_tiers.insert(
         Action::PromptRead.as_str(),
-        permitted_prompt_tiers(state, input, &batch, resource)?,
+        permitted_tiers(state, input, &batch, resource, Action::PromptRead)?,
+    );
+    read_tiers.insert(
+        Action::KnowledgeRead.as_str(),
+        permitted_tiers(state, input, &batch, resource, Action::KnowledgeRead)?,
     );
 
     Ok(Answer {
@@ -618,19 +621,20 @@ fn answer_for(
     })
 }
 
-/// The tiers `PromptRead` permits here, ascending.
-fn permitted_prompt_tiers(
+/// The tiers one tiered read permits here, ascending.
+fn permitted_tiers(
     state: &AppState,
     input: &DecisionInput,
     batch: &EntityBatch,
     resource: Resource,
+    action: Action,
 ) -> Result<Vec<Sensitivity>> {
     let mut permitted = Vec::new();
     for tier in Sensitivity::ALL {
         let decision = state.pdp.authorize_with(
             batch,
             &input.principal,
-            Action::PromptRead,
+            action,
             resource,
             &authz::context_at_tier(input, tier),
         )?;

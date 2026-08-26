@@ -96,18 +96,10 @@ fn state(url: &str) -> AppState {
         public_origin: "http://127.0.0.1:8120".to_owned(),
         pdp: Arc::new(synveda_policy::Pdp::new().expect("build the embedded PDP")),
         service_token_max_ttl: Duration::from_secs(3600),
-        search_index: Arc::new(
-            synveda_retrieval::SearchIndex::open(
-                std::env::temp_dir()
-                    .join("synveda-cpr14-tests")
-                    .join(TenantId::new().to_string()),
-            )
-            .expect("open search index"),
-        ),
         embedder: Arc::new(synveda_ingest::embedding::AnyEmbedder::Deterministic(
             synveda_ingest::embedding::DeterministicEmbedder::new(),
         )),
-        inject_embed_timeout: Duration::from_millis(200),
+        context_embed_timeout: Duration::from_millis(200),
         keys: Arc::new(synveda_store::keys::KeyRing::new(
             synveda_crypto::Kms::Disabled,
         )),
@@ -1224,8 +1216,9 @@ async fn an_installed_claude_executable_completes_the_session_plane() {
     )
     .expect("authenticated claude executable on PATH");
     let mut h = harness().await.expect("fresh current-epoch live harness");
-    // Claude Code requires an actual UUID for --session-id.
-    h.external_session_id = uuid::Uuid::new_v4().to_string();
+    // Claude Code requires an actual UUID for --session-id; v7 is the UUID
+    // capability this workspace deliberately enables.
+    h.external_session_id = uuid::Uuid::now_v7().to_string();
     let root = repo_root();
     let cli = root.join("target/debug/synveda");
     assert!(

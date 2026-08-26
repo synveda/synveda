@@ -11,7 +11,7 @@
 // the personal-scope privacy floor (ADR-0074 deleted the binding
 // escalation guard with the action it guarded).
 //
-// Since AUTHZ-5 every MemoryRead permit also names the tiers it covers
+// Since AUTHZ-5 every KnowledgeRead permit also names the tiers it covers
 // (ADR-0038 decision 4), and the three mechanisms are graded by how
 // deliberate they are: membership reads the working tiers, an explicit
 // content-role grant (or one's own scope) reaches `confidential`, and
@@ -97,7 +97,7 @@ permit (
 // a curator — the role the review inbox exists for — could not see the
 // tree at all. A workspace's *name* discloses nothing about what is in it,
 // and a member who cannot see the workspace they contribute to cannot
-// use the product. What is inside stays behind MemoryRead, PromptRead,
+// use the product. What is inside stays behind KnowledgeRead, PromptRead,
 // ContextPackRead and SkillRead, tier by tier, exactly as before.
 permit (
     principal,
@@ -109,84 +109,6 @@ permit (
 ) when {
     resource in principal.tenant
         && context.roles.containsAny(["viewer", "curator", "member", "reviewer", "owner", "administrator"])
-};
-
-// The membership floor, role-free (zero-config): the principal (parented
-// to its placement scope) is a member of the resource scope. An unplaced
-// principal has no scope parent and reads nothing.
-//
-// Membership reads the working tiers and no further: belonging to a scope
-// is not a grant, and `confidential` is defined as the tier held to
-// explicitly granted scopes (ADR-0038 decision 4).
-permit (
-    principal,
-    action == Synveda::Action::"MemoryRead",
-    resource
-) when {
-    principal in resource
-        && ["public", "internal"].contains(context.sensitivity)
-};
-
-// Your own home, up to `confidential`: material extracted from your own
-// sessions, at your own personal scope. Without this a model's tier
-// proposal could make an author's own memory invisible to them, which is
-// not a control but an accident (ADR-0038 decision 4).
-permit (
-    principal,
-    action == Synveda::Action::"MemoryRead",
-    resource
-) when {
-    principal has own_scope
-        && resource == principal.own_scope
-        && ["public", "internal", "confidential"].contains(context.sensitivity)
-};
-
-// Content roles read the bound subtree — the explicit-grant mechanism, and
-// therefore the mechanism that reaches `confidential` (ADR-0038 decision 4).
-// Admin and audit roles deliberately grant no content read (least
-// privilege).
-//
-// Personal (user-kind) scopes stay excluded, and AUTHZ-5 resolved that
-// deferral rather than lifting it: classification says how sensitive
-// material is, and the privacy floor is about *whose* it is (ADR-0015
-// decision 4). A tier cannot answer a question about ownership, so the
-// exclusion stays exactly where it was — and a relaxation cannot target a
-// principal-shaped scope either.
-permit (
-    principal,
-    action == Synveda::Action::"MemoryRead",
-    resource
-) when {
-    resource in principal.tenant
-        && context.roles.containsAny(["viewer", "curator", "member", "reviewer", "owner", "administrator"])
-        && ["public", "internal", "confidential"].contains(context.sensitivity)
-};
-
-// The write floor, role-free (zero-config): every placed principal may
-// land observe events at its own personal scope — and nowhere else.
-// Deliberately narrower than the read floor: reads compose up the
-// chain, writes land at home (MEM-1, ADR-0020 decision 3).
-permit (
-    principal,
-    action == Synveda::Action::"MemoryWrite",
-    resource
-) when {
-    principal has own_scope
-        && resource == principal.own_scope
-};
-
-// Content roles write the bound subtree, personal scopes excluded — the
-// explicit-grant mechanism for shared-scope writes (ADR-0015's
-// contributor-writes marker, discharged by ADR-0020 decision 3).
-// Viewer stays read-only by name; admin and audit roles grant no
-// content write (least privilege, as with reads).
-permit (
-    principal,
-    action == Synveda::Action::"MemoryWrite",
-    resource
-) when {
-    resource in principal.tenant
-        && context.roles.containsAny(["curator", "member", "owner", "administrator"])
 };
 
 // Stable Knowledge uses its own action and aggregate entity (CPR-16,
@@ -251,7 +173,7 @@ when {
 // Under this pack that means the membership floor — your own chain, which is
 // where your own `principal` scope's runs live — plus an explicit content
 // grant, and nothing else. There is no `ambit` clause here, exactly as there
-// is none for `MemoryRead`: this is the deny-first pack, and a neighbouring
+// is none for `KnowledgeRead`: this is the deny-first pack, and a neighbouring
 // project's transcripts are not a default.
 //
 // It carries no tier. A session has no sensitivity of its own; what a run
@@ -289,7 +211,7 @@ permit (
 // anybody granting them anything — and a content key beyond it. `viewer` and
 // `reviewer` are absent by name: reading somebody's runs is not running one.
 //
-// Composing context for a session additionally takes `MemoryRead` at every
+// Composing context for a session additionally takes `KnowledgeRead` at every
 // scope that contributes, decided by the same walk `inject` runs, so this
 // permit admits no material of its own.
 // The write floor, role-free: your own scope, and the runs that hang below it.
@@ -355,7 +277,7 @@ permit (
 };
 
 // The prompt registry (PRMT-1, ADR-0049 decision 4). Reading mirrors this
-// pack's MemoryRead shape exactly — membership at the working tiers, one's
+// pack's KnowledgeRead shape exactly — membership at the working tiers, one's
 // own home and an explicit content-role binding up to `confidential`,
 // personal scopes excluded from the binding — because a prompt is content
 // the same people are trusted with, classified on the same four-tier scale.
@@ -419,14 +341,14 @@ permit (
 
 // The context-pack registry (PRMT-2, ADR-0050 decision 7). The prompt
 // plane's shape above, mirrored tier for tier onto this pack's own
-// MemoryRead — a pack's documents are content the same people are trusted
+// KnowledgeRead — a pack's documents are content the same people are trusted
 // with, classified on the same four-tier scale, and `restricted` is named
 // by nothing for decision 12's reason.
 //
 // The membership floor matters more here than it did for prompts, and that
 // is the case the feature exists for (decision 8): a reader who holds no
 // readable *memory* at a scope still receives that scope's conventions,
-// because this action admits pack chunks and `MemoryRead` never does.
+// because this action admits pack chunks and `KnowledgeRead` never does.
 permit (
     principal,
     action == Synveda::Action::"ContextPackRead",
@@ -480,7 +402,7 @@ permit (
 
 // The skills registry (SKIL-1, ADR-0051 decision 10). The context-pack
 // plane's shape above, mirrored tier for tier onto this pack's own
-// MemoryRead — a skill is content the same people are trusted with,
+// KnowledgeRead — a skill is content the same people are trusted with,
 // classified on the same four-tier scale, and `restricted` is named by
 // nothing for decision 11's reason.
 //
@@ -594,38 +516,6 @@ permit (
         && context.roles.containsAny(["curator", "member", "owner", "administrator"])
 };
 
-// The classification plane (AUTHZ-5, ADR-0038 decision 9): pack-uniform,
-// like the channel, quarantine and proposal planes and for the same reason
-// — what a tier *means* cannot loosen per pack, or `restricted` stops
-// meaning one thing. The same three roles as publishing, plus the owner at
-// their own home, because classifying your own memory is not an act of
-// authority over anyone else.
-//
-// This decides who may run a classification effect, never how much
-// approval it takes: that is the matrix, resolved at the maximum of the
-// current and proposed tiers. The route additionally requires MemoryRead at
-// the *working* tier — decision 10's whose-material question, the same guard
-// publishing takes — so you may not reclassify material at a scope you are a
-// stranger to, and the top tier stays maintainable by someone who could
-// never compose it.
-permit (
-    principal,
-    action == Synveda::Action::"MemoryClassify",
-    resource
-) when {
-    resource in principal.tenant
-        && context.roles.containsAny(["curator", "owner", "administrator"])
-};
-
-permit (
-    principal,
-    action == Synveda::Action::"MemoryClassify",
-    resource
-) when {
-    principal has own_scope
-        && resource == principal.own_scope
-};
-
 // The quarantine review plane (MEM-2, ADR-0021 decision 6): owners,
 // administrators and reviewers adjudicate quarantined observe events over
 // the granted subtree — `reviewer`'s first live action. Pack-uniform,
@@ -666,7 +556,7 @@ permit (
 // Publishing is the curator's act by name (seed §5: curator "can
 // pin/approve"), with owner and administrator above it. Personal scopes are
 // deliberately NOT excluded here, unlike the content-role grants: the
-// route additionally requires MemoryRead on every record it admits
+// route additionally requires KnowledgeRead on every record it admits
 // (ADR-0031 decision 12), and the privacy floor already denies that at
 // someone else's personal scope. So a user who holds a curator binding may
 // publish their own memories to their own channel, and no curator can
@@ -723,7 +613,7 @@ permit (
         && context.roles.containsAny(["curator", "reviewer", "owner", "administrator"])
 };
 
-// At a scope, reading proposals mirrors this pack's MemoryRead shape — the
+// At a scope, reading proposals mirrors this pack's KnowledgeRead shape — the
 // membership floor, then content roles with personal scopes excluded — plus
 // the review and audit roles, who have to see a proposal before acting.
 permit (

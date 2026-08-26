@@ -15,12 +15,12 @@ versions=$($DEMO_COMPOSE exec -T postgres psql -At -U synveda -d "$DEMO_DATABASE
   "select count(*) from policy_relaxation_versions")
 changes=$($DEMO_COMPOSE exec -T postgres psql -At -U synveda -d "$DEMO_DATABASE" -c \
   "select count(*) from policy_relaxation_changes")
-old_table=$($DEMO_COMPOSE exec -T postgres psql -At -U synveda -d "$DEMO_DATABASE" -c \
+retired_table=$($DEMO_COMPOSE exec -T postgres psql -At -U synveda -d "$DEMO_DATABASE" -c \
   "select count(*) from pg_class where relnamespace = 'public'::regnamespace and relname = 'policy_lapses'")
 
 if [ "$aggregates" -lt 2 ] || [ "$versions" -lt 3 ] || \
-   [ "$changes" -lt 5 ] || [ "$old_table" -ne 0 ]; then
-  echo "CPR-31 state mismatch: aggregates=$aggregates versions=$versions changes=$changes old_table=$old_table" >&2
+   [ "$changes" -lt 5 ] || [ "$retired_table" -ne 0 ]; then
+  echo "CPR-31 state mismatch: aggregates=$aggregates versions=$versions changes=$changes retired_table=$retired_table" >&2
   exit 1
 fi
 

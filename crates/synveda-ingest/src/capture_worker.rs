@@ -1,6 +1,6 @@
 //! Restart-safe capture extraction worker (CPR-18, ADR-0083).
 //!
-//! A database lease, not a PGMQ event signal, is the work address. The worker
+//! A tenant-bound database lease is the work address. The worker
 //! reads one frozen batch under tenant RLS, re-decides `SessionWrite` as the
 //! principal that opened the run, calls the configured extractor outside any
 //! transaction, then re-decides each exact current Knowledge neighbour before

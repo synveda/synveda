@@ -158,17 +158,22 @@ spool/diagnostic defects: automatic hash validation, refused-state
 preservation, gateway-origin pinning and raw-exception/payload redaction. The
 focused demo, complete CI/database suites, 18-case product gate and full
 10,000-variant security gate pass; `docs/SECURITY.md` records residual limits.
+CPR-43, the final hard cut, is delivered from `9bda16b`. The 60-file
+development migration chain is one epoch-3 `0001_context_platform.sql`; its 87
+tables include 83 tenant tables under enabled and forced RLS, beside two
+current views. Record storage/search/promotion/retention, Tantivy, PGMQ, AGE
+and the obsolete graph/runtime/client residue are deleted. The router and
+generated contract agree at 171 operations / 272 schemas, the hard-cut gate
+classifies 375 active files, and clean bootstrap, complete CI/database,
+product, default, BGE-M3, 10k-security and 4,927-turn Stage-H gates pass.
 **It is a pre-1.0 hard
 cut**: a fresh schema epoch, no old-data migration, no compatibility shims,
 and old databases rejected with a reset instruction. Since CPR-2 that is
-enforced rather than planned (ADR-0069), and since CPR-7 the epoch is **2**
-(ADR-0074): the migration chain was rewritten in place — the scope
-substrate sits at `0004` where the hierarchy was, and `role_bindings` and
-the old hierarchy files left it (43 → 41 migrations) — so a database at
-epoch 1 is refused with the reset instruction by the guard rather than by
-a checksum error. **Your dev database will be refused** — reset it
-(`synveda reset --database --force`). The chain is not squashed yet; that
-is Prompt 33.
+enforced rather than planned (ADR-0069), and since CPR-43 the current epoch is
+**3**. Epoch-1, epoch-2 and markerless databases are refused by the guard
+before sqlx compares checksums. **Your dev database will be refused** — reset
+it (`synveda reset --database --force`). There is one pure-DDL baseline and no
+old-to-new translator.
 
 Since CPR-3 the governed scope model (ADR-0070): `scopes` + `scope_closure`,
 a named node with a parent and a subtree, where `kind` is a **shape**
@@ -270,7 +275,7 @@ explicitly and say so.
 
 Phases 0, 1 and 2 are complete; SKIL-1 through SKIL-4, OPS-1, CNSL-1, ADPT-2,
 CNSL-2, AUTH-4, AUTH-5, EVAL-3, OPS-2, TEN-3, TEN-4 and OPS-8 are the Phase 3
-features done. 108 of 139 features delivered — see docs/backlog/STATUS.md for
+features done. 109 of 140 features delivered — see docs/backlog/STATUS.md for
 what each one proved and what it left standing. (The total read 86 until
 2026-08-05, when it was corrected to the 88 STATUS.md and `make
 check-backlog` had both said for some time; AUTHZ-7 was filed the same day by
@@ -535,6 +540,14 @@ preservation, deployment binding and diagnostic redaction; 27 named
 adversarial seams are now a CI gate, and the focused, complete database,
 product and 10,000-variant security evidence passes before the final hard cut.
 
+**CPR-43 was filed and delivered next**, making it **140 with 109 delivered**:
+the final pre-1.0 cut replaces the 60-file development chain with one epoch-3
+baseline, deletes remaining replaced runtime/client residue and classifies
+every Prompt-33 search term. Clean bootstrap, complete CI/database, product,
+default, BGE-M3, 10k-security and authentic 4,927-turn Stage-H gates pass. The
+real second-client criterion remains externally blocked and is not promoted
+from configuration or replay evidence.
+
 Since CPR-9 a **listing decides per row**. The audit of Prompts 1–7 found that
 `GET /v1/workspaces` and `/v1/me` took one decision at the tenant root and
 applied it to every row, so a caller granted `member` at a workspace — who
@@ -736,7 +749,7 @@ first thing that ever asked the gateway *image* to serve, which closes
 ADR-0055 decision 8's open residue.)
 
 ## Commands
-- make dev-up      — start Postgres(+pgvector+PGMQ), Rauthy, Temporal, TEI, Jaeger
+- make dev-up      — start Postgres(+pgvector), Rauthy, Temporal, TEI, Jaeger
 - make smoke       — end-to-end health check
 - make dev-down    — stop; state persists in named volumes
 - make ci          — exactly what .github/workflows/ci.yml runs; green here == green there

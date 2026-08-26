@@ -332,7 +332,7 @@ mod tests {
         let bytes = asset("Escalate.").canonical_bytes();
         assert_ne!(
             object_hash(AssetKind::ContextPack, &bytes),
-            object_hash(AssetKind::Memory, &bytes)
+            object_hash(AssetKind::Knowledge, &bytes)
         );
         assert_ne!(
             object_hash(AssetKind::ContextPack, &bytes),

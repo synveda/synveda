@@ -20,7 +20,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::time::{Duration, Instant};
 
 use crate::client::{
-    CaptureAcceptOptions, Client, KnowledgeSweepRequest, ObserveEvent, ObserveRequest,
+    CaptureAcceptOptions, Client, KnowledgeSweepRequest, SessionEventBatchRequest,
+    SessionEventInput,
 };
 use crate::fixtures::{CLASSES, Fixture, Group};
 use crate::report::{ClassCounts, ExtractionOutcome};
@@ -59,11 +60,11 @@ pub async fn run_group(
             .session_for(bearer, &fixture.input.session_id)
             .await?;
         let response = client
-            .observe(
+            .append_events(
                 bearer,
                 &session,
-                &ObserveRequest {
-                    events: vec![ObserveEvent {
+                &SessionEventBatchRequest {
+                    events: vec![SessionEventInput {
                         idempotency_key: fixture.name.clone(),
                         kind: &fixture.input.event_type,
                         payload: fixture.input.payload.clone(),
@@ -111,33 +112,17 @@ pub async fn run_group(
             }
             for source in candidate.source_event_ids {
                 let slot = materialised.entry(source).or_default();
-                slot.records += 1;
+                slot.knowledge_items += 1;
             }
         }
     }
     outcome.seed_wait_ms = round(capture_started.elapsed().as_secs_f64() * 1000.0);
 
-    // Sweep, as the group's own actor.
-    //
-    // The instant is deliberately a little AHEAD of now, and this is the
-    // subtlest thing in the file. A sweep must carry an `as_of` — it is
-    // how the surface distinguishes the shape from a malformed request —
-    // and the surface reads `as_of < now` as a *rewind*: `tx_at` becomes
-    // `Some`, the body fetches move to `records_versions`, and with them
-    // "no retention horizon is applied, because the horizon governs the
-    // live corpus" (ADR-0042 decision 11, stated on `ComposeRequest
-    // ::tx_at`). Sending `Utc::now()` therefore measures the *historical*
-    // read: by the time the gateway evaluates its own `now`, the client's
-    // instant is already milliseconds behind it.
-    //
-    // That is not the read a caller gets, and it would quietly hollow out
-    // the attribution column this suite exists for — a horizon or a
-    // supersession would withhold nothing from a rewind, so committed and
-    // served could never differ for those reasons and the column would
-    // report "nothing withheld" forever. An instant at or after the
-    // server's `now` keeps the sweep on the live tables, where every
-    // admission rule applies. A minute is far more than any handling
-    // delay and far less than the age of anything the corpus seeds.
+    // Enumerate current visible Knowledge as the group's own actor. The
+    // valid-time instant is deliberately a little ahead of the client clock
+    // so freshly applied revisions remain current despite sub-second clock
+    // skew between the harness and gateway. Transaction time is omitted and
+    // therefore remains the server's present.
     let as_of = (chrono::Utc::now() + chrono::Duration::seconds(60)).to_rfc3339();
     let session = format!("eval:extraction:{}", group.group);
     let swept = client
@@ -165,9 +150,8 @@ pub async fn run_group(
         ));
     }
 
-    // Two truncations, both unmeasurable, and neither one silently
-    // absorbed: the scope cap the surface reports, and the record cap it
-    // does not (decision 3).
+    // Two bounds, both unmeasurable, and neither silently absorbed: the
+    // diagnostic surface's visibility traversal and this harness's item cap.
     if sweep.truncated {
         outcome.failures.push(format!(
             "the sweep's scope universe was truncated at {} of {} scopes; the answer is bounded \
@@ -177,14 +161,14 @@ pub async fn run_group(
     }
     if sweep.entries.len() >= SWEEP_LIMIT {
         outcome.failures.push(format!(
-            "the sweep returned {} records against a requested limit of {SWEEP_LIMIT}: a full \
+            "the sweep returned {} Knowledge items against a requested limit of {SWEEP_LIMIT}: a full \
              page and a truncated one are indistinguishable from here, so this group cannot be \
              scored — split it into more groups rather than raising the limit",
             sweep.entries.len()
         ));
     }
 
-    // Attribute. A record from another group's fixture is a leak: sibling
+    // Attribute. Knowledge from another group's fixture is a leak: sibling
     // isolation is a policy property (no pack opens another principal's
     // personal scope) and this suite depends on it, so it asserts it
     // rather than assuming it (decision 2).
@@ -197,9 +181,9 @@ pub async fn run_group(
     for entry in &sweep.entries {
         let Some(event_id) = entry.source_event_id() else {
             outcome.failures.push(format!(
-                "served record {} carries no source event in its provenance, so it can be \
+                "served Knowledge item {} carries no source event in its provenance, so it can be \
                  attributed to nothing",
-                entry.record_id
+                entry.knowledge_item_id
             ));
             continue;
         };
@@ -211,9 +195,9 @@ pub async fn run_group(
                     .push((&entry.class, &entry.content));
             }
             _ => outcome.failures.push(format!(
-                "served record {} came from session {:?}, which this group did not seed — a \
+                "served Knowledge item {} came from session {:?}, which this group did not seed — a \
                  cross-actor leak, not a measurement",
-                entry.record_id,
+                entry.knowledge_item_id,
                 entry.source_session_id().unwrap_or("unknown")
             )),
         }
@@ -227,7 +211,7 @@ pub async fn run_group(
     // Score. One candidate consumes at most one expectation and one
     // expectation is consumed at most once (decision 5).
     for fixture in &group.fixtures {
-        let records = served
+        let knowledge = served
             .get(fixture.name.as_str())
             .cloned()
             .unwrap_or_default();
@@ -239,7 +223,7 @@ pub async fn run_group(
         }
 
         let mut taken = vec![false; fixture.expected.len()];
-        for (class, content) in &records {
+        for (class, content) in &knowledge {
             outcome.class_mut(class).produced += 1;
             let hit = fixture
                 .expected
@@ -268,11 +252,11 @@ pub async fn run_group(
                 }
             }
         }
-        outcome.served_records += records.len();
+        outcome.served_knowledge += knowledge.len();
 
         // A fixture that missed an expectation and says why. This is what
         // the `note` field is for: without it, a known structural limit —
-        // one record per event, truncation-as-summary, no marker phrase —
+        // one candidate per event, truncation-as-summary, no marker phrase —
         // is indistinguishable in the report from a regression.
         let missed = taken.iter().filter(|hit| !**hit).count();
         if missed > 0 && !fixture.note.is_empty() {
@@ -290,7 +274,7 @@ pub async fn run_group(
     for (event_id, name) in &event_ids {
         match materialised.get(event_id.as_str()) {
             Some(entry) => {
-                outcome.committed_records += entry.records;
+                outcome.committed_knowledge += entry.knowledge_items;
             }
             None if group
                 .fixtures
@@ -315,7 +299,7 @@ pub async fn run_group(
 /// What accepted capture candidates materialised for one source event.
 #[derive(Clone, Copy, Default)]
 struct Materialised {
-    pub records: usize,
+    pub knowledge_items: usize,
 }
 
 /// The extraction axes, reduced over every group (decision 5 and 6).
@@ -427,7 +411,7 @@ mod tests {
 
     #[test]
     fn a_class_produced_but_never_expected_scores_precision_and_no_recall() {
-        // The shape of a systematic mis-routing: records arrive under a
+        // The shape of a systematic mis-routing: items arrive under a
         // class the corpus never labels. Precision catches it; recall has
         // no denominator to catch it with.
         let metrics = metrics(&[outcome(&[("fact", 0, 4, 0), ("preference", 4, 0, 0)])]);

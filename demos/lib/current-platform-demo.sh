@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 # Shared CPR-13 harness for feature demos re-pointed from the retired hierarchy
 # and global runtime routes. Callers still own their narrative and focused
-# acceptance command; this file only gives each one a real, isolated epoch-2
+# acceptance command; this file only gives each one a real, isolated epoch-3
 # Postgres database.
 
 demo_start() {
@@ -25,7 +25,7 @@ demo_start() {
   # shellcheck disable=SC2086
   $DEMO_COMPOSE exec -T postgres psql -v ON_ERROR_STOP=1 -U synveda \
     -d "$DEMO_DATABASE" -c \
-    "create extension if not exists vector; create extension if not exists age; create extension if not exists pgmq" \
+    "create extension if not exists vector; create extension if not exists btree_gin" \
     >/dev/null
 
   DATABASE_URL="postgres://synveda:synveda-dev@localhost:5432/$DEMO_DATABASE"
@@ -34,7 +34,7 @@ demo_start() {
   trap demo_cleanup EXIT HUP INT TERM
 
   echo "==> $DEMO_TITLE"
-  echo "    isolated schema epoch 2 database: $DEMO_DATABASE"
+  echo "    isolated schema epoch 3 database: $DEMO_DATABASE"
 }
 
 demo_cleanup() {

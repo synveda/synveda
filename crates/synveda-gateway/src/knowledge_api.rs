@@ -1496,7 +1496,7 @@ async fn semantic_query(state: &AppState, query: &str) -> (Option<Vec<f32>>, Opt
         );
     }
     let inputs = vec![query.to_owned()];
-    match tokio::time::timeout(state.inject_embed_timeout, state.embedder.embed(&inputs)).await {
+    match tokio::time::timeout(state.context_embed_timeout, state.embedder.embed(&inputs)).await {
         Ok(Ok(mut vectors)) if vectors.len() == 1 && !vectors[0].is_empty() => {
             (vectors.pop(), None)
         }
@@ -1513,7 +1513,7 @@ async fn semantic_query(state: &AppState, query: &str) -> (Option<Vec<f32>>, Opt
         }
         Err(_) => {
             tracing::warn!(
-                timeout_ms = state.inject_embed_timeout.as_millis() as u64,
+                timeout_ms = state.context_embed_timeout.as_millis() as u64,
                 "Knowledge query embedding timed out; lexical-only"
             );
             (None, Some("semantic_embedder_timeout".to_owned()))

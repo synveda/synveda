@@ -46,15 +46,6 @@ function proposal(overrides: Partial<ProposalDetail> = {}): ProposalDetail {
       },
     ],
     outstanding: "one curator approval",
-    promotion: {
-      rule: "knowledge-review",
-      pack_name: "standard",
-      pack_version: 1,
-      actions: ["knowledge.used"],
-      from_seq: 41,
-      to_seq: 44,
-      members: [],
-    },
     approvals: [
       {
         approver_id: "0199bb11-1111-7111-8111-111111111111",
@@ -135,8 +126,6 @@ test("the common review names requirement, approvals, immutable effect and sourc
     "2 distinct approvers",
     "reviewer distinct from author",
     "one curator approval",
-    "knowledge-review",
-    "audit seq 41..=44",
     "robin@example.test",
     "Source evidence checked.",
     "governed artifacts",

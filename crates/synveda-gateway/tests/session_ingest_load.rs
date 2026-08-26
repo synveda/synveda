@@ -192,18 +192,10 @@ fn state(url: &str, issuer: &str, tenant: TenantId) -> AppState {
                     .expect("test kek"),
             ),
         )),
-        search_index: Arc::new(
-            synveda_retrieval::SearchIndex::open(
-                std::env::temp_dir()
-                    .join("synveda-gateway-tests")
-                    .join(synveda_types::TenantId::new().to_string()),
-            )
-            .expect("open search index"),
-        ),
         embedder: Arc::new(synveda_ingest::embedding::AnyEmbedder::Deterministic(
             synveda_ingest::embedding::DeterministicEmbedder::new(),
         )),
-        inject_embed_timeout: std::time::Duration::from_millis(100),
+        context_embed_timeout: std::time::Duration::from_millis(100),
     }
 }
 

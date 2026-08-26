@@ -17,7 +17,7 @@ trap cleanup EXIT HUP INT TERM
 $COMPOSE up --detach --wait postgres
 $COMPOSE exec -T postgres createdb -U synveda "$DEMO_DB"
 $COMPOSE exec -T postgres psql -v ON_ERROR_STOP=1 -U synveda -d "$DEMO_DB" -c \
-  "create extension if not exists vector; create extension if not exists age; create extension if not exists pgmq" \
+  "create extension if not exists vector; create extension if not exists btree_gin" \
   >/dev/null
 
 DATABASE_URL="postgres://synveda:synveda-dev@localhost:5432/$DEMO_DB"
@@ -35,12 +35,12 @@ pnpm --filter @synveda/console test
 
 knowledge=$($COMPOSE exec -T postgres psql -At -U synveda -d "$DEMO_DB" -c \
   "select count(*) from knowledge_items")
-old_records=$($COMPOSE exec -T postgres psql -At -U synveda -d "$DEMO_DB" -c \
-  "select count(*) from records")
-if [ "$knowledge" -eq 0 ] || [ "$old_records" -ne 0 ]; then
-  echo "CPR-17 noun cutover failed: Knowledge=$knowledge old records=$old_records" >&2
+retired_table=$($COMPOSE exec -T postgres psql -At -U synveda -d "$DEMO_DB" -c \
+  "select (to_regclass('records') is not null)::int")
+if [ "$knowledge" -eq 0 ] || [ "$retired_table" -ne 0 ]; then
+  echo "CPR-17 noun cutover failed: Knowledge=$knowledge retired_table=$retired_table" >&2
   exit 1
 fi
 
 echo ""
-echo "CPR-17 browser: $knowledge Knowledge items, zero old records; acceptance criteria pass."
+echo "CPR-17 browser: $knowledge Knowledge items and no retired Record table; acceptance criteria pass."

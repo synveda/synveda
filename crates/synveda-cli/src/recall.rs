@@ -1,13 +1,10 @@
 //! `synveda recall` — query current governed Knowledge from a terminal
 //! (CPR-20, ADR-0084).
 //!
-//! # What this was, and what it is now
-//!
-//! The deleted global `/v1/recall` read the retired record model. Its supported
-//! successor is the session-scoped Knowledge query: current active immutable
-//! revisions, independently authorised provenance and honest lexical/semantic
-//! degradation. Context delivery remains a separately budgeted context run;
-//! a deep query never pretends to be an injected block.
+//! The command uses the session-scoped Knowledge query: current active
+//! immutable revisions, independently authorised provenance and honest
+//! lexical/semantic degradation. Context delivery remains a separately
+//! budgeted ContextRun; a deep query never pretends to be rendered context.
 //!
 //! # Why a terminal command opens a session
 //!
@@ -18,7 +15,7 @@
 //!
 //! HTTP-only, on FLOW-6's precedent: a query is a governed read whose
 //! decisions the PDP takes per scope and whose audit event the gateway chains
-//! under the caller's own identity. A CLI that read the records itself would
+//! under the caller's own identity. A CLI that read the database itself would
 //! leave no decision in the trail, so this module opens no database connection
 //! and the verb takes no `--database-url`.
 

@@ -10,8 +10,8 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    ApprovalMatrix, CompositionConfig, DedupConfig, MoverConfig, PromotionConfig, RedactionConfig,
-    RetentionConfig, ScopeId, SkillQualityConfig, SkillScanConfig, TenantId,
+    ApprovalMatrix, CompositionConfig, RedactionConfig, ScopeId, SkillQualityConfig,
+    SkillScanConfig, TenantId,
 };
 
 /// A per-node policy pack assignment: the node (and its subtree, until a
@@ -33,29 +33,17 @@ pub struct PolicyAssignment {
 /// beside its policies.
 ///
 /// One struct rather than a growing parameter list, and one place to look
-/// for "what does a pack configure": the redaction modes the observe scan
-/// applies (MEM-2, ADR-0021 decision 3), the budget and channel rule the
-/// read path composes under (CTX-2, ADR-0025 decisions 2–3), the
-/// approvals a publication needs (FLOW-3, ADR-0032 decision 3), the
-/// rules that open a promotion proposal without a human deciding to
-/// (FLOW-4, ADR-0033 decision 6), what the ingestion pipeline does with a
-/// restatement or a contradiction (MEM-5, ADR-0039
-/// decision 12), how long material is served, kept and destroyed
-/// (MEM-6, ADR-0040), and the severity at which a skill bundle's
-/// security scan refuses rather than reports (SKIL-2, ADR-0052
-/// decision 9).
+/// for "what does a pack configure": redaction at external-text admission,
+/// the authored-context budget, VedaFlow approvals, and Skill scan/quality
+/// thresholds. Runtime capture, freshness and context behaviour live in
+/// governed Configuration artifacts rather than in this policy-pack row.
 ///
 /// Every field is optional because a stored pack may configure none of
 /// them, and each has its own fail-safe default resolved downstream:
-/// strict redaction, the product composition config (which only ever
-/// narrows), the empty approval matrix — which still resolves to the
-/// invariant floor, never to "no review needed" — no promotion rules
-/// at all, because an absent trigger must not fire, the product dedup config,
-/// which removes nothing a reader could otherwise have seen except the
-/// facts a newer statement replaced, and the product retention config,
-/// whose record horizons are all unset — a pack that configures nothing
-/// must not start destroying memory (MEM-6, ADR-0040 decision 13).
+/// strict redaction, the product authored-context config, the empty approval
+/// matrix (which still resolves to the invariant floor), and the Skill gates.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct PackConfig {
     /// The pack's redaction configuration.
     pub redaction: Option<RedactionConfig>,
@@ -63,21 +51,6 @@ pub struct PackConfig {
     pub composition: Option<CompositionConfig>,
     /// The pack's approval matrix.
     pub approvals: Option<ApprovalMatrix>,
-    /// The pack's auto-promotion rules.
-    pub promotion: Option<PromotionConfig>,
-    /// The pack's dedup and conflict-detection configuration.
-    pub dedup: Option<DedupConfig>,
-    /// The pack's retention, disposal and staleness configuration.
-    pub retention: Option<RetentionConfig>,
-    /// What happens to a mover's own memory when the directory moves them
-    /// across a policy boundary (AUTH-4, ADR-0059 decision 10).
-    ///
-    /// Its fail-safe is `retention`'s rather than `quality`'s, and for
-    /// `retention`'s reason: an unconfigured pack seals on a cross-pack
-    /// move, because the alternative hands material to a schedule nobody
-    /// wrote it under. Nothing is refused either way — the move always
-    /// happens.
-    pub mover: Option<MoverConfig>,
     /// The severity at which a skill bundle's security scan refuses.
     ///
     /// Its fail-safe is the invariant floor (`critical` blocks and

@@ -1,7 +1,8 @@
 //! Seed → wait → probe → grade, one scenario at a time (EVAL-1,
 //! ADR-0028 decision 3).
 //!
-//! Memory is planted through `/v1/observe` and nothing else, so a run
+//! Source material enters as session events and accepted capture candidates,
+//! so a run
 //! exercises MEM-1's buffer, MEM-2's redaction, MEM-3's extraction, and
 //! MEM-4's embedding before it ever measures composition. That is slower
 //! than an INSERT by whole seconds, and it is the difference between
@@ -14,8 +15,8 @@ use std::time::{Duration, Instant};
 use std::{collections::BTreeMap, collections::HashMap};
 
 use crate::client::{
-    CaptureAcceptOptions, CaptureCandidateRef, CaptureReplacement, Client, InjectRequest,
-    InjectResponse, ObserveEvent, ObserveRequest,
+    CaptureAcceptOptions, CaptureCandidateRef, CaptureReplacement, Client, ContextRunRequest,
+    ContextRunResponse, SessionEventBatchRequest, SessionEventInput,
 };
 use crate::qa_runner::{CURATOR_ACTOR, PUBLISHER_ACTOR, STEWARD_ACTOR};
 use crate::report::Outcome;
@@ -78,18 +79,18 @@ pub async fn run_scenario(
     // more than one sample. Only the first is judged: a scenario that
     // passes on the third attempt has not passed.
     let bearer = &environment.actor(&scenario.probe.actor)?.token;
-    let request = InjectRequest {
+    let request = ContextRunRequest {
         task: scenario.probe.task.as_deref(),
         budget_tokens: scenario.probe.budget_tokens,
     };
     let probe_run = client
         .session_for(bearer, &scenario.probe.session_id)
         .await?;
-    let first = client.inject(bearer, &probe_run, &request).await?;
+    let first = client.compose_context(bearer, &probe_run, &request).await?;
     let mut latency_ms = vec![round(first.elapsed_ms)];
     note_degraded(&mut degraded, &first.degraded);
     for _ in 1..scenario.probe.repeat {
-        let repeat = client.inject(bearer, &probe_run, &request).await?;
+        let repeat = client.compose_context(bearer, &probe_run, &request).await?;
         latency_ms.push(round(repeat.elapsed_ms));
         note_degraded(&mut degraded, &repeat.degraded);
     }
@@ -209,10 +210,10 @@ async fn seed(
     for batch in &scenario.seed {
         let bearer = &environment.actor(&batch.actor)?.token;
         let occurred_at = chrono::Utc::now().to_rfc3339();
-        let events: Vec<ObserveEvent<'_>> = batch
+        let events: Vec<SessionEventInput<'_>> = batch
             .events
             .iter()
-            .map(|event| ObserveEvent {
+            .map(|event| SessionEventInput {
                 // Per-run unique, so re-running a suite against the same
                 // tenant seeds again rather than deduplicating into
                 // nothing (ADR-0020 decision 2 would report duplicates,
@@ -225,7 +226,7 @@ async fn seed(
             .collect();
         let session = client.session_for(bearer, &batch.session_id).await?;
         let response = client
-            .observe(bearer, &session, &ObserveRequest { events })
+            .append_events(bearer, &session, &SessionEventBatchRequest { events })
             .await?;
         note_degraded(degraded, &response.degraded);
         if response.value.denied > 0 || response.value.quarantined > 0 {
@@ -345,7 +346,7 @@ async fn wait_for_seed(
     // would be waiting forever.
     let wanted: Vec<&Seeded> = seeded
         .iter()
-        .filter(|entry| scenario.expect.records.contains(&entry.key))
+        .filter(|entry| scenario.expect.knowledge.contains(&entry.key))
         .collect();
     if wanted.is_empty() {
         return Ok(0.0);
@@ -361,10 +362,10 @@ async fn wait_for_seed(
             let bearer = &environment.actor(&entry.actor)?.token;
             let run = client.session_for(bearer, &session).await?;
             let landed = client
-                .inject(
+                .compose_context(
                     bearer,
                     &run,
-                    &InjectRequest {
+                    &ContextRunRequest {
                         task: None,
                         budget_tokens: None,
                     },
@@ -383,10 +384,10 @@ async fn wait_for_seed(
                 let probe = &environment.actor(&scenario.probe.actor)?.token;
                 let probe_run = client.session_for(probe, &session).await?;
                 let ranked = client
-                    .inject(
+                    .compose_context(
                         probe,
                         &probe_run,
-                        &InjectRequest {
+                        &ContextRunRequest {
                             task: scenario.probe.task.as_deref(),
                             budget_tokens: scenario.probe.budget_tokens,
                         },
@@ -424,17 +425,17 @@ struct Graded {
 fn grade(
     scenario: &Scenario,
     seeded: &[Seeded],
-    block: &InjectResponse,
+    block: &ContextRunResponse,
     failures: &mut Vec<String>,
 ) -> Graded {
     let text = &block.text;
     let before = failures.len();
 
-    let recall = if scenario.expect.records.is_empty() {
+    let recall = if scenario.expect.knowledge.is_empty() {
         None
     } else {
         let mut found = 0usize;
-        for key in &scenario.expect.records {
+        for key in &scenario.expect.knowledge {
             let marker = seeded
                 .iter()
                 .find(|entry| &entry.key == key)
@@ -445,7 +446,7 @@ fn grade(
                 failures.push(format!("expected record `{key}` never reached the block"));
             }
         }
-        Some(found as f64 / scenario.expect.records.len() as f64)
+        Some(found as f64 / scenario.expect.knowledge.len() as f64)
     };
 
     for phrase in &scenario.expect.must_contain {
@@ -472,11 +473,11 @@ fn grade(
     }
 
     let abstained = scenario.expect.abstain.then(|| {
-        let empty = block.record_ids.is_empty();
+        let empty = block.knowledge_item_ids.is_empty();
         if !empty {
             failures.push(format!(
-                "expected an empty block, got {} record(s) and {} token(s)",
-                block.record_ids.len(),
+                "expected an empty block, got {} Knowledge item(s) and {} token(s)",
+                block.knowledge_item_ids.len(),
                 block.tokens
             ));
         }
@@ -509,15 +510,11 @@ mod tests {
     use super::*;
     use crate::scenario::Scenario;
 
-    fn block(text: &str, records: usize, tokens: u32) -> InjectResponse {
-        InjectResponse {
+    fn block(text: &str, items: usize, tokens: u32) -> ContextRunResponse {
+        ContextRunResponse {
             text: text.to_owned(),
             block_hash: "b3-test".to_owned(),
-            record_ids: (0..records).map(|index| index.to_string()).collect(),
-            tiers: vec!["body".to_owned(); records],
-            index_entries: 0,
-            index_tokens: 0,
-            staleness_permille: vec![1000; records],
+            knowledge_item_ids: (0..items).map(|index| index.to_string()).collect(),
             tokens,
             budget_tokens: 1500,
         }
@@ -541,7 +538,7 @@ mod tests {
                   "events": [{"key": "deploy", "text": "Deploys go through make deploy.",
                               "marker": "make deploy"}]}],
         "probe": {"actor": "curator", "session_id": "p1"},
-        "expect": {"records": ["deploy"], "must_not_contain": ["push to main"]}
+        "expect": {"knowledge": ["deploy"], "must_not_contain": ["push to main"]}
     }"#;
 
     #[test]
@@ -560,7 +557,7 @@ mod tests {
     }
 
     #[test]
-    fn a_missing_record_costs_recall_and_accuracy_both() {
+    fn a_missing_knowledge_item_costs_recall_and_accuracy_both() {
         let mut failures = Vec::new();
         let graded = grade(
             &scenario(RECALLING),

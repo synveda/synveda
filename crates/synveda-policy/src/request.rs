@@ -156,7 +156,7 @@ pub struct Principal {
     /// The token's confinement scope — the anchor node whose subtree
     /// bounds every decision for a service identity (AUTH-3, ADR-0018
     /// decision 4). The base layer forbids everything outside it, roles
-    /// notwithstanding, except own-chain `MemoryRead`. `None` for users
+    /// notwithstanding, except own-chain `KnowledgeRead`. `None` for users
     /// and dev subjects: no confinement.
     pub token_scope: Option<ScopeId>,
 }
@@ -235,9 +235,8 @@ pub enum Action {
     /// project's owner should be able to close a runaway agent's session in
     /// their own project.
     ///
-    /// It does **not** admit any material: composing context for a session
-    /// additionally takes [`Action::MemoryRead`] at every scope that
-    /// contributes, decided by the same composition walk `inject` runs.
+    /// It does **not** admit Knowledge or authored material; those reads are
+    /// independently decided before retrieval or composition.
     SessionWrite,
     /// Read the **raw payload** of one session event (CPR-11, ADR-0077
     /// decision 3).
@@ -305,15 +304,6 @@ pub enum Action {
     /// it outright (ADR-0018 decision 4), which is correct — an agent must not
     /// redeem a person's invitation.
     InviteAccept,
-    /// Include memories attached to the resource scope in the caller's
-    /// composition — the seam inject/recall stand on (AUTHZ-2, ADR-0014
-    /// decision 5).
-    MemoryRead,
-    /// Land memory content at the resource scope — the write seam observe
-    /// stands on (MEM-1, ADR-0020 decision 3). The packs permit the
-    /// principal's own personal scope role-free (zero-config) and bound
-    /// content roles beyond it.
-    MemoryWrite,
     /// Read one Knowledge item or enumerate visible Knowledge at a scope
     /// (CPR-16, ADR-0081).
     KnowledgeRead,
@@ -322,28 +312,11 @@ pub enum Action {
     /// Governed plaintext erasure. Separate from archive because it is
     /// intentionally irreversible and may be refused by retention hooks.
     KnowledgeForget,
-    /// Run a classification proposal's effect at the resource scope: move
-    /// records to the sensitivity their proposed versions carry (AUTHZ-5,
-    /// ADR-0038 decision 9).
-    ///
-    /// Its own action rather than [`Action::MemoryWrite`], on
-    /// [`Action::ChannelRollback`]'s separability rule: the write floor
-    /// grants every principal `MemoryWrite` at its own home, and a pack must
-    /// be able to say "you may write here" without saying "you may classify
-    /// here".
-    ///
-    /// Like publishing, the route resolves the approval matrix on top of
-    /// this decision — at the **maximum** of the current and proposed tiers,
-    /// so a declassification is priced at the tier it is leaving — and
-    /// additionally requires [`Action::MemoryRead`] at the working tier,
-    /// which is the whose-material question every governance act asks
-    /// (ADR-0038 decision 10).
-    MemoryClassify,
     /// Be served a prompt attached to the resource scope — the seam the
     /// registry's resolve stands on (PRMT-1, ADR-0049 decision 4).
     ///
-    /// Names the tier it is asking about, exactly as [`Action::MemoryRead`]
-    /// does and for the same reason: with four values the seam can be asked
+    /// Names the tier it is asking about, exactly as Knowledge reads do:
+    /// with four values the seam can be asked
     /// about a tier before any content is fetched. It carries no relaxation
     /// input — CPR-31 closes that vocabulary over `KnowledgeRead` — and no
     /// pack names `restricted`, because
@@ -355,11 +328,8 @@ pub enum Action {
     PromptRead,
     /// Author a prompt draft at the resource scope (ADR-0049 decision 4).
     ///
-    /// Its own action rather than [`Action::MemoryWrite`], on
-    /// [`Action::ChannelRollback`]'s separability rule: every placed
-    /// principal holds the memory write floor at its own home, and a pack
-    /// must be able to say "observe here" without saying "author governed
-    /// assets here". Whether a draft may then cross the trust boundary is
+    /// Its own action because authoring governed templates is distinct from
+    /// Knowledge mutation. Whether a draft may then cross the trust boundary is
     /// the approval matrix's arithmetic, never this decision's.
     PromptWrite,
     /// Be served a context pack attached to the resource scope — the seam
@@ -368,8 +338,7 @@ pub enum Action {
     ///
     /// Taken per scope inside the plan walk composition already runs, never
     /// as a second authorization path (decision 8), and it is what *admits*
-    /// pack chunks: [`Action::MemoryRead`] never does, and this action never
-    /// admits a memory. That separation is the case packs exist for — a
+    /// pack chunks; Knowledge reads do not. That separation is the case packs exist for — a
     /// scope may distribute conventions and glossaries to readers who hold
     /// no readable memory there at all.
     ///
@@ -460,10 +429,8 @@ pub enum Action {
     /// subtree-bound auditor therefore holds nothing here — deliberately,
     /// and the denial names what it would take.
     ///
-    /// Grants no content: this action reads record ids, object addresses,
-    /// channels and tiers, and resolving any of them to a body is
-    /// [`Action::MemoryRead`] through a different route (ADR-0045
-    /// decision 6).
+    /// Grants no content: this action reads identifiers, hashes, counts and
+    /// decisions. Resolving any identifier to content takes its own PDP action.
     AuditRead,
     /// Issue, list or revoke this tenant's provisioning credentials —
     /// `/v1/scim/credentials` (AUTH-4, ADR-0059 decision 13).
@@ -506,9 +473,8 @@ pub enum Action {
     /// Read the VedaFlow channels standing at the resource scope —
     /// `GET /v1/channels/{scope}` (FLOW-2, ADR-0031 decision 12).
     ChannelRead,
-    /// Publish records onto the resource scope's published channel: the
-    /// act that moves content across the trust boundary, so `inject`
-    /// composes it as reviewed material. Never a tenant-level action —
+    /// Publish authored prompt or context-pack versions onto the resource
+    /// scope's published channel. Never a tenant-level action —
     /// a channel belongs to a node — and never cross-scope: climbing to
     /// a higher scope's channel needs that scope's approvers (FLOW-5).
     ///
@@ -560,7 +526,7 @@ impl Action {
     /// every action is in exactly one of the four groups, so a new action
     /// that nobody classified fails the build rather than silently going
     /// unanswerable at CNSL-2's probe.
-    pub const ALL: [Action; 49] = [
+    pub const ALL: [Action; 46] = [
         Action::ScopeCreate,
         Action::ScopeRead,
         Action::ScopeUpdate,
@@ -577,12 +543,9 @@ impl Action {
         Action::MembershipGrant,
         Action::GroupManage,
         Action::InviteAccept,
-        Action::MemoryRead,
-        Action::MemoryWrite,
         Action::KnowledgeRead,
         Action::KnowledgeWrite,
         Action::KnowledgeForget,
-        Action::MemoryClassify,
         Action::PromptRead,
         Action::PromptWrite,
         Action::ContextPackRead,
@@ -627,7 +590,7 @@ impl Action {
     /// a scope resource at all (ADR-0045 decision 2); it appears in
     /// [`Action::PROBED_AT_TENANT`], where the chain it reads actually
     /// lives.
-    pub const PROBED_AT_SCOPE: [Action; 39] = [
+    pub const PROBED_AT_SCOPE: [Action; 37] = [
         Action::ScopeCreate,
         Action::ScopeRead,
         Action::ScopeUpdate,
@@ -642,10 +605,8 @@ impl Action {
         Action::SessionDiagnostics,
         Action::MembershipRead,
         Action::MembershipGrant,
-        Action::MemoryWrite,
         Action::KnowledgeWrite,
         Action::KnowledgeForget,
-        Action::MemoryClassify,
         Action::PromptWrite,
         Action::ContextPackWrite,
         Action::SkillWrite,
@@ -707,8 +668,7 @@ impl Action {
     /// A boolean here would have to choose a tier to ask at, and then the
     /// answer would be about that tier while looking like it was about the
     /// action — the failure ADR-0038 decision 2 refuses a default for.
-    pub const TIERED_READS: [Action; 5] = [
-        Action::MemoryRead,
+    pub const TIERED_READS: [Action; 4] = [
         Action::KnowledgeRead,
         Action::PromptRead,
         Action::ContextPackRead,
@@ -736,12 +696,9 @@ impl Action {
             Action::MembershipGrant => "membership.grant",
             Action::GroupManage => "group.manage",
             Action::InviteAccept => "invite.accept",
-            Action::MemoryRead => "memory.read",
-            Action::MemoryWrite => "memory.write",
             Action::KnowledgeRead => "knowledge.read",
             Action::KnowledgeWrite => "knowledge.write",
             Action::KnowledgeForget => "knowledge.forget",
-            Action::MemoryClassify => "memory.classify",
             Action::PromptRead => "prompt.read",
             Action::PromptWrite => "prompt.write",
             Action::ContextPackRead => "context_pack.read",
@@ -791,12 +748,9 @@ impl Action {
             Action::MembershipGrant => "MembershipGrant",
             Action::GroupManage => "GroupManage",
             Action::InviteAccept => "InviteAccept",
-            Action::MemoryRead => "MemoryRead",
-            Action::MemoryWrite => "MemoryWrite",
             Action::KnowledgeRead => "KnowledgeRead",
             Action::KnowledgeWrite => "KnowledgeWrite",
             Action::KnowledgeForget => "KnowledgeForget",
-            Action::MemoryClassify => "MemoryClassify",
             Action::PromptRead => "PromptRead",
             Action::PromptWrite => "PromptWrite",
             Action::ContextPackRead => "ContextPackRead",
@@ -962,11 +916,8 @@ pub struct AuthzContext<'a> {
     /// when no node on the chain carries an assignment. `None` falls
     /// back to `regulated-strict` (seed §2.1).
     pub default_pack: Option<&'a str>,
-    /// For [`Action::MemoryRead`] only: the tier being asked about, passed
-    /// to policies as `context.sensitivity` (AUTHZ-5, ADR-0038 decision 2).
-    /// A `MemoryRead` decision without it fails closed — the `grant`
-    /// discipline, applied to the attribute the base layer's `restricted`
-    /// forbid stands on; other actions ignore it.
+    /// For tiered reads: the tier being asked about, passed to policies as
+    /// `context.sensitivity`. A tiered decision without it fails closed.
     ///
     /// One tier per decision, never a ceiling: the read path asks per tier
     /// and keeps the answers as a set, so a pack that says something

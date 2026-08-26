@@ -21,9 +21,8 @@ use cedar_policy::{
 };
 use synveda_types::access::{RoleKey, inherits_into};
 use synveda_types::{
-    ApprovalMatrix, CompositionConfig, CurrentRelaxation, DedupConfig, Error, MoverConfig,
-    PackConfig, PromotionConfig, RedactionConfig, RelaxationAction, Result, RetentionConfig,
-    ScopeId, Sensitivity, SkillQualityConfig, SkillScanConfig, TenantId,
+    ApprovalMatrix, CompositionConfig, CurrentRelaxation, Error, PackConfig, RedactionConfig,
+    RelaxationAction, Result, ScopeId, Sensitivity, SkillQualityConfig, SkillScanConfig, TenantId,
 };
 
 use synveda_types::scope::ScopeKind;
@@ -50,7 +49,7 @@ pub const OPEN_COLLABORATION: &str = "open-collaboration";
 /// decision 1). `@2`: AUTHZ-3 narrowed the admin planes to roles and
 /// added the content-role read grant (ADR-0015 decision 4). `@3`: AUTH-3
 /// added the service-identity plane to the admin permits (ADR-0018
-/// decision 3). `@4`: MEM-1 added the `MemoryWrite` own-home floor and
+/// decision 3). `@4`: MEM-1 added the `KnowledgeWrite` own-home floor and
 /// content-role write grant (ADR-0020 decision 3). `@5`: MEM-2 added the
 /// quarantine review plane (ADR-0021 decision 6). `@6`: FLOW-2 added the
 /// channel plane (ADR-0031 decision 12). `@7`: FLOW-3 added the proposal
@@ -58,17 +57,17 @@ pub const OPEN_COLLABORATION: &str = "open-collaboration";
 /// `@8`: FLOW-7 added the rewind and pin actions (ADR-0036 decision 3).
 /// `@9`: AUTHZ-4 added the retired time-boxed record grant (ADR-0037
 /// decisions 7 and 15). `@10`: AUTHZ-5 made sensitivity a policy
-/// attribute — every `MemoryRead` permit names the tiers it covers, the base
+/// attribute — every `KnowledgeRead` permit names the tiers it covers, the base
 /// layer forbids `restricted` outright unless that reviewed grant declared it, and the
 /// classification plane joined (ADR-0038 decisions 4, 5 and 9). `@11`: AUD-2
 /// added `AuditRead` to the read-only admin permit every pack has carried
 /// since AUTHZ-2 — the line whose comment named this feature — which makes
 /// `auditor` a role with a live action rather than a marker row in the
 /// golden matrix (ADR-0045 decision 1). `@12`: PRMT-1 added the prompt
-/// registry's two seams — `PromptRead`, mirroring each pack's own MemoryRead
+/// registry's two seams — `PromptRead`, mirroring each pack's own KnowledgeRead
 /// shape tier for tier, and `PromptWrite`, mirroring its write floor — and
 /// the base layer's confinement carve-out gained `PromptRead` beside
-/// `MemoryRead`, because a team-anchored agent is the consumer prompts exist
+/// `KnowledgeRead`, because a team-anchored agent is the consumer prompts exist
 /// for and the org's are on its own chain (ADR-0049 decision 4). `@13`:
 /// PRMT-2 added the context-pack registry's two seams on the same shape —
 /// `ContextPackRead` is what admits pack chunks into a composed block, so
@@ -205,22 +204,6 @@ struct LoadedPack {
     /// [`EffectivePack`] per candidate scope on the inject path, and a
     /// matrix is the one config that is not `Copy` (FLOW-3, ADR-0032).
     approvals: Arc<ApprovalMatrix>,
-    /// The promotion rules (FLOW-4, ADR-0033 decision 6), behind an `Arc`
-    /// for the same reason as the matrix. Empty means nothing
-    /// auto-promotes at scopes this pack governs.
-    promotion: Arc<PromotionConfig>,
-    /// What the ingestion pipeline does with a restatement or a
-    /// contradiction at scopes this pack governs (MEM-5, ADR-0039
-    /// decision 12). `Copy`, so no `Arc`.
-    dedup: DedupConfig,
-    /// How long material at scopes this pack governs is served, kept and
-    /// destroyed, and how fast it decays in ranking (MEM-6, ADR-0040).
-    /// `Copy`, so no `Arc`.
-    retention: RetentionConfig,
-    /// What happens to a mover's own memory when the directory moves them
-    /// across a policy boundary (AUTH-4, ADR-0059 decision 10). `Copy`,
-    /// so no `Arc`.
-    mover: MoverConfig,
     /// The severity at which a skill bundle's security scan refuses
     /// rather than reports (SKIL-2, ADR-0052 decision 9). `Copy`, so no
     /// `Arc`.
@@ -249,17 +232,11 @@ pub enum PackOrigin {
 /// What one scope permits this principal to read, as
 /// [`Pdp::permitted_read_tiers`] decided it in one pack resolution.
 ///
-/// The two tier sets are independent answers to independent questions, and
+/// The tier sets are independent answers to independent questions, and
 /// that independence is the point (PRMT-2, ADR-0050 decision 8): a scope
-/// may distribute conventions and glossaries to readers who hold no
-/// readable memory there at all, so `context_pack` being non-empty while
-/// `memory` is empty is a supported state and the composition plan must
-/// keep such a scope rather than skip it.
+/// may distribute conventions and executable capabilities independently.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PermittedTiers {
-    /// The tiers `MemoryRead` permits here, ascending. Empty means no
-    /// memory composes from this scope.
-    pub memory: Vec<Sensitivity>,
     /// The tiers `ContextPackRead` permits here, ascending. Empty means no
     /// pack chunk composes from this scope.
     pub context_pack: Vec<Sensitivity>,
@@ -271,10 +248,6 @@ pub struct PermittedTiers {
     /// walk — which is what keeps "the set and the by-name resolve are the
     /// same walk" (decision 2) true rather than parallel.
     pub skill: Vec<Sensitivity>,
-    /// The `MemoryRead` decision — what the plan records and the audit
-    /// event carries. The pack identity is the same for every ask, one
-    /// resource, one resolution.
-    pub decision: AuthzDecision,
     /// The pack's own configuration, so a caller planning a scope needs no
     /// second resolution to read its channel rule.
     pub effective: EffectivePack,
@@ -300,27 +273,6 @@ pub struct EffectivePack {
     /// Resolving it always merges the invariant floor, so this is what
     /// the pack adds *above* the product's non-negotiables.
     pub approvals: Arc<ApprovalMatrix>,
-    /// The pack's promotion rules (FLOW-4, ADR-0033): what opens a
-    /// proposal at scopes this pack governs without a human deciding to.
-    /// Empty in every embedded pack — a trigger nobody configured must
-    /// not fire.
-    pub promotion: Arc<PromotionConfig>,
-    /// The pack's dedup configuration (MEM-5, ADR-0039 decision 12): what
-    /// the extraction worker does when a candidate restates or contradicts
-    /// a record its owner's scope already holds.
-    pub dedup: DedupConfig,
-    /// The pack's retention configuration (MEM-6, ADR-0040): the horizons
-    /// scopes this pack governs serve and keep material under, and the
-    /// staleness half-life composition ranks by. Read on the read path at
-    /// every planned scope, and by the sweep at the scope a record lives
-    /// at (ADR-0040 decision 10).
-    pub retention: RetentionConfig,
-    /// The pack's mover configuration (AUTH-4, ADR-0059 decision 10):
-    /// whether a person's own memory follows them across a policy
-    /// boundary or is sealed where it was written. Read by the SCIM
-    /// reconciler at the scope the person is moving **away from** —
-    /// authority over material belongs where the material is.
-    pub mover: MoverConfig,
     /// The pack's skill-scan configuration (SKIL-2, ADR-0052 decision 9):
     /// the severity at which a bundle's security scan refuses rather than
     /// reports. Read at the authoring seam and again at publication —
@@ -400,11 +352,6 @@ impl Pdp {
         // decision 2: derived is readable-per-policy by design; the
         // published-only restriction is an explicit choice, never a
         // default).
-        // The retention configs are ADR-0040 decision 13's one product
-        // default that can differ per pack without destroying anything a
-        // tenant expected to keep: no pack sets a record horizon, and
-        // `regulated-strict` disposes of the staging plane at a week
-        // against the relaxed packs' month.
         // The skill-scan thresholds are the one axis where the strict
         // reading is affordable (ADR-0052 decision 3): `regulated-strict`
         // refuses a bundle that shells out or writes outside itself,
@@ -416,8 +363,6 @@ impl Pdp {
                 REGULATED_STRICT,
                 REGULATED_STRICT_SRC,
                 RedactionConfig::STRICT,
-                RetentionConfig::STRICT,
-                MoverConfig::STRICT,
                 SkillScanConfig::STRICT,
                 SkillQualityConfig::STRICT,
             ),
@@ -425,8 +370,6 @@ impl Pdp {
                 STANDARD,
                 STANDARD_SRC,
                 RedactionConfig::REDACT_ALL,
-                RetentionConfig::DEFAULT,
-                MoverConfig::FOLLOWS,
                 SkillScanConfig::FLOOR,
                 SkillQualityConfig::MODERATE,
             ),
@@ -434,14 +377,12 @@ impl Pdp {
                 OPEN_COLLABORATION,
                 OPEN_COLLABORATION_SRC,
                 RedactionConfig::REDACT_ALL,
-                RetentionConfig::DEFAULT,
-                MoverConfig::FOLLOWS,
                 SkillScanConfig::FLOOR,
                 SkillQualityConfig::OPEN,
             ),
         ];
         let mut embedded = HashMap::new();
-        for ((name, version), (_, source, redaction, retention, mover, scan, quality)) in
+        for ((name, version), (_, source, redaction, scan, quality)) in
             EMBEDDED_PACKS.iter().zip(sources)
         {
             let pack = compile(
@@ -453,30 +394,6 @@ impl Pdp {
                     redaction: Some(redaction),
                     composition: Some(CompositionConfig::DEFAULT),
                     approvals: Some(crate::approvals::embedded(name)),
-                    // No embedded pack auto-promotes: ADR-0033 decision
-                    // 6's fail-safe is silence, and a product default
-                    // that opened proposals nobody asked for would be a
-                    // surprise arriving through an upgrade.
-                    promotion: None,
-                    // All three dedup identically, and the product
-                    // default supersedes: seed §4.4 already resolves
-                    // conflicts by "newer valid-time beats older", so a
-                    // pack that let contradictions accumulate would be
-                    // the one making a claim (ADR-0039 decision 12).
-                    dedup: Some(DedupConfig::DEFAULT),
-                    // No embedded pack names a record TTL: an upgrade
-                    // that silently deletes a tenant's memory is the one
-                    // surprise this product must never spring (ADR-0040
-                    // decision 13). What differs is the staging plane,
-                    // whose disposal ADR-0020/0021 already promised.
-                    retention: Some(retention),
-                    // `regulated-strict` seals a personal scope that
-                    // crosses a policy boundary; the relaxed packs let it
-                    // follow. Safe under those two for a reason they
-                    // state themselves — neither sets a record horizon,
-                    // so there is no schedule for the material to be
-                    // handed to (ADR-0059 decision 10).
-                    mover: Some(mover),
                     scan: Some(scan),
                     quality: Some(quality),
                 },
@@ -534,10 +451,6 @@ impl Pdp {
                 redaction: Some(RedactionConfig::STRICT),
                 composition: Some(CompositionConfig::DEFAULT),
                 approvals: Some(ApprovalMatrix::empty()),
-                promotion: None,
-                dedup: None,
-                retention: None,
-                mover: None,
                 scan: None,
                 quality: None,
             },
@@ -712,12 +625,9 @@ impl Pdp {
         let resource = Resource::Scope(scope_id);
         let (pack, origin) = self.resolve_pack(principal.tenant_id, resource, context, false);
         let roles = effective_roles(resource, context);
-        let mut memory = Vec::with_capacity(Sensitivity::ALL.len());
         let mut context_pack = Vec::with_capacity(Sensitivity::ALL.len());
         let mut skill = Vec::with_capacity(Sensitivity::ALL.len());
-        let mut last: Option<AuthzDecision> = None;
         for (action, tiers) in [
-            (Action::MemoryRead, &mut memory),
             (Action::ContextPackRead, &mut context_pack),
             (Action::SkillRead, &mut skill),
         ] {
@@ -739,24 +649,11 @@ impl Pdp {
                 if decision.allowed {
                     tiers.push(tier);
                 }
-                // The `MemoryRead` decision is the one the plan records and
-                // the audit event carries — it is the question "may this
-                // reader compose here" has always meant, and widening it to
-                // whichever ask happened to run last would change what a
-                // stored decision means.
-                if action == Action::MemoryRead {
-                    last = Some(decision);
-                }
             }
         }
-        let decision = last.ok_or_else(|| Error::Internal {
-            message: "the sensitivity vocabulary is empty".to_owned(),
-        })?;
         Ok(PermittedTiers {
-            memory,
             context_pack,
             skill,
-            decision,
             effective: self.effective_from(&pack, origin),
         })
     }
@@ -912,10 +809,6 @@ impl Pdp {
             redaction: pack.redaction,
             composition: pack.composition,
             approvals: Arc::clone(&pack.approvals),
-            promotion: Arc::clone(&pack.promotion),
-            dedup: pack.dedup,
-            retention: pack.retention,
-            mover: pack.mover,
             scan: pack.scan,
             quality: pack.quality,
         }
@@ -1432,8 +1325,7 @@ impl Pdp {
         }
         if matches!(
             action,
-            Action::MemoryRead
-                | Action::KnowledgeRead
+            Action::KnowledgeRead
                 | Action::PromptRead
                 | Action::ContextPackRead
                 | Action::SkillRead
@@ -1645,22 +1537,6 @@ fn compile(
     let redaction = config.redaction.unwrap_or_default();
     let composition = config.composition.unwrap_or_default();
     let approvals = config.approvals.unwrap_or_default();
-    let promotion = config.promotion.unwrap_or_default();
-    // Unconfigured is the product config — supersession on — for the reason
-    // the composition config's fallback is the product one: this config
-    // never grants anything, so its default is the honest fallback rather
-    // than a widening (ADR-0039 decision 12).
-    let dedup = config.dedup.unwrap_or_default();
-    // Unconfigured is the product config, whose record horizons are all
-    // unset: a stored pack that says nothing about retention must not
-    // start destroying a tenant's memory (ADR-0040 decision 13).
-    let retention = config.retention.unwrap_or_default();
-    // Unconfigured seals on a cross-pack move, which is `retention`'s
-    // fail-safe rather than `quality`'s: nothing here refuses anything —
-    // the move always happens — so the honest default is the one that
-    // cannot hand material to a schedule nobody wrote it under (ADR-0059
-    // decision 10, on ADR-0040 decision 13's argument).
-    let mover = config.mover.unwrap_or_default();
     // Unconfigured is the invariant floor rather than the strict pack's
     // threshold: `critical` refuses either way, and a pack that says
     // nothing must not start refusing bundles nobody asked it to
@@ -1680,25 +1556,6 @@ fn compile(
     // at review time rather than loudly at install time (ADR-0032).
     approvals.validate().map_err(|err| Error::Invalid {
         message: format!("policy pack {name}@{version} approval matrix: {err}"),
-    })?;
-    // Same discipline for a trigger: a rule asking for zero recalls, or
-    // one naming an asset with no usage signal, can only fire on
-    // everything or on nothing (ADR-0033 decision 6).
-    promotion.validate().map_err(|err| Error::Invalid {
-        message: format!("policy pack {name}@{version} promotion rules: {err}"),
-    })?;
-    // And for the thresholds: a similarity outside `0..=1` would make a
-    // band unreachable, which reads as "the feature is off" without ever
-    // saying so (ADR-0039 decision 12).
-    dedup.validate().map_err(|err| Error::Invalid {
-        message: format!("policy pack {name}@{version} dedup config: {err}"),
-    })?;
-    // And for a horizon: a schedule written in seconds, or a staging
-    // horizon that would spend MEM-1's idempotency guarantee for nothing,
-    // is refused when it is written rather than when it deletes something
-    // (ADR-0040 decision 7).
-    retention.validate().map_err(|err| Error::Invalid {
-        message: format!("policy pack {name}@{version} retention config: {err}"),
     })?;
     let combined = format!("{BASE_SRC}\n{source}");
     let policies: PolicySet = combined.parse().map_err(|err| Error::Invalid {
@@ -1724,10 +1581,6 @@ fn compile(
         redaction,
         composition,
         approvals: Arc::new(approvals),
-        promotion: Arc::new(promotion),
-        dedup,
-        retention,
-        mover,
         scan,
         quality,
     })

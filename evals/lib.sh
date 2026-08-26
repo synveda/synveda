@@ -1,7 +1,7 @@
 # The privileged half of an eval run (EVAL-1, ADR-0028 decision 7).
 #
-# Admitting a tenant, building a hierarchy, and registering identities are
-# things only an operator can do, so they live here in the same shell
+# Admitting a tenant, establishing its root, and registering service identities
+# are operator bootstrap actions, so they live here in the same shell
 # idiom every demo uses — and the runner stays a client that knows how to
 # call two endpoints. Sourced by evals/run.sh and demos/eval-1-harness.sh.
 #
@@ -64,7 +64,7 @@ eval_json_field() {
 # Without this, a leftover gateway from an aborted run is *healthy* on the
 # port the new one wants, `eval_wait_gateway` succeeds against it, and every
 # request then goes to a process pointed at a scratch database that no
-# longer exists — which arrives as a 401 on the first hierarchy call and
+# longer exists — which arrives as a 401 on the first governed call and
 # reads like a broken token. It cost two demo runs to diagnose, so the
 # collision names itself now (EVAL-5).
 eval_port_free() {
@@ -97,10 +97,8 @@ eval_up() {
   $COMPOSE up --detach --wait postgres
 
   # A scratch database per run: two runs are only comparable if neither
-  # inherits the other's records, and the sidecar indexer sweeps every
-  # active tenant per cycle — on the shared dev database (thousands of
-  # leftover test tenants) a just-admitted tenant waits minutes for its
-  # first sweep, which the relevance scenario would pay for in full.
+  # inherits the other's Knowledge or capture state. A disposable database
+  # also makes the query/index versions recorded by the report unambiguous.
   EVAL_DB=eval_$$
   $COMPOSE exec -T postgres \
     psql -v ON_ERROR_STOP=1 -U synveda -d synveda \
@@ -124,19 +122,15 @@ eval_up() {
   $COMPOSE exec -T postgres \
     psql -v ON_ERROR_STOP=1 -U synveda -d "$EVAL_DB" -c \
     "create extension if not exists vector;
-     create extension if not exists age;
-     create extension if not exists pgmq" >/dev/null
+     create extension if not exists btree_gin" >/dev/null
 
   EVAL_STATE=$(mktemp -d "${TMPDIR:-/tmp}/synveda-eval-XXXXXX")
   EVAL_ENV="$EVAL_STATE/env.json"
-  EVAL_INDEX_DIR="./data/eval-search-$$"
 
   DATABASE_URL="postgres://synveda:synveda-dev@localhost:5432/$EVAL_DB"
   export DATABASE_URL
   SYNVEDA_DEV_JWT_SECRET="$EVAL_JWT_SECRET"
   export SYNVEDA_DEV_JWT_SECRET
-  SYNVEDA_SEARCH_INDEX_DIR="$EVAL_INDEX_DIR"
-  export SYNVEDA_SEARCH_INDEX_DIR
   # The deterministic extractor and embedder are the default and stay it:
   # a nightly failure should mean someone changed the code, not that a
   # model drifted (ADR-0028 decision 6). Deliberately not exported here —
@@ -145,8 +139,6 @@ eval_up() {
   # through a real model against its own baseline (ADR-0046 decision 12).
   SYNVEDA_EXTRACTION_POLL_MS=300
   export SYNVEDA_EXTRACTION_POLL_MS
-  SYNVEDA_SEARCH_POLL_MS=300
-  export SYNVEDA_SEARCH_POLL_MS
   RUST_LOG=${RUST_LOG:-warn}
   export RUST_LOG
 
@@ -249,12 +241,14 @@ print(json.load(sys.stdin)["parent"]["id"])'
   EVAL_DESK_PROJECT_SCOPE=$(printf '%s' "$desk_project_json" | eval_json_field scope_id)
 
   # The labelled corpora retain their four tier names, but the addresses are
-  # current product scopes: principal → project → workspace → tenant.
+  # current product scopes. Sessions run in projects; shared security
+  # Knowledge sits at the workspace so a child-project grant cannot widen
+  # authority upward.
   platform=$EVAL_PROJECT_SCOPE
   payments=$EVAL_QA_PROJECT_SCOPE
   eng=$EVAL_QA_WORKSPACE_SCOPE
   sec=$org
-  vault=$EVAL_VAULT_PROJECT_SCOPE
+  vault=$EVAL_VAULT_WORKSPACE_SCOPE
   desk=$EVAL_DESK_PROJECT_SCOPE
 
   # A SECOND ADMITTED TENANT (EVAL-5, ADR-0048 decision 8). The first time
@@ -291,27 +285,41 @@ print(json.load(sys.stdin)["parent"]["id"])')
 
   # The actors. Service registration is an ordinary governed application
   # action now, so it stays on the seed gateway under the bootstrapped admin
-  # bearer. Their confinement anchor is the tenant root: every run lives in
+  # bearer. Most confinement anchors are the tenant root: every run lives in
   # the supported root-owned evaluation workspace, while grants below decide
-  # which corpus scope each identity may read or publish into.
+  # which corpus scope each identity may read or publish into. The security
+  # actors are the deliberate exception below: their project placement is the
+  # premise being measured, distinct from an explicit content-role grant.
   #
   # One actor per extraction fixture group (EVAL-2, ADR-0046 decision 2).
-  # The partition is load-bearing rather than tidy: observe writes land at
-  # the caller's home scope, so a group's corpus is its own, and a recall
-  # sweep is capped at 32 records — which is why the corpus grows by
-  # adding actors here and never by adding fixtures past that arithmetic.
-  # Every service is anchored at the tenant root so its explicitly selected
-  # project is inside its confinement subtree. Placement below is expressed by
-  # project/workspace grants and by the immutable session selection, never by
-  # recreating the deleted fixed hierarchy vocabulary.
+  # The partition is load-bearing rather than tidy: session events and
+  # accepted Knowledge remain attributable to one actor, and the diagnostic
+  # evaluation lens is explicitly bounded. A corpus grows by adding actors,
+  # not by silently truncating one actor's evidence.
+  # Every ordinary evaluation service is anchored at the tenant root so its
+  # explicitly selected project is inside its confinement subtree. Placement
+  # is the principal scope's parent, never a grant and never the deleted fixed
+  # hierarchy vocabulary.
   for actor in curator newcomer outsider \
     extract-alpha extract-beta extract-gamma extract-delta extract-epsilon \
-    qa-reader qa-team qa-dept qa-org qa-curator qa-steward qa-publisher \
-    sec-owner sec-mate sec-neighbour sec-compliance; do
+    qa-reader qa-project qa-workspace qa-tenant qa-curator qa-steward qa-publisher \
+    sec-compliance; do
     SYNVEDA_TOKEN="$admin" SYNVEDA_GATEWAY="$EVAL_SEED_URL" \
       ./target/debug/synveda service register \
         --subject "$actor" --scope "$org" >/dev/null
   done
+  # EVAL-5 separates structural workspace placement from explicit content
+  # authority. Both vault actors sit under the same workspace; their grants
+  # below differ in where they start. The neighbouring actor is structurally
+  # confined to the other workspace.
+  for actor in sec-owner sec-mate; do
+    SYNVEDA_TOKEN="$admin" SYNVEDA_GATEWAY="$EVAL_SEED_URL" \
+      ./target/debug/synveda service register \
+        --subject "$actor" --scope "$EVAL_VAULT_WORKSPACE_SCOPE" >/dev/null
+  done
+  SYNVEDA_TOKEN="$admin" SYNVEDA_GATEWAY="$EVAL_SEED_URL" \
+    ./target/debug/synveda service register \
+      --subject sec-neighbour --scope "$EVAL_DESK_WORKSPACE_SCOPE" >/dev/null
   for actor in xt-reader xt-compliance xt-curator xt-steward xt-publisher; do
     SYNVEDA_TOKEN="$admin_b" SYNVEDA_GATEWAY="$EVAL_SEED_URL" \
       ./target/debug/synveda service register \
@@ -355,7 +363,7 @@ print(json.load(sys.stdin)["parent"]["id"])')
     $COMPOSE exec -T postgres psql -qtAX -U synveda -d "$EVAL_DB" -c \
       "select id from scopes where tenant_id = '$1' and kind = 'tenant'"
   }
-  eval_workspace_access() { # tenant workspace-scope subjects...
+  eval_scope_access() { # tenant governed-scope subjects...
     eval_access_tenant=$1
     eval_access_scope=$2
     shift 2
@@ -368,23 +376,27 @@ print(json.load(sys.stdin)["parent"]["id"])')
       eval_grant "$eval_access_tenant" "$subject" reviewer "$eval_access_scope"
     done
   }
-  eval_workspace_access "$EVAL_TENANT" "$EVAL_WORKSPACE_SCOPE" \
+  eval_scope_access "$EVAL_TENANT" "$EVAL_WORKSPACE_SCOPE" \
     curator newcomer \
     extract-alpha extract-beta extract-gamma extract-delta extract-epsilon
-  eval_workspace_access "$EVAL_TENANT" "$EVAL_OUTSIDER_WORKSPACE_SCOPE" outsider
-  eval_workspace_access "$EVAL_TENANT" "$EVAL_QA_WORKSPACE_SCOPE" \
-    qa-reader qa-team qa-dept qa-org qa-curator qa-steward qa-publisher
-  eval_workspace_access "$EVAL_TENANT" "$EVAL_VAULT_WORKSPACE_SCOPE" \
-    sec-owner sec-mate sec-compliance
-  eval_workspace_access "$EVAL_TENANT" "$EVAL_DESK_WORKSPACE_SCOPE" \
-    sec-neighbour sec-compliance
+  eval_scope_access "$EVAL_TENANT" "$EVAL_OUTSIDER_WORKSPACE_SCOPE" outsider
+  eval_scope_access "$EVAL_TENANT" "$EVAL_QA_WORKSPACE_SCOPE" \
+    qa-reader qa-project qa-workspace qa-tenant qa-curator qa-steward qa-publisher
+  # Owner and compliance hold workspace roles. The teammate holds the same
+  # session/diagnostic roles only at the child project: enough to use that
+  # project, unable to flow back up to confidential workspace Knowledge.
+  eval_scope_access "$EVAL_TENANT" "$EVAL_VAULT_WORKSPACE_SCOPE" \
+    sec-owner sec-compliance
+  eval_scope_access "$EVAL_TENANT" "$EVAL_VAULT_PROJECT_SCOPE" sec-mate
+  eval_scope_access "$EVAL_TENANT" "$EVAL_DESK_WORKSPACE_SCOPE" sec-compliance
+  eval_scope_access "$EVAL_TENANT" "$EVAL_DESK_PROJECT_SCOPE" sec-neighbour
   eval_lme=0
   while [ "$eval_lme" -lt "${EVAL_LONGMEMEVAL_ACTORS:-0}" ]; do
     eval_grant "$EVAL_TENANT" "$(printf 'lme-%03d' "$eval_lme")" member "$EVAL_WORKSPACE_SCOPE"
     eval_grant "$EVAL_TENANT" "$(printf 'lme-%03d' "$eval_lme")" reviewer "$EVAL_WORKSPACE_SCOPE"
     eval_lme=$((eval_lme + 1))
   done
-  eval_workspace_access "$EVAL_TENANT_B" "$EVAL_FOREIGN_WORKSPACE_SCOPE" \
+  eval_scope_access "$EVAL_TENANT_B" "$EVAL_FOREIGN_WORKSPACE_SCOPE" \
     xt-reader xt-compliance xt-curator xt-steward xt-publisher
   # The conservative fallback profile reviews even principal-scope Knowledge.
   # These direct grants are the evaluation policy pack: privacy deliberately
@@ -425,8 +437,8 @@ print(json.load(sys.stdin)["parent"]["id"])')
   # CPR-40 creates the Q&A/security premise directly at its governed scope
   # while accepting each reviewable capture candidate. These are ordinary
   # shared-model grants, not a direct data seed or a second publication path.
-  eval_grant "$EVAL_TENANT" qa-team member "$payments"
-  eval_grant "$EVAL_TENANT" qa-org member "$org"
+  eval_grant "$EVAL_TENANT" qa-project member "$payments"
+  eval_grant "$EVAL_TENANT" qa-tenant member "$org"
   eval_grant "$EVAL_TENANT" sec-compliance administrator "$org"
   eval_grant "$EVAL_TENANT" eval-auditor administrator "$(eval_root_of "$EVAL_TENANT")"
   eval_grant "$EVAL_TENANT_B" eval-auditor-b administrator "$(eval_root_of "$EVAL_TENANT_B")"
@@ -469,7 +481,7 @@ print(json.load(sys.stdin)["parent"]["id"])')
     eval "extract_$group=\$(./target/debug/synveda token issue \
       --tenant \"\$EVAL_TENANT\" --subject \"extract-$group\")"
   done
-  for who in reader team dept org curator steward publisher; do
+  for who in reader project workspace tenant curator steward publisher; do
     eval "qa_$who=\$(./target/debug/synveda token issue \
       --tenant \"\$EVAL_TENANT\" --subject \"qa-$who\")"
   done
@@ -672,16 +684,16 @@ assert effective["document"]["allowed_external_providers"] == ["tei"]
       "token": "$qa_reader", "scope": "engineering/payments",
       "workspace_id": "$EVAL_QA_WORKSPACE", "project_id": "$EVAL_QA_PROJECT"
     },
-    "qa-team": {
-      "token": "$qa_team", "scope": "engineering/payments",
+    "qa-project": {
+      "token": "$qa_project", "scope": "engineering/payments",
       "workspace_id": "$EVAL_QA_WORKSPACE", "project_id": "$EVAL_QA_PROJECT"
     },
-    "qa-dept": {
-      "token": "$qa_dept", "scope": "engineering",
+    "qa-workspace": {
+      "token": "$qa_workspace", "scope": "engineering",
       "workspace_id": "$EVAL_QA_WORKSPACE", "project_id": "$EVAL_QA_PROJECT"
     },
-    "qa-org": {
-      "token": "$qa_org", "scope": "tenant",
+    "qa-tenant": {
+      "token": "$qa_tenant", "scope": "tenant",
       "workspace_id": "$EVAL_QA_WORKSPACE", "project_id": "$EVAL_QA_PROJECT"
     },
     "qa-curator": {
@@ -787,7 +799,6 @@ eval_down() {
     $COMPOSE exec -T postgres psql -U synveda -d synveda \
       -c "drop database if exists $EVAL_DB with (force)" >/dev/null 2>&1 || true
   fi
-  [ -n "${EVAL_INDEX_DIR:-}" ] && rm -rf "$EVAL_INDEX_DIR"
   # The gateway's log is the only place a run that committed nothing says
   # why, and until now it lived in scratch state this function deletes —
   # so the nightly of 2026-08-01 reported zero records across every corpus

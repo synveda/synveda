@@ -78,7 +78,7 @@ GATEWAY="./target/debug/synveda-gateway"
 
 step "A scratch database"
 psql_admin -c "create database ${DB}" >/dev/null
-psql_db -c "create extension if not exists vector; create extension if not exists btree_gin; create extension if not exists pgmq;" >/dev/null
+psql_db -c "create extension if not exists vector; create extension if not exists btree_gin;" >/dev/null
 DATABASE_URL="$URL" "$BIN" db migrate >/dev/null
 ok "migrated ${DB}"
 
@@ -226,7 +226,6 @@ ok "no credential material in any payload — AUTH-4's sweep, applied here"
 export SYNVEDA_DEV_JWT_SECRET="ten4-demo-secret"
 export SYNVEDA_LISTEN_ADDR="127.0.0.1:${PORT}"
 export SYNVEDA_PUBLIC_URL="$GATEWAY_URL"
-export SYNVEDA_SEARCH_INDEX_DIR="$WORK/search-index"
 TOKEN="$("$BIN" token issue --tenant "$TENANT" --subject ten4-auditor)"
 "$GATEWAY" >"$WORK/gateway.log" 2>&1 &
 GATEWAY_PID=$!

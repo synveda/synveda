@@ -109,7 +109,7 @@ kubectl config use-context "kind-$CLUSTER" >/dev/null
 # artefact serves (ADR-0062 decision 9).
 echo "==> building the product image (this is the slow part; layers cache)"
 docker build -t "synveda/gateway:$IMAGE_TAG" -f deploy/compose/gateway/Dockerfile .
-echo "==> building the enterprise Postgres image (CNPG base + pgvector + PGMQ, no AGE)"
+echo "==> building the enterprise Postgres image (CNPG base + pgvector)"
 docker build -t synveda/enterprise-postgres:17 deploy/helm/postgres
 echo "==> loading both into the cluster"
 kind load docker-image --name "$CLUSTER" "synveda/gateway:$IMAGE_TAG" synveda/enterprise-postgres:17

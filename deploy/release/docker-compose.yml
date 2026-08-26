@@ -5,8 +5,8 @@
 # registry and there is no `build:` stanza anywhere, so the machine running
 # it needs Docker and nothing else — no source tree, no Rust toolchain, no
 # pnpm. `deploy/compose/docker-compose.yml` remains what its own header
-# calls it, the contributor's loop, and keeps the build contexts, AGE and
-# Temporal that only make sense next to a checkout.
+# calls it, the contributor's loop, and keeps the build contexts and Temporal
+# that only make sense next to a checkout.
 #
 # `__SYNVEDA_VERSION__` is a placeholder. `scripts/package-release.sh`
 # replaces it with the release tag when it assembles the bundle, so the
@@ -28,8 +28,6 @@ services:
     # (deploy/compose/postgres/Dockerfile), which bakes the initdb script
     # in — so unlike the dev compose there is nothing to bind-mount here.
     image: ghcr.io/synveda/postgres:__SYNVEDA_VERSION__
-    # Preload AGE so every session can run cypher() without a per-session LOAD.
-    command: ["postgres", "-c", "shared_preload_libraries=age"]
     environment:
       POSTGRES_USER: synveda
       POSTGRES_PASSWORD: synveda-dev
@@ -123,11 +121,7 @@ services:
       RUST_LOG: ${RUST_LOG:-info}
     ports:
       - "8120:8120"
-    volumes:
-      - gateway-search:/var/lib/synveda/search
-
 volumes:
   pg-data:
   rauthy-data:
   tei-cache:
-  gateway-search:

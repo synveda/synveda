@@ -254,7 +254,7 @@ enum Command {
     /// Measure the configured reader against its probes, graded by the
     /// configured judge (ADR-0061 decision 6).
     ///
-    /// The blocks come from a file rather than from `/v1/inject`, so this
+    /// The blocks come from a file rather than from a live ContextRun, so this
     /// measures the reader and the judge and **not** Synveda — the axes
     /// are named `probe_*` rather than `qa_*` for exactly that reason.
     /// Needs no gateway and no database; only `=claude` reaches a
@@ -307,7 +307,7 @@ async fn run(cli: Cli) -> Result<bool, String> {
             // decision 5).
             let corpora = qa::load_corpora(&qa_dir)?;
             // The exhaustiveness guard is the reason this command matters
-            // most for the security corpus: an undeclared (record, reader)
+            // most for the security corpus: an undeclared (knowledge item, reader)
             // pair is a boundary nothing asserts, and it would still
             // report zero leaks (ADR-0048 decision 5).
             let boundaries = security::load_corpora(&security_dir)?;
@@ -324,7 +324,7 @@ async fn run(cli: Cli) -> Result<bool, String> {
             let baseline = Baseline::load(&baseline)?;
             eprintln!(
                 "synveda-eval: {} scenario(s), {} fixture(s) across {} group(s), {} \
-                 question(s) across {} corpus/corpora, and {} record(s) with {} declared \
+                 question(s) across {} corpus/corpora, and {} Knowledge item(s) with {} declared \
                  boundary/boundaries across {} security corpus/corpora parse; the baseline \
                  bounds {}",
                 scenarios.len(),

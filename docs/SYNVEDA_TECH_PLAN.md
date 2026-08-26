@@ -14,7 +14,7 @@ anything AGPL/BSL is opt-in and isolated behind a trait.
 
 ### 1.1 Core data platform — PostgreSQL 17
 
-One database engine for Knowledge, sessions, scopes, audit, versioning, queues, and (initially) vectors
+One database engine for Knowledge, sessions, scopes, audit, versioning, durable jobs, and (initially) vectors
 and graph. This is a feature: one backup story, one HA story, one thing to explain to a bank's
 infrastructure review board.
 
@@ -22,11 +22,11 @@ infrastructure review board.
 |---|---|---|---|
 | System of record | **PostgreSQL 17** | PostgreSQL | Boring, auditable, runs anywhere incl. air-gapped |
 | Vector search | **pgvector** (HNSW) | PostgreSQL | Fine to ~10–50M vectors per tenant shard. Scale-out: **Qdrant** (Rust, Apache-2.0) behind the same `VectorIndex` trait. Note: VectorChord/pgvecto.rs is Rust and faster but AGPL — optional adapter only |
-| Sparse / lexical | Postgres FTS + **Tantivy** (Rust, MIT) sidecar via `synveda-retrieval` | MIT | BM25 quality without ParadeDB's AGPL. Hybrid fusion (RRF) done in Rust |
+| Sparse / lexical | Tenant-bound **Postgres FTS** | PostgreSQL | Lexical rank stays transactionally aligned with current Knowledge revisions; hybrid fusion with pgvector uses RRF in the gateway |
 | Graph | **Indexed adjacency in plain Postgres** (bitemporal edge pair; named graphs as a mandatory discriminator) | — | Amended 2026-07-27 by GRPH-1/ADR-0043, was **Apache AGE**: the GRPH-4 spike measured adjacency 3–8× faster at 2.5× less storage. Relationship claims remain transactional with Knowledge. Ladder: materialised bounded expansion, then a dedicated engine with its own ADR and a licence exception (candidates: **IndraDB**, Rust, MPL; avoid SurrealDB/Memgraph — BSL) |
 | Governed scopes | Plain Postgres (`scopes` + closure table) | — | Five parent-shapes, no organisational rank and no graph DB needed for tenancy |
-| Queue (simple) | **PGMQ** (Postgres extension) | PostgreSQL | For observe-event ingestion buffer — no extra infra for SMB deployments |
-| Workflow (complex) | **Temporal** | MIT | Extraction pipelines, directory sync, retention jobs, approval timers. Go-based but the best-in-class; Rust SDK (community) or activities via gRPC workers |
+| Durable jobs | Leased tenant-bound Postgres tables | PostgreSQL | Capture, erasure, import/export, skill/tool tests and re-encryption share one observable idempotent operation model |
+| Workflow (complex) | **Temporal** | MIT | Optional boundary for future long-running cross-service workflows; current product mutations remain in the database-backed job model |
 | Bitemporal versioning | Native tables (`tx_from/tx_to`, `valid_from/valid_to`) + triggers | — | No extension dependency; queryable "as-of" both dimensions |
 
 ### 1.2 Identity & policy — Rust-first
@@ -35,7 +35,7 @@ infrastructure review board.
 |---|---|---|---|
 | Authorisation (PDP) | **Cedar** (embedded) | Apache-2.0 | Amazon's policy language, **pure Rust, in-process** — no network hop on the hot read path; formally verified evaluator; policies-as-data suits VedaFlow versioning |
 | Relationship checks | Cedar entity hierarchy (first choice); **OpenFGA** (Apache-2.0) adapter if ReBAC outgrows Cedar | Apache-2.0 | Start with one engine. The `authorize()` facade hides the choice |
-| Why not OPA | Rego is powerful but adds a Go sidecar + network hop on every inject; Cedar embeds in the gateway binary | | OPA remains a supported adapter for shops that mandate it |
+| Why not OPA | Rego is powerful but adds a Go sidecar + network hop on every context decision; Cedar embeds in the gateway binary | | OPA remains a possible adapter for shops that mandate it, not a shipped runtime |
 | OIDC provider (bundled dev/SMB) | **Rauthy** (Rust, Apache-2.0) | Apache-2.0 | Single-binary Rust OIDC server for SMB "batteries included" mode |
 | Enterprise IdP | Bring-your-own: Entra ID, Okta, Keycloak, Zitadel — standard OIDC + SCIM 2.0 | — | Synveda is an OIDC *client*, never the source of truth for identity |
 | Secrets/PII detection | Rust regex+ML pipeline; **gitleaks** ruleset port for secrets | MIT | Runs in `synveda-ingest` before persistence |
@@ -48,13 +48,13 @@ infrastructure review board.
 | ORM/queries | **sqlx** (compile-time checked SQL — auditability again) |
 | Embeddings serving | **text-embeddings-inference** (Hugging Face, Apache-2.0, Rust) serving **BGE-M3** (dense+sparse) or **Qwen3-Embedding**; per-tenant model pinning, re-embed workflow on model change |
 | Summarisation/extraction LLM | Pluggable: Claude API, or self-hosted via vLLM for air-gapped; behind `Extractor` trait |
-| Observability | OpenTelemetry (traces on every inject/recall with record-ID watermarks), Prometheus, Grafana |
+| Observability | OpenTelemetry on session, capture, Knowledge and ContextRun paths; Prometheus; Grafana/Jaeger |
 | Packaging | Single static gateway binary + Postgres = SMB mode. Helm chart with regional data planes = enterprise mode |
 
 ### 1.4 Explicit non-choices
 
-- **No Elasticsearch/OpenSearch** (JVM estate, Tantivy covers it), **no Redis** initially
-  (Postgres + moka in-process cache), **no Kafka** (PGMQ then Temporal), **no Neo4j** (licence),
+- **No Elasticsearch/OpenSearch** (JVM estate; Postgres FTS is the current lexical leg), **no Redis** initially
+  (Postgres + moka in-process cache), **no Kafka** (leased Postgres jobs, with Temporal as an extension point), **no Neo4j** (licence),
   **no SurrealDB/Memgraph** (BSL). Every one of these is a door left open behind a trait, not a
   dependency taken today.
 
@@ -64,7 +64,7 @@ infrastructure review board.
 
 The insight: **treat organisational knowledge exactly like code**. Memories, context packs,
 prompts, skills, and *policies themselves* flow through propose → review → approve → publish,
-with approval authority derived from the hierarchy. Nothing reaches an agent that wasn't either
+with approval authority derived from governed scopes and grants. Nothing reaches an agent that wasn't either
 (a) auto-derived under policy, or (b) explicitly reviewed at the right level.
 
 ### 2.1 Model — git semantics in Postgres, not git repos
@@ -213,8 +213,8 @@ global `/v1/recall` route and no direct-store adapter path.
 
 | | SMB ("one command") | Enterprise regulated |
 |---|---|---|
-| Footprint | `docker compose up`: gateway binary, Postgres (pgvector+AGE+PGMQ), Rauthy, TEI | Helm: HA Postgres (Patroni/CloudNativePG), Qdrant option, Temporal cluster, customer IdP, regional data planes |
-| Policy pack | `standard`, single-approver | `regulated-strict`, dual approval, published-only injection |
+| Footprint | `docker compose up`: gateway binary, Postgres + pgvector, Rauthy, TEI and optional Temporal | Helm: one gateway replica, CloudNativePG + pgvector, optional TEI/Temporal, customer IdP |
+| Policy pack | `standard`, single-approver | `regulated-strict`, dual approval, published-only context |
 | Residency | single region | control plane global, data planes pinned per division/region |
 | Keys | local deployment KEK wrapping deployment and per-tenant DEKs | the same shipped local provider; cloud KMS/HSM/CMK and WORM custody are extension points, not current support |
 

@@ -101,7 +101,7 @@ fn fixture() -> Fixture {
     Fixture { tenant, nodes }
 }
 
-/// Alice's `MemoryRead` on `target` under `standard`, chains supplied
+/// Alice's `KnowledgeRead` on `target` under `standard`, chains supplied
 /// exactly as the gateway would after resolving them from the
 /// scope-chain cache.
 fn alice_reads(pdp: &Pdp, fx: &Fixture, target: &str, assignments: &[PolicyAssignment]) -> bool {
@@ -116,7 +116,7 @@ fn alice_reads(pdp: &Pdp, fx: &Fixture, target: &str, assignments: &[PolicyAssig
     let principal_scopes = fx.chain("alice-user");
     pdp.authorize(
         &alice,
-        Action::MemoryRead,
+        Action::KnowledgeRead,
         Resource::Scope(fx.node(target).id),
         &AuthzContext {
             sensitivity: Some(Sensitivity::Internal),

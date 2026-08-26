@@ -170,19 +170,6 @@ function Heading({ detail }: { detail: ProposalDetail }) {
             <dd>{detail.close_reason}</dd>
           </>
         ) : null}
-        {detail.promotion ? (
-          <>
-            <dt>opened by</dt>
-            <dd>
-              rule <code>{detail.promotion.rule}</code>
-              <span className="muted">
-                {" "}
-                — checkable against audit seq {detail.promotion.from_seq}..=
-                {detail.promotion.to_seq}
-              </span>
-            </dd>
-          </>
-        ) : null}
       </dl>
     </section>
   );

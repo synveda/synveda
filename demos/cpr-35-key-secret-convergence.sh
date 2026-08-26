@@ -17,7 +17,7 @@ trap cleanup EXIT HUP INT TERM
 $COMPOSE up --detach --wait postgres
 $COMPOSE exec -T postgres createdb -U synveda "$DEMO_DB"
 $COMPOSE exec -T postgres psql -v ON_ERROR_STOP=1 -U synveda -d "$DEMO_DB" -c \
-  "create extension if not exists vector; create extension if not exists age; create extension if not exists pgmq" \
+  "create extension if not exists vector; create extension if not exists btree_gin" \
   >/dev/null
 
 DATABASE_URL="postgres://synveda:synveda-dev@localhost:5432/$DEMO_DB"

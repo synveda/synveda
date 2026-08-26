@@ -29,11 +29,8 @@
  * `crates/synveda-cli/src/spool.rs` as well — that side rewrites the whole
  * file, so a field it does not know is a field it drops.
  *
- * # Nothing reads the previous format
- *
- * A file from before this cut is not migrated, not parsed and not consulted:
- * it held a cursor and no events, so there is nothing in one to recover.
- * `~/.local/state/synveda/sessions/` is removed on sight.
+ * Files must carry the exact current format version. Unknown or malformed
+ * files are refused and never interpreted as an empty delivery queue.
  */
 
 import { createHash } from "node:crypto";
@@ -52,7 +49,7 @@ import {
 import { join } from "node:path";
 
 import { diagnostic, log } from "./log.mjs";
-import { ensureDir, legacySessionDir, spoolDir } from "./paths.mjs";
+import { ensureDir, spoolDir } from "./paths.mjs";
 import type { SessionEventType } from "./types.mjs";
 
 /** The format version this build writes and reads. */
@@ -500,22 +497,6 @@ export function retireIfComplete(spool: Spool, path?: string): boolean {
     return true;
   } catch {
     return false;
-  }
-}
-
-/**
- * Removes the pre-cut state directory, once.
- *
- * Not a migration: the old format held a cursor and no events, so there is
- * nothing in one to carry forward (ADR-0078 decision 6). It is deleted rather
- * than left because a directory of stale cursors nothing reads is a thing
- * somebody will eventually try to interpret.
- */
-export function removeLegacyState(): void {
-  try {
-    rmSync(legacySessionDir(), { recursive: true, force: true });
-  } catch {
-    // Best-effort. A hook never fails over housekeeping.
   }
 }
 

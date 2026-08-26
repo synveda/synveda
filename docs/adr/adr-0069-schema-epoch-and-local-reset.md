@@ -2,7 +2,7 @@
 
 - **Status**: Accepted
 - **Date**: 2026-08-17
-- **Feature(s)**: CPR-2
+- **Feature(s)**: CPR-2, CPR-43
 - **Deciders**: sujitn
 
 ## Context
@@ -146,6 +146,40 @@ checked to be neither `select`, `insert`, `update`, `delete`, `copy` nor
 `with`, because that file is the one place a translator would live. The same
 test refuses any `.down.sql`, which would both make the epoch look reversible
 and be the other place a translation hides.
+
+### 2026-08-26 amendment — the final baseline (CPR-43)
+
+This amendment governs the current implementation and completes the operation
+Prompt 33 anticipated. It does not reopen the hard-cut choice.
+
+**11. Epoch 3 is the clean context-platform baseline.** Epoch 1 founded the
+marker and epoch 2 cut over the scope tree. CPR-43 changes the schema beneath
+every stored aggregate by replacing the development chain, so the build serves
+epoch **3**. A database carrying epoch 1 or 2 is `Older` and receives the exact
+destructive reset instruction. There is no epoch-2-to-3 migration.
+
+**12. The embedded chain contains exactly one migration,
+`0001_context_platform.sql`.** It is pure schema DDL for a fresh database. It
+contains the `schema_metadata` table but no marker row; Rust still stamps that
+row only after sqlx has reached the embedded head. `_sqlx_migrations` remains
+sqlx bookkeeping and is never treated as model identity.
+
+**13. The baseline is mechanically derived from a fresh epoch-2 schema, then
+reviewed as source.** Dumping schema objects from a disposable empty database
+is a way to serialise the design already expressed by the migrations; it reads
+and carries no application row. The committed file removes obsolete objects,
+owners, environment-specific ACLs and extension installation, and the gate
+rejects top-level `SELECT`, `INSERT`, `UPDATE`, `DELETE`, `COPY` and `WITH`.
+Required extensions remain an explicit bootstrap prerequisite because their
+availability is deployment infrastructure, not application schema history.
+
+**14. The squash deliberately invalidates every earlier migration checksum.**
+That is why the epoch moves at the same checkpoint. Preflight rejects an
+epoch-2 database before `MIGRATOR.run`, so sqlx never reports a confusing
+missing-version/checksum error and never applies the baseline over populated
+rows. Reset creates an empty database, installs its required extensions and
+runs only the new baseline. No compatibility view, export-on-start, table
+rename or row translator bridges the boundary.
 
 ## Options considered
 

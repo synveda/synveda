@@ -222,7 +222,7 @@ if [ "$purge" = yes ]; then
 else
   say ""
   say "Your data is still here, in four Docker volumes:"
-  say "    pg-data  rauthy-data  tei-cache  gateway-search"
+  say "    pg-data  rauthy-data  tei-cache"
   say "Reinstalling and running \`synveda init\` picks them up again — unless"
   say "the release you reinstall serves a different schema epoch, which it"
   say "will tell you at startup (CPR-2). Starting over on the same install is"
@@ -232,5 +232,5 @@ else
   say "memory:"
   say "    ./uninstall.sh --purge"
   say "or, if you have already removed the profile:"
-  say "    docker volume rm pg-data rauthy-data tei-cache gateway-search"
+  say "    docker volume rm pg-data rauthy-data tei-cache"
 fi

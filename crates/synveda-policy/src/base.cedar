@@ -100,7 +100,6 @@ forbid (
     principal has token_scope &&
     !(resource in principal.token_scope) &&
     !([
-        Synveda::Action::"MemoryRead",
         Synveda::Action::"KnowledgeRead",
         Synveda::Action::"PromptRead",
         Synveda::Action::"ContextPackRead",
@@ -184,24 +183,12 @@ unless {
 // grant-key vocabulary since CPR-7). This is its mirror. Nothing reaches a
 // *reader* at `restricted`. Stable Knowledge can cross this floor only through
 // a matched, immutable relaxation whose VedaFlow matrix resolved at the tier
-// it declared. The retired record plane has no relaxation path.
+// it declared.
 //
 // `context.sensitivity` is required by the schema, so this forbid can never
 // be skipped for want of the attribute — the ADR-0015 decision 5 shape,
 // applied to the rule that would be most dangerous to lose silently.
 //
-// There is deliberately no carve-out for the material's own author at their
-// own personal scope. Under ADR-0038 decision 8 the only way a record
-// carries this tier is a reclassification two people approved, one of them
-// an administrator, so what an owner loses here is access a governance
-// decision deliberately removed — and an owner exception would make the acceptance
-// criterion false as written.
-forbid (
-    principal,
-    action == Synveda::Action::"MemoryRead",
-    resource
-) when { context.sensitivity == "restricted" };
-
 // A matched immutable Knowledge relaxation may lift only this tier floor.
 // Every other forbid in this base layer still wins.
 forbid (

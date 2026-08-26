@@ -1,11 +1,6 @@
-//! Storage traits and their Postgres/pgvector implementations, including the
-//! bitemporal record tables and, later, the `VectorIndex` trait that isolates
-//! pgvector from the Qdrant scale-out path (tech plan §1.1).
-//!
-//! Bitemporal layout (FND-4, ADR-0006): each bitemporal entity is a
-//! current/history table pair. Transaction time is maintained exclusively by
-//! database triggers; valid time is application data. See
-//! `migrations/0001_bitemporal_records.sql` and the [`records`] module.
+//! Postgres storage for the context platform. Stable aggregates keep immutable
+//! revisions where history matters; tenant domain tables are protected by
+//! enabled and forced RLS.
 //!
 //! Tenant isolation backstop (TEN-2, ADR-0009): tenant-scoped tables carry
 //! forced RLS policies keyed to a transaction-local GUC. Reach them through
@@ -46,7 +41,6 @@ pub mod capture;
 pub mod configuration;
 pub mod console_sessions;
 pub mod context;
-pub mod dedup;
 pub mod directory;
 pub mod directory_sync;
 pub mod epoch;
@@ -63,17 +57,13 @@ pub mod packs;
 pub mod policy_assignments;
 pub mod policy_packs;
 pub mod projects;
-pub mod promotion;
 pub mod prompts;
 pub mod quarantine;
-pub mod records;
 pub mod relaxations;
 pub mod repositories;
 pub mod reset;
-pub mod retention;
 pub mod rls;
 pub mod scopes;
-pub mod search;
 pub mod sessions;
 pub mod skills;
 pub mod tenant_secrets;

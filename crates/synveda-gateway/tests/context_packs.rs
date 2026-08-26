@@ -10,22 +10,22 @@
 //!   `regulated-strict` above a team that is now a curator *and* a steward,
 //!   two distinct people, where FLOW-3 had left the cell at one curator
 //!   (decision 15);
-//! - **"re-embeds atomically" is measured from the reader's side** — no
-//!   inject ever composes half a pack, and the previous version composes in
-//!   full until the new one is entirely embedded *and* published;
+//! - **immutable chunk cutover is measured from the reader's side** — no
+//!   context run ever composes half a pack, and the previous version composes
+//!   in full until the new one is entirely stored *and* published;
 //! - **"next session" is satisfied as "next call"**, because the pack
 //!   channel is read live on the composition path;
 //! - **pack content composes as pinned material, ranked**, and what does
 //!   not fit is named in the index tier by bundle, document and section
 //!   rather than silently dropped or given a dead legacy handle;
-//! - **`ContextPackRead` admits pack chunks and `MemoryRead` never does**,
+//! - **`ContextPackRead` admits pack chunks and `KnowledgeRead` never does**,
 //!   tested under a stored pack that grants one and denies the other, which
 //!   is the only shape in which the claim can be false;
 //! - **an edited published document demotes its own chunks**;
 //! - **a rewind restores the previous version by moving a ref**, with no
-//!   re-embedding;
+//!   content rewrite;
 //! - **a document carrying a live credential is quarantined at authoring**,
-//!   ahead of the embedder;
+//!   ahead of persistence;
 //! - **every act is on the chain**, and no payload carries document text.
 //!
 //! Tests need a live Postgres: they read `DATABASE_URL` and skip with a
@@ -47,7 +47,6 @@ use synveda_gateway::telemetry;
 use synveda_identity::Hs256Verifier;
 use synveda_ingest::embedding::{AnyEmbedder, DeterministicEmbedder};
 use synveda_policy::Pdp;
-use synveda_retrieval::index::SearchIndex;
 use synveda_store::{access, identities, scopes, tenants};
 use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
 use synveda_types::scope::{Scope, ScopeKind};
@@ -76,12 +75,6 @@ fn metrics_handle() -> PrometheusHandle {
         .clone()
 }
 
-fn index_root() -> std::path::PathBuf {
-    std::env::temp_dir()
-        .join("synveda-prmt2-tests")
-        .join(TenantId::new().to_string())
-}
-
 fn state(url: &str, pdp: Arc<Pdp>) -> AppState {
     AppState {
         pool: PgPoolOptions::new()
@@ -95,9 +88,8 @@ fn state(url: &str, pdp: Arc<Pdp>) -> AppState {
         public_origin: "http://127.0.0.1:8120".to_owned(),
         pdp,
         service_token_max_ttl: Duration::from_secs(3600),
-        search_index: Arc::new(SearchIndex::open(index_root()).expect("open sidecar")),
         embedder: Arc::new(AnyEmbedder::Deterministic(DeterministicEmbedder::new())),
-        inject_embed_timeout: Duration::from_millis(100),
+        context_embed_timeout: Duration::from_millis(100),
         // TEN-4 (ADR-0064): a fixed test KEK, so a suite that touches a
         // sealed column seals rather than skipping. `Kms::Disabled` is the
         // production default when no key is configured.
@@ -547,8 +539,8 @@ async fn a_pack_reaches_a_session_only_through_review_and_costs_two_people_above
         "the runbook's two sections cut into at least two chunks: {document}"
     );
     assert_eq!(
-        document["embedded"], document["chunks"],
-        "a first author embeds every chunk: {document}"
+        document["written_chunks"], document["chunks"],
+        "a first author writes every immutable chunk: {document}"
     );
     assert!(
         document["published"].is_null(),
@@ -753,15 +745,14 @@ async fn a_pack_published_at_a_local_scope_still_costs_one_curator() {
 
 // ── Atomicity, measured from the reader's side ───────────────────────────
 
-/// **No inject ever composes half a pack.** The previous version composes
-/// in full until the new one is entirely embedded *and* published, and the
+/// **No context run ever composes half a pack.** The previous version composes
+/// in full until the new one is entirely stored *and* published, and the
 /// new one in full thereafter.
 ///
-/// Two mechanisms make that true and this test exercises both: chunk rows
-/// land with their embeddings or not at all (ADR-0023 decision 2), and the
-/// ref cannot move to a commit whose chunks do not yet exist — because the
-/// commit names addresses that only exist once the authoring transaction
-/// committed (ADR-0050 decision 5).
+/// Chunk rows and their object address land atomically, and the ref cannot
+/// move to a commit whose chunks do not yet exist — because the commit names
+/// addresses that only exist once the authoring transaction committed
+/// (ADR-0050 decision 5).
 ///
 /// It is also **an edited published document demoting its own chunks**
 /// (decision 3): between the edit and the publication the *old* version is
@@ -783,7 +774,7 @@ async fn an_edit_composes_as_all_of_the_old_version_until_all_of_the_new_one_is_
     assert!(v1.contains("three days"), "v1 body one: {v1}");
     assert!(v1.contains("five hundred"), "v1 body two: {v1}");
 
-    // The edit. It re-chunks and re-embeds, and moves the document's
+    // The edit. It re-chunks and writes a new immutable version, and moves the document's
     // address — which takes every chunk of the old version off nothing at
     // all, because the channel still names the old address.
     let (status, edited) =
@@ -791,8 +782,8 @@ async fn an_edit_composes_as_all_of_the_old_version_until_all_of_the_new_one_is_
     assert_eq!(status, StatusCode::OK, "{edited}");
     let document = &edited["documents"][0];
     assert!(
-        document["embedded"].as_u64().unwrap_or(0) > 0,
-        "an edit embeds the new version's chunks: {document}"
+        document["written_chunks"].as_u64().unwrap_or(0) > 0,
+        "an edit writes the new version's chunks: {document}"
     );
     assert_eq!(
         document["published"]["current"],
@@ -832,23 +823,25 @@ async fn an_edit_composes_as_all_of_the_old_version_until_all_of_the_new_one_is_
     );
 }
 
-/// **Re-authoring an unchanged document re-embeds nothing.** The chunker is
+/// **Re-authoring an unchanged document rewrites nothing.** The chunker is
 /// deterministic and the address covers exactly what a reviewer consents
 /// to, so identical bytes find their chunks already there (ADR-0050
 /// decision 4).
 #[tokio::test]
-async fn re_authoring_unchanged_bytes_embeds_nothing() {
+async fn re_authoring_unchanged_bytes_rewrites_nothing() {
     let Some(w) = world().await else { return };
     let (_, first) = author(&w, &w.alice, w.platform, "payments", "refunds.md", V1).await;
-    let embedded = first["documents"][0]["embedded"].as_u64().unwrap_or(0);
-    assert!(embedded > 0, "the first author embeds: {first}");
+    let written = first["documents"][0]["written_chunks"]
+        .as_u64()
+        .unwrap_or(0);
+    assert!(written > 0, "the first author writes chunks: {first}");
 
     let (status, again) = author(&w, &w.alice, w.platform, "payments", "refunds.md", V1).await;
     assert_eq!(status, StatusCode::OK, "{again}");
     assert_eq!(
-        again["documents"][0]["embedded"],
+        again["documents"][0]["written_chunks"],
         json!(0),
-        "the same bytes chunk identically, so nothing is re-embedded: {again}"
+        "the same bytes chunk identically, so nothing is rewritten: {again}"
     );
     assert_eq!(
         again["documents"][0]["object_hash"], first["documents"][0]["object_hash"],
@@ -924,12 +917,12 @@ async fn a_pack_too_large_for_the_budget_is_named_rather_than_dropped() {
     );
 }
 
-/// **`ContextPackRead` admits pack chunks and `MemoryRead` never does**
+/// **`ContextPackRead` admits pack chunks and `KnowledgeRead` never does**
 /// (ADR-0050 decision 8) — the case packs exist for, and the only shape in
 /// which it can be false.
 ///
 /// A stored pack that grants `ContextPackRead` at the department and
-/// denies `MemoryRead` there. A reader who may compose *no* memory from
+/// denies `KnowledgeRead` there. A reader who may compose *no* memory from
 /// that scope still receives its conventions; a memory record published at
 /// the same scope, by the same people, does not compose. One decision,
 /// admitting one kind of material.
@@ -961,7 +954,7 @@ async fn a_reader_with_no_readable_memory_at_a_scope_still_gets_its_conventions(
         "the baseline: under the default pack it composes: {before}"
     );
 
-    // Now a pack that grants the tenant everything *except* `MemoryRead`.
+    // Now a pack that grants the tenant everything *except* `KnowledgeRead`.
     // Cedar is deny-by-default, so naming the actions is the grant.
     w.pdp
         .install_source(
@@ -973,7 +966,7 @@ async fn a_reader_with_no_readable_memory_at_a_scope_still_gets_its_conventions(
                  action in [
                    Synveda::Action::"ContextPackRead",
                    Synveda::Action::"ContextPackWrite",
-                   Synveda::Action::"MemoryWrite",
+                   Synveda::Action::"KnowledgeWrite",
                    Synveda::Action::"ChannelRead",
                    Synveda::Action::"ChannelPublish",
                    Synveda::Action::"ProposalRead",
@@ -1007,7 +1000,7 @@ async fn a_reader_with_no_readable_memory_at_a_scope_still_gets_its_conventions(
         assert_eq!(
             decision["allowed"],
             json!(false),
-            "the MemoryRead decision at the department is a deny, and the pack \
+            "the KnowledgeRead decision at the department is a deny, and the pack \
              chunk composed anyway: {decision}"
         );
     }
@@ -1016,12 +1009,12 @@ async fn a_reader_with_no_readable_memory_at_a_scope_still_gets_its_conventions(
 // ── Rewind, and the scan ────────────────────────────────────────────────
 
 /// **A rewind restores the previous version by moving a ref**, with no
-/// re-embedding and no half-swapped state (ADR-0050 decision 6).
+/// content rewrite and no half-swapped state (ADR-0050 decision 6).
 ///
 /// `ContextPackRead` is what makes it decidable, which discharges ADR-0036
 /// decision 3 for the second of the three kinds it refused by name.
 #[tokio::test]
-async fn a_rewind_restores_the_previous_version_without_re_embedding_anything() {
+async fn a_rewind_restores_the_previous_version_without_rewriting_content() {
     let Some(w) = world().await else { return };
     author(&w, &w.alice, w.eng, "payments", "runbooks/refunds.md", V1).await;
     let first = review_and_publish(
@@ -1079,21 +1072,21 @@ async fn a_rewind_restores_the_previous_version_without_re_embedding_anything() 
 }
 
 /// **A document carrying a live credential is quarantined at authoring**
-/// (ADR-0050 decision 11), and the scan runs ahead of the embedder — so no
-/// secret reaches vector space.
+/// (ADR-0050 decision 11), and the scan runs ahead of persistence — so no
+/// secret reaches stored authored context.
 ///
 /// This is the first surface where bulk external text enters the product:
 /// a prompt is short and hand-written, and PRMT-1 does not scan one. The
 /// first thing a customer does with a context pack is upload an existing
 /// runbook, and runbooks carry connection strings.
 #[tokio::test]
-async fn a_document_carrying_a_credential_is_stopped_before_the_embedder() {
+async fn a_document_carrying_a_credential_is_stopped_before_persistence() {
     let Some(w) = world().await else { return };
     // A GitHub token rather than a connection string: MEM-2's overlap
     // resolution is positional, and in `postgres://user:pass@host` the
     // `email` rule matches `pass@host` first — so that one *redacts* (PII)
     // rather than quarantining (secret). The guarantee this test is about
-    // holds either way — nothing reaches vector space unscrubbed — but the
+    // holds either way — nothing reaches stored context unscrubbed — but the
     // disposition under test here is the quarantine rung.
     let secret = "ghp_0123456789abcdefghijklmnopqrstuvwxyzAB";
     let (status, refused) = author(
@@ -1116,11 +1109,11 @@ async fn a_document_carrying_a_credential_is_stopped_before_the_embedder() {
         "the refusal names what stopped it: {refusal}"
     );
     assert!(
-        refusal.contains("not embedded"),
-        "and says the secret never reached vector space: {refusal}"
+        refusal.contains("not stored"),
+        "and says the secret never reached persistence: {refusal}"
     );
 
-    // Nothing was written: no draft, no chunk, no record.
+    // Nothing was written: no draft, object or chunk.
     let (status, listing) = get(
         &w.app,
         &format!("/v1/context-packs?scope_id={}", w.platform),

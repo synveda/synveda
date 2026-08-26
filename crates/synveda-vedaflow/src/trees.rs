@@ -268,7 +268,7 @@ mod tests {
     use synveda_types::AssetKind;
 
     fn object(byte: u8) -> ObjectHash {
-        crate::hash::object_hash(AssetKind::Memory, &[byte])
+        crate::hash::object_hash(AssetKind::Knowledge, &[byte])
     }
 
     #[test]

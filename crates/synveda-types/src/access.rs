@@ -43,9 +43,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{Error, GrantId, GroupId, IdentityId, InviteId, Result, ScopeId, TenantId};
 
-/// Longest principal id (a token subject), in characters. The same bound
-/// `role_bindings.subject` and `identities.subject` carry, because it is the
-/// same string.
+/// Longest principal id (a token subject), in characters. The identity and
+/// access planes share this bound because they carry the same string.
 pub const MAX_PRINCIPAL_CHARS: usize = 255;
 
 /// Longest invited email address, in characters. RFC 5321's practical

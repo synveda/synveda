@@ -180,7 +180,7 @@ fn ac_decisions_are_microsecond_level() {
             0 => Action::ScopeRead,
             1 => Action::ScopeCreate,
             2 => Action::ScopeUpdate,
-            3 => Action::MemoryRead,
+            3 => Action::KnowledgeRead,
             _ => Action::ScopeUpdate,
         };
         let start = Instant::now();

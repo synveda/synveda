@@ -641,11 +641,9 @@ async fn respond<T: IntoResponse>(
 
 /// What a decision on this plane is **about** (CPR-6, ADR-0073 decision 3).
 ///
-/// CPR-5 named the tenant for all thirteen and recorded why: the Cedar entity
-/// model still materialised `Scope` from `hierarchy_nodes`, so a governed
-/// scope had no chain to decide against. It has one now, so a membership read
-/// or a grant names the scope it is actually about, curating a group names the
-/// group, and revoking names **the grant** — which is what lets a pack price
+/// A membership read or a grant names the scope it is actually about,
+/// curating a group names the group, and revoking names **the grant** — which
+/// is what lets a pack price
 /// taking away a directory-managed grant differently from taking away one
 /// somebody typed.
 enum Subject<'a> {

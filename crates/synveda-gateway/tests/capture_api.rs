@@ -57,18 +57,10 @@ fn state(url: &str) -> AppState {
         public_origin: "http://127.0.0.1:8120".to_owned(),
         pdp: Arc::new(synveda_policy::Pdp::new().expect("build embedded PDP")),
         service_token_max_ttl: Duration::from_secs(3600),
-        search_index: Arc::new(
-            synveda_retrieval::SearchIndex::open(
-                std::env::temp_dir()
-                    .join("synveda-cpr18-tests")
-                    .join(TenantId::new().to_string()),
-            )
-            .expect("open search sidecar"),
-        ),
         embedder: Arc::new(synveda_ingest::embedding::AnyEmbedder::Deterministic(
             synveda_ingest::embedding::DeterministicEmbedder::new(),
         )),
-        inject_embed_timeout: Duration::from_millis(100),
+        context_embed_timeout: Duration::from_millis(100),
         keys: Arc::new(synveda_store::keys::KeyRing::new(
             synveda_crypto::Kms::Disabled,
         )),
@@ -490,16 +482,13 @@ async fn candidates_are_reviewable_only_and_every_decision_uses_vedaflow() {
             .fetch_one(&state.pool)
             .await
             .expect("count Knowledge after extraction");
-    let old_records: i64 = sqlx::query_scalar("select count(*) from records where tenant_id = $1")
-        .bind(tenant_id.as_uuid())
-        .fetch_one(&state.pool)
-        .await
-        .expect("count retired records");
+    let retired_table: Option<String> =
+        sqlx::query_scalar("select to_regclass('public.records')::text")
+            .fetch_one(&state.pool)
+            .await
+            .expect("look for the retired Record table");
     assert_eq!(after_extraction, 0, "extraction may only create candidates");
-    assert_eq!(
-        old_records, 0,
-        "the deleted writer may not dual-write records"
-    );
+    assert!(retired_table.is_none(), "the retired Record table returned");
 
     let values = candidates(&app, &token, &batch_id).await;
     assert_eq!(values.len(), phrases.len());
@@ -1569,9 +1558,9 @@ async fn pulseboard_cross_session_team_knowledge_loop_is_governed_end_to_end() {
     );
 
     // The product path remains one model: every publication has a VedaFlow
-    // change, no record dual-write occurred, and the deleted global runtime
+    // change, the retired aggregate is absent, and the deleted global runtime
     // endpoints are still hard 404s.
-    let counts: (i64, i64, i64, i64, i64, i64, i64, i64, i64, i64) = sqlx::query_as(
+    let counts: (i64, i64, i64, i64, i64, i64, i64, i64, i64, bool) = sqlx::query_as(
         "select \
            (select count(*) from sessions where tenant_id = $1), \
            (select count(*) from session_events where tenant_id = $1), \
@@ -1582,13 +1571,13 @@ async fn pulseboard_cross_session_team_knowledge_loop_is_governed_end_to_end() {
            (select count(*) from knowledge_revisions where tenant_id = $1), \
            (select count(*) from knowledge_changes where tenant_id = $1), \
            (select count(*) from session_context_runs where tenant_id = $1), \
-           (select count(*) from records where tenant_id = $1)",
+           (select to_regclass('public.records') is not null)",
     )
     .bind(tenant_id.as_uuid())
     .fetch_one(&state.pool)
     .await
     .expect("read MVP database state");
-    assert_eq!(counts, (3, 5, 2, 5, 5, 4, 4, 4, 2, 0));
+    assert_eq!(counts, (3, 5, 2, 5, 5, 4, 4, 4, 2, false));
     let active: i64 = sqlx::query_scalar(
         "select count(*) from knowledge_items where tenant_id = $1 and lifecycle_state = 'active'",
     )

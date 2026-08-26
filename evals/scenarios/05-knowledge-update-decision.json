@@ -34,7 +34,7 @@
     "session_id": "eval:knowledge-update:decision:probe"
   },
   "expect": {
-    "records": ["reconciliation-after"],
+    "knowledge": ["reconciliation-after"],
     "must_not_contain": ["ledger-archive"]
   }
 }

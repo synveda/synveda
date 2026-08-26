@@ -8,8 +8,8 @@
 //! future caller from mistaking a database filter for permission.
 //!
 //! Lexical rank comes from the immutable revision's stored `tsvector`.
-//! Semantic candidates come from `knowledge_revision_embeddings`, never from
-//! `record_embeddings`; there is no compatibility bridge between aggregates.
+//! Semantic candidates come from `knowledge_revision_embeddings`; both legs
+//! address the same current Knowledge revision.
 
 use chrono::{DateTime, Utc};
 use sqlx::PgConnection;

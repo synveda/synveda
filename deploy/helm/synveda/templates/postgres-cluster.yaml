@@ -30,12 +30,12 @@ spec:
       # The extension binaries are in the image; creating them is a
       # bootstrap act because it needs a superuser.
       #
-      # PGMQ backs the current durable session-event delivery queue and must
-      # exist before the migration chain reaches its queue definitions.
-      # `vector` and `btree_gin` create themselves in the chain and are not
-      # repeated here.
+      # Keep extension installation an explicit superuser bootstrap act; the
+      # migration repeats these idempotently so every deployment shape has
+      # the same self-describing baseline.
       postInitApplicationSQL:
-        - create extension if not exists pgmq;
+        - create extension if not exists vector;
+        - create extension if not exists btree_gin;
 
   postgresql:
     parameters:

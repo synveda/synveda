@@ -57,3 +57,18 @@ one of them is a tenant: **broad** (every scope and tier in the tenant — the
 regime hash partitioning would help) and **selective** (one scope, one tier —
 the regime migration 0016 predicted the planner would scan exactly, and the one
 partitioning by tenant cannot reach).
+
+## CPR-43 hard-cut retirement (2026-08-26)
+
+TEN-3 remains a completed historical experiment, but its executable harness
+measured the retired Record/embedding schema and cannot be represented as a
+current Knowledge benchmark. CPR-43 therefore deleted `ann_bench.rs`,
+`ten3-dense-leg.json`, its publisher/checker and the CI target. The original
+measurements and negative partitioning decision remain in ADR-0063 and the
+STATUS ledger as historical evidence.
+
+`demos/ten-3-dense-leg-sweep.sh` now points at the current Knowledge semantic,
+ContextRun and bounded-graph tests and at `make eval-retrieval`. CPR-40's
+product evaluation plus the current retrieval suite own all new quality and
+latency claims. No old schema, index name or translation path was kept to make
+the former benchmark runnable.

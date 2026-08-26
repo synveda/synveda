@@ -3,8 +3,7 @@
  *
  * The properties worth pinning are the ones that make it *durable* rather than
  * a file that happens to hold events: the write is atomic, the hash matches
- * what the Rust side computes, an unknown version is refused, and the previous
- * cursor format is not read.
+ * what the Rust side computes, and any non-current shape is refused.
  */
 
 import assert from "node:assert/strict";
@@ -34,13 +33,12 @@ import {
   readSpool,
   record,
   recordAttempt,
-  removeLegacyState,
   retireIfComplete,
   saveSpool,
   spoolFile,
   SPOOL_VERSION,
 } from "./spool.mjs";
-import { legacySessionDir, spoolDir } from "./paths.mjs";
+import { spoolDir } from "./paths.mjs";
 
 let home: string;
 let previous: string | undefined;
@@ -212,8 +210,8 @@ describe("the spool", () => {
    * and no events, so parsing one optimistically would produce an empty spool
    * that silently claims there is nothing to deliver.
    */
-  test("the previous cursor format is not read", () => {
-    const path = spoolFile("harness-legacy");
+  test("a non-current cursor shape is not read", () => {
+    const path = spoolFile("harness-pre-cut");
     writeFileSync(
       path,
       JSON.stringify({
@@ -311,21 +309,4 @@ describe("the spool", () => {
     assert.ok(loadSpool("retire-2"));
   });
 
-  /**
-   * Not a migration — there is nothing in an old spool to carry forward. The
-   * directory is removed so nobody later tries to interpret a pile of stale
-   * cursors.
-   */
-  test("the pre-cut state directory is removed rather than migrated", () => {
-    const legacy = legacySessionDir();
-    // Create it the way the old adapter would have.
-    mkdirSync(legacy, { recursive: true });
-    writeFileSync(join(legacy, "old.json"), '{"cursor":"uuid-1"}');
-    assert.deepEqual(readdirSync(legacy), ["old.json"]);
-    removeLegacyState();
-    assert.throws(
-      () => readdirSync(legacy),
-      "the old cursor directory is deleted, not left for somebody to interpret",
-    );
-  });
 });

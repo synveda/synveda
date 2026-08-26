@@ -18,7 +18,7 @@ trap cleanup EXIT HUP INT TERM
 $COMPOSE up --detach --wait postgres
 $COMPOSE exec -T postgres createdb -U synveda "$DEMO_DB"
 $COMPOSE exec -T postgres psql -v ON_ERROR_STOP=1 -U synveda -d "$DEMO_DB" -c \
-  "create extension if not exists vector; create extension if not exists age; create extension if not exists pgmq" \
+  "create extension if not exists vector; create extension if not exists btree_gin" \
   >/dev/null
 
 DATABASE_URL="postgres://synveda:synveda-dev@localhost:5432/$DEMO_DB"
@@ -32,14 +32,14 @@ echo "==> CPR-16 VedaFlow/PDP vocabulary and forced-RLS inventory"
 cargo test -p synveda-policy --test approvals --test packs --test pdp
 cargo test -p synveda-store --test rls every_tenant_scoped_table_is_covered_and_forced -- --nocapture
 
-old_records=$($COMPOSE exec -T postgres psql -At -U synveda -d "$DEMO_DB" -c \
-  "select count(*) from records")
+retired_table=$($COMPOSE exec -T postgres psql -At -U synveda -d "$DEMO_DB" -c \
+  "select (to_regclass('records') is not null)::int")
 changes=$($COMPOSE exec -T postgres psql -At -U synveda -d "$DEMO_DB" -c \
   "select count(*) from knowledge_changes")
-if [ "$old_records" -ne 0 ] || [ "$changes" -eq 0 ]; then
-  echo "CPR-16 cutoff failed: records=$old_records Knowledge changes=$changes" >&2
+if [ "$retired_table" -ne 0 ] || [ "$changes" -eq 0 ]; then
+  echo "CPR-16 cutoff failed: retired_table=$retired_table Knowledge changes=$changes" >&2
   exit 1
 fi
 
 echo ""
-echo "CPR-16 lifecycle: $changes governed changes, zero old records; acceptance criteria pass."
+echo "CPR-16 lifecycle: $changes governed changes and no retired Record table; acceptance criteria pass."

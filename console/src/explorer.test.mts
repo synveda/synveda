@@ -29,7 +29,7 @@ function capabilities(overrides: Partial<Capabilities> = {}): Capabilities {
     pack: { name: "regulated-strict", version: 3, origin: { kind: "assigned", scope_id: ABOVE } },
     roles: ["viewer"],
     actions: { "proposal.read": true, "proposal.review": false, "policy.assign": false },
-    read_tiers: { "memory.read": ["public", "internal"], "skill.read": [] },
+    read_tiers: { "knowledge.read": ["public", "internal"], "skill.read": [] },
     ...overrides,
   };
 }
@@ -44,7 +44,7 @@ test("a tiered read with no permitted tier is not listed as readable", () => {
   // An empty tier list is a real answer — "nothing here, at any tier" — and
   // rendering the action name with an empty value would read as a partial
   // permission rather than as none.
-  assert.deepEqual(mayRead(capabilities()), [["memory.read", ["public", "internal"]]]);
+  assert.deepEqual(mayRead(capabilities()), [["knowledge.read", ["public", "internal"]]]);
 });
 
 test("offers is false for a probe that never arrived", () => {

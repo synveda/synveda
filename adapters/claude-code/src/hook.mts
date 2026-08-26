@@ -107,7 +107,8 @@ async function main(): Promise<void> {
 
 /**
  * The payload is ground truth — it says which event actually fired. The
- * argument from `hooks.json` is the fallback and the cross-check.
+ * argument from `hooks.json` selects which of the two SessionStart handlers is
+ * registered and cross-checks every other registration.
  *
  * Since SKIL-4 there is one exception, and it is the argument's first
  * load-bearing use: **two entries ride `SessionStart`** — the inject that
@@ -117,29 +118,14 @@ async function main(): Promise<void> {
  * nothing is the right answer to one.
  */
 function resolveMode(argument: string | undefined, event: string | undefined): Mode {
-  if (argument === "skills") {
-    return event === undefined || event === "SessionStart" ? "skills" : "none";
+  if (argument === "skills" && event === "SessionStart") return "skills";
+  if (argument === "session-start" && event === "SessionStart") return "start";
+  if (
+    argument === "turn" &&
+    (event === "Stop" || event === "PreCompact" || event === "SessionEnd")
+  ) {
+    return "turn";
   }
-  switch (event) {
-    case "SessionStart":
-      return "start";
-    case "Stop":
-    case "PreCompact":
-    case "SessionEnd":
-      return "turn";
-    case undefined:
-      break;
-    default:
-      // Registered for an event this adapter does not handle.
-      return "none";
-  }
-  // The argument is the fallback when no payload named an event. Only the two
-  // names `hooks.json` actually registers are honoured: the pre-cut arguments
-  // (`observe`, `flush`) are gone with the plane they named, and a hook
-  // configuration still passing one does nothing rather than guessing
-  // (ADR-0078 decision 7).
-  if (argument === "session-start") return "start";
-  if (argument === "turn") return "turn";
   return "none";
 }
 

@@ -33,7 +33,6 @@ use synveda_gateway::telemetry;
 use synveda_identity::Hs256Verifier;
 use synveda_ingest::embedding::{AnyEmbedder, DeterministicEmbedder};
 use synveda_policy::Pdp;
-use synveda_retrieval::index::SearchIndex;
 use synveda_store::{access, identities, knowledge as stored, rls, scopes, tenants};
 use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
 use synveda_types::knowledge::{
@@ -71,13 +70,7 @@ fn metrics_handle() -> PrometheusHandle {
         .clone()
 }
 
-fn index_root() -> std::path::PathBuf {
-    std::env::temp_dir()
-        .join("synveda-aud2-tests")
-        .join(TenantId::new().to_string())
-}
-
-fn state_with(url: &str, search_index: Arc<SearchIndex>, pdp: Arc<Pdp>) -> AppState {
+fn state_with(url: &str, pdp: Arc<Pdp>) -> AppState {
     AppState {
         pool: PgPoolOptions::new()
             // Each test owns one app and issues its requests sequentially. A
@@ -94,9 +87,8 @@ fn state_with(url: &str, search_index: Arc<SearchIndex>, pdp: Arc<Pdp>) -> AppSt
         public_origin: "http://127.0.0.1:8120".to_owned(),
         pdp,
         service_token_max_ttl: Duration::from_secs(3600),
-        search_index,
         embedder: Arc::new(AnyEmbedder::Deterministic(DeterministicEmbedder::new())),
-        inject_embed_timeout: Duration::from_millis(100),
+        context_embed_timeout: Duration::from_millis(100),
         // TEN-4 (ADR-0064): a fixed test KEK, so a suite that touches a
         // sealed column seals rather than skipping. `Kms::Disabled` is the
         // production default when no key is configured.
@@ -471,8 +463,7 @@ async fn world() -> Option<World> {
     .await;
 
     let pdp = Arc::new(Pdp::new().expect("build the embedded PDP"));
-    let index = Arc::new(SearchIndex::open(index_root()).expect("open sidecar"));
-    let app = router(state_with(&database_url(), index, pdp));
+    let app = router(state_with(&database_url(), pdp));
 
     // The two audit readers, granted through the product surface by the
     // administrator: dana at the tenant root, erin at platform only —
@@ -957,7 +948,7 @@ async fn the_subject_of_an_audit_answer_cannot_read_the_audit_plane() {
 /// **No content reaches an audit answer** (ADR-0045 decision 6).
 ///
 /// Swept over every route's full response body: an auditor holds
-/// `AuditRead` and no `MemoryRead`, and the surface has no content path to
+/// `AuditRead` and no `KnowledgeRead`, and the surface has no content path to
 /// forget to gate. Knowledge bodies are what an auditor would otherwise
 /// acquire here, and this is the last route by which they could.
 #[tokio::test]

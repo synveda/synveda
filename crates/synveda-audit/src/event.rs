@@ -184,9 +184,8 @@ pub enum AuditAction {
     SessionEventsAppended,
     /// Context was composed for a session (CPR-10, ADR-0076 decision 7). The
     /// payload carries the block's watermark — its hash, the entry count, the
-    /// tokens against the budget — and not the block, for
-    /// [`AuditAction::ContextInjected`]'s reason: the chain records what an
-    /// agent was given, and the run row holds what that was.
+    /// tokens against the budget — and not the block: the chain records what
+    /// an agent was given, and the run row holds what that was.
     SessionContextComposed,
     /// A bounded policy-visible Knowledge pool was retrieved for a context
     /// run. Carries revision ids or hashes according to retention, score
@@ -262,47 +261,11 @@ pub enum AuditAction {
     ServiceIdentityRegistered,
     /// A service identity was revoked (row and personal leaf deleted).
     ServiceIdentityRevoked,
-    /// An observe batch was admitted to the ingestion buffer — one event
-    /// per batch, counts and id range in the payload, never one row per
-    /// event (MEM-1, ADR-0020 decision 5; ADR-0019 decision 4). Since
-    /// MEM-2 the payload also carries quarantined/denied counts and the
-    /// finding rule summary — never matched text (ADR-0021).
-    MemoryObserved,
-    /// A reviewer released a quarantined observe event into the pipeline
-    /// (MEM-2, ADR-0021 decision 7).
+    /// A reviewer released a quarantined session event for capture.
     QuarantineReleased,
-    /// A reviewer rejected a quarantined observe event; its staging row
-    /// stays provenance-only, forever signal-less.
+    /// A reviewer rejected a quarantined session event; the immutable event
+    /// remains as provenance but cannot become a capture source.
     QuarantineRejected,
-    /// The extraction pipeline processed a tenant commit-group of staged
-    /// events — one event per group, ids/counts/classes in the payload,
-    /// never one row per record (MEM-3, ADR-0022 decision 5). `failure`
-    /// marks a dead-lettered signal (retries exhausted).
-    MemoryExtracted,
-    /// The extraction pipeline closed the valid windows of records a newer
-    /// statement replaced (MEM-5, ADR-0039 decision 13) — one event per
-    /// commit group, with the id pairs, the judge, the signals as integer
-    /// per-mille, and the instant each window closed at. Never record
-    /// content.
-    ///
-    /// Its own action rather than a field on `memory.extracted` because it
-    /// asserts a different fact: extraction says what was created, and this
-    /// says what stopped being current, which is the question an auditor
-    /// arrives with. Restatements *merged* into existing records stay on
-    /// `memory.extracted`, where they belong — a merge creates nothing and
-    /// closes nothing.
-    ///
-    /// The payload also carries the contradictions the pipeline found
-    /// against *published* material and declined to act on: reviewed content
-    /// leaves the trust boundary through a proposal, never through a
-    /// session, and a refusal nobody can see is a refusal nobody can act on.
-    MemorySuperseded,
-    /// An approved classification proposal's effect ran: records moved to
-    /// the sensitivity their reviewed versions carried (AUTHZ-5, ADR-0038
-    /// decision 9). Carries both tiers, the record ids, and the approvals
-    /// as resolved — never record content, which is what the tier is
-    /// about in the first place.
-    MemoryClassified,
     /// A tenant was admitted (CLI break-glass; TEN-5 owns the product
     /// lifecycle surface).
     TenantCreated,
@@ -330,35 +293,10 @@ pub enum AuditAction {
     /// Active tenant-secret envelopes were advanced to a new DEK generation.
     /// Carries one durable job id, generations and counts, never ciphertext.
     TenantSecretsReencrypted,
-    /// An inject composed a context block — one event per inject with
-    /// the block's watermark and the per-scope `MemoryRead` decisions
-    /// aggregated, never one row per candidate (CTX-3, ADR-0026
-    /// decision 5; ADR-0019 decision 4). Payloads carry no user
-    /// content: the task rides as a BLAKE3 hash only.
-    ContextInjected,
-    /// A recall served record bodies the caller named — the third
-    /// primitive seed §3 has listed since day one, and the act seed §2.2
-    /// principle 5 requires the chain to record (CTX-4, ADR-0041
-    /// decision 8).
-    ///
-    /// One event per recall, with the requested count, the served
-    /// entries' object addresses and channels — the same watermark shape
-    /// an inject carries, so a recall is exactly as recomputable — and the
-    /// per-scope `MemoryRead` decisions aggregated. Never record content,
-    /// and never the ids that were refused as a distinguishable list: a
-    /// recall answers uniformly for what it will not serve, and an audit
-    /// payload that enumerated the difference would be the oracle the
-    /// surface refuses to be.
-    ContextRecalled,
-    /// Records were published onto a scope's VedaFlow published channel —
-    /// the act that moves content across the trust boundary so `inject`
-    /// composes it as reviewed (FLOW-2, ADR-0031 decision 14). The first
-    /// VedaFlow action; ADR-0030 decision 14 deferred it to whichever
-    /// feature produced a governed one. Payload carries the asset kind,
-    /// the record ids, the commit the channel moved from and to, and the
-    /// pack that governed — never record content. The pipeline's
-    /// derived-channel commits ride `memory.extracted` instead: one event
-    /// per group, not a second event asserting the same fact.
+    /// Authored objects were published onto a scope's VedaFlow published
+    /// channel. The payload carries the asset kind, immutable object
+    /// addresses, the commit the channel moved from and to, and the policy
+    /// pack that governed — never object content.
     ///
     /// Since FLOW-3 the payload also names the proposal a publication was
     /// the effect of, when it had one, and the approval requirement the
@@ -424,32 +362,6 @@ pub enum AuditAction {
     /// Plaintext, owned source descriptors and indexes were removed, leaving
     /// only hashes and identifiers in the tombstone and chain.
     KnowledgeErased,
-    /// Records left the live corpus because they were past the horizon
-    /// the pack at their scope sets (MEM-6, ADR-0040 decision 15) — one
-    /// event per scope per sweep batch, under `actor_kind=system`.
-    /// Carries the pack and version that decided, the horizon per class,
-    /// the record ids and their ages; never record content.
-    ///
-    /// Unlike [`AuditAction::RelaxationExpired`] this is **not** bookkeeping:
-    /// a relaxation expires whether or not its sweep runs, but a record
-    /// leaves the corpus only because this loop ran, and the event commits
-    /// in the same transaction as the delete.
-    ///
-    /// What it describes is a *temporal* delete: the record stops being
-    /// current, `as_of` keeps answering, and destruction is the second
-    /// horizon's event.
-    MemoryExpired,
-    /// Content was destroyed (MEM-6, ADR-0040 decision 15): closed record
-    /// versions past the destruction horizon, and observe staging rows
-    /// with their quarantine markers past the staging horizon. Per plane,
-    /// with counts, the horizon that authorised it, and — for records —
-    /// the scope. The one action in the product that says data is gone
-    /// rather than hidden.
-    ///
-    /// Deliberately separate from [`AuditAction::MemoryExpired`]: "what
-    /// did we stop using" and "what did we destroy" are different
-    /// questions, and only the second has a legal answer.
-    MemoryDisposed,
     /// A prompt draft was written — created or replaced (PRMT-1, ADR-0049
     /// decision 14).
     ///
@@ -595,7 +507,7 @@ impl AuditAction {
     /// unit test below plus the fact that an action missing from here is
     /// an event `GET /v1/audit/events` cannot filter for. Add the variant
     /// and add it here in the same diff.
-    pub const ALL: [AuditAction; 102] = [
+    pub const ALL: [AuditAction; 94] = [
         AuditAction::AuthzDecision,
         AuditAction::TenantResolutionDenied,
         AuditAction::TokenRejected,
@@ -642,12 +554,8 @@ impl AuditAction {
         AuditAction::PolicyPackCleared,
         AuditAction::ServiceIdentityRegistered,
         AuditAction::ServiceIdentityRevoked,
-        AuditAction::MemoryObserved,
         AuditAction::QuarantineReleased,
         AuditAction::QuarantineRejected,
-        AuditAction::MemoryExtracted,
-        AuditAction::MemorySuperseded,
-        AuditAction::MemoryClassified,
         AuditAction::TenantCreated,
         AuditAction::TenantKeyProvisioned,
         AuditAction::TenantKeyRotated,
@@ -655,8 +563,6 @@ impl AuditAction {
         AuditAction::TenantSecretStored,
         AuditAction::TenantSecretCleared,
         AuditAction::TenantSecretsReencrypted,
-        AuditAction::ContextInjected,
-        AuditAction::ContextRecalled,
         AuditAction::ChannelPublished,
         AuditAction::ChannelRolledBack,
         AuditAction::ChannelPinned,
@@ -672,8 +578,6 @@ impl AuditAction {
         AuditAction::KnowledgeConflictResolved,
         AuditAction::KnowledgeErasureBlocked,
         AuditAction::KnowledgeErased,
-        AuditAction::MemoryExpired,
-        AuditAction::MemoryDisposed,
         AuditAction::PromptAuthored,
         AuditAction::PromptResolved,
         AuditAction::ContextPackAuthored,
@@ -751,12 +655,8 @@ impl AuditAction {
             AuditAction::PolicyPackCleared => "policy.pack.cleared",
             AuditAction::ServiceIdentityRegistered => "service_identity.registered",
             AuditAction::ServiceIdentityRevoked => "service_identity.revoked",
-            AuditAction::MemoryObserved => "memory.observed",
-            AuditAction::QuarantineReleased => "memory.quarantine.released",
-            AuditAction::QuarantineRejected => "memory.quarantine.rejected",
-            AuditAction::MemoryExtracted => "memory.extracted",
-            AuditAction::MemorySuperseded => "memory.superseded",
-            AuditAction::MemoryClassified => "memory.classified",
+            AuditAction::QuarantineReleased => "session.quarantine.released",
+            AuditAction::QuarantineRejected => "session.quarantine.rejected",
             AuditAction::TenantCreated => "tenant.created",
             AuditAction::TenantKeyProvisioned => "tenant.key.provisioned",
             AuditAction::TenantKeyRotated => "tenant.key.rotated",
@@ -764,8 +664,6 @@ impl AuditAction {
             AuditAction::TenantSecretStored => "tenant.secret.stored",
             AuditAction::TenantSecretCleared => "tenant.secret.cleared",
             AuditAction::TenantSecretsReencrypted => "tenant.secrets.reencrypted",
-            AuditAction::ContextInjected => "context.injected",
-            AuditAction::ContextRecalled => "context.recalled",
             AuditAction::ChannelPublished => "vedaflow.channel.published",
             AuditAction::ChannelRolledBack => "vedaflow.channel.rolled_back",
             AuditAction::ChannelPinned => "vedaflow.channel.pinned",
@@ -781,8 +679,6 @@ impl AuditAction {
             AuditAction::KnowledgeConflictResolved => "knowledge.conflict.resolved",
             AuditAction::KnowledgeErasureBlocked => "knowledge.erasure.blocked",
             AuditAction::KnowledgeErased => "knowledge.erased",
-            AuditAction::MemoryExpired => "memory.expired",
-            AuditAction::MemoryDisposed => "memory.disposed",
             AuditAction::PromptAuthored => "prompt.authored",
             AuditAction::PromptResolved => "prompt.resolved",
             AuditAction::ContextPackAuthored => "context_pack.authored",

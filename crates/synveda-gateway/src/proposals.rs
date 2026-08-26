@@ -64,8 +64,8 @@ use synveda_store::{rls, scopes};
 use synveda_types::scope::Scope;
 use synveda_types::{
     ApprovalRequirement, ArtifactFamily, ArtifactReference, AssetKind, CastApproval, Channel,
-    DocumentPath, Error, IdentityId, PromotionEvidence, PromptName, ProposalEffect, ProposalId,
-    ProposalState, ProposalView, Result, ScopeId, Sensitivity, TenantId, Verdict,
+    DocumentPath, Error, IdentityId, PromptName, ProposalEffect, ProposalId, ProposalState,
+    ProposalView, Result, ScopeId, Sensitivity, TenantId, Verdict,
 };
 use synveda_vedaflow::{self as vedaflow, PolicySnapshot, Signer};
 
@@ -120,29 +120,6 @@ async fn respond<T: IntoResponse>(
 }
 
 // ── Views ──────────────────────────────────────────────────────────────
-
-#[derive(utoipa::ToSchema)]
-#[allow(dead_code)] // Contract-only projection for upstream evidence.
-pub(crate) struct PromotionMemberEvidenceSchema {
-    #[schema(value_type = String, format = "uuid")]
-    record_id: synveda_types::RecordId,
-    recalls: u64,
-    distinct_members: u64,
-    first_recall_at: DateTime<Utc>,
-    last_recall_at: DateTime<Utc>,
-}
-
-#[derive(utoipa::ToSchema)]
-#[allow(dead_code)] // Contract-only projection for upstream evidence.
-pub(crate) struct PromotionEvidenceSchema {
-    rule: String,
-    pack_name: String,
-    pack_version: i64,
-    actions: Vec<String>,
-    from_seq: i64,
-    to_seq: i64,
-    members: Vec<PromotionMemberEvidenceSchema>,
-}
 
 /// Content-free typed address shared by every governed artifact family.
 #[derive(Serialize, utoipa::ToSchema)]
@@ -222,13 +199,6 @@ pub(crate) struct ProposalSummary {
     required: RequirementView,
     /// What it still lacks, in one line a reviewer reads.
     outstanding: String,
-    /// Why a rule opened this, when one did (FLOW-4, ADR-0033 decision
-    /// 12): the counts, the actions counted, and the audit range they
-    /// were folded from — so a reviewer can check the claim against the
-    /// chain rather than trust it. Absent on a human's proposal.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[schema(value_type = Option<PromotionEvidenceSchema>)]
-    promotion: Option<PromotionEvidence>,
 }
 
 /// One review act as the API renders it.
@@ -908,8 +878,6 @@ async fn open_inner(
             proposer_subject: &input.principal.subject,
             committed_at: Utc::now(),
             policy_snapshot: &snapshot,
-            // A human opened this one (FLOW-4, ADR-0033 decision 12).
-            evidence: None,
         },
         &Signer::Unsigned,
     )
@@ -2173,7 +2141,6 @@ fn render(
             .collect(),
         required: RequirementView::of(requirement),
         outstanding: outstanding.describe(),
-        promotion: proposal.evidence.clone(),
     }
 }
 

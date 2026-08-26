@@ -1,6 +1,6 @@
 //! AUTHZ-2 golden tests per pack (the AC): for a fixed two-department
-//! fixture, the full `MemoryRead` decision matrix of each embedded product
-//! pack, the `MemoryWrite` floor (MEM-1, ADR-0020 decision 3 — pack
+//! fixture, the full `KnowledgeRead` decision matrix of each embedded product
+//! pack, the `KnowledgeWrite` floor (MEM-1, ADR-0020 decision 3 — pack
 //! uniform: own home only, role-free; the content-role write grant lives
 //! in tests/roles.rs), the shared admin-plane semantics, and the
 //! cross-cutting invariants (quarantine, unplaced principals, foreign
@@ -163,7 +163,7 @@ fn read(
         pdp,
         fx,
         principal,
-        Action::MemoryRead,
+        Action::KnowledgeRead,
         placement,
         target,
         assignments,
@@ -203,7 +203,7 @@ fn write_targets(
                 pdp,
                 fx,
                 principal,
-                Action::MemoryWrite,
+                Action::KnowledgeWrite,
                 placement,
                 target,
                 assignments,
@@ -213,7 +213,7 @@ fn write_targets(
         .collect()
 }
 
-/// Asserts one pack's golden `MemoryRead` matrix for alice, plus the
+/// Asserts one pack's golden `KnowledgeRead` matrix for alice, plus the
 /// invariants every pack shares: version stamping, admin-plane semantics,
 /// unplaced/quarantined/foreign denial.
 fn assert_pack_golden(pack: &str, version: i64, expected_for_alice: &[&str]) {
@@ -240,7 +240,7 @@ fn assert_pack_golden(pack: &str, version: i64, expected_for_alice: &[&str]) {
 
     // The prompt registry reads exactly where memory does (PRMT-1,
     // ADR-0049 decision 4). Asserted rather than stated: each pack's
-    // PromptRead permits are a transcription of its own MemoryRead permits,
+    // PromptRead permits are a transcription of its own KnowledgeRead permits,
     // and a transcription is the kind of thing that drifts silently — a
     // department clause copied into two packs and forgotten in the third
     // would leave a consumer resolving prompts their pack does not share.
@@ -267,7 +267,7 @@ fn assert_pack_golden(pack: &str, version: i64, expected_for_alice: &[&str]) {
     // decision 7; SKIL-1, ADR-0051 decision 10), asserted for the same
     // reason a third transcription is a third place to drift. What this does
     // *not* say is that they admit the same material: `ContextPackRead`
-    // admits pack chunks, `MemoryRead` never does (ADR-0050 decision 8), and
+    // admits pack chunks, `KnowledgeRead` never does (ADR-0050 decision 8), and
     // `SkillRead` admits neither — a skill composes into no block at all
     // (ADR-0051 decision 9). The claim here is only that the same people are
     // trusted at the same scopes.
@@ -515,7 +515,7 @@ fn standard_shares_within_what_you_hold() {
             let principal_scopes = fx.chain("carol-user");
             pdp.authorize(
                 &carol,
-                Action::MemoryRead,
+                Action::KnowledgeRead,
                 Resource::Scope(fx.node(target).id),
                 &AuthzContext {
                     sensitivity: Some(Sensitivity::Internal),
@@ -634,7 +634,7 @@ fn redaction_config_rides_the_effective_pack() {
 
     // A stored pack carries its explicit config; one stored without a
     // config falls back to strict (fail safe).
-    const MEMBER_READ: &str = r#"permit (principal, action == Synveda::Action::"MemoryRead", resource)
+    const MEMBER_READ: &str = r#"permit (principal, action == Synveda::Action::"KnowledgeRead", resource)
            when { principal in resource };"#;
     let deny_secrets = RedactionConfig {
         secrets: RedactionMode::Deny,
@@ -746,7 +746,7 @@ fn the_quality_bar_rides_the_pack_and_an_unconfigured_pack_gates_nothing() {
     // nothing — where the same pack gets `RedactionConfig::STRICT` on the
     // line above, because a secret leaking is a harm and a low-scoring
     // skill is an opinion.
-    const MEMBER_READ: &str = r#"permit (principal, action == Synveda::Action::"MemoryRead", resource)
+    const MEMBER_READ: &str = r#"permit (principal, action == Synveda::Action::"KnowledgeRead", resource)
            when { principal in resource };"#;
     let demanding = SkillQualityConfig {
         min_score: 90,

@@ -5,10 +5,8 @@
  * the caller's contract is to degrade (ADR-0027 decision 3), and an exception
  * is a poor way to express "no context this time".
  *
- * Four calls, and each one names the run it is about. The three global
- * primitives this file used to speak — `/v1/observe`, `/v1/inject`,
- * `/v1/recall` — are deleted, and with them the opaque correlation string that
- * was the only thing joining a session's writes to its reads.
+ * Four calls, and each one names the server-owned run it is about through the
+ * public session application API.
  */
 
 import { randomBytes } from "node:crypto";

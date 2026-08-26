@@ -53,9 +53,6 @@ struct Summary {
     close_reason: Option<String>,
     required: Requirement,
     outstanding: String,
-    /// Present when a FLOW-4 rule opened this rather than a person.
-    #[serde(default)]
-    promotion: Option<synveda_types::PromotionEvidence>,
 }
 
 #[derive(Deserialize)]
@@ -478,18 +475,6 @@ fn render_detail(detail: &Detail, colour: bool) -> String {
     if let Some(reason) = &summary.close_reason {
         out.push_str(&format!("  closed       {reason}\n"));
     }
-    if let Some(evidence) = &summary.promotion {
-        out.push_str(&format!(
-            "  opened by    rule `{}` — {}\n",
-            evidence.rule,
-            evidence.summary()
-        ));
-        out.push_str(&format!(
-            "               checkable against audit seq {}..={}\n",
-            evidence.from_seq, evidence.to_seq
-        ));
-    }
-
     out.push_str("\n  reviews\n");
     if detail.approvals.is_empty() {
         out.push_str("    (none yet)\n");
@@ -776,7 +761,6 @@ mod tests {
                 origins: vec!["pack regulated-strict".to_owned()],
             },
             outstanding: "1 × curator".to_owned(),
-            promotion: None,
         }
     }
 

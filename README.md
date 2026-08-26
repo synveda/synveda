@@ -103,7 +103,7 @@ only through its original PDP- and revision-checked command path.
 ## Project status
 
 **Phases 0–2 are complete. Phase 5 is re-cutting the product while Phase 3 is
-paused.** 108 of 139 filed features are delivered, each with acceptance
+paused.** 108 of 140 filed features are delivered, each with acceptance
 evidence and, where it has a runtime, a runnable script in [`demos/`](demos/).
 
 It installs, on somebody else's machine, with Docker as the only prerequisite:
@@ -130,7 +130,7 @@ switchers, a People page and the governance surfaces under **Advanced**. See
 | **4 — Ecosystem** | SDKs, importers, telemetry, DR, gateway scale | 🚧 2/17 |
 | **5 — Context platform** | The redesign: fresh epoch, governed scopes, sessions, immutable Knowledge, capture, explainable context, Skills, Tools, OKF, one public contract, governed runtime configuration, policy relaxations, offline-verifiable audit export, shared directory access, stable secret custody, one deployment runtime, a public-API PulseBoard walkthrough and an adversarial integrity gate | 🚧 41 packages delivered; final hard cut remains |
 
-One further feature (AUTH-6, session and token hygiene) is unscheduled — **139
+One further feature (AUTH-6, session and token hygiene) is unscheduled — **140
 in total, 108 delivered** (`docs/backlog/STATUS.md` is the count `make ci`
 checks). Phase 5 is the 33-prompt context-platform redesign, in flight on
 `feat/context-platform-mvp`; Phase 3 is paused mid-phase behind it. The fifteen Phase 3 items finished are the skills registry
@@ -322,7 +322,7 @@ Being explicit, so nothing here misleads:
 You need Docker and GNU Make. On Windows, run `make` from Git Bash.
 
 ```sh
-make dev-up   # Postgres 17 (pgvector + PGMQ), Rauthy, Temporal, TEI (BGE-M3), Jaeger
+make dev-up   # Postgres 17 + pgvector, Rauthy, Temporal, TEI (BGE-M3), Jaeger
 make smoke    # end-to-end health check of every service
 make dev-down # stop; state persists in named volumes
 ```
@@ -400,7 +400,7 @@ API. `make check-deps` enforces it.
 ## The stack, and why
 
 Postgres-first, Rust-native, permissively licensed. One database engine for
-Knowledge, sessions, scopes, audit, versions, queues, vectors and graph — one backup
+Knowledge, sessions, scopes, audit, durable jobs, vectors and graph — one backup
 story, one HA story, one thing to explain to a bank's infrastructure review
 board.
 
@@ -408,9 +408,9 @@ board.
 |---|---|
 | System of record | PostgreSQL 17 |
 | Vectors | pgvector (HNSW); Qdrant behind the same trait when it outgrows that |
-| Lexical search | Postgres FTS + a Tantivy sidecar, fused with RRF |
+| Lexical search | Tenant-bound Postgres full-text search, fused with pgvector by RRF |
 | Graph | Indexed adjacency in plain Postgres — measured 3–8× faster than Apache AGE at 2.5× less storage ([ADR-0043](docs/adr/adr-0043-graph-schema.md)) |
-| Queue / workflow | PGMQ for ingestion; Temporal for the heavy pipelines |
+| Jobs / workflow | Leased Postgres jobs for capture and mutations; Temporal is an optional heavy-workflow dependency |
 | Authorisation | Cedar, embedded in the gateway ([ADR-0002](docs/adr/adr-0002-cedar-embedded-pdp.md)) |
 | Identity | OIDC client, never the source of truth; Rauthy bundled for dev/SMB |
 | Gateway | axum + tower; sqlx with compile-time-checked SQL, never string-built |

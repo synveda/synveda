@@ -95,7 +95,7 @@
     },
     {
       "name": "delta-decision-and-fact-hnsw",
-      "note": "A decision and the implementation fact it forces. Both true; one record per event reaches one.",
+      "note": "A decision and the implementation fact it forces. Both true; one candidate per event reaches one.",
       "input": {
         "event_type": "message.user",
         "session_id": "delta-10",

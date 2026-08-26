@@ -131,7 +131,6 @@ async fn command_inner(
             proposer_subject: &actor_subject,
             committed_at: Utc::now(),
             policy_snapshot: &snapshot,
-            evidence: None,
         },
         &Signer::Unsigned,
     )

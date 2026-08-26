@@ -106,21 +106,20 @@ GATEWAY="./target/debug/synveda-gateway"
 export DATABASE_URL="$URL"
 export SYNVEDA_LISTEN_ADDR="127.0.0.1:${PORT}"
 export SYNVEDA_PUBLIC_URL="$GATEWAY_URL"
-export SYNVEDA_SEARCH_INDEX_DIR="$WORK/search-index"
 # No auth mode: every /v1 request is rejected 401, which is fine — this demo
 # is about the ops plane and about whether the process starts at all.
 unset SYNVEDA_OIDC_ISSUERS SYNVEDA_DEV_JWT_SECRET 2>/dev/null || true
 
 step "1. A fresh, empty database bootstraps to the current epoch"
 psql_admin -c "create database ${DB}" >/dev/null
-psql_db -c "create extension if not exists vector; create extension if not exists pgmq;" >/dev/null
+psql_db -c "create extension if not exists vector; create extension if not exists btree_gin;" >/dev/null
 "$BIN" db migrate >/dev/null 2>&1 || fail "migrating an empty database"
 MARKER="$(psql_db -c "select epoch || '|' || migration_head || '|' || created_by_version from schema_metadata")"
 EPOCH="${MARKER%%|*}"
 REST="${MARKER#*|}"
 HEAD="${REST%%|*}"
 VERSION="${REST#*|}"
-[ "$EPOCH" = "1" ] || fail "expected epoch 1, got '${EPOCH}'"
+[ "$EPOCH" = "3" ] || fail "expected epoch 3, got '${EPOCH}'"
 [ -n "$HEAD" ] || fail "the marker records no migration head"
 [ -n "$VERSION" ] || fail "the marker records no creating version"
 ROWS="$(psql_db -c "select count(*) from schema_metadata")"
@@ -140,9 +139,10 @@ stop_gateway
 
 # The fixture the whole feature is about: an operator's existing database.
 # The schema, rows in it, and no marker — because the marker did not exist
-# when it was built. Reproduced by taking the marker away and the migrator's
-# record of the migration that creates it, which is precisely the two things a
-# pre-cut database lacks.
+# when it was built. Reproduced by taking the marker away while leaving the
+# product schema, rows and migration ledger intact. The ledger is deliberately
+# irrelevant: preflight refuses before sqlx may compare the pre-baseline chain
+# with the one-file epoch-3 baseline.
 step "A database from before the cut"
 # A KEK so that admitting the tenant provisions its key in one command
 # (TEN-4, ADR-0064) rather than printing the note that it could not. Thrown
@@ -152,7 +152,7 @@ export SYNVEDA_KMS_KEY
 "$BIN" tenant create --slug "cpr2-demo-$$" --name 'CPR-2 demo' >/dev/null
 BEFORE="$(psql_db -c "select count(*) from tenants")"
 [ "$BEFORE" = "1" ] || fail "the fixture has no tenant to lose"
-psql_db -c "drop table schema_metadata; delete from _sqlx_migrations where version >= 39;" >/dev/null
+psql_db -c "drop table schema_metadata" >/dev/null
 ok "one tenant, full schema, no epoch marker"
 
 step "4. The gateway refuses to start against it"
@@ -190,18 +190,18 @@ ok "refused; the database is untouched"
 step "7. \`reset --database --force\` builds a working current-epoch database"
 "$BIN" reset --database --force >"$WORK/reset.log" 2>&1 ||
     fail "reset failed: $(tail -5 "$WORK/reset.log")"
-grep -q "epoch 1" "$WORK/reset.log" || fail "reset did not report the epoch it built"
-[ "$(psql_db -c "select epoch from schema_metadata")" = "1" ] ||
+grep -q "epoch 3" "$WORK/reset.log" || fail "reset did not report the epoch it built"
+[ "$(psql_db -c "select epoch from schema_metadata")" = "3" ] ||
     fail "the reset database is not at the current epoch"
 CARRIED="$(psql_db -c "select count(*) from tenants")"
 [ "$CARRIED" = "0" ] ||
     fail "${CARRIED} row(s) survived the reset — there is no migrator, and this is what says so"
-ok "fresh at epoch 1, and nothing was carried across"
+ok "fresh at epoch 3, and nothing was carried across"
 
 step "8. Running it again is idempotent"
 "$BIN" reset --database --force >"$WORK/reset-2.log" 2>&1 ||
     fail "the second reset failed: $(tail -5 "$WORK/reset-2.log")"
-[ "$(psql_db -c "select epoch from schema_metadata")" = "1" ] ||
+[ "$(psql_db -c "select epoch from schema_metadata")" = "3" ] ||
     fail "the second reset left a different database"
 [ "$(psql_db -c "select count(*) from tenants")" = "0" ] || fail "the second reset left rows"
 ok "same database, twice"

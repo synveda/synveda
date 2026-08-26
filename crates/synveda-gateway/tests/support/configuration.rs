@@ -170,7 +170,6 @@ async fn apply_command(
             proposer_subject: "configuration-test-fixture",
             committed_at: Utc::now(),
             policy_snapshot: &PolicySnapshot::new("configuration-test-fixture", 1),
-            evidence: None,
         },
         &Signer::Unsigned,
     )

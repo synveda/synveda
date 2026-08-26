@@ -34,7 +34,7 @@ pub use lexical::LexicalJudge;
 /// One claim of equivalence to grade: does `candidate` answer `question`
 /// the way `reference` does?
 ///
-/// Borrowed rather than owned, the `client::ObserveRequest` idiom — a
+/// Borrowed rather than owned, the `client::SessionEventBatchRequest` idiom — a
 /// judged run holds its corpus once and grades out of it.
 ///
 /// The three fields carry both labelled sets decision 4 names. For

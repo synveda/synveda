@@ -8,7 +8,7 @@
 //! 1. At the HTTP surface: an administrator granted at one org unit
 //!    moves a sibling out of it, and the mover's own authority over that
 //!    scope is gone on the very next request.
-//! 2. At the composition seam (`MemoryRead`, what CTX-2/3 will ask): a
+//! 2. At the composition seam (`KnowledgeRead`, what CTX-2/3 will ask): a
 //!    member's grant reaches a scope while it lives in the granted
 //!    subtree and stops the moment an admin moves it out — chains
 //!    resolved through the store, decisions through the same embedded
@@ -65,18 +65,10 @@ fn state(url: &str) -> AppState {
         public_origin: "http://127.0.0.1:8120".to_owned(),
         pdp: Arc::new(Pdp::new().expect("build the embedded PDP")),
         service_token_max_ttl: std::time::Duration::from_secs(3600),
-        search_index: Arc::new(
-            synveda_retrieval::SearchIndex::open(
-                std::env::temp_dir()
-                    .join("synveda-gateway-tests")
-                    .join(synveda_types::TenantId::new().to_string()),
-            )
-            .expect("open search index"),
-        ),
         embedder: Arc::new(synveda_ingest::embedding::AnyEmbedder::Deterministic(
             synveda_ingest::embedding::DeterministicEmbedder::new(),
         )),
-        inject_embed_timeout: std::time::Duration::from_millis(100),
+        context_embed_timeout: std::time::Duration::from_millis(100),
         // TEN-4 (ADR-0064): a fixed test KEK, so a suite that touches a
         // sealed column seals rather than skipping. `Kms::Disabled` is the
         // production default when no key is configured.
@@ -200,7 +192,7 @@ async fn api(
     (status, value)
 }
 
-/// One `MemoryRead` decision for `member` on `target`, with the resource
+/// One `KnowledgeRead` decision for `member` on `target`, with the resource
 /// chain, the member's own chain and their anchors resolved from the
 /// store — the inputs the gateway's `gather` assembles for the same
 /// decision (ADR-0073), rebuilt here through public surfaces because the
@@ -280,7 +272,7 @@ async fn member_reads(
         .pdp
         .authorize(
             member,
-            Action::MemoryRead,
+            Action::KnowledgeRead,
             Resource::Scope(target),
             &AuthzContext {
                 scopes: &chain,

@@ -51,12 +51,17 @@ import type { HookInput, HookOutput } from "./types.mjs";
  */
 const END_FLUSH_BUDGET_MS = 3000;
 
-/** How long a legacy payload without an event name gets for delivery. */
-const FALLBACK_DELIVERY_BUDGET_MS = 2000;
-
 export async function turn(input: HookInput, configured: AdapterConfig): Promise<HookOutput> {
   const hookStarted = Date.now();
   if (!configured.observe) return {};
+  if (
+    input.hook_event_name !== "Stop" &&
+    input.hook_event_name !== "PreCompact" &&
+    input.hook_event_name !== "SessionEnd"
+  ) {
+    log("turn.unrecognised", { hook: input.hook_event_name });
+    return {};
+  }
   const externalId = harnessSessionId(input.session_id);
   const spool = loadOrCreateSpool(externalId, CLIENT_NAME, installationId());
   if (spool === undefined) return {};
@@ -102,15 +107,16 @@ export async function turn(input: HookInput, configured: AdapterConfig): Promise
     return {};
   }
 
-  const ending = input.hook_event_name === "SessionEnd";
-  const budget = ending ? END_FLUSH_BUDGET_MS : FALLBACK_DELIVERY_BUDGET_MS;
-  const result = await deliver(spool, config, bearer.token, Date.now() + budget);
+  const result = await deliver(
+    spool,
+    config,
+    bearer.token,
+    Date.now() + END_FLUSH_BUDGET_MS,
+  );
 
-  if (ending) {
-    await closeRun(spool, config, bearer.token, endReason(input, result.complete));
-  }
+  await closeRun(spool, config, bearer.token, endReason(input, result.complete));
   saveSpool(spool);
-  if (ending) retireIfComplete(spool);
+  retireIfComplete(spool);
 
   log("turn.done", {
     session: externalId,

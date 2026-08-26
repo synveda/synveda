@@ -1248,7 +1248,6 @@ async fn open_command(
             proposer_subject: &authorization.input.principal.subject,
             committed_at: Utc::now(),
             policy_snapshot: &snapshot,
-            evidence: None,
         },
         &Signer::Unsigned,
     )

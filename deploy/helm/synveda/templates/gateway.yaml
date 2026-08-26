@@ -2,8 +2,7 @@
 The gateway: one replica, on purpose and not as a starting point
 (ADR-0062 decision 4 — the chart refuses a values file that says
 otherwise, in _helpers.tpl). `Recreate` follows from the same fact: two
-gateways must not overlap even for the length of a rolling update, and the
-search-index volume is RWO.
+gateways must not overlap even for the length of a rolling update.
 */ -}}
 apiVersion: apps/v1
 kind: Deployment
@@ -159,8 +158,6 @@ spec:
             periodSeconds: 5
             failureThreshold: 3
           volumeMounts:
-            - name: search-index
-              mountPath: /var/lib/synveda/search
             - name: tmp
               mountPath: /tmp
           {{- with .Values.gateway.resources }}
@@ -168,9 +165,6 @@ spec:
             {{- toYaml . | nindent 12 }}
           {{- end }}
       volumes:
-        - name: search-index
-          persistentVolumeClaim:
-            claimName: {{ include "synveda.fullname" . }}-search
         - name: tmp
           emptyDir: {}
       {{- with .Values.gateway.nodeSelector }}
@@ -185,28 +179,6 @@ spec:
       affinity:
         {{- toYaml . | nindent 8 }}
       {{- end }}
----
-{{/*
-The Tantivy sidecar's storage. A cache with a rebuild cost, not a system of
-record: each tenant's index carries a state file and a watermark and heals
-from Postgres, and deleting a directory is the documented rebuild
-procedure. It gets a volume so a pod replacement is not a re-index of every
-tenant's corpus. RWO, which composes with the single replica above.
-*/ -}}
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: {{ include "synveda.fullname" . }}-search
-  labels:
-    {{- include "synveda.labels" . | nindent 4 }}
-spec:
-  accessModes: ["ReadWriteOnce"]
-  resources:
-    requests:
-      storage: {{ .Values.gateway.searchIndex.size }}
-  {{- with .Values.gateway.searchIndex.storageClass }}
-  storageClassName: {{ . }}
-  {{- end }}
 ---
 apiVersion: v1
 kind: Service

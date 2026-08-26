@@ -26,8 +26,6 @@
       "knowledge.write": true,
       "membership.grant": true,
       "membership.read": true,
-      "memory.classify": true,
-      "memory.write": true,
       "policy.assign": false,
       "policy.read": true,
       "project.create": true,
@@ -62,7 +60,7 @@
         "confidential",
         "restricted"
       ],
-      "memory.read": [
+      "knowledge.read": [
         "public",
         "internal",
         "confidential"

@@ -29,7 +29,7 @@
 # nothing here touches a test; the target hands them a fresh database and
 # takes it away again.
 #
-# Cost: one `CREATE DATABASE`, three extensions, and ~0.7s of migration
+# Cost: one `CREATE DATABASE`, two extensions, and one baseline migration
 # inside the first test that runs. Against a suite that takes minutes.
 #
 # # What it keeps
@@ -91,8 +91,7 @@ psql_admin -c "create database $TEST_DB" >/dev/null
 # migrate` assumes they exist, exactly as the compose bootstrap provides
 # them for the dev database.
 psql_test -c "create extension if not exists vector;
-              create extension if not exists age;
-              create extension if not exists pgmq" >/dev/null
+              create extension if not exists btree_gin" >/dev/null
 
 # Migrate once, here, rather than leaving it to the tests.
 #

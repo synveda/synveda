@@ -55,8 +55,8 @@ use std::time::{Duration, Instant};
 use serde::Serialize;
 
 use crate::client::{
-    CaptureAcceptOptions, Client, InjectRequest, KnowledgeIdsRequest, KnowledgeQueryRequest,
-    ObserveEvent, ObserveRequest,
+    CaptureAcceptOptions, Client, ContextRunRequest, KnowledgeIdsRequest, KnowledgeQueryRequest,
+    SessionEventBatchRequest, SessionEventInput,
 };
 use crate::longmemeval::{Instance, Session, parse_date};
 use crate::report::Gate;
@@ -202,13 +202,13 @@ pub struct InstanceOutcome {
     pub evidence: Vec<String>,
     /// Of those, the ones a record in the block came from.
     pub bound_evidence: Vec<String>,
-    pub block_records: usize,
+    pub selected_knowledge: usize,
     /// Distinct haystack sessions the block carried material from.
     pub block_sessions: usize,
     /// Block records whose provenance named no session this run seeded.
     /// Never silently dropped: a join that quietly lost records would
     /// report a recall over a denominator it had shrunk itself.
-    pub unattributed_records: usize,
+    pub unattributed_knowledge: usize,
     /// Whether the block carried fewer sessions than the haystack holds.
     /// A block that carried all of them made no ranking decision, so its
     /// perfect recall is a statement about the budget rather than about
@@ -306,9 +306,9 @@ pub async fn seed_instance(
         seed_ms: 0.0,
         evidence: instance.answer_session_ids.clone(),
         bound_evidence: Vec::new(),
-        block_records: 0,
+        selected_knowledge: 0,
         block_sessions: 0,
-        unattributed_records: 0,
+        unattributed_knowledge: 0,
         bound: false,
         tokens: 0,
         budget_tokens: 0,
@@ -396,17 +396,17 @@ pub async fn measure_instance(
         )
         .await?;
     let probe = client
-        .inject(
+        .compose_context(
             bearer,
             &probe_session,
-            &InjectRequest {
+            &ContextRunRequest {
                 task: Some(&instance.question),
                 budget_tokens: options.budget_tokens,
             },
         )
         .await?;
     let block = &probe.value;
-    outcome.block_records = block.record_ids.len();
+    outcome.selected_knowledge = block.knowledge_item_ids.len();
     outcome.tokens = block.tokens;
     outcome.budget_tokens = block.budget_tokens;
     outcome.block_hash = block.block_hash.clone();
@@ -416,7 +416,7 @@ pub async fn measure_instance(
         client,
         bearer,
         instance,
-        &block.record_ids,
+        &block.knowledge_item_ids,
         source_events,
         outcome,
     )
@@ -631,11 +631,11 @@ async fn seed(
             .map(|(index, _)| index)
             .collect();
         outcome.empty_turns += session.turns.len() - sent.len();
-        let events: Result<Vec<ObserveEvent<'_>>, String> = sent
+        let events: Result<Vec<SessionEventInput<'_>>, String> = sent
             .iter()
             .map(|&index| (index, &session.turns[index]))
             .map(|(index, turn)| {
-                Ok(ObserveEvent {
+                Ok(SessionEventInput {
                     idempotency_key: turn_key(session.session_id, index),
                     kind: turn_event_type(&turn.role)?,
                     payload: serde_json::json!({
@@ -652,7 +652,7 @@ async fn seed(
         let events = events?;
         let run = client.session_for(bearer, &session_id).await?;
         let response = client
-            .observe(bearer, &run, &ObserveRequest { events })
+            .append_events(bearer, &run, &SessionEventBatchRequest { events })
             .await?;
         let acked = &response.value;
         if acked.denied > 0 || acked.quarantined > 0 {
@@ -841,13 +841,13 @@ async fn bound_sessions(
     client: &Client,
     bearer: &str,
     instance: &Instance,
-    record_ids: &[String],
+    knowledge_item_ids: &[String],
     source_events: &BTreeMap<String, String>,
     outcome: &mut InstanceOutcome,
 ) -> Result<BTreeSet<String>, String> {
     let mut bound = BTreeSet::new();
-    outcome.unattributed_records = 0;
-    for chunk in record_ids.chunks(MAX_KNOWLEDGE_IDS) {
+    outcome.unattributed_knowledge = 0;
+    for chunk in knowledge_item_ids.chunks(MAX_KNOWLEDGE_IDS) {
         let answered = client
             .knowledge_ids(
                 bearer,
@@ -860,14 +860,14 @@ async fn bound_sessions(
         if answered.value.mode != "ids" {
             return Err(format!(
                 "the surface answered the join in `{}` mode, not `ids`: this would attribute the \
-                 block's records from a different question's answer",
+                 block's Knowledge from a different question's answer",
                 answered.value.mode
             ));
         }
         let (chunk_bound, unattributed) =
             attributed_sessions(&answered.value.entries, source_events);
         bound.extend(chunk_bound);
-        outcome.unattributed_records += unattributed;
+        outcome.unattributed_knowledge += unattributed;
     }
     Ok(bound)
 }
@@ -879,7 +879,7 @@ async fn bound_sessions(
 /// store. One revision counts as attributed once even when it merged several
 /// sources.
 fn attributed_sessions(
-    entries: &[crate::client::RecallEntry],
+    entries: &[crate::client::KnowledgeResult],
     source_events: &BTreeMap<String, String>,
 ) -> (BTreeSet<String>, usize) {
     let mut sessions = BTreeSet::new();
@@ -989,7 +989,7 @@ pub fn metrics(outcomes: &[InstanceOutcome]) -> BTreeMap<String, f64> {
     // is not a retrieval result, it is a run that asked too early.
     let empty = outcomes
         .iter()
-        .filter(|outcome| outcome.block_records == 0)
+        .filter(|outcome| outcome.selected_knowledge == 0)
         .count();
     metrics.insert(
         "longmemeval_empty_blocks".to_owned(),
@@ -1020,7 +1020,7 @@ pub fn metrics(outcomes: &[InstanceOutcome]) -> BTreeMap<String, f64> {
     if !abstention.is_empty() {
         let empty = abstention
             .iter()
-            .filter(|outcome| outcome.block_records == 0)
+            .filter(|outcome| outcome.selected_knowledge == 0)
             .count();
         metrics.insert(
             "longmemeval_abstention_empty_blocks".to_owned(),
@@ -1033,10 +1033,10 @@ pub fn metrics(outcomes: &[InstanceOutcome]) -> BTreeMap<String, f64> {
     // precision.
     let unattributed: usize = outcomes
         .iter()
-        .map(|outcome| outcome.unattributed_records)
+        .map(|outcome| outcome.unattributed_knowledge)
         .sum();
     metrics.insert(
-        "longmemeval_unattributed_records".to_owned(),
+        "longmemeval_unattributed_knowledge".to_owned(),
         unattributed as f64,
     );
 
@@ -1204,11 +1204,11 @@ pub fn summarise(run: &Report) -> String {
             )
         };
         out.push_str(&format!(
-            "  {} {:<28} {:<26} {} block record(s) from {} of {} session(s){}\n",
+            "  {} {:<28} {:<26} {} Knowledge item(s) from {} of {} session(s){}\n",
             if outcome.passed { "ok  " } else { "FAIL" },
             outcome.question_id,
             verdict,
-            outcome.block_records,
+            outcome.selected_knowledge,
             outcome.block_sessions,
             outcome.sessions,
             if outcome.bound {
@@ -1374,9 +1374,9 @@ mod tests {
             seed_ms: 10.0,
             evidence: evidence.iter().map(|id| (*id).to_owned()).collect(),
             bound_evidence: bound.iter().map(|id| (*id).to_owned()).collect(),
-            block_records: 2,
+            selected_knowledge: 2,
             block_sessions: 2,
-            unattributed_records: 0,
+            unattributed_knowledge: 0,
             bound: true,
             tokens: 100,
             budget_tokens: 1500,
@@ -1421,15 +1421,15 @@ mod tests {
         assert_eq!(seeded, "lme:aa11:s1");
 
         let entries = vec![
-            crate::client::RecallEntry {
-                record_id: "k1".to_owned(),
+            crate::client::KnowledgeResult {
+                knowledge_item_id: "k1".to_owned(),
                 class: "fact".to_owned(),
                 content: "body".to_owned(),
                 provenance: serde_json::json!({"session_id": "forged"}),
                 source_event_ids: vec!["event-a".to_owned(), "event-b".to_owned()],
             },
-            crate::client::RecallEntry {
-                record_id: "k2".to_owned(),
+            crate::client::KnowledgeResult {
+                knowledge_item_id: "k2".to_owned(),
                 class: "fact".to_owned(),
                 content: "body".to_owned(),
                 provenance: serde_json::json!({}),
@@ -1522,7 +1522,7 @@ mod tests {
     #[test]
     fn abstention_instances_leave_the_retrieval_denominator() {
         let mut abstention = outcome("b_abs", "single-session-user", &[], &[]);
-        abstention.block_records = 0;
+        abstention.selected_knowledge = 0;
         let metrics = metrics(&[outcome("a", "multi-session", &["s1"], &["s1"]), abstention]);
         assert_eq!(metrics.get("longmemeval_retrieval_recall"), Some(&1.0));
         assert_eq!(metrics.get("longmemeval_instances_complete"), Some(&1.0));
@@ -1555,7 +1555,7 @@ mod tests {
     #[test]
     fn an_empty_block_is_a_run_that_asked_too_early_rather_than_a_result() {
         let mut empty = outcome("a", "multi-session", &["s1"], &[]);
-        empty.block_records = 0;
+        empty.selected_knowledge = 0;
         empty.block_sessions = 0;
         let metrics = metrics(&[empty, outcome("b", "multi-session", &["s1"], &["s1"])]);
         assert_eq!(
@@ -1568,11 +1568,14 @@ mod tests {
     }
 
     #[test]
-    fn unattributed_records_are_reported_rather_than_dropped() {
+    fn unattributed_knowledge_are_reported_rather_than_dropped() {
         let mut lost = outcome("a", "multi-session", &["s1"], &["s1"]);
-        lost.unattributed_records = 3;
+        lost.unattributed_knowledge = 3;
         let metrics = metrics(&[lost]);
-        assert_eq!(metrics.get("longmemeval_unattributed_records"), Some(&3.0));
+        assert_eq!(
+            metrics.get("longmemeval_unattributed_knowledge"),
+            Some(&3.0)
+        );
     }
 
     #[test]

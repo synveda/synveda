@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "delete from vedaflow_refs where scope_id = $1 and name = 'pin/prompt/published'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e12ab9b65f0016cd8a0c61860cb5ffe7a832df96e501af696f16ed30e6c26a06"
+}

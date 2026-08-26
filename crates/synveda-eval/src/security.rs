@@ -5,14 +5,14 @@
 //! other. What this format says that no other one can is **who must not
 //! see what** — and it says it exhaustively, because the guard that
 //! matters here is not "did a field get ignored" but "did a pair get
-//! left out". An undeclared (record, reader) pair is an unmeasured
+//! left out". An undeclared (Knowledge item, reader) pair is an unmeasured
 //! boundary, and a security suite that skips one silently is the failure
 //! mode it exists to prevent (decision 5).
 //!
 //! Note what this format deliberately does *not* carry: which boundary
-//! separates a record from a reader. That is derived per pair from facts
-//! the run already holds — the reader's tenant and the record's installed
-//! tier — because a corpus author who mis-declared it would move a gated
+//! separates an item from a reader. That is derived per pair from facts
+//! the run already holds — tenant, governing scope and sensitivity — because
+//! a corpus author who mis-declared it would move a gated
 //! count into the wrong axis, and a derived answer cannot be mis-declared.
 //!
 //! Every struct here refuses unknown fields, for EVAL-1's reason.
@@ -24,12 +24,9 @@ use serde::Deserialize;
 
 use crate::fixtures::EVENT_TYPES;
 
-/// The observe kinds MEM-1 accepts.
-/// The tiers a classify proposal may install. `public` and `internal` are
-/// absent on purpose: the pipeline already floors at `internal`
-/// (ADR-0022) and a proposal that installed a tier below the working one
-/// would be a declassification this corpus has no reason to model.
-const TIERS: [&str; 2] = ["confidential", "restricted"];
+/// Sensitivities exercised by the boundary corpus. Public and internal are
+/// covered by ordinary visibility controls; these two add sensitivity denies.
+const SENSITIVITIES: [&str; 2] = ["confidential", "restricted"];
 
 /// A word long enough to be worth generating a variant from. Matches the
 /// AUTHZ-5 leak suite's own generator, which this one scales
@@ -44,7 +41,7 @@ pub struct Corpus {
     pub corpus: String,
     /// Why this corpus exists, for whoever adds to it next.
     pub note: String,
-    /// Every reader this corpus makes claims about. A record must place
+    /// Every reader this corpus makes claims about. An item must place
     /// each of them in exactly one of `readable_by` and `forbidden_to`.
     pub readers: Vec<String>,
     pub material: Vec<Material>,
@@ -55,50 +52,45 @@ pub struct Corpus {
     pub variants: usize,
 }
 
-/// One record: how it is planted, where it ends up, what tier it carries,
+/// One proposed Knowledge item: its source, governed placement, sensitivity,
 /// and who may and may not see it.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Material {
     pub key: String,
-    /// Who writes it. Its home leaf is where the record lives, forever —
-    /// a promotion publishes a channel that *names* it there (ADR-0034
-    /// decision 3).
+    /// Who supplies its source event.
     pub actor: String,
     pub session_id: String,
-    /// A session event type that carries memory (CPR-12, ADR-0078 decision 2).
+    /// A session event type that carries candidate source material.
     /// Defaults to `message.user`, which is what an unlabelled line of a
     /// transcript is.
     #[serde(default = "default_event_type")]
     pub event_type: String,
     pub text: String,
     /// The distinctive phrase the containment predicate looks for. The
-    /// second of the two graders (decision 6) — identity says "this record
+    /// second of the two graders (decision 6) — identity says "this item
     /// was served", this says "these bytes were rendered", and a block
     /// where they disagree is its own defect.
     pub marker: String,
-    /// The tier to install, through a classify proposal the author opens
-    /// at their own home scope. Absent leaves whatever the pipeline
-    /// produced, which is `internal` (ADR-0022 clamps below it).
+    /// Sensitivity applied by the governed candidate decision.
     #[serde(default)]
-    pub classify: Option<String>,
-    /// The hierarchy node to climb to, named as the environment names it.
-    /// Absent leaves the material on its author's leaf, where only the
-    /// author composes it.
+    pub sensitivity: Option<String>,
+    /// Exact current scope alias selected during governed acceptance. Absent
+    /// leaves the item at the author's principal scope.
     #[serde(default)]
-    pub promote_to: Option<String>,
-    /// Readers this record must reach. The positive control: without it a
+    pub publish_scope: Option<String>,
+    /// Readers this item must reach. The positive control: without it a
     /// run of zeros is indistinguishable from an empty corpus (decision 4).
     #[serde(default)]
     pub readable_by: Vec<String>,
     /// Readers no surface may disclose it to, under any phrasing.
     pub forbidden_to: Vec<String>,
-    /// What this record's content attempts to forge, when it is a
+    /// What this item's content attempts to forge, when it is a
     /// structural probe rather than ordinary material (decision 9). Rides
-    /// into the report; the assertion is the same for every record.
+    /// into the report; the assertion is the same for every item.
     #[serde(default)]
     pub forges: Option<String>,
-    /// Why this record is in the corpus, for a reader of the report.
+    /// Why this item is in the corpus, for a reader of the report.
     #[serde(default)]
     pub note: String,
 }
@@ -108,11 +100,11 @@ fn default_event_type() -> String {
 }
 
 impl Material {
-    /// Whether this record ends up above the working tier, which is what
+    /// Whether this item carries elevated sensitivity, which is what
     /// makes a boundary a *sensitivity* one rather than a scope one.
     #[must_use]
-    pub fn is_classified(&self) -> bool {
-        self.classify.is_some()
+    pub fn is_sensitive(&self) -> bool {
+        self.sensitivity.is_some()
     }
 }
 
@@ -144,10 +136,10 @@ pub struct Variant {
 pub fn variants(corpus: &Corpus, cap: usize) -> Vec<Variant> {
     let mut core: BTreeSet<String> = BTreeSet::new();
     let mut words: BTreeSet<String> = BTreeSet::new();
-    for record in &corpus.material {
-        core.insert(record.marker.clone());
-        core.insert(record.marker.to_uppercase());
-        for word in significant_words(&record.marker) {
+    for item in &corpus.material {
+        core.insert(item.marker.clone());
+        core.insert(item.marker.to_uppercase());
+        for word in significant_words(&item.marker) {
             core.insert(word.to_uppercase());
             core.insert(word);
         }
@@ -155,9 +147,9 @@ pub fn variants(corpus: &Corpus, cap: usize) -> Vec<Variant> {
         // marker: the marker is the phrase a *grader* looks for, and the
         // words a reader would actually type include the rest of the
         // sentence it came out of.
-        words.extend(significant_words(&record.text));
+        words.extend(significant_words(&item.text));
     }
-    // Sorted, so the core's order does not depend on which record
+    // Sorted, so the core's order does not depend on which item
     // contributed a word first.
     let mut out: Vec<Variant> = core
         .into_iter()
@@ -316,10 +308,12 @@ fn validate(corpora: &[Corpus]) -> Result<(), String> {
                     record.event_type
                 )));
             }
-            if let Some(tier) = &record.classify
-                && !TIERS.contains(&tier.as_str())
+            if let Some(tier) = &record.sensitivity
+                && !SENSITIVITIES.contains(&tier.as_str())
             {
-                return Err(at(&format!("classify `{tier}` is not one of {TIERS:?}")));
+                return Err(at(&format!(
+                    "sensitivity `{tier}` is not one of {SENSITIVITIES:?}"
+                )));
             }
             if record.marker.trim().is_empty() {
                 return Err(at(
@@ -376,9 +370,9 @@ fn validate(corpora: &[Corpus]) -> Result<(), String> {
                 )));
             }
 
-            // `promote_to` is a climb, and a climb only makes sense
+            // `publish_scope` is a climb, and a climb only makes sense
             // towards readers the record is supposed to reach.
-            if record.promote_to.is_some() && record.readable_by.is_empty() {
+            if record.publish_scope.is_some() && record.readable_by.is_empty() {
                 return Err(at(
                     "climbs to a scope and is readable by nobody, so the promotion is either \
                      pointless or the boundaries are wrong",
@@ -402,14 +396,14 @@ mod tests {
             {"key": "vault", "actor": "sec-owner", "session_id": "s-vault",
              "text": "The vault ceremony needs two custodians and the offline shard.",
              "marker": "two custodians and the offline shard",
-             "classify": "restricted",
+             "sensitivity": "restricted",
              "readable_by": [],
              "forbidden_to": ["sec-owner", "sec-mate", "sec-neighbour"]},
             {"key": "rota", "actor": "sec-owner", "session_id": "s-rota",
              "event_type": "message.assistant",
              "text": "The incident bridge rota is maintained by the platform leads.",
              "marker": "incident bridge rota",
-             "promote_to": "vault",
+             "publish_scope": "vault",
              "readable_by": ["sec-owner", "sec-mate"],
              "forbidden_to": ["sec-neighbour"]}
         ]
@@ -427,8 +421,8 @@ mod tests {
         let corpora = parse(CLEAN).expect("parses");
         let corpus = &corpora[0];
         assert_eq!(corpus.material[0].event_type, "message.user");
-        assert!(corpus.material[0].is_classified());
-        assert!(!corpus.material[1].is_classified());
+        assert!(corpus.material[0].is_sensitive());
+        assert!(!corpus.material[1].is_sensitive());
         assert!(corpus.material[0].forges.is_none());
     }
 
@@ -497,8 +491,11 @@ mod tests {
             "unknown kind must not validate"
         );
         assert!(
-            parse(&CLEAN.replace(r#""classify": "restricted""#, r#""classify": "secret""#))
-                .is_err(),
+            parse(&CLEAN.replace(
+                r#""sensitivity": "restricted""#,
+                r#""sensitivity": "secret""#
+            ))
+            .is_err(),
             "unknown tier must not validate"
         );
         assert!(

@@ -46,31 +46,19 @@ pub struct Recreated {
     pub metadata: SchemaMetadata,
 }
 
-/// One extension's fate. `age` is the only one allowed to fail — see
-/// [`REQUIRED_EXTENSIONS`].
+/// One required extension's fate.
 #[derive(Debug, Clone)]
 pub struct ExtensionOutcome {
     /// The extension's name.
     pub name: &'static str,
-    /// `None` when it was created (or already present); the server's refusal
-    /// otherwise.
-    pub refusal: Option<String>,
 }
 
 /// The extensions a Synveda database cannot be migrated without.
 ///
-/// `vector` because migration 0015 stores embeddings in it, and `pgmq` because
-/// migration 0012 calls `pgmq.create('observe')` — a missing one is a failed
-/// migration three steps later with a message about a schema rather than about
-/// an extension, so they are created and checked here.
-const REQUIRED_EXTENSIONS: &[&str] = &["vector", "pgmq"];
-
-/// Installed by the dev image and by `deploy/compose/postgres/initdb`, and
-/// called by nothing in the product: ADR-0043 kept Apache AGE installed for
-/// the GRPH-4 spike's evidence and built the knowledge graph on indexed
-/// adjacency instead. A Postgres without it runs Synveda perfectly, so its
-/// absence is reported rather than fatal.
-const OPTIONAL_EXTENSIONS: &[&str] = &["age"];
+/// `vector` stores labelled Knowledge embeddings; `btree_gin` supports the
+/// baseline's mixed scalar/text indexes. Both are named here so reset reports
+/// a missing server package before the baseline reaches an opaque DDL error.
+const REQUIRED_EXTENSIONS: &[&str] = &["vector", "btree_gin"];
 
 /// Drops the database the URL names, creates it again, installs the
 /// extensions, and migrates it to the current epoch.
@@ -174,30 +162,23 @@ pub async fn recreate(database_url: &str) -> Result<Recreated> {
 /// what they did.
 async fn install_extensions(pool: &PgPool) -> Result<Vec<ExtensionOutcome>> {
     let mut outcomes = Vec::new();
-    for name in REQUIRED_EXTENSIONS.iter().chain(OPTIONAL_EXTENSIONS) {
-        // A constant, never a value: `name` comes from the two arrays above
-        // and reaches no other caller.
+    for name in REQUIRED_EXTENSIONS {
+        // A constant, never a value: `name` comes from the array above and
+        // reaches no other caller.
         let statement = format!("create extension if not exists {name}");
         match sqlx::query(&statement).execute(pool).await {
-            Ok(_) => outcomes.push(ExtensionOutcome {
-                name,
-                refusal: None,
-            }),
-            Err(err) if REQUIRED_EXTENSIONS.contains(name) => {
+            Ok(_) => outcomes.push(ExtensionOutcome { name }),
+            Err(err) => {
                 return Err(Error::Storage {
                     message: format!(
                         "create extension `{name}`: {err}\n\
                          (Synveda's schema cannot be built without it — \
-                         `vector` stores embeddings and `pgmq` carries the \
-                         observe queue. Install the extension on this Postgres \
+                         `vector` stores Knowledge embeddings and `btree_gin` \
+                         supports indexed scalar/text predicates. Install the extension on this Postgres \
                          server, or point DATABASE_URL at the bundled one.)"
                     ),
                 });
             }
-            Err(err) => outcomes.push(ExtensionOutcome {
-                name,
-                refusal: Some(err.to_string()),
-            }),
         }
     }
     Ok(outcomes)
@@ -272,7 +253,6 @@ mod tests {
     /// something" and "you cannot run Synveda on this Postgres".
     #[test]
     fn the_required_extensions_are_the_ones_a_migration_needs() {
-        assert_eq!(REQUIRED_EXTENSIONS, &["vector", "pgmq"]);
-        assert_eq!(OPTIONAL_EXTENSIONS, &["age"]);
+        assert_eq!(REQUIRED_EXTENSIONS, &["vector", "btree_gin"]);
     }
 }
