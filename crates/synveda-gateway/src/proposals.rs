@@ -886,7 +886,7 @@ async fn open_inner(
     if target_position > 0 {
         metrics::counter!(
             PROPOSAL_CLIMBS_TOTAL,
-            "levels" => target_position.to_string(),
+            "levels" => climb_level_bucket(target_position),
             "from" => source.kind.as_str(),
             "to" => node.kind.as_str(),
         )
@@ -3062,6 +3062,15 @@ fn role_list(roles: &[synveda_types::access::RoleKey]) -> String {
         .join(", ")
 }
 
+fn climb_level_bucket(levels: usize) -> &'static str {
+    match levels {
+        0 => "0",
+        1 => "1",
+        2 => "2",
+        _ => "3_plus",
+    }
+}
+
 fn validate_open(body: &OpenBody) -> Result<()> {
     let invalid = |message: String| Err(Error::Invalid { message });
     // One asset kind per proposal (ADR-0049 decision 6): the approval
@@ -3113,4 +3122,18 @@ fn check_text(label: &str, value: Option<&str>) -> Result<()> {
         });
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::climb_level_bucket;
+
+    #[test]
+    fn proposal_climb_metric_uses_bounded_labels() {
+        assert_eq!(climb_level_bucket(0), "0");
+        assert_eq!(climb_level_bucket(1), "1");
+        assert_eq!(climb_level_bucket(2), "2");
+        assert_eq!(climb_level_bucket(3), "3_plus");
+        assert_eq!(climb_level_bucket(usize::MAX), "3_plus");
+    }
 }
