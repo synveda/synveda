@@ -2315,6 +2315,21 @@ CPR-43  Final context-platform hard cut (XL)
   `make db-test` pass; unavailable real-client evidence stays honestly open.
   ADR-0069 amended.
 
+CPR-44  Production hardening and maintainability cut (XL)
+  Filed 2026-08-26 after the context-platform MVP. Rescan the fetched source
+  head, preserve the current PDP/RLS/VedaFlow/audit architecture, and close
+  only reproduced production defects whose remediation is bounded and
+  reviewable. AC: baseline and final gates are recorded; cross-origin
+  directory pagination, malformed service-token time claims, audit
+  verification races, Knowledge erasure residue, nested context pool use and
+  destructive key handling have adversarial regressions; high-coupling Rust
+  and console responsibilities are separated without changing the generated
+  public contract; stale code, speculative SDKs and duplicated response or
+  validation helpers are removed where evidence supports it; current docs
+  have one clear authority and a production-readiness register; remaining
+  release, recovery, availability and external-client gaps retain executable
+  acceptance criteria rather than readiness claims. ADR-0101.
+
 ──────────────────────────────────────────────
 Sequencing (features → phases)
 ──────────────────────────────────────────────
@@ -2408,7 +2423,7 @@ Phase 4 ecosystem: ADPT-4,5,6,7,8 · PRMT-3 · SKIL-5 · MEM-7 · OPS-5,6,7 · C
    or an evaluation harness — and that is a *when*, not an *if*, since ADPT-1's own demo
    is a script. What it must not become is a warning in a README: the gap is silent,
    returns exit 0, and reads exactly like a session that was observed.)
-Phase 5 context platform (redesign): CPR-1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43
+Phase 5 context platform (redesign): CPR-1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44
    (Added 2026-08-17. Its own phase rather than a slot in Phase 4, because it is not the
    next feature — it is the programme that re-cuts the model every feature above was built
    on, for an audience none of them was: one person, or four sharing agent context, who

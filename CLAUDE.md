@@ -275,7 +275,7 @@ explicitly and say so.
 
 Phases 0, 1 and 2 are complete; SKIL-1 through SKIL-4, OPS-1, CNSL-1, ADPT-2,
 CNSL-2, AUTH-4, AUTH-5, EVAL-3, OPS-2, TEN-3, TEN-4 and OPS-8 are the Phase 3
-features done. 109 of 140 features delivered — see docs/backlog/STATUS.md for
+features done. 109 of 141 features delivered — see docs/backlog/STATUS.md for
 what each one proved and what it left standing. (The total read 86 until
 2026-08-05, when it was corrected to the 88 STATUS.md and `make
 check-backlog` had both said for some time; AUTHZ-7 was filed the same day by
@@ -547,6 +547,13 @@ every Prompt-33 search term. Clean bootstrap, complete CI/database, product,
 default, BGE-M3, 10k-security and authentic 4,927-turn Stage-H gates pass. The
 real second-client criterion remains externally blocked and is not promoted
 from configuration or replay evidence.
+
+**CPR-44 was filed next**, making it **141 with 109 delivered**: it is the
+evidence-led production-hardening and maintainability cut after the MVP. It
+preserves the trust architecture, fixes only reproduced bounded defects,
+reduces demonstrated coupling and stale narrative, and records externally
+dependent release and recovery gaps without converting them into support
+claims.
 
 Since CPR-9 a **listing decides per row**. The audit of Prompts 1–7 found that
 `GET /v1/workspaces` and `/v1/me` took one decision at the tenant root and
