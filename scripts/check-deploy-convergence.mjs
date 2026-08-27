@@ -100,6 +100,175 @@ export function suppressesCargoBuildFailure(source) {
   return /cargo build[^\n]*\|\|\s*true/.test(source);
 }
 
+export function productImageFindings(source) {
+  const findings = [];
+  const stages = [...source.matchAll(/^FROM\s+.*$/gim)];
+  const finalStage = stages.length > 0 ? source.slice(stages.at(-1).index) : "";
+  const finalActive = finalStage.replace(/^[ \t]*#.*(?:\r?\n|$)/gm, "");
+  if (!/^FROM\s+\S+\s+AS\s+runtime\s*$/im.test(finalActive)) {
+    findings.push("final stage is not the named runtime stage");
+  }
+  const users = [...finalActive.matchAll(/^\s*USER\s+([^\s#]+)/gim)].map(
+    (match) => match[1],
+  );
+  const runtimeUser = users.at(-1);
+  if (!runtimeUser || !/^[1-9][0-9]*:[1-9][0-9]*$/.test(runtimeUser)) {
+    findings.push("final runtime user is not an explicit non-zero UID:GID");
+  }
+  for (const [binary, instruction] of [
+    [
+      "synveda-gateway",
+      "COPY --from=build /src/target/release/synveda-gateway /usr/local/bin/synveda-gateway",
+    ],
+    ["synveda", "COPY --from=build /src/target/release/synveda /usr/local/bin/synveda"],
+    [
+      "synveda-container",
+      "COPY --chmod=0755 deploy/compose/gateway/synveda-container /usr/local/bin/synveda-container",
+    ],
+  ]) {
+    if (!finalActive.includes(instruction)) {
+      findings.push(`final runtime stage omits ${binary}`);
+    }
+  }
+  if (!finalActive.includes('ENTRYPOINT ["/usr/local/bin/synveda-container"]')) {
+    findings.push("role-neutral entrypoint is missing");
+  }
+  if (!finalActive.includes('CMD ["gateway"]')) {
+    findings.push("default gateway role is missing");
+  }
+  if (/^\s*HEALTHCHECK\b/m.test(finalActive)) {
+    findings.push("image hard-codes a role-specific healthcheck");
+  }
+  if (!/^\s*STOPSIGNAL\s+SIGTERM\s*$/m.test(finalActive)) {
+    findings.push("SIGTERM stop signal is missing");
+  }
+  return findings;
+}
+
+export function dockerignoreFindings(source) {
+  const rules = new Set(
+    source
+      .split("\n")
+      .map((line) => line.trim())
+      .filter((line) => line && !line.startsWith("#")),
+  );
+  const findings = [];
+  for (const required of [
+    ".git",
+    ".git/**",
+    ".agents",
+    ".agents/**",
+    ".codex",
+    ".codex/**",
+    "target",
+    "target/**",
+    "node_modules",
+    "node_modules/**",
+    ".env",
+    ".env.*",
+    "**/.env",
+    "**/.env.*",
+    "deploy/compose/secrets",
+    "deploy/compose/secrets/**",
+    "deploy/compose/backups",
+    "deploy/compose/backups/**",
+  ]) {
+    if (!rules.has(required)) findings.push(`build context includes ${required}`);
+  }
+  const allowedNegations = new Set(["!**/.env.example"]);
+  for (const rule of rules) {
+    if (rule.startsWith("!") && !allowedNegations.has(rule)) {
+      findings.push(`unreviewed build-context re-inclusion ${rule}`);
+    }
+  }
+  return findings;
+}
+
+export function productLauncherFindings(source) {
+  const findings = [];
+  const active = source.replace(/^[ \t]*#.*(?:\r?\n|$)/gm, "");
+  const caseLabels = active
+    .split("\n")
+    .map((line) => line.trimStart())
+    .filter((line) => !/^[a-zA-Z_][a-zA-Z0-9_]*\(\)[ \t]*\{/.test(line))
+    .map((line) => line.match(/^([^)]*)\)/)?.[1]?.trim())
+    .filter((label) => label !== undefined);
+  const expectedCaseLabels = ["gateway", "migrate", "probe", "live", "ready", "*", "*"];
+  if (JSON.stringify(caseLabels) !== JSON.stringify(expectedCaseLabels)) {
+    findings.push("launcher case vocabulary is not closed and ordered");
+  }
+  const roleMatches = [...active.matchAll(/^ {4}(gateway|migrate|probe|\*)\)[ \t]*$/gm)];
+  const labels = roleMatches.map(
+    (match) => match[1],
+  );
+  if (JSON.stringify(labels) !== JSON.stringify(["gateway", "migrate", "probe", "*"])) {
+    findings.push("launcher role vocabulary is not closed and ordered");
+  }
+
+  const roleBlock = (role) => {
+    const position = roleMatches.findIndex((match) => match[1] === role);
+    if (position < 0) return "";
+    const current = roleMatches[position];
+    const next = roleMatches[position + 1];
+    const start = current.index + current[0].length;
+    return active.slice(start, next?.index);
+  };
+  const gateway = roleBlock("gateway");
+  const migrate = roleBlock("migrate");
+  const probe = roleBlock("probe").replace(/\\\r?\n\s*/g, " ");
+  const unknown = roleBlock("*").replace(/\s+/g, " ").trim();
+
+  if (!gateway.includes('[ "$#" -eq 1 ] || usage')) {
+    findings.push("gateway role does not enforce exact arity");
+  }
+  if (!gateway.includes("exec /usr/local/bin/synveda-gateway")) {
+    findings.push("gateway role does not exec the gateway binary");
+  }
+  if (!migrate.includes('[ "$#" -eq 1 ] || usage')) {
+    findings.push("migrate role does not enforce exact arity");
+  }
+  if (!migrate.includes("exec /usr/local/bin/synveda db migrate")) {
+    findings.push("migrate role does not exec the migration command");
+  }
+  if (!probe.includes('[ "$#" -eq 3 ] || usage')) {
+    findings.push("probe role does not enforce exact arity");
+  }
+  if (!probe.includes('[ "$2" = "gateway" ] || usage')) {
+    findings.push("probe role accepts an undeclared target");
+  }
+  if (!/live\)\s+path=healthz\s+;;/.test(probe)) {
+    findings.push("live probe does not select /healthz");
+  }
+  if (!/ready\)\s+path=readyz\s+;;/.test(probe)) {
+    findings.push("ready probe does not select /readyz");
+  }
+  if (!probe.includes('"http://127.0.0.1:8120/${path}"')) {
+    findings.push("probe does not use the fixed loopback gateway endpoint");
+  }
+  if (!/exec \/usr\/bin\/curl\s+--disable(?:\s|$)/.test(probe)) {
+    findings.push("probe permits curl configuration loading");
+  }
+  if (!/--noproxy\s+['"]\*['"]/.test(probe)) {
+    findings.push("probe permits inherited proxy routing");
+  }
+  for (const option of ["--connect-timeout 1", "--max-time 2", "--fail"]) {
+    if (!probe.includes(option)) findings.push(`probe is missing ${option}`);
+  }
+  if (unknown !== "usage ;; esac") {
+    findings.push("unknown role does not fail through usage");
+  }
+  if (!/^#!\/bin\/sh\s*$/m.test(source) || !/^set -eu\s*$/m.test(active)) {
+    findings.push("launcher shell or fail-closed options are missing");
+  }
+  if (/\beval\b/.test(active) || /\$\(|`/.test(active)) {
+    findings.push("launcher evaluates input");
+  }
+  if (/\b(?:compose|saas|enterprise)\b/.test(active)) {
+    findings.push("launcher branches on deployment shape");
+  }
+  return findings;
+}
+
 function fail(message) {
   throw new Error(`deployment convergence: ${message}`);
 }
@@ -134,6 +303,13 @@ function checkCompose(relative, release) {
   }
   if (!gateway.includes("SYNVEDA_GATEWAY_DATABASE_URL")) {
     fail(`${relative} cannot receive a separately provisioned runtime DSN`);
+  }
+  if (
+    !gateway.includes(
+      '"/usr/local/bin/synveda-container", "probe", "gateway", "live"',
+    )
+  ) {
+    fail(`${relative} does not attach the gateway role-specific liveness probe`);
   }
   if (release && /^\s*build:/m.test(source)) {
     fail(`${relative} is a release manifest with a source build`);
@@ -195,7 +371,7 @@ function checkReleaseNotes() {
   }
 }
 
-function checkGatewayImageInputs() {
+function checkProductImageInputs() {
   const relative = "deploy/compose/gateway/Dockerfile";
   const source = read(relative);
   const missing = missingLocalDockerCopySources(source, (path) =>
@@ -218,6 +394,23 @@ function checkGatewayImageInputs() {
   }
   if (suppressesCargoBuildFailure(source)) {
     fail(`${relative} suppresses a dependency-cache cargo build failure`);
+  }
+  const imageFindings = productImageFindings(source);
+  if (imageFindings.length > 0) {
+    fail(`${relative} violates the product image contract: ${imageFindings.join(", ")}`);
+  }
+
+  const launcherRelative = "deploy/compose/gateway/synveda-container";
+  const launcher = read(launcherRelative);
+  const launcherFindings = productLauncherFindings(launcher);
+  if (launcherFindings.length > 0) {
+    fail(`${launcherRelative} violates the launcher contract: ${launcherFindings.join(", ")}`);
+  }
+  run("sh", ["-n", launcherRelative]);
+
+  const ignoreFindings = dockerignoreFindings(read(".dockerignore"));
+  if (ignoreFindings.length > 0) {
+    fail(`.dockerignore violates the build-context contract: ${ignoreFindings.join(", ")}`);
   }
 }
 
@@ -260,12 +453,12 @@ export function main() {
   checkCompose("deploy/compose/docker-compose.yml", false);
   checkCompose("deploy/release/docker-compose.yml", true);
   checkHelm();
-  checkGatewayImageInputs();
+  checkProductImageInputs();
   checkPublicContract();
   checkReleaseNotes();
   checkReleaseUpgradeShape();
   console.log(
-    "deployment convergence holds: 2 Compose renders, Helm render, gateway image inputs, " +
+    "deployment convergence holds: 2 Compose renders, Helm render, product image inputs, " +
       "current OpenAPI, least-privilege runtime DSNs and repeatable release replacement",
   );
 }

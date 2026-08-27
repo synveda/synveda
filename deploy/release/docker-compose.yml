@@ -119,6 +119,11 @@ services:
       # gRPC, not HTTP: telemetry.rs builds the exporter `.with_tonic()`.
       OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
       RUST_LOG: ${RUST_LOG:-info}
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/synveda-container", "probe", "gateway", "live"]
+      interval: 5s
+      timeout: 3s
+      retries: 24
     ports:
       - "8120:8120"
 volumes:

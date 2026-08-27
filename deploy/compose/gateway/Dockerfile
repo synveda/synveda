@@ -1,5 +1,5 @@
-# The gateway, as the one runtime every deployment shape uses
-# (OPS-1; CPR-36, ADR-0095). Build context is the repository root.
+# The product image every deployment shape uses (OPS-1; CPR-36, ADR-0095;
+# CPR-45, ADR-0102). Build context is the repository root.
 #
 # Two stages, and the split is the point: dependencies compile in their own
 # layer so that editing this workspace's own sources does not recompile
@@ -94,15 +94,26 @@ RUN apt-get update \
 # `cargo build -p` that shares this stage's dependency compilation anyway.
 COPY --from=build /src/target/release/synveda-gateway /usr/local/bin/synveda-gateway
 COPY --from=build /src/target/release/synveda /usr/local/bin/synveda
+COPY --chmod=0755 deploy/compose/gateway/synveda-container /usr/local/bin/synveda-container
 
 # The console bundle: static files the binary serves from its own origin
 # (CNSL-1, ADR-0056 decision 1). No Node in this stage — the build stage
 # above is where it lived, and the runtime is still one process.
 COPY --from=console /src/console/dist /usr/share/synveda/console
-ENV SYNVEDA_CONSOLE_DIR=/usr/share/synveda/console
+ENV HOME=/tmp \
+    XDG_CACHE_HOME=/tmp/.cache \
+    SYNVEDA_CONSOLE_DIR=/usr/share/synveda/console
 
 WORKDIR /app
 EXPOSE 8120
-HEALTHCHECK --interval=5s --timeout=3s --retries=24 \
-  CMD curl -fsS http://localhost:8120/healthz || exit 1
-ENTRYPOINT ["/usr/local/bin/synveda-gateway"]
+
+# Compose supplies the operator's validated non-zero UID/GID so mode-0600
+# secret bind mounts remain readable. This default also makes an unconfigured
+# image non-root and preserves arbitrary-UID compatibility for later OpenShift.
+USER 65532:65532
+STOPSIGNAL SIGTERM
+
+# Health is role-specific. Compose and Kubernetes call the closed `probe`
+# command instead of inheriting a gateway-only OCI HEALTHCHECK.
+ENTRYPOINT ["/usr/local/bin/synveda-container"]
+CMD ["gateway"]

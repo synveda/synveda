@@ -1,0 +1,45 @@
+# Docker builds use the repository root as their context. Keep local recovery,
+# source-control metadata and generated output out of every image build.
+.git
+.git/**
+.agents
+.agents/**
+.codex
+.codex/**
+target
+target/**
+**/target
+**/target/**
+node_modules
+node_modules/**
+**/node_modules
+**/node_modules/**
+.pnpm-store
+.pnpm-store/**
+**/dist
+**/dist/**
+**/dist-test
+**/dist-test/**
+data
+data/**
+
+# Local deployment configuration can contain database passwords, issuer
+# client secrets and key paths. Examples are documentation, not credentials.
+.env
+.env.*
+**/.env
+**/.env.*
+!**/.env.example
+deploy/compose/secrets
+deploy/compose/secrets/**
+deploy/compose/backups
+deploy/compose/backups/**
+
+# Editor, operating-system and diagnostic residue never belongs in an OCI
+# build context.
+.DS_Store
+Thumbs.db
+*.log
+**/*.log
+*.tmp
+**/*.tmp

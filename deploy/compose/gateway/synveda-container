@@ -1,0 +1,41 @@
+#!/bin/sh
+# CPR-45 / ADR-0102: one product image exposes a closed command vocabulary.
+# Deployment shape belongs in Compose or Helm, never in this launcher.
+set -eu
+
+usage() {
+    echo "usage: synveda-container {gateway|migrate|probe gateway {live|ready}}" >&2
+    exit 64
+}
+
+case "${1:-}" in
+    gateway)
+        [ "$#" -eq 1 ] || usage
+        exec /usr/local/bin/synveda-gateway
+        ;;
+    migrate)
+        [ "$#" -eq 1 ] || usage
+        exec /usr/local/bin/synveda db migrate
+        ;;
+    probe)
+        [ "$#" -eq 3 ] || usage
+        [ "$2" = "gateway" ] || usage
+        case "$3" in
+            live) path=healthz ;;
+            ready) path=readyz ;;
+            *) usage ;;
+        esac
+        exec /usr/bin/curl \
+            --disable \
+            --noproxy '*' \
+            --fail \
+            --silent \
+            --show-error \
+            --connect-timeout 1 \
+            --max-time 2 \
+            "http://127.0.0.1:8120/${path}"
+        ;;
+    *)
+        usage
+        ;;
+esac
