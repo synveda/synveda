@@ -24,9 +24,10 @@ SET client_min_messages = warning;
 -- granted to this NOLOGIN role; the gateway itself is never the schema owner.
 do $$
 begin
-    if not exists (select from pg_roles where rolname = 'synveda_app') then
-        create role synveda_app nologin;
-    end if;
+    create role synveda_app nologin;
+exception
+    when duplicate_object or unique_violation then
+        null; -- The shared role exists or a concurrent database created it.
 end
 $$;
 
