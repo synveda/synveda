@@ -1,6 +1,6 @@
 # Production readiness
 
-Assessment date: 2026-08-26. Scope: the current context-platform checkout as a
+Assessment date: 2026-08-27. Scope: the current context-platform checkout as a
 service for individuals and small teams. Passing repository gates establishes
 repeatable behaviour; it does not establish availability, recoverability,
 supportability or a releasable supply chain.
@@ -13,9 +13,27 @@ drill. P1 gaps also leave the gateway single-replica, restart-shaped, without
 production abuse controls, operational SLOs or a tested tenant lifecycle. A
 controlled evaluation remains useful, but it is not a production deployment.
 
+CPR-45 and ADR-0102 now define a Docker-first reference deployment programme.
+Its acceptance can prove controlled single-host installation, Keycloak OIDC,
+separate workers, private telemetry and local isolated recovery. It cannot by
+itself close the three production P0s: release parity still needs pullable
+published artifacts, key custody still needs an owner-approved production
+ceremony, and backup/restore still needs off-host retention plus recurring
+measured drills against owned RPO/RTO.
+
 The status vocabulary below is `Ready`, `Conditional`, `Not ready` and
 `Not assessed`. Severity is the consequence of leaving the gap standing, not a
 score for the implemented code.
+
+## Docker reference programme
+
+| Scope | Current status | Exit evidence | Explicit residual limit |
+|---|---|---|---|
+| Development Compose | Not ready | Canonical render plus clean-volume HTTP login/product lifecycle on a supported desktop Docker platform | Development HTTP and loopback/operator exposure are not reference security evidence. |
+| Single-host reference | Not ready | Clean Linux and desktop runs of proxy-only HTTPS, Keycloak, gateway/worker, Collector, governed product lifecycle, backup/PITR, isolated database+key restore, restart and tested-version upgrade | One host/server, planned maintenance and same-host-backup risk; no HA or DR claim. |
+| External dependency shape | Not assessed | Same image, deterministic configuration tests and live conformance for each provider actually named | Schema/configuration evidence alone is not provider support. |
+| Hosted playground promotion | Not ready | Exact pullable artifact manifest, off-host recovery, custody, basic abuse/lifecycle controls, alerts and runbooks in addition to reference acceptance | May remain single-host only when host-loss and maintenance limits are explicit. |
+| Private-beta SaaS promotion | Not ready | All P0s plus multi-replica correctness, durable worker reliability, lifecycle/isolation, load/soak, supportability and supply-chain evidence | Docker reference evidence is necessary but not sufficient. |
 
 ## Runtime and availability
 

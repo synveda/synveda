@@ -122,6 +122,9 @@ embedding model. Named volumes persist until explicitly removed.
 For the installed local profile and its key-custody warning, follow
 [docs/INSTALL.md](docs/INSTALL.md). Release archives are currently unsigned;
 verify checksums, and do not treat the installed profile as production-ready.
+The accepted target for the Docker-first portable reference is
+[docs/DEPLOYMENT_CONTRACT.md](docs/DEPLOYMENT_CONTRACT.md); CPR-45 remains open
+until its clean-volume, identity, worker and recovery acceptance passes.
 
 Runnable feature acceptance lives under [`demos/`](demos/). Useful current
 entry points include:
@@ -189,6 +192,11 @@ evals/        scenarios, corpora and committed baselines
 docs/         current contracts, feature inventory/open briefs, ADRs and OpenAPI
 scripts/      generation and CI consistency checks
 ```
+
+Deployment shapes implement one provider-neutral contract; they do not select
+product editions. Docker Compose is the accepted single-host reference target,
+and later Helm work maps the same commands, configuration, OIDC, OTLP and
+backup semantics to native primitives rather than translating Compose YAML.
 
 ## Documentation
 

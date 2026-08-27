@@ -8,6 +8,12 @@ schemas or deployment modes (CPR-36, ADR-0095).
 For the same runtime on CloudNativePG with your own IdP, see
 [the chart](../deploy/helm/synveda) (OPS-2).
 
+> **Deployment transition:** CPR-45 is replacing this Rauthy-based installed
+> profile with the canonical Docker reference defined in
+> [the deployment contract](DEPLOYMENT_CONTRACT.md). Until its clean-volume
+> acceptance passes, the commands below describe the currently shipped profile;
+> the new contract is not yet a Keycloak or recovery-support claim.
+
 ## Prerequisites
 
 **Docker** (Docker Desktop or OrbStack), running. That is the whole list.

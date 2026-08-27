@@ -17,3 +17,7 @@ dist-test/
 *.tsbuildinfo
 .DS_Store
 Thumbs.db
+
+# Local Codex recovery state. Durable project state belongs in STATUS/open
+# briefs; the Docker build exclusion is a separate `.dockerignore` contract.
+/.codex/

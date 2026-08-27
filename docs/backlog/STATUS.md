@@ -1,11 +1,11 @@
 # Feature inventory
 
-141 features in this index. This file is authoritative for feature identity,
+142 features in this index. This file is authoritative for feature identity,
 phase and delivered/open state. Delivered names identify historical slices;
 current contracts live in code, generated artefacts and accepted ADRs, while git
 retains their implementation evidence. Open entries link to current briefs.
 
-110 delivered; 31 open. The inventory and open-brief shape are checked in CI.
+110 delivered; 32 open. The inventory and open-brief shape are checked in CI.
 
 ## Phase 0 — Foundation (wk 1)
 
@@ -164,6 +164,7 @@ retains their implementation evidence. Open entries link to current briefs.
 - [x] CPR-42: Context-platform security and product-integrity audit — delivered 2026-08-26; ADR-0078
 - [x] CPR-43: Final context-platform hard cut — delivered 2026-08-26; ADR-0069
 - [x] CPR-44: Production hardening and maintainability cut — delivered 2026-08-26; ADR-0101
+- [ ] [CPR-45: Docker-first portable reference deployment](CPR-45.md) — open
 
 ## Unscheduled — not listed in the Sequencing section
 
