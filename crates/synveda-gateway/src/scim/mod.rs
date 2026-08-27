@@ -8,30 +8,35 @@
 //! an extension — so every product effect is the mapping resolver's and the
 //! effective pack's, and the caller has no vocabulary to ask for one.
 //!
-//! That is what preserves ADR-0013's argument for seed §2.2 unchanged. JIT
-//! provisioning takes no PDP decision because it is a system write path
-//! driven by verified IdP claims and reaches no governed asset; this plane
-//! is the same trust class through a different door, and reaches no governed
-//! asset for the same structural reason.
+//! CPR-34 narrows the old reachability argument (ADR-0093). This credential
+//! can state identity and shared-group membership facts, and those facts can
+//! affect a grant already bound to the group. It still cannot name or create
+//! a scope, role, grant, pack or governed artifact: the only bridge from a
+//! directory group to product authority is the separate
+//! `/v1/directory/access-assignments` command, which takes the ordinary
+//! `MembershipGrant` PDP decision and chains the ordinary access audit event.
+//! The credential is therefore verified external-adapter authority over
+//! directory-owned facts, never an alternate authorisation plane.
 //!
 //! ## What is here
 //!
 //! - [`wire`] — RFC 7643 resources and RFC 7644 messages.
 //! - [`filter`] — the equality subset, and the `501` for the rest.
-//! - [`reconcile`] — the projection from the mirror onto identities and
-//!   placement. The **only** writer of that seam, and the function AUTH-5's
-//!   pull sync will drive.
+//! - [`reconcile`] — the projection from the user resource onto identities
+//!   and principal scopes. The **only** writer of that seam, and the function
+//!   AUTH-5's pull sync drives.
 //! - [`credentials`] — the `/v1` admin routes that issue and revoke the
 //!   static bearer this plane authenticates with, PDP-gated at the tenant.
 //!
 //! ## Audit
 //!
-//! State changes chain (`identity.provisioned`, `identity.moved`,
-//! `identity.sealed`); reads do not (decision 14). A provisioning agent
+//! State changes chain (`identity.provisioned`, `identity.sealed`,
+//! `access.group.created`, `access.group.updated`); reads do not (decision
+//! 14). A provisioning agent
 //! polls its whole assigned population every cycle, so chaining reads would
 //! fill a tenant's audit chain with a directory reading its own copy back
-//! and bury the events that matter. Nothing on this plane is governed
-//! content, so a read here discloses nothing the directory did not send us.
+//! and bury the events that matter. A read returns only source-owned directory
+//! facts, never scope grants or governed artifact content.
 
 pub mod credentials;
 pub mod filter;
@@ -45,7 +50,7 @@ use axum::extract::{Request, State};
 use axum::http::{StatusCode, header};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::get;
 use axum::{Router, middleware};
 use serde_json::json;
 use synveda_types::{Error, ScimCredential, Tenant};
@@ -152,6 +157,21 @@ impl ScimError {
             }
         }
     }
+}
+
+fn require_patch_schema(body: &wire::PatchRequest) -> Result<(), ScimError> {
+    if body
+        .schemas
+        .iter()
+        .any(|schema| schema == wire::PATCH_OP_SCHEMA)
+    {
+        return Ok(());
+    }
+    Err(ScimError::typed(
+        StatusCode::BAD_REQUEST,
+        "invalidSyntax",
+        "schemas must include the SCIM PatchOp URN",
+    ))
 }
 
 impl From<Error> for ScimError {
@@ -327,21 +347,6 @@ pub fn router(state: AppState) -> Router<AppState> {
                 .delete(groups::delete),
         )
         .route_layer(middleware::from_fn_with_state(state, require_credential))
-}
-
-/// The `/v1` admin routes that manage this plane's credentials. Mounted on
-/// the governed plane, not here: issuing one is an act of the product's own
-/// authority, PDP-gated at the tenant (ADR-0059 decision 13).
-pub fn credential_routes() -> Router<AppState> {
-    Router::new()
-        .route(
-            "/v1/scim/credentials",
-            get(credentials::list).post(credentials::issue),
-        )
-        .route(
-            "/v1/scim/credentials/{id}/revoke",
-            post(credentials::revoke),
-        )
 }
 
 /// `GET /ServiceProviderConfig` — RFC 7644 §4. Unauthenticated discovery is

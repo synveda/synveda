@@ -9,11 +9,9 @@
 //! only then probes. Twenty questions written as twenty scenarios would
 //! seed twenty times and measure twenty different corpora.
 //!
-//! What a corpus says that a scenario cannot: where each batch's material
-//! ends up. Records land at the caller's home scope (ADR-0020) and a
-//! service identity's home is a `ScopeKind::User` leaf under its anchor
-//! (ADR-0018 decision 2), so material above a leaf got there by climbing
-//! through review — `promote_to` is that climb (decision 3).
+//! What a corpus says that a scenario cannot: where each accepted Knowledge
+//! item is governed. `publish_scope` names the exact current scope selected
+//! during candidate acceptance; every acceptance still traverses VedaFlow.
 //!
 //! Every struct here refuses unknown fields, for EVAL-1's reason: a
 //! silently-ignored expectation is an eval that passes for the wrong
@@ -24,18 +22,18 @@ use std::path::Path;
 
 use serde::Deserialize;
 
+use crate::fixtures::EVENT_TYPES;
+
 /// Where a batch's material ends up, which is also the axis it reports
-/// into (`qa_scope_team` and friends). Closed, because the gradient it
+/// into (`qa_scope_project` and friends). Closed, because the gradient it
 /// names is closed (seed §4.4).
-pub const TIERS: [&str; 4] = ["user", "team", "department", "org"];
+pub const VISIBILITIES: [&str; 4] = ["principal", "project", "workspace", "tenant"];
 
 /// What a question needs from the embedder before its answer is
 /// reachable (decision 5).
 pub const NEEDS: [&str; 2] = ["lexical", "semantic"];
 
-/// The observe kinds MEM-1 accepts.
-const KINDS: [&str; 3] = ["transcript_delta", "tool_result", "decision"];
-
+/// Session event kinds accepted by the capture pipeline.
 /// Words too common to count as lexical overlap between a question and
 /// its answer. Small and deliberately unclever: the guard it serves is
 /// "did the fixture author mislabel `semantic`", and a stopword list that
@@ -65,20 +63,19 @@ pub struct Corpus {
     pub questions: Vec<Question>,
 }
 
-/// One `/v1/observe` call, as one actor, plus where its material ends up.
+/// One session-event batch, as one actor, plus its governed publication target.
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SeedBatch {
     pub actor: String,
     pub session_id: String,
-    /// The scope tier this batch's material ends up at, and the axis it
+    /// The scope visibility this batch's material ends up at, and the axis it
     /// reports into.
-    pub tier: String,
-    /// The hierarchy node to climb to, named as the environment names it.
-    /// Absent means the material stays at the author's own leaf, which is
-    /// the `user` tier and the only tier that needs no review.
+    pub visibility: String,
+    /// The exact current scope alias named by the evaluation environment.
+    /// Absent means the material remains in the author's principal scope.
     #[serde(default)]
-    pub promote_to: Option<String>,
+    pub publish_scope: Option<String>,
     pub events: Vec<SeedEvent>,
 }
 
@@ -87,13 +84,16 @@ pub struct SeedBatch {
 pub struct SeedEvent {
     /// How questions refer to this event.
     pub key: String,
-    #[serde(default = "default_kind")]
-    pub kind: String,
+    /// A session event type that carries candidate source material.
+    /// Defaults to `message.user`, which is what an unlabelled line of a
+    /// transcript is.
+    #[serde(default = "default_event_type")]
+    pub event_type: String,
     pub text: String,
 }
 
-fn default_kind() -> String {
-    "transcript_delta".to_owned()
+fn default_event_type() -> String {
+    "message.user".to_owned()
 }
 
 /// One probe of the seeded corpus.
@@ -113,11 +113,11 @@ pub struct Question {
     /// reaches them (decision 5).
     #[serde(default = "default_needs")]
     pub needs: String,
-    /// Seed keys whose records must reach the block. Graded by record
-    /// identity, never by containment (decision 2).
-    pub expect_records: Vec<String>,
+    /// Seed keys whose accepted Knowledge must reach the block. Graded by
+    /// immutable item identity, never by containment.
+    pub expect_knowledge: Vec<String>,
     /// Phrases that must not appear — another scope's material that
-    /// leaked, or a record that ranked when it should not have.
+    /// leaked, or Knowledge that ranked when it should not have.
     #[serde(default)]
     pub must_not_contain: Vec<String>,
     /// The caller-side budget. Tight on purpose for the questions that
@@ -219,26 +219,25 @@ fn validate(corpora: &[Corpus]) -> Result<(), String> {
         let mut keys: BTreeMap<&str, &SeedEvent> = BTreeMap::new();
         for batch in &corpus.seed {
             let at = |what: &str| format!("{}/{}: {what}", corpus.corpus, batch.session_id);
-            if !TIERS.contains(&batch.tier.as_str()) {
+            if !VISIBILITIES.contains(&batch.visibility.as_str()) {
                 return Err(at(&format!(
-                    "tier `{}` is not one of {TIERS:?}",
-                    batch.tier
+                    "visibility `{}` is not one of {VISIBILITIES:?}",
+                    batch.visibility
                 )));
             }
-            // The two halves of decision 3, stated as an equivalence so
-            // neither can drift: `user` is the tier that needs no review,
-            // and every other tier is one a climb produced.
-            match (batch.tier.as_str(), batch.promote_to.as_deref()) {
-                ("user", Some(scope)) => {
+            // Principal placement is implicit; every shared placement names
+            // its exact current target so the corpus cannot depend on a fixed
+            // hierarchy convention.
+            match (batch.visibility.as_str(), batch.publish_scope.as_deref()) {
+                ("principal", Some(scope)) => {
                     return Err(at(&format!(
-                        "tier `user` is the author's own leaf and promotes nowhere, but this \
-                         batch climbs to `{scope}`"
+                        "visibility `principal` is the author's own scope and names no publish target, \
+                         but this batch names `{scope}`"
                     )));
                 }
-                (tier, None) if tier != "user" => {
+                (visibility, None) if visibility != "principal" => {
                     return Err(at(&format!(
-                        "tier `{tier}` sits above a leaf, and nothing but a promotion can put \
-                         material there — name the scope in `promote_to`"
+                        "visibility `{visibility}` is shared — name its exact scope in `publish_scope`"
                     )));
                 }
                 _ => {}
@@ -253,10 +252,10 @@ fn validate(corpora: &[Corpus]) -> Result<(), String> {
                 ));
             }
             for event in &batch.events {
-                if !KINDS.contains(&event.kind.as_str()) {
+                if !EVENT_TYPES.contains(&event.event_type.as_str()) {
                     return Err(at(&format!(
-                        "kind `{}` is not one of {KINDS:?}",
-                        event.kind
+                        "event type `{}` is not one of {EVENT_TYPES:?}",
+                        event.event_type
                     )));
                 }
                 if keys.insert(&event.key, event).is_some() {
@@ -282,20 +281,20 @@ fn validate(corpora: &[Corpus]) -> Result<(), String> {
                     question.needs
                 )));
             }
-            if question.expect_records.is_empty() {
+            if question.expect_knowledge.is_empty() {
                 return Err(at(
-                    "a question that expects no records measures nothing — this suite grades by \
-                     record identity, so there is nothing else for it to grade",
+                    "a question that expects no Knowledge measures nothing — this suite grades by \
+                     item identity, so there is nothing else for it to grade",
                 ));
             }
             if question.budget_tokens == Some(0) {
                 return Err(at("budget_tokens must be at least 1"));
             }
             let mut answer = String::new();
-            for key in &question.expect_records {
+            for key in &question.expect_knowledge {
                 let Some(event) = keys.get(key.as_str()) else {
                     return Err(at(&format!(
-                        "expect_records names `{key}`, which this corpus does not seed"
+                        "expect_knowledge names `{key}`, which this corpus does not seed"
                     )));
                 };
                 answer.push(' ');
@@ -350,16 +349,16 @@ mod tests {
         "note": "n",
         "reader": "qa-reader",
         "seed": [
-            {"actor": "qa-reader", "session_id": "s-own", "tier": "user",
+            {"actor": "qa-reader", "session_id": "s-own", "visibility": "principal",
              "events": [{"key": "own", "text": "I always run cargo nextest before pushing."}]},
-            {"actor": "qa-team", "session_id": "s-team", "tier": "team",
-             "promote_to": "payments",
-             "events": [{"key": "team", "kind": "decision",
+            {"actor": "qa-project", "session_id": "s-team", "visibility": "project",
+             "publish_scope": "payments",
+             "events": [{"key": "project", "event_type": "message.assistant",
                          "text": "Payments retries are capped at three attempts."}]}
         ],
         "questions": [
             {"name": "q-team", "task": "what are payments retries capped at",
-             "expect_records": ["team"]}
+             "expect_knowledge": ["project"]}
         ]
     }"#;
 
@@ -374,44 +373,44 @@ mod tests {
     fn a_corpus_round_trips_with_its_defaults() {
         let corpora = parse(CLEAN).expect("parses");
         let corpus = &corpora[0];
-        assert_eq!(corpus.seed[0].events[0].kind, "transcript_delta");
+        assert_eq!(corpus.seed[0].events[0].event_type, "message.user");
         assert_eq!(corpus.questions[0].needs, "lexical");
         assert!(!corpus.questions[0].is_semantic());
         assert_eq!(
-            corpus.batch_of("team").map(|b| b.tier.as_str()),
-            Some("team")
+            corpus.batch_of("project").map(|b| b.visibility.as_str()),
+            Some("project")
         );
         assert!(corpus.batch_of("nothing").is_none());
     }
 
     #[test]
     fn an_unknown_field_is_refused_rather_than_ignored() {
-        let json = CLEAN.replace(r#""expect_records""#, r#""expect_recods""#);
+        let json = CLEAN.replace(r#""expect_knowledge""#, r#""expect_recods""#);
         let err = parse(&json).expect_err("unknown field must not parse");
         assert!(err.contains("expect_recods"), "unhelpful error: {err}");
     }
 
     #[test]
     fn a_question_naming_an_unseeded_key_is_refused() {
-        let json = CLEAN.replace(r#"["team"]"#, r#"["ghost"]"#);
+        let json = CLEAN.replace(r#"["project"]"#, r#"["ghost"]"#);
         let err = parse(&json).expect_err("dangling key must not validate");
         assert!(err.contains("ghost"), "unhelpful error: {err}");
     }
 
-    /// The equivalence decision 3 turns on, in both directions: `user` is
-    /// the only tier a leaf can hold, and every other tier is a climb.
+    /// Principal publication is implicit; every shared visibility names its
+    /// exact current scope.
     #[test]
-    fn a_tier_and_a_promotion_must_agree() {
-        let climbing_user = CLEAN.replace(
-            r#""tier": "user","#,
-            r#""tier": "user", "promote_to": "payments","#,
+    fn visibility_and_publish_scope_must_agree() {
+        let explicit_principal = CLEAN.replace(
+            r#""visibility": "principal","#,
+            r#""visibility": "principal", "publish_scope": "payments","#,
         );
-        let err = parse(&climbing_user).expect_err("a user tier promotes nowhere");
-        assert!(err.contains("promotes nowhere"), "{err}");
+        let err = parse(&explicit_principal).expect_err("a principal scope is implicit");
+        assert!(err.contains("names no publish target"), "{err}");
 
-        let unpromoted_team = CLEAN.replace(r#""promote_to": "payments","#, "");
-        let err = parse(&unpromoted_team).expect_err("a team tier needs a climb");
-        assert!(err.contains("nothing but a promotion"), "{err}");
+        let unscoped_project = CLEAN.replace(r#""publish_scope": "payments","#, "");
+        let err = parse(&unscoped_project).expect_err("shared Knowledge needs an exact scope");
+        assert!(err.contains("name its exact scope"), "{err}");
     }
 
     /// The guard that keeps the two paths honest. A `semantic` question
@@ -443,8 +442,8 @@ mod tests {
 
         // …and the same question declared honestly is fine.
         let honest = json.replace(
-            r#""expect_records""#,
-            r#""needs": "semantic", "expect_records""#,
+            r#""expect_knowledge""#,
+            r#""needs": "semantic", "expect_knowledge""#,
         );
         assert!(parse(&honest).is_ok(), "an honest semantic question parses");
     }
@@ -460,8 +459,11 @@ mod tests {
     }
 
     #[test]
-    fn a_question_that_expects_no_records_is_refused() {
-        let json = CLEAN.replace(r#""expect_records": ["team"]"#, r#""expect_records": []"#);
+    fn a_question_that_expects_no_knowledge_is_refused() {
+        let json = CLEAN.replace(
+            r#""expect_knowledge": ["project"]"#,
+            r#""expect_knowledge": []"#,
+        );
         let err = parse(&json).expect_err("an empty expectation measures nothing");
         assert!(err.contains("measures nothing"), "unhelpful error: {err}");
     }
@@ -469,17 +471,22 @@ mod tests {
     #[test]
     fn the_vocabularies_are_closed() {
         assert!(
-            parse(&CLEAN.replace(r#""tier": "team""#, r#""tier": "division""#)).is_err(),
-            "unknown tier must not validate"
+            parse(&CLEAN.replace(r#""visibility": "project""#, r#""visibility": "division""#))
+                .is_err(),
+            "unknown visibility must not validate"
         );
         assert!(
-            parse(&CLEAN.replace(r#""kind": "decision""#, r#""kind": "thought""#)).is_err(),
+            parse(&CLEAN.replace(
+                r#""event_type": "message.assistant""#,
+                r#""event_type": "thought""#
+            ))
+            .is_err(),
             "unknown kind must not validate"
         );
         assert!(
             parse(&CLEAN.replace(
-                r#""expect_records": ["team"]"#,
-                r#""needs": "vibes", "expect_records": ["team"]"#
+                r#""expect_knowledge": ["project"]"#,
+                r#""needs": "vibes", "expect_knowledge": ["project"]"#
             ))
             .is_err(),
             "unknown needs must not validate"

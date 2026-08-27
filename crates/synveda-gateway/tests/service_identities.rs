@@ -29,12 +29,11 @@ use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 use synveda_gateway::app::{AppState, router};
 use synveda_gateway::telemetry;
-use synveda_identity::{OidcVerifier, parse_issuers, personal_slug};
-use synveda_store::{hierarchy, identities, role_bindings, tenants};
-use synveda_types::{
-    HierarchyNode, Identity, IdentityId, IdentityKind, Role, ScopeId, ScopeKind, TenantId,
-    TenantStatus,
-};
+use synveda_identity::{OidcVerifier, parse_issuers};
+use synveda_store::{access, identities, scopes, tenants};
+use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
+use synveda_types::scope::Scope;
+use synveda_types::{GrantId, Identity, IdentityId, IdentityKind, ScopeId, TenantId, TenantStatus};
 use tower::ServiceExt;
 
 const KEY_PEM: &str = include_str!("fixtures/idp_key_a.pem");
@@ -233,20 +232,11 @@ fn state(url: &str, issuer: &str, tenant: TenantId) -> AppState {
         login: None,
         public_origin: "http://127.0.0.1:8120".to_owned(),
         pdp: Arc::new(synveda_policy::Pdp::new().expect("build the embedded PDP")),
-        scope_chains: Arc::new(synveda_store::ScopeChainCache::new()),
         service_token_max_ttl: Duration::from_secs(3600),
-        search_index: Arc::new(
-            synveda_retrieval::SearchIndex::open(
-                std::env::temp_dir()
-                    .join("synveda-gateway-tests")
-                    .join(synveda_types::TenantId::new().to_string()),
-            )
-            .expect("open search index"),
-        ),
         embedder: Arc::new(synveda_ingest::embedding::AnyEmbedder::Deterministic(
             synveda_ingest::embedding::DeterministicEmbedder::new(),
         )),
-        inject_embed_timeout: std::time::Duration::from_millis(100),
+        context_embed_timeout: std::time::Duration::from_millis(100),
         // TEN-4 (ADR-0064): a fixed test KEK, so a suite that touches a
         // sealed column seals rather than skipping. `Kms::Disabled` is the
         // production default when no key is configured.
@@ -321,86 +311,65 @@ async fn admitted_tenant() -> Option<(PgPool, TenantId, String)> {
     Some((pool, id, url))
 }
 
-/// Seeds acme-org → eng (dept) → platform (team), plus the reserved
-/// quarantine team. Returns (org, eng, platform, quarantine).
-async fn seed_hierarchy(
-    pool: &PgPool,
-    tenant: TenantId,
-) -> (HierarchyNode, HierarchyNode, HierarchyNode, HierarchyNode) {
+/// Seeds the tenant root with an `eng` org unit and a platform unit under
+/// it. Returns (root, eng, platform).
+async fn seed_hierarchy(pool: &PgPool, tenant: TenantId) -> (Scope, Scope, Scope) {
     let mut tx = pool.begin().await.expect("begin");
-    let org = hierarchy::create(
+    let org = scopes::ensure_tenant_root(&mut tx, tenant)
+        .await
+        .expect("mint root");
+    let eng = scopes::create(
         &mut tx,
-        ScopeId::new(),
-        tenant,
-        None,
-        ScopeKind::Org,
-        "acme",
-        "ACME",
+        &scopes::NewScope {
+            id: ScopeId::new(),
+            tenant_id: tenant,
+            kind: synveda_types::scope::ScopeKind::OrgUnit,
+            parent_scope_id: Some(org.id),
+            slug: "eng".to_owned(),
+            display_name: "Engineering".to_owned(),
+            attributes: serde_json::json!({}),
+            principal_id: None,
+            created_by: None,
+        },
     )
     .await
-    .expect("create org");
-    let eng = hierarchy::create(
+    .expect("create eng");
+    let platform = scopes::create(
         &mut tx,
-        ScopeId::new(),
-        tenant,
-        Some(org.id),
-        ScopeKind::Department,
-        "eng",
-        "Engineering",
+        &scopes::NewScope {
+            id: ScopeId::new(),
+            tenant_id: tenant,
+            kind: synveda_types::scope::ScopeKind::OrgUnit,
+            parent_scope_id: Some(eng.id),
+            slug: "platform".to_owned(),
+            display_name: "Platform".to_owned(),
+            attributes: serde_json::json!({}),
+            principal_id: None,
+            created_by: None,
+        },
     )
     .await
-    .expect("create dept");
-    let platform = hierarchy::create(
-        &mut tx,
-        ScopeId::new(),
-        tenant,
-        Some(eng.id),
-        ScopeKind::Team,
-        "platform",
-        "Platform",
-    )
-    .await
-    .expect("create team");
-    let quarantine = hierarchy::create(
-        &mut tx,
-        ScopeId::new(),
-        tenant,
-        Some(org.id),
-        ScopeKind::Team,
-        identities::QUARANTINE_SLUG,
-        "Quarantine",
-    )
-    .await
-    .expect("create quarantine");
-    tx.commit().await.expect("commit hierarchy");
-    (org, eng, platform, quarantine)
+    .expect("create platform");
+    tx.commit().await.expect("commit scopes");
+    (org, eng, platform)
 }
 
 /// Provisions a *user* identity at the store level (the JIT shape) so an
 /// IdP-verified subject is not quarantined at the seam.
-async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str, parent: ScopeId) -> Identity {
+async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str) -> Identity {
     let mut tx = pool.begin().await.expect("begin");
-    let id = IdentityId::new();
-    let leaf = hierarchy::create(
-        &mut tx,
-        ScopeId::new(),
-        tenant,
-        Some(parent),
-        ScopeKind::User,
-        &personal_slug(None, subject, id),
-        subject,
-    )
-    .await
-    .expect("create personal scope");
+    let own = scopes::ensure_principal_scope(&mut tx, tenant, subject, subject)
+        .await
+        .expect("mint principal scope");
     let identity = identities::create(
         &mut tx,
-        id,
+        IdentityId::new(),
         tenant,
         Some(subject),
         IdentityKind::User,
         None,
         None,
-        leaf.id,
+        own.id,
     )
     .await
     .expect("create identity");
@@ -408,14 +377,44 @@ async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str, parent: Scope
     identity
 }
 
-async fn bind(pool: &PgPool, tenant: TenantId, subject: &str, scope: Option<ScopeId>, role: Role) {
+/// A direct grant write: `None` means the tenant root.
+async fn bind(
+    pool: &PgPool,
+    tenant: TenantId,
+    subject: &str,
+    scope: Option<ScopeId>,
+    role: RoleKey,
+) {
     let mut tx = synveda_store::rls::begin_tenant_tx(pool, tenant)
         .await
         .expect("tenant tx");
-    role_bindings::bind(&mut *tx, tenant, subject, scope, role)
-        .await
-        .expect("bind role");
-    tx.commit().await.expect("commit binding");
+    let scope = match scope {
+        Some(scope) => scope,
+        None => {
+            scopes::ensure_tenant_root(&mut tx, tenant)
+                .await
+                .expect("mint root")
+                .id
+        }
+    };
+    access::create_grant(
+        &mut *tx,
+        &access::NewGrant {
+            id: GrantId::new(),
+            tenant_id: tenant,
+            scope_id: scope,
+            subject: GrantSubject::Principal {
+                principal_id: subject.to_owned(),
+            },
+            role_key: role,
+            source: GrantSource::Automation,
+            invite_id: None,
+            granted_by: None,
+        },
+    )
+    .await
+    .expect("create grant");
+    tx.commit().await.expect("commit grant");
 }
 
 /// Registers the agent through the API as `admin_bearer` and returns the
@@ -449,12 +448,12 @@ async fn agent_token_with_team_scope_cannot_call_org_scope_endpoints() {
     let Some((pool, tenant, db_url)) = admitted_tenant().await else {
         return;
     };
-    let (org, eng, platform, _) = seed_hierarchy(&pool, tenant).await;
+    let (org, eng, platform) = seed_hierarchy(&pool, tenant).await;
     let idp = MockIdp::spawn().await;
     let app = router(state(&db_url, &idp.issuer, tenant));
 
-    seed_user(&pool, tenant, "admin", org.id).await;
-    bind(&pool, tenant, "admin", None, Role::OrgAdmin).await;
+    seed_user(&pool, tenant, "admin").await;
+    bind(&pool, tenant, "admin", None, RoleKey::Administrator).await;
     let admin = idp.user_token("admin");
     register_agent(&app, &admin, platform.id).await;
 
@@ -466,14 +465,14 @@ async fn agent_token_with_team_scope_cannot_call_org_scope_endpoints() {
         tenant,
         AGENT_CLIENT,
         Some(platform.id),
-        Role::Steward,
+        RoleKey::Administrator,
     )
     .await;
     let (status, body) = send(
         &app,
         request(
             Method::GET,
-            &format!("/v1/hierarchy/nodes/{}", platform.id),
+            &format!("/v1/admin/scopes/{}", platform.id),
             &agent,
             None,
         ),
@@ -483,12 +482,12 @@ async fn agent_token_with_team_scope_cannot_call_org_scope_endpoints() {
 
     // Escalate the agent's *subject* to tenant-wide org-admin: a user
     // with this binding administers the whole tenant...
-    bind(&pool, tenant, AGENT_CLIENT, None, Role::OrgAdmin).await;
+    bind(&pool, tenant, AGENT_CLIENT, None, RoleKey::Administrator).await;
     let (status, _) = send(
         &app,
         request(
             Method::GET,
-            &format!("/v1/hierarchy/nodes/{}", org.id),
+            &format!("/v1/admin/scopes/{}", org.id),
             &admin,
             None,
         ),
@@ -497,28 +496,43 @@ async fn agent_token_with_team_scope_cannot_call_org_scope_endpoints() {
     assert_eq!(status, StatusCode::OK, "the admin user reaches the org");
 
     // ...but the agent's token stays confined: org-scope endpoints deny.
+    let denied_configuration = json!({
+        "governing_scope_id": org.id,
+        "name": "forbidden-tenant-configuration",
+        "document": synveda_types::configuration::ConfigurationDocument::template(
+            synveda_types::configuration::ConfigurationTemplate::Enterprise,
+        ),
+        "source_template": "enterprise",
+    });
     for (method, uri, body) in [
-        (Method::GET, format!("/v1/hierarchy/nodes/{}", org.id), None),
-        (Method::GET, format!("/v1/hierarchy/nodes/{}", eng.id), None),
-        (Method::GET, "/v1/hierarchy/root".to_owned(), None),
-        (Method::GET, "/v1/roles/bindings".to_owned(), None),
+        (Method::GET, format!("/v1/admin/scopes/{}", org.id), None),
+        (Method::GET, format!("/v1/admin/scopes/{}", eng.id), None),
+        (Method::GET, "/v1/admin/scopes".to_owned(), None),
+        (Method::GET, "/v1/admin/grants".to_owned(), None),
         (
-            Method::PUT,
-            "/v1/policy/default".to_owned(),
-            Some(json!({ "name": "standard" })),
+            Method::POST,
+            "/v1/configurations".to_owned(),
+            Some(denied_configuration),
         ),
         (
             Method::POST,
-            "/v1/hierarchy/nodes".to_owned(),
+            "/v1/admin/scopes".to_owned(),
             Some(json!({
                 "parent_id": org.id,
-                "kind": "department",
+                "kind": "org_unit",
                 "slug": "rogue",
-                "name": "Rogue",
+                "display_name": "Rogue",
             })),
         ),
     ] {
-        let (status, response) = send(&app, request(method.clone(), &uri, &agent, body)).await;
+        let mut built = request(method.clone(), &uri, &agent, body);
+        if method == Method::POST {
+            built.headers_mut().insert(
+                "idempotency-key",
+                "auth3-confinement-probe".parse().expect("header value"),
+            );
+        }
+        let (status, response) = send(&app, built).await;
         assert_eq!(
             status,
             StatusCode::FORBIDDEN,
@@ -532,7 +546,7 @@ async fn agent_token_with_team_scope_cannot_call_org_scope_endpoints() {
         &app,
         request(
             Method::GET,
-            &format!("/v1/hierarchy/nodes/{}", platform.id),
+            &format!("/v1/admin/scopes/{}", platform.id),
             &agent,
             None,
         ),
@@ -554,17 +568,24 @@ async fn an_unregistered_client_token_is_quarantined_fail_closed() {
     let Some((pool, tenant, db_url)) = admitted_tenant().await else {
         return;
     };
-    let (_, _, platform, _) = seed_hierarchy(&pool, tenant).await;
+    let (_, _, platform) = seed_hierarchy(&pool, tenant).await;
     let idp = MockIdp::spawn().await;
     let app = router(state(&db_url, &idp.issuer, tenant));
 
-    bind(&pool, tenant, "rogue", Some(platform.id), Role::Steward).await;
+    bind(
+        &pool,
+        tenant,
+        "rogue",
+        Some(platform.id),
+        RoleKey::Administrator,
+    )
+    .await;
     let rogue = idp.service_token("rogue", 600, true);
     let (status, body) = send(
         &app,
         request(
             Method::GET,
-            &format!("/v1/hierarchy/nodes/{}", platform.id),
+            &format!("/v1/admin/scopes/{}", platform.id),
             &rogue,
             None,
         ),
@@ -587,23 +608,23 @@ async fn service_tokens_exceeding_the_lifetime_cap_are_refused() {
     let Some((pool, tenant, db_url)) = admitted_tenant().await else {
         return;
     };
-    let (org, _, platform, _) = seed_hierarchy(&pool, tenant).await;
+    let (_, _, platform) = seed_hierarchy(&pool, tenant).await;
     let idp = MockIdp::spawn().await;
     let app = router(state(&db_url, &idp.issuer, tenant));
 
-    seed_user(&pool, tenant, "admin", org.id).await;
-    bind(&pool, tenant, "admin", None, Role::OrgAdmin).await;
+    seed_user(&pool, tenant, "admin").await;
+    bind(&pool, tenant, "admin", None, RoleKey::Administrator).await;
     register_agent(&app, &idp.user_token("admin"), platform.id).await;
     bind(
         &pool,
         tenant,
         AGENT_CLIENT,
         Some(platform.id),
-        Role::Steward,
+        RoleKey::Administrator,
     )
     .await;
 
-    let team_uri = format!("/v1/hierarchy/nodes/{}", platform.id);
+    let team_uri = format!("/v1/admin/scopes/{}", platform.id);
     for (token, label) in [
         (idp.service_token(AGENT_CLIENT, 7200, true), "over-long"),
         (idp.service_token(AGENT_CLIENT, 600, false), "iat-less"),
@@ -625,27 +646,26 @@ async fn service_tokens_exceeding_the_lifetime_cap_are_refused() {
 }
 
 /// Registration is PDP-gated on the anchor (`ServiceIdentityManage`): an
-/// unbound user cannot register anywhere; a team steward registers at
-/// their team but not at the org; the quarantine scope is refused as an
-/// anchor outright.
+/// ungranted user cannot register anywhere; an administrator of one unit
+/// registers in their subtree but not at the tenant root.
 #[tokio::test]
 async fn registration_is_pdp_gated_on_the_anchor() {
     let _serial = serial().await;
     let Some((pool, tenant, db_url)) = admitted_tenant().await else {
         return;
     };
-    let (org, _, platform, quarantine) = seed_hierarchy(&pool, tenant).await;
+    let (root, _, platform) = seed_hierarchy(&pool, tenant).await;
     let idp = MockIdp::spawn().await;
     let app = router(state(&db_url, &idp.issuer, tenant));
 
-    seed_user(&pool, tenant, "nobody", platform.id).await;
-    seed_user(&pool, tenant, "team-steward", platform.id).await;
+    seed_user(&pool, tenant, "nobody").await;
+    seed_user(&pool, tenant, "team-steward").await;
     bind(
         &pool,
         tenant,
         "team-steward",
         Some(platform.id),
-        Role::Steward,
+        RoleKey::Administrator,
     )
     .await;
 
@@ -663,18 +683,11 @@ async fn registration_is_pdp_gated_on_the_anchor() {
         "an unbound user must not register agents"
     );
 
-    let response = register(idp.user_token("team-steward"), org.id, "agent-a").await;
+    let response = register(idp.user_token("team-steward"), root.id, "agent-a").await;
     assert_eq!(
         response.status(),
         StatusCode::FORBIDDEN,
-        "a team steward must not register agents at the org"
-    );
-
-    let response = register(idp.user_token("team-steward"), quarantine.id, "agent-a").await;
-    assert_eq!(
-        response.status(),
-        StatusCode::BAD_REQUEST,
-        "the quarantine scope is not an anchor"
+        "a unit administrator must not register agents at the tenant root"
     );
 
     let response = register(idp.user_token("team-steward"), platform.id, "agent-a").await;
@@ -698,12 +711,12 @@ async fn revocation_takes_effect_on_the_next_request() {
     let Some((pool, tenant, db_url)) = admitted_tenant().await else {
         return;
     };
-    let (org, _, platform, _) = seed_hierarchy(&pool, tenant).await;
+    let (_, _, platform) = seed_hierarchy(&pool, tenant).await;
     let idp = MockIdp::spawn().await;
     let app = router(state(&db_url, &idp.issuer, tenant));
 
-    seed_user(&pool, tenant, "admin", org.id).await;
-    bind(&pool, tenant, "admin", None, Role::OrgAdmin).await;
+    seed_user(&pool, tenant, "admin").await;
+    bind(&pool, tenant, "admin", None, RoleKey::Administrator).await;
     let admin = idp.user_token("admin");
     let registered = register_agent(&app, &admin, platform.id).await;
     let id = registered["id"].as_str().expect("identity id").to_owned();
@@ -713,12 +726,12 @@ async fn revocation_takes_effect_on_the_next_request() {
         tenant,
         AGENT_CLIENT,
         Some(platform.id),
-        Role::Steward,
+        RoleKey::Administrator,
     )
     .await;
 
     let agent = idp.client_credentials(AGENT_CLIENT, AGENT_SECRET).await;
-    let team_uri = format!("/v1/hierarchy/nodes/{}", platform.id);
+    let team_uri = format!("/v1/admin/scopes/{}", platform.id);
     let (status, _) = send(&app, request(Method::GET, &team_uri, &agent, None)).await;
     assert_eq!(status, StatusCode::OK, "the agent works before revocation");
 
@@ -752,7 +765,7 @@ async fn revocation_takes_effect_on_the_next_request() {
         "the revoked agent must be contained: {body}"
     );
 
-    // Gone from the surfaces, leaf included.
+    // Gone from the identity surface.
     let (status, _) = send(
         &app,
         request(
@@ -764,15 +777,26 @@ async fn revocation_takes_effect_on_the_next_request() {
     )
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND);
-    let (status, _) = send(
-        &app,
-        request(
-            Method::GET,
-            &format!("/v1/hierarchy/nodes/{leaf}"),
-            &admin,
-            None,
-        ),
-    )
-    .await;
-    assert_eq!(status, StatusCode::NOT_FOUND, "the personal leaf is gone");
+
+    // The leaf is **archived, not deleted** (CPR-7): nothing in the
+    // governed model deletes a scope, because a scope is what audit events
+    // and versions name — the identity row going is what makes the
+    // credential refuse. Asserted at the store, because the admin plane
+    // cannot read a `principal`-shaped scope at all: it inherits nothing,
+    // so a tenant-root administrator holds no key there and the privacy
+    // floor stands behind that (ADR-0072, ADR-0073 decision 4).
+    let mut tx = synveda_store::rls::begin_tenant_tx(&pool, tenant)
+        .await
+        .expect("tenant tx");
+    let leaf_id: synveda_types::ScopeId = leaf.parse().expect("leaf id");
+    let leaf_scope = synveda_store::scopes::get(&mut *tx, tenant, leaf_id)
+        .await
+        .expect("read the leaf")
+        .expect("the leaf is still addressable");
+    drop(tx);
+    assert_eq!(
+        leaf_scope.status,
+        synveda_types::scope::ScopeStatus::Archived,
+        "the revoked agent's own scope is retired, not removed"
+    );
 }

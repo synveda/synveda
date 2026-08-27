@@ -1,10 +1,10 @@
-//! AUTHZ-1/AUTHZ-2: the PDP gates `/v1/hierarchy/*` (ADR-0012 decision 7)
+//! AUTHZ-1/AUTHZ-2: the PDP gates `/v1/admin/scopes` (ADR-0012 decision 7)
 //! under the resource's *effective* pack (ADR-0014): stored custom packs
 //! hot-swap through the reload path, and what governs a request is the
 //! tenant default (or an assignment) — request-time data, in force on the
 //! next request. Restrictive behaviour comes from a *test policy pack*
 //! applied through the same store + reload + assignment paths the product
-//! uses — never a PDP bypass (CLAUDE.md, seed §2.2).
+//! uses — never a PDP bypass.
 //!
 //! Tests that need a live Postgres read `DATABASE_URL` and skip with a
 //! message when it is unset (CI has no database); run them locally with
@@ -25,18 +25,22 @@ use synveda_gateway::app::{AppState, router};
 use synveda_gateway::{authz, telemetry};
 use synveda_identity::Hs256Verifier;
 use synveda_policy::{Pdp, REGULATED_STRICT};
-use synveda_store::{policy_assignments, policy_packs, rls, role_bindings};
-use synveda_types::{PackConfig, Role, TenantId};
+use synveda_store::{access, policy_packs, rls, scopes};
+use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
+use synveda_types::{GrantId, PackConfig, TenantId};
 use tower::ServiceExt;
+
+#[path = "support/configuration.rs"]
+mod configuration_support;
 
 const SECRET: &[u8] = b"authz-1-test-secret";
 
-/// Only permits hierarchy reads: mutations — and the policy admin plane —
+/// Only permits scope reads: mutations — and the policy admin plane —
 /// fall to Cedar's default-deny.
 const READ_ONLY_PACK: &str = r#"
 permit (
     principal,
-    action == Synveda::Action::"HierarchyRead",
+    action == Synveda::Action::"ScopeRead",
     resource
 ) when { resource in principal.tenant };
 "#;
@@ -67,20 +71,11 @@ fn state(url: &str) -> AppState {
         login: None,
         public_origin: "http://127.0.0.1:8120".to_owned(),
         pdp: Arc::new(Pdp::new().expect("build the embedded PDP")),
-        scope_chains: Arc::new(synveda_store::ScopeChainCache::new()),
         service_token_max_ttl: std::time::Duration::from_secs(3600),
-        search_index: Arc::new(
-            synveda_retrieval::SearchIndex::open(
-                std::env::temp_dir()
-                    .join("synveda-gateway-tests")
-                    .join(synveda_types::TenantId::new().to_string()),
-            )
-            .expect("open search index"),
-        ),
         embedder: Arc::new(synveda_ingest::embedding::AnyEmbedder::Deterministic(
             synveda_ingest::embedding::DeterministicEmbedder::new(),
         )),
-        inject_embed_timeout: std::time::Duration::from_millis(100),
+        context_embed_timeout: std::time::Duration::from_millis(100),
         // TEN-4 (ADR-0064): a fixed test KEK, so a suite that touches a
         // sealed column seals rather than skipping. `Kms::Disabled` is the
         // production default when no key is configured.
@@ -139,12 +134,16 @@ async fn api(
     method: &str,
     path: &str,
     token: &str,
+    key: Option<&str>,
     body: Option<Value>,
 ) -> (StatusCode, Value) {
     let mut builder = Request::builder()
         .method(method)
         .uri(path)
         .header("authorization", format!("Bearer {token}"));
+    if let Some(key) = key {
+        builder = builder.header("idempotency-key", key);
+    }
     let request = match body {
         Some(body) => {
             builder = builder.header("content-type", "application/json");
@@ -179,19 +178,36 @@ async fn store_pack(pool: &PgPool, tenant: TenantId, name: &str, source: &str) {
     tx.commit().await.expect("commit pack");
 }
 
-/// Seeds the tenant's admin: a tenant-wide org-admin binding for the dev
-/// test subject, at the store level — the CLI's bootstrap/break-glass
-/// path (ADR-0015 decision 6). Since AUTHZ-3 an unbound dev subject holds
-/// no administrative power; enforcement still runs through the PDP with
-/// this row as data — never a bypass.
+/// Seeds the tenant's admin: an `administrator` grant at the tenant root
+/// for the dev test subject, at the store level — the CLI's
+/// bootstrap/break-glass path (ADR-0015 decision 6). Since AUTHZ-3 an
+/// ungranted dev subject holds no administrative power; enforcement still
+/// runs through the PDP with this row as data — never a bypass.
 async fn bind_admin(pool: &PgPool, tenant: TenantId, subject: &str) {
     let mut tx = rls::begin_tenant_tx(pool, tenant)
         .await
         .expect("begin tenant tx");
-    role_bindings::bind(&mut *tx, tenant, subject, None, Role::OrgAdmin)
+    let root = scopes::ensure_tenant_root(&mut tx, tenant)
         .await
-        .expect("bind admin");
-    tx.commit().await.expect("commit binding");
+        .expect("mint root");
+    access::create_grant(
+        &mut *tx,
+        &access::NewGrant {
+            id: GrantId::new(),
+            tenant_id: tenant,
+            scope_id: root.id,
+            subject: GrantSubject::Principal {
+                principal_id: subject.to_owned(),
+            },
+            role_key: RoleKey::Administrator,
+            source: GrantSource::Automation,
+            invite_id: None,
+            granted_by: None,
+        },
+    )
+    .await
+    .expect("grant administrator");
+    tx.commit().await.expect("commit grant");
 }
 
 async fn clear_pack(pool: &PgPool, tenant: TenantId, name: &str) {
@@ -204,21 +220,19 @@ async fn clear_pack(pool: &PgPool, tenant: TenantId, name: &str) {
     tx.commit().await.expect("commit clear");
 }
 
-/// The store-level break-glass (ADR-0014): a tenant default naming a pack
-/// that permits no policy admin locks the `/v1/policy` plane; the CLI's
-/// tenant-tx store path clears it.
-async fn break_glass_clear_default(pool: &PgPool, tenant: TenantId) {
+/// Test-only stand-in for the documented local operator break-glass: disable
+/// the revisioned tenant-root Configuration binding. The public application
+/// plane has no mutation path around its own effective PDP.
+async fn break_glass_disable_configuration(pool: &PgPool, tenant: TenantId) {
     let mut tx = rls::begin_tenant_tx(pool, tenant)
         .await
         .expect("begin tenant tx");
-    policy_assignments::clear_default(&mut *tx, tenant)
-        .await
-        .expect("clear default");
-    tx.commit().await.expect("commit clear default");
+    assert!(configuration_support::disable_tenant(&mut tx, tenant).await);
+    tx.commit().await.expect("commit Configuration disable");
 }
 
 fn node_id(body: &Value) -> String {
-    body["id"].as_str().expect("node id").to_owned()
+    body["id"].as_str().expect("scope id").to_owned()
 }
 
 /// The headline flow: the embedded default (`regulated-strict`) admits the
@@ -239,30 +253,38 @@ async fn stored_packs_gate_the_admin_plane_and_hot_reload() {
     let token = issue(tenant_id);
     bind_admin(&pool, tenant_id, "authz-admin").await;
 
-    // Under the embedded default: create the org and a department (the
-    // admin semantics ADR-0014 carried, now held by the org-admin role —
-    // ADR-0015 decision 4).
-    let (status, org) = api(
-        &app,
-        "POST",
-        "/v1/hierarchy/nodes",
-        &token,
-        Some(json!({"kind": "org", "slug": "acme", "name": "ACME"})),
-    )
-    .await;
-    assert_eq!(status, StatusCode::CREATED, "{org}");
+    // Under the embedded default: read the tenant root, then create an
+    // org unit and a workspace under it (the admin semantics ADR-0014
+    // carried, now held by the administrator grant — ADR-0015 decision 4).
+    let (status, level) = api(&app, "GET", "/v1/admin/scopes", &token, None, None).await;
+    assert_eq!(status, StatusCode::OK, "{level}");
+    let org = level["parent"]["id"].as_str().expect("root id").to_owned();
     let (status, dept) = api(
         &app,
         "POST",
-        "/v1/hierarchy/nodes",
+        "/v1/admin/scopes",
         &token,
+        Some("authz1-create-eng"),
         Some(json!({
-            "parent_id": node_id(&org), "kind": "department",
-            "slug": "payments", "name": "Payments"
+            "parent_id": org, "kind": "org_unit",
+            "slug": "eng", "display_name": "Engineering"
         })),
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{dept}");
+    let (status, ws) = api(
+        &app,
+        "POST",
+        "/v1/admin/scopes",
+        &token,
+        Some("authz1-create-payments"),
+        Some(json!({
+            "parent_id": node_id(&dept), "kind": "workspace",
+            "slug": "payments", "display_name": "Payments"
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{ws}");
 
     // Store the read-only pack and reload — the source distribution path.
     store_pack(&pool, tenant_id, "authz1-readonly", READ_ONLY_PACK).await;
@@ -280,11 +302,12 @@ async fn stored_packs_gate_the_admin_plane_and_hot_reload() {
     let (status, probe) = api(
         &app,
         "POST",
-        "/v1/hierarchy/nodes",
+        "/v1/admin/scopes",
         &token,
+        Some("authz1-create-probe"),
         Some(json!({
-            "parent_id": node_id(&org), "kind": "team",
-            "slug": "probe", "name": "Probe"
+            "parent_id": org, "kind": "org_unit",
+            "slug": "probe", "display_name": "Probe"
         })),
     )
     .await;
@@ -294,40 +317,51 @@ async fn stored_packs_gate_the_admin_plane_and_hot_reload() {
         "an unassigned pack must not govern: {probe}"
     );
 
-    // Make it the tenant default through the product route: in force on
-    // the very next request, no reload involved (ADR-0014 decision 3).
-    let (status, set) = api(
+    // The old mutable default route is gone. The governed fixture creates a
+    // typed VedaFlow change, immutable Configuration version and root
+    // binding; that selection is in force on the next request.
+    let (status, old_route) = api(
         &app,
         "PUT",
         "/v1/policy/default",
         &token,
+        None,
         Some(json!({"name": "authz1-readonly"})),
     )
     .await;
-    assert_eq!(status, StatusCode::OK, "{set}");
+    assert_eq!(status, StatusCode::NOT_FOUND, "{old_route}");
+    let mut tx = rls::begin_tenant_tx(&pool, tenant_id)
+        .await
+        .expect("begin governed selection");
+    configuration_support::bind_tenant_pack(&mut tx, tenant_id, "authz1-readonly").await;
+    tx.commit().await.expect("commit governed selection");
 
-    // Mutations are denied 403 with the pack version in the denial reason.
+    // Mutations are denied 403 with the pack version in the denial
+    // reason: a create, a rename and an archive — there is no scope
+    // delete to name, retiring is a status transition under ScopeUpdate.
+    let dept = node_id(&dept);
     for (method, path, body) in [
         (
             "POST",
-            "/v1/hierarchy/nodes".to_owned(),
+            "/v1/admin/scopes".to_owned(),
             Some(json!({
-                "parent_id": node_id(&org), "kind": "team",
-                "slug": "core", "name": "Core"
+                "parent_id": org, "kind": "org_unit",
+                "slug": "core", "display_name": "Core"
             })),
         ),
         (
             "PATCH",
-            format!("/v1/hierarchy/nodes/{}", node_id(&dept)),
-            Some(json!({"name": "Renamed"})),
+            format!("/v1/admin/scopes/{dept}"),
+            Some(json!({"display_name": "Renamed"})),
         ),
         (
-            "DELETE",
-            format!("/v1/hierarchy/nodes/{}", node_id(&dept)),
-            None,
+            "PATCH",
+            format!("/v1/admin/scopes/{dept}"),
+            Some(json!({"status": "archived"})),
         ),
     ] {
-        let (status, response) = api(&app, method, &path, &token, body).await;
+        let (status, response) =
+            api(&app, method, &path, &token, Some("authz1-deny-probe"), body).await;
         assert_eq!(status, StatusCode::FORBIDDEN, "{method} {path}: {response}");
         assert_eq!(response["kind"], "policy_denied", "{response}");
         let reason = response["reason"].as_str().expect("reason");
@@ -339,11 +373,11 @@ async fn stored_packs_gate_the_admin_plane_and_hot_reload() {
 
     // Reads keep working under the same pack.
     for path in [
-        "/v1/hierarchy/root".to_owned(),
-        format!("/v1/hierarchy/nodes/{}", node_id(&dept)),
-        format!("/v1/hierarchy/nodes/{}/ancestors", node_id(&dept)),
+        "/v1/admin/scopes".to_owned(),
+        format!("/v1/admin/scopes/{dept}"),
+        format!("/v1/admin/scopes/{dept}/ancestors"),
     ] {
-        let (status, response) = api(&app, "GET", &path, &token, None).await;
+        let (status, response) = api(&app, "GET", &path, &token, None, None).await;
         assert_eq!(status, StatusCode::OK, "GET {path}: {response}");
     }
 
@@ -364,33 +398,36 @@ async fn stored_packs_gate_the_admin_plane_and_hot_reload() {
         );
     }
 
-    // The read-only pack permits no PolicyAssign, so the product route to
-    // undo the default is itself denied — the lockout ADR-0014 documents.
-    let (status, locked) = api(&app, "DELETE", "/v1/policy/default", &token, None).await;
-    assert_eq!(status, StatusCode::FORBIDDEN, "{locked}");
+    // The deleted route stays absent even while the selected pack permits no
+    // ConfigurationWrite. No compatibility mutation path reappears.
+    let (status, locked) = api(&app, "DELETE", "/v1/policy/default", &token, None, None).await;
+    assert_eq!(status, StatusCode::NOT_FOUND, "{locked}");
 
-    // Break-glass at the store level, then mutations work again on the
-    // next request — back on the embedded default.
-    break_glass_clear_default(&pool, tenant_id).await;
+    // Local operator break-glass disables the binding; the immutable version
+    // and its policy-pack reference remain. Mutations work again under the
+    // strict fail-safe.
+    break_glass_disable_configuration(&pool, tenant_id).await;
     let (status, team) = api(
         &app,
         "POST",
-        "/v1/hierarchy/nodes",
+        "/v1/admin/scopes",
         &token,
+        Some("authz1-create-core"),
         Some(json!({
-            "parent_id": node_id(&org), "kind": "team",
-            "slug": "core", "name": "Core"
+            "parent_id": org, "kind": "org_unit",
+            "slug": "core", "display_name": "Core"
         })),
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{team}");
 
-    // With no references left, the stored pack clears and the reloader
-    // drops the compiled copy.
-    clear_pack(&pool, tenant_id, "authz1-readonly").await;
-    assert_eq!(
-        authz::refresh_tenant_packs(&pool, &pdp, tenant_id).await,
-        "removed"
+    let mut tx = rls::begin_tenant_tx(&pool, tenant_id)
+        .await
+        .expect("begin immutable-reference check");
+    let retained = policy_packs::clear(&mut tx, tenant_id, "authz1-readonly").await;
+    assert!(
+        matches!(retained, Err(synveda_types::Error::Conflict { .. })),
+        "immutable Configuration history must retain the pack: {retained:?}"
     );
 }
 
@@ -420,12 +457,19 @@ async fn an_invalid_stored_pack_keeps_the_last_good_state() {
 
     // The embedded default (the last-good state) still decides: admin
     // works.
+    let (status, level) = api(&app, "GET", "/v1/admin/scopes", &token, None, None).await;
+    assert_eq!(status, StatusCode::OK, "{level}");
+    let root = level["parent"]["id"].as_str().expect("root id").to_owned();
     let (status, org) = api(
         &app,
         "POST",
-        "/v1/hierarchy/nodes",
+        "/v1/admin/scopes",
         &token,
-        Some(json!({"kind": "org", "slug": "acme", "name": "ACME"})),
+        Some("authz1-create-acme"),
+        Some(json!({
+            "parent_id": root, "kind": "org_unit",
+            "slug": "acme", "display_name": "ACME"
+        })),
     )
     .await;
     assert_eq!(status, StatusCode::CREATED, "{org}");

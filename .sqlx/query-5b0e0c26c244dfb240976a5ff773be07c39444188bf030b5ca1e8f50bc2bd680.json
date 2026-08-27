@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select coalesce(string_agg(payload::text, ' '), '') as \"payloads!\"\n           from knowledge_changes where tenant_id = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "payloads!",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "5b0e0c26c244dfb240976a5ff773be07c39444188bf030b5ca1e8f50bc2bd680"
+}

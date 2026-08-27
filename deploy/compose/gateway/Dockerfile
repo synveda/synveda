@@ -1,9 +1,9 @@
-# The gateway, as the single binary the SMB profile deploys (OPS-1,
-# ADR-0055). Build context is the repository root.
+# The gateway, as the one runtime every deployment shape uses
+# (OPS-1; CPR-36, ADR-0095). Build context is the repository root.
 #
 # Two stages, and the split is the point: dependencies compile in their own
 # layer so that editing this workspace's own sources does not recompile
-# Cedar, Tantivy and sqlx. A cold build is minutes and is what ADR-0055
+# Cedar and sqlx. A cold build is minutes and is what ADR-0055
 # decision 6 puts *outside* the acceptance criterion's clock — a release
 # ships this image, and the operator being timed pulls it.
 
@@ -19,10 +19,8 @@ WORKDIR /src
 RUN corepack enable
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY console/package.json console/
-# Adapters and SDKs are workspace members the lockfile resolves against;
-# their manifests have to exist for a frozen install to succeed.
+# The adapter is a workspace member the lockfile resolves against.
 COPY adapters/claude-code/package.json adapters/claude-code/
-COPY sdks/typescript/package.json      sdks/typescript/
 RUN pnpm install --frozen-lockfile --filter @synveda/console...
 COPY tsconfig.base.json ./
 COPY console console
@@ -42,10 +40,12 @@ COPY rust-toolchain.toml ./
 COPY Cargo.toml Cargo.lock ./
 COPY crates/synveda-audit/Cargo.toml       crates/synveda-audit/
 COPY crates/synveda-cli/Cargo.toml         crates/synveda-cli/
+COPY crates/synveda-crypto/Cargo.toml      crates/synveda-crypto/
 COPY crates/synveda-eval/Cargo.toml        crates/synveda-eval/
 COPY crates/synveda-gateway/Cargo.toml     crates/synveda-gateway/
 COPY crates/synveda-identity/Cargo.toml    crates/synveda-identity/
 COPY crates/synveda-ingest/Cargo.toml      crates/synveda-ingest/
+COPY crates/synveda-okf/Cargo.toml         crates/synveda-okf/
 COPY crates/synveda-policy/Cargo.toml      crates/synveda-policy/
 COPY crates/synveda-retrieval/Cargo.toml   crates/synveda-retrieval/
 COPY crates/synveda-store/Cargo.toml       crates/synveda-store/
@@ -63,10 +63,11 @@ RUN set -eux; \
 # sqlx macros compile against the committed query cache; this image has no
 # database, exactly like CI.
 ENV SQLX_OFFLINE=true
-RUN cargo build --release -p synveda-gateway -p synveda-cli || true
+RUN cargo build --release -p synveda-gateway -p synveda-cli
 
 # The real sources. Touching them invalidates only from here down.
 COPY .sqlx .sqlx
+COPY adapters/registry.json adapters/registry.json
 COPY crates crates
 RUN set -eux; \
     find crates -name '*.rs' -newermt '1970-01-01' -exec touch {} +; \
@@ -84,7 +85,7 @@ RUN apt-get update \
 # the binary's.
 #
 # The CLI joined the image with OPS-2 (ADR-0062 amendment). In the SMB
-# profile it is on the operator's laptop and only the gateway is a
+# single-node deployment it is on the operator's laptop and only the gateway is a
 # container, so one binary was right; in a cluster there is no laptop with
 # a route to the database, and the two things an enterprise install has to
 # run — `synveda db migrate` under an admin identity, and
@@ -99,12 +100,6 @@ COPY --from=build /src/target/release/synveda /usr/local/bin/synveda
 # above is where it lived, and the runtime is still one process.
 COPY --from=console /src/console/dist /usr/share/synveda/console
 ENV SYNVEDA_CONSOLE_DIR=/usr/share/synveda/console
-
-# The Tantivy sidecar (CTX-1). A named volume mounts here so an index
-# survives a container replacement rather than being rebuilt on every
-# restart by the indexer's sweep.
-ENV SYNVEDA_SEARCH_INDEX_DIR=/var/lib/synveda/search
-RUN mkdir -p /var/lib/synveda/search
 
 WORKDIR /app
 EXPOSE 8120

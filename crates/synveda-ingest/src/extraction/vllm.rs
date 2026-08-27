@@ -104,7 +104,7 @@ impl Extractor for VllmExtractor {
         let value: serde_json::Value = serde_json::from_str(prompt::strip_fence(text))
             .map_err(|err| dependency(format!("completion is not JSON: {err}")))?;
         Ok(ExtractionOutcome {
-            candidates: prompt::parse_candidates(SERVICE, value)?,
+            candidates: prompt::parse_candidates(SERVICE, value, input.event_type)?,
             method: SERVICE.to_owned(),
             model_version: completion.model.unwrap_or_else(|| self.model.clone()),
         })

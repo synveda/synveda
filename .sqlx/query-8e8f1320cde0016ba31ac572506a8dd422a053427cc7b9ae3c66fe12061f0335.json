@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select count(*) as \"count!\" from session_events\n               where tenant_id = $1 and event_type in (\n                   'message.user', 'message.assistant', 'tool.invoked',\n                   'tool.result', 'file.changed', 'command.executed',\n                   'memory.asserted'\n               )",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "8e8f1320cde0016ba31ac572506a8dd422a053427cc7b9ae3c66fe12061f0335"
+}

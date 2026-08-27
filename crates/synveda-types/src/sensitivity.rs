@@ -27,7 +27,7 @@ pub enum Sensitivity {
     /// Restricted to explicitly granted scopes.
     Confidential,
     /// Highest tier: dual approval and compliance involvement for any
-    /// promotion or lapse touching it (tech plan §2.4).
+    /// promotion or governed relaxation touching it (tech plan §2.4).
     Restricted,
 }
 

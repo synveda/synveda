@@ -1,6 +1,6 @@
 # ADR-0043: The graph is indexed adjacency in Postgres — ADR-0004's named graphs survive as a discriminator the API cannot omit, an edge is a bitemporal row of the `records` shape, and the product stops calling AGE
 
-- **Status**: Accepted
+- **Status**: Superseded by ADR-0097
 - **Date**: 2026-07-27
 - **Feature(s)**: GRPH-1 (GRPH-2, GRPH-3 inherit)
 - **Deciders**: sujitn

@@ -9,14 +9,14 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import type { Bearer } from "./credentials.mjs";
-import { log } from "./log.mjs";
+import { diagnostic, log } from "./log.mjs";
 
 /** The gateway's own default listen address (`SYNVEDA_LISTEN_ADDR`). */
 const DEFAULT_GATEWAY = "http://127.0.0.1:8120";
 
 /**
  * The per-call deadline (ADR-0027 decision 3): two decimal orders above
- * inject's 150ms SLO, sized to absorb a cold cache — not to wait out a
+ * the 150ms context engineering budget, sized to absorb a cold cache—not to wait out a
  * broken dependency.
  */
 const DEFAULT_TIMEOUT_MS = 3000;
@@ -37,6 +37,26 @@ export interface AdapterConfig {
   timeoutMs: number;
   budgetTokens?: number;
   compactBudgetTokens?: number;
+  /**
+   * The workspace runs in this project belong to (CPR-12, ADR-0078).
+   *
+   * Optional: with one workspace the adapter asks `/v1/me` and takes the
+   * answer. It is worth setting in a checked-out repository that belongs to a
+   * particular workspace — and it is safe to, unlike `gateway_url`, because
+   * naming a workspace inside a tenant the caller is already authenticated to
+   * cannot redirect a credential anywhere.
+   */
+  workspaceId?: string;
+  /**
+   * The project inside `workspaceId` that owns this checkout's runs.
+   *
+   * A project is optional in the session API, but it must not be guessed: a
+   * workspace can contain many projects and choosing one by order would write
+   * the transcript into the wrong governed subtree. CPR-14's real-client gate
+   * found that the spool and API already carried `project_id`, while no
+   * supported adapter setting could put it there.
+   */
+  projectId?: string;
 }
 
 /** The project file's shape — every field unknown until proven. */
@@ -46,6 +66,8 @@ interface ProjectConfig {
   observe?: unknown;
   skills?: unknown;
   gateway_url?: unknown;
+  workspace_id?: unknown;
+  project_id?: unknown;
   timeout_ms?: unknown;
   budget_tokens?: unknown;
   compact_budget_tokens?: unknown;
@@ -67,6 +89,8 @@ export function loadConfig(cwd: string | undefined): AdapterConfig {
       DEFAULT_TIMEOUT_MS,
     budgetTokens: positive(project.budget_tokens),
     compactBudgetTokens: positive(project.compact_budget_tokens),
+    workspaceId: str(process.env.SYNVEDA_WORKSPACE) ?? str(project.workspace_id),
+    projectId: str(process.env.SYNVEDA_PROJECT) ?? str(project.project_id),
   };
 }
 
@@ -85,7 +109,7 @@ export function resolveGateway(config: AdapterConfig, bearer: Bearer): AdapterCo
   if (bearer.source !== "cli" || credentialed === undefined) return config;
   const gatewayUrl = trimSlash(credentialed);
   if (gatewayUrl === config.gatewayUrl) return config;
-  log("gateway.from_credential", { configured: config.gatewayUrl, credential: gatewayUrl });
+  log("gateway.from_credential", { source: "stored_profile" });
   return { ...config, gatewayUrl };
 }
 
@@ -95,7 +119,7 @@ function readProjectConfig(cwd: string | undefined): ProjectConfig {
   try {
     raw = readFileSync(join(cwd, ".synveda", "config.json"), "utf8");
   } catch (error) {
-    if (!missing(error)) log("config.unreadable", { error: String(error) });
+    if (!missing(error)) log("config.unreadable", { error: diagnostic(error) });
     return {};
   }
   try {
@@ -104,8 +128,8 @@ function readProjectConfig(cwd: string | undefined): ProjectConfig {
       return parsed as ProjectConfig;
     }
     log("config.invalid", { reason: "not a JSON object" });
-  } catch (error) {
-    log("config.invalid", { error: String(error) });
+  } catch {
+    log("config.invalid", { reason: "invalid_json" });
   }
   return {};
 }

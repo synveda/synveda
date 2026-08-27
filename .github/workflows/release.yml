@@ -361,8 +361,9 @@ jobs:
 
           \`\`\`sh
           curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/${GITHUB_REF_NAME}/scripts/install.sh | sh
-          synveda init --demo
+          synveda init --slug pulseboard --name PulseBoard --embedder tei
           synveda login
+          synveda demo start --profile personal
           \`\`\`
 
           Then give an AI client your team's governed memory:

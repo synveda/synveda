@@ -8,13 +8,13 @@
       "events": [
         {
           "key": "retries",
-          "kind": "decision",
+          "event_type": "message.assistant",
           "text": "We decided to cap payment retries at three attempts with full jitter.",
           "marker": "three attempts"
         },
         {
           "key": "vacuum",
-          "kind": "transcript_delta",
+          "event_type": "message.user",
           "text": "Postgres vacuum maintenance runs weekly on the reporting replica.",
           "marker": "vacuum maintenance"
         }
@@ -28,6 +28,6 @@
     "budget_tokens": 200
   },
   "expect": {
-    "records": ["retries"]
+    "knowledge": ["retries"]
   }
 }

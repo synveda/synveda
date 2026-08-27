@@ -2,8 +2,7 @@
 The gateway: one replica, on purpose and not as a starting point
 (ADR-0062 decision 4 — the chart refuses a values file that says
 otherwise, in _helpers.tpl). `Recreate` follows from the same fact: two
-gateways must not overlap even for the length of a rolling update, and the
-search-index volume is RWO.
+gateways must not overlap even for the length of a rolling update.
 */ -}}
 apiVersion: apps/v1
 kind: Deployment
@@ -99,6 +98,16 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.oidc.existingSecret }}
                   key: {{ .Values.oidc.secretKey }}
+            - name: SYNVEDA_KMS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.kms.existingSecret }}
+                  key: {{ .Values.kms.secretKey }}
+            - name: SYNVEDA_KMS_KEY_REF
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.kms.existingSecret }}
+                  key: {{ .Values.kms.keyRefSecretKey }}
             - name: SYNVEDA_EMBEDDER
               value: {{ .Values.embedder | quote }}
             {{- with .Values.embedderModel }}
@@ -138,20 +147,27 @@ spec:
               port: http
             periodSeconds: 10
           readinessProbe:
-            # `select 1` against the pool. It is honest about a database
+            # `select 1` against the pool, and since CPR-2 (ADR-0069) the
+            # schema *epoch* beside it. It is honest about a database
             # outage — which is the property CNPG failover needs, since the
             # pool is `connect_lazy` and a lost primary must take this pod
-            # out of the Service rather than crash-loop it — and it says
-            # nothing about the schema. The initContainer above covers
-            # that, once, at start.
+            # out of the Service rather than crash-loop it — and it still
+            # says nothing about the grants. The initContainer above covers
+            # those, once, at start.
+            #
+            # The epoch check is per-probe rather than at start for the same
+            # reason the pool is lazy: a database that arrives *after* the
+            # process would otherwise be behind a check that already ran. A
+            # pod pointed at a pre-cut database therefore leaves the Service
+            # rather than serving rows in a model it does not implement —
+            # though in practice the install job's `db migrate` refuses first
+            # and this pod never starts.
             httpGet:
               path: /readyz
               port: http
             periodSeconds: 5
             failureThreshold: 3
           volumeMounts:
-            - name: search-index
-              mountPath: /var/lib/synveda/search
             - name: tmp
               mountPath: /tmp
           {{- with .Values.gateway.resources }}
@@ -159,9 +175,6 @@ spec:
             {{- toYaml . | nindent 12 }}
           {{- end }}
       volumes:
-        - name: search-index
-          persistentVolumeClaim:
-            claimName: {{ include "synveda.fullname" . }}-search
         - name: tmp
           emptyDir: {}
       {{- with .Values.gateway.nodeSelector }}
@@ -176,28 +189,6 @@ spec:
       affinity:
         {{- toYaml . | nindent 8 }}
       {{- end }}
----
-{{/*
-The Tantivy sidecar's storage. A cache with a rebuild cost, not a system of
-record: each tenant's index carries a state file and a watermark and heals
-from Postgres, and deleting a directory is the documented rebuild
-procedure. It gets a volume so a pod replacement is not a re-index of every
-tenant's corpus. RWO, which composes with the single replica above.
-*/ -}}
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: {{ include "synveda.fullname" . }}-search
-  labels:
-    {{- include "synveda.labels" . | nindent 4 }}
-spec:
-  accessModes: ["ReadWriteOnce"]
-  resources:
-    requests:
-      storage: {{ .Values.gateway.searchIndex.size }}
-  {{- with .Values.gateway.searchIndex.storageClass }}
-  storageClassName: {{ . }}
-  {{- end }}
 ---
 apiVersion: v1
 kind: Service

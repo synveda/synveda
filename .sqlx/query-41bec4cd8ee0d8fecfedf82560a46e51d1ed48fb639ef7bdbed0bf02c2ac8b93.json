@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select jsonb_agg(\n                   jsonb_build_object(\n                       'id', revision.id,\n                       'knowledge_item_id', revision.knowledge_item_id,\n                       'revision_number', revision.revision_number,\n                       'title', revision.title,\n                       'body_markdown', revision.body_markdown,\n                       'summary', revision.summary,\n                       'tags', revision.tags,\n                       'sensitivity', revision.sensitivity,\n                       'confidence_permille', revision.confidence_permille,\n                       'valid_from', revision.valid_from,\n                       'valid_to', revision.valid_to,\n                       'stale_after', revision.stale_after,\n                       'verification_metadata', revision.verification_metadata,\n                       'content_hash', revision.content_hash,\n                       'metadata', revision.metadata,\n                       'created_by', revision.created_by,\n                       'transaction_time', revision.transaction_time\n                   ) order by revision.knowledge_item_id, revision.revision_number\n               )\n          from knowledge_revisions revision\n         where revision.tenant_id = $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "jsonb_agg",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "41bec4cd8ee0d8fecfedf82560a46e51d1ed48fb639ef7bdbed0bf02c2ac8b93"
+}

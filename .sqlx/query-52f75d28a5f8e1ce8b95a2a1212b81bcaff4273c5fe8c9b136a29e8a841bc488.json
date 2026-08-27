@@ -1,0 +1,83 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select id, tenant_id, conflict_set_id, role, knowledge_item_id,\n                  knowledge_revision_id, capture_candidate_id, classification,\n                  similarity_permille, reason_code, created_at\n             from knowledge_conflict_members\n            where tenant_id = $1 and conflict_set_id = $2\n            order by (role = 'challenger') desc, id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "tenant_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "conflict_set_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "role",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "knowledge_item_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "knowledge_revision_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 6,
+        "name": "capture_candidate_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 7,
+        "name": "classification",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "similarity_permille",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 9,
+        "name": "reason_code",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "52f75d28a5f8e1ce8b95a2a1212b81bcaff4273c5fe8c9b136a29e8a841bc488"
+}

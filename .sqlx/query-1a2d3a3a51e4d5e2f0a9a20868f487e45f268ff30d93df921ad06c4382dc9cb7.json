@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            insert into capture_candidates\n                (id, tenant_id, batch_id, source_kind, session_id, import_job_id,\n                 ordinal, proposed_scope_id, proposed_project_id,\n                 proposed_owner_principal_id, knowledge_type, origin, title,\n                 body_markdown, summary, tags, sensitivity, confidence_permille,\n                 valid_from, valid_to, stale_after, verification_metadata,\n                 metadata, content_hash)\n            values ($1, $2, $3, 'okf_import', null, $4, $5, $6, $7, null,\n                    $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18,\n                    $19, $20, $21)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Int4",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "TextArray",
+        "Text",
+        "Int4",
+        "Timestamptz",
+        "Timestamptz",
+        "Timestamptz",
+        "Jsonb",
+        "Jsonb",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1a2d3a3a51e4d5e2f0a9a20868f487e45f268ff30d93df921ad06c4382dc9cb7"
+}

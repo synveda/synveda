@@ -9,7 +9,7 @@
       "events": [
         {
           "key": "reconciliation-before",
-          "kind": "decision",
+          "event_type": "message.assistant",
           "text": "We decided the payment reconciliation job runs against the ledger-archive replica.",
           "marker": "ledger-archive"
         }
@@ -21,7 +21,8 @@
       "events": [
         {
           "key": "reconciliation-after",
-          "kind": "decision",
+          "replaces": "reconciliation-before",
+          "event_type": "message.assistant",
           "text": "We decided the payment reconciliation job runs against the ledger-live replica.",
           "marker": "ledger-live"
         }
@@ -33,7 +34,7 @@
     "session_id": "eval:knowledge-update:decision:probe"
   },
   "expect": {
-    "records": ["reconciliation-after"],
+    "knowledge": ["reconciliation-after"],
     "must_not_contain": ["ledger-archive"]
   }
 }

@@ -4,26 +4,32 @@
 //! rather than a hope.
 
 use serde::Deserialize;
-use synveda_types::{Error, RecordClass, Result, Sensitivity};
+use synveda_types::knowledge::{KnowledgeOrigin, KnowledgeType};
+use synveda_types::session::SessionEventType;
+use synveda_types::{Error, Result, Sensitivity};
 
-use super::{CandidateRecord, ExtractionInput};
+use super::{CandidateKnowledge, ExtractionInput};
 
 /// The system prompt: the six class definitions, summarise-at-write, the
 /// redaction-opacity rule, and the output contract.
-pub(crate) const SYSTEM_PROMPT: &str = "You extract durable memory records from one observed \
+pub(crate) const SYSTEM_PROMPT: &str = "You propose reviewable Knowledge from one observed \
 event of an AI-agent work session.\n\
 \n\
-Classify each extractable memory into exactly one class:\n\
+Classify each extractable proposal into exactly one knowledge_type:\n\
 - fact: a stable statement about the world, the project, or a person.\n\
 - decision: a choice that was made, with its subject.\n\
 - preference: how a person or team likes things done.\n\
 - procedure: how to accomplish something, as reusable steps.\n\
 - entity: a person, system, or thing worth remembering in itself.\n\
 - episode: something that happened — an action and its outcome.\n\
+- convention: a durable project or team practice.\n\
+- warning: a hazard, caveat, or expiring caution.\n\
+- reference: a durable pointer to external material.\n\
 \n\
 Rules:\n\
-- Summarise at write time: each candidate's content is one or two \
-self-contained sentences a future reader understands without this event.\n\
+- Provide a short title, a self-contained Markdown body, a short summary and \
+zero or more lower-case tags. A future reviewer must understand each proposal \
+without this event.\n\
 - Extract zero candidates when the event holds nothing worth remembering. \
 Never invent information that is not in the event.\n\
 - Tokens of the form [REDACTED:rule-id] are opaque redaction placeholders. \
@@ -47,12 +53,19 @@ pub(crate) fn candidates_schema() -> serde_json::Value {
                 "items": {
                     "type": "object",
                     "properties": {
-                        "class": {
+                        "knowledge_type": {
                             "type": "string",
                             "enum": ["fact", "decision", "preference",
-                                     "procedure", "entity", "episode"]
+                                     "procedure", "entity", "episode",
+                                     "convention", "warning", "reference"]
                         },
-                        "content": { "type": "string" },
+                        "title": { "type": "string" },
+                        "body_markdown": { "type": "string" },
+                        "summary": { "type": "string" },
+                        "tags": {
+                            "type": "array",
+                            "items": { "type": "string" }
+                        },
                         "confidence": { "type": "number" },
                         "sensitivity": {
                             "type": "string",
@@ -67,7 +80,8 @@ pub(crate) fn candidates_schema() -> serde_json::Value {
                             "items": { "type": "string" }
                         }
                     },
-                    "required": ["class", "content", "confidence"],
+                    "required": ["knowledge_type", "title", "body_markdown",
+                                 "summary", "confidence"],
                     "additionalProperties": false
                 }
             }
@@ -77,11 +91,11 @@ pub(crate) fn candidates_schema() -> serde_json::Value {
     })
 }
 
-/// The user message: the event's kind, time, and redacted payload, as
+/// The user message: the event's type, time, and redacted payload, as
 /// compact JSON the model reads as data.
 pub(crate) fn user_message(input: &ExtractionInput) -> String {
     serde_json::json!({
-        "kind": input.kind.as_str(),
+        "event_type": input.event_type.as_str(),
         "occurred_at": input.occurred_at.to_rfc3339(),
         "payload": input.payload,
     })
@@ -89,12 +103,16 @@ pub(crate) fn user_message(input: &ExtractionInput) -> String {
 }
 
 /// The wire shape of one candidate as the schema elicits it. Separate
-/// from [`CandidateRecord`] so lenient parsing (clamping, defaults)
+/// from [`CandidateKnowledge`] so lenient parsing (clamping, defaults)
 /// happens in exactly one place.
 #[derive(Deserialize)]
 struct WireCandidate {
-    class: RecordClass,
-    content: String,
+    knowledge_type: KnowledgeType,
+    title: String,
+    body_markdown: String,
+    summary: String,
+    #[serde(default)]
+    tags: Vec<String>,
     confidence: f64,
     #[serde(default)]
     sensitivity: Option<Sensitivity>,
@@ -113,7 +131,8 @@ struct WireCandidates {
 pub(crate) fn parse_candidates(
     service: &str,
     value: serde_json::Value,
-) -> Result<Vec<CandidateRecord>> {
+    event_type: SessionEventType,
+) -> Result<Vec<CandidateKnowledge>> {
     let wire: WireCandidates = serde_json::from_value(value).map_err(|err| Error::Dependency {
         service: service.to_owned(),
         message: format!("extractor returned candidates outside the contract: {err}"),
@@ -121,10 +140,22 @@ pub(crate) fn parse_candidates(
     Ok(wire
         .candidates
         .into_iter()
-        .filter(|candidate| !candidate.content.trim().is_empty())
-        .map(|candidate| CandidateRecord {
-            class: candidate.class,
-            content: candidate.content.trim().to_owned(),
+        .filter(|candidate| {
+            !candidate.title.trim().is_empty()
+                && !candidate.body_markdown.trim().is_empty()
+                && !candidate.summary.trim().is_empty()
+        })
+        .map(|candidate| CandidateKnowledge {
+            knowledge_type: candidate.knowledge_type,
+            origin: if event_type == SessionEventType::MemoryAsserted {
+                KnowledgeOrigin::Asserted
+            } else {
+                KnowledgeOrigin::Observed
+            },
+            title: candidate.title.trim().to_owned(),
+            body_markdown: candidate.body_markdown.trim().to_owned(),
+            summary: candidate.summary.trim().to_owned(),
+            tags: candidate.tags,
             confidence: candidate.confidence.clamp(0.0, 1.0),
             sensitivity: candidate.sensitivity,
             entities: candidate.entities,

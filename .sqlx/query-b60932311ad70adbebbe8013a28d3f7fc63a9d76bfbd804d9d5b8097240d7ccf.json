@@ -1,0 +1,98 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            insert into session_events\n                (id, tenant_id, session_id, event_type, event_schema_version,\n                 client_event_id, sequence, occurred_at, payload, payload_hash,\n                 redactions)\n            select u.id, $1, $2, u.event_type, u.version, u.client_event_id,\n                   $3 + u.ord, u.occurred_at, u.payload, u.payload_hash,\n                   nullif($11::jsonb -> (u.ord - 1)::int, 'null'::jsonb)\n            from unnest($4::uuid[], $5::text[], $6::int[], $7::text[],\n                        $8::timestamptz[], $9::jsonb[], $10::text[])\n                    with ordinality as u(id, event_type, version, client_event_id,\n                                         occurred_at, payload, payload_hash, ord)\n            returning id, tenant_id, session_id, event_type, event_schema_version,\n                      client_event_id, sequence, occurred_at, received_at,\n                      payload, payload_hash, redactions\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "tenant_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "session_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "event_type",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "event_schema_version",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 5,
+        "name": "client_event_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "sequence",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 7,
+        "name": "occurred_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "received_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 9,
+        "name": "payload",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 10,
+        "name": "payload_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "redactions",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Int8",
+        "UuidArray",
+        "TextArray",
+        "Int4Array",
+        "TextArray",
+        "TimestamptzArray",
+        "JsonbArray",
+        "TextArray",
+        "Jsonb"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "b60932311ad70adbebbe8013a28d3f7fc63a9d76bfbd804d9d5b8097240d7ccf"
+}

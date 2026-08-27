@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        update capture_candidate_decisions\n           set state = 'succeeded', resulting_change_id = $3,\n               resulting_outcome = $4, resulting_knowledge_item_id = $5,\n               resulting_revision_id = $6, completed_at = now()\n         where tenant_id = $1 and candidate_id = $2 and state = 'running'\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "522f58a263ed272fe81921becbc3f4898ea45a62967756e416f66104b90bb443"
+}

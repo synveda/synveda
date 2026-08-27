@@ -100,7 +100,7 @@ if [ -z "$version" ]; then
   version="$(fetch_stdout "https://api.github.com/repos/$REPO/releases/latest" \
     | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -n 1)"
   [ -n "$version" ] || die "could not determine the latest release of $REPO.
-  Pick one explicitly:  SYNVEDA_VERSION=v0.1.0 sh install.sh"
+  Pick one explicitly:  SYNVEDA_VERSION=v0.2.0 sh install.sh"
 fi
 # Assets are named by the version without its leading `v`, matching the
 # crate version `synveda init` compares a profile against.
@@ -281,10 +281,11 @@ case ":${PATH}:" in
 esac
 say "Docker has to be running. Then:"
 say ""
-say "  synveda init --demo                # the stack, one tenant, a demo org"
-say "  synveda login                      # this is where your organisation starts"
+say "  synveda init                       # one runtime, schema and tenant"
+say "  synveda login                      # identity, principal scope, first grant"
 say ""
 say "  http://127.0.0.1:8120/console/     # the admin console"
+say "  Advanced > Configuration           # bind personal, team or enterprise data"
 say ""
 say "To give an AI client your team's governed memory:"
 say ""

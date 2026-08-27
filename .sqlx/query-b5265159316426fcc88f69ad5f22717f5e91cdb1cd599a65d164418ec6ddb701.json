@@ -1,0 +1,36 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select change.proposal_id, change.command_kind, change.payload_hash\n        from knowledge_changes change\n        join vedaflow_proposals proposal\n          on proposal.tenant_id = change.tenant_id\n         and proposal.id = change.proposal_id\n        where change.tenant_id = $1\n          and change.target_item_ids @> array[$2]::uuid[]\n          and change.proposal_id <> $3\n          and proposal.state = 'open'\n        order by change.created_at, change.proposal_id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "proposal_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "command_kind",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "payload_hash",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "b5265159316426fcc88f69ad5f22717f5e91cdb1cd599a65d164418ec6ddb701"
+}

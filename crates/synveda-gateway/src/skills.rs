@@ -1,923 +1,676 @@
-//! The skills registry API (SKIL-1, ADR-0051): `/v1/skills` behind tenant
-//! resolution, uniform-404 ownership, and the PDP (`SkillWrite` to author a
-//! draft, `SkillRead` to be served one).
+//! Versioned Agent Skills catalogue and public API (CPR-23, ADR-0085).
 //!
-//! Three surfaces, shaped like the prompt registry's and not like the pack
-//! registry's, because a skill **is** fetched by name:
-//!
-//! - **author** (`POST /v1/skills`) — validates the bundle against the open
-//!   spec, runs MEM-2's scanner and then SKIL-2's security scanner over every
-//!   file, writes the objects and the draft rows, and prunes the files the
-//!   request dropped. It moves nothing a consumer installs.
-//! - **resolve** (`GET /v1/skills/{name}`) — the consumer's call, and the
-//!   one the CLI's `install` is built on. It returns the **whole bundle**
-//!   from one commit, which is the difference from a prompt resolve: a
-//!   client loads a skill whole, so serving files from two commits would be
-//!   serving a version nobody reviewed.
-//! - **list** (`GET /v1/skills?scope_id=…`) — the registry view at one
-//!   scope.
-//!
-//! # What this module does not do
-//!
-//! It never writes a file. Seed §2.6 — the harness is a guest — and
-//! ADR-0051 decision 12: a gateway that owned an archive format and a
-//! per-client directory layout would need a release when one of forty
-//! clients moved a folder. The materialisation is `synveda skill install`,
-//! and the receipt lives in the CLI's own state, outside any client's skills
-//! root, because a receipt inside the bundle is the modification the
-//! acceptance criterion forbids.
-//!
-//! It also composes nothing. ADR-0049 option 4's third reason for refusing
-//! "prompts as memory records" — a prompt is fetched by name where a record
-//! is ranked by relevance — was inverted by PRMT-2 for packs and is restored
-//! here (decision 9): the client's own progressive disclosure is the loader.
-//!
-//! # The security gate
-//!
-//! SKIL-2 (ADR-0052) puts a second scanner at the same authoring seam, and
-//! the reason it is *here* rather than only at publication is that a draft is
-//! installable: `at_scope`'s draft branch decides `SkillRead` at the scope
-//! and not authorship, so anyone the pack lets read skills there could
-//! materialise an unreviewed bundle. A gate at the publish seam alone is one
-//! a malicious author walks around by never opening a proposal. A refused
-//! bundle is therefore never stored at all, which is what makes "cannot reach
-//! published" structural rather than procedural.
-//!
-//! # The consumer's pin
-//!
-//! `?commit=` is PRMT-1's, inherited whole (ADR-0049 decisions 9–11): a
-//! request parameter stored nowhere, checked against what the scope
-//! **serves** rather than its head, and refused with a `Conflict` naming
-//! both commits when a rewind takes it off the line. For skills it is what
-//! makes an install receipt reproducible — and what keeps FLOW-7's sixty
-//! seconds true of an asset that lives on laptops.
-
-use std::collections::{BTreeMap, HashMap};
+//! A catalogue entry has a stable id, immutable versions and explicit
+//! project/principal bindings. Every install, update and binding transition is
+//! a typed VedaFlow `Skill/apply` change. Bundle bytes remain content-addressed
+//! VedaFlow objects; neither this module nor the gateway executes bundled code.
 
 use axum::Json;
 use axum::extract::rejection::JsonRejection;
 use axum::extract::{Path, Query, State};
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use serde_json::json;
+use serde_json::{Value, json};
+use sqlx::{Acquire, PgConnection};
 use synveda_audit::{AuditAction, Outcome};
 use synveda_ingest::{BundleScan, RubricScore, ScanOutcome};
 use synveda_policy::{Action, Resource};
-use synveda_store::{hierarchy, rls, skill_reviews, skills};
-use synveda_types::{
-    Channel, ChecklistItem, Error, Frontmatter, HierarchyNode, IdentityId, QualityShortfall,
-    RedactionMode, Result, ScanSeverity, ScopeId, Sensitivity, SkillBundle, SkillChannel,
-    SkillFile, SkillFilePath, SkillName, SkillPath, SkillQualityConfig, SkillScanConfig,
+use synveda_store::anchors::AnchorSelection;
+use synveda_store::skills::{
+    self as store, ResolvedBinding, StoredBinding, StoredSkill, StoredTestRun, StoredUsageEvent,
+    StoredVersion, StoredVersionFile,
 };
-use synveda_vedaflow::{self as vedaflow, ChannelRef, SkillAsset};
+use synveda_store::{configuration, rls, scopes};
+use synveda_types::json::canonicalise;
+use synveda_types::scope::{Scope, ScopeKind};
+use synveda_types::{
+    ArtifactFamily, ArtifactReference, AssetKind, Error, IdentityId, IdentityKind, ProposalEffect,
+    ProposalId, ProposalState, Result, ScanSeverity, ScopeId, Sensitivity, SessionId,
+    SkillBindingId, SkillBundle, SkillCommand, SkillFile, SkillFilePath, SkillId,
+    SkillMutationOutcome, SkillMutationResult, SkillName, SkillProvenance, SkillTestHarness,
+    SkillTestOutcome, SkillTestRunId, SkillUsageEventId, SkillUsageEvidence, SkillUsageStage,
+    SkillVersionFileRef, SkillVersionId, TenantId, validate_skill_usage_client_event_id,
+};
+use synveda_vedaflow::{self as vedaflow, PolicySnapshot, Signer, SkillAsset};
+use utoipa::ToSchema;
 
 use crate::app::AppState;
+use crate::approvals::{self, Requested};
 use crate::audit;
-use crate::authz::{self, DecisionInput};
-use crate::error::ApiError;
-use crate::hierarchy::{body, commit, found, tenant_id};
-use crate::telemetry::SKILL_OPERATIONS_TOTAL;
+use crate::authz::{self, Authorized, DecisionInput};
+use crate::idempotency::{Claim, Dispatch};
+use crate::request::{body, commit, found, tenant_id};
+use crate::workspaces::{ApiErrorBody, string_enum, subject};
 
-/// Counts the operation and renders the result — the outcome taxonomy every
-/// governed plane uses.
-async fn respond<T: IntoResponse>(
-    state: &AppState,
-    op: &'static str,
-    result: Result<T>,
-) -> Response {
-    let outcome = match &result {
-        Ok(_) => "ok",
-        Err(
-            Error::Unauthenticated { .. }
-            | Error::PolicyDenied { .. }
-            | Error::NotFound { .. }
-            | Error::Invalid { .. }
-            | Error::Conflict { .. }
-            | Error::RateLimited { .. },
-        ) => "rejected",
-        Err(_) => "error",
-    };
-    metrics::counter!(SKILL_OPERATIONS_TOTAL, "op" => op, "outcome" => outcome).increment(1);
-    match result {
-        Ok(response) => response.into_response(),
-        Err(error) => {
-            audit::record_rejection(state, op, &error).await;
-            ApiError(error).into_response()
-        }
-    }
+/// Skill API outcomes by operation and `ok|rejected|error`.
+pub const SKILL_OPERATIONS_TOTAL: &str = "synveda_skill_operations_total";
+
+const DEFAULT_LIMIT: i64 = 50;
+const MAX_LIMIT: i64 = 200;
+const VALIDATION_HARNESS_VERSION: &str = "synveda-validation-sandbox/1";
+
+fn sensitivity_schema() -> utoipa::openapi::schema::Object {
+    string_enum(Sensitivity::ALL.iter().map(|value| value.as_str()))
 }
 
-// ── Author ─────────────────────────────────────────────────────────────
-
-/// One file as an author supplies it.
-#[derive(Deserialize)]
-pub(crate) struct FileBody {
-    /// Its path within the bundle. Validated against filesystems rather
-    /// than taste (ADR-0051 decision 7) — these bytes become a real file.
-    path: SkillFilePath,
-    /// Its content, verbatim. What an install writes, byte for byte.
-    content: String,
+fn mutation_outcome_schema() -> utoipa::openapi::schema::Object {
+    string_enum(["applied", "pending_review", "rejected"].into_iter())
 }
 
-#[derive(Deserialize)]
-pub(crate) struct AuthorBody {
-    /// Where the skill is authored — the scope that will stand behind it,
-    /// and the scope whose published channel a proposal would move.
-    scope_id: ScopeId,
-    /// Its name: one lower-case hyphenated segment, the agentskills.io
-    /// grammar, and the directory an install creates (decision 6).
-    name: SkillName,
-    /// Its classification. Absent means `internal`. Per *skill* rather than
-    /// per file (decision 11) — a client loads a bundle whole.
+fn source_kind_schema() -> utoipa::openapi::schema::Object {
+    string_enum(
+        synveda_types::SkillSourceKind::ALL
+            .iter()
+            .map(|value| value.as_str()),
+    )
+}
+
+fn usage_stage_schema() -> utoipa::openapi::schema::Object {
+    string_enum(SkillUsageStage::ALL.iter().map(|value| value.as_str()))
+}
+
+fn usage_evidence_schema() -> utoipa::openapi::schema::Object {
+    string_enum(SkillUsageEvidence::ALL.iter().map(|value| value.as_str()))
+}
+
+fn test_harness_schema() -> utoipa::openapi::schema::Object {
+    string_enum(SkillTestHarness::ALL.iter().map(|value| value.as_str()))
+}
+
+fn test_outcome_schema() -> utoipa::openapi::schema::Object {
+    string_enum(SkillTestOutcome::ALL.iter().map(|value| value.as_str()))
+}
+
+/// One file supplied for an immutable version.
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SkillFileBody {
+    /// Bundle-relative path.
+    pub path: String,
+    /// UTF-8 text stored and installed byte-for-byte.
+    pub content: String,
+}
+
+/// Provenance supplied for an imported or authored bundle.
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct SkillProvenanceBody {
+    /// Source class.
+    #[schema(schema_with = source_kind_schema)]
+    pub kind: String,
+    /// Non-secret source reference.
     #[serde(default)]
-    sensitivity: Option<Sensitivity>,
-    /// The bundle. `SKILL.md` is required and its frontmatter `name` must
-    /// equal `name` above, which is the open spec's own rule and this
-    /// registry's key at once (decision 5).
-    ///
-    /// **The request is the bundle** (decision 17): a file the author
-    /// dropped is dropped from the draft, unlike a context pack, because a
-    /// client loads a skill whole and a leftover file would be published
-    /// back onto a laptop by the next proposal.
-    files: Vec<FileBody>,
+    pub reference: Option<String>,
+    /// Exact upstream revision, when present.
+    #[serde(default)]
+    pub revision: Option<String>,
+    /// Forward-compatible source metadata.
+    #[serde(default)]
+    #[schema(value_type = Object)]
+    pub metadata: Value,
 }
 
-/// One security-scan finding, rendered for an API response (SKIL-2,
-/// ADR-0052 decision 7).
-///
-/// The `title` is here and not only the rule id because the reader is a
-/// reviewer rather than a machine, and "downloads a remote script and
-/// pipes it straight into an interpreter" is what they need to weigh.
-/// What is deliberately absent is the matched text.
-#[derive(Serialize)]
-pub(crate) struct ScanFindingView {
-    path: String,
-    rule: &'static str,
-    /// Typed rather than a string, because these are ordered and
-    /// `"critical" < "high" < "notice"` being the right order
-    /// alphabetically is a coincidence nothing should depend on.
-    severity: ScanSeverity,
-    title: &'static str,
-    /// 1-based, so it matches what an editor shows.
-    line: usize,
-    count: usize,
-    /// Whether *this* finding is one the pack in force refuses
-    /// (ADR-0056 decision 5).
-    ///
-    /// Served rather than left to the client, because the gateway is the
-    /// only participant holding both the severity order and the pack that
-    /// will decide the publication. A client comparing `severity` against
-    /// `blocks_at` has to know that the order is `notice < high <
-    /// critical` and not the alphabetical one, and has to decide what a
-    /// severity it has never heard of means — a question with a right
-    /// answer only on this side of the wire.
-    blocking: bool,
-}
-
-/// A bundle's scan as a reviewer or an author reads it.
-#[derive(Serialize)]
-pub(crate) struct ScanReport {
-    /// Which rule table produced this. It moves, and a report that did
-    /// not say which one produced it could not be compared with one
-    /// taken at review time (ADR-0052 force 4).
-    ruleset_version: u32,
-    /// The worst severity found, absent when clean.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    worst: Option<ScanSeverity>,
-    /// The severity the pack in force refuses at.
-    blocks_at: ScanSeverity,
-    /// Whether the pack in force would refuse this bundle. Always
-    /// `false` in an author response — a blocked bundle is a refusal,
-    /// not a view — and the field that matters in a review, where an
-    /// approved-but-blocking bundle is exactly what the publish gate
-    /// will stop.
-    blocked: bool,
-    /// How many findings at each severity.
-    counts: BTreeMap<ScanSeverity, usize>,
-    /// Every finding, worst first.
-    findings: Vec<ScanFindingView>,
-}
-
-impl ScanReport {
-    pub(crate) fn new(scan: &BundleScan, config: &SkillScanConfig) -> Self {
-        let threshold = config.threshold();
-        let mut findings: Vec<ScanFindingView> = scan
-            .files
-            .iter()
-            .flat_map(|file| {
-                file.findings.iter().map(move |finding| ScanFindingView {
-                    path: file.path.clone(),
-                    rule: finding.rule,
-                    severity: finding.severity,
-                    title: finding.title,
-                    line: finding.line,
-                    count: finding.count,
-                    // The same comparison `SkillScanConfig::blocks` makes
-                    // about the bundle, made about one finding: an
-                    // ordering over the enum, not a string equality.
-                    blocking: finding.severity >= threshold,
-                })
-            })
-            .collect();
-        // Worst first, then a total order so two renders of the same
-        // bundle read identically.
-        findings.sort_by(|a, b| {
-            b.severity
-                .cmp(&a.severity)
-                .then_with(|| a.path.cmp(&b.path))
-                .then_with(|| a.line.cmp(&b.line))
-                .then_with(|| a.rule.cmp(b.rule))
-        });
-        ScanReport {
-            ruleset_version: scan.ruleset_version,
-            worst: scan.worst(),
-            blocks_at: config.threshold(),
-            blocked: scan.blocked_by(config),
-            counts: scan.counts(),
-            findings,
+impl Default for SkillProvenanceBody {
+    fn default() -> Self {
+        Self {
+            kind: synveda_types::SkillSourceKind::Authored.as_str().to_owned(),
+            reference: None,
+            revision: None,
+            metadata: Value::Object(Default::default()),
         }
     }
 }
 
-/// One rubric check, rendered for an API response (SKIL-3, ADR-0053
-/// decision 11).
-#[derive(Serialize)]
-pub(crate) struct QualityCheckView {
-    check: &'static str,
-    passed: bool,
-    weight: u8,
-    title: &'static str,
-    /// What specifically was wrong, when the check can say. Never file
-    /// content — a path or a count.
+impl TryFrom<SkillProvenanceBody> for SkillProvenance {
+    type Error = Error;
+
+    fn try_from(value: SkillProvenanceBody) -> Result<Self> {
+        let provenance = Self {
+            kind: value.kind.parse()?,
+            reference: value.reference,
+            revision: value.revision,
+            metadata: value.metadata,
+        };
+        provenance.validate()?;
+        Ok(provenance)
+    }
+}
+
+/// Install the first immutable version of a stable skill.
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct InstallSkillBody {
+    /// Scope governing the catalogue aggregate.
+    #[schema(value_type = String, format = "uuid")]
+    pub governing_scope_id: ScopeId,
+    /// Agent Skills bundle name.
+    pub name: String,
+    /// Classification of every file in this version.
+    #[schema(schema_with = sensitivity_schema)]
+    pub sensitivity: String,
+    /// Whole Agent Skills-compatible bundle.
+    pub files: Vec<SkillFileBody>,
+    /// Retained bundle provenance.
+    #[serde(default)]
+    pub provenance: SkillProvenanceBody,
+}
+
+/// Add and select a new immutable version.
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct UpdateSkillBody {
+    /// Exact current version required when the change applies.
+    #[schema(value_type = String, format = "uuid")]
+    pub expected_current_version_id: SkillVersionId,
+    /// Classification of every file in this version.
+    #[schema(schema_with = sensitivity_schema)]
+    pub sensitivity: String,
+    /// Complete replacement bundle; history remains immutable.
+    pub files: Vec<SkillFileBody>,
+    /// Retained bundle provenance.
+    #[serde(default)]
+    pub provenance: SkillProvenanceBody,
+}
+
+/// Create a project- or principal-scope binding.
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct CreateSkillBindingBody {
+    /// Project or principal scope receiving the binding.
+    #[schema(value_type = String, format = "uuid")]
+    pub scope_id: ScopeId,
+    /// Stable catalogue entry.
+    #[schema(value_type = String, format = "uuid")]
+    pub skill_id: SkillId,
+    /// Exact version pin; absent follows the current version.
+    #[serde(default)]
+    #[schema(value_type = Option<String>, format = "uuid")]
+    pub pinned_version_id: Option<SkillVersionId>,
+    /// Initial activation state.
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+/// Change a binding using optimistic concurrency.
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct UpdateSkillBindingBody {
+    /// Exact binding revision required when the change applies.
+    pub expected_revision: u64,
+    /// Complete resulting activation state.
+    pub enabled: bool,
+    /// Complete resulting pin state; null follows current.
+    #[serde(default)]
+    #[schema(value_type = Option<String>, format = "uuid")]
+    pub pinned_version_id: Option<SkillVersionId>,
+    /// Stable reason code (`disable`, `enable`, `pin`, `unpin`).
+    pub reason: String,
+}
+
+/// Roll a binding back by pinning an older immutable version.
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RollbackSkillBindingBody {
+    /// Exact binding revision required when the change applies.
+    pub expected_revision: u64,
+    /// Older version of the same skill.
+    #[schema(value_type = String, format = "uuid")]
+    pub version_id: SkillVersionId,
+}
+
+/// Append one idempotent usage observation.
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RecordSkillUsageBody {
+    /// Active binding observed.
+    #[schema(value_type = String, format = "uuid")]
+    pub binding_id: SkillBindingId,
+    /// Exact immutable version involved.
+    #[schema(value_type = String, format = "uuid")]
+    pub version_id: SkillVersionId,
+    /// Session carrying the event, when applicable.
+    #[serde(default)]
+    #[schema(value_type = Option<String>, format = "uuid")]
+    pub session_id: Option<SessionId>,
+    /// Client idempotency key.
+    pub client_event_id: String,
+    /// Observable lifecycle stage.
+    #[schema(schema_with = usage_stage_schema)]
+    pub stage: String,
+    /// Whether a host observed the act or a model reported it.
+    #[schema(schema_with = usage_evidence_schema)]
+    pub evidence: String,
+    /// Resource/script path for the stages that name one.
+    #[serde(default)]
+    pub resource_path: Option<String>,
+    /// Bounded, content-free evidence.
+    #[serde(default)]
+    #[schema(value_type = Object)]
+    pub metadata: Value,
+    /// Client occurrence time.
+    pub occurred_at: DateTime<Utc>,
+}
+
+/// Run the non-executing built-in validation sandbox.
+#[derive(Debug, Clone, Deserialize, Serialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct RunSkillTestBody {
+    /// Only `validation_sandbox` runs inside the gateway.
+    #[schema(schema_with = test_harness_schema)]
+    pub harness: String,
+}
+
+/// Stable result envelope for every governed Skill mutation.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct SkillMutationView {
+    /// VedaFlow change id.
+    #[schema(value_type = String, format = "uuid")]
+    pub change_id: ProposalId,
+    /// Governance result.
+    #[schema(schema_with = mutation_outcome_schema)]
+    pub outcome: String,
+    /// Stable Skill aggregate affected by the change.
     #[serde(skip_serializing_if = "Option::is_none")]
-    detail: Option<String>,
-}
-
-/// The reviewer's half, as it is rendered beside the automated half.
-#[derive(Serialize)]
-pub(crate) struct ChecklistView {
-    /// Item → verdict, by the wire names.
-    answers: BTreeMap<&'static str, &'static str>,
-    /// Whatever the reviewer wrote.
+    #[schema(value_type = Option<String>, format = "uuid")]
+    pub skill_id: Option<SkillId>,
+    /// Immutable version created or selected by the change.
     #[serde(skip_serializing_if = "Option::is_none")]
-    note: Option<String>,
-    /// Every item has a verdict.
-    complete: bool,
-    /// The items answered `no`, which are what a publication needs an
-    /// override to step over.
-    concerns: Vec<&'static str>,
-    reviewed_at: DateTime<Utc>,
-    reviewed_by: IdentityId,
-}
-
-/// A bundle's quality, as an author and a reviewer read it (SKIL-3).
-///
-/// **Two halves, never averaged** (ADR-0053 decision 1). `score` is the
-/// automated rubric over the bytes; `checklist` is a person's judgement
-/// about them. Summing them would let each hide the other — a
-/// well-formatted bundle nobody reviewed would read the same as one a
-/// reviewer worked through — so the gate below reads both and names which
-/// one it refused on.
-#[derive(Serialize)]
-pub(crate) struct QualityReport {
-    /// Which rubric produced the score. It moves, and a number that did
-    /// not say which table produced it could not be compared with one
-    /// taken at review time.
-    rubric_version: u32,
-    /// 0..=100.
-    score: u8,
-    /// The bar this pack asks for. `0` means the pack gates nothing.
-    min_score: u8,
-    /// Whether this pack requires a checklist bound to exactly these
-    /// bytes.
-    requires_checklist: bool,
-    /// Every check, in table order — passing ones included, because "this
-    /// passed" and "this is not checked" must not look the same to
-    /// somebody deciding whether to trust the number.
-    checks: Vec<QualityCheckView>,
-    /// The checklist bound to **exactly these bytes**, if there is one.
-    ///
-    /// Absent means both "nobody has answered one" and "somebody did and
-    /// the bundle has changed since", and those being the same answer is
-    /// the design (ADR-0053 decision 4): from the publication's point of
-    /// view they are the same fact.
+    #[schema(value_type = Option<String>, format = "uuid")]
+    pub version_id: Option<SkillVersionId>,
+    /// Revisioned binding created or changed by the change.
     #[serde(skip_serializing_if = "Option::is_none")]
-    checklist: Option<ChecklistView>,
-    /// The digest the checklist is keyed by — what a reviewer's
-    /// `proposal checklist` call binds its answers to.
-    bundle_digest: String,
-    /// Every bar this bundle misses. Empty means it publishes without an
-    /// override.
-    shortfalls: Vec<ShortfallView>,
-    /// Whether publishing needs [`Action::SkillQualityOverride`]. Derived
-    /// from `shortfalls` rather than stored beside it, so the two can
-    /// never disagree.
-    needs_override: bool,
+    #[schema(value_type = Option<String>, format = "uuid")]
+    pub binding_id: Option<SkillBindingId>,
+    /// Binding revision produced by the change.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub binding_revision: Option<u64>,
 }
 
-/// One bar the bundle misses, with the sentence that explains it
-/// (ADR-0056 decision 6, amending ADR-0053 decision 7).
-///
-/// ADR-0053 served the shortfall's *data* and had the CLI compose the
-/// prose, so that a reader was never shown a `kind` slug to look up. That
-/// was right for one client. With a second renderer it is a drift source:
-/// the same shortfall explained in two languages by two authors, with
-/// nothing able to fail when they diverge. The gateway now serves both,
-/// and both surfaces display the served sentence — which is
-/// [`QualityShortfall::describe`], the one a refusal and an audit payload
-/// already use, so a reviewer and the refusal that stops them read the
-/// same words.
-///
-/// The data is flattened rather than nested so the wire shape stays what
-/// ADR-0053 defined, with one field added.
-#[derive(Serialize)]
-pub(crate) struct ShortfallView {
-    #[serde(flatten)]
-    shortfall: QualityShortfall,
-    detail: String,
-}
-
-impl QualityReport {
-    pub(crate) fn new(
-        scored: &RubricScore,
-        config: &SkillQualityConfig,
-        digest: &[u8; 32],
-        review: Option<&skill_reviews::StoredReview>,
-    ) -> Self {
-        let checklist = review.map(|review| ChecklistView {
-            answers: review
-                .checklist
-                .answers
-                .iter()
-                .map(|(item, verdict)| (item.as_str(), verdict.as_str()))
-                .collect(),
-            note: review.checklist.note.clone(),
-            complete: review.checklist.is_complete(),
-            concerns: review
-                .checklist
-                .concerns()
-                .iter()
-                .map(ChecklistItem::as_str)
-                .collect(),
-            reviewed_at: review.reviewed_at,
-            reviewed_by: review.reviewed_by,
-        });
-        let shortfalls = config.shortfalls(scored.score, review.map(|r| &r.checklist));
-        QualityReport {
-            rubric_version: scored.rubric_version,
-            score: scored.score,
-            min_score: config.min_score,
-            requires_checklist: config.require_checklist,
-            checks: scored
-                .checks
-                .iter()
-                .map(|check| QualityCheckView {
-                    check: check.check,
-                    passed: check.passed,
-                    weight: check.weight,
-                    title: check.title,
-                    detail: check.detail.clone(),
-                })
-                .collect(),
-            checklist,
-            bundle_digest: hex(digest),
-            needs_override: !shortfalls.is_empty(),
-            shortfalls: shortfalls
-                .into_iter()
-                .map(|shortfall| ShortfallView {
-                    detail: shortfall.describe(),
-                    shortfall,
-                })
-                .collect(),
+impl From<SkillMutationResult> for SkillMutationView {
+    fn from(value: SkillMutationResult) -> Self {
+        let outcome = match value.outcome {
+            SkillMutationOutcome::Applied => "applied",
+            SkillMutationOutcome::PendingReview => "pending_review",
+            SkillMutationOutcome::Rejected => "rejected",
+        };
+        Self {
+            change_id: value.change_id,
+            outcome: outcome.to_owned(),
+            skill_id: value.skill_id,
+            version_id: value.version_id,
+            binding_id: value.binding_id,
+            binding_revision: value.binding_revision,
         }
     }
 }
 
-/// A 32-byte digest as lowercase hex — the form every address in this
-/// product travels in.
-pub(crate) fn hex(bytes: &[u8; 32]) -> String {
-    bytes.iter().fold(String::with_capacity(64), |mut out, b| {
-        use std::fmt::Write as _;
-        let _ = write!(out, "{b:02x}");
-        out
-    })
+/// Immutable version metadata. File bytes use the dedicated file route.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct SkillVersionView {
+    /// Immutable version identifier.
+    #[schema(value_type = String, format = "uuid")]
+    pub id: SkillVersionId,
+    /// Stable Skill aggregate identifier.
+    #[schema(value_type = String, format = "uuid")]
+    pub skill_id: SkillId,
+    /// Monotonic version number within the aggregate.
+    pub ordinal: u64,
+    /// Stable digest over exact bundle paths and object addresses.
+    pub bundle_digest: String,
+    /// Governing sensitivity classification.
+    #[schema(schema_with = sensitivity_schema)]
+    pub sensitivity: String,
+    /// Parsed Agent Skills manifest with extension metadata preserved.
+    #[schema(value_type = Object)]
+    pub manifest: Value,
+    /// Provenance source class.
+    #[schema(schema_with = source_kind_schema)]
+    pub source_kind: String,
+    /// Version-specific provenance evidence.
+    #[schema(value_type = Object)]
+    pub provenance: Value,
+    /// Content-free scanner evidence.
+    #[schema(value_type = Object)]
+    pub scan: Value,
+    /// Scanner ruleset that produced the evidence.
+    pub scan_ruleset_version: u32,
+    /// Automated quality score from zero through one hundred.
+    pub quality_score: u8,
+    /// Rubric version that produced the score.
+    pub rubric_version: u32,
+    /// Declared tools are metadata and grant no authority.
+    pub declared_tools_are_authorization: bool,
+    /// Immutable version creation time.
+    pub created_at: DateTime<Utc>,
+    /// Principal that created the version through VedaFlow.
+    #[schema(value_type = String, format = "uuid")]
+    pub created_by: IdentityId,
 }
 
-/// The digest a checklist is keyed by, computed from draft rows.
-///
-/// The tree entry name — `<skill>/<path>` — is what goes into the hash,
-/// because that is what a proposal's members are named by, and a checklist
-/// answered at review must be found again at publication (ADR-0053
-/// decision 4).
-pub(crate) fn digest_of_files(files: &[skills::StoredFile]) -> [u8; 32] {
-    let names: Vec<(String, vedaflow::hash::ObjectHash)> = files
-        .iter()
-        .map(|file| {
-            (
-                SkillPath::new(file.skill_name.clone(), file.path.clone()).to_string(),
-                vedaflow::hash::ObjectHash::from_bytes(file.object_hash),
-            )
+impl TryFrom<StoredVersion> for SkillVersionView {
+    type Error = Error;
+
+    fn try_from(value: StoredVersion) -> Result<Self> {
+        Ok(Self {
+            id: value.id,
+            skill_id: value.skill_id,
+            ordinal: value.ordinal,
+            bundle_digest: store::hex_32(&value.bundle_digest),
+            sensitivity: value.sensitivity.as_str().to_owned(),
+            manifest: value.manifest,
+            source_kind: value.source_kind.as_str().to_owned(),
+            provenance: serde_json::to_value(value.provenance).map_err(|err| Error::Internal {
+                message: format!("encode stored skill provenance: {err}"),
+            })?,
+            scan: value.scan_report,
+            scan_ruleset_version: value.scan_ruleset_version,
+            quality_score: value.quality_score,
+            rubric_version: value.rubric_version,
+            declared_tools_are_authorization: false,
+            created_at: value.created_at,
+            created_by: value.created_by,
         })
-        .collect();
-    let borrowed: Vec<(&str, vedaflow::hash::ObjectHash)> = names
-        .iter()
-        .map(|(name, hash)| (name.as_str(), *hash))
-        .collect();
-    vedaflow::bundle_digest(&borrowed)
-}
-
-/// The digest a checklist is keyed by, computed from proposal members.
-///
-/// The counterpart of [`digest_of_files`], and the two must agree: a
-/// reviewer answers against a proposal and the gate looks the answers up
-/// at publication, so a review surface and a publish seam that computed
-/// this differently would silently lose every checklist. Both hash
-/// `(tree entry name, object address)` pairs, which is the one
-/// representation both sides hold.
-///
-/// # Errors
-///
-/// [`Error::Internal`] if a member's address is not a 32-byte hex digest,
-/// which would mean the proposal store and this code have drifted.
-pub(crate) fn digest_of_members(members: &[(String, String)]) -> Result<[u8; 32]> {
-    let parsed: Vec<(&str, vedaflow::hash::ObjectHash)> = members
-        .iter()
-        .map(|(name, hex)| {
-            let bytes = (0..hex.len())
-                .step_by(2)
-                .map(|at| u8::from_str_radix(hex.get(at..at + 2).unwrap_or("zz"), 16))
-                .collect::<std::result::Result<Vec<u8>, _>>()
-                .map_err(|_| Error::Internal {
-                    message: format!("proposal member {name:?} has a non-hex address"),
-                })?;
-            let address = <[u8; 32]>::try_from(bytes.as_slice()).map_err(|_| Error::Internal {
-                message: format!("proposal member {name:?} has an address that is not 32 bytes"),
-            })?;
-            Ok((
-                name.as_str(),
-                vedaflow::hash::ObjectHash::from_bytes(address),
-            ))
-        })
-        .collect::<Result<_>>()?;
-    Ok(vedaflow::bundle_digest(&parsed))
-}
-
-/// The skill a set of proposal members belongs to, from the `<skill>/<path>`
-/// tree entry names.
-///
-/// `None` when the members do not agree on one, which a skill proposal
-/// cannot produce — a bundle is proposed whole — but which a caller must
-/// not assume away, because the alternative is looking a checklist up
-/// under whichever name happened to sort first.
-pub(crate) fn skill_of(members: &[String]) -> Option<SkillName> {
-    let mut names = members
-        .iter()
-        .filter_map(|member| member.parse::<SkillPath>().ok())
-        .map(|path| path.skill);
-    let first = names.next()?;
-    names.all(|name| name == first).then_some(first)
-}
-
-/// The bundled files behind a set of proposal members, read from the
-/// object store.
-///
-/// Used wherever a review surface or a gate needs the *bytes* rather than
-/// the addresses — the rubric and the scanner both do.
-///
-/// # Errors
-///
-/// [`Error::Storage`] on a database failure. A member whose object is
-/// missing or is not a `SkillAsset` is skipped rather than failing the
-/// read: the append-only store makes it impossible, and a review that
-/// refused wholesale would be less useful than one reporting on what it
-/// could read.
-pub(crate) async fn files_of_members(
-    tx: &mut sqlx::Transaction<'static, sqlx::Postgres>,
-    tenant_id: synveda_types::TenantId,
-    members: &[vedaflow::ChannelMember],
-) -> Result<Vec<SkillFile>> {
-    let addresses: Vec<vedaflow::hash::ObjectHash> =
-        members.iter().map(|member| member.object).collect();
-    let objects = vedaflow::read_objects(tx, tenant_id, &addresses).await?;
-    Ok(members
-        .iter()
-        .filter_map(|member| objects.get(&member.object))
-        .filter_map(|object| SkillAsset::from_bytes(&object.content).ok())
-        .map(|asset| asset.file)
-        .collect())
-}
-
-/// Refuses free text carrying a secret (SKIL-3, ADR-0053 compliance note).
-///
-/// A checklist note and an override reason are the first author-supplied
-/// prose this plane stores that is **not** a bundled file, so they go
-/// through MEM-2's scanner like everything else — but the disposition is
-/// always a refusal rather than the pack's ladder. Unlike a bundled file
-/// there is nothing a placeholder would preserve: the value of a reason is
-/// that a person wrote it, so a scrubbed one is worth less than asking
-/// them to write it again, and they are on the other end of the request.
-pub(crate) async fn refuse_if_secret(what: &str, text: &str) -> Result<()> {
-    let payload = json!({ "content": text });
-    let span = tracing::Span::current();
-    let scan = tokio::task::spawn_blocking(move || {
-        let _entered = span.enter();
-        synveda_ingest::scan(payload)
-    })
-    .await
-    .map_err(|err| Error::Internal {
-        message: format!("redaction scan task failed: {err}"),
-    })?;
-    if scan.findings.is_empty() {
-        return Ok(());
     }
-    let rules: Vec<&str> = scan.findings.iter().map(|finding| finding.rule).collect();
-    Err(Error::Invalid {
-        message: format!(
-            "the {what} was stopped by the redaction scanner ({}); it is not stored. \
-             Unlike a bundled file there is nothing a placeholder would preserve here — \
-             the value of this text is that a person wrote it — so rewrite it without \
-             the finding",
-            rules.join(", "),
-        ),
-    })
 }
 
-/// What a scope's published channel holds for one file right now.
-#[derive(Serialize)]
-struct PublishedFile {
-    /// The address it names.
-    object_hash: String,
-    /// Whether that is the draft's own address. `false` after an edit: the
-    /// draft has moved and the reviewed version has not, which is what
-    /// "behind review" looks like from the writing side.
-    current: bool,
+/// Stable skill head and its current immutable version.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct SkillView {
+    /// Stable Skill aggregate identifier.
+    #[schema(value_type = String, format = "uuid")]
+    pub id: SkillId,
+    /// Scope governing installation and updates.
+    #[schema(value_type = String, format = "uuid")]
+    pub governing_scope_id: ScopeId,
+    /// Tenant-unique Agent Skills bundle name.
+    pub name: String,
+    /// Current immutable version pointer.
+    #[schema(value_type = String, format = "uuid")]
+    pub current_version_id: SkillVersionId,
+    /// Current immutable version metadata.
+    pub current_version: SkillVersionView,
+    /// Aggregate creation time.
+    pub created_at: DateTime<Utc>,
+    /// Principal that installed the aggregate.
+    #[schema(value_type = String, format = "uuid")]
+    pub created_by: IdentityId,
+    /// Last current-pointer update time.
+    pub updated_at: DateTime<Utc>,
+    /// Principal that last advanced the current pointer.
+    #[schema(value_type = String, format = "uuid")]
+    pub updated_by: IdentityId,
 }
 
-#[derive(Serialize)]
-struct FileView {
-    path: String,
-    /// The draft's content address — what a proposal would bind.
-    object_hash: String,
-    /// How many characters it carries. Never the content: the response is
-    /// a registry view, and the bytes come back through `resolve`.
-    chars: usize,
-    updated_at: DateTime<Utc>,
-    updated_by: IdentityId,
+/// Cursor-paginated catalogue page.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct SkillListView {
+    /// Policy-visible catalogue entries.
+    pub skills: Vec<SkillView>,
+    /// Cursor after the last candidate considered.
     #[serde(skip_serializing_if = "Option::is_none")]
-    published: Option<PublishedFile>,
+    #[schema(value_type = Option<String>, format = "uuid")]
+    pub next_cursor: Option<SkillId>,
 }
 
-#[derive(Serialize)]
-struct SkillView {
-    name: String,
-    scope_id: ScopeId,
-    scope_path: String,
-    description: String,
-    sensitivity: Sensitivity,
-    /// The frontmatter as the strict subset read it — the whole of it,
-    /// including the client keys the product does not interpret, so a
-    /// reviewer sees what a client will act on (decision 4).
-    frontmatter: Frontmatter,
-    files: Vec<FileView>,
-    /// How many draft files this request removed, because the bundle it
-    /// named did not include them (decision 17).
-    removed: u64,
-    /// What SKIL-2's security scanner found and admitted (ADR-0052).
-    ///
-    /// Present on every author, empty findings included, because "the
-    /// scan ran and found nothing" and "no scan is reported here" must
-    /// not look the same to an author. A blocking finding never reaches
-    /// this struct — it is a refusal.
-    scan: ScanReport,
-    /// What SKIL-3's rubric scored it, and the reviewer checklist bound to
-    /// exactly these bytes if there is one (ADR-0053 decision 11).
-    ///
-    /// Present on every author so an author sees their score **before** a
-    /// reviewer does — which is the whole reason a score is worth
-    /// rendering at a seam where it gates nothing: a draft is where a
-    /// skill is supposed to be unfinished, and a registry that refused to
-    /// hold work in progress is one where the work happens in a text
-    /// editor instead.
-    quality: QualityReport,
-    /// The commit the scope's skill channel serves, if any. Authoring never
-    /// moves it, which is the whole of "reaches a client only through
-    /// review".
-    #[serde(skip_serializing_if = "Option::is_none")]
-    published_commit: Option<String>,
-    created_at: DateTime<Utc>,
-    created_by: IdentityId,
-    updated_at: DateTime<Utc>,
-    updated_by: IdentityId,
+/// One immutable file descriptor.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct SkillVersionFileView {
+    /// Relative bundle path.
+    pub path: String,
+    /// Content-addressed VedaFlow object hash.
+    pub object_hash: String,
+    /// Unicode scalar count retained for bounded clients.
+    pub chars: u32,
+    /// File-reference creation time.
+    pub created_at: DateTime<Utc>,
 }
 
-/// `POST /v1/skills` — author a skill: create it, or replace it.
-#[tracing::instrument(name = "skills.author", skip_all)]
-pub(crate) async fn author(
-    State(state): State<AppState>,
-    payload: std::result::Result<Json<AuthorBody>, JsonRejection>,
-) -> Response {
-    let result = author_inner(&state, payload).await;
-    respond(&state, "author", result).await
-}
-
-async fn author_inner(
-    state: &AppState,
-    payload: std::result::Result<Json<AuthorBody>, JsonRejection>,
-) -> Result<Json<SkillView>> {
-    let body = body(payload)?;
-    let sensitivity = body.sensitivity.unwrap_or(Sensitivity::WORKING);
-    if sensitivity == Sensitivity::Restricted {
-        return Err(Error::Invalid {
-            message: format!(
-                "skill {} cannot be `restricted`: the only path to that tier is a \
-                 classification proposal over records, priced at compliance plus two \
-                 distinct approvers (ADR-0038 decision 8), and no such path exists for an \
-                 authored asset — so nothing could read the bundle back (ADR-0051 \
-                 decision 11)",
-                body.name
-            ),
-        });
-    }
-
-    // The bundle, validated against the open spec before a transaction is
-    // opened: all of it is pure, and a bundle no client would load must not
-    // reach a reviewer (decision 5).
-    let bundle = SkillBundle {
-        name: body.name.clone(),
-        files: body
-            .files
-            .iter()
-            .map(|file| SkillFile {
-                path: file.path.clone(),
-                content: file.content.clone(),
-            })
-            .collect(),
-    };
-    let frontmatter = bundle.validate()?;
-
-    let tenant_id = tenant_id()?;
-
-    // ── Decide, and read the effective redaction config ────────────────
-    //
-    // A read-only transaction: it writes nothing, so dropping it costs
-    // nothing, and the scanner below is CPU that should not hold a
-    // connection.
-    let (node, author, authorized, redaction, scan_config, quality_config, pack) = {
-        let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
-        let node = found(
-            hierarchy::node(&mut *tx, body.scope_id).await?,
-            tenant_id,
-            body.scope_id,
-        )?;
-        let input = authz::gather(state, &mut tx, Some(&node)).await?;
-        let authorized = authz::decide(
-            state,
-            &input,
-            Action::SkillWrite,
-            Resource::Scope(body.scope_id),
-            None,
-        )?;
-        let author = identity_of(&input)?;
-        let effective =
-            state
-                .pdp
-                .effective(tenant_id, Resource::Scope(body.scope_id), &input.context());
-        let pack = format!("{}@{}", effective.name, effective.version);
-        (
-            node,
-            author,
-            authorized,
-            effective.redaction,
-            effective.scan,
-            effective.quality,
-            pack,
-        )
-    };
-
-    // ── Scan, outside any transaction ──────────────────────────────────
-    //
-    // ADR-0051 decision 14, on ADR-0050 decision 11's ladder: `redact`
-    // scrubs and continues, `quarantine` and `deny` refuse to the author.
-    // The guarantee is stronger here than it is for a pack only because the
-    // destination is: a pack's secret would have reached vector space, and a
-    // skill's reaches a laptop.
-    let mut assets: Vec<SkillAsset> = Vec::with_capacity(bundle.files.len());
-    let mut redacted = 0_usize;
-    for file in bundle.files {
-        let mut file = file;
-        let scan = scan_file(&file).await?;
-        match scan.disposition(&redaction) {
-            None => {}
-            Some(RedactionMode::Redact) => {
-                file.content = scrubbed(&scan, &file.content);
-                redacted += 1;
-            }
-            Some(mode) => {
-                return refuse_scanned(
-                    state,
-                    tenant_id,
-                    body.scope_id,
-                    &body.name,
-                    &file,
-                    &scan,
-                    mode,
-                )
-                .await;
-            }
+impl From<StoredVersionFile> for SkillVersionFileView {
+    fn from(value: StoredVersionFile) -> Self {
+        Self {
+            path: value.path.to_string(),
+            object_hash: store::hex_32(&value.object_hash),
+            chars: value.chars,
+            created_at: value.created_at,
         }
-        assets.push(SkillAsset {
-            scope_id: body.scope_id,
-            skill: body.name.clone(),
-            sensitivity,
-            file,
-        });
     }
-    // A scrub can change `SKILL.md`, so the spec check runs again over what
-    // will actually be stored. A redaction that broke the frontmatter must
-    // be a refusal here rather than a bundle no client can load.
-    let scrubbed_bundle = SkillBundle {
-        name: body.name.clone(),
-        files: assets.iter().map(|asset| asset.file.clone()).collect(),
-    };
-    let frontmatter = if redacted > 0 {
-        scrubbed_bundle.validate()?
-    } else {
-        frontmatter
-    };
-
-    // ── The security gate, over exactly what would be stored ───────────
-    //
-    // SKIL-2, ADR-0052 decisions 4 and 5. It runs *after* the redaction
-    // pass rather than beside it, on the same discipline that made the
-    // spec check run twice: the bundle that matters is the one that will
-    // be written, and a scrub can change it. It also runs after MEM-2's
-    // ladder, so a bundle carrying both a live credential and a
-    // fetch-and-execute is refused for the credential — which is the
-    // right order, because the credential is live now and the code is
-    // not yet.
-    let security = scan_security(&scrubbed_bundle.files).await?;
-    if security.blocked_by(&scan_config) {
-        return refuse_scan(
-            state,
-            tenant_id,
-            body.scope_id,
-            body.name.as_str(),
-            &security,
-            &scan_config,
-            &pack,
-            "authoring",
-        )
-        .await;
-    }
-
-    // ── The rubric, over the same bytes ────────────────────────────────
-    //
-    // SKIL-3, ADR-0053. It runs here and **gates nothing**: a draft is
-    // where a skill is supposed to be unfinished, and a registry that
-    // refused to hold work in progress is one where the work happens in a
-    // text editor instead (ADR-0053 option 11). What the score is for at
-    // this seam is telling an author what a reviewer will see, and
-    // filling the registry listing's cache.
-    let scored = score_quality(&scrubbed_bundle.files).await?;
-
-    // ── Write, in one transaction ──────────────────────────────────────
-    let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
-    let stored_skill = skills::upsert_skill(
-        &mut *tx,
-        tenant_id,
-        &skills::NewSkill {
-            scope_id: body.scope_id,
-            name: &body.name,
-            description: &frontmatter.description,
-            sensitivity,
-            // The cache, written from the bytes this very call is
-            // storing — never from another cache (ADR-0053 decision 3).
-            quality: skills::CachedScore {
-                score: scored.score,
-                rubric_version: scored.rubric_version,
-            },
-            author,
-        },
-    )
-    .await?;
-
-    let mut written: Vec<(skills::StoredFile, usize)> = Vec::with_capacity(assets.len());
-    for asset in &assets {
-        let object = vedaflow::put_skill(&mut tx, tenant_id, asset).await?;
-        let stored = skills::upsert_file(
-            &mut *tx,
-            tenant_id,
-            &skills::NewFile {
-                scope_id: body.scope_id,
-                skill_name: &body.name,
-                path: &asset.file.path,
-                object_hash: *object.hash.as_bytes(),
-                author,
-            },
-        )
-        .await?;
-        written.push((stored, asset.file.content.chars().count()));
-    }
-    // Decision 17: the request is the bundle.
-    let keep: Vec<SkillFilePath> = assets.iter().map(|asset| asset.file.path.clone()).collect();
-    let removed =
-        skills::prune_files(&mut *tx, tenant_id, body.scope_id, &body.name, &keep).await?;
-
-    // The digest of exactly what was just written, and whatever checklist
-    // is bound to it (ADR-0053 decision 4).
-    //
-    // Almost always `None` here, and that is the design working rather
-    // than a gap: an author who has just changed a file has produced a
-    // bundle nobody has reviewed, so the answers about the *previous*
-    // bytes are not found. It is `Some` only when an author re-submits an
-    // identical bundle, which is exactly when the old answers still apply.
-    let stored_files: Vec<skills::StoredFile> =
-        written.iter().map(|(stored, _)| stored.clone()).collect();
-    let digest = digest_of_files(&stored_files);
-    let review =
-        skill_reviews::for_bundle(&mut *tx, tenant_id, body.scope_id, &body.name, &digest).await?;
-
-    let published = published_at(&mut tx, tenant_id, body.scope_id).await?;
-    audit::record(
-        &mut tx,
-        tenant_id,
-        AuditAction::SkillAuthored,
-        Resource::Scope(body.scope_id).to_string(),
-        Outcome::Success,
-        json!({
-            "authz": audit::decision_context(Action::SkillWrite, &authorized),
-            "asset": synveda_types::AssetKind::Skill.as_str(),
-            "skill": body.name.as_str(),
-            "sensitivity": sensitivity.as_str(),
-            // The addresses and the counts. Never SKILL.md text and never
-            // file content — the discipline every plane has followed since
-            // AUD-1.
-            "files": written
-                .iter()
-                .map(|(stored, chars)| json!({
-                    "path": stored.path.as_str(),
-                    "object_hash": vedaflow::hash::ObjectHash::from_bytes(stored.object_hash)
-                        .to_hex(),
-                    "chars": chars,
-                }))
-                .collect::<Vec<_>>(),
-            "removed": removed,
-            "redacted": redacted,
-            // What the security scan found and let through (SKIL-2).
-            // A clean scan gets no event of its own — ADR-0052
-            // decision 8 — but a bundle that was *reported on* and
-            // admitted anyway is exactly what an auditor asking "what
-            // did we let past" needs, and it rides the event the
-            // authoring already chains.
-            "scan": scan_payload(&security, &scan_config),
-            // What the rubric made of it (SKIL-3). No event of its own —
-            // scoring is not an act, and the two acts this feature adds
-            // are a reviewer answering and a publisher overriding.
-            "quality": {
-                "rubric_version": scored.rubric_version,
-                "score": scored.score,
-                "failed": scored.failed()
-                    .iter()
-                    .map(|check| check.check)
-                    .collect::<Vec<_>>(),
-            },
-            // What a client would be served *now*, which is the point of the
-            // whole surface: authoring moved nothing.
-            "published_commit": published.as_ref().map(|(commit, _)| commit.to_hex()),
-        }),
-    )
-    .await?;
-    commit(tx).await?;
-
-    Ok(Json(view(
-        &node,
-        stored_skill,
-        frontmatter,
-        written,
-        removed,
-        published.as_ref(),
-        Reports {
-            scan: ScanReport::new(&security, &scan_config),
-            quality: QualityReport::new(&scored, &quality_config, &digest, review.as_ref()),
-        },
-    )))
 }
 
-/// Runs MEM-2's scanner over one bundled file (ADR-0051 decision 14).
-///
-/// The file goes in as a JSON object because that is the shape
-/// `synveda_ingest::scan` walks, and it is the *same* scanner the observe
-/// and pack-authoring paths use rather than a third one with its own rule
-/// list.
-///
-/// CPU work, O(file bytes), so it goes off the reactor exactly as the others
-/// do.
+/// One authorised file with its exact immutable content.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct SkillVersionFileContentView {
+    /// Exact immutable version containing the file.
+    #[schema(value_type = String, format = "uuid")]
+    pub version_id: SkillVersionId,
+    /// Relative bundle path.
+    pub path: String,
+    /// Content-addressed VedaFlow object hash.
+    pub object_hash: String,
+    /// Exact authorised text content.
+    pub content: String,
+}
+
+/// One revisioned binding.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct SkillBindingView {
+    /// Stable binding identifier.
+    #[schema(value_type = String, format = "uuid")]
+    pub id: SkillBindingId,
+    /// Bound project or principal scope.
+    #[schema(value_type = String, format = "uuid")]
+    pub scope_id: ScopeId,
+    /// Bound Skill aggregate.
+    #[schema(value_type = String, format = "uuid")]
+    pub skill_id: SkillId,
+    /// Exact version pin, or absent to follow the current pointer.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>, format = "uuid")]
+    pub pinned_version_id: Option<SkillVersionId>,
+    /// Whether sessions may discover this binding.
+    pub enabled: bool,
+    /// Optimistic-concurrency revision.
+    pub revision: u64,
+    /// Binding creation time.
+    pub created_at: DateTime<Utc>,
+    /// Principal that created the binding.
+    #[schema(value_type = String, format = "uuid")]
+    pub created_by: IdentityId,
+    /// Last binding transition time.
+    pub updated_at: DateTime<Utc>,
+    /// Principal that made the last binding transition.
+    #[schema(value_type = String, format = "uuid")]
+    pub updated_by: IdentityId,
+}
+
+impl From<StoredBinding> for SkillBindingView {
+    fn from(value: StoredBinding) -> Self {
+        Self {
+            id: value.id,
+            scope_id: value.scope_id,
+            skill_id: value.skill_id,
+            pinned_version_id: value.pinned_version_id,
+            enabled: value.enabled,
+            revision: value.revision,
+            created_at: value.created_at,
+            created_by: value.created_by,
+            updated_at: value.updated_at,
+            updated_by: value.updated_by,
+        }
+    }
+}
+
+/// Binding collection.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct SkillBindingListView {
+    /// Policy-visible bindings.
+    pub bindings: Vec<SkillBindingView>,
+    /// Cursor after the last candidate considered.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>, format = "uuid")]
+    pub next_cursor: Option<SkillBindingId>,
+}
+
+/// Exact version made available by one enabled binding.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct AvailableSkillView {
+    /// Binding that makes this version available.
+    pub binding: SkillBindingView,
+    /// Agent Skills bundle name.
+    pub name: String,
+    /// Exact version resolved from the binding.
+    pub version: SkillVersionView,
+    /// Content-addressed SKILL.md object.
+    pub manifest_object_hash: String,
+}
+
+/// Visible available skills after binding and PDP evaluation.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct AvailableSkillListView {
+    /// Project or principal scope resolved for the session.
+    #[schema(value_type = String, format = "uuid")]
+    pub scope_id: ScopeId,
+    /// Enabled and policy-visible exact versions.
+    pub skills: Vec<AvailableSkillView>,
+}
+
+/// One append-only usage event.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct SkillUsageEventView {
+    /// Stable append-only usage event identifier.
+    #[schema(value_type = String, format = "uuid")]
+    pub id: SkillUsageEventId,
+    /// Binding that advertised the version.
+    #[schema(value_type = String, format = "uuid")]
+    pub binding_id: SkillBindingId,
+    /// Exact immutable version involved.
+    #[schema(value_type = String, format = "uuid")]
+    pub version_id: SkillVersionId,
+    /// Governed session, when the lifecycle event occurred in one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>, format = "uuid")]
+    pub session_id: Option<SessionId>,
+    /// Principal associated with the lifecycle event.
+    #[schema(value_type = String, format = "uuid")]
+    pub principal_id: IdentityId,
+    /// Adapter-provided idempotency key.
+    pub client_event_id: String,
+    /// Observable lifecycle stage.
+    #[schema(schema_with = usage_stage_schema)]
+    pub stage: String,
+    /// Host-observed or model-reported evidence class.
+    #[schema(schema_with = usage_evidence_schema)]
+    pub evidence: String,
+    /// Resource or script path, when the stage names one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resource_path: Option<String>,
+    /// Bounded content-free evidence.
+    #[schema(value_type = Object)]
+    pub metadata: Value,
+    /// Client occurrence time.
+    pub occurred_at: DateTime<Utc>,
+    /// Server receipt time.
+    pub received_at: DateTime<Utc>,
+}
+
+impl From<StoredUsageEvent> for SkillUsageEventView {
+    fn from(value: StoredUsageEvent) -> Self {
+        Self {
+            id: value.id,
+            binding_id: value.binding_id,
+            version_id: value.version_id,
+            session_id: value.session_id,
+            principal_id: value.principal_id,
+            client_event_id: value.client_event_id,
+            stage: value.stage.as_str().to_owned(),
+            evidence: value.evidence.as_str().to_owned(),
+            resource_path: value.resource_path.map(|path| path.to_string()),
+            metadata: value.metadata,
+            occurred_at: value.occurred_at,
+            received_at: value.received_at,
+        }
+    }
+}
+
+/// Usage collection.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct SkillUsageListView {
+    /// Append-only usage evidence.
+    pub events: Vec<SkillUsageEventView>,
+    /// Cursor after the last returned event.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>, format = "uuid")]
+    pub next_cursor: Option<SkillUsageEventId>,
+}
+
+/// One immutable controlled-harness result.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct SkillTestRunView {
+    /// Stable test-run identifier.
+    #[schema(value_type = String, format = "uuid")]
+    pub id: SkillTestRunId,
+    /// Exact immutable version tested.
+    #[schema(value_type = String, format = "uuid")]
+    pub version_id: SkillVersionId,
+    /// Controlled harness class.
+    #[schema(schema_with = test_harness_schema)]
+    pub harness: String,
+    /// Exact harness implementation version.
+    pub harness_version: String,
+    /// Terminal test outcome.
+    #[schema(schema_with = test_outcome_schema)]
+    pub outcome: String,
+    /// Scanner ruleset used by the run.
+    pub scan_ruleset_version: u32,
+    /// Quality rubric used by the run.
+    pub rubric_version: u32,
+    /// Content-free validation evidence.
+    #[schema(value_type = Object)]
+    pub evidence: Value,
+    /// Test-run creation time.
+    pub created_at: DateTime<Utc>,
+    /// Principal that requested the test.
+    #[schema(value_type = String, format = "uuid")]
+    pub created_by: IdentityId,
+}
+
+impl From<StoredTestRun> for SkillTestRunView {
+    fn from(value: StoredTestRun) -> Self {
+        Self {
+            id: value.id,
+            version_id: value.version_id,
+            harness: value.harness.as_str().to_owned(),
+            harness_version: value.harness_version,
+            outcome: value.outcome.as_str().to_owned(),
+            scan_ruleset_version: value.scan_ruleset_version,
+            rubric_version: value.rubric_version,
+            evidence: value.evidence,
+            created_at: value.created_at,
+            created_by: value.created_by,
+        }
+    }
+}
+
+/// Test-run collection.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct SkillTestRunListView {
+    /// Immutable controlled-harness results.
+    pub runs: Vec<SkillTestRunView>,
+    /// Cursor after the last returned run.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>, format = "uuid")]
+    pub next_cursor: Option<SkillTestRunId>,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+// ── Bundle validation and retained evidence ───────────────────────────────
+
 async fn scan_file(file: &SkillFile) -> Result<ScanOutcome> {
-    let payload = json!({
-        "path": file.path.as_str(),
-        "content": file.content,
-    });
+    let payload = json!({"path": file.path.as_str(), "content": file.content});
     let span = tracing::Span::current();
     tokio::task::spawn_blocking(move || {
         let _entered = span.enter();
@@ -925,109 +678,11 @@ async fn scan_file(file: &SkillFile) -> Result<ScanOutcome> {
     })
     .await
     .map_err(|err| Error::Internal {
-        message: format!("redaction scan task failed: {err}"),
+        message: format!("skill redaction scan task failed: {err}"),
     })
 }
 
-/// The file's text with every finding scrubbed, as MEM-2's scanner rewrote
-/// it.
-fn scrubbed(scan: &ScanOutcome, original: &str) -> String {
-    scan.payload
-        .get("content")
-        .and_then(serde_json::Value::as_str)
-        .map(ToOwned::to_owned)
-        .unwrap_or_else(|| original.to_owned())
-}
-
-/// The refusal a scanned file gets, and the event that chains it.
-///
-/// ADR-0050 decision 11's departure, inherited: a synchronous authoring
-/// surface reviews by refusing to its author, because there is somebody on
-/// the other end of the request who can fix the file. What is not a
-/// departure is the guarantee — the bundle is not stored, so no secret
-/// reaches a client's disk.
-async fn refuse_scanned<T>(
-    state: &AppState,
-    tenant_id: synveda_types::TenantId,
-    scope_id: ScopeId,
-    skill: &SkillName,
-    file: &SkillFile,
-    scan: &ScanOutcome,
-    mode: RedactionMode,
-) -> Result<T> {
-    let rules: Vec<&str> = scan.findings.iter().map(|finding| finding.rule).collect();
-    if mode == RedactionMode::Quarantine {
-        let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
-        audit::record(
-            &mut tx,
-            tenant_id,
-            AuditAction::SkillQuarantined,
-            Resource::Scope(scope_id).to_string(),
-            // The scan stopped the write, so the operation did not complete
-            // — `failure` rather than `deny`, which is the PDP's word and no
-            // PDP denied anything here.
-            Outcome::Failure,
-            json!({
-                "asset": synveda_types::AssetKind::Skill.as_str(),
-                "skill": skill.as_str(),
-                "path": file.path.as_str(),
-                // The rules that fired and how often — never the matched
-                // text.
-                "findings": scan
-                    .findings
-                    .iter()
-                    .map(|finding| json!({
-                        "rule": finding.rule,
-                        "category": finding.category.as_str(),
-                        "count": finding.count,
-                    }))
-                    .collect::<Vec<_>>(),
-                "disposition": mode.as_str(),
-            }),
-        )
-        .await?;
-        commit(tx).await?;
-    }
-    Err(Error::Invalid {
-        message: format!(
-            "{} was stopped by the redaction scanner ({}): {}. The bundle was not stored — \
-             a skill is bulk external text that becomes files on a fleet of laptops, so the \
-             scan runs before anything is written and no secret reaches a client's disk \
-             (ADR-0051 decision 14). Remove the finding and author again",
-            file.path,
-            mode.as_str(),
-            rules.join(", "),
-        ),
-    })
-}
-
-/// Runs SKIL-2's security scanner over the bundle (ADR-0052 decision 2:
-/// every file, `SKILL.md` included).
-///
-/// CPU work bounded by ADR-0051's own bundle limits, so it goes off the
-/// reactor exactly as MEM-2's sibling does.
-/// Runs SKIL-3's rubric over the bundle (ADR-0053 decision 2).
-///
-/// Recomputed at every seam that renders it and stored nowhere a decision
-/// reads — ADR-0052 decision 6 inherited whole, for its reasons: it is a
-/// pure function of (file bytes, rubric version), and both are already
-/// present wherever it is needed.
-///
-/// CPU work bounded by ADR-0051's own bundle limits, so it goes off the
-/// reactor exactly as its two siblings do.
-pub(crate) async fn score_quality(files: &[SkillFile]) -> Result<RubricScore> {
-    let files = files.to_vec();
-    let span = tracing::Span::current();
-    tokio::task::spawn_blocking(move || {
-        let _entered = span.enter();
-        synveda_ingest::score_bundle(&files)
-    })
-    .await
-    .map_err(|err| Error::Internal {
-        message: format!("skill quality scoring task failed: {err}"),
-    })
-}
-
+/// Runs the executable-content scanner over every bundle file.
 pub(crate) async fn scan_security(files: &[SkillFile]) -> Result<BundleScan> {
     let files = files.to_vec();
     let span = tracing::Span::current();
@@ -1041,1222 +696,2697 @@ pub(crate) async fn scan_security(files: &[SkillFile]) -> Result<BundleScan> {
     })
 }
 
-/// A scan rendered for an audit payload or a response.
-///
-/// Rule ids, severities, counts and 1-based lines — **never file content
-/// and never the matched span**, which for a credential rule is a path to
-/// a credential (ADR-0052 decision 7).
-fn scan_payload(scan: &BundleScan, config: &SkillScanConfig) -> serde_json::Value {
+/// Runs the deterministic quality rubric over exact bundle bytes.
+pub(crate) async fn score_quality(files: &[SkillFile]) -> Result<RubricScore> {
+    let files = files.to_vec();
+    let span = tracing::Span::current();
+    tokio::task::spawn_blocking(move || {
+        let _entered = span.enter();
+        synveda_ingest::score_bundle(&files)
+    })
+    .await
+    .map_err(|err| Error::Internal {
+        message: format!("skill quality scoring task failed: {err}"),
+    })
+}
+
+fn scan_payload(scan: &BundleScan, threshold: ScanSeverity) -> Value {
     json!({
         "ruleset_version": scan.ruleset_version,
-        "worst": scan.worst().map(|worst| worst.as_str()),
-        "blocks_at": config.threshold().as_str(),
-        "findings": scan
-            .files
-            .iter()
-            .flat_map(|file| file.findings.iter().map(move |finding| json!({
+        "worst": scan.worst().map(|value| value.as_str()),
+        "blocks_at": threshold.as_str(),
+        "findings": scan.files.iter().flat_map(|file| {
+            file.findings.iter().map(move |finding| json!({
                 "path": file.path,
                 "rule": finding.rule,
                 "severity": finding.severity.as_str(),
                 "line": finding.line,
                 "count": finding.count,
-            })))
-            .collect::<Vec<_>>(),
+            }))
+        }).collect::<Vec<_>>(),
     })
 }
 
-/// The refusal a scanned bundle gets, and the event that chains it.
-///
-/// One helper for both seams (ADR-0052 decisions 4 and 5) because the
-/// refusal is the same act at either: `stage` is the only thing that
-/// differs, and it is on the event so an auditor can tell an author who
-/// was stopped from a proposal that was.
-#[allow(clippy::too_many_arguments)]
-pub(crate) async fn refuse_scan<T>(
-    state: &AppState,
-    tenant_id: synveda_types::TenantId,
-    scope_id: ScopeId,
-    skill: &str,
-    scan: &BundleScan,
-    config: &SkillScanConfig,
-    pack: &str,
-    stage: &'static str,
-) -> Result<T> {
-    let blocking = scan.blocking(config);
-    let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
-    audit::record(
-        &mut tx,
-        tenant_id,
-        AuditAction::SkillScanRejected,
-        Resource::Scope(scope_id).to_string(),
-        // The scan stopped the write; no PDP denied anything, so
-        // `failure` rather than `deny` — MEM-2's distinction at the
-        // sibling seam, unchanged.
-        Outcome::Failure,
-        json!({
-            "asset": synveda_types::AssetKind::Skill.as_str(),
-            "skill": skill,
-            "stage": stage,
-            "policy_pack": pack,
-            "scan": scan_payload(scan, config),
-        }),
-    )
-    .await?;
-    commit(tx).await?;
-
-    let named = blocking
-        .iter()
-        .map(|(path, finding)| {
-            format!(
-                "{path}:{} {} ({})",
-                finding.line, finding.rule, finding.severity
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("; ");
-    let worst = blocking
-        .first()
-        .map_or("critical".to_owned(), |(_, finding)| {
-            finding.severity.to_string()
-        });
-    let title = blocking
-        .first()
-        .map_or_else(String::new, |(_, finding)| finding.title.to_owned());
-    let head = format!(
-        "skill {skill} was refused by the security scanning gate at {worst}: {named}. {title}."
-    );
-    // The two seams refuse for different reasons and must not answer alike.
-    //
-    // At authoring the request itself is wrong and the author can fix it, so
-    // it is an `Invalid` telling them how. At publication the request was
-    // well formed and was well formed when it was approved — what changed is
-    // the rule table, which is a state the caller did not control, so it is a
-    // `Conflict` like every other publish-time refusal in this product
-    // (ADR-0052 decision 5).
-    if stage == "publication" {
-        return Err(Error::Conflict {
-            message: format!(
-                "{head} The bundle stays unpublished: approvals bind bytes, and the rules \
-                 that decide whether those bytes may ship are checked again here because \
-                 they move independently of them. Withdraw the proposal, fix the finding, \
-                 and open a new one so the change is reviewed"
-            ),
-        });
+/// Refuse prose fields that would put a credential in governance metadata.
+pub(crate) async fn refuse_if_secret(what: &str, text: &str) -> Result<()> {
+    let payload = json!({"content": text});
+    let span = tracing::Span::current();
+    let scan = tokio::task::spawn_blocking(move || {
+        let _entered = span.enter();
+        synveda_ingest::scan(payload)
+    })
+    .await
+    .map_err(|err| Error::Internal {
+        message: format!("redaction scan task failed: {err}"),
+    })?;
+    if scan.findings.is_empty() {
+        return Ok(());
     }
     Err(Error::Invalid {
-        message: format!(
-            "{head} The bundle was not stored — a skill becomes files a client executes, and \
-             a draft is installable, so a finding this severe is refused before anything is \
-             written rather than left for a reviewer to catch (SKIL-2, ADR-0052). Remove the \
-             finding and author again"
-        ),
+        message: format!("the {what} contains material classified as a secret and is not stored"),
     })
 }
 
-// ── Resolve ────────────────────────────────────────────────────────────
-
-/// Where a served bundle came from.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "kebab-case")]
-enum Origin {
-    /// A scope's draft row: unreviewed, and only ever served to a caller who
-    /// named that scope and that channel (ADR-0049 decision 15).
-    Draft,
-    /// The channel's head.
-    Head,
-    /// A standing FLOW-7 pin at the scope — its readers are held at an
-    /// earlier state, and that is the ceiling a consumer pin may reach.
-    ChannelPin,
-    /// The commit the caller asked for.
-    PinnedCommit,
-}
-
-#[derive(Deserialize)]
-pub(crate) struct ResolveParams {
-    /// Which scope's copy. Absent walks the caller's own placement chain.
-    #[serde(default)]
-    scope_id: Option<ScopeId>,
-    /// `published` (default) or `draft`.
-    #[serde(default)]
-    channel: Option<SkillChannel>,
-    /// The commit a consumer was built against (ADR-0049 decision 9).
-    #[serde(default)]
-    commit: Option<String>,
-}
-
-#[derive(Serialize)]
-struct ResolvedFile {
-    path: String,
-    /// The content address — what an install re-hashes what it wrote
-    /// against, which is what makes "installs unmodified" a measurement.
-    object_hash: String,
-    /// The bytes, verbatim. Nothing added, nothing wrapped: this is the
-    /// whole of ADR-0051 force 1.
-    content: String,
-}
-
-#[derive(Serialize)]
-struct ResolveResponse {
-    name: String,
-    scope_id: ScopeId,
-    scope_path: String,
-    channel: SkillChannel,
-    origin: Origin,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    commit: Option<String>,
-    sensitivity: Sensitivity,
-    description: String,
-    frontmatter: Frontmatter,
-    /// Every file of the bundle, in path order — the order an install writes
-    /// them in, and all of them from **one** commit.
-    files: Vec<ResolvedFile>,
-}
-
-/// `GET /v1/skills/{name}` — resolve a bundle.
-#[tracing::instrument(name = "skills.resolve", skip_all)]
-pub(crate) async fn resolve(
-    State(state): State<AppState>,
-    Path(name): Path<String>,
-    Query(params): Query<ResolveParams>,
-) -> Response {
-    let result = resolve_inner(&state, &name, &params).await;
-    respond(&state, "resolve", result).await
-}
-
-async fn resolve_inner(
-    state: &AppState,
-    raw_name: &str,
-    params: &ResolveParams,
-) -> Result<Json<ResolveResponse>> {
-    let name: SkillName = raw_name.parse()?;
-    let channel = params.channel.unwrap_or(SkillChannel::Published);
-    let pinned = params
-        .commit
-        .as_deref()
-        .map(str::parse::<vedaflow::CommitHash>)
-        .transpose()?;
-    if channel == SkillChannel::Draft && pinned.is_some() {
-        return Err(Error::Invalid {
-            message: "a draft is on no channel, so there is no commit to pin it to".to_owned(),
-        });
-    }
-    let tenant_id = tenant_id()?;
-    let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
-
-    let resolved = match (params.scope_id, channel) {
-        (None, SkillChannel::Draft) => {
-            return Err(Error::Invalid {
-                message: "reading a draft names its scope: unreviewed content reaches a \
-                          caller who asked for that scope's unreviewed content, and nobody \
-                          else (ADR-0049 decision 15)"
-                    .to_owned(),
-            });
-        }
-        (None, SkillChannel::Published) => {
-            if pinned.is_some() {
-                return Err(Error::Invalid {
-                    message: "pinning a commit names its scope too — a commit belongs to \
-                              one scope's channel, and the resolve response carries the \
-                              pair to pin with"
-                        .to_owned(),
-                });
-            }
-            walk_chain(state, &mut tx, tenant_id, &name).await?
-        }
-        (Some(scope_id), channel) => {
-            at_scope(state, &mut tx, tenant_id, scope_id, &name, channel, pinned).await?
-        }
-    };
-
-    audit::record(
-        &mut tx,
-        tenant_id,
-        AuditAction::SkillResolved,
-        Resource::Scope(resolved.node.id).to_string(),
-        Outcome::Success,
-        json!({
-            "authz": audit::decision_context(Action::SkillRead, &resolved.authorized),
-            "asset": synveda_types::AssetKind::Skill.as_str(),
-            "skill": name.as_str(),
-            "channel": channel.as_str(),
-            "origin": resolved.origin,
-            "sensitivity": resolved.sensitivity.as_str(),
-            // The addresses and the commit — the citation an install
-            // records and an auditor recomputes. This event *is* the
-            // provenance of what is about to become files on a machine,
-            // because nothing inside the installed directory can carry a
-            // watermark (ADR-0051 force 2).
-            "commit": resolved.commit.map(|commit| commit.to_hex()),
-            "files": resolved
-                .files
-                .iter()
-                .map(|(path, address, _)| json!({
-                    "path": path.as_str(),
-                    "object_hash": address.to_hex(),
-                }))
-                .collect::<Vec<_>>(),
-            "chain_position": resolved.position,
-        }),
-    )
-    .await?;
-    commit(tx).await?;
-
-    let frontmatter = resolved.frontmatter()?;
-    Ok(Json(ResolveResponse {
-        name: name.to_string(),
-        scope_id: resolved.node.id,
-        scope_path: resolved.node.path.clone(),
-        channel,
-        origin: resolved.origin,
-        commit: resolved.commit.map(|commit| commit.to_hex()),
-        sensitivity: resolved.sensitivity,
-        description: frontmatter.description.clone(),
-        frontmatter,
-        files: resolved
-            .files
-            .iter()
-            .map(|(path, address, content)| ResolvedFile {
-                path: path.to_string(),
-                object_hash: address.to_hex(),
-                content: content.clone(),
-            })
-            .collect(),
-    }))
-}
-
-/// What a resolution found, before it is rendered or audited.
-struct Resolved {
-    node: HierarchyNode,
-    sensitivity: Sensitivity,
-    /// Every file of the bundle in path order, with its address and bytes.
-    files: Vec<(SkillFilePath, vedaflow::hash::ObjectHash, String)>,
-    commit: Option<vedaflow::CommitHash>,
-    origin: Origin,
-    /// Distance up the caller's chain — 0 at home.
-    position: usize,
-    authorized: crate::authz::Authorized,
-}
-
-impl Resolved {
-    /// The bundle's frontmatter, parsed from the `SKILL.md` that was served.
-    ///
-    /// A resolution that got this far has a `SKILL.md` — nothing without one
-    /// can be authored — so its absence is drift rather than a caller error.
-    fn frontmatter(&self) -> Result<Frontmatter> {
-        let manifest = self
-            .files
-            .iter()
-            .find(|(path, _, _)| path.is_manifest())
-            .ok_or_else(|| Error::Internal {
-                message: format!(
-                    "the bundle served from {} has no {}, which authoring cannot produce",
-                    self.node.path,
-                    synveda_types::SKILL_MANIFEST
-                ),
-            })?;
-        Frontmatter::parse(&manifest.2)
-    }
-}
-
-/// The gradient walk (ADR-0049 decision 8): the caller's own placement
-/// chain, nearest first, serving the first scope that publishes the name
-/// **and** permits the read.
-///
-/// For skills the gradient has a physical form: the name is the installed
-/// directory name and a client's skills root is flat, so a team's
-/// `code-review` and the org's cannot both exist on disk. This walk is what
-/// decides which one does.
-async fn walk_chain(
-    state: &AppState,
-    tx: &mut sqlx::PgConnection,
-    tenant_id: synveda_types::TenantId,
-    name: &SkillName,
-) -> Result<Resolved> {
-    let input = authz::gather_at_home(state, tx).await?;
-    let chain: Vec<HierarchyNode> = input.chain.to_vec();
-    let scope_ids: Vec<ScopeId> = chain.iter().map(|node| node.id).collect();
-    let published =
-        vedaflow::read_skill_members(tx, tenant_id, &scope_ids, Channel::Published).await?;
-
-    for (position, node) in chain.iter().enumerate() {
-        let Some(state_at) = published.iter().find(|state| state.scope_id == node.id) else {
-            continue;
-        };
-        let members = state_at.bundle(name);
-        if members.is_empty() {
-            continue;
-        }
-        let Some((sensitivity, files, authorized)) =
-            admit(state, tx, tenant_id, &input, position, node, &members).await?
-        else {
-            continue;
-        };
-        return Ok(Resolved {
-            node: node.clone(),
-            sensitivity,
-            files,
-            commit: Some(state_at.commit),
-            origin: if state_at.pinned {
-                Origin::ChannelPin
-            } else {
-                Origin::Head
-            },
-            position,
-            authorized,
-        });
-    }
-    Err(not_found(name))
-}
-
-/// A resolve that named its scope: the draft rows, the channel head, or the
-/// commit the caller pinned.
-async fn at_scope(
-    state: &AppState,
-    tx: &mut sqlx::PgConnection,
-    tenant_id: synveda_types::TenantId,
-    scope_id: ScopeId,
-    name: &SkillName,
-    channel: SkillChannel,
-    pinned: Option<vedaflow::CommitHash>,
-) -> Result<Resolved> {
-    let node = found(
-        hierarchy::node(&mut *tx, scope_id).await?,
-        tenant_id,
-        scope_id,
-    )?;
-    let input = authz::gather(state, tx, Some(&node)).await?;
-
-    if channel == SkillChannel::Draft {
-        let Some(draft) = skills::skill(&mut *tx, tenant_id, scope_id, name).await? else {
-            return Err(not_found(name));
-        };
-        let Some(authorized) = permit(state, &input, scope_id, draft.sensitivity)? else {
-            return Err(not_found(name));
-        };
-        let members: HashMap<SkillFilePath, vedaflow::hash::ObjectHash> =
-            skills::files_of(&mut *tx, tenant_id, scope_id, name)
-                .await?
-                .into_iter()
-                .map(|file| {
-                    (
-                        file.path,
-                        vedaflow::hash::ObjectHash::from_bytes(file.object_hash),
-                    )
-                })
-                .collect();
-        if members.is_empty() {
-            return Err(not_found(name));
-        }
-        // The draft row's tier is the authoritative one here — the objects
-        // carry it too, and they agree by construction.
-        let (_, files) = read_bundle(tx, tenant_id, &node, &members).await?;
-        return Ok(Resolved {
-            node,
-            sensitivity: draft.sensitivity,
-            files,
-            commit: None,
-            origin: Origin::Draft,
-            position: 0,
-            authorized,
-        });
-    }
-
-    // Published, at a named scope. The pin's refusal is a `Conflict` and
-    // every other outcome is the uniform `NotFound`, so this working-tier
-    // decision comes first: it tells nothing about the channel to a caller
-    // who could not read skills here anyway.
-    if permit(state, &input, scope_id, Sensitivity::WORKING)?.is_none() {
-        return Err(not_found(name));
-    }
-    let channel_ref = ChannelRef::skill(Channel::Published);
-    let head = vedaflow::read_ref(&mut *tx, tenant_id, scope_id, &channel_ref.name())
-        .await?
-        .ok_or_else(|| not_found(name))?;
-    // What this scope actually serves: its head, unless a standing FLOW-7
-    // pin is holding its readers at an earlier state (ADR-0036 decision 6).
-    let standing = vedaflow::read_pin(&mut *tx, tenant_id, scope_id, channel_ref).await?;
-    let served = standing.as_ref().map_or(head.commit_hash, |pin| pin.commit);
-
-    let (commit_hash, origin) = match pinned {
-        None => (
-            served,
-            standing
-                .as_ref()
-                .map_or(Origin::Head, |_| Origin::ChannelPin),
-        ),
-        Some(wanted) => {
-            // ADR-0049 decision 10, inherited whole — measured against what
-            // the scope **serves**, so a scope's own hold is the ceiling a
-            // consumer pin may reach at or below and never over.
-            if !vedaflow::is_first_parent_ancestor(&mut *tx, tenant_id, wanted, served).await? {
-                return Err(Error::Conflict {
-                    message: format!(
-                        "{} is not a state {} at this scope has held; it now serves {}. \
-                         A rewind withdrew that version, and serving it anyway would make \
-                         a rollback partial (FLOW-7); re-resolve to take the current one \
-                         deliberately",
-                        wanted.to_hex(),
-                        channel_ref,
-                        served.to_hex(),
-                    ),
-                });
-            }
-            (wanted, Origin::PinnedCommit)
-        }
-    };
-
-    let members = members_at(&mut *tx, tenant_id, commit_hash, name).await?;
-    if members.is_empty() {
-        return Err(not_found(name));
-    }
-    let Some((sensitivity, files, authorized)) =
-        admit(state, tx, tenant_id, &input, 0, &node, &members).await?
-    else {
-        return Err(not_found(name));
-    };
-    Ok(Resolved {
-        node,
-        sensitivity,
-        files,
-        commit: Some(commit_hash),
-        origin,
-        position: 0,
-        authorized,
-    })
-}
-
-/// Reads a bundle's objects and decides `SkillRead` at the tier it carries.
-///
-/// `None` means the decision denied — the caller skips or answers
-/// `NotFound`, never a policy error, so the two are indistinguishable.
-///
-/// The tier comes from the bundle rather than from a file, and the check
-/// that they agree is not decoration: a bundle whose files disagreed would
-/// be one a client loads whole under two different classifications, which
-/// ADR-0051 decision 11 exists to prevent.
-async fn admit(
-    state: &AppState,
-    tx: &mut sqlx::PgConnection,
-    tenant_id: synveda_types::TenantId,
-    input: &DecisionInput,
-    position: usize,
-    node: &HierarchyNode,
-    members: &HashMap<SkillFilePath, vedaflow::hash::ObjectHash>,
-) -> Result<
-    Option<(
-        Sensitivity,
-        Vec<(SkillFilePath, vedaflow::hash::ObjectHash, String)>,
-        crate::authz::Authorized,
-    )>,
-> {
-    let (sensitivity, files) = read_bundle(tx, tenant_id, node, members).await?;
-    let authorized = authz::decide_skill_read_from(
-        state,
-        input,
-        position,
-        Resource::Scope(node.id),
-        sensitivity,
-    );
-    match authorized {
-        Ok(authorized) => Ok(Some((sensitivity, files, authorized))),
-        Err(Error::PolicyDenied { .. }) => Ok(None),
-        Err(other) => Err(other),
-    }
-}
-
-/// A bundle's tier and its files in path order, with their addresses and
-/// bytes — one object read each, because a resolve is what `install` calls
-/// and the envelope carries the tier beside the content.
-///
-/// The tier is the *bundle's* (ADR-0051 decision 11), and taking the maximum
-/// is a clamp rather than a refusal: authoring writes one tier onto every
-/// file, so a commit whose files disagree was not built by this product, and
-/// the safe reading of two tiers is the higher one.
-async fn read_bundle(
-    tx: &mut sqlx::PgConnection,
-    tenant_id: synveda_types::TenantId,
-    node: &HierarchyNode,
-    members: &HashMap<SkillFilePath, vedaflow::hash::ObjectHash>,
-) -> Result<(
-    Sensitivity,
-    Vec<(SkillFilePath, vedaflow::hash::ObjectHash, String)>,
-)> {
-    // Sorted, because an install writes in this order and a byte-identity
-    // check compares two listings.
-    let ordered: BTreeMap<&SkillFilePath, &vedaflow::hash::ObjectHash> = members.iter().collect();
-    let mut files = Vec::with_capacity(ordered.len());
-    let mut sensitivity: Option<Sensitivity> = None;
-    for (path, address) in ordered {
-        let object = vedaflow::read_object(&mut *tx, tenant_id, *address)
-            .await?
-            .ok_or_else(|| Error::Internal {
-                message: format!(
-                    "{} names object {} which the append-only store does not hold",
-                    node.path,
-                    address.to_hex()
-                ),
-            })?;
-        let asset = SkillAsset::from_bytes(&object.content)?;
-        sensitivity = Some(match sensitivity {
-            Some(held) => held.max(asset.sensitivity),
-            None => asset.sensitivity,
-        });
-        files.push((path.clone(), *address, asset.file.content));
-    }
-    let sensitivity = sensitivity.ok_or_else(|| Error::Internal {
-        message: format!("{} names a skill with no files", node.path),
-    })?;
-    Ok((sensitivity, files))
-}
-
-/// One `SkillRead` decision at `scope_id`, as an option rather than an
-/// error: the resolve surface turns every denial into the uniform
-/// `NotFound`.
-fn permit(
-    state: &AppState,
-    input: &DecisionInput,
-    scope_id: ScopeId,
-    sensitivity: Sensitivity,
-) -> Result<Option<crate::authz::Authorized>> {
-    match authz::decide_skill_read(state, input, Resource::Scope(scope_id), sensitivity) {
-        Ok(authorized) => Ok(Some(authorized)),
-        Err(Error::PolicyDenied { .. }) => Ok(None),
-        Err(other) => Err(other),
-    }
-}
-
-/// The one answer a resolve gives for absent, unpublished, and denied alike
-/// (ADR-0041's rule for handles, applied to names).
-fn not_found(name: &SkillName) -> Error {
-    Error::NotFound {
-        entity: format!("skill {name}"),
-    }
-}
-
-/// The addresses a commit's tree names for one skill.
-async fn members_at(
-    tx: &mut sqlx::PgConnection,
-    tenant_id: synveda_types::TenantId,
-    commit_hash: vedaflow::CommitHash,
-    name: &SkillName,
-) -> Result<HashMap<SkillFilePath, vedaflow::hash::ObjectHash>> {
-    let Some(stored) = vedaflow::read_commit(&mut *tx, tenant_id, commit_hash).await? else {
-        return Ok(HashMap::new());
-    };
-    // The store is append-only, so a commit's tree always resolves; a miss
-    // would be corruption rather than an absent member.
-    let tree = vedaflow::read_tree(&mut *tx, tenant_id, stored.tree)
-        .await?
-        .ok_or_else(|| Error::Internal {
-            message: format!(
-                "commit {} names tree {} which the append-only store does not hold",
-                commit_hash.to_hex(),
-                stored.tree.to_hex()
-            ),
-        })?;
-    let mut members = HashMap::new();
-    for entry in tree {
-        let Ok(path) = entry.name.parse::<SkillPath>() else {
-            continue;
-        };
-        if let (true, vedaflow::TreeTarget::Object(hash)) = (&path.skill == name, entry.target) {
-            members.insert(path.file, hash);
-        }
-    }
-    Ok(members)
-}
-
-// ── List ───────────────────────────────────────────────────────────────
-
-#[derive(Deserialize)]
-pub(crate) struct ListParams {
-    /// The scope whose registry to list. **Absent walks the caller's own
-    /// placement chain and answers "which skills may I install"** — the
-    /// same convention the resolve route uses one line up, and the plural
-    /// of it (SKIL-4, ADR-0054 decision 1).
-    #[serde(default)]
-    scope_id: Option<ScopeId>,
-}
-
-/// One skill this identity may install (SKIL-4, ADR-0054 decisions 1–4).
-#[derive(Serialize)]
-struct AvailableEntry {
-    name: String,
-    description: String,
-    sensitivity: Sensitivity,
-    /// The scope that serves it: the nearest one on the caller's chain
-    /// that publishes this name **and** permits the read.
-    scope_id: ScopeId,
-    scope_path: String,
-    /// Distance up the chain, 0 at home — why this copy won.
-    position: usize,
-    /// The commit that scope's skill channel serves.
-    commit: String,
-    /// Whether a FLOW-7 pin chose that commit rather than the ref. A
-    /// consumer that installs a pinned scope's skill is installing a
-    /// deliberately older version, and a listing that did not say so would
-    /// invite "this is the latest reviewed bundle" (ADR-0036 decision 10).
-    pinned: bool,
-    /// How many files the bundle holds — what an install will write.
-    files: usize,
-    /// The scopes further up the chain that publish this same name and were
-    /// shadowed by this one (ADR-0051 decision 6: a client's skills
-    /// namespace is flat, so only one of them can exist on disk).
-    ///
-    /// Present because the gradient is otherwise invisible: a reader whose
-    /// team overrode the org's `code-review` sees one skill and no sign
-    /// that a decision was taken. A scope that publishes the name but
-    /// denies this caller the read is **not** here — it never entered the
-    /// walk, so it shadowed nothing (decision 3).
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    shadows: Vec<String>,
-}
-
-#[derive(Serialize)]
-struct AvailableResponse {
-    /// Which question this payload answers. Two shapes ride one route, and
-    /// a response that left a reader to infer which from the request they
-    /// sent is one an SDK gets wrong once (ADR-0054 decision 1).
-    view: &'static str,
-    /// The chain the walk ran over, nearest first — the audit-visible
-    /// reason team B's skills are absent: team B is not in this list.
-    chain: Vec<String>,
-    skills: Vec<AvailableEntry>,
-}
-
-/// The automated score as a *listing* renders it — the one place in the
-/// product that reads the cache rather than recomputing (SKIL-3, ADR-0053
-/// decision 3).
-///
-/// A listing at a scope with forty skills would otherwise read every
-/// object of every bundle to draw one column, so the pair is denormalised
-/// onto the draft row at authoring. Two rules keep that honest, and both
-/// are visible in this struct: `stale` says the number came from a rubric
-/// this binary no longer runs, and **no gate reads these fields at all** —
-/// the publish seam recomputes from the bytes it is about to publish.
-#[derive(Serialize)]
-struct CachedQualityView {
-    score: u8,
-    rubric_version: u32,
-    /// The number was produced by a rubric that is not the one compiled
-    /// in. Rendered as a fact rather than hidden, because a score that
-    /// silently claimed to be current is how a cache becomes a lie — and
-    /// re-authoring the skill is what refreshes it.
-    stale: bool,
-}
-
-#[derive(Serialize)]
-struct ListEntry {
-    name: String,
-    description: String,
-    sensitivity: Sensitivity,
-    /// Absent for a skill authored before the rubric existed, which is
-    /// "not scored yet" rather than "scored zero" — a distinction a
-    /// listing must not collapse, because one is a fact about a bundle and
-    /// the other is a fact about when it was written.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    quality: Option<CachedQualityView>,
-    files: Vec<FileView>,
-    updated_at: DateTime<Utc>,
-    updated_by: IdentityId,
-}
-
-#[derive(Serialize)]
-struct ListResponse {
-    scope_id: ScopeId,
-    scope_path: String,
-    skills: Vec<ListEntry>,
-}
-
-/// `GET /v1/skills` — the registry at one scope, or the caller's own
-/// available set when no scope is named (SKIL-4, ADR-0054 decision 1).
-///
-/// Skills the caller may not read at their tier are omitted rather than
-/// refused, for the reason a pack listing omits documents: a listing that
-/// refused wholesale would make one `confidential` bundle hide the rest.
-#[tracing::instrument(name = "skills.list", skip_all)]
-pub(crate) async fn list(
-    State(state): State<AppState>,
-    Query(params): Query<ListParams>,
-) -> Response {
-    match params.scope_id {
-        Some(scope_id) => {
-            let result = list_inner(&state, scope_id).await;
-            respond(&state, "list", result).await
-        }
-        None => {
-            let result = available_inner(&state).await;
-            respond(&state, "available", result).await
-        }
-    }
-}
-
-/// `GET /v1/skills` with no scope — what this identity may install.
-///
-/// **The same walk the resolve route takes for one name, taken for the
-/// whole shelf** (ADR-0054 decision 2). It runs the composition plan the
-/// inject path runs — one `SkillRead` decision per chain scope per tier,
-/// under each scope's own effective pack — reads what each planned scope's
-/// `skill/published` channel serves, and applies the gradient **after** the
-/// tier check, so a nearer scope that publishes a name it will not serve
-/// this caller does not hide the readable copy behind it.
-///
-/// Three clauses of the acceptance criterion, three mechanisms: the org's
-/// skills arrive because the org is on this chain; the caller's team's
-/// arrive because it is; another team's are absent because that team is on
-/// no chain this caller has, which is the same reason another tenant's
-/// records are absent, one level down.
-async fn available_inner(state: &AppState) -> Result<Json<AvailableResponse>> {
-    let tenant_id = tenant_id()?;
-    let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
-    let input = authz::gather_at_home(state, &mut tx).await?;
-    let chain: Vec<HierarchyNode> = input.chain.to_vec();
-    let scope_ids: Vec<ScopeId> = chain.iter().map(|node| node.id).collect();
-    let published =
-        vedaflow::read_skill_members(&mut tx, tenant_id, &scope_ids, Channel::Published).await?;
-
-    let mut entries: Vec<AvailableEntry> = Vec::new();
-    let mut shadowed: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    let mut decided = 0_usize;
-    for (position, node) in chain.iter().enumerate() {
-        let Some(state_at) = published.iter().find(|state| state.scope_id == node.id) else {
-            continue;
-        };
-        // The shelf, by name: every skill this scope's channel serves.
-        let mut names: Vec<SkillName> = state_at
-            .members
-            .keys()
-            .filter(|path| path.file.is_manifest())
-            .map(|path| path.skill.clone())
-            .collect();
-        names.sort_by(|a, b| a.as_str().cmp(b.as_str()));
-        names.dedup();
-        for name in names {
-            let members = state_at.bundle(&name);
-            if members.is_empty() {
-                continue;
-            }
-            let Some((sensitivity, files, _authorized)) =
-                admit(state, &mut tx, tenant_id, &input, position, node, &members).await?
-            else {
-                // Denied at this scope's tier: skipped as though the scope
-                // published nothing, so it shadows nothing either
-                // (decision 3).
-                continue;
-            };
-            decided += 1;
-            // The gradient, applied on what survived the decision.
-            if let Some(existing) = entries.iter().find(|entry| entry.name == name.as_str()) {
-                shadowed
-                    .entry(existing.name.clone())
-                    .or_default()
-                    .push(node.path.clone());
-                continue;
-            }
-            let manifest = files
-                .iter()
-                .find(|(path, _, _)| path.is_manifest())
-                .ok_or_else(|| Error::Internal {
-                    message: format!(
-                        "the bundle {} serves at {} has no {}, which publication cannot produce",
-                        name,
-                        node.path,
-                        synveda_types::SKILL_MANIFEST
-                    ),
-                })?;
-            let frontmatter = Frontmatter::parse(&manifest.2)?;
-            entries.push(AvailableEntry {
-                name: name.to_string(),
-                description: frontmatter.description,
-                sensitivity,
-                scope_id: node.id,
-                scope_path: node.path.clone(),
-                position,
-                commit: state_at.commit.to_hex(),
-                pinned: state_at.pinned,
-                files: files.len(),
-                shadows: Vec::new(),
-            });
-        }
-    }
-    for entry in &mut entries {
-        if let Some(shadows) = shadowed.remove(&entry.name) {
-            entry.shadows = shadows;
-        }
-    }
-
-    audit::record(
-        &mut tx,
-        tenant_id,
-        AuditAction::AuthzDecision,
-        input.identity.as_ref().map_or_else(
-            || "scope none".to_owned(),
-            |identity| Resource::Scope(identity.scope_id).to_string(),
-        ),
-        Outcome::Allow,
-        json!({
-            "op": "skills.available",
-            "asset": synveda_types::AssetKind::Skill.as_str(),
-            // The chain is the answer to "why these and not those", and it
-            // is the half of the acceptance criterion no per-skill record
-            // carries: a scope absent from this list published nothing to
-            // this caller because it was never asked.
-            "chain": chain.iter().map(|node| node.path.as_str()).collect::<Vec<_>>(),
-            // Names, scopes and commits — never a description.
-            "skills": entries.iter().map(|entry| json!({
-                "name": entry.name,
-                "scope_id": entry.scope_id,
-                "commit": entry.commit,
-                "sensitivity": entry.sensitivity.as_str(),
-            })).collect::<Vec<_>>(),
-            // How many (scope, skill) pairs the walk admitted before the
-            // gradient collapsed them, so a shadowed shelf is visible as a
-            // number rather than only as an absence.
-            "admitted": decided,
-        }),
-    )
-    .await?;
-    commit(tx).await?;
-
-    Ok(Json(AvailableResponse {
-        view: "available",
-        chain: chain.iter().map(|node| node.path.clone()).collect(),
-        skills: entries,
-    }))
-}
-
-async fn list_inner(state: &AppState, scope_id: ScopeId) -> Result<Json<ListResponse>> {
-    let tenant_id = tenant_id()?;
-    let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
-    let node = found(
-        hierarchy::node(&mut *tx, scope_id).await?,
-        tenant_id,
-        scope_id,
-    )?;
-    let input = authz::gather(state, &mut tx, Some(&node)).await?;
-    // The gate first, at the working tier — the question a listing asks.
-    let authorized = authz::decide_skill_read(
-        state,
-        &input,
-        Resource::Scope(scope_id),
-        Sensitivity::WORKING,
-    )?;
-    let bundles = skills::list_skills(&mut *tx, tenant_id, scope_id).await?;
-    let files = skills::list_all_files(&mut *tx, tenant_id, scope_id).await?;
-    // Then one decision per tier the shelf actually carries — at most three,
-    // and usually one (the `retrieval::plan` shape, ADR-0038 decision 3).
-    let mut permitted: HashMap<Sensitivity, bool> = HashMap::new();
-    for bundle in &bundles {
-        if let std::collections::hash_map::Entry::Vacant(slot) = permitted.entry(bundle.sensitivity)
-        {
-            slot.insert(permit(state, &input, scope_id, bundle.sensitivity)?.is_some());
-        }
-    }
-    let published = published_at(&mut tx, tenant_id, scope_id).await?;
-
-    let entries: Vec<ListEntry> = bundles
-        .into_iter()
-        .filter(|bundle| permitted.get(&bundle.sensitivity).copied().unwrap_or(false))
-        .map(|bundle| ListEntry {
-            quality: bundle.quality.map(|cached| CachedQualityView {
-                score: cached.score,
-                rubric_version: cached.rubric_version,
-                stale: !cached.is_current(synveda_ingest::RUBRIC_VERSION),
-            }),
-            files: files
-                .iter()
-                .filter(|file| file.skill_name == bundle.name)
-                .map(|file| file_view(file, 0, published.as_ref()))
-                .collect(),
-            name: bundle.name.to_string(),
-            description: bundle.description,
-            sensitivity: bundle.sensitivity,
-            updated_at: bundle.updated_at,
-            updated_by: bundle.updated_by,
+/// Digest exact `(path, object address)` pairs in stable path order.
+fn bundle_digest(files: &[SkillVersionFileRef]) -> Result<[u8; 32]> {
+    let mut parsed = files
+        .iter()
+        .map(|file| {
+            Ok((
+                file.path.to_string(),
+                vedaflow::hash::ObjectHash::from_bytes(store::decode_hex_32(
+                    &file.object_hash,
+                    "skill file object address",
+                )?),
+            ))
         })
-        .collect();
-
-    audit::record(
-        &mut tx,
-        tenant_id,
-        AuditAction::AuthzDecision,
-        Resource::Scope(scope_id).to_string(),
-        Outcome::Allow,
-        json!({
-            "authz": audit::decision_context(Action::SkillRead, &authorized),
-            "op": "skills.list",
-            "skills": entries.len(),
-        }),
-    )
-    .await?;
-    commit(tx).await?;
-
-    Ok(Json(ListResponse {
-        scope_id,
-        scope_path: node.path.clone(),
-        skills: entries,
-    }))
+        .collect::<Result<Vec<_>>>()?;
+    parsed.sort_by(|left, right| left.0.cmp(&right.0));
+    let borrowed = parsed
+        .iter()
+        .map(|(path, hash)| (path.as_str(), *hash))
+        .collect::<Vec<_>>();
+    Ok(vedaflow::bundle_digest(&borrowed))
 }
 
-// ── Shared ─────────────────────────────────────────────────────────────
+struct PreparedBundle {
+    manifest: Value,
+    files: Vec<SkillVersionFileRef>,
+    bundle_digest: String,
+    scan: Value,
+    scan_ruleset_version: u32,
+    quality_score: u8,
+    rubric_version: u32,
+}
 
-type PublishedState = (
-    vedaflow::CommitHash,
-    HashMap<SkillPath, vedaflow::hash::ObjectHash>,
-);
-
-/// What `scope`'s published skill channel holds: the commit it serves and
-/// the address it names for every skill path.
-async fn published_at(
-    tx: &mut sqlx::PgConnection,
-    tenant_id: synveda_types::TenantId,
-    scope_id: ScopeId,
-) -> Result<Option<PublishedState>> {
-    Ok(
-        vedaflow::read_skill_members(tx, tenant_id, &[scope_id], Channel::Published)
-            .await?
+async fn prepare_bundle(
+    state: &AppState,
+    tx: &mut PgConnection,
+    tenant: TenantId,
+    authorization: &CommandAuthorization,
+    name: SkillName,
+    sensitivity: Sensitivity,
+    supplied: Vec<SkillFileBody>,
+) -> Result<PreparedBundle> {
+    let bundle = SkillBundle {
+        name,
+        files: supplied
             .into_iter()
-            .next()
-            .map(|state| (state.commit, state.members)),
-    )
-}
-
-fn file_view(
-    file: &skills::StoredFile,
-    chars: usize,
-    published: Option<&PublishedState>,
-) -> FileView {
-    let address = vedaflow::hash::ObjectHash::from_bytes(file.object_hash);
-    let path = SkillPath::new(file.skill_name.clone(), file.path.clone());
-    FileView {
-        path: file.path.to_string(),
-        object_hash: address.to_hex(),
-        chars,
-        updated_at: file.updated_at,
-        updated_by: file.updated_by,
-        published: published.and_then(|(commit_hash, members)| {
-            let _ = commit_hash;
-            members.get(&path).map(|hash| PublishedFile {
-                object_hash: hash.to_hex(),
-                current: *hash == address,
+            .map(|file| {
+                Ok(SkillFile {
+                    path: file.path.parse()?,
+                    content: file.content,
+                })
             })
-        }),
+            .collect::<Result<Vec<_>>>()?,
+    };
+    let frontmatter = bundle.validate()?;
+    for file in &bundle.files {
+        let redaction = scan_file(file).await?;
+        if !redaction.findings.is_empty() {
+            return Err(Error::Invalid {
+                message: format!(
+                    "{} was stopped by the redaction scanner; the bundle was not stored",
+                    file.path
+                ),
+            });
+        }
     }
-}
-
-/// The two reports an author gets back beside their bundle.
-///
-/// Grouped because they arrived together and are read together — SKIL-2's
-/// "is this safe" and SKIL-3's "is this good" are the two questions the
-/// authoring response answers that the draft rows cannot.
-struct Reports {
-    scan: ScanReport,
-    quality: QualityReport,
-}
-
-fn view(
-    node: &HierarchyNode,
-    skill: skills::StoredSkill,
-    frontmatter: Frontmatter,
-    written: Vec<(skills::StoredFile, usize)>,
-    removed: u64,
-    published: Option<&PublishedState>,
-    reports: Reports,
-) -> SkillView {
-    let Reports { scan, quality } = reports;
-    SkillView {
-        name: skill.name.to_string(),
-        scope_id: skill.scope_id,
-        scope_path: node.path.clone(),
-        description: skill.description,
-        sensitivity: skill.sensitivity,
-        frontmatter,
-        files: written
-            .iter()
-            .map(|(file, chars)| file_view(file, *chars, published))
-            .collect(),
-        removed,
+    let effective = state.pdp.effective(
+        tenant,
+        Resource::Scope(authorization.target.id),
+        &authorization.input.context(),
+    );
+    let security = scan_security(&bundle.files).await?;
+    if security.blocked_by(&effective.scan) {
+        let worst = security.worst().unwrap_or(ScanSeverity::Critical);
+        return Err(Error::Invalid {
+            message: format!(
+                "skill {} was refused by the security scanning gate at {worst}; the bundle was not stored",
+                bundle.name
+            ),
+        });
+    }
+    let quality = score_quality(&bundle.files).await?;
+    let scan = scan_payload(&security, effective.scan.threshold());
+    let mut refs = Vec::with_capacity(bundle.files.len());
+    for file in bundle.files {
+        let chars = u32::try_from(file.content.chars().count()).unwrap_or(u32::MAX);
+        let path = file.path.clone();
+        let object = vedaflow::put_skill(
+            tx,
+            tenant,
+            &SkillAsset {
+                scope_id: authorization.target.id,
+                skill: bundle.name.clone(),
+                sensitivity,
+                file,
+            },
+        )
+        .await?;
+        refs.push(SkillVersionFileRef {
+            path,
+            object_hash: object.hash.to_hex(),
+            chars,
+        });
+    }
+    refs.sort_by(|left, right| left.path.cmp(&right.path));
+    let digest = bundle_digest(&refs)?;
+    Ok(PreparedBundle {
+        manifest: serde_json::to_value(frontmatter).map_err(|err| Error::Internal {
+            message: format!("encode validated skill manifest: {err}"),
+        })?,
+        files: refs,
+        bundle_digest: store::hex_32(&digest),
         scan,
-        quality,
-        published_commit: published.map(|(commit_hash, _)| commit_hash.to_hex()),
-        created_at: skill.created_at,
-        created_by: skill.created_by,
-        updated_at: skill.updated_at,
-        updated_by: skill.updated_by,
-    }
+        scan_ruleset_version: security.ruleset_version,
+        quality_score: quality.score,
+        rubric_version: quality.rubric_version,
+    })
 }
 
-/// The authoring identity. A verified subject with no identity row cannot
-/// reach here — every pack requires either a binding or placement — but the
-/// check is explicit rather than an unwrap.
-fn identity_of(input: &DecisionInput) -> Result<IdentityId> {
+// ── Governed command layer ────────────────────────────────────────────────
+
+struct CommandAuthorization {
+    target: Scope,
+    input: DecisionInput,
+    write_allowed: Authorized,
+    proposal_allowed: Authorized,
+}
+
+struct AppliedSkillEffect {
+    skill_id: Option<SkillId>,
+    version_id: Option<SkillVersionId>,
+    binding_id: Option<SkillBindingId>,
+    binding_revision: Option<u64>,
+}
+
+fn identity_of(input: &DecisionInput, act: &str) -> Result<IdentityId> {
     input
         .identity
         .as_ref()
         .map(|identity| identity.id)
         .ok_or_else(|| Error::Invalid {
-            message: "authoring a skill requires a provisioned identity".to_owned(),
+            message: format!("{act} requires a provisioned identity"),
         })
+}
+
+async fn scope_for(tx: &mut PgConnection, tenant: TenantId, scope_id: ScopeId) -> Result<Scope> {
+    found(
+        scopes::get(&mut *tx, tenant, scope_id).await?,
+        tenant,
+        scope_id,
+    )
+}
+
+async fn read_skill_and_version(
+    tx: &mut PgConnection,
+    tenant: TenantId,
+    skill_id: SkillId,
+    version_id: Option<SkillVersionId>,
+) -> Result<(StoredSkill, StoredVersion)> {
+    let skill = store::by_id(&mut *tx, tenant, skill_id)
+        .await?
+        .ok_or_else(|| Error::NotFound {
+            entity: format!("skill {skill_id}"),
+        })?;
+    let version_id = version_id.unwrap_or(skill.current_version_id);
+    let version = store::version(&mut *tx, tenant, version_id)
+        .await?
+        .filter(|version| version.skill_id == skill.id)
+        .ok_or_else(|| Error::NotFound {
+            entity: format!("skill version {version_id}"),
+        })?;
+    Ok((skill, version))
+}
+
+async fn authorize_skill_read(
+    state: &AppState,
+    tx: &mut PgConnection,
+    tenant: TenantId,
+    skill: &StoredSkill,
+    version: &StoredVersion,
+) -> Result<Authorized> {
+    let scope = scope_for(tx, tenant, skill.governing_scope_id).await?;
+    let input = authz::gather(state, tx, Some(&scope), AnchorSelection::none(), Vec::new()).await?;
+    authz::decide_skill_read(
+        state,
+        &input,
+        Resource::Scope(scope.id),
+        version.sensitivity,
+    )
+}
+
+async fn authorize_command(
+    state: &AppState,
+    tx: &mut PgConnection,
+    tenant: TenantId,
+    command: &SkillCommand,
+) -> Result<CommandAuthorization> {
+    let target = scope_for(tx, tenant, command.scope_id()).await?;
+    if matches!(
+        command,
+        SkillCommand::Bind { .. } | SkillCommand::SetBinding { .. }
+    ) && !matches!(target.kind, ScopeKind::Project | ScopeKind::Principal)
+    {
+        return Err(Error::Invalid {
+            message: "a skill binding targets a project or principal scope".to_owned(),
+        });
+    }
+    let input = authz::gather(
+        state,
+        tx,
+        Some(&target),
+        AnchorSelection::none(),
+        Vec::new(),
+    )
+    .await?;
+    let write_allowed = authz::decide(
+        state,
+        &input,
+        Action::SkillWrite,
+        Resource::Scope(target.id),
+    )?;
+    let proposal_allowed = authz::decide(
+        state,
+        &input,
+        Action::ProposalOpen,
+        Resource::Scope(target.id),
+    )?;
+
+    let existing = match command {
+        SkillCommand::Install { .. } => None,
+        SkillCommand::Update {
+            skill_id,
+            governing_scope_id,
+            name,
+            expected_current_version_id,
+            ..
+        } => {
+            let (skill, version) =
+                read_skill_and_version(tx, tenant, *skill_id, Some(*expected_current_version_id))
+                    .await?;
+            if skill.governing_scope_id != *governing_scope_id || &skill.name != name {
+                return Err(Error::NotFound {
+                    entity: format!("skill {skill_id}"),
+                });
+            }
+            Some((skill, version))
+        }
+        SkillCommand::Bind {
+            skill_id,
+            pinned_version_id,
+            ..
+        } => Some(read_skill_and_version(tx, tenant, *skill_id, *pinned_version_id).await?),
+        SkillCommand::SetBinding {
+            binding_id,
+            scope_id,
+            pinned_version_id,
+            ..
+        } => {
+            let binding = store::binding(&mut *tx, tenant, *binding_id)
+                .await?
+                .filter(|binding| binding.scope_id == *scope_id)
+                .ok_or_else(|| Error::NotFound {
+                    entity: format!("skill binding {binding_id}"),
+                })?;
+            Some(read_skill_and_version(tx, tenant, binding.skill_id, *pinned_version_id).await?)
+        }
+    };
+    if let Some((skill, version)) = existing {
+        authorize_skill_read(state, tx, tenant, &skill, &version).await?;
+    }
+    Ok(CommandAuthorization {
+        target,
+        input,
+        write_allowed,
+        proposal_allowed,
+    })
+}
+
+fn command_payload_hash(command: &SkillCommand) -> Result<String> {
+    let value = canonicalise(
+        &serde_json::to_value(command).map_err(|err| Error::Invalid {
+            message: format!("encode Skill command: {err}"),
+        })?,
+    );
+    Ok(blake3::hash(value.to_string().as_bytes())
+        .to_hex()
+        .to_string())
+}
+
+async fn open_command(
+    state: &AppState,
+    tx: &mut PgConnection,
+    tenant: TenantId,
+    command: &SkillCommand,
+    authorization: &CommandAuthorization,
+    claim: Option<&Claim>,
+) -> Result<SkillMutationResult> {
+    let actor = identity_of(&authorization.input, "changing a skill")?;
+    let payload_hash = command_payload_hash(command)?;
+    let artifact_reference = skill_artifact_reference(command, &payload_hash)?;
+    let manifest = canonicalise(&json!({
+        "command": command.kind(),
+        "payload_hash": payload_hash,
+        "skill_id": command.skill_id(),
+        "version_id": command.version_id(),
+        "binding_id": command.binding_id(),
+    }));
+    let bytes = serde_json::to_vec(&manifest).map_err(|err| Error::Internal {
+        message: format!("encode Skill change manifest: {err}"),
+    })?;
+    let object = vedaflow::put_object(tx, tenant, AssetKind::Skill, &bytes).await?;
+    let snapshot = PolicySnapshot::new(
+        authorization.proposal_allowed.decision.pack_name.clone(),
+        authorization.proposal_allowed.decision.pack_version,
+    );
+    let members = vec![("command".to_owned(), object.hash)];
+    let proposal = vedaflow::proposals::open(
+        tx,
+        tenant,
+        &vedaflow::NewProposal {
+            target_scope: authorization.target.id,
+            source_scope: authorization.target.id,
+            asset: AssetKind::Skill,
+            effect: ProposalEffect::Apply,
+            members: &members,
+            artifact_references: &[artifact_reference],
+            sensitivity: command.sensitivity(),
+            title: &format!("{} Skill", command.kind()),
+            proposer: actor,
+            proposer_subject: &authorization.input.principal.subject,
+            committed_at: Utc::now(),
+            policy_snapshot: &snapshot,
+        },
+        &Signer::Unsigned,
+    )
+    .await?;
+    store::insert_change(&mut *tx, tenant, proposal.id, command, &payload_hash).await?;
+    let requirement = approvals::resolve(
+        state,
+        tx,
+        tenant,
+        &authorization.input,
+        &Requested {
+            target: &authorization.target,
+            asset: AssetKind::Skill,
+            sensitivity: command.sensitivity(),
+            entries: &["command".to_owned()],
+        },
+    )
+    .await?;
+    let outstanding = requirement.outstanding(&[]);
+    audit::record(
+        tx,
+        tenant,
+        AuditAction::SkillChangeOpened,
+        Resource::Scope(authorization.target.id).to_string(),
+        Outcome::Success,
+        json!({
+            "change_id": proposal.id,
+            "command": command.kind(),
+            "payload_hash": payload_hash,
+            "manifest_hash": object.hash.to_hex(),
+            "artifact_references": &proposal.artifact_references,
+            "skill_id": command.skill_id(),
+            "version_id": command.version_id(),
+            "binding_id": command.binding_id(),
+            "authz": audit::decision_context(Action::ProposalOpen, &authorization.proposal_allowed),
+            "approvals": approvals::audit_context(&requirement, &outstanding),
+        }),
+    )
+    .await?;
+    let result = if outstanding.is_empty() {
+        apply_loaded(
+            state,
+            tx,
+            tenant,
+            proposal.id,
+            command,
+            &payload_hash,
+            actor,
+        )
+        .await?
+    } else {
+        SkillMutationResult {
+            change_id: proposal.id,
+            outcome: SkillMutationOutcome::PendingReview,
+            skill_id: command.skill_id(),
+            version_id: command.version_id(),
+            binding_id: command.binding_id(),
+            binding_revision: None,
+        }
+    };
+    if let Some(claim) = claim {
+        claim.remember(tx, tenant, proposal.id.as_uuid()).await?;
+    }
+    Ok(result)
+}
+
+fn skill_artifact_reference(
+    command: &SkillCommand,
+    payload_hash: &str,
+) -> Result<ArtifactReference> {
+    match command {
+        SkillCommand::Install {
+            skill_id,
+            version_id,
+            ..
+        } => ArtifactReference::new(
+            ArtifactFamily::Skill,
+            skill_id.to_string(),
+            command.kind(),
+            version_id.to_string(),
+            None,
+        ),
+        SkillCommand::Update {
+            skill_id,
+            expected_current_version_id,
+            version_id,
+            ..
+        } => ArtifactReference::new(
+            ArtifactFamily::Skill,
+            skill_id.to_string(),
+            command.kind(),
+            version_id.to_string(),
+            Some(expected_current_version_id.to_string()),
+        ),
+        SkillCommand::Bind {
+            binding_id,
+            pinned_version_id,
+            ..
+        } => ArtifactReference::new(
+            ArtifactFamily::Skill,
+            binding_id.to_string(),
+            command.kind(),
+            pinned_version_id.map_or_else(|| payload_hash.to_owned(), |id| id.to_string()),
+            None,
+        ),
+        SkillCommand::SetBinding {
+            binding_id,
+            expected_revision,
+            pinned_version_id,
+            ..
+        } => ArtifactReference::new(
+            ArtifactFamily::Skill,
+            binding_id.to_string(),
+            command.kind(),
+            pinned_version_id.map_or_else(|| payload_hash.to_owned(), |id| id.to_string()),
+            Some(expected_revision.to_string()),
+        ),
+    }
+}
+
+async fn apply_loaded(
+    state: &AppState,
+    tx: &mut PgConnection,
+    tenant: TenantId,
+    change_id: ProposalId,
+    command: &SkillCommand,
+    payload_hash: &str,
+    actor: IdentityId,
+) -> Result<SkillMutationResult> {
+    let authorization = authorize_command(state, tx, tenant, command).await?;
+    let mut effect_tx = tx.begin().await.map_err(|err| Error::Storage {
+        message: format!("begin Skill effect savepoint: {err}"),
+    })?;
+    let effect: Result<AppliedSkillEffect> = async {
+        verify_bundle_effect(state, &mut effect_tx, tenant, command, &authorization).await?;
+        Ok(match command {
+            SkillCommand::Install { .. } => {
+                let (skill, version) =
+                    store::install(&mut effect_tx, tenant, command, actor).await?;
+                AppliedSkillEffect {
+                    skill_id: Some(skill.id),
+                    version_id: Some(version.id),
+                    binding_id: None,
+                    binding_revision: None,
+                }
+            }
+            SkillCommand::Update {
+                skill_id,
+                version_id,
+                ..
+            } => {
+                store::update(&mut effect_tx, tenant, command, actor)
+                    .await?
+                    .ok_or_else(|| Error::Conflict {
+                        message: format!(
+                            "skill {skill_id} no longer has the expected current version"
+                        ),
+                    })?;
+                AppliedSkillEffect {
+                    skill_id: Some(*skill_id),
+                    version_id: Some(*version_id),
+                    binding_id: None,
+                    binding_revision: None,
+                }
+            }
+            SkillCommand::Bind {
+                skill_id,
+                binding_id,
+                ..
+            } => {
+                let binding = store::bind(&mut effect_tx, tenant, command, actor).await?;
+                AppliedSkillEffect {
+                    skill_id: Some(*skill_id),
+                    version_id: command.version_id(),
+                    binding_id: Some(*binding_id),
+                    binding_revision: Some(binding.revision),
+                }
+            }
+            SkillCommand::SetBinding { binding_id, .. } => {
+                let binding = store::set_binding(&mut effect_tx, tenant, command, actor)
+                    .await?
+                    .ok_or_else(|| Error::Conflict {
+                        message: format!(
+                            "skill binding {binding_id} no longer has the expected revision"
+                        ),
+                    })?;
+                AppliedSkillEffect {
+                    skill_id: Some(binding.skill_id),
+                    version_id: command.version_id(),
+                    binding_id: Some(binding.id),
+                    binding_revision: Some(binding.revision),
+                }
+            }
+        })
+    }
+    .await;
+    let effect = match effect {
+        Ok(effect) => {
+            effect_tx.commit().await.map_err(|err| Error::Storage {
+                message: format!("commit Skill effect savepoint: {err}"),
+            })?;
+            effect
+        }
+        Err(error @ (Error::Conflict { .. } | Error::NotFound { .. } | Error::Invalid { .. })) => {
+            effect_tx.rollback().await.map_err(|err| Error::Storage {
+                message: format!("roll back rejected Skill effect: {err}"),
+            })?;
+            let reason = match error {
+                Error::Conflict { .. } => "stale_precondition",
+                Error::NotFound { .. } => "target_not_found",
+                Error::Invalid { .. } => "invalid_effect",
+                _ => unreachable!(),
+            };
+            if !vedaflow::proposals::close(
+                tx,
+                tenant,
+                change_id,
+                ProposalState::Rejected,
+                actor,
+                Some(reason),
+            )
+            .await?
+            {
+                return Err(Error::Conflict {
+                    message: format!(
+                        "Skill change {change_id} closed before rejection was recorded"
+                    ),
+                });
+            }
+            audit::record(
+                tx,
+                tenant,
+                AuditAction::SkillChangeRejected,
+                Resource::Scope(authorization.target.id).to_string(),
+                Outcome::Deny,
+                json!({
+                    "change_id": change_id,
+                    "command": command.kind(),
+                    "payload_hash": payload_hash,
+                    "artifact_references": [skill_artifact_reference(command, payload_hash)?],
+                    "reason_code": reason,
+                }),
+            )
+            .await?;
+            return Ok(SkillMutationResult {
+                change_id,
+                outcome: SkillMutationOutcome::Rejected,
+                skill_id: command.skill_id(),
+                version_id: command.version_id(),
+                binding_id: command.binding_id(),
+                binding_revision: None,
+            });
+        }
+        Err(error) => {
+            effect_tx.rollback().await.map_err(|err| Error::Storage {
+                message: format!("roll back failed Skill effect: {err}"),
+            })?;
+            return Err(error);
+        }
+    };
+    let applied_result = SkillMutationResult {
+        change_id,
+        outcome: SkillMutationOutcome::Applied,
+        skill_id: effect.skill_id,
+        version_id: effect.version_id,
+        binding_id: effect.binding_id,
+        binding_revision: effect.binding_revision,
+    };
+    if !store::finish_change(&mut *tx, tenant, change_id, &applied_result).await? {
+        return Err(Error::Conflict {
+            message: format!("Skill change {change_id} was already applied"),
+        });
+    }
+    if !vedaflow::proposals::close(tx, tenant, change_id, ProposalState::Applied, actor, None)
+        .await?
+    {
+        return Err(Error::Conflict {
+            message: format!("Skill change {change_id} closed before its effect completed"),
+        });
+    }
+    audit::record(
+        tx,
+        tenant,
+        AuditAction::SkillChangeApplied,
+        Resource::Scope(authorization.target.id).to_string(),
+        Outcome::Success,
+        json!({
+            "change_id": change_id,
+            "command": command.kind(),
+            "payload_hash": payload_hash,
+            "artifact_references": [skill_artifact_reference(command, payload_hash)?],
+            "skill_id": applied_result.skill_id,
+            "version_id": applied_result.version_id,
+            "binding_id": applied_result.binding_id,
+            "binding_revision": applied_result.binding_revision,
+            "authz": audit::decision_context(Action::SkillWrite, &authorization.write_allowed),
+        }),
+    )
+    .await?;
+    Ok(applied_result)
+}
+
+/// Rebuild and rescan the exact immutable objects named by a pending install
+/// or update immediately before its VedaFlow effect runs. A review can remain
+/// open while a policy pack or scanner deployment changes; approval of the
+/// old result is not authority to admit bytes the current gate refuses.
+async fn verify_bundle_effect(
+    state: &AppState,
+    tx: &mut PgConnection,
+    tenant: TenantId,
+    command: &SkillCommand,
+    authorization: &CommandAuthorization,
+) -> Result<()> {
+    let (
+        name,
+        governing_scope_id,
+        sensitivity,
+        expected_digest,
+        expected_manifest,
+        file_refs,
+        admitted_scan,
+        admitted_scan_ruleset,
+        admitted_quality_score,
+        admitted_rubric_version,
+    ) = match command {
+        SkillCommand::Install {
+            name,
+            governing_scope_id,
+            sensitivity,
+            bundle_digest,
+            manifest,
+            files,
+            scan,
+            scan_ruleset_version,
+            quality_score,
+            rubric_version,
+            ..
+        }
+        | SkillCommand::Update {
+            name,
+            governing_scope_id,
+            sensitivity,
+            bundle_digest,
+            manifest,
+            files,
+            scan,
+            scan_ruleset_version,
+            quality_score,
+            rubric_version,
+            ..
+        } => (
+            name,
+            *governing_scope_id,
+            *sensitivity,
+            bundle_digest,
+            manifest,
+            files,
+            scan,
+            *scan_ruleset_version,
+            *quality_score,
+            *rubric_version,
+        ),
+        SkillCommand::Bind { .. } | SkillCommand::SetBinding { .. } => return Ok(()),
+    };
+
+    if bundle_digest(file_refs)? != store::decode_hex_32(expected_digest, "skill bundle digest")? {
+        return Err(Error::Invalid {
+            message: "Skill change bundle digest does not match its immutable file addresses"
+                .to_owned(),
+        });
+    }
+
+    let addresses = file_refs
+        .iter()
+        .map(|file| {
+            Ok(vedaflow::hash::ObjectHash::from_bytes(
+                store::decode_hex_32(&file.object_hash, "skill file object address")?,
+            ))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let objects = vedaflow::read_objects(tx, tenant, &addresses).await?;
+    let mut files = Vec::with_capacity(file_refs.len());
+    for (file_ref, address) in file_refs.iter().zip(addresses) {
+        let object = objects.get(&address).ok_or_else(|| Error::Invalid {
+            message: format!("Skill change names missing bundle object {address}"),
+        })?;
+        if object.kind != AssetKind::Skill {
+            return Err(Error::Invalid {
+                message: format!("Skill change object {address} has the wrong asset kind"),
+            });
+        }
+        let asset = SkillAsset::from_bytes(&object.content)?;
+        if asset.scope_id != governing_scope_id
+            || asset.skill != *name
+            || asset.sensitivity != sensitivity
+            || asset.file.path != file_ref.path
+            || asset.file.content.chars().count()
+                != usize::try_from(file_ref.chars).unwrap_or(usize::MAX)
+        {
+            return Err(Error::Invalid {
+                message: format!(
+                    "Skill change file {} failed its scope/name/sensitivity/path binding",
+                    file_ref.path
+                ),
+            });
+        }
+        files.push(asset.file);
+    }
+
+    let bundle = SkillBundle {
+        name: name.clone(),
+        files,
+    };
+    let manifest = serde_json::to_value(bundle.validate()?).map_err(|err| Error::Internal {
+        message: format!("encode revalidated Skill manifest: {err}"),
+    })?;
+    if canonicalise(&manifest) != canonicalise(expected_manifest) {
+        return Err(Error::Invalid {
+            message: "Skill change manifest does not match its immutable bundle bytes".to_owned(),
+        });
+    }
+
+    let effective = state.pdp.effective(
+        tenant,
+        Resource::Scope(governing_scope_id),
+        &authorization.input.context(),
+    );
+    let scan = scan_security(&bundle.files).await?;
+    if scan.blocked_by(&effective.scan) {
+        return Err(Error::Invalid {
+            message: format!(
+                "Skill change was refused by the current security scanner at {}",
+                scan.worst().unwrap_or(ScanSeverity::Critical)
+            ),
+        });
+    }
+    let quality = score_quality(&bundle.files).await?;
+    if quality.score < effective.quality.min_score {
+        return Err(Error::Invalid {
+            message: format!(
+                "Skill change scored {}/100 below the current policy minimum of {}",
+                quality.score, effective.quality.min_score
+            ),
+        });
+    }
+
+    // Within one ruleset/rubric, recomputation must be byte-for-byte stable.
+    // A newer deployment may legitimately produce a newer result; the old
+    // admitted evidence remains attached to the immutable command while the
+    // current result above is the one that gates application.
+    if scan.ruleset_version == admitted_scan_ruleset {
+        let admitted_findings = canonicalise(admitted_scan);
+        let threshold = admitted_scan
+            .get("blocks_at")
+            .and_then(Value::as_str)
+            .and_then(|value| value.parse::<ScanSeverity>().ok())
+            .unwrap_or(effective.scan.threshold());
+        if canonicalise(&scan_payload(&scan, threshold)) != admitted_findings {
+            return Err(Error::Invalid {
+                message: "Skill scanner produced different evidence for the admitted ruleset"
+                    .to_owned(),
+            });
+        }
+    }
+    if quality.rubric_version == admitted_rubric_version && quality.score != admitted_quality_score
+    {
+        return Err(Error::Invalid {
+            message: "Skill rubric produced a different score for the admitted rubric version"
+                .to_owned(),
+        });
+    }
+    Ok(())
+}
+
+async fn verify_change_binding(
+    tx: &mut PgConnection,
+    tenant: TenantId,
+    proposal: &vedaflow::StoredProposal,
+    change: &store::StoredChange,
+) -> Result<()> {
+    let members = vedaflow::proposals::members(tx, tenant, proposal.commit).await?;
+    let [member] = members.as_slice() else {
+        return Err(invalid_change(proposal.id));
+    };
+    let object = vedaflow::read_object(tx, tenant, member.object)
+        .await?
+        .ok_or_else(|| invalid_change(proposal.id))?;
+    let manifest: Value =
+        serde_json::from_slice(&object.content).map_err(|_| invalid_change(proposal.id))?;
+    let valid = member.name == "command"
+        && object.kind == AssetKind::Skill
+        && command_payload_hash(&change.command)? == change.payload_hash
+        && manifest.get("command").and_then(Value::as_str) == Some(change.command.kind())
+        && manifest.get("payload_hash").and_then(Value::as_str)
+            == Some(change.payload_hash.as_str());
+    if !valid {
+        return Err(invalid_change(proposal.id));
+    }
+    Ok(())
+}
+
+fn invalid_change(id: ProposalId) -> Error {
+    Error::Internal {
+        message: format!("Skill change {id} failed its VedaFlow payload-integrity check"),
+    }
+}
+
+async fn authorize_change_read(
+    state: &AppState,
+    tx: &mut PgConnection,
+    tenant: TenantId,
+    proposal: &vedaflow::StoredProposal,
+) -> Result<Authorized> {
+    let scope = scope_for(tx, tenant, proposal.target_scope_id).await?;
+    let input = authz::gather(state, tx, Some(&scope), AnchorSelection::none(), Vec::new()).await?;
+    authz::decide(
+        state,
+        &input,
+        Action::ProposalRead,
+        Resource::Scope(scope.id),
+    )
+}
+
+fn outcome(state: ProposalState) -> Result<SkillMutationOutcome> {
+    match state {
+        ProposalState::Open => Ok(SkillMutationOutcome::PendingReview),
+        ProposalState::Applied => Ok(SkillMutationOutcome::Applied),
+        ProposalState::Rejected | ProposalState::Withdrawn => Ok(SkillMutationOutcome::Rejected),
+        ProposalState::Published => Err(Error::Internal {
+            message: "a Skill/apply proposal was published as a channel".to_owned(),
+        }),
+    }
+}
+
+async fn change_result(
+    tx: &mut PgConnection,
+    tenant: TenantId,
+    proposal: &vedaflow::StoredProposal,
+) -> Result<SkillMutationResult> {
+    let change = store::change(&mut *tx, tenant, proposal.id)
+        .await?
+        .ok_or_else(|| Error::Internal {
+            message: format!("Skill proposal {} has no typed effect", proposal.id),
+        })?;
+    Ok(store::mutation_result(&change, outcome(proposal.state)?))
+}
+
+/// Apply an approved Skill change. Called only by the generic proposal route.
+pub async fn apply_reviewed(state: &AppState, id: ProposalId) -> Result<SkillMutationResult> {
+    let tenant = tenant_id()?;
+    let mut tx = rls::begin_tenant_tx(&state.pool, tenant).await?;
+    let proposal = vedaflow::proposals::read(&mut tx, tenant, id)
+        .await?
+        .filter(|proposal| {
+            proposal.asset == AssetKind::Skill && proposal.effect == ProposalEffect::Apply
+        })
+        .ok_or_else(|| Error::NotFound {
+            entity: format!("Skill change {id}"),
+        })?;
+    authorize_change_read(state, &mut tx, tenant, &proposal).await?;
+    if proposal.state != ProposalState::Open {
+        return change_result(&mut tx, tenant, &proposal).await;
+    }
+    let change = store::change(&mut *tx, tenant, id)
+        .await?
+        .ok_or_else(|| invalid_change(id))?;
+    verify_change_binding(&mut tx, tenant, &proposal, &change).await?;
+    let authorization = authorize_command(state, &mut tx, tenant, &change.command).await?;
+    let requirement = approvals::resolve(
+        state,
+        &mut tx,
+        tenant,
+        &authorization.input,
+        &Requested {
+            target: &authorization.target,
+            asset: AssetKind::Skill,
+            sensitivity: change.command.sensitivity(),
+            entries: &["command".to_owned()],
+        },
+    )
+    .await?;
+    let recorded = vedaflow::proposals::approvals(&mut tx, tenant, id).await?;
+    let cast = vedaflow::proposals::cast_for(&recorded, proposal.commit);
+    let outstanding = requirement.outstanding(&cast);
+    if !outstanding.is_empty() {
+        return Err(Error::Conflict {
+            message: format!("Skill change {id} still needs {}", outstanding.describe()),
+        });
+    }
+    let actor = identity_of(&authorization.input, "applying a skill change")?;
+    approvals::require_effect_actor(&requirement, id, proposal.proposer_id, &cast, actor)?;
+    let result = apply_loaded(
+        state,
+        &mut tx,
+        tenant,
+        id,
+        &change.command,
+        &change.payload_hash,
+        actor,
+    )
+    .await?;
+    commit(tx).await?;
+    Ok(result)
+}
+
+/// Render a typed Skill change's current result.
+pub async fn result(state: &AppState, id: ProposalId) -> Result<SkillMutationResult> {
+    let tenant = tenant_id()?;
+    let mut tx = rls::begin_tenant_tx(&state.pool, tenant).await?;
+    let proposal = vedaflow::proposals::read(&mut tx, tenant, id)
+        .await?
+        .filter(|proposal| {
+            proposal.asset == AssetKind::Skill && proposal.effect == ProposalEffect::Apply
+        })
+        .ok_or_else(|| Error::NotFound {
+            entity: format!("Skill change {id}"),
+        })?;
+    authorize_change_read(state, &mut tx, tenant, &proposal).await?;
+    let result = change_result(&mut tx, tenant, &proposal).await?;
+    commit(tx).await?;
+    Ok(result)
+}
+
+async fn begin_target_authorization(
+    state: &AppState,
+    tx: &mut PgConnection,
+    tenant: TenantId,
+    scope_id: ScopeId,
+) -> Result<CommandAuthorization> {
+    let target = scope_for(tx, tenant, scope_id).await?;
+    let input = authz::gather(
+        state,
+        tx,
+        Some(&target),
+        AnchorSelection::none(),
+        Vec::new(),
+    )
+    .await?;
+    let write_allowed =
+        authz::decide(state, &input, Action::SkillWrite, Resource::Scope(scope_id))?;
+    let proposal_allowed = authz::decide(
+        state,
+        &input,
+        Action::ProposalOpen,
+        Resource::Scope(scope_id),
+    )?;
+    Ok(CommandAuthorization {
+        target,
+        input,
+        write_allowed,
+        proposal_allowed,
+    })
+}
+
+async fn replay_or_conflict(
+    state: &AppState,
+    tenant: TenantId,
+    claim: &Claim,
+    error: Error,
+) -> Result<(StatusCode, Json<SkillMutationView>)> {
+    let id = crate::idempotency::resolve_conflict(&state.pool, tenant, claim, error).await?;
+    let rendered = result(state, ProposalId::from_uuid(id)).await?;
+    Ok((StatusCode::OK, Json(rendered.into())))
+}
+
+async fn submit_bundle(
+    state: &AppState,
+    headers: &HeaderMap,
+    skill_id: Option<SkillId>,
+    install: Option<InstallSkillBody>,
+    update: Option<UpdateSkillBody>,
+) -> Result<(StatusCode, Json<SkillMutationView>)> {
+    let tenant = tenant_id()?;
+    let actor_subject = subject()?;
+    let (operation, canonical) = match (&install, &update, skill_id) {
+        (Some(body), None, None) => (
+            "skill.install",
+            serde_json::to_value(body).map_err(|err| Error::Invalid {
+                message: format!("encode skill install request: {err}"),
+            })?,
+        ),
+        (None, Some(body), Some(id)) => ("skill.update", json!({"skill_id": id, "body": body})),
+        _ => {
+            return Err(Error::Internal {
+                message: "invalid bundle submission shape".to_owned(),
+            });
+        }
+    };
+    let claim = Claim::from_headers(headers, operation, &actor_subject, &canonical)?;
+    if let Dispatch::Replay(id) = crate::idempotency::dispatch(&state.pool, tenant, &claim).await? {
+        return Ok((
+            StatusCode::OK,
+            Json(result(state, ProposalId::from_uuid(id)).await?.into()),
+        ));
+    }
+
+    let mut tx = rls::begin_tenant_tx(&state.pool, tenant).await?;
+    let (scope_id, name, sensitivity, supplied, provenance, expected) =
+        match (install, update, skill_id) {
+            (Some(body), None, None) => (
+                body.governing_scope_id,
+                body.name.parse()?,
+                body.sensitivity.parse()?,
+                body.files,
+                SkillProvenance::try_from(body.provenance)?,
+                None,
+            ),
+            (None, Some(body), Some(id)) => {
+                let skill =
+                    store::by_id(&mut *tx, tenant, id)
+                        .await?
+                        .ok_or_else(|| Error::NotFound {
+                            entity: format!("skill {id}"),
+                        })?;
+                (
+                    skill.governing_scope_id,
+                    skill.name,
+                    body.sensitivity.parse()?,
+                    body.files,
+                    SkillProvenance::try_from(body.provenance)?,
+                    Some((id, body.expected_current_version_id)),
+                )
+            }
+            _ => unreachable!(),
+        };
+    let preliminary = begin_target_authorization(state, &mut tx, tenant, scope_id).await?;
+    if let Some((id, current)) = expected {
+        let (skill, version) = read_skill_and_version(&mut tx, tenant, id, Some(current)).await?;
+        authorize_skill_read(state, &mut tx, tenant, &skill, &version).await?;
+    }
+    let prepared = prepare_bundle(
+        state,
+        &mut tx,
+        tenant,
+        &preliminary,
+        name.clone(),
+        sensitivity,
+        supplied,
+    )
+    .await?;
+    let command = match expected {
+        None => SkillCommand::Install {
+            skill_id: SkillId::new(),
+            version_id: SkillVersionId::new(),
+            governing_scope_id: scope_id,
+            name,
+            sensitivity,
+            bundle_digest: prepared.bundle_digest,
+            manifest: prepared.manifest,
+            files: prepared.files,
+            provenance,
+            scan: prepared.scan,
+            scan_ruleset_version: prepared.scan_ruleset_version,
+            quality_score: prepared.quality_score,
+            rubric_version: prepared.rubric_version,
+        },
+        Some((id, expected_current_version_id)) => SkillCommand::Update {
+            skill_id: id,
+            expected_current_version_id,
+            version_id: SkillVersionId::new(),
+            governing_scope_id: scope_id,
+            name,
+            sensitivity,
+            bundle_digest: prepared.bundle_digest,
+            manifest: prepared.manifest,
+            files: prepared.files,
+            provenance,
+            scan: prepared.scan,
+            scan_ruleset_version: prepared.scan_ruleset_version,
+            quality_score: prepared.quality_score,
+            rubric_version: prepared.rubric_version,
+        },
+    };
+    let authorization = authorize_command(state, &mut tx, tenant, &command).await?;
+    let created = open_command(
+        state,
+        &mut tx,
+        tenant,
+        &command,
+        &authorization,
+        Some(&claim),
+    )
+    .await;
+    match created {
+        Ok(created) => {
+            commit(tx).await?;
+            Ok((StatusCode::CREATED, Json(created.into())))
+        }
+        Err(conflict @ Error::Conflict { .. }) => {
+            drop(tx);
+            replay_or_conflict(state, tenant, &claim, conflict).await
+        }
+        Err(error) => Err(error),
+    }
+}
+
+async fn submit_binding_command(
+    state: &AppState,
+    headers: &HeaderMap,
+    operation: &'static str,
+    canonical: Value,
+    command: SkillCommand,
+) -> Result<(StatusCode, Json<SkillMutationView>)> {
+    let tenant = tenant_id()?;
+    let claim = Claim::from_headers(headers, operation, &subject()?, &canonical)?;
+    if let Dispatch::Replay(id) = crate::idempotency::dispatch(&state.pool, tenant, &claim).await? {
+        return Ok((
+            StatusCode::OK,
+            Json(result(state, ProposalId::from_uuid(id)).await?.into()),
+        ));
+    }
+    let mut tx = rls::begin_tenant_tx(&state.pool, tenant).await?;
+    let authorization = authorize_command(state, &mut tx, tenant, &command).await?;
+    let created = open_command(
+        state,
+        &mut tx,
+        tenant,
+        &command,
+        &authorization,
+        Some(&claim),
+    )
+    .await;
+    match created {
+        Ok(created) => {
+            commit(tx).await?;
+            Ok((StatusCode::CREATED, Json(created.into())))
+        }
+        Err(conflict @ Error::Conflict { .. }) => {
+            drop(tx);
+            replay_or_conflict(state, tenant, &claim, conflict).await
+        }
+        Err(error) => Err(error),
+    }
+}
+
+/// Install a stable skill and first immutable version through VedaFlow.
+#[utoipa::path(
+    post,
+    path = "/v1/skills",
+    operation_id = "install_skill",
+    tag = "skills",
+    params(("Idempotency-Key" = String, Header, description = "Required; reuse verbatim on retry.")),
+    request_body = InstallSkillBody,
+    responses(
+        (status = 201, description = "Change opened", body = SkillMutationView),
+        (status = 400, description = "Invalid bundle", body = ApiErrorBody),
+        (status = 403, description = "Denied", body = ApiErrorBody),
+        (status = 409, description = "Conflict", body = ApiErrorBody)
+    ),
+    security(("bearer" = []))
+)]
+#[tracing::instrument(name = "skills.install", skip_all)]
+pub(crate) async fn install(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    payload: std::result::Result<Json<InstallSkillBody>, JsonRejection>,
+) -> Response {
+    let result = async {
+        let body = body(payload)?;
+        submit_bundle(&state, &headers, None, Some(body), None).await
+    }
+    .await;
+    respond(&state, "install", result).await
+}
+
+/// Create a new immutable version through VedaFlow.
+#[utoipa::path(
+    patch,
+    path = "/v1/skills/{id}",
+    operation_id = "update_skill",
+    tag = "skills",
+    params(
+        ("id" = String, Path, format = "uuid"),
+        ("Idempotency-Key" = String, Header, description = "Required; reuse verbatim on retry.")
+    ),
+    request_body = UpdateSkillBody,
+    responses(
+        (status = 201, description = "Change opened", body = SkillMutationView),
+        (status = 404, description = "Not found", body = ApiErrorBody),
+        (status = 409, description = "Stale version", body = ApiErrorBody)
+    ),
+    security(("bearer" = []))
+)]
+#[tracing::instrument(name = "skills.update", skip_all)]
+pub(crate) async fn update(
+    State(state): State<AppState>,
+    Path(id): Path<SkillId>,
+    headers: HeaderMap,
+    payload: std::result::Result<Json<UpdateSkillBody>, JsonRejection>,
+) -> Response {
+    let result = async {
+        let body = body(payload)?;
+        submit_bundle(&state, &headers, Some(id), None, Some(body)).await
+    }
+    .await;
+    respond(&state, "update", result).await
+}
+
+/// Create a project/principal binding through VedaFlow.
+#[utoipa::path(
+    post,
+    path = "/v1/skill-bindings",
+    operation_id = "create_skill_binding",
+    tag = "skills",
+    params(("Idempotency-Key" = String, Header, description = "Required; reuse verbatim on retry.")),
+    request_body = CreateSkillBindingBody,
+    responses(
+        (status = 201, description = "Change opened", body = SkillMutationView),
+        (status = 404, description = "Skill not visible", body = ApiErrorBody),
+        (status = 409, description = "Conflict", body = ApiErrorBody)
+    ),
+    security(("bearer" = []))
+)]
+#[tracing::instrument(name = "skills.bind", skip_all)]
+pub(crate) async fn create_binding(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    payload: std::result::Result<Json<CreateSkillBindingBody>, JsonRejection>,
+) -> Response {
+    let result = async {
+        let body = body(payload)?;
+        let canonical = serde_json::to_value(&body).map_err(|err| Error::Invalid {
+            message: format!("encode skill binding request: {err}"),
+        })?;
+        let command = SkillCommand::Bind {
+            binding_id: SkillBindingId::new(),
+            skill_id: body.skill_id,
+            scope_id: body.scope_id,
+            pinned_version_id: body.pinned_version_id,
+            enabled: body.enabled,
+        };
+        submit_binding_command(&state, &headers, "skill.bind", canonical, command).await
+    }
+    .await;
+    respond(&state, "bind", result).await
+}
+
+/// Update, enable, disable, pin or unpin a binding through VedaFlow.
+#[utoipa::path(
+    patch,
+    path = "/v1/skill-bindings/{id}",
+    operation_id = "update_skill_binding",
+    tag = "skills",
+    params(
+        ("id" = String, Path, format = "uuid"),
+        ("Idempotency-Key" = String, Header, description = "Required; reuse verbatim on retry.")
+    ),
+    request_body = UpdateSkillBindingBody,
+    responses(
+        (status = 201, description = "Change opened", body = SkillMutationView),
+        (status = 404, description = "Binding not found", body = ApiErrorBody),
+        (status = 409, description = "Stale revision", body = ApiErrorBody)
+    ),
+    security(("bearer" = []))
+)]
+#[tracing::instrument(name = "skills.binding.update", skip_all)]
+pub(crate) async fn update_binding(
+    State(state): State<AppState>,
+    Path(id): Path<SkillBindingId>,
+    headers: HeaderMap,
+    payload: std::result::Result<Json<UpdateSkillBindingBody>, JsonRejection>,
+) -> Response {
+    let result = async {
+        let body = body(payload)?;
+        if body.reason.trim().is_empty() || body.reason.chars().count() > 200 {
+            return Err(Error::Invalid {
+                message: "binding reason must contain 1..=200 characters".to_owned(),
+            });
+        }
+        refuse_if_secret("binding reason", &body.reason).await?;
+        let tenant = tenant_id()?;
+        let mut tx = rls::begin_tenant_tx(&state.pool, tenant).await?;
+        let binding =
+            store::binding(&mut *tx, tenant, id)
+                .await?
+                .ok_or_else(|| Error::NotFound {
+                    entity: format!("skill binding {id}"),
+                })?;
+        drop(tx);
+        let canonical = json!({"binding_id": id, "body": body});
+        let command = SkillCommand::SetBinding {
+            binding_id: id,
+            scope_id: binding.scope_id,
+            expected_revision: body.expected_revision,
+            enabled: body.enabled,
+            pinned_version_id: body.pinned_version_id,
+            reason: body.reason,
+        };
+        submit_binding_command(&state, &headers, "skill.binding.update", canonical, command).await
+    }
+    .await;
+    respond(&state, "binding_update", result).await
+}
+
+/// Roll a binding back by changing its pin, never its version history.
+#[utoipa::path(
+    post,
+    path = "/v1/skill-bindings/{id}/rollback",
+    operation_id = "rollback_skill_binding",
+    tag = "skills",
+    params(
+        ("id" = String, Path, format = "uuid"),
+        ("Idempotency-Key" = String, Header, description = "Required; reuse verbatim on retry.")
+    ),
+    request_body = RollbackSkillBindingBody,
+    responses(
+        (status = 201, description = "Rollback change opened", body = SkillMutationView),
+        (status = 404, description = "Binding/version not found", body = ApiErrorBody),
+        (status = 409, description = "Stale revision", body = ApiErrorBody)
+    ),
+    security(("bearer" = []))
+)]
+#[tracing::instrument(name = "skills.binding.rollback", skip_all)]
+pub(crate) async fn rollback_binding(
+    State(state): State<AppState>,
+    Path(id): Path<SkillBindingId>,
+    headers: HeaderMap,
+    payload: std::result::Result<Json<RollbackSkillBindingBody>, JsonRejection>,
+) -> Response {
+    let result = async {
+        let body = body(payload)?;
+        let tenant = tenant_id()?;
+        let mut tx = rls::begin_tenant_tx(&state.pool, tenant).await?;
+        let binding =
+            store::binding(&mut *tx, tenant, id)
+                .await?
+                .ok_or_else(|| Error::NotFound {
+                    entity: format!("skill binding {id}"),
+                })?;
+        drop(tx);
+        let canonical = json!({"binding_id": id, "body": body});
+        let command = SkillCommand::SetBinding {
+            binding_id: id,
+            scope_id: binding.scope_id,
+            expected_revision: body.expected_revision,
+            enabled: true,
+            pinned_version_id: Some(body.version_id),
+            reason: "rollback".to_owned(),
+        };
+        submit_binding_command(
+            &state,
+            &headers,
+            "skill.binding.rollback",
+            canonical,
+            command,
+        )
+        .await
+    }
+    .await;
+    respond(&state, "binding_rollback", result).await
+}
+
+// ── Public catalogue reads ────────────────────────────────────────────────
+
+/// Cursor controls for the Skill catalogue.
+#[derive(Debug, Clone, Deserialize, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct ListSkillsParams {
+    /// Resume after this stable Skill identifier.
+    #[serde(default)]
+    #[param(value_type = Option<String>, format = "uuid")]
+    pub cursor: Option<SkillId>,
+    /// Rows considered, 1–200; denied rows are omitted.
+    #[serde(default)]
+    pub limit: Option<i64>,
+}
+
+/// Cursor controls for immutable versions, newest first.
+#[derive(Debug, Clone, Default, Deserialize, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct ListVersionsParams {
+    /// Resume below this version ordinal.
+    #[serde(default)]
+    pub before_ordinal: Option<u64>,
+    /// Rows to return, from one through two hundred.
+    #[serde(default)]
+    pub limit: Option<i64>,
+}
+
+/// Scope and cursor controls for binding listings.
+#[derive(Debug, Clone, Deserialize, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct ListBindingsParams {
+    /// Project or principal scope whose bindings are listed.
+    #[param(value_type = String, format = "uuid")]
+    pub scope_id: ScopeId,
+    /// Resume after this binding identifier.
+    #[serde(default)]
+    #[param(value_type = Option<String>, format = "uuid")]
+    pub cursor: Option<SkillBindingId>,
+    /// Rows to return, from one through two hundred.
+    #[serde(default)]
+    pub limit: Option<i64>,
+}
+
+/// Scope selecting the exact Skill versions available to a session.
+#[derive(Debug, Clone, Deserialize, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct AvailableSkillsParams {
+    /// Project or principal scope at which bindings resolve.
+    #[param(value_type = String, format = "uuid")]
+    pub scope_id: ScopeId,
+}
+
+/// Cursor controls for usage evidence.
+#[derive(Debug, Clone, Default, Deserialize, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct ListUsageParams {
+    /// Resume after this usage event identifier.
+    #[serde(default)]
+    #[param(value_type = Option<String>, format = "uuid")]
+    pub cursor: Option<SkillUsageEventId>,
+    /// Rows to return, from one through two hundred.
+    #[serde(default)]
+    pub limit: Option<i64>,
+}
+
+/// Cursor controls for controlled-harness test runs.
+#[derive(Debug, Clone, Default, Deserialize, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct ListTestRunsParams {
+    /// Resume after this test-run identifier.
+    #[serde(default)]
+    #[param(value_type = Option<String>, format = "uuid")]
+    pub cursor: Option<SkillTestRunId>,
+    /// Rows to return, from one through two hundred.
+    #[serde(default)]
+    pub limit: Option<i64>,
+}
+
+/// Immutable-version collection.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct SkillVersionListView {
+    /// Immutable versions, newest first.
+    pub versions: Vec<SkillVersionView>,
+    /// Ordinal cursor for the next page.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<u64>,
+}
+
+/// Immutable file collection.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct SkillVersionFileListView {
+    /// Immutable file descriptors in path order.
+    pub files: Vec<SkillVersionFileView>,
+}
+
+fn limit(value: Option<i64>) -> Result<i64> {
+    let value = value.unwrap_or(DEFAULT_LIMIT);
+    if !(1..=MAX_LIMIT).contains(&value) {
+        return Err(Error::Invalid {
+            message: format!("limit must be between 1 and {MAX_LIMIT}"),
+        });
+    }
+    Ok(value)
+}
+
+async fn skill_view(
+    tx: &mut PgConnection,
+    tenant: TenantId,
+    skill: StoredSkill,
+) -> Result<SkillView> {
+    let version = store::version(&mut *tx, tenant, skill.current_version_id)
+        .await?
+        .filter(|version| version.skill_id == skill.id)
+        .ok_or_else(|| Error::Internal {
+            message: format!(
+                "skill {} names missing current version {}",
+                skill.id, skill.current_version_id
+            ),
+        })?;
+    Ok(SkillView {
+        id: skill.id,
+        governing_scope_id: skill.governing_scope_id,
+        name: skill.name.to_string(),
+        current_version_id: skill.current_version_id,
+        current_version: version.try_into()?,
+        created_at: skill.created_at,
+        created_by: skill.created_by,
+        updated_at: skill.updated_at,
+        updated_by: skill.updated_by,
+    })
+}
+
+async fn exact_visible(
+    state: &AppState,
+    tx: &mut PgConnection,
+    tenant: TenantId,
+    skill_id: SkillId,
+    version_id: Option<SkillVersionId>,
+) -> Result<(StoredSkill, StoredVersion, Authorized)> {
+    let (skill, version) = read_skill_and_version(tx, tenant, skill_id, version_id).await?;
+    let authorized = authorize_skill_read(state, tx, tenant, &skill, &version)
+        .await
+        .map_err(|error| match error {
+            Error::PolicyDenied { .. } => Error::NotFound {
+                entity: format!("skill {skill_id}"),
+            },
+            other => other,
+        })?;
+    Ok((skill, version, authorized))
+}
+
+/// List visible stable skills. Each row is decided at its governing scope.
+#[utoipa::path(
+    get,
+    path = "/v1/skills",
+    operation_id = "list_skills",
+    tag = "skills",
+    params(ListSkillsParams),
+    responses(
+        (status = 200, description = "Visible skills", body = SkillListView),
+        (status = 400, description = "Invalid cursor/limit", body = ApiErrorBody)
+    ),
+    security(("bearer" = []))
+)]
+#[tracing::instrument(name = "skills.list", skip_all)]
+pub(crate) async fn list(
+    State(state): State<AppState>,
+    Query(params): Query<ListSkillsParams>,
+) -> Response {
+    let result = async {
+        let tenant = tenant_id()?;
+        let take = limit(params.limit)?;
+        let mut tx = rls::begin_tenant_tx(&state.pool, tenant).await?;
+        let candidates = store::list(&mut tx, tenant, params.cursor, take + 1).await?;
+        let more = candidates.len() as i64 > take;
+        let considered = candidates
+            .into_iter()
+            .take(take as usize)
+            .collect::<Vec<_>>();
+        let next_cursor = more
+            .then(|| considered.last().map(|skill| skill.id))
+            .flatten();
+        let mut visible = Vec::new();
+        for skill in considered {
+            let Some(version) = store::version(&mut *tx, tenant, skill.current_version_id).await?
+            else {
+                return Err(Error::Internal {
+                    message: format!("skill {} has no current version", skill.id),
+                });
+            };
+            match authorize_skill_read(&state, &mut tx, tenant, &skill, &version).await {
+                Ok(_) => visible.push(skill_view(&mut tx, tenant, skill).await?),
+                Err(Error::PolicyDenied { .. } | Error::NotFound { .. }) => {}
+                Err(error) => return Err(error),
+            }
+        }
+        audit::record(
+            &mut tx,
+            tenant,
+            AuditAction::AuthzDecision,
+            "skill catalogue".to_owned(),
+            Outcome::Allow,
+            json!({"op": "skills.list", "visible": visible.len(), "considered": take}),
+        )
+        .await?;
+        commit(tx).await?;
+        Ok(Json(SkillListView {
+            skills: visible,
+            next_cursor,
+        }))
+    }
+    .await;
+    respond(&state, "list", result).await
+}
+
+/// Get one stable skill and current version.
+#[utoipa::path(
+    get,
+    path = "/v1/skills/{id}",
+    operation_id = "get_skill",
+    tag = "skills",
+    params(("id" = String, Path, format = "uuid")),
+    responses(
+        (status = 200, description = "Skill", body = SkillView),
+        (status = 404, description = "Absent or denied", body = ApiErrorBody)
+    ),
+    security(("bearer" = []))
+)]
+#[tracing::instrument(name = "skills.get", skip_all)]
+pub(crate) async fn get(State(state): State<AppState>, Path(id): Path<SkillId>) -> Response {
+    let result = async {
+        let tenant = tenant_id()?;
+        let mut tx = rls::begin_tenant_tx(&state.pool, tenant).await?;
+        let (skill, version, authorized) = exact_visible(&state, &mut tx, tenant, id, None).await?;
+        audit::record(
+            &mut tx,
+            tenant,
+            AuditAction::SkillResolved,
+            Resource::Scope(skill.governing_scope_id).to_string(),
+            Outcome::Success,
+            json!({
+                "skill_id": skill.id,
+                "version_id": version.id,
+                "bundle_digest": store::hex_32(&version.bundle_digest),
+                "artifact_references": [ArtifactReference::new(
+                    ArtifactFamily::Skill,
+                    skill.id.to_string(),
+                    "resolved",
+                    version.id.to_string(),
+                    None,
+                )?],
+                "authz": audit::decision_context(Action::SkillRead, &authorized),
+                "content_served": false,
+            }),
+        )
+        .await?;
+        let view = skill_view(&mut tx, tenant, skill).await?;
+        commit(tx).await?;
+        Ok(Json(view))
+    }
+    .await;
+    respond(&state, "get", result).await
+}
+
+/// List immutable versions, newest first.
+#[utoipa::path(
+    get,
+    path = "/v1/skills/{id}/versions",
+    operation_id = "list_skill_versions",
+    tag = "skills",
+    params(("id" = String, Path, format = "uuid"), ListVersionsParams),
+    responses(
+        (status = 200, description = "Versions", body = SkillVersionListView),
+        (status = 404, description = "Absent or denied", body = ApiErrorBody)
+    ),
+    security(("bearer" = []))
+)]
+#[tracing::instrument(name = "skills.versions", skip_all)]
+pub(crate) async fn list_versions(
+    State(state): State<AppState>,
+    Path(id): Path<SkillId>,
+    Query(params): Query<ListVersionsParams>,
+) -> Response {
+    let result = async {
+        let tenant = tenant_id()?;
+        let take = limit(params.limit)?;
+        let mut tx = rls::begin_tenant_tx(&state.pool, tenant).await?;
+        let skill = store::by_id(&mut *tx, tenant, id)
+            .await?
+            .ok_or_else(|| Error::NotFound {
+                entity: format!("skill {id}"),
+            })?;
+        let candidates =
+            store::versions(&mut tx, tenant, id, params.before_ordinal, take + 1).await?;
+        let more = candidates.len() as i64 > take;
+        let considered = candidates
+            .into_iter()
+            .take(take as usize)
+            .collect::<Vec<_>>();
+        let next_cursor = more
+            .then(|| considered.last().map(|version| version.ordinal))
+            .flatten();
+        let mut visible = Vec::new();
+        for version in considered {
+            match authorize_skill_read(&state, &mut tx, tenant, &skill, &version).await {
+                Ok(_) => visible.push(version.try_into()?),
+                Err(Error::PolicyDenied { .. }) => {}
+                Err(error) => return Err(error),
+            }
+        }
+        commit(tx).await?;
+        Ok(Json(SkillVersionListView {
+            versions: visible,
+            next_cursor,
+        }))
+    }
+    .await;
+    respond(&state, "versions", result).await
+}
+
+/// Get exact immutable version metadata.
+#[utoipa::path(
+    get,
+    path = "/v1/skills/{id}/versions/{version_id}",
+    operation_id = "get_skill_version",
+    tag = "skills",
+    params(
+        ("id" = String, Path, format = "uuid"),
+        ("version_id" = String, Path, format = "uuid")
+    ),
+    responses(
+        (status = 200, description = "Version", body = SkillVersionView),
+        (status = 404, description = "Absent or denied", body = ApiErrorBody)
+    ),
+    security(("bearer" = []))
+)]
+pub(crate) async fn get_version(
+    State(state): State<AppState>,
+    Path((id, version_id)): Path<(SkillId, SkillVersionId)>,
+) -> Response {
+    let result = async {
+        let tenant = tenant_id()?;
+        let mut tx = rls::begin_tenant_tx(&state.pool, tenant).await?;
+        let (_, version, _) = exact_visible(&state, &mut tx, tenant, id, Some(version_id)).await?;
+        commit(tx).await?;
+        let view: SkillVersionView = version.try_into()?;
+        Ok(Json(view))
+    }
+    .await;
+    respond(&state, "version_get", result).await
+}
+
+/// List exact immutable file descriptors.
+#[utoipa::path(
+    get,
+    path = "/v1/skills/{id}/versions/{version_id}/files",
+    operation_id = "list_skill_version_files",
+    tag = "skills",
+    params(
+        ("id" = String, Path, format = "uuid"),
+        ("version_id" = String, Path, format = "uuid")
+    ),
+    responses(
+        (status = 200, description = "Files", body = SkillVersionFileListView),
+        (status = 404, description = "Absent or denied", body = ApiErrorBody)
+    ),
+    security(("bearer" = []))
+)]
+pub(crate) async fn list_files(
+    State(state): State<AppState>,
+    Path((id, version_id)): Path<(SkillId, SkillVersionId)>,
+) -> Response {
+    let result = async {
+        let tenant = tenant_id()?;
+        let mut tx = rls::begin_tenant_tx(&state.pool, tenant).await?;
+        exact_visible(&state, &mut tx, tenant, id, Some(version_id)).await?;
+        let files = store::files(&mut *tx, tenant, version_id)
+            .await?
+            .into_iter()
+            .map(Into::into)
+            .collect();
+        commit(tx).await?;
+        Ok(Json(SkillVersionFileListView { files }))
+    }
+    .await;
+    respond(&state, "files", result).await
+}
+
+/// Fetch one exact version file. The wildcard remains bundle-relative.
+#[utoipa::path(
+    get,
+    path = "/v1/skills/{id}/versions/{version_id}/files/{path}",
+    operation_id = "get_skill_version_file",
+    tag = "skills",
+    params(
+        ("id" = String, Path, format = "uuid"),
+        ("version_id" = String, Path, format = "uuid"),
+        ("path" = String, Path)
+    ),
+    responses(
+        (status = 200, description = "File content", body = SkillVersionFileContentView),
+        (status = 404, description = "Absent or denied", body = ApiErrorBody)
+    ),
+    security(("bearer" = []))
+)]
+#[tracing::instrument(name = "skills.file.get", skip_all)]
+pub(crate) async fn get_file(
+    State(state): State<AppState>,
+    Path((id, version_id, path)): Path<(SkillId, SkillVersionId, String)>,
+) -> Response {
+    let result = async {
+        let tenant = tenant_id()?;
+        let path: SkillFilePath = path.parse()?;
+        let mut tx = rls::begin_tenant_tx(&state.pool, tenant).await?;
+        let (skill, version, authorized) =
+            exact_visible(&state, &mut tx, tenant, id, Some(version_id)).await?;
+        let file = store::file(&mut *tx, tenant, version_id, &path)
+            .await?
+            .ok_or_else(|| Error::NotFound {
+                entity: format!("skill version file {path}"),
+            })?;
+        let object_hash = vedaflow::hash::ObjectHash::from_bytes(file.object_hash);
+        let object = vedaflow::read_object(&mut tx, tenant, object_hash)
+            .await?
+            .ok_or_else(|| Error::Internal {
+                message: format!("skill version file {path} names a missing object"),
+            })?;
+        let asset = SkillAsset::from_bytes(&object.content)?;
+        if asset.scope_id != skill.governing_scope_id
+            || asset.sensitivity != version.sensitivity
+            || asset.file.path != path
+        {
+            return Err(Error::Internal {
+                message: format!("skill version file {path} failed its object binding"),
+            });
+        }
+        audit::record(
+            &mut tx,
+            tenant,
+            AuditAction::SkillResolved,
+            Resource::Scope(skill.governing_scope_id).to_string(),
+            Outcome::Success,
+            json!({
+                "skill_id": id,
+                "version_id": version_id,
+                "path": path,
+                "object_hash": object_hash.to_hex(),
+                "artifact_references": [ArtifactReference::new(
+                    ArtifactFamily::Skill,
+                    id.to_string(),
+                    "resource_loaded",
+                    version_id.to_string(),
+                    None,
+                )?],
+                "authz": audit::decision_context(Action::SkillRead, &authorized),
+            }),
+        )
+        .await?;
+        commit(tx).await?;
+        Ok(Json(SkillVersionFileContentView {
+            version_id,
+            path: path.to_string(),
+            object_hash: object_hash.to_hex(),
+            content: asset.file.content,
+        }))
+    }
+    .await;
+    respond(&state, "file_get", result).await
+}
+
+async fn authorize_binding_scope(
+    state: &AppState,
+    tx: &mut PgConnection,
+    tenant: TenantId,
+    scope_id: ScopeId,
+    sensitivity: Sensitivity,
+    action: Action,
+) -> Result<(Scope, DecisionInput, Authorized)> {
+    let scope = scope_for(tx, tenant, scope_id).await?;
+    let input = authz::gather(state, tx, Some(&scope), AnchorSelection::none(), Vec::new()).await?;
+    let authorized = if action == Action::SkillRead {
+        authz::decide_skill_read(state, &input, Resource::Scope(scope_id), sensitivity)?
+    } else {
+        authz::decide(state, &input, action, Resource::Scope(scope_id))?
+    };
+    Ok((scope, input, authorized))
+}
+
+async fn resolved_visible(
+    state: &AppState,
+    tx: &mut PgConnection,
+    tenant: TenantId,
+    resolved: &ResolvedBinding,
+) -> Result<()> {
+    authorize_binding_scope(
+        state,
+        tx,
+        tenant,
+        resolved.binding.scope_id,
+        resolved.version.sensitivity,
+        Action::SkillRead,
+    )
+    .await?;
+    let skill = store::by_id(&mut *tx, tenant, resolved.binding.skill_id)
+        .await?
+        .ok_or_else(|| Error::NotFound {
+            entity: format!("skill {}", resolved.binding.skill_id),
+        })?;
+    authorize_skill_read(state, tx, tenant, &skill, &resolved.version).await?;
+    Ok(())
+}
+
+/// List revisioned bindings at one project/principal scope.
+#[utoipa::path(
+    get,
+    path = "/v1/skill-bindings",
+    operation_id = "list_skill_bindings",
+    tag = "skills",
+    params(ListBindingsParams),
+    responses(
+        (status = 200, description = "Bindings", body = SkillBindingListView),
+        (status = 404, description = "Scope absent or denied", body = ApiErrorBody)
+    ),
+    security(("bearer" = []))
+)]
+pub(crate) async fn list_bindings(
+    State(state): State<AppState>,
+    Query(params): Query<ListBindingsParams>,
+) -> Response {
+    let result = async {
+        let tenant = tenant_id()?;
+        let take = limit(params.limit)?;
+        let mut tx = rls::begin_tenant_tx(&state.pool, tenant).await?;
+        authorize_binding_scope(
+            &state,
+            &mut tx,
+            tenant,
+            params.scope_id,
+            Sensitivity::Public,
+            Action::ScopeRead,
+        )
+        .await?;
+        let candidates =
+            store::bindings_at(&mut tx, tenant, params.scope_id, params.cursor, take + 1).await?;
+        let more = candidates.len() as i64 > take;
+        let considered = candidates
+            .into_iter()
+            .take(take as usize)
+            .collect::<Vec<_>>();
+        let next_cursor = more
+            .then(|| considered.last().map(|binding| binding.id))
+            .flatten();
+        let mut visible = Vec::new();
+        for binding in considered {
+            let (skill, version) = read_skill_and_version(
+                &mut tx,
+                tenant,
+                binding.skill_id,
+                binding.pinned_version_id,
+            )
+            .await?;
+            match authorize_skill_read(&state, &mut tx, tenant, &skill, &version).await {
+                Ok(_) => visible.push(binding.into()),
+                Err(Error::PolicyDenied { .. }) => {}
+                Err(error) => return Err(error),
+            }
+        }
+        commit(tx).await?;
+        Ok(Json(SkillBindingListView {
+            bindings: visible,
+            next_cursor,
+        }))
+    }
+    .await;
+    respond(&state, "bindings", result).await
+}
+
+/// Get one revisioned binding.
+#[utoipa::path(
+    get,
+    path = "/v1/skill-bindings/{id}",
+    operation_id = "get_skill_binding",
+    tag = "skills",
+    params(("id" = String, Path, format = "uuid")),
+    responses(
+        (status = 200, description = "Binding", body = SkillBindingView),
+        (status = 404, description = "Absent or denied", body = ApiErrorBody)
+    ),
+    security(("bearer" = []))
+)]
+pub(crate) async fn get_binding(
+    State(state): State<AppState>,
+    Path(id): Path<SkillBindingId>,
+) -> Response {
+    let result = async {
+        let tenant = tenant_id()?;
+        let mut tx = rls::begin_tenant_tx(&state.pool, tenant).await?;
+        let binding =
+            store::binding(&mut *tx, tenant, id)
+                .await?
+                .ok_or_else(|| Error::NotFound {
+                    entity: format!("skill binding {id}"),
+                })?;
+        authorize_binding_scope(
+            &state,
+            &mut tx,
+            tenant,
+            binding.scope_id,
+            Sensitivity::Public,
+            Action::ScopeRead,
+        )
+        .await?;
+        let (skill, version) =
+            read_skill_and_version(&mut tx, tenant, binding.skill_id, binding.pinned_version_id)
+                .await?;
+        authorize_skill_read(&state, &mut tx, tenant, &skill, &version).await?;
+        commit(tx).await?;
+        let view: SkillBindingView = binding.into();
+        Ok(Json(view))
+    }
+    .await;
+    respond(&state, "binding_get", result).await
+}
+
+/// Resolve enabled bindings to exact immutable versions for a context scope.
+#[utoipa::path(
+    get,
+    path = "/v1/skills/available",
+    operation_id = "list_available_skills",
+    tag = "skills",
+    params(AvailableSkillsParams),
+    responses(
+        (status = 200, description = "Available exact versions", body = AvailableSkillListView),
+        (status = 404, description = "Scope absent or denied", body = ApiErrorBody)
+    ),
+    security(("bearer" = []))
+)]
+#[tracing::instrument(name = "skills.available", skip_all)]
+pub(crate) async fn available(
+    State(state): State<AppState>,
+    Query(params): Query<AvailableSkillsParams>,
+) -> Response {
+    let result = async {
+        let tenant = tenant_id()?;
+        let mut tx = rls::begin_tenant_tx(&state.pool, tenant).await?;
+        let (_, input, _) = authorize_binding_scope(
+            &state,
+            &mut tx,
+            tenant,
+            params.scope_id,
+            Sensitivity::Public,
+            Action::SkillRead,
+        )
+        .await?;
+        let runtime = configuration::effective_at_scope(&mut tx, tenant, params.scope_id).await?;
+        let mut scope_ids = vec![params.scope_id];
+        if let Some(personal) = input.principal.scope_id
+            && personal != params.scope_id
+        {
+            scope_ids.push(personal);
+        }
+        let candidates = if runtime.document.advertisement.skills {
+            store::resolve_for_scopes(&mut tx, tenant, &scope_ids).await?
+        } else {
+            Vec::new()
+        };
+        let mut names = std::collections::HashSet::new();
+        let mut visible = Vec::new();
+        let mut policy_excluded = 0_u64;
+        for resolved in candidates {
+            match resolved_visible(&state, &mut tx, tenant, &resolved).await {
+                Ok(()) => {
+                    if names.insert(resolved.name.clone()) {
+                        visible.push(AvailableSkillView {
+                            binding: resolved.binding.into(),
+                            name: resolved.name.to_string(),
+                            version: resolved.version.try_into()?,
+                            manifest_object_hash: store::hex_32(&resolved.manifest_object_hash),
+                        });
+                    }
+                }
+                Err(Error::PolicyDenied { .. } | Error::NotFound { .. }) => {
+                    policy_excluded += 1;
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        audit::record(
+            &mut tx,
+            tenant,
+            AuditAction::AuthzDecision,
+            Resource::Scope(params.scope_id).to_string(),
+            Outcome::Allow,
+            json!({
+                "op": "skills.available",
+                "versions": visible.iter().map(|skill| json!({
+                    "binding_id": skill.binding.id,
+                    "version_id": skill.version.id,
+                    "bundle_digest": skill.version.bundle_digest,
+                })).collect::<Vec<_>>(),
+                "policy_excluded": policy_excluded,
+                "configuration_version_id": runtime.version_id,
+                "configuration_hash": runtime.content_hash,
+                "advertisement_enabled": runtime.document.advertisement.skills,
+            }),
+        )
+        .await?;
+        commit(tx).await?;
+        Ok(Json(AvailableSkillListView {
+            scope_id: params.scope_id,
+            skills: visible,
+        }))
+    }
+    .await;
+    respond(&state, "available", result).await
+}
+
+// ── Usage evidence and controlled tests ──────────────────────────────────
+
+fn validate_metadata(metadata: &Value, what: &str) -> Result<()> {
+    if !metadata.is_object() {
+        return Err(Error::Invalid {
+            message: format!("{what} metadata must be a JSON object"),
+        });
+    }
+    if serde_json::to_vec(metadata)
+        .map_err(|err| Error::Invalid {
+            message: format!("encode {what} metadata: {err}"),
+        })?
+        .len()
+        > 16 * 1024
+    {
+        return Err(Error::Invalid {
+            message: format!("{what} metadata exceeds 16384 bytes"),
+        });
+    }
+    Ok(())
+}
+
+/// Record one version-specific usage stage idempotently.
+#[utoipa::path(
+    post,
+    path = "/v1/skill-usage",
+    operation_id = "record_skill_usage",
+    tag = "skills",
+    request_body = RecordSkillUsageBody,
+    responses(
+        (status = 201, description = "Usage appended", body = SkillUsageEventView),
+        (status = 200, description = "Idempotent replay", body = SkillUsageEventView),
+        (status = 400, description = "Invalid evidence", body = ApiErrorBody),
+        (status = 404, description = "Binding/version absent or denied", body = ApiErrorBody)
+    ),
+    security(("bearer" = []))
+)]
+#[tracing::instrument(name = "skills.usage.record", skip_all)]
+pub(crate) async fn record_usage(
+    State(state): State<AppState>,
+    payload: std::result::Result<Json<RecordSkillUsageBody>, JsonRejection>,
+) -> Response {
+    let result: Result<(StatusCode, Json<SkillUsageEventView>)> = async {
+        let body = body(payload)?;
+        validate_skill_usage_client_event_id(&body.client_event_id)?;
+        validate_metadata(&body.metadata, "skill usage")?;
+        refuse_if_secret("skill usage metadata", &body.metadata.to_string()).await?;
+        let stage: SkillUsageStage = body.stage.parse()?;
+        let evidence: SkillUsageEvidence = body.evidence.parse()?;
+        if evidence == SkillUsageEvidence::HostObserved && body.session_id.is_none() {
+            return Err(Error::Invalid {
+                message: "host_observed skill usage must be bound to a session; otherwise use model_reported"
+                    .to_owned(),
+            });
+        }
+        let resource_path = body.resource_path.map(|value| value.parse()).transpose()?;
+        let tenant = tenant_id()?;
+        let mut tx = rls::begin_tenant_tx(&state.pool, tenant).await?;
+        let binding = store::binding(&mut *tx, tenant, body.binding_id)
+            .await?
+            .filter(|binding| binding.enabled)
+            .ok_or_else(|| Error::NotFound {
+                entity: format!("enabled skill binding {}", body.binding_id),
+            })?;
+        let (skill, version) = read_skill_and_version(
+            &mut tx,
+            tenant,
+            binding.skill_id,
+            binding.pinned_version_id,
+        )
+        .await?;
+        if version.id != body.version_id {
+            return Err(Error::Conflict {
+                message: format!(
+                    "binding {} currently resolves to version {}, not {}",
+                    binding.id, version.id, body.version_id
+                ),
+            });
+        }
+        let (_, input, binding_allowed) = authorize_binding_scope(
+            &state,
+            &mut tx,
+            tenant,
+            binding.scope_id,
+            version.sensitivity,
+            Action::SkillRead,
+        )
+        .await?;
+        let source_allowed = authorize_skill_read(&state, &mut tx, tenant, &skill, &version).await?;
+        let actor = identity_of(&input, "recording skill usage")?;
+        if evidence == SkillUsageEvidence::HostObserved
+            && input
+                .identity
+                .as_ref()
+                .is_none_or(|identity| identity.kind != IdentityKind::Service)
+            && body.session_id.is_none()
+        {
+            return Err(Error::PolicyDenied {
+                action: Action::SkillRead.as_str().to_owned(),
+                resource: format!("skill usage for {}", version.id),
+                reason: "host-observed evidence requires a trusted service or a governed session"
+                    .to_owned(),
+            });
+        }
+        let (stored, inserted) = store::record_usage(
+            &mut tx,
+            tenant,
+            SkillUsageEventId::new(),
+            binding.id,
+            version.id,
+            body.session_id,
+            actor,
+            &body.client_event_id,
+            stage,
+            evidence,
+            resource_path.as_ref(),
+            &body.metadata,
+            body.occurred_at,
+        )
+        .await?;
+        if !inserted
+            && (stored.version_id != version.id
+                || stored.session_id != body.session_id
+                || stored.principal_id != actor
+                || stored.stage != stage
+                || stored.evidence != evidence
+                || stored.resource_path != resource_path
+                || stored.metadata != body.metadata
+                || stored.occurred_at != body.occurred_at)
+        {
+            return Err(Error::Conflict {
+                message: format!(
+                    "client_event_id {:?} was already used for different skill usage",
+                    body.client_event_id
+                ),
+            });
+        }
+        if inserted {
+            audit::record(
+                &mut tx,
+                tenant,
+                AuditAction::SkillUsageRecorded,
+                Resource::Scope(binding.scope_id).to_string(),
+                Outcome::Success,
+                json!({
+                    "event_id": stored.id,
+                    "binding_id": binding.id,
+                    "skill_id": skill.id,
+                    "version_id": version.id,
+                    "session_id": stored.session_id,
+                    "artifact_references": [
+                        ArtifactReference::new(
+                            ArtifactFamily::Skill,
+                            skill.id.to_string(),
+                            stage.as_str(),
+                            version.id.to_string(),
+                            None,
+                        )?,
+                        ArtifactReference::new(
+                            ArtifactFamily::Skill,
+                            binding.id.to_string(),
+                            stage.as_str(),
+                            version.id.to_string(),
+                            Some(binding.revision.to_string()),
+                        )?,
+                    ],
+                    "stage": stage.as_str(),
+                    "evidence": evidence.as_str(),
+                    "authz": {
+                        "binding": audit::decision_context(Action::SkillRead, &binding_allowed),
+                        "source": audit::decision_context(Action::SkillRead, &source_allowed),
+                    },
+                }),
+            )
+            .await?;
+        }
+        commit(tx).await?;
+        Ok((
+            if inserted {
+                StatusCode::CREATED
+            } else {
+                StatusCode::OK
+            },
+            Json(SkillUsageEventView::from(stored)),
+        ))
+    }
+    .await;
+    respond(&state, "usage_record", result).await
+}
+
+/// List usage evidence for one exact version.
+#[utoipa::path(
+    get,
+    path = "/v1/skills/{id}/versions/{version_id}/usage",
+    operation_id = "list_skill_usage",
+    tag = "skills",
+    params(
+        ("id" = String, Path, format = "uuid"),
+        ("version_id" = String, Path, format = "uuid"),
+        ListUsageParams
+    ),
+    responses(
+        (status = 200, description = "Usage evidence", body = SkillUsageListView),
+        (status = 404, description = "Absent or denied", body = ApiErrorBody)
+    ),
+    security(("bearer" = []))
+)]
+pub(crate) async fn list_usage(
+    State(state): State<AppState>,
+    Path((id, version_id)): Path<(SkillId, SkillVersionId)>,
+    Query(params): Query<ListUsageParams>,
+) -> Response {
+    let result = async {
+        let tenant = tenant_id()?;
+        let take = limit(params.limit)?;
+        let mut tx = rls::begin_tenant_tx(&state.pool, tenant).await?;
+        exact_visible(&state, &mut tx, tenant, id, Some(version_id)).await?;
+        let candidates = store::usage(&mut tx, tenant, version_id, params.cursor, take + 1).await?;
+        let more = candidates.len() as i64 > take;
+        let considered = candidates
+            .into_iter()
+            .take(take as usize)
+            .collect::<Vec<_>>();
+        let next_cursor = more
+            .then(|| considered.last().map(|event| event.id))
+            .flatten();
+        let events = considered.into_iter().map(Into::into).collect();
+        commit(tx).await?;
+        Ok(Json(SkillUsageListView {
+            events,
+            next_cursor,
+        }))
+    }
+    .await;
+    respond(&state, "usage_list", result).await
+}
+
+async fn version_bundle(
+    tx: &mut PgConnection,
+    tenant: TenantId,
+    skill: &StoredSkill,
+    version: &StoredVersion,
+) -> Result<SkillBundle> {
+    let refs = store::files(&mut *tx, tenant, version.id).await?;
+    let addresses = refs
+        .iter()
+        .map(|file| vedaflow::hash::ObjectHash::from_bytes(file.object_hash))
+        .collect::<Vec<_>>();
+    let objects = vedaflow::read_objects(tx, tenant, &addresses).await?;
+    let mut files = Vec::with_capacity(refs.len());
+    for file in refs {
+        let address = vedaflow::hash::ObjectHash::from_bytes(file.object_hash);
+        let object = objects.get(&address).ok_or_else(|| Error::Internal {
+            message: format!(
+                "skill version {} names missing object {address}",
+                version.id
+            ),
+        })?;
+        let asset = SkillAsset::from_bytes(&object.content)?;
+        if asset.scope_id != skill.governing_scope_id
+            || asset.sensitivity != version.sensitivity
+            || asset.file.path != file.path
+        {
+            return Err(Error::Internal {
+                message: format!("skill version {} failed its file binding", version.id),
+            });
+        }
+        files.push(asset.file);
+    }
+    Ok(SkillBundle {
+        name: skill.name.clone(),
+        files,
+    })
+}
+
+/// Run the built-in non-executing validation sandbox.
+#[utoipa::path(
+    post,
+    path = "/v1/skills/{id}/versions/{version_id}/tests",
+    operation_id = "run_skill_test",
+    tag = "skills",
+    request_body = RunSkillTestBody,
+    params(
+        ("id" = String, Path, format = "uuid"),
+        ("version_id" = String, Path, format = "uuid"),
+        ("Idempotency-Key" = String, Header, description = "Required; reuse verbatim on retry.")
+    ),
+    responses(
+        (status = 201, description = "Test run", body = SkillTestRunView),
+        (status = 200, description = "Idempotent replay", body = SkillTestRunView),
+        (status = 400, description = "Unsupported harness", body = ApiErrorBody),
+        (status = 404, description = "Absent or denied", body = ApiErrorBody)
+    ),
+    security(("bearer" = []))
+)]
+#[tracing::instrument(name = "skills.test.run", skip_all)]
+pub(crate) async fn run_test(
+    State(state): State<AppState>,
+    Path((id, version_id)): Path<(SkillId, SkillVersionId)>,
+    headers: HeaderMap,
+    payload: std::result::Result<Json<RunSkillTestBody>, JsonRejection>,
+) -> Response {
+    let result: Result<(StatusCode, Json<SkillTestRunView>)> = async {
+        let body = body(payload)?;
+        let harness: SkillTestHarness = body.harness.parse()?;
+        if harness != SkillTestHarness::ValidationSandbox {
+            return Err(Error::Invalid {
+                message: "the gateway runs only validation_sandbox; controlled_client results enter through an identified adapter harness"
+                    .to_owned(),
+            });
+        }
+        let tenant = tenant_id()?;
+        let canonical = json!({
+            "skill_id": id,
+            "version_id": version_id,
+            "body": body,
+        });
+        let claim = Claim::from_headers(&headers, "skill.test", &subject()?, &canonical)?;
+        if let Dispatch::Replay(run_id) =
+            crate::idempotency::dispatch(&state.pool, tenant, &claim).await?
+        {
+            let mut tx = rls::begin_tenant_tx(&state.pool, tenant).await?;
+            let (skill, _, _) =
+                exact_visible(&state, &mut tx, tenant, id, Some(version_id)).await?;
+            let scope = scope_for(&mut tx, tenant, skill.governing_scope_id).await?;
+            let input = authz::gather(
+                &state,
+                &mut tx,
+                Some(&scope),
+                AnchorSelection::none(),
+                Vec::new(),
+            )
+            .await?;
+            authz::decide(
+                &state,
+                &input,
+                Action::SkillWrite,
+                Resource::Scope(scope.id),
+            )?;
+            let stored = store::test_run(
+                &mut *tx,
+                tenant,
+                SkillTestRunId::from_uuid(run_id),
+            )
+            .await?
+            .filter(|run| run.version_id == version_id)
+            .ok_or_else(|| Error::Conflict {
+                message: "the idempotent Skill test result is no longer available".to_owned(),
+            })?;
+            commit(tx).await?;
+            return Ok((StatusCode::OK, Json(stored.into())));
+        }
+        let mut tx = rls::begin_tenant_tx(&state.pool, tenant).await?;
+        let (skill, version, _) =
+            exact_visible(&state, &mut tx, tenant, id, Some(version_id)).await?;
+        let scope = scope_for(&mut tx, tenant, skill.governing_scope_id).await?;
+        let input = authz::gather(&state, &mut tx, Some(&scope), AnchorSelection::none(), Vec::new())
+            .await?;
+        authz::decide(
+            &state,
+            &input,
+            Action::SkillWrite,
+            Resource::Scope(scope.id),
+        )?;
+        let actor = identity_of(&input, "testing a skill")?;
+        let bundle = version_bundle(&mut tx, tenant, &skill, &version).await?;
+        let manifest = bundle.validate()?;
+        let scan = scan_security(&bundle.files).await?;
+        let quality = score_quality(&bundle.files).await?;
+        let evidence = json!({
+            "executes_bundle_code": false,
+            "validated_manifest": true,
+            "files": bundle.files.len(),
+            "declared_tools": manifest.allowed_tools,
+            "declared_tools_are_authorization": false,
+            "security_findings": scan.files.iter().map(|file| file.findings.len()).sum::<usize>(),
+            "quality_score": quality.score,
+            "agent_skills_spec_commit": synveda_types::AGENT_SKILLS_SPEC_COMMIT,
+        });
+        let stored = store::record_test_run(
+            &mut *tx,
+            tenant,
+            SkillTestRunId::new(),
+            version.id,
+            harness,
+            VALIDATION_HARNESS_VERSION,
+            SkillTestOutcome::Passed,
+            scan.ruleset_version,
+            quality.rubric_version,
+            &evidence,
+            actor,
+        )
+        .await?;
+        claim
+            .remember(&mut tx, tenant, stored.id.as_uuid())
+            .await?;
+        audit::record(
+            &mut tx,
+            tenant,
+            AuditAction::SkillTestRecorded,
+            Resource::Scope(skill.governing_scope_id).to_string(),
+            Outcome::Success,
+            json!({
+                "test_run_id": stored.id,
+                "skill_id": skill.id,
+                "version_id": version.id,
+                "harness": harness.as_str(),
+                "harness_version": VALIDATION_HARNESS_VERSION,
+                "outcome": stored.outcome.as_str(),
+                "executes_bundle_code": false,
+            }),
+        )
+        .await?;
+        commit(tx).await?;
+        Ok((StatusCode::CREATED, Json(SkillTestRunView::from(stored))))
+    }
+    .await;
+    respond(&state, "test_run", result).await
+}
+
+/// List controlled test runs for one immutable version.
+#[utoipa::path(
+    get,
+    path = "/v1/skills/{id}/versions/{version_id}/tests",
+    operation_id = "list_skill_tests",
+    tag = "skills",
+    params(
+        ("id" = String, Path, format = "uuid"),
+        ("version_id" = String, Path, format = "uuid"),
+        ListTestRunsParams
+    ),
+    responses(
+        (status = 200, description = "Test runs", body = SkillTestRunListView),
+        (status = 404, description = "Absent or denied", body = ApiErrorBody)
+    ),
+    security(("bearer" = []))
+)]
+pub(crate) async fn list_tests(
+    State(state): State<AppState>,
+    Path((id, version_id)): Path<(SkillId, SkillVersionId)>,
+    Query(params): Query<ListTestRunsParams>,
+) -> Response {
+    let result = async {
+        let tenant = tenant_id()?;
+        let take = limit(params.limit)?;
+        let mut tx = rls::begin_tenant_tx(&state.pool, tenant).await?;
+        exact_visible(&state, &mut tx, tenant, id, Some(version_id)).await?;
+        let candidates =
+            store::test_runs(&mut tx, tenant, version_id, params.cursor, take + 1).await?;
+        let more = candidates.len() as i64 > take;
+        let considered = candidates
+            .into_iter()
+            .take(take as usize)
+            .collect::<Vec<_>>();
+        let next_cursor = more.then(|| considered.last().map(|run| run.id)).flatten();
+        let runs = considered.into_iter().map(Into::into).collect();
+        commit(tx).await?;
+        Ok(Json(SkillTestRunListView { runs, next_cursor }))
+    }
+    .await;
+    respond(&state, "tests", result).await
+}
+
+async fn respond<T: IntoResponse>(
+    state: &AppState,
+    operation: &'static str,
+    result: Result<T>,
+) -> Response {
+    let outcome = crate::response::outcome(&result);
+    metrics::counter!(SKILL_OPERATIONS_TOTAL, "op" => operation, "outcome" => outcome).increment(1);
+    crate::response::finish(state, operation, result).await
 }
 
 #[cfg(test)]
 mod tests {
-    use synveda_ingest::{FileScan, SkillFinding};
-
     use super::*;
 
-    fn scan(findings: &[(&'static str, ScanSeverity)]) -> BundleScan {
-        BundleScan {
-            ruleset_version: 1,
-            files: vec![FileScan {
-                path: "helper/scripts/setup.sh".to_owned(),
-                findings: findings
-                    .iter()
-                    .enumerate()
-                    .map(|(index, (rule, severity))| SkillFinding {
-                        rule,
-                        severity: *severity,
-                        title: "does something worth weighing",
-                        line: index + 1,
-                        count: 1,
-                    })
-                    .collect(),
+    fn file(path: &str, content: &str) -> SkillFileBody {
+        SkillFileBody {
+            path: path.to_owned(),
+            content: content.to_owned(),
+        }
+    }
+
+    #[test]
+    fn official_manifest_fields_and_tools_are_metadata_only() {
+        let bundle = SkillBundle {
+            name: "release-notes".parse().unwrap(),
+            files: vec![SkillFile {
+                path: "SKILL.md".parse().unwrap(),
+                content: "---\nname: release-notes\ndescription: Prepare release notes\nlicense: Apache-2.0\ncompatibility: Requires git\nallowed-tools: Read Grep\nmetadata:\n  owner: platform\n---\nDo the work.\n"
+                    .to_owned(),
             }],
-        }
-    }
-
-    /// ADR-0056 decision 5. The verdict is served per finding, and the
-    /// case that makes it worth serving is a threshold no client can
-    /// answer by comparing strings: under `high`, a `critical` blocks —
-    /// which equality would have denied — and a `notice` does not.
-    ///
-    /// This is the judgement `synveda proposal review` used to make on its
-    /// own. It is here now because the gateway holds the severity order
-    /// and the pack in force, and a client that reimplements the
-    /// comparison is a second implementation that agrees on the day it is
-    /// written.
-    #[test]
-    fn each_finding_carries_the_packs_verdict_on_it() {
-        let report = ScanReport::new(
-            &scan(&[
-                ("fetch-and-execute", ScanSeverity::Critical),
-                ("privilege-change", ScanSeverity::High),
-                ("package-install", ScanSeverity::Notice),
-            ]),
-            &SkillScanConfig::STRICT,
-        );
-        let verdicts: Vec<(ScanSeverity, bool)> = report
-            .findings
-            .iter()
-            .map(|finding| (finding.severity, finding.blocking))
-            .collect();
-        assert_eq!(
-            verdicts,
-            vec![
-                (ScanSeverity::Critical, true),
-                (ScanSeverity::High, true),
-                (ScanSeverity::Notice, false),
-            ],
-            "worst first, and blocking is an ordering against the threshold \
-             rather than an equality with it",
-        );
-
-        // The same bundle under the floor: only the invariant band
-        // refuses, so `high` moves from a refusal to something a reviewer
-        // weighs. The finding did not change; the pack did.
-        let relaxed = ScanReport::new(
-            &scan(&[("privilege-change", ScanSeverity::High)]),
-            &SkillScanConfig::FLOOR,
-        );
-        assert!(!relaxed.findings[0].blocking);
-        assert!(!relaxed.blocked);
-    }
-
-    /// A per-finding verdict has to agree with the bundle-level one, or a
-    /// reviewer reads "this will be refused" above a list in which nothing
-    /// is marked as the reason.
-    #[test]
-    fn a_blocked_bundle_names_at_least_one_blocking_finding() {
-        let report = ScanReport::new(
-            &scan(&[
-                ("package-install", ScanSeverity::Notice),
-                ("fetch-and-execute", ScanSeverity::Critical),
-            ]),
-            &SkillScanConfig::FLOOR,
-        );
-        assert!(report.blocked);
-        assert_eq!(
-            report.findings.iter().filter(|f| f.blocking).count(),
-            1,
-            "the count the refusal line quotes is the count of blocking findings",
-        );
-    }
-
-    /// ADR-0056 decision 6, amending ADR-0053 decision 7: the shortfall's
-    /// data and the shortfall's sentence both reach the wire, and the
-    /// sentence is [`QualityShortfall::describe`] — the same one the
-    /// refusal at publication and the audit payload carry, so a reviewer
-    /// and the refusal that stops them are not told the bar was missed in
-    /// two different languages.
-    #[test]
-    fn a_shortfall_serialises_its_data_and_its_sentence() {
-        let shortfall = QualityShortfall::BelowThreshold {
-            score: 40,
-            min_score: 70,
         };
-        let sentence = shortfall.describe();
-        let view = ShortfallView {
-            detail: shortfall.describe(),
-            shortfall,
-        };
-        let json = serde_json::to_value(&view).expect("serialises");
-
-        // The shape ADR-0053 defined, unchanged: flattened, tagged by
-        // `kind`, with the arithmetic still available to a client that
-        // wants to lay it out itself.
-        assert_eq!(json["kind"], json!("below-threshold"), "{json}");
-        assert_eq!(json["score"], json!(40), "{json}");
-        assert_eq!(json["min_score"], json!(70), "{json}");
-
-        // And the sentence, which is the addition.
-        assert_eq!(json["detail"], json!(sentence), "{json}");
+        let manifest = bundle.validate().unwrap();
+        assert_eq!(manifest.allowed_tools, ["Read", "Grep"]);
+        assert_eq!(manifest.compatibility.as_deref(), Some("Requires git"));
         assert!(
-            json["detail"].as_str().expect("detail").contains("70"),
-            "the bar is in the sentence, so a surface that renders only \
-             `detail` still says what to fix: {json}"
+            !SkillVersionView {
+                id: SkillVersionId::new(),
+                skill_id: SkillId::new(),
+                ordinal: 1,
+                bundle_digest: "00".repeat(32),
+                sensitivity: "internal".to_owned(),
+                manifest: serde_json::to_value(manifest).unwrap(),
+                source_kind: "authored".to_owned(),
+                provenance: json!({}),
+                scan: json!({}),
+                scan_ruleset_version: 1,
+                quality_score: 100,
+                rubric_version: 1,
+                declared_tools_are_authorization: false,
+                created_at: Utc::now(),
+                created_by: IdentityId::new(),
+            }
+            .declared_tools_are_authorization
         );
     }
 
-    /// Every shortfall kind, not just the one with arithmetic in it: a
-    /// kind that reached the wire without a sentence would be a slug in
-    /// front of a reviewer on both surfaces at once.
     #[test]
-    fn every_shortfall_kind_carries_a_sentence() {
-        for shortfall in [
-            QualityShortfall::BelowThreshold {
-                score: 40,
-                min_score: 70,
-            },
-            QualityShortfall::ChecklistMissing,
-            QualityShortfall::ChecklistIncomplete {
-                unanswered: vec![ChecklistItem::Tested],
-            },
-            QualityShortfall::ChecklistConcerns {
-                items: vec![ChecklistItem::Tested],
-            },
-        ] {
-            let view = ShortfallView {
-                detail: shortfall.describe(),
-                shortfall,
-            };
-            let json = serde_json::to_value(&view).expect("serialises");
-            let detail = json["detail"].as_str().expect("detail");
-            assert!(!detail.is_empty(), "{json}");
-            assert_ne!(
-                detail,
-                json["kind"].as_str().expect("kind"),
-                "a sentence, not the slug again: {json}"
-            );
-        }
+    fn bundle_digest_is_path_order_independent() {
+        let a = SkillVersionFileRef {
+            path: "SKILL.md".parse().unwrap(),
+            object_hash: "11".repeat(32),
+            chars: 1,
+        };
+        let b = SkillVersionFileRef {
+            path: "references/a.md".parse().unwrap(),
+            object_hash: "22".repeat(32),
+            chars: 1,
+        };
+        assert_eq!(
+            bundle_digest(&[a.clone(), b.clone()]).unwrap(),
+            bundle_digest(&[b, a]).unwrap()
+        );
+    }
+
+    #[test]
+    fn api_bundle_fields_reject_bad_paths() {
+        let supplied = file("../escape", "no");
+        assert!(supplied.path.parse::<SkillFilePath>().is_err());
     }
 }

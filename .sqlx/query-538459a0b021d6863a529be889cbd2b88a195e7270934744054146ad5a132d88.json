@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                insert into import_artifacts\n                    (id, tenant_id, job_id, ordinal, logical_path, artifact_kind,\n                     content_hash, frontmatter, body_markdown)\n                values ($1, $2, $3, $4, $5, $6, $7, $8, $9)\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Int4",
+        "Text",
+        "Text",
+        "Text",
+        "Jsonb",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "538459a0b021d6863a529be889cbd2b88a195e7270934744054146ad5a132d88"
+}

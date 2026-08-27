@@ -1,11 +1,11 @@
 //! AUTHZ-2 golden tests per pack (the AC): for a fixed two-department
-//! fixture, the full `MemoryRead` decision matrix of each embedded product
-//! pack, the `MemoryWrite` floor (MEM-1, ADR-0020 decision 3 — pack
+//! fixture, the full `KnowledgeRead` decision matrix of each embedded product
+//! pack, the `KnowledgeWrite` floor (MEM-1, ADR-0020 decision 3 — pack
 //! uniform: own home only, role-free; the content-role write grant lives
 //! in tests/roles.rs), the shared admin-plane semantics, and the
 //! cross-cutting invariants (quarantine, unplaced principals, foreign
-//! tenants). Packs are applied through the same assignment-resolution
-//! path production uses — never a PDP bypass (CLAUDE.md, seed §2.2).
+//! tenants). Packs use the same assignment-resolution path as production,
+//! never a PDP bypass.
 //!
 //! The fixture:
 //!
@@ -21,10 +21,11 @@
 use chrono::Utc;
 use synveda_policy::{
     Action, AuthzContext, OPEN_COLLABORATION, Pdp, Principal, REGULATED_STRICT, Resource, STANDARD,
+    ScopeNode,
 };
-use synveda_types::{
-    HierarchyNode, PackConfig, PolicyAssignment, Role, ScopeId, ScopeKind, Sensitivity, TenantId,
-};
+use synveda_types::anchor::{AnchorSource, ScopeAnchor};
+use synveda_types::scope::ScopeKind;
+use synveda_types::{PackConfig, PolicyAssignment, ScopeId, Sensitivity, TenantId};
 
 /// Every scope of the fixture — the candidate set a composition sweep
 /// would consider.
@@ -41,11 +42,11 @@ const ALL_SCOPES: [&str; 8] = [
 
 struct Fixture {
     tenant: TenantId,
-    nodes: Vec<HierarchyNode>,
+    nodes: Vec<ScopeNode>,
 }
 
 impl Fixture {
-    fn node(&self, slug: &str) -> &HierarchyNode {
+    fn node(&self, slug: &str) -> &ScopeNode {
         self.nodes
             .iter()
             .find(|node| node.slug == slug)
@@ -54,7 +55,11 @@ impl Fixture {
 
     /// The node and its ancestors — what a caller reads for the resource
     /// (and what the gateway reads for a principal's placement).
-    fn chain(&self, slug: &str) -> Vec<HierarchyNode> {
+    /// The chain the PDP takes: the old hierarchy's rows projected onto
+    /// the shape vocabulary at the caller's edge (CPR-6, ADR-0073
+    /// decision 1). The fixture still holds `HierarchyNode`s because the
+    /// hierarchy plane still exists; nothing below this line does.
+    fn chain(&self, slug: &str) -> Vec<ScopeNode> {
         let mut chain = vec![self.node(slug).clone()];
         let mut current = chain[0].parent_id;
         while let Some(id) = current {
@@ -66,7 +71,7 @@ impl Fixture {
             current = parent.parent_id;
             chain.push(parent.clone());
         }
-        chain
+        chain.clone()
     }
 
     fn assignment(&self, slug: &str, pack: &str) -> PolicyAssignment {
@@ -93,31 +98,27 @@ impl Fixture {
 fn fixture() -> Fixture {
     let tenant = TenantId::new();
     let mut nodes = Vec::new();
-    let mut add = |parent: Option<ScopeId>, kind: ScopeKind, slug: &str, depth: i32| -> ScopeId {
+    let mut add = |parent: Option<ScopeId>, kind: ScopeKind, slug: &str, _depth: i32| -> ScopeId {
         let id = ScopeId::new();
-        nodes.push(HierarchyNode {
+        nodes.push(ScopeNode {
             id,
             tenant_id: tenant,
             parent_id: parent,
             kind,
             slug: slug.to_owned(),
-            name: slug.to_owned(),
-            depth,
-            path: slug.to_owned(),
             sealed: false,
-            created_at: Utc::now(),
         });
         id
     };
-    let org = add(None, ScopeKind::Org, "org", 0);
-    let eng = add(Some(org), ScopeKind::Department, "eng", 1);
-    let sales = add(Some(org), ScopeKind::Department, "sales", 1);
-    let team_a = add(Some(eng), ScopeKind::Team, "team-a", 2);
-    let team_b = add(Some(eng), ScopeKind::Team, "team-b", 2);
-    let team_c = add(Some(sales), ScopeKind::Team, "team-c", 2);
-    add(Some(team_a), ScopeKind::User, "alice-user", 3);
-    add(Some(team_b), ScopeKind::User, "carol-user", 3);
-    add(Some(team_c), ScopeKind::User, "dave-user", 3);
+    let org = add(None, ScopeKind::Tenant, "org", 0);
+    let eng = add(Some(org), ScopeKind::OrgUnit, "eng", 1);
+    let sales = add(Some(org), ScopeKind::OrgUnit, "sales", 1);
+    let team_a = add(Some(eng), ScopeKind::OrgUnit, "team-a", 2);
+    let team_b = add(Some(eng), ScopeKind::OrgUnit, "team-b", 2);
+    let team_c = add(Some(sales), ScopeKind::OrgUnit, "team-c", 2);
+    add(Some(team_a), ScopeKind::Principal, "alice-user", 3);
+    add(Some(team_b), ScopeKind::Principal, "carol-user", 3);
+    add(Some(team_c), ScopeKind::Principal, "dave-user", 3);
     Fixture { tenant, nodes }
 }
 
@@ -162,7 +163,7 @@ fn read(
         pdp,
         fx,
         principal,
-        Action::MemoryRead,
+        Action::KnowledgeRead,
         placement,
         target,
         assignments,
@@ -202,7 +203,7 @@ fn write_targets(
                 pdp,
                 fx,
                 principal,
-                Action::MemoryWrite,
+                Action::KnowledgeWrite,
                 placement,
                 target,
                 assignments,
@@ -212,7 +213,7 @@ fn write_targets(
         .collect()
 }
 
-/// Asserts one pack's golden `MemoryRead` matrix for alice, plus the
+/// Asserts one pack's golden `KnowledgeRead` matrix for alice, plus the
 /// invariants every pack shares: version stamping, admin-plane semantics,
 /// unplaced/quarantined/foreign denial.
 fn assert_pack_golden(pack: &str, version: i64, expected_for_alice: &[&str]) {
@@ -239,7 +240,7 @@ fn assert_pack_golden(pack: &str, version: i64, expected_for_alice: &[&str]) {
 
     // The prompt registry reads exactly where memory does (PRMT-1,
     // ADR-0049 decision 4). Asserted rather than stated: each pack's
-    // PromptRead permits are a transcription of its own MemoryRead permits,
+    // PromptRead permits are a transcription of its own KnowledgeRead permits,
     // and a transcription is the kind of thing that drifts silently — a
     // department clause copied into two packs and forgotten in the third
     // would leave a consumer resolving prompts their pack does not share.
@@ -266,13 +267,14 @@ fn assert_pack_golden(pack: &str, version: i64, expected_for_alice: &[&str]) {
     // decision 7; SKIL-1, ADR-0051 decision 10), asserted for the same
     // reason a third transcription is a third place to drift. What this does
     // *not* say is that they admit the same material: `ContextPackRead`
-    // admits pack chunks, `MemoryRead` never does (ADR-0050 decision 8), and
+    // admits pack chunks, `KnowledgeRead` never does (ADR-0050 decision 8), and
     // `SkillRead` admits neither — a skill composes into no block at all
     // (ADR-0051 decision 9). The claim here is only that the same people are
     // trusted at the same scopes.
     for (action, what) in [
         (Action::ContextPackRead, "context packs"),
         (Action::SkillRead, "skills"),
+        (Action::ToolRead, "tool servers"),
     ] {
         for target in ALL_SCOPES {
             let decision = memory(
@@ -301,6 +303,7 @@ fn assert_pack_golden(pack: &str, version: i64, expected_for_alice: &[&str]) {
         (Action::PromptWrite, "prompts"),
         (Action::ContextPackWrite, "context packs"),
         (Action::SkillWrite, "skills"),
+        (Action::ToolWrite, "tool servers"),
     ] {
         let authorable: Vec<&str> = ALL_SCOPES
             .into_iter()
@@ -337,14 +340,11 @@ fn assert_pack_golden(pack: &str, version: i64, expected_for_alice: &[&str]) {
         token_scope: None,
     };
     for action in [
-        Action::HierarchyCreate,
-        Action::HierarchyRead,
-        Action::HierarchyUpdate,
-        Action::HierarchyDelete,
+        Action::ScopeCreate,
+        Action::ScopeRead,
+        Action::ScopeUpdate,
         Action::PolicyRead,
         Action::PolicyAssign,
-        Action::RoleRead,
-        Action::RoleAssign,
     ] {
         for principal in [&alice, &unplaced] {
             let scopes = fx.chain("team-b");
@@ -357,9 +357,6 @@ fn assert_pack_golden(pack: &str, version: i64, expected_for_alice: &[&str]) {
                         sensitivity: Some(Sensitivity::Internal),
                         scopes: &scopes,
                         assignments: &assignments,
-                        // RoleAssign requires the grant in context; the
-                        // decision must still be a deny.
-                        grant: (action == Action::RoleAssign).then_some(Role::Viewer),
                         ..Default::default()
                     },
                 )
@@ -437,20 +434,21 @@ fn assert_pack_golden(pack: &str, version: i64, expected_for_alice: &[&str]) {
 fn golden_regulated_strict() {
     assert_pack_golden(
         REGULATED_STRICT,
-        16,
+        23,
         &["org", "eng", "team-a", "alice-user"],
     );
 }
 
-/// standard: own chain plus the department subtree — sibling team-b joins;
-/// sales, team-c, and carol's personal scope stay out.
+/// standard: own chain, **plus the subtree of everything this caller holds**
+/// (CPR-6, ADR-0073). A principal with no grant holds nothing, so this matrix
+/// is now identical to `regulated-strict`'s — which is not a regression but
+/// the removal of the rank: what used to widen it was
+/// `principal.department`, the nearest department-kind ancestor of a
+/// placement, and there is no such thing any more. What widens it now is a
+/// grant, which `standard_shares_within_what_you_hold` asserts.
 #[test]
 fn golden_standard() {
-    assert_pack_golden(
-        STANDARD,
-        16,
-        &["org", "eng", "team-a", "team-b", "alice-user"],
-    );
+    assert_pack_golden(STANDARD, 23, &["org", "eng", "team-a", "alice-user"]);
 }
 
 /// open-collaboration: org-wide — only other people's personal scopes
@@ -460,7 +458,7 @@ fn golden_standard() {
 fn golden_open_collaboration() {
     assert_pack_golden(
         OPEN_COLLABORATION,
-        16,
+        23,
         &[
             "org",
             "eng",
@@ -473,24 +471,69 @@ fn golden_open_collaboration() {
     );
 }
 
-/// standard, from the other side of the org: dave (sales/team-c) gains
-/// nothing in eng — department sharing is symmetric and bounded.
+/// standard's sharing default, re-cut: **the subtree of what you hold**, not
+/// the subtree of where an org chart put you (CPR-6, ADR-0073).
+///
+/// The old version of this test asserted that dave (sales) gained nothing in
+/// eng and that carol (eng) gained her sibling team — both facts about
+/// `principal.department`. The property that replaces it says what a reader
+/// now has to be told: sharing follows a **grant's neighbourhood**, so carol
+/// with a grant at her own team reads the teams beside it, and carol with no
+/// grant reads exactly her own chain.
 #[test]
-fn standard_shares_within_the_department_only() {
+fn standard_shares_within_what_you_hold() {
     let pdp = Pdp::new().expect("build pdp");
     let fx = fixture();
     let assignments = [fx.assignment("org", STANDARD)];
-    let dave = fx.placed("dave", "dave-user");
-    assert_eq!(
-        composition(&pdp, &fx, &dave, Some("dave-user"), &assignments),
-        vec!["org", "sales", "team-c"],
-        "dave's department sharing must stop at sales"
-    );
     let carol = fx.placed("carol", "carol-user");
+
+    // No grant: own chain only.
     assert_eq!(
         composition(&pdp, &fx, &carol, Some("carol-user"), &assignments),
+        vec!["org", "eng", "team-b", "carol-user"],
+        "with nothing held, standard is regulated-strict's read surface"
+    );
+
+    // A grant at carol's own team: its **parent** — eng — is her
+    // neighbourhood, so eng's whole subtree joins and sales does not.
+    let team_b = fx.node("team-b");
+    let anchor = ScopeAnchor {
+        scope_id: team_b.id,
+        kind: team_b.kind,
+        parent_scope_id: team_b.parent_id,
+        depth: 0,
+        source: AnchorSource::Grant,
+        roles: vec![synveda_types::access::RoleKey::Member],
+        granted_at: vec![team_b.id],
+        via_groups: Vec::new(),
+    };
+    let anchors = [anchor];
+    let held: Vec<&'static str> = ALL_SCOPES
+        .into_iter()
+        .filter(|target| {
+            let scopes = fx.chain(target);
+            let principal_scopes = fx.chain("carol-user");
+            pdp.authorize(
+                &carol,
+                Action::KnowledgeRead,
+                Resource::Scope(fx.node(target).id),
+                &AuthzContext {
+                    sensitivity: Some(Sensitivity::Internal),
+                    scopes: &scopes,
+                    principal_scopes: &principal_scopes,
+                    anchors: &anchors,
+                    assignments: &assignments,
+                    ..Default::default()
+                },
+            )
+            .expect("authorize")
+            .allowed
+        })
+        .collect();
+    assert_eq!(
+        held,
         vec!["org", "eng", "team-a", "team-b", "carol-user"],
-        "carol shares alice's department, both teams visible"
+        "a grant at team-b shares its neighbourhood, and nothing in sales"
     );
 }
 
@@ -591,7 +634,7 @@ fn redaction_config_rides_the_effective_pack() {
 
     // A stored pack carries its explicit config; one stored without a
     // config falls back to strict (fail safe).
-    const MEMBER_READ: &str = r#"permit (principal, action == Synveda::Action::"MemoryRead", resource)
+    const MEMBER_READ: &str = r#"permit (principal, action == Synveda::Action::"KnowledgeRead", resource)
            when { principal in resource };"#;
     let deny_secrets = RedactionConfig {
         secrets: RedactionMode::Deny,
@@ -703,7 +746,7 @@ fn the_quality_bar_rides_the_pack_and_an_unconfigured_pack_gates_nothing() {
     // nothing — where the same pack gets `RedactionConfig::STRICT` on the
     // line above, because a secret leaking is a harm and a low-scoring
     // skill is an opinion.
-    const MEMBER_READ: &str = r#"permit (principal, action == Synveda::Action::"MemoryRead", resource)
+    const MEMBER_READ: &str = r#"permit (principal, action == Synveda::Action::"KnowledgeRead", resource)
            when { principal in resource };"#;
     let demanding = SkillQualityConfig {
         min_score: 90,

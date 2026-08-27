@@ -31,7 +31,7 @@ pub struct Outcome {
     /// did; 0.0 otherwise. Deliberately binary: a block that leaks one
     /// forbidden phrase is not 80% right.
     pub accuracy: f64,
-    /// The fraction of expected records whose marker reached the block.
+    /// The fraction of expected Knowledge whose address reached the block.
     /// Absent for scenarios that expect none.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub recall: Option<f64>,
@@ -101,14 +101,14 @@ pub struct ExtractionOutcome {
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub noted_misses: Vec<String>,
     /// What the pipeline committed, from the chain (decision 4).
-    pub committed_records: usize,
+    pub committed_knowledge: usize,
     /// What the sweep served. The gap between the two is admission doing
     /// its job — a horizon, a tier, a shut valid window — and naming it
     /// here is what stops it reading as an extraction miss.
-    pub served_records: usize,
+    pub served_knowledge: usize,
     /// Restatements MEM-5 absorbed into records that already asserted
     /// them: the part of that gap with a specific cause.
-    pub merged_records: usize,
+    pub merged_knowledge: usize,
     /// The models that actually served this group, as the pipeline recorded
     /// them — not the alias the config asked for (decision 12).
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -143,16 +143,11 @@ impl ExtractionOutcome {
     }
 }
 
-/// One scope tier's counts over one corpus (EVAL-4, ADR-0047 decision 9).
-/// `reached` counts an expected record that arrived at any tier and `body`
-/// the ones that arrived whole, so `body <= reached` always — the index
-/// tier names what it could not carry (ADR-0041 decision 13) and the gap
-/// between the two is the displacement CTX-4 parked here.
+/// One governed placement's selection counts over a corpus.
 #[derive(Debug, Default, Clone, Copy, Serialize)]
-pub struct TierCounts {
+pub struct ScopeCounts {
     pub expected: usize,
-    pub reached: usize,
-    pub body: usize,
+    pub selected: usize,
 }
 
 /// What one question measured.
@@ -171,34 +166,29 @@ pub struct QuestionOutcome {
     /// regression.
     pub skipped: bool,
     pub passed: bool,
-    pub per_tier: BTreeMap<String, TierCounts>,
-    /// Expected records that arrived at the index tier — named, not
-    /// carried. Not a failure on its own: the block still says they
-    /// exist and recall fetches them.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub demoted: Vec<String>,
-    /// Expected records the block did not carry at all.
+    pub per_scope: BTreeMap<String, ScopeCounts>,
+    /// Expected Knowledge the block did not select.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub missing: Vec<String>,
-    /// Every record the block carried, and how many of them this question
+    /// Every Knowledge item the block selected, and how many this question
     /// judges relevant — the two halves of `retrieval_precision`.
-    pub block_records: usize,
-    pub relevant_records: usize,
-    /// What the index tier cost this block, as the product counts it
-    /// (ADR-0041 decision 14). Reported beside the displacement so the
-    /// two halves of CTX-4's trade — what was named, what it cost — sit
-    /// together.
-    pub index_entries: usize,
-    pub index_tokens: u32,
-    /// Whether something bound this block: it carried fewer records than
+    pub selected_knowledge: usize,
+    pub relevant_knowledge: usize,
+    /// Whether something bound this block: it carried fewer Knowledge items than
     /// the reader is served, because the budget ran out or because
     /// retrieval offered fewer candidates. Either way a choice was made,
     /// which is the condition under which what the block *did* carry is a
     /// ranking decision rather than a restatement of the corpus size —
     /// and it is what `retrieval_precision` reads (ADR-0047 decision 8).
-    /// Exact rather than declared, so a corpus cannot opt a question into
-    /// or out of the axis by mistake.
+    /// Exact rather than declared, so a corpus cannot claim a ranking probe
+    /// whose block did not actually bind.
     pub bound: bool,
+    /// Whether the corpus deliberately supplied a narrower caller budget.
+    /// `retrieval_precision` requires this as well as `bound`: the structured
+    /// Knowledge evidence envelope can make the ordinary product default bind,
+    /// but those far-scope questions measure the scope gradient rather than
+    /// within-scope ranking.
+    pub explicit_budget: bool,
     pub tokens: u32,
     pub budget_tokens: u32,
     /// What a real BPE tokenizer counts for the same text. CTX-2 ships
@@ -207,9 +197,6 @@ pub struct QuestionOutcome {
     pub reference_tokens: usize,
     pub block_hash: String,
     pub latency_ms: f64,
-    /// Freshness of what the block carried, in block order (MEM-6).
-    #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub staleness_permille: Vec<u16>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub degraded: Vec<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -224,21 +211,18 @@ pub struct QaOutcome {
     #[serde(skip_serializing_if = "String::is_empty")]
     pub note: String,
     pub passed: bool,
-    /// The climbs this corpus made to exist at all, each naming the tier
-    /// it reached and the commit that carried it. A per-scope answer rate
-    /// is an assertion about FLOW-5 as much as about CTX-2, and this is
-    /// where that shows.
+    /// The governed publications this corpus made, each naming its target.
     #[serde(skip_serializing_if = "Vec::is_empty")]
-    pub promotions: Vec<String>,
+    pub publications: Vec<String>,
     pub questions: Vec<QuestionOutcome>,
     /// Questions this run could not measure, because the configured
     /// embedder cannot rank a paraphrase.
     pub skipped_semantic: usize,
-    /// How many records the reader is served in total, from its own
-    /// sweep. The denominator that says whether a block was bound, and
-    /// the number that makes a block's record count readable: 8 of 12 is
+    /// How many Knowledge items the reader is served in total, from its own
+    /// evaluation lens. The denominator that says whether a block was bound:
+    /// 8 of 12 is
     /// a ranking decision, 12 of 12 is the whole corpus fitting.
-    pub served_records: usize,
+    pub served_knowledge: usize,
     /// How long the whole corpus took to become composable. Reported,
     /// never gated: MEM-3's lag and EVAL-6's to bound.
     pub seed_wait_ms: f64,
@@ -264,11 +248,11 @@ impl QaOutcome {
 /// run's first N probes and see it again.
 #[derive(Debug, Serialize)]
 pub struct Leak {
-    /// `sensitivity` | `scope` | `tenant` — derived per (record, reader)
+    /// `sensitivity` | `scope` | `tenant` — derived per (Knowledge item, reader)
     /// pair, never declared, so a corpus author cannot file a leak under
     /// the wrong axis (ADR-0048 decision 12's note).
     pub boundary: String,
-    pub record: String,
+    pub knowledge: String,
     pub reader: String,
     pub surface: String,
     /// Which grader fired: `identity`, `content`, or both. A content-only
@@ -312,7 +296,7 @@ pub struct SecurityOutcome {
     /// zero above sits on.
     pub probes: usize,
     pub probes_by_surface: BTreeMap<String, usize>,
-    /// Declared-readable (record, reader) pairs, and how many actually
+    /// Declared-readable (Knowledge item, reader) pairs, and how many actually
     /// reached their reader over the whole run. The positive control:
     /// without it a run of zeros is indistinguishable from an empty
     /// corpus (decision 4).
@@ -333,7 +317,7 @@ pub struct SecurityOutcome {
     /// region the renderer left to content. Reported and gated by nothing
     /// on the first run (decision 11).
     ///
-    /// Distinct, because the same record echoes in every block that
+    /// Distinct, because the same item echoes in every block that
     /// carries it: the first run counted 159 occurrences of one line,
     /// which measured how many probes were issued rather than how much of
     /// the corpus renders indistinguishably from a marker.
@@ -803,11 +787,11 @@ fn extraction_summary(groups: &[ExtractionOutcome]) -> String {
             if group.passed { "✓" } else { "✗" },
             group.group,
             group.actor,
-            group.committed_records,
-            group.served_records
+            group.committed_knowledge,
+            group.served_knowledge
         ));
-        if group.merged_records > 0 {
-            out.push_str(&format!(", {} merged", group.merged_records));
+        if group.merged_knowledge > 0 {
+            out.push_str(&format!(", {} merged", group.merged_knowledge));
         }
         if group.chain_to > 0 {
             out.push_str(&format!(
@@ -867,7 +851,7 @@ fn extraction_summary(groups: &[ExtractionOutcome]) -> String {
     let unmatched: usize = groups.iter().map(|group| group.unmatched.len()).sum();
     if unmatched > 0 {
         out.push_str(&format!(
-            "\n  {unmatched} record(s) matched no expectation — the review queue for \
+            "\n  {unmatched} Knowledge item(s) matched no expectation — the review queue for \
              unanticipated invention:\n"
         ));
         for group in groups {
@@ -888,11 +872,9 @@ fn extraction_summary(groups: &[ExtractionOutcome]) -> String {
     out
 }
 
-/// The per-tier table EVAL-4's AC asks for (ADR-0047 decisions 8 and 9):
-/// what each scope tier was asked for, what reached the reader, and what
-/// reached it whole — plus the climbs that put the material there, because
-/// a per-scope answer rate is an assertion about FLOW-5 as much as about
-/// composition.
+/// The per-placement table: what each current scope shape was asked for and
+/// what the ContextRun selected, plus the governed publications that created
+/// shared Knowledge.
 fn qa_summary(corpora: &[QaOutcome]) -> String {
     let mut out = String::new();
     let questions: usize = corpora.iter().map(|corpus| corpus.questions.len()).sum();
@@ -902,11 +884,11 @@ fn qa_summary(corpora: &[QaOutcome]) -> String {
     ));
     for corpus in corpora {
         out.push_str(&format!(
-            "  {} {} (read by {}): {} record(s) served",
+            "  {} {} (read by {}): {} Knowledge item(s) served",
             if corpus.passed { "✓" } else { "✗" },
             corpus.corpus,
             corpus.reader,
-            corpus.served_records
+            corpus.served_knowledge
         ));
         if corpus.skipped_semantic > 0 {
             out.push_str(&format!(
@@ -915,8 +897,8 @@ fn qa_summary(corpora: &[QaOutcome]) -> String {
             ));
         }
         out.push('\n');
-        for promotion in &corpus.promotions {
-            out.push_str(&format!("      climbed: {promotion}\n"));
+        for publication in &corpus.publications {
+            out.push_str(&format!("      published: {publication}\n"));
         }
         for failure in &corpus.failures {
             out.push_str(&format!("      {failure}\n"));
@@ -928,21 +910,20 @@ fn qa_summary(corpora: &[QaOutcome]) -> String {
         }
     }
 
-    let mut totals: BTreeMap<&str, TierCounts> = BTreeMap::new();
+    let mut totals: BTreeMap<&str, ScopeCounts> = BTreeMap::new();
     for question in corpora
         .iter()
         .flat_map(|corpus| corpus.questions.iter())
         .filter(|question| !question.skipped)
     {
-        for (tier, counts) in &question.per_tier {
-            let slot = totals.entry(tier.as_str()).or_default();
+        for (scope, counts) in &question.per_scope {
+            let slot = totals.entry(scope.as_str()).or_default();
             slot.expected += counts.expected;
-            slot.reached += counts.reached;
-            slot.body += counts.body;
+            slot.selected += counts.selected;
         }
     }
-    out.push_str("\n  scope tier   reached            whole\n");
-    for (tier, counts) in &totals {
+    out.push_str("\n  placement    selected\n");
+    for (scope, counts) in &totals {
         let ratio = |hit: usize| {
             if counts.expected == 0 {
                 "     —".to_owned()
@@ -954,29 +935,7 @@ fn qa_summary(corpora: &[QaOutcome]) -> String {
                 )
             }
         };
-        out.push_str(&format!(
-            "  {:<12} {:<18} {}\n",
-            tier,
-            ratio(counts.reached),
-            ratio(counts.body)
-        ));
-    }
-
-    // Demotions before misses: a record the index tier named is a
-    // different fact from one the block never carried, and a reader
-    // scanning this needs to know which is which.
-    let demoted: Vec<&str> = corpora
-        .iter()
-        .flat_map(|corpus| corpus.questions.iter())
-        .flat_map(|question| question.demoted.iter().map(String::as_str))
-        .collect();
-    if !demoted.is_empty() {
-        out.push_str(&format!(
-            "\n  {} expected record(s) reached the reader as index lines rather than bodies — \
-             named, not carried:\n    {}\n",
-            demoted.len(),
-            demoted.join(", ")
-        ));
+        out.push_str(&format!("  {:<12} {}\n", scope, ratio(counts.selected)));
     }
     let noted: Vec<String> = corpora
         .iter()
@@ -1036,13 +995,13 @@ fn security_summary(corpora: &[SecurityOutcome]) -> String {
             out.push_str(&format!("      {failure}\n"));
         }
         // Leaks before anything else a reader might scan past. A count in
-        // the axis table says a boundary broke; this says which record
+        // the axis table says a boundary broke; this says which Knowledge item
         // reached whom, under what phrasing, and at which probe — the
         // three things needed to reproduce it.
         //
         // Capped, because one disclosure recurs under every phrasing that
         // reaches it: the demo's pack change produced 322 of these lines
-        // for two (record, reader) pairs, which is a wall rather than a
+        // for two (Knowledge item, reader) pairs, which is a wall rather than a
         // report. The JSON keeps every one — that is what the artifact is
         // for — and the first few plus a count is what a person needs to
         // start reproducing.
@@ -1050,7 +1009,7 @@ fn security_summary(corpora: &[SecurityOutcome]) -> String {
             out.push_str(&format!(
                 "      LEAK [{}] {} → {} via {} ({}) at probe {}{}\n",
                 leak.boundary,
-                leak.record,
+                leak.knowledge,
                 leak.reader,
                 leak.surface,
                 leak.predicate,
@@ -1065,10 +1024,10 @@ fn security_summary(corpora: &[SecurityOutcome]) -> String {
             let distinct: BTreeSet<(&str, &str)> = corpus
                 .leaks
                 .iter()
-                .map(|leak| (leak.record.as_str(), leak.reader.as_str()))
+                .map(|leak| (leak.knowledge.as_str(), leak.reader.as_str()))
                 .collect();
             out.push_str(&format!(
-                "      … and {} more, over {} distinct (record, reader) pair(s) — the full list \
+                "      … and {} more, over {} distinct (Knowledge item, reader) pair(s) — the full list \
                  is in the JSON report\n",
                 corpus.leaks.len() - LEAKS_SHOWN,
                 distinct.len()

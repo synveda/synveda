@@ -1,15 +1,10 @@
 /**
  * One proposal, in full (CNSL-1, ADR-0056).
  *
- * The order of the blocks is the order a reviewer decides in — is it safe,
- * is it good, what changed — which is the CLI's order too, and for the same
- * reason rather than for consistency's sake: the diff says what the change
- * *is*, and the scan says what it can *do*.
- *
- * Every judgement on this screen arrives from the gateway. `blocking` is
- * rendered, not computed; a shortfall's sentence is displayed, not composed
- * (ADR-0056 decisions 5 and 6). What this file decides is where things sit
- * and what they look like, which is the half the ADR left to each client.
+ * This is the common VedaFlow review: requirement, approvals and the exact
+ * immutable members a verdict binds. CPR-24 removed its old Skill-specific
+ * scan/checklist/quality branch; that evidence now belongs to the versioned
+ * Skills Library, while this surface remains shared by every artifact family.
  */
 
 import { useState } from "react";
@@ -20,20 +15,20 @@ import {
   effectLabel,
   instant,
   label,
-  readable,
   showsDiff,
   type Approval,
-  type Finding,
   type Member,
   type ProposalDetail,
-  type QualityReport,
-  type ScanReport,
 } from "./review.mjs";
 
 export interface ReviewProps {
   detail: ProposalDetail;
   /** Cast a verdict. Absent when the screen is read-only. */
   onVerdict?: (verdict: "approve" | "reject", reason: string) => void;
+  /** Cancel this open change as its author. */
+  onCancel?: () => void;
+  /** Execute an approved apply or publication effect. */
+  onExecute?: () => void;
   /**
    * Why no verdict is offered, when none is (CNSL-2, ADR-0058).
    *
@@ -47,7 +42,15 @@ export interface ReviewProps {
   busy?: boolean;
 }
 
-export function Review({ detail, onVerdict, cannotReview, error, busy }: ReviewProps) {
+export function Review({
+  detail,
+  onVerdict,
+  onCancel,
+  onExecute,
+  cannotReview,
+  error,
+  busy,
+}: ReviewProps) {
   return (
     <article className="review">
       <Heading detail={detail} />
@@ -57,8 +60,8 @@ export function Review({ detail, onVerdict, cannotReview, error, busy }: ReviewP
         </div>
       ) : null}
       <Reviews approvals={detail.approvals} />
-      {detail.scan ? <Scan scan={detail.scan} /> : null}
-      {detail.quality ? <Quality quality={detail.quality} id={detail.id} /> : null}
+      <Artifacts detail={detail} />
+      <Timeline detail={detail} />
       <Effect detail={detail} />
       {onVerdict ? (
         <Verdict onVerdict={onVerdict} busy={busy ?? false} />
@@ -68,7 +71,61 @@ export function Review({ detail, onVerdict, cannotReview, error, busy }: ReviewP
           <p className="muted">{cannotReview}</p>
         </section>
       ) : null}
+      {onCancel || onExecute ? (
+        <section className="verdict-section">
+          <h3>change lifecycle</h3>
+          <div className="actions">
+            {onExecute ? (
+              <button type="button" disabled={busy} onClick={onExecute}>
+                {detail.effect === "apply" ? "Apply approved change" : "Publish approved change"}
+              </button>
+            ) : null}
+            {onCancel ? (
+              <button type="button" disabled={busy} onClick={onCancel}>
+                Cancel proposal
+              </button>
+            ) : null}
+          </div>
+        </section>
+      ) : null}
     </article>
+  );
+}
+
+function Artifacts({ detail }: { detail: ProposalDetail }) {
+  return (
+    <section>
+      <h3>governed artifacts</h3>
+      <ul className="plain">
+        {detail.artifact_references.map((reference) => (
+          <li key={`${reference.family}:${reference.artifact_id}:${reference.operation}`}>
+            <strong>{reference.family}</strong> · {reference.operation} · <code>{reference.artifact_id}</code>
+            <div className="muted">
+              proposed <code>{reference.version}</code>
+              {reference.expected_revision ? (
+                <> from <code>{reference.expected_revision}</code></>
+              ) : null}
+            </div>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+function Timeline({ detail }: { detail: ProposalDetail }) {
+  return (
+    <section>
+      <h3>timeline</h3>
+      <ol className="plain">
+        {detail.timeline.map((event, index) => (
+          <li key={`${event.kind}:${event.at}:${index}`}>
+            {event.kind} {event.actor_subject ? `by ${event.actor_subject}` : ""} at {instant(event.at)}
+            {event.reason ? <div className="comment">“{event.reason}”</div> : null}
+          </li>
+        ))}
+      </ol>
+    </section>
   );
 }
 
@@ -113,19 +170,6 @@ function Heading({ detail }: { detail: ProposalDetail }) {
             <dd>{detail.close_reason}</dd>
           </>
         ) : null}
-        {detail.promotion ? (
-          <>
-            <dt>opened by</dt>
-            <dd>
-              rule <code>{detail.promotion.rule}</code>
-              <span className="muted">
-                {" "}
-                — checkable against audit seq {detail.promotion.from_seq}..=
-                {detail.promotion.to_seq}
-              </span>
-            </dd>
-          </>
-        ) : null}
       </dl>
     </section>
   );
@@ -153,138 +197,6 @@ function Reviews({ approvals }: { approvals: Approval[] }) {
   );
 }
 
-function Scan({ scan }: { scan: ScanReport }) {
-  return (
-    <section>
-      <h3>
-        security scan{" "}
-        <span className="muted">
-          (ruleset v{scan.ruleset_version}, this pack refuses at {scan.blocks_at})
-        </span>
-      </h3>
-      {scan.findings.length === 0 ? <p className="muted">nothing found</p> : null}
-      <ul className="findings">
-        {scan.findings.map((finding, index) => (
-          <FindingRow key={index} finding={finding} />
-        ))}
-      </ul>
-      {scan.blocked ? (
-        <p className="refusal">
-          this bundle will be REFUSED at publication (
-          {scan.findings.filter((finding) => finding.blocking).length} findings at{" "}
-          {scan.blocks_at} or above); approving it cannot make it publishable
-        </p>
-      ) : scan.worst ? (
-        <p className="muted">
-          worst is {scan.worst}; the pack in force reports it rather than refusing it, so this is
-          yours to weigh
-        </p>
-      ) : null}
-    </section>
-  );
-}
-
-function FindingRow({ finding }: { finding: Finding }) {
-  return (
-    <li className={finding.blocking ? "finding blocking" : "finding"}>
-      <span className={`severity ${finding.severity}`}>{finding.severity}</span>{" "}
-      <code>
-        {finding.path}:{finding.line}
-      </code>{" "}
-      <code>{finding.rule}</code>
-      {finding.count > 1 ? <span className="muted"> ×{finding.count}</span> : null}
-      {/* The verdict in the text and not only in the colour. A chip a
-          screen reader announces and a copy-paste carries, because this is
-          the one fact on the row that decides whether approving the
-          proposal can achieve anything — and it matters most where the
-          reader cannot reason around it, which is a severity served by a
-          gateway newer than this bundle. */}
-      {finding.blocking ? <span className="chip">blocks</span> : null}
-      <div className="muted">{finding.title}</div>
-    </li>
-  );
-}
-
-function Quality({ quality, id }: { quality: QualityReport; id: string }) {
-  const failed = quality.checks.filter((check) => !check.passed);
-  return (
-    <section>
-      {/* Two numbers, never one (ADR-0053 decision 1). A reviewer shown an
-          average cannot tell a well-formatted bundle nobody worked through
-          from one somebody did. */}
-      <h3>
-        quality {quality.score}/100{" "}
-        <span className="muted">
-          (rubric v{quality.rubric_version},{" "}
-          {quality.min_score === 0
-            ? "this pack sets no bar"
-            : `this pack asks for ${quality.min_score}`}
-          )
-        </span>
-      </h3>
-      {failed.length === 0 ? <p className="muted">every check passed</p> : null}
-      <ul className="plain">
-        {failed.map((check) => (
-          <li key={check.check}>
-            <span className="weight">-{check.weight}</span> <code>{check.check}</code>{" "}
-            {check.title}
-            {check.detail ? <div className="muted">{check.detail}</div> : null}
-          </li>
-        ))}
-      </ul>
-
-      <h4>
-        checklist{" "}
-        {quality.checklist ? (
-          <span>
-            {quality.checklist.complete ? "complete" : "PARTIAL"}{" "}
-            <span className="muted">{instant(quality.checklist.reviewed_at)}</span>
-          </span>
-        ) : quality.requires_checklist ? (
-          <span className="refusal">NONE recorded for these bytes — this pack requires one</span>
-        ) : (
-          <span className="muted">none recorded; this pack does not require one</span>
-        )}
-      </h4>
-      {quality.checklist ? (
-        <>
-          <ul className="plain answers">
-            {Object.entries(quality.checklist.answers).map(([item, verdict]) => (
-              <li key={item} className={verdict === "no" ? "concern" : undefined}>
-                <span className="verdict">{verdict}</span> {item}
-              </li>
-            ))}
-          </ul>
-          {quality.checklist.note ? (
-            <p className="comment">“{quality.checklist.note}”</p>
-          ) : null}
-          {quality.checklist.concerns.length > 0 ? (
-            <p className="refusal">
-              a reviewer objected to {quality.checklist.concerns.join(", ")}; publishing over that
-              needs an override under every pack
-            </p>
-          ) : null}
-        </>
-      ) : quality.requires_checklist ? (
-        <p className="muted">
-          record it with: <code>synveda proposal checklist {id}</code>
-        </p>
-      ) : null}
-
-      {quality.needs_override ? (
-        <p className="refusal">
-          {/* The sentences are the gateway's, verbatim. A second author of
-              one line is two lines, and nothing would ever fail when they
-              diverged (ADR-0056 decision 6). */}
-          publishing this needs a quality override (
-          {quality.shortfalls.map((shortfall) => shortfall.detail).join("; ")}); approving it does
-          not clear the bar
-        </p>
-      ) : null}
-    </section>
-  );
-}
-
 function Effect({ detail }: { detail: ProposalDetail }) {
   const target = detail.target_scope_path ?? detail.target_scope_id;
   return (
@@ -301,14 +213,14 @@ function Effect({ detail }: { detail: ProposalDetail }) {
 
 function MemberRow({ member }: { member: Member }) {
   const rows = showsDiff(member)
-    ? diffLines(member.baseline ? readable(member.baseline.text) : null, readable(member.proposed))
+    ? diffLines(member.baseline?.text ?? null, member.proposed)
     : [];
   return (
     <div className="member">
       <div className={`member-head ${member.effect}`}>
         <span className="effect">{effectLabel(member.effect)}</span> <code>{label(member.member)}</code>{" "}
         <span className="muted">
-          {member.class ?? member.asset} · {member.sensitivity}
+          {member.asset} · {member.sensitivity}
         </span>
       </div>
       {member.unchanged ? null : (
@@ -318,7 +230,7 @@ function MemberRow({ member }: { member: Member }) {
               and the proposal and belongs to nobody's decision yet
               (ADR-0035 decision 5). Telling a reviewer the bytes moved
               without telling them where to is telling them to go and look. */}
-          <pre className="now">{readable(member.content)}</pre>
+          <pre className="now">{member.content}</pre>
         </div>
       )}
       {rows.length > 0 ? (

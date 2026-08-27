@@ -435,7 +435,7 @@ mod tests {
         // Disjoint domains: no encoding of an object can collide with a tree.
         assert_ne!(
             empty.as_bytes(),
-            object_hash(AssetKind::Memory, b"").as_bytes()
+            object_hash(AssetKind::Knowledge, b"").as_bytes()
         );
     }
 
@@ -507,7 +507,7 @@ mod tests {
 
     #[test]
     fn hex_round_trips_and_rejects_garbage() {
-        let hash = object_hash(AssetKind::Memory, b"content");
+        let hash = object_hash(AssetKind::Knowledge, b"content");
         assert_eq!(hash.to_hex().parse::<ObjectHash>().unwrap(), hash);
         assert!(matches!(
             "not-hex".parse::<ObjectHash>(),

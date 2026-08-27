@@ -120,12 +120,22 @@ button:hover,
   border-color: var(--accent);
 }
 
+/*
+ * A banner is neutral; `.error` is what makes it red (CPR-8). Until the
+ * shell there was only ever one kind, so the base rule carried the error
+ * colours — which would have made "the chain verifies" and "your session
+ * expired" look identical the moment a second kind arrived.
+ */
 .banner {
-  border: 1px solid var(--error-line);
-  background: var(--error-bg);
+  border: 1px solid var(--line);
   border-radius: 6px;
   padding: 0.85rem 1rem;
   margin-bottom: 1.5rem;
+}
+
+.banner.error {
+  border-color: var(--error-line);
+  background: var(--error-bg);
 }
 
 .banner p {
@@ -167,8 +177,7 @@ h4 {
 }
 
 ul.plain,
-ul.queue,
-ul.findings {
+ul.queue {
   list-style: none;
   margin: 0;
   padding: 0;
@@ -197,66 +206,18 @@ ul.queue li + li {
   font-weight: 600;
 }
 
-/*
- * A blocking finding is marked in the text, not only in the colour. The
- * chip is what a screen reader announces and what survives a copy-paste
- * into a ticket; the colour is the fast read for somebody looking at it.
- * Either alone would leave a reader unable to tell which findings stop the
- * publication — most acutely for a severity served by a newer gateway,
- * where the name itself tells them nothing (ADR-0056 decision 5).
- */
-.chip {
-  display: inline-block;
-  border: 1px solid var(--error-line);
-  background: var(--error-bg);
-  border-radius: 999px;
-  padding: 0 0.5rem;
-  margin-left: 0.4rem;
-  font-size: 0.78rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
-.finding {
-  padding: 0.4rem 0;
-  border-bottom: 1px solid var(--line);
-}
-
-.finding.blocking .severity {
-  font-weight: 700;
-}
-
-.severity {
-  display: inline-block;
-  min-width: 4.5rem;
-  font-size: 0.85rem;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-}
-
 .refusal {
   color: var(--error-line);
   margin: 0.5rem 0;
 }
 
-.stale,
-.weight {
+.stale {
   color: var(--muted);
 }
 
 .comment {
   color: var(--muted);
   font-style: italic;
-}
-
-.answers .concern .verdict {
-  color: var(--error-line);
-  font-weight: 700;
-}
-
-.verdict {
-  display: inline-block;
-  min-width: 2.5rem;
 }
 
 .member {
@@ -329,11 +290,9 @@ button:disabled {
 
 /* ── The hierarchy & policy explorer (CNSL-2, ADR-0058) ─────────────────
  *
- * A neutral badge, deliberately not `.chip`. That class is CNSL-1's alert
- * for a finding that blocks a publication and is styled as one; an origin
- * or a grant's outcome is a fact rather than a warning, and painting
- * "assigned here" in the refusal colour would teach a reader that the
- * loudest thing on the screen is the ordinary one.
+ * A neutral badge: an origin or a grant's outcome is a fact rather than a
+ * warning, and painting "assigned here" in the refusal colour would teach a
+ * reader that the loudest thing on the screen is the ordinary one.
  */
 .tag {
   display: inline-block;
@@ -450,12 +409,12 @@ button:disabled {
   font-size: 0.84rem;
 }
 
-ul.lapses {
+ul.relaxations {
   list-style: none;
   padding: 0;
 }
 
-ul.lapses li {
+ul.relaxations li {
   padding: 0.35rem 0;
   border-bottom: 1px solid var(--line);
 }
@@ -494,4 +453,1205 @@ ul.actions-list {
   padding-top: 0.4rem;
   margin-top: 0.6rem;
   font-style: italic;
+}
+
+/*
+ * ── The product shell (CPR-8, ADR-0075) ──────────────────────────────────
+ *
+ * The console stopped being one page and became an application with
+ * navigation, so the layout stopped being `main { max-width }` and became a
+ * header, a sidebar and an outlet. Plain CSS still — no framework, no
+ * external font, and the gateway's `default-src 'none'` policy enforces it
+ * rather than trusting it (ADR-0056 decision 8).
+ */
+
+.shell {
+  min-height: 100vh;
+}
+
+.shell-header {
+  display: flex;
+  align-items: center;
+  gap: 1.5rem;
+  flex-wrap: wrap;
+  border-bottom: 1px solid var(--line);
+  padding: 0.75rem 1.25rem;
+}
+
+.brand {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+}
+
+.brand-link {
+  color: var(--ink);
+  text-decoration: none;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.tenant {
+  font-size: 0.85rem;
+}
+
+.switchers {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.identity {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.switcher {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.switcher-label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+select,
+input,
+textarea {
+  font: inherit;
+  color: var(--ink);
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.3rem 0.5rem;
+}
+
+.shell-body {
+  display: grid;
+  grid-template-columns: 13rem 1fr;
+  align-items: start;
+  gap: 2rem;
+  max-width: 78rem;
+  margin: 0 auto;
+  padding: 1.5rem 1.25rem 4rem;
+}
+
+/* One column on a narrow viewport: the sidebar becomes a strip above the
+   page rather than squeezing the content it exists to reach. */
+@media (max-width: 60rem) {
+  .shell-body {
+    grid-template-columns: 1fr;
+  }
+  .sidebar ul.nav {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.25rem;
+  }
+}
+
+.nav-heading {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  margin: 1.5rem 0 0.4rem;
+}
+
+ul.nav {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.nav-link {
+  display: block;
+  padding: 0.3rem 0.55rem;
+  border-radius: 6px;
+  color: var(--ink);
+  text-decoration: none;
+  border-left: 2px solid transparent;
+}
+
+.nav-link:hover {
+  border-left-color: var(--line);
+}
+
+.nav-link.selected {
+  border-left-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.page {
+  min-width: 0;
+}
+
+.page-heading {
+  border: 0;
+  padding: 0;
+  margin: 0 0 1.5rem;
+  display: block;
+}
+
+.page-heading h1 {
+  font-size: 1.35rem;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.page-heading p {
+  margin: 0.25rem 0 0;
+}
+
+.centred {
+  max-width: 32rem;
+  margin: 4rem auto;
+  padding: 0 1.25rem;
+}
+
+/* Home's summary cards. */
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: 1rem;
+  margin-bottom: 2rem;
+}
+
+.card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.85rem 1rem;
+}
+
+.card h2 {
+  margin-bottom: 0.35rem;
+}
+
+.card-value {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 600;
+}
+
+ul.anchors,
+ul.next,
+ul.invites,
+ul.repositories,
+ul.skills,
+ul.packs,
+ul.client-choices {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+ul.anchors li,
+ul.invites li,
+ul.repositories li,
+ul.sessions li,
+ul.skills li,
+ul.packs li,
+ul.client-choices li {
+  border-bottom: 1px solid var(--line);
+  padding: 0.55rem 0;
+}
+
+ul.next li {
+  padding: 0.3rem 0;
+}
+
+ul.client-choices label {
+  display: block;
+  cursor: pointer;
+}
+
+/* Tables: members, audit. Scrollable rather than overflowing, because a
+   principal id and a resource string are both long and neither is worth
+   truncating into ambiguity. */
+table.members,
+table.audit {
+  width: 100%;
+  border-collapse: collapse;
+  display: block;
+  overflow-x: auto;
+}
+
+table.members th,
+table.audit th {
+  text-align: left;
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  font-weight: 600;
+  padding: 0.35rem 0.6rem 0.35rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+table.members td,
+table.audit td {
+  padding: 0.5rem 0.6rem 0.5rem 0;
+  border-bottom: 1px solid var(--line);
+  vertical-align: top;
+}
+
+.mono {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  font-size: 0.85em;
+}
+
+.breakable {
+  overflow-wrap: anywhere;
+}
+
+.inline-form,
+.stacked-form {
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  margin-top: 1rem;
+}
+
+.stacked-form {
+  flex-direction: column;
+  align-items: stretch;
+  max-width: 34rem;
+}
+
+.inline-form label,
+.stacked-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.form-error {
+  color: var(--error-line);
+}
+
+.choice {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.6rem 0.9rem;
+  display: flex;
+  gap: 1.25rem;
+  margin: 0 0 0.75rem;
+}
+
+.choice legend {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+ol.commands {
+  padding-left: 1.2rem;
+}
+
+ol.commands li {
+  margin: 0.35rem 0;
+}
+
+.onboarding {
+  max-width: 44rem;
+}
+
+.planned {
+  max-width: 44rem;
+}
+
+/* Sessions (CPR-10, CPR-11). A run is a *row you open*, so the whole row is
+   the control — a small chevron would make the hit area a fifth of what a
+   reader aims at, and a run is the one thing on this page anybody clicks.
+   Since CPR-11 it is a real <a href> rather than a button: a run has its own
+   address, so middle-click, copy-link and open-in-new-tab all have to work. */
+ul.sessions a.row {
+  display: block;
+  width: 100%;
+  padding: 0;
+  color: inherit;
+  text-decoration: none;
+}
+
+ul.sessions a.row:hover strong {
+  text-decoration: underline;
+}
+
+/* A run that stopped without finishing is marked in the list as well as on
+   its own page, because the list is where somebody notices. */
+ul.sessions li.incomplete {
+  border-left: 2px solid var(--error-line);
+  padding-left: 0.5rem;
+}
+
+/* A running agent is the one state worth seeing across a list at a glance. */
+.tag.live {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* A run nobody closed and a run that broke are both worth noticing, and the
+   page keeps them apart in words; the tone only says "look at this". */
+.tag.warn {
+  border-color: var(--error-line);
+  background: var(--error-bg);
+  color: inherit;
+}
+
+.tag.done {
+  opacity: 0.7;
+}
+
+.timeline {
+  margin: 0.4rem 0 0.8rem 0;
+  padding-left: 0.9rem;
+  border-left: 2px solid var(--line);
+}
+
+.timeline ol {
+  list-style: none;
+  margin: 0.3rem 0 0 0;
+  padding: 0;
+  font-size: 0.92rem;
+}
+
+.timeline li {
+  padding: 0.2rem 0;
+  border: 0;
+}
+
+/* Context runs read as a different kind of thing from what the agent said or
+   did: one is the product answering, the rest is the run. */
+.timeline li.context {
+  color: var(--accent);
+}
+
+
+/* ── The session detail page (CPR-11, ADR-0077) ───────────────────────── */
+
+/* The filter row wraps rather than scrolls: six controls on a narrow screen
+   is two rows of three, and a horizontal scrollbar over form controls is a
+   filter nobody finds. */
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem 1rem;
+  align-items: flex-end;
+  margin: 0.6rem 0 1rem 0;
+}
+
+.filters label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.audit-filters {
+  padding: 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.audit-filters input,
+.audit-filters select {
+  max-width: 18rem;
+}
+
+.run-summary {
+  margin-bottom: 1.2rem;
+}
+
+/* The facts about a run, as a definition list: the pairing is the meaning,
+   and a table would be a grid of two columns pretending to be data. */
+dl.facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.25rem 1rem;
+  margin: 0.6rem 0 0 0;
+}
+
+dl.facts dt {
+  color: var(--muted);
+}
+
+dl.facts dd {
+  margin: 0;
+}
+
+/* A warning banner is the error tone without the alert role: the run already
+   happened, and there is nothing here for the reader to fix in the page. */
+.banner.warn {
+  background: var(--error-bg);
+  border: 1px solid var(--error-line);
+}
+
+.timeline ol.entries {
+  font-size: 0.92rem;
+}
+
+.timeline li.entry {
+  padding: 0.35rem 0;
+  border-bottom: 1px solid var(--line);
+}
+
+/* A warning is the one family a reader must not have to go looking for. */
+.timeline li.entry.warning {
+  border-left: 2px solid var(--error-line);
+  padding-left: 0.5rem;
+}
+
+/* And an entry that did not arrive live is marked in place, because a
+   transcript with one recovered hour in the middle reads perfectly plausibly
+   until somebody notices. */
+.timeline li.entry.late {
+  border-left: 2px dashed var(--muted);
+  padding-left: 0.5rem;
+}
+
+.late-note {
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+/* A button that reads as a link: the expansion is an inline act, not a form
+   submission, and a full button would out-weigh the line it belongs to. */
+button.link {
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: var(--accent);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.diagnostic pre {
+  overflow-x: auto;
+  max-height: 22rem;
+  padding: 0.5rem;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  font-size: 0.85rem;
+}
+
+.diagnostic-closed {
+  font-size: 0.85rem;
+}
+
+/* ── Knowledge Browser + conflict/freshness review (CPR-17/37) ───────── */
+
+.knowledge-toolbar {
+  display: flex;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  margin: -2.9rem 0 1rem;
+}
+
+.knowledge-filters {
+  padding: 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.knowledge-filters input,
+.knowledge-filters select {
+  max-width: 16rem;
+}
+
+ul.knowledge-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+ul.knowledge-list li {
+  border-bottom: 1px solid var(--line);
+}
+
+ul.knowledge-list a.row {
+  color: inherit;
+  text-decoration: none;
+}
+
+ul.knowledge-list a.row:hover strong {
+  text-decoration: underline;
+}
+
+.search-mode {
+  border-left: 2px solid var(--accent);
+  padding-left: 0.6rem;
+}
+
+.tag-list {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.knowledge-detail > header,
+.knowledge-detail > section {
+  max-width: 72rem;
+}
+
+.knowledge-body {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding: 1rem;
+  border-left: 3px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 5%, transparent);
+}
+
+.knowledge-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(18rem, 1fr));
+  gap: 1rem;
+}
+
+.knowledge-columns > section {
+  min-width: 0;
+}
+
+.revision-history,
+.knowledge-columns ul {
+  padding-left: 1.25rem;
+}
+
+.revision-history li,
+.knowledge-columns li {
+  margin: 0.5rem 0;
+}
+
+.knowledge-action {
+  max-width: 44rem;
+  border-bottom: 1px solid var(--line);
+  padding: 0.65rem 0;
+}
+
+.knowledge-conflicts,
+.knowledge-freshness-policies {
+  max-width: 72rem;
+  margin: 1rem 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 1rem;
+}
+
+.knowledge-conflict-list {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.knowledge-conflict {
+  border-left: 3px solid var(--error-line);
+  padding: 0.7rem 0.9rem;
+  background: color-mix(in srgb, var(--error-line) 4%, transparent);
+}
+
+.knowledge-conflict > summary,
+.knowledge-freshness-policies > summary {
+  cursor: pointer;
+}
+
+.knowledge-conflict-comparison {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(18rem, 1fr));
+  gap: 1rem;
+  margin: 0.8rem 0;
+}
+
+.knowledge-conflict-comparison article {
+  min-width: 0;
+}
+
+.knowledge-conflict-comparison .knowledge-body {
+  font-size: 0.9rem;
+  padding: 0.7rem;
+}
+
+.knowledge-freshness-policies table {
+  width: 100%;
+  margin-top: 0.8rem;
+}
+
+/* ── OKF exchange (CPR-28, ADR-0087) ─────────────────────────────────── */
+
+.form-actions,
+.metric-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+
+.metric-strip {
+  padding: 0.7rem 0;
+  border-block: 1px solid var(--line);
+}
+
+.metric-strip span {
+  min-width: 7rem;
+}
+
+.knowledge-detail pre {
+  max-height: 24rem;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.knowledge-action summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+button.danger {
+  border-color: var(--error-line);
+  color: var(--error-line);
+}
+
+.banner.success {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+}
+
+.banner.warning {
+  border-color: var(--error-line);
+  background: color-mix(in srgb, var(--error-line) 8%, transparent);
+}
+
+/* ── New Learnings (CPR-19) ──────────────────────────────────────────── */
+
+.learnings-intro {
+  max-width: 48rem;
+}
+
+.learning-filters {
+  padding: 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.learning-filters input,
+.learning-filters select {
+  max-width: 17rem;
+}
+
+.learning-batches {
+  display: grid;
+  gap: 1.5rem;
+}
+
+.learning-batch {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 1rem;
+  margin: 0;
+}
+
+.learning-batch > header {
+  align-items: flex-start;
+  margin-bottom: 1rem;
+}
+
+.learning-batch > header h2,
+.learning-batch > header p {
+  margin-bottom: 0;
+}
+
+.batch-progress {
+  display: flex;
+  flex-direction: column;
+  text-align: right;
+  font-size: 0.85rem;
+}
+
+.learning-candidates {
+  display: grid;
+  gap: 1rem;
+}
+
+.learning-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 1rem;
+  min-width: 0;
+}
+
+.learning-card > header {
+  align-items: flex-start;
+  margin-bottom: 0.7rem;
+}
+
+.learning-card > header h3 {
+  color: var(--ink);
+  font-size: 1rem;
+  letter-spacing: 0;
+  margin: 0.15rem 0 0;
+  text-transform: none;
+}
+
+.eyebrow {
+  color: var(--muted);
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.learning-facts,
+.match-badges,
+.learning-pagination {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem 0.8rem;
+}
+
+.learning-facts {
+  color: var(--muted);
+  font-size: 0.85rem;
+  margin: 0.8rem 0;
+}
+
+.learning-facts span + span::before {
+  content: "·";
+  margin-right: 0.8rem;
+}
+
+.match-badges {
+  margin: 0.8rem 0;
+}
+
+.match-badges .tag {
+  margin-left: 0;
+}
+
+.tag.match-contradiction,
+.tag.match-supersession,
+.tag.match-transition {
+  border-color: var(--error-line);
+}
+
+.tag.match-duplicate {
+  border-color: var(--accent);
+}
+
+.source-preview,
+.existing-comparisons,
+.learning-actions {
+  border-top: 1px solid var(--line);
+  margin: 1rem 0 0;
+  padding-top: 0.2rem;
+}
+
+.source-events {
+  margin: 0.4rem 0 0;
+  padding-left: 1.4rem;
+}
+
+.source-events li {
+  margin: 0.7rem 0;
+}
+
+.source-events p {
+  margin: 0.15rem 0;
+}
+
+.comparison-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: 0.7rem;
+}
+
+.comparison-card {
+  border-left: 3px solid var(--line);
+  padding: 0.6rem 0.8rem;
+  min-width: 0;
+}
+
+.comparison-card h5,
+.comparison-card p {
+  margin: 0.3rem 0;
+}
+
+.learning-actions {
+  max-width: 46rem;
+}
+
+.learning-actions > button {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.scope-explanation {
+  color: var(--muted);
+  font-size: 0.85rem;
+  margin: 0.25rem 0 0.7rem;
+}
+
+.candidate-action {
+  border-bottom: 1px solid var(--line);
+  padding: 0.65rem 0;
+}
+
+.candidate-action summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.learning-pagination {
+  margin-top: 1rem;
+}
+
+/* ── Context Inspector (CPR-21, ADR-0084) ────────────────────────────── */
+
+.context-inspector {
+  max-width: 72rem;
+}
+
+.context-run-heading,
+.context-selection > header,
+.context-exclusions header {
+  align-items: flex-start;
+  margin-bottom: 0.8rem;
+}
+
+.context-run-heading h2,
+.context-selection h4,
+.context-exclusions h4 {
+  color: var(--ink);
+  font-size: 1rem;
+  letter-spacing: 0;
+  margin: 0.15rem 0 0;
+  text-transform: none;
+}
+
+.context-rendered,
+.context-content {
+  overflow-x: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding: 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--line) 12%, transparent);
+  font: 0.88rem/1.5 ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+}
+
+.context-selections,
+.context-exclusions {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 1rem;
+}
+
+.context-selection,
+.context-exclusions > li {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 1rem;
+  min-width: 0;
+}
+
+.context-reasons,
+.context-feedback-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.context-reasons .tag {
+  margin-left: 0;
+}
+
+dl.context-scores {
+  grid-template-columns: repeat(auto-fit, minmax(8rem, 1fr));
+  gap: 0.5rem;
+  margin: 1rem 0;
+}
+
+dl.context-scores > div {
+  border-left: 2px solid var(--line);
+  padding-left: 0.6rem;
+}
+
+dl.context-scores dd {
+  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+}
+
+.context-sources,
+.context-feedback {
+  border-top: 1px solid var(--line);
+  margin: 1rem 0 0;
+  padding-top: 0.2rem;
+}
+
+.context-feedback-history {
+  color: var(--muted);
+  font-size: 0.88rem;
+}
+
+/* ── Skills Library (CPR-24, ADR-0085) ──────────────────────────────── */
+
+.skills-intro {
+  max-width: 52rem;
+}
+
+.skill-availability,
+.skill-form,
+.skill-detail > section,
+.skill-version > section {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 1rem;
+}
+
+ul.skill-library-list,
+ul.inline-list,
+ul.evidence-list,
+ul.scan-findings,
+.skill-files ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+ul.skill-library-list > li,
+ul.evidence-list > li,
+ul.scan-findings > li,
+.skill-files li {
+  border-bottom: 1px solid var(--line);
+  padding: 0.65rem 0;
+}
+
+ul.skill-library-list a.row {
+  color: inherit;
+  text-decoration: none;
+}
+
+ul.skill-library-list a.row:hover strong {
+  text-decoration: underline;
+}
+
+ul.inline-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.7rem;
+}
+
+ul.inline-list li {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.2rem 0.65rem;
+}
+
+.form-grid,
+.skill-binding-grid,
+.skill-version {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(16rem, 1fr));
+  gap: 1rem;
+}
+
+.form-grid label,
+.full-field,
+.binding-actions label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.full-field {
+  margin-top: 1rem;
+}
+
+.full-field textarea,
+.json-value,
+.file-content {
+  width: 100%;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: 0.82rem/1.45 ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+}
+
+.skill-binding-card {
+  min-width: 0;
+  padding: 0.85rem;
+  border-left: 3px solid var(--line);
+}
+
+dl.facts.compact {
+  font-size: 0.88rem;
+}
+
+.binding-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 0.5rem;
+  margin: 0.8rem 0;
+}
+
+.availability-state {
+  overflow-wrap: anywhere;
+}
+
+.skill-version {
+  margin-top: 1rem;
+}
+
+.skill-version > section {
+  min-width: 0;
+  margin: 0;
+}
+
+.skill-files button.selected,
+.evidence.host_observed {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.evidence {
+  display: inline-block;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0.05rem 0.45rem;
+  font-size: 0.75rem;
+}
+
+.evidence.model_reported {
+  color: var(--muted);
+}
+
+.json-value,
+.file-content {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--ink) 3%, transparent);
+  padding: 0.75rem;
+}
+
+/* ── Trusted MCP Tools catalogue (CPR-26, ADR-0086) ──────────────── */
+
+.tools-intro {
+  max-width: 56rem;
+}
+
+.tool-form,
+.tool-detail > section,
+.tool-version > section,
+.tool-configuration {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 1rem;
+  margin-bottom: 1rem;
+}
+
+ul.tool-catalogue-list,
+ul.tool-capabilities,
+ul.tool-test-runs {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+ul.tool-catalogue-list > li,
+ul.tool-capabilities > li,
+ul.tool-test-runs > li {
+  border-bottom: 1px solid var(--line);
+  padding: 0.75rem 0;
+}
+
+ul.tool-catalogue-list a.row {
+  color: inherit;
+  text-decoration: none;
+}
+
+ul.tool-catalogue-list a.row:hover strong {
+  text-decoration: underline;
+}
+
+.tag.quarantined,
+.banner.quarantine {
+  border-color: var(--error-line);
+  background: var(--error-bg);
+}
+
+.tool-version {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(16rem, 1fr));
+  gap: 1rem;
+  margin-top: 1rem;
+}
+
+.tool-version > .banner,
+.tool-version > section:last-child {
+  grid-column: 1 / -1;
+}
+
+.tool-diff-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(10rem, 1fr));
+  gap: 0.75rem;
+}
+
+.tool-capability-family {
+  border-top: 1px solid var(--line);
+  padding-top: 0.25rem;
+}
+
+.tool-capabilities details,
+.tool-test-form,
+.tool-binding-card {
+  padding: 0.5rem;
+}
+
+.tool-configuration .json-value {
+  max-height: 28rem;
+}
+
+@media (max-width: 55rem) {
+  .knowledge-toolbar {
+    justify-content: flex-start;
+    margin: 0 0 1rem;
+  }
+
+  .knowledge-columns,
+  .knowledge-conflict-comparison {
+    grid-template-columns: 1fr;
+  }
+
+  .form-grid,
+  .skill-binding-grid,
+  .skill-version,
+  .tool-version,
+  .tool-diff-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .tool-version > .banner,
+  .tool-version > section:last-child {
+    grid-column: auto;
+  }
+
+  .learning-batch > header {
+    display: block;
+  }
+
+  .batch-progress {
+    margin-top: 0.6rem;
+    text-align: left;
+  }
 }

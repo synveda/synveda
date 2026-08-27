@@ -12,10 +12,10 @@
 //! wiped when the last holder drops them.
 //!
 //! **The cache is per process.** A rotation on one replica is invisible to
-//! another until its entry expires, which is the same staleness shape
-//! `ScopeChainCache` has and lands in the same place: OPS-7 owns cross-process
-//! invalidation, and this cache is named in it rather than growing a second
-//! transport of its own. The bound is [`KeyRing::ttl`], and until OPS-7 the
+//! another until its entry expires, which is the same staleness shape the
+//! PDP's entity fragments have and lands in the same place: OPS-7 owns
+//! cross-process invalidation, and this cache is named in it rather than
+//! growing a second transport of its own. The bound is [`KeyRing::ttl`], and until OPS-7 the
 //! chart pins one gateway replica anyway.
 
 use std::collections::HashMap;

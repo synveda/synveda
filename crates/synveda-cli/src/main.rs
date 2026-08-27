@@ -17,23 +17,31 @@
 #![cfg_attr(not(test), forbid(unsafe_code))]
 
 mod api;
+mod audit;
 mod channel;
+mod configuration;
 mod credentials;
+mod demo;
 mod diff;
 mod directory;
-mod hierarchy;
 mod init;
 mod keys;
-mod lapse;
 mod login;
 mod mcp;
+mod okf;
 mod pack;
 mod plugin;
 mod prompt;
 mod proposal;
 mod recall;
+mod relaxation;
+mod reset;
 mod scim;
+mod scope;
+mod service;
+mod session;
 mod skill;
+mod spool;
 #[cfg(test)]
 mod testing;
 mod whoami;
@@ -41,17 +49,14 @@ mod whoami;
 use std::process::ExitCode;
 use std::time::Duration;
 
-use chrono::{DateTime, Utc};
 use clap::{Parser, Subcommand};
 use serde_json::json;
 use sqlx::postgres::PgPoolOptions;
 use synveda_audit::{Actor, AuditAction, AuditEvent, Outcome};
-use synveda_identity::{Hs256Verifier, personal_slug};
+use synveda_identity::Hs256Verifier;
 use synveda_types::{
-    CompositionConfig, DedupConfig, DedupMode, IdentityId, IdentityKind, IndexTier, InjectChannels,
-    PackConfig, PromotionConfig, ProposalId, ProposalState, RecordId, RedactionConfig,
-    RedactionMode, RetentionConfig, Role, ScanSeverity, ScopeId, ScopeKind, SkillIndex,
-    SkillScanConfig, TenantId, TenantStatus,
+    CompositionConfig, IdentityId, PackConfig, ProposalId, ProposalState, RedactionConfig,
+    RedactionMode, ScanSeverity, ScopeId, SkillIndex, SkillScanConfig, TenantId, TenantStatus,
 };
 
 #[derive(Parser)]
@@ -63,35 +68,35 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Bring up a single-node deployment and admit its first tenant
-    /// (OPS-1, ADR-0055) — the SMB profile of tech plan §4.
+    /// Bring up the single-node form of the shared runtime and admit its
+    /// first tenant (OPS-1; CPR-36, ADR-0095).
     ///
     /// What it does is deliberately small, because everything else the
     /// product has a governed surface for is created *through* that
     /// surface: `init` applies migrations, admits the tenant, configures
-    /// the issuer, and starts the stack. The org root, the operator's
-    /// identity and their `org-admin` binding all arrive on the first
-    /// `synveda login`, from AUTH-2's provisioning transaction, chained
-    /// under the operator's own subject. Departments and teams are
-    /// `synveda hierarchy create` after that.
+    /// the issuer, and starts the stack. The operator's identity, their own
+    /// scope and their `administrator` grant at the tenant root all arrive
+    /// on the first `synveda login`, from AUTH-2's provisioning transaction,
+    /// chained under the operator's own subject. Workspaces, projects and
+    /// org units are `POST /v1/workspaces` and `synveda scope create` after
+    /// that.
     ///
-    /// There is no path in here that writes a scope, an identity, a role
-    /// binding or a record behind the PDP's back — an installer runs once,
-    /// as root-equivalent, before anybody is watching, which makes it the
+    /// There is no path in here that writes a scope, an identity, a grant,
+    /// Configuration or Knowledge behind the PDP's back — an installer runs once, as
+    /// root-equivalent, before anybody is watching, which makes it the
     /// worst place in the product to keep a shortcut (seed §2.2).
     Init {
         /// Tenant slug to admit: lowercase, hyphenated. Also becomes the
-        /// org root's slug when the first admin logs in.
+        /// tenant root scope's slug when the first thing that needs a parent
+        /// mints it.
         #[arg(long, default_value = "acme")]
         slug: String,
-        /// Tenant display name; becomes the org root's name.
+        /// Tenant display name; becomes the tenant root scope's name.
         #[arg(long, default_value = "ACME")]
         name: String,
-        /// Which embedder the corpus will be written with. Permanent in
-        /// practice: `record_embeddings` stores the model, embed-or-fail
-        /// is unconditional, and nothing re-embeds a corpus that changed
-        /// its mind (ADR-0055 decision 5). `deterministic` needs no model
-        /// download; `tei` serves BGE-M3 and downloads ~2.3 GB once.
+        /// Which embedder new Knowledge indexes use. `deterministic` needs no
+        /// model download and is lexical-only; `tei` serves BGE-M3 and
+        /// downloads ~2.3 GB once. Index rows retain their model/dimension.
         #[arg(long, value_parser = ["deterministic", "tei"], default_value = "deterministic")]
         embedder: String,
         /// An external OIDC issuer URL. Omitted, the bundled Rauthy is
@@ -100,28 +105,24 @@ enum Command {
         /// (ADR-0055 decision 4).
         #[arg(long)]
         issuer: Option<String>,
-        /// Also build the ACME demo organisation — two departments, three
-        /// teams, four people, and material that arrives through the
-        /// observe → extract → embed pipeline like anybody else's. Never
-        /// use on a deployment that will hold real memory.
-        #[arg(long)]
-        demo: bool,
         /// Print what would happen and change nothing.
         #[arg(long)]
         dry_run: bool,
     },
-    /// The scopes an organisation is made of (OPS-1, ADR-0055 decision 3).
+    /// The governed scope tree (CPR-7, ADR-0074 decision 5).
     ///
     /// Gateway calls under the bearer `synveda login` stored, like
-    /// `proposal` and `recall`: creating a department is a governed act
-    /// whose `HierarchyCreate` decision the PDP takes at the parent scope
-    /// and whose event the gateway chains under your own identity.
+    /// `proposal` and `recall`: creating a scope is a governed act whose
+    /// `ScopeCreate` decision the PDP takes at the parent scope and whose
+    /// event the gateway chains under your own identity.
     ///
-    /// The org root is not creatable here — it arrives with the first
-    /// admin login, from the tenant's own slug and name (ADR-0055
-    /// decision 2), so every `create` has a parent.
+    /// The tenant root is not creatable here — it is minted by the first
+    /// thing that needs a parent (ADR-0071), so every `create` has one.
+    /// There is no `delete`: retiring a scope is `--status archived`
+    /// through the API, because a scope is what audit events, versions and
+    /// grants name.
     #[command(subcommand)]
-    Hierarchy(HierarchyCommand),
+    Scope(ScopeCommand),
     /// Which identity is acting, and what it may do tenant-wide.
     ///
     /// The first question anybody asks a deployment they just logged into,
@@ -148,13 +149,9 @@ enum Command {
     /// authorisation that releases its circuit breaker (AUTH-5, ADR-0060).
     #[command(subcommand)]
     Directory(DirectoryCommand),
-    /// What is currently relaxed, and over what (AUTHZ-4's grants).
-    ///
-    /// The lapse machinery is this product's answer to "strict by default,
-    /// relaxable by design" (seed §2.3), and until CNSL-2 there was no
-    /// terminal in which to ask what was relaxed.
+    /// Governed, immutable, time-boxed policy relaxations.
     #[command(subcommand)]
-    Lapse(LapseCommand),
+    Relaxation(RelaxationCommand),
     /// Log in to a gateway through your browser (AUTH-1 end to end,
     /// ADR-0027 decision 5) and store the session under a profile. This
     /// is the whole of "zero-config": every other Synveda client on this
@@ -208,6 +205,19 @@ enum Command {
         /// downstream can tell they were the same turn.
         #[arg(long, value_enum, default_value_t = mcp::Writes::Tool)]
         writes: mcp::Writes,
+        /// The workspace this server's run belongs to (CPR-12, ADR-0078).
+        ///
+        /// Every write and every composition names the run it belongs to, and
+        /// a run happens in a workspace. Omit it when you have one workspace
+        /// and the server will use it; with more than one it asks, rather
+        /// than writing a model's assertions into whichever sorted first.
+        #[arg(long)]
+        workspace: Option<String>,
+        /// The project this server's run and governed Skill/Tool
+        /// advertisements belong to. Its workspace is derived and checked;
+        /// omit it for workspace-scoped memory with no project Tool binding.
+        #[arg(long)]
+        project: Option<String>,
         /// Credential profile. Defaults to $SYNVEDA_PROFILE, else
         /// `default`.
         #[arg(long)]
@@ -224,6 +234,31 @@ enum Command {
     /// Database administration (dev bootstrap).
     #[command(subcommand)]
     Db(DbCommand),
+    /// Destroy this deployment's database and build a fresh one at the
+    /// current schema epoch (CPR-2, ADR-0069).
+    ///
+    /// Synveda is pre-1.0 and the context-platform redesign is a hard cut:
+    /// there is no migration from the schema that came before it, so a
+    /// database written before it is refused at startup rather than upgraded.
+    /// This is what an operator runs next, and it is destruction rather than
+    /// translation — every tenant, record and audit event in that database
+    /// goes.
+    ///
+    /// It keeps everything that is not the database: `kms.key`, the compose
+    /// profile, the console bundle, your stored logins, the Docker volumes,
+    /// and the other databases on the same server — Temporal's two share the
+    /// volume with ours, which is why this drops a database rather than a
+    /// volume.
+    Reset {
+        /// What to reset. Required: `reset` names what it destroys rather
+        /// than defaulting to everything there is.
+        #[arg(long)]
+        database: bool,
+        /// Required. Without it nothing is destroyed and the command says
+        /// what it would have done.
+        #[arg(long)]
+        force: bool,
+    },
     /// The key-encryption key (TEN-4, ADR-0064). Everything else in the key
     /// plane is wrapped by this one, and it lives outside the database.
     #[command(subcommand)]
@@ -240,11 +275,6 @@ enum Command {
     /// packs as reviewed assets.
     #[command(subcommand)]
     Policy(PolicyCommand),
-    /// Role bindings (AUTHZ-3, ADR-0015). Dev plumbing and the documented
-    /// break-glass: a tenant that revoked its last org-admin recovers
-    /// here, at the store level — the product surface is `/v1/roles/*`.
-    #[command(subcommand)]
-    Role(RoleCommand),
     /// Service identities (AUTH-3, ADR-0018). Dev plumbing and the
     /// break-glass at the store level — the product surface is
     /// `/v1/service-identities`. Credentials live in the IdP: register
@@ -302,10 +332,10 @@ enum Command {
     /// a terminal can never disagree with it about a document's address.
     #[command(subcommand, name = "context-pack")]
     ContextPack(ContextPackCommand),
-    /// The skills registry (SKIL-1, ADR-0051): import an
-    /// agentskills.io-format bundle, list what a scope holds, open the
-    /// review that carries it, and **install** it into a client's own
-    /// skills directory.
+    /// The immutable Skills catalogue (CPR-23, ADR-0085): import an Agent
+    /// Skills-compatible bundle through VedaFlow, inspect exact versions,
+    /// resolve project/personal bindings, and **install** an authorised
+    /// version into a client's own skills directory.
     ///
     /// `install` is the only thing in the product that writes a skill onto
     /// a disk, and it is here rather than in the gateway because the
@@ -317,59 +347,161 @@ enum Command {
     /// forbids.
     #[command(subcommand)]
     Skill(SkillCommand),
-    /// Fetch records in full by id (CTX-4, ADR-0041) — the other half of
-    /// tiered injection.
+    /// Versioned governed runtime profiles (CPR-30, ADR-0089).
     ///
-    /// An inject block's index tier ends its lines with `(recall <id>)`;
-    /// this is that instruction. A gateway call under the bearer `synveda
-    /// login` stored, so the PDP decides per scope and the read is chained
-    /// under your own identity.
+    /// Every mutation calls the public gateway API and returns its VedaFlow
+    /// change outcome. Templates are copied into immutable versions; bindings
+    /// select an exact artifact at a governed scope.
+    #[command(subcommand)]
+    Configuration(ConfigurationCommand),
+    /// Open Knowledge Format v0.2 exchange (CPR-28, ADR-0087).
     ///
-    /// A handle is a name, not a capability: what you may read is decided
-    /// now, not when the block was composed, so an id you have since lost
-    /// access to simply does not come back.
+    /// Validation and inspection are local and use the exact pinned adapter.
+    /// Import/export acts use the public project API; the gateway receives
+    /// inert bytes, never a local path or permission to run Git/content.
+    #[command(subcommand)]
+    Okf(OkfCommand),
+    /// The durable observation spool (CPR-12, ADR-0078).
+    ///
+    /// An agent client records what happened into a local spool before it
+    /// tries to deliver it, so an unreachable gateway, a killed hook, a
+    /// compaction or a reboot costs nothing. These are the commands for
+    /// looking at that spool and pushing it.
+    #[command(subcommand)]
+    Session(SessionCommand),
+    /// Query current governed Knowledge for a question (CPR-20, ADR-0084).
+    ///
+    /// Opens an ephemeral run and performs the public session-scoped Knowledge
+    /// query under the bearer `synveda login` stored. The PDP decides each
+    /// exact Knowledge revision and provenance descriptor.
     Recall {
-        /// The record ids, as the block printed them. Omit when asking a
-        /// question with --query.
-        #[arg(num_args = 0..)]
-        ids: Vec<RecordId>,
-        /// Ask a question instead of naming records: hybrid retrieval over
-        /// every scope your policy lets you read, which is wider than the
-        /// scopes an inject block composes from.
-        ///
-        /// Omit both this and the ids, with --as-of, to sweep everything
-        /// you may read as it stood at that instant — the complete
-        /// historical read, including material the live corpus no longer
-        /// holds.
-        #[arg(long, conflicts_with = "ids")]
-        query: Option<String>,
-        /// Serve bodies as the database held them at this instant —
-        /// "what did the agent know on March 3rd" (RFC 3339, e.g.
-        /// 2026-03-03T00:00:00Z).
-        ///
-        /// It rewinds the corpus, never your access: what you may read is
-        /// decided now, so this cannot return material you lost access to.
+        /// The question to answer.
         #[arg(long)]
-        as_of: Option<DateTime<Utc>>,
-        /// Valid time — which assertions were true *about the world* at
-        /// this instant. Defaults to --as-of, so one flag asks the
-        /// diagonal question.
+        query: String,
+        /// The workspace to compose in. Needed only when you can see more
+        /// than one.
         #[arg(long)]
-        valid_at: Option<DateTime<Utc>>,
-        /// How many records a --query may return.
+        workspace: Option<String>,
+        /// Maximum current Knowledge results to return (1–100).
         #[arg(long)]
-        limit: Option<usize>,
+        limit: Option<u32>,
         /// Print the gateway's answer verbatim.
         #[arg(long)]
         json: bool,
-        /// Skip the "reading as ..." line — for a harness piping the
-        /// bodies straight into a session.
+        /// Skip the "reading as ..." line — for a harness piping the block
+        /// straight into a session.
         #[arg(long)]
         quiet: bool,
-        /// Credential profile. Defaults to $SYNVEDA_PROFILE, else
-        /// `default`.
         #[arg(long)]
         profile: Option<String>,
+    },
+    /// Run the public-API PulseBoard product walkthrough (CPR-41, ADR-0100).
+    ///
+    /// `start` is resumable and creates only governed product data. It assumes
+    /// this one runtime is already initialised and that `synveda login` has
+    /// stored the acting user's credential. `--profile` selects a canonical
+    /// governed Configuration document; it is not an edition or deployment
+    /// switch.
+    #[command(subcommand)]
+    Demo(DemoCommand),
+}
+
+#[derive(Subcommand)]
+enum DemoCommand {
+    /// Create or resume the realistic PulseBoard walkthrough.
+    Start {
+        /// Governed product profile copied into an immutable Configuration.
+        #[arg(long, value_enum)]
+        profile: demo::DemoProfile,
+        /// Alice's stored credential profile. Defaults to SYNVEDA_PROFILE,
+        /// else `default`.
+        #[arg(long)]
+        credentials: Option<String>,
+        /// A separately logged-in Bob profile for the genuine teammate leg.
+        /// In team mode the command also discovers a stored profile named
+        /// `bob`; otherwise it issues a one-time invitation and runs the clean
+        /// reuse leg as Alice without impersonating another person.
+        #[arg(long)]
+        bob_credentials: Option<String>,
+        /// Print the final manifest summary as JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Show the public resources named by the local demo receipt.
+    Status {
+        /// Stored credential profile. Defaults to SYNVEDA_PROFILE, else
+        /// `default`.
+        #[arg(long)]
+        credentials: Option<String>,
+        /// Print machine-readable JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Archive the active PulseBoard workspace and private demo Knowledge.
+    ///
+    /// Immutable revisions, proposals, capture evidence and audit events stay
+    /// as history. This never resets the database or touches non-demo data.
+    Reset {
+        /// Required: without it no mutation is attempted.
+        #[arg(long)]
+        force: bool,
+        /// Stored credential profile. Defaults to SYNVEDA_PROFILE, else
+        /// `default`.
+        #[arg(long)]
+        credentials: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum SessionCommand {
+    /// Deliver every unacknowledged event now.
+    ///
+    /// The hooks do this on their own schedule — `SessionStart` retries the
+    /// backlog, `Stop` delivers the turn, `SessionEnd` flushes within a
+    /// bounded deadline. This is the same delivery, on demand, for when a
+    /// gateway has been unreachable and you would rather not wait for the
+    /// next session to start.
+    Flush {
+        /// The spool directory. Defaults to $XDG_STATE_HOME/synveda/spool.
+        #[arg(long)]
+        dir: Option<std::path::PathBuf>,
+        /// Name each session as it goes.
+        #[arg(long)]
+        verbose: bool,
+        /// Credential profile. Defaults to $SYNVEDA_PROFILE, else `default`.
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    /// The spool itself: what is held and what has been delivered.
+    #[command(subcommand)]
+    Spool(SpoolCommand),
+}
+
+#[derive(Subcommand)]
+enum SpoolCommand {
+    /// What is held, per session, and since when.
+    Status {
+        /// The spool directory. Defaults to $XDG_STATE_HOME/synveda/spool.
+        #[arg(long)]
+        dir: Option<std::path::PathBuf>,
+        /// Print the inventory as JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Delete events this deployment has already answered for.
+    ///
+    /// Only acknowledged events are ever deleted, and `--acknowledged` is
+    /// required rather than assumed: the one irreversible thing that can be
+    /// done to an undelivered observation is delete it, so the command that
+    /// reclaims disk says out loud what it is allowed to take. There is no
+    /// flag that deletes undelivered events.
+    Purge {
+        /// Required. Delete only the events the gateway has acknowledged.
+        #[arg(long)]
+        acknowledged: bool,
+        /// The spool directory. Defaults to $XDG_STATE_HOME/synveda/spool.
+        #[arg(long)]
+        dir: Option<std::path::PathBuf>,
     },
 }
 
@@ -468,166 +600,302 @@ enum PromptCommand {
 
 #[derive(Subcommand)]
 enum SkillCommand {
-    /// The registry at one scope: every skill, its files, and whether what
-    /// a client would install is what was last written.
+    /// List stable Skill aggregates and their current immutable versions.
     List {
-        /// The scope UUID.
-        scope: ScopeId,
-        /// Credential profile. Defaults to $SYNVEDA_PROFILE, else
-        /// `default`.
-        #[arg(long)]
-        profile: Option<String>,
-    },
-    /// Resolve a bundle the way a client would: by name, walking your own
-    /// placement chain nearest-first, unless you name a scope.
-    ///
-    /// Because the name is also the installed directory name and a client's
-    /// skills root is flat, that walk is what decides which of two
-    /// same-named skills exists on your disk at all.
-    Show {
-        /// The skill's name, e.g. `code-review`.
-        name: String,
-        /// Resolve at this scope instead of walking your chain. Required
-        /// with --draft and with --commit.
+        /// Restrict the listing to this governing scope.
         #[arg(long)]
         scope: Option<ScopeId>,
-        /// Read the authoring copy at --scope rather than the reviewed
-        /// version. Unreviewed by construction.
-        #[arg(long)]
-        draft: bool,
-        /// Pin to a commit that scope's channel has held.
-        #[arg(long)]
-        commit: Option<String>,
-        /// Print the gateway's answer verbatim.
+        /// Print JSON.
         #[arg(long)]
         json: bool,
-        /// Suppress the connection banner — for piping.
+        /// Credential profile.
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    /// Inspect one exact immutable version by tenant-unique bundle name.
+    Show {
+        /// Agent Skills bundle name.
+        name: String,
+        /// Inspect this immutable version instead of the current one.
+        #[arg(long)]
+        version: Option<synveda_types::SkillVersionId>,
+        /// Print JSON.
+        #[arg(long)]
+        json: bool,
+        /// Suppress the connection banner.
         #[arg(long)]
         quiet: bool,
-        /// Credential profile. Defaults to $SYNVEDA_PROFILE, else
-        /// `default`.
+        /// Credential profile.
         #[arg(long)]
         profile: Option<String>,
     },
-    /// Read an anthropics/skills-format directory and write it as a draft.
-    /// This moves nothing a client installs.
+    /// Install or update a complete Agent Skills-compatible directory.
     ///
-    /// The request is the bundle: a file you removed from the directory is
-    /// removed from the draft, because a client loads a skill whole and a
-    /// leftover file would be published back onto a laptop.
+    /// The mutation is a typed VedaFlow change. Content changes create an
+    /// immutable version; the command never edits a version in place.
     Import {
-        /// The directory holding SKILL.md and its bundled files.
+        /// Directory holding SKILL.md and its text resources/scripts.
         dir: std::path::PathBuf,
-        /// The scope that will stand behind it.
+        /// Scope governing the stable Skill aggregate.
         #[arg(long)]
         scope: ScopeId,
-        /// Override the skill name. Defaults to the directory's own name,
-        /// which is the spec's rule; the frontmatter `name` must agree
-        /// either way.
+        /// Override the directory-derived bundle name.
         #[arg(long)]
         name: Option<String>,
-        /// public | internal | confidential. Defaults to internal;
-        /// `restricted` is refused — nothing in the product mints that tier
-        /// for an authored asset.
+        /// public | internal | confidential.
         #[arg(long)]
         sensitivity: Option<String>,
-        /// Credential profile. Defaults to $SYNVEDA_PROFILE, else
-        /// `default`.
+        /// Credential profile.
         #[arg(long)]
         profile: Option<String>,
     },
-    /// Write a published bundle into a client's own skills directory, byte
-    /// for byte, and re-hash every file against the address the commit
-    /// named.
+    /// Materialise the exact version enabled at a project/principal scope.
     Install {
-        /// The skill's name — also the directory this creates.
+        /// Tenant-unique Agent Skills bundle name.
         name: String,
-        /// Which client's layout to write. The per-client difference is the
-        /// root and nothing else.
+        /// Project or principal scope whose binding authorises exposure.
+        #[arg(long)]
+        scope: ScopeId,
+        /// Supported client layout.
         #[arg(long, default_value = "claude-code")]
         client: String,
-        /// Write under this directory instead of the client's own root.
+        /// Write under this directory instead of the client's default root.
         #[arg(long)]
         root: Option<std::path::PathBuf>,
-        /// Install this scope's copy instead of walking your chain.
-        #[arg(long)]
-        scope: Option<ScopeId>,
-        /// Install the commit you were built against. A rewind that took it
-        /// off the channel refuses this, naming both commits.
-        #[arg(long)]
-        commit: Option<String>,
         /// Print the receipt as JSON.
         #[arg(long)]
         json: bool,
-        /// Credential profile. Defaults to $SYNVEDA_PROFILE, else
-        /// `default`.
+        /// Credential profile.
         #[arg(long)]
         profile: Option<String>,
     },
-    /// What you may install: every published skill on your own placement
-    /// chain, nearest scope first (SKIL-4, ADR-0054).
-    ///
-    /// The plural of `show`, and the same walk — a scope you may not read
-    /// skills at is skipped as though it published nothing, so it cannot
-    /// shadow a copy further up that you can read. Another team's skills
-    /// are absent because that team is not on your chain at all.
+    /// List exact immutable versions enabled by bindings at a scope.
     Available {
-        /// Print the gateway's answer verbatim.
-        #[arg(long)]
-        json: bool,
-        /// Credential profile. Defaults to $SYNVEDA_PROFILE, else
-        /// `default`.
-        #[arg(long)]
-        profile: Option<String>,
-    },
-    /// Make a client's governed skills directory match what you may
-    /// install: write every available skill, remove what is no longer
-    /// available (SKIL-4, ADR-0054 decision 15).
-    ///
-    /// The removal is the half that makes a rollback mean something on a
-    /// laptop. It is bounded to directories this command wrote — the root
-    /// is a directory Synveda owns, never a client's own skills folder —
-    /// and to names the registry no longer serves you.
-    Sync {
-        /// Which client's layout to write. The per-client difference is the
-        /// root and nothing else.
-        #[arg(long, default_value = "claude-code")]
-        client: String,
-        /// Write under this directory instead of the client's own root.
-        /// The adapter passes its plugin's own `skills/` here.
-        #[arg(long)]
-        root: Option<std::path::PathBuf>,
-        /// Report what would change and write nothing.
-        #[arg(long)]
-        dry_run: bool,
-        /// Print the outcome as JSON — what an adapter reads.
-        #[arg(long)]
-        json: bool,
-        /// Credential profile. Defaults to $SYNVEDA_PROFILE, else
-        /// `default`.
-        #[arg(long)]
-        profile: Option<String>,
-    },
-    /// Open the review that can carry a bundle onto a scope's published
-    /// channel. Everything after this is `synveda proposal`.
-    ///
-    /// Under every pack this is the only route: the invariant floor asks
-    /// for a security reviewer and two distinct approvers, so no pack makes
-    /// shipping executable code a one-signature act.
-    Propose {
-        /// The skill's name. The proposal names the bundle, never a file.
-        name: String,
-        /// The scope whose channel would move. Requirements resolve here.
+        /// Project or principal scope whose bindings resolve.
         #[arg(long)]
         scope: ScopeId,
-        /// The scope that holds it, when climbing. Defaults to --scope.
+        /// Print JSON.
         #[arg(long)]
-        source: Option<ScopeId>,
-        /// What this proposes, in one line. Defaults to the name.
+        json: bool,
+        /// Credential profile.
         #[arg(long)]
-        title: Option<String>,
-        /// Credential profile. Defaults to $SYNVEDA_PROFILE, else
-        /// `default`.
+        profile: Option<String>,
+    },
+    /// Reconcile a supported client root to one scope's enabled bindings.
+    Sync {
+        /// Project or principal scope whose bindings resolve.
+        #[arg(long)]
+        scope: ScopeId,
+        /// Supported client layout.
+        #[arg(long, default_value = "claude-code")]
+        client: String,
+        /// Write under this directory instead of the client's default root.
+        #[arg(long)]
+        root: Option<std::path::PathBuf>,
+        /// Report changes without writing.
+        #[arg(long)]
+        dry_run: bool,
+        /// Print JSON.
+        #[arg(long)]
+        json: bool,
+        /// Credential profile.
+        #[arg(long)]
+        profile: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum OkfCommand {
+    /// Validate a local OKF v0.2 directory or archive without contacting a gateway.
+    Validate {
+        /// Directory, .zip, .tar, .tar.gz or .tgz bundle.
+        path: std::path::PathBuf,
+        /// Treat a directory as a checked-out Git tree at this explicit revision.
+        #[arg(long)]
+        source_revision: Option<String>,
+        /// Print the complete inspection as JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Inspect artifacts, exact types, extension metadata and proposed mappings locally.
+    Inspect {
+        /// Directory, .zip, .tar, .tar.gz or .tgz bundle.
+        path: std::path::PathBuf,
+        /// Treat a directory as a checked-out Git tree at this explicit revision.
+        #[arg(long)]
+        source_revision: Option<String>,
+        /// Print the complete inspection as JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Plan an import and optionally materialise reviewable candidates.
+    Import {
+        /// Directory, .zip, .tar, .tar.gz or .tgz bundle.
+        path: std::path::PathBuf,
+        /// Project receiving the immutable plan and candidate batch.
+        #[arg(long)]
+        project: synveda_types::ProjectId,
+        /// Persist the immutable plan only; create no capture candidates.
+        #[arg(long)]
+        dry_run: bool,
+        /// Treat a directory as a checked-out Git tree at this explicit revision.
+        #[arg(long)]
+        source_revision: Option<String>,
+        /// Print the public API response as JSON.
+        #[arg(long)]
+        json: bool,
+        /// Credential profile.
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    /// Export current visible project Knowledge as a new deterministic directory.
+    Export {
+        /// Project whose current visible Knowledge enters the bundle.
+        #[arg(long)]
+        project: synveda_types::ProjectId,
+        /// New output directory. Existing paths are never overwritten.
+        #[arg(long)]
+        output: std::path::PathBuf,
+        /// Export only these Knowledge items. Repeatable; empty means all visible current items.
+        #[arg(long = "item")]
+        item_ids: Vec<synveda_types::KnowledgeItemId>,
+        /// Print the completed export summary as JSON.
+        #[arg(long)]
+        json: bool,
+        /// Credential profile.
+        #[arg(long)]
+        profile: Option<String>,
+    },
+}
+
+#[derive(Subcommand)]
+enum ConfigurationCommand {
+    /// List the canonical personal, team and enterprise source documents.
+    Templates {
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    /// List stable Configuration aggregates.
+    List {
+        /// Restrict to the scope that governs the aggregate.
+        #[arg(long)]
+        scope: Option<ScopeId>,
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    /// Inspect one aggregate and all visible immutable versions.
+    Show {
+        id: synveda_types::ConfigurationArtifactId,
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    /// Resolve the exact Configuration effective at a scope.
+    Effective {
+        scope: ScopeId,
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    /// Compare two immutable versions of one aggregate.
+    Compare {
+        id: synveda_types::ConfigurationArtifactId,
+        #[arg(long)]
+        from: synveda_types::ConfigurationVersionId,
+        #[arg(long)]
+        to: synveda_types::ConfigurationVersionId,
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    /// Create an aggregate from one template or a complete JSON document.
+    Create {
+        #[arg(long)]
+        scope: ScopeId,
+        #[arg(long)]
+        name: String,
+        #[arg(long, required_unless_present = "file", conflicts_with = "file")]
+        template: Option<synveda_types::configuration::ConfigurationTemplate>,
+        #[arg(
+            long,
+            required_unless_present = "template",
+            conflicts_with = "template"
+        )]
+        file: Option<std::path::PathBuf>,
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    /// Publish a complete document as a new immutable version.
+    Publish {
+        id: synveda_types::ConfigurationArtifactId,
+        #[arg(long)]
+        expected_version: synveda_types::ConfigurationVersionId,
+        #[arg(long)]
+        file: std::path::PathBuf,
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    /// List revisioned bindings written at one exact scope.
+    Bindings {
+        scope: ScopeId,
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    /// Bind an artifact at a scope, following current unless a version is pinned.
+    Bind {
+        #[arg(long)]
+        scope: ScopeId,
+        #[arg(long)]
+        artifact: synveda_types::ConfigurationArtifactId,
+        #[arg(long)]
+        version: Option<synveda_types::ConfigurationVersionId>,
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    /// Enable, disable, pin or unpin a binding under its exact revision.
+    UpdateBinding {
+        id: synveda_types::ConfigurationBindingId,
+        #[arg(long)]
+        expected_revision: u64,
+        #[arg(long)]
+        artifact: synveda_types::ConfigurationArtifactId,
+        #[arg(long)]
+        version: Option<synveda_types::ConfigurationVersionId>,
+        #[arg(long, required_unless_present = "disable", conflicts_with = "disable")]
+        enable: bool,
+        #[arg(long, required_unless_present = "enable", conflicts_with = "enable")]
+        disable: bool,
+        #[arg(long)]
+        reason: String,
+        #[arg(long)]
+        json: bool,
+        #[arg(long)]
+        profile: Option<String>,
+    },
+    /// Pin a binding to an older immutable version.
+    Rollback {
+        id: synveda_types::ConfigurationBindingId,
+        #[arg(long)]
+        expected_revision: u64,
+        #[arg(long)]
+        version: synveda_types::ConfigurationVersionId,
+        #[arg(long)]
+        json: bool,
         #[arg(long)]
         profile: Option<String>,
     },
@@ -718,10 +986,10 @@ enum ChannelCommand {
     History {
         /// The scope UUID.
         scope: ScopeId,
-        /// Which channel, as its ref name. Defaults to
-        /// `memory/published`.
+        /// Which authored-artifact channel, as its ref name (for example
+        /// `prompt/published`).
         #[arg(long)]
-        channel: Option<String>,
+        channel: String,
         /// How many states, 1..=200.
         #[arg(long)]
         limit: Option<u32>,
@@ -746,11 +1014,11 @@ enum ChannelCommand {
         #[arg(long)]
         to: String,
         /// Why. An auditor reads this, and so does whoever asks next week
-        /// why a record stopped being published.
+        /// why an artifact stopped being published.
         #[arg(long)]
         message: String,
         #[arg(long)]
-        channel: Option<String>,
+        channel: String,
         #[arg(long)]
         json: bool,
         #[arg(long)]
@@ -771,7 +1039,7 @@ enum ChannelCommand {
         #[arg(long)]
         reason: String,
         #[arg(long)]
-        channel: Option<String>,
+        channel: String,
         #[arg(long)]
         json: bool,
         #[arg(long)]
@@ -786,7 +1054,7 @@ enum ChannelCommand {
         #[arg(long)]
         reason: String,
         #[arg(long)]
-        channel: Option<String>,
+        channel: String,
         #[arg(long)]
         json: bool,
         #[arg(long)]
@@ -878,7 +1146,7 @@ enum ProposalCommand {
     },
     /// Run an approved proposal's effect: move the target's published
     /// channel. A separate act from the deciding approval by design
-    /// (ADR-0032 decision 9) — it takes `ChannelPublish` and `MemoryRead`
+    /// (ADR-0032 decision 9) — it takes `ChannelPublish` and `KnowledgeRead`
     /// at the target, which the deciding reviewer may not hold.
     Publish {
         /// The proposal UUID.
@@ -886,63 +1154,9 @@ enum ProposalCommand {
         #[arg(long)]
         profile: Option<String>,
     },
-    /// Record a decision to publish a skill the quality gate refuses
-    /// (SKIL-3, ADR-0053 decision 8).
-    ///
-    /// Takes `SkillQualityOverride` at the target scope — deliberately a
-    /// *different* authority from the one that publishes. Under the
-    /// product packs a `curator` publishes skills and a `steward` grants
-    /// this, so the person who decided a bundle was good enough is never
-    /// the person who records that it was not.
-    ///
-    /// It is its own act rather than a flag on `publish` for a plainer
-    /// reason too: a steward holds no content read, so a steward cannot
-    /// publish a skill at all. Grant the override, then let whoever
-    /// ordinarily publishes publish.
-    ///
-    /// The reason is what an auditor will read in a year to find out why
-    /// the product shipped something it had itself marked down, so write
-    /// it for them. It never waves the *security* scan through: that has
-    /// no override at any tier and must not acquire one.
-    OverrideQuality {
-        /// The proposal UUID.
-        id: ProposalId,
-        /// Why. Mandatory.
-        #[arg(long)]
-        reason: String,
-        #[arg(long)]
-        profile: Option<String>,
-    },
-    /// Record the reviewer's quality checklist for a skill proposal
-    /// (SKIL-3): the half of a skill's score no machine can supply.
-    ///
-    /// Its own act rather than part of approving, because a reviewer may
-    /// legitimately work through the checklist without yet deciding to
-    /// ship — indeed under `regulated-strict` that is the point, since the
-    /// pack requires one to exist *before* anybody publishes.
-    ///
-    /// The answers are bound to the bundle's bytes, not to this proposal:
-    /// if the author edits a file afterwards, the answers are not found
-    /// and the checklist has to be redone. That is deliberate — a review
-    /// of bytes nobody has since changed is the only kind worth recording.
-    Checklist {
-        /// The proposal UUID.
-        id: ProposalId,
-        /// An answer, repeatable: `--item tested=yes`. Items are
-        /// `instructions-correct`, `scope-appropriate`, `not-duplicate`,
-        /// `dependencies-available` and `tested`; verdicts are `yes`,
-        /// `no` and `n/a`.
-        #[arg(long = "item", value_name = "ITEM=VERDICT", required = true)]
-        items: Vec<String>,
-        /// Anything you want the record to say.
-        #[arg(long)]
-        note: Option<String>,
-        #[arg(long)]
-        profile: Option<String>,
-    },
-    /// Run an approved *classification* proposal's effect: move its
-    /// records to the tier the review approved (AUTHZ-5).
-    Classify {
+    /// Run an approved Knowledge proposal's typed effect. The gateway
+    /// repeats PDP and revision checks before applying it (CPR-16).
+    Apply {
         /// The proposal UUID.
         id: ProposalId,
         #[arg(long)]
@@ -1093,21 +1307,117 @@ enum AuthCommand {
 
 #[derive(Subcommand)]
 enum AuditCommand {
-    /// Walk the tenant's whole chain, recomputing every hash, and report
-    /// the first divergence. Exits non-zero on a broken chain.
+    /// Ask the governed audit API to verify the caller's tenant chain.
     Verify {
-        /// Tenant UUID.
+        /// Credential profile. Defaults to $SYNVEDA_PROFILE, else `default`.
         #[arg(long)]
-        tenant: TenantId,
+        profile: Option<String>,
+        /// Print the public response as JSON.
+        #[arg(long)]
+        json: bool,
     },
-    /// Print the tenant's most recent events, newest first, as JSON.
+    /// Print the caller's most recent policy-visible events.
     Tail {
-        /// Tenant UUID.
+        /// Credential profile. Defaults to $SYNVEDA_PROFILE, else `default`.
         #[arg(long)]
-        tenant: TenantId,
+        profile: Option<String>,
         /// How many events.
         #[arg(long, default_value_t = 20)]
         limit: i64,
+        /// Print the complete cursor-page response as JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Search policy-visible audit events through structured content-free filters.
+    Events {
+        /// Credential profile. Defaults to $SYNVEDA_PROFILE, else `default`.
+        #[arg(long)]
+        profile: Option<String>,
+        /// Exact acting subject.
+        #[arg(long)]
+        actor_subject: Option<String>,
+        /// Exact audit action.
+        #[arg(long)]
+        action: Option<String>,
+        /// Exact outcome (`allow`, `deny`, `success`, or `failure`).
+        #[arg(long)]
+        outcome: Option<String>,
+        /// Exact content-free resource string.
+        #[arg(long)]
+        resource: Option<String>,
+        /// Inclusive RFC 3339 occurrence-time bound.
+        #[arg(long)]
+        from: Option<String>,
+        /// Exclusive RFC 3339 occurrence-time bound.
+        #[arg(long)]
+        until: Option<String>,
+        /// Governed artifact family.
+        #[arg(long)]
+        artifact_family: Option<String>,
+        /// Stable governed artifact id.
+        #[arg(long, requires = "artifact_family")]
+        artifact_id: Option<String>,
+        /// Exact immutable artifact version.
+        #[arg(long, requires = "artifact_family")]
+        artifact_version: Option<String>,
+        /// Exact session id.
+        #[arg(long)]
+        session_id: Option<String>,
+        /// Exact context-run id.
+        #[arg(long)]
+        context_run_id: Option<String>,
+        /// Forward keyset cursor.
+        #[arg(long, default_value_t = 0)]
+        after: i64,
+        /// Maximum page size.
+        #[arg(long, default_value_t = 50)]
+        limit: i64,
+        /// Print the complete cursor-page response as JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Reconstruct content-free Knowledge evidence at valid and transaction times.
+    Knowledge {
+        /// Subject whose served Knowledge is being reconstructed.
+        subject: String,
+        /// Credential profile. Defaults to $SYNVEDA_PROFILE, else `default`.
+        #[arg(long)]
+        profile: Option<String>,
+        /// Valid-time instant, RFC 3339. Defaults to `as-known-at`.
+        #[arg(long)]
+        valid_at: Option<String>,
+        /// Transaction-time instant, RFC 3339. Defaults to now.
+        #[arg(long)]
+        as_known_at: Option<String>,
+        /// Reverse keyset cursor (exclusive audit sequence).
+        #[arg(long)]
+        before: Option<i64>,
+        /// Maximum page size.
+        #[arg(long, default_value_t = 50)]
+        limit: i64,
+        /// Print the complete temporal response as JSON.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Export one frozen tenant-bound chain prefix for offline verification.
+    Export {
+        /// Destination JSON file; an existing file is never overwritten.
+        #[arg(long)]
+        output: std::path::PathBuf,
+        /// Credential profile. Defaults to $SYNVEDA_PROFILE, else `default`.
+        #[arg(long)]
+        profile: Option<String>,
+        /// Cursor page size used while assembling the frozen prefix.
+        #[arg(long, default_value_t = 1000)]
+        page_size: i64,
+    },
+    /// Verify a previously exported chain without contacting Synveda.
+    VerifyExport {
+        /// Export JSON file.
+        path: std::path::PathBuf,
+        /// Print the verification summary as JSON.
+        #[arg(long)]
+        json: bool,
     },
 }
 
@@ -1118,33 +1428,10 @@ enum DbCommand {
 }
 
 #[derive(Subcommand)]
-enum HierarchyCommand {
-    /// Create a scope under a parent you may write to.
-    Create {
-        /// Parent scope UUID. Required — the org root is provisioned by
-        /// the first admin login, not created here.
-        #[arg(long)]
-        parent: ScopeId,
-        /// Level: division, department, team. (`org` is the root, and
-        /// `user` scopes are provisioned per person, never authored.)
-        #[arg(long, value_parser = scope_kind_below_root)]
-        kind: ScopeKind,
-        /// Human-stable handle, unique among siblings, immutable.
-        #[arg(long)]
-        slug: String,
-        /// Display name.
-        #[arg(long)]
-        name: String,
-        /// Credential profile. Defaults to $SYNVEDA_PROFILE, else `default`.
-        #[arg(long)]
-        profile: Option<String>,
-        /// Print the gateway's JSON rather than a line.
-        #[arg(long)]
-        json: bool,
-    },
-    /// Draw the subtree under a scope, or under the org root.
+enum ScopeCommand {
+    /// One level of the tenant's scope tree, or a scope's whole subtree.
     List {
-        /// Anchor scope UUID. Defaults to the tenant's org root.
+        /// Anchor scope UUID. Defaults to the tenant root.
         #[arg(long)]
         under: Option<ScopeId>,
         #[arg(long)]
@@ -1152,7 +1439,7 @@ enum HierarchyCommand {
         #[arg(long)]
         json: bool,
     },
-    /// One scope, in full.
+    /// One scope, with its path.
     Show {
         /// Scope UUID.
         id: ScopeId,
@@ -1161,42 +1448,44 @@ enum HierarchyCommand {
         #[arg(long)]
         json: bool,
     },
-    /// The org root's id — the parent every first `create` needs.
-    Root {
-        #[arg(long)]
-        profile: Option<String>,
-        #[arg(long)]
-        json: bool,
-    },
-    /// The policy pack in force at a scope, and where it came from.
-    Policy {
-        /// Scope UUID.
-        id: ScopeId,
-        #[arg(long)]
-        profile: Option<String>,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Role bindings at a scope, or (--effective) every binding in force
-    /// there with the node it was bound at.
-    Roles {
-        /// Scope UUID.
-        id: ScopeId,
-        /// Include bindings inherited from ancestors and tenant-wide ones.
-        #[arg(long)]
-        effective: bool,
-        #[arg(long)]
-        profile: Option<String>,
-        #[arg(long)]
-        json: bool,
-    },
-    /// What *you* may do at a scope, decided by the PDP.
+    /// Create a scope under a parent you may write to.
     ///
-    /// A forecast rather than a grant: every act decides again at its own
-    /// seam, so this says what to try, never what will be permitted.
-    Capabilities {
-        /// Scope UUID.
+    /// `kind` is one of the governed shapes: `org_unit`, `workspace`,
+    /// `project` (the old org/division/department/team/user vocabulary is
+    /// gone and fails here by name).
+    Create {
+        /// Parent scope UUID. Required — the tenant root is minted by the
+        /// substrate, not created here.
+        #[arg(long)]
+        parent: ScopeId,
+        /// Shape: org_unit, workspace, project.
+        #[arg(long)]
+        kind: String,
+        /// Human-stable handle, unique among siblings, immutable.
+        #[arg(long)]
+        slug: String,
+        /// Display name.
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Move a scope — and its whole subtree — under a new parent.
+    Move {
+        /// The scope to move.
         id: ScopeId,
+        /// The destination parent.
+        #[arg(long)]
+        parent: ScopeId,
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Draw the tenant's whole scope tree.
+    Tree {
         #[arg(long)]
         profile: Option<String>,
         #[arg(long)]
@@ -1234,8 +1523,9 @@ enum DirectoryCommand {
         #[arg(long)]
         config: std::path::PathBuf,
     },
-    /// Destroy this tenant's stored directory configuration. The sweep then
-    /// falls back to the deployment's, if it has one for this tenant.
+    /// Revoke this tenant's stored directory configuration. Its stable
+    /// reference remains fail-closed and does not fall back to deployment
+    /// configuration.
     ClearCredential {
         /// Tenant UUID.
         #[arg(long)]
@@ -1305,53 +1595,81 @@ enum ScimTokenCommand {
 }
 
 #[derive(Subcommand)]
-enum LapseCommand {
-    /// Standing grants anywhere you may read, or one scope's history.
-    ///
-    /// Each grant is visible from *either* end — the scope that discloses
-    /// and the scope that receives — so the steward of a granted team can
-    /// list, and therefore revoke, what their own team holds (ADR-0058
-    /// decision 7).
+enum RelaxationCommand {
+    /// Policy-visible current or historical relaxations.
     List {
-        /// Limit to grants over one target scope. Without it, every grant
-        /// you may see, anywhere in the tenant.
         #[arg(long)]
         scope: Option<ScopeId>,
-        /// Include grants that have expired or been revoked. Default with
-        /// --scope (that form answers "who could read this in March"),
-        /// off without it (that form answers "what is relaxed now").
         #[arg(long)]
-        all: bool,
+        status: Option<String>,
         #[arg(long)]
         profile: Option<String>,
         #[arg(long)]
         json: bool,
     },
-}
-
-/// Refuses `org` and `user` at the surface (ADR-0011's rank rule and
-/// ADR-0055 decision 2): the root has no parent to pass, and a personal
-/// scope is provisioned with its identity — an authored one would be a
-/// leaf nobody is placed at.
-fn scope_kind_below_root(value: &str) -> Result<ScopeKind, String> {
-    match value {
-        "division" => Ok(ScopeKind::Division),
-        "department" => Ok(ScopeKind::Department),
-        "team" => Ok(ScopeKind::Team),
-        "org" => Err(
-            "the org root is created by the first admin login, from the tenant's \
-                      own slug and name — there is nothing to create here"
-                .to_owned(),
-        ),
-        "user" => Err(
-            "personal scopes are provisioned with their identity at login, \
-                       never authored"
-                .to_owned(),
-        ),
-        other => Err(format!(
-            "unknown scope kind `{other}` (division, department, team)"
-        )),
-    }
+    /// Show the current aggregate and immutable version history.
+    Show {
+        id: synveda_types::RelaxationId,
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Open a governed create change.
+    Create {
+        #[arg(long)]
+        scope: ScopeId,
+        #[arg(long)]
+        subject: IdentityId,
+        #[arg(long, default_value = "knowledge.read")]
+        action: String,
+        #[arg(long, default_value = "internal")]
+        max_sensitivity: String,
+        #[arg(long)]
+        start: String,
+        #[arg(long)]
+        end: String,
+        #[arg(long)]
+        reason: String,
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Publish a replacement immutable version.
+    Revise {
+        id: synveda_types::RelaxationId,
+        #[arg(long)]
+        expected: synveda_types::RelaxationVersionId,
+        #[arg(long)]
+        subject: IdentityId,
+        #[arg(long, default_value = "knowledge.read")]
+        action: String,
+        #[arg(long, default_value = "internal")]
+        max_sensitivity: String,
+        #[arg(long)]
+        start: String,
+        #[arg(long)]
+        end: String,
+        #[arg(long)]
+        reason: String,
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
+    /// End a current immutable version early through VedaFlow.
+    Revoke {
+        id: synveda_types::RelaxationId,
+        #[arg(long)]
+        expected: synveda_types::RelaxationVersionId,
+        #[arg(long)]
+        reason: String,
+        #[arg(long)]
+        profile: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1377,7 +1695,10 @@ enum TenantCommand {
     /// A tenant's encryption keys (TEN-4, ADR-0064).
     #[command(subcommand)]
     Key(TenantKeyCommand),
-    /// Write a sealed archive of a tenant's records and audit chain.
+    /// Stable, scope-bound sealed tenant-secret references (CPR-35).
+    #[command(subcommand)]
+    Secret(TenantSecretCommand),
+    /// Write a sealed archive of a tenant's Knowledge history and audit chain.
     ///
     /// The AC's artefact: unreadable without that tenant's key. Sealed under
     /// a fresh per-archive key wrapped by the tenant's, so handing somebody
@@ -1415,12 +1736,8 @@ enum TenantKeyCommand {
         #[arg(long)]
         tenant: TenantId,
     },
-    /// Retire the current data key and mint the next generation.
-    ///
-    /// Re-seals nothing: payloads under the retired key keep opening under
-    /// it and move forward when their rows are next written, so this
-    /// returning does not mean every ciphertext is on the new key
-    /// (ADR-0064 decision 6).
+    /// Retire the current data key, mint the next generation and durably
+    /// re-encrypt active tenant-secret envelopes.
     Rotate {
         #[arg(long)]
         tenant: TenantId,
@@ -1429,6 +1746,38 @@ enum TenantKeyCommand {
     Status {
         #[arg(long)]
         tenant: TenantId,
+    },
+}
+
+#[derive(Subcommand)]
+enum TenantSecretCommand {
+    /// Store or rotate one stable local secret from a file or stdin.
+    Put {
+        #[arg(long)]
+        tenant: TenantId,
+        /// Exact governing scope. Immutable after the reference is minted.
+        #[arg(long)]
+        scope: ScopeId,
+        /// Consumer family: directory, tool_server, model_provider or import_export.
+        #[arg(long)]
+        kind: synveda_types::secret::TenantSecretKind,
+        /// Credential-free dotted-lowercase operator label.
+        #[arg(long)]
+        label: String,
+        /// Credential-free provider identifier such as entra or anthropic.
+        #[arg(long)]
+        provider: Option<String>,
+        /// File containing the secret value, or `-` for stdin. Values are
+        /// never accepted in argv.
+        #[arg(long)]
+        from: std::path::PathBuf,
+    },
+    /// Revoke one stable reference and destroy its current envelope.
+    Revoke {
+        #[arg(long)]
+        tenant: TenantId,
+        /// Stable secret UUID printed by `put` and `tenant key status`.
+        id: synveda_types::TenantSecretId,
     },
 }
 
@@ -1455,39 +1804,20 @@ enum PolicyCommand {
         /// reserved (ADR-0014).
         #[arg(long)]
         name: String,
-        /// Redaction mode for secret findings on observe ingest
+        /// Redaction mode for secret findings on session-event ingest
         /// (deny/redact/quarantine — MEM-2, ADR-0021). Both redaction
         /// flags must be given together or neither; unconfigured packs
         /// get the strict default (secrets quarantine, PII redact).
         #[arg(long, requires = "redaction_pii")]
         redaction_secrets: Option<RedactionMode>,
-        /// Redaction mode for PII findings on observe ingest.
+        /// Redaction mode for PII findings on session-event ingest.
         #[arg(long, requires = "redaction_secrets")]
         redaction_pii: Option<RedactionMode>,
-        /// Estimated-token inject budget at scopes this pack governs
-        /// (CTX-2, ADR-0025). Both composition flags must be given
-        /// together or neither; unconfigured packs get the product
-        /// default (1500, published-and-derived).
-        #[arg(long, requires = "composition_channels")]
+        /// Estimated-token authored-context budget at scopes this pack
+        /// governs (CTX-2, ADR-0025). Unconfigured packs use 1,500.
+        #[arg(long)]
         composition_budget: Option<u32>,
-        /// Inject channel rule (published-and-derived/published-only —
-        /// published-only is the bank-mode switch).
-        #[arg(long, requires = "composition_budget")]
-        composition_channels: Option<InjectChannels>,
-        /// What happens to material that does not fit the budget
-        /// (off/demote — CTX-4, ADR-0041). `demote` names it and hands the
-        /// reader a recall handle; `off` drops it in silence, which is how
-        /// composition behaved before CTX-4. Omitted keeps the product
-        /// config, which demotes. Only meaningful alongside the
-        /// composition pair.
-        #[arg(long, requires = "composition_budget")]
-        composition_index_tier: Option<IndexTier>,
-        /// How wide an index line's content is, in characters (default
-        /// 320 — the feature's "~80 tokens each" through the chars/4
-        /// estimator). Lower it where the corpus is short: a record is
-        /// only ever named instead of shown when naming it is genuinely
-        /// cheaper, so a width near the median record length turns the
-        /// tier off in practice.
+        /// How wide a compact authored-context summary is, in characters.
         #[arg(long, requires = "composition_budget")]
         composition_index_chars: Option<u32>,
         /// Whether a block names the skills this identity may install
@@ -1507,39 +1837,6 @@ enum PolicyCommand {
         /// `critical` — that band is not a pack's to move.
         #[arg(long)]
         scan_block_at: Option<ScanSeverity>,
-        /// Path to a JSON file of auto-promotion rules (FLOW-4,
-        /// ADR-0033): `{"rules":[{"name":..., "min_recalls":...,
-        /// "min_distinct_members":..., "max_sensitivity":...}]}`. A file
-        /// rather than flags because a rule set is a list, not a scalar.
-        /// Omitted means the pack carries no rules and nothing
-        /// auto-promotes at the scopes it governs — a trigger's fail-safe
-        /// is silence.
-        #[arg(long)]
-        promotion: Option<std::path::PathBuf>,
-        /// What the ingestion pipeline does with a restatement or a
-        /// contradiction at scopes this pack governs (off/merge/supersede
-        /// — MEM-5, ADR-0039). Omitted keeps the product config, which
-        /// supersedes; the thresholds are product constants and are tuned
-        /// through `--dedup-config` rather than one flag each.
-        #[arg(long)]
-        dedup_mode: Option<DedupMode>,
-        /// Path to a JSON file holding a full `DedupConfig` — the mode
-        /// plus the three thresholds in per mille and the nomination
-        /// depth. Takes precedence over `--dedup-mode`; a file rather than
-        /// five flags for the reason `--promotion` is one.
-        #[arg(long, conflicts_with = "dedup_mode")]
-        dedup_config: Option<std::path::PathBuf>,
-        /// Path to a JSON file holding a full `RetentionConfig` (MEM-6,
-        /// ADR-0040): the mode, the per-class record horizons in days,
-        /// the destruction and staging horizons, and the staleness
-        /// half-life. A file rather than a flag per class for the reason
-        /// `--promotion` is one — a schedule is a table, not a scalar.
-        ///
-        /// Omitted keeps the product config, whose record horizons are
-        /// all unset: nothing this CLI does by default can expire or
-        /// destroy a tenant's memory.
-        #[arg(long)]
-        retention: Option<std::path::PathBuf>,
         /// Path to the Cedar policy source file.
         file: std::path::PathBuf,
     },
@@ -1557,58 +1854,15 @@ enum PolicyCommand {
 }
 
 #[derive(Subcommand)]
-enum RoleCommand {
-    /// Bind a role to a subject; prints the binding as JSON. Without
-    /// --scope the binding is tenant-wide (in force everywhere, the
-    /// tenant plane included).
-    Bind {
-        /// Tenant UUID.
-        #[arg(long)]
-        tenant: TenantId,
-        /// The token subject to bind.
-        #[arg(long)]
-        subject: String,
-        /// The role (viewer/contributor/curator/steward/org-admin/
-        /// auditor/security-reviewer/compliance).
-        #[arg(long)]
-        role: Role,
-        /// Hierarchy node UUID to bind at; omit for tenant-wide.
-        #[arg(long)]
-        scope: Option<ScopeId>,
-    },
-    /// Remove one binding (exact subject + role + scope).
-    Unbind {
-        /// Tenant UUID.
-        #[arg(long)]
-        tenant: TenantId,
-        /// The bound subject.
-        #[arg(long)]
-        subject: String,
-        /// The bound role.
-        #[arg(long)]
-        role: Role,
-        /// The bound node UUID; omit for the tenant-wide binding.
-        #[arg(long)]
-        scope: Option<ScopeId>,
-    },
-    /// List every binding of the tenant as JSON.
-    List {
-        /// Tenant UUID.
-        #[arg(long)]
-        tenant: TenantId,
-    },
-}
-
-#[derive(Subcommand)]
 enum ServiceCommand {
     /// Register a service identity at an anchor node: creates its
     /// personal leaf under the anchor and the identity row (kind
     /// `service`); prints the identity as JSON. Tokens for its subject
     /// are then confined to the anchor's subtree.
     Register {
-        /// Tenant UUID.
+        /// Credential profile. Defaults to $SYNVEDA_PROFILE, else `default`.
         #[arg(long)]
-        tenant: TenantId,
+        profile: Option<String>,
         /// The `sub` the IdP puts in the agent's client-credentials
         /// tokens (for Rauthy, the client id).
         #[arg(long)]
@@ -1622,18 +1876,18 @@ enum ServiceCommand {
     },
     /// Revoke a service identity: deletes the row and its personal leaf.
     Remove {
-        /// Tenant UUID.
+        /// Credential profile. Defaults to $SYNVEDA_PROFILE, else `default`.
         #[arg(long)]
-        tenant: TenantId,
+        profile: Option<String>,
         /// The registered identity UUID (see `service list`).
         #[arg(long)]
         id: IdentityId,
     },
     /// List the tenant's service identities as JSON.
     List {
-        /// Tenant UUID.
+        /// Credential profile. Defaults to $SYNVEDA_PROFILE, else `default`.
         #[arg(long)]
-        tenant: TenantId,
+        profile: Option<String>,
     },
 }
 
@@ -1715,7 +1969,6 @@ async fn run(cli: Cli) -> Result<(), String> {
             name,
             embedder,
             issuer,
-            demo,
             dry_run,
         } => {
             init::init(init::Plan {
@@ -1723,54 +1976,36 @@ async fn run(cli: Cli) -> Result<(), String> {
                 name,
                 embedder,
                 issuer,
-                demo,
                 dry_run,
             })
             .await
         }
-        Command::Hierarchy(HierarchyCommand::Create {
+        Command::Scope(ScopeCommand::List {
+            under,
+            profile,
+            json,
+        }) => scope::list(&profile_name(profile), under.as_ref().copied(), json).await,
+        Command::Scope(ScopeCommand::Show { id, profile, json }) => {
+            scope::show(&profile_name(profile), id, json).await
+        }
+        Command::Scope(ScopeCommand::Create {
             parent,
             kind,
             slug,
             name,
             profile,
             json,
-        }) => {
-            hierarchy::create(
-                &profile_name(profile),
-                hierarchy::NewNode {
-                    parent,
-                    kind,
-                    slug: &slug,
-                    name: &name,
-                },
-                json,
-            )
-            .await
-        }
-        Command::Hierarchy(HierarchyCommand::List {
-            under,
-            profile,
-            json,
-        }) => hierarchy::list(&profile_name(profile), under, json).await,
-        Command::Hierarchy(HierarchyCommand::Show { id, profile, json }) => {
-            hierarchy::show(&profile_name(profile), id, json).await
-        }
-        Command::Hierarchy(HierarchyCommand::Root { profile, json }) => {
-            hierarchy::root(&profile_name(profile), json).await
-        }
-        Command::Hierarchy(HierarchyCommand::Policy { id, profile, json }) => {
-            hierarchy::policy(&profile_name(profile), id, json).await
-        }
-        Command::Hierarchy(HierarchyCommand::Roles {
+        }) => scope::create(&profile_name(profile), parent, &kind, &slug, &name, json).await,
+        Command::Scope(ScopeCommand::Move {
             id,
-            effective,
+            parent,
             profile,
             json,
-        }) => hierarchy::roles(&profile_name(profile), id, effective, json).await,
-        Command::Hierarchy(HierarchyCommand::Capabilities { id, profile, json }) => {
-            hierarchy::capabilities(&profile_name(profile), id, json).await
+        }) => scope::move_scope(&profile_name(profile), id, parent, json).await,
+        Command::Scope(ScopeCommand::Tree { profile, json }) => {
+            scope::tree(&profile_name(profile), json).await
         }
+
         Command::Whoami {
             capabilities,
             profile,
@@ -1800,12 +2035,72 @@ async fn run(cli: Cli) -> Result<(), String> {
         Command::Scim(ScimCommand::Token(ScimTokenCommand::Revoke { id, profile })) => {
             scim::revoke(&profile_name(profile), &id).await
         }
-        Command::Lapse(LapseCommand::List {
+        Command::Relaxation(RelaxationCommand::List {
             scope,
-            all,
+            status,
             profile,
             json,
-        }) => lapse::list(&profile_name(profile), scope, all, json).await,
+        }) => relaxation::list(&profile_name(profile), scope, status.as_deref(), json).await,
+        Command::Relaxation(RelaxationCommand::Show { id, profile, json }) => {
+            relaxation::show(&profile_name(profile), id, json).await
+        }
+        Command::Relaxation(RelaxationCommand::Create {
+            scope,
+            subject,
+            action,
+            max_sensitivity,
+            start,
+            end,
+            reason,
+            profile,
+            json,
+        }) => {
+            relaxation::create(
+                &profile_name(profile),
+                scope,
+                subject,
+                &action,
+                &max_sensitivity,
+                &start,
+                &end,
+                &reason,
+                json,
+            )
+            .await
+        }
+        Command::Relaxation(RelaxationCommand::Revise {
+            id,
+            expected,
+            subject,
+            action,
+            max_sensitivity,
+            start,
+            end,
+            reason,
+            profile,
+            json,
+        }) => {
+            relaxation::revise(
+                &profile_name(profile),
+                id,
+                expected,
+                subject,
+                &action,
+                &max_sensitivity,
+                &start,
+                &end,
+                &reason,
+                json,
+            )
+            .await
+        }
+        Command::Relaxation(RelaxationCommand::Revoke {
+            id,
+            expected,
+            reason,
+            profile,
+            json,
+        }) => relaxation::revoke(&profile_name(profile), id, expected, &reason, json).await,
         Command::Login {
             gateway,
             issuer,
@@ -1826,9 +2121,13 @@ async fn run(cli: Cli) -> Result<(), String> {
         Command::Mcp {
             command: None,
             writes,
+            workspace,
+            project,
             profile,
-        } => mcp::serve(profile_name(profile), writes).await,
+        } => mcp::serve(profile_name(profile), writes, workspace, project).await,
         Command::Mcp {
+            workspace,
+            project,
             command:
                 Some(McpCommand::Install {
                     client,
@@ -1839,15 +2138,21 @@ async fn run(cli: Cli) -> Result<(), String> {
                     profile,
                 }),
             ..
-        } => mcp::install::install(&mcp::install::Plan {
-            client,
-            config,
-            profile: profile_name(profile),
-            dry_run,
-            force,
-            print,
-        }),
+        } => mcp::install::install_for(
+            &mcp::install::Plan {
+                client,
+                config,
+                profile: profile_name(profile),
+                dry_run,
+                force,
+                print,
+            },
+            workspace.as_deref(),
+            project.as_deref(),
+        ),
         Command::Mcp {
+            workspace: _,
+            project: _,
             command:
                 Some(McpCommand::Uninstall {
                     client,
@@ -1900,12 +2205,21 @@ async fn run(cli: Cli) -> Result<(), String> {
         }
         Command::Db(DbCommand::Migrate) => {
             let pool = connect().await?;
+            // Asked here as well as inside `migrate`, so the refusal reaches
+            // a terminal as itself rather than wrapped in `storage:` — this
+            // is the command whose whole job is to advance a schema, and the
+            // answer "this one cannot be advanced, here is what to run" is
+            // the answer (CPR-2, ADR-0069).
+            synveda_store::epoch::preflight(&pool)
+                .await
+                .map_err(|refusal| refusal.to_string())?;
             synveda_store::migrate(&pool)
                 .await
                 .map_err(|err| err.to_string())?;
             eprintln!("migrations applied");
             Ok(())
         }
+        Command::Reset { database, force } => reset::reset(reset::Plan { database, force }).await,
         Command::Tenant(TenantCommand::Create {
             slug,
             name,
@@ -1916,7 +2230,7 @@ async fn run(cli: Cli) -> Result<(), String> {
             } else {
                 TenantStatus::Active
             };
-            let pool = connect().await?;
+            let pool = connect_current_epoch().await?;
             let tenant = create_tenant(&pool, &slug, &name, status).await?;
             // The tenant's key, in the same command that admits it (TEN-4,
             // ADR-0064). Not in `create_tenant`'s transaction: wrapping a key
@@ -1948,23 +2262,47 @@ async fn run(cli: Cli) -> Result<(), String> {
         }
         Command::Kms(KmsCommand::Keygen) => keys::keygen(),
         Command::Tenant(TenantCommand::Key(TenantKeyCommand::Provision { tenant })) => {
-            let pool = connect().await?;
+            let pool = connect_current_epoch().await?;
             keys::provision(&pool, tenant).await
         }
         Command::Tenant(TenantCommand::Key(TenantKeyCommand::Rotate { tenant })) => {
-            let pool = connect().await?;
+            let pool = connect_current_epoch().await?;
             keys::rotate(&pool, tenant).await
         }
         Command::Tenant(TenantCommand::Key(TenantKeyCommand::Status { tenant })) => {
-            let pool = connect().await?;
+            let pool = connect_current_epoch().await?;
             keys::status(&pool, tenant).await
         }
+        Command::Tenant(TenantCommand::Secret(TenantSecretCommand::Put {
+            tenant,
+            scope,
+            kind,
+            label,
+            provider,
+            from,
+        })) => {
+            let pool = connect_current_epoch().await?;
+            keys::put_tenant_secret_from_path(
+                &pool,
+                tenant,
+                scope,
+                kind,
+                &label,
+                provider.as_deref(),
+                &from,
+            )
+            .await
+        }
+        Command::Tenant(TenantCommand::Secret(TenantSecretCommand::Revoke { tenant, id })) => {
+            let pool = connect_current_epoch().await?;
+            keys::revoke_tenant_secret(&pool, tenant, id).await
+        }
         Command::Tenant(TenantCommand::Export { tenant, out }) => {
-            let pool = connect().await?;
+            let pool = connect_current_epoch().await?;
             keys::export(&pool, tenant, &out).await
         }
         Command::Tenant(TenantCommand::ExportOpen { archive }) => {
-            let pool = connect().await?;
+            let pool = connect_current_epoch().await?;
             keys::export_open(&pool, &archive).await
         }
         Command::Tenant(TenantCommand::ExportDescribe { archive }) => {
@@ -1972,11 +2310,11 @@ async fn run(cli: Cli) -> Result<(), String> {
         }
         Command::Directory(DirectoryCommand::SetCredential { tenant, config }) => {
             let json = read_config_arg(&config)?;
-            let pool = connect().await?;
+            let pool = connect_current_epoch().await?;
             keys::set_directory_credential(&pool, tenant, &json).await
         }
         Command::Directory(DirectoryCommand::ClearCredential { tenant }) => {
-            let pool = connect().await?;
+            let pool = connect_current_epoch().await?;
             keys::clear_directory_credential(&pool, tenant).await
         }
         Command::Policy(PolicyCommand::Apply {
@@ -1985,15 +2323,9 @@ async fn run(cli: Cli) -> Result<(), String> {
             redaction_secrets,
             redaction_pii,
             composition_budget,
-            composition_channels,
-            composition_index_tier,
             composition_index_chars,
             composition_skill_index,
             scan_block_at,
-            promotion,
-            dedup_mode,
-            dedup_config,
-            retention,
             file,
         }) => {
             let source = std::fs::read_to_string(&file)
@@ -2003,83 +2335,19 @@ async fn run(cli: Cli) -> Result<(), String> {
             synveda_policy::Pdp::new()
                 .and_then(|pdp| pdp.compile_check(&name, &source))
                 .map_err(|err| err.to_string())?;
-            // clap's `requires` makes each config's flags all-or-nothing.
             let redaction = redaction_secrets
                 .zip(redaction_pii)
                 .map(|(secrets, pii)| RedactionConfig { secrets, pii });
-            let composition =
-                composition_budget
-                    .zip(composition_channels)
-                    .map(|(budget_tokens, channels)| CompositionConfig {
-                        budget_tokens,
-                        channels,
-                        // Omitted keeps the product config's tier rather
-                        // than turning the index off: a flag nobody passed
-                        // must not silently remove a rendering the pack it
-                        // replaces was serving (ADR-0041 decision 11).
-                        index_tier: composition_index_tier
-                            .unwrap_or(CompositionConfig::DEFAULT.index_tier),
-                        index_entry_chars: composition_index_chars
-                            .unwrap_or(CompositionConfig::DEFAULT.index_entry_chars),
-                        // Same rule as the tier above, and it matters more
-                        // here: omitting the flag must not silently stop a
-                        // fleet being told which skills it may install.
-                        skill_index: composition_skill_index
-                            .unwrap_or(CompositionConfig::DEFAULT.skill_index),
-                    });
+            let composition = composition_budget.map(|budget_tokens| CompositionConfig {
+                budget_tokens,
+                summary_chars: composition_index_chars
+                    .unwrap_or(CompositionConfig::DEFAULT.summary_chars),
+                skill_index: composition_skill_index
+                    .unwrap_or(CompositionConfig::DEFAULT.skill_index),
+                trace_retention: CompositionConfig::DEFAULT.trace_retention,
+            });
             let scan = scan_block_at.map(|block_at| SkillScanConfig { block_at });
-            // Validated here as well as at install: a rule that asks for
-            // zero recalls, or names an asset with no usage signal, is
-            // refused when it is written rather than discovered when a
-            // sweep silently does nothing (ADR-0033 decision 6).
-            let promotion = promotion
-                .map(|path| {
-                    let raw = std::fs::read_to_string(&path)
-                        .map_err(|err| format!("read {}: {err}", path.display()))?;
-                    let config: PromotionConfig = serde_json::from_str(&raw)
-                        .map_err(|err| format!("parse {}: {err}", path.display()))?;
-                    config
-                        .validate()
-                        .map_err(|err| format!("{}: {err}", path.display()))?;
-                    Ok::<_, String>(config)
-                })
-                .transpose()?;
-            // A threshold outside `0..=1` makes a band unreachable, which
-            // reads as "dedup is off" without the pack ever saying so —
-            // refused here as well as at install (ADR-0039 decision 12).
-            let dedup = match dedup_config {
-                Some(path) => {
-                    let raw = std::fs::read_to_string(&path)
-                        .map_err(|err| format!("read {}: {err}", path.display()))?;
-                    let config: DedupConfig = serde_json::from_str(&raw)
-                        .map_err(|err| format!("parse {}: {err}", path.display()))?;
-                    config
-                        .validate()
-                        .map_err(|err| format!("{}: {err}", path.display()))?;
-                    Some(config)
-                }
-                None => dedup_mode.map(|mode| DedupConfig {
-                    mode,
-                    ..DedupConfig::DEFAULT
-                }),
-            };
-            // A schedule written in seconds, or a staging horizon that
-            // would spend MEM-1's idempotency guarantee for nothing, is
-            // refused here as well as at install — before it destroys
-            // something, rather than after (ADR-0040 decision 7).
-            let retention = retention
-                .map(|path| {
-                    let raw = std::fs::read_to_string(&path)
-                        .map_err(|err| format!("read {}: {err}", path.display()))?;
-                    let config: RetentionConfig = serde_json::from_str(&raw)
-                        .map_err(|err| format!("parse {}: {err}", path.display()))?;
-                    config
-                        .validate()
-                        .map_err(|err| format!("{}: {err}", path.display()))?;
-                    Ok::<_, String>(config)
-                })
-                .transpose()?;
-            let pool = connect().await?;
+            let pool = connect_current_epoch().await?;
             let mut tx = synveda_store::rls::begin_tenant_tx(&pool, tenant)
                 .await
                 .map_err(|err| err.to_string())?;
@@ -2091,9 +2359,6 @@ async fn run(cli: Cli) -> Result<(), String> {
                 &PackConfig {
                     redaction,
                     composition,
-                    promotion,
-                    dedup,
-                    retention,
                     scan,
                     ..Default::default()
                 },
@@ -2111,8 +2376,6 @@ async fn run(cli: Cli) -> Result<(), String> {
                     "redaction": pack.config.redaction,
                     "composition": pack.config.composition,
                     "scan": pack.config.scan,
-                    "promotion": pack.config.promotion,
-                    "retention": pack.config.retention,
                 }),
             )
             .await?;
@@ -2129,7 +2392,7 @@ async fn run(cli: Cli) -> Result<(), String> {
             Ok(())
         }
         Command::Policy(PolicyCommand::Clear { tenant, name }) => {
-            let pool = connect().await?;
+            let pool = connect_current_epoch().await?;
             let mut tx = synveda_store::rls::begin_tenant_tx(&pool, tenant)
                 .await
                 .map_err(|err| err.to_string())?;
@@ -2157,241 +2420,93 @@ async fn run(cli: Cli) -> Result<(), String> {
             );
             Ok(())
         }
-        Command::Role(RoleCommand::Bind {
-            tenant,
-            subject,
-            role,
-            scope,
-        }) => {
-            let pool = connect().await?;
-            let mut tx = synveda_store::rls::begin_tenant_tx(&pool, tenant)
-                .await
-                .map_err(|err| err.to_string())?;
-            let binding =
-                synveda_store::role_bindings::bind(&mut *tx, tenant, &subject, scope, role)
-                    .await
-                    .map_err(|err| err.to_string())?;
-            record_break_glass(
-                &mut tx,
-                tenant,
-                AuditAction::RoleBound,
-                scope.map_or_else(|| format!("tenant {tenant}"), |id| format!("scope {id}")),
-                json!({"binding": {"subject": subject, "role": role, "scope_id": scope}}),
-            )
-            .await?;
-            tx.commit().await.map_err(|err| err.to_string())?;
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&binding).map_err(|err| err.to_string())?
-            );
-            Ok(())
-        }
-        Command::Role(RoleCommand::Unbind {
-            tenant,
-            subject,
-            role,
-            scope,
-        }) => {
-            let pool = connect().await?;
-            let mut tx = synveda_store::rls::begin_tenant_tx(&pool, tenant)
-                .await
-                .map_err(|err| err.to_string())?;
-            let removed =
-                synveda_store::role_bindings::unbind(&mut *tx, tenant, &subject, scope, role)
-                    .await
-                    .map_err(|err| err.to_string())?;
-            if removed {
-                record_break_glass(
-                    &mut tx,
-                    tenant,
-                    AuditAction::RoleUnbound,
-                    scope.map_or_else(|| format!("tenant {tenant}"), |id| format!("scope {id}")),
-                    json!({"binding": {"subject": subject, "role": role, "scope_id": scope}}),
-                )
-                .await?;
-            }
-            tx.commit().await.map_err(|err| err.to_string())?;
-            eprintln!(
-                "{}",
-                if removed {
-                    "role binding removed; it is out of force on the next request"
-                } else {
-                    "no such binding"
-                }
-            );
-            Ok(())
-        }
-        Command::Role(RoleCommand::List { tenant }) => {
-            let pool = connect().await?;
-            let mut tx = synveda_store::rls::begin_tenant_tx(&pool, tenant)
-                .await
-                .map_err(|err| err.to_string())?;
-            let bindings = synveda_store::role_bindings::all(&mut *tx, tenant)
-                .await
-                .map_err(|err| err.to_string())?;
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&bindings).map_err(|err| err.to_string())?
-            );
-            Ok(())
-        }
         Command::Service(ServiceCommand::Register {
-            tenant,
+            profile,
             subject,
             scope,
             name,
+        }) => service::register(&profile_name(profile), &subject, scope, name.as_deref()).await,
+        Command::Service(ServiceCommand::Remove { profile, id }) => {
+            service::remove(&profile_name(profile), id).await
+        }
+        Command::Service(ServiceCommand::List { profile }) => {
+            service::list(&profile_name(profile)).await
+        }
+        Command::Audit(AuditCommand::Verify { profile, json }) => {
+            audit::verify(&profile_name(profile), json).await
+        }
+        Command::Audit(AuditCommand::Tail {
+            profile,
+            limit,
+            json,
+        }) => audit::tail(&profile_name(profile), limit, json).await,
+        Command::Audit(AuditCommand::Events {
+            profile,
+            actor_subject,
+            action,
+            outcome,
+            resource,
+            from,
+            until,
+            artifact_family,
+            artifact_id,
+            artifact_version,
+            session_id,
+            context_run_id,
+            after,
+            limit,
+            json,
         }) => {
-            let pool = connect().await?;
-            let mut tx = synveda_store::rls::begin_tenant_tx(&pool, tenant)
-                .await
-                .map_err(|err| err.to_string())?;
-            let anchor = synveda_store::hierarchy::node(&mut *tx, scope)
-                .await
-                .map_err(|err| err.to_string())?
-                .filter(|node| node.tenant_id == tenant)
-                .ok_or_else(|| format!("no scope {scope} in tenant {tenant}"))?;
-            if anchor.slug == synveda_store::identities::QUARANTINE_SLUG && anchor.depth == 1 {
-                return Err(
-                    "service identities cannot be anchored at the quarantine scope".to_owned(),
-                );
-            }
-            let identity_id = IdentityId::new();
-            let display_name = name.as_deref().unwrap_or(&subject);
-            let leaf = synveda_store::hierarchy::create(
-                &mut tx,
-                ScopeId::new(),
-                tenant,
-                Some(anchor.id),
-                ScopeKind::User,
-                &personal_slug(None, &subject, identity_id),
-                display_name,
+            audit::events(
+                &profile_name(profile),
+                audit::EventQuery {
+                    actor_subject,
+                    action,
+                    outcome,
+                    resource,
+                    from,
+                    until,
+                    artifact_family,
+                    artifact_id,
+                    artifact_version,
+                    session_id,
+                    context_run_id,
+                    after,
+                    limit,
+                },
+                json,
             )
             .await
-            .map_err(|err| err.to_string())?;
-            let identity = synveda_store::identities::create(
-                &mut tx,
-                identity_id,
-                tenant,
-                Some(&subject),
-                IdentityKind::Service,
-                None,
-                name.as_deref(),
-                leaf.id,
+        }
+        Command::Audit(AuditCommand::Knowledge {
+            subject,
+            profile,
+            valid_at,
+            as_known_at,
+            before,
+            limit,
+            json,
+        }) => {
+            audit::knowledge(
+                &profile_name(profile),
+                audit::KnowledgeQuery {
+                    subject,
+                    valid_at,
+                    as_known_at,
+                    before,
+                    limit,
+                },
+                json,
             )
             .await
-            .map_err(|err| err.to_string())?;
-            record_break_glass(
-                &mut tx,
-                tenant,
-                AuditAction::ServiceIdentityRegistered,
-                format!("scope {}", anchor.id),
-                json!({
-                    "identity": {"id": identity.id, "subject": identity.subject},
-                    "leaf_scope_id": leaf.id,
-                    "anchor": {"slug": anchor.slug, "path": anchor.path},
-                }),
-            )
-            .await?;
-            tx.commit().await.map_err(|err| err.to_string())?;
-            eprintln!(
-                "note: a running gateway caches hierarchy out-of-process; restart it or use the API path"
-            );
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&identity).map_err(|err| err.to_string())?
-            );
-            Ok(())
         }
-        Command::Service(ServiceCommand::Remove { tenant, id }) => {
-            let pool = connect().await?;
-            let mut tx = synveda_store::rls::begin_tenant_tx(&pool, tenant)
-                .await
-                .map_err(|err| err.to_string())?;
-            let identity = synveda_store::identities::by_id(&mut *tx, tenant, id)
-                .await
-                .map_err(|err| err.to_string())?
-                .filter(|identity| identity.kind == IdentityKind::Service)
-                .ok_or_else(|| format!("no service identity {id} in tenant {tenant}"))?;
-            // The anchor (the leaf's parent) names the event's resource,
-            // read before the leaf goes.
-            let anchor_id = synveda_store::hierarchy::node(&mut *tx, identity.scope_id)
-                .await
-                .map_err(|err| err.to_string())?
-                .and_then(|leaf| leaf.parent_id);
-            // Row first (its FK pins the leaf), then the leaf.
-            synveda_store::identities::delete_service(&mut *tx, tenant, id)
-                .await
-                .map_err(|err| err.to_string())?;
-            synveda_store::hierarchy::delete(&mut tx, identity.scope_id)
-                .await
-                .map_err(|err| err.to_string())?;
-            record_break_glass(
-                &mut tx,
-                tenant,
-                AuditAction::ServiceIdentityRevoked,
-                anchor_id.map_or_else(|| format!("tenant {tenant}"), |id| format!("scope {id}")),
-                json!({"identity": {"id": identity.id, "subject": identity.subject}}),
-            )
-            .await?;
-            tx.commit().await.map_err(|err| err.to_string())?;
-            eprintln!("service identity revoked; its tokens are quarantined from the next request");
-            Ok(())
-        }
-        Command::Service(ServiceCommand::List { tenant }) => {
-            let pool = connect().await?;
-            let mut tx = synveda_store::rls::begin_tenant_tx(&pool, tenant)
-                .await
-                .map_err(|err| err.to_string())?;
-            let identities = synveda_store::identities::services(&mut *tx, tenant)
-                .await
-                .map_err(|err| err.to_string())?;
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&identities).map_err(|err| err.to_string())?
-            );
-            Ok(())
-        }
-        Command::Audit(AuditCommand::Verify { tenant }) => {
-            let pool = connect().await?;
-            let mut tx = synveda_store::rls::begin_tenant_tx(&pool, tenant)
-                .await
-                .map_err(|err| err.to_string())?;
-            let verification = synveda_audit::verify(&mut tx, tenant)
-                .await
-                .map_err(|err| err.to_string())?;
-            println!("{verification}");
-            match verification {
-                synveda_audit::ChainVerification::Valid { .. } => Ok(()),
-                synveda_audit::ChainVerification::Broken { .. } => {
-                    Err("audit chain verification failed".to_owned())
-                }
-            }
-        }
-        Command::Audit(AuditCommand::Tail { tenant, limit }) => {
-            let pool = connect().await?;
-            let mut tx = synveda_store::rls::begin_tenant_tx(&pool, tenant)
-                .await
-                .map_err(|err| err.to_string())?;
-            let events = synveda_audit::tail(&mut tx, tenant, limit)
-                .await
-                .map_err(|err| err.to_string())?;
-            for event in events {
-                println!(
-                    "{}",
-                    json!({
-                        "seq": event.seq,
-                        "occurred_at": event.occurred_at,
-                        "actor": {"kind": event.actor_kind, "subject": event.actor_subject},
-                        "action": event.action,
-                        "resource": event.resource,
-                        "outcome": event.outcome,
-                        "payload": event.payload,
-                        "trace_id": event.trace_id,
-                        "hash": event.hash_hex(),
-                    })
-                );
-            }
-            Ok(())
+        Command::Audit(AuditCommand::Export {
+            output,
+            profile,
+            page_size,
+        }) => audit::export(&profile_name(profile), &output, page_size).await,
+        Command::Audit(AuditCommand::VerifyExport { path, json }) => {
+            audit::verify_export_file(&path, json)
         }
         Command::Proposal(command) => match command {
             ProposalCommand::List {
@@ -2426,19 +2541,8 @@ async fn run(cli: Cli) -> Result<(), String> {
             ProposalCommand::Publish { id, profile } => {
                 proposal::publish(&profile_name(profile), id).await
             }
-            ProposalCommand::OverrideQuality {
-                id,
-                reason,
-                profile,
-            } => proposal::override_quality(&profile_name(profile), id, &reason).await,
-            ProposalCommand::Checklist {
-                id,
-                items,
-                note,
-                profile,
-            } => proposal::checklist(&profile_name(profile), id, &items, note).await,
-            ProposalCommand::Classify { id, profile } => {
-                proposal::classify(&profile_name(profile), id).await
+            ProposalCommand::Apply { id, profile } => {
+                proposal::apply(&profile_name(profile), id).await
             }
         },
         Command::Prompt(command) => match command {
@@ -2505,31 +2609,18 @@ async fn run(cli: Cli) -> Result<(), String> {
             } => prompt::propose(&profile_name(profile), &name, scope, title.as_deref()).await,
         },
         Command::Skill(command) => match command {
-            SkillCommand::List { scope, profile } => {
-                skill::list(&profile_name(profile), scope).await
-            }
+            SkillCommand::List {
+                scope,
+                json,
+                profile,
+            } => skill::list(&profile_name(profile), scope, json).await,
             SkillCommand::Show {
                 name,
-                scope,
-                draft,
-                commit,
+                version,
                 json,
                 quiet,
                 profile,
-            } => {
-                skill::show(
-                    &profile_name(profile),
-                    skill::Ask {
-                        name: &name,
-                        scope,
-                        draft,
-                        commit: commit.as_deref(),
-                    },
-                    json,
-                    quiet,
-                )
-                .await
-            }
+            } => skill::show(&profile_name(profile), &name, version, json, quiet).await,
             SkillCommand::Import {
                 dir,
                 scope,
@@ -2553,31 +2644,29 @@ async fn run(cli: Cli) -> Result<(), String> {
             }
             SkillCommand::Install {
                 name,
+                scope,
                 client,
                 root,
-                scope,
-                commit,
                 json,
                 profile,
             } => {
                 skill::install(
                     &profile_name(profile),
-                    skill::Ask {
-                        name: &name,
-                        scope,
-                        draft: false,
-                        commit: commit.as_deref(),
-                    },
+                    &name,
+                    scope,
                     &client,
                     root.as_deref(),
                     json,
                 )
                 .await
             }
-            SkillCommand::Available { json, profile } => {
-                skill::available(&profile_name(profile), json).await
-            }
+            SkillCommand::Available {
+                scope,
+                json,
+                profile,
+            } => skill::available(&profile_name(profile), scope, json).await,
             SkillCommand::Sync {
+                scope,
                 client,
                 root,
                 dry_run,
@@ -2586,6 +2675,7 @@ async fn run(cli: Cli) -> Result<(), String> {
             } => {
                 skill::sync(
                     &profile_name(profile),
+                    scope,
                     &client,
                     root.as_deref(),
                     dry_run,
@@ -2593,23 +2683,151 @@ async fn run(cli: Cli) -> Result<(), String> {
                 )
                 .await
             }
-            SkillCommand::Propose {
-                name,
+        },
+
+        Command::Configuration(command) => match command {
+            ConfigurationCommand::Templates { json, profile } => {
+                configuration::templates(&profile_name(profile), json).await
+            }
+            ConfigurationCommand::List {
                 scope,
-                source,
-                title,
+                json,
+                profile,
+            } => configuration::list(&profile_name(profile), scope, json).await,
+            ConfigurationCommand::Show { id, json, profile } => {
+                configuration::show(&profile_name(profile), id, json).await
+            }
+            ConfigurationCommand::Effective {
+                scope,
+                json,
+                profile,
+            } => configuration::effective(&profile_name(profile), scope, json).await,
+            ConfigurationCommand::Compare {
+                id,
+                from,
+                to,
+                json,
+                profile,
+            } => configuration::compare(&profile_name(profile), id, from, to, json).await,
+            ConfigurationCommand::Create {
+                scope,
+                name,
+                template,
+                file,
+                json,
                 profile,
             } => {
-                skill::propose(
+                configuration::create(
                     &profile_name(profile),
-                    &name,
                     scope,
-                    source,
-                    title.as_deref().unwrap_or(&name),
+                    &name,
+                    template,
+                    file.as_deref(),
+                    json,
+                )
+                .await
+            }
+            ConfigurationCommand::Publish {
+                id,
+                expected_version,
+                file,
+                json,
+                profile,
+            } => {
+                configuration::publish(&profile_name(profile), id, expected_version, &file, json)
+                    .await
+            }
+            ConfigurationCommand::Bindings {
+                scope,
+                json,
+                profile,
+            } => configuration::bindings(&profile_name(profile), scope, json).await,
+            ConfigurationCommand::Bind {
+                scope,
+                artifact,
+                version,
+                json,
+                profile,
+            } => configuration::bind(&profile_name(profile), scope, artifact, version, json).await,
+            ConfigurationCommand::UpdateBinding {
+                id,
+                expected_revision,
+                artifact,
+                version,
+                enable,
+                disable: _,
+                reason,
+                json,
+                profile,
+            } => {
+                configuration::update_binding(
+                    &profile_name(profile),
+                    id,
+                    expected_revision,
+                    artifact,
+                    version,
+                    enable,
+                    &reason,
+                    json,
+                )
+                .await
+            }
+            ConfigurationCommand::Rollback {
+                id,
+                expected_revision,
+                version,
+                json,
+                profile,
+            } => {
+                configuration::rollback(
+                    &profile_name(profile),
+                    id,
+                    expected_revision,
+                    version,
+                    json,
                 )
                 .await
             }
         },
+
+        Command::Okf(command) => match command {
+            OkfCommand::Validate {
+                path,
+                source_revision,
+                json,
+            } => okf::validate(&path, source_revision.as_deref(), json),
+            OkfCommand::Inspect {
+                path,
+                source_revision,
+                json,
+            } => okf::inspect(&path, source_revision.as_deref(), json),
+            OkfCommand::Import {
+                path,
+                project,
+                dry_run,
+                source_revision,
+                json,
+                profile,
+            } => {
+                okf::import(
+                    &profile_name(profile),
+                    &path,
+                    project,
+                    source_revision.as_deref(),
+                    dry_run,
+                    json,
+                )
+                .await
+            }
+            OkfCommand::Export {
+                project,
+                output,
+                item_ids,
+                json,
+                profile,
+            } => okf::export(&profile_name(profile), project, &output, &item_ids, json).await,
+        },
+
         Command::ContextPack(command) => match command {
             ContextPackCommand::List { scope, profile } => {
                 pack::list(&profile_name(profile), scope).await
@@ -2648,11 +2866,20 @@ async fn run(cli: Cli) -> Result<(), String> {
                 profile,
             } => pack::propose(&profile_name(profile), &name, scope, title.as_deref()).await,
         },
+        Command::Session(command) => match command {
+            SessionCommand::Flush {
+                dir,
+                verbose,
+                profile,
+            } => session::flush(&profile_name(profile), dir, verbose).await,
+            SessionCommand::Spool(command) => match command {
+                SpoolCommand::Status { dir, json } => session::status(dir, json),
+                SpoolCommand::Purge { acknowledged, dir } => session::purge(dir, acknowledged),
+            },
+        },
         Command::Recall {
-            ids,
             query,
-            as_of,
-            valid_at,
+            workspace,
             limit,
             json,
             quiet,
@@ -2661,16 +2888,34 @@ async fn run(cli: Cli) -> Result<(), String> {
             recall::recall(
                 &profile_name(profile),
                 recall::Ask {
-                    ids: &ids,
-                    query: query.as_deref(),
-                    as_of,
-                    valid_at,
+                    query: &query,
+                    workspace: workspace.as_deref(),
                     limit,
                 },
                 json,
                 quiet,
             )
             .await
+        }
+        Command::Demo(DemoCommand::Start {
+            profile,
+            credentials,
+            bob_credentials,
+            json,
+        }) => {
+            demo::start(
+                profile,
+                &profile_name(credentials),
+                bob_credentials.as_deref(),
+                json,
+            )
+            .await
+        }
+        Command::Demo(DemoCommand::Status { credentials, json }) => {
+            demo::status(&profile_name(credentials), json).await
+        }
+        Command::Demo(DemoCommand::Reset { force, credentials }) => {
+            demo::reset(&profile_name(credentials), force).await
         }
         Command::Channel(command) => match command {
             ChannelCommand::Status {
@@ -2816,6 +3061,23 @@ pub(crate) async fn record_break_glass(
     .map_err(|err| err.to_string())
 }
 
+/// [`connect`], then the schema epoch guard (CPR-2, ADR-0069).
+///
+/// Every store-level command goes through this. They open `DATABASE_URL`
+/// directly and write with the owner role — which makes them the one family
+/// of verbs that could quietly succeed against a database from before the
+/// context-platform cut, writing new-model rows beside old-model ones with
+/// nothing in the process to notice. The two that do not are the two that
+/// cannot: `db migrate`, which creates the epoch, and `reset`, which is what
+/// a refusal tells you to run.
+async fn connect_current_epoch() -> Result<sqlx::PgPool, String> {
+    let pool = connect().await?;
+    synveda_store::epoch::verify(&pool)
+        .await
+        .map_err(|refusal| refusal.to_string())?;
+    Ok(pool)
+}
+
 async fn connect() -> Result<sqlx::PgPool, String> {
     // `DATABASE_URL`, or the single-node profile's own Postgres — which is
     // the same default `synveda init` installs against, so the commands
@@ -2831,10 +3093,85 @@ async fn connect() -> Result<sqlx::PgPool, String> {
         .connect(&url)
         .await
         .map_err(|err| {
+            let safe_url = init::redacted_database_url(&url);
             format!(
-                "connect to {url}: {err}\n\
+                "connect to {safe_url}: {err}\n\
                  (set DATABASE_URL to reach a database other than the one \
                  `synveda init` installs)"
             )
         })
+}
+
+#[cfg(test)]
+mod hard_cut_tests {
+    use super::*;
+
+    #[test]
+    fn removed_record_classification_command_is_not_an_alias() {
+        let error = Cli::try_parse_from([
+            "synveda",
+            "proposal",
+            "classify",
+            "0198f000-0000-7000-8000-000000000001",
+        ])
+        .err()
+        .expect("the removed command must fail parsing");
+        assert!(
+            error.to_string().contains("unrecognized subcommand"),
+            "unexpected clap refusal: {error}"
+        );
+    }
+
+    #[test]
+    fn removed_init_demo_flag_is_not_an_alias() {
+        let error = Cli::try_parse_from(["synveda", "init", "--demo"])
+            .err()
+            .expect("the retired packaged seeder must fail parsing");
+        assert!(
+            error.to_string().contains("unexpected argument '--demo'"),
+            "unexpected clap refusal: {error}"
+        );
+    }
+
+    #[test]
+    fn channel_history_requires_an_authored_artifact_ref() {
+        let error = Cli::try_parse_from([
+            "synveda",
+            "channel",
+            "history",
+            "0198f000-0000-7000-8000-000000000001",
+        ])
+        .err()
+        .expect("the removed memory default must not parse");
+        assert!(error.to_string().contains("--channel"), "{error}");
+    }
+
+    #[test]
+    fn okf_public_workflows_have_the_documented_command_shape() {
+        let project = "0198f000-0000-7000-8000-000000000001";
+        for args in [
+            vec!["synveda", "okf", "validate", "bundle"],
+            vec!["synveda", "okf", "inspect", "bundle"],
+            vec![
+                "synveda",
+                "okf",
+                "import",
+                "bundle",
+                "--project",
+                project,
+                "--dry-run",
+            ],
+            vec![
+                "synveda",
+                "okf",
+                "export",
+                "--project",
+                project,
+                "--output",
+                "exported",
+            ],
+        ] {
+            Cli::try_parse_from(args).expect("documented OKF command must parse");
+        }
+    }
 }

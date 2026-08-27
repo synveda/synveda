@@ -5,6 +5,14 @@
 - **Feature(s)**: HIER-2
 - **Deciders**: sujitn
 
+> **Superseded by ADR-0074 (CPR-7, 2026-08-20).** The `ScopeChainCache`,
+> its invalidation seam and its metrics are deleted with the tree they
+> cached. Chains resolve per request through `scope_closure`, so "a move
+> governs the very next request" is structural rather than cache-dependent.
+> The latency discipline this ADR set transfers to the anchor resolver
+> (ADR-0073), and ADR-0073 decision 7 holds the deferred cache if
+> measurement ever asks for one.
+
 ## Context
 
 Every governed request resolves scope chains twice: the resource's chain

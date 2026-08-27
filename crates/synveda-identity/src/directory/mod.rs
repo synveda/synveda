@@ -31,13 +31,247 @@
 //! and the only way to reach a conclusion about absence is to match on
 //! [`Enumeration::Complete`], which no failing path can construct.
 
+use std::collections::HashSet;
 use std::fmt;
 
 use async_trait::async_trait;
 use serde::Deserialize;
+use url::{ParseError, Url};
 
 pub mod entra;
 pub mod okta;
+
+/// Maximum requests one directory enumeration may make.
+///
+/// This and the other enumeration limits are resource-safety invariants, not
+/// vendor support-size claims. They are deliberately well above an
+/// individual or small team's directory while keeping a corrupt or hostile
+/// continuation finite.
+const MAX_ENUMERATION_PAGES: usize = 10_000;
+
+/// Maximum decoded response bytes retained across one complete enumeration.
+const MAX_ENUMERATION_BYTES: usize = 128 * 1024 * 1024;
+
+/// Maximum user objects retained across one enumeration.
+const MAX_ENUMERATION_USERS: usize = 100_000;
+
+/// Maximum group objects retained across one enumeration.
+const MAX_ENUMERATION_GROUPS: usize = 25_000;
+
+/// Maximum membership objects retained across one enumeration.
+const MAX_ENUMERATION_MEMBERS: usize = 1_000_000;
+
+/// Maximum user, group and membership objects retained in total across one
+/// enumeration.
+const MAX_ENUMERATION_ITEMS: usize = 1_000_000;
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct EnumerationLimits {
+    pages: usize,
+    bytes: usize,
+    users: usize,
+    groups: usize,
+    members: usize,
+    items: usize,
+}
+
+impl EnumerationLimits {
+    pub(crate) const DEFAULT: Self = Self {
+        pages: MAX_ENUMERATION_PAGES,
+        bytes: MAX_ENUMERATION_BYTES,
+        users: MAX_ENUMERATION_USERS,
+        groups: MAX_ENUMERATION_GROUPS,
+        members: MAX_ENUMERATION_MEMBERS,
+        items: MAX_ENUMERATION_ITEMS,
+    };
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(crate) enum DirectoryItemKind {
+    Users,
+    Groups,
+    Members,
+}
+
+/// One mutable resource budget shared by every users/groups/member walk in a
+/// pass. A fresh budget per collection would make the advertised bound a
+/// multiple of the number of groups, which is exactly where membership walks
+/// become unbounded.
+pub(crate) struct EnumerationBudget {
+    limits: EnumerationLimits,
+    pages: usize,
+    bytes: usize,
+    users: usize,
+    groups: usize,
+    members: usize,
+    items: usize,
+    seen_urls: HashSet<String>,
+}
+
+impl EnumerationBudget {
+    pub(crate) fn with_limits(limits: EnumerationLimits) -> Self {
+        Self {
+            limits,
+            pages: 0,
+            bytes: 0,
+            users: 0,
+            groups: 0,
+            members: 0,
+            items: 0,
+            seen_urls: HashSet::new(),
+        }
+    }
+
+    /// Accounts for a page before its request is built. In particular, the
+    /// caller must do this before attaching a bearer or API token.
+    pub(crate) fn begin_page(&mut self, url: &Url) -> Result<(), String> {
+        let key = url.as_str().to_owned();
+        if self.seen_urls.contains(&key) {
+            return Err("directory pagination repeated a URL (cycle refused)".to_owned());
+        }
+        if self.pages >= self.limits.pages {
+            return Err(format!(
+                "directory enumeration exceeded its {}-page bound",
+                self.limits.pages
+            ));
+        }
+        self.seen_urls.insert(key);
+        self.pages += 1;
+        Ok(())
+    }
+
+    fn add_bytes(&mut self, count: usize) -> Result<(), String> {
+        let next = self
+            .bytes
+            .checked_add(count)
+            .ok_or_else(|| "directory response byte count overflowed".to_owned())?;
+        if next > self.limits.bytes {
+            return Err(format!(
+                "directory enumeration exceeded its {}-byte response bound",
+                self.limits.bytes
+            ));
+        }
+        self.bytes = next;
+        Ok(())
+    }
+
+    /// Accounts for decoded objects before retaining the page that carries
+    /// them. If the page crosses a bound, earlier pages remain available and
+    /// this page is not partially appended.
+    pub(crate) fn retain(&mut self, kind: DirectoryItemKind, count: usize) -> Result<(), String> {
+        let (current, limit, label) = match kind {
+            DirectoryItemKind::Users => (&mut self.users, self.limits.users, "user"),
+            DirectoryItemKind::Groups => (&mut self.groups, self.limits.groups, "group"),
+            DirectoryItemKind::Members => (&mut self.members, self.limits.members, "membership"),
+        };
+        let next = current
+            .checked_add(count)
+            .ok_or_else(|| format!("directory {label} count overflowed"))?;
+        if next > limit {
+            return Err(format!(
+                "directory enumeration exceeded its {limit}-{label} bound"
+            ));
+        }
+        let next_items = self
+            .items
+            .checked_add(count)
+            .ok_or_else(|| "directory item count overflowed".to_owned())?;
+        if next_items > self.limits.items {
+            return Err(format!(
+                "directory enumeration exceeded its {}-item bound",
+                self.limits.items
+            ));
+        }
+        *current = next;
+        self.items = next_items;
+        Ok(())
+    }
+}
+
+/// The configured origin to which a connector may present credentials.
+/// Continuations resolve relative to the current page, but must remain on
+/// this exact scheme, host and effective port.
+pub(crate) struct ApiOrigin {
+    configured: Url,
+}
+
+impl ApiOrigin {
+    pub(crate) fn parse(raw: &str, label: &str) -> synveda_types::Result<Self> {
+        let configured = Url::parse(raw).map_err(|_| synveda_types::Error::Invalid {
+            message: format!("{label} must be an absolute HTTP(S) URL"),
+        })?;
+        if !matches!(configured.scheme(), "http" | "https")
+            || configured.host_str().is_none()
+            || !configured.username().is_empty()
+            || configured.password().is_some()
+            || configured.fragment().is_some()
+        {
+            return Err(synveda_types::Error::Invalid {
+                message: format!(
+                    "{label} must be an HTTP(S) origin without userinfo or a fragment"
+                ),
+            });
+        }
+        Ok(Self { configured })
+    }
+
+    pub(crate) fn resolve(
+        &self,
+        current_page: Option<&Url>,
+        continuation: &str,
+    ) -> Result<Url, String> {
+        let url = match Url::parse(continuation) {
+            Ok(url) => url,
+            Err(ParseError::RelativeUrlWithoutBase) => current_page
+                .unwrap_or(&self.configured)
+                .join(continuation)
+                .map_err(|_| "directory continuation is not a valid URL".to_owned())?,
+            Err(_) => return Err("directory continuation is not a valid URL".to_owned()),
+        };
+        if !url.username().is_empty() || url.password().is_some() {
+            return Err("directory continuation contains forbidden userinfo".to_owned());
+        }
+        if url.fragment().is_some() {
+            return Err("directory continuation contains a forbidden fragment".to_owned());
+        }
+        if url.scheme() != self.configured.scheme()
+            || url.host_str() != self.configured.host_str()
+            || url.port_or_known_default() != self.configured.port_or_known_default()
+        {
+            return Err("directory continuation changes the configured API origin".to_owned());
+        }
+        Ok(url)
+    }
+}
+
+/// Incrementally reads and deserializes one response under the pass-wide byte
+/// budget. Errors report classification and location only; response content
+/// is never copied into an error.
+pub(crate) async fn bounded_json<T: serde::de::DeserializeOwned>(
+    mut response: reqwest::Response,
+    budget: &mut EnumerationBudget,
+    url: &Url,
+) -> Result<T, String> {
+    let mut body = Vec::new();
+    loop {
+        let chunk = response
+            .chunk()
+            .await
+            .map_err(|err| format!("reading {url}: {err}"))?;
+        let Some(chunk) = chunk else {
+            break;
+        };
+        budget.add_bytes(chunk.len())?;
+        body.extend_from_slice(&chunk);
+    }
+    serde_json::from_slice(&body).map_err(|err| {
+        format!(
+            "decoding {url}: invalid JSON at line {}, column {}",
+            err.line(),
+            err.column()
+        )
+    })
+}
 
 /// One person as the directory describes them.
 ///
@@ -65,8 +299,17 @@ pub struct DirectoryUserRecord {
     /// The work address, which the correspondence rule prefers over
     /// `userName` (ADR-0059 decision 4, as the AUTH-4 demo corrected it).
     pub work_email: Option<String>,
-    /// Group display names, as the AUTH-2 mapping resolver will see them.
-    pub groups: Vec<String>,
+}
+
+/// One group and its complete membership as the directory describes it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DirectoryGroupRecord {
+    /// Stable vendor resource id (Entra object id or Okta group id).
+    pub external_id: String,
+    /// Human-facing directory name.
+    pub display_name: String,
+    /// Stable vendor user ids belonging to the group.
+    pub member_external_ids: Vec<String>,
 }
 
 /// Everything one pass read.
@@ -75,6 +318,8 @@ pub struct DirectorySnapshot {
     /// Every user the enumeration reached, in the order the directory
     /// listed them.
     pub users: Vec<DirectoryUserRecord>,
+    /// Every group reached by the enumeration, including empty groups.
+    pub groups: Vec<DirectoryGroupRecord>,
 }
 
 /// What an enumeration produced, and whether it may be trusted about who is
@@ -227,21 +472,17 @@ impl fmt::Debug for Secret {
     }
 }
 
-/// The name a tenant's sealed directory credential is stored under
-/// (TEN-4, ADR-0064 decision 9).
-///
-/// Part of the sealed payload's AAD as well as its key, so renaming it makes
-/// existing ciphertext unopenable rather than silently re-pointing it — the
-/// safe direction.
+/// The stable operator label of a tenant's directory secret aggregate
+/// (CPR-35, ADR-0094). Its UUID, rather than this label, binds the envelope
+/// and is the immutable reference identity.
 pub const CREDENTIAL_SECRET_NAME: &str = "directory.credential";
 
 /// How a deployment configures the pull sync for one issuer.
 ///
-/// **Two sources since TEN-4, and the per-tenant one wins** (ADR-0064
-/// decision 9). A tenant with a sealed `directory.credential` in
-/// `tenant_secrets` is pulled with that; a tenant without one falls back to
-/// this, configured beside the issuer it syncs in the same environment JSON
-/// that carries `SYNVEDA_OIDC_ISSUERS`.
+/// **Two sources since TEN-4, and the per-tenant one wins.** A tenant that has
+/// never created a `directory.credential` aggregate may fall back to this,
+/// configured beside the issuer in `SYNVEDA_OIDC_ISSUERS`. A revoked or
+/// unusable stable aggregate fails closed and does not fall back (ADR-0094).
 ///
 /// ADR-0060 decision 7 put the credential here alone and named the cost: one
 /// deployment could not pull two tenants from two directories, because one
@@ -335,8 +576,8 @@ mod tests {
                 given_name: None,
                 family_name: None,
                 work_email: None,
-                groups: Vec::new(),
             }],
+            groups: Vec::new(),
         };
         let partial = Enumeration::Partial {
             snapshot: snapshot.clone(),
@@ -345,5 +586,60 @@ mod tests {
         assert!(!partial.is_complete());
         assert_eq!(partial.snapshot().users.len(), 1);
         assert!(Enumeration::Complete(snapshot).is_complete());
+    }
+
+    #[test]
+    fn continuations_are_relative_or_same_origin_with_effective_ports() {
+        let origin =
+            ApiOrigin::parse("https://directory.example.test", "test origin").expect("origin");
+        let current = Url::parse("https://directory.example.test/v1/users?page=1").unwrap();
+        assert_eq!(
+            origin
+                .resolve(Some(&current), "?page=2")
+                .expect("relative query")
+                .as_str(),
+            "https://directory.example.test/v1/users?page=2"
+        );
+        assert!(
+            origin
+                .resolve(
+                    Some(&current),
+                    "https://directory.example.test:443/v1/users?page=3"
+                )
+                .is_ok(),
+            "an explicit default port is the same effective origin"
+        );
+        for refused in [
+            "http://directory.example.test/v1/users",
+            "https://directory.example.test:444/v1/users",
+            "https://other.example.test/v1/users",
+            "https://user@directory.example.test/v1/users",
+            "/v1/users#fragment",
+        ] {
+            assert!(
+                origin.resolve(Some(&current), refused).is_err(),
+                "accepted forbidden continuation {refused:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn every_retained_collection_has_its_own_pass_wide_bound() {
+        for (kind, expected) in [
+            (DirectoryItemKind::Users, "user"),
+            (DirectoryItemKind::Groups, "group"),
+            (DirectoryItemKind::Members, "membership"),
+        ] {
+            let mut budget = EnumerationBudget::with_limits(EnumerationLimits {
+                users: 1,
+                groups: 1,
+                members: 1,
+                items: 10,
+                ..EnumerationLimits::DEFAULT
+            });
+            budget.retain(kind, 1).expect("at the boundary");
+            let failure = budget.retain(kind, 1).expect_err("over the boundary");
+            assert!(failure.contains(expected), "got {failure:?}");
+        }
     }
 }

@@ -367,7 +367,7 @@ mod tests {
         let bytes = asset("Re: {{ subject }}").canonical_bytes();
         assert_ne!(
             object_hash(AssetKind::Prompt, &bytes),
-            object_hash(AssetKind::Memory, &bytes)
+            object_hash(AssetKind::Knowledge, &bytes)
         );
     }
 }

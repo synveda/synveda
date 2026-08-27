@@ -13,6 +13,7 @@
 //! No network: everything binds `127.0.0.1:0`, which is the MockIdp
 //! discipline this crate already holds itself to.
 
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use axum::extract::{Path, Query, State};
@@ -117,7 +118,7 @@ fn entra_router(base: Arc<Mutex<String>>, seen: Seen, fail_second_page: bool) ->
 }
 
 #[tokio::test]
-async fn entra_pages_users_and_attaches_group_names() {
+async fn entra_pages_users_and_preserves_stable_group_membership() {
     let base = Arc::new(Mutex::new(String::new()));
     let seen: Seen = Arc::new(Mutex::new(Vec::new()));
     let url = spawn(entra_router(Arc::clone(&base), Arc::clone(&seen), false)).await;
@@ -146,19 +147,17 @@ async fn entra_pages_users_and_attaches_group_names() {
     assert_eq!(alice.user_name, "alice@example.test");
     assert!(alice.active);
     assert_eq!(alice.work_email.as_deref(), Some("alice.ng@example.test"));
-    assert_eq!(
-        alice.groups,
-        vec!["synveda-eng-core"],
-        "membership attaches by object id, and the group's display name is \
-         what the AUTH-2 resolver will match on"
-    );
+    let groups = &enumeration.snapshot().groups;
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0].external_id, "g1");
+    assert_eq!(groups[0].display_name, "synveda-eng-core");
+    assert_eq!(groups[0].member_external_ids, vec!["u1", "u-unknown"]);
 
-    // `accountEnabled: false` is an act and survives as one. A member id
-    // naming somebody outside the enumeration attaches to nobody rather
-    // than panicking.
+    // `accountEnabled: false` is an act and survives as one. Membership is
+    // retained by stable external id even when a referenced user was not in
+    // this enumeration; projection decides whether the identity exists.
     let bob = &users[1];
     assert!(!bob.active);
-    assert!(bob.groups.is_empty());
 
     let grant = seen
         .lock()
@@ -324,7 +323,12 @@ async fn okta_follows_the_link_header_and_maps_its_statuses() {
 
     assert_eq!(users[0].user_name, "alice@example.test");
     assert!(users[0].active, "ACTIVE is here");
-    assert_eq!(users[0].groups, vec!["synveda-eng-core"]);
+    assert_eq!(enumeration.snapshot().groups.len(), 1);
+    assert_eq!(enumeration.snapshot().groups[0].external_id, "g1");
+    assert_eq!(
+        enumeration.snapshot().groups[0].member_external_ids,
+        vec!["u1"]
+    );
     assert!(!users[1].active, "DEPROVISIONED is Okta's leaver");
     assert_eq!(users[1].family_name.as_deref(), Some("Stone"));
 
@@ -360,4 +364,196 @@ async fn a_refused_okta_read_never_echoes_the_api_token() {
         "the failure must not carry the credential: {failure}"
     );
     assert!(failure.contains("403"));
+}
+
+#[tokio::test]
+async fn an_okta_continuation_cannot_disclose_the_token_to_another_origin() {
+    let attacker_hits = Arc::new(AtomicUsize::new(0));
+    async fn attacker(
+        State(hits): State<Arc<AtomicUsize>>,
+        headers: axum::http::HeaderMap,
+    ) -> Json<Value> {
+        if headers.contains_key(axum::http::header::AUTHORIZATION) {
+            hits.fetch_add(1, Ordering::SeqCst);
+        }
+        Json(json!([]))
+    }
+    let attacker_url = spawn(
+        Router::new()
+            .route("/steal", get(attacker))
+            .with_state(Arc::clone(&attacker_hits)),
+    )
+    .await;
+
+    async fn users(State(attacker_url): State<String>) -> impl IntoResponse {
+        (
+            [(
+                axum::http::header::LINK,
+                format!("<{attacker_url}/steal>; rel=\"next\""),
+            )],
+            Json(json!([{
+                "id": "u1", "status": "ACTIVE",
+                "profile": {"login": "alice@example.test"}
+            }])),
+        )
+    }
+    let source_url = spawn(
+        Router::new()
+            .route("/api/v1/users", get(users))
+            .with_state(attacker_url),
+    )
+    .await;
+
+    let connector =
+        OktaConnector::new(source_url, Secret::new(OKTA_TOKEN)).expect("build connector");
+    let Enumeration::Partial { snapshot, failure } = connector.enumerate().await else {
+        panic!("a cross-origin continuation must make the pass partial");
+    };
+    assert_eq!(snapshot.users.len(), 1, "presence from page one survives");
+    assert!(failure.contains("origin"), "got {failure:?}");
+    assert_eq!(
+        attacker_hits.load(Ordering::SeqCst),
+        0,
+        "origin validation must run before the SSWS header is attached"
+    );
+}
+
+#[tokio::test]
+async fn an_entra_continuation_cannot_disclose_the_bearer_to_another_origin() {
+    let attacker_hits = Arc::new(AtomicUsize::new(0));
+    async fn attacker(
+        State(hits): State<Arc<AtomicUsize>>,
+        headers: axum::http::HeaderMap,
+    ) -> Json<Value> {
+        if headers.contains_key(axum::http::header::AUTHORIZATION) {
+            hits.fetch_add(1, Ordering::SeqCst);
+        }
+        Json(json!({"value": []}))
+    }
+    let attacker_url = spawn(
+        Router::new()
+            .route("/steal", get(attacker))
+            .with_state(Arc::clone(&attacker_hits)),
+    )
+    .await;
+
+    async fn token() -> Json<Value> {
+        Json(json!({"access_token": "graph-access-token"}))
+    }
+    async fn users(State(attacker_url): State<String>) -> Json<Value> {
+        Json(json!({
+            "value": [{"id": "u1", "userPrincipalName": "alice@example.test"}],
+            "@odata.nextLink": format!("{attacker_url}/steal")
+        }))
+    }
+    let source_url = spawn(
+        Router::new()
+            .route("/{tenant}/oauth2/v2.0/token", post(token))
+            .route("/v1.0/users", get(users))
+            .with_state(attacker_url),
+    )
+    .await;
+    let connector = EntraConnector::new(
+        "tenant-1".to_owned(),
+        "client-1".to_owned(),
+        Secret::new(CLIENT_SECRET),
+        Some(source_url.clone()),
+        Some(source_url),
+    )
+    .expect("build connector");
+
+    let Enumeration::Partial { snapshot, failure } = connector.enumerate().await else {
+        panic!("a cross-origin continuation must make the pass partial");
+    };
+    assert_eq!(snapshot.users.len(), 1);
+    assert!(failure.contains("origin"), "got {failure:?}");
+    assert_eq!(
+        attacker_hits.load(Ordering::SeqCst),
+        0,
+        "origin validation must run before the Graph bearer is attached"
+    );
+}
+
+#[tokio::test]
+async fn entra_accepts_a_relative_same_origin_continuation() {
+    async fn token() -> Json<Value> {
+        Json(json!({"access_token": "graph-access-token"}))
+    }
+    async fn users(Query(query): Query<std::collections::HashMap<String, String>>) -> Json<Value> {
+        if query.contains_key("$skiptoken") {
+            return Json(json!({"value": [{
+                "id": "u2", "userPrincipalName": "bob@example.test"
+            }]}));
+        }
+        Json(json!({
+            "value": [{"id": "u1", "userPrincipalName": "alice@example.test"}],
+            "@odata.nextLink": "/v1.0/users?$skiptoken=page2"
+        }))
+    }
+    async fn groups() -> Json<Value> {
+        Json(json!({"value": []}))
+    }
+    let url = spawn(
+        Router::new()
+            .route("/{tenant}/oauth2/v2.0/token", post(token))
+            .route("/v1.0/users", get(users))
+            .route("/v1.0/groups", get(groups)),
+    )
+    .await;
+    let connector = EntraConnector::new(
+        "tenant-1".to_owned(),
+        "client-1".to_owned(),
+        Secret::new(CLIENT_SECRET),
+        Some(url.clone()),
+        Some(url),
+    )
+    .expect("build connector");
+
+    let enumeration = connector.enumerate().await;
+    assert!(
+        enumeration.is_complete(),
+        "relative pagination stayed on-origin"
+    );
+    assert_eq!(enumeration.snapshot().users.len(), 2);
+}
+
+#[tokio::test]
+async fn a_repeated_okta_page_is_a_partial_cycle_not_an_infinite_walk() {
+    let base = Arc::new(Mutex::new(String::new()));
+    let calls = Arc::new(AtomicUsize::new(0));
+    async fn users(
+        State((base, calls)): State<(Arc<Mutex<String>>, Arc<AtomicUsize>)>,
+    ) -> impl IntoResponse {
+        calls.fetch_add(1, Ordering::SeqCst);
+        let link = format!(
+            "<{}/api/v1/users?limit=200>; rel=\"next\"",
+            base.lock().expect("lock")
+        );
+        (
+            [(axum::http::header::LINK, link)],
+            Json(json!([{
+                "id": "u1", "status": "ACTIVE",
+                "profile": {"login": "alice@example.test"}
+            }])),
+        )
+    }
+    let url = spawn(
+        Router::new()
+            .route("/api/v1/users", get(users))
+            .with_state((Arc::clone(&base), Arc::clone(&calls))),
+    )
+    .await;
+    *base.lock().expect("lock") = url.clone();
+    let connector = OktaConnector::new(url, Secret::new(OKTA_TOKEN)).expect("build connector");
+
+    let Enumeration::Partial { snapshot, failure } = connector.enumerate().await else {
+        panic!("a repeated page cannot be complete");
+    };
+    assert_eq!(snapshot.users.len(), 1);
+    assert!(failure.contains("cycle"), "got {failure:?}");
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        1,
+        "the repeated URL is refused before a second authenticated request"
+    );
 }

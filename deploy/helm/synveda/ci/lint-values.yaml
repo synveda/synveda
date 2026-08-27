@@ -5,4 +5,6 @@ gateway:
   publicUrl: https://synveda.example.com
 oidc:
   existingSecret: synveda-oidc
+kms:
+  existingSecret: synveda-kms
 embedder: deterministic

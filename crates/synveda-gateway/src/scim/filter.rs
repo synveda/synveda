@@ -9,9 +9,7 @@
 //! return HTTP 501."*
 //!
 //! The bound is not laziness, and it is worth being precise about why. A
-//! filter here compiles to a **sqlx compile-time-checked query** (CLAUDE.md:
-//! no string-built SQL, ever), so the grammar this server can accept is
-//! exactly the grammar it can express as one of a fixed set of prepared
+//! filter here compiles to one of a fixed set of compile-time-checked SQL
 //! statements. A parser that accepted the whole language would have to
 //! either build SQL from strings or reject most of what it parsed at
 //! evaluation time — a rejection wearing a conformance badge. Refusing at

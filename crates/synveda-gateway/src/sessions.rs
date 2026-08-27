@@ -1,0 +1,2252 @@
+//! The session ledger and runtime API (CPR-10, ADR-0076): `/v1/sessions/*`.
+//!
+//! Seven routes over the CPR-10 store services — open, list, read, append
+//! events, end, timeline, compose context — behind tenant resolution like
+//! every `/v1` route, behind the PDP like every governed one, and chaining an
+//! audit event for every mutation.
+//!
+//! # Nothing on the wire carries a tenant or an acting principal
+//!
+//! ADR-0076 decision 8, and it is the one rule to check before adding a field
+//! to any body here. Every request body on this plane is
+//! `#[serde(deny_unknown_fields)]`, so a client that sends `tenant_id` or
+//! `principal_id` is refused rather than quietly ignored — and
+//! `a_client_cannot_submit_its_own_tenant_or_principal` in
+//! `tests/sessions_api.rs` asserts exactly that, by name, from the outside.
+//! Both values come from the verified token.
+//!
+//! # Two idempotency mechanisms, and they are not redundant
+//!
+//! Opening a session and composing a context run each take a required
+//! `Idempotency-Key` (see [`crate::idempotency`]), because each is a creation
+//! whose retry after a timeout would otherwise make a second row.
+//!
+//! Appending events does **not**. Its unit of idempotency is the *event*, not
+//! the request: a batch is a list of things that happened, each carrying the
+//! client's own `client_event_id`, and a redelivered batch that overlaps a
+//! previous one by three events out of ten must append seven and answer
+//! `duplicate` for three. A header guarding the whole request could not
+//! express that, and requiring both would be one mechanism doing nothing.
+//!
+//! # Where the decisions are anchored
+//!
+//! ADR-0073 decision 3: a decision names what it is about. The **listing** is
+//! decided at the scope it is anchored at — a named scope, or the tenant root
+//! — and then **again per row against the row** (CPR-9), so a caller granted
+//! `member` at one project sees that project's runs and not the workspace's.
+//! Every per-object route decides about the `Session` itself, after the
+//! ownership check, so a foreign id is a 404 rather than a denial oracle.
+//!
+//! # The timeline is a projection
+//!
+//! `GET …/timeline` merges the session's events and its context runs, orders
+//! them, and renders them as one sequence. There is no timeline table and
+//! there must not be one (ADR-0076 decision 9): a materialised transcript
+//! would be a second copy of `session_events`, and the two would disagree the
+//! first time one was written and the other was not.
+
+use std::collections::BTreeMap;
+
+use axum::Json;
+use axum::extract::rejection::JsonRejection;
+use axum::extract::{Path, Query, State};
+use axum::http::{HeaderMap, StatusCode};
+use axum::response::{IntoResponse, Response};
+use base64::Engine as _;
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use serde_json::json;
+use synveda_audit::{AuditAction, Outcome};
+use synveda_ingest::ScanOutcome;
+use synveda_policy::{Action, Resource, ResourceEntity};
+use synveda_store::anchors::AnchorSelection;
+use synveda_store::sessions::{self, AppendOutcome, NewSession, NewSessionEvent, SessionFilter};
+use synveda_store::{capture, rls, scopes};
+use synveda_types::session::{
+    CURRENT_EVENT_SCHEMA_VERSION, ContextRun, Session, SessionEvent, SessionEventType,
+    SessionStatus,
+};
+use synveda_types::{
+    ContextRunId, Error, ProjectId, RedactionMode, RepositoryId, Result, ScopeId, SessionId,
+    TenantId, WorkspaceId,
+};
+use utoipa::ToSchema;
+
+use crate::app::AppState;
+use crate::audit;
+use crate::authz::{self, Authorized};
+use crate::idempotency::{Claim, Dispatch};
+use crate::request::{body, commit, tenant_id};
+use crate::telemetry::{REDACTION_FINDINGS_TOTAL, SESSION_OPERATIONS_TOTAL};
+use crate::workspaces::{ApiErrorBody, Decidable, string_enum, subject};
+
+/// Default rows in a session listing. The scan bound above it is the store's
+/// [`sessions::SCAN_LIMIT`].
+const DEFAULT_LIST_LIMIT: i64 = 50;
+
+/// Most rows one listing will serve.
+const MAX_LIST_LIMIT: i64 = 200;
+
+/// Most timeline entries one response carries, per source.
+const MAX_TIMELINE_ENTRIES: i64 = 500;
+
+/// How far an event's arrival may lag what it says about itself before the
+/// timeline calls it delayed (CPR-11, ADR-0077 decision 2).
+///
+/// A minute, because that is well above what a live hook costs — a delivery
+/// on the same turn is sub-second even through a queue — and well below what
+/// a spool replay produces, which is however long the network was down. A
+/// tighter bound would mark a slow batch as recovered; a looser one would
+/// hide a whole coffee break's worth of buffering.
+pub const DELAYED_AFTER_SECONDS: i64 = 60;
+
+// ── Views ────────────────────────────────────────────────────────────────────
+
+/// A session, as the API serves it.
+///
+/// A view rather than `synveda_types::session::Session` itself, for
+/// [`crate::workspaces::WorkspaceView`]'s reason: this is the **contract** and
+/// the domain type is not. `tenant_id` is deliberately absent — every `/v1`
+/// response is already scoped to the caller's tenant.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct SessionView {
+    /// The session's stable id.
+    #[schema(value_type = String, format = "uuid")]
+    pub id: SessionId,
+    /// The workspace the run happened in.
+    #[schema(value_type = String, format = "uuid")]
+    pub workspace_id: WorkspaceId,
+    /// The project, when the run was against one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>, format = "uuid")]
+    pub project_id: Option<ProjectId>,
+    /// The governed scope this session is decided at — **derived** from the
+    /// workspace and project, never submitted.
+    #[schema(value_type = String, format = "uuid")]
+    pub scope_id: ScopeId,
+    /// The token subject that opened it.
+    pub principal_id: String,
+    /// The agent client, as it named itself.
+    pub client_name: String,
+    /// Its version, when it said one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub client_version: Option<String>,
+    /// A stable id for that installation of the client.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub client_installation_id: Option<String>,
+    /// The harness's own id for the run.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub external_session_id: Option<String>,
+    /// Which agent ran.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_name: Option<String>,
+    /// The model, as the client named it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model_name: Option<String>,
+    /// The repository the run was against.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>, format = "uuid")]
+    pub repository_id: Option<RepositoryId>,
+    /// The branch it was on.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub branch: Option<String>,
+    /// What the run is about, in the client's words.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub task_summary: Option<String>,
+    /// Where the run is in its life.
+    #[schema(schema_with = session_status_schema)]
+    pub status: SessionStatus,
+    /// When it began.
+    pub started_at: DateTime<Utc>,
+    /// When it closed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ended_at: Option<DateTime<Utc>>,
+    /// Why it stopped, in the client's words — `status` says a run failed,
+    /// this says the hook timed out (CPR-11, ADR-0077 decision 4).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub end_reason: Option<String>,
+    /// The newest appended event's own instant.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_observed_at: Option<DateTime<Utc>>,
+    /// The client's labelling bag, echoed back.
+    #[schema(value_type = Object)]
+    pub metadata: serde_json::Value,
+    /// When the row was created.
+    pub created_at: DateTime<Utc>,
+    /// When the row last changed.
+    pub updated_at: DateTime<Utc>,
+}
+
+impl From<Session> for SessionView {
+    fn from(session: Session) -> Self {
+        SessionView {
+            id: session.id,
+            workspace_id: session.workspace_id,
+            project_id: session.project_id,
+            scope_id: session.scope_id,
+            principal_id: session.principal_id,
+            client_name: session.client_name,
+            client_version: session.client_version,
+            client_installation_id: session.client_installation_id,
+            external_session_id: session.external_session_id,
+            agent_name: session.agent_name,
+            model_name: session.model_name,
+            repository_id: session.repository_id,
+            branch: session.branch,
+            task_summary: session.task_summary,
+            status: session.status,
+            started_at: session.started_at,
+            ended_at: session.ended_at,
+            end_reason: session.end_reason,
+            last_observed_at: session.last_observed_at,
+            metadata: session.metadata,
+            created_at: session.created_at,
+            updated_at: session.updated_at,
+        }
+    }
+}
+
+/// The session listing, one page of it.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct SessionList {
+    /// The sessions this caller may read, newest first.
+    pub sessions: Vec<SessionView>,
+    /// Where the next page resumes, or absent when this is the last one
+    /// (CPR-11, ADR-0077 decision 1).
+    ///
+    /// Opaque: pass it back as `cursor` and nothing else. It replaced CPR-10's
+    /// `truncated` boolean, which could say *that* an answer was cut short and
+    /// could not say where to continue — so a reader who wanted the run from
+    /// last Tuesday had no way to reach it.
+    ///
+    /// A page may be **empty and still carry one**: rows are filtered by the
+    /// PDP after they are scanned, so a page whose candidates this caller may
+    /// not read serves nothing and still says where to continue. That is the
+    /// honest shape — the alternative is a server that keeps scanning until it
+    /// fills a page, which is unbounded work driven by somebody else's rows.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
+}
+
+/// One immutable session event, as the API serves it.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct SessionEventView {
+    /// The event's id in this deployment.
+    #[schema(value_type = String, format = "uuid")]
+    pub id: synveda_types::SessionEventId,
+    /// The session it belongs to.
+    #[schema(value_type = String, format = "uuid")]
+    pub session_id: SessionId,
+    /// What happened.
+    #[schema(schema_with = event_type_schema)]
+    pub event_type: SessionEventType,
+    /// The payload shape the client declared.
+    pub event_schema_version: i32,
+    /// The client's own id for it.
+    pub client_event_id: String,
+    /// Position in the session, assigned by the server.
+    pub sequence: i64,
+    /// When the client says it happened.
+    pub occurred_at: DateTime<Utc>,
+    /// When the gateway received it.
+    pub received_at: DateTime<Utc>,
+    /// The content.
+    #[schema(value_type = Object)]
+    pub payload: serde_json::Value,
+    /// BLAKE3-256 of the canonical payload, hex — the server's.
+    pub payload_hash: String,
+}
+
+impl From<SessionEvent> for SessionEventView {
+    fn from(event: SessionEvent) -> Self {
+        SessionEventView {
+            id: event.id,
+            session_id: event.session_id,
+            event_type: event.event_type,
+            event_schema_version: event.event_schema_version,
+            client_event_id: event.client_event_id,
+            sequence: event.sequence,
+            occurred_at: event.occurred_at,
+            received_at: event.received_at,
+            payload: event.payload,
+            payload_hash: event.payload_hash,
+        }
+    }
+}
+
+/// What one appended event did, and the row it names.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct AppendedEventView {
+    /// `appended`, `duplicate`, `quarantined` or `denied`.
+    pub outcome: String,
+    /// The client's own id for the event, echoed on every outcome — including
+    /// the ones that store nothing, which is what lets a spooling client mark
+    /// exactly the entries this call resolved.
+    pub client_event_id: String,
+    /// The stored row — this deployment's version of it, never the caller's,
+    /// because a retry must be told what is held rather than handed back what
+    /// it just sent.
+    ///
+    /// Absent for a `denied` event: nothing was stored, so there is no row to
+    /// name (CPR-12, ADR-0078 decision 1).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub event: Option<SessionEventView>,
+    /// The scan's finding summary — rule ids, categories and counts, never
+    /// matched text. Absent when the payload was clean.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<Object>)]
+    pub redactions: Option<serde_json::Value>,
+}
+
+/// The append response.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct AppendResponse {
+    /// Per-event outcomes, in the order the batch listed them.
+    pub events: Vec<AppendedEventView>,
+    /// How many were written.
+    pub appended: usize,
+    /// How many were already here.
+    pub duplicates: usize,
+    /// How many were stored but withheld from the extraction pipeline pending
+    /// a reviewer's decision (MEM-2, ADR-0021 decision 5).
+    pub quarantined: usize,
+    /// How many were refused outright by the redaction policy. Nothing of a
+    /// denied event persists — not its payload, not a row, not a position.
+    pub denied: usize,
+}
+
+/// A context run, as the API serves it.
+#[derive(Debug, Clone, Serialize, ToSchema)]
+pub struct ContextRunView {
+    /// The run's id.
+    #[schema(value_type = String, format = "uuid")]
+    pub id: ContextRunId,
+    /// The session it was composed for.
+    #[schema(value_type = String, format = "uuid")]
+    pub session_id: SessionId,
+    /// Workspace derived from the session.
+    #[schema(value_type = String, format = "uuid")]
+    pub workspace_id: WorkspaceId,
+    /// Project derived from the session, when present.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>, format = "uuid")]
+    pub project_id: Option<ProjectId>,
+    /// The scope it was anchored at.
+    #[schema(value_type = String, format = "uuid")]
+    pub scope_id: ScopeId,
+    /// Exact immutable runtime configuration, absent for the built-in
+    /// fail-safe.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>, format = "uuid")]
+    pub configuration_version_id: Option<synveda_types::ConfigurationVersionId>,
+    /// Canonical digest of the exact runtime configuration.
+    pub configuration_hash: String,
+    /// The task, when one was named.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub query: Option<String>,
+    /// Content-free query digest.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub query_hash: Option<String>,
+    /// The rendered block, watermark line included. Empty when nothing
+    /// composed — a result, not an error.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rendered: Option<String>,
+    /// BLAKE3 over the composed entries, hex.
+    pub block_hash: String,
+    /// Estimated tokens of `rendered`.
+    pub tokens: i32,
+    /// The budget it composed under.
+    pub budget_tokens: i32,
+    /// Caller-requested budget before the governed ceiling.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub requested_budget_tokens: Option<i32>,
+    /// How many records composed.
+    pub entry_count: i32,
+    /// Visible candidates retained for the run.
+    pub candidate_count: i32,
+    /// Immutable Knowledge revisions selected.
+    pub selection_count: i32,
+    /// The skills this block advertised (ADR-0054 decision 8): name, scope,
+    /// commit and object address, so an adapter can materialise exactly what
+    /// was named without asking twice.
+    #[schema(value_type = Object)]
+    pub skills: serde_json::Value,
+    /// Which retrieval legs degraded — `embedder`, `retrieval`. Empty is the
+    /// ordinary answer.
+    pub degraded: Vec<String>,
+    /// Valid-time instant used for current Knowledge.
+    pub as_of: DateTime<Utc>,
+    /// Planner implementation version.
+    pub retrieval_version: String,
+    /// Semantic model used, when configured.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub embedding_model: Option<String>,
+    /// Knowledge index implementation version.
+    pub index_version: String,
+    /// Graph implementation version, when graph expansion ran.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub graph_version: Option<String>,
+    /// `full`, `redacted`, `hashes_only` or `disabled`.
+    pub trace_retention_mode: String,
+    /// `pending`, `completed` or `failed`.
+    pub completion_status: String,
+    /// Aggregate policy-filtering notice without a denied count.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub policy_exclusion_message: Option<String>,
+    /// When it was composed.
+    pub created_at: DateTime<Utc>,
+}
+
+impl From<ContextRun> for ContextRunView {
+    fn from(run: ContextRun) -> Self {
+        ContextRunView {
+            id: run.id,
+            session_id: run.session_id,
+            workspace_id: run.workspace_id,
+            project_id: run.project_id,
+            scope_id: run.scope_id,
+            configuration_version_id: run.configuration_version_id,
+            configuration_hash: run.configuration_hash,
+            query: run.query,
+            query_hash: run.query_hash,
+            rendered: Some(run.rendered),
+            block_hash: run.block_hash,
+            tokens: run.tokens,
+            budget_tokens: run.budget_tokens,
+            requested_budget_tokens: run.requested_budget_tokens,
+            entry_count: run.entry_count,
+            candidate_count: run.candidate_count,
+            selection_count: run.selection_count,
+            skills: run.skills,
+            degraded: run.degraded,
+            as_of: run.as_of,
+            retrieval_version: run.retrieval_version,
+            embedding_model: run.embedding_model,
+            index_version: run.index_version,
+            graph_version: run.graph_version,
+            trace_retention_mode: run.trace_retention.as_str().to_owned(),
+            completion_status: run.completion_status.as_str().to_owned(),
+            policy_exclusion_message: run
+                .policy_exclusion
+                .then(|| "Some candidates were excluded by policy.".to_owned()),
+            created_at: run.created_at,
+        }
+    }
+}
+
+impl ContextRunView {
+    /// Applies trace-read disclosure. Creation/replay may return the delivered
+    /// block; inspection follows the retained trace mode.
+    pub(crate) fn for_trace(run: ContextRun) -> Self {
+        let mode = run.trace_retention;
+        let mut view = Self::from(run);
+        if !matches!(mode, synveda_types::TraceRetentionMode::Full) {
+            view.query = None;
+            view.rendered = None;
+        }
+        view
+    }
+
+    /// A listing identifies runs but never bulk-discloses their delivery
+    /// payload, content-derived hash, token size, entry counts or advertised
+    /// skills. Those fields can reveal that a now-denied Knowledge selection
+    /// existed before the detail surface has re-authorised exact revisions.
+    pub(crate) fn for_listing(run: ContextRun) -> Self {
+        let mut view = Self::for_trace(run);
+        view.rendered = None;
+        view.block_hash = blake3::hash(b"").to_hex().to_string();
+        view.tokens = 0;
+        view.entry_count = 0;
+        view.candidate_count = 0;
+        view.selection_count = 0;
+        view.skills = serde_json::json!([]);
+        view
+    }
+}
+
+/// One entry of the timeline projection.
+///
+/// Deliberately **not** a union of the two row shapes. A timeline is a reading
+/// surface: it answers "what happened, in order, and roughly what was it", and
+/// a client that wants an event's full payload fetches the event. Flattening
+/// two tables into one wide row with half its fields null per entry would make
+/// every consumer branch on which half is populated.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct TimelineEntry {
+    /// `event` or `context_run` — which table this came from.
+    pub kind: String,
+    /// The entry's own id, as a string, because the two sources have
+    /// different id types and a timeline is read rather than joined.
+    pub id: String,
+    /// When it happened: an event's `occurred_at`, a run's `created_at`.
+    pub at: DateTime<Utc>,
+    /// The event type, for an event.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub event_type: Option<String>,
+    /// The event's position, for an event.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sequence: Option<i64>,
+    /// When this deployment received it, for an event (CPR-11, ADR-0077
+    /// decision 2).
+    ///
+    /// The *other* clock. `at` is the client's statement about when the thing
+    /// happened; this is when the gateway was told. A live turn has them
+    /// within a second of each other; an adapter that spooled to disk while
+    /// the network was down delivers an hour of them at once, and only one of
+    /// the two instants is a clock this deployment controls.
+    ///
+    /// Absent for a context run: a composition happens *here*, so its two
+    /// instants would be the same number written twice.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub received_at: Option<DateTime<Utc>>,
+    /// Whether the gap between the two exceeded a minute.
+    ///
+    /// Computed rather than left to each client, so "this did not arrive live"
+    /// means one thing across the console, the CLI and anything else that
+    /// reads a timeline. It is what a locally spooled batch, a replay after a
+    /// crash, and a machine with a wrong clock all look like from here — the
+    /// server cannot tell those three apart and does not pretend to.
+    pub delayed: bool,
+    /// One line about what this entry is — a run's query, an event's family.
+    pub summary: String,
+}
+
+/// The timeline projection.
+#[derive(Debug, Serialize, ToSchema)]
+pub struct TimelineView {
+    /// The session this is about.
+    #[schema(value_type = String, format = "uuid")]
+    pub session_id: SessionId,
+    /// The merged entries, oldest first.
+    pub entries: Vec<TimelineEntry>,
+    /// How many events the session has appended, of every type — the shape of
+    /// the run, which is what an auditor reads before any single entry.
+    pub event_counts: BTreeMap<String, i64>,
+    /// Whether either source hit its bound.
+    pub truncated: bool,
+}
+
+/// The `status` vocabulary, built from
+/// [`synveda_types::session::SessionStatus`] itself rather than transcribed —
+/// so the OpenAPI enum and the Rust enum cannot disagree.
+fn session_status_schema() -> utoipa::openapi::schema::Object {
+    string_enum(SessionStatus::ALL.iter().map(SessionStatus::as_str))
+}
+
+/// The `event_type` vocabulary, built the same way.
+fn event_type_schema() -> utoipa::openapi::schema::Object {
+    string_enum(SessionEventType::ALL.iter().map(SessionEventType::as_str))
+}
+
+/// The three states `POST …/end` accepts beside `ending`.
+fn end_status_schema() -> utoipa::openapi::schema::Object {
+    string_enum(
+        [SessionStatus::Ending]
+            .iter()
+            .chain(SessionStatus::TERMINAL.iter())
+            .map(|status| status.as_str()),
+    )
+}
+
+// ── Request bodies ───────────────────────────────────────────────────────────
+
+/// `POST /v1/sessions`.
+///
+/// There is no `tenant_id` and no `principal_id` here, and
+/// `deny_unknown_fields` is what makes sending one an error rather than a
+/// silent no-op (ADR-0076 decision 8). There is no `scope_id` either: the
+/// governed scope is derived from `workspace_id` and `project_id` by the
+/// store, because a client that could name the scope could name one its
+/// workspace is not in.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct OpenSessionBody {
+    /// The workspace the run is in.
+    #[schema(value_type = String, format = "uuid")]
+    pub workspace_id: WorkspaceId,
+    /// The project, when the run is against one.
+    #[serde(default)]
+    #[schema(value_type = Option<String>, format = "uuid")]
+    pub project_id: Option<ProjectId>,
+    /// The agent client, as it names itself: a lowercase label of letters,
+    /// digits, `-` and `.`.
+    pub client_name: String,
+    /// Its version.
+    #[serde(default)]
+    pub client_version: Option<String>,
+    /// A stable id for this installation of the client.
+    #[serde(default)]
+    pub client_installation_id: Option<String>,
+    /// The harness's own id for this run. Unique per caller and client.
+    #[serde(default)]
+    pub external_session_id: Option<String>,
+    /// Which agent is running.
+    #[serde(default)]
+    pub agent_name: Option<String>,
+    /// The model, as the client names it.
+    #[serde(default)]
+    pub model_name: Option<String>,
+    /// A repository attached to the named project.
+    #[serde(default)]
+    #[schema(value_type = Option<String>, format = "uuid")]
+    pub repository_id: Option<RepositoryId>,
+    /// The branch the run is on.
+    #[serde(default)]
+    pub branch: Option<String>,
+    /// What the run is about.
+    #[serde(default)]
+    pub task_summary: Option<String>,
+    /// A labelling bag: a JSON object, at most 8 KiB encoded. Never copied
+    /// into an audit payload.
+    #[serde(default)]
+    #[schema(value_type = Option<Object>)]
+    pub metadata: Option<serde_json::Value>,
+}
+
+/// One event of a `POST /v1/sessions/{session_id}/events` batch.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct NewEventBody {
+    /// What happened — one of the twelve names.
+    #[schema(schema_with = event_type_schema)]
+    pub event_type: SessionEventType,
+    /// The payload shape this client declares. Defaults to the current one.
+    #[serde(default = "default_schema_version")]
+    pub event_schema_version: i32,
+    /// The client's own id for this event. **The idempotency unit**: a
+    /// redelivered batch appends nothing twice.
+    pub client_event_id: String,
+    /// When the client says it happened.
+    pub occurred_at: DateTime<Utc>,
+    /// The content: a JSON object, at most 64 KiB encoded.
+    #[serde(default)]
+    #[schema(value_type = Option<Object>)]
+    pub payload: Option<serde_json::Value>,
+}
+
+const fn default_schema_version() -> i32 {
+    CURRENT_EVENT_SCHEMA_VERSION
+}
+
+/// `POST /v1/sessions/{session_id}/events`.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct AppendEventsBody {
+    /// The batch, at most 200 events, each `client_event_id` at most once.
+    pub events: Vec<NewEventBody>,
+}
+
+/// `POST /v1/sessions/{session_id}/end`.
+#[derive(Debug, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
+pub struct EndSessionBody {
+    /// Where to move it: `ending` to announce the close while buffered events
+    /// are still arriving, or one of `ended`, `abandoned`, `failed` to close
+    /// it.
+    #[schema(schema_with = end_status_schema)]
+    pub status: SessionStatus,
+    /// What the run turned out to be about, when the client only knows at the
+    /// end. Replaces whatever was set at open.
+    #[serde(default)]
+    pub task_summary: Option<String>,
+    /// **Why** it stopped, in the client's words — `hook timed out`, `user
+    /// cancelled`, `context window exhausted` (CPR-11, ADR-0077 decision 4).
+    ///
+    /// Distinct from `task_summary`, which is what the run was *about*: the
+    /// status says a run failed, this says what failed. Free text, because the
+    /// vocabulary belongs to the harness.
+    #[serde(default)]
+    pub end_reason: Option<String>,
+}
+
+/// Query parameters for `GET /v1/sessions`.
+#[derive(Debug, Default, Deserialize, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct ListParams {
+    /// Only runs at or under this governed scope — the subtree, so a
+    /// workspace's scope lists its projects' runs.
+    #[serde(default)]
+    #[param(value_type = Option<String>, format = "uuid")]
+    pub scope_id: Option<ScopeId>,
+    /// Only runs in this workspace.
+    #[serde(default)]
+    #[param(value_type = Option<String>, format = "uuid")]
+    pub workspace_id: Option<WorkspaceId>,
+    /// Only runs in this project.
+    #[serde(default)]
+    #[param(value_type = Option<String>, format = "uuid")]
+    pub project_id: Option<ProjectId>,
+    /// Only runs in this state: `active`, `ending`, `ended`, `abandoned` or
+    /// `failed`.
+    #[serde(default)]
+    pub status: Option<String>,
+    /// Only runs opened by this agent client, matched exactly — `claude-code`,
+    /// `zed`, `mcp`. The label the client named itself with, never a prefix.
+    #[serde(default)]
+    pub client_name: Option<String>,
+    /// Only runs opened by this token subject.
+    #[serde(default)]
+    pub principal_id: Option<String>,
+    /// Only runs started at or after this instant (RFC 3339).
+    #[serde(default)]
+    #[param(value_type = Option<String>, format = "date-time")]
+    pub started_after: Option<DateTime<Utc>>,
+    /// Only runs started strictly before this instant (RFC 3339).
+    ///
+    /// Half-open with `started_after`, so two adjacent days cover every run
+    /// exactly once rather than sharing the one that started at midnight.
+    #[serde(default)]
+    #[param(value_type = Option<String>, format = "date-time")]
+    pub started_before: Option<DateTime<Utc>>,
+    /// The previous page's `next_cursor`. Opaque — pass it back unchanged.
+    #[serde(default)]
+    pub cursor: Option<String>,
+    /// How many rows to serve: 1–200, default 50.
+    #[serde(default)]
+    pub limit: Option<i64>,
+}
+
+// ── The listing cursor ───────────────────────────────────────────────────────
+
+/// Encodes a keyset cursor for the wire (CPR-11, ADR-0077 decision 1).
+///
+/// `base64url(<rfc3339>|<uuid>)`. Opaque by contract, not authenticated: it
+/// carries only the served row's start instant and id. Clients pass it back
+/// unchanged so its representation can evolve.
+fn encode_cursor(cursor: &sessions::SessionCursor) -> String {
+    URL_SAFE_NO_PAD.encode(format!("{}|{}", cursor.started_at.to_rfc3339(), cursor.id))
+}
+
+/// The inverse. A malformed cursor is a 400 rather than a silent restart from
+/// the newest row: a client that sent one is looping, and answering page one
+/// forever is how that becomes an infinite scroll nobody notices.
+fn decode_cursor(raw: &str) -> Result<sessions::SessionCursor> {
+    let invalid = || Error::Invalid {
+        message: "`cursor` is not a well-formed session cursor".to_owned(),
+    };
+    let bytes = URL_SAFE_NO_PAD.decode(raw).map_err(|_| invalid())?;
+    let decoded = String::from_utf8(bytes).map_err(|_| invalid())?;
+    let (at, id) = decoded.split_once('|').ok_or_else(invalid)?;
+    Ok(sessions::SessionCursor {
+        started_at: DateTime::parse_from_rfc3339(at)
+            .map_err(|_| invalid())?
+            .with_timezone(&Utc),
+        id: id.parse::<SessionId>().map_err(|_| invalid())?,
+    })
+}
+
+/// Query parameters for `GET /v1/sessions/{session_id}/timeline`.
+#[derive(Debug, Default, Deserialize, utoipa::IntoParams)]
+#[into_params(parameter_in = Query)]
+pub struct TimelineParams {
+    /// Only entries after this event sequence. A sequence rather than an
+    /// offset, so a client following a live run can ask for "everything
+    /// since" and get a stable answer while events are still arriving.
+    #[serde(default)]
+    pub after: Option<i64>,
+}
+
+// ── Shared handler plumbing ──────────────────────────────────────────────────
+
+/// Counts the operation and renders the result — the three-outcome taxonomy
+/// every plane in this gateway uses.
+async fn respond<T: IntoResponse>(
+    state: &AppState,
+    op: &'static str,
+    result: Result<T>,
+) -> Response {
+    let outcome = crate::response::outcome(&result);
+    metrics::counter!(SESSION_OPERATIONS_TOTAL, "op" => op, "outcome" => outcome).increment(1);
+    crate::response::finish(state, op, result).await
+}
+
+/// The uniform 404 for a session that is missing *or* another tenant's.
+pub(crate) fn session_not_found(id: SessionId) -> Error {
+    Error::NotFound {
+        entity: format!("session {id}"),
+    }
+}
+
+/// What a decision on this plane is about.
+enum Subject<'a> {
+    /// The plane, anchored at a governed scope — a listing's gate, or the
+    /// scope a run is about to be opened at.
+    ///
+    /// Not optional, unlike the workspace plane's: the Cedar schema does not
+    /// admit a `Tenant` resource for these actions, because a run always
+    /// happens somewhere. A tenant with no scopes at all therefore has no
+    /// session question to ask, and the listing answers it without reaching
+    /// here.
+    At(&'a synveda_types::scope::Scope),
+    /// One session.
+    Session(&'a Session),
+}
+
+/// Takes one decision about `subject`, returning the gathered input beside it
+/// so a listing can decide per row without gathering twice.
+async fn require(
+    state: &AppState,
+    tx: &mut sqlx::PgConnection,
+    action: Action,
+    tenant_id: TenantId,
+    subject: Subject<'_>,
+) -> Result<(Authorized, Resource, authz::DecisionInput)> {
+    let (anchor, selection, resources, resource) = match subject {
+        Subject::At(scope) => (
+            Some(scope.clone()),
+            AnchorSelection::none(),
+            Vec::new(),
+            Resource::Scope(scope.id),
+        ),
+        Subject::Session(session) => (
+            scopes::get(&mut *tx, tenant_id, session.scope_id).await?,
+            match session.project_id {
+                Some(project_id) => AnchorSelection::project(project_id),
+                None => AnchorSelection::workspace(session.workspace_id),
+            },
+            vec![ResourceEntity::Session {
+                id: session.id,
+                scope_id: session.scope_id,
+            }],
+            Resource::Session(session.id),
+        ),
+    };
+    let input = authz::gather(state, tx, anchor.as_ref(), selection, resources).await?;
+    let authorized = authz::decide(state, &input, action, resource)?;
+    Ok((authorized, resource, input))
+}
+
+/// The allowed-read decision event (ADR-0019 decision 4): a read has no
+/// semantic event of its own, so the decision itself chains.
+pub(crate) async fn read_event(
+    tx: &mut sqlx::PgConnection,
+    tenant_id: TenantId,
+    op: &'static str,
+    action: Action,
+    authorized: &Authorized,
+    resource: Resource,
+    detail: serde_json::Value,
+) -> Result<()> {
+    audit::record(
+        tx,
+        tenant_id,
+        AuditAction::AuthzDecision,
+        resource.to_string(),
+        Outcome::Allow,
+        json!({
+            "op": op,
+            "authz": audit::decision_context(action, authorized),
+            "detail": detail,
+        }),
+    )
+    .await
+    .map(|_| ())
+}
+
+/// The payload image of a session.
+///
+/// `metadata` is deliberately **absent** and replaced by a size: an agent's
+/// environment is where credentials live, and this is the field a harness
+/// would put an environment in (seed: no secret in an audit payload). That
+/// there was metadata, and how much, is auditable; what was in it is not.
+fn session_image(session: &Session) -> serde_json::Value {
+    json!({
+        "id": session.id,
+        "workspace_id": session.workspace_id,
+        "project_id": session.project_id,
+        "scope_id": session.scope_id,
+        "principal_id": session.principal_id,
+        "client_name": session.client_name,
+        "client_version": session.client_version,
+        "external_session_id": session.external_session_id,
+        "agent_name": session.agent_name,
+        "model_name": session.model_name,
+        "repository_id": session.repository_id,
+        "branch": session.branch,
+        "status": session.status.as_str(),
+        "started_at": session.started_at,
+        "metadata_bytes": session.metadata.to_string().len(),
+    })
+}
+
+/// One page of the listing: the rows this caller may read, decided **one at a
+/// time against the row** (CPR-9's rule, applied from the start rather than
+/// retrofitted), and where the next page resumes.
+///
+/// [`crate::workspaces::decide_each`] does the deciding; this is the mapping
+/// from a session to what that function needs, plus the walk that turns a
+/// scanned candidate list into a page. The reason the decision is per row
+/// rather than per distinct scope — which would be cheaper, because every
+/// session in one project decides identically under the shipped packs — is
+/// that a *stored* pack may name a session by its own entity id, and a cache
+/// keyed on the scope would then answer a question it was never asked.
+///
+/// # Why the cursor follows the last candidate and not the last kept row
+///
+/// This is the whole of what makes pagination correct here, so it is written
+/// out. Rows are filtered by the PDP **after** they are scanned. If the cursor
+/// were the last row served, every denied row between two served ones would be
+/// scanned again on the next page — and a page whose candidates were *all*
+/// denied would serve nothing, carry no cursor, and end the listing while
+/// readable rows sat below it. So the cursor is the last candidate this page
+/// *considered*, whether or not it was served, and a page may be empty and
+/// still say where to continue.
+async fn page(
+    state: &AppState,
+    conn: &mut sqlx::PgConnection,
+    tenant_id: TenantId,
+    input: &authz::DecisionInput,
+    candidates: Vec<Session>,
+    limit: i64,
+    scan_truncated: bool,
+) -> Result<(
+    Vec<Session>,
+    Option<Authorized>,
+    Option<sessions::SessionCursor>,
+)> {
+    let rows: Vec<Decidable> = candidates
+        .iter()
+        .map(|session| Decidable {
+            resource: Resource::Session(session.id),
+            scope_id: session.scope_id,
+            entity: ResourceEntity::Session {
+                id: session.id,
+                scope_id: session.scope_id,
+            },
+        })
+        .collect();
+    let verdicts =
+        crate::workspaces::decide_each(state, conn, tenant_id, input, Action::SessionRead, &rows)
+            .await?;
+
+    let total = candidates.len();
+    let mut authorized = None;
+    let mut kept: Vec<Session> = Vec::new();
+    let mut consumed = 0usize;
+    // The last candidate this page looked at, kept whichever way its verdict
+    // went: the cursor is a position in the scan, not a position in the answer.
+    let mut last: Option<sessions::SessionCursor> = None;
+    for (session, verdict) in candidates.into_iter().zip(verdicts) {
+        consumed += 1;
+        last = Some(sessions::SessionCursor {
+            started_at: session.started_at,
+            id: session.id,
+        });
+        if let Some(allowed) = verdict {
+            authorized.get_or_insert(allowed);
+            kept.push(session);
+        }
+        if kept.len() as i64 == limit {
+            break;
+        }
+    }
+    // More below: either this page stopped short of the scan, or the scan
+    // itself stopped short of the table.
+    let more = consumed < total || scan_truncated;
+    Ok((kept, authorized, if more { last } else { None }))
+}
+
+/// Reads a session and decides `action` about it, in that order.
+///
+/// The order is ADR-0012 decision 7's and it is not negotiable on this plane:
+/// a session that is not this tenant's is a 404, indistinguishable from an id
+/// nobody ever minted, because a caller who can tell the two apart can
+/// enumerate another tenant's runs a uuid at a time.
+pub(crate) async fn load(
+    state: &AppState,
+    tx: &mut sqlx::PgConnection,
+    tenant_id: TenantId,
+    id: SessionId,
+    action: Action,
+) -> Result<(Session, Authorized, Resource)> {
+    let (session, authorized, resource, _) =
+        load_with_input(state, tx, tenant_id, id, action).await?;
+    Ok((session, authorized, resource))
+}
+
+/// [`load`], keeping the decision input.
+///
+/// The append path needs it: the redaction config comes off the **effective
+/// pack for the session's scope**, which is the same resolution the
+/// `SessionWrite` decision just performed, and re-gathering it would be a
+/// second walk that could disagree with the first.
+pub(crate) async fn load_with_input(
+    state: &AppState,
+    tx: &mut sqlx::PgConnection,
+    tenant_id: TenantId,
+    id: SessionId,
+    action: Action,
+) -> Result<(Session, Authorized, Resource, authz::DecisionInput)> {
+    let session = sessions::get(&mut *tx, tenant_id, id)
+        .await?
+        .ok_or_else(|| session_not_found(id))?;
+    let (authorized, resource, input) =
+        require(state, tx, action, tenant_id, Subject::Session(&session)).await?;
+    Ok((session, authorized, resource, input))
+}
+
+// ── Open ─────────────────────────────────────────────────────────────────────
+
+/// `POST /v1/sessions` — open a run.
+#[utoipa::path(
+    post,
+    path = "/v1/sessions",
+    operation_id = "open_session",
+    tag = "sessions",
+    request_body = OpenSessionBody,
+    params(
+        ("Idempotency-Key" = String, Header,
+         description = "Required. A unique value per request, reused verbatim on retry."),
+    ),
+    responses(
+        (status = 201, description = "Opened", body = SessionView),
+        (status = 200, description = "This key already opened this session", body = SessionView),
+        (status = 400, description = "Malformed body, or no `Idempotency-Key`", body = ApiErrorBody),
+        (status = 403, description = "The PDP denied `session.write`", body = ApiErrorBody),
+        (status = 404, description = "No such workspace or project in this tenant", body = ApiErrorBody),
+        (status = 409, description = "The workspace is archived, the harness id is taken, or the key was reused for a different request", body = ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
+pub(crate) async fn open(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    payload: std::result::Result<Json<OpenSessionBody>, JsonRejection>,
+) -> Response {
+    let result = async {
+        let body = body(payload)?;
+        let tenant_id = tenant_id()?;
+        let subject = subject()?;
+        let claim = Claim::from_headers(
+            &headers,
+            "session.open",
+            &subject,
+            &json!({
+                "route": "POST /v1/sessions",
+                "workspace_id": body.workspace_id,
+                "project_id": body.project_id,
+                "client_name": body.client_name,
+                "external_session_id": body.external_session_id,
+            }),
+        )?;
+
+        let replayed = match crate::idempotency::dispatch(&state.pool, tenant_id, &claim).await? {
+            Dispatch::Replay(id) => Some(id),
+            Dispatch::Create => {
+                match open_session(&state, tenant_id, &subject, &body, &claim).await {
+                    Ok(session) => {
+                        return Ok((StatusCode::CREATED, Json(SessionView::from(session))));
+                    }
+                    Err(conflict @ Error::Conflict { .. }) => Some(
+                        crate::idempotency::resolve_conflict(
+                            &state.pool,
+                            tenant_id,
+                            &claim,
+                            conflict,
+                        )
+                        .await?,
+                    ),
+                    Err(other) => return Err(other),
+                }
+            }
+        };
+        let id = SessionId::from_uuid(replayed.expect("replay id"));
+        let session = replay_open(&state, tenant_id, id, &claim).await?;
+        Ok((StatusCode::OK, Json(SessionView::from(session))))
+    }
+    .await;
+    respond(&state, "session.open", result).await
+}
+
+/// The fresh-open path: decide, create, remember the key, chain, commit —
+/// all four in one transaction, for [`crate::workspaces`]'s reason.
+async fn open_session(
+    state: &AppState,
+    tenant_id: TenantId,
+    principal_id: &str,
+    body: &OpenSessionBody,
+    claim: &Claim,
+) -> Result<Session> {
+    let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
+    // The decision is taken at the scope the run will be anchored at, which
+    // means resolving the workspace and project **first** — and a foreign one
+    // is a 404 before any decision is taken, so a probe learns nothing.
+    let anchor = anchor_scope(&mut tx, tenant_id, body.workspace_id, body.project_id).await?;
+    let (authorized, _, _) = require(
+        state,
+        &mut tx,
+        Action::SessionWrite,
+        tenant_id,
+        Subject::At(&anchor),
+    )
+    .await?;
+
+    let session = sessions::create(
+        &mut tx,
+        &NewSession {
+            id: SessionId::new(),
+            tenant_id,
+            workspace_id: body.workspace_id,
+            project_id: body.project_id,
+            principal_id: principal_id.to_owned(),
+            client_name: body.client_name.clone(),
+            client_version: body.client_version.clone(),
+            client_installation_id: body.client_installation_id.clone(),
+            external_session_id: body.external_session_id.clone(),
+            agent_name: body.agent_name.clone(),
+            model_name: body.model_name.clone(),
+            repository_id: body.repository_id,
+            branch: body.branch.clone(),
+            task_summary: body.task_summary.clone(),
+            metadata: body.metadata.clone().unwrap_or_else(|| json!({})),
+        },
+    )
+    .await?;
+    claim
+        .remember(&mut tx, tenant_id, session.id.as_uuid())
+        .await?;
+    audit::record(
+        &mut tx,
+        tenant_id,
+        AuditAction::SessionOpened,
+        Resource::Session(session.id).to_string(),
+        Outcome::Success,
+        json!({
+            "authz": audit::decision_context(Action::SessionWrite, &authorized),
+            "session": session_image(&session),
+            "idempotency_key": claim.key,
+        }),
+    )
+    .await?;
+    commit(tx).await?;
+    Ok(session)
+}
+
+/// The replay path: the same decision, then the session the key produced.
+///
+/// The decision is taken again on purpose. A replay is still a request to open
+/// a session, and a caller whose permission was revoked between the first
+/// attempt and the retry must be refused — a replay that skipped the PDP would
+/// be a cached authorisation, which seed §2.2 forbids.
+async fn replay_open(
+    state: &AppState,
+    tenant_id: TenantId,
+    id: SessionId,
+    claim: &Claim,
+) -> Result<Session> {
+    let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
+    let session = sessions::get(&mut *tx, tenant_id, id)
+        .await?
+        .ok_or_else(|| crate::idempotency::vanished(claim, id.as_uuid()))?;
+    let (authorized, resource, _) = require(
+        state,
+        &mut tx,
+        Action::SessionWrite,
+        tenant_id,
+        Subject::Session(&session),
+    )
+    .await?;
+    read_event(
+        &mut tx,
+        tenant_id,
+        "session.open.replay",
+        Action::SessionWrite,
+        &authorized,
+        resource,
+        json!({"session_id": id, "idempotency_key": claim.key}),
+    )
+    .await?;
+    commit(tx).await?;
+    Ok(session)
+}
+
+/// The governed scope a run in this workspace and project would be anchored
+/// at, resolved from the rows rather than from the request.
+///
+/// A missing or foreign workspace or project is a 404 here, before any
+/// decision, which is what keeps this route from being an existence oracle for
+/// another tenant's inventory.
+async fn anchor_scope(
+    tx: &mut sqlx::PgConnection,
+    tenant_id: TenantId,
+    workspace_id: WorkspaceId,
+    project_id: Option<ProjectId>,
+) -> Result<synveda_types::scope::Scope> {
+    let scope_id = match project_id {
+        Some(project_id) => {
+            let project = synveda_store::projects::get(&mut *tx, tenant_id, project_id)
+                .await?
+                .filter(|project| project.workspace_id == workspace_id)
+                .ok_or_else(|| Error::NotFound {
+                    entity: format!("project {project_id} in workspace {workspace_id}"),
+                })?;
+            project.scope_id
+        }
+        None => {
+            synveda_store::workspaces::get(&mut *tx, tenant_id, workspace_id)
+                .await?
+                .ok_or_else(|| Error::NotFound {
+                    entity: format!("workspace {workspace_id}"),
+                })?
+                .scope_id
+        }
+    };
+    scopes::get(&mut *tx, tenant_id, scope_id)
+        .await?
+        .ok_or_else(|| Error::Internal {
+            message: format!("workspace or project {scope_id} has no scope"),
+        })
+}
+
+// ── List and read ────────────────────────────────────────────────────────────
+
+/// `GET /v1/sessions` — the runs this caller may read, newest first.
+#[utoipa::path(
+    get,
+    path = "/v1/sessions",
+    operation_id = "list_sessions",
+    tag = "sessions",
+    params(ListParams),
+    responses(
+        (status = 200, description = "The sessions this caller may read", body = SessionList),
+        (status = 400, description = "A filter outside its bounds", body = ApiErrorBody),
+        (status = 403, description = "The PDP denied `session.read`", body = ApiErrorBody),
+        (status = 404, description = "No such scope in this tenant", body = ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
+pub(crate) async fn list(
+    State(state): State<AppState>,
+    Query(params): Query<ListParams>,
+) -> Response {
+    let result = async {
+        let tenant_id = tenant_id()?;
+        let limit = match params.limit {
+            Some(limit) if !(1..=MAX_LIST_LIMIT).contains(&limit) => {
+                return Err(Error::Invalid {
+                    message: format!("`limit` is 1..={MAX_LIST_LIMIT}, got {limit}"),
+                });
+            }
+            Some(limit) => limit,
+            None => DEFAULT_LIST_LIMIT,
+        };
+        let status = params
+            .status
+            .as_deref()
+            .map(str::parse::<SessionStatus>)
+            .transpose()?;
+        let after = params.cursor.as_deref().map(decode_cursor).transpose()?;
+        if let (Some(from), Some(to)) = (params.started_after, params.started_before)
+            && from >= to
+        {
+            return Err(Error::Invalid {
+                message: "`started_after` must be before `started_before`".to_owned(),
+            });
+        }
+
+        let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
+        // The gate is decided at the scope the listing is anchored at: the one
+        // the caller named, or the tenant root. A named scope that is not this
+        // tenant's is a 404 first, so this route is not an existence oracle.
+        let anchor = match params.scope_id {
+            Some(scope_id) => Some(
+                scopes::get(&mut *tx, tenant_id, scope_id)
+                    .await?
+                    .ok_or_else(|| crate::request::not_found(scope_id))?,
+            ),
+            None => scopes::tenant_root(&mut *tx, tenant_id).await?,
+        };
+        // A tenant with no governed scopes at all has no session question to
+        // ask: there is no resource for the PDP to decide about, no session
+        // row that could exist, and therefore nothing disclosed. It is
+        // answered rather than errored — the property CPR-9's audit asserted
+        // for a caller who holds nothing — and chains no event, because a
+        // disclosure of nothing is not one.
+        let Some(anchor) = anchor else {
+            commit(tx).await?;
+            return Ok(Json(SessionList {
+                sessions: Vec::new(),
+                next_cursor: None,
+            }));
+        };
+        // One gather serves both questions: the caller's principal, anchors
+        // and groups are properties of the caller, and re-gathering per row
+        // could observe them changing mid-response.
+        let input = authz::gather(
+            &state,
+            &mut tx,
+            Some(&anchor),
+            AnchorSelection::none(),
+            Vec::new(),
+        )
+        .await?;
+        let gate_resource = Resource::Scope(anchor.id);
+        let at_gate = authz::decide(&state, &input, Action::SessionRead, gate_resource);
+
+        let (candidates, scan_truncated) = sessions::list(
+            &mut *tx,
+            tenant_id,
+            &SessionFilter {
+                scope_id: params.scope_id,
+                workspace_id: params.workspace_id,
+                project_id: params.project_id,
+                status,
+                client_name: params.client_name.clone(),
+                principal_id: params.principal_id.clone(),
+                started_after: params.started_after,
+                started_before: params.started_before,
+                after,
+            },
+        )
+        .await?;
+        let (rows, at_row, next_cursor) = page(
+            &state,
+            &mut tx,
+            tenant_id,
+            &input,
+            candidates,
+            limit,
+            scan_truncated,
+        )
+        .await?;
+
+        // Two questions, not one (CPR-9): the gate answers "may this caller
+        // read this plane as such", the per-row verdicts answer "which of
+        // these". Refused only when both say no — a caller who holds nothing
+        // at the anchor and nothing below it is told so, which is the contract
+        // an outsider has always had.
+        //
+        // A consequence worth knowing (CPR-11): a *later* page can refuse
+        // where an earlier one served, when the caller is denied at the anchor
+        // and this page's candidates all belong to somebody else. The
+        // alternative — answer an empty page and a cursor — would hand a
+        // caller who holds nothing both the fact that rows exist and one row's
+        // key, which is precisely the class of leak CPR-9's audit was about.
+        // The refusal is honest and the disclosure is not, so this refuses.
+        // The console never meets it: it lists at the selected scope, where
+        // the gate is the scope the reader holds.
+        let (authorized, resource) = match (at_gate, at_row) {
+            (Ok(authorized), _) => (authorized, gate_resource),
+            (Err(_), Some(authorized)) => (
+                authorized,
+                Resource::Session(rows.first().expect("a readable row").id),
+            ),
+            (Err(denial), None) => return Err(denial),
+        };
+        read_event(
+            &mut tx,
+            tenant_id,
+            "session.list",
+            Action::SessionRead,
+            &authorized,
+            resource,
+            json!({"count": rows.len(), "more": next_cursor.is_some()}),
+        )
+        .await?;
+        commit(tx).await?;
+        Ok(Json(SessionList {
+            sessions: rows.into_iter().map(Into::into).collect(),
+            next_cursor: next_cursor.as_ref().map(encode_cursor),
+        }))
+    }
+    .await;
+    respond(&state, "session.list", result).await
+}
+
+/// `GET /v1/sessions/{session_id}`.
+#[utoipa::path(
+    get,
+    path = "/v1/sessions/{session_id}",
+    operation_id = "get_session",
+    tag = "sessions",
+    params(("session_id" = String, Path, description = "The session's id")),
+    responses(
+        (status = 200, description = "The session", body = SessionView),
+        (status = 403, description = "The PDP denied `session.read`", body = ApiErrorBody),
+        (status = 404, description = "No such session in this tenant", body = ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
+pub(crate) async fn get(State(state): State<AppState>, Path(id): Path<SessionId>) -> Response {
+    let result = async {
+        let tenant_id = tenant_id()?;
+        let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
+        let (session, authorized, resource) =
+            load(&state, &mut tx, tenant_id, id, Action::SessionRead).await?;
+        read_event(
+            &mut tx,
+            tenant_id,
+            "session.get",
+            Action::SessionRead,
+            &authorized,
+            resource,
+            json!({"session_id": id}),
+        )
+        .await?;
+        commit(tx).await?;
+        Ok(Json(SessionView::from(session)))
+    }
+    .await;
+    respond(&state, "session.get", result).await
+}
+
+/// `GET /v1/sessions/{session_id}/events/{event_id}` — the diagnostic
+/// expansion (CPR-11, ADR-0077 decision 3).
+///
+/// # Why this is not part of the timeline
+///
+/// A timeline says *that* a message was sent and summarises it in a line. This
+/// serves the **payload**: what the person and the agent actually said, byte
+/// for byte, the prompt, the tool arguments, the diff. Those are different
+/// disclosures, so they are different authorities — `SessionDiagnostics`
+/// rather than `SessionRead` — and a pack can let a project's members follow
+/// what their agents have been doing without handing every one of them a
+/// transcript of everybody's prompts.
+///
+/// One event per request, deliberately. A bulk "give me every payload" route
+/// would be the same disclosure with a better ergonomics story, and the shape
+/// this has is the shape a reader actually uses: they read a timeline, one
+/// entry looks wrong, they expand that entry.
+///
+/// The ownership check runs first, as everywhere on this plane: an event id
+/// from another session — or another tenant — is a 404 before any decision, so
+/// a refusal cannot be used to confirm that a run exists.
+#[utoipa::path(
+    get,
+    path = "/v1/sessions/{session_id}/events/{event_id}",
+    operation_id = "get_session_event",
+    tag = "sessions",
+    params(
+        ("session_id" = String, Path, description = "The session's id"),
+        ("event_id" = String, Path, description = "The event's id, from a timeline entry"),
+    ),
+    responses(
+        (status = 200, description = "The event, payload included", body = SessionEventView),
+        (status = 403, description = "The PDP denied `session.diagnostics`", body = ApiErrorBody),
+        (status = 404, description = "No such session or event in this tenant", body = ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
+pub(crate) async fn get_event(
+    State(state): State<AppState>,
+    Path((session_id, event_id)): Path<(SessionId, synveda_types::SessionEventId)>,
+) -> Response {
+    let result = async {
+        let tenant_id = tenant_id()?;
+        let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
+        // The session first, then the event, then the decision. The event read
+        // is keyed by both ids in SQL, so an event of another run is missing
+        // rather than foreign.
+        let session = sessions::get(&mut *tx, tenant_id, session_id)
+            .await?
+            .ok_or_else(|| session_not_found(session_id))?;
+        let event = sessions::event(&mut *tx, tenant_id, session_id, event_id)
+            .await?
+            .ok_or_else(|| Error::NotFound {
+                entity: format!("event {event_id} of session {session_id}"),
+            })?;
+        let (authorized, resource, _) = require(
+            &state,
+            &mut tx,
+            Action::SessionDiagnostics,
+            tenant_id,
+            Subject::Session(&session),
+        )
+        .await?;
+        // The chain records **which** event was expanded and never the payload
+        // it served: an audit log that copied every prompt somebody read would
+        // be a second, unbounded transcript store with weaker access rules than
+        // the first.
+        read_event(
+            &mut tx,
+            tenant_id,
+            "session.event.diagnostic",
+            Action::SessionDiagnostics,
+            &authorized,
+            resource,
+            json!({
+                "session_id": session_id,
+                "event_id": event_id,
+                "event_type": event.event_type.as_str(),
+                "sequence": event.sequence,
+                "payload_hash": event.payload_hash,
+            }),
+        )
+        .await?;
+        commit(tx).await?;
+        Ok(Json(SessionEventView::from(event)))
+    }
+    .await;
+    respond(&state, "session.event.get", result).await
+}
+
+// ── Events ───────────────────────────────────────────────────────────────────
+
+/// `POST /v1/sessions/{session_id}/events` — append to the ledger.
+#[utoipa::path(
+    post,
+    path = "/v1/sessions/{session_id}/events",
+    operation_id = "append_session_events",
+    tag = "sessions",
+    params(("session_id" = String, Path, description = "The session's id")),
+    request_body = AppendEventsBody,
+    responses(
+        (status = 200, description = "Per-event outcomes", body = AppendResponse),
+        (status = 400, description = "An empty or oversized batch, a repeated `client_event_id`, or an event outside its bounds", body = ApiErrorBody),
+        (status = 403, description = "The PDP denied `session.write`", body = ApiErrorBody),
+        (status = 404, description = "No such session in this tenant", body = ApiErrorBody),
+        (status = 409, description = "The session is closed", body = ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
+pub(crate) async fn append_events(
+    State(state): State<AppState>,
+    Path(id): Path<SessionId>,
+    payload: std::result::Result<Json<AppendEventsBody>, JsonRejection>,
+) -> Response {
+    let result = async {
+        let body = body(payload)?;
+        let tenant_id = tenant_id()?;
+        let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
+        let (session, authorized, _, input) =
+            load_with_input(&state, &mut tx, tenant_id, id, Action::SessionWrite).await?;
+
+        // ── The scan seam (MEM-2, ADR-0021 decision 1; CPR-12,
+        // ADR-0078 decision 1) ──
+        //
+        // Every payload is scanned and redacted **before anything persists**,
+        // and the effective pack's redaction config picks each event's
+        // disposition. The raw finding text survives in no table, no response,
+        // no metric and no audit payload — only the summary of rule ids,
+        // categories and counts does.
+        //
+        // The config comes off the pack that governs the session's scope,
+        // which is the same resolution the `SessionWrite` decision above
+        // performed. `SessionWrite` is not `PolicyAssign`, so there is no
+        // skip-self divergence to worry about.
+        let config = state
+            .pdp
+            .effective(
+                tenant_id,
+                Resource::Scope(session.scope_id),
+                &input.context(),
+            )
+            .redaction;
+        let payloads: Vec<serde_json::Value> = body
+            .events
+            .iter()
+            .map(|event| event.payload.clone().unwrap_or_else(|| json!({})))
+            .collect();
+        // CPU work, O(payload bytes): off the reactor. The request span travels
+        // along so the scan spans nest under it.
+        let span = tracing::Span::current();
+        let scans: Vec<ScanOutcome> = tokio::task::spawn_blocking(move || {
+            let _entered = span.enter();
+            payloads.into_iter().map(synveda_ingest::scan).collect()
+        })
+        .await
+        .map_err(|err| Error::Internal {
+            message: format!("redaction scan task failed: {err}"),
+        })?;
+
+        // Dispositions (ADR-0021 decision 4): a denied event never reaches the
+        // store, the rest are appended with their finding summary, and a
+        // quarantined one is appended **without a work signal**.
+        //
+        // Denial is per event and not per batch, deliberately: a hook
+        // delivering a turn's worth of events should not lose nineteen of them
+        // because the twentieth quoted a live credential.
+        let mut denied_views: Vec<AppendedEventView> = Vec::new();
+        let mut events: Vec<NewSessionEvent> = Vec::with_capacity(body.events.len());
+        let mut submitted_order: Vec<Option<usize>> = Vec::with_capacity(body.events.len());
+        let mut rule_summary: BTreeMap<&'static str, u64> = BTreeMap::new();
+        for (event, scan) in body.events.iter().zip(scans) {
+            for finding in &scan.findings {
+                metrics::counter!(
+                    REDACTION_FINDINGS_TOTAL,
+                    "rule" => finding.rule,
+                    "category" => finding.category.as_str(),
+                )
+                .increment(finding.count as u64);
+                *rule_summary.entry(finding.rule).or_default() += finding.count as u64;
+            }
+            let disposition = scan.disposition(&config);
+            let redactions = if scan.findings.is_empty() {
+                None
+            } else {
+                Some(
+                    serde_json::to_value(&scan.findings).map_err(|err| Error::Internal {
+                        message: format!("serialise finding summary: {err}"),
+                    })?,
+                )
+            };
+            if disposition == Some(RedactionMode::Deny) {
+                denied_views.push(AppendedEventView {
+                    outcome: "denied".to_owned(),
+                    client_event_id: event.client_event_id.clone(),
+                    redactions,
+                    event: None,
+                });
+                submitted_order.push(None);
+                continue;
+            }
+            submitted_order.push(Some(events.len()));
+            events.push(NewSessionEvent {
+                event_type: event.event_type,
+                event_schema_version: event.event_schema_version,
+                client_event_id: event.client_event_id.clone(),
+                occurred_at: event.occurred_at,
+                payload: scan.payload,
+                redactions,
+                quarantine: disposition == Some(RedactionMode::Quarantine),
+            });
+        }
+
+        let appended = if events.is_empty() {
+            Vec::new()
+        } else {
+            sessions::append_events(&mut tx, tenant_id, id, &events).await?
+        };
+
+        let written = appended
+            .iter()
+            .filter(|event| event.outcome == AppendOutcome::Appended)
+            .count();
+        let quarantined = appended.iter().filter(|event| event.quarantined).count();
+        let denied = denied_views.len();
+        let written_total = appended.len();
+        // One event per batch, carrying counts and the sequence range rather
+        // than the events themselves: a hundred-turn run would otherwise put
+        // its whole transcript in the chain twice, and the chain is not the
+        // transcript store. The per-type breakdown rides along, because "what
+        // did that agent actually do" should be answerable from the chain
+        // without reading the events.
+        let mut by_type: BTreeMap<&str, usize> = BTreeMap::new();
+        for event in &appended {
+            if event.outcome == AppendOutcome::Appended {
+                *by_type.entry(event.event.event_type.as_str()).or_default() += 1;
+            }
+        }
+        let sequences: Vec<i64> = appended
+            .iter()
+            .filter(|event| event.outcome == AppendOutcome::Appended)
+            .map(|event| event.event.sequence)
+            .collect();
+        audit::record(
+            &mut tx,
+            tenant_id,
+            AuditAction::SessionEventsAppended,
+            Resource::Session(session.id).to_string(),
+            Outcome::Success,
+            json!({
+                "authz": audit::decision_context(Action::SessionWrite, &authorized),
+                "session_id": session.id,
+                "submitted": body.events.len(),
+                "appended": written,
+                "duplicates": written_total - written,
+                "quarantined": quarantined,
+                "denied": denied,
+                "by_type": by_type,
+                "first_sequence": sequences.first(),
+                "last_sequence": sequences.last(),
+                // Rule ids and counts only. The finding summary is already
+                // content-free (ADR-0021 decision 1) and the matched text
+                // exists in no table, response, metric or payload — asserted
+                // by sweeping the whole chain for a planted credential.
+                "redaction_rules": rule_summary,
+            }),
+        )
+        .await?;
+        commit(tx).await?;
+
+        // Re-interleave into submission order: a client keyed on position must
+        // get one outcome per event it sent, in the order it sent them, even
+        // though the denied ones never reached the store.
+        let mut stored = appended.into_iter().map(Some).collect::<Vec<_>>();
+        let mut denied_iter = denied_views.into_iter();
+        let mut views: Vec<AppendedEventView> = Vec::with_capacity(submitted_order.len());
+        for slot in submitted_order {
+            match slot {
+                Some(index) => {
+                    let item = stored[index].take().ok_or_else(|| Error::Internal {
+                        message: "an append outcome was claimed twice".to_owned(),
+                    })?;
+                    let outcome = if item.quarantined {
+                        "quarantined".to_owned()
+                    } else {
+                        item.outcome.as_str().to_owned()
+                    };
+                    views.push(AppendedEventView {
+                        outcome,
+                        client_event_id: item.event.client_event_id.clone(),
+                        redactions: item.event.redactions.clone(),
+                        event: Some(item.event.into()),
+                    });
+                }
+                None => views.push(denied_iter.next().ok_or_else(|| Error::Internal {
+                    message: "a denied event lost its outcome".to_owned(),
+                })?),
+            }
+        }
+
+        Ok(Json(AppendResponse {
+            appended: written,
+            duplicates: written_total - written,
+            quarantined,
+            denied,
+            events: views,
+        }))
+    }
+    .await;
+    respond(&state, "session.events.append", result).await
+}
+
+// ── End ──────────────────────────────────────────────────────────────────────
+
+/// `POST /v1/sessions/{session_id}/end` — move a run through its close.
+#[utoipa::path(
+    post,
+    path = "/v1/sessions/{session_id}/end",
+    operation_id = "end_session",
+    tag = "sessions",
+    params(("session_id" = String, Path, description = "The session's id")),
+    request_body = EndSessionBody,
+    responses(
+        (status = 200, description = "The session, in its new state", body = SessionView),
+        (status = 400, description = "A status this session cannot be moved to", body = ApiErrorBody),
+        (status = 403, description = "The PDP denied `session.write`", body = ApiErrorBody),
+        (status = 404, description = "No such session in this tenant", body = ApiErrorBody),
+        (status = 409, description = "The session is already past this state", body = ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
+pub(crate) async fn end(
+    State(state): State<AppState>,
+    Path(id): Path<SessionId>,
+    payload: std::result::Result<Json<EndSessionBody>, JsonRejection>,
+) -> Response {
+    let result = async {
+        let body = body(payload)?;
+        let tenant_id = tenant_id()?;
+        if body.status == SessionStatus::Active {
+            return Err(Error::Invalid {
+                message: "a session cannot be reopened; `status` is `ending`, `ended`, \
+                          `abandoned` or `failed`"
+                    .to_owned(),
+            });
+        }
+        let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
+        let (before, authorized, _) =
+            load(&state, &mut tx, tenant_id, id, Action::SessionWrite).await?;
+        let after = sessions::transition(
+            &mut tx,
+            tenant_id,
+            id,
+            body.status,
+            body.task_summary.as_deref(),
+            body.end_reason.as_deref(),
+        )
+        .await?;
+        // A terminal close freezes exactly the evidence eligible at this
+        // instant. The extractor runs asynchronously: Stop/SessionEnd hooks
+        // cross only the durable session boundary and never wait on a model.
+        // `ending` is the first half of the two-phase close, so later events
+        // remain eligible until the terminal transition.
+        let terminal = matches!(
+            after.status,
+            SessionStatus::Ended | SessionStatus::Abandoned | SessionStatus::Failed
+        );
+        let configuration = if terminal {
+            Some(
+                synveda_store::configuration::effective_at_scope(
+                    &mut tx,
+                    tenant_id,
+                    after.scope_id,
+                )
+                .await?,
+            )
+        } else {
+            None
+        };
+        let frozen = if let Some(configuration) = &configuration
+            && configuration.document.capture.enabled
+            && configuration.document.capture.on_session_end
+        {
+            Some(capture::freeze_batch(&mut tx, &after, configuration).await?)
+        } else {
+            None
+        };
+        audit::record(
+            &mut tx,
+            tenant_id,
+            AuditAction::SessionEnded,
+            Resource::Session(after.id).to_string(),
+            Outcome::Success,
+            json!({
+                "authz": audit::decision_context(Action::SessionWrite, &authorized),
+                // Both ends of the transition, so the chain says what a run was
+                // doing when somebody closed it.
+                "from": before.status.as_str(),
+                "to": after.status.as_str(),
+                "session": session_image(&after),
+                "ended_at": after.ended_at,
+                "end_reason": after.end_reason,
+            }),
+        )
+        .await?;
+        if let Some(frozen) = &frozen
+            && frozen.created
+        {
+            audit::record(
+                &mut tx,
+                tenant_id,
+                AuditAction::CaptureBatchCreated,
+                Resource::Session(after.id).to_string(),
+                Outcome::Success,
+                json!({
+                    "batch_id": frozen.batch.id,
+                    "session_id": after.id,
+                    "input_hash": frozen.batch.input_hash,
+                    "event_count": frozen.batch.event_count,
+                    "trigger": "session_terminal",
+                    "configuration_version_id": frozen.batch.configuration_version_id,
+                    "configuration_hash": frozen.batch.configuration_hash,
+                    "authz": audit::decision_context(Action::SessionWrite, &authorized),
+                }),
+            )
+            .await?;
+        }
+        commit(tx).await?;
+        Ok(Json(SessionView::from(after)))
+    }
+    .await;
+    respond(&state, "session.end", result).await
+}
+
+// ── Timeline ─────────────────────────────────────────────────────────────────
+
+/// `GET /v1/sessions/{session_id}/timeline` — the projection.
+#[utoipa::path(
+    get,
+    path = "/v1/sessions/{session_id}/timeline",
+    operation_id = "get_session_timeline",
+    tag = "sessions",
+    params(
+        ("session_id" = String, Path, description = "The session's id"),
+        TimelineParams,
+    ),
+    responses(
+        (status = 200, description = "The merged timeline", body = TimelineView),
+        (status = 403, description = "The PDP denied `session.read`", body = ApiErrorBody),
+        (status = 404, description = "No such session in this tenant", body = ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
+pub(crate) async fn timeline(
+    State(state): State<AppState>,
+    Path(id): Path<SessionId>,
+    Query(params): Query<TimelineParams>,
+) -> Response {
+    let result = async {
+        let tenant_id = tenant_id()?;
+        let after = params.after.unwrap_or(0).max(0);
+        let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
+        let (session, authorized, resource) =
+            load(&state, &mut tx, tenant_id, id, Action::SessionRead).await?;
+
+        let events =
+            sessions::events(&mut *tx, tenant_id, id, after, MAX_TIMELINE_ENTRIES + 1).await?;
+        let runs =
+            sessions::context_runs(&mut *tx, tenant_id, id, MAX_TIMELINE_ENTRIES + 1).await?;
+        let truncated =
+            events.len() as i64 > MAX_TIMELINE_ENTRIES || runs.len() as i64 > MAX_TIMELINE_ENTRIES;
+
+        let mut counts: BTreeMap<String, i64> = BTreeMap::new();
+        let mut event_entries: Vec<TimelineEntry> = Vec::new();
+        for event in events.into_iter().take(MAX_TIMELINE_ENTRIES as usize) {
+            *counts
+                .entry(event.event_type.as_str().to_owned())
+                .or_default() += 1;
+            event_entries.push(TimelineEntry {
+                kind: "event".to_owned(),
+                id: event.id.to_string(),
+                at: event.occurred_at,
+                event_type: Some(event.event_type.as_str().to_owned()),
+                sequence: Some(event.sequence),
+                received_at: Some(event.received_at),
+                delayed: is_delayed(event.occurred_at, event.received_at),
+                summary: event_summary(&event),
+            });
+        }
+        let mut run_entries: Vec<TimelineEntry> = Vec::new();
+        for run in runs.into_iter().take(MAX_TIMELINE_ENTRIES as usize) {
+            let (visible_selections, policy_exclusion) =
+                crate::context_api::timeline_selection_visibility(&state, &mut tx, tenant_id, &run)
+                    .await?;
+            run_entries.push(TimelineEntry {
+                kind: "context_run".to_owned(),
+                id: run.id.to_string(),
+                at: run.created_at,
+                event_type: None,
+                sequence: None,
+                // A composition happens here, so there is no second clock to
+                // report and nothing that could have been late.
+                received_at: None,
+                delayed: false,
+                summary: context_run_summary(visible_selections, policy_exclusion),
+            });
+        }
+        let entries = merge_timeline(event_entries, run_entries);
+
+        read_event(
+            &mut tx,
+            tenant_id,
+            "session.timeline",
+            Action::SessionRead,
+            &authorized,
+            resource,
+            json!({"session_id": id, "entries": entries.len(), "truncated": truncated}),
+        )
+        .await?;
+        commit(tx).await?;
+        Ok(Json(TimelineView {
+            session_id: session.id,
+            entries,
+            event_counts: counts,
+            truncated,
+        }))
+    }
+    .await;
+    respond(&state, "session.timeline", result).await
+}
+
+/// Whether an event reached this deployment far enough after it happened to
+/// call it delayed (CPR-11, ADR-0077 decision 2).
+///
+/// A signed comparison, so an event whose client clock runs *ahead* — a
+/// `received_at` earlier than the `occurred_at` it claims — is not delayed. It
+/// is something else, and reporting it as late would be a second wrong answer
+/// on top of the clock's.
+fn is_delayed(occurred_at: DateTime<Utc>, received_at: DateTime<Utc>) -> bool {
+    (received_at - occurred_at).num_seconds() >= DELAYED_AFTER_SECONDS
+}
+
+/// Merges the two sources into one reading order.
+///
+/// A **merge**, not a sort, and the difference is the whole of what this
+/// function is for.
+///
+/// The two instants come from two clocks. An event's `occurred_at` is the
+/// *client's* — a buffered adapter delivers an hour late, and a machine whose
+/// clock is wrong sends whatever it believes — while a context run's
+/// `created_at` is this deployment's. Sorting both by instant therefore lets a
+/// skewed client clock **reorder a transcript**, which is the one thing a
+/// timeline must never do: `sequence` is server-assigned and monotonic, and it
+/// is the only authority on what happened before what inside a run.
+///
+/// So the events keep their `sequence` order unconditionally, and the runs are
+/// placed *among* them by instant. A run landing in the wrong gap because a
+/// client's clock is off is a small wrong; a transcript reordered by the same
+/// skew is a different account of what an agent did.
+///
+/// Both inputs arrive ordered — events by `sequence` from the store's own
+/// query, runs by `created_at` — so this is one pass.
+fn merge_timeline(events: Vec<TimelineEntry>, runs: Vec<TimelineEntry>) -> Vec<TimelineEntry> {
+    let mut merged = Vec::with_capacity(events.len() + runs.len());
+    let mut runs = runs.into_iter().peekable();
+    for event in events {
+        while runs.peek().is_some_and(|run| run.at <= event.at) {
+            merged.push(runs.next().expect("peeked"));
+        }
+        merged.push(event);
+    }
+    merged.extend(runs);
+    merged
+}
+
+/// A server-owned, content-free timeline line for one context delivery.
+///
+/// The task belongs on the inspector under its trace-retention mode, not in
+/// the broader session timeline. The count has already been re-authorised by
+/// `context_api::timeline_selection_visibility`; the optional sentence is the
+/// only thing a denied selection contributes.
+fn context_run_summary(visible_selections: usize, policy_exclusion: bool) -> String {
+    let noun = if visible_selections == 1 {
+        "knowledge item"
+    } else {
+        "knowledge items"
+    };
+    let mut summary = format!("Synveda supplied {visible_selections} {noun}");
+    if policy_exclusion {
+        summary.push_str(". Some context detail is unavailable under current policy.");
+    }
+    summary
+}
+
+/// One line about an event, from the fields its family actually carries.
+///
+/// Best-effort by design: a payload is the client's shape, so this reads the
+/// two or three keys each family conventionally uses and falls back to the
+/// family name. It is a **reading** surface — a client that wants the payload
+/// has the payload.
+fn event_summary(event: &SessionEvent) -> String {
+    let text = |key: &str| event.payload.get(key).and_then(|value| value.as_str());
+    match event.event_type {
+        // **A message's summary never carries what was said.**
+        //
+        // CPR-11 put the first 120 characters here and asserted, in the same
+        // feature, that "a timeline is not a transcript" — two statements that
+        // cannot both hold, and the integration test is the one that was
+        // right. `SessionDiagnostics` exists precisely because a timeline says
+        // *that* a message was sent and a payload is what was said (ADR-0077
+        // decision 3); a summary that reproduces the text hands most of a
+        // transcript to every holder of the strictly wider `SessionRead`.
+        //
+        // The length is the most a reader gets for free, and it is genuinely
+        // useful: a one-word reply and a pasted stack trace are different
+        // events, and saying which is which discloses neither.
+        SessionEventType::MessageUser | SessionEventType::MessageAssistant => {
+            match text("text").or_else(|| text("content")) {
+                Some(said) => format!(
+                    "{} ({} characters)",
+                    event.event_type.as_str(),
+                    said.chars().count()
+                ),
+                None => event.event_type.as_str().to_owned(),
+            }
+        }
+        SessionEventType::ToolInvoked | SessionEventType::ToolResult => {
+            text("tool").or_else(|| text("name")).map_or_else(
+                || event.event_type.as_str().to_owned(),
+                |t| format!("{}: {t}", event.event_type.as_str()),
+            )
+        }
+        SessionEventType::FileRead | SessionEventType::FileChanged => text("path").map_or_else(
+            || event.event_type.as_str().to_owned(),
+            |p| format!("{}: {p}", event.event_type.as_str()),
+        ),
+        SessionEventType::CommandExecuted => {
+            text("command").map_or_else(|| "command.executed".to_owned(), |c| truncate(c, 120))
+        }
+        SessionEventType::SkillLoaded => {
+            text("name").map_or_else(|| "skill.loaded".to_owned(), |n| format!("skill: {n}"))
+        }
+        SessionEventType::AdapterWarning => {
+            text("message").map_or_else(|| "adapter.warning".to_owned(), |m| truncate(m, 200))
+        }
+        _ => event.event_type.as_str().to_owned(),
+    }
+}
+
+/// `text`, at most `max` characters, with an ellipsis when it was longer.
+///
+/// Counts characters rather than bytes: slicing a UTF-8 string on a byte
+/// boundary panics, and a summary line is exactly the place a multi-byte
+/// character arrives.
+fn truncate(text: &str, max: usize) -> String {
+    let mut out: String = text.chars().take(max).collect();
+    if text.chars().count() > max {
+        out.push('…');
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The contract's own statement of ADR-0076 decision 8, asserted where a
+    /// reader adding a field will meet it: a body that names a tenant or an
+    /// acting principal is refused by serde before any handler runs.
+    #[test]
+    fn a_client_cannot_submit_a_tenant_or_an_acting_principal() {
+        let base = json!({"workspace_id": uuid::Uuid::nil(), "client_name": "claude-code"});
+        serde_json::from_value::<OpenSessionBody>(base.clone()).expect("the ordinary body parses");
+        for forbidden in ["tenant_id", "principal_id", "scope_id", "id"] {
+            let mut body = base.clone();
+            body[forbidden] = json!("anything");
+            let parsed = serde_json::from_value::<OpenSessionBody>(body);
+            assert!(
+                parsed.is_err(),
+                "`{forbidden}` must be refused, not ignored"
+            );
+        }
+    }
+
+    #[test]
+    fn an_event_body_defaults_its_schema_version_and_refuses_an_unknown_type() {
+        let body: NewEventBody = serde_json::from_value(json!({
+            "event_type": "message.user",
+            "client_event_id": "e1",
+            "occurred_at": "2026-08-23T10:00:00Z",
+        }))
+        .expect("the minimal event parses");
+        assert_eq!(body.event_schema_version, CURRENT_EVENT_SCHEMA_VERSION);
+        assert_eq!(body.event_type, SessionEventType::MessageUser);
+
+        assert!(
+            serde_json::from_value::<NewEventBody>(json!({
+                "event_type": "message.system",
+                "client_event_id": "e1",
+                "occurred_at": "2026-08-23T10:00:00Z",
+            }))
+            .is_err(),
+            "the event vocabulary is closed"
+        );
+    }
+
+    fn entry(kind: &str, at: &str, sequence: Option<i64>, id: &str) -> TimelineEntry {
+        TimelineEntry {
+            kind: kind.to_owned(),
+            id: id.to_owned(),
+            at: at.parse().expect("an instant"),
+            event_type: None,
+            sequence,
+            received_at: None,
+            delayed: false,
+            summary: String::new(),
+        }
+    }
+
+    /// The property the merge exists for: a client whose clock is wrong can
+    /// misplace a **context run**, and can never reorder the **transcript**.
+    ///
+    /// The events below arrive in `sequence` order with `occurred_at` values
+    /// that run backwards — which is what a machine with a bad clock, or an
+    /// adapter replaying a buffer, actually sends. A sort by instant would
+    /// reverse them and produce a different account of what the agent did.
+    #[test]
+    fn a_skewed_client_clock_cannot_reorder_a_transcript() {
+        let events = vec![
+            entry("event", "2026-08-23T10:00:00Z", Some(1), "e1"),
+            entry("event", "2026-08-23T09:00:00Z", Some(2), "e2"),
+            entry("event", "2026-08-23T11:00:00Z", Some(3), "e3"),
+        ];
+        let runs = vec![entry("context_run", "2026-08-23T10:30:00Z", None, "r1")];
+        let merged = merge_timeline(events, runs);
+        assert_eq!(
+            merged
+                .iter()
+                .filter(|item| item.kind == "event")
+                .map(|item| item.sequence.expect("a sequence"))
+                .collect::<Vec<_>>(),
+            vec![1, 2, 3],
+            "events keep the server's own order, whatever the client's clock said"
+        );
+        // And the run lands in a gap chosen by instant.
+        assert_eq!(merged[2].id, "r1");
+    }
+
+    #[test]
+    fn a_run_before_every_event_leads_and_one_after_them_trails() {
+        let events = vec![
+            entry("event", "2026-08-23T10:00:00Z", Some(1), "e1"),
+            entry("event", "2026-08-23T10:01:00Z", Some(2), "e2"),
+        ];
+        let runs = vec![
+            entry("context_run", "2026-08-23T09:59:00Z", None, "before"),
+            entry("context_run", "2026-08-23T10:02:00Z", None, "after"),
+        ];
+        let merged = merge_timeline(events, runs);
+        assert_eq!(
+            merged
+                .iter()
+                .map(|item| item.id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["before", "e1", "e2", "after"]
+        );
+        // Neither source alone loses anything.
+        assert_eq!(merge_timeline(Vec::new(), Vec::new()).len(), 0);
+        assert_eq!(
+            merge_timeline(
+                Vec::new(),
+                vec![entry("context_run", "2026-08-23T10:00:00Z", None, "only")]
+            )
+            .len(),
+            1
+        );
+    }
+
+    #[test]
+    fn a_context_summary_is_plural_and_discloses_only_an_aggregate_policy_gap() {
+        assert_eq!(
+            context_run_summary(0, false),
+            "Synveda supplied 0 knowledge items"
+        );
+        assert_eq!(
+            context_run_summary(1, false),
+            "Synveda supplied 1 knowledge item"
+        );
+        assert_eq!(
+            context_run_summary(2, false),
+            "Synveda supplied 2 knowledge items"
+        );
+        assert_eq!(
+            context_run_summary(1, true),
+            "Synveda supplied 1 knowledge item. Some context detail is unavailable under current policy."
+        );
+    }
+
+    #[test]
+    fn a_summary_never_splits_a_character_and_says_when_it_cut() {
+        assert_eq!(truncate("hello", 10), "hello");
+        assert_eq!(truncate("hello", 3), "hel…");
+        // The case a byte-slicing implementation panics on.
+        assert_eq!(truncate("日本語テキスト", 3), "日本語…");
+    }
+
+    #[test]
+    fn a_summary_reads_the_key_its_family_carries_and_falls_back_by_name() {
+        let event = |kind: SessionEventType, payload: serde_json::Value| SessionEvent {
+            id: synveda_types::SessionEventId::new(),
+            tenant_id: TenantId::new(),
+            session_id: SessionId::new(),
+            event_type: kind,
+            event_schema_version: 1,
+            client_event_id: "e".to_owned(),
+            sequence: 1,
+            occurred_at: Utc::now(),
+            received_at: Utc::now(),
+            payload,
+            payload_hash: "ab".repeat(32),
+            redactions: None,
+        };
+        // A message is summarised by its shape, never its words: the payload
+        // is `SessionDiagnostics`' to serve, and a summary that quoted it
+        // would hand the transcript to every `SessionRead` holder.
+        // `a_payload_takes_diagnostics_and_a_timeline_does_not` is the
+        // integration-level statement of the same rule.
+        assert_eq!(
+            event_summary(&event(
+                SessionEventType::MessageUser,
+                json!({"text": "fix it"})
+            )),
+            "message.user (6 characters)"
+        );
+        assert_eq!(
+            event_summary(&event(
+                SessionEventType::ToolInvoked,
+                json!({"tool": "grep"})
+            )),
+            "tool.invoked: grep"
+        );
+        assert_eq!(
+            event_summary(&event(
+                SessionEventType::FileChanged,
+                json!({"path": "a.rs"})
+            )),
+            "file.changed: a.rs"
+        );
+        // An empty or unexpected payload is never a panic and never a blank
+        // line: the family's own name is the honest fallback.
+        assert_eq!(
+            event_summary(&event(SessionEventType::MessageUser, json!({}))),
+            "message.user"
+        );
+        assert_eq!(
+            event_summary(&event(SessionEventType::SessionStarted, json!({}))),
+            "session.started"
+        );
+    }
+}

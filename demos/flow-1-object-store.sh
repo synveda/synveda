@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 # FLOW-1 acceptance demo: the VedaFlow object store.
-# AC (docs/backlog/FLOW-1.md): property tests — identical content dedups;
-# history immutable under concurrent writers. Plus the feature text:
+# Acceptance: identical content deduplicates and history stays immutable under
+# concurrent writers. The current model uses
 # BLAKE3 content-addressed objects/trees/commits/refs in Postgres, with
 # commits recording author identity, signature, and policy-pack snapshot
 # hash (ADR-0003, object model in ADR-0030).

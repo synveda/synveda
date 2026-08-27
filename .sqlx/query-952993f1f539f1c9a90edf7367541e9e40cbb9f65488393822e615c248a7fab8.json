@@ -1,0 +1,71 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select proposal_id, payload, payload_hash, resulting_server_id,\n                  resulting_version_id, resulting_binding_id,\n                  resulting_binding_revision, applied_at, created_at\n             from tool_changes where tenant_id = $1 and proposal_id = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "proposal_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "payload",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 2,
+        "name": "payload_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "resulting_server_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "resulting_version_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "resulting_binding_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 6,
+        "name": "resulting_binding_revision",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 7,
+        "name": "applied_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "952993f1f539f1c9a90edf7367541e9e40cbb9f65488393822e615c248a7fab8"
+}

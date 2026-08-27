@@ -15,7 +15,7 @@
 //! - **One key changes.** The file is read, the client's own server map
 //!   gains a `synveda` entry, and everything else is written back as it was
 //!   found. A user's other servers are not this command's to touch. Which
-//!   key that is comes from the registry in `clients.jsonc`: `mcpServers`
+//!   key that is comes from the product adapter registry: `mcpServers`
 //!   for most, `context_servers` for Zed.
 //! - **It refuses to clobber.** An existing `synveda` entry that differs
 //!   is a conflict, not an opportunity: it is shown and `--force` is
@@ -75,14 +75,14 @@ use crate::credentials::DEFAULT_PROFILE;
 /// up when it made `--writes` describe a capability instead of naming
 /// harnesses.
 ///
-/// So the vendor knowledge lives in `clients.jsonc` and a user's own file
-/// is read through the same loader. This also answers decision 10's
+/// So the product registry owns the built-ins and a user's own file is read
+/// through the same configuration loader. This also answers decision 10's
 /// reversal trigger ("a third client arrives with another config format →
 /// `install` grows a generic print-the-JSON mode rather than a branch per
 /// vendor") better than the trigger's own remedy did: `--print` still
 /// exists, but a third client no longer needs it, and a fourth needs
 /// neither it nor us.
-const BUILT_IN: &str = include_str!("clients.jsonc");
+const BUILT_IN: &str = include_str!("../../../../adapters/registry.json");
 
 /// Where a user adds clients we have never heard of, or overrides ours.
 const USER_REGISTRY: &str = ".config/synveda/mcp-clients.jsonc";
@@ -107,6 +107,20 @@ struct Client {
     restart: String,
     /// Config location by `std::env::consts::OS`, plus `any`.
     path: std::collections::BTreeMap<String, String>,
+}
+
+/// The product-level registry owns support evidence as well as configuration;
+/// the CLI deliberately projects only the latter. A recipe grants no support
+/// level and no tool authority.
+#[derive(serde::Deserialize)]
+struct BuiltInRegistry {
+    clients: Vec<BuiltInClient>,
+}
+
+#[derive(serde::Deserialize)]
+struct BuiltInClient {
+    id: String,
+    configuration: Option<Client>,
 }
 
 /// The built-in table, then the user's over the top of it.
@@ -141,7 +155,13 @@ fn merge(
     built_in: &str,
     user: Option<&str>,
 ) -> Result<std::collections::BTreeMap<String, Client>, String> {
-    let mut clients = parse_registry(built_in, "the built-in client registry")?;
+    let registry: BuiltInRegistry = serde_json::from_str(built_in)
+        .map_err(|err| format!("the built-in client registry does not match the schema: {err}"))?;
+    let mut clients: std::collections::BTreeMap<String, Client> = registry
+        .clients
+        .into_iter()
+        .filter_map(|client| client.configuration.map(|config| (client.id, config)))
+        .collect();
     if let Some(raw) = user {
         clients.extend(parse_registry(raw, &format!("~/{USER_REGISTRY}"))?);
     }
@@ -187,8 +207,22 @@ pub struct Plan {
 }
 
 /// `synveda mcp install --client <name>`.
+#[cfg(test)]
 pub fn install(plan: &Plan) -> Result<(), String> {
-    let entry = entry(&plan.profile)?;
+    install_for(plan, None, None)
+}
+
+/// Install a configuration that pins the runtime workspace/project selection.
+///
+/// Kept beside the ordinary entry point so existing callers and tests retain
+/// the default no-selection shape, while the CLI can faithfully carry its
+/// outer `mcp --workspace/--project` arguments into the file a client owns.
+pub fn install_for(
+    plan: &Plan,
+    workspace: Option<&str>,
+    project: Option<&str>,
+) -> Result<(), String> {
+    let entry = entry_for(&plan.profile, workspace, project)?;
     let client = lookup(&plan.client)?;
     let key = client.key.as_str();
 
@@ -350,7 +384,16 @@ fn remove_entry(document: &mut Document, key: &str, path: &Path) -> Result<(), S
 }
 
 /// The entry a client will exec.
+#[cfg(test)]
 fn entry(profile: &str) -> Result<Value, String> {
+    entry_for(profile, None, None)
+}
+
+fn entry_for(
+    profile: &str,
+    workspace: Option<&str>,
+    project: Option<&str>,
+) -> Result<Value, String> {
     let exe = std::env::current_exe().map_err(|err| format!("locate this binary: {err}"))?;
     // Through symlinks, because a client that cannot read this path is a
     // server that never starts, and `current_exe` may hand back a shim.
@@ -366,6 +409,14 @@ fn entry(profile: &str) -> Result<Value, String> {
     // what it means so a later change of default cannot quietly take
     // `remember` away from every config already on disk.
     let mut args = vec![json!("mcp"), json!("--writes"), json!("tool")];
+    if let Some(workspace) = workspace {
+        args.push(json!("--workspace"));
+        args.push(json!(workspace));
+    }
+    if let Some(project) = project {
+        args.push(json!("--project"));
+        args.push(json!(project));
+    }
     if profile != DEFAULT_PROFILE {
         args.push(json!("--profile"));
         args.push(json!(profile));
@@ -1026,6 +1077,24 @@ mod tests {
         );
     }
 
+    #[test]
+    fn an_exact_project_selection_is_carried_into_the_entry() {
+        let selected =
+            entry_for("default", Some("workspace-1"), Some("project-2")).expect("selected entry");
+        assert_eq!(
+            selected["args"],
+            json!([
+                "mcp",
+                "--writes",
+                "tool",
+                "--workspace",
+                "workspace-1",
+                "--project",
+                "project-2"
+            ])
+        );
+    }
+
     /// Decision 6, at the one place a config file decides it: both clients
     /// this command knows are model-driven, so the entry it generates must
     /// advertise the write tool — and must say so rather than rely on a
@@ -1058,7 +1127,7 @@ mod tests {
     /// The clients OPS-9 added parse and resolve a path (ADR-0066
     /// decision 7). This asserts they are *reachable*, not that they are
     /// correct: none has been replayed against a running client, which
-    /// `clients.jsonc` says in its own comment and BETA.md repeats.
+    /// The client-support registry states that limitation.
     #[test]
     fn the_clients_ops_9_added_resolve_somewhere() {
         for client in ["vscode", "windsurf", "continue"] {
@@ -1102,7 +1171,7 @@ mod tests {
 
     /// The file that ships in the binary is the one thing here nobody
     /// edits with a compiler watching, so it gets a test of its own: a
-    /// typo in `clients.jsonc` should fail here rather than at a user's
+    /// typo in `adapters/registry.json` should fail here rather than at a user's
     /// first `install`.
     #[test]
     fn the_built_in_registry_parses_and_every_client_can_be_located_somewhere() {

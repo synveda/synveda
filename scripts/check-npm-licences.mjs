@@ -1,12 +1,10 @@
 #!/usr/bin/env node
-// Enforces CLAUDE.md's licence rule on the npm side (CNSL-1, ADR-0056
+// Enforces the repository licence rule on the npm side (CNSL-1, ADR-0056
 // decision 8) — the gate `cargo deny` has given the Rust side since FND-3.
 //
-// It has not mattered until now: adapters/claude-code and sdks/typescript
-// between them declare typescript and @types/node as devDependencies and no
-// runtime dependency at all. The console is the first package in this repo
-// with a real runtime dependency tree, so it is the first one where the rule
-// has anything to enforce against.
+// The Claude adapter has build-only dependencies. The console is the package
+// with a shipped runtime dependency tree, so it is where the core-path rule
+// has bytes to enforce against.
 //
 // (adapters/mcp-server was a third such package until ADPT-2 removed it —
 // ADR-0057 decision 1 put the generic MCP server in the Rust CLI, where
@@ -15,8 +13,7 @@
 // Two lists, because they answer different questions.
 //
 //   * SHIPPED — what reaches a deployment. Held to exactly deny.toml's
-//     allowlist, with no exception mechanism at all. This is CLAUDE.md's
-//     "core path" applied literally: a dependency whose bytes a customer
+//     allowlist, with no exception mechanism: a dependency whose bytes a customer
 //     runs is governed by the product's licence policy, full stop.
 //
 //   * BUILD — what turns source into that bundle and never leaves CI or a
@@ -75,7 +72,7 @@ for (const [name, found] of shipped) {
     if (!SHIPPED.includes(licence)) {
       console.error(
         `FAIL: ${name} is ${licence} and reaches a deployment — the core path is ` +
-          `${SHIPPED.join(" / ")} only (CLAUDE.md). There is no exception list for ` +
+          `${SHIPPED.join(" / ")} only. There is no exception list for ` +
           `shipped dependencies: replace it, or move it to a devDependency if it ` +
           `is genuinely build-time.`,
       );

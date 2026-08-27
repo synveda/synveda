@@ -1,0 +1,95 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select id, tenant_id, context_run_id, context_candidate_id, rank, channel,\n               knowledge_item_id, knowledge_revision_id, capture_candidate_id,\n               content_hash, token_count,\n               reason_codes as \"reason_codes!: Vec<String>\", created_at\n        from context_selections\n        where tenant_id = $1 and context_run_id = $2\n        order by rank\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "tenant_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "context_run_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "context_candidate_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "rank",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 5,
+        "name": "channel",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "knowledge_item_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 7,
+        "name": "knowledge_revision_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 8,
+        "name": "capture_candidate_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 9,
+        "name": "content_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "token_count",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 11,
+        "name": "reason_codes!: Vec<String>",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 12,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "6df149444fc3e822891c8019b2f9ee7e999a223116f511717c994667059c5575"
+}

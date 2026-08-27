@@ -1,9 +1,14 @@
-# Synveda enterprise profile (OPS-2, ADR-0062).
+# Synveda Kubernetes deployment (OPS-2; CPR-36, ADR-0095).
 #
-# Four values have no default and the chart refuses to render without them:
-# `gateway.publicUrl`, `embedder`, `oidc.existingSecret`, and — if the
-# embedder is `tei` — one of `tei.enabled` or `tei.url`. Each is a decision
-# somebody has to make on purpose; a default would make it silently.
+# This chart sizes infrastructure and connects external services. It never
+# selects personal, team or enterprise product behaviour: those are immutable
+# governed Configuration versions and scope bindings in the one runtime.
+#
+# Five values have no default and the chart refuses to render without them:
+# `gateway.publicUrl`, `embedder`, `oidc.existingSecret`,
+# `kms.existingSecret`, and — if the embedder is `tei` — one of
+# `tei.enabled` or `tei.url`. Each is a decision somebody has to make on
+# purpose; a default would make it silently.
 
 # ── The product image ────────────────────────────────────────────────────
 # Carries both binaries: the gateway serves, and the `synveda` CLI is what
@@ -24,7 +29,7 @@ gateway:
   # no-op. One replica is a property of the process, not a starting point:
   # pending logins live in memory (`LoginFlow` — a callback on the wrong pod
   # is a 401 for a login the IdP completed) and the scope-chain cache is
-  # invalidated in-process with no TTL (a hierarchy move handled by one
+  # invalidated in-process with no TTL (a scope move handled by one
   # replica leaves the others composing against the ancestry the mover
   # left). Both fail silently, which is why this is refused rather than
   # discouraged. OPS-7 is the feature that lifts it; ADR-0062 decision 4
@@ -41,14 +46,6 @@ gateway:
   # against postgres.maxConnections: this many per gateway, plus whatever
   # else connects to the cluster, has to fit.
   dbMaxConnections: 20
-
-  # The Tantivy BM25 sidecar (CTX-1). A cache, not a system of record — it
-  # carries a watermark and heals from Postgres, and deleting a tenant's
-  # directory is the documented rebuild — but losing it means re-indexing
-  # every tenant's corpus on the next sweep, so it gets a volume.
-  searchIndex:
-    size: 20Gi
-    storageClass: ""
 
   logLevel: info
   resources:
@@ -80,10 +77,8 @@ ingress:
 # The operator is not installed by this chart (ADR-0062 decision 1); this
 # renders a Cluster for an operator that is already there.
 postgres:
-  # Built from deploy/helm/postgres/Dockerfile: the CNPG base plus pgvector
-  # and PGMQ. No AGE — nothing in `crates/*/src` calls `cypher()`, it needs
-  # shared_preload_libraries, and it has no PG17 release (ADR-0062
-  # decision 3).
+  # Built from deploy/helm/postgres/Dockerfile: the CNPG base plus pgvector.
+  # Epoch 3 has no queue or graph-extension dependency.
   image: synveda/enterprise-postgres:17
   instances: 3
   storage:
@@ -114,13 +109,28 @@ oidc:
   existingSecret: ""
   secretKey: SYNVEDA_OIDC_ISSUERS
 
+# ── Local key custody ────────────────────────────────────────────────────
+kms:
+  # Name of an existing Secret holding the local KMS key and its stable
+  # reference. The chart wires custody into the gateway but never creates,
+  # prints or owns the key. Losing it makes every wrapped tenant key
+  # unrecoverable; back up and restore this Secret outside the database.
+  #
+  #   kubectl create secret generic synveda-kms \
+  #     --from-literal=SYNVEDA_KMS_KEY="$(synveda kms keygen)" \
+  #     --from-literal=SYNVEDA_KMS_KEY_REF=local:production
+  #
+  # Required. This proves only that startup names a custody source; it does
+  # not provide cloud KMS/HSM integration or a rotation/restore procedure.
+  existingSecret: ""
+  secretKey: SYNVEDA_KMS_KEY
+  keyRefSecretKey: SYNVEDA_KMS_KEY_REF
+
 # ── The embedder: a data decision, not a preference ──────────────────────
-# `record_embeddings` stores a model and a dim and the dense leg filters on
-# both, so a corpus written under one embedder and read under another does
-# not rank badly — it leaves the dense leg entirely and survives on BM25,
-# with no error and no degraded header. There is no re-embed command
-# (ADR-0055's first deferral), so this choice is permanent, and a default
-# that silently becomes permanent is not a default.
+# Knowledge embedding rows retain model and dimension and the dense leg filters
+# on both. A model change converges a separately labelled sidecar; it never
+# reinterprets an old vector as output from a new model. The deterministic
+# implementation is lexical-only and must not be presented as semantic.
 #
 # `deterministic` | `tei`. Required.
 embedder: ""
@@ -149,10 +159,11 @@ tei:
 # Changing it changes what future extraction produces and invalidates
 # nothing already written.
 extractor:
-  # `deterministic` | `claude` | `vllm` | `off`
+  # `deterministic` | `claude` | `vllm`
   kind: deterministic
   model: ""
-  # For `claude`: a Secret with key ANTHROPIC_API_KEY. For `vllm`: baseUrl.
+  # For `claude`: a Secret with key ANTHROPIC_API_KEY. For `vllm`: both
+  # baseUrl and model are required.
   existingSecret: ""
   baseUrl: ""
 

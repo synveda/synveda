@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        delete from project_repositories\n        where tenant_id = $1 and project_id = $2 and id = $3\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "54efc9b5d6bfa02177209992bd9d489a630fe88b50e2cc8780bf9d2796923654"
+}

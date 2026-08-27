@@ -1,0 +1,91 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select id, binding_id, version_id, session_id, principal_id, client_event_id,\n                  stage, evidence, resource_path, metadata, occurred_at, received_at\n           from skill_usage_events\n           where tenant_id = $1 and version_id = $2 and ($3::uuid is null or id < $3)\n           order by id desc limit $4",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "binding_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "version_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "session_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "principal_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "client_event_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "stage",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "evidence",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "resource_path",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "metadata",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 10,
+        "name": "occurred_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 11,
+        "name": "received_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "cdea48f748273c1c3a89e77e10139a63b8edf34e4bd18f8260039846b2e01c9a"
+}

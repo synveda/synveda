@@ -1,5 +1,5 @@
 //! FND-5 tests: the ops routes respond, the Prometheus contract (including
-//! `synveda_tokens_per_inject`) renders from boot, and one readiness request
+//! `synveda_tokens_per_context_run`) renders from boot, and one readiness request
 //! produces the gateway→core→store span chain the Jaeger AC relies on.
 //!
 //! The span-chain test needs a live Postgres: it reads `DATABASE_URL` and
@@ -48,24 +48,15 @@ fn state(url: &str) -> AppState {
             .expect("parse database url"),
         metrics: metrics_handle(),
         pdp: std::sync::Arc::new(synveda_policy::Pdp::new().expect("build the embedded PDP")),
-        scope_chains: std::sync::Arc::new(synveda_store::ScopeChainCache::new()),
         service_token_max_ttl: std::time::Duration::from_secs(3600),
         // These tests exercise the ops plane only; fail-closed default.
         verifier: std::sync::Arc::new(synveda_identity::DisabledVerifier),
         login: None,
         public_origin: "http://127.0.0.1:8120".to_owned(),
-        search_index: Arc::new(
-            synveda_retrieval::SearchIndex::open(
-                std::env::temp_dir()
-                    .join("synveda-gateway-tests")
-                    .join(synveda_types::TenantId::new().to_string()),
-            )
-            .expect("open search index"),
-        ),
         embedder: Arc::new(synveda_ingest::embedding::AnyEmbedder::Deterministic(
             synveda_ingest::embedding::DeterministicEmbedder::new(),
         )),
-        inject_embed_timeout: std::time::Duration::from_millis(100),
+        context_embed_timeout: std::time::Duration::from_millis(100),
         // TEN-4 (ADR-0064): a fixed test KEK, so a suite that touches a
         // sealed column seals rather than skipping. `Kms::Disabled` is the
         // production default when no key is configured.
@@ -103,7 +94,7 @@ async fn healthz_is_alive_without_a_database() {
 }
 
 #[tokio::test]
-async fn metrics_exposes_the_tokens_per_inject_contract() {
+async fn metrics_exposes_the_tokens_per_context_run_contract() {
     let _serial = serial().await;
     // The middleware records after a response completes; serve one request
     // first so the labelled HTTP series exist in the exposition.
@@ -119,11 +110,10 @@ async fn metrics_exposes_the_tokens_per_inject_contract() {
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
     let body = body_text(response).await;
-    // Registered at startup, before any inject exists (ADR-0007): the SLO
-    // metric must be scrapeable from boot, not from first use.
+    // Registered at startup so the budget metric is scrapeable before first use.
     assert!(
-        body.contains("# TYPE synveda_tokens_per_inject histogram"),
-        "tokens_per_inject histogram missing from exposition:\n{body}"
+        body.contains("# TYPE synveda_tokens_per_context_run histogram"),
+        "tokens_per_context_run histogram missing from exposition:\n{body}"
     );
     assert!(
         body.contains("synveda_http_requests_total"),
@@ -141,6 +131,83 @@ async fn readyz_degrades_to_503_when_storage_is_unreachable() {
     assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
     // The body stays generic; failure detail belongs to the trace and log.
     assert_eq!(body_text(response).await, "not ready");
+}
+
+/// Readiness carries the schema epoch guard (CPR-2, ADR-0069).
+///
+/// The gateway also refuses to *boot* against a database at the wrong epoch,
+/// and that check cannot be reached from here — it is in `main`. This is the
+/// half that can be, and it is the half that matters most for the case the
+/// boot check cannot cover: the gateway is allowed to start without a
+/// database, so a database that comes up afterwards would otherwise arrive
+/// behind a check that had already run. `demos/cpr-2-schema-epoch.sh` drives
+/// the boot refusal end to end.
+///
+/// Needs a live Postgres and builds a database of its own, because it takes
+/// the epoch marker away — run it with `make db-test`.
+#[tokio::test]
+async fn readyz_refuses_a_database_that_is_not_at_this_schema_epoch() {
+    let _serial = serial().await;
+    let Ok(source) = std::env::var("DATABASE_URL").map_err(|_| ()) else {
+        eprintln!(
+            "skipping the schema epoch readiness test: DATABASE_URL is not set \
+             (run `make dev-up` then `make db-test`)"
+        );
+        return;
+    };
+    // `DATABASE_URL` with the database name swapped, as `scripts/db-test.sh`
+    // builds its own.
+    let head = source.split('?').next().unwrap_or(&source);
+    let base = &head[..head.rfind('/').expect("a database name in DATABASE_URL")];
+    let name = format!("synveda_readyz_epoch_{}", std::process::id());
+    let url = format!("{base}/{name}{}", &source[head.len()..]);
+
+    synveda_store::reset::recreate(&url)
+        .await
+        .expect("build a current-epoch database");
+
+    // A database at this epoch is ready.
+    let response = router(state(&url))
+        .oneshot(Request::get("/readyz").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // The same database with the marker taken away — which is what every
+    // database written before the context-platform cut looks like — is not.
+    let pool = PgPoolOptions::new()
+        .max_connections(1)
+        .connect(&url)
+        .await
+        .expect("connect to the scratch database");
+    sqlx::query("drop table schema_metadata")
+        .execute(&pool)
+        .await
+        .expect("remove the marker");
+    pool.close().await;
+
+    let response = router(state(&url))
+        .oneshot(Request::get("/readyz").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(
+        response.status(),
+        StatusCode::SERVICE_UNAVAILABLE,
+        "a gateway whose store answers `SELECT 1` is not ready if the rows \
+         behind it are in a model it does not implement"
+    );
+    assert_eq!(body_text(response).await, "not ready");
+
+    // Tidy up; a failure here is not worth failing a passing test over.
+    if let Ok(mut admin) = source.parse::<sqlx::postgres::PgConnectOptions>() {
+        use sqlx::ConnectOptions as _;
+        admin = admin.database("postgres");
+        if let Ok(mut connection) = admin.connect().await {
+            let _ = sqlx::query(&format!("drop database if exists \"{name}\" with (force)"))
+                .execute(&mut connection)
+                .await;
+        }
+    }
 }
 
 // ── Span-chain test (needs a live Postgres) ─────────────────────────────────

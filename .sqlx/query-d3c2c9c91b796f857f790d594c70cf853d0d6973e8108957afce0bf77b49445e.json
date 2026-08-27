@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select exists (\n            select 1 from configuration_versions\n            where tenant_id = $1 and document ->> 'policy_pack' = $2\n        ) as \"referenced!\"\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "referenced!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "d3c2c9c91b796f857f790d594c70cf853d0d6973e8108957afce0bf77b49445e"
+}

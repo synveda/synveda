@@ -1,7 +1,6 @@
 #!/usr/bin/env sh
 # EVAL-3 acceptance demo: LongMemEval through the governed path (ADR-0061).
-# AC (docs/backlog/EVAL-3.md): reproducible scores published in repo,
-# tracked per release, as a marketing artefact.
+# Acceptance: publish reproducible, release-tracked scores with their limits.
 #
 # The AC's load-bearing word is *reproducible*, and this demo is about
 # that rather than about the score. A number anybody can print is not an

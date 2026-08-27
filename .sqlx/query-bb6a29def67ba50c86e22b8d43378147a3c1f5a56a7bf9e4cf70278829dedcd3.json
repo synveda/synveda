@@ -1,0 +1,53 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select current.id as \"item_id!\",\n               current.updated_at as \"updated_at!\",\n               ts_rank_cd(\n                   revision.search_document,\n                   websearch_to_tsquery('simple'::regconfig, $2)\n               )::float8 as \"score!\"\n        from knowledge_item_versions current\n        join knowledge_revisions revision\n          on revision.tenant_id = current.tenant_id\n         and revision.knowledge_item_id = current.id\n         and revision.id = current.current_revision_id\n        where current.tenant_id = $1\n          and current.tx_from <= $18\n          and (current.tx_to is null or $18 < current.tx_to)\n          and revision.search_document @@ websearch_to_tsquery('simple'::regconfig, $2)\n          and ($3::uuid is null or exists (\n              select 1\n              from workspaces workspace\n              join scope_closure closure\n                on closure.tenant_id = workspace.tenant_id\n               and closure.ancestor_id = workspace.scope_id\n               and closure.descendant_id = current.scope_id\n              where workspace.tenant_id = current.tenant_id\n                and workspace.id = $3\n          ))\n          and ($4::uuid is null or current.project_id = $4)\n          and ($5::uuid is null or exists (\n              select 1 from scope_closure closure\n              where closure.tenant_id = current.tenant_id\n                and closure.ancestor_id = $5\n                and closure.descendant_id = current.scope_id\n          ))\n          and ($6::text is null or current.owner_principal_id = $6)\n          and ($7::text is null or current.knowledge_type = $7)\n          and ($8::text is null or current.origin = $8)\n          and (($9::text is not null and current.lifecycle_state = $9)\n               or ($9::text is null and (\n                   current.lifecycle_state = 'active'\n                   or ($14 = true and current.lifecycle_state = 'stale')\n                   or ($19 and current.lifecycle_state in ('stale', 'superseded', 'archived'))\n                   or ($20 and current.lifecycle_state = 'transitional')\n               )))\n          and ($10::text is null or $10 = any(revision.tags))\n          and ($11::text is null or exists (\n              select 1\n              from knowledge_revision_sources link\n              join knowledge_sources source\n                on source.tenant_id = link.tenant_id\n               and source.id = link.knowledge_source_id\n              where link.tenant_id = current.tenant_id\n                and link.knowledge_revision_id = current.current_revision_id\n                and source.source_type = $11\n          ))\n          and ($12::timestamptz is null or current.updated_at >= $12)\n          and ($13::timestamptz is null or current.updated_at < $13)\n          and ($14::bool is null or current.id is not null)\n          and ((revision.valid_from <= $15\n                and (revision.valid_to is null or $15 < revision.valid_to))\n               or ($20 and current.lifecycle_state = 'transitional'))\n          and ($19 or not exists (\n              select 1\n                from knowledge_relations transition\n                join knowledge_item_versions successor\n                  on successor.tenant_id = transition.tenant_id\n                 and successor.id = transition.source_item_id\n                 and successor.tx_from <= $18\n                 and (successor.tx_to is null or $18 < successor.tx_to)\n                join knowledge_revisions successor_revision\n                  on successor_revision.tenant_id = successor.tenant_id\n                 and successor_revision.knowledge_item_id = successor.id\n                 and successor_revision.id = successor.current_revision_id\n               where transition.tenant_id = current.tenant_id\n                 and transition.target_item_id = current.id\n                 and transition.relation_type = 'transitions_to'\n                 and transition.created_at <= $18\n                 and successor.lifecycle_state = 'active'\n                 and successor_revision.valid_from <= $15\n                 and (successor_revision.valid_to is null\n                      or $15 < successor_revision.valid_to)\n          ))\n          and (cardinality($17::uuid[]) = 0 or current.scope_id = any($17))\n        order by 3 desc, current.updated_at desc, current.id desc\n        limit $16\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "item_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "updated_at!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 2,
+        "name": "score!",
+        "type_info": "Float8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Timestamptz",
+        "Timestamptz",
+        "Bool",
+        "Timestamptz",
+        "Int8",
+        "UuidArray",
+        "Timestamptz",
+        "Bool",
+        "Bool"
+      ]
+    },
+    "nullable": [
+      true,
+      true,
+      null
+    ]
+  },
+  "hash": "bb6a29def67ba50c86e22b8d43378147a3c1f5a56a7bf9e4cf70278829dedcd3"
+}

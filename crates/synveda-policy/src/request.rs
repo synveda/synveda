@@ -4,10 +4,128 @@
 
 use std::fmt;
 
+use synveda_types::access::{GrantSource, RoleKey};
+use synveda_types::anchor::ScopeAnchor;
+use synveda_types::scope::{Scope, ScopeKind};
 use synveda_types::{
-    Error, HierarchyNode, Lapse, PolicyAssignment, Result, Role, RoleBinding, ScopeId, Sensitivity,
-    TenantId,
+    CurrentRelaxation, Error, GrantId, GroupId, KnowledgeItemId, PolicyAssignment, ProjectId,
+    Result, ScopeId, Sensitivity, SessionId, TenantId, WorkspaceId,
 };
+
+/// The PDP's own view of a governed scope: a node with a parent, a tenant, a
+/// shape and a seal, and nothing else (CPR-6, ADR-0073 decision 1).
+///
+/// It exists so that the decision point has **one** scope vocabulary. Before
+/// CPR-6 the PDP was written against the old hierarchy's node — a five-value
+/// rank ladder with a materialised path and a depth — and every pack rule
+/// that mentioned a department, a team or an ordering was reading that
+/// ladder. The governed scope model has no ladder; since CPR-7 there is one
+/// tree and every caller is written against this (ADR-0074 decision 1).
+///
+/// One display field, `slug`, and it is as immutable as the id: a rename
+/// changes `display_name`, never the slug (CPR-3's trigger), so a slug on a
+/// chain cannot go stale — and the composition plane renders a section
+/// header per scope, which needs something stable to say (CPR-7,
+/// ADR-0074). No `display_name`, and a path is never an authorisation
+/// input.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ScopeNode {
+    /// The scope.
+    pub id: ScopeId,
+    /// Its tenant. Carried per node so a chain from a foreign tenant chains up to
+    /// a *different* `Tenant` entity and every membership rule fails closed.
+    pub tenant_id: TenantId,
+    /// Its parent; `None` for the tenant root.
+    pub parent_id: Option<ScopeId>,
+    /// Its shape — `tenant`, `org_unit`, `workspace`, `project` or
+    /// `principal`. A shape, never a rank: nothing anywhere compares two of
+    /// these for order.
+    pub kind: ScopeKind,
+    /// The immutable slug — display and ordering only, never an
+    /// authorisation input.
+    pub slug: String,
+    /// Whether the scope is sealed — nobody's to act on, under any pack
+    /// (AUTH-4, ADR-0059 decision 8).
+    pub sealed: bool,
+}
+
+impl ScopeNode {
+    /// A governed scope, with the seal the caller resolved for it.
+    #[must_use]
+    pub fn from_scope(scope: &Scope, sealed: bool) -> Self {
+        ScopeNode {
+            id: scope.id,
+            tenant_id: scope.tenant_id,
+            parent_id: scope.parent_scope_id,
+            kind: scope.kind,
+            slug: scope.slug.clone(),
+            sealed,
+        }
+    }
+}
+
+/// A subtype or access-plane object the decision needs as a Cedar entity
+/// (CPR-6, ADR-0073 decision 3).
+///
+/// The scope tree carries containment; these carry **identity**. A pack that
+/// wants to say something about one workspace, one group or one grant needs
+/// the thing itself to exist in the entity graph, and a resource that is only
+/// ever its scope makes that unsayable.
+///
+/// Each is parented to the scope it belongs to, so every containment rule
+/// written over scopes — `resource in principal.anchors`, the token-scope
+/// confinement, the seal — applies to them without being restated.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResourceEntity {
+    /// A workspace and the governed scope it owns.
+    Workspace {
+        /// The workspace.
+        id: WorkspaceId,
+        /// Its scope.
+        scope_id: ScopeId,
+    },
+    /// A project, its scope, and the workspace it sits in.
+    Project {
+        /// The project.
+        id: ProjectId,
+        /// Its scope.
+        scope_id: ScopeId,
+        /// Its workspace.
+        workspace_id: WorkspaceId,
+    },
+    /// A session and the governed scope it runs at (CPR-10, ADR-0076).
+    Session {
+        /// The session.
+        id: SessionId,
+        /// The scope it is decided at — its project's, or its workspace's.
+        scope_id: ScopeId,
+    },
+    /// A stable Knowledge aggregate, parented to its governing scope
+    /// (CPR-16, ADR-0081).
+    KnowledgeItem {
+        /// The Knowledge item.
+        id: KnowledgeItemId,
+        /// Its governing scope.
+        scope_id: ScopeId,
+    },
+    /// A group. Tenant-wide: a group is not anchored anywhere in the tree.
+    Group {
+        /// The group.
+        id: GroupId,
+    },
+    /// One grant, at the scope it is written at.
+    Grant {
+        /// The grant.
+        id: GrantId,
+        /// The scope it is written at.
+        scope_id: ScopeId,
+        /// What it confers.
+        role: RoleKey,
+        /// Where it came from — so a pack can price revoking a
+        /// directory-managed grant differently from revoking a direct one.
+        source: GrantSource,
+    },
+}
 
 /// Who is asking: a verified token subject resolved to a tenant (TEN-1)
 /// with its provisioning status (AUTH-2, ADR-0013 decision 6). The caller
@@ -23,17 +141,22 @@ pub struct Principal {
     /// Whether the subject is quarantined; the base layer forbids every
     /// action when set (ADR-0013 decision 5, ADR-0014 decision 2).
     pub quarantined: bool,
-    /// The identity's placement — its personal scope node (AUTH-2). The
-    /// principal entity is parented to it, so pack membership rules
-    /// (`principal in resource`) walk the real hierarchy. `None` for
-    /// subjects provisioning never placed (dev HS256): such a principal
-    /// is a member of nothing and `MemoryRead` denies everywhere
-    /// (ADR-0014 decision 5).
+    /// The principal's **own scope** — the `principal`-shaped scope that
+    /// belongs to this subject (CPR-6, ADR-0073 decision 2).
+    ///
+    /// The principal entity is parented to it, so pack membership rules
+    /// (`principal in resource`) walk the scope tree upward from it. `None`
+    /// for a subject with neither: such a principal is a member of nothing
+    /// and every membership floor denies (ADR-0014 decision 5).
+    ///
+    /// It is deliberately **not** the same thing as
+    /// [`AuthzContext::anchors`]: this is where the caller stands, those are
+    /// the places their grants reach down from.
     pub scope_id: Option<ScopeId>,
     /// The token's confinement scope — the anchor node whose subtree
     /// bounds every decision for a service identity (AUTH-3, ADR-0018
     /// decision 4). The base layer forbids everything outside it, roles
-    /// notwithstanding, except own-chain `MemoryRead`. `None` for users
+    /// notwithstanding, except own-chain `KnowledgeRead`. `None` for users
     /// and dev subjects: no confinement.
     pub token_scope: Option<ScopeId>,
 }
@@ -44,49 +167,159 @@ pub struct Principal {
 /// compile-check time, not at decision time.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Action {
-    /// Create a hierarchy node under the resource (the parent scope, or
-    /// the tenant when creating the org root).
-    HierarchyCreate,
-    /// Read a hierarchy node or listing anchored at the resource.
-    HierarchyRead,
-    /// Rename or move the resource node.
-    HierarchyUpdate,
-    /// Delete the resource node.
-    HierarchyDelete,
-    /// Include memories attached to the resource scope in the caller's
-    /// composition — the seam inject/recall stand on (AUTHZ-2, ADR-0014
-    /// decision 5).
-    MemoryRead,
-    /// Land memory content at the resource scope — the write seam observe
-    /// stands on (MEM-1, ADR-0020 decision 3). The packs permit the
-    /// principal's own personal scope role-free (zero-config) and bound
-    /// content roles beyond it.
-    MemoryWrite,
-    /// Run a classification proposal's effect at the resource scope: move
-    /// records to the sensitivity their proposed versions carry (AUTHZ-5,
-    /// ADR-0038 decision 9).
+    /// Create a governed scope under the resource (CPR-7, ADR-0074
+    /// decision 5). The tenant root is minted by the substrate, so this is
+    /// always a child.
+    ScopeCreate,
+    /// Read a governed scope, listing, ancestry or subtree anchored at the
+    /// resource.
+    ScopeRead,
+    /// Rename, re-describe, archive or **move** the resource scope. A move
+    /// is decided against the destination and audited with both ends.
     ///
-    /// Its own action rather than [`Action::MemoryWrite`], on
-    /// [`Action::ChannelRollback`]'s separability rule: the write floor
-    /// grants every principal `MemoryWrite` at its own home, and a pack must
-    /// be able to say "you may write here" without saying "you may classify
-    /// here".
+    /// There is deliberately no delete variant, for
+    /// [`Action::WorkspaceUpdate`]'s reason: a scope is what audit events,
+    /// versions and grants name, so retiring one is a status transition and
+    /// a delete authority nobody can exercise would be a lie in the
+    /// vocabulary.
+    ScopeUpdate,
+    /// Read a workspace, or list the tenant's workspaces (CPR-4, ADR-0071
+    /// decision 3).
     ///
-    /// Like publishing, the route resolves the approval matrix on top of
-    /// this decision — at the **maximum** of the current and proposed tiers,
-    /// so a declassification is priced at the tier it is leaving — and
-    /// additionally requires [`Action::MemoryRead`] at the working tier,
-    /// which is the whose-material question every governance act asks
-    /// (ADR-0038 decision 10).
-    MemoryClassify,
+    /// Structure rather than content, which is why the shipped packs grant it
+    /// to the content roles as well as the admin ones: a workspace's *name*
+    /// discloses nothing about what is in it, and everything that is in it
+    /// stays behind the tiered reads.
+    WorkspaceRead,
+    /// Create a workspace — and, with it, the governed scope the workspace
+    /// owns.
+    WorkspaceCreate,
+    /// Rename, re-describe or retire a workspace.
+    ///
+    /// Retirement is a status transition under this action rather than a
+    /// delete action of its own: a workspace is what sessions, versions and
+    /// audit events name, so nothing removes one, and a delete authority
+    /// nobody can exercise would be a lie in the vocabulary.
+    WorkspaceUpdate,
+    /// Read a project, list a workspace's projects, or list the repositories
+    /// a project is about.
+    ProjectRead,
+    /// Create a project inside a workspace.
+    ProjectCreate,
+    /// Rename, re-describe or retire a project — and attach or detach the
+    /// repositories it is about.
+    ///
+    /// Repository attachment takes this action rather than one of its own:
+    /// what a project is *about* is part of what the project is, and a
+    /// separate authority over it would be one nobody could describe without
+    /// describing this one.
+    ProjectUpdate,
+    /// Read a session, its events, its context runs or its timeline
+    /// (CPR-10, ADR-0076 decision 6).
+    ///
+    /// **Content, not structure**, which is why it is not folded into
+    /// [`Action::ProjectRead`] the way a repository attachment is folded into
+    /// [`Action::ProjectUpdate`]. A project's name discloses nothing; a
+    /// session's timeline is a transcript of what somebody and their agent
+    /// did, said, read and changed. A pack must be able to let a member see
+    /// the project they work in without handing them everybody's runs.
+    SessionRead,
+    /// Open a session, append events to it, compose context for it, or close
+    /// it (CPR-10, ADR-0076 decision 6).
+    ///
+    /// One authority for all four, on [`Action::ChannelRollback`]'s
+    /// separability rule read the other way: an agent that may open a session
+    /// must be able to close it, and an authority to open that could not
+    /// close would produce runs nobody can end. Closing *somebody else's*
+    /// session at a shared scope takes the same key, and that is correct — a
+    /// project's owner should be able to close a runaway agent's session in
+    /// their own project.
+    ///
+    /// It does **not** admit Knowledge or authored material; those reads are
+    /// independently decided before retrieval or composition.
+    SessionWrite,
+    /// Read the **raw payload** of one session event (CPR-11, ADR-0077
+    /// decision 3).
+    ///
+    /// Separate from [`Action::SessionRead`] because the two disclose
+    /// different things. A timeline is a reading surface: it says a message
+    /// was sent, a tool ran, a file changed, and summarises each in a line.
+    /// A payload is what the agent and the person actually said, byte for
+    /// byte — the prompt, the tool arguments, the diff. A pack must be able to
+    /// let a project's members follow what their agents have been doing
+    /// without handing every one of them a full transcript of everybody's
+    /// prompts.
+    ///
+    /// It is strictly narrower than [`Action::SessionRead`] in the shipped
+    /// packs and must stay so in any other: an authority to read a payload
+    /// without the authority to know the event exists is not a thing this
+    /// product can express, because the route reads the timeline's own rows.
+    SessionDiagnostics,
+    /// Read who holds what on the access plane: a scope's effective members,
+    /// the tenant's groups, its grants and its outstanding invitations
+    /// (CPR-5, ADR-0072 decision 7).
+    ///
+    /// One read authority over the whole plane rather than one per noun, on
+    /// [`Action::DirectoryManage`]'s argument: a list of who may act and a
+    /// list of outstanding invitations to act are the same disclosure seen
+    /// from two ends, and splitting them would create a role whose only power
+    /// is reconnaissance over the other half.
+    ///
+    /// It is separate from [`Action::WorkspaceRead`] because a workspace's
+    /// *name* discloses nothing and its *membership* discloses who works on
+    /// what — a pack must be able to let a contributor see the workspace they
+    /// contribute to without handing them the org chart.
+    MembershipRead,
+    /// Assign or revoke access at the resource scope: create and revoke
+    /// grants, add and remove members, issue and withdraw invitations
+    /// (ADR-0072 decision 7).
+    ///
+    /// Issuing an invitation takes this action rather than one of its own,
+    /// and that is the whole of what an invitation is: deferred granting. An
+    /// authority to invite that was weaker than the authority to grant would
+    /// be a way around the second, and one that was stronger would be an
+    /// action nobody could describe.
+    MembershipGrant,
+    /// Create, rename, retire and re-populate a group (ADR-0072 decision 7).
+    ///
+    /// Separate from [`Action::MembershipGrant`] on [`Action::ChannelRollback`]'s
+    /// separability rule, and the distinction is real: a group says who exists
+    /// together, a grant says what they may do, and a deployment must be able
+    /// to let somebody curate the first without conferring the second. A group
+    /// with no grant naming it confers nothing at all.
+    GroupManage,
+    /// Redeem an invitation (ADR-0072 decision 8).
+    ///
+    /// Every shipped pack permits this to any principal the base layer has
+    /// not already forbidden, which is the point: the *token* is the
+    /// authority, and a person holding a valid invitation who is refused for
+    /// want of a role is a person the product invited and then turned away.
+    ///
+    /// It is an action rather than an exemption so that the invariant floor
+    /// still runs — a quarantined principal and a sealed scope refuse it like
+    /// everything else — and so that a deployment which wants to switch the
+    /// mechanism off can say so in a pack instead of in a deployment flag.
+    ///
+    /// Tenant-only: a service identity's token confinement therefore forbids
+    /// it outright (ADR-0018 decision 4), which is correct — an agent must not
+    /// redeem a person's invitation.
+    InviteAccept,
+    /// Read one Knowledge item or enumerate visible Knowledge at a scope
+    /// (CPR-16, ADR-0081).
+    KnowledgeRead,
+    /// Create or change a Knowledge aggregate through VedaFlow.
+    KnowledgeWrite,
+    /// Governed plaintext erasure. Separate from archive because it is
+    /// intentionally irreversible and may be refused by retention hooks.
+    KnowledgeForget,
     /// Be served a prompt attached to the resource scope — the seam the
     /// registry's resolve stands on (PRMT-1, ADR-0049 decision 4).
     ///
-    /// Names the tier it is asking about, exactly as [`Action::MemoryRead`]
-    /// does and for the same reason: with four values the seam can be asked
-    /// about a tier before any content is fetched. It carries no `lapsed`
-    /// attribute — the lapse vocabulary is closed over `memory.read`
-    /// (ADR-0037 decision 2) — and no pack names `restricted`, because
+    /// Names the tier it is asking about, exactly as Knowledge reads do:
+    /// with four values the seam can be asked
+    /// about a tier before any content is fetched. It carries no relaxation
+    /// input — CPR-31 closes that vocabulary over `KnowledgeRead` — and no
+    /// pack names `restricted`, because
     /// nothing in the product mints that tier for an authored asset.
     ///
     /// It is also the read action that makes a rewind or a pin of
@@ -95,11 +328,8 @@ pub enum Action {
     PromptRead,
     /// Author a prompt draft at the resource scope (ADR-0049 decision 4).
     ///
-    /// Its own action rather than [`Action::MemoryWrite`], on
-    /// [`Action::ChannelRollback`]'s separability rule: every placed
-    /// principal holds the memory write floor at its own home, and a pack
-    /// must be able to say "observe here" without saying "author governed
-    /// assets here". Whether a draft may then cross the trust boundary is
+    /// Its own action because authoring governed templates is distinct from
+    /// Knowledge mutation. Whether a draft may then cross the trust boundary is
     /// the approval matrix's arithmetic, never this decision's.
     PromptWrite,
     /// Be served a context pack attached to the resource scope — the seam
@@ -108,13 +338,12 @@ pub enum Action {
     ///
     /// Taken per scope inside the plan walk composition already runs, never
     /// as a second authorization path (decision 8), and it is what *admits*
-    /// pack chunks: [`Action::MemoryRead`] never does, and this action never
-    /// admits a memory. That separation is the case packs exist for — a
+    /// pack chunks; Knowledge reads do not. That separation is the case packs exist for — a
     /// scope may distribute conventions and glossaries to readers who hold
     /// no readable memory there at all.
     ///
     /// Carries the tier for [`Action::PromptRead`]'s reason and carries no
-    /// `lapsed` for the same one. It is also the read action that makes a
+    /// relaxation input for the same one. It is also the read action that makes a
     /// rewind or a pin of `context-pack/published` decidable, which
     /// discharges ADR-0036 decision 3 for the second of the three kinds it
     /// refused by name, leaving `skill`.
@@ -137,44 +366,27 @@ pub enum Action {
     /// nowhere in the composition plan walk.
     ///
     /// Carries the tier for [`Action::PromptRead`]'s reason and carries no
-    /// `lapsed` for the same one. It is also the read action that makes a
-    /// rewind or a pin of `skill/published` decidable, which discharges
-    /// ADR-0036 decision 3 for the **last** of the three kinds it refused by
-    /// name — after this, every asset kind with a channel has a read action.
+    /// relaxation input for the same one. CPR-23 applies it to exact immutable
+    /// versions selected by project/principal bindings; no Skill channel
+    /// remains.
     SkillRead,
-    /// Author a skill draft at the resource scope (ADR-0051 decision 10).
+    /// Install/update a stable Skill or change its binding at the resource
+    /// scope (CPR-23, ADR-0085).
     ///
     /// Its own action rather than [`Action::ContextPackWrite`] on
     /// [`Action::ChannelRollback`]'s separability rule, and here the reason
     /// is sharpest: a skill is executable, so a pack must be able to say
     /// "curate conventions here" without saying "author code here".
     SkillWrite,
-    /// Publish a skill bundle the quality gate would otherwise refuse
-    /// (SKIL-3, ADR-0053 decision 8).
+    /// Inspect trusted MCP catalogue metadata or generate configuration for
+    /// an exact approved project binding (CPR-25, ADR-0086).
     ///
-    /// A *second* decision at the publish seam, distinct from the
-    /// [`Action::ChannelPublish`] the publication already takes, and that
-    /// separation is the entire content of the action: a publisher who
-    /// may ship a good skill cannot necessarily ship one below the bar,
-    /// and must go and find somebody who can. ADR-0051 decision 18's
-    /// argument in its own idiom — the content of separating two
-    /// authorities is that they can be two people.
-    ///
-    /// It exists at all because a quality bar with no way past it is a bar
-    /// that gets routed around (ADR-0053 force 3). That is the asymmetry
-    /// with SKIL-2's security gate and it is deliberate: `critical` is a
-    /// band defined by having no legitimate reading, so refusing an
-    /// exception costs an author only a wait for a rule fix; a *low score*
-    /// always has a legitimate reading, so refusing an exception costs the
-    /// product its registry. There is deliberately **no equivalent action
-    /// for the scan** and there must not be one — an override that could
-    /// reach the security floor would make ADR-0052 decision 3's guarantee
-    /// negotiable by whoever holds this.
-    ///
-    /// A scope action carrying no `context.sensitivity`: it is a statement
-    /// about a process rather than about content, so a tier would be a
-    /// field with nothing to say.
-    SkillQualityOverride,
+    /// Capability declarations remain untrusted metadata; this action grants
+    /// no permission to invoke a tool.
+    ToolRead,
+    /// Register, version, approve or bind trusted MCP metadata through a
+    /// typed VedaFlow change (CPR-25, ADR-0086).
+    ToolWrite,
     /// List/read quarantined observe events: the tenant's pending queue
     /// (the tenant resource) or a subtree's (a scope) — `/v1/quarantine`
     /// (MEM-2, ADR-0021 decision 6).
@@ -187,13 +399,16 @@ pub enum Action {
     /// Assign a pack to the resource node, or set the tenant default
     /// (the tenant resource).
     PolicyAssign,
-    /// Read role bindings at the resource node, or the tenant's bindings
-    /// (the tenant resource) — `/v1/roles/*` (AUTHZ-3, ADR-0015).
-    RoleRead,
-    /// Bind or unbind a role at the resource node, or tenant-wide (the
-    /// tenant resource). Decisions require [`AuthzContext::grant`] — the
-    /// role being granted or revoked (ADR-0015 decision 5).
-    RoleAssign,
+    /// Inspect immutable runtime configuration and its effective binding.
+    ConfigurationRead,
+    /// Create, publish, bind, pin, enable, disable or roll back governed
+    /// runtime configuration through VedaFlow (CPR-30, ADR-0089).
+    ConfigurationWrite,
+    /// Create, revise, or revoke a time-boxed policy relaxation through the
+    /// one typed VedaFlow path (CPR-31, ADR-0090).
+    RelaxationWrite,
+    /// Release or reject one quarantined event at its scope. Never a
+
     /// Read service-identity registrations: one at its anchor node, or
     /// the tenant's list (the tenant resource) — `/v1/service-identities`
     /// (AUTH-3, ADR-0018 decision 3).
@@ -214,10 +429,8 @@ pub enum Action {
     /// subtree-bound auditor therefore holds nothing here — deliberately,
     /// and the denial names what it would take.
     ///
-    /// Grants no content: this action reads record ids, object addresses,
-    /// channels and tiers, and resolving any of them to a body is
-    /// [`Action::MemoryRead`] through a different route (ADR-0045
-    /// decision 6).
+    /// Grants no content: this action reads identifiers, hashes, counts and
+    /// decisions. Resolving any identifier to content takes its own PDP action.
     AuditRead,
     /// Issue, list or revoke this tenant's provisioning credentials —
     /// `/v1/scim/credentials` (AUTH-4, ADR-0059 decision 13).
@@ -260,9 +473,8 @@ pub enum Action {
     /// Read the VedaFlow channels standing at the resource scope —
     /// `GET /v1/channels/{scope}` (FLOW-2, ADR-0031 decision 12).
     ChannelRead,
-    /// Publish records onto the resource scope's published channel: the
-    /// act that moves content across the trust boundary, so `inject`
-    /// composes it as reviewed material. Never a tenant-level action —
+    /// Publish authored prompt or context-pack versions onto the resource
+    /// scope's published channel. Never a tenant-level action —
     /// a channel belongs to a node — and never cross-scope: climbing to
     /// a higher scope's channel needs that scope's approvers (FLOW-5).
     ///
@@ -304,26 +516,6 @@ pub enum Action {
     /// Whether the verdicts recorded so far are *enough* is the approval
     /// matrix's arithmetic, never this decision's (ADR-0032 decision 5).
     ProposalReview,
-    /// Run an approved lapse proposal's effect at the resource scope: open
-    /// a time-boxed grant of one action over this scope's material to
-    /// another scope's members (AUTHZ-4, ADR-0037 decision 15).
-    ///
-    /// The resource is the scope whose material is *disclosed*, never the
-    /// one receiving it: authority over a disclosure belongs where the
-    /// material is. Like publishing, the route resolves the approval matrix
-    /// on top of this decision — a lapse is the `policy` cell, which every
-    /// pack has carried since FLOW-3.
-    LapseGrant,
-    /// End a standing lapse early, with a mandatory reason (ADR-0037
-    /// decision 15).
-    ///
-    /// Its own action rather than a mode of [`Action::LapseGrant`], on
-    /// [`Action::ChannelRollback`]'s precedent: a pack must be able to grant
-    /// one broadly and the other narrowly. It deliberately resolves *no*
-    /// approval matrix — a revocation installs nothing and can only narrow,
-    /// and a product whose answer to "that grant was a mistake" is "convene
-    /// the two stewards again" has not shipped revocation.
-    LapseRevoke,
 }
 
 impl Action {
@@ -334,27 +526,41 @@ impl Action {
     /// every action is in exactly one of the four groups, so a new action
     /// that nobody classified fails the build rather than silently going
     /// unanswerable at CNSL-2's probe.
-    pub const ALL: [Action; 34] = [
-        Action::HierarchyCreate,
-        Action::HierarchyRead,
-        Action::HierarchyUpdate,
-        Action::HierarchyDelete,
-        Action::MemoryRead,
-        Action::MemoryWrite,
-        Action::MemoryClassify,
+    pub const ALL: [Action; 46] = [
+        Action::ScopeCreate,
+        Action::ScopeRead,
+        Action::ScopeUpdate,
+        Action::WorkspaceRead,
+        Action::WorkspaceCreate,
+        Action::WorkspaceUpdate,
+        Action::ProjectRead,
+        Action::ProjectCreate,
+        Action::ProjectUpdate,
+        Action::SessionRead,
+        Action::SessionWrite,
+        Action::SessionDiagnostics,
+        Action::MembershipRead,
+        Action::MembershipGrant,
+        Action::GroupManage,
+        Action::InviteAccept,
+        Action::KnowledgeRead,
+        Action::KnowledgeWrite,
+        Action::KnowledgeForget,
         Action::PromptRead,
         Action::PromptWrite,
         Action::ContextPackRead,
         Action::ContextPackWrite,
         Action::SkillRead,
         Action::SkillWrite,
-        Action::SkillQualityOverride,
+        Action::ToolRead,
+        Action::ToolWrite,
         Action::QuarantineRead,
         Action::QuarantineReview,
         Action::PolicyRead,
         Action::PolicyAssign,
-        Action::RoleRead,
-        Action::RoleAssign,
+        Action::ConfigurationRead,
+        Action::ConfigurationWrite,
+        Action::RelaxationWrite,
         Action::ServiceIdentityRead,
         Action::ServiceIdentityManage,
         Action::AuditRead,
@@ -367,8 +573,6 @@ impl Action {
         Action::ProposalRead,
         Action::ProposalOpen,
         Action::ProposalReview,
-        Action::LapseGrant,
-        Action::LapseRevoke,
     ];
 
     /// The actions a capability probe answers as a plain yes/no about a
@@ -381,28 +585,40 @@ impl Action {
     /// operand beyond (principal, action, resource). The two exclusions
     /// are their own groups — [`Action::TIERED_READS`], which answer with
     /// a tier set because a bare boolean would have to pick a tier and
-    /// then hide which one, and [`Action::RoleAssign`], which fails closed
-    /// without [`AuthzContext::grant`] and is therefore probed once per
-    /// role. [`Action::AuditRead`] is absent because the schema refuses it
+    /// then hide which one. [`Action::AuditRead`] is absent because the
+    /// schema refuses it
     /// a scope resource at all (ADR-0045 decision 2); it appears in
     /// [`Action::PROBED_AT_TENANT`], where the chain it reads actually
     /// lives.
-    pub const PROBED_AT_SCOPE: [Action; 26] = [
-        Action::HierarchyCreate,
-        Action::HierarchyRead,
-        Action::HierarchyUpdate,
-        Action::HierarchyDelete,
-        Action::MemoryWrite,
-        Action::MemoryClassify,
+    pub const PROBED_AT_SCOPE: [Action; 37] = [
+        Action::ScopeCreate,
+        Action::ScopeRead,
+        Action::ScopeUpdate,
+        Action::WorkspaceRead,
+        Action::WorkspaceCreate,
+        Action::WorkspaceUpdate,
+        Action::ProjectRead,
+        Action::ProjectCreate,
+        Action::ProjectUpdate,
+        Action::SessionRead,
+        Action::SessionWrite,
+        Action::SessionDiagnostics,
+        Action::MembershipRead,
+        Action::MembershipGrant,
+        Action::KnowledgeWrite,
+        Action::KnowledgeForget,
         Action::PromptWrite,
         Action::ContextPackWrite,
         Action::SkillWrite,
-        Action::SkillQualityOverride,
+        Action::ToolRead,
+        Action::ToolWrite,
         Action::QuarantineRead,
         Action::QuarantineReview,
         Action::PolicyRead,
         Action::PolicyAssign,
-        Action::RoleRead,
+        Action::ConfigurationRead,
+        Action::ConfigurationWrite,
+        Action::RelaxationWrite,
         Action::ServiceIdentityRead,
         Action::ServiceIdentityManage,
         Action::ChannelRead,
@@ -412,8 +628,6 @@ impl Action {
         Action::ProposalRead,
         Action::ProposalOpen,
         Action::ProposalReview,
-        Action::LapseGrant,
-        Action::LapseRevoke,
     ];
 
     /// The same, for the **tenant** plane — what `whoami` answers.
@@ -422,15 +636,25 @@ impl Action {
     /// much shorter than the scope set and that is the honest shape: most
     /// of this vocabulary is about a node, and an action that is only ever
     /// taken at a node has no tenant-level answer to give.
-    pub const PROBED_AT_TENANT: [Action; 12] = [
-        Action::HierarchyCreate,
-        Action::HierarchyRead,
-        Action::HierarchyUpdate,
-        Action::HierarchyDelete,
+    pub const PROBED_AT_TENANT: [Action; 22] = [
+        Action::ScopeCreate,
+        Action::ScopeRead,
+        Action::ScopeUpdate,
+        Action::WorkspaceRead,
+        Action::WorkspaceCreate,
+        Action::WorkspaceUpdate,
+        Action::ProjectRead,
+        Action::ProjectCreate,
+        Action::ProjectUpdate,
+        Action::MembershipRead,
+        Action::MembershipGrant,
+        Action::GroupManage,
+        Action::InviteAccept,
         Action::QuarantineRead,
         Action::PolicyRead,
         Action::PolicyAssign,
-        Action::RoleRead,
+        Action::ConfigurationRead,
+        Action::ConfigurationWrite,
         Action::ServiceIdentityRead,
         Action::AuditRead,
         Action::DirectoryManage,
@@ -445,7 +669,7 @@ impl Action {
     /// answer would be about that tier while looking like it was about the
     /// action — the failure ADR-0038 decision 2 refuses a default for.
     pub const TIERED_READS: [Action; 4] = [
-        Action::MemoryRead,
+        Action::KnowledgeRead,
         Action::PromptRead,
         Action::ContextPackRead,
         Action::SkillRead,
@@ -456,26 +680,40 @@ impl Action {
     #[must_use]
     pub const fn as_str(&self) -> &'static str {
         match self {
-            Action::HierarchyCreate => "hierarchy.create",
-            Action::HierarchyRead => "hierarchy.read",
-            Action::HierarchyUpdate => "hierarchy.update",
-            Action::HierarchyDelete => "hierarchy.delete",
-            Action::MemoryRead => "memory.read",
-            Action::MemoryWrite => "memory.write",
-            Action::MemoryClassify => "memory.classify",
+            Action::ScopeCreate => "scope.create",
+            Action::ScopeRead => "scope.read",
+            Action::ScopeUpdate => "scope.update",
+            Action::WorkspaceRead => "workspace.read",
+            Action::WorkspaceCreate => "workspace.create",
+            Action::WorkspaceUpdate => "workspace.update",
+            Action::ProjectRead => "project.read",
+            Action::ProjectCreate => "project.create",
+            Action::ProjectUpdate => "project.update",
+            Action::SessionRead => "session.read",
+            Action::SessionWrite => "session.write",
+            Action::SessionDiagnostics => "session.diagnostics",
+            Action::MembershipRead => "membership.read",
+            Action::MembershipGrant => "membership.grant",
+            Action::GroupManage => "group.manage",
+            Action::InviteAccept => "invite.accept",
+            Action::KnowledgeRead => "knowledge.read",
+            Action::KnowledgeWrite => "knowledge.write",
+            Action::KnowledgeForget => "knowledge.forget",
             Action::PromptRead => "prompt.read",
             Action::PromptWrite => "prompt.write",
             Action::ContextPackRead => "context_pack.read",
             Action::ContextPackWrite => "context_pack.write",
             Action::SkillRead => "skill.read",
             Action::SkillWrite => "skill.write",
-            Action::SkillQualityOverride => "skill.quality.override",
+            Action::ToolRead => "tool.read",
+            Action::ToolWrite => "tool.write",
             Action::QuarantineRead => "quarantine.read",
             Action::QuarantineReview => "quarantine.review",
             Action::PolicyRead => "policy.read",
             Action::PolicyAssign => "policy.assign",
-            Action::RoleRead => "role.read",
-            Action::RoleAssign => "role.assign",
+            Action::ConfigurationRead => "configuration.read",
+            Action::ConfigurationWrite => "configuration.write",
+            Action::RelaxationWrite => "relaxation.write",
             Action::ServiceIdentityRead => "service_identity.read",
             Action::ServiceIdentityManage => "service_identity.manage",
             Action::AuditRead => "audit.read",
@@ -488,34 +726,46 @@ impl Action {
             Action::ProposalRead => "proposal.read",
             Action::ProposalOpen => "proposal.open",
             Action::ProposalReview => "proposal.review",
-            Action::LapseGrant => "lapse.grant",
-            Action::LapseRevoke => "lapse.revoke",
         }
     }
 
     /// The action's entity id inside the Cedar schema's `Synveda` namespace.
     pub(crate) const fn cedar_id(&self) -> &'static str {
         match self {
-            Action::HierarchyCreate => "HierarchyCreate",
-            Action::HierarchyRead => "HierarchyRead",
-            Action::HierarchyUpdate => "HierarchyUpdate",
-            Action::HierarchyDelete => "HierarchyDelete",
-            Action::MemoryRead => "MemoryRead",
-            Action::MemoryWrite => "MemoryWrite",
-            Action::MemoryClassify => "MemoryClassify",
+            Action::ScopeCreate => "ScopeCreate",
+            Action::ScopeRead => "ScopeRead",
+            Action::ScopeUpdate => "ScopeUpdate",
+            Action::WorkspaceRead => "WorkspaceRead",
+            Action::WorkspaceCreate => "WorkspaceCreate",
+            Action::WorkspaceUpdate => "WorkspaceUpdate",
+            Action::ProjectRead => "ProjectRead",
+            Action::ProjectCreate => "ProjectCreate",
+            Action::ProjectUpdate => "ProjectUpdate",
+            Action::SessionRead => "SessionRead",
+            Action::SessionWrite => "SessionWrite",
+            Action::SessionDiagnostics => "SessionDiagnostics",
+            Action::MembershipRead => "MembershipRead",
+            Action::MembershipGrant => "MembershipGrant",
+            Action::GroupManage => "GroupManage",
+            Action::InviteAccept => "InviteAccept",
+            Action::KnowledgeRead => "KnowledgeRead",
+            Action::KnowledgeWrite => "KnowledgeWrite",
+            Action::KnowledgeForget => "KnowledgeForget",
             Action::PromptRead => "PromptRead",
             Action::PromptWrite => "PromptWrite",
             Action::ContextPackRead => "ContextPackRead",
             Action::ContextPackWrite => "ContextPackWrite",
             Action::SkillRead => "SkillRead",
             Action::SkillWrite => "SkillWrite",
-            Action::SkillQualityOverride => "SkillQualityOverride",
+            Action::ToolRead => "ToolRead",
+            Action::ToolWrite => "ToolWrite",
             Action::QuarantineRead => "QuarantineRead",
             Action::QuarantineReview => "QuarantineReview",
             Action::PolicyRead => "PolicyRead",
             Action::PolicyAssign => "PolicyAssign",
-            Action::RoleRead => "RoleRead",
-            Action::RoleAssign => "RoleAssign",
+            Action::ConfigurationRead => "ConfigurationRead",
+            Action::ConfigurationWrite => "ConfigurationWrite",
+            Action::RelaxationWrite => "RelaxationWrite",
             Action::ServiceIdentityRead => "ServiceIdentityRead",
             Action::ServiceIdentityManage => "ServiceIdentityManage",
             Action::AuditRead => "AuditRead",
@@ -528,8 +778,6 @@ impl Action {
             Action::ProposalRead => "ProposalRead",
             Action::ProposalOpen => "ProposalOpen",
             Action::ProposalReview => "ProposalReview",
-            Action::LapseGrant => "LapseGrant",
-            Action::LapseRevoke => "LapseRevoke",
         }
     }
 }
@@ -541,13 +789,56 @@ impl fmt::Display for Action {
 }
 
 /// What is being acted on.
+///
+/// Four of the six are **objects with a scope** (CPR-6, ADR-0073 decision 3).
+/// Before this, every workspace, project, group and grant decision named the
+/// tenant, because the entity model had no way to say which one — so a pack
+/// could price "administer workspaces" and never "administer *this*
+/// workspace". Each of these materialises as its own Cedar entity parented to
+/// the scope it belongs to, so containment rules written over scopes reach
+/// them without being restated.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Resource {
-    /// The tenant itself — the resource of tenant-level actions such as
-    /// creating the org root.
+    /// The tenant itself — the resource of the few actions that are genuinely
+    /// about the whole boundary: the audit chain, the directory plane,
+    /// redeeming an invitation.
     Tenant(TenantId),
-    /// A node of the tenancy hierarchy.
+    /// A governed scope.
     Scope(ScopeId),
+    /// One workspace.
+    Workspace(WorkspaceId),
+    /// One project.
+    Project(ProjectId),
+    /// One session — one run of an agent (CPR-10, ADR-0076).
+    Session(SessionId),
+    /// One stable Knowledge aggregate.
+    KnowledgeItem(KnowledgeItemId),
+    /// One group. Tenant-wide, like the action over it.
+    Group(GroupId),
+    /// One grant — what a revocation names.
+    Grant(GrantId),
+}
+
+impl Resource {
+    /// The governed scope this decision is anchored at, when it has one.
+    ///
+    /// [`Resource::Scope`] is its own answer; a workspace, project or grant
+    /// answers with the scope its chain was gathered from, which the caller
+    /// supplies as the head of [`AuthzContext::scopes`]. A tenant and a group
+    /// answer `None`: neither is anchored anywhere in the tree, which is why
+    /// neither takes a subtree-scoped authority.
+    #[must_use]
+    pub fn anchor_scope(&self, context: &AuthzContext<'_>) -> Option<ScopeId> {
+        match self {
+            Resource::Scope(id) => Some(*id),
+            Resource::Workspace(_)
+            | Resource::Project(_)
+            | Resource::Session(_)
+            | Resource::KnowledgeItem(_)
+            | Resource::Grant(_) => context.scopes.first().map(|node| node.id),
+            Resource::Tenant(_) | Resource::Group(_) => None,
+        }
+    }
 }
 
 impl fmt::Display for Resource {
@@ -555,6 +846,12 @@ impl fmt::Display for Resource {
         match self {
             Resource::Tenant(id) => write!(f, "tenant {id}"),
             Resource::Scope(id) => write!(f, "scope {id}"),
+            Resource::Workspace(id) => write!(f, "workspace {id}"),
+            Resource::Project(id) => write!(f, "project {id}"),
+            Resource::Session(id) => write!(f, "session {id}"),
+            Resource::KnowledgeItem(id) => write!(f, "knowledge item {id}"),
+            Resource::Group(id) => write!(f, "group {id}"),
+            Resource::Grant(id) => write!(f, "grant {id}"),
         }
     }
 }
@@ -570,18 +867,46 @@ impl fmt::Display for Resource {
 /// purpose-of-use are refused or deferred there, each for its own reason.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct AuthzContext<'a> {
-    /// The resource's scope chain — the node and its ancestors, in any
-    /// order — from the caller's own transaction. A [`Resource::Scope`]
-    /// whose chain is absent has no ancestors in the entity graph, so
-    /// tenant-membership rules fail closed. Empty is correct for
-    /// [`Resource::Tenant`]. HIER-3 replaces this with a synced entity
-    /// store (ADR-0012 decision 4).
-    pub scopes: &'a [HierarchyNode],
-    /// The principal's placement chain — its personal scope node and that
-    /// node's ancestors, in any order — when the principal is a
-    /// provisioned identity. Empty for unplaced principals: membership
-    /// rules then fail closed (ADR-0014 decision 5).
-    pub principal_scopes: &'a [HierarchyNode],
+    /// The resource's scope chain — the scope and its ancestors, **nearest
+    /// first** — from the caller's own transaction. A resource whose chain is
+    /// absent has no ancestors in the entity graph, so containment rules fail
+    /// closed. Empty is correct for [`Resource::Tenant`] and
+    /// [`Resource::Group`], neither of which is anchored in the tree.
+    ///
+    /// Nearest-first matters now that it does: [`Resource::anchor_scope`]
+    /// reads the head of this slice to learn which scope a workspace, project
+    /// or grant decision is anchored at.
+    pub scopes: &'a [ScopeNode],
+    /// The principal's own chain — its own scope and that scope's ancestors,
+    /// in any order. Empty for a principal with no scope of its own:
+    /// membership rules then fail closed (ADR-0014 decision 5).
+    pub principal_scopes: &'a [ScopeNode],
+    /// The ordered anchors this request resolved to (CPR-6, ADR-0073).
+    ///
+    /// Where [`AuthzContext::principal_scopes`] says where the caller
+    /// *stands*, this says where their authority *reaches from*: their own
+    /// scope, the selected workspace and project, the organisation units above
+    /// them, the tenant root, and every scope a direct or group grant names.
+    /// Each carries the [`RoleKey`]s effective there.
+    ///
+    /// The PDP uses it for two things and nothing else: the role keys that
+    /// reach the resource become part of `context.roles`, and the anchors this
+    /// caller actually *holds* become `principal.anchors`, the set every
+    /// "inside something I hold" rule tests against.
+    ///
+    /// Empty is the zero-config answer and denies everything a grant would
+    /// have permitted — which is correct for a caller who holds nothing.
+    pub anchors: &'a [ScopeAnchor],
+    /// The groups this principal belongs to, so a pack can name one directly.
+    /// The principal entity is parented to each, making
+    /// `principal in Synveda::Group::"…"` an entity-hierarchy check rather
+    /// than a string comparison.
+    pub groups: &'a [GroupId],
+    /// The workspace, project, group and grant entities this decision needs
+    /// materialised (ADR-0073 decision 3). A resource whose entity is missing
+    /// evaluates with no attributes and no parents, which fails every
+    /// containment rule — a denial, never a wrong allow.
+    pub resources: &'a [ResourceEntity],
     /// Pack assignments for the nodes of the resource's chain (missing
     /// rows mean "inherit"). The PDP walks the chain nearest-first; the
     /// first assigned node decides the effective pack (ADR-0014
@@ -591,45 +916,18 @@ pub struct AuthzContext<'a> {
     /// when no node on the chain carries an assignment. `None` falls
     /// back to `regulated-strict` (seed §2.1).
     pub default_pack: Option<&'a str>,
-    /// The principal's role bindings relevant to this resource: rows
-    /// bound at nodes of the resource's chain, plus its tenant-wide rows
-    /// (AUTHZ-3, ADR-0015 decision 3). The PDP resolves the effective
-    /// set — tenant-wide always; node rows when the bound node is on the
-    /// chain — and passes it to policies as `context.roles`. Empty means
-    /// no roles: strict by default.
-    pub role_bindings: &'a [RoleBinding],
-    /// For [`Action::RoleAssign`] only: the role being granted or
-    /// revoked, passed to policies as `context.grant` so the base layer
-    /// can guard org-admin escalation (ADR-0015 decision 5). A
-    /// `RoleAssign` decision without it fails closed; other actions
-    /// ignore it.
-    pub grant: Option<Role>,
-    /// For [`Action::MemoryRead`] only: the tier being asked about, passed
-    /// to policies as `context.sensitivity` (AUTHZ-5, ADR-0038 decision 2).
-    /// A `MemoryRead` decision without it fails closed — the `grant`
-    /// discipline, applied to the attribute the base layer's `restricted`
-    /// forbid stands on; other actions ignore it.
+    /// For tiered reads: the tier being asked about, passed to policies as
+    /// `context.sensitivity`. A tiered decision without it fails closed.
     ///
     /// One tier per decision, never a ceiling: the read path asks per tier
     /// and keeps the answers as a set, so a pack that says something
     /// non-contiguous gets exactly what it said (decision 3).
     pub sensitivity: Option<Sensitivity>,
-    /// The lapses standing over the caller **as the caller's own read
-    /// found them** (AUTHZ-4, ADR-0037 decision 9): grants whose grantee
-    /// scope is on [`AuthzContext::principal_scopes`], neither revoked nor
-    /// expired at the instant that query ran.
-    ///
-    /// Caller-supplied for the reason [`AuthzContext::role_bindings`] is —
-    /// policy knows nothing of storage (seed §2.4) — and *pre-filtered* for
-    /// the reason that matters more: expiry is a property of the decision
-    /// rather than of a job, so the one query that loads these rows is the
-    /// one place a window ends (decision 4). Empty means no grant stands,
-    /// which is the zero-config answer everywhere.
-    ///
-    /// The PDP still gates them on the resource's own pack: a pack whose
-    /// lapse ceiling is zero admits none of these, standing or not
-    /// (decision 5).
-    pub lapses: &'a [Lapse],
+    /// Active, Configuration-admitted relaxations for this exact authenticated
+    /// subject. Storage pre-filters by database time; the PDP independently
+    /// matches action, target scope, sensitivity and subject before exposing
+    /// the required `context.relaxed` attribute to Cedar.
+    pub relaxations: &'a [CurrentRelaxation],
 }
 
 /// The verdict, plus everything the decision log and audit event need to
@@ -687,13 +985,17 @@ mod probe_vocabulary_tests {
         for action in Action::PROBED_AT_SCOPE
             .iter()
             .chain(Action::TIERED_READS.iter())
-            .chain(std::iter::once(&Action::RoleAssign))
             // The two tenant-only actions: the schema gives neither a
             // scope resource, so a per-node probe would be asking a
             // question the model refuses to represent.
             .chain(std::iter::once(&Action::AuditRead))
             .chain(std::iter::once(&Action::DirectoryManage))
             .chain(std::iter::once(&Action::DirectorySealAuthorise))
+            // CPR-5's two tenant-plane actions: a group is tenant-wide and an
+            // invitation is redeemed at the tenant, so neither has a per-scope
+            // question to answer (ADR-0072 decision 7).
+            .chain(std::iter::once(&Action::GroupManage))
+            .chain(std::iter::once(&Action::InviteAccept))
         {
             if !seen.insert(action.as_str()) {
                 twice.push(action.as_str());
@@ -740,14 +1042,6 @@ mod probe_vocabulary_tests {
                 "{tiered:?} is tier-bearing and cannot be a boolean probe"
             );
         }
-    }
-
-    /// `RoleAssign` fails closed without `context.grant`, so it must not
-    /// be in a list the probe loops over without one.
-    #[test]
-    fn role_assign_is_not_probed_without_a_grant() {
-        assert!(!Action::PROBED_AT_SCOPE.contains(&Action::RoleAssign));
-        assert!(!Action::PROBED_AT_TENANT.contains(&Action::RoleAssign));
     }
 
     /// `AuditRead` applies to the tenant and nothing else (ADR-0045

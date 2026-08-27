@@ -201,6 +201,68 @@ impl Api {
             .await
     }
 
+    /// `PATCH path` with a JSON body, as a JSON value.
+    pub async fn patch(&self, path: &str, body: Value) -> Result<Value, String> {
+        let request = self.http.patch(format!("{}{path}", self.base)).json(&body);
+        self.send(request, "PATCH", path).await
+    }
+
+    /// `DELETE path`, as a JSON value (or `null` for a 204).
+    pub async fn delete(&self, path: &str) -> Result<Value, String> {
+        self.send(
+            self.http.delete(format!("{}{path}", self.base)),
+            "DELETE",
+            path,
+        )
+        .await
+    }
+
+    /// `DELETE path` with a JSON body.
+    ///
+    /// Knowledge distinguishes archive from governed erasure and requires an
+    /// exact revision precondition, so an empty DELETE cannot express that
+    /// command. Keeping the transport here prevents a product client from
+    /// reaching for the store merely because HTTP DELETE may carry a body.
+    pub async fn delete_with_body(&self, path: &str, body: Value) -> Result<Value, String> {
+        let request = self.http.delete(format!("{}{path}", self.base)).json(&body);
+        self.send(request, "DELETE", path).await
+    }
+
+    /// `PATCH path` with a required idempotency key.
+    pub async fn patch_idempotent(
+        &self,
+        path: &str,
+        body: Value,
+        idempotency_key: &str,
+    ) -> Result<Value, String> {
+        let request = self
+            .http
+            .patch(format!("{}{path}", self.base))
+            .header("Idempotency-Key", idempotency_key)
+            .json(&body);
+        self.send(request, "PATCH", path).await
+    }
+
+    /// `POST path` with a JSON body and one extra header — the
+    /// idempotency-keyed creations (CPR-4's discipline, kept by CPR-7's
+    /// scope plane).
+    pub async fn post_with_header(
+        &self,
+        path: &str,
+        body: Option<Value>,
+        header: (&str, &str),
+        _subject: &str,
+    ) -> Result<Value, String> {
+        let mut request = self
+            .http
+            .post(format!("{}{path}", self.base))
+            .header(header.0, header.1);
+        if let Some(body) = body {
+            request = request.json(&body);
+        }
+        self.send(request, "POST", path).await
+    }
+
     /// `POST path` with an optional JSON body, as a JSON value.
     pub async fn post(&self, path: &str, body: Option<Value>) -> Result<Value, String> {
         let mut request = self.http.post(format!("{}{path}", self.base));
@@ -222,6 +284,30 @@ impl Api {
         body: Option<Value>,
     ) -> Result<T, String> {
         decode(self.post(path, body).await?, path)
+    }
+
+    /// [`Api::post_as`] carrying an `Idempotency-Key`.
+    ///
+    /// The context-platform plane requires one on every creation (ADR-0071):
+    /// the same key with the same body replays with 200, and with a different
+    /// body is refused with 409. So the key has to be **stable for the request
+    /// it names** rather than fresh per attempt — a retry that minted a new
+    /// key would create a second row, which is the thing the header exists to
+    /// prevent.
+    pub async fn post_idempotent_as<T: DeserializeOwned>(
+        &self,
+        path: &str,
+        body: Option<Value>,
+        key: &str,
+    ) -> Result<T, String> {
+        let mut request = self
+            .http
+            .post(format!("{}{path}", self.base))
+            .header("Idempotency-Key", key);
+        if let Some(body) = body {
+            request = request.json(&body);
+        }
+        decode(self.send(request, "POST", path).await?, path)
     }
 
     async fn send(
@@ -372,8 +458,20 @@ mod tests {
                     seen.lock()
                         .await
                         .push((field("traceparent: "), field("x-synveda-client: ")));
+                    // `connection: close` is load-bearing, not politeness.
+                    // HTTP/1.1 keep-alive is the default, so without it
+                    // `reqwest` pools the socket and sends the second
+                    // request down a connection this loop has already
+                    // stopped reading — it is blocked in `accept()` waiting
+                    // for a new one. Whether the pool is consulted before
+                    // the first response is fully drained is a race, which
+                    // is why this failed about a third of the time under a
+                    // parallel suite and never in isolation.
                     stream
-                        .write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\r\n{}")
+                        .write_all(
+                            b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\n\
+                              connection: close\r\n\r\n{}",
+                        )
                         .await
                         .expect("write");
                 }
@@ -388,7 +486,7 @@ mod tests {
         }
         let (api, _origin) = Api::connect("default").await.expect("connect");
         api.get("/v1/whoami").await.expect("first call");
-        api.post("/v1/recall", None).await.expect("second call");
+        api.post("/v1/sessions", None).await.expect("second call");
         unsafe {
             std::env::remove_var("SYNVEDA_TOKEN");
             std::env::remove_var("SYNVEDA_GATEWAY");

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Asserts no ADR still reads `Proposed` after its feature shipped.
 //
-// CLAUDE.md requires an ADR before implementation, so an ADR spends its
+// AGENTS.md requires an ADR before implementation, so an ADR spends its
 // early life as `Proposed` — correctly. What nothing checked was the other
 // end: the feature lands, STATUS.md gets its `[x]`, and the ADR keeps
 // saying the decision is a proposal. Two of them drifted that way
@@ -16,9 +16,8 @@
 // turns off, so this one stays silent there. ADR-0061 sat in exactly that
 // state on the day this was written.
 //
-// Run by `make ci` beside check-backlog.mjs, which reconciles
-// SYNVEDA_FEATURES.md, docs/backlog/<ID>.md and STATUS.md with each other
-// and never reads an ADR header — the gap this fills.
+// Run by `make ci` beside check-backlog.mjs, which validates the feature
+// inventory and open briefs but never reads an ADR header.
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
@@ -43,7 +42,7 @@ const fail = (message) => {
 let failed = false;
 
 const status = readFileSync(STATUS, "utf8");
-const delivered = new Set([...status.matchAll(/^- \[x\] \[([A-Z]+-\d+):/gm)].map((m) => m[1]));
+const delivered = new Set([...status.matchAll(/^- \[x\] ([A-Z]+-\d+):/gm)].map((m) => m[1]));
 const pending = new Set([...status.matchAll(/^- \[ \] \[([A-Z]+-\d+):/gm)].map((m) => m[1]));
 
 const files = readdirSync(ADRS)

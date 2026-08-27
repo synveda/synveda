@@ -2,13 +2,13 @@
   "asked_about": "0199c000-0000-7000-8000-000000000000",
   "payload": {
     "scope_id": "0199c000-0000-7000-8000-000000000000",
-    "scope_path": "acme/eng/platform",
+    "scope_path": "<tenant>/eng/platform",
     "pack": {
       "name": "eng-pack",
       "version": 7,
       "origin": {
-        "kind": "assigned",
-        "scope_id": "0199c000-0000-7000-8000-000000000001"
+        "kind": "configuration-binding",
+        "scope_id": "0199c000-0000-7000-8000-000000000002"
       }
     },
     "roles": [
@@ -19,28 +19,39 @@
       "channel.publish": true,
       "channel.read": true,
       "channel.rollback": true,
+      "configuration.read": true,
+      "configuration.write": true,
       "context_pack.write": true,
-      "hierarchy.create": true,
-      "hierarchy.delete": true,
-      "hierarchy.read": true,
-      "hierarchy.update": true,
-      "lapse.grant": true,
-      "lapse.revoke": true,
-      "memory.classify": true,
-      "memory.write": true,
+      "knowledge.forget": true,
+      "knowledge.write": true,
+      "membership.grant": true,
+      "membership.read": true,
       "policy.assign": false,
       "policy.read": true,
+      "project.create": true,
+      "project.read": true,
+      "project.update": true,
       "prompt.write": true,
       "proposal.open": true,
       "proposal.read": true,
       "proposal.review": true,
       "quarantine.read": true,
       "quarantine.review": true,
-      "role.read": true,
+      "relaxation.write": true,
+      "scope.create": true,
+      "scope.read": true,
+      "scope.update": true,
       "service_identity.manage": true,
       "service_identity.read": true,
-      "skill.quality.override": true,
-      "skill.write": true
+      "session.diagnostics": true,
+      "session.read": true,
+      "session.write": true,
+      "skill.write": true,
+      "tool.read": true,
+      "tool.write": true,
+      "workspace.create": true,
+      "workspace.read": true,
+      "workspace.update": true
     },
     "read_tiers": {
       "context_pack.read": [
@@ -49,7 +60,7 @@
         "confidential",
         "restricted"
       ],
-      "memory.read": [
+      "knowledge.read": [
         "public",
         "internal",
         "confidential"
@@ -66,16 +77,6 @@
         "confidential",
         "restricted"
       ]
-    },
-    "role_assign": {
-      "auditor": true,
-      "compliance": true,
-      "contributor": true,
-      "curator": true,
-      "org-admin": false,
-      "security-reviewer": true,
-      "steward": true,
-      "viewer": true
     }
   }
 }

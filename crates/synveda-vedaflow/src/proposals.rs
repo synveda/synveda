@@ -34,9 +34,10 @@ use std::collections::HashSet;
 
 use chrono::{DateTime, Utc};
 use sqlx::PgConnection;
+use synveda_types::access::RoleKey;
 use synveda_types::{
-    AssetKind, CastApproval, Error, IdentityId, PromotionEvidence, ProposalEffect, ProposalId,
-    ProposalState, Result, Role, ScopeId, Sensitivity, TenantId, Verdict,
+    ArtifactFamily, ArtifactReference, AssetKind, CastApproval, Error, IdentityId, ProposalEffect,
+    ProposalId, ProposalState, Result, ScopeId, Sensitivity, TenantId, Verdict,
 };
 use uuid::Uuid;
 
@@ -57,6 +58,9 @@ pub const PROPOSAL_ACTS_TOTAL: &str = "synveda_vedaflow_proposal_acts_total";
 /// reviewed act, and two hundred records in one review is a migration
 /// wearing a reviewer's hat.
 pub const MAX_PROPOSAL_MEMBERS: usize = 200;
+
+/// The most typed artifact addresses one common review may carry.
+pub const MAX_ARTIFACT_REFERENCES: usize = 200;
 
 /// The most proposals that may stand open at one scope.
 ///
@@ -80,8 +84,8 @@ pub struct NewProposal<'a> {
     /// Which asset type.
     pub asset: AssetKind,
     /// What running this proposal would do: publish its members onto the
-    /// target's channel, or — since AUTHZ-4 — open a lapse (ADR-0037
-    /// decision 16). This module runs neither; the caller does.
+    /// target's channel or apply a typed governed effect. This module runs
+    /// neither; the caller does.
     pub effect: ProposalEffect,
     /// The members, as `(entry name, content address)`.
     pub members: &'a [(String, ObjectHash)],
@@ -97,16 +101,9 @@ pub struct NewProposal<'a> {
     pub committed_at: DateTime<Utc>,
     /// The pack in force, as the caller resolved it.
     pub policy_snapshot: &'a PolicySnapshot,
-    /// Why a rule opened this, when one did (FLOW-4, ADR-0033 decision
-    /// 12). `None` on every human-opened proposal, which is the honest
-    /// value — no rule fired.
-    ///
-    /// Written in the insert rather than set afterwards: the transition
-    /// trigger permits a proposal row exactly one update, open → closed,
-    /// so evidence either arrives with the row or cannot arrive at all.
-    /// That is the right shape anyway — it is a fact about why the
-    /// proposal was opened.
-    pub evidence: Option<&'a PromotionEvidence>,
+    /// Content-free typed domain addresses under review. Stored on the
+    /// common lifecycle row so every artifact family has one queue contract.
+    pub artifact_references: &'a [ArtifactReference],
 }
 
 /// A proposal as stored.
@@ -145,9 +142,8 @@ pub struct StoredProposal {
     pub closed_by: Option<IdentityId>,
     /// Why it closed — always present on a rejection.
     pub close_reason: Option<String>,
-    /// Why a rule opened it, when one did (FLOW-4, ADR-0033 decision
-    /// 12). `None` on a human's proposal.
-    pub evidence: Option<PromotionEvidence>,
+    /// Canonically ordered typed domain addresses under review.
+    pub artifact_references: Vec<ArtifactReference>,
 }
 
 /// One recorded review act.
@@ -164,7 +160,7 @@ pub struct StoredApproval {
     pub verdict: Verdict,
     /// The effective roles they held at the target scope when they cast
     /// it — recorded, never re-derived (ADR-0032 decision 5).
-    pub roles: Vec<Role>,
+    pub roles: Vec<RoleKey>,
     /// What they said.
     pub comment: Option<String>,
     /// When.
@@ -211,7 +207,7 @@ pub struct NewApproval<'a> {
     /// Approve or reject.
     pub verdict: Verdict,
     /// The effective roles held at the target scope.
-    pub roles: &'a [Role],
+    pub roles: &'a [RoleKey],
     /// What they said.
     pub comment: Option<&'a str>,
 }
@@ -253,6 +249,32 @@ pub async fn open(
             ),
         });
     }
+    if new.artifact_references.is_empty() || new.artifact_references.len() > MAX_ARTIFACT_REFERENCES
+    {
+        return Err(Error::Invalid {
+            message: format!(
+                "a proposal carries 1..={MAX_ARTIFACT_REFERENCES} typed artifact references, got {}",
+                new.artifact_references.len()
+            ),
+        });
+    }
+    let mut artifact_references = new.artifact_references.to_vec();
+    for reference in &artifact_references {
+        reference.validate()?;
+    }
+    artifact_references.sort();
+    if artifact_references
+        .windows(2)
+        .any(|pair| pair[0] == pair[1])
+    {
+        return Err(Error::Invalid {
+            message: "a proposal cannot name the same typed artifact reference twice".to_owned(),
+        });
+    }
+    let artifact_references_json =
+        serde_json::to_value(&artifact_references).map_err(|err| Error::Internal {
+            message: format!("serialise proposal artifact references: {err}"),
+        })?;
     let entries: Vec<TreeEntry> = new
         .members
         .iter()
@@ -277,19 +299,11 @@ pub async fn open(
     .await?;
 
     let id = ProposalId::new();
-    let evidence = new
-        .evidence
-        .map(|evidence| {
-            serde_json::to_value(evidence).map_err(|err| Error::Internal {
-                message: format!("serialise promotion evidence: {err}"),
-            })
-        })
-        .transpose()?;
     let row = sqlx::query!(
         r#"insert into vedaflow_proposals
                (tenant_id, id, target_scope_id, source_scope_id, asset_kind,
                 target_channel, commit_hash, sensitivity, title, proposer_id,
-                proposer_subject, evidence)
+                proposer_subject, artifact_references)
            values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
            returning created_at, updated_at"#,
         tenant.as_uuid(),
@@ -303,7 +317,7 @@ pub async fn open(
         new.title,
         new.proposer.as_uuid(),
         new.proposer_subject,
-        evidence,
+        artifact_references_json,
     )
     .fetch_one(&mut *conn)
     .await
@@ -330,7 +344,7 @@ pub async fn open(
         closed_at: None,
         closed_by: None,
         close_reason: None,
-        evidence: new.evidence.cloned(),
+        artifact_references,
     })
 }
 
@@ -345,7 +359,8 @@ pub async fn read(
         ProposalRow,
         r#"select id, target_scope_id, source_scope_id, asset_kind, target_channel,
                   commit_hash, sensitivity, state, title, proposer_id, proposer_subject,
-                  created_at, updated_at, closed_at, closed_by, close_reason, evidence
+                  created_at, updated_at, closed_at, closed_by, close_reason,
+                  artifact_references
            from vedaflow_proposals
            where tenant_id = $1 and id = $2"#,
         tenant.as_uuid(),
@@ -365,6 +380,8 @@ pub struct ProposalFilter {
     pub target_scope: Option<ScopeId>,
     /// Only proposals in this state.
     pub state: Option<ProposalState>,
+    /// Only proposals whose typed reference index contains this family.
+    pub artifact_family: Option<ArtifactFamily>,
     /// At most this many, newest first.
     pub limit: i64,
 }
@@ -380,16 +397,21 @@ pub async fn list(
         ProposalRow,
         r#"select id, target_scope_id, source_scope_id, asset_kind, target_channel,
                   commit_hash, sensitivity, state, title, proposer_id, proposer_subject,
-                  created_at, updated_at, closed_at, closed_by, close_reason, evidence
+                  created_at, updated_at, closed_at, closed_by, close_reason,
+                  artifact_references
            from vedaflow_proposals
            where tenant_id = $1
              and ($2::uuid is null or target_scope_id = $2)
              and ($3::text is null or state = $3)
+             and ($4::jsonb is null or artifact_references @> $4)
            order by created_at desc, id desc
-           limit $4"#,
+           limit $5"#,
         tenant.as_uuid(),
         filter.target_scope.map(|scope| scope.as_uuid()),
         filter.state.map(|state| state.as_str()),
+        filter
+            .artifact_family
+            .map(|family| { serde_json::json!([{ "family": family.as_str() }]) }),
         filter.limit,
     )
     .fetch_all(&mut *conn)
@@ -443,7 +465,7 @@ pub async fn approvals(
                     .roles
                     .iter()
                     .map(|role| role.parse().map_err(vocabulary))
-                    .collect::<Result<Vec<Role>>>()?,
+                    .collect::<Result<Vec<RoleKey>>>()?,
                 comment: row.comment,
                 created_at: row.created_at,
             })
@@ -678,7 +700,7 @@ struct ProposalRow {
     closed_at: Option<DateTime<Utc>>,
     closed_by: Option<Uuid>,
     close_reason: Option<String>,
-    evidence: Option<serde_json::Value>,
+    artifact_references: serde_json::Value,
 }
 
 impl TryFrom<ProposalRow> for StoredProposal {
@@ -702,24 +724,40 @@ impl TryFrom<ProposalRow> for StoredProposal {
             closed_at: row.closed_at,
             closed_by: row.closed_by.map(IdentityId::from_uuid),
             close_reason: row.close_reason,
-            // Stored by this crate on the way in, so unparseable json can
-            // only come from an out-of-band write. Fail safe and loud:
-            // report the proposal without its evidence rather than
-            // refusing to render a real proposal at all.
-            evidence: row.evidence.and_then(|value| {
-                serde_json::from_value(value)
-                    .inspect_err(|err: &serde_json::Error| {
-                        tracing::warn!(
-                            proposal.id = %row.id,
-                            error = %err,
-                            "stored promotion evidence does not parse; \
-                             rendering the proposal without it"
-                        );
-                    })
-                    .ok()
-            }),
+            artifact_references: parse_artifact_references(row.id, row.artifact_references)?,
         })
     }
+}
+
+fn parse_artifact_references(
+    proposal_id: Uuid,
+    value: serde_json::Value,
+) -> Result<Vec<ArtifactReference>> {
+    let mut references: Vec<ArtifactReference> =
+        serde_json::from_value(value).map_err(|err| Error::Internal {
+            message: format!("proposal {proposal_id} has invalid typed artifact references: {err}"),
+        })?;
+    if references.is_empty() || references.len() > MAX_ARTIFACT_REFERENCES {
+        return Err(Error::Internal {
+            message: format!(
+                "proposal {proposal_id} has an invalid typed artifact reference count"
+            ),
+        });
+    }
+    for reference in &references {
+        reference.validate().map_err(|err| Error::Internal {
+            message: format!(
+                "proposal {proposal_id} has an invalid typed artifact reference: {err}"
+            ),
+        })?;
+    }
+    references.sort();
+    if references.windows(2).any(|pair| pair[0] == pair[1]) {
+        return Err(Error::Internal {
+            message: format!("proposal {proposal_id} contains duplicate typed artifact references"),
+        });
+    }
+    Ok(references)
 }
 
 /// The CHECK constraints keep these columns inside their vocabularies, so
@@ -741,7 +779,7 @@ mod tests {
             approver_subject: format!("subject-{byte}"),
             commit,
             verdict,
-            roles: vec![Role::Curator],
+            roles: vec![RoleKey::Curator],
             comment: None,
             created_at: Utc::now(),
         }
@@ -782,6 +820,7 @@ mod tests {
             ProposalState::Rejected,
             ProposalState::Withdrawn,
             ProposalState::Published,
+            ProposalState::Applied,
         ] {
             assert!(state.is_terminal());
         }

@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into vedaflow_tree_entries (tenant_id, tree_hash, name, object_hash)\n         values ($1, $2, 'command', $3)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Bytea",
+        "Bytea"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "bfcdf9174f3123c64d695663a7fe63d1f883ac057e7b02060981472df688c715"
+}

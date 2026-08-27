@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// CLAUDE.md's licence rule on the *corpus* side (EVAL-3, ADR-0061
+// The repository licence rule on the *corpus* side (EVAL-3, ADR-0061
 // compliance notes) — the gate that did not exist when it was needed.
 //
 // ADR-0061 decision 1 found LoCoMo's corpus is licensed CC BY-NC 4.0: it
@@ -9,7 +9,7 @@
 // case of the use that licence withholds — and nothing in the build would
 // have caught it. `cargo deny` governs crates. `check-npm-licences.mjs`
 // governs packages. A corpus is data, so it passed through the feature
-// specification, the phase demo goal and CLAUDE.md untouched by any gate,
+// specification and phase demo goal untouched by any gate,
 // and was caught by somebody reading a LICENSE.txt.
 //
 // This is that gap closed where the build can see it. Three shapes of
@@ -118,7 +118,7 @@ for (const name of directories) {
   if (!PERMITTED.includes(declared.licence)) {
     fail(
       `${ROOT}/${name} is declared ${declared.licence}, which the core path does not admit ` +
-        `(${PERMITTED.join(" / ")}, per CLAUDE.md and deny.toml). There is no exception ` +
+        `(${PERMITTED.join(" / ")}, per deny.toml). There is no exception ` +
         `mechanism here: a corpus whose licence withholds the use we make of it is a corpus ` +
         `that does not enter the repository.`,
     );

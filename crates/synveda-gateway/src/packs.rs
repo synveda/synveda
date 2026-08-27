@@ -2,43 +2,25 @@
 //! behind tenant resolution, uniform-404 ownership, and the PDP
 //! (`ContextPackWrite` to author, `ContextPackRead` to see a shelf).
 //!
-//! Two surfaces here, and **neither is the one that matters most**. A
-//! prompt is fetched by name through its own route; a pack's content
-//! arrives through `inject`, as pinned records the composition engine
-//! ranks (ADR-0050 decision 2). So this module authors and lists, and the
-//! read path lives in `synveda_retrieval::compose`.
+//! Authoring stores scanned immutable `context_pack_chunks`; VedaFlow
+//! publication selects which version is current. A ContextRun resolves those
+//! published chunks as separately authorised authored input, outside the
+//! Knowledge semantic index.
 //!
-//! - **author** (`POST /v1/context-packs`) — the slowest write in the
-//!   product, and deliberately: it chunks, scans and embeds a bundle in one
-//!   request. It moves nothing a session reads, which is the whole of "a
+//! - **author** (`POST /v1/context-packs`) — it scans and chunks a bundle in
+//!   one request. It moves nothing a session reads, which is the whole of "a
 //!   pack reaches a session only through review": the published channel is
 //!   somewhere else, and only the approval matrix moves it.
 //! - **list** (`GET /v1/context-packs?scope_id=…`) — the registry view at
 //!   one scope: what is drafted, what is published, and whether they are
 //!   the same bytes.
 //!
-//! # Why the expensive half happens here
-//!
-//! The AC says "chunked+embedded **on publish**". This is a departure with
-//! a reason (ADR-0050 decision 4): embedding is a call to TEI, no proposal
-//! approval has ever made a network call, and the literal reading makes a
-//! curator's approval fail when a model server is down. Doing it at
-//! authoring also makes the atomicity clause cheap — chunk rows land with
-//! their embeddings or not at all, a publication is a ref move, and a
-//! rewind restores a version with no re-embedding at all.
-//!
-//! The order inside it is ADR-0023 decision 5's, applied to authored bulk:
-//! **chunk, scan, embed, commit**. The scanner runs before the embedder, so
-//! a secret that never reaches `content` never reaches vector space.
-//!
 //! # Re-authoring an unchanged document costs nothing
 //!
 //! The chunker is deterministic and the document address covers exactly
 //! what a reviewer consents to, so identical bytes produce the same address
 //! and the same chunks. This route looks the address up first and skips the
-//! scan, the chunking and the embedding for every document that has not
-//! moved — which is what keeps "save the bundle again" from being a
-//! thousand vectors of work.
+//! scan and chunking for every document that has not moved.
 
 use std::collections::HashMap;
 
@@ -51,21 +33,20 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use synveda_audit::{AuditAction, Outcome};
 use synveda_ingest::ScanOutcome;
-use synveda_ingest::embedding::Embedder as _;
 use synveda_policy::{Action, Resource};
-use synveda_store::{hierarchy, packs, records, rls};
+use synveda_store::{packs, rls, scopes};
+use synveda_types::scope::Scope;
 use synveda_types::{
-    Channel, ContextPackName, DocumentChunk, DocumentName, DocumentPath, Error, HierarchyNode,
-    IdentityId, MAX_PACK_DESCRIPTION_CHARS, MAX_PACK_DOCUMENTS, PackDocument, RecordClass,
-    RecordId, RecordKind, RedactionMode, Result, ScopeId, Sensitivity,
+    Channel, ContextPackChunkId, ContextPackName, DocumentChunk, DocumentName, DocumentPath, Error,
+    IdentityId, MAX_PACK_DESCRIPTION_CHARS, MAX_PACK_DOCUMENTS, PackDocument, RedactionMode,
+    Result, ScopeId, Sensitivity,
 };
 use synveda_vedaflow::{self as vedaflow, ContextPackAsset};
 
 use crate::app::AppState;
 use crate::audit;
 use crate::authz::{self, DecisionInput};
-use crate::error::ApiError;
-use crate::hierarchy::{body, commit, found, tenant_id};
+use crate::request::{body, commit, found, tenant_id};
 use crate::telemetry::CONTEXT_PACK_OPERATIONS_TOTAL;
 
 /// Counts the operation and renders the result — the outcome taxonomy
@@ -75,35 +56,20 @@ async fn respond<T: IntoResponse>(
     op: &'static str,
     result: Result<T>,
 ) -> Response {
-    let outcome = match &result {
-        Ok(_) => "ok",
-        Err(
-            Error::Unauthenticated { .. }
-            | Error::PolicyDenied { .. }
-            | Error::NotFound { .. }
-            | Error::Invalid { .. }
-            | Error::Conflict { .. }
-            | Error::RateLimited { .. },
-        ) => "rejected",
-        Err(_) => "error",
-    };
+    let outcome = crate::response::outcome(&result);
     metrics::counter!(CONTEXT_PACK_OPERATIONS_TOTAL, "op" => op, "outcome" => outcome).increment(1);
-    match result {
-        Ok(response) => response.into_response(),
-        Err(error) => {
-            audit::record_rejection(state, op, &error).await;
-            ApiError(error).into_response()
-        }
-    }
+    crate::response::finish(state, op, result).await
 }
 
 // ── Author ─────────────────────────────────────────────────────────────
 
 /// One document as an author supplies it.
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
+#[schema(as = ContextPackDocumentBody)]
 pub(crate) struct DocumentBody {
     /// Its name within the pack: path-shaped, so a bundle can carry
     /// `runbooks/payments.md` rather than flattening a directory.
+    #[schema(value_type = String)]
     name: DocumentName,
     /// One line, read in a listing, at review, and in the index tier
     /// (ADR-0050 decision 10).
@@ -115,16 +81,20 @@ pub(crate) struct DocumentBody {
     /// than per pack (decision 12) — a glossary of public terms and an
     /// internal runbook are plausibly the same bundle.
     #[serde(default)]
+    #[schema(value_type = Option<String>)]
     sensitivity: Option<Sensitivity>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
+#[schema(as = ContextPackAuthorBody)]
 pub(crate) struct AuthorBody {
     /// Where the pack is authored — the scope that will stand behind it,
     /// and the scope whose published channel a proposal would move.
+    #[schema(value_type = String, format = "uuid")]
     scope_id: ScopeId,
     /// Its name: one segment, lower-case, and the identifier a scope's
     /// override is expressed in (ADR-0050 decision 1).
+    #[schema(value_type = String)]
     name: ContextPackName,
     /// One line, read in a listing and at review.
     #[serde(default)]
@@ -137,8 +107,9 @@ pub(crate) struct AuthorBody {
 }
 
 /// What a scope's published channel holds for one document right now.
-#[derive(Serialize)]
-struct PublishedView {
+#[derive(Serialize, utoipa::ToSchema)]
+#[schema(as = ContextPackPublishedView)]
+pub(crate) struct PublishedView {
     /// The commit the channel serves.
     commit: String,
     /// The address it names for this document.
@@ -151,35 +122,41 @@ struct PublishedView {
     current: bool,
 }
 
-#[derive(Serialize)]
-struct DocumentView {
+#[derive(Serialize, utoipa::ToSchema)]
+#[schema(as = ContextPackDocumentView)]
+pub(crate) struct DocumentView {
     name: String,
     title: String,
+    #[schema(value_type = String)]
     sensitivity: Sensitivity,
     /// The draft's content address — what a proposal would bind.
     object_hash: String,
     /// How many chunks it cut into.
     chunks: u32,
-    /// How many of those this request actually embedded. Zero for a
-    /// document whose bytes did not move, which is the observable half of
-    /// "re-authoring an unchanged document re-embeds nothing".
-    embedded: u32,
+    /// How many immutable chunk rows this request wrote. Zero means the
+    /// exact document version already existed.
+    written_chunks: u32,
     updated_at: DateTime<Utc>,
+    #[schema(value_type = String, format = "uuid")]
     updated_by: IdentityId,
     #[serde(skip_serializing_if = "Option::is_none")]
     published: Option<PublishedView>,
 }
 
-#[derive(Serialize)]
-struct PackView {
+#[derive(Serialize, utoipa::ToSchema)]
+#[schema(as = ContextPackView)]
+pub(crate) struct PackView {
     name: String,
+    #[schema(value_type = String, format = "uuid")]
     scope_id: ScopeId,
     scope_path: String,
     description: String,
     documents: Vec<DocumentView>,
     created_at: DateTime<Utc>,
+    #[schema(value_type = String, format = "uuid")]
     created_by: IdentityId,
     updated_at: DateTime<Utc>,
+    #[schema(value_type = String, format = "uuid")]
     updated_by: IdentityId,
 }
 
@@ -191,6 +168,21 @@ struct PackView {
 /// below this handler. Documents *not* named in the request are left
 /// alone — a bundle is edited a file at a time, and a request that dropped
 /// the rest would make every save a full re-upload.
+#[utoipa::path(
+    post,
+    path = "/v1/context-packs",
+    operation_id = "author_context_pack",
+    tag = "context-packs",
+    request_body = AuthorBody,
+    responses(
+        (status = 200, description = "The authored context-pack draft", body = PackView),
+        (status = 400, description = "The pack or document content is invalid", body = crate::workspaces::ApiErrorBody),
+        (status = 401, description = "No usable credential", body = crate::workspaces::ApiErrorBody),
+        (status = 403, description = "Context-pack authoring is not permitted", body = crate::workspaces::ApiErrorBody),
+        (status = 404, description = "The governing scope is absent", body = crate::workspaces::ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
 #[tracing::instrument(name = "context_packs.author", skip_all)]
 pub(crate) async fn author(
     State(state): State<AppState>,
@@ -206,8 +198,6 @@ struct Prepared {
     asset: ContextPackAsset,
     /// The chunks to write, empty when the document has not moved.
     chunks: Vec<DocumentChunk>,
-    /// Their vectors, in the same order.
-    vectors: Vec<Vec<f32>>,
     /// How many chunks this document cuts into in total, moved or not.
     total: u32,
 }
@@ -282,17 +272,23 @@ async fn author_inner(
     let (node, author, authorized, redaction, unmoved) = {
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
         let node = found(
-            hierarchy::node(&mut *tx, body.scope_id).await?,
+            scopes::get(&mut *tx, tenant_id, body.scope_id).await?,
             tenant_id,
             body.scope_id,
         )?;
-        let input = authz::gather(state, &mut tx, Some(&node)).await?;
+        let input = authz::gather(
+            state,
+            &mut tx,
+            Some(&node),
+            synveda_store::anchors::AnchorSelection::none(),
+            Vec::new(),
+        )
+        .await?;
         let authorized = authz::decide(
             state,
             &input,
             Action::ContextPackWrite,
             Resource::Scope(body.scope_id),
-            None,
         )?;
         let author = identity_of(&input)?;
         // The authoring scope's effective redaction config — the same
@@ -306,14 +302,19 @@ async fn author_inner(
         // question: identical bytes, identical address, identical chunks.
         let mut unmoved: Vec<bool> = Vec::with_capacity(assets.len());
         for asset in &assets {
-            let existing =
-                packs::chunks_of(&mut *tx, tenant_id, *asset.address().as_bytes()).await?;
+            let existing = packs::chunks_of(
+                &mut *tx,
+                tenant_id,
+                body.scope_id,
+                *asset.address().as_bytes(),
+            )
+            .await?;
             unmoved.push(!existing.is_empty());
         }
         (node, author, authorized, redaction, unmoved)
     };
 
-    // ── Scan, chunk, embed — outside any transaction ───────────────────
+    // ── Scan and chunk — outside any transaction ───────────────────────
     let mut prepared: Vec<Prepared> = Vec::with_capacity(assets.len());
     let mut scanned = 0_usize;
     let mut redacted = 0_usize;
@@ -321,26 +322,24 @@ async fn author_inner(
         let total =
             u32::try_from(synveda_types::chunk(&asset.document.content).len()).unwrap_or(u32::MAX);
         if unmoved {
-            // Nothing to scan, nothing to cut, nothing to embed. The bytes
+            // Nothing to scan and nothing to cut. The bytes
             // were admitted once and are addressed by exactly what was
             // admitted.
             prepared.push(Prepared {
                 asset,
                 chunks: Vec::new(),
-                vectors: Vec::new(),
                 total,
             });
             continue;
         }
         scanned += 1;
-        // The scanner first, always (ADR-0023 decision 5's order applied to
-        // authored bulk): a secret that never reaches `content` never
-        // reaches vector space.
+        // The scanner first, always: a secret that does not survive this
+        // seam never reaches stored authored context.
         //
         // The ladder is MEM-2's own (ADR-0021 decision 4, ADR-0050
         // decision 11), which means `redact` **scrubs and continues** here
         // exactly as it does on the observe path — the finding is gone from
-        // the text before anything is chunked, addressed or embedded, so
+        // the text before anything is chunked or addressed, so
         // what a reviewer reads and what a session composes are the
         // scrubbed bytes. Only `quarantine` and `deny` stop the write.
         let mut asset = asset;
@@ -356,41 +355,17 @@ async fn author_inner(
             }
         }
         let chunks = synveda_types::chunk(&asset.document.content);
-        let inputs: Vec<String> = chunks.iter().map(|piece| piece.content.clone()).collect();
-        let vectors = if inputs.is_empty() {
-            Vec::new()
-        } else {
-            let vectors = state.embedder.embed(&inputs).await?;
-            if vectors.len() != inputs.len() {
-                return Err(Error::Dependency {
-                    service: "embedder".to_owned(),
-                    message: format!(
-                        "the embedder returned {} vectors for {} chunks of {}; a document \
-                         lands with all of its embeddings or none (ADR-0023 decision 2)",
-                        vectors.len(),
-                        inputs.len(),
-                        asset.document.name
-                    ),
-                });
-            }
-            vectors
-        };
         prepared.push(Prepared {
             asset,
             chunks,
-            vectors,
             total,
         });
     }
 
     // ── Write, in one transaction ──────────────────────────────────────
     //
-    // Every chunk row lands with its embedding or none do (ADR-0023
-    // decision 2, and migration 0015's deferred constraint trigger behind
-    // it). A publication cannot then move the ref to a commit whose chunks
-    // are not all embedded, because the commit names addresses that only
-    // exist once this transaction committed — which is the whole of "re-
-    // embeds atomically" (ADR-0050 decision 5).
+    // Every scanned chunk row lands with its object address or none do. A
+    // publication cannot point at a partially admitted document version.
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
     let stored_pack = packs::upsert_pack(
         &mut *tx,
@@ -404,9 +379,7 @@ async fn author_inner(
     )
     .await?;
 
-    let now = Utc::now();
-    let model = state.embedder.model().to_owned();
-    let mut embedded_total = 0_u32;
+    let mut written_total = 0_u32;
     let mut written: Vec<(packs::StoredDocument, u32, String)> = Vec::with_capacity(prepared.len());
     for item in &prepared {
         let object = vedaflow::put_context_pack(&mut tx, tenant_id, &item.asset).await?;
@@ -426,74 +399,30 @@ async fn author_inner(
             },
         )
         .await?;
-        let mut embedded = 0_u32;
-        for (chunk, vector) in item.chunks.iter().zip(&item.vectors) {
-            let record_id = RecordId::new();
-            records::insert(
-                &mut *tx,
-                record_id,
-                tenant_id,
-                &records::RecordState {
-                    scope_id: body.scope_id,
-                    owner_id: author,
-                    // A pack's published content composes as pinned records
-                    // — the decision the rest of the feature hangs on
-                    // (ADR-0050 decision 2). It is also what buys ADR-0040's
-                    // exemption from expiry, destruction and staleness, and
-                    // ADR-0039's derived-only supersession, without a second
-                    // implementation of either.
-                    kind: RecordKind::Pinned,
-                    // The class vocabulary describes what a *memory*
-                    // asserts. A pack states what is so at its scope, so
-                    // `fact` is the honest neutral — and the description
-                    // that actually matters for a chunk is its
-                    // `pack/document § heading`, which is why ADR-0041
-                    // decision 4 made the index slot a per-`AssetKind` seam.
-                    class: RecordClass::Fact,
-                    content: chunk.content.clone(),
-                    // Every chunk inherits its document's tier
-                    // (decision 12), which is what CTX-4 and ADR-0038's
-                    // per-scope tier check then apply per entry.
-                    sensitivity: item.asset.sensitivity,
-                    provenance: json!({
-                        "source": "context-pack",
-                        "pack": body.name.as_str(),
-                        "document": item.asset.document.name.as_str(),
-                        "ordinal": chunk.ordinal,
-                        // The address it was cut from — the same value the
-                        // chunk row carries, so a record read alone still
-                        // says which reviewed version it came from.
-                        "document_hash": object.hash.to_hex(),
-                        "embedding_model": model,
-                    }),
-                    valid_from: now,
-                    valid_to: None,
-                },
-                &records::RecordEmbedding {
-                    model: model.clone(),
-                    vector: vector.clone(),
-                },
-            )
-            .await?;
+        let mut written_chunks = 0_u32;
+        for chunk in &item.chunks {
             packs::record_chunk(
                 &mut *tx,
                 tenant_id,
                 &packs::NewChunk {
-                    record_id,
+                    id: ContextPackChunkId::new(),
                     scope_id: body.scope_id,
                     pack_name: &body.name,
                     document_name: &item.asset.document.name,
                     title: &item.asset.document.title,
+                    sensitivity: item.asset.sensitivity,
                     document_hash: address,
                     ordinal: chunk.ordinal,
                     heading: chunk.heading.as_deref(),
+                    content: &chunk.content,
+                    content_hash: *blake3::hash(chunk.content.as_bytes()).as_bytes(),
                 },
             )
             .await?;
-            embedded += 1;
+            written_chunks += 1;
         }
-        embedded_total += embedded;
-        written.push((stored, embedded, object.hash.to_hex()));
+        written_total += written_chunks;
+        written.push((stored, written_chunks, object.hash.to_hex()));
     }
 
     let published = published_at(&mut tx, tenant_id, body.scope_id).await?;
@@ -512,18 +441,17 @@ async fn author_inner(
             // since AUD-1.
             "documents": written
                 .iter()
-                .map(|(stored, embedded, hash)| json!({
+                .map(|(stored, written_chunks, hash)| json!({
                     "document": stored.document_name.as_str(),
                     "sensitivity": stored.sensitivity.as_str(),
                     "object_hash": hash,
                     "chunks": stored.chunks,
-                    "embedded": embedded,
+                    "written_chunks": written_chunks,
                 }))
                 .collect::<Vec<_>>(),
             "scanned": scanned,
             "redacted": redacted,
-            "embedded": embedded_total,
-            "embedding_model": model,
+            "written_chunks": written_total,
             // What a session is being served *now*, which is the point of
             // the whole surface: authoring moved nothing.
             "published_commit": published.as_ref().map(|(commit, _)| commit.to_hex()),
@@ -580,17 +508,13 @@ fn scrubbed(scan: &ScanOutcome, original: &str) -> String {
 /// The refusal a scanned document gets, and the event that chains it.
 ///
 /// Both dispositions refuse, and that is what a **synchronous** authoring
-/// surface can honestly do: the observe path stages a quarantined event
-/// because it is asynchronous and there is nobody to tell, while here there
-/// is an author on the other end of the request who can fix the document.
-/// So the review this decision asks for is the author's own, and the
-/// `context_pack.quarantined` event is what puts it on the chain — no
-/// second review queue, and no row in `observe_quarantine`, whose contents
-/// are observe events (a departure from decision 11's literal wording,
-/// recorded in ADR-0050's consequences).
+/// surface can honestly do: there is an author on the other end of the
+/// request who can fix the document. The `context_pack.quarantined` event
+/// puts that refusal on the chain without creating a second review queue
+/// (ADR-0050).
 ///
 /// What is not a departure is the guarantee: the document is not stored,
-/// not chunked and not embedded, so no secret reaches vector space.
+/// not chunked, so no secret reaches served context.
 async fn refuse_scanned<T>(
     state: &AppState,
     tenant_id: synveda_types::TenantId,
@@ -636,9 +560,9 @@ async fn refuse_scanned<T>(
     Err(Error::Invalid {
         message: format!(
             "document {} was stopped by the redaction scanner ({}): {}. It was not stored, \
-             not chunked and not embedded — a pack is the first surface where bulk external \
-             text enters the product, and the scan runs ahead of the embedder so no secret \
-             reaches vector space (ADR-0050 decision 11). Remove the finding and author again",
+             not chunked — a pack is a surface where bulk external text enters the product, \
+             and the scan runs before persistence (ADR-0050 decision 11). Remove the finding \
+             and author again",
             asset.document.name,
             mode.as_str(),
             rules.join(", "),
@@ -668,17 +592,21 @@ pub(crate) struct ListParams {
     scope_id: ScopeId,
 }
 
-#[derive(Serialize)]
-struct ListEntry {
+#[derive(Serialize, utoipa::ToSchema)]
+#[schema(as = ContextPackListEntry)]
+pub(crate) struct ListEntry {
     name: String,
     description: String,
     documents: Vec<DocumentView>,
     updated_at: DateTime<Utc>,
+    #[schema(value_type = String, format = "uuid")]
     updated_by: IdentityId,
 }
 
-#[derive(Serialize)]
-struct ListResponse {
+#[derive(Serialize, utoipa::ToSchema)]
+#[schema(as = ContextPackListResponse)]
+pub(crate) struct ListResponse {
+    #[schema(value_type = String, format = "uuid")]
     scope_id: ScopeId,
     scope_path: String,
     packs: Vec<ListEntry>,
@@ -690,6 +618,20 @@ struct ListResponse {
 /// Documents the caller may not read at their tier are omitted rather than
 /// refused, for the reason composition skips them: a listing that refused
 /// wholesale would make one `confidential` runbook hide the rest.
+#[utoipa::path(
+    get,
+    path = "/v1/context-packs",
+    operation_id = "list_context_packs",
+    tag = "context-packs",
+    params(("scope_id" = String, Query, format = "uuid")),
+    responses(
+        (status = 200, description = "Visible context-pack drafts at the scope", body = ListResponse),
+        (status = 401, description = "No usable credential", body = crate::workspaces::ApiErrorBody),
+        (status = 403, description = "Context-pack read is not permitted", body = crate::workspaces::ApiErrorBody),
+        (status = 404, description = "The governing scope is absent", body = crate::workspaces::ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
 #[tracing::instrument(name = "context_packs.list", skip_all)]
 pub(crate) async fn list(
     State(state): State<AppState>,
@@ -703,11 +645,18 @@ async fn list_inner(state: &AppState, scope_id: ScopeId) -> Result<Json<ListResp
     let tenant_id = tenant_id()?;
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
     let node = found(
-        hierarchy::node(&mut *tx, scope_id).await?,
+        scopes::get(&mut *tx, tenant_id, scope_id).await?,
         tenant_id,
         scope_id,
     )?;
-    let input = authz::gather(state, &mut tx, Some(&node)).await?;
+    let input = authz::gather(
+        state,
+        &mut tx,
+        Some(&node),
+        synveda_store::anchors::AnchorSelection::none(),
+        Vec::new(),
+    )
+    .await?;
     // The gate first, at the working tier — the question a listing asks.
     let authorized = authz::decide_context_pack_read(
         state,
@@ -769,7 +718,7 @@ async fn list_inner(state: &AppState, scope_id: ScopeId) -> Result<Json<ListResp
 
     Ok(Json(ListResponse {
         scope_id,
-        scope_path: node.path.clone(),
+        scope_path: node.slug.clone(),
         packs: entries,
     }))
 }
@@ -804,7 +753,7 @@ type PublishedState = (
 
 fn document_view(
     document: &packs::StoredDocument,
-    embedded: u32,
+    written_chunks: u32,
     published: Option<&PublishedState>,
 ) -> Result<DocumentView> {
     let address = vedaflow::hash::ObjectHash::from_bytes(document.object_hash);
@@ -815,7 +764,7 @@ fn document_view(
         sensitivity: document.sensitivity,
         object_hash: address.to_hex(),
         chunks: document.chunks,
-        embedded,
+        written_chunks,
         updated_at: document.updated_at,
         updated_by: document.updated_by,
         published: published.and_then(|(commit, members)| {
@@ -829,21 +778,21 @@ fn document_view(
 }
 
 fn view(
-    node: &HierarchyNode,
+    node: &Scope,
     pack: packs::StoredPack,
     written: Vec<(packs::StoredDocument, u32, String)>,
     published: Option<PublishedState>,
 ) -> PackView {
     let documents = written
         .iter()
-        .filter_map(|(document, embedded, _)| {
-            document_view(document, *embedded, published.as_ref()).ok()
+        .filter_map(|(document, written_chunks, _)| {
+            document_view(document, *written_chunks, published.as_ref()).ok()
         })
         .collect();
     PackView {
         name: pack.name.to_string(),
         scope_id: pack.scope_id,
-        scope_path: node.path.clone(),
+        scope_path: node.slug.clone(),
         description: pack.description,
         documents,
         created_at: pack.created_at,

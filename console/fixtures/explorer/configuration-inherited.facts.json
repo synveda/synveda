@@ -1,0 +1,12 @@
+{
+  "must_name": [
+    "eng-pack",
+    "0199c000-0000-7000-8000-000000000004",
+    "617ad3f0d49b8a111b7a1ddcaeaa90ae91b2eae05a8221186b2834da41cdd53f",
+    "inherited"
+  ],
+  "must_not_name": [
+    "bound here",
+    "enterprise fail-safe"
+  ]
+}

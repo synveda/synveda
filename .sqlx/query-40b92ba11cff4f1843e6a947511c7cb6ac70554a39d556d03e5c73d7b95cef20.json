@@ -1,0 +1,53 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select event.id, event.event_type, event.payload, event.occurred_at,\n               event.redactions, frozen.ordinal\n        from capture_batch_events frozen\n        join session_events event\n          on event.tenant_id = frozen.tenant_id and event.id = frozen.event_id\n        where frozen.tenant_id = $1 and frozen.batch_id = $2\n        order by frozen.ordinal\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "event_type",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "payload",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 3,
+        "name": "occurred_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 4,
+        "name": "redactions",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 5,
+        "name": "ordinal",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "40b92ba11cff4f1843e6a947511c7cb6ac70554a39d556d03e5c73d7b95cef20"
+}

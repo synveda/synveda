@@ -1,7 +1,7 @@
 //! `synveda scim token` — the provisioning credential from a terminal
 //! (AUTH-4, ADR-0059 decision 13).
 //!
-//! HTTP only, like `hierarchy` and `lapse` and for their reason: issuing a
+//! HTTP only, like the other governed application commands: issuing a
 //! credential is a governed act, decided by the PDP at the tenant resource
 //! and chained, and a verb that wrote the row directly would answer a
 //! governed question with no decision in the trail. `synveda policy` and
@@ -27,11 +27,6 @@ pub struct CredentialView {
     revoked_at: Option<DateTime<Utc>>,
     #[serde(default)]
     last_used_at: Option<DateTime<Utc>>,
-    /// Kept for the `--json` form, where an operator reconciling a
-    /// rotation wants to know when each one was issued. The table renders
-    /// expiry and last use, which are what a rotation decision turns on.
-    #[allow(dead_code)]
-    created_at: DateTime<Utc>,
     created_by: String,
 }
 
@@ -202,7 +197,6 @@ mod tests {
             expires_at,
             revoked_at: revoked.then(Utc::now),
             last_used_at: None,
-            created_at: Utc::now(),
             created_by: "alice@example.test".to_owned(),
         }
     }
@@ -264,7 +258,7 @@ mod tests {
             credentials: vec![
                 view("current", at("2027-01-01T00:00:00Z"), false),
                 view("rotated-out", at("2027-01-01T00:00:00Z"), true),
-                view("lapsed", at("2026-01-01T00:00:00Z"), false),
+                view("expired", at("2026-01-01T00:00:00Z"), false),
             ],
         };
         let rendered = render_listing(&listing, now);

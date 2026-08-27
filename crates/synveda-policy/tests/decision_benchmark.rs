@@ -24,10 +24,11 @@
 use std::time::Instant;
 
 use chrono::Utc;
-use synveda_policy::{Action, AuthzContext, Pdp, Principal, Resource, STANDARD};
-use synveda_types::{
-    HierarchyNode, PolicyAssignment, Role, RoleBinding, ScopeId, ScopeKind, Sensitivity, TenantId,
-};
+use synveda_policy::{Action, AuthzContext, Pdp, Principal, Resource, STANDARD, ScopeNode};
+use synveda_types::access::RoleKey;
+use synveda_types::anchor::{AnchorSource, ScopeAnchor};
+use synveda_types::scope::ScopeKind;
+use synveda_types::{PolicyAssignment, ScopeId, Sensitivity, TenantId};
 
 const WARMUP: usize = 1_000;
 const SAMPLES: usize = 10_000;
@@ -48,20 +49,16 @@ fn node(
     parent_id: Option<ScopeId>,
     kind: ScopeKind,
     slug: &str,
-    depth: i32,
-    path: &str,
-) -> HierarchyNode {
-    HierarchyNode {
+    _depth: i32,
+    _path: &str,
+) -> ScopeNode {
+    ScopeNode {
         id,
         tenant_id,
         parent_id,
         kind,
         slug: slug.to_owned(),
-        name: slug.to_owned(),
-        depth,
-        path: path.to_owned(),
         sealed: false,
-        created_at: Utc::now(),
     }
 }
 
@@ -77,13 +74,13 @@ fn ac_decisions_are_microsecond_level() {
     );
     // A full-depth chain — deeper than most real tenants use (levels are
     // skippable, ADR-0011), so the entity graph is not flattered.
-    let scopes = vec![
-        node(tenant, org, None, ScopeKind::Org, "acme", 0, "acme"),
+    let scopes = [
+        node(tenant, org, None, ScopeKind::Tenant, "acme", 0, "acme"),
         node(
             tenant,
             division,
             Some(org),
-            ScopeKind::Division,
+            ScopeKind::OrgUnit,
             "emea",
             1,
             "acme/emea",
@@ -92,7 +89,7 @@ fn ac_decisions_are_microsecond_level() {
             tenant,
             dept,
             Some(division),
-            ScopeKind::Department,
+            ScopeKind::OrgUnit,
             "payments",
             2,
             "acme/emea/payments",
@@ -101,7 +98,7 @@ fn ac_decisions_are_microsecond_level() {
             tenant,
             team,
             Some(dept),
-            ScopeKind::Team,
+            ScopeKind::OrgUnit,
             "core",
             3,
             "acme/emea/payments/core",
@@ -115,7 +112,7 @@ fn ac_decisions_are_microsecond_level() {
         tenant,
         user,
         Some(team),
-        ScopeKind::User,
+        ScopeKind::Principal,
         "bench",
         4,
         "acme/emea/payments/core/bench",
@@ -137,25 +134,31 @@ fn ac_decisions_are_microsecond_level() {
         pack_name: STANDARD.to_owned(),
         updated_at: Utc::now(),
     }];
-    // One binding at the org: the admin-plane decisions below require a
-    // role since AUTHZ-3 (ADR-0015), and resolution against the chain is
-    // part of the measured cost.
-    let bindings = [RoleBinding {
-        tenant_id: tenant,
-        subject: "bench".to_owned(),
-        scope_id: Some(org),
-        role: Role::Steward,
-        updated_at: Utc::now(),
-    }];
+    // One grant at the org root: the admin-plane decisions below require
+    // a role key (CPR-6; since the cutover the only vocabulary), and
+    // resolution against the anchors is part of the measured cost.
+    let anchor = ScopeAnchor {
+        scope_id: org,
+        kind: synveda_types::scope::ScopeKind::Tenant,
+        parent_scope_id: None,
+        depth: 0,
+        source: AnchorSource::Grant,
+        roles: vec![RoleKey::Administrator],
+        granted_at: vec![org],
+        via_groups: Vec::new(),
+    };
+    let scope_nodes: Vec<ScopeNode> = scopes.to_vec();
+    let principal_nodes: Vec<ScopeNode> = principal_scopes.clone();
     let context = AuthzContext {
         sensitivity: Some(Sensitivity::Internal),
-        scopes: &scopes,
-        principal_scopes: &principal_scopes,
+        scopes: &scope_nodes,
+        principal_scopes: &principal_nodes,
+        anchors: std::slice::from_ref(&anchor),
+        groups: &[],
+        resources: &[],
         assignments: &assignments,
         default_pack: None,
-        role_bindings: &bindings,
-        grant: None,
-        lapses: &[],
+        relaxations: &[],
     };
 
     let call = |action: Action| {
@@ -167,18 +170,18 @@ fn ac_decisions_are_microsecond_level() {
     };
 
     for _ in 0..WARMUP {
-        call(Action::HierarchyRead);
+        call(Action::ScopeRead);
     }
 
     let mut samples: Vec<u128> = Vec::with_capacity(SAMPLES);
     for i in 0..SAMPLES {
         // Rotate actions so no single decision path is cached unrealistically.
         let action = match i % 5 {
-            0 => Action::HierarchyRead,
-            1 => Action::HierarchyCreate,
-            2 => Action::HierarchyUpdate,
-            3 => Action::MemoryRead,
-            _ => Action::HierarchyDelete,
+            0 => Action::ScopeRead,
+            1 => Action::ScopeCreate,
+            2 => Action::ScopeUpdate,
+            3 => Action::KnowledgeRead,
+            _ => Action::ScopeUpdate,
         };
         let start = Instant::now();
         call(action);

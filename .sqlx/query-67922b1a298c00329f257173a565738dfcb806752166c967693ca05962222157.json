@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into vedaflow_proposals\n             (tenant_id, id, target_scope_id, source_scope_id, asset_kind,\n              target_channel, commit_hash, sensitivity, title, proposer_id,\n              proposer_subject, artifact_references)\n         values ($1, $2, $3, $3, 'configuration', 'apply', $4, 'internal',\n                 'RLS Configuration fixture', $5, 'rls-fixture', $6)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Bytea",
+        "Uuid",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "67922b1a298c00329f257173a565738dfcb806752166c967693ca05962222157"
+}

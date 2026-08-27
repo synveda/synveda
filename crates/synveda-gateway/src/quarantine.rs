@@ -3,9 +3,20 @@
 //! the PDP (`QuarantineRead` for the queue, `QuarantineReview` for
 //! release/reject).
 //!
+//! **The plane is tenant-anchored** (CPR-7, ADR-0074 decision 7). Since
+//! placement became identity, every quarantined event lands at a
+//! `principal`-shaped scope — and a principal scope inherits nothing, so
+//! no grant but one written directly at that person's own scope carries a
+//! role there. Anchoring the verdict at the event's scope therefore made
+//! this plane unreachable for every event it exists for. It decides at the
+//! tenant resource instead, which is where the queue's tenant-wide branch
+//! has always decided and which matches the packs' own treatment of this
+//! control: how a security control is reviewed does not loosen per pack.
+//! A `scope_id` on the queue stays a **filter**, not the anchor.
+//!
 //! A quarantined observe event staged redacted but signal-less; the
-//! reviewer — steward, org-admin, or security-reviewer on the event's
-//! chain — sees the redacted payload plus the finding summary and
+//! reviewer — a `reviewer`, `owner` or `administrator` in the tenant —
+//! sees the redacted payload plus the finding summary and
 //! decides flow: release sends the standard work signal in the review's
 //! own transaction (the pipeline cannot tell a released event from an
 //! admitted one), reject leaves the staging row provenance-only. Review
@@ -23,14 +34,13 @@ use serde_json::json;
 use synveda_audit::{AuditAction, Outcome};
 use synveda_policy::{Action, Resource};
 use synveda_store::quarantine::{QuarantinedEvent, ReviewDecision};
-use synveda_store::{hierarchy, quarantine, rls};
-use synveda_types::{Error, IdentityId, ObserveEventId, QuarantineState, Result, ScopeId};
+use synveda_store::{quarantine, rls, scopes};
+use synveda_types::{Error, QuarantineState, Result, ScopeId, SessionEventId, SessionId};
 
 use crate::app::AppState;
 use crate::audit;
 use crate::authz;
-use crate::error::ApiError;
-use crate::hierarchy::{commit, found, tenant_id};
+use crate::request::{commit, found, tenant_id};
 use crate::telemetry::QUARANTINE_OPERATIONS_TOTAL;
 
 /// The queue page cap; `limit` above it is a 400, not a silent trim.
@@ -48,40 +58,33 @@ async fn respond<T: IntoResponse>(
     op: &'static str,
     result: Result<T>,
 ) -> Response {
-    let outcome = match &result {
-        Ok(_) => "ok",
-        Err(
-            Error::Unauthenticated { .. }
-            | Error::PolicyDenied { .. }
-            | Error::NotFound { .. }
-            | Error::Invalid { .. }
-            | Error::Conflict { .. }
-            | Error::RateLimited { .. },
-        ) => "rejected",
-        Err(_) => "error",
-    };
+    let outcome = crate::response::outcome(&result);
     metrics::counter!(QUARANTINE_OPERATIONS_TOTAL, "op" => op, "outcome" => outcome).increment(1);
-    match result {
-        Ok(response) => response.into_response(),
-        Err(error) => {
-            audit::record_rejection(state, op, &error).await;
-            ApiError(error).into_response()
-        }
-    }
+    crate::response::finish(state, op, result).await
 }
 
 /// One quarantined event as the API renders it: the redacted payload,
 /// the finding summary, and the review state — never raw finding text
 /// (there is none anywhere to render, ADR-0021 decision 1).
-#[derive(Serialize)]
-struct QuarantineView {
-    event_id: ObserveEventId,
+#[derive(Serialize, utoipa::ToSchema)]
+#[schema(as = QuarantineEventView)]
+pub(crate) struct QuarantineView {
+    #[schema(value_type = String, format = "uuid")]
+    event_id: SessionEventId,
+    #[schema(value_type = String, format = "uuid")]
     scope_id: ScopeId,
-    owner_id: IdentityId,
-    session_id: String,
-    kind: String,
+    /// The run the event belongs to — a real aggregate since CPR-12, so a
+    /// reviewer can open the transcript this payload came from instead of
+    /// deciding about it in isolation.
+    #[schema(value_type = String, format = "uuid")]
+    session_id: SessionId,
+    /// The token subject that opened that run.
+    principal_id: String,
+    event_type: String,
+    client_event_id: String,
     payload: serde_json::Value,
     findings: serde_json::Value,
+    #[schema(value_type = String)]
     state: QuarantineState,
     created_at: DateTime<Utc>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -97,9 +100,10 @@ impl From<QuarantinedEvent> for QuarantineView {
         QuarantineView {
             event_id: event.event_id,
             scope_id: event.scope_id,
-            owner_id: event.owner_id,
             session_id: event.session_id,
-            kind: event.kind,
+            principal_id: event.principal_id,
+            event_type: event.event_type,
+            client_event_id: event.client_event_id,
             payload: event.payload,
             findings: event.findings,
             state: event.state,
@@ -119,15 +123,34 @@ pub(crate) struct ListParams {
     limit: Option<i64>,
 }
 
-#[derive(Serialize)]
-struct QueueResponse {
+#[derive(Serialize, utoipa::ToSchema)]
+#[schema(as = QuarantineQueueResponse)]
+pub(crate) struct QueueResponse {
     pending: Vec<QuarantineView>,
 }
 
 /// `GET /v1/quarantine` — the pending review queue, oldest first.
-/// Tenant-wide without `scope_id` (a tenant-resource `QuarantineRead`:
-/// tenant-wide reviewer bindings only); a subtree with it (the node's
-/// chain resolves the reviewer's authority, uniform-404 first).
+/// `QuarantineRead` is decided at the tenant either way (module doc);
+/// `scope_id` narrows *which* events come back, after the uniform-404
+/// ownership check on the scope named.
+#[utoipa::path(
+    get,
+    path = "/v1/quarantine",
+    operation_id = "list_quarantine",
+    tag = "quarantine",
+    params(
+        ("scope_id" = Option<String>, Query, format = "uuid"),
+        ("limit" = Option<i64>, Query)
+    ),
+    responses(
+        (status = 200, description = "Pending quarantined session events", body = QueueResponse),
+        (status = 400, description = "The filter or limit is invalid", body = crate::workspaces::ApiErrorBody),
+        (status = 401, description = "No usable credential", body = crate::workspaces::ApiErrorBody),
+        (status = 403, description = "The quarantine queue is not visible", body = crate::workspaces::ApiErrorBody),
+        (status = 404, description = "The requested scope is absent or outside the tenant", body = crate::workspaces::ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
 #[tracing::instrument(name = "quarantine.list", skip_all)]
 pub(crate) async fn list(
     State(state): State<AppState>,
@@ -155,8 +178,10 @@ pub(crate) async fn list(
                 (authorized, Resource::Tenant(tenant_id), None)
             }
             Some(scope_id) => {
-                let node = found(
-                    hierarchy::node(&mut *tx, scope_id).await?,
+                // Ownership first, so a made-up id is a 404 and never a
+                // denial oracle (ADR-0012 decision 7).
+                found(
+                    scopes::get(&mut *tx, tenant_id, scope_id).await?,
                     tenant_id,
                     scope_id,
                 )?;
@@ -164,13 +189,14 @@ pub(crate) async fn list(
                     &state,
                     &mut tx,
                     Action::QuarantineRead,
-                    Resource::Scope(scope_id),
-                    Some(&node),
+                    Resource::Tenant(tenant_id),
+                    None,
                 )
                 .await?;
-                // The subtree filter: the node and everything below it —
-                // quarantined events live at user-kind leaves.
-                let mut scopes: Vec<ScopeId> = hierarchy::descendants(&mut *tx, scope_id)
+                // The subtree filter: the scope and everything below it —
+                // quarantined events live at the `principal` scopes under
+                // it (CPR-7).
+                let mut scopes: Vec<ScopeId> = scopes::descendants(&mut *tx, tenant_id, scope_id)
                     .await?
                     .into_iter()
                     .map(|node| node.id)
@@ -204,17 +230,35 @@ pub(crate) async fn list(
     respond(&state, "list", result).await
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
+#[schema(as = QuarantineReviewBody)]
 pub(crate) struct ReviewBody {
     /// The reviewer's note, recorded on the row and in the audit event.
     reason: Option<String>,
 }
 
 /// `POST /v1/quarantine/{event_id}/release`.
+#[utoipa::path(
+    post,
+    path = "/v1/quarantine/{event_id}/release",
+    operation_id = "release_quarantined_event",
+    tag = "quarantine",
+    params(("event_id" = String, Path, format = "uuid")),
+    request_body = ReviewBody,
+    responses(
+        (status = 200, description = "The released quarantined event", body = QuarantineView),
+        (status = 400, description = "The review reason is invalid", body = crate::workspaces::ApiErrorBody),
+        (status = 401, description = "No usable credential", body = crate::workspaces::ApiErrorBody),
+        (status = 403, description = "Quarantine review is not permitted", body = crate::workspaces::ApiErrorBody),
+        (status = 404, description = "The event is absent or outside the tenant", body = crate::workspaces::ApiErrorBody),
+        (status = 409, description = "The event was already reviewed", body = crate::workspaces::ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
 #[tracing::instrument(name = "quarantine.release", skip_all)]
 pub(crate) async fn release(
     State(state): State<AppState>,
-    Path(event_id): Path<ObserveEventId>,
+    Path(event_id): Path<SessionEventId>,
     payload: std::result::Result<Json<ReviewBody>, JsonRejection>,
 ) -> Response {
     let result = review(&state, event_id, payload, ReviewDecision::Release).await;
@@ -222,10 +266,27 @@ pub(crate) async fn release(
 }
 
 /// `POST /v1/quarantine/{event_id}/reject`.
+#[utoipa::path(
+    post,
+    path = "/v1/quarantine/{event_id}/reject",
+    operation_id = "reject_quarantined_event",
+    tag = "quarantine",
+    params(("event_id" = String, Path, format = "uuid")),
+    request_body = ReviewBody,
+    responses(
+        (status = 200, description = "The rejected quarantined event", body = QuarantineView),
+        (status = 400, description = "The review reason is invalid", body = crate::workspaces::ApiErrorBody),
+        (status = 401, description = "No usable credential", body = crate::workspaces::ApiErrorBody),
+        (status = 403, description = "Quarantine review is not permitted", body = crate::workspaces::ApiErrorBody),
+        (status = 404, description = "The event is absent or outside the tenant", body = crate::workspaces::ApiErrorBody),
+        (status = 409, description = "The event was already reviewed", body = crate::workspaces::ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
 #[tracing::instrument(name = "quarantine.reject", skip_all)]
 pub(crate) async fn reject(
     State(state): State<AppState>,
-    Path(event_id): Path<ObserveEventId>,
+    Path(event_id): Path<SessionEventId>,
     payload: std::result::Result<Json<ReviewBody>, JsonRejection>,
 ) -> Response {
     let result = review(&state, event_id, payload, ReviewDecision::Reject).await;
@@ -233,16 +294,16 @@ pub(crate) async fn reject(
 }
 
 /// The shared review path: uniform-404 ownership (the quarantine row,
-/// then its scope node), `QuarantineReview` on the event's scope, the
+/// then its scope node), `QuarantineReview` at the tenant (module doc), the
 /// one-shot state flip (plus the release signal) on this transaction,
 /// and the chained semantic event — all atomic (ADR-0021 decision 7).
 async fn review(
     state: &AppState,
-    event_id: ObserveEventId,
+    event_id: SessionEventId,
     payload: std::result::Result<Json<ReviewBody>, JsonRejection>,
     decision: ReviewDecision,
 ) -> Result<Json<QuarantineView>> {
-    let body = crate::hierarchy::body(payload)?;
+    let body = crate::request::body(payload)?;
     if let Some(reason) = &body.reason
         && (reason.is_empty() || reason.chars().count() > MAX_REASON_CHARS)
     {
@@ -262,11 +323,12 @@ async fn review(
             entity: "quarantined event".to_owned(),
         });
     };
-    // The event's scope anchors the decision; a since-deleted scope (a
-    // revoked agent's leaf) answers the uniform 404 like every dangling
-    // resource — disposal owns those rows (module doc).
-    let node = found(
-        hierarchy::node(&mut *tx, event.scope_id).await?,
+    // The event's scope is still resolved, because a since-deleted scope
+    // (a revoked agent's) answers the uniform 404 like every dangling
+    // resource — disposal owns those rows (module doc). It no longer
+    // anchors the decision: see the module doc.
+    found(
+        scopes::get(&mut *tx, tenant_id, event.scope_id).await?,
         tenant_id,
         event.scope_id,
     )?;
@@ -274,8 +336,8 @@ async fn review(
         state,
         &mut tx,
         Action::QuarantineReview,
-        Resource::Scope(event.scope_id),
-        Some(&node),
+        Resource::Tenant(tenant_id),
+        None,
     )
     .await?;
     let reviewed = quarantine::review(
@@ -305,8 +367,8 @@ async fn review(
         json!({
             "authz": audit::decision_context(Action::QuarantineReview, &authorized),
             "event_id": reviewed.event_id,
-            "owner_id": reviewed.owner_id,
             "session_id": reviewed.session_id,
+            "principal_id": reviewed.principal_id,
             // Rule ids and counts — the finding summary is already
             // content-free (ADR-0021 decision 1).
             "findings": reviewed.findings,

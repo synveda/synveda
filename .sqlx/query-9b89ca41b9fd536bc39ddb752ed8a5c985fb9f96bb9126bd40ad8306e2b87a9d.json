@@ -1,0 +1,197 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select current.id as \"id!\",\n               current.tenant_id as \"tenant_id!\",\n               current.scope_id as \"scope_id!\",\n               current.project_id,\n               current.owner_principal_id,\n               current.knowledge_type as \"knowledge_type!\",\n               current.origin as \"origin!\",\n               current.lifecycle_state as \"lifecycle_state!\",\n               current.current_revision_id as \"current_revision_id!\",\n               current.created_by as item_created_by,\n               current.updated_by,\n               current.created_at as \"item_created_at!\",\n               current.updated_at as \"updated_at!\",\n               current.tx_from as \"tx_from!\",\n               null::timestamptz as tx_to,\n               current.revision_number as \"revision_number!\",\n               current.title as \"title!\",\n               current.body_markdown as \"body_markdown!\",\n               current.summary as \"summary!\",\n               current.tags as \"tags!: Vec<String>\",\n               current.sensitivity as \"sensitivity!\",\n               current.confidence_permille as \"confidence_permille!\",\n               current.valid_from as \"valid_from!\",\n               current.valid_to,\n               current.stale_after,\n               current.verification_metadata as \"verification_metadata!\",\n               current.content_hash as \"content_hash!\",\n               current.metadata as \"metadata!\",\n               current.revision_created_by,\n               current.transaction_time as \"transaction_time!\"\n        from knowledge_current current\n        where current.tenant_id = $1 and current.id = $2\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "tenant_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "scope_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "project_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "owner_principal_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "knowledge_type!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "origin!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "lifecycle_state!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "current_revision_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 9,
+        "name": "item_created_by",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "updated_by",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "item_created_at!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 12,
+        "name": "updated_at!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 13,
+        "name": "tx_from!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 14,
+        "name": "tx_to",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 15,
+        "name": "revision_number!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 16,
+        "name": "title!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 17,
+        "name": "body_markdown!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 18,
+        "name": "summary!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 19,
+        "name": "tags!: Vec<String>",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 20,
+        "name": "sensitivity!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 21,
+        "name": "confidence_permille!",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 22,
+        "name": "valid_from!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 23,
+        "name": "valid_to",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 24,
+        "name": "stale_after",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 25,
+        "name": "verification_metadata!",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 26,
+        "name": "content_hash!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 27,
+        "name": "metadata!",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 28,
+        "name": "revision_created_by",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 29,
+        "name": "transaction_time!",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      null,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "9b89ca41b9fd536bc39ddb752ed8a5c985fb9f96bb9126bd40ad8306e2b87a9d"
+}

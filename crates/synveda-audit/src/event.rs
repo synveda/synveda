@@ -1,7 +1,7 @@
 //! The audit event vocabulary (AUD-1, ADR-0019).
 //!
 //! An [`AuditEvent`] is what a seam hands to [`crate::append`]; the chain
-//! columns it becomes are described in `migrations/0011_audit_log.sql`.
+//! columns it becomes are defined in the epoch baseline's `audit_log` table.
 //! Actions are a closed enum in-process so a typo cannot mint a new event
 //! type silently, while the column stays open text so later features add
 //! actions without schema churn.
@@ -138,75 +138,134 @@ pub enum AuditAction {
     /// — unreadable under the base layer's forbid, and exempt from every
     /// retention horizon (AUTH-4, ADR-0059 decision 8).
     IdentitySealed,
-    /// A hierarchy node was created.
-    HierarchyNodeCreated,
-    /// A hierarchy node was renamed and/or moved.
-    HierarchyNodeUpdated,
-    /// A hierarchy node was deleted.
-    HierarchyNodeDeleted,
-    /// The tenant's default policy pack was set.
-    PolicyDefaultSet,
-    /// The tenant's default policy pack was cleared.
-    PolicyDefaultCleared,
-    /// A policy pack was assigned to a hierarchy node.
-    PolicyNodeAssigned,
-    /// A node's policy pack assignment was removed.
-    PolicyNodeUnassigned,
+    /// A workspace was created, with the governed scope it owns — one event
+    /// for both, because they are one act and one transaction (CPR-4,
+    /// ADR-0071). The payload carries the scope id, so the chain answers
+    /// "which scope is this workspace" without a join.
+    WorkspaceCreated,
+    /// A workspace was renamed, re-described or retired. The payload carries
+    /// the before and after images and the revision the update was applied
+    /// under — a lost-update conflict is a *refusal*, so a chain that records
+    /// the precondition records why the write that lost is absent.
+    WorkspaceUpdated,
+    /// A project was created inside a workspace, with the scope it owns.
+    ProjectCreated,
+    /// A project was renamed, re-described or retired.
+    ProjectUpdated,
+    /// A repository was attached to a project. The payload carries the
+    /// **canonical** URI — which is credential-free by construction, so this
+    /// is one of the places that property is load-bearing rather than tidy.
+    ProjectRepositoryAttached,
+    /// A repository was detached from a project. A delete rather than a
+    /// stamp, because the row asserts a present fact about a project; what it
+    /// was is here, in the chain.
+    ProjectRepositoryDetached,
+    /// A session was opened (CPR-10, ADR-0076). The payload carries the
+    /// workspace, the project when there is one, the governed scope the run
+    /// is decided at, and the client that opened it — never the client's
+    /// `metadata`, which is where an agent's environment would land and
+    /// therefore where a credential would (seed: no secret in an audit
+    /// payload). That metadata was present, and how large it was, is
+    /// recorded; its contents are not.
+    SessionOpened,
+    /// A session moved through its lifecycle: `ending`, or one of the three
+    /// closed states. The payload carries both ends of the transition, so the
+    /// chain says what a run was doing when somebody closed it.
+    SessionEnded,
+    /// Events were appended to a session. **One event per batch**, carrying
+    /// counts and the sequence range rather than the events themselves — a
+    /// hundred-turn run would otherwise put its whole transcript in the chain
+    /// twice, and the chain is not the transcript store.
+    ///
+    /// The per-type breakdown rides the payload, because "what did that agent
+    /// actually do" should be answerable from the chain without reading the
+    /// events, and because the *shape* of a run is what an auditor reads
+    /// first.
+    SessionEventsAppended,
+    /// Context was composed for a session (CPR-10, ADR-0076 decision 7). The
+    /// payload carries the block's watermark — its hash, the entry count, the
+    /// tokens against the budget — and not the block: the chain records what
+    /// an agent was given, and the run row holds what that was.
+    SessionContextComposed,
+    /// A bounded policy-visible Knowledge pool was retrieved for a context
+    /// run. Carries revision ids or hashes according to retention, score
+    /// component names and an aggregate policy-filtering flag, never content.
+    ContextCandidatesRetrieved,
+    /// Exact immutable Knowledge revisions were selected under the context
+    /// budget. Distinct from delivery: a selection is a planner decision and
+    /// `SessionContextComposed` proves the resulting block crossed the API.
+    ContextSelectionsMade,
+    /// Explicit feedback was attached to one context selection and immutable
+    /// revision. Retrieval or delivery alone never emits this action.
+    ContextFeedbackRecorded,
+    /// An exact eligible session-event snapshot was frozen for extraction.
+    /// Carries ids, digest and count, never transcript content.
+    CaptureBatchCreated,
+    /// A capture batch reached completed or failed. Carries extractor
+    /// identity, counts and a content-free error code.
+    CaptureBatchCompleted,
+    /// A person made one terminal candidate decision. Carries the action,
+    /// VedaFlow change/result ids and hashes, never candidate content.
+    CaptureCandidateDecided,
+    /// A bounded OKF bundle was validated into an immutable dry-run plan.
+    /// Carries counts, version and hashes, never Markdown or frontmatter.
+    OkfImportPlanned,
+    /// One immutable OKF plan became reviewable capture candidates. It does
+    /// not imply that any candidate was published as Knowledge.
+    OkfImportMaterialized,
+    /// Freshly authorised current Knowledge was rendered as deterministic
+    /// OKF output. Carries revision ids and the output digest, never bodies.
+    OkfExported,
+    /// A group was created (CPR-5, ADR-0072). The payload carries the
+    /// group's handle and whether a directory owns it — a group nobody here
+    /// maintains is a different fact from one somebody here made.
+    GroupCreated,
+    /// A group was renamed, retired or re-populated. The payload carries the
+    /// before and after images and the revision the update was applied under;
+    /// when the membership changed it carries **counts and the difference**,
+    /// never the whole list, because a hundred-person group would otherwise
+    /// put a hundred names in the chain on every edit.
+    GroupUpdated,
+    /// Somebody was granted a role at a scope. The payload carries the
+    /// subject, the role key, the scope and the **source** — which is the
+    /// whole of "why does this person have access", answerable from the chain
+    /// as well as from the row.
+    AccessGranted,
+    /// A grant was revoked. A delete rather than a stamp, on the repository
+    /// plane's reasoning: the row asserts a present fact about who may act,
+    /// and what it was is here.
+    AccessRevoked,
+    /// An invitation was issued. The payload carries the invitation's id, the
+    /// scope, the role and the expiry — and **never the token**, which exists
+    /// once, in the response to the request that created it.
+    InviteCreated,
+    /// An invitation was withdrawn before anybody redeemed it.
+    InviteRevoked,
+    /// An invitation was redeemed, and the grant it carried was minted. One
+    /// event for both, because they are one act and one transaction.
+    InviteAccepted,
+    /// A governed scope was created (CPR-7, ADR-0074 decision 5).
+    ScopeCreated,
+    /// A governed scope was renamed, re-described, archived or moved —
+    /// the payload names which, and a move names both ends.
+    ScopeUpdated,
+    /// A scope's VedaFlow curator rules were updated. This is policy source
+    /// governance, not runtime-profile selection (CPR-30, ADR-0089).
+    CuratorRulesUpdated,
     /// A stored policy pack was applied (CLI break-glass; the reviewed
     /// product surface arrives with VedaFlow).
     PolicyPackApplied,
     /// A stored policy pack was removed (CLI break-glass).
     PolicyPackCleared,
-    /// A role binding was created (admin API, JIT admin-group first
-    /// establishment, or break-glass).
-    RoleBound,
-    /// A role binding was removed.
-    RoleUnbound,
     /// A service identity was registered at an anchor node.
     ServiceIdentityRegistered,
     /// A service identity was revoked (row and personal leaf deleted).
     ServiceIdentityRevoked,
-    /// An observe batch was admitted to the ingestion buffer — one event
-    /// per batch, counts and id range in the payload, never one row per
-    /// event (MEM-1, ADR-0020 decision 5; ADR-0019 decision 4). Since
-    /// MEM-2 the payload also carries quarantined/denied counts and the
-    /// finding rule summary — never matched text (ADR-0021).
-    MemoryObserved,
-    /// A reviewer released a quarantined observe event into the pipeline
-    /// (MEM-2, ADR-0021 decision 7).
+    /// A reviewer released a quarantined session event for capture.
     QuarantineReleased,
-    /// A reviewer rejected a quarantined observe event; its staging row
-    /// stays provenance-only, forever signal-less.
+    /// A reviewer rejected a quarantined session event; the immutable event
+    /// remains as provenance but cannot become a capture source.
     QuarantineRejected,
-    /// The extraction pipeline processed a tenant commit-group of staged
-    /// events — one event per group, ids/counts/classes in the payload,
-    /// never one row per record (MEM-3, ADR-0022 decision 5). `failure`
-    /// marks a dead-lettered signal (retries exhausted).
-    MemoryExtracted,
-    /// The extraction pipeline closed the valid windows of records a newer
-    /// statement replaced (MEM-5, ADR-0039 decision 13) — one event per
-    /// commit group, with the id pairs, the judge, the signals as integer
-    /// per-mille, and the instant each window closed at. Never record
-    /// content.
-    ///
-    /// Its own action rather than a field on `memory.extracted` because it
-    /// asserts a different fact: extraction says what was created, and this
-    /// says what stopped being current, which is the question an auditor
-    /// arrives with. Restatements *merged* into existing records stay on
-    /// `memory.extracted`, where they belong — a merge creates nothing and
-    /// closes nothing.
-    ///
-    /// The payload also carries the contradictions the pipeline found
-    /// against *published* material and declined to act on: reviewed content
-    /// leaves the trust boundary through a proposal, never through a
-    /// session, and a refusal nobody can see is a refusal nobody can act on.
-    MemorySuperseded,
-    /// An approved classification proposal's effect ran: records moved to
-    /// the sensitivity their reviewed versions carried (AUTHZ-5, ADR-0038
-    /// decision 9). Carries both tiers, the record ids, and the approvals
-    /// as resolved — never record content, which is what the tier is
-    /// about in the first place.
-    MemoryClassified,
     /// A tenant was admitted (CLI break-glass; TEN-5 owns the product
     /// lifecycle surface).
     TenantCreated,
@@ -231,35 +290,13 @@ pub enum AuditAction {
     TenantSecretStored,
     /// A tenant's sealed secret was destroyed.
     TenantSecretCleared,
-    /// An inject composed a context block — one event per inject with
-    /// the block's watermark and the per-scope `MemoryRead` decisions
-    /// aggregated, never one row per candidate (CTX-3, ADR-0026
-    /// decision 5; ADR-0019 decision 4). Payloads carry no user
-    /// content: the task rides as a BLAKE3 hash only.
-    ContextInjected,
-    /// A recall served record bodies the caller named — the third
-    /// primitive seed §3 has listed since day one, and the act seed §2.2
-    /// principle 5 requires the chain to record (CTX-4, ADR-0041
-    /// decision 8).
-    ///
-    /// One event per recall, with the requested count, the served
-    /// entries' object addresses and channels — the same watermark shape
-    /// an inject carries, so a recall is exactly as recomputable — and the
-    /// per-scope `MemoryRead` decisions aggregated. Never record content,
-    /// and never the ids that were refused as a distinguishable list: a
-    /// recall answers uniformly for what it will not serve, and an audit
-    /// payload that enumerated the difference would be the oracle the
-    /// surface refuses to be.
-    ContextRecalled,
-    /// Records were published onto a scope's VedaFlow published channel —
-    /// the act that moves content across the trust boundary so `inject`
-    /// composes it as reviewed (FLOW-2, ADR-0031 decision 14). The first
-    /// VedaFlow action; ADR-0030 decision 14 deferred it to whichever
-    /// feature produced a governed one. Payload carries the asset kind,
-    /// the record ids, the commit the channel moved from and to, and the
-    /// pack that governed — never record content. The pipeline's
-    /// derived-channel commits ride `memory.extracted` instead: one event
-    /// per group, not a second event asserting the same fact.
+    /// Active tenant-secret envelopes were advanced to a new DEK generation.
+    /// Carries one durable job id, generations and counts, never ciphertext.
+    TenantSecretsReencrypted,
+    /// Authored objects were published onto a scope's VedaFlow published
+    /// channel. The payload carries the asset kind, immutable object
+    /// addresses, the commit the channel moved from and to, and the policy
+    /// pack that governed — never object content.
     ///
     /// Since FLOW-3 the payload also names the proposal a publication was
     /// the effect of, when it had one, and the approval requirement the
@@ -304,45 +341,27 @@ pub enum AuditAction {
     ProposalRejected,
     /// A proposer withdrew their own proposal, closing it.
     ProposalWithdrawn,
-    /// An approved lapse proposal's effect ran: a time-boxed grant now
-    /// stands over the target scope's material (AUTHZ-4, ADR-0037
-    /// decision 17). Payload carries both scopes, the action granted, the
-    /// window, the mandatory reason, the proposal, and the requirement as
-    /// resolved — never any of the material the grant discloses.
-    ///
-    /// The window is the load-bearing field: with it recorded here, the
-    /// trail is complete even if the expiry sweep never runs, because when
-    /// the grant stopped deciding anything is arithmetic over this event.
-    LapseGranted,
-    /// A standing grant was ended early, with its mandatory reason and the
-    /// window it cut short.
-    LapseRevoked,
-    /// Records left the live corpus because they were past the horizon
-    /// the pack at their scope sets (MEM-6, ADR-0040 decision 15) — one
-    /// event per scope per sweep batch, under `actor_kind=system`.
-    /// Carries the pack and version that decided, the horizon per class,
-    /// the record ids and their ages; never record content.
-    ///
-    /// Unlike [`AuditAction::LapseExpired`] this is **not** bookkeeping: a
-    /// lapse expires whether or not its sweep runs, but a record leaves
-    /// the corpus only because this loop ran, and the event commits in the
-    /// same transaction as the delete.
-    ///
-    /// What it describes is a *temporal* delete: the record stops being
-    /// current, `as_of` keeps answering, and destruction is the second
-    /// horizon's event.
-    MemoryExpired,
-    /// Content was destroyed (MEM-6, ADR-0040 decision 15): closed record
-    /// versions past the destruction horizon, and observe staging rows
-    /// with their quarantine markers past the staging horizon. Per plane,
-    /// with counts, the horizon that authorised it, and — for records —
-    /// the scope. The one action in the product that says data is gone
-    /// rather than hidden.
-    ///
-    /// Deliberately separate from [`AuditAction::MemoryExpired`]: "what
-    /// did we stop using" and "what did we destroy" are different
-    /// questions, and only the second has a legal answer.
-    MemoryDisposed,
+    /// A typed Knowledge mutation was opened as a VedaFlow change. Carries
+    /// command kind, ids, hashes and approval arithmetic, never content.
+    KnowledgeChangeOpened,
+    /// A Knowledge change's typed effect completed. The command kind in the
+    /// payload distinguishes create/edit/verify/supersede/merge/lifecycle.
+    KnowledgeChangeApplied,
+    /// A Knowledge change was closed without applying because a revision,
+    /// lifecycle or retention precondition no longer permitted its effect.
+    /// Carries only a stable reason code and identifiers.
+    KnowledgeChangeRejected,
+    /// A bounded, policy-visible matcher retained one durable conflict set.
+    /// Carries set/member ids, classifications and hashes only.
+    KnowledgeConflictOpened,
+    /// A revision-aware Knowledge/VedaFlow change made one conflict set
+    /// terminal. Carries the exact resolution and change id, never content.
+    KnowledgeConflictResolved,
+    /// A retention or legal-hold hook blocked a governed erasure operation.
+    KnowledgeErasureBlocked,
+    /// Plaintext, owned source descriptors and indexes were removed, leaving
+    /// only hashes and identifiers in the tombstone and chain.
+    KnowledgeErased,
     /// A prompt draft was written — created or replaced (PRMT-1, ADR-0049
     /// decision 14).
     ///
@@ -386,20 +405,15 @@ pub enum AuditAction {
     /// `context.injected` with its object address like every other entry,
     /// which is why there is no third action here.
     ContextPackQuarantined,
-    /// A skill's draft was written at a scope (SKIL-1, ADR-0051
-    /// decision 16).
-    ///
-    /// The authoring act, not a publication, exactly as
-    /// [`AuditAction::ContextPackAuthored`] is. The payload carries the
-    /// name, the tier, the per-file object addresses and how many files
-    /// were removed from the bundle — never `SKILL.md` text and never file
-    /// content.
-    ///
-    /// There is deliberately no `skill.installed`: an install is a
-    /// client-side act on bytes an audited [`AuditAction::SkillResolved`]
-    /// already served, and an event the server cannot verify is a fact an
-    /// auditor would have to reconcile (ADR-0019 decision 4).
-    SkillAuthored,
+    /// A typed Skill/apply VedaFlow change was opened (CPR-23, ADR-0085).
+    /// Carries ids, command kind, hashes and approval requirements, never
+    /// bundle text.
+    SkillChangeOpened,
+    /// A typed Skill/apply effect installed an immutable version or changed
+    /// a revisioned binding.
+    SkillChangeApplied,
+    /// A Skill/apply effect reached a terminal precondition refusal.
+    SkillChangeRejected,
     /// A skill bundle was served to a consumer (ADR-0051 decision 16).
     ///
     /// A data-plane read, so it chains its own event for
@@ -433,53 +447,55 @@ pub enum AuditAction {
     /// the matched span, which for a credential rule *is* the credential
     /// path.
     ///
-    /// There is deliberately no event for a clean scan (every authored
-    /// bundle already chains [`AuditAction::SkillAuthored`], and a scan
-    /// that found nothing is not an act) and none for rendering a report
-    /// to a reviewer (the proposal read already chains, and the report is
-    /// recomputable from what it names).
+    /// There is deliberately no event for a clean scan (every governed
+    /// install or update already chains [`AuditAction::SkillChangeOpened`],
+    /// and a scan that found nothing is not an act) and none for rendering
+    /// a report to a reviewer (the proposal read already chains, and the
+    /// report is bound to the immutable version command).
     SkillScanRejected,
-    /// A reviewer recorded a quality checklist against a skill bundle
-    /// (SKIL-3, ADR-0053 decision 10).
-    ///
-    /// The **durable record of the human half of the score**, and the
-    /// reason the row it writes can be last-writer-wins: a row is mutable
-    /// and a chained event is not, so re-answering replaces a row while
-    /// the chain keeps every answer anybody gave.
-    ///
-    /// Carries the item ids, the verdicts, the bundle digest the answers
-    /// are bound to and the rubric version rendered beside the reviewer —
-    /// never file content, and the note only because a reviewer wrote it
-    /// to be read (it passes MEM-2's scanner before it is stored).
-    SkillChecklistRecorded,
-    /// A skill was published over the quality gate's objection (SKIL-3,
-    /// ADR-0053 decision 10).
-    ///
-    /// **The most valuable event this feature produces.** "What did we
-    /// ship that we knew was below the bar, and who said so" is a question
-    /// no other event in the product answers, and an override whose event
-    /// was lost would be a publication with no explanation — which is why
-    /// it chains inside the publish transaction rather than beside it.
-    ///
-    /// Carries the score, which of the three bars was missed, the reason
-    /// the publisher gave, the pack that set the bar and the identity that
-    /// held [`Action::SkillQualityOverride`](synveda_policy::Action).
-    ///
-    /// There is deliberately **no equivalent for the security scan**, and
-    /// there must not be: ADR-0052 decision 3 put the `critical` band on
-    /// the invariant floor precisely so nothing can wave it through, and
-    /// an event recording that somebody had would be evidence of a path
-    /// that should not exist.
-    SkillQualityOverridden,
-    /// A grant reached the end of its window. Emitted by the sweep under
-    /// `actor_kind=system`, and **bookkeeping only** — the grant stopped
-    /// deciding anything at `expires_at` whether or not this was ever
-    /// written (ADR-0037 decision 4).
-    ///
-    /// Revoked grants deliberately get no expiry event: their ending is
-    /// already on the chain, and a second event asserting the same fact is
-    /// something an auditor would have to reconcile (ADR-0019 decision 4).
-    LapseExpired,
+    /// One version-specific usage stage was appended. Host observation and
+    /// model self-report are distinct payload values.
+    SkillUsageRecorded,
+    /// A controlled harness completed against one immutable version. The
+    /// gateway's built-in harness validates and scans; it executes no bundle
+    /// script.
+    SkillTestRecorded,
+    /// A typed Tool/apply VedaFlow change staged trusted MCP catalogue or
+    /// exact-binding intent (CPR-25, ADR-0086). Carries hashes and ids, never
+    /// credentials or arbitrary descriptions.
+    ToolChangeOpened,
+    /// An approved Tool/apply effect advanced the current version or changed
+    /// an exact project binding.
+    ToolChangeApplied,
+    /// A Tool/apply effect reached a terminal precondition refusal.
+    ToolChangeRejected,
+    /// A trusted adapter reported one immutable read-only connection test.
+    ToolTestRecorded,
+    /// Secret-free client configuration was generated for a project from its
+    /// exact approved bindings.
+    ToolConfigurationGenerated,
+    /// A typed Configuration/apply VedaFlow change was opened (CPR-30,
+    /// ADR-0089). Carries identifiers, hashes and approval requirements,
+    /// never credentials or configuration-adjacent secret material.
+    ConfigurationChangeOpened,
+    /// An approved Configuration/apply effect published an immutable document
+    /// or changed a revisioned scope selector.
+    ConfigurationChangeApplied,
+    /// A Configuration/apply effect reached a terminal precondition refusal.
+    ConfigurationChangeRejected,
+    /// A typed Policy/apply relaxation command was opened. Carries only
+    /// identifiers, immutable term/configuration hashes and approval
+    /// arithmetic; never Knowledge content.
+    RelaxationChangeOpened,
+    /// A governed relaxation create, revision or early revocation completed.
+    RelaxationChangeApplied,
+    /// A relaxation effect reached a terminal validation or revision
+    /// precondition refusal.
+    RelaxationChangeRejected,
+    /// The current immutable relaxation version reached its hard expiry.
+    /// This system event is bookkeeping only: database time stopped the
+    /// permission regardless of whether the sweep emitted it.
+    RelaxationExpired,
 }
 
 impl AuditAction {
@@ -491,7 +507,7 @@ impl AuditAction {
     /// unit test below plus the fact that an action missing from here is
     /// an event `GET /v1/audit/events` cannot filter for. Add the variant
     /// and add it here in the same diff.
-    pub const ALL: [AuditAction; 63] = [
+    pub const ALL: [AuditAction; 94] = [
         AuditAction::AuthzDecision,
         AuditAction::TenantResolutionDenied,
         AuditAction::TokenRejected,
@@ -505,33 +521,48 @@ impl AuditAction {
         AuditAction::DirectorySyncBreakerTripped,
         AuditAction::DirectorySealAuthorised,
         AuditAction::DirectorySealAuthorisationUsed,
-        AuditAction::HierarchyNodeCreated,
-        AuditAction::HierarchyNodeUpdated,
-        AuditAction::HierarchyNodeDeleted,
-        AuditAction::PolicyDefaultSet,
-        AuditAction::PolicyDefaultCleared,
-        AuditAction::PolicyNodeAssigned,
-        AuditAction::PolicyNodeUnassigned,
+        AuditAction::ScopeCreated,
+        AuditAction::ScopeUpdated,
+        AuditAction::WorkspaceCreated,
+        AuditAction::WorkspaceUpdated,
+        AuditAction::ProjectCreated,
+        AuditAction::ProjectUpdated,
+        AuditAction::ProjectRepositoryAttached,
+        AuditAction::ProjectRepositoryDetached,
+        AuditAction::SessionOpened,
+        AuditAction::SessionEnded,
+        AuditAction::SessionEventsAppended,
+        AuditAction::SessionContextComposed,
+        AuditAction::ContextCandidatesRetrieved,
+        AuditAction::ContextSelectionsMade,
+        AuditAction::ContextFeedbackRecorded,
+        AuditAction::CaptureBatchCreated,
+        AuditAction::CaptureBatchCompleted,
+        AuditAction::CaptureCandidateDecided,
+        AuditAction::OkfImportPlanned,
+        AuditAction::OkfImportMaterialized,
+        AuditAction::OkfExported,
+        AuditAction::GroupCreated,
+        AuditAction::GroupUpdated,
+        AuditAction::AccessGranted,
+        AuditAction::AccessRevoked,
+        AuditAction::InviteCreated,
+        AuditAction::InviteRevoked,
+        AuditAction::InviteAccepted,
+        AuditAction::CuratorRulesUpdated,
         AuditAction::PolicyPackApplied,
         AuditAction::PolicyPackCleared,
-        AuditAction::RoleBound,
-        AuditAction::RoleUnbound,
         AuditAction::ServiceIdentityRegistered,
         AuditAction::ServiceIdentityRevoked,
-        AuditAction::MemoryObserved,
         AuditAction::QuarantineReleased,
         AuditAction::QuarantineRejected,
-        AuditAction::MemoryExtracted,
-        AuditAction::MemorySuperseded,
-        AuditAction::MemoryClassified,
         AuditAction::TenantCreated,
         AuditAction::TenantKeyProvisioned,
         AuditAction::TenantKeyRotated,
         AuditAction::TenantExported,
         AuditAction::TenantSecretStored,
         AuditAction::TenantSecretCleared,
-        AuditAction::ContextInjected,
-        AuditAction::ContextRecalled,
+        AuditAction::TenantSecretsReencrypted,
         AuditAction::ChannelPublished,
         AuditAction::ChannelRolledBack,
         AuditAction::ChannelPinned,
@@ -540,21 +571,37 @@ impl AuditAction {
         AuditAction::ProposalApproved,
         AuditAction::ProposalRejected,
         AuditAction::ProposalWithdrawn,
-        AuditAction::LapseGranted,
-        AuditAction::LapseRevoked,
-        AuditAction::LapseExpired,
-        AuditAction::MemoryExpired,
-        AuditAction::MemoryDisposed,
+        AuditAction::KnowledgeChangeOpened,
+        AuditAction::KnowledgeChangeApplied,
+        AuditAction::KnowledgeChangeRejected,
+        AuditAction::KnowledgeConflictOpened,
+        AuditAction::KnowledgeConflictResolved,
+        AuditAction::KnowledgeErasureBlocked,
+        AuditAction::KnowledgeErased,
         AuditAction::PromptAuthored,
         AuditAction::PromptResolved,
         AuditAction::ContextPackAuthored,
         AuditAction::ContextPackQuarantined,
-        AuditAction::SkillAuthored,
+        AuditAction::SkillChangeOpened,
+        AuditAction::SkillChangeApplied,
+        AuditAction::SkillChangeRejected,
         AuditAction::SkillResolved,
         AuditAction::SkillQuarantined,
         AuditAction::SkillScanRejected,
-        AuditAction::SkillChecklistRecorded,
-        AuditAction::SkillQualityOverridden,
+        AuditAction::SkillUsageRecorded,
+        AuditAction::SkillTestRecorded,
+        AuditAction::ToolChangeOpened,
+        AuditAction::ToolChangeApplied,
+        AuditAction::ToolChangeRejected,
+        AuditAction::ToolTestRecorded,
+        AuditAction::ToolConfigurationGenerated,
+        AuditAction::ConfigurationChangeOpened,
+        AuditAction::ConfigurationChangeApplied,
+        AuditAction::ConfigurationChangeRejected,
+        AuditAction::RelaxationChangeOpened,
+        AuditAction::RelaxationChangeApplied,
+        AuditAction::RelaxationChangeRejected,
+        AuditAction::RelaxationExpired,
     ];
 
     /// The stable dotted name stored in the `action` column. Renaming an
@@ -575,33 +622,48 @@ impl AuditAction {
             AuditAction::DirectorySyncBreakerTripped => "directory.sync.breaker_tripped",
             AuditAction::DirectorySealAuthorised => "directory.seal.authorised",
             AuditAction::DirectorySealAuthorisationUsed => "directory.seal.authorisation_used",
-            AuditAction::HierarchyNodeCreated => "hierarchy.node.created",
-            AuditAction::HierarchyNodeUpdated => "hierarchy.node.updated",
-            AuditAction::HierarchyNodeDeleted => "hierarchy.node.deleted",
-            AuditAction::PolicyDefaultSet => "policy.default.set",
-            AuditAction::PolicyDefaultCleared => "policy.default.cleared",
-            AuditAction::PolicyNodeAssigned => "policy.node.assigned",
-            AuditAction::PolicyNodeUnassigned => "policy.node.unassigned",
+            AuditAction::WorkspaceCreated => "workspace.created",
+            AuditAction::WorkspaceUpdated => "workspace.updated",
+            AuditAction::ProjectCreated => "project.created",
+            AuditAction::ProjectUpdated => "project.updated",
+            AuditAction::ProjectRepositoryAttached => "project.repository.attached",
+            AuditAction::ProjectRepositoryDetached => "project.repository.detached",
+            AuditAction::SessionOpened => "session.opened",
+            AuditAction::SessionEnded => "session.ended",
+            AuditAction::SessionEventsAppended => "session.events.appended",
+            AuditAction::SessionContextComposed => "session.context.composed",
+            AuditAction::ContextCandidatesRetrieved => "context.candidates.retrieved",
+            AuditAction::ContextSelectionsMade => "context.selections.made",
+            AuditAction::ContextFeedbackRecorded => "context.feedback.recorded",
+            AuditAction::CaptureBatchCreated => "capture.batch.created",
+            AuditAction::CaptureBatchCompleted => "capture.batch.completed",
+            AuditAction::CaptureCandidateDecided => "capture.candidate.decided",
+            AuditAction::OkfImportPlanned => "okf.import.planned",
+            AuditAction::OkfImportMaterialized => "okf.import.materialized",
+            AuditAction::OkfExported => "okf.exported",
+            AuditAction::GroupCreated => "access.group.created",
+            AuditAction::GroupUpdated => "access.group.updated",
+            AuditAction::AccessGranted => "access.granted",
+            AuditAction::AccessRevoked => "access.revoked",
+            AuditAction::InviteCreated => "access.invite.created",
+            AuditAction::InviteRevoked => "access.invite.revoked",
+            AuditAction::InviteAccepted => "access.invite.accepted",
+            AuditAction::ScopeCreated => "scope.created",
+            AuditAction::ScopeUpdated => "scope.updated",
+            AuditAction::CuratorRulesUpdated => "policy.curator_rules.updated",
             AuditAction::PolicyPackApplied => "policy.pack.applied",
             AuditAction::PolicyPackCleared => "policy.pack.cleared",
-            AuditAction::RoleBound => "role.bound",
-            AuditAction::RoleUnbound => "role.unbound",
             AuditAction::ServiceIdentityRegistered => "service_identity.registered",
             AuditAction::ServiceIdentityRevoked => "service_identity.revoked",
-            AuditAction::MemoryObserved => "memory.observed",
-            AuditAction::QuarantineReleased => "memory.quarantine.released",
-            AuditAction::QuarantineRejected => "memory.quarantine.rejected",
-            AuditAction::MemoryExtracted => "memory.extracted",
-            AuditAction::MemorySuperseded => "memory.superseded",
-            AuditAction::MemoryClassified => "memory.classified",
+            AuditAction::QuarantineReleased => "session.quarantine.released",
+            AuditAction::QuarantineRejected => "session.quarantine.rejected",
             AuditAction::TenantCreated => "tenant.created",
             AuditAction::TenantKeyProvisioned => "tenant.key.provisioned",
             AuditAction::TenantKeyRotated => "tenant.key.rotated",
             AuditAction::TenantExported => "tenant.exported",
             AuditAction::TenantSecretStored => "tenant.secret.stored",
             AuditAction::TenantSecretCleared => "tenant.secret.cleared",
-            AuditAction::ContextInjected => "context.injected",
-            AuditAction::ContextRecalled => "context.recalled",
+            AuditAction::TenantSecretsReencrypted => "tenant.secrets.reencrypted",
             AuditAction::ChannelPublished => "vedaflow.channel.published",
             AuditAction::ChannelRolledBack => "vedaflow.channel.rolled_back",
             AuditAction::ChannelPinned => "vedaflow.channel.pinned",
@@ -610,21 +672,37 @@ impl AuditAction {
             AuditAction::ProposalApproved => "vedaflow.proposal.approved",
             AuditAction::ProposalRejected => "vedaflow.proposal.rejected",
             AuditAction::ProposalWithdrawn => "vedaflow.proposal.withdrawn",
-            AuditAction::LapseGranted => "policy.lapse.granted",
-            AuditAction::LapseRevoked => "policy.lapse.revoked",
-            AuditAction::LapseExpired => "policy.lapse.expired",
-            AuditAction::MemoryExpired => "memory.expired",
-            AuditAction::MemoryDisposed => "memory.disposed",
+            AuditAction::KnowledgeChangeOpened => "knowledge.change.opened",
+            AuditAction::KnowledgeChangeApplied => "knowledge.change.applied",
+            AuditAction::KnowledgeChangeRejected => "knowledge.change.rejected",
+            AuditAction::KnowledgeConflictOpened => "knowledge.conflict.opened",
+            AuditAction::KnowledgeConflictResolved => "knowledge.conflict.resolved",
+            AuditAction::KnowledgeErasureBlocked => "knowledge.erasure.blocked",
+            AuditAction::KnowledgeErased => "knowledge.erased",
             AuditAction::PromptAuthored => "prompt.authored",
             AuditAction::PromptResolved => "prompt.resolved",
             AuditAction::ContextPackAuthored => "context_pack.authored",
             AuditAction::ContextPackQuarantined => "context_pack.quarantined",
-            AuditAction::SkillAuthored => "skill.authored",
+            AuditAction::SkillChangeOpened => "skill.change.opened",
+            AuditAction::SkillChangeApplied => "skill.change.applied",
+            AuditAction::SkillChangeRejected => "skill.change.rejected",
             AuditAction::SkillResolved => "skill.resolved",
             AuditAction::SkillQuarantined => "skill.quarantined",
             AuditAction::SkillScanRejected => "skill.scan.rejected",
-            AuditAction::SkillChecklistRecorded => "skill.checklist.recorded",
-            AuditAction::SkillQualityOverridden => "skill.quality.overridden",
+            AuditAction::SkillUsageRecorded => "skill.usage.recorded",
+            AuditAction::SkillTestRecorded => "skill.test.recorded",
+            AuditAction::ToolChangeOpened => "tool.change.opened",
+            AuditAction::ToolChangeApplied => "tool.change.applied",
+            AuditAction::ToolChangeRejected => "tool.change.rejected",
+            AuditAction::ToolTestRecorded => "tool.test.recorded",
+            AuditAction::ToolConfigurationGenerated => "tool.configuration.generated",
+            AuditAction::ConfigurationChangeOpened => "configuration.change.opened",
+            AuditAction::ConfigurationChangeApplied => "configuration.change.applied",
+            AuditAction::ConfigurationChangeRejected => "configuration.change.rejected",
+            AuditAction::RelaxationChangeOpened => "policy.relaxation.change.opened",
+            AuditAction::RelaxationChangeApplied => "policy.relaxation.change.applied",
+            AuditAction::RelaxationChangeRejected => "policy.relaxation.change.rejected",
+            AuditAction::RelaxationExpired => "policy.relaxation.expired",
         }
     }
 }

@@ -1,11 +1,15 @@
-//! Provisioned identities (seed §5, AUTH-2, ADR-0013; AUTH-3, ADR-0018).
+//! Provisioned identities (seed §5, AUTH-2, ADR-0013; AUTH-3, ADR-0018;
+//! CPR-7, ADR-0074).
 //!
-//! An identity is a token subject placed in the tenancy hierarchy: every
-//! user and every service identity owns a personal user-kind scope node.
-//! Users arrive through JIT provisioning at first login; service
-//! identities are registered explicitly (headless agents never log in).
-//! Subjects the IdP has verified but neither path has seen are *not*
-//! identities — the PDP treats them as quarantined (ADR-0013 decision 6).
+//! An identity is a token subject bound to its own `principal`-shaped
+//! governed scope: every user and every service identity owns one, minted
+//! at first login or at registration. Users arrive through JIT
+//! provisioning; service identities are registered explicitly (headless
+//! agents never log in). Subjects the IdP has verified but neither path has
+//! seen are *not* identities — the enforcement seam treats them as
+//! quarantined (ADR-0013 decision 6), which with the hierarchy gone is the
+//! only quarantine left: it is a property of *not being provisioned*, never
+//! of where somebody sits.
 
 use std::fmt;
 use std::str::FromStr;
@@ -61,11 +65,13 @@ impl FromStr for IdentityKind {
 /// Where an identity is in its lifecycle (AUTH-4, ADR-0059 decision 7).
 ///
 /// The one piece of lifecycle state this product stores rather than
-/// derives. ADR-0013 decision 4 refused a `quarantined` column because
-/// placement already answered that question and a second copy would
-/// drift; departure is answered by nothing else in the schema, so it is
+/// derives. Departure is answered by nothing else in the schema, so it is
 /// stored — once, here — and a *scope's* sealed-ness derives from it
-/// through the one-personal-scope-per-identity constraint.
+/// through the one-scope-per-identity constraint. (The `quarantined` flag
+/// ADR-0013 decision 4 derived from placement is gone with the hierarchy:
+/// a principal with no grants reaches nothing beyond their own scope
+/// because the anchor model says so, decided per action rather than per
+/// person — CPR-7, ADR-0074 decision 3.)
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum IdentityStatus {
@@ -130,11 +136,10 @@ pub struct Identity {
     pub email: Option<String>,
     /// The IdP's `name` claim at provisioning time, if any.
     pub display_name: Option<String>,
-    /// The identity's personal scope node (`ScopeKind::User`).
+    /// The identity's own `principal`-shaped scope (CPR-7, ADR-0074
+    /// decision 3) — minted in the provisioning transaction, never placed
+    /// by a convention.
     pub scope_id: ScopeId,
-    /// Derived from placement, never stored (ADR-0013 decision 4): the
-    /// personal scope sits under the tenant's quarantine scope.
-    pub quarantined: bool,
     /// Active, or departed and therefore sealed (ADR-0059 decision 7).
     pub status: IdentityStatus,
     /// When the directory said this person left; `Some` exactly when

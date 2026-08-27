@@ -20,7 +20,8 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
-use synveda_types::{DirectoryGroup, DirectoryUser};
+use synveda_types::DirectoryUser;
+use synveda_types::access::Group;
 
 /// The core `User` schema URN.
 pub const USER_SCHEMA: &str = "urn:ietf:params:scim:schemas:core:2.0:User";
@@ -210,11 +211,11 @@ impl GroupResource {
     /// Renders a stored group and its membership as the resource a client
     /// reads back.
     #[must_use]
-    pub fn of(group: &DirectoryGroup, members: &[DirectoryUser], base: &str) -> GroupResource {
+    pub fn of(group: &Group, members: &[DirectoryUser], base: &str) -> GroupResource {
         GroupResource {
             schemas: vec![GROUP_SCHEMA.to_owned()],
             id: Some(group.id.to_string()),
-            external_id: group.external_id.clone(),
+            external_id: group.directory_external_id.clone(),
             display_name: Some(group.display_name.clone()),
             members: members
                 .iter()
@@ -230,7 +231,7 @@ impl GroupResource {
                 created: group.created_at,
                 last_modified: group.updated_at,
                 location: format!("{base}/Groups/{}", group.id),
-                version: etag(group.version),
+                version: etag(group.revision),
             }),
         }
     }

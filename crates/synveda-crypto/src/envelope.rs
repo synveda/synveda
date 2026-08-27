@@ -301,14 +301,10 @@ mod tests {
     fn round_trips() {
         let key = key_for(KeyScope::Tenant(TenantId::new()));
         let sealed = key
-            .seal(
-                Purpose::DirectoryCredential,
-                RowKey::Name("graph"),
-                b"s3cr3t",
-            )
+            .seal(Purpose::TenantSecret, RowKey::Name("graph"), b"s3cr3t")
             .expect("seal");
         let opened = key
-            .open(Purpose::DirectoryCredential, RowKey::Name("graph"), &sealed)
+            .open(Purpose::TenantSecret, RowKey::Name("graph"), &sealed)
             .expect("open");
         assert_eq!(&opened[..], b"s3cr3t");
     }
@@ -351,11 +347,11 @@ mod tests {
             DataKey::from_bytes(bytes),
         );
         let sealed = first
-            .seal(Purpose::DirectoryCredential, RowKey::Name("graph"), b"x")
+            .seal(Purpose::TenantSecret, RowKey::Name("graph"), b"x")
             .expect("seal");
         assert!(
             second
-                .open(Purpose::DirectoryCredential, RowKey::Name("graph"), &sealed)
+                .open(Purpose::TenantSecret, RowKey::Name("graph"), &sealed)
                 .is_err(),
             "a ciphertext must not open under another tenant's scope"
         );

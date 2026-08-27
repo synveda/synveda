@@ -1,0 +1,167 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select b.id as binding_id, b.scope_id, b.skill_id, b.pinned_version_id,\n                  b.enabled, b.revision as binding_revision,\n                  b.created_at as binding_created_at, b.created_by as binding_created_by,\n                  b.updated_at as binding_updated_at, b.updated_by as binding_updated_by,\n                  s.name, v.id as version_id, v.ordinal, v.bundle_digest, v.sensitivity,\n                  v.manifest, v.source_kind, v.provenance, v.scan_report,\n                  v.scan_ruleset_version, v.quality_score, v.rubric_version,\n                  v.created_at as version_created_at, v.created_by as version_created_by,\n                  f.object_hash as manifest_object_hash\n           from skill_bindings b\n           join skills s on s.tenant_id = b.tenant_id and s.id = b.skill_id\n           join skill_versions v on v.tenant_id = s.tenant_id and v.skill_id = s.id\n                and v.id = coalesce(b.pinned_version_id, s.current_version_id)\n           join skill_version_files f on f.tenant_id = v.tenant_id and f.version_id = v.id\n                and f.path = 'SKILL.md'\n           where b.tenant_id = $1 and b.scope_id = any($2) and b.enabled\n           order by array_position($2::uuid[], b.scope_id), s.name, b.id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "binding_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "scope_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "skill_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "pinned_version_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "enabled",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 5,
+        "name": "binding_revision",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 6,
+        "name": "binding_created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "binding_created_by",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 8,
+        "name": "binding_updated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 9,
+        "name": "binding_updated_by",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 10,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "version_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 12,
+        "name": "ordinal",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 13,
+        "name": "bundle_digest",
+        "type_info": "Bytea"
+      },
+      {
+        "ordinal": 14,
+        "name": "sensitivity",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 15,
+        "name": "manifest",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 16,
+        "name": "source_kind",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 17,
+        "name": "provenance",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 18,
+        "name": "scan_report",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 19,
+        "name": "scan_ruleset_version",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 20,
+        "name": "quality_score",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 21,
+        "name": "rubric_version",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 22,
+        "name": "version_created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 23,
+        "name": "version_created_by",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 24,
+        "name": "manifest_object_hash",
+        "type_info": "Bytea"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "b79101afca1f3a22cd5564b39c257d7544d15f1c3560e2f524c3d3a14a255f37"
+}

@@ -10,112 +10,79 @@ size: L
 
 **Epic:** OPS — Deployment & operations · **Phase:** 4 · **Size:** L
 
-## Description
+## Problem and evidence
 
-More than one gateway replica, serving one deployment, without a login failing
-or a scope chain going stale. OPS-2's chart pins `replicas: 1` and refuses an
-override until this lands.
+Helm pins one gateway replica and Recreate. Pending OIDC login/CLI handoff
+state is process-local in crates/synveda-identity/src/flow.rs, and PDP entity
+invalidation is process-local in the gateway. Background capture, Knowledge
+indexing, directory and expiry work also runs inside each gateway process.
+SIGTERM now enters Axum graceful request shutdown, but workers are aborted
+rather than drained. These gaps are recorded in
+[production readiness](../PRODUCTION_READINESS.md) and the one-replica refusal
+is governed by [ADR-0062](../adr/adr-0062-enterprise-profile-and-helm-chart.md).
 
-## Why this exists
+## Scope
 
-Filed 2026-08-10 by OPS-2 (ADR-0062 decision 5), which found it by reading the
-seven background loops and three caches inside the process a chart was about to
-replicate.
+- Persist one-time login state and CLI handoff redemption with database time,
+  TTL and atomic consume semantics.
+- Propagate scope, grant, policy and entity invalidation across replicas within
+  a stated bound.
+- Give every background job explicit multi-replica ownership, lease,
+  idempotency and provider-concurrency behaviour.
+- Withdraw readiness on termination, finish or safely release claimed work,
+  flush telemetry and exit within a bounded grace period.
+- Lift the chart refusal only after a three-replica acceptance passes.
 
-The question "is the gateway HA?" has a more useful answer than yes or no, and
-the useful answer is what makes this a feature rather than a warning in a values
-file.
+## Non-goals
 
-## What is already safe, and why that is the point
+- No distributed cache or separate worker service without measured need.
+- No weakening of fresh PDP decisions, forced RLS or live re-authorisation on
+  idempotent replay.
+- No claim that CloudNativePG replication makes the request plane available.
+- No unbounded sticky-session dependency presented as high availability.
 
-Most of the concurrency work was done years earlier than it needed to be, in the
-database, on purpose:
+## Architecture seam
 
-- The **audit chain** appends inside the caller's tenant transaction after
-  `select seq, head_hash from audit_chain_heads where tenant_id = $1 for update`
-  (`synveda-audit/src/chain.rs`). Two processes appending for one tenant
-  serialize; they do not fork the chain.
-- The **promotion sweep** takes `watermark_for_update` with the reason written
-  beside it: "two sweepers that both acted on the same watermark would fold the
-  same events twice."
-- The **lapse expiry sweep** uses its stamp as an idempotency key — "two
-  overlapping sweeps cannot chain one expiry twice, and the loser simply finds
-  nothing to update rather than writing a duplicate event."
-- The **extraction worker** is a PGMQ consumer whose `pgmq.archive` runs inside
-  the tenant write transaction (ADR-0022), so racing consumers cannot duplicate
-  a record.
-- **Console sessions** are a table (migration `0034_console_sessions.sql`), not
-  a map.
-- The **search indexer** is per-process by design and converges: each index
-  carries a state file and a watermark and heals from Postgres
-  (`synveda-retrieval/src/index.rs`).
-
-So this feature is not "make the gateway stateless". It is two specific pieces
-of process-local state, and a ruling on load.
-
-## The two blockers
-
-1. **Login state lives in memory.** `LoginFlow` parks pending logins (state,
-   nonce, PKCE verifier) and CLI handoff codes in a bounded in-memory store with
-   a 10-minute and a 60-second TTL, and its module doc says the consequence out
-   loud: "single-replica only until OPS-2 (ADR-0010)." A `/auth/callback` that
-   lands on a different pod than the `/auth/login` that minted the `state` is a
-   401 for a login the IdP completed — a failure that reads as an IdP problem.
-
-2. **Scope-chain invalidation is process-local.** `ScopeChainCache` is
-   read-through per `(tenant, scope)` and invalidated tenant-wide, post-commit,
-   by the handler that performed the mutation (ADR-0016 decision 5). There is no
-   TTL and no eviction anywhere in `synveda-store/src/scope_chain.rs`. A
-   hierarchy move handled by one replica therefore leaves every other replica
-   composing against the ancestry the mover has left — indefinitely, and in the
-   direction that matters. It does not look like a bug: the material returned is
-   material a real ancestry once permitted, so it reads as a policy decision.
-
-## Three parts
-
-- **A durable login and handoff store.** Move both to Postgres beside the
-  console sessions already there, with a TTL sweep. The handoff code is
-  one-time, state-bound and 60 seconds (ADR-0027 decision 5) — its single-use
-  property has to survive being in a table read by several processes, which is
-  the one part of this that is a design rather than a move.
-- **Cross-process invalidation.** LISTEN/NOTIFY, or a generation column polled
-  beside the pack refresher that already polls every 5s. The choice is a
-  latency-versus-transport question and wants its own reversal trigger: a
-  polled generation has a bounded staleness window that must be stated, and
-  NOTIFY does not survive a connection the pool recycles unless it is held.
-- **A loop-ownership ruling.** The five writing loops are safe on every replica.
-  N replicas is still N times the sweep load on one database, and a directory
-  pull is N calls to a customer's Entra tenant per interval, which is a rate
-  limit rather than a correctness question. Either bound the loops to a leader
-  (a Kubernetes Lease, or a Postgres advisory lock — the second needs no cluster
-  API), or keep them everywhere and pace them by replica count. Also settle the
-  one gap OPS-2 recorded: the **retention sweep** is the writing loop with no
-  visible lock or idempotency key, so its concurrency is unverified rather than
-  known-safe.
-
-## Why Phase 4
-
-Phase 3's demo goal asks for a Helm install and OPS-2 is one. The enterprise
-profile's HA claim is about the data plane — "HA Postgres (CloudNativePG)" is
-what OPS-2's own text says — and CNPG delivers it. Gateway HA is a scale and
-availability question rather than a hole in what is claimed, and OPS-2 refuses
-the configuration it cannot honour instead of shipping it with a warning
-comment.
-
-Two things move it forward: a deployment that cannot serve its request rate from
-one gateway, or one that cannot accept a restart-shaped upgrade. If it moves, it
-belongs beside OPS-6, since both are about an upgrade nobody notices.
+Login state belongs beside durable console sessions in synveda-store. Scope
+and grant mutations already invalidate local PDP entities; add one
+cross-process generation or notification contract rather than a second
+authorisation cache. Existing durable batch/job tables remain the worker seam.
+Gateway readiness and task cancellation own drain; Helm owns replica and
+termination settings.
 
 ## Acceptance criteria
 
-- A kind-cluster test at **three replicas** proving both blockers closed: a
-  login that begins on one pod and completes on another, and a hierarchy move
-  performed against one pod that every replica's composition reflects within a
-  stated bound.
-- The bound is **stated, not implied** — whatever the invalidation transport
-  turns out to be, the staleness window is a documented number and the test
-  asserts it.
-- The retention sweep's concurrency is verified, and the answer is recorded
-  wherever it turns out to live.
-- ADR-0062's single-replica pin is lifted in the chart, and the values key that
-  replaces it does not accept a number the test has not covered.
+- Three replicas complete a login begun on one pod and callback/handoff on
+  another; the same state/code cannot be redeemed twice.
+- A scope move, grant revoke, identity disable and Configuration/policy change
+  become visible to every replica within the documented bound, with no stale
+  permit after the bound.
+- Concurrent workers across three replicas produce one durable effect, respect
+  provider concurrency and recover every lease after pod loss.
+- SIGTERM makes readiness fail first, drains requests and claimed work or
+  releases it safely, and exits inside the pod grace period.
+- Sustained traffic loses a pod and a rolling upgrade without incorrect
+  decisions or avoidable login failure.
+- The chart accepts only tested replica counts and no longer requires Recreate.
+
+## Required tests
+
+- Three-pod kind acceptance with cross-pod login and direct per-pod requests.
+- Mutation/invalidation latency tests for every authority-changing family.
+- Worker race, lost-ack, lease-expiry, provider-outage and pod-kill tests.
+- Connection-pool/load/soak evidence at the maximum supported replica count.
+- Exact shutdown subprocess and Kubernetes termination-sequence tests.
+
+## Rollout and rollback
+
+Ship durable login and invalidation while still pinned to one replica, observe
+lag, then canary two and three replicas. Retain one-replica/Recreate as the
+rollback until the full acceptance is stable. Rollback must leave durable
+state readable and may reduce replicas without discarding jobs.
+
+## Dependencies
+
+The owner must define availability, invalidation staleness, drain and provider-
+concurrency limits. Choose a Postgres generation/notification mechanism and
+worker-leadership model in an ADR. OPS-5 and OPS-6 provide recovery and upgrade
+discipline.

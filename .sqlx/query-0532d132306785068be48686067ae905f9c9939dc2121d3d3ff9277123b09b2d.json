@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update skill_versions set manifest = '{}'::jsonb where tenant_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "0532d132306785068be48686067ae905f9c9939dc2121d3d3ff9277123b09b2d"
+}

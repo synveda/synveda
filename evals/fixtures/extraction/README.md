@@ -1,13 +1,13 @@
 # The labelled extraction corpus (EVAL-2, ADR-0046)
 
-Transcript-shaped observe events with the records a careful reader would
-say they contain. One corpus, two readers:
+Transcript-shaped session events with the candidate Knowledge a careful
+reader would say they contain. One corpus, two readers:
 
 - `crates/synveda-ingest/tests/extraction_precision.rs` reads it as a fast,
   hermetic, no-stack tripwire on the extractor **function**.
 - `crates/synveda-eval` reads the same files to measure the **product
-  path** — observe → redact → extract → embed → dedup → commit → serve —
-  over HTTP only.
+  path** — append → redact → extract candidates → review → VedaFlow apply →
+  Knowledge query — over HTTP only.
 
 Both deserialize the *full* format with `deny_unknown_fields`, so a field
 added for one reader cannot be silently ignored by the other. It is a data
@@ -28,7 +28,7 @@ One file per **group**; a group is one eval actor's worth of fixtures.
       "name": "alpha-decision-blake3",
       "note": "optional — why this fixture is interesting, or what it is expected to miss and why",
       "input": {
-        "kind": "transcript_delta | tool_result | decision | assertion",
+        "event_type": "message.user | message.assistant | tool.invoked | tool.result | file.changed | command.executed | memory.asserted",
         "session_id": "alpha-1",
         "occurred_at": "2026-07-20T10:00:00Z",
         "payload": { "text": "..." }
@@ -54,23 +54,21 @@ mistake here fails a test rather than quietly moving a number:
    present in the source is not bait: a faithful extractor would reproduce
    it, and the hallucination axis would be measuring copying.
 3. **Session ids are unique across the whole corpus.** The harness
-   attributes a served record back to its fixture through
-   `provenance.session_id`; a collision merges two fixtures' results.
+   attributes served Knowledge back to its fixture through exact
+   session-event provenance; a collision merges two fixtures' results.
 4. **Fixture names are unique.** MEM-3's tests look two of them up by name
    (`fact-redaction-placeholder`, `empty-payload`); renaming either breaks
    that test rather than weakening it silently.
 
 ## Sizing: why ten fixtures per group
 
-A recall sweep is bounded by `MAX_RECALL_IDS` (32), and a sweep that
-returns exactly that many is **refused as a measurement** — the response's
-`truncated` flag reports the scope cap, not the record cap, so a full page
-and a truncated one are indistinguishable from the consumer's side
-(ADR-0046 decision 3).
+The evaluation lens is bounded at 32 Knowledge items, and a page that
+returns exactly that many is **refused as a measurement**: reaching the
+bound cannot prove the set is complete (ADR-0046 decision 3).
 
 Ten events per group leaves room for a live model producing up to three
-records per event (30 < 32). The deterministic ruleset produces exactly
-one per event, so it sits at ten. **Grow the corpus by adding groups and
+candidate items per event (30 < 32). The deterministic ruleset produces
+exactly one per event, so it sits at ten. **Grow the corpus by adding groups and
 actors, never by adding fixtures past this arithmetic** — a group that
 outgrows the cap fails the suite by name, which is correct and is still a
 failure someone has to go fix.
@@ -83,7 +81,7 @@ failure someone has to go fix.
   working; a corpus written to flatter the rules measures nothing.
   `beta-preference-tabs-implicit` is the worked example.
 - **A `note` earns its place when a fixture is expected to miss.** Say why
-  — one record per event, truncation at 300 characters, no marker phrase —
+  — one candidate per event, truncation at 300 characters, no marker phrase —
   so the next reader knows it is a known limit and not a regression.
 - **Bait is plausible-but-absent content, never a plausible-looking
   secret.** The same discipline as the redaction and extraction fixtures:

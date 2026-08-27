@@ -1,0 +1,198 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select head.id as \"id!\",\n               head.tenant_id as \"tenant_id!\",\n               head.scope_id as \"scope_id!\",\n               head.project_id,\n               head.owner_principal_id,\n               head.knowledge_type as \"knowledge_type!\",\n               head.origin as \"origin!\",\n               head.lifecycle_state as \"lifecycle_state!\",\n               head.current_revision_id as \"current_revision_id!\",\n               head.created_by as item_created_by,\n               head.updated_by,\n               head.created_at as \"item_created_at!\",\n               head.updated_at as \"updated_at!\",\n               head.tx_from as \"tx_from!\",\n               head.tx_to,\n               revision.revision_number as \"revision_number!\",\n               revision.title as \"title!\",\n               revision.body_markdown as \"body_markdown!\",\n               revision.summary as \"summary!\",\n               revision.tags as \"tags!: Vec<String>\",\n               revision.sensitivity as \"sensitivity!\",\n               revision.confidence_permille as \"confidence_permille!\",\n               revision.valid_from as \"valid_from!\",\n               revision.valid_to,\n               revision.stale_after,\n               revision.verification_metadata as \"verification_metadata!\",\n               revision.content_hash as \"content_hash!\",\n               revision.metadata as \"metadata!\",\n               revision.created_by as revision_created_by,\n               revision.transaction_time as \"transaction_time!\"\n        from knowledge_item_versions head\n        join knowledge_revisions revision\n          on revision.tenant_id = head.tenant_id\n         and revision.knowledge_item_id = head.id\n         and revision.id = head.current_revision_id\n        where head.tenant_id = $1\n          and head.id = $2\n          and head.tx_from <= $3\n          and (head.tx_to is null or $3 < head.tx_to)\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "tenant_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "scope_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "project_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "owner_principal_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "knowledge_type!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "origin!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "lifecycle_state!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "current_revision_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 9,
+        "name": "item_created_by",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "updated_by",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "item_created_at!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 12,
+        "name": "updated_at!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 13,
+        "name": "tx_from!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 14,
+        "name": "tx_to",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 15,
+        "name": "revision_number!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 16,
+        "name": "title!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 17,
+        "name": "body_markdown!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 18,
+        "name": "summary!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 19,
+        "name": "tags!: Vec<String>",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 20,
+        "name": "sensitivity!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 21,
+        "name": "confidence_permille!",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 22,
+        "name": "valid_from!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 23,
+        "name": "valid_to",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 24,
+        "name": "stale_after",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 25,
+        "name": "verification_metadata!",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 26,
+        "name": "content_hash!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 27,
+        "name": "metadata!",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 28,
+        "name": "revision_created_by",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 29,
+        "name": "transaction_time!",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "5d896f9826645b9d045450c69d4da5fc026300aa0a4ebdaae07bb955b2d603fe"
+}

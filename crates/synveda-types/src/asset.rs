@@ -10,8 +10,8 @@ use crate::Error;
 /// What kind of governed asset a VedaFlow object holds.
 ///
 /// The four managed asset classes of seed §4.3 plus policy, which tech plan
-/// §2.3 makes an asset in its own right: "policy packs and lapses are
-/// themselves assets flowing through VedaFlow".
+/// §2.3 makes an asset in its own right. Policy packs, configuration and
+/// relaxations themselves flow through VedaFlow.
 ///
 /// This is part of a VedaFlow object's content address (FLOW-1, ADR-0030
 /// decision 4), not a label beside it: identical bytes registered as a prompt
@@ -24,32 +24,56 @@ use crate::Error;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum AssetKind {
-    /// A memory record's content — derived by the pipeline or authored
-    /// (seed §4.2).
-    Memory,
+    /// A stable Knowledge aggregate revision or governed mutation
+    /// (CPR-16, ADR-0081).
+    Knowledge,
     /// A versioned prompt template (PRMT-1).
     Prompt,
     /// A skill definition and its bundled files (SKIL-1). Executable, and
     /// reviewed like code.
     Skill,
+    /// A trusted MCP server version or exact project binding (CPR-25,
+    /// ADR-0086). Declared capabilities are metadata, never authority.
+    Tool,
     /// A curated bundle pinned to a scope: docs, conventions, glossaries
     /// (PRMT-2).
     ContextPack,
-    /// A policy pack or lapse, flowing through the same propose/review/approve
-    /// path as everything else it governs.
+    /// A policy pack, governed configuration or relaxation, flowing through
+    /// the same propose/review/approve path as everything else it governs.
     Policy,
+    /// A complete immutable runtime-configuration document or revisioned
+    /// scope binding (CPR-30, ADR-0089). Templates are source data; this is
+    /// the governed artifact that runtime consumers resolve.
+    Configuration,
 }
 
 impl AssetKind {
     /// All asset kinds. Kept in the same order as the `vedaflow_objects.kind`
     /// CHECK constraint (migration 0018).
-    pub const ALL: [AssetKind; 5] = [
-        AssetKind::Memory,
+    pub const ALL: [AssetKind; 7] = [
+        AssetKind::Knowledge,
         AssetKind::Prompt,
         AssetKind::Skill,
+        AssetKind::Tool,
         AssetKind::ContextPack,
         AssetKind::Policy,
+        AssetKind::Configuration,
     ];
+
+    /// Asset kinds represented by VedaFlow channels.
+    ///
+    /// Knowledge changes use VedaFlow proposals, but their current state is
+    /// the aggregate projection rather than a second channel head
+    /// (CPR-16, ADR-0081). Policy effects likewise write governed rows, not
+    /// refs. Keeping this list separate from [`Self::ALL`] prevents either
+    /// non-channelled kind from acquiring a shadow `*/published` truth.
+    pub const CHANNELLED: [AssetKind; 2] = [AssetKind::Prompt, AssetKind::ContextPack];
+
+    /// Whether this asset family has VedaFlow channel refs.
+    #[must_use]
+    pub const fn has_channels(self) -> bool {
+        matches!(self, AssetKind::Prompt | AssetKind::ContextPack)
+    }
 
     /// Stable wire name, identical to the serde form and to the stored
     /// column. It is hashed into every object's content address, so renaming
@@ -57,11 +81,13 @@ impl AssetKind {
     #[must_use]
     pub const fn as_str(&self) -> &'static str {
         match self {
-            AssetKind::Memory => "memory",
+            AssetKind::Knowledge => "knowledge",
             AssetKind::Prompt => "prompt",
             AssetKind::Skill => "skill",
+            AssetKind::Tool => "tool",
             AssetKind::ContextPack => "context-pack",
             AssetKind::Policy => "policy",
+            AssetKind::Configuration => "configuration",
         }
     }
 }

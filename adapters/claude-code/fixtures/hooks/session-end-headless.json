@@ -1,0 +1,8 @@
+{
+  "session_id": "0198e4c1-6c2a-7b3d-9f10-4e5a6b7c8d90",
+  "transcript_path": "/Users/dev/.claude/projects/-Users-dev-Source-acme-api/0198e4c1-6c2a-7b3d-9f10-4e5a6b7c8d90.jsonl",
+  "cwd": "/Users/dev/Source/acme-api",
+  "prompt_id": "23862416-dcc3-414d-9a4e-0f1e293cd831",
+  "hook_event_name": "SessionEnd",
+  "reason": "other"
+}

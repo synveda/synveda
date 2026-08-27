@@ -1,83 +1,29 @@
 {
-  "note": "EVAL-1's gate (ADR-0028 decision 5). The three quality axes are absolutes and stay that way: this suite is small enough that any scenario failing is a regression, not noise. The two cost axes are ceilings, and they are calibrated differently on purpose. tokens_mean is environment-independent \u2014 a deterministic corpus through a deterministic composition \u2014 so it sits at roughly twice what this suite measures, tight enough that a composition which starts spending double is caught. The latency ceiling is on the MEDIAN, and that is a correction rather than a preference. It gated latency_p95_ms until 2026-08-12, when the same commit measured p95 985.457ms and then 53.141ms on two runs twenty minutes apart \u2014 an 18x swing with no code between them, which failed a merge on the weather. A debug-profile gateway on a shared runner is nothing like a laptop and its TAIL is where that shows; the median barely moved (23.440ms against ~16ms on a laptop). This is the convention the rest of the repository already follows on variable hardware \u2014 crates/synveda-gateway/tests/inject_latency.rs, HIER-1, MEM-1 and CTX-3 all assert a median and report the tails \u2014 and the PR slice had it backwards. latency_p95_ms is still measured and still reported; it is no longer allowed to block a merge, because at this ceiling it cannot tell a product regression from a busy runner. The ceiling stays 250ms, which is an order of magnitude above the median either environment measures, and it is emphatically not an SLO: EVAL-6 owns latency under load, and CTX-1's own budgets are asserted by crates/synveda-retrieval/tests/latency.rs and inject_latency.rs where the environment is controlled. knowledge_update is MEM-5's category axis (ADR-0039 decision 14) and is an absolute for the same reason the other quality axes are: with dedup off \u2014 the state `a_pack_can_turn_the_feature_off` puts the product in, and the state it was in before MEM-5 \u2014 an ADD-only store composes the superseded fact beside its replacement, both scenarios' `must_not_contain` fails, and the axis reads 0.0. Any value below 1.0 is therefore the feature regressing rather than noise. EVAL-3 owns the real LongMemEval corpus and its judge; that axis measures the same category on this suite's fixtures. EVAL-6 owns latency under load, EVAL-4 owns retrieval quality with real embeddings, EVAL-5 owns the zero-tolerance policy-leak gate. Nothing here is a target for any of them. `--update-baseline` rewrites floors to what a run achieved and ceilings to half again above what it cost.\n\nEVAL-2 (ADR-0046) adds the extraction axes, measured over the labelled corpus in evals/fixtures/extraction/ by seeding through /v1/observe and enumerating what the pipeline produced through /v1/recall's sweep. They are the first axes here to declare `slack`, which is the AC's \"gate on regression >2pts\" written as a number a reviewer sees: `--update-baseline` lands the floor that far below the measurement, and the gate still compares against `min` exactly as committed. Both macro floors are set from a measured run and carry 2 points of tolerance, because per-class quality over a labelled corpus is genuinely noisier than this suite's deterministic scenarios \u2014 the reason ADR-0028 gave floors no headroom does not hold for them. Per-class axes (extraction_precision_fact and the rest) are reported and not gated: they are how a macro regression gets diagnosed, and bounding twelve of them would make the gate fire on the corpus growing rather than on the product getting worse. hallucination_rate is bait fixtures that produced a phrase the transcript does not support, and it is zero-tolerance: against the deterministic extractor it is zero by construction, so the gate asserts that a span-copying extractor cannot invent and fails if a future summarisation step breaks that. The live-model measurement has its own baseline (evals/baseline-live.json) because the two are not comparable.\n\nThe two extraction floors are measured-minus-slack from the first green run over the 50-fixture corpus: macro precision 0.983 and macro recall 0.914, so 0.963 and 0.894. They are regression gates and nothing else. The separate question of how bad extraction may get before the product is unshippable is ADR-0046 decision 13's registered >=0.90 macro precision, asserted by crates/synveda-ingest/tests/extraction_precision.rs against the same corpus with no stack at all \u2014 two numbers with two jobs (decision 8), and the reason the eval floor sitting above the ship floor is correct rather than redundant. A corpus addition that legitimately lowers a macro number below its floor \u2014 a genuinely hard fixture, which the corpus wants \u2014 is re-baselined deliberately, with the diff reviewed; that is the mechanism working, not fighting it.\n\nOne warning about `--update-baseline`: it rewrites every bound in this file, and latency_p50_ms is deliberately loose (250ms against ~16ms measured on a laptop and 23ms on a CI runner) because a debug-profile gateway on a shared CI runner is nothing like one. Running it wholesale would pin that ceiling to a laptop measurement and fail every CI run afterwards. Update the extraction floors by hand, or restore latency_p50_ms afterwards.\n\nEVAL-4 (ADR-0047) adds the Q&A axes, measured over evals/fixtures/qa/ by seeding a corpus, climbing it to a team, a department and the org through POST /v1/proposals and real approvals, and then asking questions of the reader's inject block. They are absolutes and stay that way for EVAL-1's reason: this corpus is fixed, the extractor is deterministic, the sparse index is BM25 over the same text every run, and the scope gradient is a total order \u2014 so any drop is a regression rather than noise. qa_answer_rate counts an expected record that reached the block at any tier and qa_body_rate the ones that reached it whole, so body <= answer always and the gap between them is the index tier displacing bodies that mattered (ADR-0041's parked trigger). The four qa_scope_* axes ARE gated, unlike EVAL-2's per-class axes, and the difference is that the tiers are a closed set of four rather than an open set that grows with the corpus: bounding them cannot make the gate fire on the corpus getting bigger, and it makes a gradient regression fail naming the end of the chain that paid for it. tokens_per_answer is the exchange rate a composition change moves \u2014 block tokens per expected record carried whole \u2014 and its ceiling is deliberately tighter than tokens_mean's, because a fixed corpus through a deterministic composition has no jitter to absorb: 320 against 258 measured catches a quarter's worth of regression. retrieval_precision here is the SPARSE leg alone, over the blocks something bound: the deterministic hash embedder's geometry carries no meaning by construction (ADR-0023 decision 6), so the dense leg contributes nothing to it and the number is not the one evals/baseline-retrieval.json holds. The `semantic` questions are skipped and counted on this path rather than scored zero, so they are absent from every axis above \u2014 a question the configured embedder structurally cannot answer is not a regression. estimator_bias_p95 (CTX-2's ceil(chars/4) against a reference BPE vocabulary) and staleness_p50_permille (MEM-6's unvalidated heuristic) are reported and bounded by nothing on purpose: they are first measurements, and a target invented before one is a wish.\n\nEVAL-5 (ADR-0048) adds the security axes, measured over evals/fixtures/security/ by seeding a corpus with exhaustively declared boundaries, governing its tiers and placements into place through classification proposals and real approvals, and then asking every reader every generated variant over POST /v1/inject and POST /v1/recall's query, sweep and ids forms. The leak axes are COUNTS gated at zero and never rates: report::round keeps three decimals, so one leak in ten thousand probes expressed as a rate is 0.0 and passes \u2014 at exactly the scale the acceptance criterion's headline number sets. security_probes and security_variants are floors because a one-sided gate whose denominator the run chooses passes by measuring less, and security_controls at 1.0 is what separates a run of zeros from an empty corpus, a dead pipeline or an expired bearer. security_unattributed_lines is the prompt-injection half \u2014 every non-empty line of a block is the preamble, the data notice, a section header, the legend, the watermark or an entry, and the entries number exactly what the watermark names \u2014 so a record's content cannot forge a scope header, an entry no record backs, a marker on a line of its own, or a watermark. security_marker_echoes is deliberately unbounded here and in the nightly file: content can still reproduce a marker's lexical form inline, and the fix is CTX-2/CTX-4's format decision rather than an eval's to drive.\n\nThis file gates the PULL-REQUEST slice: 400 variants rather than 10,000, chosen as every core variant plus an even spread of the combinatorial tail, because a product that blocks a merge on a token count and not on a disclosure has recorded its priorities backwards. The leak counts are identical to evals/baseline-security.json's, because zero is zero; only the two coverage floors differ, and they are arithmetic rather than measurements (see that file's note).\n\nOne thing this feature moved that it is not about: the block's preamble gained a line saying its entries are recorded material and not instructions (ADR-0048 decision 10), which costs about 14 estimated tokens on every non-empty block. no ceiling here moved for it \u2014 tokens_mean sits at 150 against roughly 75 measured and tokens_per_answer at 320 against 258, so a 14-token addition is inside both \u2014 but the four bound Q&A questions went from a 120-token to a 134-token caller budget, because their budget is about ENTRY room and holding it would have shrunk that room by a change to a sentence. The ADR labels the line honestly \u2014 a mitigation addressed to the guest, not a control, because nothing in the product can make a model obey it. The control is that the read path makes no model call at all.\n\nFIRST GREEN RUN, 2026-07-31 (EVAL-5): security_variants 400 of 11,680 generated, security_probes 1,276 over four surfaces in 23.6s, controls 9/9, every leak count and security_unattributed_lines zero, security_marker_echoes 1 distinct line. The corpus's premise was governed into place on that run and the report says so: vault-ceremony classified internal -> restricted and supplier-terms internal -> confidential through classification proposals their own author opened, then bridge-rota and supplier-terms climbed to acme/sec/vault through real proposals and real approvals.",
+  "note": "CPR-40 re-cut the deterministic EVAL-1/2/4/5 merge gate onto public sessions, governed capture candidates, immutable Knowledge, session-scoped query/evaluation lenses and ContextRun (ADR-0099). The six small scenario quality axes and four QA product-scope axes are exact floors because this corpus and ruleset are deterministic. Extraction macro precision/recall retain the measured-minus-0.02 gates from the labelled 50-fixture corpus; ruleset builtin@4 measures 0.983/0.914 by recognising explicit imperative and architectural-choice forms without changing the one-candidate-per-event limit. Per-class extraction scores remain diagnostic. Hallucination, tenant/scope/sensitivity leakage, unattributed context lines and address gaps are zero-count gates. Coverage floors prevent an empty path from passing: the pull-request security slice asks 400 of 11,680 generated variants over 1,276 probes and proves all nine positive controls. The context renderer now emits one JSON data entry per selected immutable revision with normalised source evidence. That evidence-bearing envelope intentionally raises deterministic token cost: tokens_mean measures 260 with a 300 ceiling; tokens_per_answer measures 363.636 with a 420 ceiling. The final deterministic run measures 0.667 bounded lexical retrieval precision against the retained 0.45 floor. Median latency remains the only hardware-variable gate at 250ms; p95 is reported. The deterministic hash embedder is lexical-only, so semantic QA questions are skipped and counted rather than scored. BGE-M3 retrieval, model extraction, the 10,000-variant security run and LongMemEval Stage H have separate baselines and cannot be represented by this result.",
   "metrics": {
-    "accuracy": {
-      "min": 1.0
-    },
-    "recall": {
-      "min": 1.0
-    },
-    "abstention": {
-      "min": 1.0
-    },
-    "knowledge_update": {
-      "min": 1.0
-    },
-    "extraction_precision_macro": {
-      "min": 0.963,
-      "slack": 0.02
-    },
-    "extraction_recall_macro": {
-      "min": 0.894,
-      "slack": 0.02
-    },
-    "hallucination_rate": {
-      "max": 0.0
-    },
-    "tokens_mean": {
-      "max": 150.0
-    },
-    "latency_p50_ms": {
-      "max": 250.0
-    },
-    "qa_answer_rate": {
-      "min": 1.0
-    },
-    "qa_body_rate": {
-      "min": 1.0
-    },
-    "qa_scope_user": {
-      "min": 1.0
-    },
-    "qa_scope_team": {
-      "min": 1.0
-    },
-    "qa_scope_department": {
-      "min": 1.0
-    },
-    "qa_scope_org": {
-      "min": 1.0
-    },
-    "retrieval_precision": {
-      "min": 0.45,
-      "slack": 0.05
-    },
-    "tokens_per_answer": {
-      "max": 320.0
-    },
-    "security_leaks_sensitivity": {
-      "max": 0.0
-    },
-    "security_leaks_scope": {
-      "max": 0.0
-    },
-    "security_leaks_tenant": {
-      "max": 0.0
-    },
-    "security_unattributed_lines": {
-      "max": 0.0
-    },
-    "security_watermark_gaps": {
-      "max": 0.0
-    },
-    "security_controls": {
-      "min": 1.0
-    },
-    "security_variants": {
-      "min": 400.0
-    },
-    "security_probes": {
-      "min": 1200.0
-    }
+    "accuracy": { "min": 1.0 },
+    "recall": { "min": 1.0 },
+    "abstention": { "min": 1.0 },
+    "knowledge_update": { "min": 1.0 },
+    "extraction_precision_macro": { "min": 0.963, "slack": 0.02 },
+    "extraction_recall_macro": { "min": 0.894, "slack": 0.02 },
+    "hallucination_rate": { "max": 0.0 },
+    "tokens_mean": { "max": 300.0 },
+    "latency_p50_ms": { "max": 250.0 },
+    "qa_selection_rate": { "min": 1.0 },
+    "qa_scope_principal": { "min": 1.0 },
+    "qa_scope_project": { "min": 1.0 },
+    "qa_scope_workspace": { "min": 1.0 },
+    "qa_scope_tenant": { "min": 1.0 },
+    "retrieval_precision": { "min": 0.45, "slack": 0.05 },
+    "tokens_per_answer": { "max": 420.0 },
+    "security_leaks_sensitivity": { "max": 0.0 },
+    "security_leaks_scope": { "max": 0.0 },
+    "security_leaks_tenant": { "max": 0.0 },
+    "security_unattributed_lines": { "max": 0.0 },
+    "security_watermark_gaps": { "max": 0.0 },
+    "security_controls": { "min": 1.0 },
+    "security_variants": { "min": 400.0 },
+    "security_probes": { "min": 1200.0 }
   }
 }

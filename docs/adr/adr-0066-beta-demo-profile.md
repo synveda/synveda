@@ -364,7 +364,7 @@ runs offline, and scored 0.958 macro precision on MEM-3's labelled fixtures.
 ### 7. Harnesses beyond Claude Code: breadth and proof, no new mechanism
 
 The extension point already satisfies seed §2 principle 6.
-`crates/synveda-cli/src/mcp/clients.jsonc` is data rather than a `match`,
+`adapters/registry.json` is data rather than a `match`,
 `~/.config/synveda/mcp-clients.jsonc` is read through the identical loader
 (the built-ins use the extension path, which is what keeps it first-class),
 `--print` covers a client we have never heard of and `--config` a layout we

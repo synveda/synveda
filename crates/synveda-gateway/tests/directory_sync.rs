@@ -32,8 +32,7 @@
 //! Tests need a live Postgres: they read `DATABASE_URL` and skip with a
 //! message when it is unset (CI has no database), the house convention.
 
-use std::collections::VecDeque;
-use std::path::PathBuf;
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -52,15 +51,18 @@ use synveda_gateway::directory_sync::{PassReport, SyncConfig, run_once};
 use synveda_gateway::telemetry;
 use synveda_identity::Hs256Verifier;
 use synveda_identity::directory::{
-    DirectoryConnector, DirectorySnapshot, DirectoryUserRecord, Enumeration,
+    DirectoryConnector, DirectoryGroupRecord, DirectorySnapshot, DirectoryUserRecord, Enumeration,
 };
 use synveda_ingest::embedding::{AnyEmbedder, DeterministicEmbedder};
 use synveda_policy::Pdp;
-use synveda_retrieval::index::SearchIndex;
 use synveda_store::{
-    directory, directory_sync, group_mappings, hierarchy, identities, rls, role_bindings, tenants,
+    access, directory, directory_sync, identities, rls, scopes, tenant_secrets, tenants,
 };
-use synveda_types::{Role, ScimCredentialId, ScopeId, ScopeKind, Tenant, TenantId, TenantStatus};
+use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
+use synveda_types::secret::TenantSecretKind;
+use synveda_types::{
+    GrantId, ScimCredentialId, ScopeId, Tenant, TenantId, TenantSecretId, TenantStatus,
+};
 
 const SECRET: &[u8] = b"auth-5-directory-sync-suite-secret";
 
@@ -99,7 +101,7 @@ impl DirectoryConnector for ScriptedDirectory {
     }
 }
 
-fn person(external_id: &str, user_name: &str, group: &str) -> DirectoryUserRecord {
+fn person(external_id: &str, user_name: &str, _group: &str) -> DirectoryUserRecord {
     DirectoryUserRecord {
         external_id: external_id.to_owned(),
         user_name: user_name.to_owned(),
@@ -108,19 +110,36 @@ fn person(external_id: &str, user_name: &str, group: &str) -> DirectoryUserRecor
         given_name: None,
         family_name: None,
         work_email: Some(user_name.to_owned()),
-        groups: vec![group.to_owned()],
     }
 }
 
 fn complete(users: Vec<DirectoryUserRecord>) -> Enumeration {
-    Enumeration::Complete(DirectorySnapshot { users })
+    let member_external_ids = users.iter().map(|user| user.external_id.clone()).collect();
+    Enumeration::Complete(DirectorySnapshot {
+        users,
+        groups: vec![DirectoryGroupRecord {
+            external_id: "g-eng-core".to_owned(),
+            display_name: "synveda-eng-core".to_owned(),
+            member_external_ids,
+        }],
+    })
 }
 
 fn partial(users: Vec<DirectoryUserRecord>) -> Enumeration {
     Enumeration::Partial {
-        snapshot: DirectorySnapshot { users },
+        snapshot: DirectorySnapshot {
+            users,
+            groups: Vec::new(),
+        },
         failure: "429 from the second page".to_owned(),
     }
+}
+
+fn complete_without_groups(users: Vec<DirectoryUserRecord>) -> Enumeration {
+    Enumeration::Complete(DirectorySnapshot {
+        users,
+        groups: Vec::new(),
+    })
 }
 
 // ── Harness ──────────────────────────────────────────────────────────────────
@@ -158,58 +177,9 @@ async fn world() -> Option<World> {
         .await
         .expect("admit tenant");
 
-    let mut tx = pool.begin().await.expect("begin");
-    let org = hierarchy::create(
-        &mut tx,
-        ScopeId::new(),
-        tenant,
-        None,
-        ScopeKind::Org,
-        "acme",
-        "acme",
-    )
-    .await
-    .expect("org");
-    let eng = hierarchy::create(
-        &mut tx,
-        ScopeId::new(),
-        tenant,
-        Some(org.id),
-        ScopeKind::Department,
-        "eng",
-        "eng",
-    )
-    .await
-    .expect("eng");
-    let core = hierarchy::create(
-        &mut tx,
-        ScopeId::new(),
-        tenant,
-        Some(eng.id),
-        ScopeKind::Team,
-        "core",
-        "core",
-    )
-    .await
-    .expect("core");
-    hierarchy::create(
-        &mut tx,
-        ScopeId::new(),
-        tenant,
-        Some(org.id),
-        ScopeKind::Team,
-        identities::QUARANTINE_SLUG,
-        identities::QUARANTINE_SLUG,
-    )
-    .await
-    .expect("quarantine");
-    tx.commit().await.expect("commit hierarchy");
-
-    let mut tx = rls::begin_tenant_tx(&pool, tenant).await.expect("begin");
-    group_mappings::upsert(&mut *tx, tenant, "synveda-eng-core", core.id)
-        .await
-        .expect("map group");
-    tx.commit().await.expect("commit mapping");
+    // Nothing else is seeded: the pass itself mints the tenant root (with
+    // each person's principal scope) and the groups it reads, exactly as
+    // ADR-0074's "synchronises nothing" intends.
 
     let pdp = Arc::new(Pdp::new().expect("build the embedded PDP"));
     let state = app_state(pool.clone(), pdp);
@@ -431,6 +401,58 @@ async fn an_incomplete_pass_records_presence_and_concludes_nothing() {
     );
 }
 
+/// Stable provider group ids project onto the shared access graph. A partial
+/// pass cannot speak about absence, while the next complete pass archives a
+/// group the provider no longer lists.
+#[tokio::test]
+async fn directory_groups_converge_only_on_complete_snapshots() {
+    let Some(w) = world().await else { return };
+    let alice = person("u1", "alice@example.test", "synveda-eng-core");
+    let directory = ScriptedDirectory::new(vec![
+        complete(vec![alice.clone()]),
+        partial(vec![alice.clone()]),
+        complete_without_groups(vec![alice]),
+    ]);
+
+    let first = pass(&w, &directory).await;
+    assert_eq!(first.groups, 1);
+    let groups = access::directory_groups(&w.pool, w.tenant, "scripted")
+        .await
+        .expect("list projected groups");
+    assert_eq!(groups.len(), 1);
+    assert_eq!(
+        groups[0].directory_resource_id.as_deref(),
+        Some("g-eng-core")
+    );
+    let members = access::group_members(&w.pool, w.tenant, groups[0].id)
+        .await
+        .expect("list projected membership");
+    assert_eq!(members.len(), 1);
+    assert_eq!(members[0].principal_id, None, "membership predates login");
+
+    let incomplete = pass(&w, &directory).await;
+    assert!(!incomplete.complete);
+    assert_eq!(incomplete.groups_archived, 0);
+    let still_active = access::directory_groups(&w.pool, w.tenant, "scripted")
+        .await
+        .expect("list after partial pass");
+    assert_eq!(
+        still_active[0].status,
+        synveda_types::workspace::LifecycleStatus::Active
+    );
+
+    let complete = pass(&w, &directory).await;
+    assert!(complete.complete);
+    assert_eq!(complete.groups_archived, 1);
+    let archived = access::directory_groups(&w.pool, w.tenant, "scripted")
+        .await
+        .expect("list after complete pass");
+    assert_eq!(
+        archived[0].status,
+        synveda_types::workspace::LifecycleStatus::Archived
+    );
+}
+
 // ── 4. Deactivation is an act; absence is not ───────────────────────────────
 
 /// The asymmetry, as a contrast against test 2.
@@ -588,6 +610,107 @@ async fn a_tenant_the_push_plane_owns_is_not_pulled() {
     );
 }
 
+/// A stable stored credential is an authority boundary, including when its
+/// value is unusable. Revocation and corruption both skip the tenant rather
+/// than silently handing it to a deployment fallback connector.
+#[tokio::test]
+async fn an_unusable_stable_credential_never_falls_back_to_deployment_configuration() {
+    let Some(w) = world().await else { return };
+    let scope = synveda_crypto::KeyScope::Tenant(w.tenant);
+    w.state
+        .keys
+        .provision(&w.pool, scope)
+        .await
+        .expect("provision tenant key");
+    let key = w
+        .state
+        .keys
+        .sealing_key(&w.pool, scope)
+        .await
+        .expect("tenant sealing key");
+    let id = TenantSecretId::new();
+    let valid = br#"{"connector":"okta","org_url":"https://directory.example.test","api_token":"never-log-cpr35"}"#;
+    let sealed = key
+        .seal(
+            synveda_crypto::Purpose::TenantSecret,
+            synveda_crypto::RowKey::Uuid(id.as_uuid()),
+            valid,
+        )
+        .expect("seal connector");
+    let mut tx = rls::begin_tenant_tx(&w.pool, w.tenant)
+        .await
+        .expect("begin secret setup");
+    let root = scopes::ensure_tenant_root(&mut tx, w.tenant)
+        .await
+        .expect("tenant root");
+    tenant_secrets::put(
+        &mut tx,
+        id,
+        w.tenant,
+        root.id,
+        TenantSecretKind::Directory,
+        synveda_identity::directory::CREDENTIAL_SECRET_NAME,
+        Some("okta"),
+        key.version(),
+        &sealed,
+    )
+    .await
+    .expect("store connector");
+    tenant_secrets::revoke(&mut tx, w.tenant, id)
+        .await
+        .expect("revoke connector")
+        .expect("active connector");
+    tx.commit().await.expect("commit revoked connector");
+
+    // This connector has no scripted pass. Any fallback calls `enumerate`
+    // and panics, making this a positive assertion rather than an absence.
+    let mut fallbacks: HashMap<TenantId, Box<dyn DirectoryConnector>> = HashMap::new();
+    fallbacks.insert(w.tenant, Box::new(ScriptedDirectory::new(Vec::new())));
+    synveda_gateway::directory_sync::sweep(&w.state, &fallbacks, &SyncConfig::default())
+        .await
+        .expect("revoked credential sweep");
+
+    let corrupt = key
+        .seal(
+            synveda_crypto::Purpose::TenantSecret,
+            synveda_crypto::RowKey::Uuid(id.as_uuid()),
+            b"not a directory configuration; never-log-cpr35-corrupt",
+        )
+        .expect("seal corrupt connector");
+    let mut tx = rls::begin_tenant_tx(&w.pool, w.tenant)
+        .await
+        .expect("begin corrupt setup");
+    tenant_secrets::put(
+        &mut tx,
+        id,
+        w.tenant,
+        root.id,
+        TenantSecretKind::Directory,
+        synveda_identity::directory::CREDENTIAL_SECRET_NAME,
+        Some("okta"),
+        key.version(),
+        &corrupt,
+    )
+    .await
+    .expect("reactivate corrupt connector");
+    tx.commit().await.expect("commit corrupt connector");
+    synveda_gateway::directory_sync::sweep(&w.state, &fallbacks, &SyncConfig::default())
+        .await
+        .expect("corrupt credential sweep");
+
+    let mut tx = rls::begin_tenant_tx(&w.pool, w.tenant)
+        .await
+        .expect("begin state check");
+    assert!(
+        directory_sync::state(&mut *tx, w.tenant)
+            .await
+            .expect("directory state")
+            .is_none(),
+        "neither unusable stored credential reached a fallback pass"
+    );
+    tx.commit().await.expect("commit state check");
+}
+
 // ── Harness plumbing ────────────────────────────────────────────────────────
 
 fn metrics_handle() -> PrometheusHandle {
@@ -595,12 +718,6 @@ fn metrics_handle() -> PrometheusHandle {
     HANDLE
         .get_or_init(|| telemetry::init_metrics().expect("install metrics"))
         .clone()
-}
-
-fn index_root() -> PathBuf {
-    let root = std::env::temp_dir().join(format!("synveda-auth5-{}", ScopeId::new().as_uuid()));
-    std::fs::create_dir_all(&root).expect("create index root");
-    root
 }
 
 /// The `AppState` a test drives, over the pool that test already opened.
@@ -625,11 +742,9 @@ fn app_state(pool: PgPool, pdp: Arc<Pdp>) -> AppState {
         login: None,
         public_origin: "http://127.0.0.1:8120".to_owned(),
         pdp,
-        scope_chains: Arc::new(synveda_store::ScopeChainCache::new()),
         service_token_max_ttl: Duration::from_secs(3600),
-        search_index: Arc::new(SearchIndex::open(index_root()).expect("open sidecar")),
         embedder: Arc::new(AnyEmbedder::Deterministic(DeterministicEmbedder::new())),
-        inject_embed_timeout: Duration::from_millis(100),
+        context_embed_timeout: Duration::from_millis(100),
         // TEN-4 (ADR-0064): a fixed test KEK, so a suite that touches a
         // sealed column seals rather than skipping. `Kms::Disabled` is the
         // production default when no key is configured.
@@ -787,16 +902,33 @@ fn bearer(w: &World, subject: &str) -> String {
     Hs256Verifier::new(SECRET).issue(subject, w.tenant, Duration::from_secs(600))
 }
 
-/// Binds `org-admin` at the tenant, which is where every embedded pack puts
-/// `DirectorySealAuthorise`.
+/// Grants `administrator` at the tenant root, which is where every
+/// embedded pack puts `DirectorySealAuthorise`.
 async fn bind_org_admin(w: &World, subject: &str) {
     let mut tx = rls::begin_tenant_tx(&w.pool, w.tenant)
         .await
         .expect("begin");
-    role_bindings::bind(&mut *tx, w.tenant, subject, None, Role::OrgAdmin)
+    let root = scopes::ensure_tenant_root(&mut tx, w.tenant)
         .await
-        .expect("bind org-admin");
-    tx.commit().await.expect("commit binding");
+        .expect("mint root");
+    access::create_grant(
+        &mut *tx,
+        &access::NewGrant {
+            id: GrantId::new(),
+            tenant_id: w.tenant,
+            scope_id: root.id,
+            subject: GrantSubject::Principal {
+                principal_id: subject.to_owned(),
+            },
+            role_key: RoleKey::Administrator,
+            source: GrantSource::Automation,
+            invite_id: None,
+            granted_by: None,
+        },
+    )
+    .await
+    .expect("grant administrator");
+    tx.commit().await.expect("commit grant");
 }
 
 fn authorise_request(token: &str, w: &World, body: Value) -> Request<Body> {

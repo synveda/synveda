@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update skill_version_files set path = 'scripts/other.py'\n             where tenant_id = $1 and path = 'scripts/check.py'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e33f6fc5b8d00c580f41319fbf75ffd3cb6b24439ff468f09465cee1b92c2405"
+}

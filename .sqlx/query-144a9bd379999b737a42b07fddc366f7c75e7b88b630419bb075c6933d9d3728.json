@@ -1,0 +1,104 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        with reviewed as (\n            update session_event_quarantine\n            set state = $3,\n                reviewer_subject = $4,\n                reviewed_at = now(),\n                review_reason = $5\n            where tenant_id = $1 and event_id = $2 and state = 'pending'\n            returning event_id, tenant_id, scope_id, session_id, findings,\n                      state, created_at, reviewer_subject, reviewed_at,\n                      review_reason\n        )\n        select r.event_id, r.tenant_id, r.scope_id, r.session_id,\n               s.principal_id, e.event_type, e.client_event_id, e.payload,\n               r.findings, r.state, r.created_at,\n               r.reviewer_subject, r.reviewed_at, r.review_reason\n        from reviewed r\n        join session_events e\n          on e.tenant_id = r.tenant_id and e.id = r.event_id\n        join sessions s\n          on s.tenant_id = r.tenant_id and s.id = r.session_id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "event_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "tenant_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "scope_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "session_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "principal_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "event_type",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "client_event_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "payload",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 8,
+        "name": "findings",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 9,
+        "name": "state",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 11,
+        "name": "reviewer_subject",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 12,
+        "name": "reviewed_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 13,
+        "name": "review_reason",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "144a9bd379999b737a42b07fddc366f7c75e7b88b630419bb075c6933d9d3728"
+}

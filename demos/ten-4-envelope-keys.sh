@@ -10,11 +10,11 @@
 # What it asserts, in order:
 #
 #   1. A tenant is admitted **with** a data key, in one command.
-#   2. Its records and audit chain export into one sealed archive.
+#   2. Its Knowledge history and audit chain export into one sealed archive.
 #   3. The archive's cleartext header names the tenant and the generation —
 #      a backup vault full of anonymous blobs is not a backup.
-#   4. The archive opens under this deployment's key and the body is the
-#      records that went in.
+#   4. The archive opens under this deployment's key and carries only the
+#      context-platform Knowledge contract (no Record compatibility body).
 #   5. **It does not open under another deployment's KEK.** The AC.
 #   6. **It does not open under another tenant's key.** The AC's other half:
 #      "that tenant's" is doing work in the sentence.
@@ -28,7 +28,8 @@
 #   DATABASE_URL   the database to run against (defaults to the dev one)
 #   KEEP_DB=1      keep the scratch database on the way out
 #
-# Cost: one scratch database, no gateway, no network. Under a minute.
+# Cost: one scratch database and one loopback gateway, no external network.
+# The gateway exists only for the final public audit verification.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
@@ -42,6 +43,9 @@ COMPOSE="docker compose -f deploy/compose/docker-compose.yml"
 DB="synveda_ten4_demo_$$"
 URL="postgres://synveda:synveda-dev@localhost:5432/${DB}"
 WORK="$(mktemp -d)"
+PORT=8139
+GATEWAY_URL="http://127.0.0.1:${PORT}"
+GATEWAY_PID=""
 
 # A **scratch database**, for the reason `make db-test` takes one: this demo
 # admits tenants and mints keys, and the deployment key is a per-database
@@ -51,6 +55,7 @@ psql_admin() { $COMPOSE exec -T postgres psql -U synveda -d postgres -qtAX -v ON
 psql_db() { $COMPOSE exec -T postgres psql -U synveda -d "$DB" -qtAX -v ON_ERROR_STOP=1 "$@"; }
 
 cleanup() {
+    [ -n "$GATEWAY_PID" ] && kill "$GATEWAY_PID" 2>/dev/null || true
     if [ "${KEEP_DB:-0}" = "1" ]; then
         echo "keeping ${URL}"
     else
@@ -66,13 +71,14 @@ fail() { printf '   \033[31mFAIL\033[0m %s\n' "$1"; exit 1; }
 
 $COMPOSE ps postgres >/dev/null 2>&1 || { echo "run \`make dev-up\` first"; exit 1; }
 
-step "Building the CLI"
-cargo build -q -p synveda-cli
+step "Building the CLI and gateway"
+cargo build -q -p synveda-cli -p synveda-gateway
 BIN="./target/debug/synveda"
+GATEWAY="./target/debug/synveda-gateway"
 
 step "A scratch database"
 psql_admin -c "create database ${DB}" >/dev/null
-psql_db -c "create extension if not exists vector; create extension if not exists btree_gin; create extension if not exists pgmq;" >/dev/null
+psql_db -c "create extension if not exists vector; create extension if not exists btree_gin;" >/dev/null
 DATABASE_URL="$URL" "$BIN" db migrate >/dev/null
 ok "migrated ${DB}"
 
@@ -116,7 +122,14 @@ step "4. It opens under this deployment's key"
 "$BIN" tenant export-open --archive "$WORK/tenant.svexp" >"$WORK/body.json"
 BODY_TENANT="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["tenant"])' "$WORK/body.json")"
 [ "$BODY_TENANT" = "$TENANT" ] || fail "the body is for ${BODY_TENANT}"
-ok "opened, and the body is this tenant's"
+python3 - "$WORK/body.json" <<'PY' || fail "the opened archive is not the Knowledge-only contract"
+import json, sys
+body = json.load(open(sys.argv[1]))
+assert body["format"] == "synveda-context-export-2"
+assert set(body["knowledge"]) == {"head_history", "revisions", "sources", "revision_sources", "relations"}
+assert "records" not in body and "record_history" not in body
+PY
+ok "opened as the Knowledge-only context export, with no Record compatibility body"
 
 step "5. It does NOT open under another deployment's KEK — the AC"
 if SYNVEDA_KMS_KEY="$KEK_THEIRS" "$BIN" tenant export-open \
@@ -158,9 +171,11 @@ ok "refused: a relabelled archive does not open under the tenant it names"
 step "7. Nothing plaintext reached the database"
 # Asserted from SQL rather than from the application that wrote the rows:
 # the claim is about what a dumped table contains.
-"$BIN" directory set-credential --tenant "$TENANT" --config - <<'JSON' >/dev/null
+"$BIN" directory set-credential --tenant "$TENANT" --config - <<'JSON' >"$WORK/directory-secret.json"
 {"connector":"okta","org_url":"https://example.okta.com","api_token":"s3cr3t-token-value"}
 JSON
+SECRET_ID="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["secret_id"])' "$WORK/directory-secret.json")"
+SECRET_REVISION="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["value_revision"])' "$WORK/directory-secret.json")"
 LEAKED="$(psql_db -c "select count(*) from tenant_secrets where encode(sealed, 'escape') like '%s3cr3t%'")"
 [ "$LEAKED" = "0" ] || fail "the credential is readable in tenant_secrets"
 SEALED="$(psql_db -c "select octet_length(sealed) from tenant_secrets where tenant_id = '${TENANT}'")"
@@ -179,6 +194,14 @@ NEW_VERSION="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["
     || fail "an archive sealed under generation 1 stopped opening after a rotation"
 ok "generation ${NEW_VERSION} is current, and the generation-1 archive still opens"
 
+SECRET_KEY_VERSION="$(psql_db -c "select key_version from tenant_secrets where tenant_id = '${TENANT}' and id = '${SECRET_ID}'")"
+SECRET_REVISION_AFTER="$(psql_db -c "select value_revision from tenant_secrets where tenant_id = '${TENANT}' and id = '${SECRET_ID}'")"
+JOB_STATE="$(psql_db -c "select state from tenant_secret_reencryption_jobs where tenant_id = '${TENANT}' order by created_at desc limit 1")"
+[ "$SECRET_KEY_VERSION" = "2" ] || fail "the active secret stayed on key generation ${SECRET_KEY_VERSION}"
+[ "$SECRET_REVISION_AFTER" = "$SECRET_REVISION" ] || fail "DEK re-encryption changed logical revision ${SECRET_REVISION} to ${SECRET_REVISION_AFTER}"
+[ "$JOB_STATE" = "completed" ] || fail "the durable re-encryption job ended ${JOB_STATE}"
+ok "the durable job re-encrypted the secret without changing its stable id or logical revision"
+
 CURRENT="$(psql_db -c "select count(*) from tenant_keys where tenant_id = '${TENANT}' and retired_at is null")"
 [ "$CURRENT" = "1" ] || fail "expected exactly one current key, found ${CURRENT}"
 TOTAL="$(psql_db -c "select count(*) from tenant_keys where tenant_id = '${TENANT}'")"
@@ -186,17 +209,39 @@ TOTAL="$(psql_db -c "select count(*) from tenant_keys where tenant_id = '${TENAN
 ok "one current key, one retired and kept — a dropped key is data made unreadable"
 
 step "9. The acts are on the chain, and the chain verifies"
-for action in tenant.key.provisioned tenant.exported tenant.key.rotated tenant.secret.stored; do
+for action in tenant.key.provisioned tenant.exported tenant.key.rotated tenant.secret.stored tenant.secrets.reencrypted; do
     COUNT="$(psql_db -c "select count(*) from audit_log where tenant_id = '${TENANT}' and action = '${action}'")"
     [ "$COUNT" -ge 1 ] || fail "no ${action} event on the chain"
 done
-ok "provisioned, exported, rotated and secret-stored are all chained"
+ok "provisioned, exported, rotated, secret-stored and re-encryption are all chained"
 
 LEAKS="$(psql_db -c "select count(*) from audit_log where tenant_id = '${TENANT}' and payload::text like '%s3cr3t%'")"
 [ "$LEAKS" = "0" ] || fail "a credential reached an audit payload"
 ok "no credential material in any payload — AUTH-4's sweep, applied here"
 
-"$BIN" audit verify --tenant "$TENANT" >"$WORK/verify.txt" 2>&1 \
+# Verification is an ordinary governed read now (CPR-29): start the public
+# application boundary, resolve the caller's principal/root, seed only the
+# dev-token operator door this scratch tenant cannot obtain from an IdP, and
+# ask the API. The key/export commands above remain local custody operations.
+export SYNVEDA_DEV_JWT_SECRET="ten4-demo-secret"
+export SYNVEDA_LISTEN_ADDR="127.0.0.1:${PORT}"
+export SYNVEDA_PUBLIC_URL="$GATEWAY_URL"
+TOKEN="$("$BIN" token issue --tenant "$TENANT" --subject ten4-auditor)"
+"$GATEWAY" >"$WORK/gateway.log" 2>&1 &
+GATEWAY_PID=$!
+for _ in $(seq 1 60); do
+    curl -fsS "${GATEWAY_URL}/healthz" >/dev/null 2>&1 && break
+    sleep 0.5
+done
+ME="$(curl -fsS -H "authorization: Bearer ${TOKEN}" "${GATEWAY_URL}/v1/me")" ||
+    fail "the gateway did not resolve the audit caller: $(tail -5 "$WORK/gateway.log")"
+ROOT_SCOPE="$(printf '%s' "$ME" | python3 -c 'import json,sys; print(json.load(sys.stdin)["onboarding"]["tenant_scope_id"])')"
+psql_db -c "insert into scope_grants
+              (id, tenant_id, scope_id, subject_kind, principal_id, role_key, source)
+            values (gen_random_uuid(), '${TENANT}', '${ROOT_SCOPE}', 'principal',
+                    'ten4-auditor', 'administrator', 'automation')" >/dev/null
+SYNVEDA_GATEWAY="$GATEWAY_URL" SYNVEDA_TOKEN="$TOKEN" \
+    "$BIN" audit verify >"$WORK/verify.txt" 2>&1 \
     || fail "the chain does not verify: $(cat "$WORK/verify.txt")"
 ok "$(tr -d '\n' <"$WORK/verify.txt" | head -c 100)"
 

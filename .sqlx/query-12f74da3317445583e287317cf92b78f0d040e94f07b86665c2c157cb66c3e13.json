@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update configuration_changes\n              set resulting_artifact_id = $3,\n                  resulting_version_id = $4,\n                  resulting_binding_id = $5,\n                  resulting_binding_revision = $6,\n                  applied_at = now()\n            where tenant_id = $1 and proposal_id = $2 and applied_at is null",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "12f74da3317445583e287317cf92b78f0d040e94f07b86665c2c157cb66c3e13"
+}

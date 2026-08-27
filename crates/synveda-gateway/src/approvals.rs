@@ -18,9 +18,11 @@
 use serde::Serialize;
 use serde_json::Value;
 use sqlx::PgConnection;
-use synveda_policy::{Resource, effective_roles_at};
+use synveda_policy::{Resource, effective_role_keys_at};
+use synveda_types::access::RoleKey;
+use synveda_types::scope::Scope;
 use synveda_types::{
-    ApprovalRequirement, AssetKind, CastApproval, Error, HierarchyNode, Outstanding,
+    ApprovalRequirement, AssetKind, CastApproval, Error, IdentityId, Outstanding, ProposalId,
     RequirementOrigin, Result, Sensitivity, TenantId,
 };
 use synveda_vedaflow as vedaflow;
@@ -35,7 +37,7 @@ use crate::telemetry::PUBLISH_REVIEW_REQUIRED_TOTAL;
 pub(crate) struct Requested<'a> {
     /// The target scope. Its kind and its effective pack both feed the
     /// matrix, and its chain carries the curator file.
-    pub(crate) target: &'a HierarchyNode,
+    pub(crate) target: &'a Scope,
     /// Which asset type.
     pub(crate) asset: AssetKind,
     /// The **maximum** sensitivity over the set: a set is reviewed as a
@@ -80,14 +82,11 @@ pub(crate) async fn resolve(
     Ok(requirement)
 }
 
-/// The acting principal's effective roles at `target` — the same set the
-/// PDP weighed for the decision that got them here.
-pub(crate) fn roles_at(input: &DecisionInput, target: &HierarchyNode) -> Vec<synveda_types::Role> {
-    effective_roles_at(
-        &input.principal,
-        Resource::Scope(target.id),
-        &input.context(),
-    )
+/// The acting principal's effective role keys at `target` — the same set
+/// the PDP weighed for the decision that got them here (CPR-6, ADR-0073
+/// decision 5; since the cutover, the only roles there are).
+pub(crate) fn roles_at(input: &DecisionInput, target: &Scope) -> Vec<RoleKey> {
+    effective_role_keys_at(Resource::Scope(target.id), &input.context())
 }
 
 /// The direct publish route's gate (ADR-0032 decision 8): the publisher
@@ -122,13 +121,60 @@ pub(crate) fn require_single_actor(
     })
 }
 
+/// Enforces the live matrix's proposal-author separation after Cedar has
+/// independently authorised the review act.
+pub(crate) fn require_review_actor(
+    requirement: &ApprovalRequirement,
+    proposal_id: ProposalId,
+    author: IdentityId,
+    reviewer: IdentityId,
+) -> Result<()> {
+    if requirement.allows_review_by(author, reviewer) {
+        return Ok(());
+    }
+    Err(Error::PolicyDenied {
+        action: "proposal.review".to_owned(),
+        resource: format!("proposal {proposal_id}"),
+        reason:
+            "the effective approval matrix requires a reviewer distinct from the proposal author"
+                .to_owned(),
+    })
+}
+
+/// Enforces author/reviewer/publisher separation at the exact transaction
+/// that executes a reviewed effect. Artifact PDP checks remain mandatory and
+/// separate; an approval is never write authority.
+pub(crate) fn require_effect_actor(
+    requirement: &ApprovalRequirement,
+    proposal_id: ProposalId,
+    author: IdentityId,
+    approvals: &[CastApproval],
+    actor: IdentityId,
+) -> Result<()> {
+    if requirement.allows_effect_by(author, approvals, actor) {
+        return Ok(());
+    }
+    Err(Error::PolicyDenied {
+        action: "proposal.effect".to_owned(),
+        resource: format!("proposal {proposal_id}"),
+        reason: "the effective approval matrix requires an effect actor distinct from the proposal author and every reviewer"
+            .to_owned(),
+    })
+}
+
 /// A requirement as the API and the audit payload render it.
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
+#[schema(as = ApprovalRequirementView)]
 pub(crate) struct RequirementView {
     /// Roles required, with counts.
     pub(crate) roles: Vec<RoleView>,
     /// Distinct identities required.
     pub(crate) distinct_approvers: u8,
+    /// The proposal author cannot cast a verdict when true.
+    pub(crate) forbid_author_approval: bool,
+    /// Applying or publishing requires an actor distinct from the author
+    /// and every recorded approver when true.
+    pub(crate) separate_effect_actor: bool,
     /// Named subjects a curator file requires.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub(crate) subjects: Vec<String>,
@@ -139,7 +185,8 @@ pub(crate) struct RequirementView {
 }
 
 /// One role line.
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
+#[schema(as = ApprovalRoleView)]
 pub(crate) struct RoleView {
     pub(crate) role: String,
     pub(crate) count: u8,
@@ -158,6 +205,8 @@ impl RequirementView {
                 })
                 .collect(),
             distinct_approvers: requirement.distinct_approvers,
+            forbid_author_approval: requirement.forbid_author_approval,
+            separate_effect_actor: requirement.separate_effect_actor,
             subjects: requirement.subjects.clone(),
             origins: requirement
                 .origins

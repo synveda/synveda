@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# `make db-test` — the workspace suite against a database of its own.
+# `make db-test` — a database-backed repository task against a database of
+# its own. The default task is the workspace suite; CPR-40 reuses the same
+# hard-cut-safe lifecycle for its exact product acceptance cases.
 #
 # # Why a scratch database
 #
@@ -11,9 +13,10 @@
 #
 # That is not only untidy. The sidecar indexer, the pack refresher, the
 # promotion sweep and the retention sweep all visit **every active tenant
-# per cycle**, which is why `demos/ctx-5-recall.sh` takes a scratch database
-# and says so: "on the shared dev database a just-admitted tenant waits
-# minutes for its first pass". A suite whose fixtures wait on a sweep gets
+# per cycle**, which is why `demos/ctx-5-recall.sh` took a scratch database
+# and said so: "on the shared dev database a just-admitted tenant waits
+# minutes for its first pass". (That demo is deleted — CPR-12 — but the
+# measurement below is why this script still does the same thing.) A suite whose fixtures wait on a sweep gets
 # slower as the database fills, and eventually flaky. Measured before this
 # change, same tests either side: `synveda-store --test hierarchy` 6.49s
 # shared against 4.54s fresh, `--test rls` 0.90s against 0.47s.
@@ -26,7 +29,7 @@
 # nothing here touches a test; the target hands them a fresh database and
 # takes it away again.
 #
-# Cost: one `CREATE DATABASE`, three extensions, and ~0.7s of migration
+# Cost: one `CREATE DATABASE`, two extensions, and one baseline migration
 # inside the first test that runs. Against a suite that takes minutes.
 #
 # # What it keeps
@@ -88,8 +91,7 @@ psql_admin -c "create database $TEST_DB" >/dev/null
 # migrate` assumes they exist, exactly as the compose bootstrap provides
 # them for the dev database.
 psql_test -c "create extension if not exists vector;
-              create extension if not exists age;
-              create extension if not exists pgmq" >/dev/null
+              create extension if not exists btree_gin" >/dev/null
 
 # Migrate once, here, rather than leaving it to the tests.
 #
@@ -125,7 +127,23 @@ echo "db-test: $TEST_DB (scratch, migrated)"
 trap 'drop_test_db' INT TERM
 
 status=0
-DATABASE_URL="$TEST_URL" cargo test --workspace "$@" || status=$?
+case "${SYNVEDA_DB_TEST_TASK:-workspace}" in
+  workspace)
+    DATABASE_URL="$TEST_URL" cargo test --workspace "$@" || status=$?
+    ;;
+  product-evaluation)
+    if [ "$#" -ne 0 ]; then
+      echo "db-test: product-evaluation takes no cargo-test arguments" >&2
+      status=2
+    else
+      DATABASE_URL="$TEST_URL" node scripts/product-evaluation.mjs || status=$?
+    fi
+    ;;
+  *)
+    echo "db-test: unknown SYNVEDA_DB_TEST_TASK '${SYNVEDA_DB_TEST_TASK}'" >&2
+    status=2
+    ;;
+esac
 
 if [ "$status" -eq 0 ] && [ -z "${KEEP_TEST_DB:-}" ]; then
   drop_test_db

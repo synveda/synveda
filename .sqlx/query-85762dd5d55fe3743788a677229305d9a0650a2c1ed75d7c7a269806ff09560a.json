@@ -1,0 +1,147 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        insert into context_graph_steps\n            (tenant_id, context_run_id, context_candidate_id, ordinal, hop,\n             relation_id, relation_hash, relation_type, direction,\n             from_item_id, from_revision_id, to_item_id, to_revision_id,\n             asserting_revision_id, from_content_hash, to_content_hash,\n             edge_weight_micros, supporting)\n        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,\n                $13, $14, $15, $16, $17, $18)\n        returning tenant_id, context_run_id, context_candidate_id, ordinal,\n                  hop, relation_id, relation_hash, relation_type, direction,\n                  from_item_id, from_revision_id, to_item_id, to_revision_id,\n                  asserting_revision_id, from_content_hash, to_content_hash,\n                  edge_weight_micros, supporting, created_at\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "tenant_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "context_run_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "context_candidate_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "ordinal",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 4,
+        "name": "hop",
+        "type_info": "Int2"
+      },
+      {
+        "ordinal": 5,
+        "name": "relation_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 6,
+        "name": "relation_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "relation_type",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "direction",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "from_item_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 10,
+        "name": "from_revision_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 11,
+        "name": "to_item_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 12,
+        "name": "to_revision_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 13,
+        "name": "asserting_revision_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 14,
+        "name": "from_content_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 15,
+        "name": "to_content_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 16,
+        "name": "edge_weight_micros",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 17,
+        "name": "supporting",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 18,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Int4",
+        "Int2",
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Int4",
+        "Bool"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "85762dd5d55fe3743788a677229305d9a0650a2c1ed75d7c7a269806ff09560a"
+}

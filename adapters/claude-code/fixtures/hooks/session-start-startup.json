@@ -2,9 +2,6 @@
   "session_id": "0198e4c1-6c2a-7b3d-9f10-4e5a6b7c8d90",
   "transcript_path": "/Users/dev/.claude/projects/-Users-dev-Source-acme-api/0198e4c1-6c2a-7b3d-9f10-4e5a6b7c8d90.jsonl",
   "cwd": "/Users/dev/Source/acme-api",
-  "agent_type": "main",
   "hook_event_name": "SessionStart",
-  "source": "startup",
-  "model": "claude-opus-4-5",
-  "session_title": "acme-api"
+  "source": "startup"
 }

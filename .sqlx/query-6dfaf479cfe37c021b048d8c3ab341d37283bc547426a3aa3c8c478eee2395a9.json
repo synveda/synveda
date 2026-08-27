@@ -1,0 +1,47 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select version_id, path, object_hash, chars, created_at\n           from skill_version_files\n           where tenant_id = $1 and version_id = $2 order by path",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "version_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "path",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "object_hash",
+        "type_info": "Bytea"
+      },
+      {
+        "ordinal": 3,
+        "name": "chars",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 4,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "6dfaf479cfe37c021b048d8c3ab341d37283bc547426a3aa3c8c478eee2395a9"
+}

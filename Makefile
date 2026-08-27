@@ -19,7 +19,7 @@ export SYNVEDA_TEI_IMAGE
 # and skip when it is unset — CI runs without a database.
 DATABASE_URL ?= postgres://synveda:synveda-dev@localhost:5432/synveda
 
-.PHONY: fmt lint test build deny check-deps check-adr-status check-ann-bench check-backlog check-benchmarks check-chart-images check-corpus-licences check-npm-licences chart-lint ts-build ts-test ci dev-up dev-down smoke db-test eval eval-check eval-judge eval-read eval-longmemeval eval-longmemeval-full eval-longmemeval-judged eval-extraction-live eval-retrieval eval-security
+.PHONY: fmt lint test build deny check-deps check-adr-status check-adapters check-api-types check-backlog check-benchmarks check-chart-images check-context-hard-cut check-context-security check-corpus-licences check-demos check-deploy check-docs check-npm-licences check-product-eval chart-lint ts-build ts-test ci dev-up dev-down smoke db-test claude-acceptance claude-acceptance-live eval eval-check eval-product eval-judge eval-read eval-longmemeval eval-longmemeval-full eval-longmemeval-judged eval-extraction-live eval-retrieval eval-security
 
 dev-up:
 	$(COMPOSE) up --build --detach --wait
@@ -88,6 +88,22 @@ eval-extraction-live:
 # nothing or a fixture whose label can never match.
 eval-check:
 	cargo run -q -p synveda-eval -- check
+	node scripts/product-evaluation.mjs --check
+	node --test scripts/product-evaluation.test.mjs
+
+# CPR-40's deterministic product/trust suite. It executes exact
+# database-backed acceptance cases on a fresh migrated scratch database,
+# rejects skipped DB tests, and writes one machine-readable and one
+# human-readable report under target/. The existing corpus targets below
+# remain separate because semantic/model measurements are not comparable with
+# the deterministic path.
+eval-product:
+	SYNVEDA_DB_TEST_TASK=product-evaluation \
+		DATABASE_URL="$(DATABASE_URL)" bash scripts/db-test.sh
+
+check-product-eval:
+	node scripts/product-evaluation.mjs --check
+	node --test scripts/product-evaluation.test.mjs
 
 # The judge measured before it measures (EVAL-3, ADR-0061 decision 4):
 # the configured judge over the labelled sets, with no gateway and no
@@ -150,7 +166,7 @@ eval-longmemeval-judged:
 
 # The reader measured against its probes, graded by the configured judge
 # (EVAL-3, ADR-0061 decision 6). The blocks come from a file rather than
-# from /v1/inject, so this measures the reader and the judge and NOT
+# from a live ContextRun, so this measures the reader and the judge and NOT
 # Synveda — the axes are named probe_* rather than qa_* to keep that
 # impossible to mistake. SYNVEDA_READER=claude plus ANTHROPIC_API_KEY
 # runs the model reader; the default selects a line and costs nothing.
@@ -163,6 +179,24 @@ eval-read:
 # scripts/db-test.sh for what that cost.
 db-test:
 	DATABASE_URL=$(DATABASE_URL) bash scripts/db-test.sh
+
+# CPR-14's deterministic tier: authentic Claude Code frames through the built
+# hook, the real gateway/PDP/schema, persisted events, timeline and audit chain.
+# A fresh scratch database is created and dropped by db-test.sh.
+CLAUDE_ACCEPTANCE_TEST := a_claude_code_session_is_a_governed_run_from_start_to_end
+claude-acceptance:
+	pnpm --filter @synveda/claude-code-adapter build
+	cargo test -q -p synveda-gateway --test claude_lifecycle -- --list | \
+		grep -Fqx '$(CLAUDE_ACCEPTANCE_TEST): test'
+	DATABASE_URL=$(DATABASE_URL) bash scripts/db-test.sh \
+		-p synveda-gateway --test claude_lifecycle \
+		$(CLAUDE_ACCEPTANCE_TEST) \
+		-- --exact --nocapture --test-threads=1
+
+# Tier 3 is never substituted by replay. The wrapper exits 77, with the exact
+# missing prerequisite, when Claude Code or authentication is unavailable.
+claude-acceptance-live:
+	bash scripts/claude-acceptance-live.sh
 
 fmt:
 	cargo fmt --all --check
@@ -182,21 +216,69 @@ deny:
 check-deps:
 	node scripts/check-crate-deps.mjs
 
-# SYNVEDA_FEATURES.md, docs/backlog/<ID>.md and STATUS.md describe one feature
-# set; this asserts they agree. Writes nothing — it replaced a generator that
-# wrote all three and discarded their hand-written narrative doing it.
+# The frontend's types are generated from the OpenAPI document, and the
+# document is generated from the gateway's own handlers (CPR-4, ADR-0071
+# decision 7). The Rust half of that chain is checked by
+# `crates/synveda-gateway/tests/openapi.rs`, which `test` already runs; this is
+# the TypeScript half. Needs nothing but node, so it runs early.
+#
+# To refresh both after changing a DTO or a handler annotation:
+#   SYNVEDA_WRITE_OPENAPI=1 cargo test -p synveda-gateway --test openapi
+#   node scripts/generate-api-types.mjs
+check-api-types:
+	node scripts/generate-api-types.mjs --check
+
+# STATUS.md is the concise feature inventory. This enforces unique IDs/counts
+# and requires an implementation-ready brief for open work only; delivered
+# history stays in git rather than duplicate Markdown diaries.
 check-backlog:
+	node --test scripts/check-backlog.test.mjs
 	node scripts/check-backlog.mjs
 
-# check-backlog reconciles those three files with each other and never
-# reads an ADR header; this closes that gap in the one direction worth
-# gating — an ADR still reading `Proposed` after its feature shipped. The
-# mirror check would fire on every feature in flight, because CLAUDE.md
-# requires the ADR first.
+# Demos are executable documentation. CPR-13 derives the accepted command
+# vocabulary from Clap's recursive help and the route vocabulary from the
+# generated OpenAPI document, then checks every shell script without executing
+# it. The fixture test deliberately adds one dead command and one dead path.
+check-demos:
+	node --test scripts/check-demos.test.mjs
+	node scripts/check-demos.mjs
+
+# CPR-39: a config recipe, captured protocol and a fully verified client are
+# deliberately different support levels. This also checks the fixture hashes
+# and the generated public support/onboarding surfaces plus README summary.
+check-adapters:
+	node --test scripts/check-adapter-conformance.test.mjs
+	node scripts/check-adapter-conformance.mjs
+
+# CPR-42: the Rust/TypeScript suites execute each adversarial case; this
+# inventory prevents a refactor from deleting a whole security boundary while
+# leaving unrelated tests green, and enforces the non-execution/client/logging
+# seams that are visible directly in source.
+check-context-security:
+	node --test scripts/check-context-security.test.mjs
+	node scripts/check-context-security.mjs
+
+# CPR-43: active runtime code/config carries no retired route, aggregate,
+# table, sidecar, hidden alias or old telemetry name; storage is exactly one
+# epoch-3 baseline with the pgvector-only extension shape.
+check-context-hard-cut:
+	node --test scripts/check-context-hard-cut.test.mjs
+	node scripts/check-context-hard-cut.mjs
+
+# check-backlog does not read ADR headers. This closes the useful half of that
+# gap: a delivered feature must not retain a Proposed ADR. Accepted decisions
+# may precede delivery because ADRs are written first.
 check-adr-status:
 	node scripts/check-adr-status.mjs
 
-# CLAUDE.md's licence rule on the npm side (CNSL-1, ADR-0056 decision 8).
+# Current documentation, including open briefs, must resolve repository-local
+# links and code-path references. Historical ADR/spike prose stays link-checked
+# without becoming a claim about the current product.
+check-docs:
+	node --test scripts/check-docs.test.mjs
+	node scripts/check-docs.mjs
+
+# The repository licence rule on the npm side (CNSL-1, ADR-0056 decision 8).
 # Needs the workspace installed, so it runs after ts-build in `ci`.
 check-npm-licences:
 	node scripts/check-npm-licences.mjs
@@ -204,7 +286,7 @@ check-npm-licences:
 # The same rule on the corpus side (EVAL-3, ADR-0061 compliance notes).
 # `cargo deny` governs crates and check-npm-licences governs packages; a
 # corpus is data, which is how a CC BY-NC one reached a feature
-# specification, the phase demo goal and CLAUDE.md before anyone read its
+# specification, the phase demo goal and AGENTS.md before anyone read its
 # LICENSE.txt. Needs nothing but node, so it runs early in `ci` — and it
 # also fires on a developer's machine that fetched a corpus, which is
 # where the licence file actually lands.
@@ -219,17 +301,6 @@ check-corpus-licences:
 check-benchmarks:
 	node scripts/publish-benchmark.mjs
 
-# TEN-3's dense-leg rows (ADR-0063 decision 1), which are engineering
-# evidence for a gate rather than a published claim — hence a sibling of
-# check-benchmarks and not a branch inside it. What it asserts is narrower
-# and comes from that ADR's own history: every row carries the commit, the
-# pgvector version and the corpus it was measured over, and no row is a
-# single run. ADR-0063's first table was n=1 in every row, and three of its
-# four findings were withdrawn. To publish a sweep:
-# `node scripts/publish-ann-bench.mjs <run-dir>`.
-check-ann-bench:
-	node scripts/publish-ann-bench.mjs
-
 # The same rule again, one artefact class further out (OPS-2, ADR-0062
 # decision 11). cargo-deny governs crates, check-npm-licences packages and
 # check-corpus-licences corpora; a Helm chart references container images,
@@ -241,13 +312,22 @@ check-chart-images:
 
 # The enterprise chart renders, in both of the shapes CI covers: the
 # minimum a real install must state, and every optional path at once.
-# Needs helm. The chart's defaults deliberately do not render — four values
+# Needs helm. The chart's defaults deliberately do not render — five values
 # have no default because each is a decision somebody has to make on
 # purpose — so the lint values are also the list of those decisions.
 chart-lint:
 	helm lint deploy/helm/synveda --strict -f deploy/helm/synveda/ci/lint-values.yaml
 	helm lint deploy/helm/synveda --strict -f deploy/helm/synveda/ci/full-values.yaml
-	helm template synveda deploy/helm/synveda -f deploy/helm/synveda/ci/full-values.yaml >/dev/null
+	node scripts/check-helm-contract.mjs
+
+# CPR-36: source/release Compose, Helm, generated API and the packaged profile
+# are one runtime; a repeat package cannot retain a removed asset. CPR-44's
+# scratch-HOME test keeps the local KEK exactly when this deployment keeps its
+# volumes, and proves the explicit purge and dry-run paths separately.
+check-deploy:
+	node --test scripts/check-deploy-convergence.test.mjs
+	node --test scripts/uninstall.test.mjs
+	node scripts/check-deploy-convergence.mjs
 
 ts-build:
 	pnpm install --frozen-lockfile
@@ -257,4 +337,4 @@ ts-build:
 ts-test:
 	pnpm -r test
 
-ci: fmt lint test build deny check-deps check-backlog check-adr-status check-corpus-licences check-chart-images check-benchmarks check-ann-bench chart-lint eval-check ts-build check-npm-licences ts-test
+ci: fmt lint test build deny check-deps check-api-types check-backlog check-demos check-adapters check-context-security check-context-hard-cut check-adr-status check-docs check-corpus-licences check-chart-images check-benchmarks chart-lint check-deploy eval-check ts-build check-npm-licences ts-test

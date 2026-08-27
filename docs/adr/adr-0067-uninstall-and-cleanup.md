@@ -75,32 +75,36 @@ of erasure this product currently has. A default that took them would make
 `uninstall.sh` the most destructive command we ship, run by people whose
 mental model is "undo the install".
 
-So the default stops the deployment and leaves `pg-data`, `rauthy-data`,
-`tei-cache` and `gateway-search` in place, **naming them** and printing the
-command that would remove them. `--purge` removes them and says in the same
-breath that a tenant's memory is what it just removed and that TEN-5 is why
-there was no smaller unit.
+So the default stops the deployment and leaves `pg-data`, `rauthy-data` and
+`tei-cache` in place, **naming them** and printing the command that would
+remove them. `--purge` removes them and says in the same breath that a
+tenant's memory is what it just removed and that TEN-5 is why there was no
+smaller unit. (`gateway-search` was removed by the context-platform hard cut.)
 
 This is the one place the missing feature is visible to a user as a missing
 feature, and the message says so rather than hiding it.
 
-### 2. `kms.key` goes with the install, and that is a decision
+### 2. Preserved data keeps `kms.key` (amended 2026-08-26 by CPR-44)
 
-`$SYNVEDA_HOME/data/kms.key` is removed by a default uninstall even though
-the data survives, and the asymmetry is deliberate: it is a *file the
-installer's own directory holds*, not a volume.
+`$SYNVEDA_HOME/data/kms.key` survives a default uninstall with the database
+volumes. The script removes the other runtime entries under `data/`, leaves
+the key at its canonical path and names it in the result. Reinstalling and
+running `synveda init` therefore reuses the same volumes and the same key.
 
-The consequence is stated at the point of removal, because it is sharp. Under
-ADR-0064 the KEK wraps the deployment key and every tenant key; records and
-embeddings are **not** sealed (decision 7), so a kept volume still holds the
-memory in readable form — but console sessions and any `tenant_secrets`
-become unopenable, and a `synveda tenant export` archive taken earlier can
-never be opened again. Anyone keeping data across an uninstall is told to
-copy that file first.
+This supersedes the original OPS-10 decision to delete the file after only a
+warning. Under ADR-0064 the local KEK wraps the deployment key and every
+tenant key. Destroying it while retaining the database irreversibly loses
+console sessions and tenant secrets and makes previously sealed tenant
+exports unusable. A warning is not consent to that loss, and searchable
+Knowledge being substrate-encrypted rather than application-sealed does not
+make the partial destruction sound.
 
-Keeping the KEK by default was the alternative and is worse: it leaves the
-one secret in the system lying in a directory the operator believes they just
-emptied.
+`--purge` is the explicit coupled destruction path: Compose removes the
+persistent volumes and uninstall removes `data/kms.key`. `--purge --dry-run`
+names both operations and performs neither. The retained key remains a secret
+that must stay `0600` and be backed up. If Compose cannot confirm volume
+removal, purge exits non-zero and preserves the key; a default uninstall no
+longer claims to leave `$SYNVEDA_HOME` empty.
 
 ### 3. Another application's config is somebody else's property
 
@@ -138,7 +142,8 @@ here, because this is the destructive direction.
 - **Positive.** The product can be removed as cleanly as it is installed, by
   the person who installed it, without a support conversation. The three-way
   split means each tier's removal is exactly as careful as its ownership
-  demands.
+  demands. Retained encrypted state remains recoverable because its KEK is
+  retained with it.
 - **Negative / accepted.** Three surfaces rather than one, so "remove
   everything" is more than one command — mitigated by `uninstall.sh` printing
   the other two when it finds their traces. The default leaves data behind,
@@ -164,8 +169,8 @@ here, because this is the destructive direction.
   subject; per-tenant, ordered, certificate-producing erasure is TEN-5's, and
   ADR-0064 decision 7 already records that destroying keys is not erasure
   either, since records are not sealed.
-- **Secrets**: removing `kms.key` is the only irreversible act a default
-  uninstall performs. It is called out at the point of removal rather than in
-  a footnote, because the operator who keeps their data and loses that file
-  has crypto-shredded their console sessions and tenant secrets without
-  intending to.
+- **Secrets**: a default uninstall preserves `kms.key`; only the explicit
+  `--purge` path removes it with the volumes. The operator must continue to
+  protect and back up the retained `0600` file. Losing it still makes console
+  sessions, tenant secrets and sealed exports unrecoverable; uninstall no
+  longer causes that loss implicitly.

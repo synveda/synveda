@@ -15,11 +15,10 @@ use tracing_subscriber::Layer as _;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
-/// Tokens included in each composed inject block. The name was registered
-/// here from day one (FND-5); the constant now lives in the emitting crate
-/// (CTX-2, ADR-0025 decision 8) and is re-exported for the recorder wiring.
+/// Tokens included in each composed context run. The constant lives in the
+/// emitting crate and is re-exported for recorder wiring.
 /// A tracked SLO metric (research digest A1).
-pub use synveda_retrieval::TOKENS_PER_INJECT;
+pub use synveda_retrieval::TOKENS_PER_CONTEXT_RUN;
 
 /// Requests served, labelled by method/route/status.
 pub const HTTP_REQUESTS_TOTAL: &str = "synveda_http_requests_total";
@@ -32,22 +31,42 @@ pub const TENANT_RESOLUTIONS_TOTAL: &str = "synveda_tenant_resolutions_total";
 /// Request latency in seconds, labelled by method/route/status.
 pub const HTTP_REQUEST_DURATION_SECONDS: &str = "synveda_http_request_duration_seconds";
 
-/// Hierarchy admin operations, labelled by `op` (create/get/root/children/
-/// ancestors/descendants/update/delete) and `outcome` (`ok`, `rejected` —
-/// the caller's fault, `error` — ours or an operator's). HIER-1; an AUD-1
-/// emission point once the audit log lands.
-pub const HIERARCHY_OPERATIONS_TOTAL: &str = "synveda_hierarchy_operations_total";
+/// Scope admin operations (CPR-7, ADR-0074), labelled by `op`
+/// (`list`/`create`/`get`/`update`/`ancestors`/`descendants`) and
+/// `outcome` (`ok`, `rejected` — the caller's fault, `error` — ours or an
+/// operator's).
+pub const SCOPE_OPERATIONS_TOTAL: &str = "synveda_scope_operations_total";
+
+/// The workspace/project/repository plane's operations (CPR-4, ADR-0071),
+/// labelled by `op` (`me`, `workspace.list`, `workspace.create`,
+/// `workspace.get`, `workspace.update`, `project.list`, `project.create`,
+/// `project.get`, `project.update`, `repository.list`, `repository.attach`,
+/// `repository.detach`) and `outcome` (`ok`, `rejected`, `error`) — the same
+/// three-outcome taxonomy every other admin plane uses.
+pub const WORKSPACE_OPERATIONS_TOTAL: &str = "synveda_workspace_operations_total";
+
+/// The access plane's operations (CPR-5, ADR-0072), labelled by `op`
+/// (`members.list`, `member.add`, `member.remove`, `invite.create`,
+/// `invite.list`, `invite.revoke`, `invite.accept`, `group.list`,
+/// `group.create`, `group.update`, `grant.list`, `grant.create`,
+/// `grant.revoke`) and `outcome` (`ok`, `rejected`, `error`) — the same
+/// three-outcome taxonomy every other admin plane uses.
+pub const ACCESS_OPERATIONS_TOTAL: &str = "synveda_access_operations_total";
+
+/// Counter: session-plane operations, labelled `op` (`session.open`,
+/// `session.list`, `session.get`, `session.events.append`, `session.end`,
+/// `session.timeline`, `session.context_run`) and `outcome`
+/// (`ok`/`rejected`/`error`). CPR-10, ADR-0076.
+pub const SESSION_OPERATIONS_TOTAL: &str = "synveda_session_operations_total";
 
 /// Policy pack reload sweeps' per-pack outcomes: `installed`, `removed`,
 /// `unchanged`, or `error` (a stored pack that fails to compile keeps the
 /// last-good compile in force — ADR-0012 decision 5). AUTHZ-1/AUTHZ-2.
 pub const POLICY_PACK_RELOADS_TOTAL: &str = "synveda_policy_pack_reloads_total";
 
-/// Policy admin operations (AUTHZ-2, ADR-0014 decision 8), labelled by
-/// `op` (packs/get_default/set_default/clear_default/get_node_policy/
-/// assign_node_policy/unassign_node_policy) and `outcome` (`ok`,
-/// `rejected`, `error`). Mutations are an AUD-1 emission point once the
-/// audit log lands.
+/// Policy-source catalogue operations (AUTHZ-2, CPR-30), labelled by `op`
+/// (`packs`) and `outcome` (`ok`, `rejected`, `error`). Runtime selection is
+/// measured separately by the Configuration plane.
 pub const POLICY_OPERATIONS_TOTAL: &str = "synveda_policy_operations_total";
 
 /// JIT provisioning outcomes at login (AUTH-2, ADR-0013): `mapped`,
@@ -86,26 +105,14 @@ pub const SERVICE_IDENTITY_OPERATIONS_TOTAL: &str = "synveda_service_identity_op
 /// log lands.
 pub const SERVICE_TOKEN_REJECTIONS_TOTAL: &str = "synveda_service_token_rejections_total";
 
-/// Observe ingestion batches (MEM-1, ADR-0020), labelled by `outcome`
-/// (`ok`, `rejected`, `error`). Each `ok` batch chains one
-/// `memory.observed` audit event.
-pub const OBSERVE_BATCHES_TOTAL: &str = "synveda_observe_batches_total";
-
-/// Observe events admitted to the buffer (MEM-1, ADR-0020), labelled by
-/// `outcome`: `accepted` (staged and enqueued), `duplicate` (idempotency
-/// key already admitted — reported, never re-enqueued), `quarantined`
-/// (staged signal-less behind a pending review, MEM-2 ADR-0021), or
-/// `denied` (refused per event; nothing persisted).
-pub const OBSERVE_EVENTS_TOTAL: &str = "synveda_observe_events_total";
-
-/// Redaction findings on the observe scan seam (MEM-2, ADR-0021),
+/// Redaction findings on the session-event intake seam,
 /// labelled by `rule` and `category` (`secret`/`pii`). Counts findings
 /// only — matched text appears nowhere, metrics included.
 pub const REDACTION_FINDINGS_TOTAL: &str = "synveda_redaction_findings_total";
 
-/// Quarantine review operations (MEM-2, ADR-0021 decision 6), labelled
+/// Session-event quarantine review operations, labelled
 /// by `op` (`list`/`release`/`reject`) and `outcome` (`ok`, `rejected`,
-/// `error`). Release and reject chain `memory.quarantine.*` events;
+/// `error`). Release and reject chain `session.quarantine.*` events;
 /// list chains its allowed decision (ADR-0019 decision 4).
 pub const QUARANTINE_OPERATIONS_TOTAL: &str = "synveda_quarantine_operations_total";
 
@@ -141,7 +148,7 @@ pub const PROPOSAL_OPERATIONS_TOTAL: &str = "synveda_proposal_operations_total";
 /// `prompt.resolved`; the listing chains its allowed decision like every
 /// other read (ADR-0019 decision 4). A publication is counted by
 /// `CHANNEL_OPERATIONS_TOTAL` and chains `vedaflow.channel.published`,
-/// because it is the same governed act a memory publication is.
+/// because it is the same governed publication act.
 pub const PROMPT_OPERATIONS_TOTAL: &str = "synveda_prompt_operations_total";
 
 /// Context-pack registry operations (PRMT-2, ADR-0050), labelled by `op`
@@ -150,10 +157,9 @@ pub const PROMPT_OPERATIONS_TOTAL: &str = "synveda_prompt_operations_total";
 /// Two ops rather than three, and the missing one is the point: a pack is
 /// not *fetched*. `author` chains `context_pack.authored` (or
 /// `context_pack.quarantined` when the scanner stops a document), the
-/// listing chains its allowed decision like every other read, and a
-/// pack's content reaches a session through `inject` — where it is counted
-/// by `synveda_composed_entries_total` and watermarked inside
-/// `context.injected` like every other entry (ADR-0050 decision 13).
+/// listing chains its allowed decision like every other read, and a pack's
+/// content reaches a session through a context run where it is counted and
+/// watermarked like every other authored entry.
 pub const CONTEXT_PACK_OPERATIONS_TOTAL: &str = "synveda_context_pack_operations_total";
 
 /// Skills registry operations (SKIL-1, ADR-0051), labelled by `op`
@@ -162,7 +168,7 @@ pub const CONTEXT_PACK_OPERATIONS_TOTAL: &str = "synveda_context_pack_operations
 /// Three ops, like the prompt registry and unlike the pack one: a skill IS
 /// fetched by name. What it is not is *composed* — nothing here appears in
 /// `synveda_composed_entries_total`, because a skill's content becomes no
-/// records and enters no block (ADR-0051 decision 9). `author` chains
+/// Knowledge revisions and enters no block (ADR-0051 decision 9). `author` chains
 /// `skill.authored` (or `skill.quarantined` when the scanner stops a file),
 /// `resolve` chains `skill.resolved`, and a publication is counted by
 /// `CHANNEL_OPERATIONS_TOTAL` like every other one.
@@ -172,37 +178,6 @@ pub const SKILL_OPERATIONS_TOTAL: &str = "synveda_skill_operations_total";
 /// labelled by the `pack` that set the bar.
 ///
 /// **The one number that says whether this gate is working.** ADR-0053
-/// reversal trigger (a) is "overrides frequent enough to be routine", and
-/// this counter beside `SKILL_OPERATIONS_TOTAL{op="author"}` is how that
-/// gets noticed before somebody reads a year of audit events: a bar
-/// everybody steps over is a bar set wrong, and a bar nobody ever reaches
-/// is one set too low to mean anything.
-///
-/// There is deliberately no counter for a *refused* publication — that is
-/// `CHANNEL_OPERATIONS_TOTAL`'s `rejected` outcome already, and a second
-/// number asserting the same fact is one somebody would have to reconcile.
-pub const SKILL_QUALITY_OVERRIDES_TOTAL: &str = "synveda_skill_quality_overrides_total";
-
-/// Lapse API operations (AUTHZ-4, ADR-0037), labelled by `op`
-/// (`propose`/`grant`/`revoke`/`list`) and `outcome` (`ok`, `rejected`,
-/// `error`).
-///
-/// `propose` chains `vedaflow.proposal.opened` like any other proposal —
-/// a lapse is one — and `grant`/`revoke` chain `policy.lapse.granted` and
-/// `policy.lapse.revoked`. The expiry sweep chains
-/// `policy.lapse.expired` under `actor_kind=system` and is counted
-/// separately: it is bookkeeping, not an operation anyone requested.
-pub const LAPSE_OPERATIONS_TOTAL: &str = "synveda_lapse_operations_total";
-
-/// Standing lapse grants that reached the end of their window and had
-/// their expiry chained by the sweep (AUTHZ-4, ADR-0037 decision 4).
-///
-/// Deliberately *not* a gauge of standing grants: nothing needs to know
-/// how many stand, because the read path asks the question per request.
-/// A flat counter with a growing backlog in `policy_lapses` would mean
-/// the sweep is wedged — which costs an audit line, never access.
-pub const LAPSE_EXPIRIES_TOTAL: &str = "synveda_lapse_expiries_total";
-
 /// Publications refused because the approval matrix could not be met by
 /// the acting principal alone (FLOW-3, ADR-0032 decision 8), labelled by
 /// `surface` (`channel` for the direct route, `proposal` for a
@@ -210,56 +185,13 @@ pub const LAPSE_EXPIRIES_TOTAL: &str = "synveda_lapse_expiries_total";
 /// counts the publications that were pushed onto the review path.
 pub const PUBLISH_REVIEW_REQUIRED_TOTAL: &str = "synveda_publish_review_required_total";
 
-/// Proposals opened against an **ancestor** of the material's scope
-/// (FLOW-5, ADR-0034), labelled by `levels` (how far up the chain the
-/// target sits — `1` is the parent) and by the source and target scope
-/// kinds. Same-scope proposals are not counted here: this measures the
-/// org gradient being climbed, which is the thing the feature exists to
-/// make observable, and a counter that also ticked for FLOW-3's case
-/// would answer a different question.
+/// Proposals opened against an ancestor scope, labelled by a bounded distance
+/// bucket and the source and target scope kinds.
 pub const PROPOSAL_CLIMBS_TOTAL: &str = "synveda_proposal_climbs_total";
 
 /// Curator-file edits (FLOW-3, ADR-0032 decision 15), labelled by `op`
 /// (`get`/`put`) and `outcome`.
 pub const CURATOR_OPERATIONS_TOTAL: &str = "synveda_curator_operations_total";
-
-/// Inject requests (CTX-3, ADR-0026 decision 8), labelled by `outcome`,
-/// funnel-collapsed worst-first: `error`, `rejected`, `degraded` (a
-/// block was served under a degradation), `empty` (nothing composed),
-/// `ok`. Each served inject chains one `context.injected` audit event.
-pub const CONTEXT_INJECTS_TOTAL: &str = "synveda_context_injects_total";
-
-/// Per-stage inject latency in seconds, labelled by `stage`
-/// (`plan`/`embed`/`search`/`compose`/`audit` — audit includes the
-/// commit). This is the measurement behind ADR-0019 option 2's trigger:
-/// whether the chain append binds the read path is read here, not
-/// guessed (ADR-0026 decision 9).
-pub const INJECT_STAGE_SECONDS: &str = "synveda_inject_stage_duration_seconds";
-
-/// Recall requests (CTX-4, ADR-0041), labelled by `outcome`, on the
-/// inject counter's funnel: `error`, `rejected`, `empty` (nothing the
-/// current plan admits), `degraded`, `ok` — and by `mode` (`ids` |
-/// `query`) since CTX-5 gave the route two ways in (ADR-0042 decision 1).
-/// Each served recall chains one `context.recalled` audit event.
-pub const CONTEXT_RECALLS_TOTAL: &str = "synveda_context_recalls_total";
-
-/// Per-stage recall latency in seconds, labelled by `stage`
-/// (`plan`/`embed`/`search`/`admit`).
-///
-/// `plan` is the one this feature is most exposed on: ADR-0029 allotted
-/// the plan stage **15ms** of a 300ms recall, and CTX-5 spends it on a
-/// universe wider than the chain (ADR-0042 decisions 2 and 17). Whether
-/// the widened sweep fits is read here, not guessed.
-pub const RECALL_STAGE_SECONDS: &str = "synveda_recall_stage_duration_seconds";
-
-/// Records served per recall, against records asked for — labelled
-/// `side` (`requested`/`served`).
-///
-/// The gap is the measurement that matters on this surface: a handle is a
-/// name rather than a capability (ADR-0041 decision 5), so a caller
-/// naming ids it may no longer read is a *normal* outcome, and one whose
-/// rate an operator should be able to see without reading the chain.
-pub const RECALL_RECORDS_TOTAL: &str = "synveda_recall_records_total";
 
 /// Handle to the installed tracer provider. Call [`Telemetry::shutdown`] on
 /// exit to flush batched spans; dropping without it can lose the tail of the
@@ -357,41 +289,21 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
         // Budget-shaped buckets: the default inject budget is 1,500 tokens
         // (seed §4.4); the tail catches misconfigured budgets.
         .set_buckets_for_metric(
-            Matcher::Full(TOKENS_PER_INJECT.to_owned()),
+            Matcher::Full(TOKENS_PER_CONTEXT_RUN.to_owned()),
             &[64.0, 128.0, 256.0, 512.0, 1024.0, 1536.0, 2048.0, 4096.0],
         )
         .map_err(|err| internal(format!("metric buckets: {err}")))?
         .set_buckets_for_metric(
             Matcher::Full(HTTP_REQUEST_DURATION_SECONDS.to_owned()),
-            // The inject SLO is p99 < 150ms (seed §10); buckets bracket it.
+            // Buckets bracket the 150ms context engineering budget (seed §10).
             &[0.005, 0.01, 0.025, 0.05, 0.1, 0.15, 0.25, 0.5, 1.0, 2.5],
-        )
-        .map_err(|err| internal(format!("metric buckets: {err}")))?
-        .set_buckets_for_metric(
-            Matcher::Full(INJECT_STAGE_SECONDS.to_owned()),
-            // Stages subdivide the 150ms SLO (ADR-0026 decision 9);
-            // finer low end than the HTTP histogram so the split is
-            // readable when every stage is fast.
-            &[
-                0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.15, 0.25, 0.5,
-            ],
-        )
-        .map_err(|err| internal(format!("metric buckets: {err}")))?
-        .set_buckets_for_metric(
-            Matcher::Full(RECALL_STAGE_SECONDS.to_owned()),
-            // Stages subdivide ADR-0029's derived 300ms recall budget; the
-            // 0.015 boundary is the plan-stage allowance CTX-5 spends on
-            // the widened universe, so "did it fit" is one bucket edge.
-            &[
-                0.001, 0.0025, 0.005, 0.01, 0.015, 0.03, 0.08, 0.15, 0.3, 0.6,
-            ],
         )
         .map_err(|err| internal(format!("metric buckets: {err}")))?
         .install_recorder()
         .map_err(|err| internal(format!("prometheus recorder: {err}")))?;
 
     metrics::describe_histogram!(
-        TOKENS_PER_INJECT,
+        TOKENS_PER_CONTEXT_RUN,
         metrics::Unit::Count,
         "Tokens included in each composed inject context block"
     );
@@ -406,8 +318,30 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
         "Gateway HTTP request latency"
     );
     metrics::describe_counter!(
-        HIERARCHY_OPERATIONS_TOTAL,
+        SCOPE_OPERATIONS_TOTAL,
         "Hierarchy admin operations by op and outcome (ok/rejected/error)"
+    );
+    // CPR-4 counters (ADR-0071): the plane's own operations here, and the
+    // store-side mutation counters beside the scope one below.
+    metrics::describe_counter!(
+        WORKSPACE_OPERATIONS_TOTAL,
+        "Workspace, project and repository operations by op and outcome (ok/rejected/error)"
+    );
+    // CPR-5 counters (ADR-0072): the access plane's own operations here, its
+    // store-side mutation counter beside the scope ones below.
+    metrics::describe_counter!(
+        ACCESS_OPERATIONS_TOTAL,
+        "Group, grant, member and invitation operations by op and outcome (ok/rejected/error)"
+    );
+    // CPR-10 counters (ADR-0076): the session plane's own operations here, its
+    // store-side ledger counter beside the other store counters below.
+    metrics::describe_counter!(
+        SESSION_OPERATIONS_TOTAL,
+        "Session, event, timeline and context-run operations by op and outcome (ok/rejected/error)"
+    );
+    metrics::describe_counter!(
+        synveda_store::sessions::SESSION_MUTATIONS_TOTAL,
+        "Session-ledger row mutations by table (session/event/context_run) and operation"
     );
     // AUTHZ-1 counters (ADR-0012): the decision counter is emitted in
     // synveda-policy through the facade, the reload counter in the
@@ -420,11 +354,11 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
         POLICY_PACK_RELOADS_TOTAL,
         "Policy pack reloads by outcome (installed/removed/unchanged/error)"
     );
-    // AUTHZ-2 counters (ADR-0014): operations in the gateway's policy
-    // routes; fallbacks in synveda-policy's effective-pack resolution.
+    // AUTHZ-2 counters (ADR-0014): policy-source catalogue reads;
+    // fail-safe resolution in synveda-policy.
     metrics::describe_counter!(
         POLICY_OPERATIONS_TOTAL,
-        "Policy admin operations by op and outcome (ok/rejected/error)"
+        "Policy-source catalogue operations by op and outcome (ok/rejected/error)"
     );
     metrics::describe_counter!(
         synveda_policy::POLICY_PACK_FALLBACKS_TOTAL,
@@ -458,50 +392,32 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
         "Service tokens refused at the enforcement seam by reason \
          (lifetime_exceeded/lifetime_unknown)"
     );
-    // MEM-1 counters (ADR-0020): emitted in the gateway's observe route.
+    // CPR-18 metrics (ADR-0083): extraction freezes session evidence and
+    // produces reviewable candidates. Nothing here calls a candidate a
+    // published record or retains the retired per-event queue vocabulary.
     metrics::describe_counter!(
-        OBSERVE_BATCHES_TOTAL,
-        "Observe ingestion batches by outcome (ok/rejected/error)"
+        synveda_ingest::capture_worker::CAPTURE_BATCHES_TOTAL,
+        "Capture batches processed by outcome"
     );
     metrics::describe_counter!(
-        OBSERVE_EVENTS_TOTAL,
-        "Observe events admitted to the buffer by outcome (accepted/duplicate)"
-    );
-    // MEM-3 metrics (ADR-0022): emitted in synveda-ingest's extraction
-    // worker through the facade, described here where the recorder lives.
-    metrics::describe_counter!(
-        synveda_ingest::worker::EXTRACTION_EVENTS_TOTAL,
-        "Staged events resolved by the extraction worker by outcome \
-         (ok/empty/denied/dead_letter/error/skipped)"
+        synveda_ingest::capture_worker::CAPTURE_CANDIDATES_TOTAL,
+        "Reviewable capture candidates persisted by Knowledge type"
     );
     metrics::describe_counter!(
-        synveda_ingest::worker::EXTRACTION_RECORDS_TOTAL,
-        "Derived records committed by the extraction pipeline by class"
-    );
-    metrics::describe_histogram!(
-        synveda_ingest::worker::EXTRACTION_LAG_SECONDS,
-        "Seconds from observe admission to extraction commit (seed §10: <60s SLO)"
-    );
-    metrics::describe_counter!(
-        synveda_ingest::worker::EXTRACTOR_REQUESTS_TOTAL,
+        synveda_ingest::capture_worker::CAPTURE_EXTRACTOR_REQUESTS_TOTAL,
         "Extractor calls by method and outcome (ok/error)"
     );
     metrics::describe_histogram!(
-        synveda_ingest::worker::EXTRACTOR_REQUEST_SECONDS,
+        synveda_ingest::capture_worker::CAPTURE_EXTRACTOR_SECONDS,
         "Extractor call duration in seconds by method"
     );
     metrics::describe_counter!(
-        synveda_ingest::worker::EXTRACTION_RESCAN_FINDINGS_TOTAL,
-        "Redaction findings in extractor output (redacted before persistence, ADR-0022)"
+        synveda_store::capture::CAPTURE_MUTATIONS_TOTAL,
+        "Durable capture batch and candidate state transitions"
     );
-    // MEM-4 metrics (ADR-0023): emitted in the worker's embed stage.
     metrics::describe_counter!(
-        synveda_ingest::worker::EMBEDDER_REQUESTS_TOTAL,
-        "Embedder calls by method and outcome (ok/error)"
-    );
-    metrics::describe_histogram!(
-        synveda_ingest::worker::EMBEDDER_REQUEST_SECONDS,
-        "Embedder call duration in seconds by method"
+        crate::capture::CAPTURE_API_OPERATIONS_TOTAL,
+        "Capture API operations by op and outcome (ok/rejected/error)"
     );
     // AUD-1 counters (ADR-0019): appends and verifications in
     // synveda-audit through the facade; best-effort append failures at
@@ -518,15 +434,36 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
         synveda_audit::AUDIT_VERIFICATIONS_TOTAL,
         "Audit chain verifications by outcome (valid/broken)"
     );
-    // HIER-2 counters (ADR-0016): emitted in synveda-store's scope-chain
-    // resolver; invalidations by the hierarchy-mutating handlers.
+    // (The HIER-2 chain-cache counters left with the cache and the tree it
+    // read — CPR-7, ADR-0074. The description block is kept rather than
+    // silently dropped so a scrape comparing releases sees the series end
+    // rather than a gap.)
+    // CPR-3 (ADR-0070): the generic scope substrate. Emitted in
+    // synveda-store's scope services; described here where the recorder lives
+    // (ADR-0007). No route reaches those services yet — the governed entry
+    // points land with the later prompts of the context-platform programme —
+    // so this series is expected to be absent rather than zero until then.
     metrics::describe_counter!(
-        synveda_store::scope_chain::SCOPE_CHAIN_RESOLUTIONS_TOTAL,
-        "Scope chain resolutions by outcome (hit/miss)"
+        synveda_store::scopes::SCOPE_MUTATIONS_TOTAL,
+        "Scope tree mutations by operation (create/rename/move/status)"
+    );
+    // CPR-4 (ADR-0071): the product-level subtypes above those scopes.
+    // Unlike the scope counter above, these series appear as soon as anybody
+    // uses the product — /v1/workspaces is the route the scope services
+    // finally have.
+    metrics::describe_counter!(
+        synveda_store::workspaces::SUBTYPE_MUTATIONS_TOTAL,
+        "Workspace and project mutations by subtype and operation (create/update)"
     );
     metrics::describe_counter!(
-        synveda_store::scope_chain::SCOPE_CHAIN_INVALIDATIONS_TOTAL,
-        "Tenant-wide scope-chain cache flushes after committed hierarchy mutations"
+        synveda_store::repositories::REPOSITORY_MUTATIONS_TOTAL,
+        "Repository attachments by operation (attach/detach)"
+    );
+    // CPR-5 (ADR-0072): who holds what, and where it came from.
+    metrics::describe_counter!(
+        synveda_store::access::ACCESS_MUTATIONS_TOTAL,
+        "Access-plane mutations by object (group/membership/grant/invite) and \
+         operation (create/update/revoke/accept)"
     );
     // TEN-4 key plane (ADR-0064). Emitted in synveda-store and the gateway,
     // described here where the recorder lives (ADR-0007).
@@ -561,67 +498,10 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
         synveda_policy::CEDAR_ENTITY_FLUSHES_TOTAL,
         "Tenant-wide Cedar entity fragment flushes at the hierarchy-invalidation seam"
     );
-    // CTX-1 metrics (ADR-0024): the search legs in synveda-retrieval's
-    // hybrid engine; sweeps and document ops in its sidecar indexer.
-    metrics::describe_counter!(
-        synveda_retrieval::RETRIEVAL_SEARCHES_TOTAL,
-        "Hybrid searches by mode (hybrid/sparse_only/dense_only/empty_filter)"
-    );
+    // Authored-context summary cost, emitted by composition.
     metrics::describe_histogram!(
-        synveda_retrieval::RETRIEVAL_LEG_SECONDS,
-        metrics::Unit::Seconds,
-        "Retrieval leg latency by leg (dense/sparse/hydrate)"
-    );
-    metrics::describe_counter!(
-        synveda_retrieval::SEARCH_INDEX_SWEEPS_TOTAL,
-        "Search index sweeps per tenant by outcome (updated/empty/error)"
-    );
-    metrics::describe_counter!(
-        synveda_retrieval::SEARCH_INDEX_DOCS_TOTAL,
-        "Search index document operations by op (upsert/delete)"
-    );
-    // CTX-3 metrics (ADR-0026): emitted in the gateway's inject route.
-    metrics::describe_counter!(
-        CONTEXT_INJECTS_TOTAL,
-        "Inject requests by outcome (ok/degraded/empty/rejected/error)"
-    );
-    metrics::describe_histogram!(
-        INJECT_STAGE_SECONDS,
-        metrics::Unit::Seconds,
-        "Inject stage latency by stage (plan/embed/search/compose/audit)"
-    );
-    // CTX-4 metrics (ADR-0041): the index tier's cost, emitted in
-    // composition, and the recall surface's, emitted in its route.
-    metrics::describe_histogram!(
-        synveda_retrieval::INDEX_TIER_TOKENS,
-        "Estimated tokens spent on the index tier per composed block"
-    );
-    metrics::describe_counter!(
-        CONTEXT_RECALLS_TOTAL,
-        "Recall requests by outcome (ok/degraded/empty/rejected/error) and mode (ids/query)"
-    );
-    metrics::describe_counter!(
-        RECALL_RECORDS_TOTAL,
-        "Records asked for and served by recall, by side (requested/served)"
-    );
-    // CTX-5 (ADR-0042): the widened universe's cost, against ADR-0029's
-    // 15ms plan-stage allowance.
-    metrics::describe_histogram!(
-        RECALL_STAGE_SECONDS,
-        metrics::Unit::Seconds,
-        "Recall stage latency by stage (plan/embed/search/admit)"
-    );
-    // GRPH-1 metrics (ADR-0043): emitted in synveda-store's graph module —
-    // the traversal's own clock, against the slice ADR-0029's 300ms recall
-    // decomposition reserves for graph expansion.
-    metrics::describe_histogram!(
-        synveda_store::graph::GRAPH_EXPANSION_SECONDS,
-        metrics::Unit::Seconds,
-        "Graph expansion latency by graph (entity/episode/provenance) and depth (one/two)"
-    );
-    metrics::describe_counter!(
-        synveda_store::graph::GRAPH_EDGES_TOTAL,
-        "Graph edges asserted by graph (entity/episode/provenance)"
+        synveda_retrieval::AUTHORED_SUMMARY_TOKENS,
+        "Estimated tokens spent abbreviating authored context"
     );
     // AUTH-1 counters (ADR-0010): emitted in synveda-identity through the
     // facade, described here where the recorder lives (ADR-0007).
@@ -674,6 +554,14 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
         "Proposal API operations by op and outcome (ok/rejected/error)"
     );
     metrics::describe_counter!(
+        crate::relaxations::RELAXATION_OPERATIONS_TOTAL,
+        "Governed relaxation API operations by operation and outcome (ok/rejected/error)"
+    );
+    metrics::describe_counter!(
+        crate::relaxations::RELAXATION_EXPIRIES_TOTAL,
+        "Immutable relaxation versions whose hard expiry was chained by the bookkeeping sweep"
+    );
+    metrics::describe_counter!(
         PROMPT_OPERATIONS_TOTAL,
         "Prompt registry operations by op (author/resolve/list) and \
          outcome (ok/rejected/error)"
@@ -700,7 +588,7 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
     metrics::describe_counter!(
         PROPOSAL_CLIMBS_TOTAL,
         "Proposals opened against an ancestor of the material's scope, \
-         by levels climbed and source/target scope kind"
+         by bounded distance and source/target scope kind"
     );
     metrics::describe_counter!(
         CURATOR_OPERATIONS_TOTAL,
@@ -712,19 +600,7 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
     );
     metrics::describe_counter!(
         synveda_retrieval::COMPOSED_ENTRIES_TOTAL,
-        "Composed context entries by the channel they composed from (published/derived) \
-         and the tier they composed at (body/index)"
-    );
-    // MEM-6 counters (ADR-0040): emitted by the retention sweep. The
-    // second one is the only counter in the product that measures data
-    // being gone rather than hidden.
-    metrics::describe_counter!(
-        synveda_ingest::retention::RECORDS_EXPIRED_TOTAL,
-        "Records expired out of the live corpus by class (the temporal delete)"
-    );
-    metrics::describe_counter!(
-        synveda_ingest::retention::RETENTION_DESTROYED_TOTAL,
-        "Rows destroyed by retention, by plane (history/staging/quarantine)"
+        "Published authored context chunks selected by rendered tier"
     );
     // AUTH-4 (ADR-0059): the directory plane. Reads there are metered and
     // traced rather than chained (decision 14), so these three counters and
@@ -746,7 +622,7 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
     );
     // Touch the label-less histogram so it renders (count 0) before the first
     // inject exists — the FND-5 contract is visible in /metrics from boot.
-    let _ = metrics::histogram!(TOKENS_PER_INJECT);
+    let _ = metrics::histogram!(TOKENS_PER_CONTEXT_RUN);
 
     Ok(handle)
 }

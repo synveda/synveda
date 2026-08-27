@@ -10,6 +10,7 @@ publish.workspace = true
 synveda-audit = { workspace = true }
 synveda-identity = { workspace = true }
 synveda-ingest = { workspace = true }
+synveda-okf = { workspace = true }
 synveda-policy = { workspace = true }
 synveda-retrieval = { workspace = true }
 synveda-store = { workspace = true }
@@ -46,9 +47,25 @@ tracing-subscriber = { workspace = true }
 # header, and hand-rolling URL parsing for a security control is how the
 # comparison ends up wrong in a way nobody reads.
 url = { workspace = true }
+# The OpenAPI document (CPR-4, ADR-0071 decision 7), derived from the DTOs in
+# this crate. Gateway-only by the same rule the Prometheus recorder follows:
+# the contract is a property of the surface, and no crate below it has one.
+utoipa = { workspace = true }
+# An idempotency record names its resource with a bare UUID (the operation
+# column says which table), so this plane handles one directly rather than
+# through a typed newtype.
+uuid = { workspace = true }
+# The session listing's keyset cursor is base64url of a row's own start
+# instant and id (CPR-11, ADR-0077 decision 1): opaque so that no client comes
+# to depend on its shape, not secret — it carries what was just served.
+base64 = { workspace = true }
 
 [dev-dependencies]
 base64 = { workspace = true }
+# CPR-14's acceptance harness spawns the real hook binary as a child process
+# and writes its recorded frame to stdin, so the test profile needs the two
+# tokio features the gateway itself has no use for.
+tokio = { workspace = true, features = ["process", "io-util"] }
 http-body-util = { workspace = true }
 # `InMemorySpanExporter`, so FND-5's traceparent test can read the spans the
 # gateway would have exported instead of asserting on a header it parsed.

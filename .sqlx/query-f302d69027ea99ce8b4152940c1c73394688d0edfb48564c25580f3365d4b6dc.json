@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update tool_servers set current_version_id = $3, updated_at = now(), updated_by = $4\n                where tenant_id = $1 and id = $2 and current_version_id is null",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f302d69027ea99ce8b4152940c1c73394688d0edfb48564c25580f3365d4b6dc"
+}

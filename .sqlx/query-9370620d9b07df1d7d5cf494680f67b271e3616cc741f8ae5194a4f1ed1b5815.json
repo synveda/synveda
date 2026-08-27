@@ -1,0 +1,99 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into skill_usage_events\n               (id, tenant_id, binding_id, version_id, session_id, principal_id,\n                client_event_id, stage, evidence, resource_path, metadata, occurred_at)\n           values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)\n           on conflict (tenant_id, binding_id, client_event_id) do nothing\n           returning id, binding_id, version_id, session_id, principal_id, client_event_id,\n                     stage, evidence, resource_path, metadata, occurred_at, received_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "binding_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "version_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "session_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "principal_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "client_event_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "stage",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "evidence",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "resource_path",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "metadata",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 10,
+        "name": "occurred_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 11,
+        "name": "received_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Jsonb",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "9370620d9b07df1d7d5cf494680f67b271e3616cc741f8ae5194a4f1ed1b5815"
+}

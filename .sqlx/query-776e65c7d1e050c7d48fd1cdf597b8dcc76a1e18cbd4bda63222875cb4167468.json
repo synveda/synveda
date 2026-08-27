@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        update scim_users\n           set missing_passes = 0, missing_since = null\n         where tenant_id = $1\n           and directory_source = $2\n           and id = any($3)\n           and missing_passes > 0\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "UuidArray"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "776e65c7d1e050c7d48fd1cdf597b8dcc76a1e18cbd4bda63222875cb4167468"
+}

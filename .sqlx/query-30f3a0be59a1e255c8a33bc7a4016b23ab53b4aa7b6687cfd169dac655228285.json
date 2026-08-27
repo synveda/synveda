@@ -1,0 +1,109 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        update scim_users\n        set external_id = $4, user_name = $5, active = $6, display_name = $7,\n            given_name = $8, family_name = $9, work_email = $10,\n            version = version + 1, updated_at = now()\n        where tenant_id = $1 and id = $2 and directory_source = $3\n        returning id, tenant_id, directory_source, external_id, user_name, active, display_name,\n                  given_name, family_name, work_email, identity_id, version,\n                  created_at, updated_at\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "tenant_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "directory_source",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "external_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "user_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "active",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 6,
+        "name": "display_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "given_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "family_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "work_email",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "identity_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 11,
+        "name": "version",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 12,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 13,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Bool",
+        "Text",
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "30f3a0be59a1e255c8a33bc7a4016b23ab53b4aa7b6687cfd169dac655228285"
+}

@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select coalesce(max(ordinal), 0) + 1 as \"ordinal!\"\n           from skill_versions where tenant_id = $1 and skill_id = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "ordinal!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "0a7e95de01408e398c1407328e1cb9f0ae27dd3dff89f2b4f0c0fb7ecda8a492"
+}

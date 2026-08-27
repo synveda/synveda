@@ -1,35 +1,35 @@
-Synveda {{ .Chart.AppVersion }} — enterprise profile (OPS-2, ADR-0062)
+Synveda {{ .Chart.AppVersion }} — one context-platform runtime (CPR-36, ADR-0095)
 
-  gateway    {{ include "synveda.fullname" . }} (1 replica; see below)
-  database   {{ include "synveda.clusterName" . }} — {{ .Values.postgres.instances }} instances under CloudNativePG
+  gateway    {{ include "synveda.fullname" . }} (1 replica; see limits below)
+  database   {{ include "synveda.clusterName" . }} — {{ .Values.postgres.instances }} CloudNativePG instances
   embedder   {{ .Values.embedder }}{{ if eq .Values.embedder "tei" }} ({{ if .Values.tei.enabled }}in-cluster{{ else }}{{ .Values.tei.url }}{{ end }}){{ end }}
   extractor  {{ .Values.extractor.kind }}
   public URL {{ .Values.gateway.publicUrl }}
 
-1. Watch the install job finish. It migrates the schema under the admin
-   identity and grants the gateway's role membership of `synveda_app`; the
-   gateway waits for exactly that before it starts.
+1. Watch the install job. It migrates with the admin identity, grants the
+   generated gateway login membership of the NOLOGIN `synveda_app` role and
+   optionally admits one tenant. The gateway never receives the admin DSN.
 
      kubectl logs -l app.kubernetes.io/component=install -f
 
-2. Register this redirect URI with your IdP, if you have not already:
+2. Register this redirect URI with the IdP named by
+   `{{ .Values.oidc.existingSecret }}`:
 
      {{ .Values.gateway.publicUrl }}/auth/callback
 
-   A trust entry binds an issuer to a tenant id, so `{{ .Values.oidc.existingSecret }}`
-   can only be complete once a tenant exists. The gateway pod pends on a
-   missing secret rather than starting without one, which is the right
-   failure for an uninitialised deployment — see step 3.
+   A trust entry binds the issuer to a tenant id. The tenant root scope, first
+   principal scope and first `administrator` grant are not chart resources;
+   they are created and audited under the first `synveda-admins` member who
+   logs in.
 
-   The org root, the first admin's identity and its role binding are not
-   created by this chart. They arrive when a person in your directory's
-   admin group logs in for the first time (AUTH-2), which is what puts the
-   tenant's first two facts on the audit chain under a real subject rather
-   than under an installer.
+   The gateway reads its local KMS key from `{{ .Values.kms.existingSecret }}`.
+   This chart does not create or own that Secret. Back it up outside Postgres
+   and test restoring it: losing the key makes wrapped tenant keys and console
+   sessions unrecoverable. The stable key reference is evidence metadata, not
+   a cloud KMS/HSM custody integration.
 
-{{ if not .Values.install.tenant.slug }}3. Admit a tenant. Admission is an owner-role operation — the gateway's
-   own credential holds SELECT on `tenants` and nothing more — so this runs
-   with the admin secret, not from the gateway pod:
+{{ if not .Values.install.tenant.slug }}3. Admit a tenant with the admin credential. Tenant admission is the retained
+   bootstrap boundary and is intentionally unavailable to the gateway role:
 
      ADMIN=$(kubectl get secret {{ include "synveda.superuserSecret" . }} \
        -o jsonpath='{.data.password}' | base64 -d)
@@ -40,36 +40,37 @@ Synveda {{ .Chart.AppVersion }} — enterprise profile (OPS-2, ADR-0062)
 
 {{ else }}3. Tenant `{{ .Values.install.tenant.slug }}` was admitted by the install job.
 
-{{ end }}4. SCIM, when your directory pushes rather than the gateway pulls
-   (AUTH-4, ADR-0059) — the credential is a CLI verb, and the CLI is in
-   this image:
+{{ end }}4. After login, select product behaviour through the generated public
+   Configuration API or Advanced > Configuration. `personal`, `team` and
+   `enterprise` are complete immutable documents copied into ordinary
+   VedaFlow-governed versions and bound to scopes. No Helm value or environment
+   variable selects a product edition. With no binding, the enterprise
+   document is the conservative fail-safe.
 
-     kubectl exec deploy/{{ include "synveda.fullname" . }} -- synveda scim token issue --help
+5. Create workspaces/projects and append sessions through `/v1`. Capture
+   produces reviewable candidates; accepting one invokes the Knowledge command
+   layer and VedaFlow. The chart seeds none of those domain rows.
 
-WHAT THIS DEPLOYMENT IS AND IS NOT
+OPERATIONAL LIMITS
 
-  HA means the data plane. CloudNativePG runs {{ .Values.postgres.instances }} instances and elects a
-  new primary when one is lost; the gateway's pool connects lazily, so a
-  failover takes this pod out of the Service and puts it back rather than
-  crash-looping it.
+  CloudNativePG provides a replicated data plane and the OPS-2 acceptance test
+  deletes its primary before repeating a public context request. That is not a
+  claim of gateway HA.
 
-  The gateway is one replica and the chart will not render a second. Two
-  things in it are process-local and both fail silently: pending logins
-  live in memory, so a callback landing on another pod is a 401 for a login
-  your IdP completed; and the scope-chain cache is invalidated in-process
-  with no TTL, so a hierarchy move handled by one replica leaves the others
-  composing against the ancestry the mover left. OPS-7 is the feature that
-  fixes both. Until then a gateway restart — including this chart's own
-  upgrade, which is a `Recreate` — is a brief outage.
+  The gateway remains one replica and upgrades use `Recreate`. Pending login
+  state and cross-process cache invalidation have not passed OPS-7's
+  multi-replica criterion, so a gateway upgrade has a brief outage. The chart
+  refuses a replicas key instead of accepting a configuration it cannot honour.
 
-  What is already safe across processes, and needed no work here: the audit
-  chain (a row lock on the tenant's chain head), the promotion sweep, the
-  lapse expiry sweep, the extraction queue, and console sessions.
-{{ if eq .Values.embedder "deterministic" }}
-  The embedder is `deterministic`. That is a real choice and a permanent
-  one: `record_embeddings` stores the model, the dense leg filters on it,
-  and there is no re-embed command — a corpus written this way cannot be
-  compared with one written by TEI later. If this deployment will hold a
-  corpus anybody searches, `tei` is the value you want, before the first
-  record.
-{{ end }}
+  Provider credentials and the local KMS key remain Kubernetes Secret
+  references. Rendered diagnostics, ordinary APIs and audit rows do not
+  contain their values. Key rotation and restore are operator procedures that
+  this chart does not automate or prove.
+
+  `deterministic` embeddings are lexical-only. Select `tei` for meaningful
+  semantic retrieval. Knowledge index rows retain model and dimension, and a
+  model change converges a separately labelled sidecar.
+
+  This chart does not promise zero-downtime gateway upgrades, signed binaries,
+  Windows support, an external HSM/customer-managed key integration, SIEM/WORM
+  export, or an old-schema translator.

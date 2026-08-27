@@ -43,8 +43,9 @@
  *
  * # `--writes host` is not a default; it is the point
  *
- * ADR-0057 decision 6: this plugin's `Stop` hook already POSTs the turn to
- * `/v1/observe`. A `remember` tool advertised here would let the model
+ * ADR-0057 decision 6: this plugin's `Stop` hook already records the turn for
+ * durable delivery to session events. A `remember` tool advertised here
+ * would let the model
  * store a fact by tool call while the hook independently observes the
  * transcript containing it — two rows in the same home scope, different
  * payloads, different idempotency keys, so ADR-0020 decision 2's
@@ -56,7 +57,7 @@
 
 import { spawn } from "node:child_process";
 
-import { log } from "./log.mjs";
+import { diagnostic, log } from "./log.mjs";
 
 /**
  * What the user is told when the CLI is not there. The plugin already
@@ -79,7 +80,7 @@ const child = spawn(binary, ["mcp", "--writes", "host"], {
 });
 
 child.on("error", (error: unknown) => {
-  log("mcp.spawn_failed", { binary, error: String(error) });
+  log("mcp.spawn_failed", { binary, error: diagnostic(error) });
   // stderr, never stdout: stdout is the client's half of a protocol this
   // process no longer speaks, and a stray line on it is a parse error at
   // the far end rather than a message anyone reads.

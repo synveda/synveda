@@ -1,0 +1,30 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select revision.id as \"revision_id!\",\n               concat_ws(E'\\n\\n', revision.title, revision.summary, revision.body_markdown)\n                   as \"text!\"\n        from knowledge_revisions revision\n        left join knowledge_revision_embeddings embedding\n          on embedding.tenant_id = revision.tenant_id\n         and embedding.knowledge_revision_id = revision.id\n         and embedding.model = $2\n        where revision.tenant_id = $1\n          and embedding.knowledge_revision_id is null\n        order by revision.transaction_time, revision.id\n        limit $3\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "revision_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "text!",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      null
+    ]
+  },
+  "hash": "209573934f7c2690bfeaf998cd5cd026ac684ec21434b7846a40d13ac546c4ae"
+}

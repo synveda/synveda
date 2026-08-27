@@ -1,0 +1,221 @@
+{
+  "schema_version": 1,
+  "support_levels": {
+    "configured": "A generated connection configuration exists; no authentic client exchange is claimed.",
+    "captured": "Authentic client frames are digest-pinned and replayed; a complete product lifecycle is not claimed.",
+    "verified": "A named real client version completed every applicable conformance criterion against public APIs with persisted and audited outcomes.",
+    "experimental": "The client contract is promising but one or more required lifecycle criteria have not been demonstrated.",
+    "unsupported": "The current client contract cannot provide the lifecycle Synveda requires."
+  },
+  "required_conformance": [
+    "session_creation",
+    "event_delivery",
+    "context_request_delivery",
+    "capture",
+    "session_end",
+    "retry_idempotency",
+    "skill_advertisement_activation",
+    "tool_configuration",
+    "cross_session_knowledge_reuse",
+    "persisted_audited_outcomes"
+  ],
+  "clients": [
+    {
+      "id": "claude-code",
+      "display_name": "Claude Code",
+      "support_level": "verified",
+      "connection": "plugin",
+      "tested_versions": ["2.1.220", "2.1.241"],
+      "configuration": null,
+      "lifecycle": {
+        "mechanism": "Claude Code plugin hooks plus the plugin-owned MCP launch",
+        "contract_version": "plugin 0.2.0 / captured Claude Code 2.1.241 hook schema",
+        "status": "complete",
+        "source": "adapters/claude-code/hooks/hooks.json",
+        "events": ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "PreCompact", "Stop", "SessionEnd"]
+      },
+      "limitations": [
+        "Stop and PreCompact cross only the atomic local-spool boundary synchronously; SessionEnd or the next SessionStart delivers them.",
+        "A host killed before any hook cannot be observed.",
+        "A spool is pinned to its first authenticated gateway origin; a profile switch to another deployment holds the run instead of sending it.",
+        "Payload hashes detect accidental corruption but do not authenticate local state against an attacker with arbitrary write access to the same account.",
+        "Skill execution evidence remains host-observed at the sync/advertisement seam; a model statement alone never counts."
+      ],
+      "authentic_fixtures": [
+        {
+          "path": "adapters/claude-code/fixtures/manifest.json",
+          "sha256": "76a5b6b9d5b118f1e762f59edd400458c3cdfb1d89a0a36d8759a7b035331b57",
+          "kind": "captured-real-client-manifest"
+        }
+      ],
+      "conformance": {
+        "evidence_level": "live-client",
+        "tested_at": "2026-08-24T00:00:00Z",
+        "tested_version": "2.1.241",
+        "checks": {
+          "session_creation": { "status": "passed", "evidence": ["crates/synveda-gateway/tests/claude_lifecycle.rs"] },
+          "event_delivery": { "status": "passed", "evidence": ["crates/synveda-gateway/tests/claude_lifecycle.rs", "adapters/claude-code/fixtures/manifest.json"] },
+          "context_request_delivery": { "status": "passed", "evidence": ["crates/synveda-gateway/tests/claude_lifecycle.rs"] },
+          "capture": { "status": "passed", "evidence": ["crates/synveda-gateway/tests/claude_lifecycle.rs"] },
+          "session_end": { "status": "passed", "evidence": ["crates/synveda-gateway/tests/claude_lifecycle.rs", "adapters/claude-code/fixtures/hooks/session-end-headless.json"] },
+          "retry_idempotency": { "status": "passed", "evidence": ["crates/synveda-gateway/tests/claude_lifecycle.rs", "adapters/claude-code/src/spool.test.mts"] },
+          "skill_advertisement_activation": { "status": "not_applicable", "reason": "The host exposes governed skill sync/advertisement but no trustworthy activation callback; model self-report is deliberately not accepted as activation evidence.", "evidence": ["adapters/claude-code/src/skills.test.mts"] },
+          "tool_configuration": { "status": "passed", "evidence": ["adapters/claude-code/.mcp.json", "crates/synveda-gateway/tests/claude_lifecycle.rs"] },
+          "cross_session_knowledge_reuse": { "status": "passed", "evidence": ["crates/synveda-gateway/tests/claude_lifecycle.rs"] },
+          "persisted_audited_outcomes": { "status": "passed", "evidence": ["crates/synveda-gateway/tests/claude_lifecycle.rs"] }
+        }
+      }
+    },
+    {
+      "id": "cursor",
+      "display_name": "Cursor",
+      "support_level": "experimental",
+      "connection": "mcp",
+      "tested_versions": [],
+      "configuration": {
+        "key": "mcpServers",
+        "syntax": "json",
+        "restart": "restart Cursor to pick this up",
+        "path": { "any": "~/.cursor/mcp.json" }
+      },
+      "lifecycle": {
+        "mechanism": "Cursor Hooks v1 plus MCP",
+        "contract_version": "Hooks schema version 1 (official contract inspected 2026-08-25)",
+        "status": "contract-only",
+        "source": "https://prod.cursor.com/docs/hooks",
+        "events": ["sessionStart", "beforeSubmitPrompt", "preToolUse", "postToolUse", "afterAgentResponse", "preCompact", "stop", "sessionEnd"]
+      },
+      "limitations": [
+        "No Cursor executable or authenticated client was available on 2026-08-25.",
+        "No authentic Cursor lifecycle frame is committed; generated MCP configuration is not verification.",
+        "Cloud agents omit sessionStart and sessionEnd and therefore do not satisfy this lifecycle."
+      ],
+      "authentic_fixtures": [],
+      "conformance": {
+        "evidence_level": "not-run",
+        "tested_at": null,
+        "tested_version": null,
+        "checks": {}
+      }
+    },
+    {
+      "id": "vscode",
+      "display_name": "Visual Studio Code",
+      "support_level": "configured",
+      "connection": "mcp",
+      "tested_versions": [],
+      "configuration": {
+        "key": "servers",
+        "syntax": "jsonc",
+        "restart": "reload the VS Code window to pick this up",
+        "path": {
+          "macos": "~/Library/Application Support/Code/User/mcp.json",
+          "linux": "~/.config/Code/User/mcp.json",
+          "windows": "$APPDATA/Code/User/mcp.json"
+        }
+      },
+      "lifecycle": {
+        "mechanism": "VS Code agent hooks Preview plus MCP",
+        "contract_version": "VS Code 1.133 Preview hook reference (inspected 2026-08-25)",
+        "status": "insufficient-close-boundary",
+        "source": "https://code.visualstudio.com/docs/agents/reference/hooks-reference",
+        "events": ["SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse", "PreCompact", "Stop"]
+      },
+      "limitations": [
+        "The documented Preview contract has no SessionEnd event; Stop explicitly does not mean the session became inactive.",
+        "VS Code 1.133.0 was installed locally, but no authenticated agent profile or real run was available.",
+        "MCP configuration alone does not provide reliable capture lifecycle semantics."
+      ],
+      "authentic_fixtures": [],
+      "conformance": { "evidence_level": "not-run", "tested_at": null, "tested_version": null, "checks": {} }
+    },
+    {
+      "id": "claude-desktop",
+      "display_name": "Claude Desktop",
+      "support_level": "captured",
+      "connection": "mcp",
+      "tested_versions": ["1.25927.0"],
+      "configuration": {
+        "key": "mcpServers",
+        "syntax": "json",
+        "restart": "quit Claude Desktop completely and reopen it to pick this up",
+        "path": {
+          "macos": "~/Library/Application Support/Claude/claude_desktop_config.json",
+          "windows": "$APPDATA/Claude/claude_desktop_config.json"
+        }
+      },
+      "lifecycle": {
+        "mechanism": "MCP tool calls only",
+        "contract_version": "MCP 2025-11-25 captured",
+        "status": "tool-only",
+        "source": "crates/synveda-cli/fixtures/mcp/README.md",
+        "events": []
+      },
+      "limitations": ["Authentic discovery and tool-call frames are replayed, but MCP alone does not prove session capture or end semantics."],
+      "authentic_fixtures": [
+        { "path": "crates/synveda-cli/fixtures/mcp/claude-desktop-probe.json", "sha256": "08defbfbddbe99a48271ffa9ca203e658782e431d601ae97478b532981e5a022", "kind": "captured-client-frames" },
+        { "path": "crates/synveda-cli/fixtures/mcp/claude-desktop-agent.json", "sha256": "8ac8fac8d07913a562f440933ae8cbd77ebbacb26e70f851304ab0498e6389d9", "kind": "captured-client-frames" }
+      ],
+      "conformance": { "evidence_level": "captured-protocol", "tested_at": "2026-08-05T00:00:00Z", "tested_version": "1.25927.0", "checks": {} }
+    },
+    {
+      "id": "zed",
+      "display_name": "Zed",
+      "support_level": "captured",
+      "connection": "mcp",
+      "tested_versions": ["1.13.2"],
+      "configuration": {
+        "key": "context_servers",
+        "syntax": "jsonc",
+        "restart": "restart Zed to pick this up",
+        "path": { "any": "~/.config/zed/settings.json" }
+      },
+      "lifecycle": {
+        "mechanism": "MCP tool calls only",
+        "contract_version": "MCP 2025-11-25 captured",
+        "status": "tool-only",
+        "source": "crates/synveda-cli/fixtures/mcp/README.md",
+        "events": []
+      },
+      "limitations": ["Authentic non-Anthropic tool frames are replayed, but no session lifecycle/capture contract is available."],
+      "authentic_fixtures": [
+        { "path": "crates/synveda-cli/fixtures/mcp/zed.json", "sha256": "8248caaa969cdae1606ba3c6c0ba39ee30b89702f29b49c901a3181e7d81cb3b", "kind": "captured-client-frames" }
+      ],
+      "conformance": { "evidence_level": "captured-protocol", "tested_at": "2026-08-05T00:00:00Z", "tested_version": "1.13.2", "checks": {} }
+    },
+    {
+      "id": "windsurf",
+      "display_name": "Windsurf",
+      "support_level": "configured",
+      "connection": "mcp",
+      "tested_versions": [],
+      "configuration": {
+        "key": "mcpServers",
+        "syntax": "json",
+        "restart": "restart Windsurf to pick this up",
+        "path": { "any": "~/.codeium/windsurf/mcp_config.json" }
+      },
+      "lifecycle": { "mechanism": "MCP configuration only", "contract_version": null, "status": "unknown", "source": null, "events": [] },
+      "limitations": ["Documented config shape only; no authentic exchange or lifecycle run is claimed."],
+      "authentic_fixtures": [],
+      "conformance": { "evidence_level": "not-run", "tested_at": null, "tested_version": null, "checks": {} }
+    },
+    {
+      "id": "continue",
+      "display_name": "Continue",
+      "support_level": "configured",
+      "connection": "mcp",
+      "tested_versions": [],
+      "configuration": {
+        "key": "mcpServers",
+        "syntax": "json",
+        "restart": "reload Continue to pick this up",
+        "path": { "any": "~/.continue/config.json" }
+      },
+      "lifecycle": { "mechanism": "MCP configuration only", "contract_version": null, "status": "unknown", "source": null, "events": [] },
+      "limitations": ["Documented legacy JSON config shape only; use --print for YAML-only installations. No authentic run is claimed."],
+      "authentic_fixtures": [],
+      "conformance": { "evidence_level": "not-run", "tested_at": null, "tested_version": null, "checks": {} }
+    }
+  ]
+}

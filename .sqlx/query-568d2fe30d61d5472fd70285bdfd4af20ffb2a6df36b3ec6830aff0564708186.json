@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select count(*) as \"count!\" from audit_log\n           where tenant_id = $1\n             and action in ('tool.change.applied', 'tool.change.rejected',\n                            'tool.configuration.generated')\n             and not (payload ? 'artifact_references')",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "568d2fe30d61d5472fd70285bdfd4af20ffb2a6df36b3ec6830aff0564708186"
+}

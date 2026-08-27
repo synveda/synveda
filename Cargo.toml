@@ -2,6 +2,27 @@
 resolver = "3"
 members = ["crates/*"]
 
+# Full debuginfo is what makes `target/debug` grow without bound: unpacked
+# `.o` files are the macOS default, and this workspace's dep graph turns
+# that into hundreds of gigabytes and over a million files. Cargo never
+# GCs `target/`, so the cost lands on every later invocation as fingerprint
+# stat traffic — a no-op `cargo check` measured 151s of system time at 9%
+# CPU against a 295G tree. Line tables keep backtraces pointing at
+# file:line, which is what the test suites and demos actually read;
+# stepping through locals in a debugger needs `debug = 2` set back.
+[profile.dev]
+debug = "line-tables-only"
+# Build scripts and proc-macro crates are dependencies of `cargo check`,
+# not just of `cargo build` — check still expands every macro. This tree
+# expands 578 `sqlx::query!`/`query_as!` invocations, each of which parses
+# SQL and type-checks it against `.sqlx`, plus `utoipa-gen` over the
+# gateway's handlers and `serde_derive` almost everywhere. Compiling the
+# expanders unoptimized makes every one of those slower. Same reasoning as
+# the Cedar overrides below, applied to compile time instead of
+# request time.
+[profile.dev.build-override]
+opt-level = 3
+
 # Cedar evaluation is pure CPU on the request hot path. Keep the engine
 # optimized even in dev/test builds (test inherits dev) so the AUTHZ-1
 # µs-level decision benchmark measures reality — unoptimized Cedar is an
@@ -12,24 +33,6 @@ opt-level = 3
 opt-level = 3
 [profile.dev.package.cedar-policy-formatter]
 opt-level = 3
-# Tantivy is the same story on the read path (CTX-1, ADR-0024): BM25
-# scoring and segment writing are pure CPU, and the latency AC test
-# indexes a million documents. Same reasoning, same precedent.
-[profile.dev.package.tantivy]
-opt-level = 3
-[profile.dev.package.tantivy-common]
-opt-level = 3
-[profile.dev.package.tantivy-fst]
-opt-level = 3
-[profile.dev.package.tantivy-columnar]
-opt-level = 3
-[profile.dev.package.tantivy-sstable]
-opt-level = 3
-[profile.dev.package.tantivy-stacker]
-opt-level = 3
-[profile.dev.package.tantivy-bitpacker]
-opt-level = 3
-
 [workspace.package]
 version = "0.2.0"
 edition = "2024"
@@ -50,6 +53,7 @@ synveda-audit = { path = "crates/synveda-audit" }
 synveda-vedaflow = { path = "crates/synveda-vedaflow" }
 synveda-retrieval = { path = "crates/synveda-retrieval" }
 synveda-ingest = { path = "crates/synveda-ingest" }
+synveda-okf = { path = "crates/synveda-okf" }
 
 # External dependencies (MIT/Apache-2.0 only in the core path — deny.toml enforces).
 # Object-safe async traits (TokenVerifier went async with AUTH-1, ADR-0010).
@@ -116,10 +120,6 @@ reqwest = { version = "0.12", default-features = false, features = [
     "native-tls",
 ] }
 sha2 = "0.10"
-# The BM25 sidecar (CTX-1, ADR-0024): per-tenant lexical indexes in
-# `synveda-retrieval`, MIT — the tech plan's "BM25 quality without
-# ParadeDB's AGPL" (§1.1).
-tantivy = "0.26"
 # The `metrics` facade is the only metrics dependency below the gateway; the
 # Prometheus recorder is installed by the gateway alone (ADR-0007).
 metrics = "0.24"
@@ -134,6 +134,11 @@ opentelemetry-otlp = { version = "0.32", default-features = false, features = [
 opentelemetry_sdk = "0.32"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# OKF v0.2 is Markdown with YAML frontmatter. The adapter parses YAML as an
+# external exchange format and immediately projects it into bounded JSON;
+# Synveda's own persisted/configuration formats remain JSON (CPR-27,
+# ADR-0087). MIT/Apache-2.0.
+serde_yaml = "0.9"
 # No TLS feature on purpose: dev connections are plain; the production TLS
 # backend is chosen (and licence-reviewed) when a deployment needs it.
 sqlx = { version = "0.8", default-features = false, features = [
@@ -159,7 +164,20 @@ tracing = "0.1"
 tracing-opentelemetry = "0.33"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 url = "2"
+# The OpenAPI document, derived from the gateway's own request and response
+# types (CPR-4, ADR-0071 decision 7). Derived rather than hand-authored so the
+# contract cannot drift from the handlers that serve it — which is the whole
+# content of "the OpenAPI contract is authoritative". MIT/Apache-2.0.
+# Gateway-only, like the Prometheus recorder and the OTel SDK: no crate below
+# the gateway knows this exists.
+utoipa = { version = "5", default-features = false, features = ["chrono", "macros"] }
 uuid = { version = "1", features = ["serde", "v7"] }
+# Hostile OKF archive inputs are unpacked inside the leaf adapter under strict
+# entry/count/size/path bounds. These crates parse inert bytes only; the
+# gateway never executes an imported artifact (CPR-27, ADR-0087).
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+tar = { version = "0.4", default-features = false }
+zip = { version = "2", default-features = false, features = ["deflate"] }
 # Wipes key material and opened plaintext on drop (TEN-4, ADR-0064
 # decision 11). MIT/Apache-2.0.
 zeroize = { version = "1", features = ["derive"] }

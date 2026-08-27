@@ -1,5 +1,6 @@
 //! Curator files per scope (FLOW-3, ADR-0032 decisions 13–15):
-//! `/v1/hierarchy/nodes/{id}/curators`, beside `/policy` and `/roles`.
+//! `/v1/admin/scopes/{scope_id}/curators`, beside `/policy` — both
+//! re-homed under the scope admin prefix when CPR-7 deleted `/v1/hierarchy`.
 //!
 //! A curator file names who must **additionally** approve a proposal
 //! touching matching assets at this scope. It adds requirements; it never
@@ -27,15 +28,14 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use synveda_audit::{AuditAction, Outcome};
 use synveda_policy::{Action, Resource};
-use synveda_store::{hierarchy, rls};
+use synveda_store::{rls, scopes};
 use synveda_types::{Error, IdentityId, Result, ScopeId};
 use synveda_vedaflow::{self as vedaflow, CuratorFile, PolicySnapshot, Signer};
 
 use crate::app::AppState;
 use crate::audit;
 use crate::authz;
-use crate::error::ApiError;
-use crate::hierarchy::{body, commit, found, tenant_id};
+use crate::request::{body, commit, found, tenant_id};
 use crate::telemetry::CURATOR_OPERATIONS_TOTAL;
 
 /// The commit-message cap; mirrors `vedaflow_commits`' CHECK.
@@ -46,44 +46,30 @@ async fn respond<T: IntoResponse>(
     op: &'static str,
     result: Result<T>,
 ) -> Response {
-    let outcome = match &result {
-        Ok(_) => "ok",
-        Err(
-            Error::Unauthenticated { .. }
-            | Error::PolicyDenied { .. }
-            | Error::NotFound { .. }
-            | Error::Invalid { .. }
-            | Error::Conflict { .. }
-            | Error::RateLimited { .. },
-        ) => "rejected",
-        Err(_) => "error",
-    };
+    let outcome = crate::response::outcome(&result);
     metrics::counter!(CURATOR_OPERATIONS_TOTAL, "op" => op, "outcome" => outcome).increment(1);
-    match result {
-        Ok(response) => response.into_response(),
-        Err(error) => {
-            audit::record_rejection(state, op, &error).await;
-            ApiError(error).into_response()
-        }
-    }
+    crate::response::finish(state, op, result).await
 }
 
 /// One rule, parsed — rendered beside the source so a console can show
 /// what the file *means* without reimplementing the parser.
-#[derive(Serialize)]
-struct RuleView {
+#[derive(Serialize, utoipa::ToSchema)]
+#[schema(as = CuratorRuleView)]
+pub(crate) struct RuleView {
     pattern: String,
     approvers: Vec<String>,
 }
 
-#[derive(Serialize)]
-struct CuratorsResponse {
+#[derive(Serialize, utoipa::ToSchema)]
+pub(crate) struct CuratorsResponse {
     /// The node asked about.
+    #[schema(value_type = String, format = "uuid")]
     scope_id: ScopeId,
     /// The scope the effective file is committed at — this node, or the
     /// nearest ancestor carrying one (ADR-0032 decision 14). Absent when
     /// no scope on the chain has a file.
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>, format = "uuid")]
     effective_at: Option<ScopeId>,
     /// The file's exact authored bytes, comments included.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -99,28 +85,49 @@ struct CuratorsResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     updated_at: Option<DateTime<Utc>>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>, format = "uuid")]
     updated_by: Option<IdentityId>,
 }
 
-/// `GET /v1/hierarchy/nodes/{id}/curators` — the curator file in force
+/// `GET /v1/admin/scopes/{scope_id}/curators` — the curator file in force
 /// for this node: its own, or the nearest ancestor's.
+#[utoipa::path(
+    get,
+    path = "/v1/admin/scopes/{scope_id}/curators",
+    operation_id = "get_scope_curators",
+    tag = "policy",
+    params(("scope_id" = String, Path, format = "uuid")),
+    responses(
+        (status = 200, description = "The effective curator file", body = CuratorsResponse),
+        (status = 401, description = "No usable credential", body = crate::workspaces::ApiErrorBody),
+        (status = 403, description = "Policy read is not permitted", body = crate::workspaces::ApiErrorBody),
+        (status = 404, description = "The scope is absent or outside the tenant", body = crate::workspaces::ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
 #[tracing::instrument(name = "curators.get", skip_all)]
 pub(crate) async fn get(State(state): State<AppState>, Path(scope_id): Path<ScopeId>) -> Response {
     let result = async {
         let tenant_id = tenant_id()?;
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
         let node = found(
-            hierarchy::node(&mut *tx, scope_id).await?,
+            scopes::get(&mut *tx, tenant_id, scope_id).await?,
             tenant_id,
             scope_id,
         )?;
-        let input = authz::gather(&state, &mut tx, Some(&node)).await?;
+        let input = authz::gather(
+            &state,
+            &mut tx,
+            Some(&node),
+            synveda_store::anchors::AnchorSelection::none(),
+            Vec::new(),
+        )
+        .await?;
         let authorized = authz::decide(
             &state,
             &input,
             Action::PolicyRead,
             Resource::Scope(scope_id),
-            None,
         )?;
         let chain: Vec<ScopeId> = input.chain.iter().map(|node| node.id).collect();
         let stored = vedaflow::nearest_curators(&mut tx, tenant_id, &chain).await?;
@@ -173,7 +180,8 @@ pub(crate) async fn get(State(state): State<AppState>, Path(scope_id): Path<Scop
     respond(&state, "get", result).await
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
+#[schema(as = CuratorsPutBody)]
 pub(crate) struct PutBody {
     /// The file's text. An empty file clears this scope's requirements —
     /// there is no delete, because the removal is history too.
@@ -182,8 +190,10 @@ pub(crate) struct PutBody {
     message: String,
 }
 
-#[derive(Serialize)]
-struct PutResponse {
+#[derive(Serialize, utoipa::ToSchema)]
+#[schema(as = CuratorsPutResponse)]
+pub(crate) struct PutResponse {
+    #[schema(value_type = String, format = "uuid")]
     scope_id: ScopeId,
     commit: String,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -195,8 +205,24 @@ struct PutResponse {
     rules: usize,
 }
 
-/// `PUT /v1/hierarchy/nodes/{id}/curators` — commit this node's curator
+/// `PUT /v1/admin/scopes/{scope_id}/curators` — commit this scope's curator
 /// file.
+#[utoipa::path(
+    put,
+    path = "/v1/admin/scopes/{scope_id}/curators",
+    operation_id = "put_scope_curators",
+    tag = "policy",
+    params(("scope_id" = String, Path, format = "uuid")),
+    request_body = PutBody,
+    responses(
+        (status = 200, description = "The committed curator file", body = PutResponse),
+        (status = 400, description = "The curator file or message is invalid", body = crate::workspaces::ApiErrorBody),
+        (status = 401, description = "No usable credential", body = crate::workspaces::ApiErrorBody),
+        (status = 403, description = "Policy management is not permitted", body = crate::workspaces::ApiErrorBody),
+        (status = 404, description = "The scope is absent or outside the tenant", body = crate::workspaces::ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
 #[tracing::instrument(name = "curators.put", skip_all)]
 pub(crate) async fn put(
     State(state): State<AppState>,
@@ -226,17 +252,23 @@ async fn put_inner(
     let tenant_id = tenant_id()?;
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
     let node = found(
-        hierarchy::node(&mut *tx, scope_id).await?,
+        scopes::get(&mut *tx, tenant_id, scope_id).await?,
         tenant_id,
         scope_id,
     )?;
-    let input = authz::gather(state, &mut tx, Some(&node)).await?;
+    let input = authz::gather(
+        state,
+        &mut tx,
+        Some(&node),
+        synveda_store::anchors::AnchorSelection::none(),
+        Vec::new(),
+    )
+    .await?;
     let authorized = authz::decide(
         state,
         &input,
         Action::PolicyAssign,
         Resource::Scope(scope_id),
-        None,
     )?;
     let author = input
         .identity
@@ -268,7 +300,7 @@ async fn put_inner(
     audit::record(
         &mut tx,
         tenant_id,
-        AuditAction::PolicyNodeAssigned,
+        AuditAction::CuratorRulesUpdated,
         Resource::Scope(scope_id).to_string(),
         Outcome::Success,
         json!({

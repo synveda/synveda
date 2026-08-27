@@ -1,300 +1,420 @@
-regulated-strict   memory public org        curator×1 + steward×1 + 2distinct
-regulated-strict   memory public division   curator×1 + steward×1 + 2distinct
-regulated-strict   memory public department curator×1 + steward×1 + 2distinct
-regulated-strict   memory public team       curator×1 + 1distinct
-regulated-strict   memory public user       curator×1 + 1distinct
-regulated-strict   memory internal org        curator×1 + steward×1 + 2distinct
-regulated-strict   memory internal division   curator×1 + steward×1 + 2distinct
-regulated-strict   memory internal department curator×1 + steward×1 + 2distinct
-regulated-strict   memory internal team       curator×1 + 1distinct
-regulated-strict   memory internal user       curator×1 + 1distinct
-regulated-strict   memory confidential org        curator×1 + steward×1 + 2distinct
-regulated-strict   memory confidential division   curator×1 + steward×1 + 2distinct
-regulated-strict   memory confidential department curator×1 + steward×1 + 2distinct
-regulated-strict   memory confidential team       curator×1 + 1distinct
-regulated-strict   memory confidential user       curator×1 + 1distinct
-regulated-strict   memory restricted org        curator×1 + steward×1 + compliance×1 + 2distinct
-regulated-strict   memory restricted division   curator×1 + steward×1 + compliance×1 + 2distinct
-regulated-strict   memory restricted department curator×1 + steward×1 + compliance×1 + 2distinct
-regulated-strict   memory restricted team       curator×1 + compliance×1 + 2distinct
-regulated-strict   memory restricted user       curator×1 + compliance×1 + 2distinct
-regulated-strict   prompt public org        curator×1 + steward×1 + 2distinct
-regulated-strict   prompt public division   curator×1 + steward×1 + 2distinct
-regulated-strict   prompt public department curator×1 + steward×1 + 2distinct
-regulated-strict   prompt public team       curator×1 + steward×1 + 2distinct
-regulated-strict   prompt public user       curator×1 + steward×1 + 2distinct
-regulated-strict   prompt internal org        curator×1 + steward×1 + 2distinct
-regulated-strict   prompt internal division   curator×1 + steward×1 + 2distinct
-regulated-strict   prompt internal department curator×1 + steward×1 + 2distinct
-regulated-strict   prompt internal team       curator×1 + steward×1 + 2distinct
-regulated-strict   prompt internal user       curator×1 + steward×1 + 2distinct
-regulated-strict   prompt confidential org        curator×1 + steward×1 + 2distinct
-regulated-strict   prompt confidential division   curator×1 + steward×1 + 2distinct
-regulated-strict   prompt confidential department curator×1 + steward×1 + 2distinct
-regulated-strict   prompt confidential team       curator×1 + steward×1 + 2distinct
-regulated-strict   prompt confidential user       curator×1 + steward×1 + 2distinct
-regulated-strict   prompt restricted org        curator×1 + steward×1 + compliance×1 + 2distinct
-regulated-strict   prompt restricted division   curator×1 + steward×1 + compliance×1 + 2distinct
-regulated-strict   prompt restricted department curator×1 + steward×1 + compliance×1 + 2distinct
-regulated-strict   prompt restricted team       curator×1 + steward×1 + compliance×1 + 2distinct
-regulated-strict   prompt restricted user       curator×1 + steward×1 + compliance×1 + 2distinct
-regulated-strict   skill public org        steward×1 + security-reviewer×1 + 2distinct
-regulated-strict   skill public division   steward×1 + security-reviewer×1 + 2distinct
-regulated-strict   skill public department steward×1 + security-reviewer×1 + 2distinct
-regulated-strict   skill public team       steward×1 + security-reviewer×1 + 2distinct
-regulated-strict   skill public user       steward×1 + security-reviewer×1 + 2distinct
-regulated-strict   skill internal org        steward×1 + security-reviewer×1 + 2distinct
-regulated-strict   skill internal division   steward×1 + security-reviewer×1 + 2distinct
-regulated-strict   skill internal department steward×1 + security-reviewer×1 + 2distinct
-regulated-strict   skill internal team       steward×1 + security-reviewer×1 + 2distinct
-regulated-strict   skill internal user       steward×1 + security-reviewer×1 + 2distinct
-regulated-strict   skill confidential org        steward×1 + security-reviewer×1 + 2distinct
-regulated-strict   skill confidential division   steward×1 + security-reviewer×1 + 2distinct
-regulated-strict   skill confidential department steward×1 + security-reviewer×1 + 2distinct
-regulated-strict   skill confidential team       steward×1 + security-reviewer×1 + 2distinct
-regulated-strict   skill confidential user       steward×1 + security-reviewer×1 + 2distinct
-regulated-strict   skill restricted org        steward×1 + security-reviewer×1 + compliance×1 + 2distinct
-regulated-strict   skill restricted division   steward×1 + security-reviewer×1 + compliance×1 + 2distinct
-regulated-strict   skill restricted department steward×1 + security-reviewer×1 + compliance×1 + 2distinct
-regulated-strict   skill restricted team       steward×1 + security-reviewer×1 + compliance×1 + 2distinct
-regulated-strict   skill restricted user       steward×1 + security-reviewer×1 + compliance×1 + 2distinct
-regulated-strict   context-pack public org        curator×1 + steward×1 + 2distinct
-regulated-strict   context-pack public division   curator×1 + steward×1 + 2distinct
-regulated-strict   context-pack public department curator×1 + steward×1 + 2distinct
-regulated-strict   context-pack public team       curator×1 + 1distinct
-regulated-strict   context-pack public user       curator×1 + 1distinct
-regulated-strict   context-pack internal org        curator×1 + steward×1 + 2distinct
-regulated-strict   context-pack internal division   curator×1 + steward×1 + 2distinct
-regulated-strict   context-pack internal department curator×1 + steward×1 + 2distinct
-regulated-strict   context-pack internal team       curator×1 + 1distinct
-regulated-strict   context-pack internal user       curator×1 + 1distinct
-regulated-strict   context-pack confidential org        curator×1 + steward×1 + 2distinct
-regulated-strict   context-pack confidential division   curator×1 + steward×1 + 2distinct
-regulated-strict   context-pack confidential department curator×1 + steward×1 + 2distinct
-regulated-strict   context-pack confidential team       curator×1 + 1distinct
-regulated-strict   context-pack confidential user       curator×1 + 1distinct
-regulated-strict   context-pack restricted org        curator×1 + steward×1 + compliance×1 + 2distinct
-regulated-strict   context-pack restricted division   curator×1 + steward×1 + compliance×1 + 2distinct
-regulated-strict   context-pack restricted department curator×1 + steward×1 + compliance×1 + 2distinct
-regulated-strict   context-pack restricted team       curator×1 + compliance×1 + 2distinct
-regulated-strict   context-pack restricted user       curator×1 + compliance×1 + 2distinct
-regulated-strict   policy public org        steward×2 + 2distinct
-regulated-strict   policy public division   steward×2 + 2distinct
-regulated-strict   policy public department steward×2 + 2distinct
-regulated-strict   policy public team       steward×2 + 2distinct
-regulated-strict   policy public user       steward×2 + 2distinct
-regulated-strict   policy internal org        steward×2 + 2distinct
-regulated-strict   policy internal division   steward×2 + 2distinct
-regulated-strict   policy internal department steward×2 + 2distinct
-regulated-strict   policy internal team       steward×2 + 2distinct
-regulated-strict   policy internal user       steward×2 + 2distinct
-regulated-strict   policy confidential org        steward×2 + 2distinct
-regulated-strict   policy confidential division   steward×2 + 2distinct
-regulated-strict   policy confidential department steward×2 + 2distinct
-regulated-strict   policy confidential team       steward×2 + 2distinct
-regulated-strict   policy confidential user       steward×2 + 2distinct
-regulated-strict   policy restricted org        steward×2 + compliance×1 + 2distinct
-regulated-strict   policy restricted division   steward×2 + compliance×1 + 2distinct
-regulated-strict   policy restricted department steward×2 + compliance×1 + 2distinct
-regulated-strict   policy restricted team       steward×2 + compliance×1 + 2distinct
-regulated-strict   policy restricted user       steward×2 + compliance×1 + 2distinct
-standard           memory public org        curator×1 + 1distinct
-standard           memory public division   curator×1 + 1distinct
-standard           memory public department curator×1 + 1distinct
-standard           memory public team       auto
-standard           memory public user       auto
-standard           memory internal org        curator×1 + 1distinct
-standard           memory internal division   curator×1 + 1distinct
-standard           memory internal department curator×1 + 1distinct
-standard           memory internal team       auto
-standard           memory internal user       auto
-standard           memory confidential org        curator×1 + 1distinct
-standard           memory confidential division   curator×1 + 1distinct
-standard           memory confidential department curator×1 + 1distinct
-standard           memory confidential team       auto
-standard           memory confidential user       auto
-standard           memory restricted org        curator×1 + compliance×1 + 2distinct
-standard           memory restricted division   curator×1 + compliance×1 + 2distinct
-standard           memory restricted department curator×1 + compliance×1 + 2distinct
-standard           memory restricted team       compliance×1 + 2distinct
-standard           memory restricted user       compliance×1 + 2distinct
-standard           prompt public org        curator×1 + 1distinct
-standard           prompt public division   curator×1 + 1distinct
-standard           prompt public department curator×1 + 1distinct
-standard           prompt public team       curator×1 + 1distinct
-standard           prompt public user       curator×1 + 1distinct
-standard           prompt internal org        curator×1 + 1distinct
-standard           prompt internal division   curator×1 + 1distinct
-standard           prompt internal department curator×1 + 1distinct
-standard           prompt internal team       curator×1 + 1distinct
-standard           prompt internal user       curator×1 + 1distinct
-standard           prompt confidential org        curator×1 + 1distinct
-standard           prompt confidential division   curator×1 + 1distinct
-standard           prompt confidential department curator×1 + 1distinct
-standard           prompt confidential team       curator×1 + 1distinct
-standard           prompt confidential user       curator×1 + 1distinct
-standard           prompt restricted org        curator×1 + compliance×1 + 2distinct
-standard           prompt restricted division   curator×1 + compliance×1 + 2distinct
-standard           prompt restricted department curator×1 + compliance×1 + 2distinct
-standard           prompt restricted team       curator×1 + compliance×1 + 2distinct
-standard           prompt restricted user       curator×1 + compliance×1 + 2distinct
-standard           skill public org        steward×1 + security-reviewer×1 + 2distinct
-standard           skill public division   steward×1 + security-reviewer×1 + 2distinct
-standard           skill public department steward×1 + security-reviewer×1 + 2distinct
-standard           skill public team       steward×1 + security-reviewer×1 + 2distinct
-standard           skill public user       steward×1 + security-reviewer×1 + 2distinct
-standard           skill internal org        steward×1 + security-reviewer×1 + 2distinct
-standard           skill internal division   steward×1 + security-reviewer×1 + 2distinct
-standard           skill internal department steward×1 + security-reviewer×1 + 2distinct
-standard           skill internal team       steward×1 + security-reviewer×1 + 2distinct
-standard           skill internal user       steward×1 + security-reviewer×1 + 2distinct
-standard           skill confidential org        steward×1 + security-reviewer×1 + 2distinct
-standard           skill confidential division   steward×1 + security-reviewer×1 + 2distinct
-standard           skill confidential department steward×1 + security-reviewer×1 + 2distinct
-standard           skill confidential team       steward×1 + security-reviewer×1 + 2distinct
-standard           skill confidential user       steward×1 + security-reviewer×1 + 2distinct
-standard           skill restricted org        steward×1 + security-reviewer×1 + compliance×1 + 2distinct
-standard           skill restricted division   steward×1 + security-reviewer×1 + compliance×1 + 2distinct
-standard           skill restricted department steward×1 + security-reviewer×1 + compliance×1 + 2distinct
-standard           skill restricted team       steward×1 + security-reviewer×1 + compliance×1 + 2distinct
-standard           skill restricted user       steward×1 + security-reviewer×1 + compliance×1 + 2distinct
-standard           context-pack public org        curator×1 + 1distinct
-standard           context-pack public division   curator×1 + 1distinct
-standard           context-pack public department curator×1 + 1distinct
-standard           context-pack public team       curator×1 + 1distinct
-standard           context-pack public user       curator×1 + 1distinct
-standard           context-pack internal org        curator×1 + 1distinct
-standard           context-pack internal division   curator×1 + 1distinct
-standard           context-pack internal department curator×1 + 1distinct
-standard           context-pack internal team       curator×1 + 1distinct
-standard           context-pack internal user       curator×1 + 1distinct
-standard           context-pack confidential org        curator×1 + 1distinct
-standard           context-pack confidential division   curator×1 + 1distinct
-standard           context-pack confidential department curator×1 + 1distinct
-standard           context-pack confidential team       curator×1 + 1distinct
-standard           context-pack confidential user       curator×1 + 1distinct
-standard           context-pack restricted org        curator×1 + compliance×1 + 2distinct
-standard           context-pack restricted division   curator×1 + compliance×1 + 2distinct
-standard           context-pack restricted department curator×1 + compliance×1 + 2distinct
-standard           context-pack restricted team       curator×1 + compliance×1 + 2distinct
-standard           context-pack restricted user       curator×1 + compliance×1 + 2distinct
-standard           policy public org        steward×1 + 1distinct
-standard           policy public division   steward×1 + 1distinct
-standard           policy public department steward×1 + 1distinct
-standard           policy public team       steward×1 + 1distinct
-standard           policy public user       steward×1 + 1distinct
-standard           policy internal org        steward×1 + 1distinct
-standard           policy internal division   steward×1 + 1distinct
-standard           policy internal department steward×1 + 1distinct
-standard           policy internal team       steward×1 + 1distinct
-standard           policy internal user       steward×1 + 1distinct
-standard           policy confidential org        steward×1 + 1distinct
-standard           policy confidential division   steward×1 + 1distinct
-standard           policy confidential department steward×1 + 1distinct
-standard           policy confidential team       steward×1 + 1distinct
-standard           policy confidential user       steward×1 + 1distinct
-standard           policy restricted org        steward×1 + compliance×1 + 2distinct
-standard           policy restricted division   steward×1 + compliance×1 + 2distinct
-standard           policy restricted department steward×1 + compliance×1 + 2distinct
-standard           policy restricted team       steward×1 + compliance×1 + 2distinct
-standard           policy restricted user       steward×1 + compliance×1 + 2distinct
-open-collaboration memory public org        curator×1 + 1distinct
-open-collaboration memory public division   auto
-open-collaboration memory public department auto
-open-collaboration memory public team       auto
-open-collaboration memory public user       auto
-open-collaboration memory internal org        curator×1 + 1distinct
-open-collaboration memory internal division   auto
-open-collaboration memory internal department auto
-open-collaboration memory internal team       auto
-open-collaboration memory internal user       auto
-open-collaboration memory confidential org        curator×1 + 1distinct
-open-collaboration memory confidential division   auto
-open-collaboration memory confidential department auto
-open-collaboration memory confidential team       auto
-open-collaboration memory confidential user       auto
-open-collaboration memory restricted org        curator×1 + compliance×1 + 2distinct
-open-collaboration memory restricted division   compliance×1 + 2distinct
-open-collaboration memory restricted department compliance×1 + 2distinct
-open-collaboration memory restricted team       compliance×1 + 2distinct
-open-collaboration memory restricted user       compliance×1 + 2distinct
-open-collaboration prompt public org        curator×1 + 1distinct
-open-collaboration prompt public division   curator×1 + 1distinct
-open-collaboration prompt public department curator×1 + 1distinct
-open-collaboration prompt public team       curator×1 + 1distinct
-open-collaboration prompt public user       curator×1 + 1distinct
-open-collaboration prompt internal org        curator×1 + 1distinct
-open-collaboration prompt internal division   curator×1 + 1distinct
-open-collaboration prompt internal department curator×1 + 1distinct
-open-collaboration prompt internal team       curator×1 + 1distinct
-open-collaboration prompt internal user       curator×1 + 1distinct
-open-collaboration prompt confidential org        curator×1 + 1distinct
-open-collaboration prompt confidential division   curator×1 + 1distinct
-open-collaboration prompt confidential department curator×1 + 1distinct
-open-collaboration prompt confidential team       curator×1 + 1distinct
-open-collaboration prompt confidential user       curator×1 + 1distinct
-open-collaboration prompt restricted org        curator×1 + compliance×1 + 2distinct
-open-collaboration prompt restricted division   curator×1 + compliance×1 + 2distinct
-open-collaboration prompt restricted department curator×1 + compliance×1 + 2distinct
-open-collaboration prompt restricted team       curator×1 + compliance×1 + 2distinct
-open-collaboration prompt restricted user       curator×1 + compliance×1 + 2distinct
-open-collaboration skill public org        steward×1 + security-reviewer×1 + 2distinct
-open-collaboration skill public division   steward×1 + security-reviewer×1 + 2distinct
-open-collaboration skill public department steward×1 + security-reviewer×1 + 2distinct
-open-collaboration skill public team       steward×1 + security-reviewer×1 + 2distinct
-open-collaboration skill public user       steward×1 + security-reviewer×1 + 2distinct
-open-collaboration skill internal org        steward×1 + security-reviewer×1 + 2distinct
-open-collaboration skill internal division   steward×1 + security-reviewer×1 + 2distinct
-open-collaboration skill internal department steward×1 + security-reviewer×1 + 2distinct
-open-collaboration skill internal team       steward×1 + security-reviewer×1 + 2distinct
-open-collaboration skill internal user       steward×1 + security-reviewer×1 + 2distinct
-open-collaboration skill confidential org        steward×1 + security-reviewer×1 + 2distinct
-open-collaboration skill confidential division   steward×1 + security-reviewer×1 + 2distinct
-open-collaboration skill confidential department steward×1 + security-reviewer×1 + 2distinct
-open-collaboration skill confidential team       steward×1 + security-reviewer×1 + 2distinct
-open-collaboration skill confidential user       steward×1 + security-reviewer×1 + 2distinct
-open-collaboration skill restricted org        steward×1 + security-reviewer×1 + compliance×1 + 2distinct
-open-collaboration skill restricted division   steward×1 + security-reviewer×1 + compliance×1 + 2distinct
-open-collaboration skill restricted department steward×1 + security-reviewer×1 + compliance×1 + 2distinct
-open-collaboration skill restricted team       steward×1 + security-reviewer×1 + compliance×1 + 2distinct
-open-collaboration skill restricted user       steward×1 + security-reviewer×1 + compliance×1 + 2distinct
-open-collaboration context-pack public org        curator×1 + 1distinct
-open-collaboration context-pack public division   curator×1 + 1distinct
-open-collaboration context-pack public department curator×1 + 1distinct
-open-collaboration context-pack public team       curator×1 + 1distinct
-open-collaboration context-pack public user       curator×1 + 1distinct
-open-collaboration context-pack internal org        curator×1 + 1distinct
-open-collaboration context-pack internal division   curator×1 + 1distinct
-open-collaboration context-pack internal department curator×1 + 1distinct
-open-collaboration context-pack internal team       curator×1 + 1distinct
-open-collaboration context-pack internal user       curator×1 + 1distinct
-open-collaboration context-pack confidential org        curator×1 + 1distinct
-open-collaboration context-pack confidential division   curator×1 + 1distinct
-open-collaboration context-pack confidential department curator×1 + 1distinct
-open-collaboration context-pack confidential team       curator×1 + 1distinct
-open-collaboration context-pack confidential user       curator×1 + 1distinct
-open-collaboration context-pack restricted org        curator×1 + compliance×1 + 2distinct
-open-collaboration context-pack restricted division   curator×1 + compliance×1 + 2distinct
-open-collaboration context-pack restricted department curator×1 + compliance×1 + 2distinct
-open-collaboration context-pack restricted team       curator×1 + compliance×1 + 2distinct
-open-collaboration context-pack restricted user       curator×1 + compliance×1 + 2distinct
-open-collaboration policy public org        steward×1 + 1distinct
-open-collaboration policy public division   steward×1 + 1distinct
-open-collaboration policy public department steward×1 + 1distinct
-open-collaboration policy public team       steward×1 + 1distinct
-open-collaboration policy public user       steward×1 + 1distinct
-open-collaboration policy internal org        steward×1 + 1distinct
-open-collaboration policy internal division   steward×1 + 1distinct
-open-collaboration policy internal department steward×1 + 1distinct
-open-collaboration policy internal team       steward×1 + 1distinct
-open-collaboration policy internal user       steward×1 + 1distinct
-open-collaboration policy confidential org        steward×1 + 1distinct
-open-collaboration policy confidential division   steward×1 + 1distinct
-open-collaboration policy confidential department steward×1 + 1distinct
-open-collaboration policy confidential team       steward×1 + 1distinct
-open-collaboration policy confidential user       steward×1 + 1distinct
-open-collaboration policy restricted org        steward×1 + compliance×1 + 2distinct
-open-collaboration policy restricted division   steward×1 + compliance×1 + 2distinct
-open-collaboration policy restricted department steward×1 + compliance×1 + 2distinct
-open-collaboration policy restricted team       steward×1 + compliance×1 + 2distinct
-open-collaboration policy restricted user       steward×1 + compliance×1 + 2distinct
+regulated-strict   knowledge public tenant     curator×1 + administrator×1 + 2distinct
+regulated-strict   knowledge public org_unit   curator×1 + administrator×1 + 2distinct
+regulated-strict   knowledge public workspace  curator×1 + 1distinct
+regulated-strict   knowledge public project    curator×1 + 1distinct
+regulated-strict   knowledge public principal  curator×1 + 1distinct
+regulated-strict   knowledge internal tenant     curator×1 + administrator×1 + 2distinct
+regulated-strict   knowledge internal org_unit   curator×1 + administrator×1 + 2distinct
+regulated-strict   knowledge internal workspace  curator×1 + 1distinct
+regulated-strict   knowledge internal project    curator×1 + 1distinct
+regulated-strict   knowledge internal principal  curator×1 + 1distinct
+regulated-strict   knowledge confidential tenant     curator×1 + administrator×1 + 2distinct
+regulated-strict   knowledge confidential org_unit   curator×1 + administrator×1 + 2distinct
+regulated-strict   knowledge confidential workspace  curator×1 + 1distinct
+regulated-strict   knowledge confidential project    curator×1 + 1distinct
+regulated-strict   knowledge confidential principal  curator×1 + 1distinct
+regulated-strict   knowledge restricted tenant     curator×1 + administrator×1 + 2distinct
+regulated-strict   knowledge restricted org_unit   curator×1 + administrator×1 + 2distinct
+regulated-strict   knowledge restricted workspace  curator×1 + administrator×1 + 2distinct
+regulated-strict   knowledge restricted project    curator×1 + administrator×1 + 2distinct
+regulated-strict   knowledge restricted principal  curator×1 + administrator×1 + 2distinct
+regulated-strict   prompt public tenant     curator×1 + administrator×1 + 2distinct
+regulated-strict   prompt public org_unit   curator×1 + administrator×1 + 2distinct
+regulated-strict   prompt public workspace  curator×1 + administrator×1 + 2distinct
+regulated-strict   prompt public project    curator×1 + administrator×1 + 2distinct
+regulated-strict   prompt public principal  curator×1 + administrator×1 + 2distinct
+regulated-strict   prompt internal tenant     curator×1 + administrator×1 + 2distinct
+regulated-strict   prompt internal org_unit   curator×1 + administrator×1 + 2distinct
+regulated-strict   prompt internal workspace  curator×1 + administrator×1 + 2distinct
+regulated-strict   prompt internal project    curator×1 + administrator×1 + 2distinct
+regulated-strict   prompt internal principal  curator×1 + administrator×1 + 2distinct
+regulated-strict   prompt confidential tenant     curator×1 + administrator×1 + 2distinct
+regulated-strict   prompt confidential org_unit   curator×1 + administrator×1 + 2distinct
+regulated-strict   prompt confidential workspace  curator×1 + administrator×1 + 2distinct
+regulated-strict   prompt confidential project    curator×1 + administrator×1 + 2distinct
+regulated-strict   prompt confidential principal  curator×1 + administrator×1 + 2distinct
+regulated-strict   prompt restricted tenant     curator×1 + administrator×1 + 2distinct
+regulated-strict   prompt restricted org_unit   curator×1 + administrator×1 + 2distinct
+regulated-strict   prompt restricted workspace  curator×1 + administrator×1 + 2distinct
+regulated-strict   prompt restricted project    curator×1 + administrator×1 + 2distinct
+regulated-strict   prompt restricted principal  curator×1 + administrator×1 + 2distinct
+regulated-strict   skill public tenant     reviewer×1 + administrator×1 + 2distinct
+regulated-strict   skill public org_unit   reviewer×1 + administrator×1 + 2distinct
+regulated-strict   skill public workspace  reviewer×1 + administrator×1 + 2distinct
+regulated-strict   skill public project    reviewer×1 + administrator×1 + 2distinct
+regulated-strict   skill public principal  reviewer×1 + administrator×1 + 2distinct
+regulated-strict   skill internal tenant     reviewer×1 + administrator×1 + 2distinct
+regulated-strict   skill internal org_unit   reviewer×1 + administrator×1 + 2distinct
+regulated-strict   skill internal workspace  reviewer×1 + administrator×1 + 2distinct
+regulated-strict   skill internal project    reviewer×1 + administrator×1 + 2distinct
+regulated-strict   skill internal principal  reviewer×1 + administrator×1 + 2distinct
+regulated-strict   skill confidential tenant     reviewer×1 + administrator×1 + 2distinct
+regulated-strict   skill confidential org_unit   reviewer×1 + administrator×1 + 2distinct
+regulated-strict   skill confidential workspace  reviewer×1 + administrator×1 + 2distinct
+regulated-strict   skill confidential project    reviewer×1 + administrator×1 + 2distinct
+regulated-strict   skill confidential principal  reviewer×1 + administrator×1 + 2distinct
+regulated-strict   skill restricted tenant     reviewer×1 + administrator×1 + 2distinct
+regulated-strict   skill restricted org_unit   reviewer×1 + administrator×1 + 2distinct
+regulated-strict   skill restricted workspace  reviewer×1 + administrator×1 + 2distinct
+regulated-strict   skill restricted project    reviewer×1 + administrator×1 + 2distinct
+regulated-strict   skill restricted principal  reviewer×1 + administrator×1 + 2distinct
+regulated-strict   tool public tenant     reviewer×1 + administrator×1 + 2distinct
+regulated-strict   tool public org_unit   reviewer×1 + administrator×1 + 2distinct
+regulated-strict   tool public workspace  reviewer×1 + administrator×1 + 2distinct
+regulated-strict   tool public project    reviewer×1 + administrator×1 + 2distinct
+regulated-strict   tool public principal  reviewer×1 + administrator×1 + 2distinct
+regulated-strict   tool internal tenant     reviewer×1 + administrator×1 + 2distinct
+regulated-strict   tool internal org_unit   reviewer×1 + administrator×1 + 2distinct
+regulated-strict   tool internal workspace  reviewer×1 + administrator×1 + 2distinct
+regulated-strict   tool internal project    reviewer×1 + administrator×1 + 2distinct
+regulated-strict   tool internal principal  reviewer×1 + administrator×1 + 2distinct
+regulated-strict   tool confidential tenant     reviewer×1 + administrator×1 + 2distinct
+regulated-strict   tool confidential org_unit   reviewer×1 + administrator×1 + 2distinct
+regulated-strict   tool confidential workspace  reviewer×1 + administrator×1 + 2distinct
+regulated-strict   tool confidential project    reviewer×1 + administrator×1 + 2distinct
+regulated-strict   tool confidential principal  reviewer×1 + administrator×1 + 2distinct
+regulated-strict   tool restricted tenant     reviewer×1 + administrator×1 + 2distinct
+regulated-strict   tool restricted org_unit   reviewer×1 + administrator×1 + 2distinct
+regulated-strict   tool restricted workspace  reviewer×1 + administrator×1 + 2distinct
+regulated-strict   tool restricted project    reviewer×1 + administrator×1 + 2distinct
+regulated-strict   tool restricted principal  reviewer×1 + administrator×1 + 2distinct
+regulated-strict   context-pack public tenant     curator×1 + administrator×1 + 2distinct
+regulated-strict   context-pack public org_unit   curator×1 + administrator×1 + 2distinct
+regulated-strict   context-pack public workspace  curator×1 + 1distinct
+regulated-strict   context-pack public project    curator×1 + 1distinct
+regulated-strict   context-pack public principal  curator×1 + 1distinct
+regulated-strict   context-pack internal tenant     curator×1 + administrator×1 + 2distinct
+regulated-strict   context-pack internal org_unit   curator×1 + administrator×1 + 2distinct
+regulated-strict   context-pack internal workspace  curator×1 + 1distinct
+regulated-strict   context-pack internal project    curator×1 + 1distinct
+regulated-strict   context-pack internal principal  curator×1 + 1distinct
+regulated-strict   context-pack confidential tenant     curator×1 + administrator×1 + 2distinct
+regulated-strict   context-pack confidential org_unit   curator×1 + administrator×1 + 2distinct
+regulated-strict   context-pack confidential workspace  curator×1 + 1distinct
+regulated-strict   context-pack confidential project    curator×1 + 1distinct
+regulated-strict   context-pack confidential principal  curator×1 + 1distinct
+regulated-strict   context-pack restricted tenant     curator×1 + administrator×1 + 2distinct
+regulated-strict   context-pack restricted org_unit   curator×1 + administrator×1 + 2distinct
+regulated-strict   context-pack restricted workspace  curator×1 + administrator×1 + 2distinct
+regulated-strict   context-pack restricted project    curator×1 + administrator×1 + 2distinct
+regulated-strict   context-pack restricted principal  curator×1 + administrator×1 + 2distinct
+regulated-strict   policy public tenant     administrator×2 + 2distinct
+regulated-strict   policy public org_unit   administrator×2 + 2distinct
+regulated-strict   policy public workspace  administrator×2 + 2distinct
+regulated-strict   policy public project    administrator×2 + 2distinct
+regulated-strict   policy public principal  administrator×2 + 2distinct
+regulated-strict   policy internal tenant     administrator×2 + 2distinct
+regulated-strict   policy internal org_unit   administrator×2 + 2distinct
+regulated-strict   policy internal workspace  administrator×2 + 2distinct
+regulated-strict   policy internal project    administrator×2 + 2distinct
+regulated-strict   policy internal principal  administrator×2 + 2distinct
+regulated-strict   policy confidential tenant     administrator×2 + 2distinct
+regulated-strict   policy confidential org_unit   administrator×2 + 2distinct
+regulated-strict   policy confidential workspace  administrator×2 + 2distinct
+regulated-strict   policy confidential project    administrator×2 + 2distinct
+regulated-strict   policy confidential principal  administrator×2 + 2distinct
+regulated-strict   policy restricted tenant     administrator×2 + 2distinct
+regulated-strict   policy restricted org_unit   administrator×2 + 2distinct
+regulated-strict   policy restricted workspace  administrator×2 + 2distinct
+regulated-strict   policy restricted project    administrator×2 + 2distinct
+regulated-strict   policy restricted principal  administrator×2 + 2distinct
+regulated-strict   configuration public tenant     administrator×2 + 2distinct
+regulated-strict   configuration public org_unit   administrator×2 + 2distinct
+regulated-strict   configuration public workspace  administrator×2 + 2distinct
+regulated-strict   configuration public project    administrator×2 + 2distinct
+regulated-strict   configuration public principal  administrator×2 + 2distinct
+regulated-strict   configuration internal tenant     administrator×2 + 2distinct
+regulated-strict   configuration internal org_unit   administrator×2 + 2distinct
+regulated-strict   configuration internal workspace  administrator×2 + 2distinct
+regulated-strict   configuration internal project    administrator×2 + 2distinct
+regulated-strict   configuration internal principal  administrator×2 + 2distinct
+regulated-strict   configuration confidential tenant     administrator×2 + 2distinct
+regulated-strict   configuration confidential org_unit   administrator×2 + 2distinct
+regulated-strict   configuration confidential workspace  administrator×2 + 2distinct
+regulated-strict   configuration confidential project    administrator×2 + 2distinct
+regulated-strict   configuration confidential principal  administrator×2 + 2distinct
+regulated-strict   configuration restricted tenant     administrator×2 + 2distinct
+regulated-strict   configuration restricted org_unit   administrator×2 + 2distinct
+regulated-strict   configuration restricted workspace  administrator×2 + 2distinct
+regulated-strict   configuration restricted project    administrator×2 + 2distinct
+regulated-strict   configuration restricted principal  administrator×2 + 2distinct
+standard           knowledge public tenant     curator×1 + 1distinct
+standard           knowledge public org_unit   curator×1 + 1distinct
+standard           knowledge public workspace  auto
+standard           knowledge public project    auto
+standard           knowledge public principal  auto
+standard           knowledge internal tenant     curator×1 + 1distinct
+standard           knowledge internal org_unit   curator×1 + 1distinct
+standard           knowledge internal workspace  auto
+standard           knowledge internal project    auto
+standard           knowledge internal principal  auto
+standard           knowledge confidential tenant     curator×1 + 1distinct
+standard           knowledge confidential org_unit   curator×1 + 1distinct
+standard           knowledge confidential workspace  auto
+standard           knowledge confidential project    auto
+standard           knowledge confidential principal  auto
+standard           knowledge restricted tenant     curator×1 + administrator×1 + 2distinct
+standard           knowledge restricted org_unit   curator×1 + administrator×1 + 2distinct
+standard           knowledge restricted workspace  administrator×1 + 2distinct
+standard           knowledge restricted project    administrator×1 + 2distinct
+standard           knowledge restricted principal  administrator×1 + 2distinct
+standard           prompt public tenant     curator×1 + 1distinct
+standard           prompt public org_unit   curator×1 + 1distinct
+standard           prompt public workspace  curator×1 + 1distinct
+standard           prompt public project    curator×1 + 1distinct
+standard           prompt public principal  curator×1 + 1distinct
+standard           prompt internal tenant     curator×1 + 1distinct
+standard           prompt internal org_unit   curator×1 + 1distinct
+standard           prompt internal workspace  curator×1 + 1distinct
+standard           prompt internal project    curator×1 + 1distinct
+standard           prompt internal principal  curator×1 + 1distinct
+standard           prompt confidential tenant     curator×1 + 1distinct
+standard           prompt confidential org_unit   curator×1 + 1distinct
+standard           prompt confidential workspace  curator×1 + 1distinct
+standard           prompt confidential project    curator×1 + 1distinct
+standard           prompt confidential principal  curator×1 + 1distinct
+standard           prompt restricted tenant     curator×1 + administrator×1 + 2distinct
+standard           prompt restricted org_unit   curator×1 + administrator×1 + 2distinct
+standard           prompt restricted workspace  curator×1 + administrator×1 + 2distinct
+standard           prompt restricted project    curator×1 + administrator×1 + 2distinct
+standard           prompt restricted principal  curator×1 + administrator×1 + 2distinct
+standard           skill public tenant     reviewer×1 + administrator×1 + 2distinct
+standard           skill public org_unit   reviewer×1 + administrator×1 + 2distinct
+standard           skill public workspace  reviewer×1 + administrator×1 + 2distinct
+standard           skill public project    reviewer×1 + administrator×1 + 2distinct
+standard           skill public principal  reviewer×1 + administrator×1 + 2distinct
+standard           skill internal tenant     reviewer×1 + administrator×1 + 2distinct
+standard           skill internal org_unit   reviewer×1 + administrator×1 + 2distinct
+standard           skill internal workspace  reviewer×1 + administrator×1 + 2distinct
+standard           skill internal project    reviewer×1 + administrator×1 + 2distinct
+standard           skill internal principal  reviewer×1 + administrator×1 + 2distinct
+standard           skill confidential tenant     reviewer×1 + administrator×1 + 2distinct
+standard           skill confidential org_unit   reviewer×1 + administrator×1 + 2distinct
+standard           skill confidential workspace  reviewer×1 + administrator×1 + 2distinct
+standard           skill confidential project    reviewer×1 + administrator×1 + 2distinct
+standard           skill confidential principal  reviewer×1 + administrator×1 + 2distinct
+standard           skill restricted tenant     reviewer×1 + administrator×1 + 2distinct
+standard           skill restricted org_unit   reviewer×1 + administrator×1 + 2distinct
+standard           skill restricted workspace  reviewer×1 + administrator×1 + 2distinct
+standard           skill restricted project    reviewer×1 + administrator×1 + 2distinct
+standard           skill restricted principal  reviewer×1 + administrator×1 + 2distinct
+standard           tool public tenant     reviewer×1 + administrator×1 + 2distinct
+standard           tool public org_unit   reviewer×1 + administrator×1 + 2distinct
+standard           tool public workspace  reviewer×1 + administrator×1 + 2distinct
+standard           tool public project    reviewer×1 + administrator×1 + 2distinct
+standard           tool public principal  reviewer×1 + administrator×1 + 2distinct
+standard           tool internal tenant     reviewer×1 + administrator×1 + 2distinct
+standard           tool internal org_unit   reviewer×1 + administrator×1 + 2distinct
+standard           tool internal workspace  reviewer×1 + administrator×1 + 2distinct
+standard           tool internal project    reviewer×1 + administrator×1 + 2distinct
+standard           tool internal principal  reviewer×1 + administrator×1 + 2distinct
+standard           tool confidential tenant     reviewer×1 + administrator×1 + 2distinct
+standard           tool confidential org_unit   reviewer×1 + administrator×1 + 2distinct
+standard           tool confidential workspace  reviewer×1 + administrator×1 + 2distinct
+standard           tool confidential project    reviewer×1 + administrator×1 + 2distinct
+standard           tool confidential principal  reviewer×1 + administrator×1 + 2distinct
+standard           tool restricted tenant     reviewer×1 + administrator×1 + 2distinct
+standard           tool restricted org_unit   reviewer×1 + administrator×1 + 2distinct
+standard           tool restricted workspace  reviewer×1 + administrator×1 + 2distinct
+standard           tool restricted project    reviewer×1 + administrator×1 + 2distinct
+standard           tool restricted principal  reviewer×1 + administrator×1 + 2distinct
+standard           context-pack public tenant     curator×1 + 1distinct
+standard           context-pack public org_unit   curator×1 + 1distinct
+standard           context-pack public workspace  curator×1 + 1distinct
+standard           context-pack public project    curator×1 + 1distinct
+standard           context-pack public principal  curator×1 + 1distinct
+standard           context-pack internal tenant     curator×1 + 1distinct
+standard           context-pack internal org_unit   curator×1 + 1distinct
+standard           context-pack internal workspace  curator×1 + 1distinct
+standard           context-pack internal project    curator×1 + 1distinct
+standard           context-pack internal principal  curator×1 + 1distinct
+standard           context-pack confidential tenant     curator×1 + 1distinct
+standard           context-pack confidential org_unit   curator×1 + 1distinct
+standard           context-pack confidential workspace  curator×1 + 1distinct
+standard           context-pack confidential project    curator×1 + 1distinct
+standard           context-pack confidential principal  curator×1 + 1distinct
+standard           context-pack restricted tenant     curator×1 + administrator×1 + 2distinct
+standard           context-pack restricted org_unit   curator×1 + administrator×1 + 2distinct
+standard           context-pack restricted workspace  curator×1 + administrator×1 + 2distinct
+standard           context-pack restricted project    curator×1 + administrator×1 + 2distinct
+standard           context-pack restricted principal  curator×1 + administrator×1 + 2distinct
+standard           policy public tenant     administrator×1 + 1distinct
+standard           policy public org_unit   administrator×1 + 1distinct
+standard           policy public workspace  administrator×1 + 1distinct
+standard           policy public project    administrator×1 + 1distinct
+standard           policy public principal  administrator×1 + 1distinct
+standard           policy internal tenant     administrator×1 + 1distinct
+standard           policy internal org_unit   administrator×1 + 1distinct
+standard           policy internal workspace  administrator×1 + 1distinct
+standard           policy internal project    administrator×1 + 1distinct
+standard           policy internal principal  administrator×1 + 1distinct
+standard           policy confidential tenant     administrator×1 + 1distinct
+standard           policy confidential org_unit   administrator×1 + 1distinct
+standard           policy confidential workspace  administrator×1 + 1distinct
+standard           policy confidential project    administrator×1 + 1distinct
+standard           policy confidential principal  administrator×1 + 1distinct
+standard           policy restricted tenant     administrator×1 + 2distinct
+standard           policy restricted org_unit   administrator×1 + 2distinct
+standard           policy restricted workspace  administrator×1 + 2distinct
+standard           policy restricted project    administrator×1 + 2distinct
+standard           policy restricted principal  administrator×1 + 2distinct
+standard           configuration public tenant     administrator×1 + 1distinct
+standard           configuration public org_unit   administrator×1 + 1distinct
+standard           configuration public workspace  administrator×1 + 1distinct
+standard           configuration public project    administrator×1 + 1distinct
+standard           configuration public principal  administrator×1 + 1distinct
+standard           configuration internal tenant     administrator×1 + 1distinct
+standard           configuration internal org_unit   administrator×1 + 1distinct
+standard           configuration internal workspace  administrator×1 + 1distinct
+standard           configuration internal project    administrator×1 + 1distinct
+standard           configuration internal principal  administrator×1 + 1distinct
+standard           configuration confidential tenant     administrator×1 + 1distinct
+standard           configuration confidential org_unit   administrator×1 + 1distinct
+standard           configuration confidential workspace  administrator×1 + 1distinct
+standard           configuration confidential project    administrator×1 + 1distinct
+standard           configuration confidential principal  administrator×1 + 1distinct
+standard           configuration restricted tenant     administrator×1 + 2distinct
+standard           configuration restricted org_unit   administrator×1 + 2distinct
+standard           configuration restricted workspace  administrator×1 + 2distinct
+standard           configuration restricted project    administrator×1 + 2distinct
+standard           configuration restricted principal  administrator×1 + 2distinct
+open-collaboration knowledge public tenant     curator×1 + 1distinct
+open-collaboration knowledge public org_unit   auto
+open-collaboration knowledge public workspace  auto
+open-collaboration knowledge public project    auto
+open-collaboration knowledge public principal  auto
+open-collaboration knowledge internal tenant     curator×1 + 1distinct
+open-collaboration knowledge internal org_unit   auto
+open-collaboration knowledge internal workspace  auto
+open-collaboration knowledge internal project    auto
+open-collaboration knowledge internal principal  auto
+open-collaboration knowledge confidential tenant     curator×1 + 1distinct
+open-collaboration knowledge confidential org_unit   auto
+open-collaboration knowledge confidential workspace  auto
+open-collaboration knowledge confidential project    auto
+open-collaboration knowledge confidential principal  auto
+open-collaboration knowledge restricted tenant     curator×1 + administrator×1 + 2distinct
+open-collaboration knowledge restricted org_unit   administrator×1 + 2distinct
+open-collaboration knowledge restricted workspace  administrator×1 + 2distinct
+open-collaboration knowledge restricted project    administrator×1 + 2distinct
+open-collaboration knowledge restricted principal  administrator×1 + 2distinct
+open-collaboration prompt public tenant     curator×1 + 1distinct
+open-collaboration prompt public org_unit   curator×1 + 1distinct
+open-collaboration prompt public workspace  curator×1 + 1distinct
+open-collaboration prompt public project    curator×1 + 1distinct
+open-collaboration prompt public principal  curator×1 + 1distinct
+open-collaboration prompt internal tenant     curator×1 + 1distinct
+open-collaboration prompt internal org_unit   curator×1 + 1distinct
+open-collaboration prompt internal workspace  curator×1 + 1distinct
+open-collaboration prompt internal project    curator×1 + 1distinct
+open-collaboration prompt internal principal  curator×1 + 1distinct
+open-collaboration prompt confidential tenant     curator×1 + 1distinct
+open-collaboration prompt confidential org_unit   curator×1 + 1distinct
+open-collaboration prompt confidential workspace  curator×1 + 1distinct
+open-collaboration prompt confidential project    curator×1 + 1distinct
+open-collaboration prompt confidential principal  curator×1 + 1distinct
+open-collaboration prompt restricted tenant     curator×1 + administrator×1 + 2distinct
+open-collaboration prompt restricted org_unit   curator×1 + administrator×1 + 2distinct
+open-collaboration prompt restricted workspace  curator×1 + administrator×1 + 2distinct
+open-collaboration prompt restricted project    curator×1 + administrator×1 + 2distinct
+open-collaboration prompt restricted principal  curator×1 + administrator×1 + 2distinct
+open-collaboration skill public tenant     reviewer×1 + administrator×1 + 2distinct
+open-collaboration skill public org_unit   reviewer×1 + administrator×1 + 2distinct
+open-collaboration skill public workspace  reviewer×1 + administrator×1 + 2distinct
+open-collaboration skill public project    reviewer×1 + administrator×1 + 2distinct
+open-collaboration skill public principal  reviewer×1 + administrator×1 + 2distinct
+open-collaboration skill internal tenant     reviewer×1 + administrator×1 + 2distinct
+open-collaboration skill internal org_unit   reviewer×1 + administrator×1 + 2distinct
+open-collaboration skill internal workspace  reviewer×1 + administrator×1 + 2distinct
+open-collaboration skill internal project    reviewer×1 + administrator×1 + 2distinct
+open-collaboration skill internal principal  reviewer×1 + administrator×1 + 2distinct
+open-collaboration skill confidential tenant     reviewer×1 + administrator×1 + 2distinct
+open-collaboration skill confidential org_unit   reviewer×1 + administrator×1 + 2distinct
+open-collaboration skill confidential workspace  reviewer×1 + administrator×1 + 2distinct
+open-collaboration skill confidential project    reviewer×1 + administrator×1 + 2distinct
+open-collaboration skill confidential principal  reviewer×1 + administrator×1 + 2distinct
+open-collaboration skill restricted tenant     reviewer×1 + administrator×1 + 2distinct
+open-collaboration skill restricted org_unit   reviewer×1 + administrator×1 + 2distinct
+open-collaboration skill restricted workspace  reviewer×1 + administrator×1 + 2distinct
+open-collaboration skill restricted project    reviewer×1 + administrator×1 + 2distinct
+open-collaboration skill restricted principal  reviewer×1 + administrator×1 + 2distinct
+open-collaboration tool public tenant     reviewer×1 + administrator×1 + 2distinct
+open-collaboration tool public org_unit   reviewer×1 + administrator×1 + 2distinct
+open-collaboration tool public workspace  reviewer×1 + administrator×1 + 2distinct
+open-collaboration tool public project    reviewer×1 + administrator×1 + 2distinct
+open-collaboration tool public principal  reviewer×1 + administrator×1 + 2distinct
+open-collaboration tool internal tenant     reviewer×1 + administrator×1 + 2distinct
+open-collaboration tool internal org_unit   reviewer×1 + administrator×1 + 2distinct
+open-collaboration tool internal workspace  reviewer×1 + administrator×1 + 2distinct
+open-collaboration tool internal project    reviewer×1 + administrator×1 + 2distinct
+open-collaboration tool internal principal  reviewer×1 + administrator×1 + 2distinct
+open-collaboration tool confidential tenant     reviewer×1 + administrator×1 + 2distinct
+open-collaboration tool confidential org_unit   reviewer×1 + administrator×1 + 2distinct
+open-collaboration tool confidential workspace  reviewer×1 + administrator×1 + 2distinct
+open-collaboration tool confidential project    reviewer×1 + administrator×1 + 2distinct
+open-collaboration tool confidential principal  reviewer×1 + administrator×1 + 2distinct
+open-collaboration tool restricted tenant     reviewer×1 + administrator×1 + 2distinct
+open-collaboration tool restricted org_unit   reviewer×1 + administrator×1 + 2distinct
+open-collaboration tool restricted workspace  reviewer×1 + administrator×1 + 2distinct
+open-collaboration tool restricted project    reviewer×1 + administrator×1 + 2distinct
+open-collaboration tool restricted principal  reviewer×1 + administrator×1 + 2distinct
+open-collaboration context-pack public tenant     curator×1 + 1distinct
+open-collaboration context-pack public org_unit   curator×1 + 1distinct
+open-collaboration context-pack public workspace  curator×1 + 1distinct
+open-collaboration context-pack public project    curator×1 + 1distinct
+open-collaboration context-pack public principal  curator×1 + 1distinct
+open-collaboration context-pack internal tenant     curator×1 + 1distinct
+open-collaboration context-pack internal org_unit   curator×1 + 1distinct
+open-collaboration context-pack internal workspace  curator×1 + 1distinct
+open-collaboration context-pack internal project    curator×1 + 1distinct
+open-collaboration context-pack internal principal  curator×1 + 1distinct
+open-collaboration context-pack confidential tenant     curator×1 + 1distinct
+open-collaboration context-pack confidential org_unit   curator×1 + 1distinct
+open-collaboration context-pack confidential workspace  curator×1 + 1distinct
+open-collaboration context-pack confidential project    curator×1 + 1distinct
+open-collaboration context-pack confidential principal  curator×1 + 1distinct
+open-collaboration context-pack restricted tenant     curator×1 + administrator×1 + 2distinct
+open-collaboration context-pack restricted org_unit   curator×1 + administrator×1 + 2distinct
+open-collaboration context-pack restricted workspace  curator×1 + administrator×1 + 2distinct
+open-collaboration context-pack restricted project    curator×1 + administrator×1 + 2distinct
+open-collaboration context-pack restricted principal  curator×1 + administrator×1 + 2distinct
+open-collaboration policy public tenant     auto
+open-collaboration policy public org_unit   auto
+open-collaboration policy public workspace  auto
+open-collaboration policy public project    auto
+open-collaboration policy public principal  auto
+open-collaboration policy internal tenant     auto
+open-collaboration policy internal org_unit   auto
+open-collaboration policy internal workspace  auto
+open-collaboration policy internal project    auto
+open-collaboration policy internal principal  auto
+open-collaboration policy confidential tenant     auto
+open-collaboration policy confidential org_unit   auto
+open-collaboration policy confidential workspace  auto
+open-collaboration policy confidential project    auto
+open-collaboration policy confidential principal  auto
+open-collaboration policy restricted tenant     administrator×1 + 2distinct
+open-collaboration policy restricted org_unit   administrator×1 + 2distinct
+open-collaboration policy restricted workspace  administrator×1 + 2distinct
+open-collaboration policy restricted project    administrator×1 + 2distinct
+open-collaboration policy restricted principal  administrator×1 + 2distinct
+open-collaboration configuration public tenant     administrator×1 + 1distinct
+open-collaboration configuration public org_unit   administrator×1 + 1distinct
+open-collaboration configuration public workspace  auto
+open-collaboration configuration public project    auto
+open-collaboration configuration public principal  auto
+open-collaboration configuration internal tenant     administrator×1 + 1distinct
+open-collaboration configuration internal org_unit   administrator×1 + 1distinct
+open-collaboration configuration internal workspace  auto
+open-collaboration configuration internal project    auto
+open-collaboration configuration internal principal  auto
+open-collaboration configuration confidential tenant     administrator×1 + 1distinct
+open-collaboration configuration confidential org_unit   administrator×1 + 1distinct
+open-collaboration configuration confidential workspace  auto
+open-collaboration configuration confidential project    auto
+open-collaboration configuration confidential principal  auto
+open-collaboration configuration restricted tenant     administrator×1 + 2distinct
+open-collaboration configuration restricted org_unit   administrator×1 + 2distinct
+open-collaboration configuration restricted workspace  administrator×1 + 2distinct
+open-collaboration configuration restricted project    administrator×1 + 2distinct
+open-collaboration configuration restricted principal  administrator×1 + 2distinct

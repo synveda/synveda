@@ -134,7 +134,7 @@ async fn make_commit(
     body: &str,
     parents: Vec<CommitHash>,
 ) -> Result<CommitHash> {
-    let object = put_object(conn, tenant, AssetKind::Memory, body.as_bytes()).await?;
+    let object = put_object(conn, tenant, AssetKind::Knowledge, body.as_bytes()).await?;
     let tree = put_tree(conn, tenant, &[TreeEntry::object("note.md", object.hash)]).await?;
     let head = commit(
         conn,
@@ -322,13 +322,13 @@ fn dedup_is_per_tenant_never_across_one() {
         let content = b"the same sentence in two organisations";
 
         let mut tx = tenant_tx(pool, left).await;
-        let in_left = put_object(&mut tx, left, AssetKind::Memory, content)
+        let in_left = put_object(&mut tx, left, AssetKind::Knowledge, content)
             .await
             .expect("put in left");
         tx.commit().await.expect("commit left");
 
         let mut tx = tenant_tx(pool, right).await;
-        let in_right = put_object(&mut tx, right, AssetKind::Memory, content)
+        let in_right = put_object(&mut tx, right, AssetKind::Knowledge, content)
             .await
             .expect("put in right");
         tx.commit().await.expect("commit right");
@@ -406,7 +406,7 @@ async fn writer(
                 .expect("read ref")
                 .expect("ref exists");
             let body = format!("writer {id} round {round} attempt {attempts}");
-            let object = put_object(conn, tenant, AssetKind::Memory, body.as_bytes())
+            let object = put_object(conn, tenant, AssetKind::Knowledge, body.as_bytes())
                 .await
                 .expect("put object");
             let tree = put_tree(conn, tenant, &[TreeEntry::object("note.md", object.hash)])
@@ -794,7 +794,7 @@ fn a_ref_moves_only_forward_unless_forced() {
         let first = seed_commit(conn, tenant, author, "one")
             .await
             .expect("seed");
-        let object = put_object(conn, tenant, AssetKind::Memory, b"two")
+        let object = put_object(conn, tenant, AssetKind::Knowledge, b"two")
             .await
             .expect("put object");
         let tree = put_tree(conn, tenant, &[TreeEntry::object("note.md", object.hash)])
@@ -927,7 +927,7 @@ fn a_commit_cannot_claim_a_parent_or_tree_that_does_not_exist() {
 
         // A parent that was never written.
         let mut tx = tenant_tx(pool, tenant).await;
-        let object = put_object(&mut tx, tenant, AssetKind::Memory, b"x")
+        let object = put_object(&mut tx, tenant, AssetKind::Knowledge, b"x")
             .await
             .expect("put object");
         let tree = put_tree(&mut tx, tenant, &[TreeEntry::object("x", object.hash)])

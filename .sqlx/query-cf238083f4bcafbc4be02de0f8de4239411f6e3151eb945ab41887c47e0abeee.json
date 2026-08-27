@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            update sessions\n               set last_observed_at = greatest(coalesce(last_observed_at, $3), $3),\n                   updated_at       = now()\n             where id = $1 and tenant_id = $2\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "cf238083f4bcafbc4be02de0f8de4239411f6e3151eb945ab41887c47e0abeee"
+}

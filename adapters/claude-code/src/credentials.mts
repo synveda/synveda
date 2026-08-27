@@ -18,7 +18,7 @@
 
 import { execFile } from "node:child_process";
 
-import { log } from "./log.mjs";
+import { diagnostic, log } from "./log.mjs";
 
 /** How long the CLI gets to answer before the hook gives up on memory. */
 const CLI_TIMEOUT_MS = 3000;
@@ -71,15 +71,15 @@ async function resolveFromCli(): Promise<Bearer | undefined> {
     // Not installed, not logged in, expired past refresh, gateway down
     // mid-refresh: the same outcome either way, and the reason belongs in
     // the log rather than in the user's session.
-    log("credentials.unavailable", { reason: describe(error) });
+    log("credentials.unavailable", { reason: diagnostic(error) });
     return undefined;
   }
 
   let parsed: CliToken;
   try {
     parsed = JSON.parse(stdout) as CliToken;
-  } catch (error) {
-    log("credentials.unparsed", { error: String(error) });
+  } catch {
+    log("credentials.unparsed", { reason: "invalid_json" });
     return undefined;
   }
   const token = typeof parsed.access_token === "string" ? parsed.access_token : "";
@@ -121,13 +121,6 @@ class CliFailure extends Error {
     this.name = "CliFailure";
     this.detail = detail;
   }
-}
-
-function describe(error: unknown): string {
-  if (error instanceof CliFailure) {
-    return error.detail.length > 0 ? error.detail : error.message;
-  }
-  return String(error);
 }
 
 /** What the user is told when no credential resolves (ADR-0027 decision 3). */

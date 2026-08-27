@@ -2,26 +2,13 @@
 //!
 //! FLOW-1 left the ref vocabulary open because a CHECK constraint written
 //! then would have been a guess. This module fixes it: a channel is a
-//! [`crate::refs`] row named `{asset-kind}/{channel}` — `memory/derived`,
-//! `memory/published`, `memory/staged`, and the same three per asset type
-//! as those types arrive. Nothing is created up front; a ref materialises
+//! [`crate::refs`] row named `{asset-kind}/{channel}` for authored prompts
+//! and context packs. Nothing is created up front; a ref materialises
 //! on its first write, so a scope with nothing published has no published
 //! ref and reading it returns the empty set (ADR-0031 decision 2).
 //!
-//! # Two shapes, on purpose
-//!
-//! - **Set channels** (`published`, `staged`): each commit's tree is the
-//!   channel's *entire* membership, so "what is published here" is one
-//!   read of one tree. Written by [`publish`].
-//! - **The log channel** (`derived`): each commit's tree holds only what
-//!   that commit added, and the history is the parent chain. Written by
-//!   [`append`].
-//!
-//! The asymmetry is cost, and it is safe because derived membership is
-//! never enumerated: a record is derived material unless it is published
-//! (ADR-0031 decisions 3 and 4). A full-membership tree per derived commit
-//! would cost one `vedaflow_tree_entries` row per record in the corpus on
-//! every extraction batch.
+//! Every channel is a set: each commit's tree is the entire membership, so
+//! "what is published here" is one read of one immutable tree.
 //!
 //! # Publication binds bytes
 //!
@@ -36,24 +23,19 @@ use std::fmt;
 use std::str::FromStr;
 
 use chrono::{DateTime, Utc};
-use serde_json::json;
 use sqlx::PgConnection;
-use synveda_types::{
-    AssetKind, Channel, Error, IdentityId, RecordClass, RecordId, RecordKind, Result, ScopeId,
-    Sensitivity, TenantId,
-};
+use synveda_types::{AssetKind, Channel, Error, IdentityId, Result, ScopeId, TenantId};
 use uuid::Uuid;
 
 use crate::commits::{
     MAX_FIRST_PARENT_WALK, NewCommit, commit, is_ancestor, is_first_parent_ancestor,
 };
-use crate::hash::{CommitHash, ObjectHash, canonical_timestamp, object_hash};
-use crate::objects::put_object;
-use crate::policy::{PolicySnapshot, canonical_json};
+use crate::hash::{CommitHash, ObjectHash};
+use crate::policy::PolicySnapshot;
 use crate::refs::{RefUpdate, StoredRef, create_ref, force_update_ref, read_ref, update_ref};
 use crate::signer::CommitSigner;
+use crate::storage_error;
 use crate::trees::{TreeEntry, put_tree};
-use crate::{Written, storage_error};
 
 /// Counts channel commits, labelled by asset kind, channel, and outcome.
 pub const CHANNEL_COMMITS_TOTAL: &str = "synveda_vedaflow_channel_commits_total";
@@ -88,13 +70,11 @@ impl ChannelRef {
     /// The channel of `asset` named `channel`.
     #[must_use]
     pub const fn new(asset: AssetKind, channel: Channel) -> Self {
+        assert!(
+            asset.has_channels(),
+            "a VedaFlow channel requires a channelled asset kind"
+        );
         ChannelRef { asset, channel }
-    }
-
-    /// The `memory/{channel}` ref.
-    #[must_use]
-    pub const fn memory(channel: Channel) -> Self {
-        ChannelRef::new(AssetKind::Memory, channel)
     }
 
     /// The `prompt/{channel}` ref (PRMT-1, ADR-0049) — the second asset
@@ -107,26 +87,9 @@ impl ChannelRef {
     /// The `context-pack/{channel}` ref (PRMT-2, ADR-0050 decision 3) —
     /// the third asset type with a writer, and the first whose entries are
     /// *bundles*: one entry per document, named `pack/document`.
-    ///
-    /// Published-ness for pack content comes from here and never from the
-    /// memory channel, which is what keeps `synveda channel show
-    /// memory/published` meaning what it says (option 3, rejected).
     #[must_use]
     pub const fn context_pack(channel: Channel) -> Self {
         ChannelRef::new(AssetKind::ContextPack, channel)
-    }
-
-    /// The `skill/{channel}` ref (SKIL-1, ADR-0051 decision 2) — the fourth
-    /// asset type with a writer, and the last one ADR-0036 decision 3
-    /// refused a rewind and a pin to by name. One entry per bundled file,
-    /// named `skill/path`.
-    ///
-    /// Unlike every other channel here, what this one publishes is not read
-    /// by this product at all: an install writes the bytes into a client's
-    /// own skills directory and the client's loader reads them (decision 9).
-    #[must_use]
-    pub const fn skill(channel: Channel) -> Self {
-        ChannelRef::new(AssetKind::Skill, channel)
     }
 
     /// The ref name this channel is stored under.
@@ -135,14 +98,7 @@ impl ChannelRef {
         format!("{}/{}", self.asset.as_str(), self.channel.as_str())
     }
 
-    /// Whether the channel's tree is its whole membership (`published`,
-    /// `staged`) rather than one commit's additions (`derived`).
-    #[must_use]
-    pub const fn is_set(&self) -> bool {
-        matches!(self.channel, Channel::Published | Channel::Staged)
-    }
-
-    /// The ref name a pin on this channel takes — `pin/memory/published`
+    /// The ref name a pin on this channel takes.
     /// (FLOW-7, ADR-0036 decision 5).
     ///
     /// It cannot collide with a channel: [`FromStr`] splits on the first
@@ -176,7 +132,13 @@ impl FromStr for ChannelRef {
         let (asset, channel) = name.split_once('/').ok_or_else(|| Error::Invalid {
             message: format!("not a channel ref name: {name:?}"),
         })?;
-        Ok(ChannelRef::new(asset.parse()?, channel.parse()?))
+        let asset = asset.parse::<AssetKind>()?;
+        if !asset.has_channels() {
+            return Err(Error::Invalid {
+                message: format!("{} has no VedaFlow channels", asset.as_str()),
+            });
+        }
+        Ok(ChannelRef::new(asset, channel.parse()?))
     }
 }
 
@@ -184,8 +146,7 @@ impl FromStr for ChannelRef {
 /// admitted at.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ChannelMember {
-    /// The entry name — a record id for memories, a path for the authored
-    /// asset types.
+    /// The authored member path.
     pub name: String,
     /// The address of exactly the content that was admitted.
     pub object: ObjectHash,
@@ -205,23 +166,8 @@ pub struct ChannelSnapshot {
     /// watermark, because a block that cites a frozen commit without
     /// saying so overstates its own freshness (ADR-0036 decision 10).
     pub pinned: bool,
-    /// The commit's tree entries, in name order. For a set channel that
-    /// is the whole membership; for the derived log it is the last
-    /// commit's additions.
+    /// The commit's complete membership, in name order.
     pub members: Vec<ChannelMember>,
-}
-
-/// One scope's memory channel, keyed the way composition reads it.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MemoryChannel {
-    /// The scope whose channel this is.
-    pub scope_id: ScopeId,
-    /// The commit the channel serves.
-    pub commit: CommitHash,
-    /// Whether a pin chose that commit.
-    pub pinned: bool,
-    /// Record id → the address that scope admitted it at.
-    pub members: HashMap<RecordId, ObjectHash>,
 }
 
 /// One scope's channel as it stands: what it points at, how big the
@@ -236,8 +182,7 @@ pub struct ChannelStatus {
     pub updated_at: DateTime<Utc>,
     /// Who last moved it.
     pub updated_by: IdentityId,
-    /// Entries in the head commit's tree. For a set channel that is the
-    /// membership; for the derived log it is what the last commit added.
+    /// Entries in the head commit's complete membership tree.
     pub entries: usize,
     /// The standing pin, when there is one: publications keep landing on
     /// the head above, and readers keep composing this commit until it is
@@ -304,39 +249,7 @@ pub async fn publish(
     write: &ChannelWrite<'_>,
     signer: &impl CommitSigner,
 ) -> Result<ChannelCommit> {
-    if !write.channel.is_set() {
-        return Err(Error::Invalid {
-            message: format!(
-                "{} is a log channel; use append (ADR-0031 decision 3)",
-                write.channel
-            ),
-        });
-    }
     write_channel(conn, tenant, write, signer, true).await
-}
-
-/// Appends `members` to a log channel: the new tree holds exactly this
-/// write's members, parented on the channel's history.
-pub async fn append(
-    conn: &mut PgConnection,
-    tenant: TenantId,
-    write: &ChannelWrite<'_>,
-    signer: &impl CommitSigner,
-) -> Result<ChannelCommit> {
-    if write.channel.is_set() {
-        return Err(Error::Invalid {
-            message: format!(
-                "{} is a set channel; use publish (ADR-0031 decision 3)",
-                write.channel
-            ),
-        });
-    }
-    if write.members.is_empty() {
-        return Err(Error::Invalid {
-            message: "a log-channel commit with no members records nothing".to_owned(),
-        });
-    }
-    write_channel(conn, tenant, write, signer, false).await
 }
 
 /// The compare-and-swap loop both shapes share.
@@ -572,45 +485,6 @@ pub async fn read_members(
     Ok(snapshots)
 }
 
-/// [`read_members`] for the memory channel, keyed the way composition
-/// reads it: record id → the address that scope admitted.
-///
-/// Entry names that are not record ids cannot occur — only this crate
-/// writes memory channels, and it names entries by id — so one is an
-/// internal error rather than a member to drop.
-pub async fn read_memory_members(
-    conn: &mut PgConnection,
-    tenant: TenantId,
-    scopes: &[ScopeId],
-    channel: Channel,
-) -> Result<Vec<MemoryChannel>> {
-    read_members(conn, tenant, scopes, ChannelRef::memory(channel))
-        .await?
-        .into_iter()
-        .map(|snapshot| {
-            let members = snapshot
-                .members
-                .into_iter()
-                .map(|member| {
-                    let id = member.name.parse::<Uuid>().map_err(|err| Error::Internal {
-                        message: format!(
-                            "memory channel entry {:?} is not a record id: {err}",
-                            member.name
-                        ),
-                    })?;
-                    Ok((RecordId::from_uuid(id), member.object))
-                })
-                .collect::<Result<HashMap<RecordId, ObjectHash>>>()?;
-            Ok(MemoryChannel {
-                scope_id: snapshot.scope_id,
-                commit: snapshot.commit,
-                pinned: snapshot.pinned,
-                members,
-            })
-        })
-        .collect()
-}
-
 /// Every scope whose `channel` ref exists at all — the published half of
 /// a recall's candidate universe (CTX-5, ADR-0042 decision 2).
 ///
@@ -645,58 +519,6 @@ pub async fn scopes_with_channel(
     .fetch_all(&mut *conn)
     .await
     .map_err(|err| storage_error("read channel scopes", &err))?;
-    tracing::Span::current().record("scopes", rows.len());
-    Ok(rows.into_iter().map(ScopeId::from_uuid).collect())
-}
-
-/// Every scope whose `channel` names one of `ids` — the published half of
-/// the *ids* form's candidate universe (CTX-5, ADR-0042 decision 2).
-///
-/// The pin is honoured exactly as [`read_members`] honours it: a pinned
-/// channel serves the commit it is pinned to (FLOW-7, ADR-0036), so the
-/// scopes this returns are the scopes that would actually have served
-/// these records, not the ones whose moving ref happens to name them.
-///
-/// Entry names are compared as text because that is how a tree stores
-/// them; only this crate writes memory channels and it names entries by
-/// id, so the comparison is exact rather than a prefix match.
-#[tracing::instrument(
-    name = "vedaflow.scopes_naming",
-    skip_all,
-    fields(tenant.id = %tenant, channel = %channel, ids.count = ids.len(), scopes = tracing::field::Empty),
-    err(Display)
-)]
-pub async fn scopes_naming(
-    conn: &mut PgConnection,
-    tenant: TenantId,
-    ids: &[RecordId],
-    channel: ChannelRef,
-) -> Result<Vec<ScopeId>> {
-    if ids.is_empty() {
-        return Ok(Vec::new());
-    }
-    let names: Vec<String> = ids.iter().map(ToString::to_string).collect();
-    let rows = sqlx::query_scalar!(
-        r#"select distinct r.scope_id as "scope_id!"
-           from vedaflow_refs r
-           left join vedaflow_refs p
-               on p.tenant_id = r.tenant_id and p.scope_id = r.scope_id
-                  and p.name = $4
-           join vedaflow_commits c
-               on c.tenant_id = r.tenant_id
-                  and c.hash = coalesce(p.commit_hash, r.commit_hash)
-           join vedaflow_tree_entries e
-               on e.tenant_id = c.tenant_id and e.tree_hash = c.tree_hash
-           where r.tenant_id = $1 and r.name = $2 and e.name = any($3)
-           order by r.scope_id"#,
-        tenant.as_uuid(),
-        channel.name(),
-        &names,
-        channel.pin_name(),
-    )
-    .fetch_all(&mut *conn)
-    .await
-    .map_err(|err| storage_error("read scopes naming records", &err))?;
     tracing::Span::current().record("scopes", rows.len());
     Ok(rows.into_iter().map(ScopeId::from_uuid).collect())
 }
@@ -860,7 +682,6 @@ pub async fn pin(
     commit: CommitHash,
     by: IdentityId,
 ) -> Result<Option<ChannelPin>> {
-    require_set_channel(channel, "pinned")?;
     let head = require_head(conn, tenant, scope, channel).await?;
     require_channel_state(conn, tenant, channel, head.commit_hash, commit, "pin").await?;
 
@@ -1002,7 +823,6 @@ pub async fn rollback(
     rewind: &ChannelRewind,
 ) -> Result<ChannelRolledBack> {
     let channel = rewind.channel;
-    require_set_channel(channel, "rewound")?;
     if rewind.from == rewind.to {
         return Err(Error::Invalid {
             message: format!("{channel} already points at {}", rewind.to.to_hex()),
@@ -1222,21 +1042,6 @@ pub async fn history(
         .collect()
 }
 
-/// Refuses a log channel for the operations that only make sense on a
-/// membership.
-fn require_set_channel(channel: ChannelRef, verb: &str) -> Result<()> {
-    if channel.is_set() {
-        return Ok(());
-    }
-    Err(Error::Invalid {
-        message: format!(
-            "{channel} is a log channel: its tree is one commit's additions rather \
-             than a membership, and nothing composes it, so it cannot be {verb} \
-             (ADR-0031 decision 3)"
-        ),
-    })
-}
-
 /// The channel's ref, or a `NotFound` naming it. A channel with no ref was
 /// never written (ADR-0031 decision 2), so there is nothing to hold or
 /// rewind.
@@ -1291,92 +1096,6 @@ async fn require_channel_state(
     })
 }
 
-/// A memory record as VedaFlow addresses it (ADR-0031 decision 6).
-///
-/// The governed fields and nothing else: `provenance` is outside because
-/// it carries a float (`confidence`) and a float has no canonical form
-/// worth hashing, and `tx_from` is outside because this is a *content*
-/// address — the same content at the same scope is the same object
-/// however many times the bitemporal pair rewrites around it. `valid_to`
-/// is inside, so closing a record's window changes its address and drops
-/// it off any published set that admitted the open version.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MemoryAsset {
-    /// The record.
-    pub id: RecordId,
-    /// The scope it attaches to.
-    pub scope_id: ScopeId,
-    /// Who owns it.
-    pub owner_id: IdentityId,
-    /// Authored/canonical or pipeline-derived (seed §4.2). Authorship,
-    /// not channel — that is what FLOW-2 separated.
-    pub kind: RecordKind,
-    /// What it asserts.
-    pub class: RecordClass,
-    /// The persisted (post-redaction) text.
-    pub content: String,
-    /// Its classification.
-    pub sensitivity: Sensitivity,
-    /// Valid-time window start.
-    pub valid_from: DateTime<Utc>,
-    /// Valid-time window end, when closed.
-    pub valid_to: Option<DateTime<Utc>>,
-}
-
-impl MemoryAsset {
-    /// The object's bytes: canonical JSON, keys sorted bytewise,
-    /// timestamps in the one rendering this crate uses everywhere.
-    ///
-    /// Human-readable on purpose — FLOW-6 renders diffs of it and FLOW-8
-    /// exports it into a real git repository, where a length-prefixed
-    /// binary blob would be worthless.
-    #[must_use]
-    pub fn canonical_bytes(&self) -> Vec<u8> {
-        let value = json!({
-            "class": self.class.as_str(),
-            "content": self.content,
-            "id": self.id.as_uuid().to_string(),
-            "kind": self.kind.as_str(),
-            "owner": self.owner_id.as_uuid().to_string(),
-            "scope": self.scope_id.as_uuid().to_string(),
-            "sensitivity": self.sensitivity.as_str(),
-            "valid_from": canonical_timestamp(self.valid_from),
-            "valid_to": self.valid_to.map(canonical_timestamp),
-        });
-        let mut out = String::with_capacity(self.content.len() + 256);
-        // Every value here is a string, a null, or an object of those:
-        // the float rejection cannot fire, and the expect says so.
-        canonical_json(&value, &mut out).expect("a memory asset contains no numbers");
-        out.into_bytes()
-    }
-
-    /// The content address — computable without touching the database,
-    /// which is what lets composition check a published entry against the
-    /// version it is about to serve for the cost of a hash.
-    #[must_use]
-    pub fn address(&self) -> ObjectHash {
-        object_hash(AssetKind::Memory, &self.canonical_bytes())
-    }
-
-    /// The name this asset takes in a channel tree.
-    #[must_use]
-    pub fn entry_name(&self) -> String {
-        self.id.as_uuid().to_string()
-    }
-}
-
-/// Writes a memory's object, returning its address.
-///
-/// Dedups like every other object write: re-committing unchanged content
-/// stores nothing and returns the same address.
-pub async fn put_memory(
-    conn: &mut PgConnection,
-    tenant: TenantId,
-    asset: &MemoryAsset,
-) -> Result<Written<ObjectHash>> {
-    put_object(conn, tenant, AssetKind::Memory, &asset.canonical_bytes()).await
-}
-
 /// A commit's tree as `(name, object address)` pairs.
 async fn tree_of(
     conn: &mut PgConnection,
@@ -1426,33 +1145,18 @@ fn record(channel: ChannelRef, outcome: &'static str) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::TimeZone;
-
-    fn asset(content: &str) -> MemoryAsset {
-        MemoryAsset {
-            id: RecordId::from_uuid(Uuid::from_bytes([1; 16])),
-            scope_id: ScopeId::from_uuid(Uuid::from_bytes([2; 16])),
-            owner_id: IdentityId::from_uuid(Uuid::from_bytes([3; 16])),
-            kind: RecordKind::Derived,
-            class: RecordClass::Fact,
-            content: content.to_owned(),
-            sensitivity: Sensitivity::Internal,
-            valid_from: Utc.with_ymd_and_hms(2026, 7, 25, 9, 0, 0).unwrap(),
-            valid_to: None,
-        }
-    }
 
     #[test]
     fn ref_names_round_trip_through_the_vocabulary() {
-        for asset in AssetKind::ALL {
+        for asset in AssetKind::CHANNELLED {
             for channel in Channel::ALL {
                 let reference = ChannelRef::new(asset, channel);
                 assert_eq!(reference.name().parse::<ChannelRef>().unwrap(), reference);
             }
         }
         assert_eq!(
-            ChannelRef::memory(Channel::Published).name(),
-            "memory/published"
+            ChannelRef::prompt(Channel::Published).name(),
+            "prompt/published"
         );
     }
 
@@ -1462,8 +1166,8 @@ mod tests {
     fn names_that_are_not_channels_do_not_parse_into_one() {
         for name in [
             "published",
-            "memory",
-            "memory/review",
+            "knowledge",
+            "knowledge/review",
             "notes/published",
             "",
         ] {
@@ -1479,7 +1183,7 @@ mod tests {
     /// `read_members` would compose one (ADR-0036 decision 5).
     #[test]
     fn a_pin_name_is_not_a_channel_name() {
-        for asset in AssetKind::ALL {
+        for asset in AssetKind::CHANNELLED {
             for channel in Channel::ALL {
                 let reference = ChannelRef::new(asset, channel);
                 let pin = reference.pin_name();
@@ -1492,8 +1196,8 @@ mod tests {
             }
         }
         assert_eq!(
-            ChannelRef::memory(Channel::Published).pin_name(),
-            "pin/memory/published"
+            ChannelRef::prompt(Channel::Published).pin_name(),
+            "pin/prompt/published"
         );
     }
 
@@ -1503,7 +1207,7 @@ mod tests {
     /// and once here.
     #[test]
     fn every_pin_name_matches_what_the_schema_lets_go() {
-        for asset in AssetKind::ALL {
+        for asset in AssetKind::CHANNELLED {
             for channel in Channel::ALL {
                 let pin = ChannelRef::new(asset, channel).pin_name();
                 assert!(pin.starts_with("pin/"), "migration 0021 would refuse {pin}");
@@ -1515,86 +1219,13 @@ mod tests {
         }
     }
 
-    /// Log channels have no membership to hold or rewind — their tree is
-    /// one commit's additions (ADR-0031 decision 3), and nothing composes
-    /// it.
     #[test]
-    fn only_set_channels_can_be_pinned_or_rewound() {
-        for asset in AssetKind::ALL {
+    fn aggregate_and_row_effect_assets_are_not_channels() {
+        for name in ["knowledge/published", "policy/published"] {
             assert!(
-                require_set_channel(ChannelRef::new(asset, Channel::Published), "rewound").is_ok()
-            );
-            assert!(require_set_channel(ChannelRef::new(asset, Channel::Staged), "pinned").is_ok());
-            let refused = require_set_channel(ChannelRef::new(asset, Channel::Derived), "rewound")
-                .expect_err("a log channel cannot be rewound");
-            assert!(
-                matches!(&refused, Error::Invalid { message } if message.contains("log channel")),
-                "unexpected refusal: {refused}"
+                name.parse::<ChannelRef>().is_err(),
+                "{name} must not create a second current-state pointer"
             );
         }
-    }
-
-    #[test]
-    fn set_and_log_channels_are_distinguished_by_shape_not_by_name() {
-        assert!(ChannelRef::memory(Channel::Published).is_set());
-        assert!(ChannelRef::memory(Channel::Staged).is_set());
-        assert!(!ChannelRef::memory(Channel::Derived).is_set());
-    }
-
-    #[test]
-    fn a_memory_object_is_canonical_json_with_sorted_keys() {
-        let bytes = asset("be terse").canonical_bytes();
-        let text = String::from_utf8(bytes).unwrap();
-        assert_eq!(
-            text,
-            "{\"class\":\"fact\",\"content\":\"be terse\",\
-             \"id\":\"01010101-0101-0101-0101-010101010101\",\"kind\":\"derived\",\
-             \"owner\":\"03030303-0303-0303-0303-030303030303\",\
-             \"scope\":\"02020202-0202-0202-0202-020202020202\",\
-             \"sensitivity\":\"internal\",\"valid_from\":\"2026-07-25T09:00:00.000000Z\",\
-             \"valid_to\":null}"
-        );
-    }
-
-    /// The property decision 5 rests on: the address moves with the
-    /// content, so an edited record no longer matches what was published.
-    #[test]
-    fn the_address_moves_with_every_governed_field() {
-        let base = asset("be terse");
-        assert_eq!(base.address(), asset("be terse").address(), "recomputable");
-        assert_ne!(base.address(), asset("be verbose").address(), "content");
-
-        let mut moved = base.clone();
-        moved.scope_id = ScopeId::from_uuid(Uuid::from_bytes([9; 16]));
-        assert_ne!(base.address(), moved.address(), "scope");
-
-        let mut pinned = base.clone();
-        pinned.kind = RecordKind::Pinned;
-        assert_ne!(base.address(), pinned.address(), "kind");
-
-        let mut reclassified = base.clone();
-        reclassified.sensitivity = Sensitivity::Confidential;
-        assert_ne!(base.address(), reclassified.address(), "sensitivity");
-
-        let mut closed = base.clone();
-        closed.valid_to = Some(Utc.with_ymd_and_hms(2026, 8, 1, 0, 0, 0).unwrap());
-        assert_ne!(base.address(), closed.address(), "valid_to");
-    }
-
-    /// The object is a *content* address: two versions of the same text
-    /// at the same scope share it however the bitemporal pair rewrites
-    /// around them. Nothing outside the governed fields can move it.
-    #[test]
-    fn the_address_is_content_not_version() {
-        let a = asset("same");
-        let b = asset("same");
-        assert_eq!(a.address(), b.address());
-        // A memory's object never carries a number, so the canonical-JSON
-        // float rejection cannot fire on this path.
-        assert!(
-            !String::from_utf8(a.canonical_bytes())
-                .unwrap()
-                .contains("confidence")
-        );
     }
 }

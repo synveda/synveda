@@ -1,15 +1,9 @@
 //! The embedded Cedar engine behind the facade (ADR-0002, ADR-0012,
 //! ADR-0014).
 //!
-//! Everything Cedar stays inside this crate: packs compile (parse +
-//! schema-validate, on top of the invariant base layer) at install time,
-//! the effective pack resolves nearest-ancestor-first from caller-supplied
-//! assignment rows, decisions evaluate against entities served from the
-//! entity store's prebuilt fragments (HIER-3, ADR-0017) — rebuilt from
-//! the caller-supplied chains whenever a hierarchy mutation reshaped
-//! them — and every call logs its decision with the policy pack version
-//! in force (the AUTHZ-1 AC; an AUD-1 emission point until the
-//! hash-chained log lands).
+//! Packs compile against the invariant base layer, resolve nearest-scope-first,
+//! and evaluate against entities assembled for the current governed scope
+//! chain. Every decision reports the exact pack version in force.
 
 use std::collections::{HashMap, HashSet};
 use std::fmt;
@@ -19,15 +13,18 @@ use cedar_policy::{
     Authorizer, Context, Decision, Entities, Entity, EntityId, EntityTypeName, EntityUid,
     PolicySet, Request, Schema, ValidationMode, Validator,
 };
+use synveda_types::access::{RoleKey, inherits_into};
 use synveda_types::{
-    ApprovalMatrix, CompositionConfig, DedupConfig, Error, HierarchyNode, Lapse, LapseAction,
-    LapseConfig, MoverConfig, PackConfig, PromotionConfig, RedactionConfig, Result,
-    RetentionConfig, Role, ScopeId, ScopeKind, Sensitivity, SkillQualityConfig, SkillScanConfig,
-    TenantId,
+    ApprovalMatrix, CompositionConfig, CurrentRelaxation, Error, PackConfig, RedactionConfig,
+    RelaxationAction, Result, ScopeId, Sensitivity, SkillQualityConfig, SkillScanConfig, TenantId,
 };
 
+use synveda_types::scope::ScopeKind;
+
 use crate::entity_store::EntityStore;
-use crate::request::{Action, AuthzContext, AuthzDecision, Principal, Resource};
+use crate::request::{
+    Action, AuthzContext, AuthzDecision, Principal, Resource, ResourceEntity, ScopeNode,
+};
 use crate::{AUTHZ_DECISIONS_TOTAL, POLICY_PACK_FALLBACKS_TOTAL};
 
 /// The default product pack (ADR-0014 decision 1): deny-first, own-chain
@@ -41,65 +38,13 @@ pub const STANDARD: &str = "standard";
 /// Org-wide read, personal scopes excluded (seed §6).
 pub const OPEN_COLLABORATION: &str = "open-collaboration";
 
-/// The embedded product packs and their versions — hand-bumped constants,
-/// changed whenever the corresponding source changes (ADR-0014
-/// decision 1). `@2`: AUTHZ-3 narrowed the admin planes to roles and
-/// added the content-role read grant (ADR-0015 decision 4). `@3`: AUTH-3
-/// added the service-identity plane to the admin permits (ADR-0018
-/// decision 3). `@4`: MEM-1 added the `MemoryWrite` own-home floor and
-/// content-role write grant (ADR-0020 decision 3). `@5`: MEM-2 added the
-/// quarantine review plane (ADR-0021 decision 6). `@6`: FLOW-2 added the
-/// channel plane (ADR-0031 decision 12). `@7`: FLOW-3 added the proposal
-/// plane and each pack's approval matrix (ADR-0032 decisions 3 and 16).
-/// `@8`: FLOW-7 added the rewind and pin actions (ADR-0036 decision 3).
-/// `@9`: AUTHZ-4 added the lapse plane and the base layer's first permit
-/// (ADR-0037 decisions 7 and 15). `@10`: AUTHZ-5 made sensitivity a policy
-/// attribute — every `MemoryRead` permit names the tiers it covers, the base
-/// layer forbids `restricted` outright unless a lapse declared it, and the
-/// classification plane joined (ADR-0038 decisions 4, 5 and 9). `@11`: AUD-2
-/// added `AuditRead` to the read-only admin permit every pack has carried
-/// since AUTHZ-2 — the line whose comment named this feature — which makes
-/// `auditor` a role with a live action rather than a marker row in the
-/// golden matrix (ADR-0045 decision 1). `@12`: PRMT-1 added the prompt
-/// registry's two seams — `PromptRead`, mirroring each pack's own MemoryRead
-/// shape tier for tier, and `PromptWrite`, mirroring its write floor — and
-/// the base layer's confinement carve-out gained `PromptRead` beside
-/// `MemoryRead`, because a team-anchored agent is the consumer prompts exist
-/// for and the org's are on its own chain (ADR-0049 decision 4). `@13`:
-/// PRMT-2 added the context-pack registry's two seams on the same shape —
-/// `ContextPackRead` is what admits pack chunks into a composed block, so
-/// the confinement carve-out gained it too — and re-priced
-/// `regulated-strict`'s `context-pack` approval cell, which FLOW-3 had left
-/// at one curator at every scope kind and nothing could reach until now
-/// (ADR-0050 decisions 7, 8 and 15). `@14`: SKIL-1 added the skills
-/// registry's two seams — `SkillRead`, on the context-pack plane's shape
-/// and in the confinement carve-out beside it, because an agent that cannot
-/// resolve the org's skills cannot do the work they were published for, and
-/// `SkillWrite`, separate because a skill is executable — and corrected the
-/// **invariant floor's** skill rule, which had required the
-/// `security-reviewer` role at one distinct approver, so under `standard`
-/// and `open-collaboration` one person holding both roles published
-/// executable code alone (ADR-0051 decisions 10 and 18). `@15`: AUTH-4
-/// added the base layer's second forbid — a sealed scope is nobody's to
-/// act on — and the `Scope` entity attribute it stands on, which is the
-/// mirror of the quarantine rule these packs have carried since ADR-0013:
-/// quarantine says this caller may do nothing, a seal says nothing may be
-/// done to this material. Every pack's own policies are **byte-identical**
-/// across this bump, which is what makes the golden diff checkable: the
-/// only cells that move are the ones a seal turns off (ADR-0059
-/// decisions 8 and 9). `@16`: AUTH-5 added `DirectorySealAuthorise`, the
-/// human release of a pull sync's circuit breaker, as its **own** action
-/// rather than widening `DirectoryManage` — one hands out a provisioning
-/// token, the other authorises irreversible bulk sealing, and a tenant that
-/// wants those two held by two people could not say so while they shared an
-/// action (ADR-0060 decision 10). All three packs grant it to `org-admin`,
-/// so the golden diff is exactly one new row per pack per scope kind and
-/// nothing else moves: the separation's value is what a *stored* pack can
-/// now express, not what these three say differently.
+/// Stable addresses of the embedded Cedar sources. Bump a version whenever
+/// its source changes; audit and decision evidence use the exact pair
+/// (ADR-0014). The accepted ADRs retain the version history.
 pub const EMBEDDED_PACKS: [(&str, i64); 3] = [
-    (REGULATED_STRICT, 16),
-    (STANDARD, 16),
-    (OPEN_COLLABORATION, 16),
+    (REGULATED_STRICT, 23),
+    (STANDARD, 23),
+    (OPEN_COLLABORATION, 23),
 ];
 
 /// Whether `name` is reserved for the product (ADR-0014 decision 6): the
@@ -133,26 +78,6 @@ struct LoadedPack {
     /// [`EffectivePack`] per candidate scope on the inject path, and a
     /// matrix is the one config that is not `Copy` (FLOW-3, ADR-0032).
     approvals: Arc<ApprovalMatrix>,
-    /// The promotion rules (FLOW-4, ADR-0033 decision 6), behind an `Arc`
-    /// for the same reason as the matrix. Empty means nothing
-    /// auto-promotes at scopes this pack governs.
-    promotion: Arc<PromotionConfig>,
-    /// The lapse ceiling (AUTHZ-4, ADR-0037 decision 5): the longest window
-    /// a lapse at scopes this pack governs may run for, and — at zero —
-    /// whether any may stand at all. `Copy`, so no `Arc`.
-    lapse: LapseConfig,
-    /// What the ingestion pipeline does with a restatement or a
-    /// contradiction at scopes this pack governs (MEM-5, ADR-0039
-    /// decision 12). `Copy`, so no `Arc`.
-    dedup: DedupConfig,
-    /// How long material at scopes this pack governs is served, kept and
-    /// destroyed, and how fast it decays in ranking (MEM-6, ADR-0040).
-    /// `Copy`, so no `Arc`.
-    retention: RetentionConfig,
-    /// What happens to a mover's own memory when the directory moves them
-    /// across a policy boundary (AUTH-4, ADR-0059 decision 10). `Copy`,
-    /// so no `Arc`.
-    mover: MoverConfig,
     /// The severity at which a skill bundle's security scan refuses
     /// rather than reports (SKIL-2, ADR-0052 decision 9). `Copy`, so no
     /// `Arc`.
@@ -181,17 +106,11 @@ pub enum PackOrigin {
 /// What one scope permits this principal to read, as
 /// [`Pdp::permitted_read_tiers`] decided it in one pack resolution.
 ///
-/// The two tier sets are independent answers to independent questions, and
+/// The tier sets are independent answers to independent questions, and
 /// that independence is the point (PRMT-2, ADR-0050 decision 8): a scope
-/// may distribute conventions and glossaries to readers who hold no
-/// readable memory there at all, so `context_pack` being non-empty while
-/// `memory` is empty is a supported state and the composition plan must
-/// keep such a scope rather than skip it.
+/// may distribute conventions and executable capabilities independently.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PermittedTiers {
-    /// The tiers `MemoryRead` permits here, ascending. Empty means no
-    /// memory composes from this scope.
-    pub memory: Vec<Sensitivity>,
     /// The tiers `ContextPackRead` permits here, ascending. Empty means no
     /// pack chunk composes from this scope.
     pub context_pack: Vec<Sensitivity>,
@@ -203,10 +122,6 @@ pub struct PermittedTiers {
     /// walk — which is what keeps "the set and the by-name resolve are the
     /// same walk" (decision 2) true rather than parallel.
     pub skill: Vec<Sensitivity>,
-    /// The `MemoryRead` decision — what the plan records and the audit
-    /// event carries. The pack identity is the same for every ask, one
-    /// resource, one resolution.
-    pub decision: AuthzDecision,
     /// The pack's own configuration, so a caller planning a scope needs no
     /// second resolution to read its channel rule.
     pub effective: EffectivePack,
@@ -232,32 +147,6 @@ pub struct EffectivePack {
     /// Resolving it always merges the invariant floor, so this is what
     /// the pack adds *above* the product's non-negotiables.
     pub approvals: Arc<ApprovalMatrix>,
-    /// The pack's promotion rules (FLOW-4, ADR-0033): what opens a
-    /// proposal at scopes this pack governs without a human deciding to.
-    /// Empty in every embedded pack — a trigger nobody configured must
-    /// not fire.
-    pub promotion: Arc<PromotionConfig>,
-    /// The pack's lapse ceiling (AUTHZ-4, ADR-0037 decision 5): how long a
-    /// lapse at scopes this pack governs may run, and whether one may
-    /// stand at all. The grant surface reads it to bound a window; the PDP
-    /// reads it on every `MemoryRead` to gate a standing one.
-    pub lapse: LapseConfig,
-    /// The pack's dedup configuration (MEM-5, ADR-0039 decision 12): what
-    /// the extraction worker does when a candidate restates or contradicts
-    /// a record its owner's scope already holds.
-    pub dedup: DedupConfig,
-    /// The pack's retention configuration (MEM-6, ADR-0040): the horizons
-    /// scopes this pack governs serve and keep material under, and the
-    /// staleness half-life composition ranks by. Read on the read path at
-    /// every planned scope, and by the sweep at the scope a record lives
-    /// at (ADR-0040 decision 10).
-    pub retention: RetentionConfig,
-    /// The pack's mover configuration (AUTH-4, ADR-0059 decision 10):
-    /// whether a person's own memory follows them across a policy
-    /// boundary or is sealed where it was written. Read by the SCIM
-    /// reconciler at the scope the person is moving **away from** —
-    /// authority over material belongs where the material is.
-    pub mover: MoverConfig,
     /// The pack's skill-scan configuration (SKIL-2, ADR-0052 decision 9):
     /// the severity at which a bundle's security scan refuses rather than
     /// reports. Read at the authoring seam and again at publication —
@@ -306,6 +195,12 @@ pub struct Pdp {
     tenant_type: EntityTypeName,
     principal_type: EntityTypeName,
     scope_type: EntityTypeName,
+    group_type: EntityTypeName,
+    grant_type: EntityTypeName,
+    workspace_type: EntityTypeName,
+    project_type: EntityTypeName,
+    session_type: EntityTypeName,
+    knowledge_item_type: EntityTypeName,
     action_type: EntityTypeName,
     embedded: HashMap<&'static str, Arc<LoadedPack>>,
     tenant_packs: RwLock<HashMap<TenantId, HashMap<String, Arc<LoadedPack>>>>,
@@ -331,16 +226,6 @@ impl Pdp {
         // decision 2: derived is readable-per-policy by design; the
         // published-only restriction is an explicit choice, never a
         // default).
-        // The lapse ceilings are tech plan §2.4's SMB collapse in the one
-        // place a window is a number: `regulated-strict` grants seed §6's
-        // own example (30 days) and the relaxed packs the product maximum
-        // (90). No pack refuses lapses outright — that is a tenant's
-        // decision to make in a stored pack, not a product default.
-        // The retention configs are ADR-0040 decision 13's one product
-        // default that can differ per pack without destroying anything a
-        // tenant expected to keep: no pack sets a record horizon, and
-        // `regulated-strict` disposes of the staging plane at a week
-        // against the relaxed packs' month.
         // The skill-scan thresholds are the one axis where the strict
         // reading is affordable (ADR-0052 decision 3): `regulated-strict`
         // refuses a bundle that shells out or writes outside itself,
@@ -352,9 +237,6 @@ impl Pdp {
                 REGULATED_STRICT,
                 REGULATED_STRICT_SRC,
                 RedactionConfig::STRICT,
-                LapseConfig::STRICT,
-                RetentionConfig::STRICT,
-                MoverConfig::STRICT,
                 SkillScanConfig::STRICT,
                 SkillQualityConfig::STRICT,
             ),
@@ -362,9 +244,6 @@ impl Pdp {
                 STANDARD,
                 STANDARD_SRC,
                 RedactionConfig::REDACT_ALL,
-                LapseConfig::RELAXED,
-                RetentionConfig::DEFAULT,
-                MoverConfig::FOLLOWS,
                 SkillScanConfig::FLOOR,
                 SkillQualityConfig::MODERATE,
             ),
@@ -372,15 +251,12 @@ impl Pdp {
                 OPEN_COLLABORATION,
                 OPEN_COLLABORATION_SRC,
                 RedactionConfig::REDACT_ALL,
-                LapseConfig::RELAXED,
-                RetentionConfig::DEFAULT,
-                MoverConfig::FOLLOWS,
                 SkillScanConfig::FLOOR,
                 SkillQualityConfig::OPEN,
             ),
         ];
         let mut embedded = HashMap::new();
-        for ((name, version), (_, source, redaction, lapse, retention, mover, scan, quality)) in
+        for ((name, version), (_, source, redaction, scan, quality)) in
             EMBEDDED_PACKS.iter().zip(sources)
         {
             let pack = compile(
@@ -392,31 +268,6 @@ impl Pdp {
                     redaction: Some(redaction),
                     composition: Some(CompositionConfig::DEFAULT),
                     approvals: Some(crate::approvals::embedded(name)),
-                    // No embedded pack auto-promotes: ADR-0033 decision
-                    // 6's fail-safe is silence, and a product default
-                    // that opened proposals nobody asked for would be a
-                    // surprise arriving through an upgrade.
-                    promotion: None,
-                    lapse: Some(lapse),
-                    // All three dedup identically, and the product
-                    // default supersedes: seed §4.4 already resolves
-                    // conflicts by "newer valid-time beats older", so a
-                    // pack that let contradictions accumulate would be
-                    // the one making a claim (ADR-0039 decision 12).
-                    dedup: Some(DedupConfig::DEFAULT),
-                    // No embedded pack names a record TTL: an upgrade
-                    // that silently deletes a tenant's memory is the one
-                    // surprise this product must never spring (ADR-0040
-                    // decision 13). What differs is the staging plane,
-                    // whose disposal ADR-0020/0021 already promised.
-                    retention: Some(retention),
-                    // `regulated-strict` seals a personal scope that
-                    // crosses a policy boundary; the relaxed packs let it
-                    // follow. Safe under those two for a reason they
-                    // state themselves — neither sets a record horizon,
-                    // so there is no schedule for the material to be
-                    // handed to (ADR-0059 decision 10).
-                    mover: Some(mover),
                     scan: Some(scan),
                     quality: Some(quality),
                 },
@@ -437,6 +288,12 @@ impl Pdp {
             tenant_type: type_name("Synveda::Tenant")?,
             principal_type: type_name("Synveda::Principal")?,
             scope_type: type_name("Synveda::Scope")?,
+            group_type: type_name("Synveda::Group")?,
+            grant_type: type_name("Synveda::ScopeGrant")?,
+            workspace_type: type_name("Synveda::Workspace")?,
+            project_type: type_name("Synveda::Project")?,
+            session_type: type_name("Synveda::Session")?,
+            knowledge_item_type: type_name("Synveda::KnowledgeItem")?,
             action_type: type_name("Synveda::Action")?,
             embedded,
             tenant_packs: RwLock::new(HashMap::new()),
@@ -468,11 +325,6 @@ impl Pdp {
                 redaction: Some(RedactionConfig::STRICT),
                 composition: Some(CompositionConfig::DEFAULT),
                 approvals: Some(ApprovalMatrix::empty()),
-                promotion: None,
-                lapse: None,
-                dedup: None,
-                retention: None,
-                mover: None,
                 scan: None,
                 quality: None,
             },
@@ -588,11 +440,11 @@ impl Pdp {
     pub fn materialise(
         &self,
         principal: &Principal,
-        chains: &[&[HierarchyNode]],
-        principal_scopes: &[HierarchyNode],
+        chains: &[&[ScopeNode]],
+        context: &AuthzContext<'_>,
     ) -> Result<EntityBatch> {
         Ok(EntityBatch {
-            entities: self.entities_over(principal, chains, principal_scopes)?,
+            entities: self.entities_over(principal, chains, context)?,
         })
     }
 
@@ -600,8 +452,8 @@ impl Pdp {
     ///
     /// Everything else about the decision is unchanged and still
     /// per-call: the effective pack still resolves from *this* resource's
-    /// chain and assignments, the roles from the bindings that reach it,
-    /// the lapses from the grants that bear on it. Only the entity store
+    /// chain and assignments, the roles from the grants that reach it,
+    /// and the relaxations bearing on the exact read. Only the entity store
     /// is shared, and a caller that hands over a batch missing a chain
     /// gets a *denial*, never a wrong allow — an absent scope entity fails
     /// the membership tests every permit is built on.
@@ -646,13 +498,10 @@ impl Pdp {
     ) -> Result<PermittedTiers> {
         let resource = Resource::Scope(scope_id);
         let (pack, origin) = self.resolve_pack(principal.tenant_id, resource, context, false);
-        let roles = effective_roles(principal, resource, context);
-        let mut memory = Vec::with_capacity(Sensitivity::ALL.len());
+        let roles = effective_roles(resource, context);
         let mut context_pack = Vec::with_capacity(Sensitivity::ALL.len());
         let mut skill = Vec::with_capacity(Sensitivity::ALL.len());
-        let mut last: Option<AuthzDecision> = None;
         for (action, tiers) in [
-            (Action::MemoryRead, &mut memory),
             (Action::ContextPackRead, &mut context_pack),
             (Action::SkillRead, &mut skill),
         ] {
@@ -674,24 +523,11 @@ impl Pdp {
                 if decision.allowed {
                     tiers.push(tier);
                 }
-                // The `MemoryRead` decision is the one the plan records and
-                // the audit event carries — it is the question "may this
-                // reader compose here" has always meant, and widening it to
-                // whichever ask happened to run last would change what a
-                // stored decision means.
-                if action == Action::MemoryRead {
-                    last = Some(decision);
-                }
             }
         }
-        let decision = last.ok_or_else(|| Error::Internal {
-            message: "the sensitivity vocabulary is empty".to_owned(),
-        })?;
         Ok(PermittedTiers {
-            memory,
             context_pack,
             skill,
-            decision,
             effective: self.effective_from(&pack, origin),
         })
     }
@@ -709,14 +545,14 @@ impl Pdp {
         // changing a node's governance is authorized by the surrounding
         // governance, never by the pack being replaced — so a restrictive
         // custom pack cannot seal its own node against reassignment.
-        let skip_self = action == Action::PolicyAssign;
+        let skip_self = matches!(action, Action::PolicyAssign | Action::ConfigurationWrite);
         let (pack, origin) = self.resolve_pack(principal.tenant_id, resource, context, skip_self);
-        let roles = effective_roles(principal, resource, context);
+        let roles = effective_roles(resource, context);
         let owned;
         let entities = match batch {
             Some(batch) => &batch.entities,
             None => {
-                owned = self.entities(principal, context)?;
+                owned = self.entities_over(principal, &[context.scopes], context)?;
                 &owned
             }
         };
@@ -741,24 +577,15 @@ impl Pdp {
         roles: &[&'static str],
         context: &AuthzContext<'_>,
     ) -> Result<AuthzDecision> {
-        // The standing grants that bear on *this* decision, gated by the
-        // pack in force at the resource: a pack whose ceiling is zero
-        // admits none of them on the very next request, standing or not
-        // (ADR-0037 decision 5). Empty for every action but `MemoryRead`,
-        // which is the only one the vocabulary lets a lapse relax.
-        let lapsed: Vec<&Lapse> = if pack.lapse.admits_lapses() {
-            lapsing(action, resource, *context).collect()
-        } else {
-            Vec::new()
-        };
+        let relaxed: Vec<&CurrentRelaxation> =
+            relaxing(principal, action, resource, *context).collect();
         let request = self.request(
             principal,
             action,
             resource,
             roles,
             RequestContext {
-                grant: context.grant,
-                lapsed: !lapsed.is_empty(),
+                relaxed: !relaxed.is_empty(),
                 sensitivity: context.sensitivity,
             },
         )?;
@@ -793,13 +620,11 @@ impl Pdp {
             authz.resource = %resource,
             authz.decision = verdict,
             authz.roles = %roles.join(","),
-            // Which grant let this through, by id — the decision log's half
-            // of "why was this in that block" (ADR-0037 decision 12). Empty
-            // on every decision no lapse bore on, which is almost all of
-            // them.
-            authz.lapses = %lapsed
+            // Exact immutable relaxation versions bearing on this decision.
+            // Empty on every action except a matched KnowledgeRead.
+            authz.relaxations = %relaxed
                 .iter()
-                .map(|lapse| lapse.id.to_string())
+                .map(|relaxation| relaxation.version.id.to_string())
                 .collect::<Vec<_>>()
                 .join(","),
             policy.pack = %decision.pack_name,
@@ -858,11 +683,6 @@ impl Pdp {
             redaction: pack.redaction,
             composition: pack.composition,
             approvals: Arc::clone(&pack.approvals),
-            promotion: Arc::clone(&pack.promotion),
-            lapse: pack.lapse,
-            dedup: pack.dedup,
-            retention: pack.retention,
-            mover: pack.mover,
             scan: pack.scan,
             quality: pack.quality,
         }
@@ -887,7 +707,7 @@ impl Pdp {
             .iter()
             .map(|assignment| (assignment.scope_id, assignment.pack_name.as_str()))
             .collect();
-        let nodes: HashMap<ScopeId, &HierarchyNode> =
+        let nodes: HashMap<ScopeId, &ScopeNode> =
             context.scopes.iter().map(|node| (node.id, node)).collect();
         let named = |name: &str, origin: PackOrigin| -> (Arc<LoadedPack>, PackOrigin) {
             match self.lookup(tenant_id, name) {
@@ -903,7 +723,10 @@ impl Pdp {
                 }
             }
         };
-        if let Resource::Scope(id) = resource {
+        // Every resource with a scope resolves its pack from that scope's
+        // chain — a workspace is governed by the profile assigned to the scope
+        // it owns, exactly as the scope itself is (CPR-6, ADR-0073 decision 3).
+        if let Some(id) = resource.anchor_scope(context) {
             let mut current = id;
             let mut skip = skip_self;
             // Bounded by the chain length: a malformed chain cannot loop.
@@ -961,41 +784,47 @@ impl Pdp {
             .unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Materialises the Cedar entity graph for one decision (ADR-0012
-    /// decision 4, ADR-0014 decision 5, ADR-0017): both supplied chains
-    /// arrive as prebuilt fragments from the entity store — served when
-    /// the chain's shape matches, rebuilt from the chain otherwise — and
-    /// the principal entity is built per request, so `quarantined`,
-    /// `home`, and `department` keep riding the per-request identity
-    /// read (ADR-0016 decision 6).
-    fn entities(&self, principal: &Principal, context: &AuthzContext<'_>) -> Result<Entities> {
-        self.entities_over(principal, &[context.scopes], context.principal_scopes)
-    }
-
-    /// [`Self::entities`] over several resource chains at once — the batch
-    /// materialisation recall's widened sweep needs (CTX-5, ADR-0042
-    /// decision 6).
+    /// Materialises the Cedar entity graph for one or more decisions
+    /// (ADR-0012 decision 4, ADR-0014 decision 5, ADR-0017; CPR-6, ADR-0073).
     ///
-    /// A superset entity store cannot change a verdict: Cedar resolves
-    /// only the entities a request actually names, and every scope carries
-    /// the same parents whether or not its neighbours are present. So one
-    /// store built over every chain a sweep will decide answers exactly as
-    /// N stores built one per chain would — for the price of one
-    /// `Entities::from_entities`, which is where the per-decision cost
-    /// almost entirely lives.
+    /// Seven entity types, and which of them appear is decided by what the
+    /// caller supplied rather than by the action:
+    ///
+    /// - `Tenant`, one per distinct tenant in play, so a chain from a foreign
+    ///   tenant chains up to a *different* one and every membership rule fails
+    ///   closed.
+    /// - `Scope`, one per node of every supplied chain, parented along
+    ///   `parent_id` with the root parented to its tenant. Served from the
+    ///   entity store's prebuilt fragments when the chain's shape matches.
+    /// - `Group`, one per group this principal is in.
+    /// - `Workspace`, `Project`, `Session` and `ScopeGrant`, one per
+    ///   [`ResourceEntity`] the caller named, each parented to the scope it
+    ///   belongs to — which is what makes every containment rule written over
+    ///   scopes reach them without being restated.
+    /// - `Principal`, built per request so quarantine, the caller's own scope,
+    ///   their anchors and their group memberships all ride the per-request
+    ///   read (ADR-0016 decision 6).
+    ///
+    /// A superset store cannot change a verdict: Cedar resolves only the
+    /// entities a request actually names, and every scope carries the same
+    /// parents whether or not its neighbours are present. So one store built
+    /// over every chain a sweep will decide answers exactly as N stores built
+    /// one per chain would — for the price of one `Entities::from_entities`,
+    /// which is where the per-decision cost almost entirely lives (CTX-5,
+    /// ADR-0042 decision 6).
     fn entities_over(
         &self,
         principal: &Principal,
-        chains: &[&[HierarchyNode]],
-        principal_scopes: &[HierarchyNode],
+        chains: &[&[ScopeNode]],
+        context: &AuthzContext<'_>,
     ) -> Result<Entities> {
         use cedar_policy::RestrictedExpression;
 
-        // Chains may share nodes (a team reading its own scope, or two
-        // candidates under one department); Cedar rejects duplicate entity
+        // Chains may share nodes (a project and its workspace, or two
+        // candidates under one org unit); Cedar rejects duplicate entity
         // entries, so deduplicate by uid.
         let mut merged: HashMap<EntityUid, Entity> = HashMap::new();
-        for chain in chains.iter().copied().chain([principal_scopes]) {
+        for chain in chains.iter().copied().chain([context.principal_scopes]) {
             if chain.is_empty() {
                 continue;
             }
@@ -1008,11 +837,37 @@ impl Pdp {
         }
 
         // The principal's tenant entity exists even when no chain was
-        // supplied at all (a tenant resource, an unplaced principal).
+        // supplied at all (a tenant resource, a principal with no scope).
         let principal_tenant = self.tenant_uid(principal.tenant_id)?;
         merged
             .entry(principal_tenant.clone())
             .or_insert_with(|| Entity::with_uid(principal_tenant.clone()));
+
+        // The groups this caller is in. Parents of the principal, so
+        // `principal in Synveda::Group::"…"` is an entity-hierarchy check.
+        let mut group_uids: Vec<EntityUid> = Vec::with_capacity(context.groups.len());
+        for group_id in context.groups {
+            let uid = self.group_uid(*group_id)?;
+            merged.entry(uid.clone()).or_insert_with(|| {
+                new_entity(
+                    uid.clone(),
+                    HashMap::from([(
+                        "tenant".to_owned(),
+                        RestrictedExpression::new_entity_uid(principal_tenant.clone()),
+                    )]),
+                    HashSet::from([principal_tenant.clone()]),
+                )
+                .unwrap_or_else(|_| Entity::with_uid(uid.clone()))
+            });
+            group_uids.push(uid);
+        }
+
+        // The subtype and access-plane entities the decision names.
+        for resource in context.resources {
+            let (uid, entity) = self.resource_entity(principal_tenant.clone(), *resource)?;
+            merged.entry(uid).or_insert(entity);
+        }
+
         let mut principal_attrs = HashMap::from([
             (
                 "tenant".to_owned(),
@@ -1023,23 +878,18 @@ impl Pdp {
                 RestrictedExpression::new_bool(principal.quarantined),
             ),
         ]);
-        let mut principal_parents = HashSet::from([principal_tenant]);
-        if let Some(home) = principal.scope_id {
-            // The placement makes the principal a member of its own chain
-            // (`principal in resource`), and the `home` attribute lets
-            // packs require placement outright (ADR-0014 decision 5).
-            let home_uid = self.scope_uid(home)?;
+        let mut principal_parents: HashSet<EntityUid> = HashSet::from([principal_tenant]);
+        principal_parents.extend(group_uids);
+        if let Some(own) = principal.scope_id {
+            // The caller's own scope makes them a member of its chain
+            // (`principal in resource`), and the attribute lets packs require
+            // one outright (ADR-0014 decision 5).
+            let own_uid = self.scope_uid(own)?;
             principal_attrs.insert(
-                "home".to_owned(),
-                RestrictedExpression::new_entity_uid(home_uid.clone()),
+                "own_scope".to_owned(),
+                RestrictedExpression::new_entity_uid(own_uid.clone()),
             );
-            principal_parents.insert(home_uid);
-        }
-        if let Some(department) = nearest_department(principal_scopes) {
-            principal_attrs.insert(
-                "department".to_owned(),
-                RestrictedExpression::new_entity_uid(self.scope_uid(department)?),
-            );
+            principal_parents.insert(own_uid);
         }
         if let Some(token_scope) = principal.token_scope {
             // Service identities only (AUTH-3, ADR-0018 decision 4): the
@@ -1049,6 +899,86 @@ impl Pdp {
                 RestrictedExpression::new_entity_uid(self.scope_uid(token_scope)?),
             );
         }
+
+        // The two sets the anchor model adds (ADR-0073 decision 4).
+        //
+        // `anchors` is every scope this caller actually **holds** something at
+        // — the downward direction, so `resource in principal.anchors` is
+        // "inside something I hold" and a workspace grant reaches that
+        // workspace's projects with no row written there. It deliberately
+        // excludes anchors the caller holds nothing at: the tenant root is
+        // applicable to every request, and putting it here unheld would make
+        // that expression true for the whole tenant.
+        //
+        // Anchors are **not** made parents of the principal. Authority flows
+        // *down* from where a grant was written and never up: a project grant
+        // must not make its holder a member of the workspace above it, which
+        // is exactly what an entity parent would do.
+        //
+        // `ambit` is the **parent** of every held anchor, minus the tenant
+        // root: the neighbourhood a grant puts somebody in. It replaces the
+        // `department` attribute `standard`'s sharing default used to read
+        // (ADR-0073 decision 4) and reproduces that rule's *shape* — a grant
+        // at one team shares its neighbours — without asking what kind of
+        // thing the parent is. Excluding the root is what keeps `standard`
+        // from meaning `open-collaboration`.
+        let roots: HashSet<ScopeId> = context
+            .anchors
+            .iter()
+            .filter(|anchor| anchor.kind == ScopeKind::Tenant)
+            .map(|anchor| anchor.scope_id)
+            .collect();
+        let mut anchor_uids = Vec::new();
+        let mut ambit_uids = Vec::new();
+        let mut private_uids = Vec::new();
+        for anchor in context.anchors {
+            if anchor.is_held() {
+                anchor_uids.push(RestrictedExpression::new_entity_uid(
+                    self.scope_uid(anchor.scope_id)?,
+                ));
+                if let Some(parent) = anchor.parent_scope_id
+                    && !roots.contains(&parent)
+                    && anchor.kind != ScopeKind::Principal
+                {
+                    ambit_uids.push(RestrictedExpression::new_entity_uid(
+                        self.scope_uid(parent)?,
+                    ));
+                }
+            }
+            // `private` is every `principal`-shaped scope this caller may
+            // reach: their own, and any somebody granted them directly. The
+            // base layer forbids every other principal scope outright, so this
+            // set is the whole of what makes a private scope reachable at all.
+            if anchor.is_private()
+                && (anchor.is_direct() || Some(anchor.scope_id) == principal.scope_id)
+            {
+                private_uids.push(RestrictedExpression::new_entity_uid(
+                    self.scope_uid(anchor.scope_id)?,
+                ));
+            }
+        }
+        if let Some(own) = principal.scope_id
+            && context.anchors.iter().all(|anchor| anchor.scope_id != own)
+        {
+            // A caller's own scope is reachable by them whether or not the
+            // resolver produced an anchor for it — an anchor set gathered for
+            // a different selection must not be able to lock somebody out of
+            // their own notes.
+            private_uids.push(RestrictedExpression::new_entity_uid(self.scope_uid(own)?));
+        }
+        principal_attrs.insert(
+            "anchors".to_owned(),
+            RestrictedExpression::new_set(anchor_uids),
+        );
+        principal_attrs.insert(
+            "ambit".to_owned(),
+            RestrictedExpression::new_set(ambit_uids),
+        );
+        principal_attrs.insert(
+            "private".to_owned(),
+            RestrictedExpression::new_set(private_uids),
+        );
+
         let mut list: Vec<Entity> = merged.into_values().collect();
         list.push(new_entity(
             self.principal_uid(principal)?,
@@ -1061,13 +991,124 @@ impl Pdp {
         })
     }
 
+    /// Builds one [`ResourceEntity`] — the subtype or access-plane object a
+    /// decision names, parented to the scope it belongs to.
+    fn resource_entity(
+        &self,
+        tenant: EntityUid,
+        resource: ResourceEntity,
+    ) -> Result<(EntityUid, Entity)> {
+        use cedar_policy::RestrictedExpression;
+
+        let tenant_attr = |attrs: &mut HashMap<String, RestrictedExpression>| {
+            attrs.insert(
+                "tenant".to_owned(),
+                RestrictedExpression::new_entity_uid(tenant.clone()),
+            );
+        };
+        match resource {
+            ResourceEntity::Workspace { id, scope_id } => {
+                let uid = self.uid(&self.workspace_type, &id.to_string())?;
+                let scope = self.scope_uid(scope_id)?;
+                let mut attrs = HashMap::new();
+                tenant_attr(&mut attrs);
+                attrs.insert(
+                    "scope".to_owned(),
+                    RestrictedExpression::new_entity_uid(scope.clone()),
+                );
+                let entity = new_entity(uid.clone(), attrs, HashSet::from([scope]))?;
+                Ok((uid, entity))
+            }
+            ResourceEntity::Project {
+                id,
+                scope_id,
+                workspace_id,
+            } => {
+                let uid = self.uid(&self.project_type, &id.to_string())?;
+                let scope = self.scope_uid(scope_id)?;
+                let workspace = self.uid(&self.workspace_type, &workspace_id.to_string())?;
+                let mut attrs = HashMap::new();
+                tenant_attr(&mut attrs);
+                attrs.insert(
+                    "scope".to_owned(),
+                    RestrictedExpression::new_entity_uid(scope.clone()),
+                );
+                attrs.insert(
+                    "workspace".to_owned(),
+                    RestrictedExpression::new_entity_uid(workspace),
+                );
+                // Parented to its own scope only: the workspace above it is
+                // already that scope's ancestor, so a second parent would be
+                // the same edge said twice.
+                let entity = new_entity(uid.clone(), attrs, HashSet::from([scope]))?;
+                Ok((uid, entity))
+            }
+            ResourceEntity::Session { id, scope_id } => {
+                let uid = self.uid(&self.session_type, &id.to_string())?;
+                let scope = self.scope_uid(scope_id)?;
+                let mut attrs = HashMap::new();
+                tenant_attr(&mut attrs);
+                attrs.insert(
+                    "scope".to_owned(),
+                    RestrictedExpression::new_entity_uid(scope.clone()),
+                );
+                let entity = new_entity(uid.clone(), attrs, HashSet::from([scope]))?;
+                Ok((uid, entity))
+            }
+            ResourceEntity::KnowledgeItem { id, scope_id } => {
+                let uid = self.uid(&self.knowledge_item_type, &id.to_string())?;
+                let scope = self.scope_uid(scope_id)?;
+                let mut attrs = HashMap::new();
+                tenant_attr(&mut attrs);
+                attrs.insert(
+                    "scope".to_owned(),
+                    RestrictedExpression::new_entity_uid(scope.clone()),
+                );
+                let entity = new_entity(uid.clone(), attrs, HashSet::from([scope]))?;
+                Ok((uid, entity))
+            }
+            ResourceEntity::Group { id } => {
+                let uid = self.group_uid(id)?;
+                let mut attrs = HashMap::new();
+                tenant_attr(&mut attrs);
+                let entity = new_entity(uid.clone(), attrs, HashSet::from([tenant]))?;
+                Ok((uid, entity))
+            }
+            ResourceEntity::Grant {
+                id,
+                scope_id,
+                role,
+                source,
+            } => {
+                let uid = self.uid(&self.grant_type, &id.to_string())?;
+                let scope = self.scope_uid(scope_id)?;
+                let mut attrs = HashMap::new();
+                tenant_attr(&mut attrs);
+                attrs.insert(
+                    "scope".to_owned(),
+                    RestrictedExpression::new_entity_uid(scope.clone()),
+                );
+                attrs.insert(
+                    "role".to_owned(),
+                    RestrictedExpression::new_string(role.as_str().to_owned()),
+                );
+                attrs.insert(
+                    "source".to_owned(),
+                    RestrictedExpression::new_string(source.as_str().to_owned()),
+                );
+                let entity = new_entity(uid.clone(), attrs, HashSet::from([scope]))?;
+                Ok((uid, entity))
+            }
+        }
+    }
+
     /// Builds one chain's fragment entities (ADR-0017 decision 4): a
     /// `Scope` entity per node — parented along `parent_id`, the root to
     /// its tenant entity — plus the chain's distinct `Tenant` entities.
     /// Every distinct tenant in play gets its entity so a chain from a
     /// foreign tenant chains up to a *different* tenant entity and
     /// membership rules fail closed.
-    fn chain_entities(&self, chain: &[HierarchyNode]) -> Result<Vec<Entity>> {
+    fn chain_entities(&self, chain: &[ScopeNode]) -> Result<Vec<Entity>> {
         use cedar_policy::RestrictedExpression;
 
         let mut list = Vec::with_capacity(chain.len() + 1);
@@ -1094,14 +1135,18 @@ impl Pdp {
                         RestrictedExpression::new_entity_uid(node_tenant),
                     ),
                     (
+                        // A **shape**, never a rank (ADR-0070): `tenant`,
+                        // `org_unit`, `workspace`, `project` or `principal`.
+                        // No pack compares two of these for order, and there
+                        // is nothing here to compare.
                         "kind".to_owned(),
                         RestrictedExpression::new_string(node.kind.as_str().to_owned()),
                     ),
                     (
                         // AUTH-4, ADR-0059 decision 9. Carried on the node
                         // rather than supplied beside it, so the fragment
-                        // shape below covers it and no cached fragment can
-                        // serve an unsealed answer for a sealed scope.
+                        // shape covers it and no cached fragment can serve an
+                        // unsealed answer for a sealed scope.
                         "sealed".to_owned(),
                         RestrictedExpression::new_bool(node.sealed),
                     ),
@@ -1113,9 +1158,7 @@ impl Pdp {
     }
 
     /// Builds the schema-checked request, `context.roles` included
-    /// (ADR-0015 decision 3). `RoleAssign` additionally requires the
-    /// grant role (`context.grant`): absent, the request cannot be built
-    /// and the decision fails closed (decision 5).
+    /// (ADR-0015 decision 3).
     fn request(
         &self,
         principal: &Principal,
@@ -1125,8 +1168,7 @@ impl Pdp {
         extras: RequestContext,
     ) -> Result<Request> {
         let RequestContext {
-            grant,
-            lapsed,
+            relaxed,
             sensitivity,
         } = extras;
         use cedar_policy::RestrictedExpression;
@@ -1134,6 +1176,12 @@ impl Pdp {
         let resource_uid = match resource {
             Resource::Tenant(id) => self.tenant_uid(id)?,
             Resource::Scope(id) => self.scope_uid(id)?,
+            Resource::Workspace(id) => self.uid(&self.workspace_type, &id.to_string())?,
+            Resource::Project(id) => self.uid(&self.project_type, &id.to_string())?,
+            Resource::Session(id) => self.uid(&self.session_type, &id.to_string())?,
+            Resource::KnowledgeItem(id) => self.uid(&self.knowledge_item_type, &id.to_string())?,
+            Resource::Group(id) => self.group_uid(id)?,
+            Resource::Grant(id) => self.uid(&self.grant_type, &id.to_string())?,
         };
         let mut pairs = vec![(
             "roles".to_owned(),
@@ -1143,32 +1191,21 @@ impl Pdp {
                     .map(|role| RestrictedExpression::new_string((*role).to_owned())),
             ),
         )];
-        if action == Action::RoleAssign {
-            let grant = grant.ok_or_else(|| Error::Internal {
-                message: "RoleAssign decided without the grant role in context".to_owned(),
-            })?;
+        if action == Action::KnowledgeRead {
             pairs.push((
-                "grant".to_owned(),
-                RestrictedExpression::new_string(grant.as_str().to_owned()),
+                "relaxed".to_owned(),
+                RestrictedExpression::new_bool(relaxed),
             ));
-        }
-        if action == Action::MemoryRead {
-            // Both required by the schema, exactly like `grant` on
-            // RoleAssign and for the same reason: a missing attribute makes
-            // the base layer's lapse permit — and, since AUTHZ-5, its
-            // `restricted` forbid — error, and Cedar drops a policy that
-            // errors (ADR-0015 decision 5's shape, ADR-0037 decision 9,
-            // ADR-0038 decision 2).
-            pairs.push(("lapsed".to_owned(), RestrictedExpression::new_bool(lapsed)));
         }
         if matches!(
             action,
-            Action::MemoryRead | Action::PromptRead | Action::ContextPackRead | Action::SkillRead
+            Action::KnowledgeRead
+                | Action::PromptRead
+                | Action::ContextPackRead
+                | Action::SkillRead
         ) {
             // The tier every read seam names (ADR-0038 decision 2; ADR-0049
-            // decision 4; ADR-0050 decision 7; ADR-0051 decision 10). No
-            // authored-asset read takes `lapsed`: a lapse relaxes a closed
-            // vocabulary, and `memory.read` is all of it.
+            // decision 4; ADR-0050 decision 7; ADR-0051 decision 10).
             let sensitivity = sensitivity.ok_or_else(|| Error::Internal {
                 message: format!("{action} decided without a sensitivity tier in context"),
             })?;
@@ -1200,6 +1237,10 @@ impl Pdp {
         self.uid(&self.scope_type, &id.to_string())
     }
 
+    fn group_uid(&self, id: synveda_types::GroupId) -> Result<EntityUid> {
+        self.uid(&self.group_type, &id.to_string())
+    }
+
     /// Tenant-qualified so equal subjects from different IdPs/tenants can
     /// never alias to one entity.
     fn principal_uid(&self, principal: &Principal) -> Result<EntityUid> {
@@ -1216,168 +1257,132 @@ impl Pdp {
         Ok(EntityUid::from_type_name_and_id(type_name.clone(), eid))
     }
 }
-
-/// The per-action context attributes, resolved by the PDP rather than
-/// supplied: which role a `RoleAssign` grants (ADR-0015 decision 5),
-/// whether a standing lapse covers a `MemoryRead` (ADR-0037 decision 9),
-/// and which tier that read is asking about (ADR-0038 decision 2).
+/// Per-action context attributes resolved by the PDP: whether an immutable
+/// relaxation covers a Knowledge read, and which tier the read asks about.
 ///
-/// One struct rather than three parameters because they arrive together and
+/// A struct rather than two parameters because they arrive together and
 /// are set together — and because the schema requires each of them for its
 /// action, so a caller that forgets one gets a build error rather than a
 /// dropped policy.
 #[derive(Debug, Clone, Copy)]
 struct RequestContext {
-    grant: Option<Role>,
-    lapsed: bool,
+    relaxed: bool,
     sensitivity: Option<Sensitivity>,
 }
 
-/// The principal's effective roles at the resource (AUTHZ-3, ADR-0015
-/// decision 3): from the caller-supplied binding rows, tenant-wide
-/// bindings always apply; a node binding applies iff the bound node is on
-/// the resource's chain — that one rule is "inherited downward". For a
-/// tenant resource the chain is empty, so only tenant-wide bindings
-/// apply: a root-scoped steward manages nodes, never the tenant plane.
-/// Foreign-tenant rows are dropped defensively (the store's RLS already
-/// makes them unrepresentable). Sorted for a deterministic decision log.
-/// The principal's effective role set at `resource` (ADR-0015
-/// decision 3): tenant-wide bindings always, node bindings when the bound
-/// node is on the resource's chain.
+/// The principal's effective **role keys** at the resource (CPR-6, ADR-0073
+/// decision 5): the grants, direct and group-derived, that actually reach it.
 ///
-/// Public because FLOW-3 records the roles an approval counted under
-/// (ADR-0032 decision 5), and that set has to be *the same* set the
-/// `ProposalReview` decision weighed — one implementation, so the two can
-/// never drift into disagreeing about who held what.
+/// An anchor's roles apply when the anchor's scope is on the resource's own
+/// chain — which is "at or above the resource", the inheritance rule
+/// [`crate::request::AuthzContext::anchors`] was resolved under. Two things
+/// narrow it:
+///
+/// - **Principal privacy.** When the resource is somebody's own scope, only an
+///   anchor *at* that scope applies ([`inherits_into`]). A tenant-root grant is
+///   the widest thing the model can express and it still does not reach into
+///   one person's notes.
+/// - **The tenant plane.** [`Resource::Tenant`] has no chain, so only the
+///   anchor at the `tenant`-shaped scope applies — a grant written at a
+///   workspace confers nothing over the whole boundary.
+///
+/// A group is deliberately in neither list: [`Resource::Group`] is tenant-wide
+/// and takes tenant-root authority, which is the same shape `DirectoryManage`
+/// has and for the same reason.
+///
+/// Sorted and deduplicated, for [`effective_roles_at`]'s reason.
 #[must_use]
-pub fn effective_roles_at(
-    principal: &Principal,
-    resource: Resource,
-    context: &AuthzContext<'_>,
-) -> Vec<Role> {
-    let chain: HashSet<ScopeId> = match resource {
-        Resource::Scope(_) => context.scopes.iter().map(|node| node.id).collect(),
-        Resource::Tenant(_) => HashSet::new(),
-    };
-    let mut roles: Vec<Role> = context
-        .role_bindings
-        .iter()
-        .filter(|binding| binding.tenant_id == principal.tenant_id)
-        .filter(|binding| match binding.scope_id {
-            None => true,
-            Some(scope) => chain.contains(&scope),
-        })
-        .map(|binding| binding.role)
+pub fn effective_role_keys_at(resource: Resource, context: &AuthzContext<'_>) -> Vec<RoleKey> {
+    let mut keys: Vec<RoleKey> = Vec::new();
+    match resource {
+        Resource::Tenant(_) | Resource::Group(_) => {
+            // The root is identified by its **shape**, not by why the resolver
+            // put it in the set: a scope that is both the tenant root and a
+            // scope this caller was granted merges under the more specific
+            // source, and reading `source` here would then miss exactly the
+            // tenant-wide grant this branch exists to find.
+            for anchor in context.anchors {
+                if anchor.kind == ScopeKind::Tenant {
+                    keys.extend(anchor.roles.iter().copied());
+                }
+            }
+        }
+        _ => {
+            let Some(head) = context.scopes.first() else {
+                return keys;
+            };
+            let target = head.id;
+            let inherits = inherits_into(head.kind);
+            let chain: HashSet<ScopeId> = context.scopes.iter().map(|node| node.id).collect();
+            for anchor in context.anchors {
+                if !chain.contains(&anchor.scope_id) {
+                    continue;
+                }
+                if !inherits && anchor.scope_id != target {
+                    continue;
+                }
+                keys.extend(anchor.roles.iter().copied());
+            }
+        }
+    }
+    keys.sort_unstable();
+    keys.dedup();
+    keys
+}
+
+/// `context.roles`: the grant keys in force at the resource, as one set of
+/// strings.
+///
+/// These are the six role keys of the access plane and nothing else — a
+/// Cedar `Set<String>` is what a pack reads, and since the cutover there is
+/// one vocabulary and one tree (CPR-7, ADR-0074 decision 1). The words the
+/// old hierarchy's bindings used are gone with it.
+fn effective_roles(resource: Resource, context: &AuthzContext<'_>) -> Vec<&'static str> {
+    let mut roles: Vec<&'static str> = effective_role_keys_at(resource, context)
+        .into_iter()
+        .map(|key| key.as_str())
         .collect();
     roles.sort_unstable();
     roles.dedup();
     roles
 }
 
-fn effective_roles(
-    principal: &Principal,
-    resource: Resource,
-    context: &AuthzContext<'_>,
-) -> Vec<&'static str> {
-    effective_roles_at(principal, resource, context)
-        .into_iter()
-        .map(|role| role.as_str())
-        .collect()
-}
-
-/// The lapse vocabulary's view of one PDP action: `Some` when a standing
-/// grant could relax it, `None` for everything else.
-///
-/// The mapping rather than a name comparison, so the closed vocabulary
-/// (`synveda_types::LapseAction`) and this one grow together or not at all
-/// — a lapse naming an action outside it is refused at the grant surface,
-/// and one that somehow reached a row still relaxes nothing here.
+/// Map the PDP vocabulary into the deliberately closed relaxation vocabulary.
 #[must_use]
-pub const fn lapsable(action: Action) -> Option<LapseAction> {
+pub const fn relaxable(action: Action) -> Option<RelaxationAction> {
     match action {
-        Action::MemoryRead => Some(LapseAction::MemoryRead),
+        Action::KnowledgeRead => Some(RelaxationAction::KnowledgeRead),
         _ => None,
     }
 }
 
-/// Whether `lapse` bears on one decision: it grants the action being
-/// decided at exactly the resource scope, and the principal is placed at or
-/// under its grantee scope — `principal in grantee`, read off the placement
-/// chain the PDP already has (ADR-0037 decision 9).
-///
-/// The one containment rule, shared by the decision and by the read path's
-/// plan, because the failure it prevents is asymmetric: a plan that offers
-/// a scope the permit refuses costs a wasted decision, and a permit that
-/// allows a scope the plan never offers is a grant nobody can see.
-fn covers(
-    lapse: &Lapse,
-    principal_scopes: &[HierarchyNode],
-    action: LapseAction,
-    resource: ScopeId,
-) -> bool {
-    lapse.grants(action, resource)
-        && principal_scopes
-            .iter()
-            .any(|node| node.id == lapse.grantee_scope_id)
-}
-
-/// The grants bearing on one decision — [`covers`] over the context's rows,
-/// bounded by the tier each grant declared (AUTHZ-5, ADR-0038 decision 6),
-/// and empty for every action no lapse may relax.
-///
-/// A decision with no tier in context relaxes nothing, which cannot happen
-/// for the one lapsable action — [`Pdp::request`] refuses to build a
-/// `MemoryRead` request without one — and is the fail-closed reading if the
-/// vocabulary ever grows an action whose seam has no tier.
-fn lapsing<'a>(
+/// Exact immutable relaxations bearing on one decision. Storage has already
+/// filtered by database time and current Configuration; the PDP repeats the
+/// subject, action, target and tier match so a malformed row widens nothing.
+fn relaxing<'a>(
+    principal: &Principal,
     action: Action,
     resource: Resource,
     context: AuthzContext<'a>,
-) -> impl Iterator<Item = &'a Lapse> {
-    let wanted = lapsable(action);
+) -> impl Iterator<Item = &'a CurrentRelaxation> {
+    let wanted = relaxable(action);
     let target = match resource {
         Resource::Scope(id) => Some(id),
-        Resource::Tenant(_) => None,
+        Resource::KnowledgeItem(_) => context.scopes.first().map(|scope| scope.id),
+        Resource::Tenant(_)
+        | Resource::Workspace(_)
+        | Resource::Project(_)
+        | Resource::Session(_)
+        | Resource::Group(_)
+        | Resource::Grant(_) => None,
     };
-    context.lapses.iter().filter(move |lapse| {
+    context.relaxations.iter().filter(move |relaxation| {
         let (Some(wanted), Some(target), Some(sensitivity)) = (wanted, target, context.sensitivity)
         else {
             return false;
         };
-        covers(lapse, context.principal_scopes, wanted, target)
-            && lapse.grants_at(wanted, target, sensitivity)
+        relaxation.matches(&principal.subject, wanted, target, sensitivity)
     })
-}
-
-/// The scopes a caller reaches only by lapse, with the grant that reached
-/// each — what the read path adds to a composition plan *after* the chain
-/// (ADR-0037 decision 10).
-///
-/// Public because the plan and the permit must agree about who a grant
-/// reaches, and one implementation is how they cannot drift. It does **not**
-/// apply the pack ceiling: that is a property of the target's own effective
-/// pack, which the `MemoryRead` decision the plan then takes resolves
-/// anyway — so this may offer a scope the PDP goes on to refuse, which is
-/// the safe direction.
-///
-/// Ordered by grant time then id, so a plan built twice from the same rows
-/// is the same plan — CTX-2's determinism AC reaches down here.
-#[must_use]
-pub fn lapsed_scopes<'a>(
-    principal_scopes: &[HierarchyNode],
-    lapses: &'a [Lapse],
-    action: LapseAction,
-) -> Vec<&'a Lapse> {
-    let mut seen: HashSet<ScopeId> = principal_scopes.iter().map(|node| node.id).collect();
-    let mut granting: Vec<&Lapse> = lapses
-        .iter()
-        .filter(|lapse| covers(lapse, principal_scopes, action, lapse.target_scope_id))
-        .collect();
-    granting.sort_unstable_by_key(|lapse| (lapse.granted_at, lapse.id.as_uuid()));
-    // A target already on the caller's own chain is not reached "only by
-    // lapse", and two grants naming one target are one plan entry.
-    granting.retain(|lapse| seen.insert(lapse.target_scope_id));
-    granting
 }
 
 /// [`Entity::new`] mapped onto the taxonomy — shared by the fragment
@@ -1390,18 +1395,6 @@ fn new_entity(
     Entity::new(uid, attrs, parents).map_err(|err| Error::Internal {
         message: format!("materialise entity: {err}"),
     })
-}
-
-/// The principal's department: the deepest department-kind node of its
-/// placement chain. A chain is a path with strictly increasing ranks
-/// (ADR-0011), so more than one can only mean malformed caller data —
-/// deepest is then the conservative pick (the narrower subtree).
-fn nearest_department(chain: &[HierarchyNode]) -> Option<ScopeId> {
-    chain
-        .iter()
-        .filter(|node| node.kind == ScopeKind::Department)
-        .max_by_key(|node| node.depth)
-        .map(|node| node.id)
 }
 
 /// Parse + schema-validate on top of the invariant base layer (ADR-0014
@@ -1418,26 +1411,6 @@ fn compile(
     let redaction = config.redaction.unwrap_or_default();
     let composition = config.composition.unwrap_or_default();
     let approvals = config.approvals.unwrap_or_default();
-    let promotion = config.promotion.unwrap_or_default();
-    // Unconfigured falls back to the strict 30-day window rather than to
-    // zero: a lapse ceiling narrows, and a missing narrowing must not become
-    // a missing mechanism (ADR-0037 decision 5).
-    let lapse = config.lapse.unwrap_or_default();
-    // Unconfigured is the product config — supersession on — for the reason
-    // the composition config's fallback is the product one: this config
-    // never grants anything, so its default is the honest fallback rather
-    // than a widening (ADR-0039 decision 12).
-    let dedup = config.dedup.unwrap_or_default();
-    // Unconfigured is the product config, whose record horizons are all
-    // unset: a stored pack that says nothing about retention must not
-    // start destroying a tenant's memory (ADR-0040 decision 13).
-    let retention = config.retention.unwrap_or_default();
-    // Unconfigured seals on a cross-pack move, which is `retention`'s
-    // fail-safe rather than `quality`'s: nothing here refuses anything —
-    // the move always happens — so the honest default is the one that
-    // cannot hand material to a schedule nobody wrote it under (ADR-0059
-    // decision 10, on ADR-0040 decision 13's argument).
-    let mover = config.mover.unwrap_or_default();
     // Unconfigured is the invariant floor rather than the strict pack's
     // threshold: `critical` refuses either way, and a pack that says
     // nothing must not start refusing bundles nobody asked it to
@@ -1457,31 +1430,6 @@ fn compile(
     // at review time rather than loudly at install time (ADR-0032).
     approvals.validate().map_err(|err| Error::Invalid {
         message: format!("policy pack {name}@{version} approval matrix: {err}"),
-    })?;
-    // Same discipline for a trigger: a rule asking for zero recalls, or
-    // one naming an asset with no usage signal, can only fire on
-    // everything or on nothing (ADR-0033 decision 6).
-    promotion.validate().map_err(|err| Error::Invalid {
-        message: format!("policy pack {name}@{version} promotion rules: {err}"),
-    })?;
-    // And for a ceiling: a pack asking for a longer window than the product
-    // permits is refused when it is written, not clamped in silence at the
-    // first grant that noticed.
-    lapse.validate().map_err(|err| Error::Invalid {
-        message: format!("policy pack {name}@{version} lapse config: {err}"),
-    })?;
-    // And for the thresholds: a similarity outside `0..=1` would make a
-    // band unreachable, which reads as "the feature is off" without ever
-    // saying so (ADR-0039 decision 12).
-    dedup.validate().map_err(|err| Error::Invalid {
-        message: format!("policy pack {name}@{version} dedup config: {err}"),
-    })?;
-    // And for a horizon: a schedule written in seconds, or a staging
-    // horizon that would spend MEM-1's idempotency guarantee for nothing,
-    // is refused when it is written rather than when it deletes something
-    // (ADR-0040 decision 7).
-    retention.validate().map_err(|err| Error::Invalid {
-        message: format!("policy pack {name}@{version} retention config: {err}"),
     })?;
     let combined = format!("{BASE_SRC}\n{source}");
     let policies: PolicySet = combined.parse().map_err(|err| Error::Invalid {
@@ -1507,11 +1455,6 @@ fn compile(
         redaction,
         composition,
         approvals: Arc::new(approvals),
-        promotion: Arc::new(promotion),
-        lapse,
-        dedup,
-        retention,
-        mover,
         scan,
         quality,
     })

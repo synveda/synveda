@@ -8,8 +8,8 @@
 //! stands in front of it. FLOW-1 shipped the object store: content
 //! addressing, immutable history, and compare-and-swap ref updates.
 //! FLOW-2 ([`channels`], ADR-0031) gives ref names meaning —
-//! `{asset-kind}/{channel}` per scope, published and staged carrying their
-//! whole membership and derived carrying a log of what each commit added.
+//! `{asset-kind}/{channel}` per scope, with published and staged carrying
+//! their complete authored-artifact membership.
 //! FLOW-3 ([`proposals`] and [`curators`], ADR-0032) adds the governed
 //! request that moves content onto a published channel: a commit holding
 //! exactly what is reviewed, an append-only log of who approved it under
@@ -25,7 +25,7 @@
 //! Every function takes the caller's `&mut PgConnection`, never a pool. The
 //! transaction was opened by `synveda_store::rls::begin_tenant_tx` for the
 //! same tenant, which is what makes ADR-0003's central claim true: a commit,
-//! the records it describes, and the audit event attesting to it either all
+//! the artifacts it describes, and the audit event attesting to it either all
 //! land or none do. A caller who skipped that step writes zero rows — forced
 //! RLS with an unset GUC matches nothing (ADR-0009).
 //!
@@ -77,7 +77,6 @@ pub mod channels;
 pub mod commits;
 pub mod curators;
 pub mod hash;
-pub mod lapses;
 pub mod objects;
 pub mod packs;
 pub mod policy;
@@ -92,8 +91,7 @@ pub mod verify;
 pub use channels::{
     ChannelCommit, ChannelHistoryEntry, ChannelMember, ChannelPin, ChannelRef, ChannelRewind,
     ChannelRolledBack, ChannelSnapshot, ChannelStatus, ChannelWrite, MAX_CHANNEL_MEMBERS,
-    MemoryAsset, MemoryChannel, PIN_PREFIX, append, history, pin, publish, put_memory,
-    read_members, read_memory_members, read_pin, rollback, scopes_naming, scopes_with_channel,
+    PIN_PREFIX, history, pin, publish, read_members, read_pin, rollback, scopes_with_channel,
     unpin,
 };
 pub use commits::{
@@ -105,7 +103,6 @@ pub use curators::{
     MAX_CURATOR_FILE_BYTES, StoredCuratorFile, nearest_curators, read_curators, write_curators,
 };
 pub use hash::{CommitHash, ObjectHash, PolicySnapshotHash, TreeHash, bundle_digest};
-pub use lapses::{LapseAsset, put_lapse, read_lapse};
 pub use objects::{MAX_OBJECT_BYTES, StoredObject, put_object, read_object, read_objects};
 pub use packs::{
     ContextPackAsset, ContextPackChannelState, put_context_pack, read_context_pack_members,
@@ -113,14 +110,14 @@ pub use packs::{
 pub use policy::PolicySnapshot;
 pub use prompts::{PromptAsset, PromptChannelState, put_prompt, read_prompt_members};
 pub use proposals::{
-    MAX_OPEN_PROPOSALS, MAX_PROPOSAL_MEMBERS, NewApproval, NewProposal, ProposalFilter,
-    StoredApproval, StoredProposal,
+    MAX_ARTIFACT_REFERENCES, MAX_OPEN_PROPOSALS, MAX_PROPOSAL_MEMBERS, NewApproval, NewProposal,
+    ProposalFilter, StoredApproval, StoredProposal,
 };
 pub use refs::{
     RefUpdate, StoredRef, create_ref, force_update_ref, list_refs, read_ref, update_ref,
 };
 pub use signer::{CommitSignature, CommitSigner, Ed25519Signer, Signer, verify_ed25519};
-pub use skills::{SkillAsset, SkillChannelState, put_skill, read_skill_members};
+pub use skills::{SkillAsset, put_skill};
 pub use trees::{TreeEntry, TreeTarget, put_tree, read_tree};
 pub use verify::{ObjectClass, StoreVerification, verify};
 

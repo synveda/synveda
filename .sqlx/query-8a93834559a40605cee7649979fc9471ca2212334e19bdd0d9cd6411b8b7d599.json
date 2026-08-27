@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into capability_snapshots\n           (id, tenant_id, version_id, raw, normalized, digest, discovered_at, discovered_by)\n           values ($1, $2, $3, $4, $5, $6, now(), $7)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Jsonb",
+        "Jsonb",
+        "Bytea",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "8a93834559a40605cee7649979fc9471ca2212334e19bdd0d9cd6411b8b7d599"
+}

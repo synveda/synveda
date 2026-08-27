@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select hash from audit_log where tenant_id = $1 and seq = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "hash",
+        "type_info": "Bytea"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "b908dea76a1e92485929227bd8660840616bfc9e9c0896b2f86e45ceb257e449"
+}

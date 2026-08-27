@@ -1,82 +1,48 @@
----
-title: "EVAL-7: A second public benchmark"
-labels:
-  - epic:EVAL
-  - phase:4
-size: M
----
-
 # EVAL-7: A second public benchmark
 
-**Epic:** EVAL — Evaluation (functional requirement) · **Phase:** 4 · **Size:** M
+## Problem and evidence
 
-## Description
+LongMemEval is the only public memory benchmark currently implemented. Its deterministic retrieval tier gates and its model-judged tier is published but non-gating under ADR-0061 and ADR-0099. LoCoMo was the intended second corpus, but its CC BY-NC 4.0 terms do not establish permission for Synveda's commercial benchmark use; `evals/fixtures/longmemeval/NOTICE.md` and `scripts/check-corpus-licences.mjs` preserve that finding. A second result cannot be claimed until the corpus use is demonstrably permitted.
 
-A second externally-comparable memory benchmark, published under EVAL-3's two-tier
-discipline. LoCoMo was to be that benchmark and cannot be.
+## Scope
 
-## Why this exists
+- Select either a permissively licensed, externally comparable second benchmark or LoCoMo backed by written commercial-use permission.
+- Record upstream version, source URL, licence or grant, immutable corpus digest, acquisition instructions, and any transformation before adapter work begins.
+- Adapt the corpus through current session events, capture candidates, governed Knowledge acceptance, Knowledge query, and context-run APIs; do not create a benchmark-only storage path.
+- Reuse the two-tier evaluation contract: deterministic, reproducible measures gate; reader/judge measures are published with served-model metadata and do not gate.
+- Produce machine-readable and rendered reports that identify corpus variant, code commit, embedder, reader, judge, effort, sample coverage, and exclusions.
 
-Filed 2026-08-07 by EVAL-3 (ADR-0061 decision 1), which found it by reading a
-licence before writing an adapter.
+## Non-goals
 
-`snap-research/locomo`'s `LICENSE.txt` is Creative Commons
-**Attribution-NonCommercial 4.0 International**. It grants rights "for
-NonCommercial purposes only" and defines NonCommercial as material "not primarily
-intended for or directed towards commercial advantage or monetary compensation."
+- Using a non-commercial corpus on an assumption that internal or marketing use is permitted.
+- Quietly editing benchmark questions, evidence, denominators, or answer keys to improve a score.
+- Comparing a full-haystack result with an oracle/evidence-only variant as if they were the same benchmark.
+- Making a model-judged result a merge gate or inventing a score before a complete run.
 
-EVAL-3's own acceptance criterion says the scores are a "Marketing artefact too —
-every credible 2026 memory system publishes these." That is the use the licence
-withholds, stated in the feature text that would have relied on it. A benchmark
-run whose result we may not quote has no acceptance criterion, so the corpus was
-dropped rather than run quietly — running it internally to improve a commercial
-product is arguably the same commercial use, publication or not, and would have
-been an accepted legal risk rather than an avoided one.
+## Architecture seam
 
-LongMemEval is MIT (Copyright (c) 2024 Di Wu) and carries no such restriction.
-EVAL-3 ships it, so the phase's demo goal is met; this feature is the second data
-point, not the first.
-
-## What it cost, and what closed the gap
-
-**Nothing in the build would have caught this.** CLAUDE.md's licence rule names
-MIT/Apache-2.0/PostgreSQL for the core path and `cargo-deny` enforces it — over
-crates. A corpus is data. A non-commercially-licensed dataset therefore got as far
-as being named in a feature specification and a published phase demo goal, and
-would have got as far as a published score, without touching a check.
-
-ADR-0061's compliance note closes that where the build can see it:
-`make check-corpus-licences` asserts that every directory under `evals/fixtures/`
-carrying third-party material has a licence file naming a permitted licence. That
-check exists because of this finding; this feature is the corpus it cost.
-
-## Two paths, either sufficient
-
-- **Written permission from Snap Research** for commercial benchmark use, recorded
-  in the repository beside the corpus rather than in somebody's memory of an
-  email. This is the path that restores LoCoMo specifically, and it is also
-  ADR-0061 reversal trigger (e).
-- **A permissively-licensed substitute** in LoCoMo's slot. This needs a candidate
-  found and licence-checked before the feature can commit to one, which is the
-  main reason the size is honest at M rather than S.
-
-## Why Phase 4
-
-Neither path is work we control: one waits on a grant from a third party, the
-other on a corpus that may not exist yet. Scheduling it into Phase 3 would put a
-dependency on someone else's goodwill in front of the procurement block.
+Add a corpus adapter and runner in `synveda-eval`, using the same public API and report/baseline machinery as LongMemEval. Third-party material lives only under a declared `evals/fixtures/<benchmark>/` inventory that `make check-corpus-licences` can validate. Benchmark vocabulary stays at the evaluation boundary; production domain types remain Sessions, capture candidates, Knowledge, and context runs.
 
 ## Acceptance criteria
 
-- A second published benchmark score under EVAL-3's two-tier discipline: a
-  deterministic tier that gates and a model-judged tier that is published and
-  gates nothing, against a baseline keyed to both the reader and judge models as
-  the API served them.
-- The corpus arrives in **EVAL-3's format, or the reason it cannot is recorded** —
-  ADR-0047 reversal trigger (f) inherited rather than escaped, for the same reason
-  EVAL-3 inherited it: a fourth corpus format is where the vocabulary stops being
-  shared.
-- **The licence permits the use, and the evidence is in the repository.**
-  `make check-corpus-licences` passes over the new corpus without an exemption —
-  or, if the corpus is LoCoMo under a grant, the grant is a file and the check
-  reads it.
+- Repository evidence proves the selected corpus may be used and its result published for this product.
+- A pinned full benchmark run completes through the epoch-3 public path without direct database writes or policy bypasses.
+- The deterministic report is reproducible from the pinned corpus and configuration and fails on missing coverage or a reviewed bound regression.
+- The judged report names the served reader and judge versions and effort, publishes judge agreement and ungraded counts, and gates nothing.
+- The published result states corpus variant, sample count, exclusions, limitations, and a digest that another operator can verify.
+
+## Required tests
+
+- Corpus licence/inventory, digest, schema, timestamp, duplicate, and malformed-row tests.
+- Deterministic adapter fixtures proving session/capture/Knowledge provenance and stable report output.
+- Public-path end-to-end slice with ordinary tenant transactions and the test policy pack.
+- Baseline tests that reject missing metrics, corpus/model drift, silent denominator changes, and judged-tier gating.
+- Publication test that refuses an unapproved corpus variant or incomplete run.
+
+## Rollout and rollback
+
+Land licence evidence and a small non-publishable adapter fixture first, then a full observation run, baseline review, and publication. If permission, corpus integrity, or reproducibility is withdrawn, disable publication and retain the affected report as withdrawn evidence; LongMemEval remains the independent benchmark.
+
+## Dependencies
+
+The owner must choose the benchmark and publication claim. LoCoMo specifically remains blocked on written permission and legal acceptance; a permissively licensed substitute removes that external dependency. Full judged runs require pinned external reader/judge credentials and capacity, but deterministic evidence must remain runnable without them.

@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select coalesce(max(ordinal), 0) + 1 as \"next!\"\n                         from tool_server_versions\n                        where tenant_id = $1 and server_id = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "next!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "9aac0aac147db2b5cd9c43aed8361d82dd45c4eb6e0991ef36dbd13737a745e3"
+}

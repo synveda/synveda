@@ -1,0 +1,65 @@
+{
+  "asked_about": "0199c000-0000-7000-8000-000000000000",
+  "payload": {
+    "scope_id": "0199c000-0000-7000-8000-000000000000",
+    "binding_id": "0199c000-0000-7000-8000-000000000001",
+    "binding_scope_id": "0199c000-0000-7000-8000-000000000002",
+    "artifact_id": "0199c000-0000-7000-8000-000000000003",
+    "version_id": "0199c000-0000-7000-8000-000000000004",
+    "content_hash": "617ad3f0d49b8a111b7a1ddcaeaa90ae91b2eae05a8221186b2834da41cdd53f",
+    "document": {
+      "policy_pack": "eng-pack",
+      "capture": {
+        "enabled": true,
+        "on_session_end": true,
+        "explicit_request": true,
+        "minimum_confidence_permille": 350,
+        "maximum_candidates_per_batch": 96
+      },
+      "context": {
+        "token_budget": 1500,
+        "channels": [
+          "current_knowledge"
+        ],
+        "trace_retention": "full",
+        "graph": {
+          "enabled": true,
+          "max_hops": 2,
+          "fan_out_per_node": 8,
+          "max_expanded_candidates": 32,
+          "time_budget_ms": 500,
+          "token_budget": 512
+        }
+      },
+      "freshness": {
+        "fact_days": 60,
+        "decision_days": 0,
+        "preference_days": 0,
+        "procedure_days": 180,
+        "entity_days": 365,
+        "episode_days": 0,
+        "convention_days": 180,
+        "warning_days": 30,
+        "reference_days": 180
+      },
+      "advertisement": {
+        "skills": true,
+        "tools": true
+      },
+      "relaxations": {
+        "enabled": true,
+        "maximum_duration_secs": 604800,
+        "allowed_actions": [
+          "knowledge.read"
+        ]
+      },
+      "allowed_external_providers": [
+        "anthropic",
+        "vllm",
+        "tei",
+        "remote_mcp"
+      ]
+    },
+    "fail_safe": false
+  }
+}

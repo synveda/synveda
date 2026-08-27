@@ -1,0 +1,152 @@
+{
+  "schema_version": 1,
+  "feature": "CPR-40",
+  "title": "Context-platform product and trust evaluation",
+  "synthetic_product": "PulseBoard",
+  "required_measurements": [
+    "retrieved",
+    "selected",
+    "injected",
+    "referenced_by_agent",
+    "accepted_by_user",
+    "helpful",
+    "unhelpful",
+    "caused_correction"
+  ],
+  "hard_gates": {
+    "cross_tenant_leakage": { "maximum": 0, "evidence_scenario": "tenant_isolation" },
+    "private_scope_leakage": { "maximum": 0, "evidence_scenario": "principal_private_isolation" },
+    "superseded_current_injection": { "maximum": 0, "evidence_scenario": "supersession" },
+    "selected_without_provenance": { "maximum": 0, "evidence_scenario": "source_trace_completeness" },
+    "unversioned_skill_or_tool_activation": { "maximum": 0, "evidence_scenario": "versioned_activation" },
+    "plaintext_secret_leakage": { "maximum": 0, "evidence_scenario": "secret_safety" }
+  },
+  "scenarios": [
+    {
+      "id": "capture_precision",
+      "title": "Session extraction creates reviewable durable candidates",
+      "command": ["cargo", "test", "-p", "synveda-gateway", "--test", "capture_api", "pulseboard_cross_session_team_knowledge_loop_is_governed_end_to_end", "--", "--exact"],
+      "evidence": "crates/synveda-gateway/tests/capture_api.rs",
+      "measures": ["capture_candidate_precision"]
+    },
+    {
+      "id": "duplicate_identification",
+      "title": "Duplicate candidate evidence is explicit and governed",
+      "command": ["cargo", "test", "-p", "synveda-gateway", "--test", "capture_api", "candidate_matches_are_reauthorised_and_foreign_tenants_see_404", "--", "--exact"],
+      "evidence": "crates/synveda-gateway/tests/capture_api.rs",
+      "measures": ["candidate_match_quality"]
+    },
+    {
+      "id": "cross_session_reuse",
+      "title": "A clean session reuses accepted project Knowledge",
+      "command_ref": "capture_precision",
+      "evidence": "crates/synveda-gateway/tests/capture_api.rs",
+      "measures": ["retrieved", "selected", "injected"]
+    },
+    {
+      "id": "cross_user_project_sharing",
+      "title": "Bob receives Alice's project Knowledge through the same runtime",
+      "command_ref": "capture_precision",
+      "evidence": "crates/synveda-gateway/tests/capture_api.rs",
+      "measures": ["cross_user_reuse"]
+    },
+    {
+      "id": "principal_private_isolation",
+      "title": "A teammate receives no private address, content, count or block fingerprint",
+      "command": ["cargo", "test", "-p", "synveda-gateway", "--test", "context_runs", "denied_private_knowledge_leaks_no_address_content_count_or_block_fingerprint", "--", "--exact"],
+      "evidence": "crates/synveda-gateway/tests/context_runs.rs",
+      "measures": ["private_scope_leakage"]
+    },
+    {
+      "id": "project_isolation",
+      "title": "A project grant reaches its sessions and no sibling project",
+      "command": ["cargo", "test", "-p", "synveda-gateway", "--test", "sessions_api", "a_project_member_sees_that_project_s_runs_and_no_others", "--", "--exact"],
+      "evidence": "crates/synveda-gateway/tests/sessions_api.rs",
+      "measures": ["project_scope_leakage"]
+    },
+    {
+      "id": "tenant_isolation",
+      "title": "Another tenant's session id is indistinguishable from missing",
+      "command": ["cargo", "test", "-p", "synveda-gateway", "--test", "sessions_api", "another_tenant_s_session_id_is_a_404_like_any_other", "--", "--exact"],
+      "evidence": "crates/synveda-gateway/tests/sessions_api.rs",
+      "measures": ["cross_tenant_leakage"]
+    },
+    {
+      "id": "conflict_detection",
+      "title": "Ambiguous contradictions remain transitional pending governed resolution",
+      "command": ["cargo", "test", "-p", "synveda-gateway", "--test", "knowledge_lifecycle", "conflicts_are_transitional_governed_and_temporally_queryable", "--", "--exact"],
+      "evidence": "crates/synveda-gateway/tests/knowledge_lifecycle.rs",
+      "measures": ["conflict_resolution"]
+    },
+    {
+      "id": "supersession",
+      "title": "The current projection selects the replacement and explains the obsolete head",
+      "command_ref": "capture_precision",
+      "evidence": "crates/synveda-gateway/tests/capture_api.rs",
+      "measures": ["superseded_current_injection"]
+    },
+    {
+      "id": "as_of_retrieval",
+      "title": "Valid-time and as-known-time queries retain distinct history",
+      "command_ref": "conflict_detection",
+      "evidence": "crates/synveda-gateway/tests/knowledge_lifecycle.rs",
+      "measures": ["bitemporal_accuracy"]
+    },
+    {
+      "id": "source_trace_completeness",
+      "title": "Every selected Knowledge revision has normalised provenance",
+      "command_ref": "capture_precision",
+      "evidence": "crates/synveda-gateway/tests/capture_api.rs",
+      "measures": ["selected_without_provenance"]
+    },
+    {
+      "id": "token_budget_selection",
+      "title": "Token-bound exclusions remain explicit in the ContextRun trace",
+      "command": ["cargo", "test", "-p", "synveda-gateway", "--test", "context_runs", "planner_selects_only_current_knowledge_and_feedback_names_one_revision", "--", "--exact"],
+      "evidence": "crates/synveda-gateway/tests/context_runs.rs",
+      "measures": ["selected_tokens", "context_latency_ms"]
+    },
+    {
+      "id": "graph_expansion",
+      "title": "Bounded authorised two-hop expansion improves a fixed query",
+      "command": ["cargo", "test", "-p", "synveda-gateway", "--test", "context_runs", "bounded_graph_improves_two_hop_recall_and_denied_endpoints_leave_no_trace", "--", "--exact"],
+      "evidence": "crates/synveda-gateway/tests/context_runs.rs",
+      "measures": ["graph_quality"]
+    },
+    {
+      "id": "versioned_activation",
+      "title": "Skill pinning and activation evidence name an immutable version",
+      "command": ["cargo", "test", "-p", "synveda-gateway", "--test", "skills", "immutable_versions_bindings_usage_and_tests_share_one_governed_path", "--", "--exact"],
+      "evidence": "crates/synveda-gateway/tests/skills.rs",
+      "measures": ["unversioned_skill_or_tool_activation"]
+    },
+    {
+      "id": "mcp_schema_quarantine",
+      "title": "An MCP schema change creates a quarantined immutable version",
+      "command": ["cargo", "test", "-p", "synveda-gateway", "--test", "tools", "versions_discovery_bindings_config_and_tests_share_one_governed_path", "--", "--exact"],
+      "evidence": "crates/synveda-gateway/tests/tools.rs",
+      "measures": ["tool_quarantine"]
+    },
+    {
+      "id": "secret_safety",
+      "title": "Tool secret references rotate and fail closed without plaintext disclosure",
+      "command": ["cargo", "test", "-p", "synveda-gateway", "--test", "tools", "stable_tool_secret_references_fail_closed_rotate_without_rewriting_versions_and_can_be_removed", "--", "--exact"],
+      "evidence": "crates/synveda-gateway/tests/tools.rs",
+      "measures": ["plaintext_secret_leakage"]
+    },
+    {
+      "id": "okf_round_trip",
+      "title": "OKF v0.2 import candidates and deterministic export round-trip extensions",
+      "command": ["cargo", "test", "-p", "synveda-gateway", "--test", "okf_api", "okf_plan_materialization_vedaflow_provenance_export_and_isolation", "--", "--exact"],
+      "evidence": "crates/synveda-gateway/tests/okf_api.rs",
+      "measures": ["okf_round_trip"]
+    },
+    {
+      "id": "adapter_outage_recovery",
+      "title": "Authentic Claude frames survive outage, overlap and lost acknowledgement",
+      "command": ["cargo", "test", "-p", "synveda-gateway", "--test", "claude_lifecycle", "a_claude_code_session_is_a_governed_run_from_start_to_end", "--", "--exact"],
+      "evidence": "crates/synveda-gateway/tests/claude_lifecycle.rs",
+      "measures": ["adapter_delivery"]
+    }
+  ]
+}

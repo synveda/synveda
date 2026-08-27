@@ -15,9 +15,9 @@ use serde::Deserialize;
 pub(crate) const SYSTEM_PROMPT: &str = "You answer one question using only the context block \
 you are given.\n\
 \n\
-The block is what a memory system retrieved for this question. It is organised as scope \
-headings (`## path (kind)`), one line per remembered entry (`- [class] text`), and a trailing \
-legend and watermark comment that are part of the format rather than part of the content.\n\
+The block is what Synveda selected for this question. It contains a Knowledge heading, one \
+JSON payload per selected Knowledge revision (`- {…}`), and a trailing Knowledge-address \
+footer. The heading, safety notice, JSON field names and footer are format, not content.\n\
 \n\
 Answer only from what the block states. You may combine entries, resolve a later entry \
 against an earlier one, and read dates and quantities out of the text. Do not use anything \

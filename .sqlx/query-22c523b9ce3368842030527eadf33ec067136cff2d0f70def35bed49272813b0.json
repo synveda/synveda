@@ -1,0 +1,91 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        insert into knowledge_sources\n            (id, tenant_id, scope_id, source_type, session_event_id, locator,\n             source_revision, content_hash, metadata, created_by)\n        values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)\n        returning id, tenant_id, scope_id, source_type, session_event_id,\n                  locator, source_revision, content_hash, metadata,\n                  created_by, created_at\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "tenant_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "scope_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "source_type",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "session_event_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "locator",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "source_revision",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "content_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "metadata",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 9,
+        "name": "created_by",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Jsonb",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "22c523b9ce3368842030527eadf33ec067136cff2d0f70def35bed49272813b0"
+}

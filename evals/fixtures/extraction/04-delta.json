@@ -6,7 +6,7 @@
     {
       "name": "delta-preference-no-unwrap",
       "input": {
-        "kind": "transcript_delta",
+        "event_type": "message.user",
         "session_id": "delta-1",
         "occurred_at": "2026-07-23T14:00:00Z",
         "payload": { "text": "We never use unwrap in library code; return the error and let the caller decide." }
@@ -16,7 +16,7 @@
     {
       "name": "delta-preference-boring-code",
       "input": {
-        "kind": "transcript_delta",
+        "event_type": "message.user",
         "session_id": "delta-2",
         "occurred_at": "2026-07-23T14:01:00Z",
         "payload": { "text": "My favourite rule in this repo: boring explicit code over cleverness." }
@@ -26,7 +26,7 @@
     {
       "name": "delta-preference-sqlx-checked",
       "input": {
-        "kind": "transcript_delta",
+        "event_type": "message.user",
         "session_id": "delta-3",
         "occurred_at": "2026-07-23T14:02:00Z",
         "payload": { "text": "We always use sqlx compile-time checked queries; string-built SQL is not reviewed here." }
@@ -36,7 +36,7 @@
     {
       "name": "delta-decision-postgres-first",
       "input": {
-        "kind": "decision",
+        "event_type": "message.assistant",
         "session_id": "delta-4",
         "occurred_at": "2026-07-23T14:03:00Z",
         "payload": { "text": "Postgres-first: one engine for rows, vectors, queues and graphs." }
@@ -46,7 +46,7 @@
     {
       "name": "delta-decision-licences",
       "input": {
-        "kind": "decision",
+        "event_type": "message.assistant",
         "session_id": "delta-5",
         "occurred_at": "2026-07-23T14:04:00Z",
         "payload": { "text": "Only MIT, Apache-2.0 and PostgreSQL licences in the core path; cargo-deny enforces it." }
@@ -56,7 +56,7 @@
     {
       "name": "delta-procedure-branch-naming",
       "input": {
-        "kind": "transcript_delta",
+        "event_type": "message.user",
         "session_id": "delta-6",
         "occurred_at": "2026-07-23T14:05:00Z",
         "payload": { "text": "The procedure for a new feature: name the branch feat/<ID>, then run the acceptance test before review." }
@@ -66,7 +66,7 @@
     {
       "name": "delta-episode-clippy",
       "input": {
-        "kind": "tool_result",
+        "event_type": "tool.result",
         "session_id": "delta-7",
         "occurred_at": "2026-07-23T14:06:00Z",
         "payload": { "tool": "cargo", "output": "cargo clippy -D warnings: clean across 11 crates in 41 seconds." }
@@ -76,7 +76,7 @@
     {
       "name": "delta-fact-scope-chain-cache",
       "input": {
-        "kind": "transcript_delta",
+        "event_type": "message.user",
         "session_id": "delta-8",
         "occurred_at": "2026-07-23T14:07:00Z",
         "payload": { "text": "Scope chains are cached in process and invalidated after the mutation commits." }
@@ -86,7 +86,7 @@
     {
       "name": "delta-entity-vedaflow",
       "input": {
-        "kind": "transcript_delta",
+        "event_type": "message.user",
         "session_id": "delta-9",
         "occurred_at": "2026-07-23T14:08:00Z",
         "payload": { "text": "VedaFlow is the governance layer: objects, trees, commits and channels, all in Postgres." }
@@ -95,9 +95,9 @@
     },
     {
       "name": "delta-decision-and-fact-hnsw",
-      "note": "A decision and the implementation fact it forces. Both true; one record per event reaches one.",
+      "note": "A decision and the implementation fact it forces. Both true; one candidate per event reaches one.",
       "input": {
-        "kind": "transcript_delta",
+        "event_type": "message.user",
         "session_id": "delta-10",
         "occurred_at": "2026-07-23T14:09:00Z",
         "payload": { "text": "We decided to keep HNSW with iterative scans; a partial index exists per shipped dimension." }

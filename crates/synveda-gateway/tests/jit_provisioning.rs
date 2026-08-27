@@ -31,8 +31,9 @@ use sqlx::postgres::PgPoolOptions;
 use synveda_gateway::app::{AppState, router};
 use synveda_gateway::telemetry;
 use synveda_identity::{LoginFlow, OidcVerifier, parse_issuers};
-use synveda_store::{group_mappings, hierarchy, identities, tenants};
-use synveda_types::{HierarchyNode, ScopeId, ScopeKind, TenantId, TenantStatus};
+use synveda_store::{identities, scopes, tenants};
+use synveda_types::scope::ScopeKind;
+use synveda_types::{GrantId, TenantId, TenantStatus};
 use tower::ServiceExt;
 
 const KEY_PEM: &str = include_str!("fixtures/idp_key_a.pem");
@@ -238,20 +239,11 @@ fn state(url: &str, issuer: &str) -> AppState {
         login: Some(Arc::new(LoginFlow::new(verifier, REDIRECT_URI.to_owned()))),
         public_origin: "http://127.0.0.1:8120".to_owned(),
         pdp: Arc::new(synveda_policy::Pdp::new().expect("build the embedded PDP")),
-        scope_chains: Arc::new(synveda_store::ScopeChainCache::new()),
         service_token_max_ttl: std::time::Duration::from_secs(3600),
-        search_index: Arc::new(
-            synveda_retrieval::SearchIndex::open(
-                std::env::temp_dir()
-                    .join("synveda-gateway-tests")
-                    .join(synveda_types::TenantId::new().to_string()),
-            )
-            .expect("open search index"),
-        ),
         embedder: Arc::new(synveda_ingest::embedding::AnyEmbedder::Deterministic(
             synveda_ingest::embedding::DeterministicEmbedder::new(),
         )),
-        inject_embed_timeout: std::time::Duration::from_millis(100),
+        context_embed_timeout: std::time::Duration::from_millis(100),
         // TEN-4 (ADR-0064): a fixed test KEK, so a suite that touches a
         // sealed column seals rather than skipping. `Kms::Disabled` is the
         // production default when no key is configured.
@@ -344,65 +336,20 @@ async fn admitted_tenant() -> Option<(PgPool, TenantId, String)> {
     Some((pool, id, url))
 }
 
-/// Seeds acme-org → eng (dept) → platform (team) on the RLS-exempt test
-/// connection. Returns (org, eng, platform).
-async fn seed_hierarchy(
-    pool: &PgPool,
-    tenant: TenantId,
-) -> (HierarchyNode, HierarchyNode, HierarchyNode) {
-    let mut tx = pool.begin().await.expect("begin");
-    let org = hierarchy::create(
-        &mut tx,
-        ScopeId::new(),
-        tenant,
-        None,
-        ScopeKind::Org,
-        "acme",
-        "ACME",
-    )
-    .await
-    .expect("create org");
-    let eng = hierarchy::create(
-        &mut tx,
-        ScopeId::new(),
-        tenant,
-        Some(org.id),
-        ScopeKind::Department,
-        "eng",
-        "Engineering",
-    )
-    .await
-    .expect("create dept");
-    let platform = hierarchy::create(
-        &mut tx,
-        ScopeId::new(),
-        tenant,
-        Some(eng.id),
-        ScopeKind::Team,
-        "platform",
-        "Platform",
-    )
-    .await
-    .expect("create team");
-    tx.commit().await.expect("commit hierarchy");
-    (org, eng, platform)
-}
-
 async fn status_and_kind(response: Response) -> (StatusCode, String) {
     let status = response.status();
     let body = body_json(response).await;
     (status, body["kind"].as_str().unwrap_or_default().to_owned())
 }
 
-// ── AC 1: the mapped first login ─────────────────────────────────────────────
+// ── AC 1: the first login ────────────────────────────────────────────────────
 
 #[tokio::test]
-async fn first_login_lands_in_the_correct_team_scope_with_zero_admin_action() {
+async fn first_login_mints_the_identity_and_its_own_scope_with_zero_admin_action() {
     let _serial = serial().await;
     let Some((pool, tenant_id, db_url)) = admitted_tenant().await else {
         return;
     };
-    let (_, _, platform) = seed_hierarchy(&pool, tenant_id).await;
     let idp = MockIdp::spawn(tenant_id).await;
     let app = router(state(&db_url, &idp.issuer));
 
@@ -413,83 +360,94 @@ async fn first_login_lands_in_the_correct_team_scope_with_zero_admin_action() {
     );
     let session = login(&app).await;
 
-    // The session says where provisioning placed her.
-    assert_eq!(session["identity"]["quarantined"], false, "{session}");
+    // The session reports her own scope — the placement identity itself
+    // carries (CPR-7, ADR-0074 decision 3).
     let scope_path = session["identity"]["scope_path"].as_str().expect("path");
+    // A *path*, rooted at the tenant, whose last segment is her own
+    // principal slug — the login response promises a chain, not a slug.
+    let (tenant_slug, own) = scope_path.split_once('/').expect("a rooted path");
     assert!(
-        scope_path.starts_with("acme/eng/platform/alice-"),
-        "alice must land under the platform team, got {scope_path}"
+        !tenant_slug.is_empty(),
+        "rooted at the tenant: {scope_path}"
+    );
+    assert!(
+        own.starts_with("p-"),
+        "alice's scope is her own principal scope, got {scope_path}"
     );
 
-    // The store agrees: her personal user node hangs off the team, and her
-    // identity binds to it.
+    // The store agrees: a principal-shaped scope hanging at the tenant
+    // root, with her identity bound to it.
     let identity = identities::by_subject(&pool, tenant_id, "alice-sub")
         .await
         .expect("read identity")
         .expect("alice is provisioned");
-    assert!(!identity.quarantined);
     assert_eq!(identity.email.as_deref(), Some("alice@example.test"));
-    let personal = hierarchy::node(&pool, identity.scope_id)
+    let mut tx = pool.begin().await.expect("begin");
+    let personal = scopes::get(&mut *tx, tenant_id, identity.scope_id)
         .await
         .expect("read personal scope")
         .expect("personal scope exists");
-    assert_eq!(personal.parent_id, Some(platform.id));
-    assert_eq!(personal.kind, ScopeKind::User);
-
-    // Her session bearer resolves and reaches the PDP — but since AUTHZ-3
-    // an unbound member holds no hierarchy-admin read (ADR-0015
-    // decision 4): a policy denial under the default pack, not an
-    // authentication failure and not quarantine.
-    let token = session["access_token"].as_str().expect("access_token");
-    let response = app
-        .clone()
-        .oneshot(get_request("/v1/hierarchy/root", Some(token)))
+    let root = scopes::ensure_tenant_root(&mut tx, tenant_id)
         .await
-        .unwrap();
-    assert_eq!(
-        response.status(),
-        StatusCode::FORBIDDEN,
-        "an unbound member holds no admin-plane read"
-    );
-    let denial: Value = serde_json::from_slice(
-        &response
-            .into_body()
-            .collect()
-            .await
-            .expect("read denial body")
-            .to_bytes(),
-    )
-    .expect("taxonomy body");
-    assert_eq!(denial["kind"], "policy_denied", "{denial}");
+        .expect("mint root");
+    tx.commit().await.expect("commit");
+    assert_eq!(personal.parent_scope_id, Some(root.id));
+    assert_eq!(personal.kind, ScopeKind::Principal);
 
-    // Bound auditor through the store (the roles API has its own suite),
-    // the same bearer reads on the very next request: the role, not the
-    // placement, carries the admin plane (AUTHZ-3, ADR-0015).
+    // Her session bearer resolves and reaches the PDP — but an ungranted
+    // member holds no admin-plane read: a policy denial, not an
+    // authentication failure.
+    let token = session["access_token"].as_str().expect("access_token");
+    let (status, kind) = status_and_kind(
+        app.clone()
+            .oneshot(get_request("/v1/admin/scopes", Some(token)))
+            .await
+            .unwrap(),
+    )
+    .await;
+    assert_eq!(
+        (status, kind.as_str()),
+        (StatusCode::FORBIDDEN, "policy_denied"),
+        "an ungranted member holds no admin-plane read"
+    );
+
+    // Granted administrator through the store (the access API has its own
+    // suite), the same bearer reads on the very next request: the grant,
+    // not the placement, carries the admin plane.
     let mut tx = synveda_store::rls::begin_tenant_tx(&pool, tenant_id)
         .await
         .expect("begin tenant tx");
-    synveda_store::role_bindings::bind(
+    synveda_store::access::create_grant(
         &mut *tx,
-        tenant_id,
-        "alice-sub",
-        None,
-        synveda_types::Role::Auditor,
+        &synveda_store::access::NewGrant {
+            id: GrantId::new(),
+            tenant_id,
+            scope_id: root.id,
+            subject: synveda_types::access::GrantSubject::Principal {
+                principal_id: "alice-sub".to_owned(),
+            },
+            role_key: synveda_types::access::RoleKey::Administrator,
+            source: synveda_types::access::GrantSource::Automation,
+            invite_id: None,
+            granted_by: None,
+        },
     )
     .await
-    .expect("bind auditor");
-    tx.commit().await.expect("commit binding");
+    .expect("grant administrator at the root");
+    tx.commit().await.expect("commit grant");
     let response = app
         .clone()
-        .oneshot(get_request("/v1/hierarchy/root", Some(token)))
+        .oneshot(get_request("/v1/admin/scopes", Some(token)))
         .await
         .unwrap();
     assert_eq!(
         response.status(),
         StatusCode::OK,
-        "the auditor binding carries the read on the next request"
+        "the administrator grant carries the read on the next request"
     );
 
-    // Repeat login: same identity, no second personal scope.
+    // Repeat login: same identity, same scope — "unmapped" never meant a
+    // second node, and adoption is keyed by subject.
     idp.login_as(
         "alice-sub",
         &["everyone", "synveda-eng-platform"],
@@ -500,18 +458,14 @@ async fn first_login_lands_in_the_correct_team_scope_with_zero_admin_action() {
         second["identity"]["id"], session["identity"]["id"],
         "a repeat login must adopt the existing identity"
     );
-    let children = hierarchy::children(&pool, platform.id)
-        .await
-        .expect("list team children");
     assert_eq!(
-        children.len(),
-        1,
-        "exactly one personal scope after two logins: {children:?}"
+        second["identity"]["scope_id"], session["identity"]["scope_id"],
+        "a repeat login must adopt the existing scope"
     );
 
-    // The metric contract: a mapped provision and an existing hit.
+    // The metric contract: a first login and an adopted one.
     let exposition = metrics_handle().render();
-    for outcome in ["mapped", "existing"] {
+    for outcome in ["own-scope", "bound"] {
         assert!(
             exposition
                 .lines()
@@ -522,34 +476,37 @@ async fn first_login_lands_in_the_correct_team_scope_with_zero_admin_action() {
     }
 }
 
-// ── AC 2: the unmapped first login ───────────────────────────────────────────
+// ── AC 2: the ungranted first login ──────────────────────────────────────────
 
 #[tokio::test]
-async fn unmapped_login_lands_in_quarantine_with_no_read_rights() {
+async fn an_ungranted_login_reaches_nothing_beyond_its_own_scope() {
     let _serial = serial().await;
     let Some((pool, tenant_id, db_url)) = admitted_tenant().await else {
         return;
     };
-    seed_hierarchy(&pool, tenant_id).await;
     let idp = MockIdp::spawn(tenant_id).await;
     let app = router(state(&db_url, &idp.issuer));
 
     idp.login_as("bob-sub", &["everyone", "not-a-synveda-group"], None);
     let session = login(&app).await;
 
-    assert_eq!(session["identity"]["quarantined"], true, "{session}");
     let scope_path = session["identity"]["scope_path"].as_str().expect("path");
+    let (tenant_slug, own) = scope_path.split_once('/').expect("a rooted path");
     assert!(
-        scope_path.starts_with("acme/quarantine/"),
-        "bob must land under the reserved quarantine scope, got {scope_path}"
+        !tenant_slug.is_empty(),
+        "rooted at the tenant: {scope_path}"
+    );
+    assert!(
+        own.starts_with("p-"),
+        "bob's scope is his own principal scope, got {scope_path}"
     );
 
-    // "No read rights": the PDP forbids reads (and everything else) — a
-    // 403 policy denial, not a 401; he is authenticated, just contained.
+    // "No read rights": the PDP forbids reads — a 403 policy denial, not
+    // a 401; he is authenticated, just ungranted.
     let token = session["access_token"].as_str().expect("access_token");
     let (status, kind) = status_and_kind(
         app.clone()
-            .oneshot(get_request("/v1/hierarchy/root", Some(token)))
+            .oneshot(get_request("/v1/admin/scopes", Some(token)))
             .await
             .unwrap(),
     )
@@ -557,15 +514,30 @@ async fn unmapped_login_lands_in_quarantine_with_no_read_rights() {
     assert_eq!(
         (status, kind.as_str()),
         (StatusCode::FORBIDDEN, "policy_denied"),
-        "a quarantined user must be policy-denied reads"
+        "an ungranted user must be policy-denied reads"
     );
 
-    // Writes too — quarantine has no carve-outs.
-    let create = Request::post("/v1/hierarchy/nodes")
+    // Writes too — being a principal holds no carve-outs. The parent is
+    // the real tenant root, so the ownership check passes and the PDP is
+    // what says no (a made-up parent would be a 404 before the decision).
+    let mut tx = pool.begin().await.expect("begin");
+    let root = scopes::ensure_tenant_root(&mut tx, tenant_id)
+        .await
+        .expect("mint root");
+    tx.commit().await.expect("commit");
+    let create = Request::post("/v1/admin/scopes")
         .header("authorization", format!("Bearer {token}"))
         .header("content-type", "application/json")
+        // The admin create route takes the key every governed create does
+        // (CPR-4's shape); an ungranted caller never gets past the PDP, but
+        // the request has to be well-formed enough to reach it.
+        .header("idempotency-key", "auth2-ungranted-create")
         .body(Body::from(
-            r#"{"parent_id":null,"kind":"org","slug":"rogue","name":"Rogue"}"#,
+            json!({
+                "parent_id": root.id, "kind": "org_unit",
+                "slug": "rogue", "display_name": "Rogue"
+            })
+            .to_string(),
         ))
         .unwrap();
     let (status, kind) = status_and_kind(app.clone().oneshot(create).await.unwrap()).await;
@@ -583,40 +555,7 @@ async fn unmapped_login_lands_in_quarantine_with_no_read_rights() {
     assert_eq!(response.status(), StatusCode::OK);
 }
 
-// ── Override table, zero-config root, fail-closed bearer ────────────────────
-
-#[tokio::test]
-async fn an_override_mapping_beats_the_convention() {
-    let _serial = serial().await;
-    let Some((pool, tenant_id, db_url)) = admitted_tenant().await else {
-        return;
-    };
-    let (_, eng, _) = seed_hierarchy(&pool, tenant_id).await;
-    group_mappings::upsert(&pool, tenant_id, "vendors", eng.id)
-        .await
-        .expect("create override");
-    let idp = MockIdp::spawn(tenant_id).await;
-    let app = router(state(&db_url, &idp.issuer));
-
-    // Carol matches both an override (vendors → eng) and the convention
-    // (synveda-eng-platform → platform team): the override wins.
-    idp.login_as("carol-sub", &["vendors", "synveda-eng-platform"], None);
-    let session = login(&app).await;
-    assert_eq!(session["identity"]["quarantined"], false);
-    let identity = identities::by_subject(&pool, tenant_id, "carol-sub")
-        .await
-        .expect("read identity")
-        .expect("carol is provisioned");
-    let personal = hierarchy::node(&pool, identity.scope_id)
-        .await
-        .expect("read personal scope")
-        .expect("personal scope exists");
-    assert_eq!(
-        personal.parent_id,
-        Some(eng.id),
-        "the override target, not the convention team"
-    );
-}
+// ── Zero-config root, fail-closed bearer ─────────────────────────────────────
 
 #[tokio::test]
 async fn a_fresh_tenant_needs_no_admin_before_the_first_login() {
@@ -624,34 +563,43 @@ async fn a_fresh_tenant_needs_no_admin_before_the_first_login() {
     let Some((pool, tenant_id, db_url)) = admitted_tenant().await else {
         return;
     };
-    // No hierarchy at all: the org root and quarantine scope are created
-    // by provisioning itself (seed §2.1 zero-config, ADR-0013 decision 4).
+    // No scopes at all: the tenant root and the login's own principal
+    // scope are created by provisioning itself (seed §2.1 zero-config,
+    // ADR-0013 decision 4).
     let idp = MockIdp::spawn(tenant_id).await;
     let app = router(state(&db_url, &idp.issuer));
 
     idp.login_as("eve-sub", &[], None);
     let session = login(&app).await;
-    assert_eq!(session["identity"]["quarantined"], true);
 
-    let root = hierarchy::root(&pool, tenant_id)
+    let mut tx = pool.begin().await.expect("begin");
+    let root = scopes::ensure_tenant_root(&mut tx, tenant_id)
         .await
-        .expect("read root")
-        .expect("provisioning must have created the org root");
-    assert_eq!(root.slug, session["tenant"]["slug"].as_str().unwrap());
-    let quarantine = hierarchy::child_by_slug(&pool, root.id, identities::QUARANTINE_SLUG)
+        .expect("read root");
+    let identity = identities::by_subject(&mut *tx, tenant_id, "eve-sub")
         .await
-        .expect("read quarantine")
-        .expect("provisioning must have created the quarantine scope");
-    assert_eq!(quarantine.kind, ScopeKind::Team);
+        .expect("read identity")
+        .expect("eve is provisioned");
+    let personal = scopes::get(&mut *tx, tenant_id, identity.scope_id)
+        .await
+        .expect("read personal scope")
+        .expect("personal scope exists");
+    tx.commit().await.expect("commit");
+    assert_eq!(
+        root.slug,
+        session["tenant"]["slug"].as_str().unwrap(),
+        "the root carries the tenant's slug"
+    );
+    assert_eq!(personal.kind, ScopeKind::Principal);
+    assert_eq!(personal.parent_scope_id, Some(root.id));
 }
 
 #[tokio::test]
-async fn an_idp_bearer_that_skipped_login_is_quarantined_fail_closed() {
+async fn an_idp_bearer_that_skipped_login_is_refused_fail_closed() {
     let _serial = serial().await;
     let Some((pool, tenant_id, db_url)) = admitted_tenant().await else {
         return;
     };
-    seed_hierarchy(&pool, tenant_id).await;
     let idp = MockIdp::spawn(tenant_id).await;
     let app = router(state(&db_url, &idp.issuer));
 
@@ -662,7 +610,7 @@ async fn an_idp_bearer_that_skipped_login_is_quarantined_fail_closed() {
     let token = idp.access_token();
     let (status, kind) = status_and_kind(
         app.clone()
-            .oneshot(get_request("/v1/hierarchy/root", Some(&token)))
+            .oneshot(get_request("/v1/admin/scopes", Some(&token)))
             .await
             .unwrap(),
     )
@@ -670,7 +618,7 @@ async fn an_idp_bearer_that_skipped_login_is_quarantined_fail_closed() {
     assert_eq!(
         (status, kind.as_str()),
         (StatusCode::FORBIDDEN, "policy_denied"),
-        "an unprovisioned IdP subject must be treated as quarantined"
+        "an unprovisioned IdP subject holds nothing"
     );
     assert_eq!(
         identities::by_subject(&pool, tenant_id, "dave-sub")
@@ -681,13 +629,12 @@ async fn an_idp_bearer_that_skipped_login_is_quarantined_fail_closed() {
     );
 }
 
-// ── AUTHZ-3: the admin convention group (ADR-0015 decision 6) ────────────────
+// ── AUTHZ-3: the admin door (ADR-0074 decision 4) ────────────────────────────
 
-/// Zero-config bootstrap: on a fresh tenant with no hierarchy and no
-/// admin action, the first login of a `synveda-admins` member (matched
-/// case-insensitively) is placed under the org root — never quarantine,
-/// whose base forbid would nullify the binding — gets a tenant-wide
-/// org-admin binding, and governs the tenant on the very same bearer.
+/// Zero-config bootstrap: on a fresh tenant with no scopes and no admin
+/// action, the first login of a `synveda-admins` member (matched
+/// case-insensitively) gets an `administrator` grant at the tenant root
+/// and governs the tenant on the very same bearer.
 #[tokio::test]
 async fn admin_group_login_bootstraps_a_governable_tenant() {
     let _serial = serial().await;
@@ -703,54 +650,71 @@ async fn admin_group_login_bootstraps_a_governable_tenant() {
         Some("admin@example.test"),
     );
     let session = login(&app).await;
-    assert_eq!(
-        session["identity"]["quarantined"], false,
-        "an admin-group login must never quarantine: {session}"
-    );
 
-    let root = hierarchy::root(&pool, tenant_id)
+    let mut tx = pool.begin().await.expect("begin");
+    let root = scopes::ensure_tenant_root(&mut tx, tenant_id)
         .await
-        .expect("read root")
-        .expect("provisioning created the org root");
-    let identity = identities::by_subject(&pool, tenant_id, "it-admin")
+        .expect("read root");
+    let identity = identities::by_subject(&mut *tx, tenant_id, "it-admin")
         .await
         .expect("read identity")
         .expect("admin is provisioned");
-    let personal = hierarchy::node(&pool, identity.scope_id)
+    let personal = scopes::get(&mut *tx, tenant_id, identity.scope_id)
         .await
         .expect("read personal scope")
         .expect("personal scope exists");
+    tx.commit().await.expect("commit");
     assert_eq!(
-        personal.parent_id,
+        personal.parent_scope_id,
         Some(root.id),
-        "the admin lands under the org root"
+        "the admin's own scope hangs at the root like anybody else's"
     );
 
-    // The binding is the tenant-wide org-admin row.
+    // The door is one grant: `administrator` at the tenant root.
     let mut tx = synveda_store::rls::begin_tenant_tx(&pool, tenant_id)
         .await
         .expect("begin tenant tx");
-    let bindings =
-        synveda_store::role_bindings::for_subject_on_scopes(&mut *tx, tenant_id, "it-admin", &[])
-            .await
-            .expect("read bindings");
+    let grants = synveda_store::access::list_grants(
+        &mut *tx,
+        tenant_id,
+        &synveda_store::access::GrantFilter {
+            scope_id: None,
+            principal_id: Some("it-admin".to_owned()),
+        },
+    )
+    .await
+    .expect("read grants");
     drop(tx);
-    assert_eq!(bindings.len(), 1, "exactly the admin binding: {bindings:?}");
-    assert_eq!(bindings[0].scope_id, None, "tenant-wide");
-    assert_eq!(bindings[0].role, synveda_types::Role::OrgAdmin);
+    // Exactly two: the admin door at the tenant root, and the `owner`
+    // grant every principal scope carries at itself since CPR-7 (ADR-0074
+    // decision 8) — the door this test is about, plus the one every
+    // principal scope mints regardless of who logged in.
+    assert_eq!(
+        grants.len(),
+        2,
+        "the admin door plus the own-scope owner grant: {grants:?}"
+    );
+    let door = grants
+        .iter()
+        .find(|grant| grant.scope_id == root.id)
+        .expect("the admin door grant is at the tenant root");
+    assert_eq!(door.role_key, synveda_types::access::RoleKey::Administrator);
 
-    // The same bearer governs immediately: hierarchy admin is an
-    // org-admin action under regulated-strict@2 (ADR-0015 decision 4).
+    // The same bearer governs immediately: creating a scope is an
+    // administrator action, decided through the PDP.
     let token = session["access_token"].as_str().expect("access_token");
     let request = Request::builder()
         .method("POST")
-        .uri("/v1/hierarchy/nodes")
+        .uri("/v1/admin/scopes")
         .header(header::AUTHORIZATION, format!("Bearer {token}"))
         .header(header::CONTENT_TYPE, "application/json")
+        // The governed-create contract (CPR-4): the key is required, and a
+        // replay of it with the same body is the same create.
+        .header("Idempotency-Key", "authz3-first-governed-create")
         .body(Body::from(
             json!({
-                "parent_id": root.id, "kind": "department",
-                "slug": "eng", "name": "Engineering"
+                "parent_id": root.id, "kind": "org_unit",
+                "slug": "eng", "display_name": "Engineering"
             })
             .to_string(),
         ))
@@ -762,13 +726,118 @@ async fn admin_group_login_bootstraps_a_governable_tenant() {
         "SSO login to governing admin with zero admin action"
     );
 
-    // The metric contract: the admin placement outcome.
+    // The metric contract: the first-login outcome.
     let exposition = metrics_handle().render();
     assert!(
         exposition
             .lines()
             .any(|line| line.starts_with("synveda_jit_provisions_total")
-                && line.contains("outcome=\"admin\"")),
-        "admin provision outcome missing from exposition:\n{exposition}"
+                && line.contains("outcome=\"own-scope\"")),
+        "own-scope provision outcome missing from exposition:\n{exposition}"
     );
+}
+
+/// The door opens for somebody who was **already provisioned** — and the
+/// grant survives the transaction.
+///
+/// The convention is upserted at *every* login completion, so the login
+/// that first establishes the grant is very often not a first login: a
+/// directory-created identity whose subject is already bound, or anybody
+/// added to `synveda-admins` after they joined, reaches the door down the
+/// `bound` branch. That branch looks read-only and is not, and a version
+/// of it that returned without committing dropped the grant and its
+/// `access.granted` event silently, on every such login — leaving the
+/// operator door of ADR-0074 decision 4 broken for exactly the population
+/// it exists for. This is the test that says so.
+#[tokio::test]
+async fn the_admin_door_opens_on_a_later_login_and_the_grant_is_committed() {
+    let _serial = serial().await;
+    let Some((pool, tenant_id, db_url)) = admitted_tenant().await else {
+        return;
+    };
+    let idp = MockIdp::spawn(tenant_id).await;
+    let app = router(state(&db_url, &idp.issuer));
+
+    // First login: an ordinary member, no admin group, no admin-door
+    // grant. (Their own `owner` grant at their own scope — the one every
+    // principal scope carries at itself, ADR-0074 decision 8 — is not the
+    // door this test is about, so `admin_door_grants_of` counts only the
+    // tenant root.)
+    idp.login_as("late-admin", &["everyone"], Some("late@example.test"));
+    let session = login(&app).await;
+    assert!(session["identity"]["id"].is_string(), "{session}");
+    assert_eq!(
+        admin_door_grants_of(&pool, tenant_id, "late-admin").await,
+        0
+    );
+
+    // They are added to `synveda-admins`, and log in again. The identity
+    // exists, so this goes down the `bound` branch.
+    idp.login_as(
+        "late-admin",
+        &["everyone", "synveda-admins"],
+        Some("late@example.test"),
+    );
+    let session = login(&app).await;
+    assert_eq!(
+        admin_door_grants_of(&pool, tenant_id, "late-admin").await,
+        1,
+        "the admin grant must survive the login that established it"
+    );
+
+    // And it decides on the very next request, which is the whole point of
+    // the door: the same bearer administers the tenant.
+    let token = session["access_token"].as_str().expect("access_token");
+    let response = app
+        .clone()
+        .oneshot(get_request("/v1/admin/scopes", Some(token)))
+        .await
+        .unwrap();
+    assert_eq!(
+        response.status(),
+        StatusCode::OK,
+        "the committed grant carries the admin plane on the next request"
+    );
+
+    // A third login is a no-op upsert, not a second grant.
+    let _ = login(&app).await;
+    assert_eq!(
+        admin_door_grants_of(&pool, tenant_id, "late-admin").await,
+        1,
+        "the convention is additive and idempotent"
+    );
+
+    // The metric names the branch this test is about.
+    let exposition = metrics_handle().render();
+    assert!(
+        exposition
+            .lines()
+            .any(|line| line.starts_with("synveda_jit_provisions_total")
+                && line.contains("outcome=\"bound\"")),
+        "bound provision outcome missing from exposition:\n{exposition}"
+    );
+}
+
+/// How many grants `principal` holds **at the tenant root** — the admin
+/// door, deliberately excluding the `owner` grant every principal scope
+/// carries at itself (ADR-0074 decision 8), which is not what this test
+/// is about.
+async fn admin_door_grants_of(pool: &PgPool, tenant_id: TenantId, principal: &str) -> usize {
+    let mut tx = synveda_store::rls::begin_tenant_tx(pool, tenant_id)
+        .await
+        .expect("begin tenant tx");
+    let root = synveda_store::scopes::ensure_tenant_root(&mut tx, tenant_id)
+        .await
+        .expect("read root");
+    let grants = synveda_store::access::list_grants(
+        &mut *tx,
+        tenant_id,
+        &synveda_store::access::GrantFilter {
+            scope_id: Some(root.id),
+            principal_id: Some(principal.to_owned()),
+        },
+    )
+    .await
+    .expect("read grants");
+    grants.len()
 }

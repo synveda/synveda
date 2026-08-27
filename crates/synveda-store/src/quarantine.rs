@@ -1,39 +1,47 @@
-//! The quarantine review queue (MEM-2, ADR-0021 decision 5).
+//! The quarantine review queue (MEM-2, ADR-0021 decision 5; re-anchored on
+//! session events by CPR-12, ADR-0078 decision 4).
 //!
-//! A quarantined observe event's staging row exists — redacted, under
-//! RLS, idempotent — but no work signal was sent; the
-//! `observe_quarantine` row gates it. Review is one-shot
-//! (`pending → released | rejected`, schema-enforced by migration
-//! 0013's transition trigger): release sends the standard work signal in
-//! the caller's transaction, so the pipeline cannot distinguish a
-//! released event from an admitted one (the ADR-0020 decision 7
-//! consumer contract, unchanged); reject leaves the staging row as
-//! immutable provenance that never enters the pipeline. Reach this
-//! module inside [`crate::rls::begin_tenant_tx`].
+//! A quarantined event's row exists — redacted, ordered, under RLS, idempotent
+//! by the client's own event id — but the `session_event_quarantine` row makes
+//! it ineligible for capture. Review is one-shot (`pending → released |
+//! rejected`, schema-enforced by migration 0046's transition trigger): release
+//! makes a future batch eligible to freeze it; reject leaves the event as
+//! immutable provenance that never enters extraction. Reach this module
+//! inside [`crate::rls::begin_tenant_tx`].
+//!
+//! ## Why the gate is a second table and not a column
+//!
+//! `session_events` holds SELECT and INSERT and no UPDATE (migration 0044), and
+//! that is the whole of its immutability guarantee. A `quarantined` column
+//! would need an UPDATE grant to clear, which would hand every caller the
+//! ability to rewrite an event's payload too. So the reviewable state lives
+//! here and the event row carries only `redactions` — decided once, at
+//! admission, and true of that payload forever.
 
 use chrono::{DateTime, Utc};
 use sqlx::PgConnection;
-use synveda_types::{
-    Error, IdentityId, ObserveEventId, QuarantineState, Result, ScopeId, TenantId,
-};
+use synveda_types::{Error, QuarantineState, Result, ScopeId, SessionEventId, SessionId, TenantId};
 
-/// A quarantined event, joined with its staging row — everything a
-/// reviewer sees. The payload is the *redacted* content; the raw
-/// finding text was never stored anywhere (ADR-0021 decision 1).
+/// A quarantined event, joined with its event row and its run — everything a
+/// reviewer sees. The payload is the *redacted* content; the raw finding text
+/// was never stored anywhere (ADR-0021 decision 1).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct QuarantinedEvent {
-    /// The gated staging row's id.
-    pub event_id: ObserveEventId,
+    /// The gated event's id.
+    pub event_id: SessionEventId,
     /// Owning tenant.
     pub tenant_id: TenantId,
-    /// The event's home scope (where the write landed).
+    /// The governed scope the run was decided at — where the memory would
+    /// have landed, and what a subtree-filtered review queue narrows by.
     pub scope_id: ScopeId,
-    /// The submitting identity.
-    pub owner_id: IdentityId,
-    /// The harness session the event belongs to.
-    pub session_id: String,
-    /// The event kind (`transcript_delta` | `tool_result` | `decision`).
-    pub kind: String,
+    /// The run the event belongs to.
+    pub session_id: SessionId,
+    /// The token subject that opened that run.
+    pub principal_id: String,
+    /// What happened — one of `SessionEventType`'s twelve names.
+    pub event_type: String,
+    /// The client's own id for the event.
+    pub client_event_id: String,
     /// The redacted event body.
     pub payload: serde_json::Value,
     /// The scan's finding summary: `[{rule, category, count}]`.
@@ -53,9 +61,9 @@ pub struct QuarantinedEvent {
 /// A reviewer's verdict on one quarantined event.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReviewDecision {
-    /// Send the work signal; the event joins the pipeline.
+    /// Make the event eligible for the next capture snapshot.
     Release,
-    /// Never signal; the staging row stays provenance-only.
+    /// Keep the event as provenance only.
     Reject,
 }
 
@@ -86,9 +94,10 @@ struct QuarantineRow {
     event_id: uuid::Uuid,
     tenant_id: uuid::Uuid,
     scope_id: uuid::Uuid,
-    owner_id: uuid::Uuid,
-    session_id: String,
-    kind: String,
+    session_id: uuid::Uuid,
+    principal_id: String,
+    event_type: String,
+    client_event_id: String,
     payload: serde_json::Value,
     findings: serde_json::Value,
     state: String,
@@ -103,16 +112,17 @@ impl TryFrom<QuarantineRow> for QuarantinedEvent {
 
     fn try_from(row: QuarantineRow) -> Result<Self> {
         Ok(QuarantinedEvent {
-            event_id: ObserveEventId::from_uuid(row.event_id),
+            event_id: SessionEventId::from_uuid(row.event_id),
             tenant_id: TenantId::from_uuid(row.tenant_id),
             scope_id: ScopeId::from_uuid(row.scope_id),
-            owner_id: IdentityId::from_uuid(row.owner_id),
-            session_id: row.session_id,
-            kind: row.kind,
+            session_id: SessionId::from_uuid(row.session_id),
+            principal_id: row.principal_id,
+            event_type: row.event_type,
+            client_event_id: row.client_event_id,
             payload: row.payload,
             findings: row.findings,
-            // The check constraint pins the column to the vocabulary; a
-            // parse failure here means out-of-band schema drift.
+            // The check constraint pins the column to the vocabulary; a parse
+            // failure here means out-of-band schema drift.
             state: row.state.parse()?,
             created_at: row.created_at,
             reviewer_subject: row.reviewer_subject,
@@ -122,9 +132,9 @@ impl TryFrom<QuarantineRow> for QuarantinedEvent {
     }
 }
 
-/// The pending review queue, oldest first, optionally filtered to a set
-/// of scopes (the caller resolves a subtree to its scope ids — storage
-/// knows nothing of authorization, seed §2.4).
+/// The pending review queue, oldest first, optionally filtered to a set of
+/// scopes (the caller resolves a subtree to its scope ids — storage knows
+/// nothing of authorization, seed §2.4).
 #[tracing::instrument(name = "store.quarantine.pending", skip_all, err(Display))]
 pub async fn pending(
     conn: &mut PgConnection,
@@ -137,12 +147,15 @@ pub async fn pending(
     let rows = sqlx::query_as!(
         QuarantineRow,
         r#"
-        select q.event_id, q.tenant_id, q.scope_id, e.owner_id,
-               e.session_id, e.kind, e.payload,
+        select q.event_id, q.tenant_id, q.scope_id, q.session_id,
+               s.principal_id, e.event_type, e.client_event_id, e.payload,
                q.findings, q.state, q.created_at,
                q.reviewer_subject, q.reviewed_at, q.review_reason
-        from observe_quarantine q
-        join observe_events e on e.id = q.event_id
+        from session_event_quarantine q
+        join session_events e
+          on e.tenant_id = q.tenant_id and e.id = q.event_id
+        join sessions s
+          on s.tenant_id = q.tenant_id and s.id = q.session_id
         where q.tenant_id = $1
           and q.state = 'pending'
           and ($2::uuid[] is null or q.scope_id = any($2))
@@ -159,23 +172,26 @@ pub async fn pending(
     rows.into_iter().map(TryInto::try_into).collect()
 }
 
-/// One quarantined event by id, whatever its state. `None` when no
-/// quarantine row exists (the caller's uniform 404).
+/// One quarantined event by id, whatever its state. `None` when no quarantine
+/// row exists (the caller's uniform 404).
 #[tracing::instrument(name = "store.quarantine.get", skip_all, err(Display))]
 pub async fn get(
     conn: &mut PgConnection,
     tenant_id: TenantId,
-    event_id: ObserveEventId,
+    event_id: SessionEventId,
 ) -> Result<Option<QuarantinedEvent>> {
     let row = sqlx::query_as!(
         QuarantineRow,
         r#"
-        select q.event_id, q.tenant_id, q.scope_id, e.owner_id,
-               e.session_id, e.kind, e.payload,
+        select q.event_id, q.tenant_id, q.scope_id, q.session_id,
+               s.principal_id, e.event_type, e.client_event_id, e.payload,
                q.findings, q.state, q.created_at,
                q.reviewer_subject, q.reviewed_at, q.review_reason
-        from observe_quarantine q
-        join observe_events e on e.id = q.event_id
+        from session_event_quarantine q
+        join session_events e
+          on e.tenant_id = q.tenant_id and e.id = q.event_id
+        join sessions s
+          on s.tenant_id = q.tenant_id and s.id = q.session_id
         where q.tenant_id = $1 and q.event_id = $2
         "#,
         tenant_id.as_uuid(),
@@ -187,12 +203,12 @@ pub async fn get(
     row.map(TryInto::try_into).transpose()
 }
 
-/// Reviews one pending event: flips its state and — on release — sends
-/// the standard work signal, both on the caller's transaction, so the
-/// review, its signal, and the caller's audit event commit or vanish
-/// together. Returns the reviewed row; `None` when no quarantine row
-/// exists (uniform 404); [`Error::Conflict`] when it was already
-/// reviewed (review is one-shot).
+/// Reviews one pending event, changing its future capture eligibility in the
+/// caller's transaction so the verdict and its audit event commit together.
+///
+/// Returns the reviewed row; `None` when no quarantine row exists (uniform
+/// 404); [`Error::Conflict`] when it was already reviewed (review is
+/// one-shot).
 #[tracing::instrument(
     name = "store.quarantine.review",
     skip_all,
@@ -202,7 +218,7 @@ pub async fn get(
 pub async fn review(
     conn: &mut PgConnection,
     tenant_id: TenantId,
-    event_id: ObserveEventId,
+    event_id: SessionEventId,
     decision: ReviewDecision,
     reviewer_subject: &str,
     reason: Option<&str>,
@@ -211,22 +227,25 @@ pub async fn review(
         QuarantineRow,
         r#"
         with reviewed as (
-            update observe_quarantine
+            update session_event_quarantine
             set state = $3,
                 reviewer_subject = $4,
                 reviewed_at = now(),
                 review_reason = $5
             where tenant_id = $1 and event_id = $2 and state = 'pending'
-            returning event_id, tenant_id, scope_id, findings, state,
-                      created_at, reviewer_subject, reviewed_at,
+            returning event_id, tenant_id, scope_id, session_id, findings,
+                      state, created_at, reviewer_subject, reviewed_at,
                       review_reason
         )
-        select r.event_id, r.tenant_id, r.scope_id, e.owner_id,
-               e.session_id, e.kind, e.payload,
+        select r.event_id, r.tenant_id, r.scope_id, r.session_id,
+               s.principal_id, e.event_type, e.client_event_id, e.payload,
                r.findings, r.state, r.created_at,
                r.reviewer_subject, r.reviewed_at, r.review_reason
         from reviewed r
-        join observe_events e on e.id = r.event_id
+        join session_events e
+          on e.tenant_id = r.tenant_id and e.id = r.event_id
+        join sessions s
+          on s.tenant_id = r.tenant_id and s.id = r.session_id
         "#,
         tenant_id.as_uuid(),
         event_id.as_uuid(),
@@ -238,8 +257,8 @@ pub async fn review(
     .await
     .map_err(storage_error)?;
     let Some(row) = updated else {
-        // Nothing pending: distinguish "no such quarantine" (the
-        // caller's uniform 404) from "already reviewed" (one-shot).
+        // Nothing pending: distinguish "no such quarantine" (the caller's
+        // uniform 404) from "already reviewed" (one-shot).
         return match get(&mut *conn, tenant_id, event_id).await? {
             Some(event) => Err(Error::Conflict {
                 message: format!(
@@ -251,21 +270,9 @@ pub async fn review(
         };
     };
     let event: QuarantinedEvent = row.try_into()?;
-    if decision == ReviewDecision::Release {
-        // The standard content-free signal (ADR-0020 decision 1): the
-        // consumer contract cannot tell a released event from an
-        // admitted one.
-        sqlx::query_scalar!(
-            r#"select pgmq.send($1, $2::jsonb) as "msg_id!""#,
-            crate::observe::OBSERVE_QUEUE,
-            serde_json::json!({
-                "tenant_id": tenant_id,
-                "event_id": event.event_id,
-            }),
-        )
-        .fetch_one(&mut *conn)
-        .await
-        .map_err(storage_error)?;
-    }
+    // A release changes eligibility only. The next explicit or terminal
+    // capture freezes a new immutable input digest when this event belongs in
+    // it; there is no per-event work signal and no direct active-content
+    // writer (CPR-18, ADR-0083).
     Ok(Some(event))
 }

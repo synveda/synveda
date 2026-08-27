@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            insert into scope_closure (tenant_id, ancestor_id, descendant_id, distance)\n            values ($1, $2, $2, 2)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "731b0b764126b555a93c7dcc324998e3f939338e7ac41c81ffaab9fb5ef4ec91"
+}

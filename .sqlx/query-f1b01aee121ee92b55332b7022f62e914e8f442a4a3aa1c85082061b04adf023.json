@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select jsonb_agg(\n                   jsonb_build_object(\n                       'id', relation.id,\n                       'source_item_id', relation.source_item_id,\n                       'target_item_id', relation.target_item_id,\n                       'asserting_revision_id', relation.asserting_revision_id,\n                       'relation_type', relation.relation_type,\n                       'metadata', relation.metadata,\n                       'created_by', relation.created_by,\n                       'created_at', relation.created_at\n                   ) order by relation.created_at, relation.id\n               )\n          from knowledge_relations relation\n         where relation.tenant_id = $1\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "jsonb_agg",
+        "type_info": "Jsonb"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "f1b01aee121ee92b55332b7022f62e914e8f442a4a3aa1c85082061b04adf023"
+}

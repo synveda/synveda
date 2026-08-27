@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select item.current_revision_id as \"current_revision_id!\",\n               current.revision_number as \"revision_number!\"\n        from knowledge_items item\n        join knowledge_revisions current\n          on current.tenant_id = item.tenant_id\n         and current.knowledge_item_id = item.id\n         and current.id = item.current_revision_id\n        where item.tenant_id = $1 and item.id = $2\n        for update of item\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "current_revision_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "revision_number!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "d557efd53452ee835419ea51855402eaa88bc3866ad44f221e67063c6d0b3460"
+}

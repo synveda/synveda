@@ -35,20 +35,35 @@ const ALLOWED = {
   "synveda-vedaflow": [...BASE],
   "synveda-retrieval": [...BASE, ...MIDDLE],
   "synveda-ingest": [...BASE, ...MIDDLE],
-  "synveda-gateway": [...BASE, ...MIDDLE, "synveda-retrieval", "synveda-ingest"],
+  // External knowledge-format adapters are a leaf beside retrieval/ingest:
+  // they understand shared value types but cannot see storage, policy,
+  // VedaFlow, audit or the gateway (CPR-27, ADR-0087 decision 2).
+  "synveda-okf": ["synveda-types"],
+  "synveda-gateway": [
+    ...BASE,
+    ...MIDDLE,
+    "synveda-retrieval",
+    "synveda-ingest",
+    "synveda-okf",
+  ],
   // The CLI is a client of the gateway API, plus direct store/identity access
   // for the dev-bootstrap commands (db migrate, tenant create, token issue)
   // that exist precisely when no usable gateway does. Reviewed in ADR-0008.
   // Policy added with AUTHZ-1 (ADR-0012): `synveda policy apply` compile-checks
   // a pack against the same schema the gateway's reloader enforces.
   // Audit added with AUD-1 (ADR-0019): the break-glass audits itself, and
-  // `synveda audit verify` is the operator's chain check.
+  // Retained local bootstrap/key/policy-pack acts append break-glass events;
+  // ordinary audit query and verification use the public gateway API.
   // VedaFlow added with SKIL-1 (ADR-0051 decision 12): `synveda skill install`
   // recomputes each written file's content address and compares it to the one
   // the published commit named. That is what makes "installs unmodified" a
   // measurement rather than a claim, and it is worth more computed by the
   // client than trusted from the server — a materialised bundle carries no
   // watermark of its own (force 2), so this hash is its whole provenance.
+  // OKF added with CPR-28 (ADR-0087 decision 8): the CLI owns the user's
+  // selected filesystem path, validates it with the pure leaf adapter and
+  // sends inert bytes through `/v1`; the gateway never receives path or Git
+  // process authority.
   // The eval harness depends on no Synveda crate at all, and this empty
   // set is the enforcement (EVAL-1, ADR-0028 decision 1). An eval that can
   // link the store can seed and read around the PDP and would then report
@@ -68,6 +83,7 @@ const ALLOWED = {
     "synveda-policy",
     "synveda-audit",
     "synveda-vedaflow",
+    "synveda-okf",
   ],
 };
 

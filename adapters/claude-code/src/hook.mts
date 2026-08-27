@@ -16,29 +16,37 @@
  * `SessionStart`, stdout is context the model reads.
  */
 
+import { randomUUID } from "node:crypto";
+import { closeSync, openSync, writeSync } from "node:fs";
+import { isAbsolute, join } from "node:path";
+
 import { loadConfig } from "./config.mjs";
-import { flush } from "./flush.mjs";
-import { log } from "./log.mjs";
+import { turn } from "./turn.mjs";
+import { diagnostic, log } from "./log.mjs";
+import { ensureDir } from "./paths.mjs";
 import { sessionStart } from "./session-start.mjs";
 import { syncSkills } from "./skills.mjs";
-import { prune } from "./spool.mjs";
 import type { HookInput, HookOutput } from "./types.mjs";
 
 /**
- * A hard ceiling on the whole hook, above the per-call deadline: if
- * anything hangs that the request deadline does not cover, the process
- * still leaves.
+ * A hard ceiling on the whole hook, above the per-call deadline: if anything
+ * hangs that the request deadline does not cover, the process still leaves.
+ *
+ * Above `SessionEnd`'s own flush budget, so the deadline that fires first is
+ * the flush's — a watchdog that beat it would kill the process between the
+ * append and the spool write, which is the one window where an acknowledgement
+ * can be lost.
  */
 const WATCHDOG_MS = 10_000;
 
-type Mode = "inject" | "flush" | "skills" | "none";
+type Mode = "start" | "turn" | "skills" | "none";
 
 process.on("uncaughtException", (error: unknown) => {
-  log("hook.uncaught", { error: String(error) });
+  log("hook.uncaught", { error: diagnostic(error) });
   process.exit(0);
 });
 process.on("unhandledRejection", (reason: unknown) => {
-  log("hook.unhandled_rejection", { reason: String(reason) });
+  log("hook.unhandled_rejection", { reason: diagnostic(reason) });
   process.exit(0);
 });
 
@@ -51,6 +59,7 @@ watchdog.unref();
 await main();
 
 async function main(): Promise<void> {
+  const hookStarted = Date.now();
   const input = await readInput();
   // Nothing parseable arrived at all. The mode argument alone would be
   // enough to go on, and that is exactly the trap: without a payload
@@ -84,20 +93,22 @@ async function main(): Promise<void> {
       if (config.skills) await syncSkills();
       else log("skills.disabled", {});
     } else {
-      emit(mode === "inject" ? await sessionStart(input, config) : await flush(input, config));
+      emit(mode === "start" ? await sessionStart(input, config) : await turn(input, config));
     }
   } catch (error) {
-    log("hook.failed", { hook: input.hook_event_name, error: String(error) });
+    log("hook.failed", { hook: input.hook_event_name, error: diagnostic(error) });
   }
-
-  // Session state is worthless once the session is gone; the last hook
-  // of a session is the cheapest place to notice.
-  if (input.hook_event_name === "SessionEnd") prune();
+  log("hook.done", {
+    hook: input.hook_event_name,
+    mode,
+    elapsed_ms: Date.now() - hookStarted,
+  });
 }
 
 /**
  * The payload is ground truth — it says which event actually fired. The
- * argument from `hooks.json` is the fallback and the cross-check.
+ * argument from `hooks.json` selects which of the two SessionStart handlers is
+ * registered and cross-checks every other registration.
  *
  * Since SKIL-4 there is one exception, and it is the argument's first
  * load-bearing use: **two entries ride `SessionStart`** — the inject that
@@ -107,24 +118,14 @@ async function main(): Promise<void> {
  * nothing is the right answer to one.
  */
 function resolveMode(argument: string | undefined, event: string | undefined): Mode {
-  if (argument === "skills") {
-    return event === undefined || event === "SessionStart" ? "skills" : "none";
+  if (argument === "skills" && event === "SessionStart") return "skills";
+  if (argument === "session-start" && event === "SessionStart") return "start";
+  if (
+    argument === "turn" &&
+    (event === "Stop" || event === "PreCompact" || event === "SessionEnd")
+  ) {
+    return "turn";
   }
-  switch (event) {
-    case "SessionStart":
-      return "inject";
-    case "Stop":
-    case "PreCompact":
-    case "SessionEnd":
-      return "flush";
-    case undefined:
-      break;
-    default:
-      // Registered for an event this adapter does not handle.
-      return "none";
-  }
-  if (argument === "session-start") return "inject";
-  if (argument === "observe" || argument === "flush") return "flush";
   return "none";
 }
 
@@ -138,12 +139,13 @@ async function readInput(): Promise<HookInput | undefined> {
     process.stdin.setEncoding("utf8");
     for await (const piece of process.stdin) raw += String(piece);
   } catch (error) {
-    log("hook.stdin_failed", { error: String(error) });
+    log("hook.stdin_failed", { error: diagnostic(error) });
     return undefined;
   }
   try {
     const parsed: unknown = JSON.parse(raw);
     if (parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)) {
+      captureInput(raw, parsed as HookInput);
       return parsed as HookInput;
     }
   } catch {
@@ -152,6 +154,38 @@ async function readInput(): Promise<HookInput | undefined> {
   }
   log("hook.stdin_unparsed", { bytes: raw.length });
   return undefined;
+}
+
+/**
+ * Opt-in raw-frame capture for the separately run CPR-14 live gate.
+ *
+ * Off unless an absolute scratch directory is named. The gate needs the real
+ * client's bytes to update a replay corpus when Claude's private protocol
+ * moves; writing them into the project or normal logs would turn a diagnostic
+ * facility into a second transcript store. Files are private and the live
+ * runner removes the whole scratch tree after producing its redacted report.
+ */
+function captureInput(raw: string, input: HookInput): void {
+  const directory = process.env.SYNVEDA_CAPTURE_DIR;
+  if (directory === undefined || !isAbsolute(directory)) return;
+  try {
+    ensureDir(directory);
+    const event =
+      typeof input.hook_event_name === "string"
+        ? input.hook_event_name.replace(/[^A-Za-z0-9._-]/g, "_")
+        : "unknown";
+    const name = String(Date.now()) + "-" + event + "-" + randomUUID() + ".json";
+    const path = join(directory, name);
+    const handle = openSync(path, "wx", 0o600);
+    try {
+      writeSync(handle, raw);
+    } finally {
+      closeSync(handle);
+    }
+    log("fixture.captured", { event, bytes: Buffer.byteLength(raw) });
+  } catch (error) {
+    log("fixture.capture_failed", { error: diagnostic(error) });
+  }
 }
 
 function emit(output: HookOutput): void {

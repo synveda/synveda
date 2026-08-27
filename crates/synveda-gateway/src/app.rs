@@ -6,14 +6,12 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use crate::service_identities;
-
 use axum::Router;
-use axum::extract::{DefaultBodyLimit, MatchedPath, Query, Request, State};
+use axum::extract::{MatchedPath, Query, Request, State};
 use axum::http::StatusCode;
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Json, Response};
-use axum::routing::{get, post, put};
+use axum::routing::{get, post};
 use metrics_exporter_prometheus::PrometheusHandle;
 // The two extension traits W3C trace-context extraction needs: `.span()` on
 // an extracted `Context`, and `.set_parent()` on the request span.
@@ -26,24 +24,8 @@ use synveda_types::{Error, Tenant};
 use tower_http::trace::TraceLayer;
 use tracing_opentelemetry::OpenTelemetrySpanExt as _;
 
-use crate::audit_query;
 use crate::auth;
-use crate::capabilities;
-use crate::channels;
-use crate::curators;
-use crate::directory_admin;
 use crate::error::ApiError;
-use crate::hierarchy;
-use crate::inject;
-use crate::observe;
-use crate::packs;
-use crate::policy;
-use crate::prompts;
-use crate::proposals;
-use crate::quarantine;
-use crate::recall;
-use crate::roles;
-use crate::skills;
 use crate::telemetry::{HTTP_REQUEST_DURATION_SECONDS, HTTP_REQUESTS_TOTAL};
 use crate::tenant;
 
@@ -70,26 +52,17 @@ pub struct AppState {
     /// The embedded PDP (AUTHZ-1, ADR-0012): handlers authorize through it
     /// before acting; the pack refresher hot-swaps stored packs into it.
     pub pdp: Arc<Pdp>,
-    /// The scope-chain resolver (HIER-2, ADR-0016): read-through cache
-    /// over the closure table; the hierarchy-mutating handlers invalidate
-    /// it post-commit through [`AppState::invalidate_hierarchy`].
-    pub scope_chains: Arc<synveda_store::ScopeChainCache>,
     /// The service-token lifetime cap (AUTH-3, ADR-0018 decision 5):
     /// the enforcement seam refuses a service identity's token whose
     /// lifetime (`exp − iat`) is unknown or exceeds this.
     /// `SYNVEDA_SERVICE_TOKEN_MAX_TTL_SECS`, default 3600.
     pub service_token_max_ttl: Duration,
-    /// The search-index sidecar (CTX-1, ADR-0024): the inject route's
-    /// lexical leg (CTX-3, ADR-0026); the indexer task converges it.
-    pub search_index: Arc<synveda_retrieval::SearchIndex>,
-    /// The MEM-4 embedder seam (ADR-0023): the inject route's
-    /// query-embedding call and the pipeline worker's record vectors
-    /// share one config-declared model identity (ADR-0026 decision 3).
+    /// The Knowledge embedder seam. Context queries and the immutable
+    /// Knowledge-revision indexing worker share one declared model identity.
     pub embedder: Arc<synveda_ingest::embedding::AnyEmbedder>,
-    /// The inject route's embed deadline (ADR-0026 decision 3):
-    /// `SYNVEDA_INJECT_EMBED_TIMEOUT_MS`, default 100. Expiry drops the
-    /// dense leg (sparse-only, marked degraded), never the request.
-    pub inject_embed_timeout: Duration,
+    /// Context-query embedding deadline. Expiry degrades to lexical
+    /// Knowledge retrieval and is recorded on the ContextRun.
+    pub context_embed_timeout: Duration,
     /// The key plane (TEN-4, ADR-0064): materialises the sealing keys the
     /// console session columns and the per-tenant secrets need. Backed by
     /// `Kms::Disabled` when `SYNVEDA_KMS_KEY` is unset, in which case the
@@ -98,14 +71,12 @@ pub struct AppState {
 }
 
 impl AppState {
-    /// The one post-commit seam for every hierarchy mutation (ADR-0016
-    /// decision 5, ADR-0017 decision 5): flushes the tenant's cached
-    /// scope chains and its Cedar entity fragments, so the very next
-    /// request re-reads committed truth. Any future hierarchy writer
-    /// (AUTH-4 SCIM, AUTH-5 directory sync) calls this — never the two
-    /// caches individually.
-    pub fn invalidate_hierarchy(&self, tenant_id: synveda_types::TenantId) {
-        self.scope_chains.invalidate(tenant_id);
+    /// The one post-commit seam for every scope-tree mutation (ADR-0017
+    /// decision 5, kept when the chain cache left with the hierarchy —
+    /// CPR-7, ADR-0074): flushes the tenant's Cedar entity fragments, so
+    /// the very next request re-reads committed truth. Every scope writer
+    /// — the admin plane, provisioning, the directory sync — calls this.
+    pub fn invalidate_scopes(&self, tenant_id: synveda_types::TenantId) {
         self.pdp.flush_entities(tenant_id);
     }
 
@@ -194,202 +165,12 @@ fn console_routes() -> Router<AppState> {
 /// plane, wrapped in the per-request trace span and HTTP metrics middleware.
 pub fn router(state: AppState) -> Router {
     // Every /v1 route sits behind tenant resolution; ops routes do not.
-    // The hierarchy admin plane (HIER-1) additionally authorizes every
-    // operation through the PDP inside its handlers (AUTHZ-1, ADR-0012).
-    let authenticated = Router::new()
-        .route("/v1/whoami", get(whoami))
-        .route("/v1/hierarchy/nodes", post(hierarchy::create))
-        .route("/v1/hierarchy/root", get(hierarchy::root))
-        .route(
-            "/v1/hierarchy/nodes/{id}",
-            get(hierarchy::get)
-                .patch(hierarchy::update)
-                .delete(hierarchy::delete),
-        )
-        .route(
-            "/v1/hierarchy/nodes/{id}/children",
-            get(hierarchy::children),
-        )
-        .route(
-            "/v1/hierarchy/nodes/{id}/ancestors",
-            get(hierarchy::ancestors),
-        )
-        .route(
-            "/v1/hierarchy/nodes/{id}/descendants",
-            get(hierarchy::descendants),
-        )
-        // The capability probe (CNSL-2, ADR-0058): what the *caller* may
-        // do, asked of the PDP. A forecast rather than a grant (decision
-        // 2) — nothing downstream reads the answer to decide anything —
-        // and it never takes a `subject`, so it cannot answer about a
-        // third party (decision 3).
-        .route(
-            "/v1/hierarchy/nodes/{id}/capabilities",
-            get(capabilities::at_node),
-        )
-        .route("/v1/capabilities", get(capabilities::batch))
-        // The policy admin plane (AUTHZ-2, ADR-0014 decision 8).
-        .route("/v1/policy/packs", get(policy::packs))
-        .route(
-            "/v1/policy/default",
-            get(policy::get_default)
-                .put(policy::set_default)
-                .delete(policy::clear_default),
-        )
-        .route(
-            "/v1/hierarchy/nodes/{id}/policy",
-            put(policy::assign_node_policy)
-                .get(policy::get_node_policy)
-                .delete(policy::unassign_node_policy),
-        )
-        // The role admin plane (AUTHZ-3, ADR-0015 decision 7).
-        .route(
-            "/v1/roles/bindings",
-            get(roles::list)
-                .put(roles::bind_tenant_wide)
-                .delete(roles::unbind_tenant_wide),
-        )
-        .route(
-            "/v1/hierarchy/nodes/{id}/roles",
-            get(roles::list_node)
-                .put(roles::bind_node)
-                .delete(roles::unbind_node),
-        )
-        // The observe primitive (MEM-1, ADR-0020): the data plane's write
-        // seam. Its body limit covers the worst-case batch; every other
-        // route keeps axum's default. The redaction scan runs inside it
-        // (MEM-2, ADR-0021).
-        .route(
-            "/v1/observe",
-            post(observe::create).layer(DefaultBodyLimit::max(observe::BODY_LIMIT_BYTES)),
-        )
-        // The inject primitive (CTX-3, ADR-0026): the read path's
-        // session-start seam — plan, retrieve, compose, one chained
-        // audit event.
-        .route("/v1/inject", post(inject::create))
-        // The recall primitive (CTX-4, ADR-0041): the bodies behind the
-        // handles an inject block's index tier handed out. The plan is
-        // re-decided per call — a handle is a name, not a capability —
-        // and the same `admit` the block composed under answers here.
-        .route("/v1/recall", post(recall::create))
-        // The quarantine review plane (MEM-2, ADR-0021 decisions 5–7).
-        .route("/v1/quarantine", get(quarantine::list))
-        .route(
-            "/v1/quarantine/{event_id}/release",
-            post(quarantine::release),
-        )
-        .route("/v1/quarantine/{event_id}/reject", post(quarantine::reject))
-        // The audit query plane (AUD-2, ADR-0045): one action, `AuditRead`,
-        // decided at the tenant — there is no scope-resource variant, so
-        // an audit answer covers the whole chain or is refused. The two
-        // AC questions get one call each; `verify` is the chain check the
-        // CLI has had since AUD-1, now reachable without DATABASE_URL.
-        .route("/v1/audit/events", get(audit_query::events))
-        .route("/v1/audit/disclosures", get(audit_query::disclosures))
-        .route("/v1/audit/knowledge", get(audit_query::knowledge))
-        .route("/v1/audit/verify", get(audit_query::verify))
-        // The VedaFlow channel plane (FLOW-2, ADR-0031 decision 12):
-        // reading a scope's standing channels, and publishing records
-        // across the trust boundary onto its published one. Since FLOW-3
-        // the publish resolves the same approval matrix a proposal does,
-        // satisfied by the acting principal alone (ADR-0032 decision 8).
-        .route("/v1/channels/{scope_id}", get(channels::list))
-        .route("/v1/channels/{scope_id}/publish", post(channels::publish))
-        // Rollback and pinning (FLOW-7, ADR-0036). `history` is the
-        // listing a rewind is chosen from and renders exactly the set the
-        // rewind accepts; `pin` holds what the channel serves without
-        // moving where it points, and is released by deleting it.
-        .route("/v1/channels/{scope_id}/history", get(channels::history))
-        .route("/v1/channels/{scope_id}/rollback", post(channels::rollback))
-        .route("/v1/channels/{scope_id}/pin", post(channels::pin))
-        .route("/v1/channels/{scope_id}/unpin", post(channels::unpin))
-        // The VedaFlow proposal plane (FLOW-3, ADR-0032): the review in
-        // front of a publication. Opening asks, approving counts, and
-        // publishing runs the effect under `ChannelPublish` — approvals
-        // go in front of that decision, they do not replace it.
-        .route("/v1/proposals", get(proposals::list).post(proposals::open))
-        .route("/v1/proposals/{id}", get(proposals::get))
-        .route("/v1/proposals/{id}/approve", post(proposals::approve))
-        .route("/v1/proposals/{id}/reject", post(proposals::reject))
-        .route("/v1/proposals/{id}/withdraw", post(proposals::withdraw))
-        .route("/v1/proposals/{id}/checklist", post(proposals::checklist))
-        .route(
-            "/v1/proposals/{id}/quality-override",
-            post(proposals::quality_override),
-        )
-        .route("/v1/proposals/{id}/publish", post(proposals::publish))
-        .route("/v1/proposals/{id}/classify", post(proposals::classify))
-        // The prompt registry (PRMT-1, ADR-0049). Authoring writes a draft
-        // and moves nothing a consumer reads; resolution walks the caller's
-        // own placement chain nearest-first, or serves a named scope's
-        // draft or a commit the caller pins. The wildcard is the path
-        // shape of a prompt name (decision 3), and it sits *after* the
-        // collection route so `GET /v1/prompts?scope_id=…` still lists.
-        .route("/v1/prompts", get(prompts::list).post(prompts::author))
-        .route("/v1/prompts/{*name}", get(prompts::resolve))
-        // The context-pack registry (PRMT-2, ADR-0050). There is no
-        // `GET /v1/context-packs/{name}` resolve route, and that is the
-        // difference between the two authored asset types rather than an
-        // omission: a prompt is fetched by name, and a pack's content
-        // arrives through `/v1/inject` as ranked pinned material.
-        .route("/v1/context-packs", get(packs::list).post(packs::author))
-        // The skills registry (SKIL-1, ADR-0051). Shaped like the prompt
-        // registry and not the pack one, because a skill IS fetched by name
-        // — and unlike a prompt, what comes back is the whole bundle from
-        // one commit, since a client loads a skill whole. There is no
-        // materialisation route: writing files into a client's own skills
-        // directory is `synveda skill install`, because the harness is a
-        // guest (seed §2.6, ADR-0051 decision 12).
-        .route("/v1/skills", get(skills::list).post(skills::author))
-        .route("/v1/skills/{name}", get(skills::resolve))
-        // The lapse plane (AUTHZ-4, ADR-0037). `POST /v1/lapses` opens a
-        // *proposal* and grants nothing; the grant is that proposal's
-        // effect, beside `/publish` and taking the same shape.
-        .route("/v1/proposals/{id}/lapse", post(crate::lapses::grant))
-        .route(
-            "/v1/lapses",
-            get(crate::lapses::list).post(crate::lapses::propose),
-        )
-        .route("/v1/lapses/{id}/revoke", post(crate::lapses::revoke))
-        // CODEOWNERS-style curator files (FLOW-3, ADR-0032 decisions
-        // 13–15), under the policy plane's own actions: they add required
-        // approvers and grant nothing.
-        .route(
-            "/v1/hierarchy/nodes/{id}/curators",
-            get(curators::get).put(curators::put),
-        )
-        // The service-identity plane (AUTH-3, ADR-0018 decision 3).
-        .route(
-            "/v1/service-identities",
-            get(service_identities::list).post(service_identities::register),
-        )
-        .route(
-            "/v1/service-identities/{id}",
-            get(service_identities::get).delete(service_identities::remove),
-        )
-        // The directory plane's credentials (AUTH-4, ADR-0059
-        // decision 13). On `/v1` rather than on `/scim/v2`: issuing one is
-        // an act of the product's own authority, PDP-gated at the tenant,
-        // and a credential that could mint another would make the
-        // directory the authority on its own access.
-        .merge(crate::scim::credential_routes())
-        // The pull sync's operator surface (AUTH-5, ADR-0060 decision 10).
-        // On `/v1` and reachable from nowhere else: a breaker the directory
-        // can wave through is not a breaker, so releasing one is an act of
-        // the product's own authority and never the provisioning
-        // credential's. It takes its own action rather than
-        // `DirectoryManage`'s, because handing out a token and authorising
-        // irreversible bulk sealing are not the same magnitude and a tenant
-        // must be able to hold them apart.
-        .route("/v1/directory/sync", get(directory_admin::status))
-        .route(
-            "/v1/directory/seal-authorisations",
-            post(directory_admin::authorise),
-        )
-        .route_layer(middleware::from_fn_with_state(
-            state.clone(),
-            tenant::resolve_tenant,
-        ));
+    // The admin planes authorize every operation through the PDP inside
+    // their handlers (AUTHZ-1, ADR-0012).
+    let authenticated = crate::routes::router().route_layer(middleware::from_fn_with_state(
+        state.clone(),
+        tenant::resolve_tenant,
+    ));
     Router::new()
         .route("/healthz", get(healthz))
         .route("/readyz", get(readyz))
@@ -436,14 +217,26 @@ async fn healthz() -> &'static str {
 }
 
 /// Readiness: walks the real crate layering (gateway→retrieval→store) down to
-/// a Postgres round-trip. This is the FND-5 end-to-end traced request; it
-/// reads no application data (ADR-0007).
+/// a Postgres round-trip, then asks that database which schema epoch it is.
+/// This is the FND-5 end-to-end traced request; it reads no application data
+/// (ADR-0007).
+///
+/// The epoch check is here as well as at boot (CPR-2, ADR-0069) because the
+/// gateway is allowed to start without a database — that is what lets an
+/// outage be reported instead of crash-looping — and a check that only ran at
+/// boot would therefore be a check a database could arrive after. Answering it
+/// per probe costs one single-row select and closes that window: nothing that
+/// routes on readiness sends traffic to a gateway sitting on the wrong epoch.
 async fn readyz(State(state): State<AppState>) -> Response {
-    match synveda_retrieval::readiness(&state.pool).await {
-        Ok(()) => (StatusCode::OK, "ready").into_response(),
+    if let Err(err) = synveda_retrieval::readiness(&state.pool).await {
+        tracing::error!(error = %err, "readiness check failed");
+        // The detail is in the trace and the log; the body stays generic.
+        return (StatusCode::SERVICE_UNAVAILABLE, "not ready").into_response();
+    }
+    match synveda_store::epoch::verify(&state.pool).await {
+        Ok(_) => (StatusCode::OK, "ready").into_response(),
         Err(err) => {
-            tracing::error!(error = %err, "readiness check failed");
-            // The detail is in the trace and the log; the body stays generic.
+            tracing::error!(error = %err, "readiness check failed: schema epoch");
             (StatusCode::SERVICE_UNAVAILABLE, "not ready").into_response()
         }
     }
@@ -454,9 +247,10 @@ async fn render_metrics(State(state): State<AppState>) -> String {
     state.metrics.render()
 }
 
-#[derive(Serialize)]
-struct WhoamiResponse {
+#[derive(Serialize, utoipa::ToSchema)]
+pub(crate) struct WhoamiResponse {
     subject: String,
+    #[schema(value_type = crate::me::TenantView)]
     tenant: Tenant,
     /// The tenant plane's capability probe, when the caller asked for it
     /// (CNSL-2, ADR-0058 decision 1). Absent by default: the base call is
@@ -482,7 +276,22 @@ pub(crate) struct WhoamiParams {
 /// only**, which is why it needs no permission of its own (ADR-0058
 /// decision 3). Reads the task-local rather than a request extension: this
 /// endpoint exists to prove the propagation path end to end.
-async fn whoami(State(state): State<AppState>, Query(params): Query<WhoamiParams>) -> Response {
+#[utoipa::path(
+    get,
+    path = "/v1/whoami",
+    operation_id = "get_whoami",
+    tag = "me",
+    params(("capabilities" = Option<bool>, Query, description = "Include tenant-plane capability forecasts")),
+    responses(
+        (status = 200, description = "The resolved caller and optional tenant capabilities", body = WhoamiResponse),
+        (status = 401, description = "No usable credential", body = crate::workspaces::ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
+pub(crate) async fn whoami(
+    State(state): State<AppState>,
+    Query(params): Query<WhoamiParams>,
+) -> Response {
     let capabilities = if params.capabilities {
         match crate::capabilities::at_tenant(&state).await {
             Ok(block) => Some(block),
@@ -515,13 +324,14 @@ async fn whoami(State(state): State<AppState>, Query(params): Query<WhoamiParams
 /// [`client_name`].
 fn make_request_span(request: &Request) -> tracing::Span {
     let route = matched_route(request);
+    let path = recorded_path(request, &route);
     let span = tracing::info_span!(
         "http.request",
         otel.name = %format!("{} {}", request.method(), route),
         otel.kind = "server",
         http.request.method = %request.method(),
         http.route = %route,
-        url.path = %request.uri().path(),
+        url.path = %path,
         http.response.status_code = tracing::field::Empty,
         tenant.id = tracing::field::Empty,
         synveda.client = tracing::field::Empty,
@@ -603,9 +413,9 @@ fn parent_context(headers: &axum::http::HeaderMap) -> Option<opentelemetry::Cont
 ///
 /// ADR-0027's observability note promises this header from the Claude Code
 /// adapter, and the adapter has sent it since it shipped — but nothing here
-/// read it, so the gateway could not tell an inject from a hook, a `synveda
-/// recall` from a console click, or a human's command from a model's tool
-/// call. That is the attribution the tenant and the route cannot supply,
+/// read it, so the gateway could not tell a context request from a hook, a
+/// Knowledge query from a console click, or a human's command from a model's
+/// tool call. That is the attribution the tenant and route cannot supply,
 /// and now it is a span field beside them.
 ///
 /// # Bounded, because a caller controls it
@@ -676,9 +486,83 @@ async fn track_http_metrics(request: Request, next: Next) -> Response {
     response
 }
 
+/// Routes whose **path** carries a secret.
+///
+/// `POST /v1/invites/{invite_token}/accept` takes an invitation token as a path
+/// segment (CPR-5, ADR-0072 decision 5). A trace is an ordinary log, and the
+/// seed's rule is that a secret never appears in one — so for these routes the
+/// span records the matched pattern where it would otherwise record the URI.
+///
+/// A list rather than a heuristic, because a heuristic that decides what looks
+/// like a secret is a heuristic that will one day decide wrong in the
+/// permissive direction.
+const SECRET_IN_PATH: [&str; 1] = ["/v1/invites/{invite_token}/accept"];
+
+/// The path to put on the request span: the URI, unless the matched route is
+/// one whose path carries a secret, in which case the pattern.
+fn recorded_path(request: &Request, route: &str) -> String {
+    if SECRET_IN_PATH.contains(&route) {
+        return route.to_owned();
+    }
+    request.uri().path().to_owned()
+}
+
 fn matched_route(request: &Request) -> String {
     request.extensions().get::<MatchedPath>().map_or_else(
         || request.uri().path().to_owned(),
         |path| path.as_str().to_owned(),
     )
+}
+
+#[cfg(test)]
+mod span_tests {
+    use super::*;
+
+    fn request(uri: &str) -> Request {
+        Request::builder()
+            .method("POST")
+            .uri(uri)
+            .body(axum::body::Body::empty())
+            .expect("build request")
+    }
+
+    /// The property CPR-5 needs and nothing else in the tree provides: the one
+    /// route whose *path* carries a live credential must not put that path on a
+    /// span. A trace is an ordinary log (seed: no secret in one).
+    #[test]
+    fn a_route_whose_path_carries_a_secret_records_its_pattern_instead() {
+        let token = "synveda_invite_v1.00000000-0000-7000-8000-000000000000.s3cr3t";
+        let uri = format!("/v1/invites/{token}/accept");
+        let recorded = recorded_path(&request(&uri), "/v1/invites/{invite_token}/accept");
+        assert_eq!(recorded, "/v1/invites/{invite_token}/accept");
+        assert!(
+            !recorded.contains("s3cr3t"),
+            "the span recorded the token: {recorded}"
+        );
+    }
+
+    /// And every other route still records what was actually asked for —
+    /// otherwise the mitigation would cost the whole surface its traces.
+    #[test]
+    fn every_other_route_records_the_path_it_was_asked_for() {
+        let uri = "/v1/workspaces/0199c000-0000-7000-8000-000000000000";
+        assert_eq!(
+            recorded_path(&request(uri), "/v1/workspaces/{workspace_id}"),
+            uri
+        );
+    }
+
+    /// The list names a route the router actually mounts. A stale entry here
+    /// would be a mitigation that silently stopped applying.
+    #[test]
+    fn the_secret_bearing_route_is_one_this_gateway_serves() {
+        for route in SECRET_IN_PATH {
+            assert!(
+                crate::openapi::declared_paths()
+                    .iter()
+                    .any(|path| path == route),
+                "{route} is on the secret-in-path list but not on the contract"
+            );
+        }
+    }
 }

@@ -10,9 +10,16 @@ six fields and treats the rest as opaque (decision 9), and a fixture that
 carries the *whole* shape is what proves the reading survives the fields
 it ignores.
 
-Recorded against Claude Code 2.1.220 (`hooks/`) and against a live
-session transcript of the same build (`transcripts/`); the content is
-synthetic, the shapes are not. Field-by-field:
+`manifest.json`, validated against `schema.json` on every adapter test,
+binds each file to its SHA-256, real-client provenance and exact Claude Code
+version. The corpus has captures from 2.1.220 and 2.1.241. Content and paths
+are synthetic; the protocol shapes are not. A fixture with no manifest entry,
+changed bytes, a personal path or credential-like material fails CI.
+
+The 2.1.241 capture is deliberately both headless and interactive: a headless
+`SessionStart` no longer reports `model` or `agent_type`, while the interactive
+frame does. The tool-using transcript is also what found the missing
+`tool.invoked` mapping in CPR-14. Field-by-field:
 
 - every hook payload carries the common envelope — `session_id`,
   `transcript_path`, `cwd`, and, when the harness has one to give,

@@ -26,11 +26,20 @@ struct TenantView {
     status: String,
 }
 
+/// The `capabilities` block of `GET /v1/whoami?capabilities=true`.
+///
+/// Mirrors `synveda_gateway::capabilities::TenantCapabilities`, which serves
+/// `{role_keys, actions}`. It read `{roles, actions, role_assign}` until the
+/// CPR-9 foundation audit: CPR-7 deleted the role-binding vocabulary and with
+/// it the `RoleAssign` action, renaming `roles` to `role_keys` and dropping
+/// `role_assign` entirely (ADR-0074 decision 6). This side kept both old
+/// names as required fields, so **`synveda whoami --capabilities` failed to
+/// parse every response** — the plain `synveda whoami` beside it kept working,
+/// which is why nothing noticed.
 #[derive(Deserialize)]
 struct TenantCapabilitiesView {
-    roles: Vec<String>,
+    role_keys: Vec<String>,
     actions: std::collections::BTreeMap<String, bool>,
-    role_assign: std::collections::BTreeMap<String, bool>,
 }
 
 /// `synveda whoami [--capabilities]`.
@@ -62,10 +71,10 @@ pub async fn show(profile: &str, capabilities: bool, json_out: bool) -> Result<(
     };
     println!(
         "\ntenant-wide roles: {}",
-        if block.roles.is_empty() {
+        if block.role_keys.is_empty() {
             "—".to_owned()
         } else {
-            block.roles.join(", ")
+            block.role_keys.join(", ")
         }
     );
     // The tenant plane is a much shorter vocabulary than a scope's, and
@@ -85,19 +94,16 @@ pub async fn show(profile: &str, capabilities: bool, json_out: bool) -> Result<(
     for name in &allowed {
         println!("  {name}");
     }
-    let bindable: Vec<&str> = block
-        .role_assign
-        .iter()
-        .filter(|(_, permitted)| **permitted)
-        .map(|(name, _)| name.as_str())
-        .collect();
-    if !bindable.is_empty() {
-        println!("\nmay bind tenant-wide: {}", bindable.join(", "));
-    }
+    // The per-scope forecast used to be `synveda hierarchy capabilities <id>`,
+    // which CPR-7 deleted with the hierarchy plane and did not replace: the
+    // probe itself is still there (`GET /v1/capabilities`) and the console
+    // renders it, but no CLI verb reaches it. Naming the console rather than a
+    // command that no longer exists — a message that suggests a deleted verb
+    // is worse than one that suggests nothing (CPR-9).
     println!(
         "\n{} tenant action(s) denied. A forecast, not a grant: every act \
-         decides again at its own seam. Ask a node with \
-         `synveda hierarchy capabilities <id>`.",
+         decides again at its own seam. For one scope's forecast, see \
+         Advanced ▸ Scopes in the console.",
         block.actions.len() - allowed.len(),
     );
     Ok(())

@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update policy_relaxations aggregate\n              set expiry_recorded_at = now()\n             from policy_relaxation_versions version\n            where aggregate.tenant_id = $1 and aggregate.id = $2\n              and aggregate.revision = $3\n              and aggregate.current_version_id = version.id\n              and version.tenant_id = aggregate.tenant_id\n              and version.relaxation_id = aggregate.id\n              and aggregate.revoked_at is null\n              and aggregate.expiry_recorded_at is null\n              and version.hard_expires_at <= now()",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "07b83859166042c34421eb26afd0c924811d5c5d1107d312a5346ff2519fc651"
+}

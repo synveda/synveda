@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into context_pack_chunks\n             (tenant_id, id, scope_id, pack_name, document_name, title,\n              sensitivity, document_hash, ordinal, heading, content, content_hash)\n         values ($1, $2, $3, 'payments', 'runbooks/refunds.md', 'Refunds runbook',\n                 'internal', $4, 0, 'Refunds', $5, $6)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Bytea",
+        "Text",
+        "Bytea"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "e9ff007055fafebbd1348689e4e8d5f62dc0595783830f2e8610b08f857d8d60"
+}

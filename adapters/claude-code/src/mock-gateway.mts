@@ -15,9 +15,14 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 /** One request as the gateway saw it. */
 export interface RecordedRequest {
   path: string;
+  /** `GET` or `POST`. The session plane has both, so a case that asserts a
+   *  route was reached has to be able to say which verb reached it. */
+  method: string;
   body: Record<string, unknown>;
   /** The bearer the adapter presented, verbatim. */
   authorization?: string;
+  /** The `Idempotency-Key`, on the two routes that require one. */
+  idempotencyKey?: string;
 }
 
 export interface Reply {
@@ -42,10 +47,13 @@ export async function startGateway(respond: Responder): Promise<MockGateway> {
       raw += String(piece);
     });
     request.on("end", () => {
+      const idempotency = request.headers["idempotency-key"];
       const recorded: RecordedRequest = {
         path: request.url ?? "",
+        method: request.method ?? "",
         body: parseBody(raw),
         authorization: request.headers.authorization,
+        idempotencyKey: typeof idempotency === "string" ? idempotency : undefined,
       };
       const index = requests.length;
       requests.push(recorded);

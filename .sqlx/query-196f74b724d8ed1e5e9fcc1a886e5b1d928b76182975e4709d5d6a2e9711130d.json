@@ -1,0 +1,27 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select synveda_erase_knowledge($1, $2, $3, $4, $5, $6)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "synveda_erase_knowledge",
+        "type_info": "Void"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "196f74b724d8ed1e5e9fcc1a886e5b1d928b76182975e4709d5d6a2e9711130d"
+}

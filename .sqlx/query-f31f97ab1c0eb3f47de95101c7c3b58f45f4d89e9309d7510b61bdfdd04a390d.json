@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update policy_relaxations set governing_scope_id = gen_random_uuid()\n             where tenant_id = $1 and id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f31f97ab1c0eb3f47de95101c7c3b58f45f4d89e9309d7510b61bdfdd04a390d"
+}

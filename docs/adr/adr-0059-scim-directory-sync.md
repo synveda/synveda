@@ -5,6 +5,16 @@
 - **Feature(s)**: AUTH-4 (and the seam AUTH-5 drives)
 - **Deciders**: sujitn
 
+> **Successor note (2026-08-25):** ADR-0093/CPR-34 supersedes decisions 2,
+> 3 and 6 where they describe a second SCIM group/member mirror, fixed-tree
+> placement or a plane that reaches no product authority. Directory users
+> remain adapter resources, while directory groups and identity-keyed
+> membership now project once onto the shared access graph. A directory
+> credential still cannot name a scope, role or grant; only the separately
+> PDP-governed directory access-assignment command can bind that group to
+> authority. The rest of this ADR remains historical rationale for the SCIM
+> protocol, correspondence, seal, credential and evidence rules.
+
 ## Context
 
 AUTH-4 is the feature nine earlier ones deferred to by name. ADR-0013

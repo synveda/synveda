@@ -10,23 +10,20 @@
 //!
 //! Two properties are structural rather than checked:
 //!
-//! - **No content leaves here.** A [`Disclosure`] carries record ids,
-//!   object addresses, channels, tiers and staleness — the shape of what
-//!   was served, never the substance. An auditor reads no content
+//! - **No content leaves here.** A [`Disclosure`] carries stable Knowledge
+//!   and immutable revision ids, content hashes and reason codes — the shape
+//!   of what was served, never the substance. An auditor reads no content
 //!   (seed §5), and this module is the route by which they would otherwise
 //!   acquire it (decision 6).
-//! - **Absence is reported as absence.** Payload shapes have grown with the
-//!   features that emit them: an entry written before FLOW-2 carries a
-//!   `version_hash` and no `object_hash`, one written before AUTHZ-5 has no
-//!   `tier`, and one written before MEM-6 has no staleness. Every extracted
-//!   field is therefore an `Option` that stays `None` rather than taking a
-//!   default. A default here would be this surface inventing a fact about
-//!   the past, which is the one thing an audit answer must never do.
+//! - **Absence is reported as absence.** A hashes-only or disabled trace may
+//!   omit stable addresses. Every extracted address is therefore optional and
+//!   stays absent rather than taking a default. A default here would invent a
+//!   fact about the past, which is the one thing an audit answer must never do.
 
 use chrono::{DateTime, Utc};
 use serde_json::{Value, json};
 use sqlx::PgConnection;
-use synveda_types::{Error, RecordId, Result, TenantId};
+use synveda_types::{Error, KnowledgeItemId, Result, TenantId};
 
 use crate::chain::StoredEvent;
 use crate::event::{AuditAction, Outcome};
@@ -37,32 +34,30 @@ use crate::event::{AuditAction, Outcome};
 ///
 /// This is exactly the predicate of migration 0028's partial GIN index; a
 /// query that widens it stops using that index.
-pub const DISCLOSURE_ACTIONS: [AuditAction; 2] =
-    [AuditAction::ContextInjected, AuditAction::ContextRecalled];
+/// `session.context.composed` is the set (CPR-12, ADR-0078 decision 5): a
+/// ContextRun is the **only** way material reaches an agent, and a
+/// disclosure query that did not count it would answer "nobody was served
+/// anything" about every deployment on the new plane.
+pub const DISCLOSURE_ACTIONS: [AuditAction; 1] = [AuditAction::SessionContextComposed];
 
 /// The actions that open or close authority over a scope's material — the
 /// *authority* half of "who could see X on date D" (ADR-0045 decision 4).
 ///
 /// Deliberately a list of actions rather than a fold: this module hands
-/// back the events, and the caller that knows the hierarchy assembles the
-/// answer. Historical bindings, assignments and grants exist nowhere else —
-/// `role_bindings`, `policy_pack_assignments` and `policy_lapses` are
-/// current-state tables, and an unbound role leaves no row — so these
-/// events are not merely the tamper-evident record of what governed a scope
-/// in March, they are the only record.
+/// back the events, and the caller that knows the scope tree assembles the
+/// answer. Historical grants, Configuration changes and immutable relaxation
+/// transitions must be reconstructed from the chain rather than inferred
+/// from current heads, so these events are not merely tamper evidence: they
+/// are the transaction-time record.
 ///
 /// Pass to [`search`] via [`EventFilter::actions`].
-pub const AUTHORITY_ACTIONS: [AuditAction; 13] = [
-    AuditAction::RoleBound,
-    AuditAction::RoleUnbound,
-    AuditAction::PolicyDefaultSet,
-    AuditAction::PolicyDefaultCleared,
-    AuditAction::PolicyNodeAssigned,
-    AuditAction::PolicyNodeUnassigned,
-    AuditAction::LapseGranted,
-    AuditAction::LapseRevoked,
-    AuditAction::LapseExpired,
-    AuditAction::MemoryClassified,
+pub const AUTHORITY_ACTIONS: [AuditAction; 9] = [
+    AuditAction::AccessGranted,
+    AuditAction::AccessRevoked,
+    AuditAction::ConfigurationChangeApplied,
+    AuditAction::CuratorRulesUpdated,
+    AuditAction::RelaxationChangeApplied,
+    AuditAction::RelaxationExpired,
     AuditAction::ChannelPublished,
     AuditAction::ChannelRolledBack,
     AuditAction::ChannelPinned,
@@ -131,6 +126,13 @@ pub struct EventFilter {
     pub from: Option<DateTime<Utc>>,
     /// Exclusive upper bound on `occurred_at`.
     pub until: Option<DateTime<Utc>>,
+    /// Exact JSON containment predicate over the canonical payload.
+    ///
+    /// The gateway constructs this only from validated typed artifact,
+    /// session and context-run identifiers. Keeping the predicate structured
+    /// means no query interprets display strings or searches arbitrary JSON
+    /// text (CPR-33, ADR-0092 decision 1).
+    pub payload_contains: Option<Value>,
 }
 
 /// The chain head, for stamping an answer.
@@ -187,10 +189,8 @@ pub async fn search(
             .collect()
     });
 
-    // One statement with nullable predicates rather than SQL assembled from
-    // parts: compile-time checked queries only (CLAUDE.md), and a filter
-    // combination that never runs is still a filter combination the
-    // compiler has verified.
+    // Nullable predicates keep every filter combination in one
+    // compile-time-checked statement.
     let events = sqlx::query_as!(
         StoredEvent,
         r#"select seq, occurred_at, actor_kind, actor_subject, action,
@@ -204,8 +204,9 @@ pub async fn search(
              and ($6::text is null or resource = $6)
              and ($7::timestamptz is null or occurred_at >= $7)
              and ($8::timestamptz is null or occurred_at < $8)
+             and ($9::jsonb is null or payload @> $9)
            order by seq
-           limit $9"#,
+           limit $10"#,
         tenant.as_uuid(),
         after,
         filter.actor_subject.as_deref(),
@@ -214,6 +215,7 @@ pub async fn search(
         filter.resource.as_deref(),
         filter.from,
         filter.until,
+        filter.payload_contains.as_ref(),
         limit,
     )
     .fetch_all(&mut *conn)
@@ -223,11 +225,11 @@ pub async fn search(
     Ok(page(events, frame, limit, |event| event.seq))
 }
 
-/// One record being served to one subject, as the chain recorded it.
+/// One Knowledge revision being served to one subject, as the chain recorded it.
 ///
-/// A single event discloses many records, so an event with four entries and
+/// A single event discloses many revisions, so an event with four entries and
 /// a matching id yields one `Disclosure` for that id — the answer is per
-/// (reader, record, occasion), which is what "who could see X" asks for.
+/// (reader, Knowledge item, occasion), which is what "who could see X" asks for.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Disclosure {
     /// Position in the chain — the evidence anyone can re-read.
@@ -238,9 +240,8 @@ pub struct Disclosure {
     pub actor_kind: String,
     /// Who was served.
     pub actor_subject: String,
-    /// `context.injected` or `context.recalled` — being *given* material
-    /// and *asking for* it are different acts, so the answer keeps them
-    /// apart rather than merging them into "saw".
+    /// The delivery act (`session.context.composed`) that put the immutable
+    /// revision in the session context.
     pub action: String,
     /// The session the block went to, when the caller named one.
     pub session_id: Option<String>,
@@ -252,56 +253,43 @@ pub struct Disclosure {
 /// its substance (ADR-0045 decision 6).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct DisclosedEntry {
-    /// The record served.
-    pub record_id: String,
-    /// The VedaFlow object address of exactly the version that composed
-    /// (ADR-0031 decision 11). `None` on entries written before FLOW-2.
-    pub object_hash: Option<String>,
-    /// The BLAKE3 version hash CTX-2 watermarked with (ADR-0025
-    /// decision 7), on entries old enough to predate the object address.
-    /// Kept distinct rather than folded into `object_hash`: a content
-    /// address and a version hash are different claims, and reporting one
-    /// as the other would be this surface inventing a fact.
-    pub version_hash: Option<String>,
-    /// The channel it composed from — the trust label an auditor reads
-    /// before the content they are not going to get.
-    pub channel: Option<String>,
-    /// The sensitivity tier it was served at (ADR-0041 decision 9).
-    pub tier: Option<String>,
-    /// Staleness as integer per mille (ADR-0040); never a float, because
-    /// audit canonicalisation refuses one.
-    pub staleness_permille: Option<i64>,
+    /// Stable Knowledge aggregate served. Absent in hashes-only retention.
+    pub knowledge_item_id: Option<String>,
+    /// Exact immutable revision served. Absent in hashes-only retention.
+    pub knowledge_revision_id: Option<String>,
+    /// Canonical revision content hash.
+    pub content_hash: Option<String>,
+    /// Planner reason vocabulary, content-free and order-preserving.
+    pub reason_codes: Vec<String>,
 }
 
-/// Every disclosure of `record` in `[from, until)`, oldest first — the
+/// Every disclosure of `knowledge_item` in `[from, until)`, oldest first — the
 /// evidentiary half of "who could see X on date D" (ADR-0045 decision 4).
 ///
-/// The other half is the authority that governed the record's scope that
+/// The other half is the authority that governed the item's scope that
 /// day: [`search`] with [`AUTHORITY_ACTIONS`]. The two are deliberately not
 /// merged here — merging them means deciding, and deciding over
 /// reconstructed inputs is the replay ADR-0042 option 5 rejected.
 ///
-/// A record that does not exist, belongs to another tenant, or has been
-/// disposed of under MEM-6 all answer the same empty answer: the surface is
-/// not an existence oracle (ADR-0041 decision 6's shape, for the same
-/// reason).
+/// An item that does not exist, belongs to another tenant, or was never served
+/// answers the same empty result: the surface is not an existence oracle.
 #[tracing::instrument(
     name = "audit.disclosures",
     skip_all,
-    fields(tenant.id = %tenant, record.id = %record, limit = limit),
+    fields(tenant.id = %tenant, knowledge.item.id = %knowledge_item, limit = limit),
     err(Display)
 )]
 pub async fn disclosures(
     conn: &mut PgConnection,
     tenant: TenantId,
-    record: RecordId,
+    knowledge_item: KnowledgeItemId,
     from: DateTime<Utc>,
     until: DateTime<Utc>,
     after: i64,
     limit: i64,
 ) -> Result<Page<Disclosure>> {
     let frame = frame(&mut *conn, tenant).await?;
-    let containment = json!({ "entries": [{ "record_id": record.to_string() }] });
+    let containment = json!({ "knowledge": [{ "knowledge_item_id": knowledge_item.to_string() }] });
 
     // The action list is spelled out rather than parameterised so it
     // matches migration 0028's partial index predicate exactly — a
@@ -311,7 +299,7 @@ pub async fn disclosures(
         r#"select seq, occurred_at, actor_kind, actor_subject, action, payload
            from audit_log
            where tenant_id = $1
-             and action in ('context.injected', 'context.recalled')
+             and action = 'session.context.composed'
              and payload @> $2::jsonb
              and seq > $3
              and occurred_at >= $4
@@ -337,13 +325,13 @@ pub async fn disclosures(
     let truncated = i64::try_from(rows.len()).unwrap_or(i64::MAX) >= limit;
     let last_read = rows.last().map(|row| row.seq);
 
-    let target = record.to_string();
+    let target = knowledge_item.to_string();
     let items = rows
         .into_iter()
         .filter_map(|row| {
             // Containment matched the event; this picks the entry out of
             // it. An event whose match came from somewhere other than an
-            // entry's `record_id` yields nothing rather than a disclosure
+            // entry's `knowledge_item_id` yields nothing rather than a disclosure
             // with a guessed entry.
             entry_for(&row.payload, &target).map(|entry| Disclosure {
                 seq: row.seq,
@@ -388,28 +376,38 @@ pub async fn knowledge(
     tenant: TenantId,
     subject: &str,
     at: DateTime<Utc>,
+    before: i64,
     limit: i64,
 ) -> Result<Page<Disclosure>> {
     let frame = frame(&mut *conn, tenant).await?;
-    let rows = sqlx::query!(
+    let fetch = limit.checked_add(1).ok_or_else(|| Error::Invalid {
+        message: "audit Knowledge limit is too large".to_owned(),
+    })?;
+    let mut rows = sqlx::query!(
         r#"select seq, occurred_at, actor_kind, actor_subject, action, payload
            from audit_log
            where tenant_id = $1
-             and action in ('context.injected', 'context.recalled')
+             and action = 'session.context.composed'
              and actor_subject = $2
              and occurred_at <= $3
+             and seq < $4
            order by seq desc
-           limit $4"#,
+           limit $5"#,
         tenant.as_uuid(),
         subject,
         at,
-        limit,
+        before,
+        fetch,
     )
     .fetch_all(&mut *conn)
     .await
     .map_err(|err| storage_error("read audit knowledge", &err))?;
 
-    let truncated = i64::try_from(rows.len()).unwrap_or(i64::MAX) >= limit;
+    let truncated = i64::try_from(rows.len()).unwrap_or(i64::MAX) > limit;
+    if truncated {
+        rows.pop();
+    }
+    let lowest_read = rows.last().map(|row| row.seq);
     let mut items = rows
         .into_iter()
         .flat_map(|row| {
@@ -437,7 +435,7 @@ pub async fn knowledge(
         // lowest seq reached: a caller who wants more walks backwards from
         // it, which is the opposite direction to [`search`] and is why this
         // function assembles its own page rather than calling `page`.
-        next_cursor: truncated.then(|| first_seq.unwrap_or(0)),
+        next_cursor: truncated.then(|| lowest_read.unwrap_or(0)),
         items,
         frame,
         first_seq,
@@ -445,7 +443,97 @@ pub async fn knowledge(
     })
 }
 
-/// What one subject was last served of one record — the fold behind "what
+/// One cursor page from a frozen contiguous chain prefix.
+///
+/// `through` is the prefix head captured by the first request. Later pages
+/// repeat it, so audit-read events appended while walking the export can never
+/// enter the artifact being assembled (CPR-33, ADR-0092 decision 4).
+#[tracing::instrument(
+    name = "audit.export_page",
+    skip_all,
+    fields(tenant.id = %tenant, after = after, through = ?through, limit = limit),
+    err(Display)
+)]
+pub async fn export_page(
+    conn: &mut PgConnection,
+    tenant: TenantId,
+    after: i64,
+    through: Option<i64>,
+    limit: i64,
+) -> Result<Page<StoredEvent>> {
+    let live = frame(&mut *conn, tenant).await?;
+    let through = through.unwrap_or(live.head_seq);
+    if through < 0 || through > live.head_seq {
+        return Err(Error::Invalid {
+            message: format!(
+                "audit export through must be between 0 and the current head {}",
+                live.head_seq
+            ),
+        });
+    }
+    if after < 0 || after > through {
+        return Err(Error::Invalid {
+            message: format!("audit export after must be between 0 and through {through}"),
+        });
+    }
+
+    let snapshot_hash = if through == 0 {
+        crate::chain::genesis_hash(tenant).to_vec()
+    } else {
+        sqlx::query_scalar!(
+            "select hash from audit_log where tenant_id = $1 and seq = $2",
+            tenant.as_uuid(),
+            through,
+        )
+        .fetch_optional(&mut *conn)
+        .await
+        .map_err(|err| storage_error("read audit export snapshot hash", &err))?
+        .ok_or_else(|| Error::Storage {
+            message: format!("audit chain has no row at frozen head {through}"),
+        })?
+    };
+
+    // Fetch one look-ahead row so `truncated` means another row definitely
+    // exists inside this frozen prefix, rather than merely that the page was
+    // exactly full.
+    let fetch = limit.checked_add(1).ok_or_else(|| Error::Invalid {
+        message: "audit export limit is too large".to_owned(),
+    })?;
+    let mut events = sqlx::query_as!(
+        StoredEvent,
+        r#"select seq, occurred_at, actor_kind, actor_subject, action,
+                  resource, outcome, payload, trace_id, prev_hash, hash
+             from audit_log
+            where tenant_id = $1 and seq > $2 and seq <= $3
+            order by seq
+            limit $4"#,
+        tenant.as_uuid(),
+        after,
+        through,
+        fetch,
+    )
+    .fetch_all(&mut *conn)
+    .await
+    .map_err(|err| storage_error("read frozen audit export page", &err))?;
+    let truncated = i64::try_from(events.len()).unwrap_or(i64::MAX) > limit;
+    if truncated {
+        events.pop();
+    }
+    let first_seq = events.first().map(|event| event.seq);
+    let last_seq = events.last().map(|event| event.seq);
+    Ok(Page {
+        next_cursor: truncated.then_some(last_seq.unwrap_or(after)),
+        items: events,
+        frame: ChainFrame {
+            head_seq: through,
+            head_hash: snapshot_hash,
+        },
+        first_seq,
+        last_seq,
+    })
+}
+
+/// What one subject was last served of one Knowledge item — the fold behind "what
 /// did agent A know at time T" (ADR-0045 decision 5).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Known {
@@ -455,15 +543,17 @@ pub struct Known {
     pub seq: i64,
     /// When it was last delivered.
     pub occurred_at: DateTime<Utc>,
-    /// `context.injected` or `context.recalled` — how it arrived that
-    /// last time.
+    /// The delivery act (`session.context.composed`) from the last occasion.
     pub action: String,
     /// How many times it was served in the window read.
     pub occasions: usize,
 }
 
-/// Fold disclosures to one row per record: the version *last* delivered at
-/// or before the instant asked at, with the number of occasions behind it.
+/// Fold disclosures to one row per retained Knowledge identity: the revision
+/// *last* delivered at or before the instant asked at, with the number of
+/// occasions behind it. Full/redacted evidence is keyed by stable item ID;
+/// hashes-only evidence is keyed by the retained content hash and never grows a
+/// synthetic item ID.
 ///
 /// Last-wins by `seq`, which is the chain's own order — not by
 /// `occurred_at`, which two events can share at microsecond precision.
@@ -475,7 +565,7 @@ pub fn fold_knowledge(disclosures: &[Disclosure]) -> Vec<Known> {
     for disclosure in disclosures {
         match known
             .iter_mut()
-            .find(|item| item.entry.record_id == disclosure.entry.record_id)
+            .find(|item| same_retained_identity(&item.entry, &disclosure.entry))
         {
             Some(item) => {
                 item.occasions += 1;
@@ -513,34 +603,63 @@ fn page<T>(items: Vec<T>, frame: ChainFrame, limit: i64, seq_of: impl Fn(&T) -> 
     }
 }
 
-/// Every entry of a disclosure payload, in the order the block composed
-/// them. An event with no `entries` array — an empty block, a payload shape
+/// Every Knowledge entry in a disclosure payload, in delivery order. An event
+/// with no `knowledge` array — an empty block, a payload shape
 /// this build does not know — yields none rather than an invented one.
 fn entries(payload: &Value) -> Vec<DisclosedEntry> {
     payload
-        .get("entries")
+        .get("knowledge")
         .and_then(Value::as_array)
         .map(|entries| entries.iter().filter_map(entry_from).collect())
         .unwrap_or_default()
 }
 
-/// The entry naming `record_id`, if this payload has one.
-fn entry_for(payload: &Value, record_id: &str) -> Option<DisclosedEntry> {
+/// The entry naming `knowledge_item_id`, if this payload has one.
+fn entry_for(payload: &Value, knowledge_item_id: &str) -> Option<DisclosedEntry> {
     entries(payload)
         .into_iter()
-        .find(|entry| entry.record_id == record_id)
+        .find(|entry| entry.knowledge_item_id.as_deref() == Some(knowledge_item_id))
 }
 
-/// One entry, read defensively: every field that is absent stays absent.
+/// One entry, read defensively: every field that is absent stays absent. A
+/// hashes-only trace is still evidence, so a content hash is sufficient to
+/// retain the entry; a value carrying neither an address nor a hash is not.
 fn entry_from(value: &Value) -> Option<DisclosedEntry> {
+    let knowledge_item_id = string_field(value, "knowledge_item_id");
+    let content_hash = string_field(value, "content_hash");
+    if knowledge_item_id.is_none() && content_hash.is_none() {
+        return None;
+    }
     Some(DisclosedEntry {
-        record_id: string_field(value, "record_id")?,
-        object_hash: string_field(value, "object_hash"),
-        version_hash: string_field(value, "version_hash"),
-        channel: string_field(value, "channel"),
-        tier: string_field(value, "tier"),
-        staleness_permille: value.get("staleness_permille").and_then(Value::as_i64),
+        knowledge_item_id,
+        knowledge_revision_id: string_field(value, "knowledge_revision_id"),
+        content_hash,
+        reason_codes: value
+            .get("reason_codes")
+            .and_then(Value::as_array)
+            .map(|values| {
+                values
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(ToOwned::to_owned)
+                    .collect()
+            })
+            .unwrap_or_default(),
     })
+}
+
+/// Compare only evidence the configured retention mode actually kept. Item IDs
+/// dominate when present; addressless hashes-only rows can only be correlated
+/// by their content hash.
+fn same_retained_identity(left: &DisclosedEntry, right: &DisclosedEntry) -> bool {
+    match (
+        left.knowledge_item_id.as_deref(),
+        right.knowledge_item_id.as_deref(),
+    ) {
+        (Some(left), Some(right)) => left == right,
+        (None, None) => left.content_hash == right.content_hash,
+        _ => false,
+    }
 }
 
 /// A string field, or `None` — including when it is present but not a
@@ -563,17 +682,17 @@ fn storage_error(context: &str, err: &sqlx::Error) -> Error {
 mod tests {
     use super::*;
 
-    fn disclosure(seq: i64, record: &str, object_hash: Option<&str>) -> Disclosure {
+    fn disclosure(seq: i64, item: &str, revision: Option<&str>) -> Disclosure {
         Disclosure {
             seq,
             occurred_at: DateTime::from_timestamp(1_700_000_000 + seq, 0).expect("valid instant"),
             actor_kind: "subject".to_owned(),
             actor_subject: "alice".to_owned(),
-            action: "context.injected".to_owned(),
+            action: "session.context.composed".to_owned(),
             session_id: None,
             entry: DisclosedEntry {
-                record_id: record.to_owned(),
-                object_hash: object_hash.map(ToOwned::to_owned),
+                knowledge_item_id: Some(item.to_owned()),
+                knowledge_revision_id: revision.map(ToOwned::to_owned),
                 ..DisclosedEntry::default()
             },
         }
@@ -582,19 +701,19 @@ mod tests {
     #[test]
     fn the_fold_keeps_the_last_version_delivered_and_counts_the_occasions() {
         let folded = fold_knowledge(&[
-            disclosure(1, "rec-a", Some("hash-1")),
-            disclosure(2, "rec-b", Some("hash-b")),
-            disclosure(3, "rec-a", Some("hash-2")),
+            disclosure(1, "item-a", Some("revision-1")),
+            disclosure(2, "item-b", Some("revision-b")),
+            disclosure(3, "item-a", Some("revision-2")),
         ]);
 
-        assert_eq!(folded.len(), 2, "one row per record, not per delivery");
+        assert_eq!(folded.len(), 2, "one row per item, not per delivery");
         let rec_a = folded
             .iter()
-            .find(|item| item.entry.record_id == "rec-a")
-            .expect("rec-a folded");
+            .find(|item| item.entry.knowledge_item_id.as_deref() == Some("item-a"))
+            .expect("item-a folded");
         assert_eq!(
-            rec_a.entry.object_hash.as_deref(),
-            Some("hash-2"),
+            rec_a.entry.knowledge_revision_id.as_deref(),
+            Some("revision-2"),
             "the version last delivered wins, not the first"
         );
         assert_eq!(rec_a.occasions, 2);
@@ -606,8 +725,8 @@ mod tests {
         // Two deliveries sharing an instant: seq decides, because
         // `occurred_at` is microsecond-truncated and two appends can
         // share one.
-        let mut first = disclosure(7, "rec-a", Some("older"));
-        let mut second = disclosure(8, "rec-a", Some("newer"));
+        let mut first = disclosure(7, "item-a", Some("older"));
+        let mut second = disclosure(8, "item-a", Some("newer"));
         let shared = DateTime::from_timestamp(1_700_000_000, 0).expect("valid instant");
         first.occurred_at = shared;
         second.occurred_at = shared;
@@ -616,87 +735,104 @@ mod tests {
 
         assert_eq!(folded.len(), 1);
         assert_eq!(
-            folded[0].entry.object_hash.as_deref(),
+            folded[0].entry.knowledge_revision_id.as_deref(),
             Some("newer"),
             "seq 8 is later than seq 7 whatever the timestamps say"
         );
     }
 
     #[test]
-    fn an_entry_predating_flow_2_keeps_its_version_hash_and_gains_no_object_address() {
-        // A real shape from the chain: CTX-2 watermarked with
-        // `version_hash`, and FLOW-2 replaced it with the object address.
+    fn hashes_only_absence_stays_absent() {
         let payload = json!({
-            "entries": [{"record_id": "rec-a", "version_hash": "1602..."}],
+            "knowledge": [{"content_hash": "1602..."}],
         });
 
-        let entry = entry_for(&payload, "rec-a").expect("the entry is found");
+        let entry = entries(&payload).pop().expect("hash evidence is retained");
 
-        assert_eq!(entry.version_hash.as_deref(), Some("1602..."));
+        assert_eq!(entry.knowledge_item_id, None);
+        assert_eq!(entry.content_hash.as_deref(), Some("1602..."));
+        assert_eq!(entry.knowledge_revision_id, None);
+        assert!(entry.reason_codes.is_empty());
+    }
+
+    #[test]
+    fn hashes_only_entries_fold_without_inventing_an_address() {
+        let mut first = disclosure(1, "discarded-address", None);
+        first.entry.knowledge_item_id = None;
+        first.entry.content_hash = Some("same-content".to_owned());
+        let mut second = disclosure(2, "discarded-address", None);
+        second.entry.knowledge_item_id = None;
+        second.entry.content_hash = Some("same-content".to_owned());
+
+        let folded = fold_knowledge(&[first, second]);
+
+        assert_eq!(folded.len(), 1);
+        assert_eq!(folded[0].entry.knowledge_item_id, None);
         assert_eq!(
-            entry.object_hash, None,
-            "a version hash is not a content address and is never reported as one"
+            folded[0].entry.content_hash.as_deref(),
+            Some("same-content")
         );
-        assert_eq!(entry.channel, None, "absent is absent, never a default");
-        assert_eq!(entry.tier, None);
-        assert_eq!(entry.staleness_permille, None);
+        assert_eq!(folded[0].occasions, 2);
     }
 
     #[test]
     fn a_current_entry_carries_every_label_the_chain_recorded() {
         let payload = json!({
             "session_id": "s-1",
-            "entries": [{
-                "record_id": "rec-a",
-                "object_hash": "abcd",
-                "channel": "acme/eng/published",
-                "tier": "internal",
-                "staleness_permille": 250,
+            "knowledge": [{
+                "knowledge_item_id": "item-a",
+                "knowledge_revision_id": "revision-a",
+                "content_hash": "abcd",
+                "reason_codes": ["keyword_match", "freshness_boost"],
             }],
         });
 
-        let entry = entry_for(&payload, "rec-a").expect("the entry is found");
+        let entry = entry_for(&payload, "item-a").expect("the entry is found");
 
-        assert_eq!(entry.object_hash.as_deref(), Some("abcd"));
-        assert_eq!(entry.channel.as_deref(), Some("acme/eng/published"));
-        assert_eq!(entry.tier.as_deref(), Some("internal"));
-        assert_eq!(entry.staleness_permille, Some(250));
+        assert_eq!(entry.knowledge_revision_id.as_deref(), Some("revision-a"));
+        assert_eq!(entry.content_hash.as_deref(), Some("abcd"));
+        assert_eq!(
+            entry.reason_codes,
+            ["keyword_match".to_owned(), "freshness_boost".to_owned()]
+        );
         assert_eq!(string_field(&payload, "session_id").as_deref(), Some("s-1"));
     }
 
     #[test]
     fn a_payload_without_entries_discloses_nothing() {
-        // The empty block CTX-3 serves a quarantined or unplaced caller is
-        // still audited, and it disclosed nothing.
-        assert!(entries(&json!({"entries": []})).is_empty());
+        assert!(entries(&json!({"knowledge": []})).is_empty());
         assert!(entries(&json!({"block_hash": "abcd"})).is_empty());
-        assert!(entries(&json!({"entries": "not-an-array"})).is_empty());
-        assert!(entry_for(&json!({"entries": [{"tier": "internal"}]}), "rec-a").is_none());
+        assert!(entries(&json!({"knowledge": "not-an-array"})).is_empty());
+        assert!(entries(&json!({"knowledge": [{}]})).is_empty());
+        assert!(entry_for(&json!({"knowledge": [{"content_hash": "abcd"}]}), "item-a").is_none());
     }
 
     #[test]
     fn a_field_of_the_wrong_type_reads_as_absent_rather_than_coerced() {
         let payload = json!({
-            "entries": [{"record_id": "rec-a", "tier": 3, "staleness_permille": "250"}],
+            "knowledge": [{
+                "knowledge_item_id": "item-a",
+                "knowledge_revision_id": 3,
+                "reason_codes": "keyword_match"
+            }],
         });
 
-        let entry = entry_for(&payload, "rec-a").expect("the entry is found");
+        let entry = entry_for(&payload, "item-a").expect("the entry is found");
 
-        assert_eq!(entry.tier, None, "a number is not a tier");
-        assert_eq!(
-            entry.staleness_permille, None,
-            "a string is not an integer per mille"
-        );
+        assert_eq!(entry.knowledge_revision_id, None, "a number is not an id");
+        assert!(entry.reason_codes.is_empty(), "a string is not an array");
     }
 
     #[test]
     fn the_disclosure_actions_are_exactly_the_partial_index_predicate() {
-        // Migration 0028's index is partial on these two action names; a
-        // rename here without a migration silently stops using it.
+        // The index is partial on exactly these action names — migration
+        // 0028's originally, rebuilt by 0046 when the observe cutover made a
+        // context run the only way material reaches anybody. A rename or an
+        // addition here without a matching migration silently stops using it.
         let names: Vec<&str> = DISCLOSURE_ACTIONS
             .iter()
             .map(|action| action.as_str())
             .collect();
-        assert_eq!(names, ["context.injected", "context.recalled"]);
+        assert_eq!(names, ["session.context.composed"]);
     }
 }

@@ -1,6 +1,6 @@
 [package]
 name = "synveda-store"
-description = "Storage traits and Postgres/pgvector/AGE implementations"
+description = "Tenant-bound Postgres and pgvector storage for the context platform"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

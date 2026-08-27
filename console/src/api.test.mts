@@ -65,10 +65,10 @@ test("a body with no message still yields something honest to show", () => {
 test("the gateway's own sentence is displayed rather than recomposed", () => {
   // ADR-0056 decision 6's rule, applied to errors: the gateway owns the
   // wording, and a second author of one sentence is a second sentence.
-  const outcome = classify(403, { message: "steward and security-reviewer must be two people" });
+  const outcome = classify(403, { message: "curator and reviewer must be two people" });
   assert.equal(
     outcome.kind === "forbidden" ? outcome.message : "",
-    "steward and security-reviewer must be two people",
+    "curator and reviewer must be two people",
   );
 });
 
@@ -118,4 +118,30 @@ test("a body that is not json does not crash the surface", async () => {
     Promise.resolve(new Response("<html>502</html>", { status: 502 }));
   const outcome = await call("/proposals", {}, html);
   assert.equal(outcome.kind, "unavailable");
+});
+
+test("empty and non-json error bodies do not mask their status", async () => {
+  const emptyForbidden: typeof fetch = () =>
+    Promise.resolve(new Response(null, { status: 403 }));
+  const forbidden = await call("/proposals", {}, emptyForbidden);
+  assert.equal(forbidden.kind, "forbidden");
+  assert.match(forbidden.kind === "forbidden" ? forbidden.message : "", /did not say why/);
+
+  const htmlConflict: typeof fetch = () =>
+    Promise.resolve(new Response("<html>conflict</html>", { status: 409 }));
+  const conflict = await call("/proposals", {}, htmlConflict);
+  assert.equal(conflict.kind, "conflict");
+  assert.match(conflict.kind === "conflict" ? conflict.message : "", /did not say why/);
+});
+
+test("an unreadable error body does not replace the response status", async () => {
+  const unreadable: typeof fetch = () =>
+    Promise.resolve({
+      status: 403,
+      text: () => Promise.reject(new Error("response stream failed")),
+    } as Response);
+
+  const outcome = await call("/proposals", {}, unreadable);
+  assert.equal(outcome.kind, "forbidden");
+  assert.match(outcome.kind === "forbidden" ? outcome.message : "", /did not say why/);
 });

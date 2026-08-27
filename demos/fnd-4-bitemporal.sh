@@ -2,8 +2,7 @@
 # FND-4 acceptance demo: as-of queries return historical row states, proven by
 # the deterministic AC test and a property test over random operation
 # histories (crates/synveda-store/tests/bitemporal.rs).
-# AC (docs/backlog/FND-4.md): as-of query returns historical row states;
-# property tests.
+# Acceptance: as-of queries return historical row states under property tests.
 # On Windows, run via Git Bash. Needs only the postgres service, not the full
 # dev stack.
 set -eu

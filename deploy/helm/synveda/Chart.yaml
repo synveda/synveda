@@ -1,8 +1,9 @@
 apiVersion: v2
 name: synveda
 description: |
-  Synveda's enterprise profile — the gateway, an HA Postgres cluster under
-  CloudNativePG, and the wiring for a customer's IdP. OPS-2, ADR-0062.
+  Synveda's context-platform runtime — the gateway, a CloudNativePG data
+  plane, and the wiring for a customer's IdP. Product profiles are governed
+  Configuration data, not chart variants. OPS-2; CPR-36, ADR-0095.
 type: application
 
 # The chart's own version, and the product release it deploys. appVersion

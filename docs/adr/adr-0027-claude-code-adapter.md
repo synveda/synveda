@@ -1,13 +1,51 @@
 # ADR-0027: Claude Code adapter — hook seams, the CLI as credential authority, cursor-and-idempotency observe
 
-- **Status**: Accepted, **amended twice** — 2026-08-11 by OPS-8 (decision 1's
-  manifest was wrong in two places and the plugin never loaded in Claude
-  Code) and 2026-08-13 by the first headless session (the hooks load and
-  fire, and only the *read* one completes). The hook contract itself is
-  unchanged by either.
+- **Status**: Accepted, **amended three times** — 2026-08-11 by OPS-8
+  (decision 1's manifest was wrong in two places and the plugin never loaded
+  in Claude Code), 2026-08-13 by the first headless session (the hooks load
+  and fire, and only the *read* one completes), and 2026-08-24 by CPR-14
+  (the real client closed the remaining ambiguity and moved the write hooks'
+  synchronous boundary to the local durable spool, never the gateway).
 - **Date**: 2026-07-24
-- **Feature(s)**: ADPT-1
+- **Feature(s)**: ADPT-1, ADPT-8, CPR-14
 - **Deciders**: sujitn
+
+## Amendment 3 (2026-08-24): synchronous means the local durability boundary
+
+CPR-14 ran the installed Synveda plugin through authenticated Claude Code
+**2.1.241**, rather than manufacturing hook invocations. That closes Amendment
+2's last ambiguity. With `Stop` registered `async: true`, a successful
+headless `claude -p` produced the two SessionStart frames, then exited with the
+Synveda session still active and **zero** events after an eight-second wait.
+Claude Code's hook reference now states the mechanism explicitly: print mode
+does not wait for async hooks during teardown and kills any still running.
+
+Making the old network operation synchronous would still be the wrong answer.
+The seam is split instead:
+
+- `Stop` and `PreCompact` are synchronous command registrations only through
+  transcript-delta conversion and the spool's atomic
+  temp-write → `fsync` → rename. They return before credential resolution or
+  network I/O, so an interactive turn never waits on the gateway.
+- `SessionEnd` performs the bounded synchronous delivery and close. Claude
+  Code gives SessionEnd hooks a separate overall budget (1.5 seconds by
+  default), which a plugin's own timeout does not raise; the acceptance gate
+  sets `CLAUDE_CODE_SESSIONEND_HOOKS_TIMEOUT_MS=8000` so ADR-0078's existing
+  three-second flush can finish inside the already-recorded eight-second gate.
+- The next `SessionStart` and explicit `synveda session flush` remain the
+  recovery seams for anything SessionEnd could not acknowledge.
+
+The authenticated rerun emitted real SessionStart, Stop and SessionEnd frames,
+persisted one context run and four ordered user/tool/assistant events, and
+ended the same run with reason `other`. The local Stop boundary took **8ms**;
+the append happened later in SessionEnd and took **28ms**. The test asserts the
+separation directly: Stop makes zero event requests and leaves every newly
+recorded entry pending with `delivery_attempts = 0`.
+
+This closes ADPT-8 without pretending the hook contract can cover a process
+killed before a lifecycle hook receives the in-flight turn. That tail remains
+outside the guarantee; everything which reaches the spool remains durable and
+idempotently recoverable.
 
 ## Amendment 2 (2026-08-13): the write hooks do not run where nobody is waiting
 

@@ -1,0 +1,66 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select id, tenant_id, context_run_id, context_selection_id,\n               knowledge_revision_id, feedback_type, principal_id, created_at\n        from context_feedback\n        where tenant_id = $1 and context_run_id = $2 and idempotency_key = $3\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "tenant_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "context_run_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "context_selection_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "knowledge_revision_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "feedback_type",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "principal_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "d338395e86cd7493811b1769a3c890d9f8987094beb424a2609bbbef01688c83"
+}

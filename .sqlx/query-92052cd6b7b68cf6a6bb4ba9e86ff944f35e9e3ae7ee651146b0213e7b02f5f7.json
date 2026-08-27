@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select aggregate.id\n             from policy_relaxations aggregate\n             join policy_relaxation_versions version\n               on version.tenant_id = aggregate.tenant_id\n              and version.relaxation_id = aggregate.id\n              and version.id = aggregate.current_version_id\n            where aggregate.tenant_id = $1\n              and version.subject_principal_id = $2\n              and aggregate.revoked_at is null\n              and version.effective_start_at <= now()\n              and version.hard_expires_at > now()\n            order by aggregate.id",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "92052cd6b7b68cf6a6bb4ba9e86ff944f35e9e3ae7ee651146b0213e7b02f5f7"
+}

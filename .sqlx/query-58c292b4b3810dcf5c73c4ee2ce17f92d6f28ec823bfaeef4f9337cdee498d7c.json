@@ -1,0 +1,101 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select id, tenant_id, directory_source, external_id, user_name, active, display_name,\n               given_name, family_name, work_email, identity_id, version,\n               created_at, updated_at\n        from scim_users\n        where tenant_id = $1 and external_id = $2 and active\n        order by directory_source\n        limit 2\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "tenant_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "directory_source",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "external_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "user_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "active",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 6,
+        "name": "display_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "given_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "family_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "work_email",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "identity_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 11,
+        "name": "version",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 12,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 13,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "58c292b4b3810dcf5c73c4ee2ce17f92d6f28ec823bfaeef4f9337cdee498d7c"
+}

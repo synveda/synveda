@@ -3,21 +3,27 @@
 //! The whole design of this file is what it *does not* do. It applies
 //! migrations and admits a tenant, both of which are pre-existing audited
 //! break-glass paths with no governed surface and no operator to run them
-//! yet (ADR-0055 decision 1). It writes no scope, no identity, no role
-//! binding and no record. Those arrive the way a customer's do:
+//! yet (ADR-0055 decision 1). It writes no scope, no identity, no grant and no
+//! Knowledge. Those arrive the way a customer's do:
 //!
-//!   * the **org root**, the operator's **identity** and their tenant-wide
-//!     **org-admin** binding on the first `synveda login`, inside AUTH-2's
-//!     provisioning transaction, chained under the operator's own subject
-//!     (`ensure_root` + ADR-0015 decision 6, reused rather than copied);
-//!   * **departments and teams** through `synveda hierarchy create`, a PDP
-//!     decision at the parent scope per node;
-//!   * **memory** through observe → extract → embed.
+//!   * the operator's **identity**, their own `principal` scope and — because
+//!     `init` puts them in the `synveda-admins` IdP group — an
+//!     **`administrator` grant at the tenant root**, on the first `synveda
+//!     login`, inside AUTH-2's provisioning transaction and chained under the
+//!     operator's own subject (CPR-7, ADR-0074 decision 4);
+//!   * **workspaces, projects and org units** through the governed surfaces —
+//!     `POST /v1/workspaces` and `synveda scope create`, a PDP decision each;
+//!   * **sessions, capture candidates and Knowledge** through the generated
+//!     public application API, with publication passing through VedaFlow.
+//!
+//! There is no placement convention and no role binding left for it to write:
+//! CPR-7 deleted both, so an identity's scope is its own and everything else
+//! is a grant (ADR-0074 decision 3).
 //!
 //! That is not fastidiousness. An installer runs once, as root-equivalent,
 //! before anybody is watching, and whatever it writes becomes the tenant's
 //! history — so it is the single worst place in this product to keep a
-//! shortcut past the PDP (seed §2.2, CLAUDE.md). It is also why the
+//! shortcut past the PDP. It is also why the
 //! bootstrap this replaces needed a *second gateway* running with
 //! `SYNVEDA_DEV_JWT_SECRET` just to create three nodes, and why nothing
 //! here does: the gateway starts once, in OIDC mode, and the dev secret
@@ -28,6 +34,7 @@ use std::process::Command;
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
+use sha2::{Digest as _, Sha256};
 use synveda_types::{TenantId, TenantStatus};
 
 /// The bundled dev IdP, as `deploy/compose/docker-compose.yml` publishes
@@ -46,7 +53,9 @@ const GATEWAY_URL: &str = "http://127.0.0.1:8120";
 /// none (OPS-8).
 const INSTALL_COMMAND: &str =
     "curl -fsSL https://raw.githubusercontent.com/synveda/synveda/main/scripts/install.sh | sh";
-/// The group AUTHZ-3 binds tenant-wide `org-admin` from at login.
+/// The one IdP group the product reads: its members are granted
+/// `administrator` at the tenant root on every login (CPR-7, ADR-0074
+/// decision 4, over AUTHZ-3's tenant-wide `org-admin` binding).
 const ADMIN_GROUP: &str = "synveda-admins";
 
 /// What one `init` was asked for.
@@ -55,46 +64,19 @@ pub struct Plan {
     pub name: String,
     pub embedder: String,
     pub issuer: Option<String>,
-    pub demo: bool,
     pub dry_run: bool,
 }
 
-/// The demo organisation (ADR-0055 decision 8). Two departments, three
-/// teams; the people are IdP users in convention-shaped groups, so AUTH-2
-/// places each of them by the same mapping rule a customer's directory
-/// drives (ADR-0013 decision 3) — nothing here assigns a scope directly.
-const DEMO_DEPARTMENTS: &[(&str, &str)] = &[("eng", "Engineering"), ("sales", "Sales")];
-const DEMO_TEAMS: &[(&str, &str, &str)] = &[
-    ("eng", "platform", "Platform"),
-    ("eng", "payments", "Payments"),
-    ("sales", "emea", "EMEA"),
-];
-/// `(local-part, given, family, group)` — the group is convention-shaped
-/// (`synveda-<department>-<team>`), which is what makes placement a
-/// mapping rather than an assignment.
-///
-/// The address is completed with the tenant slug by [`demo_email`], for the
-/// same reason [`operator_email`] does it: two deployments on one laptop
-/// must not share a login. These were hard-coded at `@demo.localhost` while
-/// the operator beside them was already slug-derived and carried a test
-/// saying why — the rule was written down and then not applied here.
-///
-/// It is not only tidiness. `init` sets a password for everyone it creates,
-/// and Rauthy refuses one it has seen in its last three; two deployments
-/// writing the same address means the second cannot set its password and
-/// [`ensure_user`] falls back to leaving whatever is there. A shared login
-/// whose password nobody can restore is the failure that took
-/// `demos/adpt-1-claude-code.sh` and `demos/auth-2-jit-provisioning.sh`
-/// down together, and this constant is the same shape one layer up — with a
-/// *different* `DEMO_PASSWORD` from the one those demos use, so the two
-/// writers could never have agreed.
-const DEMO_PEOPLE: &[(&str, &str, &str, &str)] = &[
-    ("alice", "Alice", "Chen", "synveda-eng-platform"),
-    ("bob", "Bob", "Okafor", "synveda-eng-platform"),
-    ("carol", "Carol", "Diaz", "synveda-eng-payments"),
-    ("dan", "Dan", "Novak", "synveda-sales-emea"),
-];
-const DEMO_PASSWORD: &str = "Synveda-Demo-Passw0rd!";
+/// Local-only credential for the operator created in the bundled IdP. It is
+/// printed by `init`; it is not a production or customer secret.
+const OPERATOR_PASSWORD: &str = "Synveda-Demo-Passw0rd!";
+
+/// The fixed local Compose login. Its credential is deliberately the existing
+/// dev-only Compose credential; Helm provisions a generated login instead.
+/// Domain migrations own the NOLOGIN `synveda_app` capability role, while the
+/// deployment owns this LOGIN identity (CPR-36, ADR-0095).
+const COMPOSE_GATEWAY_DATABASE_URL: &str =
+    "postgres://synveda_gateway:synveda-dev@localhost:5432/synveda";
 
 pub async fn init(plan: Plan) -> Result<(), String> {
     let started = Instant::now();
@@ -158,10 +140,29 @@ pub async fn init(plan: Plan) -> Result<(), String> {
         .acquire_timeout(Duration::from_secs(30))
         .connect(&database_url)
         .await
-        .map_err(|err| format!("connect to {database_url}: {err}"))?;
-    synveda_store::migrate(&pool)
+        .map_err(|err| format!("connect to {}: {err}", redacted_database_url(&database_url)))?;
+    // The epoch guard before the migrator (CPR-2, ADR-0069), so that an
+    // operator re-running `init` over a database from before the
+    // context-platform cut is told to reset it — as itself, rather than
+    // wrapped in "apply migrations: storage:" three layers down.
+    synveda_store::epoch::preflight(&pool)
+        .await
+        .map_err(|refusal| refusal.to_string())?;
+    let schema = synveda_store::migrate_reporting(&pool)
         .await
         .map_err(|err| format!("apply migrations: {err}"))?;
+    println!(
+        "    schema epoch {} at migration {}",
+        schema.epoch, schema.migration_head
+    );
+    let runtime_database_url = gateway_database_url()?;
+    let runtime_role = runtime_database_role(&runtime_database_url)?;
+    if std::env::var("SYNVEDA_GATEWAY_DATABASE_URL").is_ok_and(|value| !value.is_empty()) {
+        verify_runtime_role(&pool, &runtime_role).await?;
+    } else {
+        provision_compose_gateway_role(&pool).await?;
+    }
+    println!("    runtime role {runtime_role}: LOGIN, RLS-enforced, synveda_app member");
 
     // ── 3. the tenant ───────────────────────────────────────────────────
     //
@@ -233,7 +234,12 @@ pub async fn init(plan: Plan) -> Result<(), String> {
         None
     } else {
         Some(start_host_gateway(
-            &profile, &plan, tenant_id, &issuer, &kek,
+            &profile,
+            &plan,
+            tenant_id,
+            &issuer,
+            &kek,
+            &runtime_database_url,
         )?)
     };
     wait_for_health(
@@ -244,71 +250,35 @@ pub async fn init(plan: Plan) -> Result<(), String> {
     .await?;
     println!("    {GATEWAY_URL} healthy");
 
-    // ── 6. the demo organisation, if asked for ──────────────────────────
-    if plan.demo {
-        if !bundled {
-            return Err(
-                "--demo builds its people in the bundled IdP; it cannot create \
-                        users in your directory (ADR-0055 decision 4)"
-                    .to_owned(),
-            );
-        }
-        step(6, "the ACME demo organisation");
-        println!("    people and groups are in the IdP; scopes are created after you log in");
-        seed_demo_people(&plan.slug).await?;
-    }
-
     let elapsed = started.elapsed();
     println!();
     println!("synveda: initialised in {}s", elapsed.as_secs());
     println!();
-    println!("Next, and this is where the organisation starts to exist:");
+    println!("Next, and this is where the workspace starts to exist:");
     println!();
     println!("    synveda login --gateway {GATEWAY_URL}");
     println!();
+    println!("That first login provisions your identity and your own scope, and — because");
+    println!("you are in the `{ADMIN_GROUP}` group — grants you `administrator` at the root");
     println!(
-        "That first login provisions the org root `{}` from the tenant you just admitted,",
+        "of tenant `{}`, all of it audited under your own subject",
         plan.slug
     );
-    println!("places you under it, and binds you tenant-wide org-admin — all of it audited");
-    println!("under your own subject rather than an installer's. Then:");
+    println!("rather than an installer's. Then:");
     println!();
-    println!("    synveda hierarchy list");
-    if plan.demo {
-        println!();
-        println!("    # then build ACME — scopes, packs, memory and a proposal —");
-        println!("    # as yourself, because every one of those is a governed act:");
-        match profile.demo_seeder() {
-            Some(path) => println!("    {}", path.display()),
-            // The bundle predates OPS-9, or a checkout has not got the file.
-            // Naming what is missing beats printing a path that is not there.
-            None => {
-                println!("    # (this profile carries no demo/seed.sh — it predates OPS-9)");
-            }
-        }
-        println!();
-        println!("    # demo logins (bundled IdP): password {DEMO_PASSWORD}");
-        for (local, _, _, group) in DEMO_PEOPLE {
-            let email = demo_email(local, &plan.slug);
-            println!("    #   {email:<26} {group}");
-        }
-        println!();
-        println!("    docs/BETA.md is the guided tour and the list of known gaps.");
-    }
+    println!("    synveda scope tree");
+    println!("    # create and bind a governed personal/team/enterprise Configuration");
+    println!("    # under Advanced > Configuration, then create a workspace and project");
     if plan.embedder == "deterministic" {
         println!();
         println!("Embedder: deterministic (hash). Retrieval works and is exact for the");
         println!("lexical leg; semantic similarity is not meaningful. `--embedder tei`");
-        println!("serves BGE-M3 — but choose before writing records: `record_embeddings`");
-        println!("stores the model, and nothing in the product re-embeds a corpus.");
+        println!("serves BGE-M3. Knowledge embeddings retain their model and dimension,");
+        println!("and a model change converges a separately labelled index sidecar.");
     }
     Ok(())
 }
 
-/// The demo organisation's shape, as the commands that build it. Printed
-/// rather than executed for the reason in ADR-0055 decision 1: these are
-/// governed creates that need the operator's own bearer, and the operator
-/// has not logged in yet when `init` runs.
 fn dry_run(plan: &Plan, profile: &Profile, issuer: &str, bundled: bool) -> Result<(), String> {
     println!("synveda init --dry-run");
     println!();
@@ -344,29 +314,8 @@ fn dry_run(plan: &Plan, profile: &Profile, issuer: &str, bundled: bool) -> Resul
         if bundled { ", rauthy" } else { "" },
         if plan.embedder == "tei" { ", tei" } else { "" },
     );
-    println!("  would write    migrations, one tenant row (audited break-glass)");
-    println!("  would NOT      write any scope, identity, role binding or record");
-    if plan.demo {
-        println!();
-        println!("  after `synveda login`, ACME is built by the demo seeder — the same");
-        println!("  governed creates, run under your own bearer (OPS-9, ADR-0066):");
-        println!();
-        match profile.demo_seeder() {
-            Some(path) => {
-                println!("    {}", path.display());
-                println!("    {} --dry-run   # what it would do", path.display());
-            }
-            None => println!("    (this profile carries no demo/seed.sh — it predates OPS-9)"),
-        }
-        println!();
-        println!("  the scopes it creates, which are what the IdP groups resolve to:");
-        for (slug, name) in DEMO_DEPARTMENTS {
-            println!("    department  {slug:<10} ({name})");
-        }
-        for (department, slug, name) in DEMO_TEAMS {
-            println!("    team        {slug:<10} ({name}, under {department})");
-        }
-    }
+    println!("  would write    migrations, one tenant row and a least-privilege runtime login");
+    println!("  would NOT      write any scope, identity, grant, Configuration or Knowledge");
     Ok(())
 }
 
@@ -381,10 +330,11 @@ fn print_external_issuer_instructions(issuer: &str) {
     println!("      scopes         openid, profile, email, groups");
     println!("      issuer         {issuer}");
     println!();
-    println!("    Group claims drive placement: a `{ADMIN_GROUP}` member becomes");
-    println!("    tenant-wide org-admin, and `synveda-<department>-<team>` places by");
-    println!("    convention. This command configures an issuer; it does not");
-    println!("    synchronise a directory.");
+    println!("    One group claim is read: a `{ADMIN_GROUP}` member is granted");
+    println!("    `administrator` at the tenant root on every login. There is no");
+    println!("    placement convention — everybody arrives at their own scope and");
+    println!("    reaches anything else through a grant. This command configures an");
+    println!("    issuer; it does not synchronise a directory.");
     println!();
     println!("    For joiners, movers and leavers, issue a provisioning credential");
     println!("    once the instance is up:");
@@ -446,23 +396,7 @@ async fn converge_rauthy(plan: &Plan) -> Result<(), String> {
     ensure_group(&http, ADMIN_GROUP).await?;
     let operator = operator_email(&plan.slug);
     ensure_user(&http, &operator, "Synveda", "Operator", ADMIN_GROUP).await?;
-    println!("    operator: {operator}  (password {DEMO_PASSWORD})");
-    Ok(())
-}
-
-async fn seed_demo_people(slug: &str) -> Result<(), String> {
-    let http = idp_client()?;
-    for (_, _, team_group) in DEMO_TEAMS
-        .iter()
-        .map(|(department, team, _)| (department, team, format!("synveda-{department}-{team}")))
-    {
-        ensure_group(&http, &team_group).await?;
-    }
-    for (local, given, family, group) in DEMO_PEOPLE {
-        let email = demo_email(local, slug);
-        ensure_user(&http, &email, given, family, group).await?;
-        println!("    {email}  {group}");
-    }
+    println!("    operator: {operator}  (password {OPERATOR_PASSWORD})");
     Ok(())
 }
 
@@ -503,16 +437,10 @@ async fn ensure_group(http: &reqwest::Client, group: &str) -> Result<(), String>
 /// **That fallback is only correct while this command is the sole writer of
 /// the address.** It reads "Rauthy would not take the password" as "the
 /// password is already the one I want", and those are the same fact only if
-/// nothing else has set a different one in between. If something has, the
-/// constant is in the history without being current, no `init` can put it
-/// back, and the login is unrecoverable — which is precisely what happened
-/// to `alice@demo.localhost` when this command and two demo scripts wrote
-/// the same address with two different passwords. Slug-derived addresses
-/// ([`demo_email`], [`operator_email`]) are what make the assumption true,
-/// so they are the reason this stays simple rather than growing a
-/// delete-and-recreate path — which would be wrong here anyway: the
-/// operator goes through this function, and minting a new `sub` for them
-/// would orphan the org-admin binding their deployment depends on.
+/// nothing else has set a different one in between. The slug-derived
+/// [`operator_email`] makes the address deployment-local. Deleting and
+/// recreating the operator would mint a new `sub` and orphan the
+/// `administrator` grant keyed by that subject (ADR-0072 decision 4).
 async fn ensure_user(
     http: &reqwest::Client,
     email: &str,
@@ -566,7 +494,7 @@ async fn ensure_user(
     // re-run that fails on its own idempotence is not idempotent
     // (ADR-0055 decision 7).
     let mut with_password = state.clone();
-    with_password["password"] = json!(DEMO_PASSWORD);
+    with_password["password"] = json!(OPERATOR_PASSWORD);
     let path = format!("/auth/v1/users/{id}");
     if idp_send(http, reqwest::Method::PUT, &path, &with_password)
         .await
@@ -632,12 +560,6 @@ fn operator_email(slug: &str) -> String {
     format!("operator@{slug}.localhost")
 }
 
-/// A demo person's login for this deployment, on [`operator_email`]'s rule
-/// and for [`DEMO_PEOPLE`]'s reasons.
-fn demo_email(local: &str, slug: &str) -> String {
-    format!("{local}@{slug}.localhost")
-}
-
 // ── compose, environment, waiting ───────────────────────────────────────
 
 /// Whether the gateway runs as a container or as a host process
@@ -677,6 +599,7 @@ fn start_host_gateway(
     tenant_id: TenantId,
     issuer: &str,
     kek: &str,
+    runtime_database_url: &str,
 ) -> Result<Started, String> {
     let state = profile.state_dir();
     std::fs::create_dir_all(&state).map_err(|err| format!("create {}: {err}", state.display()))?;
@@ -712,14 +635,10 @@ fn start_host_gateway(
     // this". Reinstalling moves both.
     let stamp = binary_stamp(profile);
     let desired = format!(
-        "{issuers}\n{}\n{GATEWAY_URL}\nkek:{:016x}\ngateway:{stamp}\n",
+        "{issuers}\n{}\n{GATEWAY_URL}\nkek:{}\ndatabase:{}\ngateway:{stamp}\n",
         plan.embedder,
-        {
-            use std::hash::{Hash, Hasher};
-            let mut hasher = std::collections::hash_map::DefaultHasher::new();
-            kek.hash(&mut hasher);
-            hasher.finish()
-        }
+        secret_fingerprint(kek),
+        secret_fingerprint(runtime_database_url),
     );
     match (
         running_gateway(&pidfile),
@@ -771,7 +690,7 @@ fn start_host_gateway(
     let mut command = Command::new(&binary);
     command
         .current_dir(profile.working_dir())
-        .env("DATABASE_URL", database_url())
+        .env("DATABASE_URL", runtime_database_url)
         .env("SYNVEDA_OIDC_ISSUERS", &issuers)
         .env("SYNVEDA_PUBLIC_URL", GATEWAY_URL)
         .env("SYNVEDA_LISTEN_ADDR", "127.0.0.1:8120")
@@ -933,6 +852,47 @@ fn running_gateway(pidfile: &Path) -> Option<u32> {
     pid_alive(pid).then_some(pid)
 }
 
+/// Stops the host gateway this deployment started, if one is running
+/// (CPR-2, ADR-0069). `Some(pid)` when something was signalled.
+///
+/// `synveda reset` needs this before it destroys the database: a gateway left
+/// running would hold connections against a database that is about to stop
+/// existing, and — worse — would keep serving from in-process caches (the
+/// scope chains, the policy packs) that describe rows nobody can read any
+/// more. `DROP DATABASE ... WITH (FORCE)` would evict its connections and
+/// leave the process alive and confidently wrong.
+///
+/// Deliberately only the host process. The containerised gateway is compose's
+/// (`init --issuer`), and stopping somebody else's container is not this
+/// command's to do — the caller says so instead.
+pub fn stop_host_gateway() -> Option<u32> {
+    let pidfile = state_dir()?.join("gateway.pid");
+    let pid = running_gateway(&pidfile)?;
+    let _ = Command::new("kill").arg(pid.to_string()).status();
+    wait_for_port_release(GATEWAY_URL, Duration::from_secs(10));
+    Some(pid)
+}
+
+/// The compose file of the deployment this CLI would drive, or `None` where no
+/// profile resolves. Named so that a message can tell somebody which compose
+/// file is theirs rather than making them work it out from which shape of
+/// install they have.
+pub fn compose_file_if_any() -> Option<PathBuf> {
+    Profile::discover()
+        .ok()
+        .map(|profile| profile.compose_file())
+}
+
+/// The state directory of the deployment this CLI would drive — the pidfile,
+/// the log, `kms.key` — or `None` where no profile resolves at all.
+///
+/// `None` is ordinary rather than an error: somebody pointing `DATABASE_URL`
+/// at their own Postgres has no compose profile, and the commands that ask
+/// this are the ones that can carry on without one.
+pub fn state_dir() -> Option<PathBuf> {
+    Profile::discover().ok().map(|profile| profile.state_dir())
+}
+
 /// What the gateway binary is, for the convergence fingerprint.
 ///
 /// Modification time and length rather than a digest: this runs on every
@@ -1043,16 +1003,20 @@ fn write_env_file(
     } else {
         ""
     };
+    let runtime_database = match std::env::var("SYNVEDA_GATEWAY_DATABASE_URL") {
+        Ok(value) if !value.is_empty() => format!("SYNVEDA_GATEWAY_DATABASE_URL={value}\n"),
+        _ => String::new(),
+    };
     let body = format!(
-        "# Written by `synveda init` (OPS-1, ADR-0055). Regenerate by re-running it.\n\
-         # Dev-shaped credentials: this is the single-node profile, not a production one.\n\
+        "# Written by `synveda init` (CPR-36, ADR-0095). Regenerate by re-running it.\n\
+         # Local deployment material. Runtime behaviour comes from governed Configuration.\n\
          SYNVEDA_TENANT_ID={tenant_id}\n\
          SYNVEDA_OIDC_ISSUERS={issuers}\n\
          SYNVEDA_PUBLIC_URL={GATEWAY_URL}\n\
          SYNVEDA_LISTEN_ADDR=0.0.0.0:8120\n\
          SYNVEDA_EMBEDDER={}\n\
          SYNVEDA_KMS_KEY={kek}\n\
-         {tei}",
+         {runtime_database}{tei}",
         plan.embedder,
     );
     std::fs::write(path, body).map_err(|err| format!("write {}: {err}", path.display()))?;
@@ -1206,6 +1170,146 @@ pub fn database_url() -> String {
         .unwrap_or_else(|| "postgres://synveda:synveda-dev@localhost:5432/synveda".to_owned())
 }
 
+/// A credential-safe rendering for operator errors. `DATABASE_URL` is an
+/// admin boundary and must not be echoed into a terminal transcript or CI log.
+pub(crate) fn redacted_database_url(value: &str) -> String {
+    let Ok(mut parsed) = url::Url::parse(value) else {
+        return "configured PostgreSQL database".to_owned();
+    };
+    if parsed.password().is_some() {
+        let _ = parsed.set_password(Some("REDACTED"));
+    }
+    parsed.to_string()
+}
+
+/// A stable, content-sensitive value suitable for the non-secret deployment
+/// convergence file. A credential rotation must restart the gateway, while
+/// the credential itself must never be copied beside the pidfile.
+fn secret_fingerprint(value: &str) -> String {
+    format!("{:x}", Sha256::digest(value.as_bytes()))
+}
+
+/// Runtime DSN for the host gateway. An operator can provide a separately
+/// provisioned login; otherwise the local Compose owner URL is reduced to the
+/// fixed `synveda_gateway` identity that [`provision_compose_gateway_role`]
+/// converges. The password is never printed.
+fn gateway_database_url() -> Result<String, String> {
+    if let Ok(value) = std::env::var("SYNVEDA_GATEWAY_DATABASE_URL")
+        && !value.is_empty()
+    {
+        return Ok(value);
+    }
+
+    let admin = std::env::var("DATABASE_URL")
+        .ok()
+        .filter(|value| !value.is_empty());
+    gateway_database_url_from_admin(admin.as_deref())
+}
+
+/// Pure half of [`gateway_database_url`], kept separate so URL handling is
+/// covered without mutating process-global environment variables in tests.
+fn gateway_database_url_from_admin(admin: Option<&str>) -> Result<String, String> {
+    let Some(admin) = admin else {
+        return Ok(COMPOSE_GATEWAY_DATABASE_URL.to_owned());
+    };
+    let mut parsed = url::Url::parse(admin)
+        .map_err(|_| "DATABASE_URL is not a valid PostgreSQL URL".to_owned())?;
+    parsed
+        .set_username("synveda_gateway")
+        .map_err(|()| "DATABASE_URL cannot carry a gateway login".to_owned())?;
+    parsed
+        .set_password(Some("synveda-dev"))
+        .map_err(|()| "DATABASE_URL cannot carry a gateway password".to_owned())?;
+    Ok(parsed.to_string())
+}
+
+/// Database principal named by a runtime DSN. Deployment validation happens
+/// through the admin connection before the credential is ever given to the
+/// gateway. Percent-encoded role names are refused because PostgreSQL and URL
+/// decoding must not disagree about which cluster-global role was checked.
+fn runtime_database_role(runtime_url: &str) -> Result<String, String> {
+    let parsed = url::Url::parse(runtime_url)
+        .map_err(|_| "SYNVEDA_GATEWAY_DATABASE_URL is not a valid PostgreSQL URL".to_owned())?;
+    let role = parsed.username();
+    if role.is_empty() || role.contains('%') {
+        return Err(
+            "SYNVEDA_GATEWAY_DATABASE_URL must name an unescaped PostgreSQL login role".to_owned(),
+        );
+    }
+    Ok(role.to_owned())
+}
+
+async fn verify_runtime_role(pool: &sqlx::PgPool, role: &str) -> Result<(), String> {
+    let facts = sqlx::query!(
+        r#"select rolcanlogin as "rolcanlogin!", rolsuper as "rolsuper!",
+                  rolbypassrls as "rolbypassrls!",
+                  pg_has_role($1, 'synveda_app', 'member') as "member!"
+             from pg_catalog.pg_roles
+            where rolname = $1"#,
+        role,
+    )
+    .fetch_optional(pool)
+    .await
+    .map_err(|error| format!("verify runtime database login {role}: {error}"))?
+    .ok_or_else(|| format!("runtime database login {role} is not provisioned"))?;
+    if !facts.rolcanlogin || facts.rolsuper || facts.rolbypassrls || !facts.member {
+        return Err(format!(
+            "runtime database login {role} is not LOGIN/non-superuser/non-BYPASSRLS/synveda_app"
+        ));
+    }
+    Ok(())
+}
+
+/// Provision the local Compose login after the migrations have established
+/// the NOLOGIN capability role. This is deployment bootstrap, not schema or
+/// domain data: Helm performs the equivalent grant to CloudNativePG's generated
+/// login and neither path hands its admin credential to the gateway.
+async fn provision_compose_gateway_role(pool: &sqlx::PgPool) -> Result<(), String> {
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|error| format!("begin runtime-role provisioning: {error}"))?;
+    // Roles are cluster-global while `make db-test` databases are not. Keep
+    // two concurrent initialisers from both observing the role as absent.
+    sqlx::query!("select pg_advisory_xact_lock(hashtext('synveda.deployment.runtime-role'))")
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| format!("lock runtime-role provisioning: {error}"))?;
+    sqlx::query!(
+        r#"do $synveda$
+           begin
+             if not exists (
+               select 1 from pg_catalog.pg_roles where rolname = 'synveda_gateway'
+             ) then
+               create role synveda_gateway login password 'synveda-dev';
+             end if;
+           end
+           $synveda$"#
+    )
+    .execute(&mut *tx)
+    .await
+    .map_err(|error| format!("provision the runtime database login: {error}"))?;
+    sqlx::query!(
+        r#"alter role synveda_gateway
+              with login inherit nosuperuser nocreatedb nocreaterole
+                   noreplication nobypassrls connection limit -1
+                   password 'synveda-dev'"#
+    )
+    .execute(&mut *tx)
+    .await
+    .map_err(|error| format!("converge the runtime database login: {error}"))?;
+    sqlx::query!("grant synveda_app to synveda_gateway")
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| format!("grant the runtime database capability role: {error}"))?;
+
+    tx.commit()
+        .await
+        .map_err(|error| format!("commit runtime-role provisioning: {error}"))?;
+    verify_runtime_role(pool, "synveda_gateway").await?;
+    Ok(())
+}
+
 /// Everything `init` needs that is not inside this binary: the compose file,
 /// a gateway to run, a console bundle to serve, and somewhere to keep the
 /// pidfile. ADR-0055 decision 6 said a released binary would carry its own
@@ -1329,25 +1433,6 @@ impl Profile {
             Self::Bundle { home, .. } => home.join("console"),
         };
         candidate.join("index.html").is_file().then_some(candidate)
-    }
-
-    /// The demo seeder (OPS-9, ADR-0066 decision 1), or `None` where this
-    /// profile does not carry one.
-    ///
-    /// `init --demo` prints it, so that neither a contributor nor a tester
-    /// has to know that a checkout and an installed bundle keep it in
-    /// different places — the same courtesy `console_dir` extends, and for
-    /// the same reason: the path is ours to resolve, not theirs to learn.
-    ///
-    /// Absent rather than fatal when missing, on `console_dir`'s precedent
-    /// (ADR-0056 decision 1): a demo affordance must never be a dependency
-    /// of starting the product.
-    fn demo_seeder(&self) -> Option<PathBuf> {
-        let candidate = match self {
-            Self::Checkout { root } => root.join("deploy/release/demo/seed.sh"),
-            Self::Bundle { home, .. } => home.join("profile/demo/seed.sh"),
-        };
-        candidate.is_file().then_some(candidate)
     }
 
     /// Where to look for a gateway to run, in order.
@@ -1502,7 +1587,7 @@ mod tests {
         let logfile = dir.join("gateway.log");
         std::fs::write(
             &logfile,
-            "INFO search indexer starting\n\
+            "INFO gateway starting\n\
              Error: Os { code: 48, kind: AddrInUse, message: \"Address already in use\" }\n",
         )
         .unwrap();
@@ -1749,7 +1834,6 @@ mod tests {
                 name: "ACME".to_owned(),
                 embedder: "deterministic".to_owned(),
                 issuer: None,
-                demo: false,
                 dry_run: false,
             },
             TenantId::new(),
@@ -1833,7 +1917,6 @@ mod tests {
                 name: "ACME".to_owned(),
                 embedder: "deterministic".to_owned(),
                 issuer: None,
-                demo: false,
                 dry_run: false,
             },
             tenant,
@@ -1879,7 +1962,6 @@ mod tests {
                 name: "ACME".to_owned(),
                 embedder: "tei".to_owned(),
                 issuer: None,
-                demo: false,
                 dry_run: false,
             },
             TenantId::new(),
@@ -1900,160 +1982,140 @@ mod tests {
     }
 
     #[test]
-    fn every_demo_team_belongs_to_a_declared_department() {
-        // The demo people's groups are convention-shaped, so a team whose
-        // department does not exist would place its person in quarantine
-        // and the demo would silently show an empty block.
-        for (department, team, _) in DEMO_TEAMS {
-            assert!(
-                DEMO_DEPARTMENTS.iter().any(|(slug, _)| slug == department),
-                "team {team} names department {department}, which is not declared"
-            );
-        }
-        for (local, _, _, group) in DEMO_PEOPLE {
-            let expected: Vec<String> = DEMO_TEAMS
-                .iter()
-                .map(|(department, team, _)| format!("synveda-{department}-{team}"))
-                .collect();
-            assert!(
-                expected.iter().any(|candidate| candidate == group),
-                "{local} is in {group}, which no declared team maps from"
-            );
-        }
-    }
-
-    #[test]
     fn two_deployments_on_one_laptop_do_not_share_an_operator() {
         assert_ne!(operator_email("acme"), operator_email("globex"));
     }
 
-    /// The same rule, for the people the operator was already following.
-    ///
-    /// This assertion existed for `operator_email` alone while `DEMO_PEOPLE`
-    /// sat hard-coded at `@demo.localhost` two hundred lines above it — the
-    /// rule was written down, tested, and then not applied to the constant
-    /// beside it. `init` sets a password for everyone it creates and Rauthy
-    /// refuses one it has seen recently, so a shared address is a login the
-    /// second deployment cannot fix.
     #[test]
-    fn two_deployments_on_one_laptop_do_not_share_a_demo_person_either() {
-        for (local, _, _, _) in DEMO_PEOPLE {
-            assert_ne!(
-                demo_email(local, "acme"),
-                demo_email(local, "globex"),
-                "{local} is the same login in both deployments"
-            );
-        }
-        // And no demo person collides with the operator, whose address is
-        // built by the same rule.
-        let taken: Vec<String> = DEMO_PEOPLE
-            .iter()
-            .map(|(local, _, _, _)| demo_email(local, "acme"))
-            .collect();
-        assert!(!taken.contains(&operator_email("acme")), "{taken:?}");
+    fn database_errors_redact_passwords() {
+        let rendered = redacted_database_url("postgres://admin:secret@example.test/synveda");
+        assert!(!rendered.contains("secret"), "password leaked: {rendered}");
+        assert!(
+            rendered.contains("REDACTED"),
+            "redaction absent: {rendered}"
+        );
     }
 
-    /// The demo organisation's shape, as `deploy/release/demo/seed.sh` reads
-    /// it — comments and blanks out, one pipe-delimited record per line.
-    fn demo_shape() -> Vec<Vec<String>> {
-        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../../deploy/release/demo/organisation.txt");
-        let text = std::fs::read_to_string(&path)
-            .unwrap_or_else(|err| panic!("read {}: {err}", path.display()));
-        text.lines()
-            .map(str::trim)
-            .filter(|line| !line.is_empty() && !line.starts_with('#'))
-            .map(|line| line.split('|').map(str::to_owned).collect())
-            .collect()
+    #[test]
+    fn an_admin_dsn_derives_only_the_local_runtime_identity() {
+        let derived = gateway_database_url_from_admin(Some(
+            "postgres://owner:owner-secret@db.example.test:5544/customer?sslmode=require",
+        ))
+        .unwrap();
+        let parsed = url::Url::parse(&derived).unwrap();
+        assert_eq!(parsed.username(), "synveda_gateway");
+        assert_eq!(parsed.password(), Some("synveda-dev"));
+        assert_eq!(parsed.host_str(), Some("db.example.test"));
+        assert_eq!(parsed.port(), Some(5544));
+        assert_eq!(parsed.path(), "/customer");
+        assert_eq!(parsed.query(), Some("sslmode=require"));
+        assert!(!derived.contains("owner-secret"));
+        assert_eq!(runtime_database_role(&derived).unwrap(), "synveda_gateway");
+        assert!(runtime_database_role("postgres://escaped%2Drole:secret@db/synveda").is_err());
     }
 
-    /// Every group `--demo` creates in the IdP must resolve to a team the
-    /// seeder creates (OPS-9, ADR-0066 decision 5).
-    ///
-    /// This test is the whole reason the organisation's shape is a data file
-    /// rather than shell. Moving the seeder out of the binary moved it out of
-    /// `cargo test`, and this is the one check that could not wait for an
-    /// integration run: `--demo` puts people in `synveda-<department>-<team>`
-    /// groups and AUTH-2 places them by that convention, so a team missing
-    /// from the shape file is a group whose members land in **quarantine** on
-    /// first login — one person later, in a different command, looking like
-    /// an authorisation bug rather than a missing scope.
     #[test]
-    fn every_demo_group_resolves_to_a_team_the_seeder_creates() {
-        let shape = demo_shape();
-        let teams: Vec<String> = shape
-            .iter()
-            .filter(|record| record.first().is_some_and(|kind| kind == "team"))
-            .map(|record| format!("synveda-{}-{}", record[1], record[2]))
-            .collect();
-        assert!(!teams.is_empty(), "the shape file defines no teams at all");
-        for (local, _, _, group) in DEMO_PEOPLE {
-            assert!(
-                teams.iter().any(|team| team == group),
-                "`init --demo` puts {local} in `{group}`, which no team in \
-                 deploy/release/demo/organisation.txt resolves — they would land \
-                 in quarantine on first login. Known: {teams:?}"
-            );
-        }
+    fn credential_fingerprints_change_without_containing_credentials() {
+        let first = secret_fingerprint("postgres://role:first-secret@db/synveda");
+        let second = secret_fingerprint("postgres://role:second-secret@db/synveda");
+        assert_ne!(
+            first, second,
+            "credential rotation must restart the gateway"
+        );
+        assert_eq!(first.len(), 64);
+        assert!(!first.contains("secret"));
     }
 
-    /// A team must name a department the seeder also creates, and a pack must
-    /// be assigned somewhere that exists. Both would fail against a live
-    /// gateway partway through seeding; they are constants, so they can fail
-    /// here instead.
-    #[test]
-    fn the_shape_file_is_internally_consistent() {
-        let shape = demo_shape();
-        let departments: Vec<&String> = shape
-            .iter()
-            .filter(|record| record[0] == "department")
-            .map(|record| &record[1])
-            .collect();
-        for record in shape.iter().filter(|record| record[0] == "team") {
-            assert!(
-                departments.contains(&&record[1]),
-                "team `{}` names department `{}`, which is not created",
-                record[2],
-                record[1]
-            );
-        }
-        for record in shape.iter().filter(|record| record[0] == "pack") {
-            assert!(
-                departments.contains(&&record[1]),
-                "pack `{}` is assigned at `{}`, which is not created",
-                record[2],
-                record[1]
-            );
-        }
-    }
+    /// The deployment login is subject to forced RLS and can see a tenant
+    /// only after the application establishes its transaction-local tenant
+    /// context. This is the executable boundary between bootstrap authority
+    /// and the one normal gateway runtime (CPR-36, ADR-0095).
+    #[tokio::test]
+    async fn compose_gateway_login_is_rls_enforced() {
+        let Some(admin_url) = std::env::var("DATABASE_URL")
+            .ok()
+            .filter(|value| !value.is_empty())
+        else {
+            eprintln!("DATABASE_URL not set; skipping CPR-36 database acceptance");
+            return;
+        };
+        let admin = sqlx::postgres::PgPoolOptions::new()
+            .max_connections(2)
+            .connect(&admin_url)
+            .await
+            .expect("connect as deployment owner");
+        provision_compose_gateway_role(&admin)
+            .await
+            .expect("converge the runtime login");
+        verify_runtime_role(&admin, "synveda_gateway")
+            .await
+            .expect("accept the least-privilege runtime login");
+        assert!(
+            verify_runtime_role(&admin, "synveda").await.is_err(),
+            "the bootstrap owner must never pass runtime-role validation",
+        );
 
-    /// The seeder polls `recall` with a fixed query while the extraction
-    /// worker catches up. The default embedder is a hash, so if no corpus
-    /// line carries one of those words the lexical leg returns nothing and
-    /// the seeder times out against a pipeline that worked perfectly.
-    #[test]
-    fn the_wait_query_can_retrieve_the_corpus_it_waits_for() {
-        let shape = demo_shape();
-        let corpus: Vec<String> = shape
-            .iter()
-            .filter(|record| record[0] == "corpus")
-            .map(|record| record[1].to_lowercase())
-            .collect();
-        let query = shape
-            .iter()
-            .find(|record| record[0] == "setting" && record[1] == "wait_query")
-            .map(|record| record[2].clone())
-            .expect("the shape file names no wait_query");
-        assert!(!corpus.is_empty(), "the shape file defines no corpus");
-        for term in query.split_whitespace() {
-            // Matched on a stem so `rollouts` answers `rollout`, which is
-            // what the lexical leg does and what the seeder relies on.
-            let stem = &term[..term.len().saturating_sub(1).max(1)];
-            assert!(
-                corpus.iter().any(|line| line.contains(stem)),
-                "the wait query names `{term}`, which no corpus line carries — \
-                 the seeder would poll until it timed out"
-            );
-        }
+        let suffix_source = TenantId::new().to_string();
+        let tenant = crate::create_tenant(
+            &admin,
+            &format!("cpr36-{}", &suffix_source[suffix_source.len() - 12..]),
+            "CPR-36 deployment acceptance",
+            TenantStatus::Active,
+        )
+        .await
+        .expect("admit an isolated tenant");
+        let tenant_id = tenant.id;
+
+        let runtime_url = gateway_database_url_from_admin(Some(&admin_url)).unwrap();
+        let runtime = sqlx::postgres::PgPoolOptions::new()
+            .max_connections(2)
+            .connect(&runtime_url)
+            .await
+            .expect("connect as synveda_gateway");
+
+        let without_context = sqlx::query_scalar!("select count(*) from scopes")
+            .fetch_one(&runtime)
+            .await
+            .expect("query under forced RLS")
+            .unwrap_or_default();
+        assert_eq!(without_context, 0, "a missing tenant GUC must fail closed");
+
+        let mut tx = synveda_store::rls::begin_tenant_tx(&runtime, tenant_id)
+            .await
+            .expect("establish the tenant context");
+        let root = synveda_store::scopes::ensure_tenant_root(&mut tx, tenant_id)
+            .await
+            .expect("create through the RLS-enforced application role");
+        tx.commit().await.expect("commit the tenant root");
+
+        let mut visible = synveda_store::rls::begin_tenant_tx(&runtime, tenant_id)
+            .await
+            .expect("restore the tenant context");
+        assert_eq!(
+            synveda_store::scopes::get(&mut *visible, tenant_id, root.id)
+                .await
+                .expect("read the tenant root")
+                .map(|scope| scope.id),
+            Some(root.id),
+        );
+        visible
+            .rollback()
+            .await
+            .expect("close the read transaction");
+
+        let mut wrong_tenant = synveda_store::rls::begin_tenant_tx(&runtime, TenantId::new())
+            .await
+            .expect("establish a different tenant context");
+        assert!(
+            synveda_store::scopes::get(&mut *wrong_tenant, tenant_id, root.id)
+                .await
+                .expect("cross-tenant reads fail closed")
+                .is_none(),
+            "the runtime role crossed a tenant boundary",
+        );
+        wrong_tenant
+            .rollback()
+            .await
+            .expect("close the cross-tenant transaction");
     }
 }

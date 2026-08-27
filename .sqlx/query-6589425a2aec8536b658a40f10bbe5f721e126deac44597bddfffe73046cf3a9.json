@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select count(*) as \"count!\"\n               from session_events event\n               left join session_event_quarantine quarantine\n                 on quarantine.tenant_id = event.tenant_id\n                and quarantine.event_id = event.id\n               where event.tenant_id = $1 and event.id = $2\n                 and (quarantine.event_id is null or quarantine.state = 'released')",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "count!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "6589425a2aec8536b658a40f10bbe5f721e126deac44597bddfffe73046cf3a9"
+}

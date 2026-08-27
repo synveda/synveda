@@ -1,9 +1,14 @@
 # ADR-0054: distribution is a set where resolution was a name — an advertisement is not a demotion, so it has to earn its place a different way, and a materialisation that cannot remove is not a distribution
 
-- **Status**: Accepted
+- **Status**: Superseded by ADR-0085
 - **Date**: 2026-08-03
 - **Feature(s)**: SKIL-4
 - **Deciders**: sujitn
+
+ADR-0085 retains PDP-filtered, nearest-scope resolution and exact-byte client
+materialisation, but makes an enabled project/principal `SkillBinding` the only
+distribution switch. It deletes skill channel heads and channel-wide pins;
+rollback now advances a binding revision to select an older immutable version.
 
 ## Context
 

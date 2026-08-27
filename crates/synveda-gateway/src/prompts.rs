@@ -58,18 +58,18 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use synveda_audit::{AuditAction, Outcome};
 use synveda_policy::{Action, Resource};
-use synveda_store::{hierarchy, prompts, rls};
+use synveda_store::{prompts, rls, scopes};
+use synveda_types::scope::Scope;
 use synveda_types::{
-    Channel, Error, HierarchyNode, IdentityId, PromptChannel, PromptName, PromptTemplate,
-    PromptVariable, Result, ScopeId, Sensitivity,
+    Channel, Error, IdentityId, PromptChannel, PromptName, PromptTemplate, PromptVariable, Result,
+    ScopeId, Sensitivity,
 };
 use synveda_vedaflow::{self as vedaflow, ChannelRef, PromptAsset};
 
 use crate::app::AppState;
 use crate::audit;
 use crate::authz::{self, DecisionInput};
-use crate::error::ApiError;
-use crate::hierarchy::{body, commit, found, tenant_id};
+use crate::request::{body, commit, found, tenant_id};
 use crate::telemetry::PROMPT_OPERATIONS_TOTAL;
 
 /// Counts the operation and renders the result — the outcome taxonomy
@@ -80,37 +80,31 @@ async fn respond<T: IntoResponse>(
     op: &'static str,
     result: Result<T>,
 ) -> Response {
-    let outcome = match &result {
-        Ok(_) => "ok",
-        Err(
-            Error::Unauthenticated { .. }
-            | Error::PolicyDenied { .. }
-            | Error::NotFound { .. }
-            | Error::Invalid { .. }
-            | Error::Conflict { .. }
-            | Error::RateLimited { .. },
-        ) => "rejected",
-        Err(_) => "error",
-    };
+    let outcome = crate::response::outcome(&result);
     metrics::counter!(PROMPT_OPERATIONS_TOTAL, "op" => op, "outcome" => outcome).increment(1);
-    match result {
-        Ok(response) => response.into_response(),
-        Err(error) => {
-            audit::record_rejection(state, op, &error).await;
-            ApiError(error).into_response()
-        }
-    }
+    crate::response::finish(state, op, result).await
 }
 
 // ── Author ─────────────────────────────────────────────────────────────
 
-#[derive(Deserialize)]
+#[derive(utoipa::ToSchema)]
+#[allow(dead_code)] // Contract-only projection for an upstream wire type.
+pub(crate) struct PromptVariableSchema {
+    name: String,
+    description: Option<String>,
+    default: Option<String>,
+}
+
+#[derive(Deserialize, utoipa::ToSchema)]
+#[schema(as = PromptAuthorBody)]
 pub(crate) struct AuthorBody {
     /// Where the prompt is authored — the scope that will stand behind it,
     /// and the scope whose published channel a proposal would move.
+    #[schema(value_type = String, format = "uuid")]
     scope_id: ScopeId,
     /// Its name: path-shaped, lower-case, and the identifier a consumer
     /// writes in its source (ADR-0049 decision 3).
+    #[schema(value_type = String)]
     name: PromptName,
     /// One line, read in a listing and at review.
     #[serde(default)]
@@ -121,6 +115,7 @@ pub(crate) struct AuthorBody {
     /// disagrees with the template is refused here rather than discovered
     /// by a consumer (decision 12).
     #[serde(default)]
+    #[schema(value_type = Vec<PromptVariableSchema>)]
     variables: Vec<PromptVariable>,
     /// Its classification. Absent means `internal`, the working tier
     /// everything else in the product defaults to. `restricted` is refused
@@ -128,14 +123,16 @@ pub(crate) struct AuthorBody {
     /// asset, so a prompt carrying it could never be read back
     /// (decision 5).
     #[serde(default)]
+    #[schema(value_type = Option<String>)]
     sensitivity: Option<Sensitivity>,
 }
 
 /// What a scope's published channel holds for a name right now — the
 /// answer to "is my edit live?", which an author who just saved has to be
 /// told rather than left to infer.
-#[derive(Serialize)]
-struct PublishedView {
+#[derive(Serialize, utoipa::ToSchema)]
+#[schema(as = PromptPublishedView)]
+pub(crate) struct PublishedView {
     /// The commit the channel serves.
     commit: String,
     /// The address it names for this prompt.
@@ -146,20 +143,26 @@ struct PublishedView {
     current: bool,
 }
 
-#[derive(Serialize)]
-struct PromptView {
+#[derive(Serialize, utoipa::ToSchema)]
+#[schema(as = PromptView)]
+pub(crate) struct PromptView {
     name: String,
+    #[schema(value_type = String, format = "uuid")]
     scope_id: ScopeId,
     scope_path: String,
     description: String,
+    #[schema(value_type = String)]
     sensitivity: Sensitivity,
     template: String,
+    #[schema(value_type = Vec<PromptVariableSchema>)]
     variables: Vec<PromptVariable>,
     /// The draft's content address — what a proposal would bind.
     object_hash: String,
     created_at: DateTime<Utc>,
+    #[schema(value_type = String, format = "uuid")]
     created_by: IdentityId,
     updated_at: DateTime<Utc>,
+    #[schema(value_type = String, format = "uuid")]
     updated_by: IdentityId,
     /// The published version at this scope, when there is one.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -172,6 +175,21 @@ struct PromptView {
 /// An overwrite is the authoring act rather than a conflict; what cannot
 /// change is the prompt's identity, which migration 0029's trigger
 /// enforces below this handler.
+#[utoipa::path(
+    post,
+    path = "/v1/prompts",
+    operation_id = "author_prompt",
+    tag = "prompts",
+    request_body = AuthorBody,
+    responses(
+        (status = 200, description = "The authored prompt draft", body = PromptView),
+        (status = 400, description = "The prompt name, template, variables, or sensitivity is invalid", body = crate::workspaces::ApiErrorBody),
+        (status = 401, description = "No usable credential", body = crate::workspaces::ApiErrorBody),
+        (status = 403, description = "Prompt authoring is not permitted", body = crate::workspaces::ApiErrorBody),
+        (status = 404, description = "The governing scope is absent", body = crate::workspaces::ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
 #[tracing::instrument(name = "prompts.author", skip_all)]
 pub(crate) async fn author(
     State(state): State<AppState>,
@@ -212,17 +230,23 @@ async fn author_inner(
     let tenant_id = tenant_id()?;
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
     let node = found(
-        hierarchy::node(&mut *tx, body.scope_id).await?,
+        scopes::get(&mut *tx, tenant_id, body.scope_id).await?,
         tenant_id,
         body.scope_id,
     )?;
-    let input = authz::gather(state, &mut tx, Some(&node)).await?;
+    let input = authz::gather(
+        state,
+        &mut tx,
+        Some(&node),
+        synveda_store::anchors::AnchorSelection::none(),
+        Vec::new(),
+    )
+    .await?;
     let authorized = authz::decide(
         state,
         &input,
         Action::PromptWrite,
         Resource::Scope(body.scope_id),
-        None,
     )?;
     let author = identity_of(&input)?;
 
@@ -304,9 +328,10 @@ pub(crate) struct ResolveParams {
 /// Where the served bytes came from — one field with four honest answers,
 /// because a response that cites a frozen commit without saying so
 /// overstates its own freshness (ADR-0036 decision 10, applied here).
-#[derive(Serialize, Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Serialize, Clone, Copy, PartialEq, Eq, Debug, utoipa::ToSchema)]
+#[schema(as = PromptOrigin)]
 #[serde(rename_all = "kebab-case")]
-enum Origin {
+pub(crate) enum Origin {
     /// The channel's head: the current reviewed version.
     Head,
     /// The commit this request named.
@@ -318,13 +343,16 @@ enum Origin {
     Draft,
 }
 
-#[derive(Serialize)]
-struct ResolveResponse {
+#[derive(Serialize, utoipa::ToSchema)]
+#[schema(as = PromptResolveResponse)]
+pub(crate) struct ResolveResponse {
     name: String,
     /// The scope the version came from — for a walked resolve, the nearest
     /// one on the caller's chain that publishes it and permits the read.
+    #[schema(value_type = String, format = "uuid")]
     scope_id: ScopeId,
     scope_path: String,
+    #[schema(value_type = String)]
     channel: PromptChannel,
     /// What produced these bytes.
     origin: Origin,
@@ -334,13 +362,35 @@ struct ResolveResponse {
     commit: Option<String>,
     /// The version's content address.
     object_hash: String,
+    #[schema(value_type = String)]
     sensitivity: Sensitivity,
     description: String,
     template: String,
+    #[schema(value_type = Vec<PromptVariableSchema>)]
     variables: Vec<PromptVariable>,
 }
 
 /// `GET /v1/prompts/{name}` — resolve a prompt for this caller.
+#[utoipa::path(
+    get,
+    path = "/v1/prompts/{name}",
+    operation_id = "resolve_prompt",
+    tag = "prompts",
+    params(
+        ("name" = String, Path),
+        ("channel" = Option<String>, Query),
+        ("scope_id" = Option<String>, Query, format = "uuid"),
+        ("commit" = Option<String>, Query)
+    ),
+    responses(
+        (status = 200, description = "The resolved prompt version", body = ResolveResponse),
+        (status = 400, description = "The prompt selector is invalid", body = crate::workspaces::ApiErrorBody),
+        (status = 401, description = "No usable credential", body = crate::workspaces::ApiErrorBody),
+        (status = 403, description = "Prompt read is not permitted", body = crate::workspaces::ApiErrorBody),
+        (status = 404, description = "No visible prompt matches", body = crate::workspaces::ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
 #[tracing::instrument(name = "prompts.resolve", skip_all)]
 pub(crate) async fn resolve(
     State(state): State<AppState>,
@@ -424,7 +474,7 @@ async fn resolve_inner(
     Ok(Json(ResolveResponse {
         name: name.to_string(),
         scope_id: resolved.node.id,
-        scope_path: resolved.node.path.clone(),
+        scope_path: resolved.node.slug.clone(),
         channel,
         origin: resolved.origin,
         commit: resolved.commit.map(|commit| commit.to_hex()),
@@ -438,7 +488,7 @@ async fn resolve_inner(
 
 /// What a resolution found, before it is rendered or audited.
 struct Resolved {
-    node: HierarchyNode,
+    node: Scope,
     asset: PromptAsset,
     object_hash: vedaflow::hash::ObjectHash,
     commit: Option<vedaflow::CommitHash>,
@@ -467,7 +517,7 @@ async fn walk_chain(
     name: &PromptName,
 ) -> Result<Resolved> {
     let input = authz::gather_at_home(state, tx).await?;
-    let chain: Vec<HierarchyNode> = input.chain.to_vec();
+    let chain: Vec<synveda_policy::ScopeNode> = input.chain.to_vec();
     let scope_ids: Vec<ScopeId> = chain.iter().map(|node| node.id).collect();
     let published =
         vedaflow::read_prompt_members(tx, tenant_id, &scope_ids, Channel::Published).await?;
@@ -484,6 +534,9 @@ async fn walk_chain(
                 Some(admitted) => admitted,
                 None => continue,
             };
+        let node = scopes::get(tx, tenant_id, node.id)
+            .await?
+            .expect("the chain's own node resolves");
         return Ok(Resolved {
             node: node.clone(),
             asset,
@@ -513,11 +566,18 @@ async fn at_scope(
     pinned: Option<vedaflow::CommitHash>,
 ) -> Result<Resolved> {
     let node = found(
-        hierarchy::node(&mut *tx, scope_id).await?,
+        scopes::get(&mut *tx, tenant_id, scope_id).await?,
         tenant_id,
         scope_id,
     )?;
-    let input = authz::gather(state, tx, Some(&node)).await?;
+    let input = authz::gather(
+        state,
+        tx,
+        Some(&node),
+        synveda_store::anchors::AnchorSelection::none(),
+        Vec::new(),
+    )
+    .await?;
 
     if channel == PromptChannel::Draft {
         let Some(draft) = prompts::read(&mut *tx, tenant_id, scope_id, name).await? else {
@@ -603,7 +663,11 @@ async fn at_scope(
     // The tier decision is taken now, against the live pack, at the tier the
     // *served* version carries: a pin freezes bytes and never authority
     // (decision 11).
-    let Some((asset, authorized)) = admit(state, tx, tenant_id, &input, 0, &node, address).await?
+    let Some(scope_node) = input.chain.first() else {
+        return Err(not_found(name));
+    };
+    let Some((asset, authorized)) =
+        admit(state, tx, tenant_id, &input, 0, scope_node, address).await?
     else {
         return Err(not_found(name));
     };
@@ -627,7 +691,7 @@ async fn admit(
     tenant_id: synveda_types::TenantId,
     input: &DecisionInput,
     position: usize,
-    node: &HierarchyNode,
+    node: &synveda_policy::ScopeNode,
     address: vedaflow::hash::ObjectHash,
 ) -> Result<Option<(PromptAsset, crate::authz::Authorized)>> {
     let object = vedaflow::read_object(&mut *tx, tenant_id, address)
@@ -635,7 +699,7 @@ async fn admit(
         .ok_or_else(|| Error::Internal {
             message: format!(
                 "{} names object {} which the append-only store does not hold",
-                node.path,
+                node.slug,
                 address.to_hex()
             ),
         })?;
@@ -715,22 +779,28 @@ pub(crate) struct ListParams {
     scope_id: ScopeId,
 }
 
-#[derive(Serialize)]
-struct ListEntry {
+#[derive(Serialize, utoipa::ToSchema)]
+#[schema(as = PromptListEntry)]
+pub(crate) struct ListEntry {
     name: String,
     description: String,
+    #[schema(value_type = String)]
     sensitivity: Sensitivity,
     /// The draft's address, and when it last moved.
     object_hash: String,
     updated_at: DateTime<Utc>,
+    #[schema(value_type = String, format = "uuid")]
     updated_by: IdentityId,
+    #[schema(value_type = Vec<PromptVariableSchema>)]
     variables: Vec<PromptVariable>,
     #[serde(skip_serializing_if = "Option::is_none")]
     published: Option<PublishedView>,
 }
 
-#[derive(Serialize)]
-struct ListResponse {
+#[derive(Serialize, utoipa::ToSchema)]
+#[schema(as = PromptListResponse)]
+pub(crate) struct ListResponse {
+    #[schema(value_type = String, format = "uuid")]
     scope_id: ScopeId,
     scope_path: String,
     prompts: Vec<ListEntry>,
@@ -742,6 +812,20 @@ struct ListResponse {
 /// Entries the caller may not read at their tier are omitted rather than
 /// refused, for the reason the walk skips them: a listing that refused
 /// wholesale would make one `confidential` prompt hide the rest.
+#[utoipa::path(
+    get,
+    path = "/v1/prompts",
+    operation_id = "list_prompts",
+    tag = "prompts",
+    params(("scope_id" = String, Query, format = "uuid")),
+    responses(
+        (status = 200, description = "Visible prompt drafts at the scope", body = ListResponse),
+        (status = 401, description = "No usable credential", body = crate::workspaces::ApiErrorBody),
+        (status = 403, description = "Prompt read is not permitted", body = crate::workspaces::ApiErrorBody),
+        (status = 404, description = "The governing scope is absent", body = crate::workspaces::ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
 #[tracing::instrument(name = "prompts.list", skip_all)]
 pub(crate) async fn list(
     State(state): State<AppState>,
@@ -755,11 +839,18 @@ async fn list_inner(state: &AppState, scope_id: ScopeId) -> Result<Json<ListResp
     let tenant_id = tenant_id()?;
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
     let node = found(
-        hierarchy::node(&mut *tx, scope_id).await?,
+        scopes::get(&mut *tx, tenant_id, scope_id).await?,
         tenant_id,
         scope_id,
     )?;
-    let input = authz::gather(state, &mut tx, Some(&node)).await?;
+    let input = authz::gather(
+        state,
+        &mut tx,
+        Some(&node),
+        synveda_store::anchors::AnchorSelection::none(),
+        Vec::new(),
+    )
+    .await?;
     // The gate first: may this principal see this scope's shelf at all. At
     // the working tier, which is the question a listing asks — the allowed
     // decision is also what puts the read on the chain (ADR-0019
@@ -832,7 +923,7 @@ async fn list_inner(state: &AppState, scope_id: ScopeId) -> Result<Json<ListResp
 
     Ok(Json(ListResponse {
         scope_id,
-        scope_path: node.path.clone(),
+        scope_path: node.slug.clone(),
         prompts: entries,
     }))
 }
@@ -857,7 +948,7 @@ async fn published_at(
 }
 
 fn view(
-    node: &HierarchyNode,
+    node: &Scope,
     stored: prompts::StoredPrompt,
     published: Option<(vedaflow::CommitHash, vedaflow::hash::ObjectHash)>,
 ) -> PromptView {
@@ -865,7 +956,7 @@ fn view(
     PromptView {
         name: stored.template.name.to_string(),
         scope_id: stored.scope_id,
-        scope_path: node.path.clone(),
+        scope_path: node.slug.clone(),
         description: stored.template.description,
         sensitivity: stored.sensitivity,
         template: stored.template.template,

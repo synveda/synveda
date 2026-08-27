@@ -1,9 +1,14 @@
 # ADR-0051: skills are the third authored asset and the first whose format belongs to somebody else — the bytes leave untouched so the receipt sits outside the bundle, the frontmatter is a strict subset rather than YAML, and the floor asked for a security reviewer without ever asking for a second signature
 
-- **Status**: Accepted
+- **Status**: Superseded by ADR-0085
 - **Date**: 2026-08-03
 - **Feature(s)**: SKIL-1
 - **Deciders**: sujitn
+
+ADR-0085 retains the official bundle grammar, byte-preserving
+content-addressed objects, disclosure checks and client-owned materialisation,
+but replaces mutable drafts and `skill/published` with stable aggregates,
+immutable versions and governed project/principal bindings.
 
 ## Context
 

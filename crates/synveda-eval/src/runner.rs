@@ -1,7 +1,8 @@
 //! Seed → wait → probe → grade, one scenario at a time (EVAL-1,
 //! ADR-0028 decision 3).
 //!
-//! Memory is planted through `/v1/observe` and nothing else, so a run
+//! Source material enters as session events and accepted capture candidates,
+//! so a run
 //! exercises MEM-1's buffer, MEM-2's redaction, MEM-3's extraction, and
 //! MEM-4's embedding before it ever measures composition. That is slower
 //! than an INSERT by whole seconds, and it is the difference between
@@ -11,13 +12,18 @@
 //! would also make the latency axis a measurement of the runner.
 
 use std::time::{Duration, Instant};
+use std::{collections::BTreeMap, collections::HashMap};
 
-use crate::client::{Client, InjectRequest, InjectResponse, ObserveEvent, ObserveRequest};
+use crate::client::{
+    CaptureAcceptOptions, CaptureCandidateRef, CaptureReplacement, Client, ContextRunRequest,
+    ContextRunResponse, SessionEventBatchRequest, SessionEventInput,
+};
+use crate::qa_runner::{CURATOR_ACTOR, PUBLISHER_ACTOR, STEWARD_ACTOR};
 use crate::report::Outcome;
 use crate::scenario::{Environment, Scenario};
 
 /// How long seeded material gets to become composable before the scenario
-/// is graded anyway. The pipeline's own SLO is 60s (seed §10), and a
+/// is graded anyway. The local capture-lag budget is 60s (seed §10), and a
 /// scenario that times out fails on its axes rather than crashing the
 /// run — a stuck pipeline should read as "quality collapsed", because to
 /// the person whose session it is, that is what happened.
@@ -47,7 +53,14 @@ pub async fn run_scenario(
     let mut failures = Vec::new();
     let mut degraded = Vec::new();
 
-    let seeded = seed(client, environment, scenario, &mut degraded).await?;
+    let seeded = seed(
+        client,
+        environment,
+        scenario,
+        &mut degraded,
+        options.seed_timeout,
+    )
+    .await?;
     let seed_wait_ms = if seeded.is_empty() {
         0.0
     } else {
@@ -66,16 +79,18 @@ pub async fn run_scenario(
     // more than one sample. Only the first is judged: a scenario that
     // passes on the third attempt has not passed.
     let bearer = &environment.actor(&scenario.probe.actor)?.token;
-    let request = InjectRequest {
+    let request = ContextRunRequest {
         task: scenario.probe.task.as_deref(),
-        session_id: &scenario.probe.session_id,
         budget_tokens: scenario.probe.budget_tokens,
     };
-    let first = client.inject(bearer, &request).await?;
+    let probe_run = client
+        .session_for(bearer, &scenario.probe.session_id)
+        .await?;
+    let first = client.compose_context(bearer, &probe_run, &request).await?;
     let mut latency_ms = vec![round(first.elapsed_ms)];
     note_degraded(&mut degraded, &first.degraded);
     for _ in 1..scenario.probe.repeat {
-        let repeat = client.inject(bearer, &request).await?;
+        let repeat = client.compose_context(bearer, &probe_run, &request).await?;
         latency_ms.push(round(repeat.elapsed_ms));
         note_degraded(&mut degraded, &repeat.degraded);
     }
@@ -107,38 +122,111 @@ struct Seeded {
     actor: String,
 }
 
+pub(crate) struct AppliedCandidate {
+    pub item_id: String,
+    pub revision_id: String,
+}
+
+/// Completes the conservative profile's real review matrix with the
+/// evaluation estate's distinct curator, administrator and publisher. A
+/// permissive profile returns `applied` before this votes; neither branch
+/// bypasses the candidate's VedaFlow change.
+pub(crate) async fn apply_candidate(
+    client: &Client,
+    environment: &Environment,
+    candidate: &CaptureCandidateRef,
+    context: &str,
+) -> Result<AppliedCandidate, String> {
+    if candidate.resulting_outcome.as_deref() == Some("applied") {
+        return Ok(AppliedCandidate {
+            item_id: candidate
+                .resulting_knowledge_item_id
+                .clone()
+                .ok_or_else(|| {
+                    format!("applied candidate {} names no Knowledge item", candidate.id)
+                })?,
+            revision_id: candidate.resulting_revision_id.clone().ok_or_else(|| {
+                format!(
+                    "applied candidate {} names no Knowledge revision",
+                    candidate.id
+                )
+            })?,
+        });
+    }
+    if candidate.resulting_outcome.as_deref() != Some("pending_review") {
+        return Err(format!(
+            "capture candidate {} from `{context}` was reviewed as {:?}",
+            candidate.id, candidate.resulting_outcome
+        ));
+    }
+    let change = candidate
+        .resulting_change_id
+        .as_deref()
+        .ok_or_else(|| format!("candidate {} is pending without a change id", candidate.id))?;
+    let mut state = "open".to_owned();
+    for reviewer in [CURATOR_ACTOR, STEWARD_ACTOR] {
+        if state != "open" {
+            break;
+        }
+        state = client
+            .approve(&environment.actor(reviewer)?.token, change)
+            .await?
+            .value
+            .state;
+    }
+    if state != "approved" {
+        return Err(format!(
+            "capture candidate {} from `{context}` remained `{state}` after the available reviewers",
+            candidate.id
+        ));
+    }
+    let applied = client
+        .apply(&environment.actor(PUBLISHER_ACTOR)?.token, change)
+        .await?
+        .value;
+    Ok(AppliedCandidate {
+        item_id: applied
+            .get("knowledge_item_id")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned)
+            .ok_or_else(|| format!("applied change {change} names no Knowledge item"))?,
+        revision_id: applied
+            .get("revision_id")
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_owned)
+            .ok_or_else(|| format!("applied change {change} names no Knowledge revision"))?,
+    })
+}
+
 async fn seed(
     client: &Client,
     environment: &Environment,
     scenario: &Scenario,
     degraded: &mut Vec<String>,
+    seed_timeout: Duration,
 ) -> Result<Vec<Seeded>, String> {
     let mut seeded = Vec::new();
+    let mut published: BTreeMap<String, CaptureReplacement> = BTreeMap::new();
     for batch in &scenario.seed {
         let bearer = &environment.actor(&batch.actor)?.token;
         let occurred_at = chrono::Utc::now().to_rfc3339();
-        let events: Vec<ObserveEvent<'_>> = batch
+        let events: Vec<SessionEventInput<'_>> = batch
             .events
             .iter()
-            .map(|event| ObserveEvent {
+            .map(|event| SessionEventInput {
                 // Per-run unique, so re-running a suite against the same
                 // tenant seeds again rather than deduplicating into
                 // nothing (ADR-0020 decision 2 would report duplicates,
                 // and the scenario would then measure the previous run).
                 idempotency_key: format!("{}:{}", batch.session_id, event.key),
-                kind: &event.kind,
+                kind: &event.event_type,
                 payload: serde_json::json!({ "text": event.text }),
                 occurred_at: occurred_at.clone(),
             })
             .collect();
+        let session = client.session_for(bearer, &batch.session_id).await?;
         let response = client
-            .observe(
-                bearer,
-                &ObserveRequest {
-                    session_id: &batch.session_id,
-                    events,
-                },
-            )
+            .append_events(bearer, &session, &SessionEventBatchRequest { events })
             .await?;
         note_degraded(degraded, &response.degraded);
         if response.value.denied > 0 || response.value.quarantined > 0 {
@@ -156,6 +244,79 @@ async fn seed(
                 batch.session_id,
                 batch.events.len()
             ));
+        }
+        let event_ids: HashMap<&str, &str> = response
+            .value
+            .events
+            .iter()
+            .filter_map(|entry| {
+                entry
+                    .event_id()
+                    .map(|id| (entry.idempotency_key.as_str(), id))
+            })
+            .collect();
+        let mut source_keys: HashMap<&str, &str> = HashMap::new();
+        let mut replacements = BTreeMap::new();
+        for event in &batch.events {
+            let client_event_id = format!("{}:{}", batch.session_id, event.key);
+            let event_id = event_ids.get(client_event_id.as_str()).ok_or_else(|| {
+                let outcomes = response
+                    .value
+                    .events
+                    .iter()
+                    .map(|entry| {
+                        format!(
+                            "{}:{}:{}",
+                            entry.idempotency_key,
+                            entry.outcome,
+                            entry.event_id().unwrap_or("no-row")
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                format!(
+                    "seeding `{}` acked no event id, so its candidate cannot be attributed \
+                     (outcomes: {outcomes})",
+                    event.key,
+                )
+            })?;
+            source_keys.insert(*event_id, event.key.as_str());
+            if let Some(replaces) = &event.replaces {
+                let target = published.get(replaces).ok_or_else(|| {
+                    format!(
+                        "seed `{}` cannot replace `{replaces}` because no applied Knowledge head was recorded",
+                        event.key
+                    )
+                })?;
+                replacements.insert((*event_id).to_owned(), target.clone());
+            }
+        }
+        let reviewed = client
+            .capture_and_accept(
+                bearer,
+                &session,
+                &format!("eval-capture-{}", batch.session_id),
+                seed_timeout,
+                CaptureAcceptOptions {
+                    replacements: (!replacements.is_empty()).then_some(&replacements),
+                    ..CaptureAcceptOptions::default()
+                },
+            )
+            .await?;
+        for candidate in &reviewed {
+            let applied =
+                apply_candidate(client, environment, candidate, &batch.session_id).await?;
+            for source in &candidate.source_event_ids {
+                if let Some(key) = source_keys.get(source.as_str()) {
+                    published.insert(
+                        (*key).to_owned(),
+                        CaptureReplacement {
+                            item_id: applied.item_id.clone(),
+                            revision_id: applied.revision_id.clone(),
+                        },
+                    );
+                }
+            }
         }
         for event in &batch.events {
             seeded.push(Seeded {
@@ -185,7 +346,7 @@ async fn wait_for_seed(
     // would be waiting forever.
     let wanted: Vec<&Seeded> = seeded
         .iter()
-        .filter(|entry| scenario.expect.records.contains(&entry.key))
+        .filter(|entry| scenario.expect.knowledge.contains(&entry.key))
         .collect();
     if wanted.is_empty() {
         return Ok(0.0);
@@ -199,12 +360,13 @@ async fn wait_for_seed(
             // recency-ordered branch, so this asks only whether the
             // pipeline has made a record, with no retrieval involved.
             let bearer = &environment.actor(&entry.actor)?.token;
+            let run = client.session_for(bearer, &session).await?;
             let landed = client
-                .inject(
+                .compose_context(
                     bearer,
-                    &InjectRequest {
+                    &run,
+                    &ContextRunRequest {
                         task: None,
-                        session_id: &session,
                         budget_tokens: None,
                     },
                 )
@@ -220,12 +382,13 @@ async fn wait_for_seed(
             // in that window would be measuring the sweep.
             if scenario.probe.task.is_some() {
                 let probe = &environment.actor(&scenario.probe.actor)?.token;
+                let probe_run = client.session_for(probe, &session).await?;
                 let ranked = client
-                    .inject(
+                    .compose_context(
                         probe,
-                        &InjectRequest {
+                        &probe_run,
+                        &ContextRunRequest {
                             task: scenario.probe.task.as_deref(),
-                            session_id: &session,
                             budget_tokens: scenario.probe.budget_tokens,
                         },
                     )
@@ -262,17 +425,17 @@ struct Graded {
 fn grade(
     scenario: &Scenario,
     seeded: &[Seeded],
-    block: &InjectResponse,
+    block: &ContextRunResponse,
     failures: &mut Vec<String>,
 ) -> Graded {
     let text = &block.text;
     let before = failures.len();
 
-    let recall = if scenario.expect.records.is_empty() {
+    let recall = if scenario.expect.knowledge.is_empty() {
         None
     } else {
         let mut found = 0usize;
-        for key in &scenario.expect.records {
+        for key in &scenario.expect.knowledge {
             let marker = seeded
                 .iter()
                 .find(|entry| &entry.key == key)
@@ -283,7 +446,7 @@ fn grade(
                 failures.push(format!("expected record `{key}` never reached the block"));
             }
         }
-        Some(found as f64 / scenario.expect.records.len() as f64)
+        Some(found as f64 / scenario.expect.knowledge.len() as f64)
     };
 
     for phrase in &scenario.expect.must_contain {
@@ -310,11 +473,11 @@ fn grade(
     }
 
     let abstained = scenario.expect.abstain.then(|| {
-        let empty = block.record_ids.is_empty();
+        let empty = block.knowledge_item_ids.is_empty();
         if !empty {
             failures.push(format!(
-                "expected an empty block, got {} record(s) and {} token(s)",
-                block.record_ids.len(),
+                "expected an empty block, got {} Knowledge item(s) and {} token(s)",
+                block.knowledge_item_ids.len(),
                 block.tokens
             ));
         }
@@ -347,15 +510,11 @@ mod tests {
     use super::*;
     use crate::scenario::Scenario;
 
-    fn block(text: &str, records: usize, tokens: u32) -> InjectResponse {
-        InjectResponse {
+    fn block(text: &str, items: usize, tokens: u32) -> ContextRunResponse {
+        ContextRunResponse {
             text: text.to_owned(),
             block_hash: "b3-test".to_owned(),
-            record_ids: (0..records).map(|index| index.to_string()).collect(),
-            tiers: vec!["body".to_owned(); records],
-            index_entries: 0,
-            index_tokens: 0,
-            staleness_permille: vec![1000; records],
+            knowledge_item_ids: (0..items).map(|index| index.to_string()).collect(),
             tokens,
             budget_tokens: 1500,
         }
@@ -379,7 +538,7 @@ mod tests {
                   "events": [{"key": "deploy", "text": "Deploys go through make deploy.",
                               "marker": "make deploy"}]}],
         "probe": {"actor": "curator", "session_id": "p1"},
-        "expect": {"records": ["deploy"], "must_not_contain": ["push to main"]}
+        "expect": {"knowledge": ["deploy"], "must_not_contain": ["push to main"]}
     }"#;
 
     #[test]
@@ -398,7 +557,7 @@ mod tests {
     }
 
     #[test]
-    fn a_missing_record_costs_recall_and_accuracy_both() {
+    fn a_missing_knowledge_item_costs_recall_and_accuracy_both() {
         let mut failures = Vec::new();
         let graded = grade(
             &scenario(RECALLING),

@@ -28,8 +28,7 @@ use synveda_types::{Error, Result, ScimCredential, ScimCredentialId};
 use crate::app::AppState;
 use crate::audit;
 use crate::authz;
-use crate::error::ApiError;
-use crate::hierarchy::{body, commit, tenant_id};
+use crate::request::{body, commit, tenant_id};
 use crate::telemetry::SCIM_CREDENTIAL_OPERATIONS_TOTAL;
 
 /// The longest life a provisioning credential may be issued for, and the
@@ -47,8 +46,8 @@ const MAX_LIFETIME_DAYS: i64 = 365;
 const DEFAULT_LIFETIME_DAYS: i64 = 90;
 
 /// `POST /v1/scim/credentials`.
-#[derive(Debug, Deserialize)]
-pub struct IssueRequest {
+#[derive(Debug, Deserialize, utoipa::ToSchema)]
+pub(crate) struct IssueRequest {
     /// What an operator recognises it by when deciding to rotate.
     pub label: String,
     /// How long it lives. Clamped to [`MAX_LIFETIME_DAYS`].
@@ -57,19 +56,65 @@ pub struct IssueRequest {
 }
 
 /// The issue response — **the only time the token is ever readable**.
-#[derive(Debug, Serialize)]
-pub struct IssuedCredential {
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+pub(crate) struct IssuedCredential {
     /// The credential's record.
     #[serde(flatten)]
-    pub credential: ScimCredential,
+    pub credential: ScimCredentialView,
     /// The value to paste into Entra's "Secret Token" or Okta's
     /// authorisation header. Never stored, never logged, shown once.
     pub token: String,
 }
 
+/// The non-secret provisioning credential metadata exposed after issuance.
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+pub(crate) struct ScimCredentialView {
+    #[schema(value_type = String, format = "uuid")]
+    id: ScimCredentialId,
+    label: String,
+    expires_at: DateTime<Utc>,
+    revoked_at: Option<DateTime<Utc>>,
+    last_used_at: Option<DateTime<Utc>>,
+    created_at: DateTime<Utc>,
+    created_by: String,
+}
+
+impl From<ScimCredential> for ScimCredentialView {
+    fn from(credential: ScimCredential) -> Self {
+        Self {
+            id: credential.id,
+            label: credential.label,
+            expires_at: credential.expires_at,
+            revoked_at: credential.revoked_at,
+            last_used_at: credential.last_used_at,
+            created_at: credential.created_at,
+            created_by: credential.created_by,
+        }
+    }
+}
+
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+pub(crate) struct ScimCredentialsResponse {
+    credentials: Vec<ScimCredentialView>,
+}
+
 /// Issues a credential.
+#[utoipa::path(
+    post,
+    path = "/v1/scim/credentials",
+    operation_id = "issue_scim_credential",
+    tag = "directory",
+    request_body = IssueRequest,
+    responses(
+        (status = 201, description = "Credential metadata and its one-time token", body = IssuedCredential),
+        (status = 400, description = "The label or lifetime is invalid", body = crate::workspaces::ApiErrorBody),
+        (status = 401, description = "No usable credential", body = crate::workspaces::ApiErrorBody),
+        (status = 403, description = "Directory credential management is not permitted", body = crate::workspaces::ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
 #[tracing::instrument(name = "scim.credential.issue", skip_all)]
-pub async fn issue(
+pub(crate) async fn issue(
     State(state): State<AppState>,
     payload: std::result::Result<Json<IssueRequest>, JsonRejection>,
 ) -> Response {
@@ -86,11 +131,7 @@ pub async fn issue(
         )
         .await?;
 
-        let days = request
-            .expires_in_days
-            .unwrap_or(DEFAULT_LIFETIME_DAYS)
-            .clamp(1, MAX_LIFETIME_DAYS);
-        let expires_at = Utc::now() + Duration::days(days);
+        let expires_at = resolved_expiry(Utc::now(), request.expires_in_days);
         let minted = synveda_identity::scim::mint(tenant_id)?;
         let subject = synveda_identity::current_tenant()
             .map(|context| context.claims.subject.clone())
@@ -132,7 +173,7 @@ pub async fn issue(
         Ok((
             StatusCode::CREATED,
             Json(IssuedCredential {
-                credential,
+                credential: credential.into(),
                 token: minted.token,
             }),
         ))
@@ -144,8 +185,20 @@ pub async fn issue(
 /// `GET /v1/scim/credentials` — the inventory, revoked and expired ones
 /// included, because rotation is a decision about a history rather than
 /// about a current state.
+#[utoipa::path(
+    get,
+    path = "/v1/scim/credentials",
+    operation_id = "list_scim_credentials",
+    tag = "directory",
+    responses(
+        (status = 200, description = "Provisioning credential inventory", body = ScimCredentialsResponse),
+        (status = 401, description = "No usable credential", body = crate::workspaces::ApiErrorBody),
+        (status = 403, description = "Directory credential management is not permitted", body = crate::workspaces::ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
 #[tracing::instrument(name = "scim.credential.list", skip_all)]
-pub async fn list(State(state): State<AppState>) -> Response {
+pub(crate) async fn list(State(state): State<AppState>) -> Response {
     let result = async {
         let tenant_id = tenant_id()?;
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
@@ -159,7 +212,9 @@ pub async fn list(State(state): State<AppState>) -> Response {
         .await?;
         let credentials = directory::credentials(&mut *tx, tenant_id).await?;
         commit(tx).await?;
-        Ok(Json(json!({"credentials": credentials})))
+        Ok(Json(ScimCredentialsResponse {
+            credentials: credentials.into_iter().map(Into::into).collect(),
+        }))
     }
     .await;
     respond(&state, "list", result).await
@@ -169,8 +224,25 @@ pub async fn list(State(state): State<AppState>) -> Response {
 ///
 /// A stamp rather than a delete: which credential sealed which identity
 /// has to stay answerable from the chain after the credential is gone.
+#[utoipa::path(
+    post,
+    path = "/v1/scim/credentials/{id}/revoke",
+    operation_id = "revoke_scim_credential",
+    tag = "directory",
+    params(("id" = String, Path, format = "uuid")),
+    responses(
+        (status = 204, description = "The provisioning credential was revoked"),
+        (status = 401, description = "No usable credential", body = crate::workspaces::ApiErrorBody),
+        (status = 403, description = "Directory credential management is not permitted", body = crate::workspaces::ApiErrorBody),
+        (status = 404, description = "The provisioning credential is absent or outside the tenant", body = crate::workspaces::ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
 #[tracing::instrument(name = "scim.credential.revoke", skip_all, fields(scim.credential = %id))]
-pub async fn revoke(State(state): State<AppState>, Path(id): Path<ScimCredentialId>) -> Response {
+pub(crate) async fn revoke(
+    State(state): State<AppState>,
+    Path(id): Path<ScimCredentialId>,
+) -> Response {
     let result = async {
         let tenant_id = tenant_id()?;
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
@@ -213,33 +285,14 @@ async fn respond<T: IntoResponse>(
     op: &'static str,
     result: Result<T>,
 ) -> Response {
-    let outcome = match &result {
-        Ok(_) => "ok",
-        Err(
-            Error::Unauthenticated { .. }
-            | Error::PolicyDenied { .. }
-            | Error::NotFound { .. }
-            | Error::Invalid { .. }
-            | Error::Conflict { .. }
-            | Error::RateLimited { .. },
-        ) => "rejected",
-        Err(_) => "error",
-    };
+    let outcome = crate::response::outcome(&result);
     metrics::counter!(SCIM_CREDENTIAL_OPERATIONS_TOTAL, "op" => op, "outcome" => outcome)
         .increment(1);
-    match result {
-        Ok(response) => response.into_response(),
-        Err(error) => {
-            audit::record_rejection(state, op, &error).await;
-            ApiError(error).into_response()
-        }
-    }
+    crate::response::finish(state, op, result).await
 }
 
-/// The window a caller's request resolves to, exposed for the test that
-/// pins the cap.
 #[must_use]
-pub fn resolved_expiry(now: DateTime<Utc>, requested_days: Option<i64>) -> DateTime<Utc> {
+fn resolved_expiry(now: DateTime<Utc>, requested_days: Option<i64>) -> DateTime<Utc> {
     now + Duration::days(
         requested_days
             .unwrap_or(DEFAULT_LIFETIME_DAYS)

@@ -1,128 +1,105 @@
 # Deployment
 
-- `compose/` — **the contributor's loop** (Postgres+pgvector+AGE+PGMQ,
-  Rauthy, Temporal, TEI, Jaeger; FND-2) plus the gateway itself
-  (`gateway/Dockerfile`, OPS-1). Build contexts, AGE and Temporal, none of
-  which make sense away from a source tree. `make dev-up` runs it.
-- `release/` — **what a tester installs** (OPS-8, ADR-0065): the same
-  single-node profile with every image pulled from a public registry and no
-  `build:` stanza anywhere. `scripts/package-release.sh` turns it into the
-  bundle `scripts/install.sh` unpacks under `~/.synveda/profile`, and
-  `synveda init` runs from there. See [docs/INSTALL.md](../docs/INSTALL.md).
-- `helm/` — enterprise profile (OPS-2, ADR-0062): the gateway, an HA
-  Postgres cluster under CloudNativePG, and the wiring for a customer's
-  IdP. `helm/synveda/` is the chart, `helm/postgres/Dockerfile` builds its
-  Postgres image, and `helm/IMAGES.md` is the inventory every image in the
-  chart *and* the release profile has to appear in
-  (`make check-chart-images`).
+Synveda has one context-platform runtime. The host binary, source/release
+Compose service and Helm Deployment run the same gateway, schema epoch,
+generated `/v1` contract, embedded Cedar PDP, VedaFlow effects and hash-chained
+audit path (CPR-36, ADR-0095).
 
-## Two compose files, and a test rather than a lint
+`personal`, `team` and `enterprise` are not deployment editions. They are
+canonical Configuration documents copied into immutable governed versions and
+bound to scopes after login. Deployment files may choose infrastructure size,
+OIDC wiring, supported model implementations, secret references and telemetry;
+they do not select policy, capture rules, context budgets, trace retention,
+freshness or Skill/Tool advertisement.
 
-`compose/` and `release/` describe the same profile for different readers,
-and the drift risk is real. The answer is `demos/ops-8-release-install.sh`,
-which installs from the **packaged** bundle rather than from `release/` in
-place — so a bundle that has stopped matching the product fails the demo the
-same way it would fail a tester. A checker comparing the two files could
-only prove they are similar, which is not the property anybody wants
-(ADR-0065 decision 3).
+- `compose/` is the contributor/single-node infrastructure: Postgres with the
+  development extensions, bundled Rauthy, optional TEI and Jaeger. It also
+  contains the gateway Dockerfile. `make dev-up` starts contributor services;
+  `synveda init` starts the profiled gateway.
+- `release/` is the pull-only single-node manifest installed under
+  `~/.synveda/profile`. `scripts/package-release.sh` substitutes one release
+  version and includes no source build or retired demo seeder.
+- `helm/` is the Kubernetes infrastructure: the same gateway image,
+  CloudNativePG, optional TEI, ingress and external IdP/secret wiring. The
+  CloudNativePG operator is deliberately a separately installed cluster
+  dependency.
 
-## The enterprise profile installs what has a consumer
+## Bootstrap boundary
 
-CloudNativePG is a dependency and ships. **Temporal and Qdrant do not**:
-nothing in this workspace links a Temporal client (VedaFlow went into
-Postgres, ADR-0003, and the Rust SDK's licence graph is inadmissible), and
-`VectorIndex` — the trait a Qdrant would sit behind — is OPS-4's and does
-not exist yet. Both are named in OPS-2's feature text; ADR-0062 decision 1
-records the triggers that put them in the chart.
+Both `synveda init` and the Helm install job do only the operations for which no
+authenticated product principal exists yet:
 
-The **CloudNativePG operator is not installed by this chart**. It is
-cluster-scoped, and a product chart that owns cluster-scoped CRDs fights
-the next chart that wants them. Install it first; the chart renders a
-`Cluster` for it.
+1. apply the current schema chain;
+2. provision/grant a least-privilege gateway LOGIN;
+3. optionally admit the first tenant;
+4. establish deployment key/issuer material.
 
-## One gateway replica, and the chart refuses to render a second
+The first `synveda-admins` login creates the tenant root, the caller's principal
+scope and its root `administrator` grant. Workspaces, projects, sessions,
+capture decisions, Knowledge and Configuration are public-API/PDP/VedaFlow/
+audit acts after that. No deployment script inserts those tables directly.
 
-Not a default — a rendering error, with the reason. Two things in the
-gateway are process-local and both fail *silently* with more than one:
-pending logins live in memory (a callback landing on another pod is a 401
-for a login the IdP completed), and the scope-chain cache is invalidated
-in-process with no TTL (a hierarchy move handled by one replica leaves the
-others composing against the ancestry the mover left, which reads as a
-policy decision rather than a stale cache). OPS-7 is the feature that
-fixes both.
+## Forced RLS in every deployed shape
 
-What needed no work, because it was already done in the database: the
-audit chain's per-tenant head lock, the promotion sweep's watermark lock,
-the lapse sweep's idempotency stamp, PGMQ's archive-lock, and console
-sessions in a table. ADR-0062 decision 4 has the inventory.
+Migrations create `synveda_app` as a NOLOGIN capability role and grant each new
+table only the privileges its runtime paths need. The gateway never connects as
+the database owner:
 
-## The gateway stops being a superuser here
+- `synveda init` converges local `synveda_gateway` as LOGIN, non-superuser,
+  non-BYPASSRLS and a member of `synveda_app`; the host and Compose gateway DSNs
+  use it;
+- CloudNativePG generates the Helm login and the install job grants it the same
+  membership; the admin Secret exists only in migration/tenant-admission
+  containers.
 
-The compose profile's gateway connects as `POSTGRES_USER`, which is the
-bootstrap superuser, and a superuser bypasses row-level security even where
-it is FORCED — so TEN-2's isolation backstop has been inert in every
-deployment that exists. In this profile the install job migrates under
-CNPG's superuser (migrations create a role and an extension) and then
-grants the gateway's own login role membership of `synveda_app`, the
-least-privilege role every migration has been granting since 0003. The
-gateway never holds an admin credential, and `values.yaml` has no key that
-can give it one.
+For a separately provisioned Postgres login, set
+`SYNVEDA_GATEWAY_DATABASE_URL` before `synveda init`. Init verifies that the
+named role already has LOGIN, is neither superuser nor BYPASSRLS, and inherits
+`synveda_app`; it refuses to start the gateway when any fact is false. The
+credential is written only to the deployment's mode-0600 environment file and
+is redacted from diagnostics.
 
-## The gateway service is behind a profile
+`make check-deploy` renders both Compose manifests and Helm, rejects an owner
+DSN or removed runtime surface, packages the release twice and checks the
+upgrade-shaped replacement. The CPR-36 database acceptance test also proves a
+runtime login with no tenant GUC cannot read tenant data. The kind acceptance
+test asserts the same role facts in a running chart before a governed round
+trip and CloudNativePG primary failover.
 
-`gateway` carries `profiles: ["deployed"]`, so `make dev-up` brings up the
-dependencies and not the product: that target is the contributor's loop,
-where the gateway runs from `cargo run` against whatever is checked out.
-`synveda init` starts it explicitly, and naming a profiled service on the
-command line is enough to activate it.
+## Why the Compose gateway may run on the host
 
-Which of the two start paths `init` uses depends on the issuer, not on
-taste — with the bundled Rauthy the gateway runs as a host process, because
-an OIDC issuer identifier must be one URL both the browser and the gateway
-can reach and RFC 6761 makes `http://localhost:8100/...` unreachable from
-inside any container. ADR-0055 decision 8 has the measurements and the
-alternatives that were tried.
+The bundled Rauthy issuer is `http://localhost:8100/auth/v1/`. An OIDC issuer
+identifier must be the same URL for the browser, discovery document, token and
+gateway; RFC 6761 resolves `localhost` to each caller's own loopback. The
+default installed gateway therefore runs as a host process. An external issuer
+has a mutually reachable DNS name and `synveda init --issuer ...` uses the same
+gateway image. This changes process placement, not product behaviour.
 
-## The TEI image is per-architecture
+## Embeddings
 
-Upstream publishes two text-embeddings-inference builds and versions only
-one of them: `cpu-<version>` is amd64, and the arm64 side ships as
-`cpu-arm64-latest` plus per-commit `cpu-arm64-sha-<commit>` tags. There is
-no versioned arm64 release, so compose pins the arm64 build **by commit**
-rather than following `latest`.
+`deterministic` is a lexical-only development implementation. `tei` serves
+BGE-M3 and is the meaningful semantic option. Upstream's amd64 image is version
+tagged; its arm64 image is pinned by commit because no versioned arm64 tag is
+published. The two tested builds produce the same 1024-dimensional model output
+to float32 rounding (cosine `1.000000000`, maximum absolute difference `7e-8`,
+measured 2026-07-26).
 
-`make dev-up` selects the image from `uname -m`; the compose default is the
-amd64 release, which is what CI runs. Override with `SYNVEDA_TEI_IMAGE` to
-pin something else.
+Knowledge embedding rows retain model and dimension. A model change converges a
+separately labelled sidecar; an old vector is never reinterpreted as output from
+a new model. TEI's cache is persistent in Compose and Helm because a cold
+BGE-M3 download is about 2.3 GB.
 
-`synveda init` carries the same table, for an operator who installed a
-release and has no Makefile. It did not until OPS-8, so `init --embedder
-tei` on an Apple Silicon laptop took the compose default and ran the amd64
-image — which nothing caught while every install was a contributor's, and a
-contributor runs `make dev-up`.
+## Honest operating limits
 
-The two builds are interchangeable where it matters. Measured 2026-07-26 on
-the same inputs: same model (BAAI/bge-m3), same dimension (1024), vectors
-agreeing to float32 rounding — cosine `1.000000000`, max `|diff|` 7e-8 —
-and CTX-1's recorded live-TEI quality numbers reproduce exactly
-(sparse-only recall@6 0.500, hybrid 0.792, MRR 1.0). That is the property
-that has to hold: `record_embeddings` stores a model and a dim, so a corpus
-embedded on one architecture must stay comparable to one embedded on the
-other.
-
-## GPU
-
-Not available through compose on macOS, and not a configuration gap.
-Docker on a Mac runs a Linux VM: Metal is a host-only framework with no
-passthrough into containers, and there is no NVIDIA runtime to use instead
-(`docker info` lists `runc` alone). MLX is Metal-backed on macOS — its
-Linux wheels target CUDA — so an MLX embedder would have to run as a
-**native host process**, outside compose, and would then be a second
-embedder implementation that only some developers exercise.
-
-The CPU path is adequate for dev: BGE-M3 on the arm64 build measures ~22 ms
-for a single input and ~13 ms/text at batch 32 (~81 texts/sec sustained),
-against an inject budget of p99 150 ms. If embedding throughput ever
-becomes the constraint, `mlx-community/bge-m3-mlx-fp16` keeps the same
-model and would slot behind the existing `Embedder` seam
-(`synveda-ingest`), with the caveat above about dev/prod divergence.
+- Helm runs one gateway replica with `Recreate`. Pending login state and
+  cross-process cache invalidation have not passed OPS-7; the chart refuses a
+  replicas value. CloudNativePG provides a replicated data plane, not gateway
+  HA, and a gateway upgrade has a brief outage.
+- Compose is a local single-node shape with explicit development database
+  credentials. It is not a production secret-management example.
+- The chart has no Qdrant, Temporal consumer, backup promise, external HSM or
+  customer-managed-key implementation. Provider credentials are Secret
+  references; rendered diagnostics must not contain values.
+- Release binaries are unsigned and un-notarized; shipped binaries are macOS
+  arm64 and Linux x86_64 only. There is no Windows build, zero-downtime gateway
+  upgrade guarantee or old-schema translator.

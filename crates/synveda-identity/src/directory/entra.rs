@@ -1,10 +1,8 @@
 //! Microsoft Entra ID, through Microsoft Graph (AUTH-5, ADR-0060).
 //!
 //! Three reads make a pass: every user, every group, and every group's
-//! members. Groups are read for their **display names**, because that is what
-//! the AUTH-2 mapping resolver matches on and what the `synveda-{dept}-{team}`
-//! convention is written against — Graph's group object ids mean nothing to
-//! it.
+//! members. Stable Graph object ids become the shared Group aggregate's
+//! directory address; display names remain mutable presentation.
 //!
 //! Paging is `@odata.nextLink`, which Graph returns as an absolute URL
 //! carrying its own opaque skip token. It is followed as given rather than
@@ -19,11 +17,12 @@
 
 use async_trait::async_trait;
 use serde::Deserialize;
-use std::collections::HashMap;
+use url::Url;
 
 use super::{
-    DirectoryConnector, DirectorySnapshot, DirectoryUserRecord, Enumeration, Secret, http_client,
-    redact,
+    ApiOrigin, DirectoryConnector, DirectoryGroupRecord, DirectoryItemKind, DirectorySnapshot,
+    DirectoryUserRecord, Enumeration, EnumerationBudget, EnumerationLimits, Secret, bounded_json,
+    http_client, redact,
 };
 
 const GRAPH_BASE: &str = "https://graph.microsoft.com";
@@ -45,6 +44,9 @@ pub struct EntraConnector {
     client_secret: Secret,
     graph_base: String,
     login_base: String,
+    graph_origin: ApiOrigin,
+    login_origin: ApiOrigin,
+    limits: EnumerationLimits,
 }
 
 #[derive(Deserialize)]
@@ -101,22 +103,32 @@ impl EntraConnector {
         graph_base: Option<String>,
         login_base: Option<String>,
     ) -> synveda_types::Result<Self> {
+        let graph_base = graph_base.unwrap_or_else(|| GRAPH_BASE.to_owned());
+        let login_base = login_base.unwrap_or_else(|| LOGIN_BASE.to_owned());
         Ok(Self {
             http: http_client()?,
             tenant_id,
             client_id,
             client_secret,
-            graph_base: graph_base.unwrap_or_else(|| GRAPH_BASE.to_owned()),
-            login_base: login_base.unwrap_or_else(|| LOGIN_BASE.to_owned()),
+            graph_origin: ApiOrigin::parse(&graph_base, "Entra Graph base")?,
+            login_origin: ApiOrigin::parse(&login_base, "Entra login base")?,
+            graph_base: graph_base.trim_end_matches('/').to_owned(),
+            login_base: login_base.trim_end_matches('/').to_owned(),
+            limits: EnumerationLimits::DEFAULT,
         })
     }
 
     /// Client-credentials grant for the Graph `.default` scope.
-    async fn token(&self) -> Result<String, String> {
-        let url = format!("{}/{}/oauth2/v2.0/token", self.login_base, self.tenant_id);
+    async fn token(&self, budget: &mut EnumerationBudget) -> Result<String, String> {
+        let candidate = format!("{}/{}/oauth2/v2.0/token", self.login_base, self.tenant_id);
+        let url = self
+            .login_origin
+            .resolve(None, &candidate)
+            .map_err(|failure| self.scrub(&failure))?;
+        budget.begin_page(&url)?;
         let response = self
             .http
-            .post(&url)
+            .post(url.clone())
             .form(&[
                 ("grant_type", "client_credentials"),
                 ("client_id", self.client_id.as_str()),
@@ -132,8 +144,7 @@ impl EntraConnector {
             // body carries the client secret.
             return Err(format!("token endpoint answered {}", response.status()));
         }
-        let token: TokenResponse = response
-            .json()
+        let token: TokenResponse = bounded_json(response, budget, &url)
             .await
             .map_err(|err| self.scrub(&format!("token response: {err}")))?;
         Ok(token.access_token)
@@ -148,11 +159,26 @@ impl EntraConnector {
         &self,
         token: &str,
         first: String,
+        kind: DirectoryItemKind,
+        budget: &mut EnumerationBudget,
     ) -> (Vec<T>, Option<String>) {
         let mut collected = Vec::new();
         let mut next = Some(first);
-        while let Some(url) = next {
-            let response = match self.http.get(&url).bearer_auth(token).send().await {
+        let mut current_page: Option<Url> = None;
+        while let Some(continuation) = next {
+            // Resolve and account before building the authenticated request:
+            // a hostile continuation never receives the bearer even once.
+            let url = match self
+                .graph_origin
+                .resolve(current_page.as_ref(), &continuation)
+            {
+                Ok(url) => url,
+                Err(failure) => return (collected, Some(failure)),
+            };
+            if let Err(failure) = budget.begin_page(&url) {
+                return (collected, Some(failure));
+            }
+            let response = match self.http.get(url.clone()).bearer_auth(token).send().await {
                 Ok(response) => response,
                 Err(err) => return (collected, Some(self.scrub(&format!("GET {url}: {err}")))),
             };
@@ -160,19 +186,18 @@ impl EntraConnector {
                 let status = response.status();
                 return (collected, Some(format!("GET {url} answered {status}")));
             }
-            let page: Page<T> = match response.json().await {
+            let page: Page<T> = match bounded_json(response, budget, &url).await {
                 Ok(page) => page,
-                Err(err) => {
-                    return (
-                        collected,
-                        Some(self.scrub(&format!("decoding {url}: {err}"))),
-                    );
-                }
+                Err(err) => return (collected, Some(self.scrub(&err))),
             };
+            if let Err(failure) = budget.retain(kind, page.value.len()) {
+                return (collected, Some(failure));
+            }
             collected.extend(page.value);
             // Followed as given: the skip token is opaque, and a client that
             // rebuilds this URL is one that re-reads page one forever.
             next = page.next_link;
+            current_page = Some(url);
         }
         (collected, None)
     }
@@ -195,8 +220,9 @@ impl DirectoryConnector for EntraConnector {
     )]
     async fn enumerate(&self) -> Enumeration {
         let mut snapshot = DirectorySnapshot::default();
+        let mut budget = EnumerationBudget::with_limits(self.limits);
 
-        let token = match self.token().await {
+        let token = match self.token(&mut budget).await {
             Ok(token) => token,
             Err(failure) => return partial(snapshot, failure),
         };
@@ -205,10 +231,9 @@ impl DirectoryConnector for EntraConnector {
             "{}/v1.0/users?$select={USER_SELECT}&$top={PAGE_SIZE}",
             self.graph_base
         );
-        let (users, failure) = self.walk::<GraphUser>(&token, users_url).await;
-        // Indexed by object id so membership attaches without a second scan
-        // of a list that may hold a hundred thousand people.
-        let mut by_id: HashMap<String, usize> = HashMap::new();
+        let (users, failure) = self
+            .walk::<GraphUser>(&token, users_url, DirectoryItemKind::Users, &mut budget)
+            .await;
         for user in users {
             // Somebody with no UPN cannot be matched to an identity or
             // addressed over SCIM, so there is nothing this product could do
@@ -216,7 +241,6 @@ impl DirectoryConnector for EntraConnector {
             let Some(user_name) = user.user_principal_name else {
                 continue;
             };
-            by_id.insert(user.id.clone(), snapshot.users.len());
             snapshot.users.push(DirectoryUserRecord {
                 external_id: user.id,
                 user_name,
@@ -225,7 +249,6 @@ impl DirectoryConnector for EntraConnector {
                 given_name: user.given_name,
                 family_name: user.surname,
                 work_email: user.mail,
-                groups: Vec::new(),
             });
         }
         if let Some(failure) = failure {
@@ -233,7 +256,9 @@ impl DirectoryConnector for EntraConnector {
         }
 
         let groups_url = format!("{}/v1.0/groups?$select=id,displayName", self.graph_base);
-        let (groups, failure) = self.walk::<GraphGroup>(&token, groups_url).await;
+        let (groups, failure) = self
+            .walk::<GraphGroup>(&token, groups_url, DirectoryItemKind::Groups, &mut budget)
+            .await;
         if let Some(failure) = failure {
             return partial(snapshot, failure);
         }
@@ -246,15 +271,17 @@ impl DirectoryConnector for EntraConnector {
                 "{}/v1.0/groups/{}/members?$select=id",
                 self.graph_base, group.id
             );
-            let (members, failure) = self.walk::<GraphMember>(&token, members_url).await;
-            for member in members {
-                if let Some(index) = by_id.get(&member.id) {
-                    snapshot.users[*index].groups.push(display_name.clone());
-                }
-            }
+            let (members, failure) = self
+                .walk::<GraphMember>(&token, members_url, DirectoryItemKind::Members, &mut budget)
+                .await;
             if let Some(failure) = failure {
                 return partial(snapshot, failure);
             }
+            snapshot.groups.push(DirectoryGroupRecord {
+                external_id: group.id,
+                display_name,
+                member_external_ids: members.into_iter().map(|member| member.id).collect(),
+            });
         }
 
         complete(snapshot)

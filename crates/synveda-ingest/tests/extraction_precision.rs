@@ -30,7 +30,9 @@ use synveda_ingest::extraction::{
     AnyExtractor, ClaudeExtractor, DeterministicExtractor, ExtractionInput, Extractor,
     VllmExtractor,
 };
-use synveda_types::{IdentityId, ObserveEventId, ObserveKind, RecordClass, ScopeId, TenantId};
+use synveda_types::knowledge::KnowledgeType;
+use synveda_types::session::SessionEventType;
+use synveda_types::{ScopeId, SessionEventId, SessionId, TenantId};
 
 /// The macro-averaged precision floor for the deterministic path
 /// (ADR-0046 decision 13), raising ADR-0022's provisional 0.8 on the
@@ -80,7 +82,7 @@ struct Fixture {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct FixtureInput {
-    kind: ObserveKind,
+    event_type: SessionEventType,
     session_id: String,
     occurred_at: DateTime<Utc>,
     payload: serde_json::Value,
@@ -89,7 +91,11 @@ struct FixtureInput {
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Expected {
-    class: RecordClass,
+    // `class` is the shared pre-CPR-18 corpus spelling. CPR-13 owns the
+    // corpus-wide re-point; this reader maps it directly to the Knowledge
+    // vocabulary meanwhile, with no runtime compatibility path.
+    #[serde(rename = "class")]
+    knowledge_type: KnowledgeType,
     #[serde(default)]
     content_contains: Option<String>,
 }
@@ -124,12 +130,12 @@ fn fixtures() -> Vec<Fixture> {
 
 fn input(fixture: &FixtureInput) -> ExtractionInput {
     ExtractionInput {
-        event_id: ObserveEventId::new(),
+        event_id: SessionEventId::new(),
         tenant_id: TenantId::new(),
         scope_id: ScopeId::new(),
-        owner_id: IdentityId::new(),
-        session_id: fixture.session_id.clone(),
-        kind: fixture.kind,
+        session_id: SessionId::new(),
+        principal_id: fixture.session_id.clone(),
+        event_type: fixture.event_type,
         payload: fixture.payload.clone(),
         occurred_at: fixture.occurred_at,
         redactions: None,
@@ -242,14 +248,18 @@ async fn measure(extractor: &AnyExtractor, fixtures: &[Fixture]) -> Report {
             .unwrap_or_else(|error| panic!("fixture {}: extractor failed: {error}", fixture.name));
 
         for expected in &fixture.expected {
-            report.recall.entry(expected.class.as_str()).or_default().1 += 1;
+            report
+                .recall
+                .entry(expected.knowledge_type.as_str())
+                .or_default()
+                .1 += 1;
         }
 
         let mut taken = vec![false; fixture.expected.len()];
         for candidate in &outcome.candidates {
             report
                 .precision
-                .entry(candidate.class.as_str())
+                .entry(candidate.knowledge_type.as_str())
                 .or_default()
                 .1 += 1;
 
@@ -259,10 +269,10 @@ async fn measure(extractor: &AnyExtractor, fixtures: &[Fixture]) -> Report {
                 .enumerate()
                 .position(|(index, expected)| {
                     !taken[index]
-                        && expected.class == candidate.class
+                        && expected.knowledge_type == candidate.knowledge_type
                         && expected.content_contains.as_deref().is_none_or(|token| {
                             candidate
-                                .content
+                                .body_markdown
                                 .to_lowercase()
                                 .contains(&token.to_lowercase())
                         })
@@ -272,20 +282,28 @@ async fn measure(extractor: &AnyExtractor, fixtures: &[Fixture]) -> Report {
                     taken[index] = true;
                     report
                         .precision
-                        .entry(candidate.class.as_str())
+                        .entry(candidate.knowledge_type.as_str())
                         .or_default()
                         .0 += 1;
-                    report.recall.entry(candidate.class.as_str()).or_default().0 += 1;
+                    report
+                        .recall
+                        .entry(candidate.knowledge_type.as_str())
+                        .or_default()
+                        .0 += 1;
                 }
                 None => report.unmatched.push(format!(
                     "{} [{}] {}",
                     fixture.name,
-                    candidate.class.as_str(),
-                    candidate.content.chars().take(72).collect::<String>()
+                    candidate.knowledge_type.as_str(),
+                    candidate.body_markdown.chars().take(72).collect::<String>()
                 )),
             }
 
-            let content = candidate.content.to_lowercase();
+            let content = format!(
+                "{} {} {}",
+                candidate.title, candidate.body_markdown, candidate.summary
+            )
+            .to_lowercase();
             for bait in &fixture.must_not_extract {
                 if content.contains(&bait.to_lowercase()) {
                     report
@@ -402,10 +420,10 @@ async fn placeholders_survive_extraction_verbatim() {
     assert_eq!(outcome.candidates.len(), 1);
     assert!(
         outcome.candidates[0]
-            .content
+            .body_markdown
             .contains("[REDACTED:github-pat]"),
         "placeholder must survive verbatim: {:?}",
-        outcome.candidates[0].content
+        outcome.candidates[0].body_markdown
     );
 }
 

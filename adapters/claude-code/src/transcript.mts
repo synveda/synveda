@@ -31,6 +31,20 @@ export interface ToolResult {
   text: string;
 }
 
+/**
+ * One tool call carried by a transcript entry.
+ *
+ * The name and the arguments, and nothing else: `tool_use` blocks also carry
+ * a `caller` and whatever else the harness threads through them, and this
+ * adapter reads six fields and treats the rest as opaque (decision 9).
+ */
+export interface ToolInvocation {
+  tool_use_id?: string;
+  name: string;
+  /** The call's arguments, rendered as JSON. Empty when it took none. */
+  input: string;
+}
+
 /** Every session-content entry in the transcript, in document order. */
 export function readTranscript(path: string): TranscriptEntry[] {
   let raw: string;
@@ -127,6 +141,51 @@ export function toolResults(message: unknown): ToolResult[] {
     });
   }
   return results;
+}
+
+/**
+ * The `tool_use` blocks of a message, if any.
+ *
+ * The mirror of [`toolResults`], and it was missing until CPR-14 replayed a
+ * real transcript through this parser: an assistant turn that called a tool
+ * carries a `tool_use` block and no text at all, so the entry produced no
+ * text event and no tool event and was dropped whole. What a session *did*
+ * — which tool, with which arguments — reached nothing.
+ */
+export function toolInvocations(message: unknown): ToolInvocation[] {
+  const content = contentOf(message);
+  if (!Array.isArray(content)) return [];
+  const calls: ToolInvocation[] = [];
+  for (const block of content) {
+    if (block === null || typeof block !== "object") continue;
+    const record = block as Record<string, unknown>;
+    if (record.type !== "tool_use") continue;
+    if (typeof record.name !== "string") continue;
+    calls.push({
+      tool_use_id: typeof record.id === "string" ? record.id : undefined,
+      name: record.name,
+      input: renderInput(record.input),
+    });
+  }
+  return calls;
+}
+
+/**
+ * A tool call's arguments as JSON text.
+ *
+ * Text rather than the parsed object because everything downstream of here —
+ * the payload cap, the truncation pass, the redaction scan — works on strings,
+ * and an argument object that has to be re-serialised at each of them is three
+ * chances to disagree about what was sent.
+ */
+function renderInput(input: unknown): string {
+  if (input === undefined || input === null) return "";
+  try {
+    return JSON.stringify(input) ?? "";
+  } catch {
+    // A cyclic or otherwise unserialisable value. The call still happened.
+    return "";
+  }
 }
 
 /**

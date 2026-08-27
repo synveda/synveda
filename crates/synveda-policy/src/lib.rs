@@ -22,10 +22,11 @@ mod request;
 
 pub use pdp::{
     EMBEDDED_PACKS, EffectivePack, EntityBatch, OPEN_COLLABORATION, PackOrigin, Pdp,
-    PermittedTiers, REGULATED_STRICT, STANDARD, effective_roles_at, is_reserved, lapsable,
-    lapsed_scopes,
+    PermittedTiers, REGULATED_STRICT, STANDARD, effective_role_keys_at, is_reserved, relaxable,
 };
-pub use request::{Action, AuthzContext, AuthzDecision, Principal, Resource};
+pub use request::{
+    Action, AuthzContext, AuthzDecision, Principal, Resource, ResourceEntity, ScopeNode,
+};
 
 /// Authorization decisions, labelled by `action`, `decision`
 /// (`allow`/`deny`), and `pack` (name only — versions are unbounded and go

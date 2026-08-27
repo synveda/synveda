@@ -1,4 +1,4 @@
-//! The rule-based extractor: `ObserveKind` routing plus keyword
+//! The rule-based extractor: event-type routing plus keyword
 //! heuristics, truncation-as-summary. Honest about what it is — no
 //! network, no abstraction, fixed per-rule confidence — and exactly what
 //! keeps dev, demos, and the AC tests self-contained (ADR-0022
@@ -7,9 +7,11 @@
 use std::sync::LazyLock;
 
 use regex::Regex;
-use synveda_types::{ObserveKind, RecordClass, Result};
+use synveda_types::Result;
+use synveda_types::knowledge::{KnowledgeOrigin, KnowledgeType};
+use synveda_types::session::SessionEventType;
 
-use super::{CandidateRecord, ExtractionInput, ExtractionOutcome, Extractor};
+use super::{CandidateKnowledge, ExtractionInput, ExtractionOutcome, Extractor};
 
 /// Content longer than this is truncated on a word boundary — a
 /// truncation is an honest summary only while it stays short.
@@ -22,16 +24,34 @@ const KEYWORD_CONFIDENCE: f64 = 0.6;
 
 /// The ruleset version recorded as `model_version` in provenance. Bump
 /// whenever a rule changes: provenance must name what actually ran.
-/// `@2` added entity mentions (GRPH-2, ADR-0044 decision 2).
-const RULESET_VERSION: &str = "builtin@2";
+/// `@2` added entity mentions (GRPH-2, ADR-0044 decision 2); `@4` recognises
+/// explicit imperative and architectural-choice forms after the session-plane
+/// cut removed the caller-supplied Record kind; `@5` recognises short
+/// definitional noun phrases without requiring a capitalised one-word name.
+const RULESET_VERSION: &str = "builtin@5";
 
 static PREFERENCE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)\b(prefers?|always use|never use|i like|we like|favou?rite)\b")
         .expect("static preference pattern compiles")
 });
 static DECISION: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"(?i)\b(decided|decision|we chose|agreed to|going with|settled on)\b")
-        .expect("static decision pattern compiles")
+    // `chose`/`chosen` bare, not only `we chose`: the pronoun was never the
+    // signal, and requiring it meant "Chose BLAKE3 over SHA-256" read as a
+    // fact. Imperative choices, `thing-first:` architecture shorthand,
+    // bounded "only … licences/core path" constraints, and "stays the …
+    // substrate" are the other explicit choice forms the labelled capture
+    // corpus uses. They are narrow on purpose: a generic `must` or `use`
+    // would turn procedures and warnings into decisions.
+    Regex::new(
+        r"(?ix)
+          \b(decided|decision|chose|chosen|we\ picked|agreed\ to|going\ with|settled\ on)\b
+          | ^\s*(ship|cut|adopt|choose|keep|retain|standardise|standardize|pin)\b
+          | ^\s*[a-z][a-z0-9_-]*-first\s*:
+          | ^\s*only\b[^\n]*(licen[cs]es?|core\ path)\b
+          | \bstays\ the\b[^.;]*\bsubstrate\b
+        ",
+    )
+    .expect("static decision pattern compiles")
 });
 static PROCEDURE: LazyLock<Regex> = LazyLock::new(|| {
     // `first,` carries its own comma boundary: `\b` cannot sit between a
@@ -39,8 +59,9 @@ static PROCEDURE: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(r"(?i)\b(step \d|how to|procedure|then run|run the following)\b|(?i)\bfirst,")
         .expect("static procedure pattern compiles")
 });
-static ENTITY: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"^[A-Z][A-Za-z0-9_-]* is (a|an|the|our) ").expect("static entity pattern compiles")
+static ENTITY_DEFINITION: LazyLock<Regex> = LazyLock::new(|| {
+    Regex::new(r"(?i)^([a-z][a-z0-9_-]*(?: [a-z][a-z0-9_-]*){0,3}) is (?:a|an|the|our) ")
+        .expect("static entity-definition pattern compiles")
 });
 /// The opaque spans MEM-2 leaves behind (ADR-0021). Removed before
 /// mention detection so `REDACTED` never reads as a proper noun — the
@@ -193,16 +214,23 @@ impl Extractor for DeterministicExtractor {
         let candidates = if text.is_empty() {
             Vec::new()
         } else {
-            let (class, confidence) = classify(input.kind, &text);
-            // Mentions come from the content that will actually be
-            // persisted, not from the text before truncation: an edge
-            // claiming this record names a thing must be true of the
-            // record as stored (GRPH-2, ADR-0044 decision 2).
+            let (class, confidence) = classify(input.event_type, &text);
+            // Mentions come from the content that will actually be proposed,
+            // not from the text before truncation: a future relation claiming
+            // this revision names a thing must be true of its stored content.
             let content = truncate(&text);
             let entities = mentions(&content);
-            vec![CandidateRecord {
-                class,
-                content,
+            vec![CandidateKnowledge {
+                knowledge_type: class,
+                origin: if input.event_type == SessionEventType::MemoryAsserted {
+                    KnowledgeOrigin::Asserted
+                } else {
+                    KnowledgeOrigin::Observed
+                },
+                title: proposed_title(&content),
+                summary: content.clone(),
+                body_markdown: content,
+                tags: Vec::new(),
                 confidence,
                 sensitivity: None,
                 entities,
@@ -216,36 +244,76 @@ impl Extractor for DeterministicExtractor {
     }
 }
 
-/// Kind routes first (the client told us what this is); transcript deltas
-/// fall through to keyword heuristics, default `fact`.
+/// The event type routes first (the client told us what this is); anything
+/// that is somebody's words falls through to keyword heuristics, default
+/// `fact`.
 ///
-/// `assertion` takes the keyword path with them, and deliberately. It is the
-/// one kind that says nothing about *class*: "a model composed this and
-/// chose to store it" (ADR-0057 decision 8) is a claim about who put the
-/// content on the wire, not about what the content is — a model asserts
-/// preferences, procedures and decisions as readily as bare facts. Routing
-/// it to a fixed class at `KIND_CONFIDENCE` would be asserting a
-/// classification the kind does not carry, so the text is read the same way
-/// a transcript delta's is, and the provenance claim rides on the record's
-/// `provenance.kind` instead (worker.rs).
-fn classify(kind: ObserveKind, text: &str) -> (RecordClass, f64) {
-    match kind {
-        ObserveKind::Decision => (RecordClass::Decision, KIND_CONFIDENCE),
-        ObserveKind::ToolResult => (RecordClass::Episode, KIND_CONFIDENCE),
-        ObserveKind::TranscriptDelta | ObserveKind::Assertion => {
+/// **Something that happened is an episode.** A tool call, a tool answer, a
+/// file change and a shell command are all evidence of an act, and their class
+/// is decided by their type at `KIND_CONFIDENCE` — nothing in the text can
+/// make a `command.executed` into a preference.
+///
+/// **`memory.asserted` takes the keyword path**, and deliberately. It is the
+/// one type that says nothing about *class*: "a model composed this and chose
+/// to store it" (ADR-0057 decision 8) is a claim about who put the content on
+/// the wire, not about what the content is — a model asserts preferences,
+/// procedures and decisions as readily as bare facts. Routing it to a fixed
+/// class at `KIND_CONFIDENCE` would assert a classification the type does not
+/// carry, so the text is read the same way a message's is and the provenance
+/// claim rides on the candidate's source event instead.
+///
+/// Types that answer `false` to [`SessionEventType::capture_eligible`] never
+/// enter a frozen batch.
+fn classify(event_type: SessionEventType, text: &str) -> (KnowledgeType, f64) {
+    match event_type {
+        SessionEventType::ToolInvoked
+        | SessionEventType::ToolResult
+        | SessionEventType::FileChanged
+        | SessionEventType::CommandExecuted => (KnowledgeType::Episode, KIND_CONFIDENCE),
+        _ => {
             if PREFERENCE.is_match(text) {
-                (RecordClass::Preference, KEYWORD_CONFIDENCE)
+                (KnowledgeType::Preference, KEYWORD_CONFIDENCE)
             } else if DECISION.is_match(text) {
-                (RecordClass::Decision, KEYWORD_CONFIDENCE)
+                (KnowledgeType::Decision, KEYWORD_CONFIDENCE)
             } else if PROCEDURE.is_match(text) {
-                (RecordClass::Procedure, KEYWORD_CONFIDENCE)
-            } else if ENTITY.is_match(text) {
-                (RecordClass::Entity, KEYWORD_CONFIDENCE)
+                (KnowledgeType::Procedure, KEYWORD_CONFIDENCE)
+            } else if is_entity_definition(text) {
+                (KnowledgeType::Entity, KEYWORD_CONFIDENCE)
             } else {
-                (RecordClass::Fact, KEYWORD_CONFIDENCE)
+                (KnowledgeType::Fact, KEYWORD_CONFIDENCE)
             }
         }
     }
+}
+
+/// Recognises a compact copular definition such as `pgvector is the …` or
+/// `Postgres full-text search is the …`. The old rule accepted only one
+/// capitalised token, so ordinary lower-case technical names and multi-word
+/// terms became facts. Leading sentence grammar stays excluded: `the sky is a
+/// colour` is a statement about a subject, not an entity definition signal.
+fn is_entity_definition(text: &str) -> bool {
+    let Some(captures) = ENTITY_DEFINITION.captures(text) else {
+        return false;
+    };
+    captures
+        .get(1)
+        .and_then(|subject| subject.as_str().split_whitespace().next())
+        .is_some_and(|first| !SENTENCE_OPENERS.contains(&bare(first).as_str()))
+}
+
+/// A deterministic title from the first sentence/line, bounded below the
+/// Knowledge title limit without splitting UTF-8.
+fn proposed_title(content: &str) -> String {
+    let sentence = content
+        .split(['\n', '.', '!', '?'])
+        .find(|part| !part.trim().is_empty())
+        .unwrap_or(content)
+        .trim();
+    let mut title: String = sentence.chars().take(100).collect();
+    if sentence.chars().count() > 100 {
+        title.push('…');
+    }
+    title
 }
 
 /// Concatenates every string value in the payload, in document order,
@@ -409,27 +477,58 @@ mod tests {
         assert!(out.ends_with('…') && !out.contains("wor…"), "{out}");
     }
 
-    /// The kinds whose class the client effectively told us, and the class
-    /// each one means. `assertion` is absent by design — see below.
+    /// The types whose class the event itself decides, and the class each one
+    /// means. `memory.asserted` is absent by design — see below.
     #[test]
-    fn kind_routing_is_fixed_for_the_kinds_that_carry_a_class() {
+    fn type_routing_is_fixed_for_the_types_that_carry_a_class() {
+        for event_type in [
+            SessionEventType::ToolInvoked,
+            SessionEventType::ToolResult,
+            SessionEventType::FileChanged,
+            SessionEventType::CommandExecuted,
+        ] {
+            let (class, confidence) = classify(event_type, "anything at all");
+            assert_eq!(
+                class,
+                KnowledgeType::Episode,
+                "{} should route to episode whatever the text says",
+                event_type.as_str()
+            );
+            assert!((confidence - KIND_CONFIDENCE).abs() < f64::EPSILON);
+        }
+    }
+
+    /// The gate that keeps the extractor away from bookkeeping. A type that
+    /// answers `false` never enters a batch, so a change that made one of
+    /// these `true` would start spending an LLM call on "session started".
+    #[test]
+    fn only_durable_content_types_are_capture_eligible() {
+        let carrying: Vec<&str> = SessionEventType::ALL
+            .iter()
+            .filter(|event_type| event_type.capture_eligible())
+            .map(SessionEventType::as_str)
+            .collect();
         assert_eq!(
-            classify(ObserveKind::Decision, "anything at all").0,
-            RecordClass::Decision
-        );
-        assert_eq!(
-            classify(ObserveKind::ToolResult, "anything at all").0,
-            RecordClass::Episode
+            carrying,
+            [
+                "message.user",
+                "message.assistant",
+                "tool.invoked",
+                "tool.result",
+                "file.changed",
+                "command.executed",
+                "memory.asserted",
+            ]
         );
     }
 
-    /// ADR-0057 decision 8: `assertion` is a provenance claim, not a class
-    /// claim. It must read the text exactly as a transcript delta does —
+    /// ADR-0057 decision 8: `memory.asserted` is a provenance claim, not a
+    /// class claim. It must read the text exactly as a plain message does —
     /// identical class *and* identical confidence — because a model asserts
-    /// preferences and procedures as readily as bare facts, and pinning it
-    /// to one class would assert a classification the kind never carried.
+    /// preferences and procedures as readily as bare facts, and pinning it to
+    /// one class would assert a classification the type never carried.
     #[test]
-    fn assertion_classifies_exactly_as_a_transcript_delta_does() {
+    fn an_assertion_classifies_exactly_as_a_message_does() {
         let texts = [
             "I prefer tabs over spaces",
             "we decided to ship on Friday",
@@ -440,9 +539,9 @@ mod tests {
         ];
         for text in texts {
             assert_eq!(
-                classify(ObserveKind::Assertion, text),
-                classify(ObserveKind::TranscriptDelta, text),
-                "assertion and transcript_delta disagreed on {text:?}"
+                classify(SessionEventType::MemoryAsserted, text),
+                classify(SessionEventType::MessageUser, text),
+                "memory.asserted and message.user disagreed on {text:?}"
             );
         }
     }
@@ -457,19 +556,73 @@ mod tests {
             "we decided to ship on Friday",
             "how to deploy: then run make release",
         ]
-        .map(|text| classify(ObserveKind::Assertion, text).0);
+        .map(|text| classify(SessionEventType::MemoryAsserted, text).0);
         assert_eq!(
             classes,
             [
-                RecordClass::Preference,
-                RecordClass::Decision,
-                RecordClass::Procedure
+                KnowledgeType::Preference,
+                KnowledgeType::Decision,
+                KnowledgeType::Procedure
             ]
         );
         assert_eq!(
-            classify(ObserveKind::Assertion, "the sky is a colour").0,
-            RecordClass::Fact,
+            classify(SessionEventType::MemoryAsserted, "the sky is a colour").0,
+            KnowledgeType::Fact,
             "the default"
+        );
+    }
+
+    #[test]
+    fn explicit_choice_forms_are_decisions_without_swallowing_procedures() {
+        for text in [
+            "Ship the scanner as pure regex.",
+            "Cut the Temporal SDK from phase one.",
+            "Postgres-first: one engine for rows and vectors.",
+            "Only MIT and Apache-2.0 licences in the core path.",
+            "Indexed adjacency stays the graph substrate.",
+        ] {
+            assert_eq!(
+                classify(SessionEventType::MessageAssistant, text).0,
+                KnowledgeType::Decision,
+                "explicit choice was not classified as a decision: {text}"
+            );
+        }
+        assert_eq!(
+            classify(
+                SessionEventType::MessageUser,
+                "How to deploy: then run make release"
+            )
+            .0,
+            KnowledgeType::Procedure
+        );
+        assert_eq!(
+            classify(
+                SessionEventType::MessageUser,
+                "I keep my editor on two-space indentation"
+            )
+            .0,
+            KnowledgeType::Fact,
+            "an incidental first-person verb is not an imperative choice"
+        );
+    }
+
+    #[test]
+    fn short_definitional_noun_phrases_are_entities() {
+        for text in [
+            "pgvector is the Postgres extension for vectors.",
+            "Postgres full-text search is the lexical retrieval leg.",
+            "Acme Corp is the customer.",
+        ] {
+            assert_eq!(
+                classify(SessionEventType::MessageUser, text).0,
+                KnowledgeType::Entity,
+                "definition was not classified as an entity: {text}"
+            );
+        }
+        assert_eq!(
+            classify(SessionEventType::MessageUser, "The sky is a colour").0,
+            KnowledgeType::Fact,
+            "a sentence-opening article is not an entity name"
         );
     }
 }

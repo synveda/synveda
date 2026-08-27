@@ -1,0 +1,38 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select current.id as \"item_id!\",\n               current.updated_at as \"updated_at!\",\n               case when $2::text is null then 0.0::float8\n                    else ts_rank_cd(\n                        revision.search_document,\n                        websearch_to_tsquery('simple'::regconfig, $2)\n                    )::float8\n               end as \"score!\"\n        from knowledge_current current\n        join knowledge_revisions revision\n          on revision.tenant_id = current.tenant_id\n         and revision.id = current.current_revision_id\n        where current.tenant_id = $1\n          and current.lifecycle_state = $3\n          and (cardinality($4::uuid[]) = 0 or current.scope_id = any($4))\n          and ($2::text is null or revision.search_document @@\n               websearch_to_tsquery('simple'::regconfig, $2))\n        order by 3 desc, current.updated_at desc, current.id desc\n        limit $5\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "item_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "updated_at!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 2,
+        "name": "score!",
+        "type_info": "Float8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "UuidArray",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      true,
+      true,
+      null
+    ]
+  },
+  "hash": "cd3c978b603cc5a2e1b9f1b7f6b31b4b97c016fbfbf234e62ca316939930f745"
+}

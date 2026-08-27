@@ -279,26 +279,138 @@ impl std::fmt::Display for ChainVerification {
     }
 }
 
+/// A verification verdict together with the exact tenant-chain head it
+/// checked.
+///
+/// The head is captured once before the paged walk starts. A later append is
+/// outside the verified prefix, not evidence that the prefix was broken.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VerificationReport {
+    /// Whether the frozen prefix is valid, or its first divergence.
+    pub verification: ChainVerification,
+    /// The frozen prefix's final sequence number; zero for an empty chain.
+    pub head_seq: i64,
+    /// The frozen prefix's head hash; the tenant-bound genesis for an empty
+    /// chain.
+    pub head_hash: Vec<u8>,
+}
+
+#[derive(Debug)]
+struct VerificationSnapshot {
+    head: Option<(i64, Vec<u8>)>,
+    max_seq: i64,
+}
+
+impl VerificationSnapshot {
+    fn report_head(&self, tenant: TenantId) -> (i64, Vec<u8>) {
+        self.head
+            .clone()
+            .unwrap_or_else(|| (0, genesis_hash(tenant).to_vec()))
+    }
+}
+
 /// Walks `tenant`'s whole chain, recomputing every hash from the stored
 /// columns (never trusting stored bytes as hash input), and reports the
-/// first divergence. Deterministic and side-effect-free; one snapshot —
-/// run it inside a tenant transaction.
-#[tracing::instrument(name = "audit.verify", skip_all, fields(tenant.id = %tenant), err(Display))]
+/// first divergence.
+///
+/// This convenience helper discards the frozen frame. A caller that renders
+/// a completeness frame should use [`verify_report`] so it cannot accidentally
+/// pair this verdict with a later chain head.
 pub async fn verify(conn: &mut PgConnection, tenant: TenantId) -> Result<ChainVerification> {
-    let head = sqlx::query!(
-        "select seq, head_hash from audit_chain_heads where tenant_id = $1",
+    Ok(verify_report(conn, tenant).await?.verification)
+}
+
+/// Verifies one frozen tenant-chain prefix and returns both its verdict and
+/// the exact head that verdict covers.
+///
+/// PostgreSQL's default `READ COMMITTED` isolation takes a fresh snapshot for
+/// every statement. Capturing the head once is therefore not sufficient by
+/// itself: every page must also carry `seq <= frozen_head`. A normal append
+/// committed while a long verification is walking later pages is ignored by
+/// this run and belongs to the next one.
+#[tracing::instrument(name = "audit.verify", skip_all, fields(tenant.id = %tenant), err(Display))]
+pub async fn verify_report(
+    conn: &mut PgConnection,
+    tenant: TenantId,
+) -> Result<VerificationReport> {
+    let snapshot = verification_snapshot(conn, tenant).await?;
+    verify_snapshot(conn, tenant, snapshot).await
+}
+
+/// Captures the chain head and log extent in one SQL statement and therefore
+/// one MVCC snapshot. The extent preserves AUD-1's detection of a head moved
+/// ahead of or behind the log without making the verifier read event content
+/// beyond the frozen head.
+async fn verification_snapshot(
+    conn: &mut PgConnection,
+    tenant: TenantId,
+) -> Result<VerificationSnapshot> {
+    let row = sqlx::query!(
+        r#"select head.seq as "head_seq?",
+                  head.head_hash as "head_hash?",
+                  coalesce(log.max_seq, 0) as "max_seq!"
+             from (
+                    select max(seq) as max_seq
+                      from audit_log
+                     where tenant_id = $1
+                  ) log
+             left join audit_chain_heads head on head.tenant_id = $1"#,
         tenant.as_uuid(),
     )
-    .fetch_optional(&mut *conn)
+    .fetch_one(&mut *conn)
     .await
-    .map_err(|err| storage_error("read chain head", &err))?;
+    .map_err(|err| storage_error("freeze audit chain head", &err))?;
+
+    let head = match (row.head_seq, row.head_hash) {
+        (Some(seq), Some(hash)) => Some((seq, hash)),
+        (None, None) => None,
+        // Both columns are NOT NULL on the same row. Reaching this branch
+        // means the database returned a shape the schema cannot represent.
+        _ => {
+            return Err(Error::Storage {
+                message: "freeze audit chain head: incomplete head row".to_owned(),
+            });
+        }
+    };
+    Ok(VerificationSnapshot {
+        head,
+        max_seq: row.max_seq,
+    })
+}
+
+async fn verify_snapshot(
+    conn: &mut PgConnection,
+    tenant: TenantId,
+    snapshot: VerificationSnapshot,
+) -> Result<VerificationReport> {
+    let (head_seq, head_hash) = snapshot.report_head(tenant);
+
+    // No head and no rows is the never-started, valid empty chain. Rows
+    // without a head are already conclusively broken; there is no trusted
+    // prefix boundary whose event content could be walked.
+    if snapshot.head.is_none() {
+        let verification = if snapshot.max_seq == 0 {
+            ChainVerification::Valid { events: 0 }
+        } else {
+            ChainVerification::Broken {
+                seq: snapshot.max_seq,
+                reason: BreakReason::MissingHead,
+            }
+        };
+        record_verification_metric(verification);
+        return Ok(VerificationReport {
+            verification,
+            head_seq,
+            head_hash,
+        });
+    }
 
     let mut prev: Vec<u8> = genesis_hash(tenant).to_vec();
     let mut expected = 1i64;
     let mut outcome = None;
 
     'walk: loop {
-        let rows = page(conn, tenant, expected - 1).await?;
+        let rows = page(conn, tenant, expected - 1, head_seq).await?;
         if rows.is_empty() {
             break;
         }
@@ -344,23 +456,24 @@ pub async fn verify(conn: &mut PgConnection, tenant: TenantId) -> Result<ChainVe
     let events = expected - 1;
     let verification = if let Some((seq, reason)) = outcome {
         ChainVerification::Broken { seq, reason }
+    } else if events == head_seq && snapshot.max_seq == head_seq && head_hash == prev {
+        ChainVerification::Valid { events }
     } else {
-        match head {
-            None if events == 0 => ChainVerification::Valid { events: 0 },
-            None => ChainVerification::Broken {
-                seq: events,
-                reason: BreakReason::MissingHead,
-            },
-            Some(head) if head.seq == events && head.head_hash == prev => {
-                ChainVerification::Valid { events }
-            }
-            Some(head) => ChainVerification::Broken {
-                seq: head.seq,
-                reason: BreakReason::Head,
-            },
+        ChainVerification::Broken {
+            seq: head_seq,
+            reason: BreakReason::Head,
         }
     };
 
+    record_verification_metric(verification);
+    Ok(VerificationReport {
+        verification,
+        head_seq,
+        head_hash,
+    })
+}
+
+fn record_verification_metric(verification: ChainVerification) {
     metrics::counter!(
         AUDIT_VERIFICATIONS_TOTAL,
         "outcome" => match verification {
@@ -369,7 +482,6 @@ pub async fn verify(conn: &mut PgConnection, tenant: TenantId) -> Result<ChainVe
         },
     )
     .increment(1);
-    Ok(verification)
 }
 
 /// The most recent `limit` events, newest first — the CLI's `audit tail`
@@ -469,18 +581,25 @@ pub async fn head_seq(conn: &mut PgConnection, tenant: TenantId) -> Result<i64> 
     Ok(seq.unwrap_or(0))
 }
 
-/// One verification page: events with `seq > after`, ascending.
-async fn page(conn: &mut PgConnection, tenant: TenantId, after: i64) -> Result<Vec<StoredEvent>> {
+/// One verification page inside the head captured before the walk began:
+/// events with `after < seq <= through`, ascending.
+async fn page(
+    conn: &mut PgConnection,
+    tenant: TenantId,
+    after: i64,
+    through: i64,
+) -> Result<Vec<StoredEvent>> {
     sqlx::query_as!(
         StoredEvent,
         r#"select seq, occurred_at, actor_kind, actor_subject, action,
                   resource, outcome, payload, trace_id, prev_hash, hash
-           from audit_log
-           where tenant_id = $1 and seq > $2
-           order by seq
-           limit $3"#,
+             from audit_log
+            where tenant_id = $1 and seq > $2 and seq <= $3
+            order by seq
+            limit $4"#,
         tenant.as_uuid(),
         after,
+        through,
         VERIFY_PAGE,
     )
     .fetch_all(&mut *conn)
@@ -497,6 +616,65 @@ fn storage_error(context: &str, err: &sqlx::Error) -> Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use sqlx::postgres::PgPoolOptions;
+    use sqlx::{PgPool, Postgres, Transaction};
+
+    use crate::event::{Actor, Outcome};
+
+    async fn test_pool() -> Option<PgPool> {
+        let url = match std::env::var("DATABASE_URL") {
+            Ok(url) => url,
+            Err(_) => {
+                eprintln!(
+                    "skipping frozen verification test: DATABASE_URL is not set \
+                     (run `make dev-up` then `make db-test`)"
+                );
+                return None;
+            }
+        };
+        let pool = PgPoolOptions::new()
+            .max_connections(2)
+            .connect(&url)
+            .await
+            .expect("connect to DATABASE_URL");
+        let migrated =
+            sqlx::query_scalar::<_, Option<String>>("select to_regclass('public.audit_log')::text")
+                .fetch_one(&pool)
+                .await
+                .expect("probe for audit_log");
+        if migrated.is_none() {
+            eprintln!(
+                "skipping frozen verification test: audit tables missing -- apply \
+                 migrations first (`synveda db migrate`)"
+            );
+            return None;
+        }
+        Some(pool)
+    }
+
+    async fn tenant_tx(pool: &PgPool, tenant: TenantId) -> Transaction<'static, Postgres> {
+        let mut tx = pool.begin().await.expect("begin tenant transaction");
+        sqlx::query!(
+            "select set_config('synveda.tenant_id', $1, true)",
+            tenant.as_uuid().to_string(),
+        )
+        .fetch_one(&mut *tx)
+        .await
+        .expect("set tenant GUC");
+        tx
+    }
+
+    fn event(seq: i64) -> AuditEvent {
+        AuditEvent {
+            occurred_at: Utc::now(),
+            actor: Actor::subject("frozen-verifier"),
+            action: AuditAction::AuthzDecision,
+            resource: format!("audit verification fixture {seq}"),
+            outcome: Outcome::Allow,
+            payload: serde_json::json!({"seq": seq}),
+            trace_id: None,
+        }
+    }
 
     #[test]
     fn genesis_hashes_bind_chains_to_their_tenant() {
@@ -527,5 +705,68 @@ mod tests {
     #[test]
     fn hex_rendering_is_lowercase_and_padded() {
         assert_eq!(to_hex(&[0x00, 0x0f, 0xa5]), "000fa5");
+    }
+
+    #[tokio::test]
+    async fn append_after_freeze_stays_outside_a_two_page_verification() {
+        let Some(pool) = test_pool().await else {
+            return;
+        };
+        let tenant = TenantId::new();
+
+        // One row beyond VERIFY_PAGE forces the verifier to issue a second
+        // SELECT under READ COMMITTED, which is where the moving-snapshot
+        // defect appeared.
+        let frozen_events = VERIFY_PAGE + 1;
+        let mut seed_tx = tenant_tx(&pool, tenant).await;
+        for seq in 1..=frozen_events {
+            append(&mut seed_tx, tenant, &event(seq))
+                .await
+                .expect("append frozen prefix");
+        }
+        seed_tx.commit().await.expect("commit frozen prefix");
+
+        let mut verification_tx = tenant_tx(&pool, tenant).await;
+        let snapshot = verification_snapshot(&mut verification_tx, tenant)
+            .await
+            .expect("freeze verification head");
+        let (frozen_head_seq, frozen_head_hash) = snapshot.report_head(tenant);
+        assert_eq!(frozen_head_seq, frozen_events);
+
+        // Commit a normal append on another connection after the verifier
+        // froze its boundary but before it reads either page.
+        let mut append_tx = tenant_tx(&pool, tenant).await;
+        let appended = append(&mut append_tx, tenant, &event(frozen_events + 1))
+            .await
+            .expect("append beyond frozen prefix");
+        append_tx.commit().await.expect("commit concurrent append");
+
+        let report = verify_snapshot(&mut verification_tx, tenant, snapshot)
+            .await
+            .expect("verify frozen prefix");
+        assert_eq!(
+            report.verification,
+            ChainVerification::Valid {
+                events: frozen_events,
+            }
+        );
+        assert_eq!(report.head_seq, frozen_head_seq);
+        assert_eq!(report.head_hash, frozen_head_hash);
+        assert_eq!(appended.seq, frozen_events + 1);
+        assert_ne!(report.head_hash, appended.hash);
+
+        // The next verification takes a new boundary and includes the append;
+        // the first report was a valid prefix, not a stale global claim.
+        let current = verify_report(&mut verification_tx, tenant)
+            .await
+            .expect("verify current chain");
+        assert_eq!(
+            current.verification,
+            ChainVerification::Valid {
+                events: frozen_events + 1,
+            }
+        );
+        assert_eq!(current.head_seq, appended.seq);
+        assert_eq!(current.head_hash, appended.hash);
     }
 }

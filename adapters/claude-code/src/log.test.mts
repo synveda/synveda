@@ -12,7 +12,7 @@ import { test } from "node:test";
 const stateHome = mkdtempSync(join(tmpdir(), "synveda-state-"));
 process.env.XDG_STATE_HOME = stateHome;
 
-const { log } = await import("./log.mjs");
+const { diagnostic, log } = await import("./log.mjs");
 
 function lines(): Record<string, unknown>[] {
   return readFileSync(join(stateHome, "synveda", "adapter.log"), "utf8")
@@ -51,4 +51,25 @@ test("logging never throws, whatever the state directory is doing", () => {
     log("inject.failed", { reason: "deadline expired" });
   });
   process.env.XDG_STATE_HOME = stateHome;
+});
+
+test("secret fields and exception messages never reach the diagnostic file", () => {
+  const sentinel = "super-secret-adapter-token";
+  log("security.redaction", {
+    access_token: sentinel,
+    nested: { password: sentinel, safe: "kept" },
+    deep: { one: { two: { three: { token: sentinel } } } },
+    deeper: { one: { two: { three: { four: { value: sentinel } } } } },
+    error: diagnostic(new Error(sentinel)),
+  });
+
+  const raw = readFileSync(join(stateHome, "synveda", "adapter.log"), "utf8");
+  assert.doesNotMatch(raw, new RegExp(sentinel));
+  const written = lines().at(-1);
+  assert.equal(written?.access_token, "[redacted]");
+  assert.deepEqual(written?.nested, { password: "[redacted]", safe: "kept" });
+  assert.deepEqual(written?.deep, { one: { two: { three: { token: "[redacted]" } } } });
+  assert.deepEqual(written?.deeper, { one: { two: { three: { four: "[truncated]" } } } });
+  assert.equal(written?.error, "Error");
+  assert.equal(diagnostic({ code: sentinel.toUpperCase() }), "object");
 });

@@ -111,7 +111,7 @@ impl TryFrom<PromptRow> for StoredPrompt {
     fn try_from(row: PromptRow) -> Result<Self> {
         // Every column's CHECK mirrors a vocabulary this crate can parse, so
         // a value outside one means code and schema have drifted. Say so
-        // rather than shrug — the role_bindings discipline (ADR-0015).
+        // rather than shrug — the fail-closed binding discipline (ADR-0015).
         let variables: Vec<PromptVariable> =
             serde_json::from_value(row.variables).map_err(|err| Error::Internal {
                 message: format!(

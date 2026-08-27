@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into skill_version_files\n                 (tenant_id, version_id, path, object_hash, chars)\n             select tenant_id, id, 'references/missing.md', $2, 3\n               from skill_versions where tenant_id = $1 limit 1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Bytea"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "69882a43c94adffa58ca66ba27d41a641c99ad5c00403d5251b3e3c9d8264545"
+}

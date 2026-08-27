@@ -2,8 +2,8 @@
 //! decision 6), the way `agreement` measures the judge against its
 //! labelled set.
 //!
-//! **What this is not.** The blocks here come from a file, not from
-//! `/v1/inject`. That makes every number below a property of the reader
+//! **What this is not.** The blocks here come from a file, not from a live
+//! session ContextRun. That makes every number below a property of the reader
 //! and the judge and nothing else — it is *not* a QA accuracy, not a
 //! benchmark score, and not a measurement of Synveda, because Synveda did
 //! not compose the block. The axes are prefixed `probe_` rather than
@@ -58,9 +58,9 @@ pub struct ProbeSet {
 pub struct Probe {
     pub name: String,
     pub question: String,
-    /// The block, in the renderer's own vocabulary — `## path (kind)`
-    /// headings, `- [class] text` entries, and the legend and watermark
-    /// that follow. Written the way the product writes them, because a
+    /// The block, in the renderer's own vocabulary — the Knowledge heading,
+    /// JSON payloads and address footer. Written the way the product writes
+    /// them, because a
     /// reader tested against a tidied block is a reader untested against
     /// the furniture it will actually be handed.
     pub block: String,
@@ -571,7 +571,7 @@ pub fn summarise(report: &ReadingReport) -> String {
         &report.judge_tally.tokens,
     ));
     out.push_str(
-        "  These blocks came from a file, not from /v1/inject: this measures the reader and the\n  \
+        "  These blocks came from a file, not from a live ContextRun: this measures the reader and the\n  \
          judge, not Synveda, and it is not a QA accuracy (ADR-0061 decision 6).\n",
     );
     out
@@ -588,17 +588,17 @@ mod tests {
 
     use super::*;
 
-    // `r###`, not `r#`: a block's own scope heading puts a literal `"##`
-    // inside the string, which is the terminator for both shorter forms.
+    // Three hashes keep the literal `"# Synveda` at each block start from
+    // terminating the outer raw string.
     const CLEAN: &str = r###"{
         "set": "starter",
         "note": "hand-written blocks, not blocks the product served",
         "probes": [
             {"name": "p-answer", "question": "how long did the renovation take",
-             "block": "## alice (user)\n- [episode] The renovation ran three weeks.\n",
+             "block": "# Synveda Knowledge context\n\n## Knowledge\n\n- {\"kind\":\"published_knowledge\",\"body_markdown\":\"The renovation ran three weeks.\"}\n\n[Synveda Knowledge: knowledge:r1@v1]\n",
              "reference": "three weeks"},
             {"name": "p-abstain", "question": "who supplies the beans",
-             "block": "## alice (user)\n- [episode] The renovation ran three weeks.\n",
+             "block": "# Synveda Knowledge context\n\n## Knowledge\n\n- {\"kind\":\"published_knowledge\",\"body_markdown\":\"The renovation ran three weeks.\"}\n\n[Synveda Knowledge: knowledge:r1@v1]\n",
              "reference": "the block holds no answer",
              "expect_abstention": true}
         ]
@@ -732,10 +732,10 @@ mod tests {
                 "set": "s", "note": "n",
                 "probes": [
                     {"name": "answerable", "question": "how long did the renovation take",
-                     "block": "- [episode] The renovation ran three weeks.",
+                     "block": "- {\"kind\":\"published_knowledge\",\"body_markdown\":\"The renovation ran three weeks.\"}",
                      "reference": "three weeks"},
                     {"name": "invents", "question": "which vendor supplies the beans",
-                     "block": "- [fact] The beans are stored in the third cupboard.",
+                     "block": "- {\"kind\":\"published_knowledge\",\"body_markdown\":\"The beans are stored in the third cupboard.\"}",
                      "reference": "the block holds no answer",
                      "expect_abstention": true,
                      "note": "selection matches on `beans` and returns an unrelated line"}

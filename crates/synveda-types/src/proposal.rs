@@ -5,7 +5,160 @@ use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{Channel, Error};
+use crate::{Channel, Error, Result};
+
+/// The stable artifact family a common VedaFlow proposal refers to
+/// (CPR-32, ADR-0091).
+///
+/// This is deliberately more precise than [`crate::AssetKind`]: one Tool
+/// asset may change a server version or an exact project binding, and an OKF
+/// import publishes through Knowledge without becoming a second Knowledge
+/// aggregate. The family says what stable domain address a reviewer is
+/// looking at; it never grants authority.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ArtifactFamily {
+    /// Stable Knowledge aggregate.
+    Knowledge,
+    /// Stable Agent Skill aggregate or binding.
+    Skill,
+    /// Stable trusted MCP server catalogue entry.
+    ToolServer,
+    /// Exact project-to-Tool-version binding.
+    ToolBinding,
+    /// Stable governed runtime Configuration aggregate or binding.
+    Configuration,
+    /// Stable time-boxed policy-relaxation aggregate.
+    PolicyRelaxation,
+    /// Immutable OKF import job or source artifact cited by a Knowledge change.
+    OkfImport,
+    /// Authored prompt template.
+    Prompt,
+    /// Authored context-pack document.
+    ContextPack,
+}
+
+impl ArtifactFamily {
+    /// Every supported common-review family.
+    pub const ALL: [Self; 9] = [
+        Self::Knowledge,
+        Self::Skill,
+        Self::ToolServer,
+        Self::ToolBinding,
+        Self::Configuration,
+        Self::PolicyRelaxation,
+        Self::OkfImport,
+        Self::Prompt,
+        Self::ContextPack,
+    ];
+
+    /// Stable wire/storage name.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Knowledge => "knowledge",
+            Self::Skill => "skill",
+            Self::ToolServer => "tool_server",
+            Self::ToolBinding => "tool_binding",
+            Self::Configuration => "configuration",
+            Self::PolicyRelaxation => "policy_relaxation",
+            Self::OkfImport => "okf_import",
+            Self::Prompt => "prompt",
+            Self::ContextPack => "context_pack",
+        }
+    }
+}
+
+impl fmt::Display for ArtifactFamily {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(self.as_str())
+    }
+}
+
+impl FromStr for ArtifactFamily {
+    type Err = Error;
+
+    fn from_str(value: &str) -> Result<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|family| family.as_str() == value)
+            .ok_or_else(|| Error::Invalid {
+                message: format!("unknown governed artifact family: {value:?}"),
+            })
+    }
+}
+
+/// One immutable typed address carried by the common proposal row.
+///
+/// `version` is the exact revision, content digest or binding revision the
+/// proposal commit binds. `expected_revision` is the head the command author
+/// inspected, when the domain command has a stale-write precondition. Both
+/// are identifiers only: review lists and audit events never need artifact
+/// content or secret-bearing configuration here.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ArtifactReference {
+    /// Closed artifact-family vocabulary.
+    pub family: ArtifactFamily,
+    /// Stable aggregate, binding, import job or authored member id.
+    pub artifact_id: String,
+    /// Typed domain operation (`edit`, `bind`, `approve_version`, ...).
+    pub operation: String,
+    /// Exact immutable revision/digest proposed.
+    pub version: String,
+    /// Existing head inspected by a mutable command, if one exists.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_revision: Option<String>,
+}
+
+impl ArtifactReference {
+    /// Constructs and validates one content-free typed address.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Invalid`] when any component is empty, contains control
+    /// characters, or exceeds the bounded common-review contract.
+    pub fn new(
+        family: ArtifactFamily,
+        artifact_id: impl Into<String>,
+        operation: impl Into<String>,
+        version: impl Into<String>,
+        expected_revision: Option<String>,
+    ) -> Result<Self> {
+        let reference = Self {
+            family,
+            artifact_id: artifact_id.into(),
+            operation: operation.into(),
+            version: version.into(),
+            expected_revision,
+        };
+        reference.validate()?;
+        Ok(reference)
+    }
+
+    /// Validates an address loaded from or about to enter persistence.
+    pub fn validate(&self) -> Result<()> {
+        bounded_component("artifact_id", &self.artifact_id, 1_024)?;
+        bounded_component("operation", &self.operation, 64)?;
+        bounded_component("version", &self.version, 512)?;
+        if let Some(expected) = &self.expected_revision {
+            bounded_component("expected_revision", expected, 512)?;
+        }
+        Ok(())
+    }
+}
+
+fn bounded_component(name: &str, value: &str, max_chars: usize) -> Result<()> {
+    let chars = value.chars().count();
+    if chars == 0 || chars > max_chars || value.chars().any(char::is_control) {
+        return Err(Error::Invalid {
+            message: format!(
+                "artifact reference {name} must contain 1..={max_chars} non-control characters"
+            ),
+        });
+    }
+    Ok(())
+}
 
 /// A proposal's stored lifecycle — only what *happened* (ADR-0032
 /// decision 11).
@@ -28,15 +181,18 @@ pub enum ProposalState {
     Withdrawn,
     /// Its effect ran: the target channel moved. Terminal.
     Published,
+    /// Its non-channel effect ran (CPR-16, ADR-0081).
+    Applied,
 }
 
 impl ProposalState {
     /// Every stored state.
-    pub const ALL: [ProposalState; 4] = [
+    pub const ALL: [ProposalState; 5] = [
         ProposalState::Open,
         ProposalState::Rejected,
         ProposalState::Withdrawn,
         ProposalState::Published,
+        ProposalState::Applied,
     ];
 
     /// Stable wire name, identical to the serde form and the stored
@@ -48,6 +204,7 @@ impl ProposalState {
             ProposalState::Rejected => "rejected",
             ProposalState::Withdrawn => "withdrawn",
             ProposalState::Published => "published",
+            ProposalState::Applied => "applied",
         }
     }
 
@@ -77,9 +234,8 @@ impl FromStr for ProposalState {
     }
 }
 
-/// The five-state vocabulary tech plan §2.3 describes, as the API renders
-/// it: the stored state, with `approved` rendered from `open` plus a
-/// satisfied requirement.
+/// The API rendering of the stored vocabulary, with `approved` derived from
+/// `open` plus a satisfied requirement.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum ProposalView {
@@ -94,6 +250,8 @@ pub enum ProposalView {
     Withdrawn,
     /// Its effect ran.
     Published,
+    /// A governed non-channel effect ran.
+    Applied,
 }
 
 impl ProposalView {
@@ -106,6 +264,7 @@ impl ProposalView {
             ProposalState::Rejected => ProposalView::Rejected,
             ProposalState::Withdrawn => ProposalView::Withdrawn,
             ProposalState::Published => ProposalView::Published,
+            ProposalState::Applied => ProposalView::Applied,
         }
     }
 
@@ -118,6 +277,7 @@ impl ProposalView {
             ProposalView::Rejected => "rejected",
             ProposalView::Withdrawn => "withdrawn",
             ProposalView::Published => "published",
+            ProposalView::Applied => "applied",
         }
     }
 }
@@ -130,17 +290,9 @@ impl fmt::Display for ProposalView {
 
 /// What running a proposal's effect would do.
 ///
-/// Until AUTHZ-4 a proposal had exactly one possible effect — publish its
-/// members onto the target scope's published channel — and the column
-/// holding this was called `target_channel` with a `= 'published'` check.
-/// A lapse has no target channel at all: its effect is a grant row
-/// (ADR-0037 decision 16). So the column names the *effect*, and this is
-/// its vocabulary.
-///
-/// [`ProposalEffect::Lapse`] is deliberately **not** a [`Channel`] variant.
-/// No scope has a `policy/lapse` ref, nothing writes one, and a channel
-/// that cannot express withdrawal cannot express expiry either — the same
-/// fact that kept `staged` unwritten (ADR-0032 decision 2).
+/// The column retains its storage name, but this is the effect vocabulary:
+/// publication writes an authored-artifact channel and apply executes a
+/// typed governed command.
 ///
 /// There is no `Default`: what a proposal would *do* is the first thing a
 /// reviewer needs to know.
@@ -150,33 +302,16 @@ pub enum ProposalEffect {
     /// Publish the members onto the target scope's published channel
     /// (FLOW-3). The only effect there was until AUTHZ-4.
     Published,
-    /// Open a time-boxed grant over the target scope's material
-    /// (AUTHZ-4, ADR-0037). Always an [`crate::AssetKind::Policy`]
-    /// proposal whose one member is the lapse's reviewed terms.
-    Lapse,
-    /// Move the members to the sensitivity their proposed versions carry
-    /// (AUTHZ-5, ADR-0038 decision 9) — the only path to `restricted`, and
-    /// the only path back down from it.
+    /// Apply a typed Knowledge aggregate mutation (CPR-16, ADR-0081).
     ///
-    /// It writes no channel either: a reclassification changes what a record
-    /// *is*, not where it is published, and a record can be reclassified
-    /// without ever having crossed the trust boundary.
-    ///
-    /// Its requirement resolves at the **maximum of the current and proposed
-    /// tiers**, which is the whole reason it is its own effect: taking only
-    /// the proposed side would price a declassification at the tier it is
-    /// leaving for, and the one direction that removes a control would be
-    /// the cheap one.
-    Classify,
+    /// The reviewed VedaFlow object binds a content-free command manifest and
+    /// payload hash; the effect projection holds erasable plaintext.
+    Apply,
 }
 
 impl ProposalEffect {
     /// Every effect.
-    pub const ALL: [ProposalEffect; 3] = [
-        ProposalEffect::Published,
-        ProposalEffect::Lapse,
-        ProposalEffect::Classify,
-    ];
+    pub const ALL: [ProposalEffect; 2] = [ProposalEffect::Published, ProposalEffect::Apply];
 
     /// Stable wire name, identical to the serde form and to the stored
     /// column (whose CHECK constraint mirrors this list).
@@ -184,21 +319,19 @@ impl ProposalEffect {
     pub const fn as_str(&self) -> &'static str {
         match self {
             ProposalEffect::Published => "published",
-            ProposalEffect::Lapse => "lapse",
-            ProposalEffect::Classify => "classify",
+            ProposalEffect::Apply => "apply",
         }
     }
 
     /// The channel this effect writes, when it writes one.
     ///
-    /// `None` for a lapse and for a reclassification, which is the honest
-    /// answer rather than a stand-in: their effects are rows, and a caller
-    /// that needs a channel here has taken a wrong turn.
+    /// `None` for typed application, which is a domain state change rather
+    /// than a channel movement.
     #[must_use]
     pub const fn channel(&self) -> Option<Channel> {
         match self {
             ProposalEffect::Published => Some(Channel::Published),
-            ProposalEffect::Lapse | ProposalEffect::Classify => None,
+            ProposalEffect::Apply => None,
         }
     }
 }
@@ -284,8 +417,7 @@ mod tests {
         }
     }
 
-    /// The stored vocabulary has four states; the rendered one has five,
-    /// and `approved` is the only one that is computed.
+    /// `approved` is the only state computed rather than persisted.
     #[test]
     fn approved_is_a_rendering_of_open_plus_a_satisfied_requirement() {
         assert_eq!(
@@ -302,6 +434,7 @@ mod tests {
             ProposalState::Rejected,
             ProposalState::Withdrawn,
             ProposalState::Published,
+            ProposalState::Applied,
         ] {
             for satisfied in [true, false] {
                 assert_eq!(ProposalView::of(state, satisfied).as_str(), state.as_str());
@@ -315,6 +448,7 @@ mod tests {
         assert!(ProposalState::Rejected.is_terminal());
         assert!(ProposalState::Withdrawn.is_terminal());
         assert!(ProposalState::Published.is_terminal());
+        assert!(ProposalState::Applied.is_terminal());
     }
 
     #[test]
@@ -333,11 +467,7 @@ mod tests {
             ProposalEffect::Published.channel(),
             Some(Channel::Published)
         );
-        assert_eq!(
-            ProposalEffect::Lapse.channel(),
-            None,
-            "a lapse writes a row, not a channel; standing in for one would be a lie"
-        );
+        assert_eq!(ProposalEffect::Apply.channel(), None);
         assert!("derived".parse::<ProposalEffect>().is_err());
         assert!("staged".parse::<ProposalEffect>().is_err());
     }
@@ -348,5 +478,39 @@ mod tests {
             "approved".parse::<ProposalState>(),
             Err(Error::Invalid { .. })
         ));
+    }
+
+    #[test]
+    fn typed_artifact_references_round_trip_and_reject_loose_addresses() {
+        for family in ArtifactFamily::ALL {
+            assert_eq!(
+                family.to_string().parse::<ArtifactFamily>().unwrap(),
+                family
+            );
+        }
+        let reference = ArtifactReference::new(
+            ArtifactFamily::Knowledge,
+            "item-1",
+            "edit",
+            "revision-2",
+            Some("revision-1".to_owned()),
+        )
+        .unwrap();
+        assert_eq!(
+            serde_json::from_value::<ArtifactReference>(serde_json::to_value(&reference).unwrap())
+                .unwrap(),
+            reference
+        );
+        assert!(
+            ArtifactReference::new(
+                ArtifactFamily::ToolBinding,
+                "binding-1",
+                "bind",
+                "digest-1",
+                Some("\n".to_owned())
+            )
+            .is_err()
+        );
+        assert!("tool-server".parse::<ArtifactFamily>().is_err());
     }
 }

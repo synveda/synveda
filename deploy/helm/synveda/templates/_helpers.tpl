@@ -101,7 +101,7 @@ silent if the chart rendered it anyway.
 {{- /* Decision 4. A second replica breaks login and serves stale scope
        chains, and both look like something else. OPS-7 lifts this. */ -}}
 {{- if or (hasKey .Values.gateway "replicas") (hasKey .Values.gateway "replicaCount") (hasKey .Values "replicaCount") -}}
-{{- fail "gateway replicas are not configurable in this chart (ADR-0062 decision 4).\n  Two things in the gateway are process-local and fail silently with more than one replica:\n    - pending logins and CLI handoff codes live in memory (LoginFlow), so an\n      /auth/callback that lands on another pod is a 401 for a login the IdP completed;\n    - the scope-chain cache is invalidated in-process with no TTL, so a hierarchy move\n      handled by one replica leaves the others composing against the ancestry the mover\n      left — which reads as a policy decision, not as a stale cache.\n  OPS-7 is the feature that fixes both. Remove the key." -}}
+{{- fail "gateway replicas are not configurable in this chart (ADR-0062 decision 4).\n  Two things in the gateway are process-local and fail silently with more than one replica:\n    - pending logins and CLI handoff codes live in memory (LoginFlow), so an\n      /auth/callback that lands on another pod is a 401 for a login the IdP completed;\n    - policy/scope caches are invalidated in-process, so a scope move handled by one\n      replica can leave another replica deciding against stale ancestry.\n  OPS-7 is the feature that fixes both. Remove the key." -}}
 {{- end -}}
 
 {{- /* Decision 6. Origin and redirect URI are both derived from this. */ -}}
@@ -130,9 +130,21 @@ silent if the chart rendered it anyway.
 {{- fail "oidc.existingSecret is required: the name of a Secret holding SYNVEDA_OIDC_ISSUERS.\n  The chart never generates it — an issuer configuration names your directory, and a chart that writes one has invented a trust relationship. Create it with:\n    kubectl create secret generic synveda-oidc --from-file=SYNVEDA_OIDC_ISSUERS=./issuers.json" -}}
 {{- end -}}
 
+{{- /* The runtime starts without a KMS only to support local bootstrap and
+       diagnostics. A deployed console cannot establish a session that way. */ -}}
+{{- if not .Values.kms.existingSecret -}}
+{{- fail "kms.existingSecret is required: the name of a Secret holding SYNVEDA_KMS_KEY and SYNVEDA_KMS_KEY_REF.\n  The chart never generates or owns the key. Create it separately, back it up outside the database, and test its restore before relying on encrypted tenant data." -}}
+{{- end -}}
+{{- if not .Values.kms.secretKey -}}
+{{- fail "kms.secretKey must name the Secret key containing the 64-hex-character local KMS key" -}}
+{{- end -}}
+{{- if not .Values.kms.keyRefSecretKey -}}
+{{- fail "kms.keyRefSecretKey must name the Secret key containing the stable KMS key reference" -}}
+{{- end -}}
+
 {{- /* Decision 10. The embedder is a property of the corpus. */ -}}
 {{- if not .Values.embedder -}}
-{{- fail "embedder is required and has no default: `deterministic` or `tei`.\n  record_embeddings stores a model and a dim and the dense leg filters on both, so a corpus written under one embedder and read under another does not rank badly — it leaves the dense leg entirely and survives on BM25, with no error and no degraded header. There is no re-embed command, so the choice is permanent, and a default that silently becomes permanent is not a default." -}}
+{{- fail "embedder is required and has no default: `deterministic` or `tei`.\n  Knowledge embedding rows retain model and dimension; a different model converges a separately labelled sidecar rather than reinterpreting old vectors. `deterministic` is lexical-only and must not be labelled semantic." -}}
 {{- end -}}
 {{- if not (has .Values.embedder (list "deterministic" "tei")) -}}
 {{- fail (printf "embedder must be `deterministic` or `tei`, got %q (SUPPORTED_ANN_DIMS is [16, 1024], so a third embedder is a schema question rather than a value)" .Values.embedder) -}}
@@ -150,14 +162,17 @@ silent if the chart rendered it anyway.
 {{- end -}}
 
 {{- /* The extractor's own credential, which is not optional for `claude`. */ -}}
-{{- if not (has .Values.extractor.kind (list "deterministic" "claude" "vllm" "off")) -}}
-{{- fail (printf "extractor.kind must be one of deterministic|claude|vllm|off, got %q" .Values.extractor.kind) -}}
+{{- if not (has .Values.extractor.kind (list "deterministic" "claude" "vllm")) -}}
+{{- fail (printf "extractor.kind must be one of deterministic|claude|vllm, got %q" .Values.extractor.kind) -}}
 {{- end -}}
 {{- if and (eq .Values.extractor.kind "claude") (not .Values.extractor.existingSecret) -}}
 {{- fail "extractor.kind is `claude` but extractor.existingSecret is empty: name a Secret with an ANTHROPIC_API_KEY key" -}}
 {{- end -}}
 {{- if and (eq .Values.extractor.kind "vllm") (not .Values.extractor.baseUrl) -}}
 {{- fail "extractor.kind is `vllm` but extractor.baseUrl is empty" -}}
+{{- end -}}
+{{- if and (eq .Values.extractor.kind "vllm") (not .Values.extractor.model) -}}
+{{- fail "extractor.kind is `vllm` but extractor.model is empty" -}}
 {{- end -}}
 
 {{- /* Decision 2's arithmetic, stated where somebody can act on it. */ -}}

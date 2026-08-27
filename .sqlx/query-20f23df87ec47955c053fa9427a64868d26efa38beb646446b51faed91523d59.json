@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update context_pack_chunks set content = 'rewritten'\n             where tenant_id = $1 and id = $2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "20f23df87ec47955c053fa9427a64868d26efa38beb646446b51faed91523d59"
+}

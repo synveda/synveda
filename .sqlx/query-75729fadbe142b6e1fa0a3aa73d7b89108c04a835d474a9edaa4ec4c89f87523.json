@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select distinct source.scope_id as \"scope_id!\"\n        from knowledge_revision_sources link\n        join knowledge_sources source\n          on source.tenant_id = link.tenant_id\n         and source.id = link.knowledge_source_id\n        where link.tenant_id = $1 and link.knowledge_revision_id = $2\n        order by source.scope_id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "scope_id!",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "75729fadbe142b6e1fa0a3aa73d7b89108c04a835d474a9edaa4ec4c89f87523"
+}

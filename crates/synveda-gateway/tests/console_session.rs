@@ -82,20 +82,11 @@ fn state(url: &str) -> AppState {
         login: None,
         public_origin: ORIGIN.to_owned(),
         pdp: Arc::new(synveda_policy::Pdp::new().expect("build the embedded PDP")),
-        scope_chains: Arc::new(synveda_store::ScopeChainCache::new()),
         service_token_max_ttl: Duration::from_secs(3600),
-        search_index: Arc::new(
-            synveda_retrieval::SearchIndex::open(
-                std::env::temp_dir()
-                    .join("synveda-gateway-tests")
-                    .join(TenantId::new().to_string()),
-            )
-            .expect("open search index"),
-        ),
         embedder: Arc::new(synveda_ingest::embedding::AnyEmbedder::Deterministic(
             synveda_ingest::embedding::DeterministicEmbedder::new(),
         )),
-        inject_embed_timeout: Duration::from_millis(100),
+        context_embed_timeout: Duration::from_millis(100),
         // TEN-4 (ADR-0064): a fixed test KEK, so a suite that touches a
         // sealed column seals rather than skipping. `Kms::Disabled` is the
         // production default when no key is configured.
@@ -340,11 +331,13 @@ async fn a_cookie_mutation_from_another_origin_is_refused() {
 
     let response = router(state)
         .oneshot(
-            Request::post("/v1/hierarchy/nodes")
+            Request::post("/v1/admin/scopes")
                 .header(header::COOKIE, cookie(&secret))
                 .header(header::ORIGIN, "http://evil.test")
                 .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(r#"{"slug":"x","name":"x","kind":"team"}"#))
+                .body(Body::from(
+                    r#"{"parent_id":"11111111-1111-1111-1111-111111111111","kind":"org_unit","slug":"x","display_name":"x"}"#,
+                ))
                 .unwrap(),
         )
         .await
@@ -366,10 +359,12 @@ async fn a_cookie_mutation_without_an_origin_is_refused() {
 
     let response = router(state)
         .oneshot(
-            Request::post("/v1/hierarchy/nodes")
+            Request::post("/v1/admin/scopes")
                 .header(header::COOKIE, cookie(&secret))
                 .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(r#"{"slug":"x","name":"x","kind":"team"}"#))
+                .body(Body::from(
+                    r#"{"parent_id":"11111111-1111-1111-1111-111111111111","kind":"org_unit","slug":"x","display_name":"x"}"#,
+                ))
                 .unwrap(),
         )
         .await
@@ -400,13 +395,15 @@ async fn a_bearer_mutation_needs_no_origin() {
 
     let response = router(state)
         .oneshot(
-            Request::post("/v1/hierarchy/nodes")
+            Request::post("/v1/admin/scopes")
                 .header(
                     header::AUTHORIZATION,
                     format!("Bearer {}", issue("agent@example.test", tenant_id)),
                 )
                 .header(header::CONTENT_TYPE, "application/json")
-                .body(Body::from(r#"{"slug":"x","name":"x","kind":"team"}"#))
+                .body(Body::from(
+                    r#"{"parent_id":"11111111-1111-1111-1111-111111111111","kind":"org_unit","slug":"x","display_name":"x"}"#,
+                ))
                 .unwrap(),
         )
         .await
@@ -442,9 +439,8 @@ async fn a_cookie_read_needs_no_origin() {
 // ── Sign-out ─────────────────────────────────────────────────────────────────
 
 /// Sign-out destroys the row, and the next request is the uniform 401.
-/// This is what migration 0034's DELETE grant is for, and the reason the
-/// contrast with `skill_reviews` is drawn there: a credential that cannot
-/// be destroyed cannot be revoked.
+/// This is what migration 0034's DELETE grant is for: a credential that
+/// cannot be destroyed cannot be revoked.
 #[tokio::test]
 async fn signing_out_destroys_the_session_for_the_next_request() {
     let _guard = serial().await;

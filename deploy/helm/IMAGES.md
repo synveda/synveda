@@ -20,7 +20,7 @@ read, here.
 
 ## Why this file exists
 
-CLAUDE.md's licence rule is enforced by `cargo-deny` over crates,
+The repository licence rule is enforced by `cargo-deny` over crates,
 `check-npm-licences` over packages and — since ADR-0061 —
 `check-corpus-licences` over corpora. A Helm chart introduces a fourth
 kind of artefact, and until this file nothing in the repository looked at
@@ -41,7 +41,7 @@ reason the chart's `<appVersion>` is.
 | Image | Where | Licence | Why it is here |
 |---|---|---|---|
 | `ghcr.io/synveda/gateway:<version>` | `gateway`, `--issuer` path only | ours | The product. Same image and same Dockerfile the chart runs, published rather than built. A default install runs the binary on the host instead — ADR-0055 decision 8. |
-| `ghcr.io/synveda/postgres:<version>` | `postgres` | ours (see bases) | Postgres 17 with pgvector, AGE and PGMQ, from `deploy/compose/postgres/Dockerfile`. The same image the dev compose builds as `synveda/dev-postgres`; the published name drops the `dev-` because this one is what a customer installs. **Keeps AGE**, unlike the chart's `enterprise-postgres` — ADR-0062 decision 3 dropped it there for a reason that does not apply to a single node. |
+| `ghcr.io/synveda/postgres:<version>` | `postgres` | ours (see bases) | Postgres 17 with pgvector, from `deploy/compose/postgres/Dockerfile`. The same epoch-3 extension shape is used by dev, release and Helm. |
 | `ghcr.io/sebadob/rauthy:0.35.2` | `rauthy` | Apache-2.0 | The bundled OIDC provider. Dev-shaped credentials, and the reason the default install's gateway is a host process. |
 | `jaegertracing/jaeger:2.19.0` | `jaeger` | Apache-2.0 | Traces on port 16686. FND-5's exporter targets it; the profile starts it because an install nobody can see inside is harder to trust. |
 | `ghcr.io/huggingface/text-embeddings-inference:cpu-1.8.1` | `tei`, optional | **read on every bump** | The amd64 embedder, when `--embedder tei`. See the arm64 row below. |
@@ -55,14 +55,14 @@ Makefile.
 
 | Image | Where | Licence | Why it is here |
 |---|---|---|---|
-| `ghcr.io/huggingface/text-embeddings-inference:cpu-arm64-sha-4150561` | `TEI_IMAGE_arm64` | **read on every bump** | Apple Silicon. There are no versioned arm64 tags, so this is pinned by *commit* rather than left on `cpu-arm64-latest` — which means a bump is a deliberate act and the licence at that commit is what applies. It agrees with the amd64 release to float32 rounding (cosine 1.000000000, max abs diff 7e-8, measured 2026-07-26), which is the property that matters when `record_embeddings` stores a model and a dim. |
+| `ghcr.io/huggingface/text-embeddings-inference:cpu-arm64-sha-4150561` | `TEI_IMAGE_arm64` | **read on every bump** | Apple Silicon. There are no versioned arm64 tags, so this is pinned by *commit* rather than left on `cpu-arm64-latest` — which means a bump is a deliberate act and the licence at that commit is what applies. It agrees with the amd64 release to float32 rounding (cosine 1.000000000, max abs diff 7e-8, measured 2026-07-26), which is the property that matters when Knowledge revision vectors retain a model and dimension. |
 
 ## Images the chart runs
 
 | Image | Where | Licence | Why it is here |
 |---|---|---|---|
 | `synveda/gateway:<appVersion>` | `image.repository` | ours | The product. Both binaries: the gateway serves, the CLI migrates and issues SCIM credentials. Built from `deploy/compose/gateway/Dockerfile`. |
-| `synveda/enterprise-postgres:17` | `postgres.image` | ours (see bases) | Postgres for CloudNativePG, plus pgvector and PGMQ. Built from `deploy/helm/postgres/Dockerfile`. No AGE — ADR-0062 decision 3. |
+| `synveda/enterprise-postgres:17` | `postgres.image` | ours (see bases) | Postgres for CloudNativePG plus pgvector. Built from `deploy/helm/postgres/Dockerfile`; its schema and extension shape match the single-node profile. |
 | `ghcr.io/huggingface/text-embeddings-inference:cpu-1.8.1` | `tei.image`, optional | **read on every bump** | The embedder, when `embedder: tei` and `tei.enabled`. Serves BAAI/bge-m3, whose weights are a separate licence from the server's. |
 
 ## Base images we build on
@@ -95,7 +95,6 @@ in the same place:
 | Extension | Version | Licence |
 |---|---|---|
 | pgvector | PGDG `postgresql-17-pgvector` | PostgreSQL |
-| PGMQ | `v1.10.1` | PostgreSQL |
 
-Apache AGE is deliberately **not** in this image; the dev compose image
-keeps it. `deploy/helm/postgres/Dockerfile` says why.
+Epoch 3 uses no other Postgres extension. Bounded graph expansion, capture
+leasing and durable operations use ordinary tenant-bound tables.

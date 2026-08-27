@@ -23,6 +23,8 @@ use synveda_store::directory::UserAttributes;
 use synveda_store::{directory, directory_sync, rls, tenants};
 use synveda_types::{DirectoryUserId, TenantId, TenantStatus};
 
+const DIRECTORY_SOURCE: &str = "entra";
+
 // ── Harness ──────────────────────────────────────────────────────────────────
 
 struct Db {
@@ -82,6 +84,7 @@ async fn seed(pool: &PgPool, count: usize) -> (TenantId, Vec<DirectoryUserId>) {
             DirectoryUserId::new(),
             tenant,
             &UserAttributes {
+                directory_source: DIRECTORY_SOURCE.to_owned(),
                 external_id: Some(format!("ext-{index}")),
                 user_name: format!("person-{index}@example.test"),
                 active: true,
@@ -119,29 +122,29 @@ fn absence_accumulates_only_for_the_unseen_and_resets_on_return() {
 
         // Pass 1 lists the first two. The other two go missing.
         let seen = &users[..2];
-        let moved = directory_sync::mark_absent(&mut *tx, tenant, seen)
+        let moved = directory_sync::mark_absent(&mut *tx, tenant, DIRECTORY_SOURCE, seen)
             .await
             .expect("mark absent");
         assert_eq!(moved, 2, "only the unseen move");
-        directory_sync::mark_present(&mut *tx, tenant, seen)
+        directory_sync::mark_present(&mut *tx, tenant, DIRECTORY_SOURCE, seen)
             .await
             .expect("mark present");
 
         // One pass is a hypothesis, so nothing has reached the threshold.
-        let at_two = directory_sync::absent_at_least(&mut *tx, tenant, 2)
+        let at_two = directory_sync::absent_at_least(&mut *tx, tenant, DIRECTORY_SOURCE, 2)
             .await
             .expect("absent at least 2");
         assert!(at_two.is_empty(), "one missed pass is not a finding");
-        let at_one = directory_sync::absent_at_least(&mut *tx, tenant, 1)
+        let at_one = directory_sync::absent_at_least(&mut *tx, tenant, DIRECTORY_SOURCE, 1)
             .await
             .expect("absent at least 1");
         assert_eq!(at_one.len(), 2);
 
         // Pass 2 lists the same two. The other two reach the threshold.
-        directory_sync::mark_absent(&mut *tx, tenant, seen)
+        directory_sync::mark_absent(&mut *tx, tenant, DIRECTORY_SOURCE, seen)
             .await
             .expect("mark absent again");
-        let at_two = directory_sync::absent_at_least(&mut *tx, tenant, 2)
+        let at_two = directory_sync::absent_at_least(&mut *tx, tenant, DIRECTORY_SOURCE, 2)
             .await
             .expect("absent at least 2");
         assert_eq!(at_two.len(), 2, "two consecutive complete passes is one");
@@ -152,11 +155,11 @@ fn absence_accumulates_only_for_the_unseen_and_resets_on_return() {
         assert_eq!(found, expected, "and it is the two nobody listed");
 
         // Pass 3 lists everybody: the hypothesis is withdrawn, not decayed.
-        let returned = directory_sync::mark_present(&mut *tx, tenant, &users)
+        let returned = directory_sync::mark_present(&mut *tx, tenant, DIRECTORY_SOURCE, &users)
             .await
             .expect("mark all present");
         assert_eq!(returned, 2, "two were missing and are not any more");
-        let at_one = directory_sync::absent_at_least(&mut *tx, tenant, 1)
+        let at_one = directory_sync::absent_at_least(&mut *tx, tenant, DIRECTORY_SOURCE, 1)
             .await
             .expect("absent at least 1");
         assert!(at_one.is_empty(), "a returning person is fully present");
@@ -183,24 +186,24 @@ fn an_absence_pass_never_touches_the_mirrors_own_clock() {
             .await
             .expect("begin tenant tx");
 
-        let before = directory::user(&mut *tx, tenant, users[1])
+        let before = directory::user(&mut *tx, tenant, DIRECTORY_SOURCE, users[1])
             .await
             .expect("read user")
             .expect("the fixture's user");
 
         // Two passes miss them, and a third finds them again — every write
         // this module makes to a mirror row, in both directions.
-        directory_sync::mark_absent(&mut *tx, tenant, &users[..1])
+        directory_sync::mark_absent(&mut *tx, tenant, DIRECTORY_SOURCE, &users[..1])
             .await
             .expect("mark absent");
-        directory_sync::mark_absent(&mut *tx, tenant, &users[..1])
+        directory_sync::mark_absent(&mut *tx, tenant, DIRECTORY_SOURCE, &users[..1])
             .await
             .expect("mark absent again");
-        directory_sync::mark_present(&mut *tx, tenant, &users)
+        directory_sync::mark_present(&mut *tx, tenant, DIRECTORY_SOURCE, &users)
             .await
             .expect("mark present");
 
-        let after = directory::user(&mut *tx, tenant, users[1])
+        let after = directory::user(&mut *tx, tenant, DIRECTORY_SOURCE, users[1])
             .await
             .expect("read user")
             .expect("the fixture's user");
@@ -236,29 +239,84 @@ fn a_connector_change_forgets_what_the_previous_one_never_saw() {
             .await
             .expect("begin tenant tx");
 
-        directory_sync::mark_absent(&mut *tx, tenant, &users[..1])
+        directory_sync::mark_absent(&mut *tx, tenant, DIRECTORY_SOURCE, &users[..1])
             .await
             .expect("mark absent");
         assert_eq!(
-            directory_sync::absent_at_least(&mut *tx, tenant, 1)
+            directory_sync::absent_at_least(&mut *tx, tenant, DIRECTORY_SOURCE, 1)
                 .await
                 .expect("absent")
                 .len(),
             2
         );
 
-        let cleared = directory_sync::reset_absences(&mut *tx, tenant)
+        let cleared = directory_sync::reset_absences(&mut *tx, tenant, DIRECTORY_SOURCE)
             .await
             .expect("reset absences");
         assert_eq!(cleared, 2, "both standing hypotheses are withdrawn");
         assert!(
-            directory_sync::absent_at_least(&mut *tx, tenant, 1)
+            directory_sync::absent_at_least(&mut *tx, tenant, DIRECTORY_SOURCE, 1)
                 .await
                 .expect("absent")
                 .is_empty(),
             "a new connector starts owing nobody an explanation"
         );
 
+        tx.rollback().await.expect("rollback");
+    });
+}
+
+/// Provider external ids are namespaced by tenant and source. A login claim
+/// that omits the source fails closed when two adapters use the same id.
+#[test]
+fn external_ids_never_confuse_tenants_or_directory_sources() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let (tenant, _) = seed(&db.pool, 1).await;
+        let (other_tenant, _) = seed(&db.pool, 1).await;
+        let mut tx = rls::begin_tenant_tx(&db.pool, tenant)
+            .await
+            .expect("begin tenant tx");
+        let okta = directory::create_user(
+            &mut *tx,
+            DirectoryUserId::new(),
+            tenant,
+            &UserAttributes {
+                directory_source: "okta".to_owned(),
+                external_id: Some("ext-0".to_owned()),
+                user_name: "okta-person@example.test".to_owned(),
+                active: true,
+                display_name: None,
+                given_name: None,
+                family_name: None,
+                work_email: None,
+            },
+        )
+        .await
+        .expect("same external id in another source");
+        let entra = directory::user_by_external_id(&mut *tx, tenant, "entra", "ext-0")
+            .await
+            .expect("read Entra user")
+            .expect("Entra row");
+        assert_ne!(entra.id, okta.id);
+        assert!(
+            directory::unique_user_by_external_id(&mut *tx, tenant, "ext-0")
+                .await
+                .expect("resolve ambiguous external id")
+                .is_none(),
+            "a source-less login anchor must not choose one provider"
+        );
+        sqlx::raw_sql("set local role synveda_app")
+            .execute(&mut *tx)
+            .await
+            .expect("exercise the RLS backstop as the application role");
+        assert!(
+            directory::user_by_external_id(&mut *tx, other_tenant, "entra", "ext-0")
+                .await
+                .expect("cross-tenant lookup")
+                .is_none(),
+            "another tenant's matching external id is absent under RLS"
+        );
         tx.rollback().await.expect("rollback");
     });
 }

@@ -9,14 +9,18 @@
 // the materialised path (ADR-0011).
 //
 // Roles reach decisions as *request context*, never entity attributes
-// (ADR-0015 decision 3): `context.roles` is the principal's effective
-// role set at the resource, resolved by the PDP from caller-supplied
-// binding rows — tenant-wide bindings always, node bindings when the
-// bound node is on the resource's chain. HIER-3 takes over entity
-// materialisation.
+// (ADR-0015 decision 3): `context.roles` is the principal's effective role
+// set at the resource, resolved by the PDP and never claimed by a caller.
+// Since CPR-6 it carries **both** closed vocabularies — the old hierarchy's
+// role bindings (`viewer`, `contributor`, `curator`, `steward`, `org-admin`,
+// `auditor`, `security-reviewer`, `compliance`) and the governed scope
+// model's grant keys (`owner`, `member`, `viewer`, `reviewer`, `curator`,
+// `administrator`) — because the two trees are disjoint and a pack reads one
+// `Set<String>`. A grant's keys reach a resource when the grant's scope is on
+// that resource's chain, subject to principal privacy (ADR-0073 decision 5).
 //
 // ABAC context arrived with AUTHZ-5 (ADR-0038) and is one attribute:
-// `context.sensitivity` on MemoryRead. Channel stays the pack's
+// `context.sensitivity` on KnowledgeRead. Channel stays the pack's
 // composition config — one rule, one place (decision 14); residency waits
 // for a second region and may turn out to be a composition rule rather
 // than a permit (decision 15); time-of-day would be a second clock in a
@@ -26,122 +30,355 @@
 namespace Synveda {
     entity Tenant;
 
-    // The caller: a token subject resolved to a tenant (TEN-1), carrying
-    // its provisioning status (AUTH-2, ADR-0013): quarantined is true for
-    // identities placed in the quarantine scope and for IdP subjects that
-    // never provisioned (fail closed). A provisioned principal is
-    // parented to its placement scope (its personal user node), so pack
-    // membership rules are entity-hierarchy checks; `home` mirrors that
-    // placement as an attribute so packs can *require* placement (an
-    // unplaced principal composes nothing — ADR-0014 decision 5), and
-    // `department` is the nearest department-kind ancestor of the
-    // placement, when the hierarchy has one. `token_scope` is set for
-    // service identities only (AUTH-3, ADR-0018 decision 4): the anchor
-    // node whose subtree confines the token — the base layer forbids
-    // everything outside it, roles notwithstanding.
-    entity Principal in [Tenant, Scope] {
-        tenant: Tenant,
-        quarantined: Bool,
-        home?: Scope,
-        department?: Scope,
-        token_scope?: Scope,
-    };
-
-    // A node of the tenancy hierarchy. Parents follow the hierarchy's
-    // parent pointers; the org root's parent is the Tenant entity.
+    // A node of the **governed scope tree** (CPR-3, ADR-0070; CPR-6,
+    // ADR-0073). Parents follow the tree's parent pointers; the tenant root's
+    // parent is the Tenant entity.
     //
-    // `sealed` is AUTH-4's leaver state (ADR-0059 decision 9), derived
-    // from the identity that owns a user-kind node rather than stored on
-    // the node. It is **required** rather than optional, for the reason
-    // `context.grant` and `context.sensitivity` are: the base layer's
-    // forbid must never go missing for want of an attribute — a policy
-    // referencing a missing one errors, and Cedar drops a policy that
-    // errors, which would silently unseal every departed person.
+    // `kind` is a **shape** — `tenant`, `org_unit`, `workspace`, `project` or
+    // `principal` — and it decides only which shapes may parent which. It is
+    // not the rank vocabulary this schema used to carry: `org`, `division`,
+    // `department`, `team` and `user` are gone, with the strictly-increasing
+    // ladder they encoded, and nothing in any pack compares two kinds for
+    // order. What survives is the one distinction that is about privacy rather
+    // than about seniority: a `principal` scope is somebody's own.
     //
-    // It is an attribute of the *resource* where `quarantined` is an
-    // attribute of the principal, and the pair is the whole shape of the
-    // two controls: quarantine says this caller may do nothing, and a
-    // seal says nothing may be done to this material.
+    // `sealed` is AUTH-4's leaver state (ADR-0059 decision 9). It is
+    // **required** rather than optional, for the reason `context.grant` and
+    // `context.sensitivity` are: the base layer's forbid must never go missing
+    // for want of an attribute — a policy referencing a missing one errors,
+    // and Cedar drops a policy that errors, which would silently unseal every
+    // departed person.
+    //
+    // It is an attribute of the *resource* where `quarantined` is an attribute
+    // of the principal, and the pair is the whole shape of the two controls:
+    // quarantine says this caller may do nothing, and a seal says nothing may
+    // be done to this material.
     entity Scope in [Tenant, Scope] {
         tenant: Tenant,
         kind: String,
         sealed: Bool,
     };
 
-    // The hierarchy admin plane (/v1/hierarchy/*, ADR-0011 decision 8).
-    // Create targets the parent scope — the Tenant when creating the root.
-    action HierarchyCreate, HierarchyRead, HierarchyUpdate, HierarchyDelete
+    // A named set of principals (CPR-5, ADR-0072). Tenant-wide: a group is not
+    // anchored anywhere in the scope tree, which is why `GroupManage` applies
+    // to the Tenant and nothing else.
+    //
+    // A principal is parented to every group it is in, so a pack that wants to
+    // name one writes `principal in Synveda::Group::"<id>"` — an
+    // entity-hierarchy check, never a string comparison against a claim.
+    entity Group in [Tenant] {
+        tenant: Tenant,
+    };
+
+    // The caller: a token subject resolved to a tenant (TEN-1), carrying its
+    // provisioning status (AUTH-2, ADR-0013).
+    //
+    // `own_scope` is the caller's own scope — their `principal`-shaped scope
+    // in the governed model, their placement node on the old hierarchy the
+    // programme has not deleted yet. The principal entity is parented to it,
+    // so `principal in resource` walks the tree upward from it and a pack can
+    // *require* placement (an unscoped principal composes nothing — ADR-0014
+    // decision 5).
+    //
+    // `anchors` is the set of scopes this caller actually **holds** something
+    // at, direct or through a group (CPR-6, ADR-0073 decision 4). It is the
+    // downward direction: `resource in principal.anchors` is "inside something
+    // I hold", which is how a workspace grant reaches that workspace's
+    // projects with no row written there. Anchors are deliberately **not**
+    // parents of the principal — authority flows down from where a grant was
+    // written and never up, so a project grant must not make its holder a
+    // member of the workspace above it.
+    //
+    // `ambit` is the **parent** of every scope this caller holds, minus the
+    // tenant root — their neighbourhood. It is what `standard`'s sharing
+    // default reads, and it is the honest replacement for the `department`
+    // attribute that used to serve that rule: a grant at one project shares
+    // the workspace it sits in, a grant at one team shares its org unit, and
+    // nothing anywhere asks what *kind* of thing that parent is. The tenant
+    // root is excluded deliberately — including it would make `standard` mean
+    // `open-collaboration`, which is a different pack.
+    //
+    // `private` is every `principal`-shaped scope this caller may reach: their
+    // own, plus any somebody granted them directly. The base layer forbids
+    // every other one outright, so this set is the whole of what makes a
+    // private scope reachable at all.
+    //
+    // `department` is **gone**, with the ladder it read. There is no attribute
+    // here that names a rung of an organisation.
+    //
+    // `token_scope` is set for service identities only (AUTH-3, ADR-0018
+    // decision 4): the anchor node whose subtree confines the token — the base
+    // layer forbids everything outside it, roles notwithstanding.
+    entity Principal in [Tenant, Scope, Group] {
+        tenant: Tenant,
+        quarantined: Bool,
+        own_scope?: Scope,
+        token_scope?: Scope,
+        anchors: Set<Scope>,
+        ambit: Set<Scope>,
+        private: Set<Scope>,
+    };
+
+    // A workspace and the project inside it (CPR-4, ADR-0071), as entities
+    // rather than as "the tenant, again" (CPR-6, ADR-0073 decision 3).
+    //
+    // Each is parented to the governed scope it owns, and a project's scope
+    // already sits under its workspace's — so every containment rule written
+    // over scopes reaches them without being restated, and `Project in
+    // Workspace` is true through the tree rather than through a second edge.
+    //
+    // They carry `scope` as an attribute as well as as a parent because a pack
+    // may want to *name* it (`resource.scope == principal.own_scope`) rather
+    // than only test containment.
+    entity Workspace in [Tenant, Scope] {
+        tenant: Tenant,
+        scope: Scope,
+    };
+
+    entity Project in [Tenant, Scope] {
+        tenant: Tenant,
+        scope: Scope,
+        workspace: Workspace,
+    };
+
+    // One run of an agent (CPR-10, ADR-0076). Parented to the governed scope
+    // it runs at — its project's when it has one, its workspace's when it does
+    // not — so every containment rule written over scopes reaches it without
+    // being restated, and a decision *names the run* rather than the place the
+    // run happened at.
+    //
+    // It carries `scope` as an attribute as well as as a parent for the reason
+    // `Workspace` does: a pack may want to name it rather than only test
+    // containment.
+    //
+    // It deliberately carries **no principal**. The ownership distinction a
+    // pack might write over one is already expressed by *which scope the
+    // session was opened at* — a run at somebody's own `principal` scope is
+    // theirs and the base layer's privacy forbid makes it nobody else's — and a
+    // second way to say the same thing would be a second answer to one
+    // question. ADR-0076 decision 6 records the reversal trigger.
+    entity Session in [Tenant, Scope] {
+        tenant: Tenant,
+        scope: Scope,
+    };
+
+    // One stable Knowledge aggregate (CPR-16, ADR-0081). The item is the
+    // resource because edits, verification, supersession and erasure must be
+    // decidable per aggregate. It is parented to its governing scope, and
+    // carries that scope as an attribute for packs that need to name it.
+    entity KnowledgeItem in [Tenant, Scope] {
+        tenant: Tenant,
+        scope: Scope,
+    };
+
+    // One grant: a subject's role at a scope (CPR-5, ADR-0072).
+    //
+    // It is an entity so that revoking *this* grant is a decidable act. Before
+    // CPR-6 a revocation named the tenant, so a pack could price "take access
+    // away" and never "take away a grant a directory owns" or "take away an
+    // owner's". `role` and `source` are strings for the reason `kind` is: a
+    // closed vocabulary read by name, with no arithmetic to get wrong.
+    entity ScopeGrant in [Tenant, Scope] {
+        tenant: Tenant,
+        scope: Scope,
+        role: String,
+        source: String,
+    };
+
+    // The scope admin plane (/v1/admin/scopes, CPR-7, ADR-0074 decision 5).
+    // Create and update target the scope they are about — the destination
+    // for a move, the scope itself for a rename or an archive. There is
+    // deliberately **no** delete, for the workspace plane's reason: a scope
+    // is what audit events, versions and grants name, so retiring one is a
+    // status transition under the update action, and a delete verb would be
+    // an authority nobody can exercise.
+    action ScopeCreate, ScopeRead, ScopeUpdate
         appliesTo {
             principal: [Principal],
             resource: [Tenant, Scope],
             context: { roles: Set<String> },
         };
 
-    // The composition seam (AUTHZ-2, ADR-0014 decision 5): may this
-    // principal's inject/recall composition include memories attached to
-    // this scope? CTX-1/2/3 ask exactly this question per candidate scope.
+    // The workspace and project planes (/v1/workspaces, /v1/projects —
+    // CPR-4, ADR-0071 decision 3).
     //
-    // Since AUTHZ-5 it asks per candidate scope *and tier* (ADR-0038
-    // decision 1). `sensitivity` is one of `public`, `internal`,
-    // `confidential`, `restricted` — a closed, ordered vocabulary, which is
-    // precisely why a per-record attribute can be decided here at all: the
-    // seam holds no record, but it can be asked about each of four tiers
-    // before any record is fetched. A pack names the tiers it permits
-    // (`["public", "internal"].contains(context.sensitivity)`) rather than
-    // comparing an encoding, because with four values the enumeration is the
-    // documentation and there is no arithmetic to get wrong.
+    // Their own actions rather than the hierarchy plane's, and the reason is
+    // the audit chain rather than the packs: creating a workspace is not
+    // creating a hierarchy node, and an event that said `hierarchy.create`
+    // for it would be a lie in the one record this product asks people to
+    // trust. A pack that wants to price "make a workspace" differently from
+    // "restructure the org" can only say so if they are different actions.
     //
-    // `lapsed` is required — not optional — for the reason `grant` is on
-    // RoleAssign: a policy that referenced a missing attribute would error,
-    // Cedar would drop it, and the base layer's lapse permit would silently
-    // stop existing. The PDP sets it on every MemoryRead request, true only
-    // when a standing grant covers exactly this (principal, action, scope)
-    // **at or above this tier** *and* the pack in force at that scope still
-    // admits lapses at all (AUTHZ-4, ADR-0037 decisions 5 and 9; AUTHZ-5,
-    // ADR-0038 decision 6). `sensitivity` is required for the same reason:
-    // the base layer's `restricted` forbid must never go missing for want of
-    // an attribute.
+    // Read and create/update are split on the separability rule the rest of
+    // this schema uses; there is deliberately **no** delete: a workspace is
+    // what sessions, versions and audit events name, so retiring one is a
+    // status transition under the update action, and a delete verb would be
+    // an authority nobody can exercise.
     //
-    // They are deliberately the only action's attributes. A lapse relaxes a
-    // closed vocabulary (synveda_types::LapseAction), and an attribute that
-    // existed on every action would be an invitation to widen that
-    // vocabulary in a pack rather than in a reviewed diff.
-    action MemoryRead
+    // Repository attachments take `ProjectUpdate` and `ProjectRead` rather
+    // than a pair of their own. What a project is *about* is part of what the
+    // project is — a separate authority over it would be one nobody could
+    // describe without describing the project's, and the vocabulary is
+    // already the widest thing a reviewer has to hold.
+    //
+    // Since CPR-6 they apply to the subtype **itself** (ADR-0073 decision 3),
+    // which is what ADR-0071 decision 3 said this would become: a read or an
+    // update names the workspace or the project, a creation names the scope it
+    // would land in (the tenant root for a workspace, the workspace's own
+    // scope for a project), and the tenant remains only for the case where a
+    // deployment has no root scope yet and there is genuinely nothing more
+    // specific to name.
+    action WorkspaceRead, WorkspaceCreate, WorkspaceUpdate
         appliesTo {
             principal: [Principal],
-            resource: [Scope],
-            context: { roles: Set<String>, lapsed: Bool, sensitivity: String },
-        };
-
-    // Reclassification (AUTHZ-5, ADR-0038 decision 9): may this principal
-    // run a classification proposal's effect at this scope — moving records
-    // to the sensitivity their proposed versions carry?
-    //
-    // Its own action rather than MemoryWrite, on ChannelRollback's
-    // separability rule: the write floor grants every principal MemoryWrite
-    // at its own home, and a pack must be able to say "you may write here"
-    // without saying "you may classify here".
-    //
-    // It carries no sensitivity attribute, and that is not an oversight: how
-    // much authority a reclassification needs is the approval matrix's
-    // arithmetic, resolved at the maximum of the current and proposed tiers,
-    // and duplicating that as a Cedar condition would put the rule in two
-    // places that can disagree.
-    action MemoryClassify
-        appliesTo {
-            principal: [Principal],
-            resource: [Scope],
+            resource: [Tenant, Scope, Workspace],
             context: { roles: Set<String> },
         };
 
-    // The write seam (MEM-1, ADR-0020 decision 3): may this principal
-    // land memory content at this scope? observe asks it for the
-    // caller's personal scope; richer write surfaces (FLOW) will ask the
-    // same question at shared scopes.
-    action MemoryWrite
+    action ProjectRead, ProjectCreate, ProjectUpdate
         appliesTo {
             principal: [Principal],
-            resource: [Scope],
+            resource: [Tenant, Scope, Workspace, Project],
+            context: { roles: Set<String> },
+        };
+
+    // The session ledger (/v1/sessions — CPR-10, ADR-0076 decision 6).
+    //
+    // `SessionRead` covers the session, its events, its context runs and the
+    // timeline projected over them. It is **not** `ProjectRead`, and the split
+    // is the same one `MembershipRead` makes against `WorkspaceRead`: a
+    // project's name discloses nothing, and a session's timeline is a
+    // transcript of what somebody and their agent did, said, read and changed.
+    // A pack must be able to let a member see the project they work in without
+    // handing them everybody's runs.
+    //
+    // `SessionWrite` covers opening, appending, composing and closing. One
+    // authority rather than four, on `ChannelRollback`'s separability rule read
+    // the other way: an agent that may open a session must be able to close it,
+    // and an authority to open that could not close would produce runs nobody
+    // can end.
+    //
+    // Composing context for a session takes `SessionWrite` **here** and
+    // `KnowledgeRead` at every scope that contributes, decided by the same
+    // composition walk `inject` runs — so this action admits no material of its
+    // own. It is the authority to *ask*, never the authority to *receive*.
+    //
+    // There is no delete: a session is what events, candidates, knowledge
+    // provenance and audit events name, and disposal belongs to the retention
+    // plane.
+    //
+    // Two resource types and not four. A **listing** is decided at the scope it
+    // is anchored at, and each **row** is decided as the session it is about
+    // (ADR-0073 decision 3) — so `Workspace` and `Project` never appear here,
+    // because a session is not addressed through the subtype that owns its
+    // scope. `Tenant` is absent too: a run always happens somewhere, so there
+    // is no tenant-wide session question to ask.
+    //
+    // Keeping the union to two is what lets every pack clause below stay
+    // uniform over it: `resource in principal.tenant`, `resource in
+    // principal.ambit` and `resource in principal.own_scope` all mean the same
+    // thing for a `Session` as for a `Scope`, because a session is parented to
+    // the scope it runs at. The one asymmetric rule — the membership floor —
+    // is written as two clauses in each pack, and says so.
+    //
+    // `SessionDiagnostics` (CPR-11, ADR-0077 decision 3) is the third and it
+    // is deliberately not folded into `SessionRead`: a timeline says a message
+    // was sent and summarises it in a line, and a **payload** is what the
+    // agent and the person actually said, byte for byte. A pack must be able
+    // to let a project's members follow what their agents have been doing
+    // without handing every one of them everybody's prompts. It rides the same
+    // resource union for the same reason the other two do.
+    action SessionRead, SessionWrite, SessionDiagnostics
+        appliesTo {
+            principal: [Principal],
+            resource: [Scope, Session],
+            context: { roles: Set<String> },
+        };
+
+    // The access plane (/v1/workspaces/{id}/members, /v1/projects/{id}/members,
+    // /v1/admin/grants, /v1/admin/groups, /v1/invites — CPR-5, ADR-0072
+    // decision 7).
+    //
+    // Read is one action over the whole plane, on DirectoryManage's argument:
+    // "who may act here" and "who has been invited to act here" are the same
+    // disclosure seen from two ends, and splitting them would create a role
+    // whose only power is reconnaissance over the other half.
+    //
+    // Read is **not** WorkspaceRead. A workspace's name discloses nothing; its
+    // membership discloses who works on what. A pack must be able to let a
+    // contributor see the workspace they contribute to without handing them
+    // the org chart, and it can only say that if they are two actions.
+    //
+    // Issuing an invitation takes MembershipGrant rather than an action of its
+    // own, because an invitation *is* deferred granting: an authority to invite
+    // weaker than the authority to grant would be a way around the second.
+    //
+    // Since CPR-6 both apply where the membership actually is: the scope, the
+    // workspace or the project whose members are being read or changed, and —
+    // for a revocation — the **grant itself**, so that a pack can price taking
+    // away a directory-managed grant or an owner's differently from taking
+    // away an ordinary one (ADR-0073 decision 3). The tenant stays for the
+    // tenant-wide listings and for a deployment with no root scope yet.
+    action MembershipRead, MembershipGrant
+        appliesTo {
+            principal: [Principal],
+            resource: [Tenant, Scope, Workspace, Project, ScopeGrant],
+            context: { roles: Set<String> },
+        };
+
+    // Curating groups (/v1/admin/groups). Separate from MembershipGrant on
+    // ChannelRollback's separability rule, and the distinction is real: a group
+    // says who exists together, a grant says what they may do, and a group with
+    // no grant naming it confers nothing at all. A deployment must be able to
+    // let somebody maintain the first without conferring the second.
+    //
+    // Tenant-only: a group is not anchored anywhere in the scope tree — the
+    // same shape DirectoryManage has, and for the same reason. A subtree-scoped
+    // authority over a tenant-wide set could only ever be a half-truth.
+    action GroupManage
+        appliesTo {
+            principal: [Principal],
+            resource: [Tenant, Group],
+            context: { roles: Set<String> },
+        };
+
+    // Redeeming an invitation (POST /v1/invites/{token}/accept, ADR-0072
+    // decision 8).
+    //
+    // Every shipped pack permits this to any principal the base layer has not
+    // already forbidden, and that is the point rather than a gap: the **token**
+    // is the authority. A person holding a valid invitation who is refused for
+    // want of a role is a person this product invited and then turned away.
+    //
+    // It exists as an action rather than as an exemption so that the invariant
+    // floor still runs over it — a quarantined principal is refused, a sealed
+    // scope is refused — and so that a deployment which wants the mechanism off
+    // says so in a pack rather than in a deployment flag.
+    //
+    // Tenant-only, which also means AUTH-3's confinement forbids it to every
+    // service identity for free: an agent must not redeem a person's invitation.
+    action InviteAccept
+        appliesTo {
+            principal: [Principal],
+            resource: [Tenant],
+            context: { roles: Set<String> },
+        };
+
+    // Knowledge reads carry the exact immutable revision's sensitivity and a
+    // required PDP-computed relaxation match. `relaxed` is never a caller
+    // claim; omitting it makes the request invalid rather than dropping the
+    // base-layer privacy and restricted-tier rules (CPR-31, ADR-0090).
+    action KnowledgeRead
+        appliesTo {
+            principal: [Principal],
+            resource: [Scope, KnowledgeItem],
+            context: { roles: Set<String>, sensitivity: String, relaxed: Bool },
+        };
+
+    action KnowledgeWrite, KnowledgeForget
+        appliesTo {
+            principal: [Principal],
+            resource: [Scope, KnowledgeItem],
             context: { roles: Set<String> },
         };
 
@@ -149,20 +386,20 @@ namespace Synveda {
     // this principal be served a prompt attached to this scope, and may it
     // author one there?
     //
-    // `PromptRead` carries `sensitivity` for MemoryRead's reason: with four
+    // `PromptRead` carries `sensitivity` for KnowledgeRead's reason: with four
     // values the seam can be asked about a tier before any content is
     // fetched, so a pack prices a `confidential` prompt exactly as it prices
-    // confidential memory. It deliberately carries **no** `lapsed`: the
-    // lapse vocabulary is closed over `memory.read` (ADR-0037 decision 2)
-    // and widening it is a lapse feature's decision, taken in two reviewed
-    // places, not a side effect of adding an asset type. And no pack names
+    // confidential memory. It deliberately carries no relaxation input:
+    // CPR-31 closes that vocabulary over `KnowledgeRead`, and widening it is
+    // a reviewed feature decision, not a side effect of adding an asset type.
+    // And no pack names
     // `restricted` here, because nothing in the product can mint that tier
     // for an authored asset — migration 0029's CHECK is where that is
     // structural (ADR-0049 decision 5).
     //
-    // `PromptWrite` is the authoring seam and mirrors `MemoryWrite`: the
+    // `PromptWrite` is the authoring seam and mirrors `KnowledgeWrite`: the
     // home floor role-free, bound content roles beyond it. Separate from
-    // `MemoryWrite` on `ChannelRollback`'s separability rule — every placed
+    // `KnowledgeWrite` on `ChannelRollback`'s separability rule — every placed
     // principal holds the memory write floor at its own home, and a pack
     // must be able to say "observe here" without saying "author governed
     // assets here".
@@ -191,7 +428,7 @@ namespace Synveda {
     // one difference that is the whole of ADR-0050 decision 8:
     // `ContextPackRead` is taken per scope inside the *composition* plan
     // walk, so it is the action that admits pack chunks into a block.
-    // `MemoryRead` never admits one and this never admits a memory, which
+    // `KnowledgeRead` never admits one and this never admits a memory, which
     // is what lets a scope distribute conventions to readers holding no
     // readable memory there.
     //
@@ -243,26 +480,11 @@ namespace Synveda {
             context: { roles: Set<String> },
         };
 
-    // Publishing a bundle the quality gate would refuse (SKIL-3, ADR-0053
-    // decision 8): a *second* decision at the publish seam, beside the
-    // ChannelPublish the publication already takes.
-    //
-    // The separation is the whole content of the action — a publisher who
-    // may ship a good skill cannot necessarily ship one below the bar, and
-    // has to go and find somebody who can. ADR-0051 decision 18's argument
-    // in its own idiom: the content of separating two authorities is that
-    // they can be two people.
-    //
-    // No `sensitivity` in the context, unlike SkillRead: this is a
-    // statement about a *process* rather than about content, so a tier
-    // would be a field with nothing to say.
-    //
-    // There is deliberately no equivalent for the security scan and there
-    // must not be one. ADR-0052 decision 3 put `critical` on the invariant
-    // floor precisely so that no pack and no role can wave it through; an
-    // override that reached it would make that guarantee negotiable by
-    // whoever holds this action.
-    action SkillQualityOverride
+    // Trusted MCP catalogue metadata (CPR-25, ADR-0086). Unlike SkillRead,
+    // ToolRead has no sensitivity operand: ordinary responses contain only
+    // credential-free manifests, schemas, hashes and secret-reference
+    // presence. It is not invocation authority.
+    action ToolRead, ToolWrite
         appliesTo {
             principal: [Principal],
             resource: [Scope],
@@ -279,32 +501,43 @@ namespace Synveda {
             context: { roles: Set<String> },
         };
 
-    // The role admin plane (/v1/roles/*, ADR-0015 decision 7): reading
-    // and mutating bindings at a node (or tenant-wide — the Tenant
-    // resource).
-    action RoleRead
+    // Immutable governed runtime documents and their scope selectors
+    // (CPR-30, ADR-0089). Writes resolve from the parent configuration so a
+    // binding cannot authorise the mutation that installs itself.
+    action ConfigurationRead, ConfigurationWrite
         appliesTo {
             principal: [Principal],
             resource: [Tenant, Scope],
             context: { roles: Set<String> },
         };
 
-    // `grant` is the role being granted *or revoked*, and is required —
-    // not optional — so a grant-less request fails schema validation and
-    // denies, instead of silently skipping the base layer's escalation
-    // forbid (Cedar drops a policy that errors; ADR-0015 decision 5).
-    action RoleAssign
+    // Immutable time-boxed permission changes. Every create, revision and
+    // revocation is a typed Policy/apply VedaFlow change, so one action is
+    // sufficient and there is no narrowing-only bypass path.
+    action RelaxationWrite
         appliesTo {
             principal: [Principal],
-            resource: [Tenant, Scope],
-            context: { roles: Set<String>, grant: String },
+            resource: [Scope],
+            context: { roles: Set<String> },
         };
 
+    // (The role admin plane — `RoleRead`/`RoleAssign` over role bindings,
+    // ADR-0015 decision 7 — is deleted with the bindings: grants are the
+    // access plane's actions, a revocation names the grant it is about, and
+    // the escalation guard that needed `context.grant` went with the verb it
+    // guarded. CPR-7, ADR-0074.)
+
     // The quarantine review plane (/v1/quarantine, MEM-2, ADR-0021
-    // decision 6): listing pending quarantined observe events
-    // (tenant-wide on the Tenant resource, a subtree on a Scope) and
-    // reviewing one (release/reject — always the event's scope, never
-    // the tenant: a quarantined event lives at a node).
+    // decision 6): listing pending quarantined observe events and
+    // reviewing one (release/reject).
+    //
+    // **Both decide at the tenant since CPR-7** (ADR-0074 decision 7).
+    // Every quarantined event now lands at a `principal`-shaped scope,
+    // and a principal scope inherits nothing — so a verdict anchored at
+    // the event's own scope was reachable by nobody but the person whose
+    // secret it was. `Scope` stays in the vocabulary because a queue may
+    // still be *filtered* to a subtree, and because a stored pack is free
+    // to write a narrower rule; the product routes ask at the tenant.
     action QuarantineRead
         appliesTo {
             principal: [Principal],
@@ -315,7 +548,7 @@ namespace Synveda {
     action QuarantineReview
         appliesTo {
             principal: [Principal],
-            resource: [Scope],
+            resource: [Tenant, Scope],
             context: { roles: Set<String> },
         };
 
@@ -472,32 +705,4 @@ namespace Synveda {
             context: { roles: Set<String> },
         };
 
-    // The lapse plane (AUTHZ-4, ADR-0037 decision 15).
-    //
-    // LapseGrant runs an approved lapse proposal's effect: it opens a
-    // time-boxed, reasoned grant of one action from one scope to another.
-    // LapseRevoke ends a standing grant early.
-    //
-    // Two actions rather than one, on ChannelRollback's precedent and for
-    // its reason: a pack must be able to grant one broadly and the other
-    // narrowly, because the responder who should be able to end a lapse at
-    // 3am is not the steward who should be able to open one. Revoking
-    // resolves no matrix — it installs nothing and can only narrow.
-    //
-    // The resource of both is the **target** scope, the one whose material
-    // is disclosed. Authority over a disclosure belongs where the material
-    // is, never where the request came from. Never tenant-level: a lapse is
-    // always about one node's material.
-    //
-    // Neither is PolicyAssign, which is the obvious reuse and the wrong one:
-    // PolicyAssign is the single action decided with the resource's own
-    // assignment skipped (ADR-0014 decision 4), so a lapse would be
-    // authorized under the node's *parent's* pack while its approval matrix
-    // resolved under the node's own.
-    action LapseGrant, LapseRevoke
-        appliesTo {
-            principal: [Principal],
-            resource: [Scope],
-            context: { roles: Set<String> },
-        };
 }

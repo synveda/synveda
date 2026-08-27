@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update skill_changes\n           set resulting_skill_id = $3, resulting_version_id = $4,\n               resulting_binding_id = $5, resulting_binding_revision = $6,\n               applied_at = clock_timestamp()\n           where tenant_id = $1 and proposal_id = $2 and applied_at is null",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "608cface3b6fef5408d0e80da5235016af6207044a341eda5114cc84d7f7ebd3"
+}

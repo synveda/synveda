@@ -1,9 +1,8 @@
 /**
  * The console's half of the explorer parity corpus (CNSL-2, ADR-0058
- * decision 10).
+ * decision 10; the scope re-cut CPR-7).
  *
- * The same four payloads the CLI answers in
- * `crates/synveda-cli/src/hierarchy.rs`, recorded from the real gateway by
+ * The same payloads the gateway answers, recorded from the real gateway by
  * `crates/synveda-gateway/tests/explorer.rs`. Two renderers that agree on
  * the day they are written is not parity; it is a coincidence with a
  * maintenance schedule, and this is what makes the divergence fail a test.
@@ -28,23 +27,19 @@ import { fileURLToPath } from "node:url";
 import { renderToStaticMarkup } from "react-dom/server";
 
 import {
-  describeEnd,
-  describeOrigin,
+  deniedCount,
   mayDo,
   mayRead,
-  deniedCount,
   type Capabilities,
-  type EffectiveBindings,
-  type EffectivePack,
-  type LapseListing,
+  type RelaxationListing,
 } from "./explorer.mjs";
+import type { EffectiveConfigurationView } from "./generated/api.js";
 import { toText } from "./text.mjs";
 
 const CASES = [
-  "pack-inherited",
-  "roles-mixed-origins",
+  "configuration-inherited",
   "capabilities-with-denial",
-  "lapses-standing-and-ended",
+  "relaxations-current-and-ended",
 ] as const;
 
 const FIXTURES = join(dirname(fileURLToPath(import.meta.url)), "..", "fixtures", "explorer");
@@ -68,34 +63,17 @@ function facts(name: string): { must_name: string[]; must_not_name: string[] } {
  */
 function render(name: string, asked: string, payload: unknown): string {
   switch (name) {
-    case "pack-inherited": {
-      const pack = payload as EffectivePack;
+    case "configuration-inherited": {
+      const configuration = payload as EffectiveConfigurationView;
+      const inherited = configuration.binding_scope_id !== asked;
       return toText(
         renderToStaticMarkup(
           <p>
-            <strong>
-              {pack.name}@{pack.version}
-            </strong>{" "}
-            <span>{describeOrigin(pack.origin, asked)}</span>
+            <strong>{configuration.document.policy_pack}</strong>{" "}
+            <span>{configuration.fail_safe ? "enterprise fail-safe" : inherited ? "inherited" : "bound here"}</span>{" "}
+            <span>{configuration.version_id}</span>{" "}
+            <span>{configuration.content_hash}</span>
           </p>,
-        ),
-      );
-    }
-    case "roles-mixed-origins": {
-      const view = payload as EffectiveBindings;
-      return toText(
-        renderToStaticMarkup(
-          <table>
-            <tbody>
-              {view.bindings.map((binding, index) => (
-                <tr key={index}>
-                  <td>{binding.role}</td>
-                  <td>{binding.subject}</td>
-                  <td>{describeOrigin(binding.origin, asked)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>,
         ),
       );
     }
@@ -126,17 +104,16 @@ function render(name: string, asked: string, payload: unknown): string {
         ),
       );
     }
-    case "lapses-standing-and-ended": {
-      const listing = payload as LapseListing;
+    case "relaxations-current-and-ended": {
+      const listing = payload as RelaxationListing;
       return toText(
         renderToStaticMarkup(
           <ul>
-            {listing.lapses.map((lapse) => (
-              <li key={lapse.id}>
-                <span>{lapse.outcome}</span> {lapse.action}{" "}
-                {describeEnd(lapse.grantee_scope_path, lapse.grantee_scope_id)} →{" "}
-                {describeEnd(lapse.target_scope_path, lapse.target_scope_id)}
-                <div>{lapse.reason}</div>
+            {listing.relaxations.map((relaxation) => (
+              <li key={relaxation.id}>
+                <span>{relaxation.status}</span> {relaxation.current.action}{" "}
+                {relaxation.current.subject} → {relaxation.current.target_scope_id}
+                <div>{relaxation.current.reason}</div>
               </li>
             ))}
           </ul>,

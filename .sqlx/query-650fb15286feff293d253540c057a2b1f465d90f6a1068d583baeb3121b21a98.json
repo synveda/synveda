@@ -1,0 +1,158 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select id, tenant_id, project_id, scope_id, workspace_id, principal_id,\n               format, format_version, specification_commit, source_kind,\n               source_locator, source_revision, bundle_digest, state,\n               artifact_count, mapping_count, candidate_count, capture_batch_id,\n               error_code, notices, created_at, completed_at, updated_at\n        from import_jobs\n        where tenant_id = $1 and project_id = $2 and source_kind = $3\n          and source_locator = $4 and bundle_digest = $5\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "tenant_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "project_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "scope_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "workspace_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "principal_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "format",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "format_version",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "specification_commit",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "source_kind",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "source_locator",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "source_revision",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 12,
+        "name": "bundle_digest",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 13,
+        "name": "state",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 14,
+        "name": "artifact_count",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 15,
+        "name": "mapping_count",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 16,
+        "name": "candidate_count",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 17,
+        "name": "capture_batch_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 18,
+        "name": "error_code",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 19,
+        "name": "notices",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 20,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 21,
+        "name": "completed_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 22,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "650fb15286feff293d253540c057a2b1f465d90f6a1068d583baeb3121b21a98"
+}

@@ -1,6 +1,6 @@
 # ADR-0044: Linking runs inside the extraction commit — the extractor's mention list is the only entity source, resolution is a deterministic key the schema's unique constraint enforces, and the provenance graph is projected rather than written
 
-- **Status**: Accepted
+- **Status**: Superseded by ADR-0097
 - **Date**: 2026-07-28
 - **Feature(s)**: GRPH-2 (GRPH-3 inherits)
 - **Deciders**: sujitn

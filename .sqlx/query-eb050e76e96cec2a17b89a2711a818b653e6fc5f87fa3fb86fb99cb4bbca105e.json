@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into skill_versions\n             (id, tenant_id, skill_id, ordinal, bundle_digest, sensitivity,\n              manifest, source_kind, provenance, scan_report,\n              scan_ruleset_version, quality_score, rubric_version, created_by)\n         values ($1, $2, $3, 1, $4, 'internal',\n                 '{\"name\":\"code-review\",\"description\":\"Reviews a diff.\"}'::jsonb,\n                 'authored', '{\"source\":\"rls-fixture\"}'::jsonb,\n                 '{\"findings\":[]}'::jsonb, 1, 80, 1, $5)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Bytea",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "eb050e76e96cec2a17b89a2711a818b653e6fc5f87fa3fb86fb99cb4bbca105e"
+}

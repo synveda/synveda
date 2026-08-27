@@ -1,9 +1,26 @@
 # ADR-0026: inject API — the session-start seam, degradation ladder, one chained audit event
 
-- **Status**: Accepted
+- **Status**: Accepted, **superseded in part 2026-08-23 by ADR-0078** (CPR-12): the route is gone, the ladder is not
 - **Date**: 2026-07-23
 - **Feature(s)**: CTX-3
 - **Deciders**: sujitn
+
+## Superseded in part (2026-08-23, CPR-12): `POST /v1/inject` is deleted
+
+ADR-0078 decision 5 makes `POST /v1/sessions/{id}/context-runs` the only
+composition seam, which ADR-0076 decision 7 had already declared its final
+shape. The global route is deleted.
+
+**The degradation ladder, the 150ms budget, the taskless/task branch and the
+one chained audit event are unchanged** and are asserted against the context
+run instead. Two differences are real rather than cosmetic: the request's
+`task` field is `query` and its `session_id` field is gone — the run is in
+the path, and it is an aggregate this deployment opened rather than a string
+a client chose — and the response is a `ContextRunView`, which is
+deliberately minimal (ADR-0076 decision 7) and therefore does **not** carry
+`record_ids`, `tiers`, `index_entries`, `index_tokens` or
+`staleness_permille`. Prompt 18 is where the explainability behind the run
+puts those back.
 
 ## Context
 

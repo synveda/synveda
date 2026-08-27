@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into knowledge_conflict_members\n              (id, tenant_id, conflict_set_id, role, knowledge_item_id,\n               knowledge_revision_id, capture_candidate_id, classification,\n               similarity_permille, reason_code)\n           values ($1, $2, $3, 'challenger', $4, $5, $6, $7, 1000,\n                   'proposed_statement')",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "406f75c7b89764ef6c3f0b4462eacc747aa0d23dc015cf80e2b643fdb4f126c0"
+}

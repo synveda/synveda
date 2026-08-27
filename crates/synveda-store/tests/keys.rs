@@ -26,7 +26,8 @@ use sqlx::postgres::PgPoolOptions;
 use synveda_crypto::{KeyScope, KeyVersion, Kms, LocalKms, Purpose, RowKey};
 use synveda_store::keys::KeyRing;
 use synveda_store::{tenant_secrets, tenants};
-use synveda_types::{TenantId, TenantStatus};
+use synveda_types::secret::{TenantSecretKind, TenantSecretState};
+use synveda_types::{TenantId, TenantSecretId, TenantSecretReencryptionJobId, TenantStatus};
 
 struct Db {
     rt: tokio::runtime::Runtime,
@@ -157,17 +158,13 @@ fn a_round_trip_goes_through_a_wrapped_row() {
             .sealing_key(&db.pool, scope)
             .await
             .expect("sealing key")
-            .seal(
-                Purpose::DirectoryCredential,
-                RowKey::Name("graph"),
-                b"s3cret",
-            )
+            .seal(Purpose::TenantSecret, RowKey::Name("graph"), b"s3cret")
             .expect("seal");
         let opened = ring
             .opening_key(&db.pool, scope, &sealed)
             .await
             .expect("opening key")
-            .open(Purpose::DirectoryCredential, RowKey::Name("graph"), &sealed)
+            .open(Purpose::TenantSecret, RowKey::Name("graph"), &sealed)
             .expect("open");
         assert_eq!(&opened[..], b"s3cret");
 
@@ -199,13 +196,13 @@ fn one_tenants_ciphertext_does_not_open_under_anothers_key() {
             .sealing_key(&db.pool, one)
             .await
             .expect("key one")
-            .seal(Purpose::DirectoryCredential, RowKey::Name("graph"), b"one")
+            .seal(Purpose::TenantSecret, RowKey::Name("graph"), b"one")
             .expect("seal");
         let opened = ring
             .opening_key(&db.pool, two, &sealed)
             .await
             .expect("key two")
-            .open(Purpose::DirectoryCredential, RowKey::Name("graph"), &sealed);
+            .open(Purpose::TenantSecret, RowKey::Name("graph"), &sealed);
         assert!(
             opened.is_err(),
             "a transplanted ciphertext must fail to open, not open"
@@ -226,7 +223,7 @@ fn rotation_mints_the_next_generation_and_keeps_the_old_one_readable() {
             .sealing_key(&db.pool, scope)
             .await
             .expect("first key")
-            .seal(Purpose::DirectoryCredential, RowKey::Name("graph"), b"old")
+            .seal(Purpose::TenantSecret, RowKey::Name("graph"), b"old")
             .expect("seal");
 
         let next = ring.rotate(&db.pool, scope).await.expect("rotate");
@@ -238,7 +235,7 @@ fn rotation_mints_the_next_generation_and_keeps_the_old_one_readable() {
             .opening_key(&db.pool, scope, &before)
             .await
             .expect("retired key")
-            .open(Purpose::DirectoryCredential, RowKey::Name("graph"), &before)
+            .open(Purpose::TenantSecret, RowKey::Name("graph"), &before)
             .expect("open under the retired generation");
         assert_eq!(&opened[..], b"old");
 
@@ -247,7 +244,7 @@ fn rotation_mints_the_next_generation_and_keeps_the_old_one_readable() {
             .sealing_key(&db.pool, scope)
             .await
             .expect("second key")
-            .seal(Purpose::DirectoryCredential, RowKey::Name("graph"), b"new")
+            .seal(Purpose::TenantSecret, RowKey::Name("graph"), b"new")
             .expect("seal");
         assert_eq!(
             synveda_crypto::envelope_version(&after).expect("peek"),
@@ -365,14 +362,16 @@ fn a_secret_round_trips_sealed_and_the_column_holds_no_plaintext() {
         let scope = KeyScope::Tenant(tenant);
         ring.provision(&db.pool, scope).await.expect("provision");
 
-        const NAME: &str = "directory.credential";
-        let sealed = ring
+        const LABEL: &str = "directory.credential";
+        let id = TenantSecretId::new();
+        let key = ring
             .sealing_key(&db.pool, scope)
             .await
-            .expect("sealing key")
+            .expect("sealing key");
+        let sealed = key
             .seal(
-                Purpose::DirectoryCredential,
-                RowKey::Name(NAME),
+                Purpose::TenantSecret,
+                RowKey::Uuid(id.as_uuid()),
                 b"graph-client-secret",
             )
             .expect("seal");
@@ -380,33 +379,55 @@ fn a_secret_round_trips_sealed_and_the_column_holds_no_plaintext() {
         let mut tx = synveda_store::rls::begin_tenant_tx(&db.pool, tenant)
             .await
             .expect("tenant tx");
-        tenant_secrets::put(&mut *tx, tenant, NAME, &sealed)
+        let root = synveda_store::scopes::ensure_tenant_root(&mut tx, tenant)
             .await
-            .expect("put");
-        let stored = tenant_secrets::get(&mut *tx, tenant, NAME)
+            .expect("root");
+        let stored = tenant_secrets::put(
+            &mut tx,
+            id,
+            tenant,
+            root.id,
+            TenantSecretKind::Directory,
+            LABEL,
+            Some("entra"),
+            key.version(),
+            &sealed,
+        )
+        .await
+        .expect("put");
+        let debug = format!("{stored:?}");
+        assert!(
+            !debug.contains("graph-client-secret") && !debug.contains("sealed: Some(["),
+            "debug output must carry neither plaintext nor ciphertext: {debug}"
+        );
+        let fetched = tenant_secrets::get(&mut *tx, tenant, id)
             .await
             .expect("get")
             .expect("a secret");
+        assert_eq!(fetched.id, id);
+        assert_eq!(stored.value_revision, 1);
         assert_eq!(
-            tenant_secrets::names(&mut *tx, tenant)
+            tenant_secrets::list(&mut *tx, tenant)
                 .await
-                .expect("names"),
-            vec![NAME.to_string()]
+                .expect("list")
+                .len(),
+            1
         );
         tx.commit().await.expect("commit");
 
+        let stored_envelope = stored.sealed.as_deref().expect("active envelope");
         assert!(
-            !stored.sealed.windows(5).any(|window| window == b"graph"),
+            !stored_envelope.windows(5).any(|window| window == b"graph"),
             "the stored column must not contain the credential"
         );
         let opened = ring
-            .opening_key(&db.pool, scope, &stored.sealed)
+            .opening_key(&db.pool, scope, stored_envelope)
             .await
             .expect("opening key")
             .open(
-                Purpose::DirectoryCredential,
-                RowKey::Name(NAME),
-                &stored.sealed,
+                Purpose::TenantSecret,
+                RowKey::Uuid(id.as_uuid()),
+                stored_envelope,
             )
             .expect("open");
         assert_eq!(&opened[..], b"graph-client-secret");
@@ -414,24 +435,31 @@ fn a_secret_round_trips_sealed_and_the_column_holds_no_plaintext() {
         let mut tx = synveda_store::rls::begin_tenant_tx(&db.pool, tenant)
             .await
             .expect("tenant tx");
+        let revoked = tenant_secrets::revoke(&mut tx, tenant, id)
+            .await
+            .expect("revoke")
+            .expect("active reference");
+        assert_eq!(revoked.state, TenantSecretState::Revoked);
+        assert!(revoked.sealed.is_none(), "revocation destroys ciphertext");
+        assert_eq!(revoked.value_revision, 2);
         assert!(
-            tenant_secrets::delete(&mut *tx, tenant, NAME)
+            tenant_secrets::revoke(&mut tx, tenant, id)
                 .await
-                .expect("delete"),
-            "a credential must be destroyable, or it cannot be revoked"
+                .expect("replay")
+                .is_none()
         );
         assert!(
-            !tenant_secrets::delete(&mut *tx, tenant, NAME)
+            tenant_secrets::get(&mut *tx, tenant, id)
                 .await
-                .expect("delete again"),
-            "and a replayed revocation must be distinguishable from a real one"
+                .expect("get tombstone")
+                .is_some()
         );
         tx.commit().await.expect("commit");
     });
 }
 
 #[test]
-fn a_secret_sealed_for_one_name_does_not_open_under_another() {
+fn a_secret_sealed_for_one_reference_does_not_open_under_another() {
     let Some(db) = db() else { return };
     db.rt.block_on(async {
         let ring = ring();
@@ -439,30 +467,181 @@ fn a_secret_sealed_for_one_name_does_not_open_under_another() {
         let scope = KeyScope::Tenant(tenant);
         ring.provision(&db.pool, scope).await.expect("provision");
 
+        let id = TenantSecretId::new();
+        let other = TenantSecretId::new();
         let sealed = ring
             .sealing_key(&db.pool, scope)
             .await
             .expect("sealing key")
-            .seal(
-                Purpose::DirectoryCredential,
-                RowKey::Name("directory.credential"),
-                b"value",
-            )
+            .seal(Purpose::TenantSecret, RowKey::Uuid(id.as_uuid()), b"value")
             .expect("seal");
-        // Renaming a secret makes its ciphertext unopenable rather than
-        // silently re-pointing it, which is the safe direction and the reason
-        // the name is in the AAD.
+        // Repointing immutable metadata at another stable aggregate cannot
+        // transplant that aggregate's ciphertext.
         assert!(
             ring.opening_key(&db.pool, scope, &sealed)
                 .await
                 .expect("opening key")
                 .open(
-                    Purpose::DirectoryCredential,
-                    RowKey::Name("directory.credential.old"),
+                    Purpose::TenantSecret,
+                    RowKey::Uuid(other.as_uuid()),
                     &sealed
                 )
                 .is_err()
         );
+    });
+}
+
+#[test]
+fn durable_reencryption_advances_the_dek_without_changing_secret_identity_or_value_revision() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let ring = cold_ring();
+        let tenant = seed_tenant(&db.pool).await;
+        let key_scope = KeyScope::Tenant(tenant);
+        let first = ring
+            .provision(&db.pool, key_scope)
+            .await
+            .expect("provision");
+        let id = TenantSecretId::new();
+
+        let mut tx = synveda_store::rls::begin_tenant_tx(&db.pool, tenant)
+            .await
+            .expect("tenant tx");
+        let root = synveda_store::scopes::ensure_tenant_root(&mut tx, tenant)
+            .await
+            .expect("root");
+        tx.commit().await.expect("commit root");
+
+        let first_key = ring
+            .sealing_key(&db.pool, key_scope)
+            .await
+            .expect("first key");
+        let first_envelope = first_key
+            .seal(
+                Purpose::TenantSecret,
+                RowKey::Uuid(id.as_uuid()),
+                b"token-one",
+            )
+            .expect("seal first");
+        let mut tx = synveda_store::rls::begin_tenant_tx(&db.pool, tenant)
+            .await
+            .expect("tenant tx");
+        let original = tenant_secrets::put(
+            &mut tx,
+            id,
+            tenant,
+            root.id,
+            TenantSecretKind::ToolServer,
+            "pulseboard.mcp",
+            Some("remote_mcp"),
+            first,
+            &first_envelope,
+        )
+        .await
+        .expect("put");
+        tx.commit().await.expect("commit secret");
+
+        let second = ring.rotate(&db.pool, key_scope).await.expect("rotate");
+        let job_id = TenantSecretReencryptionJobId::new();
+        let mut tx = synveda_store::rls::begin_tenant_tx(&db.pool, tenant)
+            .await
+            .expect("tenant tx");
+        tenant_secrets::create_reencryption_job(&mut tx, job_id, tenant, first, second)
+            .await
+            .expect("create job");
+        let candidates = tenant_secrets::active_for_key_generation(&mut *tx, tenant, first)
+            .await
+            .expect("candidates");
+        assert_eq!(candidates.len(), 1);
+        tenant_secrets::start_reencryption_job(&mut tx, tenant, job_id, 1)
+            .await
+            .expect("start")
+            .expect("running");
+        tx.commit().await.expect("commit start");
+
+        let plaintext = ring
+            .opening_key(&db.pool, key_scope, &first_envelope)
+            .await
+            .expect("opening key")
+            .open(
+                Purpose::TenantSecret,
+                RowKey::Uuid(id.as_uuid()),
+                &first_envelope,
+            )
+            .expect("open");
+        let second_key = ring
+            .sealing_key(&db.pool, key_scope)
+            .await
+            .expect("second key");
+        let second_envelope = second_key
+            .seal(
+                Purpose::TenantSecret,
+                RowKey::Uuid(id.as_uuid()),
+                &plaintext,
+            )
+            .expect("reseal");
+        let mut tx = synveda_store::rls::begin_tenant_tx(&db.pool, tenant)
+            .await
+            .expect("tenant tx");
+        assert!(
+            tenant_secrets::replace_envelope(
+                &mut tx,
+                tenant,
+                id,
+                original.value_revision,
+                first,
+                second,
+                &second_envelope,
+            )
+            .await
+            .expect("replace")
+        );
+        let completed = tenant_secrets::complete_reencryption_job(&mut tx, tenant, job_id, 1)
+            .await
+            .expect("complete")
+            .expect("completed job");
+        let advanced = tenant_secrets::get(&mut *tx, tenant, id)
+            .await
+            .expect("get")
+            .expect("secret");
+        tx.commit().await.expect("commit completion");
+
+        assert_eq!(completed.state, "completed");
+        assert_eq!(advanced.id, original.id);
+        assert_eq!(advanced.value_revision, original.value_revision);
+        assert_eq!(advanced.key_version, Some(second));
+        assert_ne!(advanced.sealed.as_deref(), Some(first_envelope.as_slice()));
+        let advanced_envelope = advanced.sealed.as_deref().expect("active envelope");
+        assert_eq!(
+            &ring
+                .opening_key(&db.pool, key_scope, advanced_envelope)
+                .await
+                .expect("new opening key")
+                .open(
+                    Purpose::TenantSecret,
+                    RowKey::Uuid(id.as_uuid()),
+                    advanced_envelope,
+                )
+                .expect("open re-encrypted")[..],
+            b"token-one"
+        );
+
+        let other = seed_tenant(&db.pool).await;
+        let mut other_tx = synveda_store::rls::begin_tenant_tx(&db.pool, other)
+            .await
+            .expect("other tenant tx");
+        assert!(
+            !tenant_secrets::reference_is_active(
+                &mut *other_tx,
+                other,
+                id,
+                TenantSecretKind::ToolServer,
+                root.id,
+            )
+            .await
+            .expect("cross-tenant lookup")
+        );
+        other_tx.commit().await.expect("commit other");
     });
 }
 

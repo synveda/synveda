@@ -1,0 +1,113 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select version.id, version.server_id, version.proposal_id, version.ordinal,\n                  version.digest, version.protocol_version, version.descriptor,\n                  case proposal.state when 'open' then 'quarantined'\n                       when 'applied' then 'approved' else 'rejected' end as \"state!\",\n                  snapshot.id as snapshot_id, snapshot.raw as raw_capabilities,\n                  snapshot.normalized as normalized_capabilities,\n                  snapshot.digest as capability_digest, snapshot.discovered_at,\n                  snapshot.discovered_by, version.created_at, version.created_by\n             from tool_server_versions version\n             join vedaflow_proposals proposal\n               on proposal.tenant_id = version.tenant_id and proposal.id = version.proposal_id\n             join capability_snapshots snapshot\n               on snapshot.tenant_id = version.tenant_id and snapshot.version_id = version.id\n            where version.tenant_id = $1 and version.id = $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "server_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "proposal_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "ordinal",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 4,
+        "name": "digest",
+        "type_info": "Bytea"
+      },
+      {
+        "ordinal": 5,
+        "name": "protocol_version",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "descriptor",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 7,
+        "name": "state!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "snapshot_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 9,
+        "name": "raw_capabilities",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 10,
+        "name": "normalized_capabilities",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 11,
+        "name": "capability_digest",
+        "type_info": "Bytea"
+      },
+      {
+        "ordinal": 12,
+        "name": "discovered_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 13,
+        "name": "discovered_by",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 14,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 15,
+        "name": "created_by",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      null,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "37a3d9c3b8b55c538bb8d6e42c65a17b73cd4aaf7e4f6b196600722b4d3cf1ab"
+}

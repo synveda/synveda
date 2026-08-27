@@ -1,0 +1,173 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select id, job_id, artifact_id, ordinal, okf_type, knowledge_type,\n               title, body_markdown, summary, tags as \"tags!: Vec<String>\",\n               sensitivity, confidence_permille, valid_from, valid_to,\n               stale_after, verification_metadata, metadata, content_hash,\n               classification, matched_item_id, matched_revision_id,\n               proposed_relations, materializable, content_erased, candidate_id,\n               created_at\n        from import_mappings\n        where tenant_id = $1 and job_id = $2\n        order by ordinal\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "job_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "artifact_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "ordinal",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 4,
+        "name": "okf_type",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "knowledge_type",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "title",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "body_markdown",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "summary",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "tags!: Vec<String>",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 10,
+        "name": "sensitivity",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "confidence_permille",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 12,
+        "name": "valid_from",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 13,
+        "name": "valid_to",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 14,
+        "name": "stale_after",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 15,
+        "name": "verification_metadata",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 16,
+        "name": "metadata",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 17,
+        "name": "content_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 18,
+        "name": "classification",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 19,
+        "name": "matched_item_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 20,
+        "name": "matched_revision_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 21,
+        "name": "proposed_relations",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 22,
+        "name": "materializable",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 23,
+        "name": "content_erased",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 24,
+        "name": "candidate_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 25,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "2d90b590896242545562c41c7e7db4fa7412fd03d026f826ca3be9ca6f808770"
+}

@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select artifact_id\n        from capture_candidate_import_artifacts\n        where tenant_id = $1 and candidate_id = $2\n        order by ordinal\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "artifact_id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "d19ac98f9671a969b96730753acbe0da2d39f84a4facecbdb0ad9ef3a5fed706"
+}

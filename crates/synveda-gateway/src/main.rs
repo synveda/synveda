@@ -1,8 +1,8 @@
 //! Gateway entry point. Configuration is environment-only for now:
 //! `DATABASE_URL` (required), `SYNVEDA_DB_MAX_CONNECTIONS` (default 8 —
-//! one pool shared by the request handlers *and* the background workers;
-//! see the comment at the call site for what that has and has not been
-//! measured to cost), `SYNVEDA_LISTEN_ADDR` (default `127.0.0.1:8120`),
+//! one pool shared by the request handlers and remaining background tasks;
+//! see the comment at the call site), `SYNVEDA_LISTEN_ADDR` (default
+//! `127.0.0.1:8120`),
 //! and one auth mode (ADR-0010 — setting both is a startup error):
 //! `SYNVEDA_OIDC_ISSUERS` (JSON trust-entry array; enables OIDC verification
 //! and `/auth/*`, with `SYNVEDA_PUBLIC_URL` naming this gateway in redirect
@@ -13,41 +13,20 @@
 //! (default 3600) caps service identities' token lifetime at the
 //! enforcement seam (AUTH-3, ADR-0018).
 //!
-//! The extraction worker (MEM-3, ADR-0022) is selected by
-//! `SYNVEDA_EXTRACTOR` (`deterministic` [default] | `claude` | `vllm` |
-//! `off`). `claude` requires `ANTHROPIC_API_KEY` (never logged) and
-//! honours `SYNVEDA_ANTHROPIC_BASE_URL` (default
-//! `https://api.anthropic.com`); `vllm` requires `SYNVEDA_VLLM_BASE_URL`
-//! and `SYNVEDA_EXTRACTOR_MODEL`; `SYNVEDA_EXTRACTOR_MODEL` otherwise
-//! defaults per implementation. The embedder (MEM-4, ADR-0023) is
-//! selected by `SYNVEDA_EMBEDDER` (`deterministic` [default] | `tei` —
+//! The retired record extractor is not started (CPR-16, ADR-0081). CPR-18's
+//! capture worker polls frozen session-event batches and produces reviewable
+//! candidates; `SYNVEDA_EXTRACTOR` selects `deterministic` (default),
+//! `claude` or `vllm`. The embedder is selected by `SYNVEDA_EMBEDDER`
+//! (`deterministic` [default] | `tei` —
 //! deliberately no `off`: embed-or-fail is unconditional); `tei`
 //! requires `SYNVEDA_TEI_URL` (the dev compose serves
 //! `http://localhost:8110`) and honours `SYNVEDA_EMBEDDER_MODEL`
-//! (default `BAAI/bge-m3`). Worker pacing:
-//! `SYNVEDA_EXTRACTION_POLL_MS` (default 1000),
-//! `SYNVEDA_EXTRACTION_BATCH` (default 16),
-//! `SYNVEDA_EXTRACTION_VT_SECS` (default 60),
-//! `SYNVEDA_EXTRACTION_MAX_READS` (default 5).
+//! (default `BAAI/bge-m3`).
 //!
-//! The auto-promotion engine (FLOW-4, ADR-0033) runs every
-//! `SYNVEDA_PROMOTION_INTERVAL_SECS` (default 300) and folds up to
-//! `SYNVEDA_PROMOTION_BATCH` (default 1024) audit events per tenant per
-//! pass. It cannot be turned off because it does nothing until a pack
-//! carries promotion rules, and no embedded pack does.
-//!
-//! The search index sidecar (CTX-1, ADR-0024) lives under
-//! `SYNVEDA_SEARCH_INDEX_DIR` (default `./data/search-index`; one
-//! subdirectory per tenant — deleting a tenant's directory is the
-//! rebuild procedure, and the directory must share the database's
-//! encryption-at-rest story). Its indexer task polls every
-//! `SYNVEDA_SEARCH_POLL_MS` (default 1000), which bounds BM25
-//! visibility lag; the dense leg reads Postgres directly and never lags.
-//!
-//! The inject route (CTX-3, ADR-0026) embeds the caller's task through
-//! the same configured embedder under `SYNVEDA_INJECT_EMBED_TIMEOUT_MS`
-//! (default 100): expiry or failure degrades that inject to the sparse
-//! leg (marked in `X-Synveda-Degraded`), never fails it.
+//! Context planning embeds the caller's task through
+//! the same configured embedder under `SYNVEDA_CONTEXT_EMBED_TIMEOUT_MS`
+//! (default 100): expiry or failure degrades the run to lexical Knowledge
+//! search and is persisted, never hidden.
 //!
 //! The directory pull sync (AUTH-5, ADR-0060) runs only for issuers that
 //! carry a `directory_sync` entry in `SYNVEDA_OIDC_ISSUERS`, and only when
@@ -82,25 +61,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let database_url = std::env::var("DATABASE_URL")
         .map_err(|_| "DATABASE_URL must be set (dev default is in the Makefile)")?;
-    // Eight was the number from the first day and it is still the default;
-    // what changed is that it can no longer only be changed by recompiling.
-    //
-    // 233bca9 added this setting on the finding that EVAL-3's LongMemEval
-    // run had wedged the gateway on a pool the background workers share
-    // with the request handlers. **29ae21f withdrew that finding.** The
-    // machine was sleeping — unattended runs, `pmset` `sleep 1` — the VM
-    // froze with it, and `acquire` timed out while no code was running at
-    // all; two observers on opposite sides of the container boundary froze
-    // in lockstep for 7m45s and resumed to report a healthy database. A
-    // larger pool "helped" only by coasting longer on connections opened
-    // before the freeze. There is no evidence in this repository that this
-    // pool wedges under sustained ingestion.
-    //
-    // The setting stays on its own merits. The workers and the handlers do
-    // draw from one pool, and a deployment-shaped number an operator can
-    // only change by recompiling is one that will be wrong where nobody
-    // can look — OPS-2 (ADR-0062 decision 6) makes it a chart value, sized
-    // against the server's own `max_connections`.
+    // Workers and request handlers share this bounded pool. Deployment
+    // profiles size it against Postgres `max_connections` (ADR-0062).
     let max_connections = std::env::var("SYNVEDA_DB_MAX_CONNECTIONS")
         .ok()
         .map(|raw| {
@@ -121,6 +83,43 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let pool = PgPoolOptions::new()
         .max_connections(max_connections)
         .connect_lazy(&database_url)?;
+
+    // The schema epoch guard (CPR-2, ADR-0068 decision 3, ADR-0069). This
+    // product is pre-1.0 and the context-platform redesign is a hard cut:
+    // nothing translates a database from before it, so one written before it
+    // is refused here rather than half-read later.
+    //
+    // The two arms are the two different things "the epoch is not the one I
+    // serve" can mean, and conflating them would break the boot contract
+    // above. A reachable database at the wrong epoch is a *verdict*: the
+    // process must not start, because every route below would serve rows in a
+    // model it does not implement. A database that cannot be reached at all is
+    // a don't-know, and the design here is that the gateway boots anyway so
+    // `/readyz` reports the outage (ADR-0007) — so the verdict is taken again
+    // on every readiness probe (`app::readyz`), which is what stops a database
+    // that came up late from slipping past a check that ran while it was down.
+    match synveda_store::epoch::verify(&pool).await {
+        Ok(metadata) => tracing::info!(
+            schema.epoch = metadata.epoch,
+            schema.migration_head = %metadata.migration_head,
+            schema.created_at = %metadata.created_at,
+            schema.created_by_version = %metadata.created_by_version,
+            "schema epoch accepted (CPR-2, ADR-0069)"
+        ),
+        Err(outage) if !outage.is_refusal() => tracing::warn!(
+            error = %outage,
+            "the schema epoch could not be checked at boot; /readyz will refuse \
+             until it can be"
+        ),
+        Err(refusal) => {
+            // Printed rather than only returned: this is a multi-line
+            // instruction for a person, and `main`'s `Box<dyn Error>` renders
+            // through `Debug`, which would hand them one line of `\n`s.
+            eprintln!("\nsynveda-gateway: {refusal}\n");
+            tracing::error!(error = %refusal, "refusing to serve this database");
+            return Err("the database is not at the schema epoch this build serves".into());
+        }
+    }
 
     // The pool says nothing about itself, and an operator watching every
     // `/v1` surface answer 503 has no way to learn whether this is why.
@@ -289,128 +288,65 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    // The extraction worker (MEM-3, ADR-0022 decision 1): the observe
-    // queue's consumer, embedded so SMB mode stays one process. It shares
-    // the gateway's scope-chain cache — hierarchy-move invalidations must
-    // reach the worker's authorization reads.
-    let scope_chains = Arc::new(synveda_store::ScopeChainCache::new());
-    let extractor = extractor_from_env()?;
-    // Shared with the inject route (CTX-3, ADR-0026 decision 3): the
-    // query-embedding call and the pipeline's record vectors carry one
-    // config-declared model identity.
+    // Extraction emits reviewable candidates; the embedder serves Knowledge
+    // search and context planning.
+    let capture_extractor = Arc::new(extractor_from_env()?);
     let embedder = Arc::new(embedder_from_env()?);
-    let extraction_worker = extractor.map(|extractor| {
-        tracing::info!(
-            extractor = extractor.method(),
-            embedder = embedder.method(),
-            embedding_model = embedder.model(),
-            "extraction worker starting (MEM-3/MEM-4, ADR-0022/0023)"
-        );
-        synveda_ingest::worker::spawn(
-            synveda_ingest::worker::WorkerDeps {
-                pool: pool.clone(),
-                pdp: Arc::clone(&pdp),
-                chains: Arc::clone(&scope_chains),
-                extractor,
-                embedder: embedder.as_ref().clone(),
-            },
-            extraction_config_from_env(),
-        )
-    });
-    if extraction_worker.is_none() {
-        tracing::warn!("SYNVEDA_EXTRACTOR=off: observe signals will accumulate unconsumed");
-    }
-
-    // The auto-promotion engine (FLOW-4, ADR-0033): a second background
-    // loop, on a cadence of minutes rather than the extraction worker's
-    // second. It writes nothing on the read path — it folds
-    // `context.injected` events the gateway already records into a usage
-    // projection, and opens FLOW-3 proposals under the material owner's
-    // authority when a pack's rules fire.
-    let promotion_config = promotion_config_from_env();
     tracing::info!(
-        interval_secs = promotion_config.interval.as_secs(),
-        batch = promotion_config.batch,
-        "promotion engine starting (FLOW-4, ADR-0033)"
-    );
-    let promotion_engine = synveda_ingest::promotion::spawn(
-        synveda_ingest::promotion::SweepDeps {
-            pool: pool.clone(),
-            pdp: Arc::clone(&pdp),
-            chains: Arc::clone(&scope_chains),
-        },
-        promotion_config,
+        extractor = capture_extractor.method(),
+        embedder = embedder.method(),
+        embedding_model = embedder.model(),
+        "capture extractor and Knowledge embedder ready"
     );
 
-    // The retention sweep (MEM-6, ADR-0040 decision 14): the third
-    // background loop. It enforces nothing — the read path already
-    // refused expired material in the query that asked — so what it does
-    // is disposal: the temporal delete, the destruction of closed
-    // versions past a second horizon, and the observe staging plane
-    // MEM-1 and MEM-2 have been accumulating since they landed. In the
-    // default configuration no pack sets a record horizon, so a pass
-    // expires nothing and destroys nothing; the staging plane is the one
-    // thing every pack disposes of.
-    let retention_config = retention_config_from_env();
-    tracing::info!(
-        interval_secs = retention_config.interval.as_secs(),
-        batch = retention_config.batch,
-        "retention sweep starting (MEM-6, ADR-0040)"
-    );
-    let retention_sweep = synveda_ingest::retention::spawn(
-        synveda_ingest::retention::SweepDeps {
-            pool: pool.clone(),
-            pdp: Arc::clone(&pdp),
-            chains: Arc::clone(&scope_chains),
-        },
-        retention_config,
-    );
-
-    // The lapse expiry sweep (AUTHZ-4, ADR-0037 decision 4). Bookkeeping:
-    // it chains `policy.lapse.expired` for windows that have closed, and
-    // every grant it touches stopped deciding reads at `expires_at`
-    // whether or not this loop is running. The default cadence is
-    // deliberately slack for that reason — a late audit line is the only
-    // thing a slow sweep costs.
-    let lapse_sweep_secs = match std::env::var("SYNVEDA_LAPSE_SWEEP_SECS") {
+    // Governed relaxation expiry bookkeeping (CPR-31, ADR-0090). Database
+    // time already ended authority at the hard boundary; this loop records
+    // the content-free system event once.
+    let relaxation_sweep_secs = match std::env::var("SYNVEDA_RELAXATION_SWEEP_SECS") {
         Ok(value) => value
             .parse::<u64>()
-            .map_err(|_| "SYNVEDA_LAPSE_SWEEP_SECS must be a positive integer")?,
+            .map_err(|_| "SYNVEDA_RELAXATION_SWEEP_SECS must be a positive integer")?,
         Err(_) => 60,
     };
-    let lapse_sweep = synveda_gateway::lapses::spawn_expiry_sweep(
+    let relaxation_sweep = synveda_gateway::relaxations::spawn_expiry_sweep(
         pool.clone(),
-        Duration::from_secs(lapse_sweep_secs.max(1)),
+        Duration::from_secs(relaxation_sweep_secs.max(1)),
     );
 
-    // The search index sidecar and its indexer (CTX-1, ADR-0024): a
-    // boot failure here means the index root is unusable — refuse to
-    // boot rather than serve a read path whose lexical leg can never
-    // converge.
-    let index_root = std::env::var("SYNVEDA_SEARCH_INDEX_DIR")
-        .ok()
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| "./data/search-index".to_owned());
-    let search_index = Arc::new(synveda_retrieval::SearchIndex::open(&index_root)?);
-    let indexer_config = synveda_retrieval::IndexerConfig {
-        poll_interval: std::env::var("SYNVEDA_SEARCH_POLL_MS")
+    // CPR-17's Knowledge revision sidecar. Unlike the retired record worker,
+    // this is index maintenance rather than a domain mutation: immutable
+    // revision text is embedded outside a transaction and the derivative row
+    // converges idempotently. An unavailable TEI instance degrades search to
+    // lexical and is retried; it never blocks a VedaFlow Knowledge commit.
+    let knowledge_index_config = synveda_gateway::knowledge_index::Config {
+        poll_interval: std::env::var("SYNVEDA_KNOWLEDGE_EMBED_POLL_MS")
             .ok()
             .and_then(|value| value.parse::<u64>().ok())
-            .filter(|ms| *ms > 0)
+            .filter(|millis| *millis > 0)
             .map(Duration::from_millis)
-            .unwrap_or(synveda_retrieval::IndexerConfig::default().poll_interval),
-        ..synveda_retrieval::IndexerConfig::default()
+            .unwrap_or_else(|| synveda_gateway::knowledge_index::Config::default().poll_interval),
+        batch: std::env::var("SYNVEDA_KNOWLEDGE_EMBED_BATCH")
+            .ok()
+            .and_then(|value| value.parse::<i64>().ok())
+            .filter(|batch| *batch > 0)
+            .unwrap_or_else(|| synveda_gateway::knowledge_index::Config::default().batch),
     };
     tracing::info!(
-        index_root,
-        poll_ms = indexer_config.poll_interval.as_millis() as u64,
-        "search indexer starting (CTX-1, ADR-0024)"
+        model = embedder.model(),
+        method = embedder.method(),
+        poll_ms = knowledge_index_config.poll_interval.as_millis() as u64,
+        batch = knowledge_index_config.batch,
+        "Knowledge revision embedding sweep starting (CPR-17, ADR-0082)"
     );
-    let search_indexer =
-        synveda_retrieval::indexer::spawn(pool.clone(), Arc::clone(&search_index), indexer_config);
+    let knowledge_indexer = synveda_gateway::knowledge_index::spawn(
+        pool.clone(),
+        Arc::clone(&embedder),
+        knowledge_index_config,
+    );
 
-    // The inject route's embed deadline (CTX-3, ADR-0026 decision 3).
-    let inject_embed_timeout_ms = std::env::var("SYNVEDA_INJECT_EMBED_TIMEOUT_MS")
+    // The context planner's embedding deadline. Failure is an explicit
+    // lexical degradation recorded on the ContextRun.
+    let context_embed_timeout_ms = std::env::var("SYNVEDA_CONTEXT_EMBED_TIMEOUT_MS")
         .ok()
         .and_then(|value| value.parse::<u64>().ok())
         .filter(|ms| *ms > 0)
@@ -427,13 +363,28 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         login,
         public_origin,
         pdp,
-        scope_chains,
         service_token_max_ttl: Duration::from_secs(service_token_max_ttl_secs),
-        search_index,
         embedder,
-        inject_embed_timeout: Duration::from_millis(inject_embed_timeout_ms),
+        context_embed_timeout: Duration::from_millis(context_embed_timeout_ms),
         keys,
     };
+
+    let capture_config = capture_config_from_env();
+    tracing::info!(
+        extractor = capture_extractor.method(),
+        poll_ms = capture_config.poll_interval.as_millis() as u64,
+        lease_secs = capture_config.lease_duration.as_secs(),
+        batches_per_tenant = capture_config.batches_per_tenant,
+        "session capture worker starting (CPR-18, ADR-0083)"
+    );
+    let capture_worker = synveda_ingest::capture_worker::spawn(
+        synveda_ingest::capture_worker::Deps {
+            pool: app_state.pool.clone(),
+            pdp: Arc::clone(&app_state.pdp),
+            extractor: capture_extractor,
+        },
+        capture_config,
+    );
 
     // The directory pull sync (AUTH-5, ADR-0060). Spawned only when an
     // issuer configures one, because an empty connector map is a loop that
@@ -481,15 +432,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with_graceful_shutdown(shutdown_signal())
         .await?;
     refresher.abort();
-    search_indexer.abort();
-    promotion_engine.abort();
-    retention_sweep.abort();
-    lapse_sweep.abort();
+    knowledge_indexer.abort();
+    capture_worker.abort();
+    relaxation_sweep.abort();
     if let Some(sync) = directory_sync {
         sync.abort();
-    }
-    if let Some(worker) = extraction_worker {
-        worker.abort();
     }
 
     // Flush batched spans before exit; a killed process loses the tail.
@@ -497,12 +444,46 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-/// Ctrl-C covers dev on every platform; SIGTERM handling arrives with the
-/// deployment profiles (OPS-1).
 async fn shutdown_signal() {
-    if let Err(err) = tokio::signal::ctrl_c().await {
-        tracing::error!(error = %err, "failed to install the Ctrl-C handler");
+    #[cfg(unix)]
+    tokio::select! {
+        () = wait_for_ctrl_c() => tracing::info!(signal = "SIGINT", "shutdown requested"),
+        () = wait_for_sigterm() => tracing::info!(signal = "SIGTERM", "shutdown requested"),
     }
+
+    #[cfg(not(unix))]
+    {
+        wait_for_ctrl_c().await;
+        tracing::info!(signal = "SIGINT", "shutdown requested");
+    }
+}
+
+async fn wait_for_ctrl_c() {
+    if let Err(error) = tokio::signal::ctrl_c().await {
+        tracing::error!(%error, "failed to install the Ctrl-C handler");
+        std::future::pending::<()>().await;
+    }
+}
+
+#[cfg(unix)]
+async fn wait_for_sigterm() {
+    let mut signal = match install_sigterm() {
+        Ok(signal) => signal,
+        Err(error) => {
+            tracing::error!(%error, "failed to install the SIGTERM handler");
+            std::future::pending::<()>().await;
+            return;
+        }
+    };
+    if signal.recv().await.is_none() {
+        tracing::error!("SIGTERM handler closed without receiving a signal");
+        std::future::pending::<()>().await;
+    }
+}
+
+#[cfg(unix)]
+fn install_sigterm() -> std::io::Result<tokio::signal::unix::Signal> {
+    tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
 }
 
 /// Builds the KMS from `SYNVEDA_KMS_KEY` (64 hex characters) and
@@ -531,11 +512,11 @@ fn kms_from_env() -> Result<synveda_crypto::Kms, String> {
         .map_err(|err| format!("SYNVEDA_KMS_KEY is not usable: {err}"))
 }
 
-/// Builds the configured extractor from `SYNVEDA_EXTRACTOR` and its
-/// companions (module header). `None` means `off`. Misconfiguration is a
-/// startup error: a silently-idle pipeline would break the <60s lag SLO
-/// without a symptom.
-fn extractor_from_env() -> Result<Option<synveda_ingest::extraction::AnyExtractor>, String> {
+/// Builds the CPR-18 extractor. There is deliberately no `off`: a terminal
+/// session has durably asked for candidate extraction, so silently leaving
+/// every batch pending would be a broken runtime rather than a deployment
+/// profile.
+fn extractor_from_env() -> Result<synveda_ingest::extraction::AnyExtractor, String> {
     use synveda_ingest::extraction::{
         AnyExtractor, ClaudeExtractor, DeterministicExtractor, VllmExtractor,
     };
@@ -547,10 +528,7 @@ fn extractor_from_env() -> Result<Option<synveda_ingest::extraction::AnyExtracto
         .ok()
         .filter(|value| !value.is_empty());
     match selected.as_str() {
-        "off" => Ok(None),
-        "deterministic" => Ok(Some(AnyExtractor::Deterministic(
-            DeterministicExtractor::new(),
-        ))),
+        "deterministic" => Ok(AnyExtractor::Deterministic(DeterministicExtractor::new())),
         "claude" => {
             let api_key = std::env::var("ANTHROPIC_API_KEY")
                 .ok()
@@ -561,9 +539,9 @@ fn extractor_from_env() -> Result<Option<synveda_ingest::extraction::AnyExtracto
                 .filter(|value| !value.is_empty())
                 .unwrap_or_else(|| ClaudeExtractor::DEFAULT_BASE_URL.to_owned());
             let model = model.unwrap_or_else(|| ClaudeExtractor::DEFAULT_MODEL.to_owned());
-            Ok(Some(AnyExtractor::Claude(ClaudeExtractor::new(
+            Ok(AnyExtractor::Claude(ClaudeExtractor::new(
                 api_key, model, base_url,
-            ))))
+            )))
         }
         "vllm" => {
             let base_url = std::env::var("SYNVEDA_VLLM_BASE_URL")
@@ -571,20 +549,48 @@ fn extractor_from_env() -> Result<Option<synveda_ingest::extraction::AnyExtracto
                 .filter(|value| !value.is_empty())
                 .ok_or("SYNVEDA_EXTRACTOR=vllm requires SYNVEDA_VLLM_BASE_URL")?;
             let model = model.ok_or("SYNVEDA_EXTRACTOR=vllm requires SYNVEDA_EXTRACTOR_MODEL")?;
-            Ok(Some(AnyExtractor::Vllm(VllmExtractor::new(
-                model, base_url,
-            ))))
+            Ok(AnyExtractor::Vllm(VllmExtractor::new(model, base_url)))
         }
         other => Err(format!(
-            "SYNVEDA_EXTRACTOR must be off|deterministic|claude|vllm, got {other:?}"
+            "SYNVEDA_EXTRACTOR must be deterministic|claude|vllm, got {other:?}"
         )),
     }
 }
 
+/// Capture polling is operational tuning, not an authority boundary. Invalid
+/// values fall back to conservative defaults; the extractor selection above
+/// fails closed because a malformed provider choice would change behaviour.
+fn capture_config_from_env() -> synveda_ingest::capture_worker::Config {
+    let defaults = synveda_ingest::capture_worker::Config::default();
+    synveda_ingest::capture_worker::Config {
+        poll_interval: std::env::var("SYNVEDA_CAPTURE_POLL_MS")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .filter(|value| *value > 0)
+            .map(Duration::from_millis)
+            .unwrap_or(defaults.poll_interval),
+        lease_duration: std::env::var("SYNVEDA_CAPTURE_LEASE_SECS")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .filter(|value| *value > 0)
+            .map(Duration::from_secs)
+            .unwrap_or(defaults.lease_duration),
+        batches_per_tenant: std::env::var("SYNVEDA_CAPTURE_BATCHES_PER_TENANT")
+            .ok()
+            .and_then(|value| value.parse::<usize>().ok())
+            .filter(|value| *value > 0)
+            .unwrap_or(defaults.batches_per_tenant),
+        lease_owner: std::env::var("SYNVEDA_CAPTURE_LEASE_OWNER")
+            .ok()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or(defaults.lease_owner),
+    }
+}
+
 /// Builds the configured embedder from `SYNVEDA_EMBEDDER` and its
-/// companions (module header). There is no `off`: wherever the worker
-/// runs, records commit embed-or-fail (ADR-0023 decision 6).
-/// Misconfiguration is a startup error, the extractor discipline.
+/// companions (module header). There is no `off`: Knowledge indexing and
+/// context composition share one explicit implementation identity.
+/// Misconfiguration is a startup error, like extractor selection.
 fn embedder_from_env() -> Result<synveda_ingest::embedding::AnyEmbedder, String> {
     use synveda_ingest::embedding::{AnyEmbedder, DeterministicEmbedder, TeiEmbedder};
     let selected = std::env::var("SYNVEDA_EMBEDDER")
@@ -607,27 +613,6 @@ fn embedder_from_env() -> Result<synveda_ingest::embedding::AnyEmbedder, String>
         other => Err(format!(
             "SYNVEDA_EMBEDDER must be deterministic|tei, got {other:?}"
         )),
-    }
-}
-
-/// Worker pacing from `SYNVEDA_EXTRACTION_*`, with the defaults the
-/// module header documents. Unparseable values fall back to defaults:
-/// pacing is tuning, never a fail-closed control.
-/// `SYNVEDA_PROMOTION_INTERVAL_SECS` / `SYNVEDA_PROMOTION_BATCH`, with
-/// the engine's defaults for anything unset or unparseable.
-fn promotion_config_from_env() -> synveda_ingest::promotion::SweepConfig {
-    let defaults = synveda_ingest::promotion::SweepConfig::default();
-    synveda_ingest::promotion::SweepConfig {
-        interval: std::env::var("SYNVEDA_PROMOTION_INTERVAL_SECS")
-            .ok()
-            .and_then(|value| value.parse::<u64>().ok())
-            .filter(|secs| *secs > 0)
-            .map_or(defaults.interval, Duration::from_secs),
-        batch: std::env::var("SYNVEDA_PROMOTION_BATCH")
-            .ok()
-            .and_then(|value| value.parse::<i64>().ok())
-            .filter(|batch| *batch > 0)
-            .unwrap_or(defaults.batch),
     }
 }
 
@@ -741,50 +726,28 @@ fn directory_sync_config_from_env()
     })
 }
 
-fn retention_config_from_env() -> synveda_ingest::retention::SweepConfig {
-    let defaults = synveda_ingest::retention::SweepConfig::default();
-    synveda_ingest::retention::SweepConfig {
-        interval: std::env::var("SYNVEDA_RETENTION_INTERVAL_SECS")
-            .ok()
-            .and_then(|value| value.parse::<u64>().ok())
-            .filter(|secs| *secs > 0)
-            .map_or(defaults.interval, Duration::from_secs),
-        batch: std::env::var("SYNVEDA_RETENTION_BATCH")
-            .ok()
-            .and_then(|value| value.parse::<i64>().ok())
-            .filter(|batch| *batch > 0)
-            .unwrap_or(defaults.batch),
-    }
-}
-
-fn extraction_config_from_env() -> synveda_ingest::worker::WorkerConfig {
-    let defaults = synveda_ingest::worker::WorkerConfig::default();
-    let parse = |name: &str| {
-        std::env::var(name)
-            .ok()
-            .and_then(|value| value.parse::<i64>().ok())
-            .filter(|value| *value > 0)
-    };
-    synveda_ingest::worker::WorkerConfig {
-        poll_interval: parse("SYNVEDA_EXTRACTION_POLL_MS")
-            .map(|ms| Duration::from_millis(ms as u64))
-            .unwrap_or(defaults.poll_interval),
-        batch: parse("SYNVEDA_EXTRACTION_BATCH")
-            .and_then(|value| i32::try_from(value).ok())
-            .unwrap_or(defaults.batch),
-        vt_secs: parse("SYNVEDA_EXTRACTION_VT_SECS")
-            .and_then(|value| i32::try_from(value).ok())
-            .unwrap_or(defaults.vt_secs),
-        max_reads: parse("SYNVEDA_EXTRACTION_MAX_READS")
-            .and_then(|value| i32::try_from(value).ok())
-            .unwrap_or(defaults.max_reads),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use synveda_identity::directory::{DirectorySyncConfig, Secret};
+
+    #[cfg(unix)]
+    use std::process::{Child, Command, Stdio};
+    #[cfg(unix)]
+    use std::thread;
+    #[cfg(unix)]
+    use std::time::Instant;
+
+    #[cfg(unix)]
+    struct ChildGuard(Child);
+
+    #[cfg(unix)]
+    impl Drop for ChildGuard {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
 
     fn issuer(tenant: synveda_identity::TenantBinding) -> synveda_identity::IssuerConfig {
         let json = r#"[{"issuer":"https://idp.example","client_id":"c"}]"#;
@@ -860,6 +823,78 @@ mod tests {
         second.directory_sync = Some(okta());
         let refused = build_directory_connectors(&[first, second]);
         assert!(refused.is_err(), "one tenant, one directory authority");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sigterm_is_delivered_to_the_gateway_handler() {
+        const CHILD_READY: &str = "SYNVEDA_SIGTERM_TEST_READY";
+        if let Some(path) = std::env::var_os(CHILD_READY) {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("build signal test runtime");
+            runtime.block_on(async {
+                let mut signal = install_sigterm().expect("install SIGTERM handler");
+                std::fs::write(path, b"ready").expect("publish handler readiness");
+                assert!(signal.recv().await.is_some(), "receive SIGTERM");
+            });
+            return;
+        }
+
+        let ready = std::env::temp_dir().join(format!(
+            "synveda-sigterm-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        let child = Command::new(std::env::current_exe().expect("locate test binary"))
+            .args([
+                "--exact",
+                "tests::sigterm_is_delivered_to_the_gateway_handler",
+                "--nocapture",
+            ])
+            .env(CHILD_READY, &ready)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("start signal test child");
+        let mut child = ChildGuard(child);
+        let ready_deadline = Instant::now() + Duration::from_secs(5);
+        while !ready.exists() {
+            if let Some(status) = child.0.try_wait().expect("read child status") {
+                panic!("signal test child exited before readiness: {status}");
+            }
+            assert!(
+                Instant::now() < ready_deadline,
+                "signal handler was not ready"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
+
+        let pid = child.0.id().to_string();
+        let sent = Command::new("kill")
+            .args(["-TERM", pid.as_str()])
+            .status()
+            .expect("send SIGTERM");
+        assert!(sent.success(), "kill -TERM failed");
+
+        let exit_deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            match child.0.try_wait().expect("read child status") {
+                Some(status) => {
+                    let _ = std::fs::remove_file(&ready);
+                    assert!(status.success(), "signal test child exited with {status}");
+                    break;
+                }
+                None if Instant::now() < exit_deadline => {
+                    thread::sleep(Duration::from_millis(10));
+                }
+                None => panic!("signal test child did not exit after SIGTERM"),
+            }
+        }
     }
 
     #[test]

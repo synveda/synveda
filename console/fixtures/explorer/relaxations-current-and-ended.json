@@ -1,0 +1,79 @@
+{
+  "asked_about": "0199c000-0000-7000-8000-000000000000",
+  "payload": {
+    "relaxations": [
+      {
+        "id": "0199c000-0000-7000-8000-000000000005",
+        "governing_scope_id": "0199c000-0000-7000-8000-000000000000",
+        "current_version_id": "0199c000-0000-7000-8000-000000000006",
+        "revision": 2,
+        "status": "revoked",
+        "current": {
+          "id": "0199c000-0000-7000-8000-000000000006",
+          "relaxation_id": "0199c000-0000-7000-8000-000000000005",
+          "ordinal": 1,
+          "change_id": "0199c000-0000-7000-8000-000000000007",
+          "subject_identity_id": "0199c000-0000-7000-8000-000000000008",
+          "subject": "sam",
+          "target_scope_id": "0199c000-0000-7000-8000-000000000000",
+          "action": "knowledge.read",
+          "max_sensitivity": "internal",
+          "requested_start_at": "2026-08-05T09:00:00Z",
+          "requested_end_at": "2026-08-05T09:00:00Z",
+          "effective_start_at": "2026-08-05T09:00:00Z",
+          "hard_expires_at": "2026-08-05T09:00:00Z",
+          "reason": "a governed window that was revoked",
+          "configuration_version_id": "0199c000-0000-7000-8000-000000000004",
+          "configuration_hash": "617ad3f0d49b8a111b7a1ddcaeaa90ae91b2eae05a8221186b2834da41cdd53f",
+          "content_hash": "00f78c5ed69410a7d3befc68360f41249b0f75ea83f359d55353a14de79bea4c",
+          "creator_id": "0199c000-0000-7000-8000-000000000008",
+          "approver_ids": [],
+          "auto_applied": true,
+          "created_at": "2026-08-05T09:00:00Z"
+        },
+        "created_at": "2026-08-05T09:00:00Z",
+        "created_by": "0199c000-0000-7000-8000-000000000008",
+        "updated_at": "2026-08-05T09:00:00Z",
+        "updated_by": "0199c000-0000-7000-8000-000000000008",
+        "revoked_at": "2026-08-05T09:00:00Z",
+        "revoked_by": "0199c000-0000-7000-8000-000000000008",
+        "revocation_change_id": "0199c000-0000-7000-8000-000000000009",
+        "revocation_reason": "the review finished early"
+      },
+      {
+        "id": "0199c000-0000-7000-8000-000000000010",
+        "governing_scope_id": "0199c000-0000-7000-8000-000000000000",
+        "current_version_id": "0199c000-0000-7000-8000-000000000011",
+        "revision": 1,
+        "status": "active",
+        "current": {
+          "id": "0199c000-0000-7000-8000-000000000011",
+          "relaxation_id": "0199c000-0000-7000-8000-000000000010",
+          "ordinal": 1,
+          "change_id": "0199c000-0000-7000-8000-000000000012",
+          "subject_identity_id": "0199c000-0000-7000-8000-000000000008",
+          "subject": "sam",
+          "target_scope_id": "0199c000-0000-7000-8000-000000000000",
+          "action": "knowledge.read",
+          "max_sensitivity": "internal",
+          "requested_start_at": "2026-08-05T09:00:00Z",
+          "requested_end_at": "2026-08-05T09:00:00Z",
+          "effective_start_at": "2026-08-05T09:00:00Z",
+          "hard_expires_at": "2026-08-05T09:00:00Z",
+          "reason": "joint incident review",
+          "configuration_version_id": "0199c000-0000-7000-8000-000000000004",
+          "configuration_hash": "617ad3f0d49b8a111b7a1ddcaeaa90ae91b2eae05a8221186b2834da41cdd53f",
+          "content_hash": "d76ed45b66b83484406e716a300fd89d6b6ac99d636a77357576107b248f536b",
+          "creator_id": "0199c000-0000-7000-8000-000000000008",
+          "approver_ids": [],
+          "auto_applied": true,
+          "created_at": "2026-08-05T09:00:00Z"
+        },
+        "created_at": "2026-08-05T09:00:00Z",
+        "created_by": "0199c000-0000-7000-8000-000000000008",
+        "updated_at": "2026-08-05T09:00:00Z",
+        "updated_by": "0199c000-0000-7000-8000-000000000008"
+      }
+    ]
+  }
+}

@@ -3,24 +3,22 @@
 //! Every verb here is an HTTP call to `/v1/proposals` under the reviewer's
 //! own bearer, and that is the feature. Approving is a governed act: the
 //! PDP decides who may cast a verdict (`ProposalReview`) and who may run
-//! the effect (`ChannelPublish` + `MemoryRead`), the approval matrix
+//! the artifact action, the approval matrix
 //! decides how many verdicts are needed, and the gateway chains the event.
 //! A CLI that wrote the approval row itself would be the counting rule
 //! acting as authority, from a laptop, with no decision anywhere in the
 //! trail — so this module opens no database connection at all.
 //!
-//! What it renders is the proposal's **effect on the target's published
-//! channel**: per record, whether publication would add it, replace an
-//! older version, or change nothing, with a diff of the two sides for the
-//! records it would replace. That is what a reviewer is actually voting
-//! on, and it is the half of a review a console would otherwise be needed
-//! for.
+//! What it renders is the proposal's effect on the target artifact: per
+//! member, whether publication would add it, replace an older version, or
+//! change nothing, with a diff of the two sides it would replace. That is
+//! what a reviewer is actually voting on.
 
 use std::io::{BufRead, IsTerminal, Write};
 
 use chrono::{DateTime, Utc};
 use serde::Deserialize;
-use serde_json::{Value, json};
+use serde_json::json;
 use synveda_types::{ProposalId, ProposalState, ProposalView, ScopeId, Sensitivity};
 
 use crate::api::{Api, Origin};
@@ -43,7 +41,7 @@ struct Summary {
     #[serde(default)]
     source_scope_path: Option<String>,
     asset: String,
-    /// What running it would do: `published`, or `lapse` since AUTHZ-4.
+    /// What running it would do: publish, classify, or apply a typed command.
     effect: String,
     state: ProposalView,
     sensitivity: Sensitivity,
@@ -55,9 +53,6 @@ struct Summary {
     close_reason: Option<String>,
     required: Requirement,
     outstanding: String,
-    /// Present when a FLOW-4 rule opened this rather than a person.
-    #[serde(default)]
-    promotion: Option<synveda_types::PromotionEvidence>,
 }
 
 #[derive(Deserialize)]
@@ -81,174 +76,17 @@ struct Detail {
     summary: Summary,
     members: Vec<Member>,
     approvals: Vec<Approval>,
-    /// The security scan of the bytes this proposal would publish
-    /// (SKIL-2, ADR-0052). Present for `skill` proposals only, which is
-    /// why it is defaulted rather than required: this struct is the same
-    /// one four asset kinds come back in.
-    #[serde(default)]
-    scan: Option<ScanReport>,
-    /// The quality of the bytes this proposal would publish (SKIL-3,
-    /// ADR-0053). Present for `skill` proposals only.
-    #[serde(default)]
-    quality: Option<QualityReport>,
-}
-
-/// A bundle's security scan, as `synveda proposal review` renders it.
-///
-/// FLOW-6's claim is that a full review is possible without the console,
-/// and for a skill that claim is now partly this block: a reviewer who
-/// cannot see what the scanner found is a reviewer being asked to
-/// approve executable code on the strength of a diff.
-#[derive(Deserialize)]
-struct ScanReport {
-    ruleset_version: u32,
-    #[serde(default)]
-    worst: Option<String>,
-    blocks_at: String,
-    blocked: bool,
-    findings: Vec<ScanFinding>,
-}
-
-#[derive(Deserialize)]
-struct ScanFinding {
-    path: String,
-    rule: String,
-    severity: String,
-    title: String,
-    line: usize,
-    count: usize,
-    /// The gateway's verdict on this finding (ADR-0056 decision 5).
-    ///
-    /// Absent only from a gateway older than this CLI, which is the one
-    /// skew direction that survives — the console cannot be out of step
-    /// with its gateway because the gateway ships it, and this binary
-    /// can.
-    #[serde(default)]
-    blocking: Option<bool>,
-}
-
-impl ScanReport {
-    /// Whether this finding is one the pack in force refuses.
-    ///
-    /// **The served verdict wins.** The gateway holds both the severity
-    /// order and the pack, so it is the only participant that can answer
-    /// this without guessing; ADR-0056 decision 5 moved the answer there
-    /// so that two renderers could not disagree about it.
-    ///
-    /// The rank comparison below is what remains, and it is a fallback
-    /// for an *older* gateway rather than a second implementation of the
-    /// rule. It compares by rank rather than by string, so `critical`
-    /// under a `high` threshold blocks where equality would have said it
-    /// did not, and a severity this binary has never heard of ranks above
-    /// everything and is treated as blocking rather than as decoration.
-    fn blocks(&self, finding: &ScanFinding) -> bool {
-        if let Some(blocking) = finding.blocking {
-            return blocking;
-        }
-        fn rank(severity: &str) -> u8 {
-            match severity {
-                "notice" => 0,
-                "high" => 1,
-                "critical" => 2,
-                _ => u8::MAX,
-            }
-        }
-        rank(&finding.severity) >= rank(&self.blocks_at)
-    }
-}
-
-/// A bundle's quality, as `synveda proposal review` renders it (SKIL-3,
-/// ADR-0053 decision 11).
-///
-/// **Two numbers, never one.** The rubric measures the bundle; the
-/// checklist is what a person checked. A reviewer who sees them averaged
-/// cannot tell a well-formatted bundle nobody worked through from one
-/// somebody did, which is the whole reason they are rendered apart.
-#[derive(Deserialize)]
-struct QualityReport {
-    rubric_version: u32,
-    score: u8,
-    min_score: u8,
-    requires_checklist: bool,
-    checks: Vec<QualityCheck>,
-    #[serde(default)]
-    checklist: Option<ChecklistView>,
-    #[serde(default)]
-    shortfalls: Vec<Shortfall>,
-    needs_override: bool,
-}
-
-#[derive(Deserialize)]
-struct QualityCheck {
-    check: String,
-    passed: bool,
-    weight: u8,
-    title: String,
-    #[serde(default)]
-    detail: Option<String>,
-}
-
-#[derive(Deserialize)]
-struct ChecklistView {
-    answers: std::collections::BTreeMap<String, String>,
-    #[serde(default)]
-    note: Option<String>,
-    complete: bool,
-    concerns: Vec<String>,
-    reviewed_at: DateTime<Utc>,
-}
-
-/// One bar the bundle misses.
-///
-/// The data fields ADR-0053 defined are still on the wire and are
-/// deliberately not deserialised here: since ADR-0056 decision 6 the
-/// gateway serves `detail` — [`QualityShortfall::describe`], the same
-/// sentence its refusals and audit payloads carry — and this CLI's
-/// reconstruction of that sentence is deleted rather than kept beside it.
-/// Two authors of one sentence is two sentences, and a shortfall
-/// explained one way at review and another at publication is the drift a
-/// second renderer would have made permanent.
-#[derive(Deserialize)]
-struct Shortfall {
-    #[serde(default)]
-    kind: Option<String>,
-    #[serde(default)]
-    detail: Option<String>,
-}
-
-impl Shortfall {
-    /// One line a reviewer can act on, as the gateway wrote it.
-    ///
-    /// The fallback is for a gateway *older* than this CLI, which serves
-    /// the slug and no sentence. Naming the slug is worse than a sentence
-    /// and better than silence: an unexplained bar cannot be acted on at
-    /// all.
-    fn describe(&self) -> String {
-        if let Some(detail) = &self.detail {
-            return detail.clone();
-        }
-        format!(
-            "{} (this gateway is older than the CLI and did not say why; run the publish to \
-             see the refusal)",
-            self.kind.as_deref().unwrap_or("an unnamed bar")
-        )
-    }
 }
 
 #[derive(Deserialize)]
 struct Member {
-    /// The tree entry name: a record id for a memory, a path for a prompt
-    /// (PRMT-1, ADR-0049 decision 3). The one field both asset kinds
-    /// carry, and the one this surface displays.
+    /// Stable member id or authored path. The one field every artifact
+    /// family carries, and the one this surface displays.
     member: String,
     /// What kind of asset this proposal carries.
     asset: String,
     object_hash: String,
     unchanged: bool,
-    /// A memory's class. Absent for an authored asset, which has none —
-    /// `asset` is what the line says instead.
-    #[serde(default)]
-    class: Option<String>,
     sensitivity: Sensitivity,
     effect: Effect,
     proposed: String,
@@ -280,11 +118,6 @@ impl Member {
             self.member.clone()
         }
     }
-
-    /// What it is, in one word: a record's class, or the asset kind.
-    fn kind(&self) -> &str {
-        self.class.as_deref().unwrap_or(&self.asset)
-    }
 }
 
 #[derive(Deserialize, Clone, Copy, PartialEq, Eq)]
@@ -292,6 +125,7 @@ impl Member {
 enum Effect {
     Add,
     Update,
+    Apply,
     None,
 }
 
@@ -383,38 +217,6 @@ pub async fn withdraw(profile: &str, id: ProposalId) -> Result<(), String> {
     Ok(())
 }
 
-/// `synveda proposal classify <id>` — run an approved classification
-/// proposal's effect (AUTHZ-5, ADR-0038 decision 9).
-///
-/// A sibling verb rather than a mode of `publish`, for the reason the two
-/// routes are separate: they install different things, and a reviewer who
-/// approved a tier change did not approve a channel move.
-pub async fn classify(profile: &str, id: ProposalId) -> Result<(), String> {
-    let (api, origin) = Api::connect(profile).await?;
-    announce(&api, &origin);
-    let classified = api
-        .post(&format!("/v1/proposals/{id}/classify"), None)
-        .await?;
-    let field = |name: &str| {
-        classified
-            .get(name)
-            .and_then(|value| value.as_str())
-            .unwrap_or("?")
-            .to_owned()
-    };
-    let records = classified
-        .get("records")
-        .and_then(|value| value.as_array())
-        .map(Vec::len)
-        .unwrap_or(0);
-    eprintln!(
-        "synveda: reclassified — {records} record(s) at scope {} now carry {}",
-        field("scope_id"),
-        field("sensitivity"),
-    );
-    Ok(())
-}
-
 /// `synveda proposal publish <id>` — run an approved proposal's effect.
 ///
 /// A separate act by design (ADR-0032 decision 9): the deciding approval
@@ -449,142 +251,27 @@ pub async fn publish(profile: &str, id: ProposalId) -> Result<(), String> {
     Ok(())
 }
 
-/// `synveda proposal override-quality` — record a decision to publish a
-/// skill the quality gate refuses (SKIL-3, ADR-0053 decision 8).
+/// `synveda proposal apply <id>` — run an approved Knowledge change.
 ///
-/// Its own verb rather than a flag on `publish`, because it is its own
-/// authority: a steward grants this and cannot publish a skill (no content
-/// read), a curator publishes and cannot grant this. Two acts, two people.
-pub async fn override_quality(profile: &str, id: ProposalId, reason: &str) -> Result<(), String> {
+/// The gateway repeats the command's PDP and revision checks; this client
+/// supplies no effect payload and cannot turn an approval into authority.
+pub async fn apply(profile: &str, id: ProposalId) -> Result<(), String> {
     let (api, origin) = Api::connect(profile).await?;
     announce(&api, &origin);
-    let granted = api
-        .post(
-            &format!("/v1/proposals/{id}/quality-override"),
-            Some(json!({"reason": reason})),
-        )
-        .await?;
-    let digest = granted
-        .get("bundle_digest")
-        .and_then(Value::as_str)
-        .unwrap_or_default();
-    eprintln!(
-        "synveda: override recorded for {} at {}/100 — bound to bundle {}",
-        granted
-            .get("skill")
-            .and_then(Value::as_str)
-            .unwrap_or_default(),
-        granted.get("score").and_then(Value::as_u64).unwrap_or(0),
-        short(digest),
-    );
-    eprintln!(
-        "synveda: it stands over exactly these bytes; an edit needs a new one. \
-         Whoever ordinarily publishes can now run `synveda proposal publish {id}`"
-    );
-    Ok(())
-}
-
-/// `synveda proposal checklist` — record the reviewer's half of a skill's
-/// quality score (SKIL-3, ADR-0053 decision 6).
-///
-/// The answers are bound to the bundle's **bytes**, which is why the
-/// response echoes the digest: a reviewer who sees it change between two
-/// runs is a reviewer whose author edited something underneath them, and
-/// the previous answers no longer apply to anything.
-pub async fn checklist(
-    profile: &str,
-    id: ProposalId,
-    items: &[String],
-    note: Option<String>,
-) -> Result<(), String> {
-    let mut answers = serde_json::Map::new();
-    for item in items {
-        let (name, verdict) = item.split_once('=').ok_or_else(|| {
-            format!("--item wants ITEM=VERDICT, got {item:?} (e.g. --item tested=yes)")
-        })?;
-        let name = name.trim();
-        let verdict = verdict.trim();
-        // Spelling is checked at the gateway, where the vocabulary lives.
-        // What is checked here is the *shape*, because `--item tested` with
-        // no verdict is a typo a round trip should not be spent on.
-        if name.is_empty() || verdict.is_empty() {
-            return Err(format!(
-                "--item wants ITEM=VERDICT with both halves, got {item:?}"
-            ));
-        }
-        answers.insert(name.to_owned(), Value::String(verdict.to_owned()));
-    }
-
-    let (api, origin) = Api::connect(profile).await?;
-    announce(&api, &origin);
-    let mut body = serde_json::Map::new();
-    body.insert("answers".to_owned(), Value::Object(answers));
-    if let Some(note) = note {
-        body.insert("note".to_owned(), Value::String(note));
-    }
-    let recorded = api
-        .post(
-            &format!("/v1/proposals/{id}/checklist"),
-            Some(Value::Object(body)),
-        )
-        .await?;
-
-    let text = |name: &str| {
-        recorded
+    let applied = api.post(&format!("/v1/proposals/{id}/apply"), None).await?;
+    let field = |name: &str| {
+        applied
             .get(name)
-            .and_then(Value::as_str)
-            .unwrap_or_default()
+            .and_then(|value| value.as_str())
+            .unwrap_or("-")
             .to_owned()
     };
-    let complete = recorded
-        .get("complete")
-        .and_then(Value::as_bool)
-        .unwrap_or(false);
-    let concerns: Vec<&str> = recorded
-        .get("concerns")
-        .and_then(Value::as_array)
-        .map(|items| items.iter().filter_map(Value::as_str).collect())
-        .unwrap_or_default();
-
     eprintln!(
-        "synveda: checklist recorded for {} — {}, bound to bundle {}",
-        text("skill"),
-        if complete { "complete" } else { "PARTIAL" },
-        short(&text("bundle_digest")),
+        "synveda: Knowledge change {} — item {}, revision {}",
+        field("outcome"),
+        field("knowledge_item_id"),
+        field("revision_id"),
     );
-    if !complete {
-        eprintln!(
-            "synveda: a pack that requires a checklist will not accept a partial one; \
-             answer the rest before publishing"
-        );
-    }
-    if !concerns.is_empty() {
-        eprintln!(
-            "synveda: you answered `no` to {} — publishing over that needs an override \
-             under every pack, which somebody holding SkillQualityOverride records with \
-             `synveda proposal override-quality <id> --reason ...`",
-            concerns.join(", "),
-        );
-    }
-    if let Some(quality) = recorded.get("quality") {
-        let score = quality.get("score").and_then(Value::as_u64).unwrap_or(0);
-        let min = quality
-            .get("min_score")
-            .and_then(Value::as_u64)
-            .unwrap_or(0);
-        let needs = quality
-            .get("needs_override")
-            .and_then(Value::as_bool)
-            .unwrap_or(false);
-        eprintln!(
-            "synveda: the rubric scores it {score}/100 against this pack's {min}{}",
-            if needs {
-                " — publishing will need an override"
-            } else {
-                ""
-            },
-        );
-    }
     Ok(())
 }
 
@@ -664,9 +351,13 @@ pub async fn review(
 // ── The two acts, shared by `review` and the direct verbs ───────────────
 
 async fn cast_approval(api: &Api, id: ProposalId, comment: Option<&str>) -> Result<(), String> {
-    let body = comment.map(|comment| json!({ "comment": comment }));
+    let detail: Detail = api.get_as(&format!("/v1/proposals/{id}")).await?;
+    let mut body = json!({ "expected_commit": detail.summary.commit });
+    if let Some(comment) = comment {
+        body["comment"] = json!(comment);
+    }
     let response = api
-        .post(&format!("/v1/proposals/{id}/approve"), body)
+        .post(&format!("/v1/proposals/{id}/approve"), Some(body))
         .await?;
     let summary: Summary = serde_json::from_value(response.clone())
         .map_err(|err| format!("the gateway's answer is not the shape expected: {err}"))?;
@@ -695,10 +386,14 @@ async fn cast_rejection(api: &Api, id: ProposalId, reason: &str) -> Result<(), S
     if reason.trim().is_empty() {
         return Err("a rejection must say why".to_owned());
     }
+    let detail: Detail = api.get_as(&format!("/v1/proposals/{id}")).await?;
     let _: Summary = api
         .post_as(
             &format!("/v1/proposals/{id}/reject"),
-            Some(json!({ "reason": reason })),
+            Some(json!({
+                "expected_commit": detail.summary.commit,
+                "reason": reason,
+            })),
         )
         .await?;
     eprintln!("synveda: rejected {id} — {reason}");
@@ -780,18 +475,6 @@ fn render_detail(detail: &Detail, colour: bool) -> String {
     if let Some(reason) = &summary.close_reason {
         out.push_str(&format!("  closed       {reason}\n"));
     }
-    if let Some(evidence) = &summary.promotion {
-        out.push_str(&format!(
-            "  opened by    rule `{}` — {}\n",
-            evidence.rule,
-            evidence.summary()
-        ));
-        out.push_str(&format!(
-            "               checkable against audit seq {}..={}\n",
-            evidence.from_seq, evidence.to_seq
-        ));
-    }
-
     out.push_str("\n  reviews\n");
     if detail.approvals.is_empty() {
         out.push_str("    (none yet)\n");
@@ -815,175 +498,6 @@ fn render_detail(detail: &Detail, colour: bool) -> String {
         }
     }
 
-    // The scan goes *before* the diff, because it is what a reviewer has
-    // to weigh first: the diff says what changed, and this says what the
-    // change can do.
-    if let Some(scan) = &detail.scan {
-        out.push_str(&format!(
-            "\n  security scan  (ruleset v{}, this pack refuses at {})\n",
-            scan.ruleset_version, scan.blocks_at,
-        ));
-        if scan.findings.is_empty() {
-            out.push_str(&paint(Mark::Plain, "    nothing found"));
-            out.push('\n');
-        }
-        for finding in &scan.findings {
-            // Only a blocking finding is painted as a removal: the rest
-            // are things to weigh, and colouring them all red would make
-            // the one that stops publication indistinguishable from a
-            // `pip install`.
-            let blocking = scan.blocks(finding);
-            let mark = if blocking { Mark::Removed } else { Mark::Meta };
-            let times = if finding.count > 1 {
-                format!(" ×{}", finding.count)
-            } else {
-                String::new()
-            };
-            // The verdict in the text and not only in the colour. Colour is
-            // the fast read for somebody at a terminal, and it is *nothing*
-            // to a review piped to a file, read by a screen reader, or
-            // pasted into a ticket — and this is the one fact on the line
-            // that decides whether approving the proposal can achieve
-            // anything. It matters most in the case the reader cannot
-            // reason around: a severity from a gateway newer than this
-            // binary, where the name itself tells them nothing.
-            let blocks = if blocking { "  [blocks]" } else { "" };
-            out.push_str(&paint(
-                mark,
-                &format!(
-                    "    {:<8} {}:{}  {}{}{}",
-                    finding.severity, finding.path, finding.line, finding.rule, times, blocks,
-                ),
-            ));
-            out.push('\n');
-            out.push_str(&format!("             {}\n", finding.title));
-        }
-        if scan.blocked {
-            out.push_str(&paint(
-                Mark::Removed,
-                &format!(
-                    "    this bundle will be REFUSED at publication ({} findings at {} \
-                     or above); approving it cannot make it publishable",
-                    scan.findings
-                        .iter()
-                        .filter(|finding| scan.blocks(finding))
-                        .count(),
-                    scan.blocks_at,
-                ),
-            ));
-            out.push('\n');
-        } else if let Some(worst) = &scan.worst {
-            out.push_str(&format!(
-                "    worst is {worst}; the pack in force reports it rather than refusing it, \
-                 so this is yours to weigh\n"
-            ));
-        }
-    }
-
-    // Quality after the scan and before the diff. The order is the order a
-    // reviewer decides in: is it safe, is it good, what changed.
-    if let Some(quality) = &detail.quality {
-        let bar = if quality.min_score == 0 {
-            "this pack sets no bar".to_owned()
-        } else {
-            format!("this pack asks for {}", quality.min_score)
-        };
-        out.push_str(&format!(
-            "\n  quality  {}/100  (rubric v{}, {bar})\n",
-            quality.score, quality.rubric_version,
-        ));
-        // Only the failures are listed. A reviewer reading eight lines of
-        // "passed" is a reviewer who stops reading this block, and the
-        // score already says how much passed.
-        for check in quality.checks.iter().filter(|check| !check.passed) {
-            out.push_str(&paint(
-                Mark::Meta,
-                &format!(
-                    "    -{:<3} {:<24} {}",
-                    check.weight, check.check, check.title
-                ),
-            ));
-            out.push('\n');
-            if let Some(detail) = &check.detail {
-                out.push_str(&format!("             {detail}\n"));
-            }
-        }
-        if quality.checks.iter().all(|check| check.passed) {
-            out.push_str(&paint(Mark::Plain, "    every check passed"));
-            out.push('\n');
-        }
-
-        // The reviewer's half, rendered as its own thing rather than
-        // folded into the number above it (ADR-0053 decision 1).
-        match &quality.checklist {
-            Some(checklist) => {
-                out.push_str(&format!(
-                    "\n    checklist  {} {}\n",
-                    if checklist.complete {
-                        "complete"
-                    } else {
-                        "PARTIAL"
-                    },
-                    checklist.reviewed_at.format("%Y-%m-%d %H:%M"),
-                ));
-                for (item, verdict) in &checklist.answers {
-                    let mark = if verdict == "no" {
-                        Mark::Removed
-                    } else {
-                        Mark::Meta
-                    };
-                    out.push_str(&paint(mark, &format!("      {verdict:<4} {item}")));
-                    out.push('\n');
-                }
-                if let Some(note) = &checklist.note {
-                    out.push_str(&format!("      \"{note}\"\n"));
-                }
-                if !checklist.concerns.is_empty() {
-                    out.push_str(&paint(
-                        Mark::Removed,
-                        &format!(
-                            "      a reviewer objected to {}; publishing over that needs an \
-                             override under every pack",
-                            checklist.concerns.join(", "),
-                        ),
-                    ));
-                    out.push('\n');
-                }
-            }
-            None if quality.requires_checklist => {
-                out.push_str(&paint(
-                    Mark::Removed,
-                    "\n    checklist  NONE recorded for these bytes — this pack requires one",
-                ));
-                out.push('\n');
-                out.push_str(&format!(
-                    "      record it with:  synveda proposal checklist {}\n",
-                    summary.id,
-                ));
-            }
-            None => {
-                out.push_str("\n    checklist  none recorded; this pack does not require one\n");
-            }
-        }
-
-        if quality.needs_override {
-            out.push_str(&paint(
-                Mark::Removed,
-                &format!(
-                    "    publishing this needs a quality override ({}); approving it does \
-                     not clear the bar",
-                    quality
-                        .shortfalls
-                        .iter()
-                        .map(Shortfall::describe)
-                        .collect::<Vec<_>>()
-                        .join("; "),
-                ),
-            ));
-            out.push('\n');
-        }
-    }
-
     out.push_str(&format!(
         "\n  effect on {} {}/{}\n",
         summary
@@ -997,6 +511,7 @@ fn render_detail(detail: &Detail, colour: bool) -> String {
         let (mark, label) = match member.effect {
             Effect::Add => (Mark::Added, "add   "),
             Effect::Update => (Mark::Meta, "update"),
+            Effect::Apply => (Mark::Added, "apply "),
             Effect::None => (Mark::Plain, "same  "),
         };
         out.push_str(&paint(
@@ -1004,7 +519,7 @@ fn render_detail(detail: &Detail, colour: bool) -> String {
             &format!(
                 "    {label}  {}  {} · {}",
                 member.label(),
-                member.kind(),
+                member.asset,
                 member.sensitivity.as_str()
             ),
         ));
@@ -1079,7 +594,7 @@ fn describe(requirement: &Requirement) -> String {
     )
 }
 
-/// A 12-character prefix: enough to name a proposal, a record, or an
+/// A 12-character prefix: enough to name a proposal or aggregate, or an
 /// object at a glance, and short enough to read in a list.
 fn short(id: &str) -> String {
     id.chars().take(12).collect()
@@ -1227,7 +742,7 @@ mod tests {
             source_scope_id: ScopeId::new(),
             target_scope_path: Some(target.to_owned()),
             source_scope_path: Some(source.to_owned()),
-            asset: "memory".to_owned(),
+            asset: "context_pack".to_owned(),
             effect: "published".to_owned(),
             state,
             sensitivity: Sensitivity::Internal,
@@ -1246,21 +761,19 @@ mod tests {
                 origins: vec!["pack regulated-strict".to_owned()],
             },
             outstanding: "1 × curator".to_owned(),
-            promotion: None,
         }
     }
 
     fn member(effect: Effect, before: Option<&str>, after: &str) -> Member {
         Member {
             member: "0198f000-0000-7000-8000-000000000001".to_owned(),
-            asset: "memory".to_owned(),
+            asset: "context_pack".to_owned(),
             object_hash: "b".repeat(64),
             unchanged: true,
-            class: Some("procedure".to_owned()),
             sensitivity: Sensitivity::Internal,
             effect,
             proposed: after.to_owned(),
-            // Undrifted, so the record still says what was proposed.
+            // Undrifted, so the artifact still says what was proposed.
             content: after.to_owned(),
             baseline: before.map(|text| Baseline {
                 object_hash: "c".repeat(64),
@@ -1269,26 +782,23 @@ mod tests {
         }
     }
 
-    /// A prompt member: named by path, with no class (PRMT-1, ADR-0049
-    /// decision 3).
+    /// A prompt member is named by path (PRMT-1, ADR-0049 decision 3).
     fn prompt_member(effect: Effect, before: Option<&str>, after: &str) -> Member {
         Member {
             member: "support/triage-reply".to_owned(),
             asset: "prompt".to_owned(),
-            class: None,
             ..member(effect, before, after)
         }
     }
 
     fn asset(content: &str) -> String {
-        serde_json::json!({"class": "procedure", "content": content, "sensitivity": "internal"})
-            .to_string()
+        content.to_owned()
     }
 
     /// The per-asset-kind renderer ADR-0035 predicted, as a rendering
-    /// rather than a paragraph: a record id is abbreviated the way a
-    /// commit is, a prompt's path is shown whole because it is a name a
-    /// person typed, and a member with no class says what it is instead.
+    /// rather than a paragraph: a generated id is abbreviated the way a
+    /// commit is, and a prompt's path is shown whole because it is a name a
+    /// person typed.
     #[test]
     fn a_prompt_member_is_named_by_path_and_labelled_by_its_asset_kind() {
         let detail = Detail {
@@ -1299,8 +809,6 @@ mod tests {
                 "be brief, and link the runbook",
             )],
             approvals: Vec::new(),
-            scan: None,
-            quality: None,
         };
         let rendered = render_detail(&detail, false);
         assert!(
@@ -1320,16 +828,13 @@ mod tests {
         );
     }
 
-    /// A memory member keeps the abbreviation, so the two kinds are
-    /// distinguishable at a glance in one queue.
+    /// A UUID-shaped member keeps the abbreviation.
     #[test]
-    fn a_record_id_is_still_abbreviated() {
+    fn a_uuid_shaped_member_is_abbreviated() {
         let detail = Detail {
             summary: summary(ProposalView::Open, "acme", "acme"),
             members: vec![member(Effect::Add, None, &asset("brand new"))],
             approvals: Vec::new(),
-            scan: None,
-            quality: None,
         };
         let rendered = render_detail(&detail, false);
         assert!(rendered.contains("0198f000-000"), "{rendered}");
@@ -1337,7 +842,7 @@ mod tests {
             !rendered.contains("0198f000-0000-7000-8000-000000000001"),
             "a uuid-shaped member is shortened:\n{rendered}"
         );
-        assert!(rendered.contains("procedure · internal"), "{rendered}");
+        assert!(rendered.contains("context_pack · internal"), "{rendered}");
     }
 
     #[test]
@@ -1371,8 +876,6 @@ mod tests {
                 ),
             ],
             approvals: Vec::new(),
-            scan: None,
-            quality: None,
         };
 
         let rendered = render_detail(&detail, false);
@@ -1392,8 +895,6 @@ mod tests {
             summary: summary(ProposalView::Approved, "acme", "acme"),
             members: vec![member(Effect::None, None, &asset("already published"))],
             approvals: Vec::new(),
-            scan: None,
-            quality: None,
         };
         let rendered = render_detail(&detail, false);
         assert!(rendered.contains("same  "), "{rendered}");
@@ -1409,14 +910,12 @@ mod tests {
             summary: summary(ProposalView::Open, "acme", "acme"),
             members: vec![member(Effect::Add, None, &asset("as proposed"))],
             approvals: Vec::new(),
-            scan: None,
-            quality: None,
         };
         detail.members[0].unchanged = false;
         let rendered = render_detail(&detail, false);
         assert!(
             rendered.contains("publishing will refuse"),
-            "an edited record must be visible as such:\n{rendered}"
+            "an edited artifact must be visible as such:\n{rendered}"
         );
     }
 
@@ -1443,313 +942,10 @@ mod tests {
                     created_at: Utc::now(),
                 },
             ],
-            scan: None,
-            quality: None,
         };
         let rendered = render_detail(&detail, false);
         assert!(rendered.contains("matches the runbook"), "{rendered}");
         assert!(rendered.contains("does not count"), "{rendered}");
-    }
-
-    /// SKIL-2's half of FLOW-6's "a full review is possible without the
-    /// console": a reviewer of executable code has to be able to see what
-    /// the scanner found, and — when the pack in force will refuse it —
-    /// that approving cannot make it publishable.
-    #[test]
-    fn a_blocking_scan_says_so_before_the_diff() {
-        let detail = Detail {
-            summary: summary(ProposalView::Open, "acme/eng", "acme/eng"),
-            members: Vec::new(),
-            approvals: Vec::new(),
-            scan: Some(ScanReport {
-                ruleset_version: 1,
-                worst: Some("critical".to_owned()),
-                blocks_at: "critical".to_owned(),
-                blocked: true,
-                findings: vec![
-                    ScanFinding {
-                        path: "helper/scripts/setup.sh".to_owned(),
-                        rule: "fetch-and-execute".to_owned(),
-                        severity: "critical".to_owned(),
-                        title: "downloads a remote script and pipes it straight into an \
-                                interpreter"
-                            .to_owned(),
-                        line: 4,
-                        count: 1,
-                        blocking: Some(true),
-                    },
-                    ScanFinding {
-                        path: "helper/SKILL.md".to_owned(),
-                        rule: "package-install".to_owned(),
-                        severity: "notice".to_owned(),
-                        title: "installs packages at run time".to_owned(),
-                        line: 9,
-                        count: 2,
-                        blocking: Some(false),
-                    },
-                ],
-            }),
-            quality: None,
-        };
-        let rendered = render_detail(&detail, false);
-        assert!(rendered.contains("security scan"), "{rendered}");
-        assert!(rendered.contains("ruleset v1"), "{rendered}");
-        assert!(
-            rendered.contains("helper/scripts/setup.sh:4"),
-            "the file and the line a reviewer opens: {rendered}"
-        );
-        assert!(rendered.contains("fetch-and-execute"), "{rendered}");
-        assert!(rendered.contains("×2"), "counts render: {rendered}");
-        assert!(
-            rendered.contains("will be REFUSED at publication"),
-            "{rendered}"
-        );
-        // The scan comes before the diff, because it says what the change
-        // can do and the diff only says what it is.
-        let scan_at = rendered.find("security scan").unwrap();
-        let effect_at = rendered.find("effect on").unwrap();
-        assert!(scan_at < effect_at, "{rendered}");
-    }
-
-    #[test]
-    fn a_reported_scan_hands_the_judgement_to_the_reviewer() {
-        let detail = Detail {
-            summary: summary(ProposalView::Open, "acme/eng", "acme/eng"),
-            members: Vec::new(),
-            approvals: Vec::new(),
-            scan: Some(ScanReport {
-                ruleset_version: 1,
-                worst: Some("high".to_owned()),
-                blocks_at: "critical".to_owned(),
-                blocked: false,
-                findings: vec![ScanFinding {
-                    path: "helper/scripts/build.sh".to_owned(),
-                    rule: "privilege-change".to_owned(),
-                    severity: "high".to_owned(),
-                    title: "escalates privileges or makes a file executable".to_owned(),
-                    line: 2,
-                    count: 1,
-                    blocking: Some(false),
-                }],
-            }),
-            quality: None,
-        };
-        let rendered = render_detail(&detail, false);
-        assert!(rendered.contains("yours to weigh"), "{rendered}");
-        assert!(!rendered.contains("REFUSED"), "{rendered}");
-    }
-
-    fn finding(severity: &str, blocking: Option<bool>) -> ScanFinding {
-        ScanFinding {
-            path: "helper/scripts/setup.sh".to_owned(),
-            rule: "fetch-and-execute".to_owned(),
-            severity: severity.to_owned(),
-            title: "does something worth weighing".to_owned(),
-            line: 1,
-            count: 1,
-            blocking,
-        }
-    }
-
-    /// ADR-0056 decision 5: the gateway holds the rule table and the pack,
-    /// so its verdict is the answer and this CLI's comparison does not get
-    /// a vote. The case that proves it is one where the two disagree —
-    /// a `notice` the gateway calls blocking under a `critical`
-    /// threshold, which the rank comparison would have painted as
-    /// decoration.
-    #[test]
-    fn the_gateways_verdict_wins_over_the_local_comparison() {
-        let report = ScanReport {
-            ruleset_version: 1,
-            worst: Some("notice".to_owned()),
-            blocks_at: "critical".to_owned(),
-            blocked: true,
-            findings: Vec::new(),
-        };
-        assert!(report.blocks(&finding("notice", Some(true))));
-        assert!(!report.blocks(&finding("critical", Some(false))));
-    }
-
-    /// The fallback, for a gateway older than this binary: the rank
-    /// comparison, not the string one. `critical` under a `high`
-    /// threshold blocks, and equality would have said it did not.
-    #[test]
-    fn without_a_served_verdict_a_severity_above_the_threshold_blocks() {
-        let report = ScanReport {
-            ruleset_version: 1,
-            worst: Some("critical".to_owned()),
-            blocks_at: "high".to_owned(),
-            blocked: true,
-            findings: Vec::new(),
-        };
-        assert!(report.blocks(&finding("critical", None)));
-        assert!(report.blocks(&finding("high", None)));
-        assert!(!report.blocks(&finding("notice", None)));
-        // A severity a newer gateway grew is treated as blocking rather
-        // than as decoration. Unreachable in practice now — a gateway new
-        // enough to have grown a severity is new enough to serve
-        // `blocking` — and kept because the fallback has to be safe on
-        // its own terms.
-        assert!(report.blocks(&finding("catastrophic", None)));
-    }
-
-    fn quality(score: u8, min: u8, checklist: Option<ChecklistView>) -> QualityReport {
-        QualityReport {
-            rubric_version: 1,
-            score,
-            min_score: min,
-            requires_checklist: true,
-            checks: vec![
-                QualityCheck {
-                    check: "description-states-when".to_owned(),
-                    passed: true,
-                    weight: 20,
-                    title: "the description says when to use the skill".to_owned(),
-                    detail: None,
-                },
-                QualityCheck {
-                    check: "has-examples".to_owned(),
-                    passed: false,
-                    weight: 15,
-                    title: "SKILL.md shows at least one concrete example".to_owned(),
-                    detail: Some("no fenced code block in SKILL.md".to_owned()),
-                },
-            ],
-            checklist,
-            shortfalls: Vec::new(),
-            needs_override: false,
-        }
-    }
-
-    fn answered(pairs: &[(&str, &str)], concerns: &[&str]) -> ChecklistView {
-        ChecklistView {
-            answers: pairs
-                .iter()
-                .map(|(item, verdict)| ((*item).to_owned(), (*verdict).to_owned()))
-                .collect(),
-            note: None,
-            complete: true,
-            concerns: concerns.iter().map(|item| (*item).to_owned()).collect(),
-            reviewed_at: Utc::now(),
-        }
-    }
-
-    fn detail_with(quality: QualityReport) -> Detail {
-        Detail {
-            summary: summary(ProposalView::Open, "acme/eng", "acme/eng"),
-            members: Vec::new(),
-            approvals: Vec::new(),
-            scan: None,
-            quality: Some(quality),
-        }
-    }
-
-    /// The block a reviewer reads: the score against the pack's bar, the
-    /// checks that *failed* and not the ones that passed, and the
-    /// checklist rendered as its own thing rather than folded into the
-    /// number (ADR-0053 decision 1).
-    #[test]
-    fn the_quality_block_shows_the_score_the_failures_and_the_checklist_apart() {
-        let rendered = render_detail(
-            &detail_with(quality(
-                85,
-                70,
-                Some(answered(
-                    &[("instructions-correct", "yes"), ("tested", "yes")],
-                    &[],
-                )),
-            )),
-            false,
-        );
-        assert!(rendered.contains("quality  85/100"), "{rendered}");
-        assert!(rendered.contains("this pack asks for 70"), "{rendered}");
-        // Failures are listed with what they cost; passes are not, because
-        // eight lines of "passed" is a block nobody finishes reading.
-        assert!(rendered.contains("has-examples"), "{rendered}");
-        assert!(rendered.contains("-15"), "{rendered}");
-        assert!(
-            !rendered.contains("description-states-when"),
-            "a passing check must not be listed:\n{rendered}"
-        );
-        // The two halves are visibly two halves.
-        assert!(rendered.contains("checklist  complete"), "{rendered}");
-        assert!(rendered.contains("yes  instructions-correct"), "{rendered}");
-        // And quality comes after the safety question and before the diff.
-        let quality_at = rendered.find("quality  85").unwrap();
-        let effect_at = rendered.find("effect on").unwrap();
-        assert!(quality_at < effect_at, "{rendered}");
-    }
-
-    /// A pack that requires a checklist and has none says so where a
-    /// reviewer will act on it, and names the command that fixes it.
-    #[test]
-    fn a_missing_checklist_names_the_command_that_records_one() {
-        let rendered = render_detail(&detail_with(quality(85, 70, None)), false);
-        assert!(rendered.contains("NONE recorded"), "{rendered}");
-        assert!(
-            rendered.contains("synveda proposal checklist"),
-            "a refusal a reviewer cannot act on is half a refusal:\n{rendered}"
-        );
-    }
-
-    /// A written-down `no` is painted as a removal and says what it costs,
-    /// because that is the finding a reviewer must not skim past.
-    #[test]
-    fn a_concern_says_that_publishing_over_it_needs_an_override() {
-        let mut report = quality(100, 0, Some(answered(&[("tested", "no")], &["tested"])));
-        report.needs_override = true;
-        report.shortfalls = vec![Shortfall {
-            kind: Some("checklist-concerns".to_owned()),
-            detail: Some("a reviewer answered `no` to tested".to_owned()),
-        }];
-        let rendered = render_detail(&detail_with(report), false);
-        assert!(
-            rendered.contains("a reviewer objected to tested"),
-            "{rendered}"
-        );
-        assert!(rendered.contains("needs a quality override"), "{rendered}");
-        assert!(
-            rendered.contains("a reviewer answered `no` to tested"),
-            "the shortfall is spelled out, not left as a slug:\n{rendered}"
-        );
-        // Even at a perfect score and a pack with no bar: a concern
-        // refuses under every config (ADR-0053 decision 7).
-        assert!(rendered.contains("quality  100/100"), "{rendered}");
-        assert!(rendered.contains("this pack sets no bar"), "{rendered}");
-    }
-
-    /// ADR-0056 decision 6: the sentence is the gateway's, so a kind this
-    /// binary has never heard of needs no local prose to be explained. A
-    /// shortfall invented after this CLI was built renders as well as one
-    /// invented before it.
-    #[test]
-    fn a_shortfall_kind_this_binary_never_heard_of_still_explains_itself() {
-        let unknown = Shortfall {
-            kind: Some("licence-missing".to_owned()),
-            detail: Some("no licence file is present and this pack requires one".to_owned()),
-        };
-        assert_eq!(
-            unknown.describe(),
-            "no licence file is present and this pack requires one"
-        );
-    }
-
-    /// The other direction, which is the one that now degrades: a gateway
-    /// older than this CLI serves the slug and no sentence. Name it rather
-    /// than drop it — an unexplained bar is worse than an unnamed one, and
-    /// a refusal a reviewer cannot see is the failure mode worth avoiding.
-    #[test]
-    fn an_unexplained_shortfall_is_named_rather_than_swallowed() {
-        let bare = Shortfall {
-            kind: Some("checklist-missing".to_owned()),
-            detail: None,
-        };
-        let described = bare.describe();
-        assert!(described.contains("checklist-missing"), "{described}");
-        assert!(
-            described.contains("older than the CLI"),
-            "the skew is named so the reader knows why the sentence is missing: {described}"
-        );
     }
 
     #[test]
@@ -1854,291 +1050,5 @@ mod tests {
         assert!(painted.starts_with("\u{1b}[32m") && painted.ends_with("\u{1b}[0m"));
         // Plain lines stay plain either way, so a piped diff is byte-clean.
         assert_eq!(paint_line(Mark::Plain, "  x", true), "  x");
-    }
-
-    // ── The parity corpus (CNSL-1, ADR-0056 decision 7) ─────────────────
-
-    /// Every case in `console/fixtures/`. Kept in step with the list in
-    /// `synveda-gateway/tests/console_parity.rs`, which is what records
-    /// them; a case added there and not here is a case only one surface
-    /// answers.
-    const CASES: &[&str] = &[
-        "memory-update",
-        "memory-drifted",
-        "skill-clean",
-        "skill-below-bar",
-        "skill-checklist-stale",
-        "skill-blocking-scan",
-        "skill-unknown-severity",
-    ];
-
-    fn corpus_dir() -> std::path::PathBuf {
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../console/fixtures")
-    }
-
-    /// A case recorded over in the gateway and not listed here is a case
-    /// this surface never answers, and the list above is a comment asking
-    /// somebody to remember. This is the same request, addressed to a test.
-    #[test]
-    fn every_case_in_the_corpus_is_answered_here() {
-        let mut found: Vec<String> = std::fs::read_dir(corpus_dir())
-            .expect("read console/fixtures")
-            .filter_map(|entry| {
-                let name = entry.ok()?.file_name().into_string().ok()?;
-                name.strip_suffix(".facts.json").map(str::to_owned)
-            })
-            .collect();
-        found.sort();
-        let mut listed: Vec<String> = CASES.iter().map(|case| (*case).to_owned()).collect();
-        listed.sort();
-        assert_eq!(
-            found, listed,
-            "the corpus on disk and the cases this suite answers have diverged",
-        );
-    }
-
-    fn corpus(case: &str, extension: &str) -> Value {
-        let path = corpus_dir().join(format!("{case}.{extension}"));
-        let text = std::fs::read_to_string(&path)
-            .unwrap_or_else(|err| panic!("read {}: {err}", path.display()));
-        serde_json::from_str(&text).unwrap_or_else(|err| panic!("{case}.{extension}: {err}"))
-    }
-
-    /// Asserts the rendering **names** a fact, with a message that says
-    /// which case and which fact rather than dumping a transcript and
-    /// leaving the reader to find the missing line.
-    fn names(case: &str, rendered: &str, needle: &str, what: &str) {
-        assert!(
-            rendered.contains(needle),
-            "{case}: the review does not name {what} ({needle:?})\n\n{rendered}",
-        );
-    }
-
-    /// How a member is identifiable in a rendering.
-    ///
-    /// Derived from the *shape* of the name rather than by calling the
-    /// renderer's own `label`, which would make the assertion agree with
-    /// whatever the renderer did. An address a reader cannot type is
-    /// abbreviated by both surfaces; a path somebody chose is not, because
-    /// a name a person typed is the whole point of the name.
-    fn identifier(name: &str) -> String {
-        let uuid_shaped =
-            name.len() == 36 && name.chars().all(|c| c.is_ascii_hexdigit() || c == '-');
-        if uuid_shaped {
-            short(name)
-        } else {
-            name.to_owned()
-        }
-    }
-
-    /// The part of a rendering from one heading to the next.
-    ///
-    /// Facts are asserted where a reviewer would look for them, which is
-    /// not pedantry: a scan finding names the file it was found in, and a
-    /// member names the same file, so a search over the whole transcript
-    /// would let the scan block satisfy an assertion about the diff and
-    /// the review would pass with no members rendered at all.
-    fn section<'a>(case: &str, rendered: &'a str, from: &str, to: Option<&str>) -> &'a str {
-        let start = rendered
-            .find(from)
-            .unwrap_or_else(|| panic!("{case}: no {from:?} block\n\n{rendered}"));
-        let rest = &rendered[start..];
-        to.and_then(|to| rest.find(to))
-            .map_or(rest, |end| &rest[..end])
-    }
-
-    /// The line of the rendering that mentions `needle`.
-    fn line_with<'a>(case: &str, rendered: &'a str, needle: &str) -> &'a str {
-        rendered
-            .lines()
-            .find(|line| line.contains(needle))
-            .unwrap_or_else(|| panic!("{case}: no line mentions {needle:?}\n\n{rendered}"))
-    }
-
-    /// **The acceptance criterion, this half of it.**
-    ///
-    /// CNSL-1 asks for full review parity with the CLI, and the only
-    /// version of that a test can fail is one where both surfaces answer
-    /// the same corpus. `console/fixtures/<case>.facts.json` says what a
-    /// review has to name; this asserts that `synveda proposal review`
-    /// names all of it, and the console's suite asserts the same file
-    /// against its own rendering.
-    ///
-    /// Every assertion here is about **naming a fact**, never about
-    /// layout: that a blocking finding is distinguishable, not that it is
-    /// red; that both quality numbers appear, not the shape of the line
-    /// they appear on. ADR-0056 rejected serving a display model precisely
-    /// so a terminal and a browser could differ where they should, and a
-    /// parity suite that pinned wording would be that display model
-    /// arriving through the back door.
-    #[test]
-    fn the_cli_names_every_fact_the_corpus_requires() {
-        for case in CASES {
-            let detail: Detail = serde_json::from_value(corpus(case, "json"))
-                .unwrap_or_else(|err| panic!("{case} is not a proposal detail: {err}"));
-            let facts = corpus(case, "facts.json");
-            // No colour: a review piped to a file or read by a screen
-            // reader has to carry every fact in its text, and the console
-            // has no ANSI to lean on either.
-            let rendered = render_detail(&detail, false);
-
-            names(
-                case,
-                &rendered,
-                facts["state"].as_str().expect("state"),
-                "the proposal's state",
-            );
-            names(
-                case,
-                &rendered,
-                facts["outstanding"].as_str().expect("outstanding"),
-                "what the requirement still lacks",
-            );
-
-            let reviews = section(case, &rendered, "  reviews", Some("\n  effect on "));
-            let members = section(case, &rendered, "  effect on ", None);
-
-            for approval in facts["approvals"].as_array().expect("approvals") {
-                let subject = approval["subject"].as_str().expect("subject");
-                names(case, reviews, subject, "an approver");
-                let line = line_with(case, reviews, subject);
-                assert!(
-                    line.contains(approval["verdict"].as_str().expect("verdict")),
-                    "{case}: {subject}'s verdict is not on the line naming them: {line:?}",
-                );
-                if approval["counts"] == json!(false) {
-                    assert!(
-                        line.contains("does not count"),
-                        "{case}: an approval of an earlier commit must be marked as \
-                         not counting, or a reviewer reads a requirement as met that \
-                         is not: {line:?}",
-                    );
-                }
-            }
-
-            for member in facts["members"].as_array().expect("members") {
-                let name = member["name"].as_str().expect("name");
-                // A uuid-shaped name may be abbreviated and a path may not
-                // (both surfaces abbreviate an address the reader cannot
-                // type); what parity asks is that the member is
-                // identifiable, so the assertion is the twelve characters
-                // that make it so.
-                let identifier = identifier(name);
-                names(case, members, &identifier, "a member");
-                let line = line_with(case, members, &identifier);
-                let label = match member["effect"].as_str().expect("effect") {
-                    "add" => "add",
-                    "update" => "update",
-                    "none" => "same",
-                    other => panic!("{case}: unknown effect {other}"),
-                };
-                assert!(
-                    line.contains(label),
-                    "{case}: what publishing would do to {name} is not on its line: \
-                     {line:?}",
-                );
-                if member["drifted"] == json!(true) {
-                    names(
-                        case,
-                        members,
-                        "publishing will refuse",
-                        "that the member drifted under the review",
-                    );
-                }
-                for (field, what) in [
-                    ("baseline", "the bytes a publication would overwrite"),
-                    ("proposed", "the bytes under review"),
-                    ("current", "the member as it stands now"),
-                ] {
-                    let Some(text) = member[field].as_str() else {
-                        continue;
-                    };
-                    for line in text.lines().filter(|line| !line.trim().is_empty()) {
-                        names(case, members, line, what);
-                    }
-                }
-            }
-
-            if let Some(scan) = facts.get("scan") {
-                let scan_block =
-                    section(case, &rendered, "  security scan", Some("\n  effect on "));
-                for finding in scan["findings"].as_array().expect("findings") {
-                    let rule = finding["rule"].as_str().expect("rule");
-                    names(case, scan_block, rule, "a scan finding");
-                    let line = line_with(case, scan_block, rule);
-                    for part in [
-                        finding["path"].as_str().expect("path").to_owned(),
-                        finding["line"].to_string(),
-                        finding["severity"].as_str().expect("severity").to_owned(),
-                    ] {
-                        assert!(
-                            line.contains(&part),
-                            "{case}: {rule} is missing {part:?} from its line: {line:?}",
-                        );
-                    }
-                    // ADR-0056 decision 5: the gateway's verdict, and a
-                    // reader who cannot see colour still has to be able to
-                    // tell which findings stop the publication — including
-                    // in the case where the severity means nothing to them.
-                    assert_eq!(
-                        line.contains("blocks"),
-                        finding["blocking"] == json!(true),
-                        "{case}: {rule} is served blocking={} and its line does not \
-                         say so: {line:?}",
-                        finding["blocking"],
-                    );
-                }
-                if scan["blocked"] == json!(true) {
-                    names(
-                        case,
-                        scan_block,
-                        "REFUSED",
-                        "that the pack in force will refuse this bundle",
-                    );
-                }
-            }
-
-            if let Some(quality) = facts.get("quality") {
-                // Two numbers, never one (ADR-0053 decision 1).
-                names(
-                    case,
-                    &rendered,
-                    &format!("{}/100", quality["score"]),
-                    "the rubric score",
-                );
-                names(
-                    case,
-                    &rendered,
-                    &quality["min_score"].to_string(),
-                    "the bar the pack asks for",
-                );
-                let checklist = match quality["checklist"].as_str().expect("checklist") {
-                    "complete" => "complete",
-                    "partial" => "PARTIAL",
-                    _ if quality["checklist_required"] == json!(true) => "NONE recorded",
-                    _ => "none recorded",
-                };
-                names(case, &rendered, checklist, "the state of the checklist");
-                for shortfall in quality["shortfalls"].as_array().expect("shortfalls") {
-                    // Verbatim: the sentence is the gateway's, and a surface
-                    // that reworded it would be the second author decision 6
-                    // exists to prevent.
-                    names(
-                        case,
-                        &rendered,
-                        shortfall.as_str().expect("a sentence"),
-                        "a bar this bundle misses",
-                    );
-                }
-                if quality["needs_override"] == json!(true) {
-                    names(
-                        case,
-                        &rendered,
-                        "quality override",
-                        "that publishing needs an override",
-                    );
-                }
-            }
-        }
     }
 }

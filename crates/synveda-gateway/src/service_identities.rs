@@ -27,18 +27,14 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use synveda_audit::{AuditAction, Outcome};
 use synveda_policy::{Action, Resource};
-use synveda_store::{hierarchy, identities, rls};
-use synveda_types::{
-    Error, HierarchyNode, Identity, IdentityId, IdentityKind, Result, ScopeId, ScopeKind,
-};
-
-use synveda_identity::personal_slug;
+use synveda_store::{identities, rls, scopes};
+use synveda_types::scope::ScopeKind;
+use synveda_types::{Error, Identity, IdentityId, IdentityKind, Result, ScopeId};
 
 use crate::app::AppState;
 use crate::audit;
 use crate::authz;
-use crate::error::ApiError;
-use crate::hierarchy::{body, commit, found, tenant_id};
+use crate::request::{body, commit, found, tenant_id};
 use crate::telemetry::SERVICE_IDENTITY_OPERATIONS_TOTAL;
 
 /// Counts the operation and renders the result — the same outcome
@@ -49,49 +45,82 @@ async fn respond<T: IntoResponse>(
     op: &'static str,
     result: Result<T>,
 ) -> Response {
-    let outcome = match &result {
-        Ok(_) => "ok",
-        Err(
-            Error::Unauthenticated { .. }
-            | Error::PolicyDenied { .. }
-            | Error::NotFound { .. }
-            | Error::Invalid { .. }
-            | Error::Conflict { .. }
-            | Error::RateLimited { .. },
-        ) => "rejected",
-        Err(_) => "error",
-    };
+    let outcome = crate::response::outcome(&result);
     metrics::counter!(SERVICE_IDENTITY_OPERATIONS_TOTAL, "op" => op, "outcome" => outcome)
         .increment(1);
-    match result {
-        Ok(response) => response.into_response(),
-        Err(error) => {
-            audit::record_rejection(state, op, &error).await;
-            ApiError(error).into_response()
-        }
-    }
+    crate::response::finish(state, op, result).await
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
+#[schema(as = RegisterServiceIdentityBody)]
 pub(crate) struct RegisterBody {
     /// The `sub` the IdP will put in the agent's client-credentials
     /// tokens (for Rauthy, the client id).
     subject: String,
     /// The anchor node whose subtree confines the agent's tokens.
+    #[schema(value_type = String, format = "uuid")]
     scope_id: ScopeId,
     /// Display name for the agent's personal leaf; defaults to the
     /// subject.
     display_name: Option<String>,
 }
 
-#[derive(Serialize)]
-struct ServiceIdentitiesResponse {
-    identities: Vec<Identity>,
+/// A service identity as the public application API exposes it.
+#[derive(Debug, Serialize, utoipa::ToSchema)]
+pub(crate) struct ServiceIdentityView {
+    #[schema(value_type = String, format = "uuid")]
+    id: IdentityId,
+    subject: Option<String>,
+    kind: String,
+    email: Option<String>,
+    display_name: Option<String>,
+    #[schema(value_type = String, format = "uuid")]
+    scope_id: ScopeId,
+    status: String,
+    departed_at: Option<chrono::DateTime<chrono::Utc>>,
+    created_at: chrono::DateTime<chrono::Utc>,
+}
+
+impl From<Identity> for ServiceIdentityView {
+    fn from(identity: Identity) -> Self {
+        Self {
+            id: identity.id,
+            subject: identity.subject,
+            kind: identity.kind.to_string(),
+            email: identity.email,
+            display_name: identity.display_name,
+            scope_id: identity.scope_id,
+            status: identity.status.to_string(),
+            departed_at: identity.departed_at,
+            created_at: identity.created_at,
+        }
+    }
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+pub(crate) struct ServiceIdentitiesResponse {
+    identities: Vec<ServiceIdentityView>,
 }
 
 /// `POST /v1/service-identities` — register an agent at an anchor node.
 /// `ServiceIdentityManage` on the anchor: a steward registers agents in
 /// their subtree, visibly (ADR-0018 decision 3).
+#[utoipa::path(
+    post,
+    path = "/v1/service-identities",
+    operation_id = "register_service_identity",
+    tag = "service-identities",
+    request_body = RegisterBody,
+    responses(
+        (status = 201, description = "The registered service identity", body = ServiceIdentityView),
+        (status = 400, description = "The subject or anchor is invalid", body = crate::workspaces::ApiErrorBody),
+        (status = 401, description = "No usable credential", body = crate::workspaces::ApiErrorBody),
+        (status = 403, description = "Service identity management is not permitted", body = crate::workspaces::ApiErrorBody),
+        (status = 404, description = "The anchor is absent or outside the tenant", body = crate::workspaces::ApiErrorBody),
+        (status = 409, description = "The subject or principal scope already exists", body = crate::workspaces::ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
 #[tracing::instrument(name = "service_identity.register", skip_all)]
 pub(crate) async fn register(
     State(state): State<AppState>,
@@ -102,18 +131,14 @@ pub(crate) async fn register(
         let tenant_id = tenant_id()?;
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
         let anchor = found(
-            hierarchy::node(&mut *tx, body.scope_id).await?,
+            scopes::get(&mut *tx, tenant_id, body.scope_id).await?,
             tenant_id,
             body.scope_id,
         )?;
-        // Registering an agent into quarantine is an operator error, not a
-        // placement (ADR-0018 decision 2). User-kind anchors are refused
-        // by the hierarchy's own rank rule below.
-        if anchor.slug == identities::QUARANTINE_SLUG && anchor.depth == 1 {
-            return Err(Error::Invalid {
-                message: "service identities cannot be anchored at the quarantine scope".to_owned(),
-            });
-        }
+        // An agent cannot be anchored at somebody's own scope: a principal
+        // nests under the anchor an operator names, and the substrate's
+        // own placement rule refuses a principal under a principal
+        // (CPR-7, ADR-0074 — the rank rule's old job, as a shape rule).
         let authorized = authz::require(
             &state,
             &mut tx,
@@ -124,14 +149,22 @@ pub(crate) async fn register(
         .await?;
         let identity_id = IdentityId::new();
         let display_name = body.display_name.as_deref().unwrap_or(&body.subject);
-        let leaf = hierarchy::create(
+        // The agent's own scope: a `principal`-shaped scope under the
+        // operator's anchor, so ADR-0018 decision 4's confinement is tree
+        // position — the scope above the agent's own.
+        let leaf = scopes::create(
             &mut tx,
-            ScopeId::new(),
-            tenant_id,
-            Some(anchor.id),
-            ScopeKind::User,
-            &personal_slug(None, &body.subject, identity_id),
-            display_name,
+            &scopes::NewScope {
+                id: ScopeId::new(),
+                tenant_id,
+                kind: ScopeKind::Principal,
+                parent_scope_id: Some(anchor.id),
+                slug: scopes::principal_slug(&body.subject),
+                display_name: display_name.to_owned(),
+                attributes: serde_json::json!({}),
+                principal_id: Some(body.subject.clone()),
+                created_by: None,
+            },
         )
         .await?;
         let identity = identities::create(
@@ -155,21 +188,24 @@ pub(crate) async fn register(
                 "authz": audit::decision_context(Action::ServiceIdentityManage, &authorized),
                 "identity": {"id": identity.id, "subject": identity.subject},
                 "leaf_scope_id": leaf.id,
-                "anchor": {"slug": anchor.slug, "path": anchor.path},
+                "anchor": {"slug": anchor.slug},
             }),
         )
         .await?;
         commit(tx).await?;
         // The leaf is a committed hierarchy mutation (ADR-0016 decision 5,
         // ADR-0017 decision 5).
-        state.invalidate_hierarchy(tenant_id);
+        state.invalidate_scopes(tenant_id);
         tracing::info!(
             identity.id = %identity.id,
             scope.id = %leaf.id,
             anchor.id = %anchor.id,
             "service identity registered"
         );
-        Ok((StatusCode::CREATED, Json(identity)))
+        Ok((
+            StatusCode::CREATED,
+            Json(ServiceIdentityView::from(identity)),
+        ))
     }
     .await;
     respond(&state, "register", result).await
@@ -177,6 +213,18 @@ pub(crate) async fn register(
 
 /// `GET /v1/service-identities` — the tenant's registered agents. A
 /// tenant-plane read: `ServiceIdentityRead` at the tenant.
+#[utoipa::path(
+    get,
+    path = "/v1/service-identities",
+    operation_id = "list_service_identities",
+    tag = "service-identities",
+    responses(
+        (status = 200, description = "Registered service identities", body = ServiceIdentitiesResponse),
+        (status = 401, description = "No usable credential", body = crate::workspaces::ApiErrorBody),
+        (status = 403, description = "Service identity inventory is not visible", body = crate::workspaces::ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
 #[tracing::instrument(name = "service_identity.list", skip_all)]
 pub(crate) async fn list(State(state): State<AppState>) -> Response {
     let result = async {
@@ -204,7 +252,9 @@ pub(crate) async fn list(State(state): State<AppState>) -> Response {
         )
         .await?;
         commit(tx).await?;
-        Ok(Json(ServiceIdentitiesResponse { identities }))
+        Ok(Json(ServiceIdentitiesResponse {
+            identities: identities.into_iter().map(Into::into).collect(),
+        }))
     }
     .await;
     respond(&state, "list", result).await
@@ -212,6 +262,20 @@ pub(crate) async fn list(State(state): State<AppState>) -> Response {
 
 /// `GET /v1/service-identities/{id}` — one registration.
 /// `ServiceIdentityRead` on the anchor.
+#[utoipa::path(
+    get,
+    path = "/v1/service-identities/{id}",
+    operation_id = "get_service_identity",
+    tag = "service-identities",
+    params(("id" = String, Path, format = "uuid")),
+    responses(
+        (status = 200, description = "One registered service identity", body = ServiceIdentityView),
+        (status = 401, description = "No usable credential", body = crate::workspaces::ApiErrorBody),
+        (status = 403, description = "The service identity is not visible", body = crate::workspaces::ApiErrorBody),
+        (status = 404, description = "The identity is absent, non-service or outside the tenant", body = crate::workspaces::ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
 #[tracing::instrument(name = "service_identity.get", skip_all)]
 pub(crate) async fn get(State(state): State<AppState>, Path(id): Path<IdentityId>) -> Response {
     let result = async {
@@ -239,7 +303,7 @@ pub(crate) async fn get(State(state): State<AppState>, Path(id): Path<IdentityId
         )
         .await?;
         commit(tx).await?;
-        Ok(Json(identity))
+        Ok(Json(ServiceIdentityView::from(identity)))
     }
     .await;
     respond(&state, "get", result).await
@@ -249,6 +313,20 @@ pub(crate) async fn get(State(state): State<AppState>, Path(id): Path<IdentityId
 /// and its personal leaf. `ServiceIdentityManage` on the anchor. Effective
 /// on the next request: an unregistered IdP subject is quarantined at the
 /// seam (ADR-0013 decision 6).
+#[utoipa::path(
+    delete,
+    path = "/v1/service-identities/{id}",
+    operation_id = "remove_service_identity",
+    tag = "service-identities",
+    params(("id" = String, Path, format = "uuid")),
+    responses(
+        (status = 204, description = "The service identity was revoked"),
+        (status = 401, description = "No usable credential", body = crate::workspaces::ApiErrorBody),
+        (status = 403, description = "Service identity management is not permitted", body = crate::workspaces::ApiErrorBody),
+        (status = 404, description = "The identity is absent, non-service or outside the tenant", body = crate::workspaces::ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
 #[tracing::instrument(name = "service_identity.remove", skip_all)]
 pub(crate) async fn remove(State(state): State<AppState>, Path(id): Path<IdentityId>) -> Response {
     let result = async {
@@ -263,15 +341,21 @@ pub(crate) async fn remove(State(state): State<AppState>, Path(id): Path<Identit
             Some(&anchor),
         )
         .await?;
-        // Row first (its FK pins the leaf), then the leaf.
+        // Row first (its FK pins the scope), then the scope: archived
+        // rather than row-deleted, because nothing in the governed model
+        // deletes a scope — the identity row going is what makes the
+        // agent's credential refuse, and the archived scope keeps what
+        // audit events name addressable.
         if !identities::delete_service(&mut *tx, tenant_id, identity.id).await? {
             return Err(not_found(id));
         }
-        if !hierarchy::delete(&mut tx, identity.scope_id).await? {
-            return Err(Error::Internal {
-                message: format!("service identity {id} lost its personal leaf mid-delete"),
-            });
-        }
+        scopes::set_status(
+            &mut *tx,
+            tenant_id,
+            identity.scope_id,
+            synveda_types::scope::ScopeStatus::Archived,
+        )
+        .await?;
         audit::record(
             &mut tx,
             tenant_id,
@@ -281,13 +365,13 @@ pub(crate) async fn remove(State(state): State<AppState>, Path(id): Path<Identit
             json!({
                 "authz": audit::decision_context(Action::ServiceIdentityManage, &authorized),
                 "identity": {"id": identity.id, "subject": identity.subject},
-                "anchor": {"slug": anchor.slug, "path": anchor.path},
+                "anchor": {"slug": anchor.slug},
             }),
         )
         .await?;
         commit(tx).await?;
         // The leaf's cached chain and fragment must go (ADR-0016, ADR-0017).
-        state.invalidate_hierarchy(tenant_id);
+        state.invalidate_scopes(tenant_id);
         tracing::info!(identity.id = %id, "service identity revoked");
         Ok(StatusCode::NO_CONTENT)
     }
@@ -309,22 +393,22 @@ async fn found_service(
     tx: &mut sqlx::PgConnection,
     tenant_id: synveda_types::TenantId,
     id: IdentityId,
-) -> Result<(Identity, HierarchyNode)> {
+) -> Result<(Identity, synveda_types::scope::Scope)> {
     let identity = identities::by_id(&mut *tx, tenant_id, id)
         .await?
         .filter(|identity| {
             identity.tenant_id == tenant_id && identity.kind == IdentityKind::Service
         })
         .ok_or_else(|| not_found(id))?;
-    let leaf = hierarchy::node(&mut *tx, identity.scope_id)
+    let own = scopes::get(&mut *tx, tenant_id, identity.scope_id)
         .await?
         .ok_or_else(|| Error::Internal {
-            message: format!("service identity {id} lost its personal leaf"),
+            message: format!("service identity {id} lost its scope"),
         })?;
-    let anchor_id = leaf.parent_id.ok_or_else(|| Error::Internal {
-        message: format!("service identity {id}'s personal leaf has no parent"),
+    let anchor_id = own.parent_scope_id.ok_or_else(|| Error::Internal {
+        message: format!("service identity {id}'s scope has no parent"),
     })?;
-    let anchor = hierarchy::node(&mut *tx, anchor_id)
+    let anchor = scopes::get(&mut *tx, tenant_id, anchor_id)
         .await?
         .ok_or_else(|| Error::Internal {
             message: format!("service identity {id}'s anchor vanished"),

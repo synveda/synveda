@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select c.descendant_id as \"scope_id!\", max(c.distance) as \"depth!\"\n        from scope_closure c\n        where c.tenant_id = $1 and c.descendant_id = any($2::uuid[])\n        group by c.descendant_id\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "scope_id!",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "depth!",
+        "type_info": "Int4"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false,
+      null
+    ]
+  },
+  "hash": "85bd698914c6e388575780c9003fe043e82cab796e1b38995dc523916b023ba7"
+}

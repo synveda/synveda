@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select rolcanlogin as \"rolcanlogin!\", rolsuper as \"rolsuper!\",\n                  rolbypassrls as \"rolbypassrls!\",\n                  pg_has_role($1, 'synveda_app', 'member') as \"member!\"\n             from pg_catalog.pg_roles\n            where rolname = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "rolcanlogin!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 1,
+        "name": "rolsuper!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 2,
+        "name": "rolbypassrls!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 3,
+        "name": "member!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Name"
+      ]
+    },
+    "nullable": [
+      true,
+      true,
+      true,
+      null
+    ]
+  },
+  "hash": "296767ae9807d8bfa8222a409e4eecf8d2f5cee9aabc241fe789761d53c137f9"
+}

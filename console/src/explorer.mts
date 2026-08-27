@@ -23,105 +23,29 @@
  * waiting to be noticed.
  */
 
-/** A hierarchy node, as `/v1/hierarchy/*` serves it. */
-export interface Node {
-  id: string;
-  parent_id: string | null;
-  kind: "org" | "division" | "department" | "team" | "user";
-  slug: string;
-  name: string;
-  depth: number;
-  path: string;
-}
+import type {
+  BatchResponse,
+  ListResponse,
+  NodeCapabilities,
+  RelaxationListView,
+  RelaxationView,
+  ScopeView,
+} from "./generated/api.js";
 
-/** Where an inherited thing came from. One shape, three admin planes. */
-export interface Origin {
-  kind: string;
-  scope_id?: string | null;
-}
+/** A governed scope, as `/v1/admin/scopes` serves it (CPR-7). */
+export type Node = ScopeView;
 
-export interface EffectivePack {
-  name: string;
-  version: number;
-  origin: Origin;
-}
+/** One level of the tree: the parent it hangs from, and its children. */
+export type ScopeLevel = ListResponse;
 
-export interface EffectiveBinding {
-  subject: string;
-  role: string;
-  scope_id: string | null;
-  origin: Origin;
-}
+export type Capabilities = NodeCapabilities;
 
-export interface EffectiveBindings {
-  bindings: EffectiveBinding[];
-  chain: string[];
-}
+/** The batch probe's envelope. */
+export type CapabilityBatch = BatchResponse;
 
-export interface Capabilities {
-  scope_id: string;
-  /** Absent when the reader may not read the node itself (ADR-0058
-   * decision 3): the verdicts beside it are the reader's own either way. */
-  scope_path?: string;
-  pack?: EffectivePack;
-  roles: string[];
-  actions: Record<string, boolean>;
-  read_tiers: Record<string, string[]>;
-  role_assign: Record<string, boolean>;
-}
+export type Relaxation = RelaxationView;
 
-export interface Lapse {
-  id: string;
-  grantee_scope_id: string;
-  target_scope_id: string;
-  grantee_scope_path?: string;
-  target_scope_path?: string;
-  action: string;
-  reason: string;
-  granted_at: string;
-  expires_at: string;
-  outcome: "active" | "expired" | "revoked";
-}
-
-export interface LapseListing {
-  lapses: Lapse[];
-  standing_only?: boolean;
-  truncated?: boolean;
-  max_lapses?: number;
-}
-
-/**
- * An origin in words, relative to the node that was asked about.
- *
- * `askedAbout` is the frame and without it the sentence cannot be written:
- * `{kind: "assigned", scope_id: X}` means "assigned here" or "inherited
- * from X" depending entirely on which node the reader is looking at, and a
- * renderer that dropped the comparison would tell a steward their team had
- * its own pack when it does not.
- */
-export function describeOrigin(origin: Origin, askedAbout: string): string {
-  switch (origin.kind) {
-    case "assigned":
-      return origin.scope_id === askedAbout ? "assigned here" : "inherited";
-    case "tenant-wide":
-      return "tenant-wide";
-    case "tenant-default":
-      return "the tenant default";
-    case "default":
-      return "the built-in default";
-    case "fallback":
-      // Worth its own words: the assigned pack did not compile, so this
-      // node is running something nobody chose for it.
-      return "a fallback — the assigned pack did not compile";
-    default:
-      return origin.kind;
-  }
-}
-
-/** Whether an origin points somewhere other than the node asked about. */
-export function isInherited(origin: Origin, askedAbout: string): boolean {
-  return origin.kind === "assigned" && origin.scope_id !== askedAbout;
-}
+export type RelaxationListing = RelaxationListView;
 
 /**
  * The actions a capability answer says yes to, sorted.
@@ -149,13 +73,6 @@ export function mayRead(capabilities: Capabilities): [string, string[]][] {
 }
 
 /** The roles this reader may bind here, sorted. */
-export function mayBind(capabilities: Capabilities): string[] {
-  return Object.entries(capabilities.role_assign)
-    .filter(([, permitted]) => permitted)
-    .map(([role]) => role)
-    .sort();
-}
-
 /**
  * Whether a capability answer offers an action.
  *
@@ -169,28 +86,12 @@ export function offers(capabilities: Capabilities | null, action: string): boole
 }
 
 /**
- * The lapses touching a scope, from either end.
+ * Relaxations governed at this exact scope.
  *
- * Both ends, because that is the whole of ADR-0058 decision 7: a grant is
- * as much a fact about the team that received it as about the team that
- * disclosed. A view that showed only the target end would tell the steward
- * of a granted team that nothing is happening to them.
+ * A CPR-31 relaxation freezes one provisioned identity as its subject and
+ * one non-principal scope as its target. There is no inherited grantee end
+ * and therefore no client-side reconstruction of one.
  */
-export function lapsesTouching(lapses: Lapse[], scopeId: string): Lapse[] {
-  return lapses.filter(
-    (lapse) => lapse.grantee_scope_id === scopeId || lapse.target_scope_id === scopeId,
-  );
-}
-
-/**
- * An end of a grant, as a reader may see it: the path when they may read
- * that scope, the id when they may not.
- *
- * The gateway omits the path for an end this caller cannot read, so a grant
- * visible from one end never discloses where the other end sits in the
- * organisation. The id is left because it is enough to name the row and not
- * enough to locate it.
- */
-export function describeEnd(path: string | undefined, id: string): string {
-  return path ?? `«${id.slice(0, 8)}»`;
+export function relaxationsAt(relaxations: Relaxation[], scopeId: string): Relaxation[] {
+  return relaxations.filter((relaxation) => relaxation.governing_scope_id === scopeId);
 }

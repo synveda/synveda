@@ -1,9 +1,16 @@
 # ADR-0053: a skill's quality score is two halves that are never averaged — a rubric recomputed from the bundle and a checklist bound to the bytes it was answered about — gated by a threshold a pack sets and released by the override the security gate deliberately refused
 
-- **Status**: Accepted
+- **Status**: Superseded by ADR-0085
 - **Date**: 2026-08-03
 - **Feature(s)**: SKIL-3
 - **Deciders**: sujitn
+
+ADR-0085 retains the deterministic rubric score/version as evidence on each
+immutable Skill version and recomputes it before application and in the
+non-executing validation sandbox. The mutable draft-bound checklist,
+quality-override row/action/route and channel publication gate are deleted at
+the pre-1.0 epoch boundary. Human governance is the version-bound VedaFlow
+approval record; controlled fixture evidence is an immutable `SkillTestRun`.
 
 ## Context
 

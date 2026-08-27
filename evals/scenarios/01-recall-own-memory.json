@@ -8,13 +8,13 @@
       "events": [
         {
           "key": "deploy",
-          "kind": "transcript_delta",
+          "event_type": "message.user",
           "text": "How to deploy: run the following, make deploy; never push to main directly.",
           "marker": "make deploy"
         },
         {
           "key": "rollout",
-          "kind": "decision",
+          "event_type": "message.assistant",
           "text": "The platform team settled on blue-green rollouts for the payments service.",
           "marker": "blue-green"
         }
@@ -26,6 +26,6 @@
     "session_id": "eval:recall:probe"
   },
   "expect": {
-    "records": ["deploy", "rollout"]
+    "knowledge": ["deploy", "rollout"]
   }
 }

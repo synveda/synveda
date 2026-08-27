@@ -94,7 +94,7 @@ pub struct DirectorySyncState {
 /// A human's authorisation to seal past the breaker (ADR-0060 decision 10).
 ///
 /// Reasoned, time-boxed, signed, and bounded by a ceiling — the fourth being
-/// the one the lapse does not have, and the one that stops "authorise 300,
+/// what stops "authorise 300,
 /// the directory degrades further, seal 5,000".
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SealAuthorisation {
@@ -308,6 +308,7 @@ pub async fn complete_pass(
 pub async fn mark_absent(
     executor: impl PgExecutor<'_>,
     tenant_id: TenantId,
+    directory_source: &str,
     seen: &[DirectoryUserId],
 ) -> Result<u64> {
     let ids: Vec<Uuid> = seen.iter().map(DirectoryUserId::as_uuid).collect();
@@ -317,10 +318,12 @@ pub async fn mark_absent(
            set missing_passes = missing_passes + 1,
                missing_since = coalesce(missing_since, now())
          where tenant_id = $1
+           and directory_source = $2
            and active
-           and not (id = any($2))
+           and not (id = any($3))
         "#,
         tenant_id.as_uuid(),
+        directory_source,
         &ids,
     )
     .execute(executor)
@@ -348,6 +351,7 @@ pub async fn mark_absent(
 pub async fn mark_present(
     executor: impl PgExecutor<'_>,
     tenant_id: TenantId,
+    directory_source: &str,
     seen: &[DirectoryUserId],
 ) -> Result<u64> {
     let ids: Vec<Uuid> = seen.iter().map(DirectoryUserId::as_uuid).collect();
@@ -356,10 +360,12 @@ pub async fn mark_present(
         update scim_users
            set missing_passes = 0, missing_since = null
          where tenant_id = $1
-           and id = any($2)
+           and directory_source = $2
+           and id = any($3)
            and missing_passes > 0
         "#,
         tenant_id.as_uuid(),
+        directory_source,
         &ids,
     )
     .execute(executor)
@@ -381,14 +387,19 @@ pub async fn mark_present(
     fields(tenant.id = %tenant_id),
     err(Display)
 )]
-pub async fn reset_absences(executor: impl PgExecutor<'_>, tenant_id: TenantId) -> Result<u64> {
+pub async fn reset_absences(
+    executor: impl PgExecutor<'_>,
+    tenant_id: TenantId,
+    directory_source: &str,
+) -> Result<u64> {
     let cleared = sqlx::query!(
         r#"
         update scim_users
            set missing_passes = 0, missing_since = null
-         where tenant_id = $1 and missing_passes > 0
+         where tenant_id = $1 and directory_source = $2 and missing_passes > 0
         "#,
         tenant_id.as_uuid(),
+        directory_source,
     )
     .execute(executor)
     .await
@@ -412,21 +423,24 @@ pub async fn reset_absences(executor: impl PgExecutor<'_>, tenant_id: TenantId) 
 pub async fn absent_at_least(
     executor: impl PgExecutor<'_>,
     tenant_id: TenantId,
+    directory_source: &str,
     passes: i32,
 ) -> Result<Vec<DirectoryUser>> {
     let rows = sqlx::query_as!(
         UserRow,
         r#"
-        select id, tenant_id, external_id, user_name, active, display_name,
+        select id, tenant_id, directory_source, external_id, user_name, active, display_name,
                given_name, family_name, work_email, identity_id, version,
                created_at, updated_at
         from scim_users
         where tenant_id = $1
+          and directory_source = $2
           and active
-          and missing_passes >= $2
+          and missing_passes >= $3
         order by missing_since, id
         "#,
         tenant_id.as_uuid(),
+        directory_source,
         passes,
     )
     .fetch_all(executor)
@@ -441,8 +455,8 @@ pub async fn absent_at_least(
 /// Grants a seal authorisation (ADR-0060 decision 10).
 ///
 /// The window starts **now** and both ends come from the database's clock,
-/// so an authorisation can never be born already expired by a skewed one —
-/// `lapses::grant`'s rule, for the same reason. Any authorisation already in
+/// so an authorisation can never be born already expired by a skewed one.
+/// Any authorisation already in
 /// force is replaced rather than added to: at most one stands at a time, so
 /// there is never a question of which ceiling applies.
 ///
@@ -505,8 +519,8 @@ pub async fn authorise_seals(
 /// The clock is the database's `now()`, which is `transaction_timestamp()`
 /// and therefore **frozen for the life of the calling transaction**. So the
 /// window is judged as at the moment the transaction opened, not the moment
-/// this statement runs: one pass judges one clock throughout, which is the
-/// rule `lapses::active_for_scopes` states and the reason it gives. It also
+/// this statement runs: one pass judges one clock throughout, matching the
+/// policy-relaxation read predicate. It also
 /// means an authorisation cannot expire out from under a pass mid-way, and
 /// that a pass held open for longer than the window could still spend one —
 /// immaterial while windows are operator-sized in hours and this runs in a

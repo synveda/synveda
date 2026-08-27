@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "insert into vedaflow_objects (tenant_id, hash, kind, content, size_bytes)\n         values ($1, $2, 'configuration', $3, $4)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Bytea",
+        "Bytea",
+        "Int4"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "0487a6ce13b64404d59a94863ed4743ca1f950e19c603e79c301563c92a23103"
+}

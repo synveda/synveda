@@ -1,9 +1,29 @@
 # ADR-0020: Observe ingestion — RLS-staged events, PGMQ work signals, buffer-level idempotency
 
-- **Status**: Accepted
+- **Status**: Accepted, **superseded in part 2026-08-23 by ADR-0078** (CPR-12): the route is gone, the doctrine is not
 - **Date**: 2026-07-19
 - **Feature(s)**: MEM-1
 - **Deciders**: sujitn
+
+## Superseded in part (2026-08-23, CPR-12): `POST /v1/observe` is deleted
+
+ADR-0078 decision 1 makes `POST /v1/sessions/{id}/events` the only write
+seam for observation. The global route this ADR designed, its
+`observe_events` staging table, its `observe` PGMQ queue and its
+`observe_quarantine` table are deleted by migration `0046`, and
+`ObserveKind`'s three-name vocabulary is replaced by the session plane's
+thirteen types with `carries_memory()` deciding which ones enqueue work.
+
+**What survives is the whole of why this ADR exists.** Staging under RLS
+before acknowledging, a content-free work signal on a queue, idempotency
+decided at the buffer rather than at the pipeline, the <20ms ack budget and
+the archive-lock that makes delivery exactly-once are all unchanged — they
+moved to `session_events` and are asserted there. Read this ADR for the
+reasoning and ADR-0078 for the address.
+
+The one substantive change of behaviour: an event's idempotency key was
+per-tenant and is now per-run (`(session_id, client_event_id)`), because a
+run is the unit a client redelivers.
 
 ## Context
 

@@ -5,9 +5,9 @@ use std::str::FromStr;
 
 use serde::Serialize;
 use serde::de::DeserializeOwned;
+use synveda_types::session::SessionEventType;
 use synveda_types::{
-    CompositionConfig, Depth, Error, Graph, IdentityId, InjectChannels, ObserveKind, RecordClass,
-    RecordId, RecordKind, RedactionConfig, RedactionMode, Role, RoleBinding, ScopeId, Sensitivity,
+    CompositionConfig, Error, IdentityId, RedactionConfig, RedactionMode, ScopeId, Sensitivity,
     Tenant, TenantId, TenantStatus,
 };
 
@@ -67,7 +67,6 @@ macro_rules! id_tests {
 id_tests!(tenant_id, TenantId);
 id_tests!(scope_id, ScopeId);
 id_tests!(identity_id, IdentityId);
-id_tests!(record_id, RecordId);
 
 // ── Sensitivity ──────────────────────────────────────────────────────────────
 
@@ -162,22 +161,6 @@ fn redaction_config_rejects_unknown_fields() {
 // ── Composition config ───────────────────────────────────────────────────────
 
 #[test]
-fn inject_channels_roundtrip_kebab_case() {
-    for channels in InjectChannels::ALL {
-        json_roundtrip(&channels);
-        let json = serde_json::to_string(&channels).expect("serialize");
-        assert_eq!(json, format!("\"{}\"", channels.as_str()));
-        assert_eq!(
-            InjectChannels::from_str(channels.as_str()).unwrap(),
-            channels
-        );
-    }
-    assert!(serde_json::from_str::<InjectChannels>("\"derived-only\"").is_err());
-    assert!(InjectChannels::PublishedAndDerived.includes_derived());
-    assert!(!InjectChannels::PublishedOnly.includes_derived());
-}
-
-#[test]
 fn composition_config_roundtrips_and_defaults_to_the_product_config() {
     json_roundtrip(&CompositionConfig::DEFAULT);
     assert_eq!(
@@ -187,10 +170,6 @@ fn composition_config_roundtrips_and_defaults_to_the_product_config() {
          (ADR-0025 decision 3 — the config only ever narrows)"
     );
     assert_eq!(CompositionConfig::DEFAULT.budget_tokens, 1_500, "seed §4.4");
-    assert_eq!(
-        CompositionConfig::DEFAULT.channels,
-        InjectChannels::PublishedAndDerived
-    );
 }
 
 #[test]
@@ -199,170 +178,132 @@ fn composition_config_rejects_unknown_fields() {
     // loudly, never silently compose under a default it didn't choose.
     assert!(
         serde_json::from_str::<CompositionConfig>(
-            r#"{"budget_tokens":900,"channels":"published-only","chanels":"published-only"}"#
+            r#"{"budget_tokens":900,"summary_chars":240,"channels":"published-only"}"#
         )
         .is_err()
     );
 }
 
-// ── Record kind & class ──────────────────────────────────────────────────────
+// ── Session event type (CPR-10, ADR-0076; CPR-12, ADR-0078) ─────────────────
+//
+// `ObserveKind` lived here until the observe cutover. It named four things an
+// observe event could report; `SessionEventType` names thirteen things that
+// can happen in a run, and it is the vocabulary extraction routes on now.
 
 #[test]
-fn record_kind_all_roundtrip_and_match_as_str() {
-    for kind in RecordKind::ALL {
-        json_roundtrip(&kind);
-        let json = serde_json::to_string(&kind).expect("serialize");
-        assert_eq!(json, format!("\"{}\"", kind.as_str()));
-        assert_eq!(RecordKind::from_str(kind.as_str()).unwrap(), kind);
-        assert_eq!(kind.to_string(), kind.as_str());
+fn session_event_type_all_roundtrip_and_match_as_str() {
+    for event_type in SessionEventType::ALL {
+        json_roundtrip(event_type);
+        let json = serde_json::to_string(event_type).expect("serialize");
+        assert_eq!(json, format!("\"{}\"", event_type.as_str()));
+        assert_eq!(
+            SessionEventType::from_str(event_type.as_str()).unwrap(),
+            *event_type
+        );
     }
 }
 
 #[test]
-fn record_class_all_roundtrip_and_match_as_str() {
-    for class in RecordClass::ALL {
-        json_roundtrip(&class);
-        let json = serde_json::to_string(&class).expect("serialize");
-        assert_eq!(json, format!("\"{}\"", class.as_str()));
-        assert_eq!(RecordClass::from_str(class.as_str()).unwrap(), class);
-        assert_eq!(class.to_string(), class.as_str());
-    }
-}
-
-#[test]
-fn record_kind_and_class_reject_unknown_values() {
-    assert!(serde_json::from_str::<RecordKind>("\"canonical\"").is_err());
-    assert!(RecordKind::from_str("Pinned").is_err(), "lowercase only");
-    assert!(serde_json::from_str::<RecordClass>("\"note\"").is_err());
-    assert!(RecordClass::from_str("Fact").is_err(), "lowercase only");
-}
-
-// ── Observe kind (MEM-1, ADR-0020; `assertion` from ADR-0057) ────────────────
-
-#[test]
-fn observe_kind_all_roundtrip_and_match_as_str() {
-    for kind in ObserveKind::ALL {
-        json_roundtrip(&kind);
-        let json = serde_json::to_string(&kind).expect("serialize");
-        assert_eq!(json, format!("\"{}\"", kind.as_str()));
-        assert_eq!(ObserveKind::from_str(kind.as_str()).unwrap(), kind);
-        assert_eq!(kind.to_string(), kind.as_str());
-    }
-}
-
-#[test]
-fn observe_kind_rejects_unknown_kinds() {
-    assert!(serde_json::from_str::<ObserveKind>("\"summary\"").is_err());
+fn session_event_type_rejects_unknown_names() {
+    assert!(serde_json::from_str::<SessionEventType>("\"summary\"").is_err());
     assert!(
-        ObserveKind::from_str("Decision").is_err(),
-        "snake_case only"
+        SessionEventType::from_str("message_user").is_err(),
+        "dotted, not snake_cased"
     );
     assert!(
-        ObserveKind::from_str("transcriptDelta").is_err(),
-        "snake_case only"
+        SessionEventType::from_str("MessageUser").is_err(),
+        "dotted, not the Rust spelling"
+    );
+    // The vocabulary that left with the observe plane must not creep back in.
+    for gone in ["transcript_delta", "tool_result", "decision", "assertion"] {
+        assert!(
+            SessionEventType::from_str(gone).is_err(),
+            "{gone} was an ObserveKind and is not an event type"
+        );
+    }
+}
+
+/// The wire names are stored values under a CHECK constraint (migration 0044,
+/// widened by 0046), so renaming one silently orphans every row already
+/// written with the old spelling. Pinned literally, on purpose: this test is
+/// meant to fail when someone edits `as_str`.
+#[test]
+fn session_event_type_wire_names_are_pinned_to_the_stored_vocabulary() {
+    assert_eq!(
+        SessionEventType::ALL
+            .iter()
+            .map(|event_type| event_type.as_str())
+            .collect::<Vec<_>>(),
+        vec![
+            "session.started",
+            "session.ended",
+            "message.user",
+            "message.assistant",
+            "tool.invoked",
+            "tool.result",
+            "file.read",
+            "file.changed",
+            "command.executed",
+            "skill.loaded",
+            "context.requested",
+            "adapter.warning",
+            "memory.asserted",
+        ]
     );
 }
 
-/// The wire names are stored values under a CHECK constraint (migration
-/// 0012, widened by 0035), so renaming one silently orphans every row
-/// already written with the old spelling. Pinned literally, on purpose:
-/// this test is meant to fail when someone edits `as_str`.
+/// ADR-0057 decision 8's whole point, carried across the cutover: exactly one
+/// name reports that a model composed the content rather than that a host
+/// observed it. If a later variant joins the model-driven side it has to come
+/// here deliberately rather than by inheriting a default.
 #[test]
-fn observe_kind_wire_names_are_pinned_to_the_stored_vocabulary() {
-    assert_eq!(ObserveKind::TranscriptDelta.as_str(), "transcript_delta");
-    assert_eq!(ObserveKind::ToolResult.as_str(), "tool_result");
-    assert_eq!(ObserveKind::Decision.as_str(), "decision");
-    assert_eq!(ObserveKind::Assertion.as_str(), "assertion");
-}
-
-/// ADR-0057 decision 8's whole point: exactly one kind reports that a model
-/// composed the content. If a later variant joins the model-driven side it
-/// has to come here deliberately rather than by inheriting a default.
-#[test]
-fn only_assertion_is_model_asserted() {
-    let asserted: Vec<_> = ObserveKind::ALL
-        .into_iter()
-        .filter(ObserveKind::is_model_asserted)
+fn only_memory_asserted_is_model_composed() {
+    assert_eq!(
+        SessionEventType::MemoryAsserted.as_str(),
+        "memory.asserted",
+        "the one name that is a provenance claim rather than an observation"
+    );
+    assert_eq!(SessionEventType::MemoryAsserted.family(), "memory");
+    // Nothing else shares its family, which is what keeps the claim separable.
+    let family: Vec<_> = SessionEventType::ALL
+        .iter()
+        .filter(|event_type| event_type.family() == "memory")
         .collect();
-    assert_eq!(asserted, vec![ObserveKind::Assertion]);
-}
-
-// ── Graph vocabulary (GRPH-1, ADR-0043) ──────────────────────────────────────
-
-#[test]
-fn graph_all_roundtrip_and_match_as_str() {
-    for graph in Graph::ALL {
-        json_roundtrip(&graph);
-        let json = serde_json::to_string(&graph).expect("serialize");
-        assert_eq!(json, format!("\"{}\"", graph.as_str()));
-        assert_eq!(Graph::from_str(graph.as_str()).unwrap(), graph);
-        assert_eq!(graph.to_string(), graph.as_str());
-    }
-}
-
-#[test]
-fn depth_all_roundtrip_and_match_as_str() {
-    for depth in Depth::ALL {
-        json_roundtrip(&depth);
-        let json = serde_json::to_string(&depth).expect("serialize");
-        assert_eq!(json, format!("\"{}\"", depth.as_str()));
-        assert_eq!(Depth::from_str(depth.as_str()).unwrap(), depth);
-        assert_eq!(depth.to_string(), depth.as_str());
-    }
-    assert_eq!(Depth::One.hops(), 1);
-    assert_eq!(Depth::Two.hops(), 2);
-}
-
-/// The discriminator ADR-0043 decision 2 says the API cannot omit, and the
-/// depth decision 9 says cannot be an integer: both refuse anything outside
-/// their vocabulary, so an undisciplined traversal cannot be *deserialised*
-/// into existence either — the wire is the one seam where the type system
-/// is not already the answer.
-#[test]
-fn graph_and_depth_reject_unknown_values() {
-    assert!(serde_json::from_str::<Graph>("\"social\"").is_err());
-    assert!(Graph::from_str("Entity").is_err(), "lowercase only");
-    assert!(serde_json::from_str::<Depth>("\"three\"").is_err());
-    assert!(
-        serde_json::from_str::<Depth>("2").is_err(),
-        "not an integer"
-    );
-    assert!(Depth::from_str("One").is_err(), "lowercase only");
+    assert_eq!(family, vec![&SessionEventType::MemoryAsserted]);
 }
 
 // ── Roles ────────────────────────────────────────────────────────────────────
+// The grant keys are the one vocabulary since CPR-7 (ADR-0074 decision 6);
+// the old binding vocabulary's roundtrips left with it.
 
 #[test]
-fn role_all_roundtrip_and_match_as_str() {
-    for role in Role::ALL {
-        json_roundtrip(&role);
-        let json = serde_json::to_string(&role).expect("serialize");
+fn role_keys_roundtrip_and_match_as_str() {
+    use std::str::FromStr;
+    use synveda_types::access::RoleKey;
+    for role in RoleKey::ALL {
+        json_roundtrip(role);
+        let json = serde_json::to_string(role).expect("serialize");
         assert_eq!(json, format!("\"{}\"", role.as_str()));
-        assert_eq!(Role::from_str(role.as_str()).unwrap(), role);
+        assert_eq!(RoleKey::from_str(role.as_str()).unwrap(), *role);
         assert_eq!(role.to_string(), role.as_str());
     }
 }
 
 #[test]
-fn role_rejects_unknown_values() {
-    assert!(serde_json::from_str::<Role>("\"admin\"").is_err());
-    assert!(
-        Role::from_str("OrgAdmin").is_err(),
-        "wire form is kebab-case"
-    );
-    assert!(Role::from_str("org_admin").is_err(), "kebab, not snake");
-}
-
-#[test]
-fn role_binding_roundtrips_scoped_and_tenant_wide() {
-    for scope_id in [Some(ScopeId::new()), None] {
-        json_roundtrip(&RoleBinding {
-            tenant_id: TenantId::new(),
-            subject: "idp|user-42".into(),
-            scope_id,
-            role: Role::Steward,
-            updated_at: "2026-07-19T12:00:00Z".parse().expect("timestamp"),
-        });
+fn role_keys_reject_the_old_vocabulary_by_name() {
+    use std::str::FromStr;
+    use synveda_types::access::RoleKey;
+    for old in [
+        "steward",
+        "org-admin",
+        "compliance",
+        "security-reviewer",
+        "contributor",
+    ] {
+        assert!(
+            RoleKey::from_str(old).is_err(),
+            "the binding vocabulary's {old:?} must fail by name"
+        );
     }
 }
 

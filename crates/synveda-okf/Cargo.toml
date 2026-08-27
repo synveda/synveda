@@ -1,0 +1,22 @@
+[package]
+name = "synveda-okf"
+description = "Bounded Open Knowledge Format exchange adapter"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+synveda-types = { workspace = true }
+
+blake3 = { workspace = true }
+chrono = { workspace = true }
+flate2 = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+tar = { workspace = true }
+zip = { workspace = true }
+
+[dev-dependencies]
+tempfile = "3"

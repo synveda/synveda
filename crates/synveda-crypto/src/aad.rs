@@ -32,8 +32,8 @@ pub enum Purpose {
     ConsoleAccessToken,
     /// `console_sessions.refresh_token_sealed` (deployment scope).
     ConsoleRefreshToken,
-    /// A tenant's outbound directory credential (ADR-0064 decision 9).
-    DirectoryCredential,
+    /// One stable tenant-secret aggregate (CPR-35, ADR-0094).
+    TenantSecret,
     /// The per-export data key carried in a sealed archive's header
     /// (decision 8).
     ExportKey,
@@ -54,7 +54,7 @@ impl Purpose {
         match self {
             Purpose::ConsoleAccessToken => "console.access_token",
             Purpose::ConsoleRefreshToken => "console.refresh_token",
-            Purpose::DirectoryCredential => "directory.credential",
+            Purpose::TenantSecret => "tenant.secret",
             Purpose::ExportKey => "export.key",
             Purpose::TenantExport => "export.body",
             Purpose::DataKey => "kms.data_key",
@@ -148,13 +148,13 @@ mod tests {
         let a = compose(
             HEADER,
             KeyScope::Tenant(one),
-            Purpose::DirectoryCredential,
+            Purpose::TenantSecret,
             RowKey::Name("graph"),
         );
         let b = compose(
             HEADER,
             KeyScope::Tenant(two),
-            Purpose::DirectoryCredential,
+            Purpose::TenantSecret,
             RowKey::Name("graph"),
         );
         assert_ne!(a, b, "two tenants must not share AAD");
@@ -266,7 +266,7 @@ mod tests {
         let all = [
             Purpose::ConsoleAccessToken,
             Purpose::ConsoleRefreshToken,
-            Purpose::DirectoryCredential,
+            Purpose::TenantSecret,
             Purpose::ExportKey,
             Purpose::TenantExport,
             Purpose::DataKey,

@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "delete from scope_grants where tenant_id = $1 and id = $2 and source = 'directory'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "2aff6a56395b14178bc67331725ceda707accc49a39d2c5c3ac5dee09af9e0d6"
+}

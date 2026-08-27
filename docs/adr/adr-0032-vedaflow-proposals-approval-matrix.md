@@ -157,7 +157,14 @@ Decisions, specifically:
    launders unreviewed text through a completed review.
 
 7. **Distinct approvers are counted by identity, and the proposer is not
-   special-cased.** There is no self-approval ban. A proposer's approval
+   special-cased.**
+
+   > **Superseded for recorded proposal review by ADR-0091.** The common
+   > context-platform proposal now has an explicit author and its live matrix
+   > may forbid author review or require a separate effect actor. The direct
+   > authored-channel route remains the single-actor case described below.
+
+   There is no universal self-approval ban. A proposer's approval
    counts as one identity if they hold a role the matrix asked for. What
    forbids unilateral action is `distinct_approvers >= 2`, and it forbids
    it identically on both surfaces.

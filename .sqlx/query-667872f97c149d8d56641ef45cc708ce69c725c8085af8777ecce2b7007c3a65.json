@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        select event_id\n        from capture_candidate_events\n        where tenant_id = $1 and candidate_id = $2\n        order by ordinal\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "event_id",
+        "type_info": "Uuid"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "667872f97c149d8d56641ef45cc708ce69c725c8085af8777ecce2b7007c3a65"
+}

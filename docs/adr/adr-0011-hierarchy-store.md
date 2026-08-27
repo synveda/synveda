@@ -5,6 +5,14 @@
 - **Feature(s)**: HIER-1
 - **Deciders**: sujitn
 
+> **Superseded by ADR-0074 (CPR-7, 2026-08-20).** `hierarchy_nodes`,
+> `hierarchy_closure` and the rank vocabulary this ADR decided are deleted
+> whole. The closure-table shape and its latency discipline survive
+> unchanged in `scopes` + `scope_closure` (ADR-0070); what does not survive
+> is the fixed `org → division → department → team → user` ladder and the
+> child-outranks-parent rule. Nothing was translated: no row of
+> `hierarchy_nodes` became a scope, in either direction, at any time.
+
 ## Context
 
 The tenancy hierarchy (seed §4.1) — org → division → department → team →

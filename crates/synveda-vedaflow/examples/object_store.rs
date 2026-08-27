@@ -73,8 +73,8 @@ async fn main() -> std::result::Result<(), Box<dyn std::error::Error>> {
     // ── Content addressing and dedup ────────────────────────────────────
     let mut tx = tenant_tx(&pool, tenant).await?;
     let body = b"Deploys go through the release train; hotfixes need a second pair of eyes.";
-    let first = put_object(&mut tx, tenant, AssetKind::Memory, body).await?;
-    let again = put_object(&mut tx, tenant, AssetKind::Memory, body).await?;
+    let first = put_object(&mut tx, tenant, AssetKind::Knowledge, body).await?;
+    let again = put_object(&mut tx, tenant, AssetKind::Knowledge, body).await?;
     // Same bytes, different governance: FLOW-3 resolves approvals from asset
     // type, and a skill is executable where a memory is not.
     let as_skill = put_object(&mut tx, tenant, AssetKind::Skill, body).await?;
@@ -225,7 +225,7 @@ async fn race(
                 .expect("ref exists")
                 .commit_hash;
             let body = format!("writer {id}, round {round}, attempt {}", lost + 1);
-            let object = put_object(&mut tx, tenant, AssetKind::Memory, body.as_bytes()).await?;
+            let object = put_object(&mut tx, tenant, AssetKind::Knowledge, body.as_bytes()).await?;
             let tree = put_tree(
                 &mut tx,
                 tenant,

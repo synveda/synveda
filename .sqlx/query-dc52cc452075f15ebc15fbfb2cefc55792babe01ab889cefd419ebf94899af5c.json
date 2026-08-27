@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                insert into capture_candidate_matches\n                    (tenant_id, candidate_id, knowledge_item_id,\n                     knowledge_revision_id, match_kind, similarity_permille,\n                     reason_code)\n                values ($1, $2, $3, $4, $5, $6, $7)\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Uuid",
+        "Text",
+        "Int4",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "dc52cc452075f15ebc15fbfb2cefc55792babe01ab889cefd419ebf94899af5c"
+}

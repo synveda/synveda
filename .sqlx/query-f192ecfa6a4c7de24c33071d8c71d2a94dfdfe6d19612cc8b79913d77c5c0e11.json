@@ -1,0 +1,36 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select\n            exists (\n                select 1\n                  from project_repositories repository\n                 where repository.tenant_id = $1\n                   and repository.project_id = $3\n                   and repository.metadata ? 'content_revision'\n                   and nullif(repository.metadata->>'content_revision', '') is not null\n                   and not exists (\n                       select 1\n                         from knowledge_revision_sources link\n                         join knowledge_sources source\n                           on source.tenant_id = link.tenant_id\n                          and source.id = link.knowledge_source_id\n                        where link.tenant_id = $1\n                          and link.knowledge_revision_id = $2\n                          and source.source_type = 'repository'\n                          and source.source_revision =\n                              repository.metadata->>'content_revision'\n                   )\n            ) as \"repository_changed!\",\n            exists (\n                select 1\n                  from context_feedback feedback\n                 where feedback.tenant_id = $1\n                   and feedback.knowledge_revision_id = $2\n                   and feedback.feedback_type in ('unhelpful', 'caused_correction')\n            ) as \"failed_use!\",\n            exists (\n                select 1\n                  from knowledge_revision_sources link\n                  join knowledge_sources source\n                    on source.tenant_id = link.tenant_id\n                   and source.id = link.knowledge_source_id\n                 where link.tenant_id = $1\n                   and link.knowledge_revision_id = $2\n                   and source.metadata->>'synveda_freshness_state' = 'stale'\n            ) as \"source_stale!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "repository_changed!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 1,
+        "name": "failed_use!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 2,
+        "name": "source_stale!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "f192ecfa6a4c7de24c33071d8c71d2a94dfdfe6d19612cc8b79913d77c5c0e11"
+}

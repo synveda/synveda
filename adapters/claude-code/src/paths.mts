@@ -5,7 +5,7 @@
  * user's project.
  */
 
-import { mkdirSync } from "node:fs";
+import { chmodSync, mkdirSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, parse, resolve, sep } from "node:path";
 
@@ -29,9 +29,17 @@ export function stateDir(): string {
   return xdg("XDG_STATE_HOME", [".local", "state"]);
 }
 
-/** Per-session cursors and transcript paths (ADR-0027 decision 7). */
-export function sessionDir(): string {
-  return join(stateDir(), "sessions");
+/**
+ * The durable spool (CPR-12, ADR-0078 decision 6): one file per harness
+ * session, holding recorded events and their delivery state.
+ *
+ * `synveda session flush` resolves the same directory the same way. Two
+ * programs that disagree about where the spool lives is a spool that silently
+ * never drains, so this resolution and `crates/synveda-cli/src/spool.rs`'s
+ * must stay identical.
+ */
+export function spoolDir(): string {
+  return join(stateDir(), "spool");
 }
 
 /**
@@ -67,13 +75,22 @@ export function credentialsFile(): string {
  */
 export function ensureDir(dir: string): void {
   try {
-    mkdirSync(dir);
+    // These directories hold credentials-adjacent state, raw transcript
+    // events and diagnostic identifiers. Do not delegate their privacy to a
+    // caller's umask: a conventional 022 would otherwise make every newly
+    // created directory world-readable.
+    mkdirSync(dir, { mode: 0o700 });
+    makePrivate(dir);
     return;
   } catch (error) {
     const { code } = error as NodeJS.ErrnoException;
     // Already a directory is the common case by far, and a missing parent
     // is the only answer worth walking for.
-    if (code === "EEXIST") return;
+    if (code === "EEXIST") {
+      if (!statSync(dir).isDirectory()) throw error;
+      makePrivate(dir);
+      return;
+    }
     if (code !== "ENOENT") throw error;
   }
 
@@ -84,9 +101,17 @@ export function ensureDir(dir: string): void {
     if (component.length === 0) continue;
     built = join(built, component);
     try {
-      mkdirSync(built);
+      mkdirSync(built, { mode: 0o700 });
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
     }
   }
+  // Never chmod the existing ancestors walked above: an absolute scratch path
+  // may begin at /private/tmp. Only the payload-bearing directory named by the
+  // caller belongs to this adapter.
+  makePrivate(dir);
+}
+
+function makePrivate(dir: string): void {
+  if (process.platform !== "win32") chmodSync(dir, 0o700);
 }

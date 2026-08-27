@@ -14,6 +14,7 @@ import {
   lastUserPrompt,
   messageText,
   readTranscript,
+  toolInvocations,
   toolResults,
   truncateChars,
 } from "./transcript.mjs";
@@ -139,6 +140,28 @@ test("toolResults reads both string and block content", () => {
   assert.equal(results.length, 2);
   assert.deepEqual(results[0], { tool_use_id: "t1", is_error: false, text: "output" });
   assert.deepEqual(results[1], { tool_use_id: "t2", is_error: true, text: "boom" });
+});
+
+test("toolInvocations reads the real tool_use shape and ignores opaque fields", () => {
+  const calls = toolInvocations({
+    content: [
+      {
+        type: "tool_use",
+        id: "toolu_01",
+        name: "Read",
+        input: { file_path: "/Users/dev/Source/acme-api/src/retry.rs" },
+        caller: { type: "direct" },
+      },
+      { type: "text", text: "not a call" },
+    ],
+  });
+  assert.deepEqual(calls, [
+    {
+      tool_use_id: "toolu_01",
+      name: "Read",
+      input: '{"file_path":"/Users/dev/Source/acme-api/src/retry.rs"}',
+    },
+  ]);
 });
 
 test("lastUserPrompt takes the newest real prompt, not a tool result", () => {

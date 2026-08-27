@@ -1,0 +1,35 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select binding.scope_id,\n                  version.document ->> 'policy_pack' as \"pack_name!\",\n                  binding.updated_at\n             from configuration_bindings binding\n             join configuration_artifacts artifact\n               on artifact.tenant_id = binding.tenant_id\n              and artifact.id = binding.artifact_id\n             join configuration_versions version\n               on version.tenant_id = binding.tenant_id\n              and version.artifact_id = binding.artifact_id\n              and version.id = coalesce(binding.pinned_version_id,\n                                        artifact.current_version_id)\n            where binding.tenant_id = $1\n              and binding.enabled\n              and binding.scope_id = any($2)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "scope_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "pack_name!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      false,
+      null,
+      false
+    ]
+  },
+  "hash": "d9e2a4b0ba9392057a7f350e4608f350eb60529bc12e5f26e7d0dae34c12da5a"
+}

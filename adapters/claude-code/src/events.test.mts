@@ -1,13 +1,23 @@
 /**
- * The observe mapping (ADR-0027 decision 8) against MEM-1's published
- * contract: 256 events per batch, 64 KiB per payload, the entry uuid as
- * the client-minted idempotency key.
+ * The transcript → session-event mapping (CPR-12, ADR-0078) against the append
+ * route's published contract: 200 events per batch, 64 KiB per payload, the
+ * entry uuid as the client-minted event id.
+ *
+ * The interesting change from the observe mapping is that **one turn can be
+ * two events**. `ObserveKind` had one value for "a turn that also called
+ * tools"; the session vocabulary separates what was said from what a tool
+ * returned, so the ids have to stay unique without becoming unstable.
  */
 
 import assert from "node:assert/strict";
 import { test } from "node:test";
 
-import { chunk, MAX_EVENT_PAYLOAD_BYTES, MAX_EVENTS_PER_BATCH, toObserveEvents } from "./events.mjs";
+import {
+  chunk,
+  MAX_EVENT_PAYLOAD_BYTES,
+  MAX_EVENTS_PER_BATCH,
+  toSessionEvents,
+} from "./events.mjs";
 import type { TranscriptEntry } from "./transcript.mjs";
 
 function entry(overrides: Partial<TranscriptEntry> = {}): TranscriptEntry {
@@ -25,127 +35,186 @@ function payloadOf(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-test("a plain turn is a transcript_delta keyed by the entry uuid", () => {
-  const [event] = toObserveEvents([entry()], "claude-opus-5");
+test("a user turn is a message.user keyed by the entry uuid", () => {
+  const [event] = toSessionEvents([entry()], "claude-opus-5");
   assert.ok(event);
-  assert.equal(event.kind, "transcript_delta");
-  assert.equal(event.idempotency_key, "u1");
+  assert.equal(event.event_type, "message.user");
+  assert.equal(event.client_event_id, "u1");
   assert.equal(event.occurred_at, "2026-07-24T10:00:00.000Z");
-  const payload = payloadOf(event.payload);
-  assert.equal(payload.role, "user");
-  assert.equal(payload.text, "ship the release train");
+  assert.equal(payloadOf(event.payload).text, "ship the release train");
 });
 
-test("an entry carrying tool output is a tool_result", () => {
-  const [event] = toObserveEvents(
+test("an assistant turn is a message.assistant", () => {
+  const [event] = toSessionEvents(
+    [entry({ type: "assistant", message: { role: "assistant", content: "done" } })],
+    undefined,
+  );
+  assert.ok(event);
+  assert.equal(event.event_type, "message.assistant");
+});
+
+/**
+ * The case the old mapping could not express: a turn that both said something
+ * and returned tool output is two events, not one event with both in it.
+ */
+test("a turn with text and tool output is two events with stable distinct ids", () => {
+  const events = toSessionEvents(
     [
       entry({
+        type: "assistant",
         message: {
-          role: "user",
-          content: [{ type: "tool_result", tool_use_id: "t1", content: "3 tests passed" }],
+          role: "assistant",
+          content: [
+            { type: "text", text: "running it" },
+            { type: "tool_result", tool_use_id: "t1", content: "exit 0" },
+          ],
         },
       }),
     ],
     undefined,
   );
-  assert.ok(event);
-  assert.equal(event.kind, "tool_result");
-  const tools = payloadOf(event.payload).tools;
-  assert.ok(Array.isArray(tools));
-  assert.equal(tools.length, 1);
-});
-
-test("entries with nothing to say are skipped", () => {
-  const events = toObserveEvents(
-    [entry({ message: { role: "user", content: [] } }), entry({ uuid: "u2", message: undefined })],
-    undefined,
+  assert.equal(events.length, 2);
+  assert.deepEqual(
+    events.map((event) => event.event_type),
+    ["message.assistant", "tool.result"],
   );
-  assert.deepEqual(events, []);
-});
-
-test("context carries the project name, never the full path", () => {
-  const [event] = toObserveEvents(
+  assert.deepEqual(
+    events.map((event) => event.client_event_id),
+    ["u1:msg", "u1:tool"],
+  );
+  // Re-reading the same transcript must produce the same two ids, or the
+  // append's idempotency gate cannot recognise them.
+  const again = toSessionEvents(
     [
       entry({
-        cwd: "/Users/someone/Source/synveda",
-        gitBranch: "feat/ADPT-1",
-        version: "2.1.220",
+        type: "assistant",
+        message: {
+          role: "assistant",
+          content: [
+            { type: "text", text: "running it" },
+            { type: "tool_result", tool_use_id: "t1", content: "exit 0" },
+          ],
+        },
       }),
     ],
+    undefined,
+  );
+  assert.deepEqual(
+    again.map((event) => event.client_event_id),
+    ["u1:msg", "u1:tool"],
+  );
+});
+
+/** A turn that only returned tool output keeps the bare uuid. */
+test("a tool-only turn keeps the unsuffixed id", () => {
+  const events = toSessionEvents(
+    [
+      entry({
+        type: "assistant",
+        message: {
+          role: "assistant",
+          content: [{ type: "tool_result", tool_use_id: "t1", content: "exit 0" }],
+        },
+      }),
+    ],
+    undefined,
+  );
+  assert.equal(events.length, 1);
+  assert.equal(events[0]?.event_type, "tool.result");
+  assert.equal(events[0]?.client_event_id, "u1");
+});
+
+test("a tool invocation is its own event with a stable id", () => {
+  const events = toSessionEvents(
+    [
+      entry({
+        type: "assistant",
+        message: {
+          role: "assistant",
+          content: [{ type: "tool_use", id: "toolu_01", name: "Read", input: { file_path: "x" } }],
+        },
+      }),
+    ],
+    undefined,
+  );
+  assert.equal(events.length, 1);
+  assert.equal(events[0]?.event_type, "tool.invoked");
+  assert.equal(events[0]?.client_event_id, "u1");
+  assert.deepEqual(payloadOf(events[0]?.payload).calls, [
+    { tool_use_id: "toolu_01", name: "Read", input: '{"file_path":"x"}' },
+  ]);
+});
+
+test("learning a call does not rename a message an older adapter already sent", () => {
+  const events = toSessionEvents(
+    [
+      entry({
+        type: "assistant",
+        message: {
+          role: "assistant",
+          content: [
+            { type: "text", text: "I will read it." },
+            { type: "tool_use", id: "toolu_01", name: "Read", input: { file_path: "x" } },
+          ],
+        },
+      }),
+    ],
+    undefined,
+  );
+  assert.deepEqual(
+    events.map((event) => event.client_event_id),
+    ["u1", "u1:call"],
+  );
+});
+
+test("an entry with neither text nor tool calls or results yields nothing", () => {
+  assert.deepEqual(toSessionEvents([entry({ message: { role: "user", content: "" } })], undefined), []);
+});
+
+test("the model and project ride in the payload context", () => {
+  const [event] = toSessionEvents(
+    [entry({ cwd: "/Users/someone/work/synveda", gitBranch: "main", version: "2.1.0" })],
     "claude-opus-5",
   );
   assert.ok(event);
-  assert.deepEqual(payloadOf(event.payload).context, {
-    project: "synveda",
-    git_branch: "feat/ADPT-1",
-    model: "claude-opus-5",
-    harness_version: "2.1.220",
-  });
+  const context = payloadOf(payloadOf(event.payload).context);
+  // The basename, never the path: a home directory is user data that would
+  // otherwise ride into every record.
+  assert.equal(context.project, "synveda");
+  assert.equal(context.git_branch, "main");
+  assert.equal(context.model, "claude-opus-5");
+  assert.equal(context.harness_version, "2.1.0");
 });
 
-test("the harness version rides even when nothing else does", () => {
-  const [event] = toObserveEvents([entry({ version: "2.1.220" })], undefined);
-  assert.ok(event);
-  assert.deepEqual(payloadOf(event.payload).context, { harness_version: "2.1.220" });
-});
-
-test("context is omitted entirely when there is nothing to say", () => {
-  const [event] = toObserveEvents([entry()], undefined);
-  assert.ok(event);
-  assert.equal(payloadOf(event.payload).context, undefined);
-});
-
-test("an unparseable timestamp falls back to now instead of rejecting the batch", () => {
-  const [event] = toObserveEvents([entry({ timestamp: "not a date" })], undefined);
+test("an unparseable timestamp falls back to now rather than rejecting the batch", () => {
+  const [event] = toSessionEvents([entry({ timestamp: "not a date" })], undefined);
   assert.ok(event);
   assert.ok(!Number.isNaN(Date.parse(event.occurred_at)));
 });
 
-test("an oversized payload is truncated, marked, and still sent", () => {
-  const [event] = toObserveEvents(
-    [
-      entry({
-        message: {
-          role: "user",
-          content: [{ type: "tool_result", tool_use_id: "t1", content: "x".repeat(400_000) }],
-        },
-      }),
-    ],
+test("an oversized payload is truncated and says so", () => {
+  const [event] = toSessionEvents(
+    [entry({ message: { role: "user", content: "x".repeat(MAX_EVENT_PAYLOAD_BYTES * 2) } })],
     undefined,
   );
   assert.ok(event);
-  const payload = payloadOf(event.payload);
-  assert.equal(payload.truncated, true);
-  const bytes = new TextEncoder().encode(JSON.stringify(payload)).length;
-  assert.ok(
-    bytes <= MAX_EVENT_PAYLOAD_BYTES,
-    `payload is ${String(bytes)} bytes, over the ${String(MAX_EVENT_PAYLOAD_BYTES)} cap`,
-  );
-  // The gist survives: truncation is not deletion.
-  assert.ok(String(payload.text).length + JSON.stringify(payload.tools).length > 1000);
+  const encoded = new TextEncoder().encode(JSON.stringify(event.payload)).length;
+  assert.ok(encoded <= MAX_EVENT_PAYLOAD_BYTES, `payload was ${String(encoded)} bytes`);
+  assert.equal(payloadOf(event.payload).truncated, true);
 });
 
-test("an oversized message text is truncated the same way", () => {
-  const [event] = toObserveEvents(
-    [entry({ message: { role: "assistant", content: "y".repeat(300_000) }, type: "assistant" })],
-    undefined,
-  );
-  assert.ok(event);
-  const payload = payloadOf(event.payload);
-  assert.equal(payload.truncated, true);
-  const bytes = new TextEncoder().encode(JSON.stringify(payload)).length;
-  assert.ok(bytes <= MAX_EVENT_PAYLOAD_BYTES);
+test("batching respects the route's cap", () => {
+  const batches = chunk(Array.from({ length: MAX_EVENTS_PER_BATCH * 2 + 3 }, (_, i) => i), MAX_EVENTS_PER_BATCH);
+  assert.equal(batches.length, 3);
+  assert.equal(batches[0]?.length, MAX_EVENTS_PER_BATCH);
+  assert.equal(batches[2]?.length, 3);
 });
 
-test("batches never exceed the gateway's per-batch cap", () => {
-  const entries = Array.from({ length: 600 }, (_, index) => entry({ uuid: `u${String(index)}` }));
-  const batches = chunk(toObserveEvents(entries, undefined), MAX_EVENTS_PER_BATCH);
-  assert.deepEqual(
-    batches.map((batch) => batch.length),
-    [256, 256, 88],
-  );
-});
-
-test("chunking an empty list yields no batches", () => {
-  assert.deepEqual(chunk([], MAX_EVENTS_PER_BATCH), []);
+/**
+ * The batch cap is the gateway's `MAX_EVENT_BATCH`, restated. It moved from
+ * 256 to 200 with the cutover, and a stale copy here would produce a 400 on
+ * every full batch.
+ */
+test("the batch cap matches the append route", () => {
+  assert.equal(MAX_EVENTS_PER_BATCH, 200);
 });

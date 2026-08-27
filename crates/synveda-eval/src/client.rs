@@ -1,135 +1,277 @@
 //! The `/v1` client (EVAL-1, ADR-0028 decision 1).
 //!
-//! Four endpoints, an actor's own bearer, and no other way in. The wire
-//! structs are declared here rather than imported because this crate
-//! depends on no Synveda crate at all — the same price the TypeScript
-//! adapter pays, for the same reason: what an outside caller can see is
-//! exactly what an eval should measure.
+//! An actor's own bearer and no other way in. The wire structs are declared
+//! here rather than imported because this crate depends on no Synveda crate
+//! at all — the same price the TypeScript adapter pays, for the same reason:
+//! what an outside caller can see is exactly what an eval should measure.
 //!
-//! EVAL-2 added the last two (ADR-0046 decisions 1 and 4): the recall
-//! sweep, which is how a caller enumerates what it may read, and the
-//! audit search, which is how an auditor sees what the pipeline
-//! committed. They answer different questions and the extraction
-//! measurement needs both.
+//! **Anchored on the session plane by CPR-12** (ADR-0078 decisions 1 and 5).
+//! Events are appended to a run this harness opened, capture candidates are
+//! reviewed through the public application API, and context is composed by
+//! that run's `context-runs` endpoint. Every fixture session label is looked
+//! up through [`Client::session_for`], which opens one run per label and
+//! reuses it.
+//!
+//! CPR-20 re-cuts deep query onto the ordinary session-scoped Knowledge lens
+//! and corpus enumeration/id probes onto its stricter `SessionDiagnostics`
+//! lens. Neither abuses a budgeted context run and neither restores a global
+//! recall route. Prompt 30 re-measures the suites against accepted Knowledge.
+//!
+//! The audit search is untouched (ADR-0046 decision 4): the sweep says what
+//! a *reader is served*, `GET /v1/audit/events` says what the *pipeline
+//! committed*, and only the second of those two lenses still has a route.
 
+use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 
-/// Generous next to inject's 150ms SLO: a deadline here is meant to end a
-/// hung run, not to be the thing under measurement. The latency axis
+use crate::scenario::Environment;
+
+/// Generous next to the ContextRun latency objective: a deadline here is
+/// meant to end a hung run, not to be the thing under measurement. The latency axis
 /// measures what the call took, not what it was allowed to take.
 const TIMEOUT: Duration = Duration::from_secs(30);
 
 pub struct Client {
     gateway_url: String,
     http: reqwest::Client,
+    session_selections: BTreeMap<String, SessionSelection>,
 }
 
-/// `POST /v1/inject` (CTX-3, ADR-0026).
+#[derive(Clone)]
+struct SessionSelection {
+    workspace_id: String,
+    project_id: Option<String>,
+}
+
+/// A random discriminator for an idempotency key.
+fn uuid_like() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or_default();
+    format!("{nanos:x}-{:x}", std::process::id())
+}
+
+/// `POST /v1/sessions/{id}/context-runs` (CTX-3, ADR-0026; re-anchored on the
+/// session plane by CPR-12, ADR-0078 decision 5).
+///
+/// `session_id` is no longer on the wire: the run is in the path, and its id is
+/// a real aggregate the harness opened rather than a label a fixture chose.
 #[derive(Debug, Serialize)]
-pub struct InjectRequest<'a> {
-    #[serde(skip_serializing_if = "Option::is_none")]
+pub struct ContextRunRequest<'a> {
+    #[serde(rename = "query", skip_serializing_if = "Option::is_none")]
     pub task: Option<&'a str>,
-    pub session_id: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub budget_tokens: Option<u32>,
 }
 
-/// Only what a measurement needs. The body also carries its own
-/// `degraded` list; the header is the one this reads, because the header
-/// is what ADR-0026 decision 4 makes the warning.
-///
-/// EVAL-4 stopped ignoring four fields the gateway was already sending
-/// (ADR-0047 decision 1): the per-entry tier and the index counters, which
-/// are how a demotion is told from an absence, and the staleness scores,
-/// which are MEM-6's unvalidated heuristic (ADR-0040) measured for the
-/// first time.
+/// The composed block. A ContextRun renders selected immutable Knowledge
+/// revisions. Addresses are recovered from the block's current watermark;
+/// candidate scores and exclusion details are read from the ContextRun trace,
+/// never reconstructed from obsolete progressive-rendering telemetry.
 #[derive(Debug, Deserialize)]
-pub struct InjectResponse {
+pub struct ContextRunResponse {
+    #[serde(rename = "rendered")]
     pub text: String,
     /// The watermark (ADR-0025 decision 7). It rides into the report so a
     /// measurement can be traced back to exactly the block that produced
     /// it, months later, from the audit chain.
     pub block_hash: String,
-    pub record_ids: Vec<String>,
-    /// How much of each composed record the block carried, in block order:
-    /// `body` or `index` (CTX-4, ADR-0041 decision 9). Parallel to
-    /// `record_ids`, which is what makes a per-record tier readable.
-    #[serde(default)]
-    pub tiers: Vec<String>,
-    #[serde(default)]
-    pub index_entries: usize,
-    #[serde(default)]
-    pub index_tokens: u32,
-    /// Per mille freshness at `as_of`, in block order (MEM-6, ADR-0040
-    /// decision 12).
-    #[serde(default)]
-    pub staleness_permille: Vec<u16>,
+    /// Parsed from the watermark rather than served as a field; see
+    /// [`ContextRunResponse::knowledge_item_ids`].
+    #[serde(default, skip)]
+    pub knowledge_item_ids: Vec<String>,
     pub tokens: u32,
     pub budget_tokens: u32,
 }
 
-impl InjectResponse {
-    /// The tier a record composed at, or `None` when the block does not
-    /// carry it. Absent rather than defaulted: "not in the block" and
-    /// "in the block at the body tier" are the two answers this whole
-    /// suite turns on, and a default would merge them. A response whose
-    /// `tiers` array is shorter than its `record_ids` reads as `None`
-    /// too, which grades as a miss — conservative, and the right way
-    /// round for a contract violation nobody has seen.
-    #[must_use]
-    pub fn tier_of(&self, record_id: &str) -> Option<&str> {
-        let position = self.record_ids.iter().position(|id| id == record_id)?;
-        // A gateway that sent fewer tiers than records would otherwise
-        // read as "this record was not carried"; say so instead.
-        self.tiers.get(position).map(String::as_str)
+impl ContextRunResponse {
+    /// Fills `knowledge_item_ids` from the block's watermark line.
+    ///
+    /// Called once, on the way out of the client, so every caller reads the
+    /// same field it always read.
+    fn hydrate(&mut self) {
+        self.knowledge_item_ids.clear();
+        let Some((_, marker)) = self.text.rsplit_once("[Synveda Knowledge: ") else {
+            return;
+        };
+        let ids = marker.split(']').next().unwrap_or_default().trim();
+        if ids.is_empty() {
+            return;
+        }
+        self.knowledge_item_ids = ids
+            .split(',')
+            .filter_map(|address| address.trim().strip_prefix("knowledge:"))
+            .filter_map(|address| address.split('@').next())
+            .filter(|id| !id.is_empty())
+            .map(str::to_owned)
+            .collect();
     }
 }
 
-/// `POST /v1/observe` (MEM-1, ADR-0020).
+/// `POST /v1/sessions/{id}/events` (MEM-1, ADR-0020; re-anchored by CPR-12,
+/// ADR-0078 decision 1).
 #[derive(Debug, Serialize)]
-pub struct ObserveRequest<'a> {
-    pub session_id: &'a str,
-    pub events: Vec<ObserveEvent<'a>>,
+pub struct SessionEventBatchRequest<'a> {
+    pub events: Vec<SessionEventInput<'a>>,
 }
 
 #[derive(Debug, Serialize)]
-pub struct ObserveEvent<'a> {
+pub struct SessionEventInput<'a> {
+    #[serde(rename = "client_event_id")]
     pub idempotency_key: String,
+    #[serde(rename = "event_type")]
     pub kind: &'a str,
     pub payload: serde_json::Value,
     pub occurred_at: String,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct ObserveResponse {
+pub struct SessionEventBatchResponse {
+    #[serde(rename = "appended")]
     pub accepted: usize,
     pub duplicates: usize,
     pub quarantined: usize,
     pub denied: usize,
     /// Per-event outcomes, which is what makes the extraction measurement
-    /// attributable: the buffered `event_id` acked here is the same id the
-    /// served record's `provenance` carries and the same id the
-    /// `memory.extracted` payload names, so one key joins the seed, the
-    /// sweep, and the chain.
+    /// attributable: the `event_id` acked here is the same id the served
+    /// Knowledge source carries and the same id the capture candidate names,
+    /// so one key joins the seed, the read, and the audit chain.
     #[serde(default)]
-    pub events: Vec<ObserveEventOutcome>,
+    pub events: Vec<SessionEventOutcome>,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct ObserveEventOutcome {
+pub struct SessionEventOutcome {
+    #[serde(rename = "client_event_id")]
     pub idempotency_key: String,
-    /// Absent for a denied event: nothing was persisted for it.
-    pub event_id: Option<String>,
+    pub outcome: String,
+    /// The stored row, absent for a denied event: nothing was persisted.
+    #[serde(default)]
+    pub event: Option<StoredEventRef>,
 }
 
-/// `POST /v1/recall` in its **sweep** shape (CTX-5, ADR-0042 decision 14):
-/// no ids and no query, just an instant — "everything I may read, as it
-/// stood then". The one shape that enumerates a corpus rather than ranking
-/// one (ADR-0046 decision 1).
+#[derive(Debug, Deserialize)]
+pub struct StoredEventRef {
+    pub id: String,
+}
+
+impl SessionEventOutcome {
+    /// The stored event's id, when one was stored.
+    pub fn event_id(&self) -> Option<&str> {
+        self.event.as_ref().map(|event| event.id.as_str())
+    }
+}
+
+/// `GET /v1/me`, reduced to the principal anchor needed for private
+/// candidate publication.
+#[derive(Debug, Deserialize)]
+pub struct MeResponse {
+    #[serde(default)]
+    pub anchors: Vec<MeAnchor>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct MeAnchor {
+    pub scope_id: String,
+    pub source: String,
+}
+
+impl MeResponse {
+    fn principal_scope_id(&self) -> Result<&str, String> {
+        self.anchors
+            .iter()
+            .find(|anchor| anchor.source == "principal_scope")
+            .map(|anchor| anchor.scope_id.as_str())
+            .ok_or_else(|| {
+                "/v1/me named no principal scope for private evaluation Knowledge".to_owned()
+            })
+    }
+}
+
+/// `POST /v1/sessions` — the run a measurement is attributed to.
 #[derive(Debug, Serialize)]
-pub struct RecallSweepRequest<'a> {
+pub struct OpenSessionRequest<'a> {
+    pub workspace_id: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project_id: Option<&'a str>,
+    pub client_name: &'a str,
+    pub external_session_id: &'a str,
+}
+
+/// A run, reduced to its address. The body carries more; the id is the
+/// whole of what a caller needs to post events or compose against it.
+#[derive(Debug, Deserialize)]
+pub struct SessionRef {
+    pub id: String,
+}
+
+/// One explicit session-capture job. Evaluation never treats extraction as
+/// publication: it waits for this candidate-only batch and then reviews the
+/// candidates through the same public VedaFlow-backed action as the product.
+#[derive(Debug, Clone, Deserialize)]
+pub struct CaptureBatchRef {
+    pub id: String,
+    pub state: String,
+    pub candidate_count: i32,
+    #[serde(default)]
+    pub error_code: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct CaptureCandidateRef {
+    pub id: String,
+    pub state: String,
+    pub proposed_scope_id: String,
+    pub content: serde_json::Value,
+    pub source_event_ids: Vec<String>,
+    #[serde(default)]
+    pub resulting_change_id: Option<String>,
+    #[serde(default)]
+    pub resulting_outcome: Option<String>,
+    #[serde(default)]
+    pub resulting_knowledge_item_id: Option<String>,
+    #[serde(default)]
+    pub resulting_revision_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CaptureCandidatePage {
+    candidates: Vec<CaptureCandidateRef>,
+    next_cursor: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CaptureDecisionRef {
+    candidate: CaptureCandidateRef,
+}
+
+/// Optional governed edits made while accepting a candidate. This is how the
+/// Q&A/security corpora place their premise through the current Knowledge
+/// mutation path; it is not a database fixture or a post-publication move.
+#[derive(Debug, Clone)]
+pub struct CaptureReplacement {
+    pub item_id: String,
+    pub revision_id: String,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct CaptureAcceptOptions<'a> {
+    pub scope_id: Option<&'a str>,
+    pub sensitivity: Option<&'a str>,
+    /// Source event id to the exact current Knowledge head it supersedes.
+    /// The candidate API, not the extractor, performs the governed change.
+    pub replacements: Option<&'a BTreeMap<String, CaptureReplacement>>,
+}
+
+/// Diagnostic, cursor-paginated enumeration over one session's Knowledge
+/// universe. `session_id` remains the eval label; the client resolves it to a
+/// real run before calling the public application API.
+#[derive(Debug)]
+pub struct KnowledgeSweepRequest<'a> {
     pub as_of: &'a str,
     pub session_id: &'a str,
     /// Asked for explicitly rather than left to the surface's default, so
@@ -138,45 +280,111 @@ pub struct RecallSweepRequest<'a> {
     pub limit: usize,
 }
 
-/// `POST /v1/recall` in its **query** shape (CTX-5, ADR-0042 decision 1):
-/// ranked retrieval over the widened universe, with no composition budget
-/// and no scope gradient in the way.
-///
-/// EVAL-4 uses it for one thing only — asking whether a record is
-/// retrievable at all, which is a different question from whether it fits
-/// in a block, and the only honest way to wait for the sparse sidecar
-/// without waiting for the measurement (ADR-0047 decision 5).
+/// Ordinary deep query over current Knowledge, separate from composition.
 #[derive(Debug, Serialize)]
-pub struct RecallQueryRequest<'a> {
+pub struct KnowledgeQueryRequest<'a> {
     pub query: &'a str,
-    pub session_id: &'a str,
     pub limit: usize,
 }
 
-/// `POST /v1/recall` in its **ids** shape (CTX-4, ADR-0041): the handles an
-/// index line rendered, re-decided by the current plan on the way in.
-///
-/// EVAL-5's sharpest probe (ADR-0048 decision 1). It removes retrieval
-/// from the question entirely — no ranking, no index, no phrasing — and
-/// asks the product to refuse a record by name. Refusals are uniform and
-/// silent (ADR-0041), so a request naming ten inadmissible ids answers
-/// with nothing rather than with an error, and "nothing" is exactly the
-/// measurement.
-#[derive(Debug, Serialize)]
-pub struct RecallIdsRequest<'a> {
+/// Diagnostic fetch-by-id probe. Every returned item is still decided exactly.
+#[derive(Debug)]
+pub struct KnowledgeIdsRequest<'a> {
     pub ids: Vec<String>,
     pub session_id: &'a str,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct RecallResponse {
-    pub entries: Vec<RecallEntry>,
+struct KnowledgeQueryResponse {
+    items: Vec<KnowledgeQueryEntry>,
+    #[serde(rename = "retrieval_mode")]
+    _retrieval_mode: String,
+    next_cursor: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct KnowledgeQueryEntry {
+    knowledge: KnowledgeWireItem,
+    #[serde(default)]
+    sources: Vec<KnowledgeWireSource>,
+}
+
+#[derive(Debug, Deserialize)]
+struct KnowledgeWireItem {
+    id: String,
+    knowledge_type: String,
+    current_revision: KnowledgeWireRevision,
+}
+
+#[derive(Debug, Deserialize)]
+struct KnowledgeWireRevision {
+    body_markdown: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct KnowledgeWireSource {
+    session_event_id: Option<String>,
+    #[serde(default)]
+    metadata: serde_json::Value,
+}
+
+impl KnowledgeQueryResponse {
+    fn into_eval(self, mode: &str) -> KnowledgeResults {
+        let entries = self
+            .items
+            .into_iter()
+            .map(|entry| {
+                let source_event_ids = entry
+                    .sources
+                    .iter()
+                    .filter_map(|source| source.session_event_id.clone())
+                    .collect::<Vec<_>>();
+                let mut provenance = entry
+                    .sources
+                    .first()
+                    .map(|source| source.metadata.clone())
+                    .filter(serde_json::Value::is_object)
+                    .unwrap_or_else(|| serde_json::json!({}));
+                if let (Some(object), Some(event_id)) = (
+                    provenance.as_object_mut(),
+                    entry
+                        .sources
+                        .first()
+                        .and_then(|source| source.session_event_id.clone()),
+                ) {
+                    object.insert("event_id".to_owned(), serde_json::Value::String(event_id));
+                }
+                KnowledgeResult {
+                    knowledge_item_id: entry.knowledge.id,
+                    class: entry.knowledge.knowledge_type,
+                    content: entry.knowledge.current_revision.body_markdown,
+                    source_event_ids,
+                    provenance,
+                }
+            })
+            .collect();
+        KnowledgeResults {
+            entries,
+            mode: mode.to_owned(),
+            truncated: self.next_cursor.is_some(),
+            // The new lens decides exact items, not aggregate scopes. The
+            // old report columns remain zero until Prompt 30 replaces them
+            // with Knowledge/PDP evidence rather than fabricating a count.
+            scopes_considered: 0,
+            scopes_decided: 0,
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct KnowledgeResults {
+    pub entries: Vec<KnowledgeResult>,
     /// Which shape the surface decided it was asked (ADR-0042 decision 1).
     /// Checked rather than assumed: a request the surface read as `ids` or
     /// `query` would answer a different question, and a measurement of the
     /// wrong question is worse than no measurement.
     pub mode: String,
-    /// The *scope* cap, not the record cap — which is exactly why a caller
+    /// The *scope* cap, not the Knowledge-item cap — which is exactly why a caller
     /// cannot read `false` here as "this page is complete" (ADR-0046
     /// decision 3).
     pub truncated: bool,
@@ -184,15 +392,10 @@ pub struct RecallResponse {
     pub scopes_decided: usize,
 }
 
-/// One served record, as the extraction measurement reads it.
+/// One served Knowledge item, as the extraction measurement reads it.
 #[derive(Debug, Deserialize)]
-pub struct RecallEntry {
-    pub record_id: String,
-    /// Where the record lives. EVAL-4 needs it as a promotion's
-    /// `source_scope_id`: material sits at its author's personal leaf, and
-    /// naming that leaf is how a climb says where it is coming from
-    /// (ADR-0034 decision 2).
-    pub scope_id: String,
+pub struct KnowledgeResult {
+    pub knowledge_item_id: String,
     pub class: String,
     /// Untruncated: recall does not elide what the caller named
     /// (ADR-0041 decision 7).
@@ -201,116 +404,49 @@ pub struct RecallEntry {
     /// (seed §4.2). The attribution key and the model identity both live
     /// here.
     pub provenance: serde_json::Value,
+    /// Every exact session-event source authorised on this Knowledge result.
+    /// A revision may merge provenance; retaining only the first source would
+    /// make the evaluation join silently lose evidence.
+    #[serde(default)]
+    pub source_event_ids: Vec<String>,
 }
 
-impl RecallEntry {
-    /// The observe event this record was extracted from, when provenance
-    /// names one. Absent is a fact about the record, never a default:
-    /// material written by a path that did not record it would be
+impl KnowledgeResult {
+    /// The source session event this Knowledge revision was derived from,
+    /// when provenance names one. Absence is a fact about the revision,
+    /// never a default: material written by a path that did not retain it is
     /// attributed to nothing rather than to the wrong fixture.
     pub fn source_event_id(&self) -> Option<&str> {
-        self.provenance.get("event_id")?.as_str()
+        self.source_event_ids
+            .first()
+            .map(String::as_str)
+            .or_else(|| self.provenance.get("event_id")?.as_str())
+    }
+
+    /// All exact source events, preserving the public response's provenance
+    /// order. Callers doing attribution must use this rather than assuming a
+    /// revision has only one source.
+    pub fn source_event_ids(&self) -> impl Iterator<Item = &str> {
+        self.source_event_ids.iter().map(String::as_str)
     }
 
     pub fn source_session_id(&self) -> Option<&str> {
         self.provenance.get("session_id")?.as_str()
     }
 
-    /// The model the API actually served, as the pipeline recorded it —
+    /// The model the API actually served, as the pipeline retained it —
     /// not the alias the request asked for (ADR-0046 decision 12).
     pub fn model_version(&self) -> Option<&str> {
         self.provenance.get("model_version")?.as_str()
     }
 }
 
-/// `POST /v1/proposals` (FLOW-3/FLOW-5, ADR-0032/ADR-0034) — a climb.
-///
-/// EVAL-4 needs this because nothing else can put material above a leaf:
-/// observe writes land at the caller's home scope (ADR-0020) and a service
-/// identity's home is a `ScopeKind::User` leaf under its anchor (ADR-0018
-/// decision 2), so a corpus that spans scope tiers is a corpus that was
-/// promoted through review (ADR-0047 decision 3).
-#[derive(Debug, Serialize)]
-pub struct ProposalRequest<'a> {
-    /// The scope whose published channel would move. Requirements resolve
-    /// here and only here.
-    pub scope_id: &'a str,
-    /// Where the material is now — the author's own leaf. Must be the
-    /// target or a descendant of it.
-    pub source_scope_id: &'a str,
-    pub record_ids: Vec<String>,
-    pub title: String,
-    /// What running this proposal would do. Absent is `published`, which
-    /// is what a climb is. `classify` is EVAL-5's (ADR-0048 decision 7):
-    /// the only mechanism in the product that installs a tier above the
-    /// working one, and therefore the only way a leak suite can have
-    /// `restricted` material whose premise is real.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub effect: Option<&'a str>,
-    /// The tier a `classify` proposal installs. Required for that effect
-    /// and refused for any other — a publication does not move a tier.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub sensitivity: Option<&'a str>,
-}
-
-/// What `POST /v1/proposals/{id}/classify` reports back (AUTHZ-5,
-/// ADR-0038 decision 9).
-#[derive(Debug, Deserialize)]
-pub struct Classified {
-    pub scope_id: String,
-    pub sensitivity: String,
-    pub records: Vec<ClassifiedRecord>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct ClassifiedRecord {
-    pub record_id: String,
-    /// The tier it left, so a report can say what a reclassification cost
-    /// rather than only what it installed.
-    pub was: String,
-}
-
 #[derive(Debug, Deserialize)]
 pub struct Proposal {
-    pub id: String,
+    /// Exact immutable commit a verdict must echo.
+    pub commit: String,
     /// `open` | `approved` | `rejected` | `withdrawn` | `published`.
     pub state: String,
-    /// What the proposal still lacks, in the pack's own words. The runner
-    /// approves until this says `nothing` rather than hard-coding the
-    /// approval matrix, so a pack that asks for a different set is
-    /// followed rather than fought (ADR-0032).
-    #[serde(default)]
-    pub outstanding: String,
-    #[serde(default)]
-    pub target_scope_path: String,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct Published {
-    pub scope_id: String,
-    pub commit: String,
-    /// How many records the publication added to the channel.
-    pub added: usize,
-}
-
-/// `GET /v1/audit/events` (AUD-2, ADR-0045 decision 3).
-#[derive(Debug, Deserialize)]
-pub struct AuditEventsResponse {
-    pub events: Vec<AuditEvent>,
-    pub truncated: bool,
-    pub next_cursor: Option<i64>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct AuditEvent {
-    /// The chain position this fact was read at, so an attribution number
-    /// names the range it came from rather than floating free.
-    pub seq: i64,
-    /// `success` or `failure`. A failed `memory.extracted` is a
-    /// dead-lettered event — a different fact from "extracted no records",
-    /// and one that must not read as the latter.
-    pub outcome: String,
-    pub payload: serde_json::Value,
 }
 
 /// A call's result and what it cost, because the cost is a measurement.
@@ -324,131 +460,406 @@ pub struct Timed<T> {
 }
 
 impl Client {
-    pub fn new(gateway_url: &str) -> Result<Self, String> {
+    pub fn new(environment: &Environment) -> Result<Self, String> {
         let http = reqwest::Client::builder()
             .connect_timeout(Duration::from_secs(5))
             .timeout(TIMEOUT)
             .build()
             .map_err(|err| format!("build the HTTP client: {err}"))?;
+        let session_selections = environment
+            .actors
+            .values()
+            .filter_map(|actor| {
+                actor.workspace_id.as_ref().map(|workspace_id| {
+                    (
+                        actor.token.clone(),
+                        SessionSelection {
+                            workspace_id: workspace_id.clone(),
+                            project_id: actor.project_id.clone(),
+                        },
+                    )
+                })
+            })
+            .collect();
         Ok(Self {
-            gateway_url: gateway_url.trim_end_matches('/').to_owned(),
+            gateway_url: environment.gateway_url.trim_end_matches('/').to_owned(),
             http,
+            session_selections,
         })
     }
 
-    pub async fn inject(
-        &self,
-        bearer: &str,
-        request: &InjectRequest<'_>,
-    ) -> Result<Timed<InjectResponse>, String> {
-        self.post("/v1/inject", bearer, request).await
+    /// What this caller can see, for resolving its principal scope.
+    pub async fn me(&self, bearer: &str) -> Result<MeResponse, String> {
+        self.get("/v1/me", bearer, &[]).await
     }
 
-    pub async fn observe(
-        &self,
-        bearer: &str,
-        request: &ObserveRequest<'_>,
-    ) -> Result<Timed<ObserveResponse>, String> {
-        self.post("/v1/observe", bearer, request).await
+    /// The run a scenario's `session_id` label maps to.
+    ///
+    /// A label was enough when a session was an opaque correlation string; a
+    /// run is an aggregate now (CPR-10), so the harness opens one per label
+    /// and keys its calls on the real id. Idempotent, so a scenario re-run
+    /// lands on the run it opened last time.
+    pub async fn session_for(&self, bearer: &str, label: &str) -> Result<String, String> {
+        let selection = self.session_selections.get(bearer).ok_or_else(|| {
+            format!(
+                "evaluation actor opening session `{label}` must name workspace_id in the \
+                 current environment; the harness does not discover or create product state"
+            )
+        })?;
+        Ok(self
+            .open_session(
+                bearer,
+                &OpenSessionRequest {
+                    workspace_id: &selection.workspace_id,
+                    project_id: selection.project_id.as_deref(),
+                    client_name: "synveda-eval",
+                    external_session_id: label,
+                },
+            )
+            .await?
+            .value
+            .id)
     }
 
-    pub async fn recall_sweep(
+    /// Opens the run a measurement is attributed to.
+    ///
+    /// Idempotent on the harness's own external id, so a re-run of the same
+    /// scenario lands on the same run rather than minting a second one.
+    pub async fn open_session(
         &self,
         bearer: &str,
-        request: &RecallSweepRequest<'_>,
-    ) -> Result<Timed<RecallResponse>, String> {
-        self.post("/v1/recall", bearer, request).await
+        request: &OpenSessionRequest<'_>,
+    ) -> Result<Timed<SessionRef>, String> {
+        let key = format!("eval-open-{}", request.external_session_id);
+        self.post_idempotent("/v1/sessions", bearer, request, &key)
+            .await
     }
 
-    pub async fn recall_query(
+    /// Composes context for `session`.
+    pub async fn compose_context(
         &self,
         bearer: &str,
-        request: &RecallQueryRequest<'_>,
-    ) -> Result<Timed<RecallResponse>, String> {
-        self.post("/v1/recall", bearer, request).await
+        session: &str,
+        request: &ContextRunRequest<'_>,
+    ) -> Result<Timed<ContextRunResponse>, String> {
+        let key = format!("eval-ctx-{}", uuid_like());
+        let mut timed: Timed<ContextRunResponse> = self
+            .post_idempotent(
+                &format!("/v1/sessions/{session}/context-runs"),
+                bearer,
+                request,
+                &key,
+            )
+            .await?;
+        timed.value.hydrate();
+        Ok(timed)
     }
 
-    pub async fn recall_ids(
+    /// Appends observations to `session`.
+    pub async fn append_events(
         &self,
         bearer: &str,
-        request: &RecallIdsRequest<'_>,
-    ) -> Result<Timed<RecallResponse>, String> {
-        self.post("/v1/recall", bearer, request).await
+        session: &str,
+        request: &SessionEventBatchRequest<'_>,
+    ) -> Result<Timed<SessionEventBatchResponse>, String> {
+        self.post(&format!("/v1/sessions/{session}/events"), bearer, request)
+            .await
     }
 
-    pub async fn propose(
+    /// Freeze, await and review one session snapshot through the public
+    /// capture and Knowledge/VedaFlow APIs. A deterministic rerun resolves to
+    /// the same batch and terminal decisions through idempotency.
+    pub async fn capture_and_accept(
         &self,
         bearer: &str,
-        request: &ProposalRequest<'_>,
-    ) -> Result<Timed<Proposal>, String> {
-        self.post("/v1/proposals", bearer, request).await
+        session: &str,
+        key: &str,
+        timeout: Duration,
+        options: CaptureAcceptOptions<'_>,
+    ) -> Result<Vec<CaptureCandidateRef>, String> {
+        let path = format!("/v1/sessions/{session}/capture-batches");
+        let started: Timed<CaptureBatchRef> = self
+            .post_idempotent(&path, bearer, &serde_json::json!({}), key)
+            .await?;
+        let batch_id = started.value.id;
+        let began = Instant::now();
+        let batch = loop {
+            let batch: CaptureBatchRef = self
+                .get(&format!("/v1/capture-batches/{batch_id}"), bearer, &[])
+                .await?;
+            match batch.state.as_str() {
+                "completed" => break batch,
+                "failed" => {
+                    return Err(format!(
+                        "capture batch {batch_id} failed: {}",
+                        batch.error_code.as_deref().unwrap_or("unknown")
+                    ));
+                }
+                _ if began.elapsed() >= timeout => {
+                    return Err(format!(
+                        "capture batch {batch_id} did not complete within {}s",
+                        timeout.as_secs()
+                    ));
+                }
+                _ => tokio::time::sleep(Duration::from_millis(250)).await,
+            }
+        };
+        let page: CaptureCandidatePage = self
+            .get(
+                "/v1/capture-candidates",
+                bearer,
+                &[
+                    ("batch_id".to_owned(), batch_id.clone()),
+                    ("limit".to_owned(), "200".to_owned()),
+                ],
+            )
+            .await?;
+        if page.next_cursor.is_some() || page.candidates.len() != batch.candidate_count as usize {
+            return Err(format!(
+                "capture batch {batch_id} reports {} candidates but its one bounded page served {}{}",
+                batch.candidate_count,
+                page.candidates.len(),
+                if page.next_cursor.is_some() {
+                    " with another page"
+                } else {
+                    ""
+                }
+            ));
+        }
+
+        // A generic corpus seed is private to its author. Shared Q&A and
+        // security fixtures name their governed target explicitly below; an
+        // omitted target must not silently publish into the session workspace
+        // and turn a deterministic eval into an outstanding review queue.
+        let private_scope = if options.scope_id.is_none() {
+            let me = self.me(bearer).await?;
+            Some(me.principal_scope_id()?.to_owned())
+        } else {
+            None
+        };
+        let target_scope = options.scope_id.or(private_scope.as_deref());
+
+        let mut accepted = Vec::with_capacity(page.candidates.len());
+        for candidate in page.candidates {
+            if candidate.state != "pending" {
+                accepted.push(candidate);
+                continue;
+            }
+            let mut edits = serde_json::json!({});
+            if let Some(scope_id) = target_scope {
+                edits["scope_id"] = serde_json::Value::String(scope_id.to_owned());
+                // A project association is valid only at that project's own
+                // governing scope. Moving a session candidate to its author's
+                // private scope, a workspace, or the tenant must explicitly
+                // clear the session project; omission means "retain" on this
+                // tri-state API.
+                if scope_id != candidate.proposed_scope_id {
+                    edits["project_id"] = serde_json::Value::Null;
+                }
+            }
+            if let Some(sensitivity) = options.sensitivity {
+                let mut content = candidate.content.clone();
+                content["sensitivity"] = serde_json::Value::String(sensitivity.to_owned());
+                edits["content"] = content;
+            }
+            let replacement = options.replacements.and_then(|replacements| {
+                candidate
+                    .source_event_ids
+                    .iter()
+                    .find_map(|event_id| replacements.get(event_id))
+            });
+            let (action, body) = replacement.map_or_else(
+                || ("accept", edits.clone()),
+                |target| {
+                    (
+                        "replace",
+                        serde_json::json!({
+                            "item_id": target.item_id,
+                            "expected_revision_id": target.revision_id,
+                            "replacement": edits,
+                        }),
+                    )
+                },
+            );
+            let decision: Timed<CaptureDecisionRef> = self
+                .post_idempotent(
+                    &format!("/v1/capture-candidates/{}/{action}", candidate.id),
+                    bearer,
+                    &body,
+                    &format!("eval-{action}-{}", candidate.id),
+                )
+                .await?;
+            accepted.push(decision.value.candidate);
+        }
+        Ok(accepted)
+    }
+
+    /// Enumerates the current visible Knowledge corpus through the diagnostic
+    /// lens, following every opaque cursor until `limit` or exhaustion.
+    pub async fn knowledge_sweep(
+        &self,
+        bearer: &str,
+        request: &KnowledgeSweepRequest<'_>,
+    ) -> Result<Timed<KnowledgeResults>, String> {
+        if request.limit == 0 {
+            return Err("a Knowledge sweep limit must be at least one".to_owned());
+        }
+        let session = self.session_for(bearer, request.session_id).await?;
+        let mut cursor: Option<String> = None;
+        let mut entries = Vec::new();
+        let mut elapsed_ms = 0.0;
+        let mut degraded = Vec::new();
+        let mut truncated = false;
+        loop {
+            let remaining = request.limit.saturating_sub(entries.len());
+            if remaining == 0 {
+                truncated = cursor.is_some();
+                break;
+            }
+            let page_limit = remaining.min(100);
+            let timed: Timed<KnowledgeQueryResponse> = self
+                .post(
+                    &format!("/v1/sessions/{session}/knowledge-evaluation"),
+                    bearer,
+                    &serde_json::json!({
+                        "as_of": request.as_of,
+                        "cursor": cursor.as_deref(),
+                        "limit": page_limit,
+                    }),
+                )
+                .await?;
+            elapsed_ms += timed.elapsed_ms;
+            for warning in timed.degraded {
+                if !degraded.contains(&warning) {
+                    degraded.push(warning);
+                }
+            }
+            let next = timed.value.next_cursor.clone();
+            let mut page = timed.value.into_eval("sweep");
+            entries.append(&mut page.entries);
+            let Some(next) = next else { break };
+            if cursor.as_deref() == Some(next.as_str()) {
+                return Err("Knowledge evaluation repeated its cursor".to_owned());
+            }
+            cursor = Some(next);
+        }
+        Ok(Timed {
+            value: KnowledgeResults {
+                entries,
+                mode: "sweep".to_owned(),
+                truncated,
+                scopes_considered: 0,
+                scopes_decided: 0,
+            },
+            elapsed_ms,
+            degraded,
+        })
+    }
+
+    /// Ranked, non-budgeted current Knowledge query under ordinary
+    /// `SessionRead` authority.
+    pub async fn knowledge_query(
+        &self,
+        bearer: &str,
+        session: &str,
+        request: &KnowledgeQueryRequest<'_>,
+    ) -> Result<Timed<KnowledgeResults>, String> {
+        let timed: Timed<KnowledgeQueryResponse> = self
+            .post(
+                &format!("/v1/sessions/{session}/knowledge-query"),
+                bearer,
+                request,
+            )
+            .await?;
+        Ok(Timed {
+            value: timed.value.into_eval("query"),
+            elapsed_ms: timed.elapsed_ms,
+            degraded: timed.degraded,
+        })
+    }
+
+    /// Fetches exact ids through the diagnostic lens, chunking at the public
+    /// API bound. Denied ids return no object-shaped result.
+    pub async fn knowledge_ids(
+        &self,
+        bearer: &str,
+        request: &KnowledgeIdsRequest<'_>,
+    ) -> Result<Timed<KnowledgeResults>, String> {
+        if request.ids.is_empty() {
+            return Ok(Timed {
+                value: KnowledgeResults {
+                    entries: Vec::new(),
+                    mode: "ids".to_owned(),
+                    truncated: false,
+                    scopes_considered: 0,
+                    scopes_decided: 0,
+                },
+                elapsed_ms: 0.0,
+                degraded: Vec::new(),
+            });
+        }
+        let session = self.session_for(bearer, request.session_id).await?;
+        let mut entries = Vec::new();
+        let mut elapsed_ms = 0.0;
+        let mut degraded = Vec::new();
+        for ids in request.ids.chunks(100) {
+            let timed: Timed<KnowledgeQueryResponse> = self
+                .post(
+                    &format!("/v1/sessions/{session}/knowledge-evaluation"),
+                    bearer,
+                    &serde_json::json!({"ids": ids, "limit": ids.len()}),
+                )
+                .await?;
+            elapsed_ms += timed.elapsed_ms;
+            for warning in timed.degraded {
+                if !degraded.contains(&warning) {
+                    degraded.push(warning);
+                }
+            }
+            entries.extend(timed.value.into_eval("ids").entries);
+        }
+        Ok(Timed {
+            value: KnowledgeResults {
+                entries,
+                mode: "ids".to_owned(),
+                truncated: false,
+                scopes_considered: 0,
+                scopes_decided: 0,
+            },
+            elapsed_ms,
+            degraded,
+        })
     }
 
     /// One approver's verdict. The caller repeats this with a different
     /// bearer until the proposal leaves `open`, because how many distinct
     /// approvers and which roles is the pack's answer, not the harness's.
     pub async fn approve(&self, bearer: &str, proposal: &str) -> Result<Timed<Proposal>, String> {
+        let current: Proposal = self
+            .get(&format!("/v1/proposals/{proposal}"), bearer, &[])
+            .await?;
         self.post(
             &format!("/v1/proposals/{proposal}/approve"),
             bearer,
-            &serde_json::json!({}),
+            &serde_json::json!({"expected_commit": current.commit}),
         )
         .await
     }
 
-    /// Runs the approved proposal's effect. Takes `MemoryRead` as well as
-    /// the review authority — nobody publishes what they cannot read
-    /// (ADR-0031 decision 12) — so it is the curator's call and never the
-    /// steward's.
-    pub async fn publish(&self, bearer: &str, proposal: &str) -> Result<Timed<Published>, String> {
-        self.post(
-            &format!("/v1/proposals/{proposal}/publish"),
-            bearer,
-            &serde_json::json!({}),
-        )
-        .await
-    }
-
-    /// Runs an approved classification. The **author's** call, not a
-    /// reviewer's, and that is forced rather than chosen (ADR-0048
-    /// decision 7): `MemoryClassify` is permitted role-free at
-    /// `principal.home`, the effect asks a `MemoryRead` at the working
-    /// tier at the same scope, and the privacy floor closes another
-    /// principal's personal leaf to every content role — so the one
-    /// identity that can run this is the one whose leaf it is.
-    pub async fn classify(
+    /// Applies an approved typed VedaFlow change. Unlike `publish`, this is
+    /// the current aggregate-command route used by Knowledge, Skills, Tools
+    /// and governed Configuration.
+    pub async fn apply(
         &self,
         bearer: &str,
         proposal: &str,
-    ) -> Result<Timed<Classified>, String> {
+    ) -> Result<Timed<serde_json::Value>, String> {
         self.post(
-            &format!("/v1/proposals/{proposal}/classify"),
+            &format!("/v1/proposals/{proposal}/apply"),
             bearer,
             &serde_json::json!({}),
         )
         .await
-    }
-
-    /// One page of the chain, filtered to a single action. Paging is the
-    /// caller's — `next_cursor` back in as `after` — because a helper that
-    /// swallowed the pages would also swallow `truncated`, and a truncation
-    /// nobody sees is the failure this whole surface refuses (ADR-0045
-    /// decision 9).
-    pub async fn audit_events(
-        &self,
-        bearer: &str,
-        action: &str,
-        after: Option<i64>,
-        limit: usize,
-    ) -> Result<AuditEventsResponse, String> {
-        let mut query = vec![
-            ("action".to_owned(), action.to_owned()),
-            ("limit".to_owned(), limit.to_string()),
-        ];
-        if let Some(after) = after {
-            query.push(("after".to_owned(), after.to_string()));
-        }
-        self.get("/v1/audit/events", bearer, &query).await
     }
 
     async fn get<T: serde::de::DeserializeOwned>(
@@ -484,19 +895,48 @@ impl Client {
         bearer: &str,
         body: &B,
     ) -> Result<Timed<T>, String> {
+        self.send(path, bearer, Some(body), None).await
+    }
+
+    /// [`Client::post`] carrying an `Idempotency-Key`, which every creation on
+    /// the context-platform plane requires (ADR-0071).
+    async fn post_idempotent<B: Serialize, T: serde::de::DeserializeOwned>(
+        &self,
+        path: &str,
+        bearer: &str,
+        body: &B,
+        key: &str,
+    ) -> Result<Timed<T>, String> {
+        self.send(path, bearer, Some(body), Some(key)).await
+    }
+
+    async fn send<B: Serialize, T: serde::de::DeserializeOwned>(
+        &self,
+        path: &str,
+        bearer: &str,
+        body: Option<&B>,
+        key: Option<&str>,
+    ) -> Result<Timed<T>, String> {
         let started = Instant::now();
-        let response = self
-            .http
-            .post(format!("{}{path}", self.gateway_url))
-            .bearer_auth(bearer)
-            .header(
-                "x-synveda-client",
-                concat!("synveda-eval/", env!("CARGO_PKG_VERSION")),
-            )
-            .json(body)
+        let url = format!("{}{path}", self.gateway_url);
+        let mut request = match body {
+            Some(_) => self.http.post(&url),
+            None => self.http.get(&url),
+        };
+        request = request.bearer_auth(bearer).header(
+            "x-synveda-client",
+            concat!("synveda-eval/", env!("CARGO_PKG_VERSION")),
+        );
+        if let Some(key) = key {
+            request = request.header("idempotency-key", key);
+        }
+        if let Some(body) = body {
+            request = request.json(body);
+        }
+        let response = request
             .send()
             .await
-            .map_err(|err| format!("POST {path}: {err}"))?;
+            .map_err(|err| format!("{path}: {err}"))?;
         let elapsed_ms = started.elapsed().as_secs_f64() * 1000.0;
 
         let status = response.status();
@@ -515,10 +955,10 @@ impl Client {
             .unwrap_or_default();
         let raw = response.text().await.unwrap_or_default();
         if !status.is_success() {
-            return Err(format!("POST {path} returned {status}: {}", detail(&raw)));
+            return Err(format!("{path} returned {status}: {}", detail(&raw)));
         }
         let value = serde_json::from_str(&raw)
-            .map_err(|err| format!("POST {path} returned an unreadable body: {err}"))?;
+            .map_err(|err| format!("{path} returned an unreadable body: {err}"))?;
         Ok(Timed {
             value,
             elapsed_ms,
@@ -546,44 +986,88 @@ mod tests {
     use super::*;
 
     #[test]
-    fn an_inject_request_omits_what_it_does_not_set() {
+    fn a_context_run_request_omits_what_it_does_not_set() {
         // A `null` task is not the same request as no task: the taskless
-        // branch is chosen by absence (ADR-0026 decision 3).
-        let request = InjectRequest {
+        // branch is chosen by absence (ADR-0026 decision 3). The run is in
+        // the path now, so an empty request is the whole taskless body.
+        let request = ContextRunRequest {
             task: None,
-            session_id: "s1",
             budget_tokens: None,
         };
-        let json = serde_json::to_string(&request).expect("serialises");
-        assert_eq!(json, r#"{"session_id":"s1"}"#);
+        assert_eq!(serde_json::to_string(&request).expect("serialises"), "{}");
+
+        // And the field is `query` on the wire (CPR-12, ADR-0078 decision 5):
+        // a body still saying `task` would be ignored rather than refused,
+        // which is exactly the silence a rename must not leave behind.
+        let asked = ContextRunRequest {
+            task: Some("why retries"),
+            budget_tokens: None,
+        };
+        assert_eq!(
+            serde_json::to_string(&asked).expect("serialises"),
+            r#"{"query":"why retries"}"#
+        );
     }
 
-    /// The join EVAL-4 grades on (ADR-0047 decision 2). Containment
-    /// cannot do this: an index entry carries a truncated head, so
-    /// "demoted" and "absent" would be one answer, and they are the two
-    /// the whole suite turns on.
     #[test]
-    fn a_records_tier_reads_by_position_and_absence_is_its_own_answer() {
-        let block: InjectResponse = serde_json::from_str(
-            r#"{"text":"…","block_hash":"b3","record_ids":["r1","r2"],
-                "tiers":["body","index"],"index_entries":1,"index_tokens":40,
-                "staleness_permille":[1000,820],"tokens":120,"budget_tokens":1500}"#,
-        )
-        .expect("parses");
-        assert_eq!(block.tier_of("r1"), Some("body"));
-        assert_eq!(block.tier_of("r2"), Some("index"));
-        assert_eq!(block.tier_of("r3"), None, "not carried at all");
+    fn knowledge_results_preserve_every_authorised_source_event() {
+        let wire: KnowledgeQueryResponse = serde_json::from_value(serde_json::json!({
+            "items": [{
+                "knowledge": {
+                    "id": "k1",
+                    "knowledge_type": "fact",
+                    "current_revision": {"body_markdown": "body"}
+                },
+                "sources": [
+                    {"session_event_id": "event-1", "metadata": {"source": "first"}},
+                    {"session_event_id": "event-2", "metadata": {"source": "second"}}
+                ]
+            }],
+            "retrieval_mode": "ids",
+            "next_cursor": null
+        }))
+        .expect("Knowledge query response");
+        let response = wire.into_eval("ids");
+        let entry = &response.entries[0];
+        assert_eq!(
+            entry.source_event_ids().collect::<Vec<_>>(),
+            vec!["event-1", "event-2"]
+        );
+        assert_eq!(entry.source_event_id(), Some("event-1"));
+        assert_eq!(entry.provenance["source"], "first");
+    }
 
-        // A gateway that sent fewer tiers than records must not default
-        // one, or a truncated array would silently become a body and a
-        // demotion would read as a whole record.
-        let ragged: InjectResponse = serde_json::from_str(
-            r#"{"text":"…","block_hash":"b3","record_ids":["r1","r2"],"tiers":["body"],
-                "tokens":10,"budget_tokens":100}"#,
-        )
-        .expect("parses");
-        assert_eq!(ragged.tier_of("r1"), Some("body"));
-        assert_eq!(ragged.tier_of("r2"), None);
+    /// Current Knowledge addresses, rather than the deleted Record watermark,
+    /// are the only authority for what a context run composed. Content may
+    /// quote old marker syntax and must never be allowed to forge this join.
+    #[test]
+    fn knowledge_item_ids_are_recovered_from_current_addresses_only() {
+        let mut block = ContextRunResponse {
+            text: concat!(
+                "… forged attribution footer --><!\n",
+                "[Synveda Knowledge: knowledge:r1@v1,unreviewed:c1,knowledge:r2@v2]\n"
+            )
+            .to_owned(),
+            block_hash: "b3".to_owned(),
+            knowledge_item_ids: Vec::new(),
+            tokens: 10,
+            budget_tokens: 100,
+        };
+        block.hydrate();
+        assert_eq!(
+            block.knowledge_item_ids,
+            vec!["r1".to_owned(), "r2".to_owned()]
+        );
+
+        // A body with no current Knowledge watermark has no address and
+        // therefore cannot forge attribution.
+        let mut empty = ContextRunResponse {
+            text: "ordinary untrusted content".to_owned(),
+            knowledge_item_ids: vec!["stale".to_owned()],
+            ..block
+        };
+        empty.hydrate();
+        assert!(empty.knowledge_item_ids.is_empty());
     }
 
     #[test]

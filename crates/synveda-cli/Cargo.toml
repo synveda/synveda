@@ -15,8 +15,9 @@ path = "src/main.rs"
 # create, token issue — ADR-0008); everything a running gateway can serve
 # goes through its API instead. Policy for the apply-time compile check
 # (AUTHZ-1, ADR-0012): a pack the reloader would reject never reaches the
-# store. Audit because the break-glass audits itself (AUD-1, ADR-0019
-# decision 7) and `synveda audit verify` is the operator's chain check.
+# store. Audit because the retained bootstrap, policy-pack and key/secret
+# custody operations record their explicit break-glass authority (AUD-1,
+# ADR-0019 decision 7); ordinary audit query/verification uses the gateway.
 synveda-audit = { workspace = true }
 synveda-identity = { workspace = true }
 synveda-policy = { workspace = true }
@@ -25,11 +26,15 @@ synveda-types = { workspace = true }
 # The key plane (TEN-4, ADR-0064): `tenant export` seals an archive and
 # `tenant export open` is the command that demonstrates the AC by needing the
 # key. Operator acts on a deployment's own data, so they run at the store
-# level like `db migrate` and `audit verify`.
+# level like `db migrate`.
 synveda-crypto = { workspace = true }
 # `synveda skill install` recomputes what it wrote against the address the
 # published commit named (SKIL-1, ADR-0051 decision 12).
 synveda-vedaflow = { workspace = true }
+# CPR-28 uses the same pinned leaf adapter as the gateway to validate a local
+# directory/archive before packaging inert bytes for the public API. It has no
+# store, PDP, VedaFlow, audit, process or network authority of its own.
+synveda-okf = { workspace = true }
 
 base64 = { workspace = true }
 chrono = { workspace = true }
@@ -49,6 +54,11 @@ rmcp = { workspace = true }
 
 serde = { workspace = true }
 serde_json = { workspace = true }
+# The durable spool's payload hash (CPR-12, ADR-0078 decision 6). SHA-256 and
+# not BLAKE3 because the *writer* is the Node adapter, whose `node:crypto` has
+# no BLAKE3 and which takes no dependencies; this side verifies what that side
+# wrote. The authoritative digest of an event is still the server's BLAKE3.
+sha2 = { workspace = true }
 sqlx = { workspace = true }
 # `net`/`io-util` for the loopback listener `synveda login` binds; there is
 # no daemon and no long-lived server, only one request from one browser.
@@ -60,3 +70,4 @@ tokio = { workspace = true, features = ["net", "io-util"] }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 url = { workspace = true }
+zeroize = { workspace = true }

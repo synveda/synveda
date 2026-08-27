@@ -11,12 +11,11 @@
 //! for: **artefacts that leave the database** (a tenant export) and
 //! **secrets we have to read back** (an outbound directory credential, a
 //! console session's tokens). They deliberately do **not** cover
-//! `records.content`, `record_embeddings` or the Tantivy sidecars —
+//! Knowledge content, embeddings or retrieval projections —
 //! application-level encryption there removes the lexical leg and the dense
 //! leg, which is ADR-0024 in its entirety. Encryption at rest for the
-//! retrieval substrate is the volume's, and ADR-0064 decision 7 is where
-//! seed §10's "all data encrypted at rest" is scoped out loud rather than
-//! quietly shipped as less.
+//! retrieval substrate is the volume's; ADR-0064 decision 7 makes that
+//! deployment obligation explicit rather than quietly shipping less.
 //!
 //! So: destroying a tenant's key makes its *sealed* data unreadable, and
 //! TEN-5's erasure still has rows to delete. Crypto-shredding is not erasure

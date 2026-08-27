@@ -1,12 +1,13 @@
 //! The VedaFlow proposal API (FLOW-3, ADR-0032): `/v1/proposals` behind
 //! tenant resolution, uniform-404 ownership, and the PDP.
 //!
-//! A proposal is the governed request to move reviewed content onto a
-//! scope's published channel. Its content is a commit — a tree naming
-//! every member at the object address of exactly the version proposed —
-//! and its workflow is a row. Approvals are append-only, each naming the
-//! commit it approved and the effective roles its caster held at the
-//! target when they cast it.
+//! A proposal is the governed request to run one reviewed effect. Authored
+//! artifacts move onto a scope's published channel; Knowledge proposals
+//! apply a typed aggregate command instead (CPR-16, ADR-0081). In both cases its
+//! content is a commit — a tree naming every member at the exact object
+//! address reviewed — and its workflow is one row. Approvals are append-only,
+//! each naming the commit it approved and the effective roles its caster held
+//! at the target when they cast it.
 //!
 //! # Two layers, kept apart
 //!
@@ -20,23 +21,17 @@
 //!
 //! # Climbing (FLOW-5, ADR-0034)
 //!
-//! A proposal's target may be a strict **ancestor** of its source, which
-//! is how tribal knowledge reaches the department and then the org. It is
-//! not a second kind of proposal: same table, same matrix resolved at the
-//! target and only there, same lifecycle, same audit actions. Two things
-//! are added and nothing else. Opening a climb takes a second Cedar
-//! decision — `MemoryRead` at the *source*, the proposer's warrant for
-//! showing the material to the target's reviewers — and a climb's members
-//! must be material the source scope holds, meaning records that live
-//! there or records its published channel names at their current address.
-//! The second sense is what lets a department propose onward what a team
-//! climbed into it, with nothing stored to make the hop possible.
+//! An authored-artifact proposal's target may be a strict **ancestor** of
+//! its source. It is not a second kind of proposal: same table, matrix,
+//! lifecycle and audit actions. Opening a climb takes a second Cedar
+//! decision using that artifact family's read action at the source, which
+//! is the proposer's warrant for showing the material to target reviewers.
 //!
 //! # Publishing is a separate act
 //!
 //! The deciding approval does not publish. `POST /v1/proposals/{id}/publish`
-//! takes `ChannelPublish` and `MemoryRead` at the target exactly as the
-//! direct route does, and additionally requires the proposal open, the
+//! takes `ChannelPublish` and the artifact family's read action at the
+//! target, and additionally requires the proposal open, the
 //! requirement satisfied, and the bytes unchanged since the review.
 //! Auto-publishing would have to run under system authority precisely
 //! when a `compliance` reviewer casts the deciding vote — a role that
@@ -56,8 +51,6 @@
 //! one side of the change is not a review. The CLI does the rendering;
 //! this route ships bytes.
 
-use std::collections::BTreeMap;
-
 use axum::Json;
 use axum::extract::rejection::JsonRejection;
 use axum::extract::{Path, Query, State};
@@ -67,23 +60,20 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use synveda_audit::{AuditAction, Outcome};
 use synveda_policy::{Action, Resource};
-use synveda_store::records::RecordState;
-use synveda_store::{hierarchy, records, rls};
+use synveda_store::{rls, scopes};
+use synveda_types::scope::Scope;
 use synveda_types::{
-    ApprovalRequirement, AssetKind, CastApproval, Channel, Checklist, ChecklistItem,
-    ChecklistVerdict, DocumentPath, Error, HierarchyNode, IdentityId, PromotionEvidence,
-    PromptName, ProposalEffect, ProposalId, ProposalState, ProposalView, QualityShortfall,
-    RecordId, Result, Role, ScopeId, Sensitivity, SkillFile, SkillFilePath, SkillName, SkillPath,
-    SkillQualityConfig, SkillScanConfig, TenantId, Verdict,
+    ApprovalRequirement, ArtifactFamily, ArtifactReference, AssetKind, CastApproval, Channel,
+    DocumentPath, Error, IdentityId, PromptName, ProposalEffect, ProposalId, ProposalState,
+    ProposalView, Result, ScopeId, Sensitivity, TenantId, Verdict,
 };
-use synveda_vedaflow::{self as vedaflow, MemoryAsset, PolicySnapshot, Signer};
+use synveda_vedaflow::{self as vedaflow, PolicySnapshot, Signer};
 
 use crate::app::AppState;
 use crate::approvals::{self, RequirementView};
 use crate::audit;
 use crate::authz::{self, DecisionInput};
-use crate::error::ApiError;
-use crate::hierarchy::{body, commit, found, tenant_id};
+use crate::request::{body, commit, found, tenant_id};
 use crate::telemetry::{
     PROPOSAL_CLIMBS_TOTAL, PROPOSAL_OPERATIONS_TOTAL, PUBLISH_REVIEW_REQUIRED_TOTAL,
 };
@@ -106,35 +96,50 @@ async fn respond<T: IntoResponse>(
     op: &'static str,
     result: Result<T>,
 ) -> Response {
-    let outcome = match &result {
-        Ok(_) => "ok",
-        Err(
-            Error::Unauthenticated { .. }
-            | Error::PolicyDenied { .. }
-            | Error::NotFound { .. }
-            | Error::Invalid { .. }
-            | Error::Conflict { .. }
-            | Error::RateLimited { .. },
-        ) => "rejected",
-        Err(_) => "error",
-    };
+    let outcome = crate::response::outcome(&result);
     metrics::counter!(PROPOSAL_OPERATIONS_TOTAL, "op" => op, "outcome" => outcome).increment(1);
-    match result {
-        Ok(response) => response.into_response(),
-        Err(error) => {
-            audit::record_rejection(state, op, &error).await;
-            ApiError(error).into_response()
-        }
-    }
+    crate::response::finish(state, op, result).await
 }
 
 // ── Views ──────────────────────────────────────────────────────────────
 
+/// Content-free typed address shared by every governed artifact family.
+#[derive(Serialize, utoipa::ToSchema)]
+#[schema(as = ProposalArtifactReference)]
+pub(crate) struct ArtifactReferenceView {
+    /// Closed common-review family vocabulary.
+    family: String,
+    /// Stable aggregate, binding, import job, or authored member id.
+    artifact_id: String,
+    /// Domain mutation carried by the reviewed effect.
+    operation: String,
+    /// Exact immutable revision, binding-state digest, or content digest.
+    version: String,
+    /// Head inspected by a revision-aware mutation.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    expected_revision: Option<String>,
+}
+
+impl From<&ArtifactReference> for ArtifactReferenceView {
+    fn from(reference: &ArtifactReference) -> Self {
+        Self {
+            family: reference.family.as_str().to_owned(),
+            artifact_id: reference.artifact_id.clone(),
+            operation: reference.operation.clone(),
+            version: reference.version.clone(),
+            expected_revision: reference.expected_revision.clone(),
+        }
+    }
+}
+
 /// One proposal in a listing.
-#[derive(Serialize)]
-struct ProposalSummary {
+#[derive(Serialize, utoipa::ToSchema)]
+pub(crate) struct ProposalSummary {
+    #[schema(value_type = String, format = "uuid")]
     id: ProposalId,
+    #[schema(value_type = String, format = "uuid")]
     target_scope_id: ScopeId,
+    #[schema(value_type = String, format = "uuid")]
     source_scope_id: ScopeId,
     /// The target's hierarchy path. A review surface that renders two
     /// UUIDs is not one a person can use, and for a climb the *source*
@@ -146,45 +151,46 @@ struct ProposalSummary {
     #[serde(skip_serializing_if = "Option::is_none")]
     source_scope_path: Option<String>,
     asset: String,
-    /// What running this proposal would do (AUTHZ-4, ADR-0037
-    /// decision 16). `published` for every FLOW-3 proposal; `lapse` for a
-    /// grant. Named for the effect rather than the channel because a lapse
-    /// has no channel, and a field that said `published` on a proposal that
-    /// publishes nothing would be the paper-over this feature refused at
-    /// the schema.
+    /// What running this proposal would do. `published` writes a channel,
+    /// `classify` changes sensitivity, and `apply` executes a typed governed
+    /// artifact command (including a policy relaxation).
+    #[schema(value_type = String)]
     effect: ProposalEffect,
     /// The five-state vocabulary tech plan §2.3 describes: the stored
     /// state, with `approved` rendered from `open` plus a satisfied
     /// requirement (ADR-0032 decision 11).
+    #[schema(value_type = String)]
     state: ProposalView,
+    #[schema(value_type = String)]
     sensitivity: Sensitivity,
     title: String,
     /// The commit holding exactly what is proposed.
     commit: String,
+    #[schema(value_type = String, format = "uuid")]
     proposer_id: IdentityId,
     proposer_subject: String,
     created_at: DateTime<Utc>,
+    updated_at: DateTime<Utc>,
     #[serde(skip_serializing_if = "Option::is_none")]
     closed_at: Option<DateTime<Utc>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     close_reason: Option<String>,
+    /// Stable, content-free artifacts and exact versions bound by the commit.
+    artifact_references: Vec<ArtifactReferenceView>,
     /// What the matrix asks for here, resolved now.
     required: RequirementView,
     /// What it still lacks, in one line a reviewer reads.
     outstanding: String,
-    /// Why a rule opened this, when one did (FLOW-4, ADR-0033 decision
-    /// 12): the counts, the actions counted, and the audit range they
-    /// were folded from — so a reviewer can check the claim against the
-    /// chain rather than trust it. Absent on a human's proposal.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    promotion: Option<PromotionEvidence>,
 }
 
 /// One review act as the API renders it.
-#[derive(Serialize)]
-struct ApprovalView {
+#[derive(Serialize, utoipa::ToSchema)]
+#[schema(as = ProposalApprovalView)]
+pub(crate) struct ApprovalView {
+    #[schema(value_type = String, format = "uuid")]
     approver_id: IdentityId,
     approver_subject: String,
+    #[schema(value_type = String)]
     verdict: Verdict,
     /// The effective roles the approver held at the target when they cast
     /// it — recorded then, never re-derived now (ADR-0032 decision 5).
@@ -200,18 +206,39 @@ struct ApprovalView {
     created_at: DateTime<Utc>,
 }
 
+/// One common proposal lifecycle event, oldest first.
+#[derive(Serialize, utoipa::ToSchema)]
+#[schema(as = ProposalTimelineEvent)]
+pub(crate) struct TimelineEventView {
+    /// `opened`, `approved`, `rejected`, `withdrawn`, `applied`, or `published`.
+    kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schema(value_type = Option<String>, format = "uuid")]
+    actor_id: Option<IdentityId>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    actor_subject: Option<String>,
+    at: DateTime<Utc>,
+    /// Exact proposal commit the act bound.
+    commit: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reason: Option<String>,
+}
+
 /// What publishing this proposal would do to the target's published
 /// channel, for one member (FLOW-6, ADR-0035 decision 5). Membership in
 /// the target's tree is the predicate — the same sense of "this scope
 /// holds it" ADR-0034 decision 3 used one scope over.
-#[derive(Serialize, Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Serialize, Clone, Copy, PartialEq, Eq, Debug, utoipa::ToSchema)]
+#[schema(as = ProposalMemberEffect)]
 #[serde(rename_all = "snake_case")]
-enum MemberEffect {
-    /// The channel names no version of this record; publication admits it.
+pub(crate) enum MemberEffect {
+    /// The channel names no version of this member; publication admits it.
     Add,
     /// The channel names it at a different address; publication replaces
     /// that version with this one.
     Update,
+    /// A non-channel Knowledge command will execute against its aggregate.
+    Apply,
     /// The channel already names it at exactly this address; publication
     /// changes nothing about this member.
     None,
@@ -221,14 +248,15 @@ enum MemberEffect {
 /// the old side of the diff, present only for [`MemberEffect::Update`].
 ///
 /// This is the one content-visibility widening in FLOW-6 (ADR-0035
-/// decision 8): a reviewer holding no `MemoryRead` sees what a
-/// publication would overwrite. Bounded by the proposal's own member set,
+/// decision 8): a reviewer sees what a publication would overwrite.
+/// Bounded by the proposal's own member set,
 /// the target's own channel, and the target scope the reviewer already
 /// holds `ProposalRead` on — and admitted because a review of a change
 /// that hides one side of the change is not a review.
-#[derive(Serialize)]
-struct BaselineView {
-    /// The address the target's tree names for this record today.
+#[derive(Serialize, utoipa::ToSchema)]
+#[schema(as = ProposalBaselineView)]
+pub(crate) struct BaselineView {
+    /// The address the target's tree names for this member today.
     object_hash: String,
     /// That object's canonical bytes as text (ADR-0030 decision 4's
     /// human-readable form, which FLOW-1 chose for exactly this).
@@ -237,17 +265,13 @@ struct BaselineView {
 
 /// One member of a proposal — the id and the address that was proposed,
 /// plus what a reviewer needs to review it: the bytes under review, the
-/// bytes they would replace, and the record's current content.
-#[derive(Serialize)]
-struct MemberView {
-    /// The tree entry name: a record id for a memory, a path for a prompt
-    /// (PRMT-1, ADR-0049 decision 3). The one field both asset kinds carry,
-    /// and the one a review surface displays.
+/// bytes they would replace, and the artifact's current content.
+#[derive(Serialize, utoipa::ToSchema)]
+#[schema(as = ProposalMemberView)]
+pub(crate) struct MemberView {
+    /// The tree entry name: a path for an authored asset or `command` for a
+    /// typed aggregate effect. The one field every artifact family carries.
     member: String,
-    /// The record id, for a memory proposal. Absent for an authored asset,
-    /// whose members are named rather than identified.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    record_id: Option<RecordId>,
     /// What kind of asset this proposal carries — one word, so a reviewer's
     /// first line says what they are looking at.
     asset: String,
@@ -257,20 +281,16 @@ struct MemberView {
     /// content moved after the proposal opened, and publishing will
     /// refuse (ADR-0032 decision 6).
     unchanged: bool,
-    /// A memory's class. Absent for a prompt, which has none — `asset`
-    /// says what it is instead.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    class: Option<String>,
+    #[schema(value_type = String)]
     sensitivity: Sensitivity,
-    /// The member's text **as it stands now**: a record's content, or a
-    /// prompt draft's template. Beside `unchanged` this is what makes drift
+    /// The member's text **as it stands now**. Beside `unchanged` this is what makes drift
     /// legible; it is not what the approvals bind.
     content: String,
     /// What publication would do to the target's channel for this member.
     effect: MemberEffect,
     /// The canonical bytes at the proposed address — what the approvals
     /// bind, read from the object store rather than re-derived from the
-    /// record, because an edited record is no longer what anyone approved
+    /// source row, because an edited artifact is no longer what anyone approved
     /// (ADR-0035 decision 6). Empty only if the object is missing, which
     /// the append-only store makes impossible.
     proposed: String,
@@ -280,44 +300,14 @@ struct MemberView {
 }
 
 /// One proposal, in full.
-#[derive(Serialize)]
-struct ProposalDetail {
+#[derive(Serialize, utoipa::ToSchema)]
+#[schema(as = ProposalDetail)]
+pub(crate) struct ProposalDetail {
     #[serde(flatten)]
     summary: ProposalSummary,
     members: Vec<MemberView>,
     approvals: Vec<ApprovalView>,
-    /// The security scan of the bytes this proposal would publish
-    /// (SKIL-2, ADR-0052 decision 7).
-    ///
-    /// Present for `skill` proposals and absent for every other asset
-    /// kind, because it is a statement about executable content and a
-    /// field that was always there would be a field that means nothing
-    /// three times out of four.
-    ///
-    /// **Recomputed on this read, not stored** (decision 6): it is a pure
-    /// function of the members' bytes and the rule table, and both are
-    /// already here — the objects were read to draw the diff, and the
-    /// table is compiled in. What is durable is the audit record, because
-    /// a row is mutable and a chained event is not.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    scan: Option<crate::skills::ScanReport>,
-    /// The quality of the bytes this proposal would publish (SKIL-3,
-    /// ADR-0053 decision 11).
-    ///
-    /// Present for `skill` proposals and absent for every other kind, on
-    /// `scan`'s reasoning. **Two halves, never averaged**: the automated
-    /// rubric is recomputed here from the same member bytes the diff
-    /// renders, and the reviewer checklist is looked up by a digest of
-    /// exactly those members — so a checklist answered against an earlier
-    /// draft is simply not found, rather than laundering answers about
-    /// content nobody reviewed (decision 4).
-    ///
-    /// It is rendered against the pack that will decide the *publication*,
-    /// so `needs_override` means "this will need somebody holding
-    /// `SkillQualityOverride`" rather than "some pack somewhere would ask
-    /// for one".
-    #[serde(skip_serializing_if = "Option::is_none")]
-    quality: Option<crate::skills::QualityReport>,
+    timeline: Vec<TimelineEventView>,
 }
 
 // ── List ───────────────────────────────────────────────────────────────
@@ -331,15 +321,38 @@ pub(crate) struct ListParams {
     /// Restrict to one stored state. `approved` is not a stored state —
     /// it is computed — so filter on `open` and read `state` per row.
     state: Option<ProposalState>,
+    /// Restrict to proposals whose typed artifact index contains this family.
+    artifact_family: Option<ArtifactFamily>,
     limit: Option<i64>,
 }
 
-#[derive(Serialize)]
-struct ListResponse {
+#[derive(Serialize, utoipa::ToSchema)]
+#[schema(as = ProposalListResponse)]
+pub(crate) struct ListResponse {
     proposals: Vec<ProposalSummary>,
 }
 
 /// `GET /v1/proposals` — proposals, newest first.
+#[utoipa::path(
+    get,
+    path = "/v1/proposals",
+    operation_id = "list_proposals",
+    tag = "proposals",
+    params(
+        ("scope_id" = Option<String>, Query, format = "uuid"),
+        ("state" = Option<String>, Query),
+        ("artifact_family" = Option<String>, Query),
+        ("limit" = Option<i64>, Query)
+    ),
+    responses(
+        (status = 200, description = "Visible proposals", body = ListResponse),
+        (status = 400, description = "The filter or limit is invalid", body = crate::workspaces::ApiErrorBody),
+        (status = 401, description = "No usable credential", body = crate::workspaces::ApiErrorBody),
+        (status = 403, description = "Proposal read is not permitted", body = crate::workspaces::ApiErrorBody),
+        (status = 404, description = "The requested scope is absent", body = crate::workspaces::ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
 #[tracing::instrument(name = "proposals.list", skip_all)]
 pub(crate) async fn list(
     State(state): State<AppState>,
@@ -356,28 +369,43 @@ pub(crate) async fn list(
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
         let (input, resource) = match params.scope_id {
             None => (
-                authz::gather(&state, &mut tx, None).await?,
+                authz::gather(
+                    &state,
+                    &mut tx,
+                    None,
+                    synveda_store::anchors::AnchorSelection::none(),
+                    Vec::new(),
+                )
+                .await?,
                 Resource::Tenant(tenant_id),
             ),
             Some(scope_id) => {
                 let node = found(
-                    hierarchy::node(&mut *tx, scope_id).await?,
+                    scopes::get(&mut *tx, tenant_id, scope_id).await?,
                     tenant_id,
                     scope_id,
                 )?;
                 (
-                    authz::gather(&state, &mut tx, Some(&node)).await?,
+                    authz::gather(
+                        &state,
+                        &mut tx,
+                        Some(&node),
+                        synveda_store::anchors::AnchorSelection::none(),
+                        Vec::new(),
+                    )
+                    .await?,
                     Resource::Scope(scope_id),
                 )
             }
         };
-        let authorized = authz::decide(&state, &input, Action::ProposalRead, resource, None)?;
+        let authorized = authz::decide(&state, &input, Action::ProposalRead, resource)?;
         let stored = vedaflow::proposals::list(
             &mut tx,
             tenant_id,
             vedaflow::ProposalFilter {
                 target_scope: params.scope_id,
                 state: params.state,
+                artifact_family: params.artifact_family,
                 limit,
             },
         )
@@ -415,13 +443,25 @@ pub(crate) async fn list(
 /// who cannot read the source scope reviews what the proposal shows them.
 /// Since FLOW-5 that is a real difference — a climb's members live below
 /// the target — and `ProposalRead` at the target is deliberately the only
-/// gate (ADR-0034 decision 1). Requiring the reviewer to hold
-/// `MemoryRead` at the *source* instead would break the product twice
-/// over: `compliance` holds no content read in any pack, so the invariant
-/// floor's own role could never review a `restricted` climb, and nobody
-/// but the owner reads a personal scope, so a user's own memory could
-/// never climb to their team. The read that guards a climb is the
-/// proposer's, taken once at open time and recorded under their name.
+/// gate (ADR-0034 decision 1). Requiring the reviewer to hold the artifact
+/// read action at the *source* instead would break the product: `compliance`
+/// holds no content read in any pack, so the invariant floor's own role
+/// could never review a `restricted` climb. The read that guards a climb is the
+/// proposer’s, taken once at open time and recorded under their name.
+#[utoipa::path(
+    get,
+    path = "/v1/proposals/{id}",
+    operation_id = "get_proposal",
+    tag = "proposals",
+    params(("id" = String, Path, format = "uuid")),
+    responses(
+        (status = 200, description = "The proposal, members, and review log", body = ProposalDetail),
+        (status = 401, description = "No usable credential", body = crate::workspaces::ApiErrorBody),
+        (status = 403, description = "Proposal read is not permitted", body = crate::workspaces::ApiErrorBody),
+        (status = 404, description = "The proposal is absent or outside the tenant", body = crate::workspaces::ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
 #[tracing::instrument(name = "proposals.get", skip_all)]
 pub(crate) async fn get(State(state): State<AppState>, Path(id): Path<ProposalId>) -> Response {
     let result = async {
@@ -429,98 +469,24 @@ pub(crate) async fn get(State(state): State<AppState>, Path(id): Path<ProposalId
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
         let proposal = load(&mut tx, tenant_id, id).await?;
         let node = target_node(&mut tx, tenant_id, &proposal).await?;
-        let input = authz::gather(&state, &mut tx, Some(&node)).await?;
+        let input = authz::gather(
+            &state,
+            &mut tx,
+            Some(&node),
+            synveda_store::anchors::AnchorSelection::none(),
+            Vec::new(),
+        )
+        .await?;
         let authorized = authz::decide(
             &state,
             &input,
             Action::ProposalRead,
             Resource::Scope(node.id),
-            None,
         )?;
         let summary = summarise(&state, &mut tx, tenant_id, &input, &proposal).await?;
         let members = member_views(&mut tx, tenant_id, &proposal).await?;
-        let members_of = vedaflow::proposals::members(&mut tx, tenant_id, proposal.commit).await?;
-        // The report a reviewer reads, over the same bytes the diff above
-        // renders — recomputed here rather than looked up (ADR-0052
-        // decision 6), and reported against the pack that would decide the
-        // publication, so `blocked` means "this will be refused at publish"
-        // rather than "some pack somewhere would refuse it".
-        let effective = state
-            .pdp
-            .effective(tenant_id, Resource::Scope(node.id), &input.context());
-        let (scan, quality) = if proposal.asset == AssetKind::Skill {
-            let config = effective.scan;
-            // Labelled by the member name — `<skill>/<file>` — rather than
-            // the bare filename, because a proposal may carry more than one
-            // bundle and "SKILL.md" alone would not say whose.
-            let files: Vec<SkillFile> = members
-                .iter()
-                .filter_map(|member| {
-                    member
-                        .member
-                        .parse::<SkillFilePath>()
-                        .ok()
-                        .map(|path| SkillFile {
-                            path,
-                            content: member.proposed.clone(),
-                        })
-                })
-                .collect();
-            let scanned = crate::skills::scan_security(&files).await?;
-            // The rubric over the same bytes, and the checklist bound to
-            // exactly these members. The digest is computed from
-            // `(member name, object address)` pairs, which is what a
-            // publication will recompute — so what a reviewer is shown
-            // here and what the gate reads there are the same lookup.
-            // **From the objects, not from the member names.** A member
-            // is named `<skill>/<path>`, so reconstructing a `SkillFile`
-            // from that name gives a path of `code-review/SKILL.md` —
-            // and the rubric, which has to know which file is the
-            // manifest, then sees a bundle with no manifest at all and
-            // scores it as garbage. That is harmless for the scanner
-            // above, which reads every file's content regardless of its
-            // name, and fatal here.
-            //
-            // The acceptance test caught it by asserting that the review
-            // and the registry agree about the same bytes, which is the
-            // property a recomputed score has to have to be worth
-            // rendering beside a cached one.
-            let bundle = crate::skills::files_of_members(&mut tx, tenant_id, &members_of).await?;
-            let scored = crate::skills::score_quality(&bundle).await?;
-            let digest = crate::skills::digest_of_members(
-                &members
-                    .iter()
-                    .map(|member| (member.member.clone(), member.object_hash.clone()))
-                    .collect::<Vec<_>>(),
-            )?;
-            let review = match crate::skills::skill_of(
-                &members.iter().map(|m| m.member.clone()).collect::<Vec<_>>(),
-            ) {
-                Some(name) => {
-                    synveda_store::skill_reviews::for_bundle(
-                        &mut *tx,
-                        tenant_id,
-                        proposal.source_scope_id,
-                        &name,
-                        &digest,
-                    )
-                    .await?
-                }
-                None => None,
-            };
-            (
-                Some(crate::skills::ScanReport::new(&scanned, &config)),
-                Some(crate::skills::QualityReport::new(
-                    &scored,
-                    &effective.quality,
-                    &digest,
-                    review.as_ref(),
-                )),
-            )
-        } else {
-            (None, None)
-        };
         let recorded = vedaflow::proposals::approvals(&mut tx, tenant_id, id).await?;
+        let timeline = timeline(&proposal, &recorded);
         audit::record(
             &mut tx,
             tenant_id,
@@ -537,8 +503,6 @@ pub(crate) async fn get(State(state): State<AppState>, Path(id): Path<ProposalId
         commit(tx).await?;
         Ok(Json(ProposalDetail {
             members,
-            scan,
-            quality,
             approvals: recorded
                 .into_iter()
                 .map(|approval| ApprovalView {
@@ -556,6 +520,7 @@ pub(crate) async fn get(State(state): State<AppState>, Path(id): Path<ProposalId
                     created_at: approval.created_at,
                 })
                 .collect(),
+            timeline,
             summary,
         }))
     }
@@ -563,40 +528,91 @@ pub(crate) async fn get(State(state): State<AppState>, Path(id): Path<ProposalId
     respond(&state, "get", result).await
 }
 
+fn timeline(
+    proposal: &vedaflow::StoredProposal,
+    approvals: &[vedaflow::StoredApproval],
+) -> Vec<TimelineEventView> {
+    let commit = proposal.commit.to_hex();
+    let mut events = vec![TimelineEventView {
+        kind: "opened".to_owned(),
+        actor_id: Some(proposal.proposer_id),
+        actor_subject: Some(proposal.proposer_subject.clone()),
+        at: proposal.created_at,
+        commit: commit.clone(),
+        reason: None,
+    }];
+    events.extend(approvals.iter().map(|approval| {
+        TimelineEventView {
+            kind: match approval.verdict {
+                Verdict::Approve => "approved",
+                Verdict::Reject => "rejected",
+            }
+            .to_owned(),
+            actor_id: Some(approval.approver_id),
+            actor_subject: Some(approval.approver_subject.clone()),
+            at: approval.created_at,
+            commit: approval.commit.to_hex(),
+            reason: approval.comment.clone(),
+        }
+    }));
+    let rejection_is_recorded = approvals
+        .iter()
+        .any(|approval| approval.verdict == Verdict::Reject);
+    if proposal.state.is_terminal()
+        && !(proposal.state == ProposalState::Rejected && rejection_is_recorded)
+    {
+        let actor_subject = proposal.closed_by.and_then(|actor| {
+            approvals
+                .iter()
+                .find(|approval| approval.approver_id == actor)
+                .map(|approval| approval.approver_subject.clone())
+                .or_else(|| {
+                    (actor == proposal.proposer_id).then(|| proposal.proposer_subject.clone())
+                })
+        });
+        events.push(TimelineEventView {
+            kind: proposal.state.as_str().to_owned(),
+            actor_id: proposal.closed_by,
+            actor_subject,
+            at: proposal.closed_at.unwrap_or(proposal.updated_at),
+            commit,
+            reason: proposal.close_reason.clone(),
+        });
+    }
+    events.sort_by_key(|event| event.at);
+    events
+}
+
 // ── Open ───────────────────────────────────────────────────────────────
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
+#[schema(as = ProposalOpenBody)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct OpenBody {
     /// The scope whose published channel would move. Requirements resolve
     /// here, and only here — "each level's approvers" is true because
     /// each level's proposal resolves at that level (ADR-0034
     /// decision 4).
+    #[schema(value_type = String, format = "uuid")]
     scope_id: ScopeId,
     /// Where the material is now. Absent means the target — the
     /// same-scope case, a climb of zero levels. Present, it must be the
     /// target or a **descendant** of it: a climb goes up the chain that
     /// composition walks down (ADR-0034 decision 2).
     #[serde(default)]
+    #[schema(value_type = Option<String>, format = "uuid")]
     source_scope_id: Option<ScopeId>,
-    /// The records to propose. Must be material the source scope holds —
-    /// records living there, or records its published channel names at
-    /// their current address (ADR-0034 decision 3).
-    #[serde(default)]
-    record_ids: Vec<RecordId>,
     /// The prompts to propose, by name (PRMT-1, ADR-0049 decision 6).
     ///
-    /// Exactly one of `record_ids` and `prompt_names` may be present: a
-    /// proposal has one asset kind, because the approval matrix resolves
-    /// from it and `regulated-strict` prices a prompt at two distinct
-    /// people where it prices a team's memory at one. A mixed set would
-    /// have to be priced at the maximum, which is a rule nobody wrote and
-    /// a review nobody asked for.
+    /// Exactly one authored-artifact member list may be present: a proposal
+    /// has one asset kind because the approval matrix resolves from it.
     ///
     /// The same two senses of "the source holds it" apply: the draft lives
     /// there, or the source's published channel names it at that address —
     /// which is what lets a department propose onward what a team climbed
     /// into it, with no draft row at the department at all.
     #[serde(default)]
+    #[schema(value_type = Vec<String>)]
     prompt_names: Vec<PromptName>,
     /// The context-pack documents to propose, by path (PRMT-2, ADR-0050
     /// decision 1).
@@ -610,40 +626,37 @@ pub(crate) struct OpenBody {
     /// `regulated-strict` prices a pack at a department at two distinct
     /// people where it prices a team's memory at one.
     #[serde(default)]
+    #[schema(value_type = Vec<String>)]
     document_paths: Vec<DocumentPath>,
-    /// The skills to promote, by **name** (SKIL-1, ADR-0051 decision 1).
-    /// Never by file: a client loads a bundle whole, so proposing three of
-    /// its four files would propose a version nobody can run. Every file
-    /// the source holds becomes a member.
-    ///
-    /// Exactly one of the four lists may be present, for `prompt_names`'
-    /// reason.
-    #[serde(default)]
-    skill_names: Vec<SkillName>,
     /// What this proposes, in one line. A reviewer reads it in a list.
     title: String,
-    /// What running this proposal would *do*. Absent means `published` —
-    /// the effect a proposal had before AUTHZ-4 and the one it has almost
-    /// always. `lapse` is refused here: a lapse's terms are a different
-    /// body and have their own route (ADR-0037).
-    #[serde(default)]
-    effect: Option<ProposalEffect>,
-    /// The tier a `classify` proposal would install (AUTHZ-5, ADR-0038
-    /// decision 9). Required for that effect and refused for any other:
-    /// a publication does not move a tier, and a body that named one would
-    /// be describing something the effect will not do.
-    #[serde(default)]
-    sensitivity: Option<Sensitivity>,
 }
 
-#[derive(Serialize)]
-struct OpenResponse {
+#[derive(Serialize, utoipa::ToSchema)]
+#[schema(as = ProposalOpenResponse)]
+pub(crate) struct OpenResponse {
     #[serde(flatten)]
     summary: ProposalSummary,
 }
 
 /// `POST /v1/proposals` — open a proposal against a scope's published
 /// channel.
+#[utoipa::path(
+    post,
+    path = "/v1/proposals",
+    operation_id = "open_proposal",
+    tag = "proposals",
+    request_body = OpenBody,
+    responses(
+        (status = 200, description = "The opened proposal", body = OpenResponse),
+        (status = 400, description = "The proposal shape or direction is invalid", body = crate::workspaces::ApiErrorBody),
+        (status = 401, description = "No usable credential", body = crate::workspaces::ApiErrorBody),
+        (status = 403, description = "Opening this proposal is not permitted", body = crate::workspaces::ApiErrorBody),
+        (status = 404, description = "A scope or member is absent", body = crate::workspaces::ApiErrorBody),
+        (status = 409, description = "The scope has reached its open-proposal limit", body = crate::workspaces::ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
 #[tracing::instrument(name = "proposals.open", skip_all)]
 pub(crate) async fn open(
     State(state): State<AppState>,
@@ -659,27 +672,31 @@ async fn open_inner(
 ) -> Result<Json<OpenResponse>> {
     let body = body(payload)?;
     validate_open(&body)?;
-    let effect = body.effect.unwrap_or(ProposalEffect::Published);
-    // Present exactly for the effect that installs one, absent for every
-    // other: `validate_open` refuses the two mismatches by name.
-    let proposed_tier = body.sensitivity.unwrap_or(Sensitivity::WORKING);
+    let effect = ProposalEffect::Published;
     let tenant_id = tenant_id()?;
     let source_scope_id = body.source_scope_id.unwrap_or(body.scope_id);
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
     let node = found(
-        hierarchy::node(&mut *tx, body.scope_id).await?,
+        scopes::get(&mut *tx, tenant_id, body.scope_id).await?,
         tenant_id,
         body.scope_id,
     )?;
     let source = found(
-        hierarchy::node(&mut *tx, source_scope_id).await?,
+        scopes::get(&mut *tx, tenant_id, source_scope_id).await?,
         tenant_id,
         source_scope_id,
     )?;
     // Gathered at the *source* — the deeper node, whose chain contains
     // the target's as a suffix — so two scopes are decided from one set of
     // pack assignments and role bindings (ADR-0034 decision 12).
-    let input = authz::gather(state, &mut tx, Some(&source)).await?;
+    let input = authz::gather(
+        state,
+        &mut tx,
+        Some(&source),
+        synveda_store::anchors::AnchorSelection::none(),
+        Vec::new(),
+    )
+    .await?;
     // The climb's direction, checked before anything is decided about it:
     // the target has to be on the source's own chain. A peer scope is not,
     // has no authority over the source, and admitting one would turn the
@@ -700,7 +717,6 @@ async fn open_inner(
         target_position,
         Action::ProposalOpen,
         Resource::Scope(body.scope_id),
-        None,
     )?;
     let proposer = identity_of(&input)?;
 
@@ -718,25 +734,16 @@ async fn open_inner(
         });
     }
 
-    let asset = if !body.prompt_names.is_empty() {
-        AssetKind::Prompt
-    } else if !body.document_paths.is_empty() {
+    let asset = if body.prompt_names.is_empty() {
         AssetKind::ContextPack
-    } else if !body.skill_names.is_empty() {
-        AssetKind::Skill
     } else {
-        AssetKind::Memory
+        AssetKind::Prompt
     };
     // The members, as the asset kind's own reader sees them: the two senses
     // of "the source holds it" (ADR-0034 decision 3) are the same two for
     // both kinds — it lives there, or the source's published channel names
     // it at its current address — read from different tables.
     let members_now: Vec<Proposed> = match asset {
-        AssetKind::Memory => held_versions(&mut tx, tenant_id, source_scope_id, &body.record_ids)
-            .await?
-            .into_iter()
-            .map(Proposed::Memory)
-            .collect(),
         AssetKind::ContextPack => {
             held_documents(&mut tx, tenant_id, source_scope_id, &body.document_paths)
                 .await?
@@ -744,28 +751,22 @@ async fn open_inner(
                 .map(Proposed::ContextPack)
                 .collect()
         }
-        AssetKind::Skill => held_skills(&mut tx, tenant_id, source_scope_id, &body.skill_names)
-            .await?
-            .into_iter()
-            .map(Proposed::Skill)
-            .collect(),
-        _ => held_prompts(&mut tx, tenant_id, source_scope_id, &body.prompt_names)
+        AssetKind::Prompt => held_prompts(&mut tx, tenant_id, source_scope_id, &body.prompt_names)
             .await?
             .into_iter()
             .map(Proposed::Prompt)
             .collect(),
+        other => {
+            return Err(Error::Invalid {
+                message: format!(
+                    "{} is not accepted by the authored-artifact proposal route",
+                    other.as_str()
+                ),
+            });
+        }
     };
     let held = max_sensitivity(&members_now);
-    // A classification's requirement resolves at the **maximum of the
-    // current and proposed tiers** (ADR-0038 decision 9). Taking only the
-    // proposed side would price a declassification at the tier it is
-    // leaving *for* — so removing `restricted` would cost what `internal`
-    // costs, and the one direction that actually removes a control would be
-    // the cheap one.
-    let sensitivity = match effect {
-        ProposalEffect::Classify => held.max(proposed_tier),
-        _ => held,
-    };
+    let sensitivity = held;
     // The disclosure decision (ADR-0034 decision 1): may this principal
     // read what it is about to show the target's reviewers. It is the
     // whole warrant for the climb — the privacy floor then makes "nobody
@@ -780,33 +781,18 @@ async fn open_inner(
     //
     // Taken with the *asset kind's* own read action (PRMT-1, ADR-0049
     // decision 4): a prompt proposal's disclosure is a `PromptRead`, and
-    // deciding it as a memory read would ask a question about a different
-    // corpus — in a pack that shares prompts more widely than memory, or
-    // less, the two answers differ.
+    // deciding it as another artifact family's read would ask a question
+    // about a different corpus.
     let disclosed = decide_asset_read(state, &input, asset, source_scope_id)?;
+    let disclosed_action = asset_read_action(asset)?;
     // Objects first: each member's address, computed from the version
     // being proposed. This is what binds the review to bytes — approvals
     // name this commit, and publishing recomputes these addresses from the
-    // records as they stand then (ADR-0032 decision 6).
+    // source rows as they stand then (ADR-0032 decision 6).
     let mut members: Vec<(String, vedaflow::hash::ObjectHash)> =
         Vec::with_capacity(members_now.len());
     for proposed in &members_now {
         let (entry, hash) = match proposed {
-            Proposed::Memory(version) => {
-                let mut asset = memory_asset(version.id, &version.state);
-                if effect == ProposalEffect::Classify {
-                    // The proposed version differs from the live record in
-                    // exactly one field, and it lives in the object store
-                    // rather than in the row: writing the row first would put
-                    // the change live before anyone reviewed it (ADR-0038
-                    // decision 9). The tier is inside the memory object's
-                    // address, so the approvals bind it the way they bind
-                    // bytes, with no recheck.
-                    asset.sensitivity = proposed_tier;
-                }
-                let object = vedaflow::put_memory(&mut tx, tenant_id, &asset).await?;
-                (asset.entry_name(), object.hash)
-            }
             // A prompt's object is already stored — the draft row's foreign
             // key required it at authoring time — so this write dedups and
             // stores nothing. It runs anyway, because a member reached
@@ -831,14 +817,6 @@ async fn open_inner(
                 let object = vedaflow::put_context_pack(&mut tx, tenant_id, asset).await?;
                 (asset.entry_name(), object.hash)
             }
-            // Same story again, and for the same reason: the file's object
-            // was stored at authoring — the draft row's foreign key required
-            // it — so this write dedups, and it runs anyway because a member
-            // reached through the *published* sense has no draft row here.
-            Proposed::Skill(asset) => {
-                let object = vedaflow::put_skill(&mut tx, tenant_id, asset).await?;
-                (asset.entry_name(), object.hash)
-            }
         };
         members.push((entry, hash));
     }
@@ -846,6 +824,22 @@ async fn open_inner(
         authorized.decision.pack_name.clone(),
         authorized.decision.pack_version,
     );
+    let artifact_family = match asset {
+        AssetKind::Prompt => ArtifactFamily::Prompt,
+        AssetKind::ContextPack => ArtifactFamily::ContextPack,
+        _ => {
+            return Err(Error::Invalid {
+                message: "authored proposals support prompt and context-pack assets only"
+                    .to_owned(),
+            });
+        }
+    };
+    let artifact_references = members
+        .iter()
+        .map(|(entry, hash)| {
+            ArtifactReference::new(artifact_family, entry, "publish", hash.to_hex(), None)
+        })
+        .collect::<Result<Vec<_>>>()?;
     let proposal = vedaflow::proposals::open(
         &mut tx,
         tenant_id,
@@ -859,14 +853,13 @@ async fn open_inner(
             asset,
             effect,
             members: &members,
+            artifact_references: &artifact_references,
             sensitivity,
             title: &body.title,
             proposer,
             proposer_subject: &input.principal.subject,
             committed_at: Utc::now(),
             policy_snapshot: &snapshot,
-            // A human opened this one (FLOW-4, ADR-0033 decision 12).
-            evidence: None,
         },
         &Signer::Unsigned,
     )
@@ -875,7 +868,7 @@ async fn open_inner(
     if target_position > 0 {
         metrics::counter!(
             PROPOSAL_CLIMBS_TOTAL,
-            "levels" => target_position.to_string(),
+            "levels" => climb_level_bucket(target_position),
             "from" => source.kind.as_str(),
             "to" => node.kind.as_str(),
         )
@@ -885,7 +878,7 @@ async fn open_inner(
             scope.source = %source_scope_id,
             scope.target = %body.scope_id,
             climb.levels = target_position,
-            "proposal climbs {target_position} level(s) to {}", node.path
+            "proposal climbs {target_position} level(s) to {}", node.slug
         );
     }
 
@@ -918,6 +911,7 @@ async fn open_inner(
             "title": body.title,
             "sensitivity": sensitivity.as_str(),
             "commit": proposal.commit.to_hex(),
+            "artifact_references": artifact_reference_audit(&proposal),
             // Where it came from, and — when that is not the target — the
             // second governed decision the climb took: the proposer's read
             // at the source, which is the disclosure this proposal makes
@@ -926,15 +920,11 @@ async fn open_inner(
             "target_scope_id": body.scope_id,
             "climb": (source_scope_id != body.scope_id).then(|| json!({
                 "levels": target_position,
-                "source_read": audit::decision_context(Action::MemoryRead, &disclosed),
+                "source_read": audit::decision_context(disclosed_action, &disclosed),
             })),
-            // Names and addresses, never content. `record_id` is kept for
-            // a memory proposal because AUD-2's disclosure query reads it;
-            // an authored asset is named rather than identified, and the
-            // `member` key is the one both kinds carry.
-            "records": members.iter().map(|(name, hash)| json!({
+            // Names and addresses, never content.
+            "members": members.iter().map(|(name, hash)| json!({
                 "member": name,
-                "record_id": (asset == AssetKind::Memory).then(|| name.clone()),
                 "object_hash": hash.to_hex(),
             })).collect::<Vec<_>>(),
             "approvals": approvals::audit_context(&requirement, &outstanding),
@@ -947,8 +937,8 @@ async fn open_inner(
         summary: render(
             &proposal,
             &ScopePaths {
-                target: Some(node.path.clone()),
-                source: Some(source.path.clone()),
+                target: Some(node.slug.clone()),
+                source: Some(source.slug.clone()),
             },
             &requirement,
             &outstanding,
@@ -958,24 +948,33 @@ async fn open_inner(
 
 // ── Review ─────────────────────────────────────────────────────────────
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
+#[schema(as = ProposalReviewBody)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct ReviewBody {
+    /// Exact proposal commit the reviewer inspected.
+    expected_commit: String,
     /// What the reviewer wants to say. Optional on an approval; a
     /// rejection carries its reason in `reason` instead.
     #[serde(default)]
     comment: Option<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
+#[schema(as = ProposalRejectBody)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct RejectBody {
+    /// Exact proposal commit the reviewer inspected.
+    expected_commit: String,
     /// Why. Mandatory — a rejection an auditor cannot read the reason for
     /// is not a review, and FLOW-5 inherits this reason for its
     /// per-level denials.
     reason: String,
 }
 
-#[derive(Serialize)]
-struct ReviewResponse {
+#[derive(Serialize, utoipa::ToSchema)]
+#[schema(as = ProposalReviewResponse)]
+pub(crate) struct ReviewResponse {
     #[serde(flatten)]
     summary: ProposalSummary,
     /// What this act contributed: the roles it counted under.
@@ -983,6 +982,23 @@ struct ReviewResponse {
 }
 
 /// `POST /v1/proposals/{id}/approve` — cast an approval.
+#[utoipa::path(
+    post,
+    path = "/v1/proposals/{id}/approve",
+    operation_id = "approve_proposal",
+    tag = "proposals",
+    params(("id" = String, Path, format = "uuid")),
+    request_body(content = ReviewBody, description = "Commit-bound review verdict"),
+    responses(
+        (status = 200, description = "The proposal after this approval", body = ReviewResponse),
+        (status = 400, description = "The review comment is invalid", body = crate::workspaces::ApiErrorBody),
+        (status = 401, description = "No usable credential", body = crate::workspaces::ApiErrorBody),
+        (status = 403, description = "Proposal review is not permitted", body = crate::workspaces::ApiErrorBody),
+        (status = 404, description = "The proposal is absent", body = crate::workspaces::ApiErrorBody),
+        (status = 409, description = "The proposal is closed or this approval advances nothing", body = crate::workspaces::ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
 #[tracing::instrument(name = "proposals.approve", skip_all)]
 pub(crate) async fn approve(
     State(state): State<AppState>,
@@ -990,14 +1006,8 @@ pub(crate) async fn approve(
     payload: std::result::Result<Json<ReviewBody>, JsonRejection>,
 ) -> Response {
     let result = async {
-        // An approval with no body at all is the common case: `comment`
-        // is the only field and it is optional, so a bodiless POST is a
-        // bare "I approve".
-        let comment = match payload {
-            Ok(Json(body)) => body.comment,
-            Err(_) => None,
-        };
-        approve_inner(&state, id, comment.as_deref()).await
+        let body = body(payload)?;
+        approve_inner(&state, id, &body.expected_commit, body.comment.as_deref()).await
     }
     .await;
     respond(&state, "approve", result).await
@@ -1006,6 +1016,7 @@ pub(crate) async fn approve(
 async fn approve_inner(
     state: &AppState,
     id: ProposalId,
+    expected_commit: &str,
     comment: Option<&str>,
 ) -> Result<Json<ReviewResponse>> {
     check_text("comment", comment)?;
@@ -1013,18 +1024,26 @@ async fn approve_inner(
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
     let proposal = load(&mut tx, tenant_id, id).await?;
     let node = target_node(&mut tx, tenant_id, &proposal).await?;
-    let input = authz::gather(state, &mut tx, Some(&node)).await?;
+    let input = authz::gather(
+        state,
+        &mut tx,
+        Some(&node),
+        synveda_store::anchors::AnchorSelection::none(),
+        Vec::new(),
+    )
+    .await?;
     let authorized = authz::decide(
         state,
         &input,
         Action::ProposalReview,
         Resource::Scope(node.id),
-        None,
     )?;
     require_open(&proposal)?;
+    require_expected_commit(&proposal, expected_commit)?;
     let approver = identity_of(&input)?;
 
     let requirement = requirement_for(state, &mut tx, tenant_id, &input, &node, &proposal).await?;
+    approvals::require_review_actor(&requirement, id, proposal.proposer_id, approver)?;
     let recorded = vedaflow::proposals::approvals(&mut tx, tenant_id, id).await?;
     let cast = vedaflow::proposals::cast_for(&recorded, proposal.commit);
     let outstanding = requirement.outstanding(&cast);
@@ -1073,7 +1092,7 @@ async fn approve_inner(
     let mut now = cast;
     now.push(candidate.clone());
     let after = requirement.outstanding(&now);
-    let paths = ScopePaths::resolve(&mut tx, &proposal, &node).await?;
+    let paths = ScopePaths::resolve(&mut tx, tenant_id, &proposal, &node).await?;
     audit::record(
         &mut tx,
         tenant_id,
@@ -1086,6 +1105,7 @@ async fn approve_inner(
             "commit": proposal.commit.to_hex(),
             "source_scope_id": proposal.source_scope_id,
             "target_scope_id": proposal.target_scope_id,
+            "artifact_references": artifact_reference_audit(&proposal),
             "roles": candidate.roles.iter().map(|role| role.as_str()).collect::<Vec<_>>(),
             "comment": comment,
             "approvals": approvals::audit_context(&requirement, &after),
@@ -1110,6 +1130,23 @@ async fn approve_inner(
 /// proposal whose content changes under its approvals is a review nobody
 /// consented to, and "withdraw and open a new one" says that plainly in
 /// the trail.
+#[utoipa::path(
+    post,
+    path = "/v1/proposals/{id}/reject",
+    operation_id = "reject_proposal",
+    tag = "proposals",
+    params(("id" = String, Path, format = "uuid")),
+    request_body = RejectBody,
+    responses(
+        (status = 200, description = "The rejected proposal", body = ProposalSummary),
+        (status = 400, description = "The rejection reason is invalid", body = crate::workspaces::ApiErrorBody),
+        (status = 401, description = "No usable credential", body = crate::workspaces::ApiErrorBody),
+        (status = 403, description = "Proposal review is not permitted", body = crate::workspaces::ApiErrorBody),
+        (status = 404, description = "The proposal is absent", body = crate::workspaces::ApiErrorBody),
+        (status = 409, description = "The proposal is already closed", body = crate::workspaces::ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
 #[tracing::instrument(name = "proposals.reject", skip_all)]
 pub(crate) async fn reject(
     State(state): State<AppState>,
@@ -1118,7 +1155,7 @@ pub(crate) async fn reject(
 ) -> Response {
     let result = async {
         let body = body(payload)?;
-        reject_inner(&state, id, &body.reason).await
+        reject_inner(&state, id, &body.expected_commit, &body.reason).await
     }
     .await;
     respond(&state, "reject", result).await
@@ -1127,6 +1164,7 @@ pub(crate) async fn reject(
 async fn reject_inner(
     state: &AppState,
     id: ProposalId,
+    expected_commit: &str,
     reason: &str,
 ) -> Result<Json<ProposalSummary>> {
     check_text("reason", Some(reason))?;
@@ -1139,17 +1177,26 @@ async fn reject_inner(
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
     let proposal = load(&mut tx, tenant_id, id).await?;
     let node = target_node(&mut tx, tenant_id, &proposal).await?;
-    let input = authz::gather(state, &mut tx, Some(&node)).await?;
+    let input = authz::gather(
+        state,
+        &mut tx,
+        Some(&node),
+        synveda_store::anchors::AnchorSelection::none(),
+        Vec::new(),
+    )
+    .await?;
     let authorized = authz::decide(
         state,
         &input,
         Action::ProposalReview,
         Resource::Scope(node.id),
-        None,
     )?;
     require_open(&proposal)?;
+    require_expected_commit(&proposal, expected_commit)?;
     let reviewer = identity_of(&input)?;
     let roles = approvals::roles_at(&input, &node);
+    let requirement = requirement_for(state, &mut tx, tenant_id, &input, &node, &proposal).await?;
+    approvals::require_review_actor(&requirement, id, proposal.proposer_id, reviewer)?;
 
     vedaflow::proposals::record_approval(
         &mut tx,
@@ -1176,8 +1223,7 @@ async fn reject_inner(
     .await?;
     vedaflow::proposals::act("rejected", proposal.asset);
 
-    let requirement = requirement_for(state, &mut tx, tenant_id, &input, &node, &proposal).await?;
-    let paths = ScopePaths::resolve(&mut tx, &proposal, &node).await?;
+    let paths = ScopePaths::resolve(&mut tx, tenant_id, &proposal, &node).await?;
     audit::record(
         &mut tx,
         tenant_id,
@@ -1194,6 +1240,7 @@ async fn reject_inner(
             // mandatory (ADR-0034 decision 9).
             "source_scope_id": proposal.source_scope_id,
             "target_scope_id": proposal.target_scope_id,
+            "artifact_references": artifact_reference_audit(&proposal),
             "roles": roles.iter().map(|role| role.as_str()).collect::<Vec<_>>(),
             "reason": reason,
         }),
@@ -1213,6 +1260,21 @@ async fn reject_inner(
 /// Authorized by `ProposalOpen` at the target *and* by being the
 /// proposer: withdrawing is the proposer's act, and a reviewer who wants
 /// it gone rejects it with a reason instead.
+#[utoipa::path(
+    post,
+    path = "/v1/proposals/{id}/withdraw",
+    operation_id = "withdraw_proposal",
+    tag = "proposals",
+    params(("id" = String, Path, format = "uuid")),
+    responses(
+        (status = 200, description = "The withdrawn proposal", body = ProposalSummary),
+        (status = 401, description = "No usable credential", body = crate::workspaces::ApiErrorBody),
+        (status = 403, description = "Only the proposer may withdraw this proposal", body = crate::workspaces::ApiErrorBody),
+        (status = 404, description = "The proposal is absent", body = crate::workspaces::ApiErrorBody),
+        (status = 409, description = "The proposal is already closed", body = crate::workspaces::ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
 #[tracing::instrument(name = "proposals.withdraw", skip_all)]
 pub(crate) async fn withdraw(
     State(state): State<AppState>,
@@ -1223,13 +1285,19 @@ pub(crate) async fn withdraw(
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
         let proposal = load(&mut tx, tenant_id, id).await?;
         let node = target_node(&mut tx, tenant_id, &proposal).await?;
-        let input = authz::gather(&state, &mut tx, Some(&node)).await?;
+        let input = authz::gather(
+            &state,
+            &mut tx,
+            Some(&node),
+            synveda_store::anchors::AnchorSelection::none(),
+            Vec::new(),
+        )
+        .await?;
         let authorized = authz::decide(
             &state,
             &input,
             Action::ProposalOpen,
             Resource::Scope(node.id),
-            None,
         )?;
         require_open(&proposal)?;
         let actor = identity_of(&input)?;
@@ -1254,7 +1322,7 @@ pub(crate) async fn withdraw(
         vedaflow::proposals::act("withdrawn", proposal.asset);
         let requirement =
             requirement_for(&state, &mut tx, tenant_id, &input, &node, &proposal).await?;
-        let paths = ScopePaths::resolve(&mut tx, &proposal, &node).await?;
+        let paths = ScopePaths::resolve(&mut tx, tenant_id, &proposal, &node).await?;
         audit::record(
             &mut tx,
             tenant_id,
@@ -1267,6 +1335,7 @@ pub(crate) async fn withdraw(
                 "commit": proposal.commit.to_hex(),
                 "source_scope_id": proposal.source_scope_id,
                 "target_scope_id": proposal.target_scope_id,
+                "artifact_references": artifact_reference_audit(&proposal),
             }),
         )
         .await?;
@@ -1280,410 +1349,76 @@ pub(crate) async fn withdraw(
     respond(&state, "withdraw", result).await
 }
 
-// ── Checklist: the reviewer's half of the quality score ────────────────
-
-/// What a reviewer submits (SKIL-3, ADR-0053 decision 6).
-#[derive(Deserialize)]
-pub(crate) struct ChecklistBody {
-    /// Item → verdict, by the wire names: `instructions-correct`,
-    /// `scope-appropriate`, `not-duplicate`, `dependencies-available`,
-    /// `tested`, each `yes`, `no` or `n/a`.
-    answers: BTreeMap<ChecklistItem, ChecklistVerdict>,
-    /// Anything the reviewer wants to say, in prose. Scanned before it is
-    /// stored, like every other author-supplied text in the product.
-    #[serde(default)]
-    note: Option<String>,
-}
-
-#[derive(Serialize)]
-struct ChecklistResponse {
-    proposal_id: ProposalId,
-    skill: String,
-    /// The digest the answers are bound to — what the publish gate will
-    /// look them up by, echoed so a caller can see the binding is to
-    /// bytes rather than to this proposal.
-    bundle_digest: String,
-    complete: bool,
-    concerns: Vec<&'static str>,
-    /// The quality of the bundle these answers are about, recomputed.
-    quality: crate::skills::QualityReport,
-}
-
-/// `POST /v1/proposals/{id}/checklist` — record the reviewer's half of a
-/// skill's quality score.
-///
-/// **Its own act, not part of casting a verdict.** An approval says "ship
-/// it"; a checklist says "here is what I checked", and a reviewer may
-/// legitimately do the second without the first — indeed the whole point
-/// of a mandatory checklist under `regulated-strict` is that somebody
-/// worked through it *before* anyone decided.
-///
-/// It takes `ProposalReview` at the target, which is the same decision
-/// approving takes: the people who may weigh a proposal are the people who
-/// may record what they weighed. It does not take `SkillRead` — a proposal
-/// carries the bytes to its reviewer without granting them the registry
-/// (ADR-0032 decision 16), and a checklist is a statement about what the
-/// proposal already showed them.
-#[tracing::instrument(name = "proposals.checklist", skip_all)]
-pub(crate) async fn checklist(
-    State(state): State<AppState>,
-    Path(id): Path<ProposalId>,
-    payload: std::result::Result<Json<ChecklistBody>, JsonRejection>,
-) -> Response {
-    let result = async {
-        let body = body(payload)?;
-        checklist_inner(&state, id, body).await
-    }
-    .await;
-    respond(&state, "checklist", result).await
-}
-
-async fn checklist_inner(
-    state: &AppState,
-    id: ProposalId,
-    body: ChecklistBody,
-) -> Result<Json<ChecklistResponse>> {
-    let submitted = Checklist {
-        answers: body.answers,
-        note: body.note,
-    };
-    submitted.validate()?;
-
-    let tenant_id = tenant_id()?;
-    let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
-    let proposal = load(&mut tx, tenant_id, id).await?;
-    if proposal.asset != AssetKind::Skill {
-        return Err(Error::Invalid {
-            message: format!(
-                "proposal {id} carries {}, and a quality checklist is a statement about a \
-                 skill bundle; there is nothing here for it to be about",
-                proposal.asset.as_str()
-            ),
-        });
-    }
-    let node = target_node(&mut tx, tenant_id, &proposal).await?;
-    let input = authz::gather(state, &mut tx, Some(&node)).await?;
-    let authorized = authz::decide(
-        state,
-        &input,
-        Action::ProposalReview,
-        Resource::Scope(node.id),
-        None,
-    )?;
-    require_open(&proposal)?;
-    let reviewer = identity_of(&input)?;
-
-    // The note is the first author-supplied prose this plane stores that
-    // is not a bundled file, so it goes through MEM-2's scanner before it
-    // is written. A reason carrying a credential is **refused rather than
-    // scrubbed**: unlike a bundled file there is nothing a placeholder
-    // would preserve, and the person who wrote it is on the other end of
-    // this request.
-    if let Some(note) = &submitted.note {
-        crate::skills::refuse_if_secret("checklist note", note).await?;
-    }
-
-    let members = vedaflow::proposals::members(&mut tx, tenant_id, proposal.commit).await?;
-    let names: Vec<String> = members.iter().map(|member| member.name.clone()).collect();
-    let skill = crate::skills::skill_of(&names).ok_or_else(|| Error::Invalid {
-        message: format!("proposal {id} does not carry exactly one skill bundle"),
-    })?;
-    let pairs: Vec<(&str, vedaflow::hash::ObjectHash)> = members
-        .iter()
-        .map(|member| (member.name.as_str(), member.object))
-        .collect();
-    let digest = vedaflow::bundle_digest(&pairs);
-
-    // The rubric over the same bytes, so the response tells the reviewer
-    // what their answers were recorded *against*.
-    let files = crate::skills::files_of_members(&mut tx, tenant_id, &members).await?;
-    let scored = crate::skills::score_quality(&files).await?;
-
-    let stored = synveda_store::skill_reviews::record(
-        &mut *tx,
-        tenant_id,
-        &synveda_store::skill_reviews::NewReview {
-            // The **source** scope, which is where the bundle is drafted
-            // and where the publish seam will look the answers up. A
-            // climb's target is a different node, and keying by it would
-            // hide the checklist from the very gate it exists for.
-            scope_id: proposal.source_scope_id,
-            skill_name: &skill,
-            bundle_digest: digest,
-            checklist: &submitted,
-            rubric_version: scored.rubric_version,
-            reviewer,
-        },
-    )
-    .await?;
-
-    audit::record(
-        &mut tx,
-        tenant_id,
-        AuditAction::SkillChecklistRecorded,
-        Resource::Scope(node.id).to_string(),
-        Outcome::Success,
-        json!({
-            "authz": audit::decision_context(Action::ProposalReview, &authorized),
-            "asset": AssetKind::Skill.as_str(),
-            "proposal_id": id,
-            "skill": skill.as_str(),
-            // The binding. An auditor reading this event can tell exactly
-            // which bytes were judged, and a later publication of
-            // different bytes will not find these answers.
-            "bundle_digest": crate::skills::hex(&digest),
-            "rubric_version": scored.rubric_version,
-            "score": scored.score,
-            "answers": submitted
-                .answers
-                .iter()
-                .map(|(item, verdict)| json!({
-                    "item": item.as_str(),
-                    "verdict": verdict.as_str(),
-                }))
-                .collect::<Vec<_>>(),
-            "complete": submitted.is_complete(),
-            "concerns": submitted
-                .concerns()
-                .iter()
-                .map(|item| item.as_str())
-                .collect::<Vec<_>>(),
-            // The note rides the chain because a reviewer wrote it to be
-            // read, and it has already passed the scanner.
-            "note": submitted.note,
-        }),
-    )
-    .await?;
-    commit(tx).await?;
-
-    let effective = state
-        .pdp
-        .effective(tenant_id, Resource::Scope(node.id), &input.context());
-    Ok(Json(ChecklistResponse {
-        proposal_id: id,
-        skill: skill.to_string(),
-        bundle_digest: crate::skills::hex(&digest),
-        complete: stored.checklist.is_complete(),
-        concerns: stored
-            .checklist
-            .concerns()
-            .iter()
-            .map(ChecklistItem::as_str)
-            .collect(),
-        quality: crate::skills::QualityReport::new(
-            &scored,
-            &effective.quality,
-            &digest,
-            Some(&stored),
-        ),
-    }))
-}
-
-// ── The quality override ───────────────────────────────────────────────
-
-/// What an override-holder sends (SKIL-3, ADR-0053 decision 8).
-#[derive(Deserialize)]
-pub(crate) struct OverrideBody {
-    /// Why this bundle should ship despite being below the bar.
-    ///
-    /// Mandatory, and it is the whole value of the act: it is what an
-    /// auditor reads in a year to find out why the product shipped
-    /// something it had itself marked down.
-    reason: String,
-}
-
-#[derive(Serialize)]
-struct OverrideResponse {
-    proposal_id: ProposalId,
-    skill: String,
-    /// The digest the override is granted over. An edit produces different
-    /// bytes and this override does not follow them.
-    bundle_digest: String,
-    score: u8,
-    /// The bars it steps over, so the response says what was excused.
-    shortfalls: Vec<QualityShortfall>,
-    granted_by: IdentityId,
-    granted_at: DateTime<Utc>,
-}
-
-/// `POST /v1/proposals/{id}/quality-override` — record a decision to
-/// publish a bundle the quality gate refuses.
-///
-/// **A separate act from the publication, and that is the design rather
-/// than a convenience.** Under the product packs `curator` holds the
-/// `SkillRead` and `ChannelPublish` that publishing a skill takes, and
-/// `steward` holds this action and no content read at all — so putting the
-/// override on the publish request would have meant nobody could publish a
-/// below-bar bundle under any pack. Splitting it is ADR-0032 decision 9's
-/// own shape, the one that already separates the approval that decides
-/// from the act that runs the effect.
-///
-/// It is refused when the bundle needs no override, which keeps the audit
-/// trail honest: an override standing over a bundle that never needed one
-/// is a record of a decision nobody had to make.
-#[tracing::instrument(name = "proposals.quality_override", skip_all)]
-pub(crate) async fn quality_override(
-    State(state): State<AppState>,
-    Path(id): Path<ProposalId>,
-    payload: std::result::Result<Json<OverrideBody>, JsonRejection>,
-) -> Response {
-    let result = async {
-        let body = body(payload)?;
-        quality_override_inner(&state, id, &body.reason).await
-    }
-    .await;
-    respond(&state, "quality_override", result).await
-}
-
-async fn quality_override_inner(
-    state: &AppState,
-    id: ProposalId,
-    reason: &str,
-) -> Result<Json<OverrideResponse>> {
-    check_text("reason", Some(reason))?;
-    if reason.trim().is_empty() {
-        return Err(Error::Invalid {
-            message: "an override must say why: it is the whole of what the audit trail will \
-                      carry about a publication the product itself scored below the bar"
-                .to_owned(),
-        });
-    }
-
-    let tenant_id = tenant_id()?;
-    let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
-    let proposal = load(&mut tx, tenant_id, id).await?;
-    if proposal.asset != AssetKind::Skill {
-        return Err(Error::Invalid {
-            message: format!(
-                "proposal {id} carries {}, and the quality gate is a statement about a skill \
-                 bundle; there is nothing here to override",
-                proposal.asset.as_str()
-            ),
-        });
-    }
-    let node = target_node(&mut tx, tenant_id, &proposal).await?;
-    let input = authz::gather(state, &mut tx, Some(&node)).await?;
-    let authorized = authz::decide(
-        state,
-        &input,
-        Action::SkillQualityOverride,
-        Resource::Scope(node.id),
-        None,
-    )?;
-    require_open(&proposal)?;
-    let granter = identity_of(&input)?;
-    crate::skills::refuse_if_secret("override reason", reason).await?;
-
-    let members = vedaflow::proposals::members(&mut tx, tenant_id, proposal.commit).await?;
-    let names: Vec<String> = members.iter().map(|member| member.name.clone()).collect();
-    let skill = crate::skills::skill_of(&names).ok_or_else(|| Error::Invalid {
-        message: format!("proposal {id} does not carry exactly one skill bundle"),
-    })?;
-    let pairs: Vec<(&str, vedaflow::hash::ObjectHash)> = members
-        .iter()
-        .map(|member| (member.name.as_str(), member.object))
-        .collect();
-    let digest = vedaflow::bundle_digest(&pairs);
-
-    let files = crate::skills::files_of_members(&mut tx, tenant_id, &members).await?;
-    let scored = crate::skills::score_quality(&files).await?;
-    let review = synveda_store::skill_reviews::for_bundle(
-        &mut *tx,
-        tenant_id,
-        proposal.source_scope_id,
-        &skill,
-        &digest,
-    )
-    .await?;
-    let effective = state
-        .pdp
-        .effective(tenant_id, Resource::Scope(node.id), &input.context());
-    let shortfalls = effective
-        .quality
-        .shortfalls(scored.score, review.as_ref().map(|r| &r.checklist));
-    if shortfalls.is_empty() {
-        return Err(Error::Conflict {
-            message: format!(
-                "skill {skill} already clears this pack's quality bar (rubric v{} scored it \
-                 {}/100); an override standing over a bundle that never needed one is a \
-                 record of a decision nobody had to make",
-                scored.rubric_version, scored.score,
-            ),
-        });
-    }
-
-    let stored = synveda_store::skill_reviews::grant_override(
-        &mut *tx,
-        tenant_id,
-        &synveda_store::skill_reviews::NewOverride {
-            // The source scope, where the bundle is drafted and where the
-            // publish seam will look this up.
-            scope_id: proposal.source_scope_id,
-            skill_name: &skill,
-            bundle_digest: digest,
-            reason,
-            score: scored.score,
-            rubric_version: scored.rubric_version,
-            granter,
-        },
-    )
-    .await?;
-
-    audit::record(
-        &mut tx,
-        tenant_id,
-        AuditAction::SkillQualityOverridden,
-        Resource::Scope(node.id).to_string(),
-        Outcome::Success,
-        json!({
-            "authz": audit::decision_context(Action::SkillQualityOverride, &authorized),
-            "asset": AssetKind::Skill.as_str(),
-            "proposal_id": id,
-            "skill": skill.as_str(),
-            "rubric_version": scored.rubric_version,
-            "score": scored.score,
-            "min_score": effective.quality.min_score,
-            // Which bars were stepped over, so an auditor filtering for
-            // "what did we ship below the bar" can tell a low-scoring
-            // bundle from one a reviewer objected to.
-            "shortfalls": shortfalls
-                .iter()
-                .map(|shortfall| json!({
-                    "kind": serde_json::to_value(shortfall)
-                        .ok()
-                        .and_then(|value| value.get("kind").cloned())
-                        .unwrap_or(serde_json::Value::Null),
-                    "detail": shortfall.describe(),
-                }))
-                .collect::<Vec<_>>(),
-            "bundle_digest": crate::skills::hex(&digest),
-            "reason": reason,
-        }),
-    )
-    .await?;
-    commit(tx).await?;
-    metrics::counter!(
-        crate::telemetry::SKILL_QUALITY_OVERRIDES_TOTAL,
-        "pack" => authorized.decision.pack_name.clone(),
-    )
-    .increment(1);
-
-    Ok(Json(OverrideResponse {
-        proposal_id: id,
-        skill: skill.to_string(),
-        bundle_digest: crate::skills::hex(&digest),
-        score: stored.score,
-        shortfalls,
-        granted_by: stored.granted_by,
-        granted_at: stored.granted_at,
-    }))
-}
-
 // ── Publish: the proposal's effect ─────────────────────────────────────
 
-#[derive(Serialize)]
-struct PublishResponse {
+/// `POST /v1/proposals/{id}/apply` — run an approved typed aggregate effect.
+/// The artifact command layer repeats ownership, PDP and revision checks at
+/// this boundary; approvals never become write authority by themselves.
+#[utoipa::path(
+    post,
+    path = "/v1/proposals/{id}/apply",
+    operation_id = "apply_proposal",
+    tag = "proposals",
+    params(("id" = String, Path, format = "uuid")),
+    responses(
+        (status = 200, description = "The typed aggregate mutation result", body = serde_json::Value),
+        (status = 400, description = "The proposal does not carry a typed apply effect", body = crate::workspaces::ApiErrorBody),
+        (status = 401, description = "No usable credential", body = crate::workspaces::ApiErrorBody),
+        (status = 403, description = "Applying the governed mutation is not permitted", body = crate::workspaces::ApiErrorBody),
+        (status = 404, description = "The proposal or aggregate is absent", body = crate::workspaces::ApiErrorBody),
+        (status = 409, description = "The proposal is stale, closed, or incomplete", body = crate::workspaces::ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
+#[tracing::instrument(name = "proposals.apply", skip_all)]
+pub(crate) async fn apply(State(state): State<AppState>, Path(id): Path<ProposalId>) -> Response {
+    let result = apply_inner(&state, id).await;
+    respond(&state, "apply", result).await
+}
+
+async fn apply_inner(state: &AppState, id: ProposalId) -> Result<Json<serde_json::Value>> {
+    let tenant_id = tenant_id()?;
+    let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
+    let proposal = load(&mut tx, tenant_id, id).await?;
+    drop(tx);
+    let value = match (proposal.asset, proposal.effect) {
+        (AssetKind::Knowledge, ProposalEffect::Apply) => {
+            serde_json::to_value(crate::knowledge::apply_reviewed(state, id).await?)
+        }
+        (AssetKind::Skill, ProposalEffect::Apply) => {
+            serde_json::to_value(crate::skills::apply_reviewed(state, id).await?)
+        }
+        (AssetKind::Tool, ProposalEffect::Apply) => {
+            serde_json::to_value(crate::tool_registry::apply_reviewed(state, id).await?)
+        }
+        (AssetKind::Configuration, ProposalEffect::Apply) => {
+            serde_json::to_value(crate::configuration::apply_reviewed(state, id).await?)
+        }
+        (AssetKind::Policy, ProposalEffect::Apply) => {
+            serde_json::to_value(crate::relaxations::apply_reviewed(state, id).await?)
+        }
+        _ => {
+            return Err(Error::Invalid {
+                message: format!(
+                    "proposal {id} carries {}/{}; only typed apply effects use this route",
+                    proposal.asset.as_str(),
+                    proposal.effect.as_str()
+                ),
+            });
+        }
+    }
+    .map_err(|err| Error::Internal {
+        message: format!("encode result for proposal {id}: {err}"),
+    })?;
+    Ok(Json(value))
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+#[schema(as = ProposalPublishResponse)]
+pub(crate) struct PublishResponse {
+    #[schema(value_type = String, format = "uuid")]
     proposal_id: ProposalId,
+    #[schema(value_type = String, format = "uuid")]
     scope_id: ScopeId,
     channel: String,
     /// The commit the channel now points at. Its parents are
@@ -1699,6 +1434,22 @@ struct PublishResponse {
 }
 
 /// `POST /v1/proposals/{id}/publish` — run an approved proposal's effect.
+#[utoipa::path(
+    post,
+    path = "/v1/proposals/{id}/publish",
+    operation_id = "publish_proposal",
+    tag = "proposals",
+    params(("id" = String, Path, format = "uuid")),
+    responses(
+        (status = 200, description = "The published channel state", body = PublishResponse),
+        (status = 400, description = "The proposal does not carry a publish effect", body = crate::workspaces::ApiErrorBody),
+        (status = 401, description = "No usable credential", body = crate::workspaces::ApiErrorBody),
+        (status = 403, description = "Publishing the proposal is not permitted", body = crate::workspaces::ApiErrorBody),
+        (status = 404, description = "The proposal or target scope is absent", body = crate::workspaces::ApiErrorBody),
+        (status = 409, description = "The proposal is stale, closed, or lacks approval", body = crate::workspaces::ApiErrorBody),
+    ),
+    security(("bearer" = [])),
+)]
 #[tracing::instrument(name = "proposals.publish", skip_all)]
 pub(crate) async fn publish(State(state): State<AppState>, Path(id): Path<ProposalId>) -> Response {
     let result = publish_inner(&state, id).await;
@@ -1710,7 +1461,14 @@ async fn publish_inner(state: &AppState, id: ProposalId) -> Result<Json<PublishR
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
     let proposal = load(&mut tx, tenant_id, id).await?;
     let node = target_node(&mut tx, tenant_id, &proposal).await?;
-    let input = authz::gather(state, &mut tx, Some(&node)).await?;
+    let input = authz::gather(
+        state,
+        &mut tx,
+        Some(&node),
+        synveda_store::anchors::AnchorSelection::none(),
+        Vec::new(),
+    )
+    .await?;
     // The same two decisions the direct route takes (ADR-0031
     // decision 12): may this principal publish here, and may it read what
     // it is about to declare reviewed. The approvals go *in front of*
@@ -1720,15 +1478,13 @@ async fn publish_inner(state: &AppState, id: ProposalId) -> Result<Json<PublishR
         &input,
         Action::ChannelPublish,
         Resource::Scope(node.id),
-        None,
     )?;
     // At the working tier, like the direct route (ADR-0038 decision 10):
     // running an approved effect governs material, it does not compose it,
     // and the tier was priced by the matrix these approvals satisfied. With
     // the asset kind's own read action since PRMT-1 (ADR-0049 decision 4) —
     // which is what keeps a steward, who reads no content in any pack, from
-    // running a prompt publication's effect exactly as it keeps them from
-    // running a memory one's.
+    // running a prompt publication's effect.
     decide_asset_read(state, &input, proposal.asset, node.id)?;
     require_open(&proposal)?;
     require_effect(&proposal, ProposalEffect::Published, "publish")?;
@@ -1747,9 +1503,10 @@ async fn publish_inner(state: &AppState, id: ProposalId) -> Result<Json<PublishR
             ),
         });
     }
+    approvals::require_effect_actor(&requirement, id, proposal.proposer_id, &cast, publisher)?;
 
     // Approvals bind bytes. Recompute every member's address from the
-    // record as it stands *now* and require it to equal what the approved
+    // artifact as it stands *now* and require it to equal what the approved
     // commit named — otherwise the content moved after the review, and
     // publishing it would launder unreviewed text through a completed
     // approval (ADR-0032 decision 6). Then re-ask whether the source still
@@ -1771,32 +1528,6 @@ async fn publish_inner(state: &AppState, id: ProposalId) -> Result<Json<PublishR
         )
         .await;
     }
-    if proposal.asset == AssetKind::Skill {
-        // The pack in force at the *target*, resolved here because this is
-        // where the decision input lives. SKIL-2's gate runs inside the
-        // publish seam, so a bundle approved under one threshold and
-        // published under another is decided by the one standing when the
-        // bytes go fleet-wide (ADR-0052 decision 5).
-        let effective = state
-            .pdp
-            .effective(tenant_id, Resource::Scope(node.id), &input.context());
-        return publish_skills(
-            state,
-            tx,
-            tenant_id,
-            id,
-            &proposal,
-            publisher,
-            &authorized,
-            &requirement,
-            &cast,
-            &outstanding,
-            &proposed,
-            effective.scan,
-            effective.quality,
-        )
-        .await;
-    }
     if proposal.asset == AssetKind::Prompt {
         return publish_prompts(
             tx,
@@ -1812,144 +1543,12 @@ async fn publish_inner(state: &AppState, id: ProposalId) -> Result<Json<PublishR
         )
         .await;
     }
-    let ids = member_ids(&proposed)?;
-    let versions = records::current_many(&mut *tx, tenant_id, &ids).await?;
-    let published = published_at(&mut tx, tenant_id, proposal.source_scope_id).await?;
-    // Every refusal here is a `Conflict`, never an `Invalid`: the request
-    // is well formed and was well formed when it was approved — what moved
-    // is the world, between the review and its effect.
-    let moved = |what: &str, record: RecordId| Error::Conflict {
+    Err(Error::Invalid {
         message: format!(
-            "record {record} {what} after this proposal was approved; withdraw it and \
-             open a new one so the change is reviewed"
+            "proposal {id} carries removed asset kind {}; raw records cannot be published",
+            proposal.asset.as_str()
         ),
-    };
-    let mut members: Vec<(String, vedaflow::hash::ObjectHash)> = Vec::with_capacity(ids.len());
-    for member in &proposed {
-        let record: RecordId = member.name.parse().map_err(|err| Error::Internal {
-            message: format!(
-                "proposal member {:?} is not a record id: {err}",
-                member.name
-            ),
-        })?;
-        let Some(version) = versions.iter().find(|version| version.id == record) else {
-            return Err(moved("no longer exists", record));
-        };
-        let asset = memory_asset(version.id, &version.state);
-        let address = asset.address();
-        if address != member.object {
-            return Err(moved("changed", record));
-        }
-        // And the source must still hold it. A record rewound off the
-        // source's channel (FLOW-7) or moved out of the scope between
-        // approval and publication is refused rather than carried up on a
-        // review of material the source no longer stands behind
-        // (ADR-0034 decision 7).
-        if version.state.scope_id != proposal.source_scope_id
-            && published.get(&record) != Some(&address)
-        {
-            return Err(Error::Conflict {
-                message: format!(
-                    "scope {} no longer holds record {record}; the climb was approved \
-                     against material its source has since given up",
-                    proposal.source_scope_id
-                ),
-            });
-        }
-        // Content-addressed: the object is already stored from the open,
-        // so this re-write dedups and stores nothing.
-        vedaflow::put_memory(&mut tx, tenant_id, &asset).await?;
-        members.push((asset.entry_name(), address));
-    }
-
-    let channel = vedaflow::ChannelRef::memory(Channel::Published);
-    let snapshot = PolicySnapshot::new(
-        authorized.decision.pack_name.clone(),
-        authorized.decision.pack_version,
-    );
-    let committed = vedaflow::publish(
-        &mut tx,
-        tenant_id,
-        &vedaflow::ChannelWrite {
-            scope: proposal.target_scope_id,
-            channel,
-            members: &members,
-            // The publication is a merge: head first (the mainline), then
-            // the proposal it is the effect of. Lineage becomes a fact
-            // about the commit graph rather than a join between tables.
-            merge_parents: &[proposal.commit],
-            author: publisher,
-            message: &proposal.title,
-            committed_at: Utc::now(),
-            policy_snapshot: &snapshot,
-        },
-        &Signer::Unsigned,
-    )
-    .await?;
-    close(
-        &mut tx,
-        tenant_id,
-        id,
-        ProposalState::Published,
-        publisher,
-        None,
-    )
-    .await?;
-    vedaflow::proposals::act("published", proposal.asset);
-
-    // The same action a direct publish emits, with the proposal named:
-    // it is the same governed act with the same consequence, and a second
-    // action asserting it would be a fact an auditor has to reconcile
-    // (ADR-0019 decision 4; ADR-0032 decision 18).
-    audit::record(
-        &mut tx,
-        tenant_id,
-        AuditAction::ChannelPublished,
-        Resource::Scope(proposal.target_scope_id).to_string(),
-        Outcome::Success,
-        json!({
-            "authz": audit::decision_context(Action::ChannelPublish, &authorized),
-            "channel": channel.name(),
-            "asset": channel.asset.as_str(),
-            "message": proposal.title,
-            "proposal_id": id,
-            "proposal_commit": proposal.commit.to_hex(),
-            "sensitivity": proposal.sensitivity.as_str(),
-            // What climbed, and from where. The scope pair on the
-            // publication event is what lets an auditor read a climb off
-            // the chain without joining the proposal row (ADR-0034
-            // decision 9).
-            "source_scope_id": proposal.source_scope_id,
-            "target_scope_id": proposal.target_scope_id,
-            "records": members.iter().map(|(name, hash)| json!({
-                "record_id": name,
-                "object_hash": hash.to_hex(),
-            })).collect::<Vec<_>>(),
-            "commit": committed.commit.to_hex(),
-            "parent": committed.parent.map(|parent| parent.to_hex()),
-            "members": committed.entries,
-            "added": committed.added,
-            "approvals": approvals::audit_context(&requirement, &outstanding),
-            "approved_by": cast.iter().map(|approval| json!({
-                "identity_id": approval.identity,
-                "subject": approval.subject,
-                "roles": approval.roles.iter().map(|role| role.as_str()).collect::<Vec<_>>(),
-            })).collect::<Vec<_>>(),
-        }),
-    )
-    .await?;
-    commit(tx).await?;
-
-    Ok(Json(PublishResponse {
-        proposal_id: id,
-        scope_id: proposal.target_scope_id,
-        channel: channel.name(),
-        commit: committed.commit.to_hex(),
-        parent: committed.parent.map(|parent| parent.to_hex()),
-        proposal_commit: proposal.commit.to_hex(),
-        members: committed.entries,
-        added: committed.added,
-    }))
+    })
 }
 
 /// The publish effect for a context-pack proposal (PRMT-2, ADR-0050
@@ -1962,8 +1561,8 @@ async fn publish_inner(state: &AppState, id: ProposalId) -> Result<Json<PublishR
 /// `Conflict`, because the request was well formed when it was approved and
 /// what moved is the world.
 ///
-/// It writes `context-pack/published` rather than `memory/published`, and it
-/// chains the same `vedaflow.channel.published` event with `asset` reading
+/// It writes `context-pack/published` and chains the
+/// `vedaflow.channel.published` event with `asset` reading
 /// `context-pack` — the same governed act with the same consequence
 /// (ADR-0019 decision 4).
 ///
@@ -2092,336 +1691,8 @@ async fn publish_documents(
             "sensitivity": proposal.sensitivity.as_str(),
             "source_scope_id": source,
             "target_scope_id": proposal.target_scope_id,
+            "artifact_references": artifact_reference_audit(proposal),
             // Paths and addresses, never document text.
-            "records": members.iter().map(|(name, hash)| json!({
-                "member": name,
-                "object_hash": hash.to_hex(),
-            })).collect::<Vec<_>>(),
-            "commit": committed.commit.to_hex(),
-            "parent": committed.parent.map(|parent| parent.to_hex()),
-            "members": committed.entries,
-            "added": committed.added,
-            "approvals": approvals::audit_context(requirement, outstanding),
-            "approvers": cast.len(),
-        }),
-    )
-    .await?;
-    commit(tx).await?;
-
-    Ok(Json(PublishResponse {
-        proposal_id: id,
-        scope_id: proposal.target_scope_id,
-        channel: channel.name(),
-        commit: committed.commit.to_hex(),
-        parent: committed.parent.map(|parent| parent.to_hex()),
-        proposal_commit: proposal.commit.to_hex(),
-        members: committed.entries,
-        added: committed.added,
-    }))
-}
-
-/// The publish effect for a skill proposal (SKIL-1, ADR-0051 decision 1).
-///
-/// [`publish_documents`] line for line, one table over: approvals bind
-/// bytes, so every member's address is required to equal what the approved
-/// commit named, and the source must still hold it. Every refusal is a
-/// `Conflict`, because the request was well formed when it was approved and
-/// what moved is the world.
-///
-/// It writes `skill/published` and chains the same
-/// `vedaflow.channel.published` event with `asset` reading `skill` — the
-/// same governed act with the same consequence (ADR-0019 decision 4).
-///
-/// **What it does not do is write a file.** Publication moves a ref; the
-/// bytes reach a client when somebody runs `synveda skill install`, and the
-/// receipt of that lives in the CLI's own state rather than in the bundle
-/// (ADR-0051 decision 12).
-#[allow(clippy::too_many_arguments)]
-async fn publish_skills(
-    state: &AppState,
-    mut tx: sqlx::Transaction<'static, sqlx::Postgres>,
-    tenant_id: TenantId,
-    id: ProposalId,
-    proposal: &vedaflow::StoredProposal,
-    publisher: IdentityId,
-    authorized: &crate::authz::Authorized,
-    requirement: &ApprovalRequirement,
-    cast: &[CastApproval],
-    outstanding: &synveda_types::Outstanding,
-    proposed: &[vedaflow::ChannelMember],
-    scan_config: SkillScanConfig,
-    quality_config: SkillQualityConfig,
-) -> Result<Json<PublishResponse>> {
-    let source = proposal.source_scope_id;
-    let paths: Vec<SkillPath> = proposed
-        .iter()
-        .map(|member| {
-            member
-                .name
-                .parse::<SkillPath>()
-                .map_err(|err| Error::Internal {
-                    message: format!(
-                        "proposal member {:?} is not a skill path: {err}",
-                        member.name
-                    ),
-                })
-        })
-        .collect::<Result<_>>()?;
-    let drafts: std::collections::HashMap<SkillPath, [u8; 32]> =
-        synveda_store::skills::list_all_files(&mut *tx, tenant_id, source)
-            .await?
-            .into_iter()
-            .map(|file| {
-                (
-                    SkillPath::new(file.skill_name.clone(), file.path.clone()),
-                    file.object_hash,
-                )
-            })
-            .collect();
-    let published_at_source = published_skills_at(&mut tx, tenant_id, source).await?;
-
-    let moved = |what: &str, path: &SkillPath| Error::Conflict {
-        message: format!(
-            "skill file {path} {what} after this proposal was approved; withdraw it and \
-             open a new one so the change is reviewed"
-        ),
-    };
-    let mut members: Vec<(String, vedaflow::hash::ObjectHash)> = Vec::with_capacity(paths.len());
-    for (member, path) in proposed.iter().zip(&paths) {
-        match drafts.get(path) {
-            Some(address) if member.object.as_bytes() == address => {}
-            Some(_) => return Err(moved("changed", path)),
-            None => {
-                // No draft here — but a file *removed* from the bundle since
-                // the review lands here too, which is exactly the case
-                // ADR-0051 decision 17's DELETE grant creates and exactly
-                // the one this check exists to catch: a publication that
-                // silently dropped it would ship a bundle a reviewer never
-                // saw.
-                if published_at_source.get(path) != Some(&member.object) {
-                    return Err(Error::Conflict {
-                        message: format!(
-                            "scope {source} no longer holds skill file {path}; the bundle \
-                             was approved against files its source has since changed or \
-                             removed"
-                        ),
-                    });
-                }
-            }
-        }
-        members.push((member.name.clone(), member.object));
-    }
-
-    // ── The security gate, on exactly the approved bytes ───────────────
-    //
-    // SKIL-2, ADR-0052 decision 5. The loop above re-verified every
-    // address because approvals bind bytes; this re-verifies what those
-    // bytes *do*, because the rule table is what says whether they are
-    // publishable and it moves independently of them. A rule that landed
-    // between authoring and approval must not be one a proposal outruns.
-    //
-    // Its refusal is a `Conflict` for the same reason every other refusal
-    // in this function is: the request was well formed and was well
-    // formed when it was approved — what changed is the world.
-    let addresses: Vec<vedaflow::hash::ObjectHash> =
-        members.iter().map(|(_, hash)| *hash).collect();
-    let objects = vedaflow::read_objects(&mut tx, tenant_id, &addresses).await?;
-    let files: Vec<SkillFile> = members
-        .iter()
-        .filter_map(|(_, hash)| objects.get(hash))
-        .filter_map(|object| vedaflow::SkillAsset::from_bytes(&object.content).ok())
-        .map(|asset| asset.file)
-        .collect();
-    let security = crate::skills::scan_security(&files).await?;
-    if security.blocked_by(&scan_config) {
-        // The gate's own transaction: this one is about to be dropped, and
-        // the refusal has to chain even though the publication does not.
-        drop(tx);
-        let pack = format!(
-            "{}@{}",
-            authorized.decision.pack_name, authorized.decision.pack_version
-        );
-        let named = paths
-            .first()
-            .map_or_else(|| proposal.title.clone(), |path| path.skill.to_string());
-        return crate::skills::refuse_scan(
-            state,
-            tenant_id,
-            proposal.target_scope_id,
-            &named,
-            &security,
-            &scan_config,
-            &pack,
-            "publication",
-        )
-        .await;
-    }
-
-    // ── The quality gate ───────────────────────────────────────────────
-    //
-    // SKIL-3, ADR-0053 decision 7. Three bars, each named separately in
-    // the refusal because the remedy differs: an edit for a low score, a
-    // reviewer for a missing checklist, a conversation for a concern.
-    //
-    // **Recomputed here, never read from the registry cache** (decision
-    // 3). The cache on the `skills` row exists so a listing can draw a
-    // column without reading forty bundles; a gate that read it would be
-    // deciding on a number that was true when somebody last authored,
-    // which is exactly the staleness the recompute exists to avoid.
-    //
-    // The checklist is looked up at the **source** scope by a digest of
-    // exactly these members, which is the same lookup the review surface
-    // did — so answers given about these bytes are found, and answers
-    // given about an earlier draft are not (decision 4).
-    let scored = crate::skills::score_quality(&files).await?;
-    let digest = {
-        let pairs: Vec<(&str, vedaflow::hash::ObjectHash)> = members
-            .iter()
-            .map(|(name, hash)| (name.as_str(), *hash))
-            .collect();
-        vedaflow::bundle_digest(&pairs)
-    };
-    let named = paths
-        .first()
-        .map_or_else(|| proposal.title.clone(), |path| path.skill.to_string());
-    let review = match crate::skills::skill_of(
-        &members
-            .iter()
-            .map(|(name, _)| name.clone())
-            .collect::<Vec<_>>(),
-    ) {
-        Some(skill) => {
-            synveda_store::skill_reviews::for_bundle(&mut *tx, tenant_id, source, &skill, &digest)
-                .await?
-        }
-        None => None,
-    };
-    let mut overridden: Option<synveda_store::skill_reviews::StoredOverride> = None;
-    let shortfalls = quality_config.shortfalls(scored.score, review.as_ref().map(|r| &r.checklist));
-    if !shortfalls.is_empty() {
-        // **The override is looked up, not sent.** It is a separate
-        // governed act by a separate authority (ADR-0053 decision 8), and
-        // it has to be: under the product packs `curator` holds the
-        // `SkillRead` and `ChannelPublish` that publishing a skill takes,
-        // while `steward` holds the override and no content read at all —
-        // so requiring one principal to hold both would mean nobody could
-        // publish a below-bar bundle under any pack. That is ADR-0032
-        // decision 9's own separation, arriving one seam later: the
-        // authority records the override, the publisher spends it.
-        //
-        // It is looked up by the **same digest** as the checklist, so an
-        // override granted over one bundle does not carry to whatever the
-        // author edits it into. Nobody agreed to ship that.
-        let standing = match crate::skills::skill_of(
-            &members
-                .iter()
-                .map(|(name, _)| name.clone())
-                .collect::<Vec<_>>(),
-        ) {
-            Some(skill) => {
-                synveda_store::skill_reviews::override_for(
-                    &mut *tx, tenant_id, source, &skill, &digest,
-                )
-                .await?
-            }
-            None => None,
-        };
-        let Some(standing) = standing else {
-            // A `Conflict` rather than an `Invalid`, on this function's
-            // own rule: the request is well formed, and what stands in
-            // its way is a state — the bytes scored what they scored, and
-            // nobody has recorded an override over them.
-            return Err(Error::Conflict {
-                message: format!(
-                    "skill {named} is below this pack's quality bar: {}. \
-Somebody holding `SkillQualityOverride` at this scope — a steward or an org-admin under \
-the product packs, deliberately not the role that publishes — can record an override with \
-`POST /v1/proposals/{id}/quality-override`, after which this publication proceeds. \
-Or fix the bundle and open a new proposal",
-                    shortfalls
-                        .iter()
-                        .map(QualityShortfall::describe)
-                        .collect::<Vec<_>>()
-                        .join("; "),
-                ),
-            });
-        };
-        // The publication rides an override somebody else already
-        // recorded and the chain already carries. What is added here is
-        // the join: this commit went out under that decision.
-        overridden = Some(standing);
-    }
-
-    let channel = vedaflow::ChannelRef::skill(Channel::Published);
-    let snapshot = PolicySnapshot::new(
-        authorized.decision.pack_name.clone(),
-        authorized.decision.pack_version,
-    );
-    let committed = vedaflow::publish(
-        &mut tx,
-        tenant_id,
-        &vedaflow::ChannelWrite {
-            scope: proposal.target_scope_id,
-            channel,
-            members: &members,
-            merge_parents: &[proposal.commit],
-            author: publisher,
-            message: &proposal.title,
-            committed_at: Utc::now(),
-            policy_snapshot: &snapshot,
-        },
-        &Signer::Unsigned,
-    )
-    .await?;
-    close(
-        &mut tx,
-        tenant_id,
-        id,
-        ProposalState::Published,
-        publisher,
-        None,
-    )
-    .await?;
-    vedaflow::proposals::act("published", proposal.asset);
-
-    audit::record(
-        &mut tx,
-        tenant_id,
-        AuditAction::ChannelPublished,
-        Resource::Scope(proposal.target_scope_id).to_string(),
-        Outcome::Success,
-        json!({
-            "authz": audit::decision_context(Action::ChannelPublish, authorized),
-            "channel": channel.name(),
-            "asset": channel.asset.as_str(),
-            "message": proposal.title,
-            "proposal_id": id,
-            "proposal_commit": proposal.commit.to_hex(),
-            "sensitivity": proposal.sensitivity.as_str(),
-            "source_scope_id": source,
-            // What the rubric made of the bytes that just went fleet-wide,
-            // and — when they were below the bar — whose override this
-            // publication spent (SKIL-3, ADR-0053).
-            //
-            // The override chained an event of its own when it was
-            // granted, so this is deliberately not a second copy of it: it
-            // is the *join*, the thing that says this commit went out
-            // under that decision. Without it an auditor holding a
-            // published commit would have to go looking for an override by
-            // digest to find out whether one was involved at all.
-            "quality": {
-                "rubric_version": scored.rubric_version,
-                "score": scored.score,
-                "min_score": quality_config.min_score,
-                "overridden_by": overridden.as_ref().map(|granted| json!({
-                    "granted_by": granted.granted_by,
-                    "granted_at": granted.granted_at,
-                    "reason": granted.reason,
-                })),
-            },
-            "target_scope_id": proposal.target_scope_id,
-            // Paths and addresses, never SKILL.md text and never file
-            // content.
             "records": members.iter().map(|(name, hash)| json!({
                 "member": name,
                 "object_hash": hash.to_hex(),
@@ -2580,6 +1851,7 @@ async fn publish_prompts(
             "sensitivity": proposal.sensitivity.as_str(),
             "source_scope_id": source,
             "target_scope_id": proposal.target_scope_id,
+            "artifact_references": artifact_reference_audit(proposal),
             // Names and addresses, never template text.
             "records": members.iter().map(|(name, hash)| json!({
                 "member": name,
@@ -2612,192 +1884,10 @@ async fn publish_prompts(
     }))
 }
 
-// ── Classify: the other effect ─────────────────────────────────────────
-
-#[derive(Serialize)]
-struct ClassifyResponse {
-    proposal_id: ProposalId,
-    scope_id: ScopeId,
-    /// The tier every named record now carries.
-    sensitivity: Sensitivity,
-    /// The records that moved, with the tier each left.
-    records: Vec<ClassifiedRecord>,
-    proposal_commit: String,
-    state: &'static str,
-}
-
-#[derive(Serialize)]
-struct ClassifiedRecord {
-    record_id: RecordId,
-    /// What the record carried before this effect ran — the half of the
-    /// change an auditor needs to price it (ADR-0038 decision 9).
-    was: Sensitivity,
-}
-
-/// `POST /v1/proposals/{id}/classify` — run an approved classification
-/// proposal's effect (AUTHZ-5, ADR-0038 decision 9).
-#[tracing::instrument(name = "proposals.classify", skip_all)]
-pub(crate) async fn classify(
-    State(state): State<AppState>,
-    Path(id): Path<ProposalId>,
-) -> Response {
-    let result = classify_inner(&state, id).await;
-    respond(&state, "classify", result).await
-}
-
-async fn classify_inner(state: &AppState, id: ProposalId) -> Result<Json<ClassifyResponse>> {
-    let tenant_id = tenant_id()?;
-    let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
-    let proposal = load(&mut tx, tenant_id, id).await?;
-    let node = target_node(&mut tx, tenant_id, &proposal).await?;
-    let input = authz::gather(state, &mut tx, Some(&node)).await?;
-    // Two decisions, the shape every governed act over material takes: may
-    // this principal classify here, and is it a stranger to the material.
-    // The read is at the working tier (ADR-0038 decision 10) — a
-    // reclassification discloses nothing to the actor, and how much
-    // authority the tier takes is the matrix's arithmetic, resolved below at
-    // the maximum of both tiers.
-    let authorized = authz::decide(
-        state,
-        &input,
-        Action::MemoryClassify,
-        Resource::Scope(node.id),
-        None,
-    )?;
-    authz::decide_read(
-        state,
-        &input,
-        Resource::Scope(node.id),
-        Sensitivity::WORKING,
-    )?;
-    require_open(&proposal)?;
-    require_effect(&proposal, ProposalEffect::Classify, "classify")?;
-    let classifier = identity_of(&input)?;
-
-    let requirement = requirement_for(state, &mut tx, tenant_id, &input, &node, &proposal).await?;
-    let recorded = vedaflow::proposals::approvals(&mut tx, tenant_id, id).await?;
-    let cast = vedaflow::proposals::cast_for(&recorded, proposal.commit);
-    let outstanding = requirement.outstanding(&cast);
-    if !outstanding.is_empty() {
-        metrics::counter!(PUBLISH_REVIEW_REQUIRED_TOTAL, "surface" => "classify").increment(1);
-        return Err(Error::Conflict {
-            message: format!(
-                "proposal {id} still needs {}; it cannot reclassify yet",
-                outstanding.describe()
-            ),
-        });
-    }
-
-    // Approvals bind bytes here exactly as they do for a publication, with
-    // one substitution: the member objects were written at the *proposed*
-    // tier, so the address to compare against is the live record's with that
-    // tier substituted. Everything else — content, class, scope, validity —
-    // must be untouched, or the record moved under its own review and this
-    // effect would install a tier decided about different bytes.
-    let proposed = vedaflow::proposals::members(&mut tx, tenant_id, proposal.commit).await?;
-    let ids = member_ids(&proposed)?;
-    let versions = records::current_many(&mut *tx, tenant_id, &ids).await?;
-    let moved = |what: &str, record: RecordId| Error::Conflict {
-        message: format!(
-            "record {record} {what} after this proposal was approved; withdraw it and \
-             open a new one so the change is reviewed"
-        ),
-    };
-    let mut classified: Vec<ClassifiedRecord> = Vec::with_capacity(ids.len());
-    for member in &proposed {
-        let record: RecordId = member.name.parse().map_err(|err| Error::Internal {
-            message: format!(
-                "proposal member {:?} is not a record id: {err}",
-                member.name
-            ),
-        })?;
-        let Some(version) = versions.iter().find(|version| version.id == record) else {
-            return Err(moved("no longer exists", record));
-        };
-        let mut asset = memory_asset(version.id, &version.state);
-        asset.sensitivity = proposal.sensitivity;
-        if asset.address() != member.object {
-            return Err(moved("changed", record));
-        }
-        // The record must still live where the proposal was decided: a
-        // reclassification is authorized at one scope, and material that
-        // moved out of it since is governed somewhere else now.
-        if version.state.scope_id != proposal.target_scope_id {
-            return Err(Error::Conflict {
-                message: format!(
-                    "record {record} no longer lives at scope {}; its classification is \
-                     decided where it lives",
-                    proposal.target_scope_id
-                ),
-            });
-        }
-        let was = version.state.sensitivity;
-        records::reclassify(&mut *tx, tenant_id, record, proposal.sensitivity)
-            .await?
-            .ok_or_else(|| moved("no longer exists", record))?;
-        classified.push(ClassifiedRecord {
-            record_id: record,
-            was,
-        });
-    }
-
-    close(
-        &mut tx,
-        tenant_id,
-        id,
-        ProposalState::Published,
-        classifier,
-        None,
-    )
-    .await?;
-
-    audit::record(
-        &mut tx,
-        tenant_id,
-        AuditAction::MemoryClassified,
-        Resource::Scope(proposal.target_scope_id).to_string(),
-        Outcome::Success,
-        json!({
-            "authz": audit::decision_context(Action::MemoryClassify, &authorized),
-            "proposal_id": id,
-            "proposal_commit": proposal.commit.to_hex(),
-            "scope_id": proposal.target_scope_id,
-            // Both tiers per record, because the requirement was resolved at
-            // their maximum and an auditor reading this event has to be able
-            // to see why it cost what it cost.
-            "sensitivity": proposal.sensitivity.as_str(),
-            "records": classified.iter().map(|record| json!({
-                "record_id": record.record_id,
-                "was": record.was.as_str(),
-                "now": proposal.sensitivity.as_str(),
-            })).collect::<Vec<_>>(),
-            "approvals": approvals::audit_context(&requirement, &outstanding),
-            "approved_by": cast.iter().map(|approval| json!({
-                "identity_id": approval.identity,
-                "subject": approval.subject,
-                "roles": approval.roles.iter().map(|role| role.as_str()).collect::<Vec<_>>(),
-            })).collect::<Vec<_>>(),
-        }),
-    )
-    .await?;
-    commit(tx).await?;
-
-    Ok(Json(ClassifyResponse {
-        proposal_id: id,
-        scope_id: proposal.target_scope_id,
-        sensitivity: proposal.sensitivity,
-        records: classified,
-        proposal_commit: proposal.commit.to_hex(),
-        state: ProposalState::Published.as_str(),
-    }))
-}
-
 /// Refuses a proposal whose effect is not the one this route runs.
 ///
-/// A route per effect, and each one checks: running a classification
-/// through the publish route would move a channel to member objects
-/// carrying a tier no row has, and running a publication through this one
-/// would rewrite tiers nobody proposed.
+/// A route per effect, and each one checks that an authored publication
+/// cannot execute a typed Knowledge change (or vice versa).
 fn require_effect(
     proposal: &vedaflow::StoredProposal,
     expected: ProposalEffect,
@@ -2838,9 +1928,9 @@ async fn target_node(
     tx: &mut sqlx::PgConnection,
     tenant_id: TenantId,
     proposal: &vedaflow::StoredProposal,
-) -> Result<HierarchyNode> {
+) -> Result<Scope> {
     found(
-        hierarchy::node(&mut *tx, proposal.target_scope_id).await?,
+        scopes::get(&mut *tx, tenant_id, proposal.target_scope_id).await?,
         tenant_id,
         proposal.target_scope_id,
     )
@@ -2856,6 +1946,24 @@ fn require_open(proposal: &vedaflow::StoredProposal) -> Result<()> {
         });
     }
     Ok(())
+}
+
+fn require_expected_commit(
+    proposal: &vedaflow::StoredProposal,
+    expected_commit: &str,
+) -> Result<()> {
+    let expected: vedaflow::CommitHash = expected_commit.parse()?;
+    if expected == proposal.commit {
+        return Ok(());
+    }
+    Err(Error::Conflict {
+        message: format!(
+            "proposal {} is at commit {}; the reviewed commit {} is stale",
+            proposal.id,
+            proposal.commit.to_hex(),
+            expected.to_hex()
+        ),
+    })
 }
 
 /// The proposing/reviewing identity. A verified subject with no identity
@@ -2896,7 +2004,7 @@ async fn requirement_for(
     tx: &mut sqlx::PgConnection,
     tenant_id: TenantId,
     input: &DecisionInput,
-    node: &HierarchyNode,
+    node: &Scope,
     proposal: &vedaflow::StoredProposal,
 ) -> Result<ApprovalRequirement> {
     let members = vedaflow::proposals::members(tx, tenant_id, proposal.commit).await?;
@@ -2928,7 +2036,7 @@ async fn summarise(
     // The listing decides against the *requested* resource; a proposal at
     // another scope is still rendered with its own target's requirement,
     // which is the honest answer to "what does this need".
-    let node = match hierarchy::node(&mut *tx, proposal.target_scope_id).await? {
+    let node = match scopes::get(&mut *tx, tenant_id, proposal.target_scope_id).await? {
         Some(node) => node,
         // The target vanished (TEN-5's disposal window): render what the
         // pack asks for at the tenant default rather than dropping the row.
@@ -2942,7 +2050,7 @@ async fn summarise(
             ));
         }
     };
-    let paths = ScopePaths::resolve(tx, proposal, &node).await?;
+    let paths = ScopePaths::resolve(tx, tenant_id, proposal, &node).await?;
     let requirement = requirement_for(state, tx, tenant_id, input, &node, proposal).await?;
     let recorded = vedaflow::proposals::approvals(tx, tenant_id, proposal.id).await?;
     let cast = vedaflow::proposals::cast_for(&recorded, proposal.commit);
@@ -2966,18 +2074,19 @@ impl ScopePaths {
     /// things.
     async fn resolve(
         tx: &mut sqlx::PgConnection,
+        tenant_id: synveda_types::TenantId,
         proposal: &vedaflow::StoredProposal,
-        target: &HierarchyNode,
+        target: &Scope,
     ) -> Result<Self> {
         let source = if proposal.source_scope_id == proposal.target_scope_id {
-            Some(target.path.clone())
+            Some(target.slug.clone())
         } else {
-            hierarchy::node(&mut *tx, proposal.source_scope_id)
+            scopes::get(&mut *tx, tenant_id, proposal.source_scope_id)
                 .await?
-                .map(|node| node.path)
+                .map(|node| node.slug)
         };
         Ok(Self {
-            target: Some(target.path.clone()),
+            target: Some(target.slug.clone()),
             source,
         })
     }
@@ -3004,12 +2113,22 @@ fn render(
         proposer_id: proposal.proposer_id,
         proposer_subject: proposal.proposer_subject.clone(),
         created_at: proposal.created_at,
+        updated_at: proposal.updated_at,
         closed_at: proposal.closed_at,
         close_reason: proposal.close_reason.clone(),
+        artifact_references: proposal
+            .artifact_references
+            .iter()
+            .map(ArtifactReferenceView::from)
+            .collect(),
         required: RequirementView::of(requirement),
         outstanding: outstanding.describe(),
-        promotion: proposal.evidence.clone(),
     }
+}
+
+fn artifact_reference_audit(proposal: &vedaflow::StoredProposal) -> serde_json::Value {
+    serde_json::to_value(&proposal.artifact_references)
+        .unwrap_or_else(|_| serde_json::Value::Array(Vec::new()))
 }
 
 /// A proposal's members with their current content, a drift flag, and the
@@ -3021,88 +2140,432 @@ async fn member_views(
     proposal: &vedaflow::StoredProposal,
 ) -> Result<Vec<MemberView>> {
     let proposed = vedaflow::proposals::members(tx, tenant_id, proposal.commit).await?;
+    if proposal.asset == AssetKind::Knowledge {
+        return knowledge_member_views(tx, tenant_id, proposal, &proposed).await;
+    }
     if proposal.asset == AssetKind::ContextPack {
         return document_member_views(tx, tenant_id, proposal, &proposed).await;
     }
     if proposal.asset == AssetKind::Skill {
-        return skill_member_views(tx, tenant_id, proposal, &proposed).await;
+        return skill_change_member_views(tx, tenant_id, proposal, &proposed).await;
+    }
+    if proposal.asset == AssetKind::Tool {
+        return tool_change_member_views(tx, tenant_id, proposal, &proposed).await;
+    }
+    if proposal.asset == AssetKind::Configuration {
+        return configuration_change_member_views(tx, tenant_id, proposal, &proposed).await;
+    }
+    if proposal.asset == AssetKind::Policy && proposal.effect == ProposalEffect::Apply {
+        return relaxation_change_member_views(tx, tenant_id, proposal, &proposed).await;
     }
     if proposal.asset == AssetKind::Prompt {
         return prompt_member_views(tx, tenant_id, proposal, &proposed).await;
     }
-    let ids = member_ids(&proposed)?;
-    // Read wherever the records live, not at the target: a climb's members
-    // live below it, and rendering them as "changed, no content" would
-    // make every climb unreviewable (ADR-0034 decision 3). The address
-    // comparison below is what says whether they still match the review.
-    let versions = records::current_many(&mut *tx, tenant_id, &ids).await?;
-    // The baseline is the **target's** channel, which for a climb is the
-    // ancestor's: what the proposal would move is the target's published
-    // set, so that is what the diff is against.
-    let published = published_at(tx, tenant_id, proposal.target_scope_id).await?;
-    // Both sides of every member's diff, in one statement rather than two
-    // per member (ADR-0035 decision 10).
-    let mut wanted: Vec<vedaflow::hash::ObjectHash> =
-        proposed.iter().map(|member| member.object).collect();
-    wanted.extend(ids.iter().filter_map(|id| published.get(id).copied()));
-    let objects = vedaflow::read_objects(tx, tenant_id, &wanted).await?;
-    // The store is append-only, so an address a tree or a commit names
-    // always resolves; a miss would be corruption, and rendering it as an
-    // empty side is honest about having nothing to show rather than
-    // failing a review that is otherwise fine.
-    let text_at = |hash: &vedaflow::hash::ObjectHash| -> String {
-        objects
-            .get(hash)
-            .map(|object| String::from_utf8_lossy(&object.content).into_owned())
-            .unwrap_or_default()
-    };
+    Err(Error::Invalid {
+        message: format!(
+            "proposal {} carries removed asset kind {}; the fresh context-platform epoch \
+             does not admit raw-record proposals",
+            proposal.id,
+            proposal.asset.as_str()
+        ),
+    })
+}
 
-    Ok(proposed
-        .into_iter()
-        .zip(ids)
-        .map(|(member, record_id)| {
-            let current = versions.iter().find(|version| version.id == record_id);
-            let (unchanged, class, sensitivity, content) = match current {
-                Some(version) => {
-                    let asset = memory_asset(version.id, &version.state);
-                    (
-                        asset.address() == member.object,
-                        version.state.class.as_str().to_owned(),
-                        version.state.sensitivity,
-                        version.state.content.clone(),
-                    )
-                }
-                // The record was deleted or re-scoped under the proposal.
-                // Rendered as changed, with no content to show — which is
-                // exactly what publishing will refuse on.
-                None => (false, String::new(), proposal.sensitivity, String::new()),
-            };
-            let (effect, baseline) = match published.get(&record_id) {
-                None => (MemberEffect::Add, None),
-                Some(held) if *held == member.object => (MemberEffect::None, None),
-                Some(held) => (
-                    MemberEffect::Update,
-                    Some(BaselineView {
-                        object_hash: held.to_hex(),
-                        text: text_at(held),
-                    }),
+/// [`member_views`] for a governed Knowledge command (CPR-16, ADR-0081).
+///
+/// The VedaFlow object is deliberately content-free so authorised erasure can
+/// remove plaintext without rewriting immutable governance history. The
+/// erasable typed effect projection supplies the review text while it exists;
+/// its canonical digest must still equal the digest in the reviewed manifest.
+async fn knowledge_member_views(
+    tx: &mut sqlx::PgConnection,
+    tenant_id: TenantId,
+    proposal: &vedaflow::StoredProposal,
+    proposed: &[vedaflow::ChannelMember],
+) -> Result<Vec<MemberView>> {
+    let [member] = proposed else {
+        return Err(Error::Internal {
+            message: format!(
+                "Knowledge change {} has {} members rather than one command",
+                proposal.id,
+                proposed.len()
+            ),
+        });
+    };
+    if member.name != "command" {
+        return Err(Error::Internal {
+            message: format!(
+                "Knowledge change {} names member {:?}, expected command",
+                proposal.id, member.name
+            ),
+        });
+    }
+    let change = synveda_store::knowledge_lifecycle::read_change(&mut *tx, tenant_id, proposal.id)
+        .await?
+        .ok_or_else(|| Error::Internal {
+            message: format!(
+                "Knowledge change {} has no typed effect projection",
+                proposal.id
+            ),
+        })?;
+    let object = vedaflow::read_object(&mut *tx, tenant_id, member.object)
+        .await?
+        .ok_or_else(|| Error::Internal {
+            message: format!(
+                "Knowledge change {} names missing manifest object {}",
+                proposal.id,
+                member.object.to_hex()
+            ),
+        })?;
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&object.content).map_err(|err| Error::Internal {
+            message: format!(
+                "Knowledge change {} manifest is invalid: {err}",
+                proposal.id
+            ),
+        })?;
+    let manifest_hash = manifest
+        .get("payload_hash")
+        .and_then(serde_json::Value::as_str);
+    let (content, payload_matches) = match change.payload {
+        Some(command) => {
+            let value = synveda_types::json::canonicalise(&serde_json::to_value(command).map_err(
+                |err| Error::Internal {
+                    message: format!("encode Knowledge change {} for review: {err}", proposal.id),
+                },
+            )?);
+            let bytes = serde_json::to_vec(&value).map_err(|err| Error::Internal {
+                message: format!(
+                    "encode Knowledge change {} canonical bytes: {err}",
+                    proposal.id
                 ),
-            };
-            MemberView {
-                member: record_id.to_string(),
-                record_id: Some(record_id),
-                asset: AssetKind::Memory.as_str().to_owned(),
-                object_hash: member.object.to_hex(),
-                unchanged,
-                class: Some(class),
-                sensitivity,
-                content,
-                effect,
-                proposed: text_at(&member.object),
-                baseline,
-            }
-        })
-        .collect())
+            })?;
+            let hash = blake3::hash(&bytes).to_hex().to_string();
+            let rendered = serde_json::to_string_pretty(&value).map_err(|err| Error::Internal {
+                message: format!("render Knowledge change {}: {err}", proposal.id),
+            })?;
+            (rendered, hash == change.payload_hash)
+        }
+        None => (
+            format!(
+                "{{\n  \"payload\": \"erased\",\n  \"payload_hash\": \"{}\"\n}}",
+                change.payload_hash
+            ),
+            true,
+        ),
+    };
+    Ok(vec![MemberView {
+        member: member.name.clone(),
+        asset: AssetKind::Knowledge.as_str().to_owned(),
+        object_hash: member.object.to_hex(),
+        unchanged: payload_matches && manifest_hash == Some(change.payload_hash.as_str()),
+        sensitivity: proposal.sensitivity,
+        content: content.clone(),
+        effect: MemberEffect::Apply,
+        proposed: content,
+        baseline: None,
+    }])
+}
+
+/// [`member_views`] for an immutable, typed Skill command (CPR-23,
+/// ADR-0085). Review binds the canonical command digest; bundle files remain
+/// content-addressed objects referenced by the command rather than mutable
+/// channel drafts.
+async fn skill_change_member_views(
+    tx: &mut sqlx::PgConnection,
+    tenant_id: TenantId,
+    proposal: &vedaflow::StoredProposal,
+    proposed: &[vedaflow::ChannelMember],
+) -> Result<Vec<MemberView>> {
+    let [member] = proposed else {
+        return Err(Error::Internal {
+            message: format!(
+                "Skill change {} has {} members rather than one command",
+                proposal.id,
+                proposed.len()
+            ),
+        });
+    };
+    if member.name != "command" {
+        return Err(Error::Internal {
+            message: format!(
+                "Skill change {} names member {:?}, expected command",
+                proposal.id, member.name
+            ),
+        });
+    }
+    let change = synveda_store::skills::change(&mut *tx, tenant_id, proposal.id)
+        .await?
+        .ok_or_else(|| Error::Internal {
+            message: format!("Skill change {} has no typed effect", proposal.id),
+        })?;
+    let object = vedaflow::read_object(&mut *tx, tenant_id, member.object)
+        .await?
+        .ok_or_else(|| Error::Internal {
+            message: format!(
+                "Skill change {} names missing manifest object {}",
+                proposal.id,
+                member.object.to_hex()
+            ),
+        })?;
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&object.content).map_err(|err| Error::Internal {
+            message: format!("Skill change {} manifest is invalid: {err}", proposal.id),
+        })?;
+    let manifest_hash = manifest
+        .get("payload_hash")
+        .and_then(serde_json::Value::as_str);
+    let value = synveda_types::json::canonicalise(&serde_json::to_value(&change.command).map_err(
+        |err| Error::Internal {
+            message: format!("encode Skill change {} for review: {err}", proposal.id),
+        },
+    )?);
+    let rendered = serde_json::to_string_pretty(&value).map_err(|err| Error::Internal {
+        message: format!("render Skill change {}: {err}", proposal.id),
+    })?;
+    let payload_hash = blake3::hash(value.to_string().as_bytes())
+        .to_hex()
+        .to_string();
+    Ok(vec![MemberView {
+        member: member.name.clone(),
+        asset: AssetKind::Skill.as_str().to_owned(),
+        object_hash: member.object.to_hex(),
+        unchanged: payload_hash == change.payload_hash
+            && manifest_hash == Some(change.payload_hash.as_str()),
+        sensitivity: change.command.sensitivity(),
+        content: rendered.clone(),
+        effect: MemberEffect::Apply,
+        proposed: rendered,
+        baseline: None,
+    }])
+}
+
+/// [`member_views`] for an immutable typed Tool/apply command (CPR-25,
+/// ADR-0086). The command carries only credential-free descriptors, schemas,
+/// hashes and exact binding intent; secret material cannot enter this review.
+async fn tool_change_member_views(
+    tx: &mut sqlx::PgConnection,
+    tenant_id: TenantId,
+    proposal: &vedaflow::StoredProposal,
+    proposed: &[vedaflow::ChannelMember],
+) -> Result<Vec<MemberView>> {
+    let [member] = proposed else {
+        return Err(Error::Internal {
+            message: format!(
+                "Tool change {} has {} members rather than one command",
+                proposal.id,
+                proposed.len()
+            ),
+        });
+    };
+    if member.name != "command" {
+        return Err(Error::Internal {
+            message: format!(
+                "Tool change {} names member {:?}, expected command",
+                proposal.id, member.name
+            ),
+        });
+    }
+    let change = synveda_store::tool_registry::change(&mut *tx, tenant_id, proposal.id)
+        .await?
+        .ok_or_else(|| Error::Internal {
+            message: format!("Tool change {} has no typed effect", proposal.id),
+        })?;
+    let object = vedaflow::read_object(&mut *tx, tenant_id, member.object)
+        .await?
+        .ok_or_else(|| Error::Internal {
+            message: format!(
+                "Tool change {} names missing manifest object {}",
+                proposal.id,
+                member.object.to_hex()
+            ),
+        })?;
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&object.content).map_err(|err| Error::Internal {
+            message: format!("Tool change {} manifest is invalid: {err}", proposal.id),
+        })?;
+    let manifest_hash = manifest
+        .get("payload_hash")
+        .and_then(serde_json::Value::as_str);
+    let value = synveda_types::json::canonicalise(&serde_json::to_value(&change.command).map_err(
+        |err| Error::Internal {
+            message: format!("encode Tool change {} for review: {err}", proposal.id),
+        },
+    )?);
+    let rendered = serde_json::to_string_pretty(&value).map_err(|err| Error::Internal {
+        message: format!("render Tool change {}: {err}", proposal.id),
+    })?;
+    let payload_hash = blake3::hash(value.to_string().as_bytes())
+        .to_hex()
+        .to_string();
+    Ok(vec![MemberView {
+        member: member.name.clone(),
+        asset: AssetKind::Tool.as_str().to_owned(),
+        object_hash: member.object.to_hex(),
+        unchanged: payload_hash == change.payload_hash
+            && manifest_hash == Some(change.payload_hash.as_str()),
+        sensitivity: Sensitivity::Internal,
+        content: rendered.clone(),
+        effect: MemberEffect::Apply,
+        proposed: rendered,
+        baseline: None,
+    }])
+}
+
+/// [`member_views`] for an immutable typed Configuration/apply command
+/// (CPR-30, ADR-0089). Complete documents are reviewable here; they carry no
+/// credentials, and their canonical hash is bound into the manifest.
+async fn configuration_change_member_views(
+    tx: &mut sqlx::PgConnection,
+    tenant_id: TenantId,
+    proposal: &vedaflow::StoredProposal,
+    proposed: &[vedaflow::ChannelMember],
+) -> Result<Vec<MemberView>> {
+    let [member] = proposed else {
+        return Err(Error::Internal {
+            message: format!(
+                "Configuration change {} has {} members rather than one command",
+                proposal.id,
+                proposed.len()
+            ),
+        });
+    };
+    if member.name != "command" {
+        return Err(Error::Internal {
+            message: format!(
+                "Configuration change {} names member {:?}, expected command",
+                proposal.id, member.name
+            ),
+        });
+    }
+    let change = synveda_store::configuration::change(&mut *tx, tenant_id, proposal.id)
+        .await?
+        .ok_or_else(|| Error::Internal {
+            message: format!("Configuration change {} has no typed effect", proposal.id),
+        })?;
+    let object = vedaflow::read_object(&mut *tx, tenant_id, member.object)
+        .await?
+        .ok_or_else(|| Error::Internal {
+            message: format!(
+                "Configuration change {} names missing manifest object {}",
+                proposal.id,
+                member.object.to_hex()
+            ),
+        })?;
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&object.content).map_err(|error| Error::Internal {
+            message: format!(
+                "Configuration change {} manifest is invalid: {error}",
+                proposal.id
+            ),
+        })?;
+    let manifest_hash = manifest
+        .get("payload_hash")
+        .and_then(serde_json::Value::as_str);
+    let value = synveda_types::json::canonicalise(&serde_json::to_value(&change.command).map_err(
+        |error| Error::Internal {
+            message: format!(
+                "encode Configuration change {} for review: {error}",
+                proposal.id
+            ),
+        },
+    )?);
+    let rendered = serde_json::to_string_pretty(&value).map_err(|error| Error::Internal {
+        message: format!("render Configuration change {}: {error}", proposal.id),
+    })?;
+    let payload_hash = blake3::hash(value.to_string().as_bytes())
+        .to_hex()
+        .to_string();
+    Ok(vec![MemberView {
+        member: member.name.clone(),
+        asset: AssetKind::Configuration.as_str().to_owned(),
+        object_hash: member.object.to_hex(),
+        unchanged: payload_hash == change.payload_hash
+            && manifest_hash == Some(change.payload_hash.as_str()),
+        sensitivity: Sensitivity::Internal,
+        content: rendered.clone(),
+        effect: MemberEffect::Apply,
+        proposed: rendered,
+        baseline: None,
+    }])
+}
+
+/// [`member_views`] for an immutable typed Policy/apply relaxation command
+/// (CPR-31, ADR-0090). The complete bounded terms are reviewable here and
+/// their canonical digest must match the content-addressed manifest.
+async fn relaxation_change_member_views(
+    tx: &mut sqlx::PgConnection,
+    tenant_id: TenantId,
+    proposal: &vedaflow::StoredProposal,
+    proposed: &[vedaflow::ChannelMember],
+) -> Result<Vec<MemberView>> {
+    let [member] = proposed else {
+        return Err(Error::Internal {
+            message: format!(
+                "relaxation change {} has {} members rather than one command",
+                proposal.id,
+                proposed.len()
+            ),
+        });
+    };
+    if member.name != "command" {
+        return Err(Error::Internal {
+            message: format!(
+                "relaxation change {} names member {:?}, expected command",
+                proposal.id, member.name
+            ),
+        });
+    }
+    let change = synveda_store::relaxations::change(&mut *tx, tenant_id, proposal.id)
+        .await?
+        .ok_or_else(|| Error::Internal {
+            message: format!("relaxation change {} has no typed effect", proposal.id),
+        })?;
+    let object = vedaflow::read_object(&mut *tx, tenant_id, member.object)
+        .await?
+        .ok_or_else(|| Error::Internal {
+            message: format!(
+                "relaxation change {} names missing manifest object {}",
+                proposal.id,
+                member.object.to_hex()
+            ),
+        })?;
+    let manifest: serde_json::Value =
+        serde_json::from_slice(&object.content).map_err(|error| Error::Internal {
+            message: format!(
+                "relaxation change {} manifest is invalid: {error}",
+                proposal.id
+            ),
+        })?;
+    let manifest_hash = manifest
+        .get("payload_hash")
+        .and_then(serde_json::Value::as_str);
+    let value = synveda_types::json::canonicalise(&serde_json::to_value(&change.command).map_err(
+        |error| Error::Internal {
+            message: format!(
+                "encode relaxation change {} for review: {error}",
+                proposal.id
+            ),
+        },
+    )?);
+    let rendered = serde_json::to_string_pretty(&value).map_err(|error| Error::Internal {
+        message: format!("render relaxation change {}: {error}", proposal.id),
+    })?;
+    let payload_hash = blake3::hash(value.to_string().as_bytes())
+        .to_hex()
+        .to_string();
+    Ok(vec![MemberView {
+        member: member.name.clone(),
+        asset: AssetKind::Policy.as_str().to_owned(),
+        object_hash: member.object.to_hex(),
+        unchanged: payload_hash == change.payload_hash
+            && manifest_hash == Some(change.payload_hash.as_str()),
+        sensitivity: proposal.sensitivity,
+        content: rendered.clone(),
+        effect: MemberEffect::Apply,
+        proposed: rendered,
+        baseline: None,
+    }])
 }
 
 /// [`member_views`] for a context-pack proposal (PRMT-2, ADR-0050).
@@ -3193,11 +2656,9 @@ async fn document_member_views(
             };
             MemberView {
                 member: path.to_string(),
-                record_id: None,
                 asset: AssetKind::ContextPack.as_str().to_owned(),
                 object_hash: member.object.to_hex(),
                 unchanged,
-                class: None,
                 sensitivity: reviewed
                     .as_ref()
                     .map_or(proposal.sensitivity, |asset| asset.sensitivity),
@@ -3212,7 +2673,7 @@ async fn document_member_views(
 
 /// [`member_views`] for a prompt proposal (PRMT-1, ADR-0049 decision 6).
 ///
-/// The same three questions FLOW-6 asks of a memory member — what the
+/// The same three questions FLOW-6 asks of every governed member — what the
 /// approvals bind, what publication would replace, and whether the source
 /// has moved since — read one table over. The baseline is still the
 /// **target's** tree, which for a climb is the ancestor's, and the "as it
@@ -3291,11 +2752,9 @@ async fn prompt_member_views(
             };
             MemberView {
                 member: name.to_string(),
-                record_id: None,
                 asset: AssetKind::Prompt.as_str().to_owned(),
                 object_hash: member.object.to_hex(),
                 unchanged,
-                class: None,
                 sensitivity: reviewed
                     .as_ref()
                     .map_or(proposal.sensitivity, |asset| asset.sensitivity),
@@ -3306,123 +2765,6 @@ async fn prompt_member_views(
             }
         })
         .collect())
-}
-
-/// [`member_views`] for a skill proposal (SKIL-1, ADR-0051 decision 1).
-///
-/// [`document_member_views`]'s shape, one table over — and the renderer
-/// ADR-0035 predicted for "SKIL-1's skill bundles", arriving as its third
-/// kind. A reviewer sees a file at a time, which is what makes reviewing a
-/// skill *like reviewing code* rather than like reviewing a blob.
-async fn skill_member_views(
-    tx: &mut sqlx::PgConnection,
-    tenant_id: TenantId,
-    proposal: &vedaflow::StoredProposal,
-    proposed: &[vedaflow::ChannelMember],
-) -> Result<Vec<MemberView>> {
-    let paths: Vec<SkillPath> = proposed
-        .iter()
-        .map(|member| {
-            member
-                .name
-                .parse::<SkillPath>()
-                .map_err(|err| Error::Internal {
-                    message: format!(
-                        "proposal member {:?} is not a skill path: {err}",
-                        member.name
-                    ),
-                })
-        })
-        .collect::<Result<_>>()?;
-    let drafts: std::collections::HashMap<SkillPath, [u8; 32]> =
-        synveda_store::skills::list_all_files(&mut *tx, tenant_id, proposal.source_scope_id)
-            .await?
-            .into_iter()
-            .map(|file| {
-                (
-                    SkillPath::new(file.skill_name.clone(), file.path.clone()),
-                    file.object_hash,
-                )
-            })
-            .collect();
-    let published = published_skills_at(tx, tenant_id, proposal.target_scope_id).await?;
-
-    let mut wanted: Vec<vedaflow::hash::ObjectHash> =
-        proposed.iter().map(|member| member.object).collect();
-    wanted.extend(paths.iter().filter_map(|path| published.get(path).copied()));
-    let objects = vedaflow::read_objects(tx, tenant_id, &wanted).await?;
-    // The *file's* bytes rather than the envelope's: a reviewer reads the
-    // script, not the JSON around it. That is the same content a client
-    // will load, which is the whole point of reviewing it here.
-    let text_at = |hash: &vedaflow::hash::ObjectHash| -> String {
-        objects
-            .get(hash)
-            .and_then(|object| vedaflow::SkillAsset::from_bytes(&object.content).ok())
-            .map(|asset| asset.file.content)
-            .unwrap_or_default()
-    };
-
-    Ok(proposed
-        .iter()
-        .zip(&paths)
-        .map(|(member, path)| {
-            let reviewed = objects
-                .get(&member.object)
-                .and_then(|object| vedaflow::SkillAsset::from_bytes(&object.content).ok());
-            let (unchanged, content) = match drafts.get(path) {
-                Some(address) => (member.object.as_bytes() == address, text_at(&member.object)),
-                None => (true, String::new()),
-            };
-            let (effect, baseline) = match published.get(path) {
-                None => (MemberEffect::Add, None),
-                Some(held) if *held == member.object => (MemberEffect::None, None),
-                Some(held) => (
-                    MemberEffect::Update,
-                    Some(BaselineView {
-                        object_hash: held.to_hex(),
-                        text: text_at(held),
-                    }),
-                ),
-            };
-            MemberView {
-                member: path.to_string(),
-                record_id: None,
-                asset: AssetKind::Skill.as_str().to_owned(),
-                object_hash: member.object.to_hex(),
-                unchanged,
-                class: None,
-                sensitivity: reviewed
-                    .as_ref()
-                    .map_or(proposal.sensitivity, |asset| asset.sensitivity),
-                content,
-                effect,
-                proposed: text_at(&member.object),
-                baseline,
-            }
-        })
-        .collect())
-}
-
-/// A proposal commit's entry names as record ids, in tree order.
-///
-/// Only this crate writes memory-asset entries and it names them by id,
-/// so an unparseable name means schema and code have drifted — a bug to
-/// name, not a member to drop silently from a review.
-fn member_ids(members: &[vedaflow::ChannelMember]) -> Result<Vec<RecordId>> {
-    members
-        .iter()
-        .map(|member| {
-            member
-                .name
-                .parse::<RecordId>()
-                .map_err(|err| Error::Internal {
-                    message: format!(
-                        "proposal member {:?} is not a record id: {err}",
-                        member.name
-                    ),
-                })
-        })
-        .collect()
 }
 
 /// Decides the asset kind's own read action at `scope_id`, at the working
@@ -3440,19 +2782,30 @@ fn decide_asset_read(
 ) -> Result<crate::authz::Authorized> {
     let resource = Resource::Scope(scope_id);
     match asset {
-        AssetKind::Memory => authz::decide_read(state, input, resource, Sensitivity::WORKING),
         AssetKind::Prompt => {
             authz::decide_prompt_read(state, input, resource, Sensitivity::WORKING)
         }
         AssetKind::ContextPack => {
             authz::decide_context_pack_read(state, input, resource, Sensitivity::WORKING)
         }
-        AssetKind::Skill => authz::decide_skill_read(state, input, resource, Sensitivity::WORKING),
-        // `policy` is the one that remains, and it is not proposable here —
-        // a lapse is its own route (ADR-0037 decision 16).
+        // Typed governed artifacts are opened by their own command routes;
+        // this generic authoring route carries only prompt/pack documents.
         other => Err(Error::Invalid {
             message: format!(
-                "{} is not an asset a proposal carries; a policy lapse is POST /v1/lapses",
+                "{} is not an authored artifact this proposal route carries",
+                other.as_str()
+            ),
+        }),
+    }
+}
+
+fn asset_read_action(asset: AssetKind) -> Result<Action> {
+    match asset {
+        AssetKind::Prompt => Ok(Action::PromptRead),
+        AssetKind::ContextPack => Ok(Action::ContextPackRead),
+        other => Err(Error::Invalid {
+            message: format!(
+                "{} is not an authored artifact a proposal carries",
                 other.as_str()
             ),
         }),
@@ -3466,8 +2819,6 @@ fn decide_asset_read(
 /// name it in a tree — is one of these three questions, and the two kinds
 /// answer them from different tables.
 enum Proposed {
-    /// A memory record's current version.
-    Memory(synveda_store::records::RecordVersion),
     /// A prompt, as it will be addressed. Either the draft that lives at
     /// the source scope, or — for the second sense of "the source holds
     /// it" — the object the source's published tree already names.
@@ -3477,29 +2828,18 @@ enum Proposed {
     /// table over — and a bundle is several of these rather than one
     /// member, because the channel names documents.
     ContextPack(vedaflow::ContextPackAsset),
-    /// One **file** of a skill bundle, as it will be addressed (SKIL-1,
-    /// ADR-0051 decision 2). The same two senses again — and unlike the
-    /// other three, a caller never names one of these: it names the skill,
-    /// and every file of it becomes a member, because a client loads a
-    /// bundle whole.
-    Skill(vedaflow::SkillAsset),
 }
 
 impl Proposed {
     /// The tier the approval matrix prices this member at.
     fn sensitivity(&self) -> Sensitivity {
         match self {
-            Proposed::Memory(version) => version.state.sensitivity,
             Proposed::Prompt(asset) => asset.sensitivity,
             // Per document, never per pack (ADR-0050 decision 12) — so a
             // bundle mixing a public glossary and a confidential runbook is
             // priced at the runbook, which is `max_sensitivity`'s existing
             // rule doing exactly what it was written for.
             Proposed::ContextPack(asset) => asset.sensitivity,
-            // Per skill rather than per file (ADR-0051 decision 11), so
-            // every member of one bundle reports the same tier and the
-            // maximum over the set is that tier.
-            Proposed::Skill(asset) => asset.sensitivity,
         }
     }
 }
@@ -3683,167 +3023,6 @@ async fn held_documents(
     Ok(held)
 }
 
-/// What `scope`'s published skill channel names, by skill path.
-async fn published_skills_at(
-    tx: &mut sqlx::PgConnection,
-    tenant_id: TenantId,
-    scope_id: ScopeId,
-) -> Result<std::collections::HashMap<SkillPath, vedaflow::hash::ObjectHash>> {
-    Ok(
-        vedaflow::read_skill_members(tx, tenant_id, &[scope_id], Channel::Published)
-            .await?
-            .into_iter()
-            .next()
-            .map(|state| state.members)
-            .unwrap_or_default(),
-    )
-}
-
-/// The skills `scope` **holds**, refusing the whole request if any is not
-/// held there — [`held_documents`]'s two senses, one table over, with one
-/// difference that is the whole of ADR-0051 decision 17.
-///
-/// A caller names the **bundle** and every file of it becomes a member,
-/// because a client loads a skill whole: proposing three files of four
-/// would put a version nobody can run in front of a reviewer, and approving
-/// it would publish one.
-async fn held_skills(
-    tx: &mut sqlx::PgConnection,
-    tenant_id: TenantId,
-    scope_id: ScopeId,
-    names: &[SkillName],
-) -> Result<Vec<vedaflow::SkillAsset>> {
-    let mut requested: Vec<SkillName> = names.to_vec();
-    requested.sort();
-    requested.dedup();
-    let published = published_skills_at(tx, tenant_id, scope_id).await?;
-
-    let mut held = Vec::new();
-    let mut missing: Vec<String> = Vec::new();
-    for name in &requested {
-        // Sense one: the draft lives here, and its files are the bundle.
-        let drafts = synveda_store::skills::files_of(&mut *tx, tenant_id, scope_id, name).await?;
-        let addresses: Vec<vedaflow::hash::ObjectHash> = if drafts.is_empty() {
-            // Sense two: no draft here, but this scope published it — which
-            // is how a second hop starts from where the first one landed.
-            let names_here: Vec<vedaflow::hash::ObjectHash> = published
-                .iter()
-                .filter(|(path, _)| &path.skill == name)
-                .map(|(_, address)| *address)
-                .collect();
-            if names_here.is_empty() {
-                missing.push(name.to_string());
-                continue;
-            }
-            names_here
-        } else {
-            drafts
-                .into_iter()
-                .map(|file| vedaflow::hash::ObjectHash::from_bytes(file.object_hash))
-                .collect()
-        };
-        for address in addresses {
-            let object = vedaflow::read_object(&mut *tx, tenant_id, address)
-                .await?
-                .ok_or_else(|| Error::Internal {
-                    message: format!(
-                        "skill {name} names object {} which the append-only store does \
-                         not hold",
-                        address.to_hex()
-                    ),
-                })?;
-            held.push(vedaflow::SkillAsset::from_bytes(&object.content)?);
-        }
-    }
-    if !missing.is_empty() {
-        return Err(Error::Invalid {
-            message: format!(
-                "scope {scope_id} neither drafts nor publishes: {} — name the scope \
-                 that does with source_scope_id, which must be {scope_id} or a scope \
-                 beneath it (FLOW-5 climbs the hierarchy, it does not cross it)",
-                missing.join(", ")
-            ),
-        });
-    }
-    Ok(held)
-}
-
-/// The current versions of `ids` that `scope` **holds**, refusing the
-/// whole request if any is not held there.
-///
-/// A scope holds material in one of two senses, and FLOW-5 needs both
-/// (ADR-0034 decision 3):
-///
-/// - the record **lives** there (`records.scope_id`), which is every
-///   same-scope proposal and the first hop of any climb; or
-/// - the scope **published** it — its `memory/published` tree names the
-///   record at exactly the address its current content produces — which
-///   is how a second hop starts from where the first one landed, with
-///   nothing new stored to make it possible.
-///
-/// The address is what makes the second sense safe: an edited record
-/// falls out of it by arithmetic, so a climb can never carry content the
-/// source scope did not stand behind (ADR-0031 decision 5).
-///
-/// Named rather than silently dropped: proposing (or publishing) a subset
-/// of what a curator asked for is the one outcome a review surface must
-/// never produce quietly.
-async fn held_versions(
-    tx: &mut sqlx::PgConnection,
-    tenant_id: TenantId,
-    scope_id: ScopeId,
-    ids: &[RecordId],
-) -> Result<Vec<synveda_store::records::RecordVersion>> {
-    let mut requested = ids.to_vec();
-    requested.sort_unstable();
-    requested.dedup();
-    // Scope-blind: where each record lives is one of the two answers, not
-    // the predicate.
-    let versions = records::current_many(&mut *tx, tenant_id, &requested).await?;
-    let published = published_at(tx, tenant_id, scope_id).await?;
-    let held: Vec<synveda_store::records::RecordVersion> = versions
-        .into_iter()
-        .filter(|version| {
-            version.state.scope_id == scope_id
-                || published.get(&version.id)
-                    == Some(&memory_asset(version.id, &version.state).address())
-        })
-        .collect();
-    if held.len() != requested.len() {
-        let found: Vec<RecordId> = held.iter().map(|version| version.id).collect();
-        let missing: Vec<String> = requested
-            .iter()
-            .filter(|id| !found.contains(id))
-            .map(ToString::to_string)
-            .collect();
-        return Err(Error::Invalid {
-            message: format!(
-                "scope {scope_id} neither holds nor publishes: {} — name the scope \
-                 that does with source_scope_id, which must be {scope_id} or a scope \
-                 beneath it (FLOW-5 climbs the hierarchy, it does not cross it)",
-                missing.join(", ")
-            ),
-        });
-    }
-    Ok(held)
-}
-
-/// What `scope`'s published channel names, record id → admitted address.
-async fn published_at(
-    tx: &mut sqlx::PgConnection,
-    tenant_id: TenantId,
-    scope_id: ScopeId,
-) -> Result<std::collections::HashMap<RecordId, vedaflow::hash::ObjectHash>> {
-    Ok(
-        vedaflow::read_memory_members(tx, tenant_id, &[scope_id], Channel::Published)
-            .await?
-            .into_iter()
-            .next()
-            .map(|channel| channel.members)
-            .unwrap_or_default(),
-    )
-}
-
 /// A set is reviewed as a set and is governed by its most sensitive
 /// element (ADR-0032 decision 3), whichever kind of asset it holds.
 fn max_sensitivity(members: &[Proposed]) -> Sensitivity {
@@ -3854,7 +3033,7 @@ fn max_sensitivity(members: &[Proposed]) -> Sensitivity {
         .unwrap_or(Sensitivity::Public)
 }
 
-fn role_list(roles: &[Role]) -> String {
+fn role_list(roles: &[synveda_types::access::RoleKey]) -> String {
     if roles.is_empty() {
         return "none".to_owned();
     }
@@ -3865,88 +3044,49 @@ fn role_list(roles: &[Role]) -> String {
         .join(", ")
 }
 
+fn climb_level_bucket(levels: usize) -> &'static str {
+    match levels {
+        0 => "0",
+        1 => "1",
+        2 => "2",
+        _ => "3_plus",
+    }
+}
+
 fn validate_open(body: &OpenBody) -> Result<()> {
     let invalid = |message: String| Err(Error::Invalid { message });
     // One asset kind per proposal (ADR-0049 decision 6): the approval
     // matrix resolves from it, and a mixed set would have to be priced at
     // the maximum by a rule nobody wrote.
-    let named = usize::from(!body.record_ids.is_empty())
-        + usize::from(!body.prompt_names.is_empty())
-        + usize::from(!body.document_paths.is_empty())
-        + usize::from(!body.skill_names.is_empty());
+    let named =
+        usize::from(!body.prompt_names.is_empty()) + usize::from(!body.document_paths.is_empty());
     match named {
         0 => {
             return invalid(
-                "name at least one member: record_ids for memories, prompt_names for \
-                 prompts, document_paths for context pack documents, skill_names for \
-                 skills"
+                "name at least one member: prompt_names for prompts or document_paths for \
+                 context pack documents"
                     .to_owned(),
             );
         }
         1 => {}
         _ => {
             return invalid(
-                "a proposal carries one asset kind: name record_ids, prompt_names, \
-                 document_paths or skill_names, never more than one — the approval matrix resolves \
-                 from the asset, and regulated-strict prices a prompt at two distinct \
-                 people where it prices a team's memory at one"
+                "a proposal carries one asset kind: name prompt_names or document_paths, \
+                 never both — the approval matrix resolves from the asset"
                     .to_owned(),
             );
         }
     }
-    let members = body
-        .record_ids
-        .len()
-        .max(body.prompt_names.len())
-        .max(body.document_paths.len())
-        .max(body.skill_names.len());
+    let members = body.prompt_names.len().max(body.document_paths.len());
     if members > vedaflow::MAX_PROPOSAL_MEMBERS {
         return invalid(format!(
             "a proposal may name at most {} members",
             vedaflow::MAX_PROPOSAL_MEMBERS
         ));
     }
-    if (!body.prompt_names.is_empty() || !body.skill_names.is_empty())
-        && body.effect.unwrap_or(ProposalEffect::Published) != ProposalEffect::Published
-    {
-        return invalid(
-            "an authored-asset proposal publishes: reclassification is a records effect \
-             (ADR-0038 decision 9), and an authored asset's tier is a field of the \
-             version under review"
-                .to_owned(),
-        );
-    }
     let chars = body.title.chars().count();
     if chars == 0 || chars > MAX_TITLE_CHARS {
         return invalid(format!("title must be 1..={MAX_TITLE_CHARS} characters"));
-    }
-    // The effect and the tier travel together or not at all (AUTHZ-5,
-    // ADR-0038 decision 9). A body that says `classify` without a tier has
-    // not said what it would do; one that names a tier for a publication has
-    // described something the effect will not perform, and storing it would
-    // make the proposal read as a reclassification that never happens.
-    match body.effect.unwrap_or(ProposalEffect::Published) {
-        ProposalEffect::Classify if body.sensitivity.is_none() => {
-            return invalid(
-                "a classify proposal must name the sensitivity it would install".to_owned(),
-            );
-        }
-        ProposalEffect::Classify => {}
-        other if body.sensitivity.is_some() => {
-            return invalid(format!(
-                "sensitivity applies to the classify effect only; this proposal's \
-                 effect is {other} and would not move a tier"
-            ));
-        }
-        // A lapse's terms are a different body entirely, and refusing it
-        // here by name beats opening a policy proposal with no terms in it
-        // (ADR-0037 decision 1: POST /v1/lapses is its surface).
-        ProposalEffect::Lapse => {
-            return invalid(
-                "a lapse is proposed at POST /v1/lapses, which is where its terms live".to_owned(),
-            );
-        }
-        ProposalEffect::Published => {}
     }
     Ok(())
 }
@@ -3966,21 +3106,16 @@ fn check_text(label: &str, value: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-/// The VedaFlow view of a stored record version (ADR-0031 decision 6).
-/// The same field copy the pipeline, the composition engine, and the
-/// channel route make, for the reason recorded there: `synveda-store` and
-/// `synveda-vedaflow` are siblings, so neither can host a conversion
-/// between their types.
-fn memory_asset(id: RecordId, state: &RecordState) -> MemoryAsset {
-    MemoryAsset {
-        id,
-        scope_id: state.scope_id,
-        owner_id: state.owner_id,
-        kind: state.kind,
-        class: state.class,
-        content: state.content.clone(),
-        sensitivity: state.sensitivity,
-        valid_from: state.valid_from,
-        valid_to: state.valid_to,
+#[cfg(test)]
+mod tests {
+    use super::climb_level_bucket;
+
+    #[test]
+    fn proposal_climb_metric_uses_bounded_labels() {
+        assert_eq!(climb_level_bucket(0), "0");
+        assert_eq!(climb_level_bucket(1), "1");
+        assert_eq!(climb_level_bucket(2), "2");
+        assert_eq!(climb_level_bucket(3), "3_plus");
+        assert_eq!(climb_level_bucket(usize::MAX), "3_plus");
     }
 }

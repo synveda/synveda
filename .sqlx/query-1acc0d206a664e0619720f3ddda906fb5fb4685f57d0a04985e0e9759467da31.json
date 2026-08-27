@@ -1,0 +1,151 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select id, tenant_id, relaxation_id, proposal_id, ordinal,\n                  subject_identity_id, subject_principal_id, target_scope_id,\n                  action, max_sensitivity, requested_start_at,\n                  requested_end_at, effective_start_at, hard_expires_at,\n                  reason, configuration_version_id, configuration_hash,\n                  content_hash, creator_id, approver_ids, auto_applied,\n                  created_at\n             from policy_relaxation_versions\n            where tenant_id = $1 and relaxation_id = $2\n              and ($3::bigint is null or ordinal < $3)\n            order by ordinal desc\n            limit $4",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "tenant_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "relaxation_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "proposal_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "ordinal",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 5,
+        "name": "subject_identity_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 6,
+        "name": "subject_principal_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "target_scope_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 8,
+        "name": "action",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "max_sensitivity",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "requested_start_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 11,
+        "name": "requested_end_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 12,
+        "name": "effective_start_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 13,
+        "name": "hard_expires_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 14,
+        "name": "reason",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 15,
+        "name": "configuration_version_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 16,
+        "name": "configuration_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 17,
+        "name": "content_hash",
+        "type_info": "Bytea"
+      },
+      {
+        "ordinal": 18,
+        "name": "creator_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 19,
+        "name": "approver_ids",
+        "type_info": "UuidArray"
+      },
+      {
+        "ordinal": 20,
+        "name": "auto_applied",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 21,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid",
+        "Int8",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "1acc0d206a664e0619720f3ddda906fb5fb4685f57d0a04985e0e9759467da31"
+}

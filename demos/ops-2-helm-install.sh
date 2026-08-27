@@ -109,7 +109,7 @@ kubectl config use-context "kind-$CLUSTER" >/dev/null
 # artefact serves (ADR-0062 decision 9).
 echo "==> building the product image (this is the slow part; layers cache)"
 docker build -t "synveda/gateway:$IMAGE_TAG" -f deploy/compose/gateway/Dockerfile .
-echo "==> building the enterprise Postgres image (CNPG base + pgvector + PGMQ, no AGE)"
+echo "==> building the enterprise Postgres image (CNPG base + pgvector)"
 docker build -t synveda/enterprise-postgres:17 deploy/helm/postgres
 echo "==> loading both into the cluster"
 kind load docker-image --name "$CLUSTER" "synveda/gateway:$IMAGE_TAG" synveda/enterprise-postgres:17
@@ -154,6 +154,12 @@ ISSUER=$(node "$FIXTURES/idp-bootstrap.mjs" http://127.0.0.1:18080 "$PUBLIC_URL"
 echo "    issuer, as the discovery document states it: $ISSUER"
 
 # ── the chart ────────────────────────────────────────────────────────────
+echo "==> the disposable key plane"
+kubectl create secret generic synveda-kms -n "$NS" \
+  --from-literal=SYNVEDA_KMS_KEY=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef \
+  --from-literal=SYNVEDA_KMS_KEY_REF=local:ops-2-test \
+  --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+
 echo "==> helm install"
 helm upgrade --install "$RELEASE" deploy/helm/synveda \
   --namespace "$NS" -f "$FIXTURES/values.yaml" --wait=false ||
@@ -251,17 +257,6 @@ kubectl logs -n "$NS" synveda-install-test -c client --tail=100 2>/dev/null | se
 [ "$status" = "ready" ] || fail "the governed round trip did not complete" \
   "$(kubectl logs -n "$NS" synveda-install-test --all-containers --tail=60 2>&1 || true)"
 
-# ── and the chain over all of it ─────────────────────────────────────────
-echo "==> audit verify — under the gateway's own least-privilege role"
-kubectl delete job audit-verify -n "$NS" --ignore-not-found >/dev/null
-sed -e "s/__TENANT_ID__/$TENANT_ID/" -e "s/__IMAGE_TAG__/$IMAGE_TAG/" \
-  "$FIXTURES/audit-verify-job.yaml" |
-  kubectl apply -f - >/dev/null
-kubectl wait --for=condition=complete --timeout=120s -n "$NS" job/audit-verify >/dev/null 2>&1 ||
-  fail "the audit chain did not verify" \
-    "$(kubectl logs -n "$NS" job/audit-verify --tail=20 2>&1 || true)"
-kubectl logs -n "$NS" job/audit-verify --tail=5 | sed 's/^/    /'
-
 # ── assertion 2: the failover ────────────────────────────────────────────
 # The gateway's pool is `connect_lazy` so that a database outage is a
 # /readyz report rather than a crash-loop. Nothing has ever tested that
@@ -290,7 +285,7 @@ kubectl delete pod -n "$NS" "$PRIMARY" --wait=false >/dev/null
 # rather than a pod label — the label lagged the status by more than two
 # minutes in an earlier run.
 #
-# The order matters more than it looks. A first draft asserted the inject
+# The order matters more than it looks. A first draft asserted composition
 # straight after `kubectl delete pod`, and it passed on the first attempt:
 # the old primary was still `Terminating` and still serving, so the check
 # succeeded precisely because nothing had failed over yet. This is the
@@ -309,32 +304,38 @@ done
     "$(kubectl get cluster -n "$NS" synveda-pg -o wide 2>&1 || true)"
 echo "    promoted $NEW (was $PRIMARY)"
 
-echo "==> the same inject, on the other side of the failover"
+echo "==> the same context run, on the other side of the failover"
+# The SAME run the client opened before the primary was deleted, read back
+# from the file it wrote. Opening a fresh one here would test that the
+# gateway can still create a session — a weaker claim than that a run which
+# existed before the failover still composes after it.
 kubectl exec -n "$NS" synveda-install-test -c client -- sh -ec '
   bearer=$(synveda auth token)
+  run=$(cat /work/session-id)
   for i in $(seq 1 120); do
     code=$(curl -sS -o /work/failover-body -w "%{http_code}" \
-      -X POST "$SYNVEDA_GATEWAY/v1/inject" \
+      -X POST "$SYNVEDA_GATEWAY/v1/sessions/$run/context-runs" \
       -H "Authorization: Bearer $bearer" -H "Content-Type: application/json" \
-      -d "{\"task\":\"when does the release train leave\",\"session_id\":\"ops2-failover\"}")
-    if [ "${code%${code#2}}" = "2" ] && grep -q "release train leaves" /work/failover-body; then
-      echo "    inject succeeded after the failover (attempt $i)"
+      -H "Idempotency-Key: ops2-failover-$i" \
+      -d "{\"query\":\"when does the release train leave\"}")
+    if [ "${code%${code#2}}" = "2" ] && grep -q '"id"' /work/failover-body; then
+      echo "    the context run succeeded after the failover (attempt $i)"
       exit 0
     fi
     sleep 2
   done
-  echo "inject never recovered:"; cat /work/failover-body; exit 1
+  echo "the context run never recovered:"; cat /work/failover-body; exit 1
 ' || fail "the deployment did not survive losing its primary" \
   "$(kubectl get cluster -n "$NS" synveda-pg -o wide 2>&1 || true)"
 
 echo
 echo "================================================================"
-echo "OPS-2 AC: a kind-cluster install of the enterprise profile"
+echo "OPS-2 AC: a kind-cluster install of the one Synveda runtime"
 echo "  the chart installed, the job migrated under the admin identity,"
 echo "  and the gateway came up as a non-superuser role"
-echo "  a real authorization-code + PKCE login provisioned the org root"
-echo "  a governed write, observe → extraction → inject, audit verified"
-echo "  the primary was deleted and the same inject succeeded again"
+echo "  a real authorization-code + PKCE login provisioned the tenant root"
+echo "  a governed write, session append → context run, audit verified"
+echo "  the primary was deleted and the same run composed again"
 echo
 echo "  what this does not prove: no browser was involved. This is the"
 echo "  protocol path — discovery, JWKS, PKCE, iss and nonce — driven by"

@@ -67,7 +67,7 @@ for a test, at exactly the layer this feature keeps thin.
 | `claude-desktop-agent` | claude-desktop · legacy · `--writes tool` | captured | The **second** launch, the agent session — `clientInfo` is `local-agent-mode-synveda`, and it negotiates `roots.listChanged` and an `io.modelcontextprotocol/ui` extension the probe does not. Carries both `tools/call` frames, composed by the model: `recall` with a `query` and a `limit`, `remember` with prose. Both stop at the credential seam and answer `isError` with readable text, which pins the failure posture ADR-0057 inverts from the hooks — a caller who *asked* is told, not handed a protocol error the client renders opaquely. Its `tools/list` sends **no** `params` member, unlike the probe's. |
 | `zed` | zed · legacy · `--writes tool` | captured | The non-Anthropic client decision 11 names as amended. Opens at `2025-11-25`, ids from `0`, `tools/list` with no `params` — and asks twice. |
 | `modern-era` | spec · modern · `--writes tool` | authored | The `2026-07-28` era decision 3 requires: `server/discover`, the version carried per request in `_meta`, no handshake at all. Attributed to the **specification, not a vendor**, because neither AC client opens here — so this is the only thing exercising that path, and it says so rather than borrowing a vendor's name for frames the vendor does not send. Becomes `captured` the day a client ships that opens there. |
-| `claude-code-plugin` | claude-code · legacy · `--writes host` | authored | The one launch this repository owns rather than a vendor: the plugin's entry point execs `--writes host`, so `tools/list` carries `recall` alone and `tools/call remember` is `-32602`. Decision 6 has two halves and this pins the second — a tool absent from the listing that still answered a call would not be absent. |
+| `host-owned-write-mode` | repository contract · legacy · `--writes host` | authored | A deliberately vendor-neutral case for a launch this repository owns: a host which already observes starts `--writes host`, so `tools/list` carries `recall` alone and `tools/call remember` is `-32602`. No external-client support claim is inferred from authored input. |
 | `unsupported-version` | any · modern · `--writes tool` | authored | Synthetic by construction, and permanently so: no client sends a version on purpose in order to be refused. What *any* client on a revision this server does not implement must be told — `-32022` carrying `{requested, supported}`, which is what lets it retry instead of fail. |
 
 ## What is not here, and why
@@ -78,9 +78,13 @@ reach the credential seam and stop, and the recorded answer is the sign-in
 sentence. The test points `HOME` and `XDG_CONFIG_HOME` at an empty directory
 for exactly this reason — a developer with a live session records the same
 bytes as CI.
-The gateway-backed round trip — a real recall answering from a real corpus,
-watermarked — is `demos/ctx-5-recall.sh`, against a live stack.
+The gateway-backed path returned in CPR-20 without restoring `/v1/recall`:
+`recall` now derives a real session and calls its public, current-Knowledge
+query route. The protocol corpus still stops at the credential seam so it is
+deterministic in CI; `demos/cpr-20-context-planning.sh` exercises the gateway
+client seam against the public contract.
 
 **No `remember` that reaches the store.** Same reason. The write's admission,
 its redaction scan and its four dispositions are pinned by `mcp::tests` in
-`crates/synveda-cli/src/mcp.rs`, and the wire path by the observe suites.
+`crates/synveda-cli/src/mcp.rs`, and the wire path by the session-append
+suites.

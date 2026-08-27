@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "update skill_bindings set scope_id = $2 where tenant_id = $1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "4f81f317924d4869215fe7e7761ca21e776972fb1f5bae623a18326f2ca4031b"
+}
