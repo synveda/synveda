@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        update capture_batches\n           set state = 'completed', extractor_method = $4, model_version = $5,\n               candidate_count = $6, lease_owner = null,\n               lease_expires_at = null, completed_at = now(), updated_at = now()\n         where tenant_id = $1 and id = $2 and state = 'running'\n           and lease_owner = $3\n        returning id, tenant_id, source_kind, session_id, import_job_id,\n                  scope_id, workspace_id, project_id,\n                  principal_id, configuration_version_id, configuration_hash,\n                  input_hash, event_count, state, extractor_method,\n                  model_version, attempts, candidate_count, error_code,\n                  created_at, started_at, completed_at, updated_at\n        ",
+  "query": "\n        with candidate as (\n            select id\n            from capture_batches\n            where tenant_id = $1\n              and source_kind = 'session'\n              and attempts < $2\n              and (state = 'pending'\n                   or (state = 'running'\n                       and lease_expires_at <= statement_timestamp()))\n            order by created_at, id\n            for update skip locked\n            limit 1\n        )\n        update capture_batches batch\n           set state = 'running', attempts = attempts + 1,\n               lease_owner = $3,\n               lease_expires_at = statement_timestamp()\n                                  + make_interval(secs => $4::double precision),\n               started_at = coalesce(started_at, now()), updated_at = now(),\n               error_code = null\n          from candidate\n         where batch.tenant_id = $1 and batch.id = candidate.id\n        returning batch.id, batch.tenant_id, batch.source_kind, batch.session_id,\n                  batch.import_job_id, batch.scope_id, batch.workspace_id,\n                  batch.project_id, batch.principal_id,\n                  batch.configuration_version_id, batch.configuration_hash,\n                  batch.input_hash, batch.event_count, batch.state,\n                  batch.extractor_method, batch.model_version, batch.attempts,\n                  batch.candidate_count, batch.error_code, batch.created_at,\n                  batch.started_at, batch.completed_at, batch.updated_at\n        ",
   "describe": {
     "columns": [
       {
@@ -122,11 +122,9 @@
     "parameters": {
       "Left": [
         "Uuid",
-        "Uuid",
+        "Int4",
         "Text",
-        "Text",
-        "Text",
-        "Int4"
+        "Float8"
       ]
     },
     "nullable": [
@@ -155,5 +153,5 @@
       false
     ]
   },
-  "hash": "99924440f5b51d68cfffd25cb4a45ff8132e06beb0b845a6e06078521da04210"
+  "hash": "45d9e72bd45562211f1b8e611f4cc0683373ffb80662c95d5a9a3a4f441ae656"
 }

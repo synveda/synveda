@@ -413,7 +413,7 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
     );
     metrics::describe_counter!(
         synveda_store::capture::CAPTURE_MUTATIONS_TOTAL,
-        "Durable capture batch and candidate state transitions"
+        "Capture mutation statements accepted inside caller-owned transactions; transaction outcome is reported by the enclosing API or worker metric"
     );
     metrics::describe_counter!(
         crate::capture::CAPTURE_API_OPERATIONS_TOTAL,

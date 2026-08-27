@@ -1,0 +1,155 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        with candidate as (\n            select id\n              from capture_batches\n             where tenant_id = $1 and source_kind = 'session'\n               and state = 'running' and attempts >= $2\n               and lease_expires_at <= statement_timestamp()\n             order by created_at, id\n             for update skip locked\n             limit 1\n        )\n        update capture_batches batch\n           set state = 'failed', lease_owner = null, lease_expires_at = null,\n               error_code = 'lease_expired', completed_at = now(), updated_at = now()\n          from candidate\n         where batch.tenant_id = $1 and batch.id = candidate.id\n        returning batch.id, batch.tenant_id, batch.source_kind, batch.session_id,\n                  batch.import_job_id, batch.scope_id, batch.workspace_id,\n                  batch.project_id, batch.principal_id,\n                  batch.configuration_version_id, batch.configuration_hash,\n                  batch.input_hash, batch.event_count, batch.state,\n                  batch.extractor_method, batch.model_version, batch.attempts,\n                  batch.candidate_count, batch.error_code, batch.created_at,\n                  batch.started_at, batch.completed_at, batch.updated_at\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "tenant_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "source_kind",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "session_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "import_job_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "scope_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 6,
+        "name": "workspace_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 7,
+        "name": "project_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 8,
+        "name": "principal_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "configuration_version_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 10,
+        "name": "configuration_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "input_hash",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 12,
+        "name": "event_count",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 13,
+        "name": "state",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 14,
+        "name": "extractor_method",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 15,
+        "name": "model_version",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 16,
+        "name": "attempts",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 17,
+        "name": "candidate_count",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 18,
+        "name": "error_code",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 19,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 20,
+        "name": "started_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 21,
+        "name": "completed_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 22,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Int4"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      true,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      true,
+      false,
+      true,
+      true,
+      false
+    ]
+  },
+  "hash": "fd6abff9e8a17f6c327c20e730f2af54aa74811dde9d3aecee0a36f69311ae18"
+}

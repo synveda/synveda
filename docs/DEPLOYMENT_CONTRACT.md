@@ -107,6 +107,16 @@ the selected binary; it does not interpret deployment type or print secrets.
 health is not hard-coded to the gateway: Compose and later Kubernetes attach a
 role-specific probe to each service.
 
+Capture remains its existing durable aggregate rather than becoming an Apalis
+task. Its current claim is fenced by tenant, batch, process-unique owner and
+attempt number. The core worker renews the lease independently during provider
+calls, re-proves it after preflight before the first provider disclosure,
+abandons results after renewal loss, bounds renewal shutdown, makes the guarded
+terminal transition before candidate writes, and audits an expired exhausted
+attempt. This row-level safety does not by itself prove process drain or
+multi-worker availability; those claims require the worker lifecycle
+acceptance below.
+
 Stateless images run with the validated numeric
 `SYNVEDA_RUNTIME_UID:SYNVEDA_RUNTIME_GID` recorded in the environment manifest;
 the generator defaults to the non-root operator's current ids and refuses

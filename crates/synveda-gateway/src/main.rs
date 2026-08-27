@@ -562,6 +562,18 @@ fn extractor_from_env() -> Result<synveda_ingest::extraction::AnyExtractor, Stri
 /// fails closed because a malformed provider choice would change behaviour.
 fn capture_config_from_env() -> synveda_ingest::capture_worker::Config {
     let defaults = synveda_ingest::capture_worker::Config::default();
+    let lease_owner = std::env::var("SYNVEDA_CAPTURE_LEASE_OWNER")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .map(|prefix| {
+            let suffix = synveda_types::CaptureBatchId::new();
+            // The store caps owners at 255 characters. Reserve the separator
+            // and UUID so an operator label can never make startup claims
+            // invalid or erase the process-unique fencing identity.
+            let prefix = prefix.trim().chars().take(218).collect::<String>();
+            format!("{prefix}-{suffix}")
+        })
+        .unwrap_or_else(|| defaults.lease_owner.clone());
     synveda_ingest::capture_worker::Config {
         poll_interval: std::env::var("SYNVEDA_CAPTURE_POLL_MS")
             .ok()
@@ -580,10 +592,7 @@ fn capture_config_from_env() -> synveda_ingest::capture_worker::Config {
             .and_then(|value| value.parse::<usize>().ok())
             .filter(|value| *value > 0)
             .unwrap_or(defaults.batches_per_tenant),
-        lease_owner: std::env::var("SYNVEDA_CAPTURE_LEASE_OWNER")
-            .ok()
-            .filter(|value| !value.trim().is_empty())
-            .unwrap_or(defaults.lease_owner),
+        lease_owner,
     }
 }
 
@@ -906,5 +915,19 @@ mod tests {
         let refused = directory_sync_config_from_env();
         unsafe { std::env::remove_var("SYNVEDA_DIRECTORY_ABSENCE_PASSES") };
         assert!(refused.is_err(), "a threshold of zero is refused at boot");
+    }
+
+    #[test]
+    fn configured_capture_owner_is_a_bounded_prefix_not_an_instance_id() {
+        unsafe { std::env::set_var("SYNVEDA_CAPTURE_LEASE_OWNER", "x".repeat(400)) };
+        let first = capture_config_from_env().lease_owner;
+        let second = capture_config_from_env().lease_owner;
+        unsafe { std::env::remove_var("SYNVEDA_CAPTURE_LEASE_OWNER") };
+
+        assert_ne!(first, second, "each runtime gets its own claim identity");
+        assert_eq!(first.chars().count(), 255);
+        assert_eq!(second.chars().count(), 255);
+        assert!(first.starts_with(&"x".repeat(218)));
+        assert!(second.starts_with(&"x".repeat(218)));
     }
 }

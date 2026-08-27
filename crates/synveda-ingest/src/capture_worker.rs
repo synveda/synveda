@@ -7,6 +7,7 @@
 //! persisting a match. Its only domain output is reviewable candidates.
 
 use std::collections::BTreeSet;
+use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -31,8 +32,10 @@ use synveda_types::knowledge::{
     classify_knowledge_match, normalise_knowledge_tags, validate_knowledge_revision_content,
 };
 use synveda_types::{
-    Error, IdentityKind, IdentityStatus, Result, ScopeId, Sensitivity, SessionId, TenantId,
+    CaptureBatchId, Error, IdentityKind, IdentityStatus, Result, ScopeId, Sensitivity, SessionId,
+    TenantId,
 };
+use tokio::sync::{oneshot, watch};
 
 use crate::chain::scope_chain;
 use crate::extraction::{AnyExtractor, ExtractionInput, Extractor};
@@ -47,7 +50,10 @@ pub const CAPTURE_BATCHES_TOTAL: &str = "synveda_capture_batches_total";
 pub const CAPTURE_CANDIDATES_TOTAL: &str = "synveda_capture_candidates_total";
 
 const ACTOR_COMPONENT: &str = "capture-extraction";
-const DEFAULT_LEASE_OWNER: &str = "capture-worker";
+const DEFAULT_LEASE_OWNER_PREFIX: &str = "capture-worker";
+const MIN_RENEWAL_INTERVAL: Duration = Duration::from_millis(250);
+const MAX_RENEWAL_INTERVAL: Duration = Duration::from_secs(30);
+const RENEWAL_STOP_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// Background pacing and lease bound.
 #[derive(Debug, Clone)]
@@ -58,7 +64,7 @@ pub struct Config {
     pub lease_duration: Duration,
     /// Claimed batches per tenant per sweep.
     pub batches_per_tenant: usize,
-    /// Stable worker identity recorded on the lease.
+    /// Process-unique worker identity recorded on the lease.
     pub lease_owner: String,
 }
 
@@ -68,7 +74,7 @@ impl Default for Config {
             poll_interval: Duration::from_secs(1),
             lease_duration: Duration::from_secs(60),
             batches_per_tenant: 8,
-            lease_owner: DEFAULT_LEASE_OWNER.to_owned(),
+            lease_owner: format!("{DEFAULT_LEASE_OWNER_PREFIX}-{}", CaptureBatchId::new()),
         }
     }
 }
@@ -93,6 +99,148 @@ pub struct SweepSummary {
     pub completed: usize,
     /// Attempts released for retry or terminally failed.
     pub failed_attempts: usize,
+    /// Attempts abandoned because their lease could no longer be proved.
+    pub abandoned_attempts: usize,
+}
+
+struct LeaseGuard {
+    stop: Option<oneshot::Sender<()>>,
+    lost: watch::Receiver<bool>,
+    task: Option<tokio::task::JoinHandle<()>>,
+}
+
+impl LeaseGuard {
+    async fn start(deps: &Deps, config: &Config, batch: &CaptureBatch) -> Result<Self> {
+        let pool = deps.pool.clone();
+        let batch = batch.clone();
+        let lease_owner = config.lease_owner.clone();
+        let lease_seconds = lease_seconds(config.lease_duration);
+        let renewal_interval = renewal_interval(config.lease_duration);
+        // The claim's clock starts inside the preflight transaction. Prove it
+        // is still live after that transaction commits and before disclosing
+        // any frozen event to an external extractor.
+        renew_claim(&pool, &batch, &lease_owner, lease_seconds).await?;
+        Ok(Self::spawn_with_renewal(
+            renewal_interval,
+            renewal_interval,
+            move || {
+                let pool = pool.clone();
+                let batch = batch.clone();
+                let lease_owner = lease_owner.clone();
+                async move { renew_claim(&pool, &batch, &lease_owner, lease_seconds).await }
+            },
+        ))
+    }
+
+    fn spawn_with_renewal<F, Fut>(
+        renewal_interval: Duration,
+        renewal_timeout: Duration,
+        mut renew: F,
+    ) -> Self
+    where
+        F: FnMut() -> Fut + Send + 'static,
+        Fut: Future<Output = Result<()>> + Send,
+    {
+        let (stop_tx, mut stop_rx) = oneshot::channel();
+        let (lost_tx, lost_rx) = watch::channel(false);
+        let task = tokio::spawn(async move {
+            let first_renewal = tokio::time::Instant::now() + renewal_interval;
+            let mut ticker = tokio::time::interval_at(first_renewal, renewal_interval);
+            ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            loop {
+                tokio::select! {
+                    _ = &mut stop_rx => return,
+                    _ = ticker.tick() => {}
+                }
+                // Dropping a SQLx future cancels the in-flight acquisition or
+                // query and drops its transaction. Stop therefore remains
+                // effective even when PostgreSQL or the pool is stalled.
+                let renewal = tokio::select! {
+                    _ = &mut stop_rx => return,
+                    renewal = tokio::time::timeout(renewal_timeout, renew()) => renewal,
+                };
+                if !matches!(renewal, Ok(Ok(()))) {
+                    let _ = lost_tx.send(true);
+                    return;
+                }
+            }
+        });
+        Self {
+            stop: Some(stop_tx),
+            lost: lost_rx,
+            task: Some(task),
+        }
+    }
+
+    fn is_lost(&self) -> bool {
+        *self.lost.borrow() || self.lost.has_changed().is_err()
+    }
+
+    async fn wait_for_loss(&mut self) {
+        if self.is_lost() {
+            return;
+        }
+        let _ = self.lost.changed().await;
+    }
+
+    async fn stop(mut self) {
+        self.request_stop();
+        let Some(task) = self.task.as_mut() else {
+            return;
+        };
+        match tokio::time::timeout(RENEWAL_STOP_TIMEOUT, task).await {
+            Ok(Ok(())) => {}
+            Ok(Err(error)) => {
+                tracing::warn!(%error, "capture lease renewal task did not stop cleanly");
+            }
+            Err(_) => {
+                tracing::warn!(
+                    timeout_ms = RENEWAL_STOP_TIMEOUT.as_millis() as u64,
+                    "capture lease renewal task exceeded its stop bound; aborting"
+                );
+                let task = self.task.as_mut().expect("renewal task remains owned");
+                task.abort();
+                let _ = tokio::time::timeout(RENEWAL_STOP_TIMEOUT, task).await;
+            }
+        }
+        self.task.take();
+    }
+
+    fn request_stop(&mut self) {
+        if let Some(stop) = self.stop.take() {
+            let _ = stop.send(());
+        }
+    }
+}
+
+async fn renew_claim(
+    pool: &PgPool,
+    batch: &CaptureBatch,
+    lease_owner: &str,
+    lease_seconds: i64,
+) -> Result<()> {
+    let mut tx = rls::begin_tenant_tx(pool, batch.tenant_id).await?;
+    capture::renew_batch(&mut tx, batch, lease_owner, lease_seconds).await?;
+    tx.commit().await.map_err(commit_error)
+}
+
+impl Drop for LeaseGuard {
+    fn drop(&mut self) {
+        self.request_stop();
+        if let Some(task) = self.task.take() {
+            task.abort();
+        }
+    }
+}
+
+fn lease_seconds(duration: Duration) -> i64 {
+    i64::try_from(duration.as_secs())
+        .unwrap_or(i64::MAX)
+        .clamp(1, 3_600)
+}
+
+fn renewal_interval(duration: Duration) -> Duration {
+    (duration / 3).clamp(MIN_RENEWAL_INTERVAL, MAX_RENEWAL_INTERVAL)
 }
 
 /// Starts one immediate pass and then one per configured interval.
@@ -122,6 +270,10 @@ pub async fn sweep_once(deps: &Deps, config: &Config) -> Result<SweepSummary> {
                 Ok(ProcessOutcome::Empty) => break,
                 Ok(ProcessOutcome::Completed) => summary.completed += 1,
                 Ok(ProcessOutcome::FailedAttempt) => summary.failed_attempts += 1,
+                Ok(ProcessOutcome::Abandoned) => {
+                    summary.abandoned_attempts += 1;
+                    break;
+                }
                 Err(error) => {
                     summary.failed_attempts += 1;
                     tracing::warn!(tenant.id = %tenant.id, %error, "capture tenant pass failed");
@@ -138,16 +290,21 @@ enum ProcessOutcome {
     Empty,
     Completed,
     FailedAttempt,
+    Abandoned,
 }
 
 /// Processes at most one batch for a tenant. Public behavior is exposed by
 /// [`sweep_once`]; keeping this function private prevents callers from
 /// inventing a second claim discipline.
 async fn process_one(deps: &Deps, config: &Config, tenant_id: TenantId) -> Result<ProcessOutcome> {
-    let lease_seconds = i64::try_from(config.lease_duration.as_secs())
-        .unwrap_or(i64::MAX)
-        .clamp(1, 3_600);
+    let lease_seconds = lease_seconds(config.lease_duration);
     let mut claim_tx = rls::begin_tenant_tx(&deps.pool, tenant_id).await?;
+    if let Some(expired) = capture::fail_expired_exhausted_batch(&mut claim_tx, tenant_id).await? {
+        append_system_failure(&mut claim_tx, &expired, "lease_expired").await?;
+        claim_tx.commit().await.map_err(commit_error)?;
+        metrics::counter!(CAPTURE_BATCHES_TOTAL, "outcome" => "lease_expired").increment(1);
+        return Ok(ProcessOutcome::FailedAttempt);
+    }
     let Some(batch) =
         capture::claim_batch(&mut claim_tx, tenant_id, &config.lease_owner, lease_seconds).await?
     else {
@@ -226,6 +383,11 @@ async fn process_one(deps: &Deps, config: &Config, tenant_id: TenantId) -> Resul
         return Ok(ProcessOutcome::FailedAttempt);
     }
     claim_tx.commit().await.map_err(commit_error)?;
+    let mut lease = match LeaseGuard::start(deps, config, &batch).await {
+        Ok(lease) => lease,
+        Err(Error::Conflict { .. }) => return Ok(record_abandoned_attempt(&batch)),
+        Err(error) => return Err(error),
+    };
 
     let mut proposed = Vec::new();
     let mut method = deps.extractor.method().to_owned();
@@ -243,9 +405,16 @@ async fn process_one(deps: &Deps, config: &Config, tenant_id: TenantId) -> Resul
             redactions: event.redactions.clone(),
         };
         let started = std::time::Instant::now();
-        let outcome = deps.extractor.extract(&input).await;
+        let outcome = tokio::select! {
+            biased;
+            _ = lease.wait_for_loss() => None,
+            outcome = deps.extractor.extract(&input) => Some(outcome),
+        };
         metrics::histogram!(CAPTURE_EXTRACTOR_SECONDS, "method" => method.clone())
             .record(started.elapsed().as_secs_f64());
+        let Some(outcome) = outcome else {
+            return abandon_attempt(lease, &batch).await;
+        };
         let outcome = match outcome {
             Ok(outcome) => {
                 metrics::counter!(
@@ -263,13 +432,21 @@ async fn process_one(deps: &Deps, config: &Config, tenant_id: TenantId) -> Resul
                     "outcome" => "error"
                 )
                 .increment(1);
-                return fail_attempt(deps, config, &batch, "extractor_failed", error).await;
+                return fail_attempt_with_lease(
+                    deps,
+                    config,
+                    &batch,
+                    "extractor_failed",
+                    error,
+                    lease,
+                )
+                .await;
             }
         };
         method = outcome.method.clone();
         model_versions.insert(outcome.model_version.clone());
         if outcome.candidates.len() > synveda_types::capture::MAX_CANDIDATES_PER_EVENT {
-            return fail_attempt(
+            return fail_attempt_with_lease(
                 deps,
                 config,
                 &batch,
@@ -277,6 +454,7 @@ async fn process_one(deps: &Deps, config: &Config, tenant_id: TenantId) -> Resul
                 Error::Invalid {
                     message: "extractor returned too many candidates".to_owned(),
                 },
+                lease,
             )
             .await;
         }
@@ -290,7 +468,7 @@ async fn process_one(deps: &Deps, config: &Config, tenant_id: TenantId) -> Resul
             let ordinal = match i32::try_from(proposed.len() + 1) {
                 Ok(ordinal) => ordinal,
                 Err(_) => {
-                    return fail_attempt(
+                    return fail_attempt_with_lease(
                         deps,
                         config,
                         &batch,
@@ -298,6 +476,7 @@ async fn process_one(deps: &Deps, config: &Config, tenant_id: TenantId) -> Resul
                         Error::Internal {
                             message: "capture candidate ordinal overflow".to_owned(),
                         },
+                        lease,
                     )
                     .await;
                 }
@@ -312,7 +491,15 @@ async fn process_one(deps: &Deps, config: &Config, tenant_id: TenantId) -> Resul
             ) {
                 Ok(prepared) => prepared,
                 Err(error) => {
-                    return fail_attempt(deps, config, &batch, "candidate_invalid", error).await;
+                    return fail_attempt_with_lease(
+                        deps,
+                        config,
+                        &batch,
+                        "candidate_invalid",
+                        error,
+                        lease,
+                    )
+                    .await;
                 }
             };
             if prepared.content.confidence_permille
@@ -339,6 +526,10 @@ async fn process_one(deps: &Deps, config: &Config, tenant_id: TenantId) -> Resul
         );
         format!("mixed:{}", digest.to_hex())
     };
+
+    if lease.is_lost() {
+        return abandon_attempt(lease, &batch).await;
+    }
 
     let mut write = rls::begin_tenant_tx(&deps.pool, tenant_id).await?;
     let fresh_session_decision = decide_exact(
@@ -367,6 +558,7 @@ async fn process_one(deps: &Deps, config: &Config, tenant_id: TenantId) -> Resul
         .await?;
         append_batch_event(&mut write, &failed, &fresh_session_decision, "failed", 0, 0).await?;
         write.commit().await.map_err(commit_error)?;
+        lease.stop().await;
         return Ok(ProcessOutcome::FailedAttempt);
     }
     // Preferences are personal by default. Their evidence remains governed by
@@ -463,6 +655,7 @@ async fn process_one(deps: &Deps, config: &Config, tenant_id: TenantId) -> Resul
         .await?;
     }
     write.commit().await.map_err(commit_error)?;
+    lease.stop().await;
     for candidate in &proposed {
         metrics::counter!(
             CAPTURE_CANDIDATES_TOTAL,
@@ -472,6 +665,21 @@ async fn process_one(deps: &Deps, config: &Config, tenant_id: TenantId) -> Resul
     }
     metrics::counter!(CAPTURE_BATCHES_TOTAL, "outcome" => "completed").increment(1);
     Ok(ProcessOutcome::Completed)
+}
+
+async fn abandon_attempt(lease: LeaseGuard, batch: &CaptureBatch) -> Result<ProcessOutcome> {
+    lease.stop().await;
+    Ok(record_abandoned_attempt(batch))
+}
+
+fn record_abandoned_attempt(batch: &CaptureBatch) -> ProcessOutcome {
+    tracing::warn!(
+        batch.id = %batch.id,
+        batch.attempt = batch.attempts,
+        "capture attempt abandoned after lease ownership was lost"
+    );
+    metrics::counter!(CAPTURE_BATCHES_TOTAL, "outcome" => "lease_lost").increment(1);
+    ProcessOutcome::Abandoned
 }
 
 async fn exact_configuration(
@@ -802,6 +1010,19 @@ async fn fail_attempt(
     Ok(ProcessOutcome::FailedAttempt)
 }
 
+async fn fail_attempt_with_lease(
+    deps: &Deps,
+    config: &Config,
+    batch: &CaptureBatch,
+    code: &'static str,
+    error: Error,
+    lease: LeaseGuard,
+) -> Result<ProcessOutcome> {
+    let result = fail_attempt(deps, config, batch, code, error).await;
+    lease.stop().await;
+    result
+}
+
 fn capture_session_id(batch: &CaptureBatch) -> Result<SessionId> {
     if batch.source_kind != CaptureSourceKind::Session || batch.import_job_id.is_some() {
         return Err(Error::Internal {
@@ -913,6 +1134,17 @@ mod tests {
     use super::*;
     use synveda_types::knowledge::{KnowledgeOrigin, KnowledgeType};
     use synveda_types::{KnowledgeItemId, KnowledgeRevisionId};
+    use tokio::sync::Notify;
+
+    struct PendingRenewalDrop(Option<oneshot::Sender<()>>);
+
+    impl Drop for PendingRenewalDrop {
+        fn drop(&mut self) {
+            if let Some(dropped) = self.0.take() {
+                let _ = dropped.send(());
+            }
+        }
+    }
 
     fn candidate(body: &str) -> NewCaptureCandidate {
         let content = KnowledgeRevisionContent {
@@ -996,5 +1228,69 @@ mod tests {
         let config = Config::default();
         assert!(config.batches_per_tenant > 0);
         assert!(config.lease_duration <= Duration::from_secs(3_600));
+    }
+
+    #[tokio::test]
+    async fn stopping_a_guard_cancels_a_blocked_renewal() {
+        let entered = Arc::new(Notify::new());
+        let (dropped_tx, dropped_rx) = oneshot::channel();
+        let mut dropped_tx = Some(dropped_tx);
+        let guard =
+            LeaseGuard::spawn_with_renewal(Duration::from_millis(1), Duration::from_secs(60), {
+                let entered = Arc::clone(&entered);
+                move || {
+                    let entered = Arc::clone(&entered);
+                    let dropped = PendingRenewalDrop(dropped_tx.take());
+                    async move {
+                        entered.notify_one();
+                        let _dropped = dropped;
+                        std::future::pending::<Result<()>>().await
+                    }
+                }
+            });
+
+        tokio::time::timeout(Duration::from_secs(1), entered.notified())
+            .await
+            .expect("renewal entered its blocked future");
+        tokio::time::timeout(Duration::from_secs(1), guard.stop())
+            .await
+            .expect("guard stop remains bounded");
+        tokio::time::timeout(Duration::from_secs(1), dropped_rx)
+            .await
+            .expect("blocked renewal future is cancelled")
+            .expect("drop signal is delivered");
+    }
+
+    #[tokio::test]
+    async fn a_stalled_renewal_marks_the_claim_lost_within_its_bound() {
+        let entered = Arc::new(Notify::new());
+        let (dropped_tx, dropped_rx) = oneshot::channel();
+        let mut dropped_tx = Some(dropped_tx);
+        let mut guard =
+            LeaseGuard::spawn_with_renewal(Duration::from_millis(1), Duration::from_millis(25), {
+                let entered = Arc::clone(&entered);
+                move || {
+                    let entered = Arc::clone(&entered);
+                    let dropped = PendingRenewalDrop(dropped_tx.take());
+                    async move {
+                        entered.notify_one();
+                        let _dropped = dropped;
+                        std::future::pending::<Result<()>>().await
+                    }
+                }
+            });
+
+        tokio::time::timeout(Duration::from_secs(1), entered.notified())
+            .await
+            .expect("renewal entered its stalled future");
+        tokio::time::timeout(Duration::from_secs(1), guard.wait_for_loss())
+            .await
+            .expect("stalled renewal marks the lease lost");
+        assert!(guard.is_lost());
+        tokio::time::timeout(Duration::from_secs(1), dropped_rx)
+            .await
+            .expect("timed-out renewal future is cancelled")
+            .expect("drop signal is delivered");
+        guard.stop().await;
     }
 }

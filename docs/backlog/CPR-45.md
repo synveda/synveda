@@ -100,6 +100,16 @@ database on one PostgreSQL server, but each has its own database, role and
 migration owner. Physical backup therefore restores the server as one recovery
 unit; logical authority and application access remain isolated.
 
+Before process extraction, Capture's existing durable job is made safe for a
+restartable worker. Its incremented attempt is the fence; renewal, completion
+and failure require the exact tenant/batch/owner/attempt tuple and a lease that
+is live at statement time. Stale completion checks precede candidate writes,
+the lease is re-proved after preflight and before provider disclosure, lost
+renewal abandons dependency output, renewal shutdown is bounded, and an
+expired final attempt becomes an audited terminal failure. This is a
+prerequisite for, not evidence of, the later worker SIGTERM/drain and
+multi-process acceptance.
+
 ## Acceptance criteria
 
 - From a clean checkout and empty named volumes, secret generation, image
@@ -113,6 +123,12 @@ unit; logical authority and application access remain isolated.
 - Gateway and worker have separate processes, health/readiness, bounded work
   and graceful shutdown; gateway contains no newly introduced maintenance
   loops.
+- Capture renewal runs during blocking extractor calls; wrong-owner,
+  wrong-attempt, expired and same-owner-reclaimed executors cannot renew,
+  fail or retain candidates, including when a caught conflict is deliberately
+  committed. Expiry during preflight causes zero provider calls, blocked
+  renewal is cancellable, and an expired final attempt becomes an inspectable
+  audited failure.
 - Synveda and Keycloak cross-database connections fail. Synveda gateway/worker
   roles are non-owner, non-superuser and non-`BYPASSRLS`; Keycloak owns only
   its own database/schema and has no Synveda access. The complete forced-RLS
@@ -167,6 +183,10 @@ unit; logical authority and application access remain isolated.
 - Add container inspection tests for user, capabilities, read-only roots,
   ports, networks, secrets, forwarded headers and private management paths.
 - Add operation/outbox/attempt forced-RLS and failure-matrix tests.
+- Keep deterministic Capture lease tests for statement-time expiry, renewal,
+  same-owner reclaim, stale-result containment, one winning completion and
+  final-attempt terminalisation; do not infer exactly-once provider calls,
+  graceful process drain or HA from row fencing alone.
 - Distinguish operation/outbox commit then dispatcher crash, submit then
   acknowledgement-write failure, duplicate dispatch, two dispatchers, two
   workers and worker SIGTERM; none may create a duplicate governed effect.
