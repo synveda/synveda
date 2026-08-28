@@ -3797,6 +3797,8 @@ dependencies = [
  "synveda-types",
  "tokio",
  "tracing",
+ "tracing-subscriber",
+ "url",
  "uuid",
 ]
 

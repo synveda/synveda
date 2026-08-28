@@ -13,14 +13,15 @@ size: XL
 ## Problem and evidence
 
 Synveda has one application runtime and strong request/data trust boundaries,
-but its single-host packaging is not yet an executable product reference. The
-current Compose files expose infrastructure directly, bundle Rauthy, retain an
-unused Temporal development service, run the default gateway on the host to
-work around a loopback issuer, and keep background work inside the gateway.
-There is no joint database/key restore, release-image parity, private Collector
-topology or clean-volume platform acceptance. Static deployment convergence is
-valuable but does not prove that a user can install, sign in, use, back up,
-restore or upgrade the product.
+but its single-host packaging is not yet an executable product reference. At
+programme start the Compose files exposed infrastructure directly, bundled
+Rauthy, retained an unused Temporal development service, ran the default
+gateway on the host to work around a loopback issuer, and kept background work
+inside the gateway. The core worker is now a separate process, but the other
+packaging gaps remain: there is no joint database/key restore, release-image
+parity, private Collector topology or clean-volume platform acceptance. Static
+deployment convergence is valuable but does not prove that a user can install,
+sign in, use, back up, restore or upgrade the product.
 
 [ADR-0102](../adr/adr-0102-portable-reference-deployment.md) fixes the target
 architecture. [The deployment contract](../DEPLOYMENT_CONTRACT.md) fixes its
@@ -100,15 +101,72 @@ database on one PostgreSQL server, but each has its own database, role and
 migration owner. Physical backup therefore restores the server as one recovery
 unit; logical authority and application access remain isolated.
 
-Before process extraction, Capture's existing durable job is made safe for a
-restartable worker. Its incremented attempt is the fence; renewal, completion
+Capture's existing durable job is safe for a restartable worker. Its
+incremented attempt is the fence; renewal, completion
 and failure require the exact tenant/batch/owner/attempt tuple and a lease that
 is live at statement time. Stale completion checks precede candidate writes,
 the lease is re-proved after preflight and before provider disclosure, lost
 renewal abandons dependency output, renewal shutdown is bounded, and an
-expired final attempt becomes an audited terminal failure. This is a
-prerequisite for, not evidence of, the later worker SIGTERM/drain and
-multi-process acceptance.
+expired final attempt becomes an audited terminal failure. The core worker now
+runs that loop separately from the gateway and has strict boot, private
+readiness, readiness withdrawal and bounded cancellation/join. Real SIGTERM
+during claimed Capture work and two-worker execution remain required; idle
+process shutdown plus row fencing do not imply those results.
+
+### Current implementation evidence
+
+The product image contains separate `synveda-gateway` and `synveda-worker`
+binaries behind one closed role entrypoint; release archives also carry both
+direct binaries. The gateway has no
+domain maintenance loops: Capture, Knowledge indexing, relaxation expiry and
+optional directory pull are supervised by the worker. It still owns request
+state, policy refresh, pool monitoring and startup KMS provisioning. The worker
+refuses work until schema epoch, exact non-elevated runtime role that owns no
+database and no schema/relation/routine in the selected Synveda database,
+writable-primary state and initial
+policy convergence pass, binds health/readiness/metrics to loopback, and treats an
+unexpected critical task exit as fatal. A supervised authority sentinel
+continues to re-prove epoch and runtime role; a conclusive refusal faults the
+process, cancels every loop and exits non-zero rather than merely changing
+readiness.
+
+For the implicit bundled default, init verifies derived host-side `localhost`
+URLs while Compose supplies the `postgres` alias to the containers. Any
+explicit `DATABASE_URL`, including a loopback one, requires an explicit
+runtime-URL pair; init verifies those exact host-side URLs against the bootstrap
+cluster identity, database OID, live postmaster generation and writable-primary
+state. The generation marker is compared only during bootstrap and is not
+persisted across a database restart. The transitional raw
+`.env`/Compose handoff has no accepted byte-for-byte evidence for arbitrary URL
+characters. The worker therefore independently proves the resolved container
+session's exact role/epoch/writable-primary state at boot and while running;
+init's host-side check alone is not container-resolution evidence. The gateway
+has no equivalent boot-time role sentinel yet. Helm
+renders a private worker Deployment from the
+same image and a separately owned Secret, and its install job refuses a mounted
+worker URL targeting a different live primary instance/database. Helm's gateway still uses
+the CloudNativePG application-owner Secret, and the transitional Compose
+manifests still use a monolithic rendered environment file (the other runtime
+DSN is explicitly masked in each service); both are explicit gaps before the
+locked secret/role-isolation contract is satisfied.
+
+The shared product database-URL boundary accepts only `postgres`/`postgresql`,
+requires an explicit database path or effective `dbname`, and rejects fragments
+or query keys not consumed by pinned SQLx before SQLx can log an ignored value.
+Content-free unit, reset and real gateway/worker process sentinels prove wrong
+schemes, ambient database fallback and unknown query secrets are refused
+without disclosure.
+
+Deterministic evidence covers worker boot outage, live/not-ready semantics,
+exact role, any-schema ownership, elevation, unexpected membership and
+membership-administration refusal, live `BYPASSRLS` drift causing non-zero
+exit, bounded idle SIGTERM, configuration bounds and private Helm probes.
+Compose leaves an 85-second outer stop window around the worker's 75-second
+default join. Model-provider clients used by Capture and embedding validate
+absolute credential-free HTTP(S) base URLs, refuse redirects, redact credential
+debug output and expose only closed transport/status/parse errors. This evidence
+does not yet cover clean canonical Compose, Keycloak, claimed-work process
+interruption, multi-worker operation, backup/restore or upgrade.
 
 ## Acceptance criteria
 
@@ -130,7 +188,8 @@ multi-process acceptance.
   renewal is cancellable, and an expired final attempt becomes an inspectable
   audited failure.
 - Synveda and Keycloak cross-database connections fail. Synveda gateway/worker
-  roles are non-owner, non-superuser and non-`BYPASSRLS`; Keycloak owns only
+  roles own no database, schema, relation or routine and are non-superuser and
+  non-`BYPASSRLS`; Keycloak owns only
   its own database/schema and has no Synveda access. The complete forced-RLS
   inventory passes.
 - Direct/file secret ambiguity is refused; rendered configuration, logs,

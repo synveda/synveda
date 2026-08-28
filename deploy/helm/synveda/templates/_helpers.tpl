@@ -64,6 +64,7 @@ cannot drift apart.
 */}}
 {{- define "synveda.dbName" -}}synveda{{- end -}}
 {{- define "synveda.appRole" -}}synveda_gateway{{- end -}}
+{{- define "synveda.workerRole" -}}synveda_worker{{- end -}}
 
 {{/*
 The admin identity, for the install job and nothing else. Assembled from
@@ -98,10 +99,13 @@ silent if the chart rendered it anyway.
 */}}
 {{- define "synveda.validate" -}}
 
-{{- /* Decision 4. A second replica breaks login and serves stale scope
-       chains, and both look like something else. OPS-7 lifts this. */ -}}
+{{- /* Decision 4. Pending login handoff and authority-mutation visibility do
+       not have accepted multi-replica evidence. OPS-7 lifts this. */ -}}
 {{- if or (hasKey .Values.gateway "replicas") (hasKey .Values.gateway "replicaCount") (hasKey .Values "replicaCount") -}}
-{{- fail "gateway replicas are not configurable in this chart (ADR-0062 decision 4).\n  Two things in the gateway are process-local and fail silently with more than one replica:\n    - pending logins and CLI handoff codes live in memory (LoginFlow), so an\n      /auth/callback that lands on another pod is a 401 for a login the IdP completed;\n    - policy/scope caches are invalidated in-process, so a scope move handled by one\n      replica can leave another replica deciding against stale ancestry.\n  OPS-7 is the feature that fixes both. Remove the key." -}}
+{{- fail "gateway replicas are not configurable in this chart (ADR-0062 decision 4).\n  Two things in the gateway lack accepted multi-replica evidence:\n    - pending logins and CLI handoff codes live in memory (LoginFlow), so an\n      /auth/callback that lands on another pod is a 401 for a login the IdP completed;\n    - cross-process policy/entity convergence has no accepted mutation-visibility\n      bound, so a second replica is not yet supported.\n  OPS-7 is the feature that fixes both. Remove the key." -}}
+{{- end -}}
+{{- if or (hasKey .Values.worker "replicas") (hasKey .Values.worker "replicaCount") -}}
+{{- fail "worker replicas are not configurable in this chart (CPR-45, ADR-0102).\n  Capture is fenced, but every core maintenance loop has not yet passed concurrent-worker acceptance. Remove the key." -}}
 {{- end -}}
 
 {{- /* Decision 6. Origin and redirect URI are both derived from this. */ -}}
@@ -142,6 +146,22 @@ silent if the chart rendered it anyway.
 {{- fail "kms.keyRefSecretKey must name the Secret key containing the stable KMS key reference" -}}
 {{- end -}}
 
+{{- /* The worker login is a fixed, non-owner runtime principal. Its Secret
+       remains operator-owned because Helm must not generate a rotating
+       password or render a database credential. */ -}}
+{{- if not .Values.worker.databaseExistingSecret -}}
+{{- fail "worker.databaseExistingSecret is required: name an operator-owned Secret holding DATABASE_URL and password for the fixed synveda_worker login.\n  The install job creates/converges that non-owner login; the worker mounts only the DSN file." -}}
+{{- end -}}
+{{- if not .Values.worker.databaseUrlSecretKey -}}
+{{- fail "worker.databaseUrlSecretKey must name the Secret key containing the worker PostgreSQL URL" -}}
+{{- end -}}
+{{- if not .Values.worker.databasePasswordSecretKey -}}
+{{- fail "worker.databasePasswordSecretKey must name the Secret key containing the worker login password" -}}
+{{- end -}}
+{{- if eq .Values.worker.databaseExistingSecret (include "synveda.appSecret" .) -}}
+{{- fail "worker.databaseExistingSecret must not be the CloudNativePG app Secret: that credential owns the database and the worker refuses owner roles" -}}
+{{- end -}}
+
 {{- /* Decision 10. The embedder is a property of the corpus. */ -}}
 {{- if not .Values.embedder -}}
 {{- fail "embedder is required and has no default: `deterministic` or `tei`.\n  Knowledge embedding rows retain model and dimension; a different model converges a separately labelled sidecar rather than reinterpreting old vectors. `deterministic` is lexical-only and must not be labelled semantic." -}}
@@ -176,8 +196,18 @@ silent if the chart rendered it anyway.
 {{- end -}}
 
 {{- /* Decision 2's arithmetic, stated where somebody can act on it. */ -}}
-{{- if ge (int .Values.gateway.dbMaxConnections) (int .Values.postgres.maxConnections) -}}
-{{- fail (printf "gateway.dbMaxConnections (%d) must be below postgres.maxConnections (%d): the gateway's pool is shared by its request handlers and its background loops, and the cluster needs headroom for the operator's own connections" (int .Values.gateway.dbMaxConnections) (int .Values.postgres.maxConnections)) -}}
+{{- if or (lt (int .Values.gateway.dbMaxConnections) 1) (gt (int .Values.gateway.dbMaxConnections) 64) -}}
+{{- fail "gateway.dbMaxConnections must be between 1 and 64, matching the application startup bound" -}}
+{{- end -}}
+{{- if or (lt (int .Values.worker.dbMaxConnections) 1) (gt (int .Values.worker.dbMaxConnections) 64) -}}
+{{- fail "worker.dbMaxConnections must be between 1 and 64, matching the application startup bound" -}}
+{{- end -}}
+{{- $runtimeConnections := add (int .Values.gateway.dbMaxConnections) (int .Values.worker.dbMaxConnections) -}}
+{{- if ge $runtimeConnections (int .Values.postgres.maxConnections) -}}
+{{- fail (printf "gateway.dbMaxConnections + worker.dbMaxConnections (%d) must be below postgres.maxConnections (%d): the cluster needs headroom for migration, operator and probe connections" $runtimeConnections (int .Values.postgres.maxConnections)) -}}
+{{- end -}}
+{{- if or (lt (int .Values.worker.shutdownSeconds) 1) (gt (int .Values.worker.shutdownSeconds) 300) -}}
+{{- fail "worker.shutdownSeconds must be between 1 and 300, matching the worker's bounded cancellation/join contract" -}}
 {{- end -}}
 
 {{- /*

@@ -1,9 +1,10 @@
 apiVersion: v2
 name: synveda
 description: |
-  Synveda's context-platform runtime — the gateway, a CloudNativePG data
-  plane, and the wiring for a customer's IdP. Product profiles are governed
-  Configuration data, not chart variants. OPS-2; CPR-36, ADR-0095.
+  Synveda's context-platform runtime — separate gateway and core worker
+  processes from one image, a CloudNativePG data plane, and the wiring for a
+  customer's IdP. Product profiles are governed Configuration data, not chart
+  variants. CPR-45; ADR-0102.
 type: application
 
 # The chart's own version, and the product release it deploys. appVersion

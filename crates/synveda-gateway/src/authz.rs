@@ -661,6 +661,27 @@ pub async fn refresh_packs_once(pool: &PgPool, pdp: &Pdp) -> Result<()> {
     Ok(())
 }
 
+/// Performs the first process-local policy convergence and refuses any
+/// tenant or pack failure.
+///
+/// A periodic refresher may retain a previous in-memory compile after a bad
+/// update. A fresh worker has no last-good tenant pack, so it must not claim
+/// Capture work until every active tenant has been read and compiled once.
+pub(crate) async fn converge_packs_once(pool: &PgPool, pdp: &Pdp) -> Result<()> {
+    for tenant in tenants::active(pool).await? {
+        let outcomes = refresh_tenant(pool, pdp, tenant.id).await?;
+        if record_refresh_outcomes(&outcomes) == "error" {
+            return Err(Error::Invalid {
+                message: format!(
+                    "stored policy-pack convergence failed for tenant {}",
+                    tenant.id
+                ),
+            });
+        }
+    }
+    Ok(())
+}
+
 /// Reconciles one tenant's stored packs (see [`refresh_packs_once`]),
 /// counts each pack-level outcome (`installed`, `removed`, `unchanged`,
 /// `error`) into the reload metric, and returns the tenant's collapsed
@@ -677,7 +698,11 @@ pub async fn refresh_tenant_packs(pool: &PgPool, pdp: &Pdp, tenant_id: TenantId)
             vec!["error"]
         }
     };
-    for outcome in &outcomes {
+    record_refresh_outcomes(&outcomes)
+}
+
+fn record_refresh_outcomes(outcomes: &[&'static str]) -> &'static str {
+    for outcome in outcomes {
         metrics::counter!(POLICY_PACK_RELOADS_TOTAL, "outcome" => *outcome).increment(1);
     }
     for candidate in ["error", "installed", "removed"] {
@@ -756,4 +781,37 @@ pub fn spawn_pack_refresher(
             }
         }
     })
+}
+
+/// Runs the process-local policy-pack refresh loop until worker shutdown.
+///
+/// The worker performs one successful refresh before this loop is started,
+/// so Capture cannot decide against a fresh process that has not installed
+/// stored tenant packs yet.
+pub(crate) async fn run_pack_refresher(
+    pool: PgPool,
+    pdp: Arc<Pdp>,
+    interval: Duration,
+    mut shutdown: tokio::sync::watch::Receiver<bool>,
+) {
+    let mut ticker = tokio::time::interval(interval);
+    // The initial convergence was explicit; do not immediately duplicate it.
+    ticker.tick().await;
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    loop {
+        tokio::select! {
+            changed = shutdown.changed() => {
+                if changed.is_err() || *shutdown.borrow() {
+                    return;
+                }
+            }
+            _ = ticker.tick() => {}
+        }
+        if *shutdown.borrow() {
+            return;
+        }
+        if let Err(error) = refresh_packs_once(&pool, &pdp).await {
+            tracing::warn!(error = %error, "policy pack refresh sweep failed");
+        }
+    }
 }

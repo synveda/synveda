@@ -59,7 +59,9 @@ RUN set -eux; \
     mkdir -p crates/synveda-cli/src crates/synveda-eval/src crates/synveda-gateway/src; \
     echo 'fn main() {}' > crates/synveda-cli/src/main.rs; \
     echo 'fn main() {}' > crates/synveda-eval/src/main.rs; \
-    echo 'fn main() {}' > crates/synveda-gateway/src/main.rs
+    echo 'fn main() {}' > crates/synveda-gateway/src/main.rs; \
+    mkdir -p crates/synveda-gateway/src/bin; \
+    echo 'fn main() {}' > crates/synveda-gateway/src/bin/synveda-worker.rs
 # sqlx macros compile against the committed query cache; this image has no
 # database, exactly like CI.
 ENV SQLX_OFFLINE=true
@@ -79,33 +81,30 @@ FROM debian:bookworm-slim AS runtime
 RUN apt-get update \
  && apt-get install --no-install-recommends --yes ca-certificates curl \
  && rm -rf /var/lib/apt/lists/*
-# Two binaries and no data: the Cedar schema, the base layer and all three
+# Three binaries and no data: the Cedar schema, the base layer and all three
 # product packs are `include_str!`d into synveda-policy, so there is no
 # policy directory to ship and no way for the image's policy to differ from
 # the binary's.
 #
-# The CLI joined the image with OPS-2 (ADR-0062 amendment). In the SMB
-# single-node deployment it is on the operator's laptop and only the gateway is a
-# container, so one binary was right; in a cluster there is no laptop with
-# a route to the database, and the two things an enterprise install has to
-# run — `synveda db migrate` under an admin identity, and
-# `synveda scim token issue` to wire Entra or Okta (AUTH-4, ADR-0059) —
-# are CLI verbs. A second image for them would double the build for one
-# `cargo build -p` that shares this stage's dependency compilation anyway.
+# The one product image is the deployment contract. It contains the separate
+# gateway and core-worker commands plus the operator CLI used for migrations
+# and SCIM provisioning. Compose and Helm select a closed launcher role; they
+# do not rebuild or reinterpret the application for a deployment shape.
 COPY --from=build /src/target/release/synveda-gateway /usr/local/bin/synveda-gateway
+COPY --from=build /src/target/release/synveda-worker /usr/local/bin/synveda-worker
 COPY --from=build /src/target/release/synveda /usr/local/bin/synveda
 COPY --chmod=0755 deploy/compose/gateway/synveda-container /usr/local/bin/synveda-container
 
-# The console bundle: static files the binary serves from its own origin
-# (CNSL-1, ADR-0056 decision 1). No Node in this stage — the build stage
-# above is where it lived, and the runtime is still one process.
+# The console bundle is static data served by the gateway from its own origin
+# (CNSL-1, ADR-0056 decision 1). No Node process runs in this stage; gateway and
+# worker remain separate invocations of this same immutable image.
 COPY --from=console /src/console/dist /usr/share/synveda/console
 ENV HOME=/tmp \
     XDG_CACHE_HOME=/tmp/.cache \
     SYNVEDA_CONSOLE_DIR=/usr/share/synveda/console
 
 WORKDIR /app
-EXPOSE 8120
+EXPOSE 8120 8121
 
 # Compose supplies the operator's validated non-zero UID/GID so mode-0600
 # secret bind mounts remain readable. This default also makes an unconfigured

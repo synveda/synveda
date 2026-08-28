@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "grant synveda_app to synveda_gateway",
+  "query": "drop role synveda_cli_role_grantor",
   "describe": {
     "columns": [],
     "parameters": {
@@ -8,5 +8,5 @@
     },
     "nullable": []
   },
-  "hash": "1b39d3d238455d4d65d11b59533dfc8398d22ba0ea3df181719e94918d9ac314"
+  "hash": "ab2e98bd36c5c25c62c62da11262916dfaa90bf570d122f73e483c0d5f70edb3"
 }

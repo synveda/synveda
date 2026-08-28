@@ -28,16 +28,19 @@ pub struct VllmExtractor {
 impl VllmExtractor {
     /// Builds the extractor against an OpenAI-compatible base URL
     /// (e.g. `http://vllm.internal:8000`).
-    #[must_use]
-    pub fn new(model: String, base_url: String) -> Self {
-        Self {
-            client: reqwest::Client::builder()
-                .timeout(REQUEST_TIMEOUT)
-                .build()
-                .unwrap_or_default(),
+    pub fn new(model: String, base_url: String) -> Result<Self> {
+        let base_url = crate::provider_url::normalise(&base_url)
+            .ok_or_else(|| dependency("client_configuration_failed".to_owned()))?;
+        let client = reqwest::Client::builder()
+            .timeout(REQUEST_TIMEOUT)
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .map_err(|_| dependency("client_configuration_failed".to_owned()))?;
+        Ok(Self {
+            client,
             model,
-            base_url: base_url.trim_end_matches('/').to_owned(),
-        }
+            base_url,
+        })
     }
 }
 
@@ -82,32 +85,37 @@ impl Extractor for VllmExtractor {
             .json(&body)
             .send()
             .await
-            .map_err(|err| dependency(format!("request failed: {err}")))?;
+            .map_err(|error| dependency(transport_code(&error).to_owned()))?;
         let status = response.status();
         if !status.is_success() {
-            let detail = response.text().await.unwrap_or_default();
-            let cut = detail
-                .char_indices()
-                .nth(200)
-                .map_or(detail.len(), |(index, _)| index);
-            return Err(dependency(format!("status {status}: {}", &detail[..cut])));
+            return Err(dependency(format!("upstream_http_{}", status.as_u16())));
         }
         let completion: ChatResponse = response
             .json()
             .await
-            .map_err(|err| dependency(format!("unreadable response: {err}")))?;
+            .map_err(|_| dependency("response_invalid".to_owned()))?;
         let text = completion
             .choices
             .first()
             .and_then(|choice| choice.message.content.as_deref())
             .ok_or_else(|| dependency("empty completion".to_owned()))?;
         let value: serde_json::Value = serde_json::from_str(prompt::strip_fence(text))
-            .map_err(|err| dependency(format!("completion is not JSON: {err}")))?;
+            .map_err(|_| dependency("completion_invalid_json".to_owned()))?;
         Ok(ExtractionOutcome {
             candidates: prompt::parse_candidates(SERVICE, value, input.event_type)?,
             method: SERVICE.to_owned(),
             model_version: completion.model.unwrap_or_else(|| self.model.clone()),
         })
+    }
+}
+
+fn transport_code(error: &reqwest::Error) -> &'static str {
+    if error.is_timeout() {
+        "request_timeout"
+    } else if error.is_connect() {
+        "request_connect_failed"
+    } else {
+        "request_failed"
     }
 }
 

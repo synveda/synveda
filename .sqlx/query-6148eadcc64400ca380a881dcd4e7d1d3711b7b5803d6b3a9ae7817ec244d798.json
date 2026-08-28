@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select exists (\n             select 1\n               from pg_catalog.pg_roles as app\n              where app.rolname = 'synveda_app'\n                and not app.rolcanlogin\n                and app.rolinherit\n                and not app.rolsuper\n                and not app.rolcreatedb\n                and not app.rolcreaterole\n                and not app.rolreplication\n                and not app.rolbypassrls\n                and not exists (\n                  select 1 from pg_catalog.pg_database\n                   where datdba = app.oid\n                )\n                and not exists (\n                  select 1 from pg_catalog.pg_namespace\n                   where nspowner = app.oid\n                )\n                and not exists (\n                  select 1 from pg_catalog.pg_class\n                   where relowner = app.oid\n                  union all\n                  select 1 from pg_catalog.pg_proc\n                   where proowner = app.oid\n                )\n                and not exists (\n                  select 1 from pg_catalog.pg_auth_members\n                   where member = app.oid\n                )\n           ) as \"safe!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "safe!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "6148eadcc64400ca380a881dcd4e7d1d3711b7b5803d6b3a9ae7817ec244d798"
+}

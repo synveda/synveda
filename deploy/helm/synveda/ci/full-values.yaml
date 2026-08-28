@@ -4,6 +4,8 @@
 gateway:
   publicUrl: https://synveda.example.com
   dbMaxConnections: 40
+worker:
+  databaseExistingSecret: synveda-worker-db
 ingress:
   enabled: true
   className: nginx

@@ -1,6 +1,6 @@
 [package]
 name = "synveda-ingest"
-description = "Extraction, redaction, dedup, and summarisation (Temporal activities)"
+description = "Extraction, redaction, embeddings, and Capture worker logic"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true

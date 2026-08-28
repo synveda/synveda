@@ -37,8 +37,8 @@ automatically generated cross-tenant probe. This residual gap is described in
 
 ## Non-goals
 
-- No claim against a database superuser, compromised gateway process or host;
-  those are outside the current boundary and must remain explicit.
+- No claim against a database superuser, compromised gateway or worker process,
+  or host; those are outside the current boundary and must remain explicit.
 - No random-only fuzzer whose coverage cannot be explained or reproduced.
 - No replacement for PDP semantic tests, RLS inventory or targeted regression
   cases.

@@ -116,6 +116,9 @@ services:
       # migrations. It observes the same forced-RLS path as Helm's generated
       # application role; the database owner remains bootstrap-only.
       DATABASE_URL: ${SYNVEDA_GATEWAY_DATABASE_URL:-postgres://synveda_gateway:synveda-dev@postgres:5432/synveda}
+      # The transition still uses one env file; mask the worker credential
+      # from this request process until role-specific Compose secrets replace it.
+      SYNVEDA_WORKER_DATABASE_URL: ""
       # gRPC, not HTTP: telemetry.rs builds the exporter `.with_tonic()`.
       OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
       RUST_LOG: ${RUST_LOG:-info}
@@ -126,6 +129,34 @@ services:
       retries: 24
     ports:
       - "8120:8120"
+
+  worker:
+    # Same immutable product image, separate supervised command. Worker
+    # health is container-private and never published on the host.
+    profiles: ["deployed"]
+    image: ghcr.io/synveda/gateway:__SYNVEDA_VERSION__
+    command: ["worker"]
+    init: true
+    restart: unless-stopped
+    # Keep Docker's outer stop deadline beyond the worker's default 75-second
+    # cancellation/join bound.
+    stop_grace_period: 85s
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: ${SYNVEDA_WORKER_DATABASE_URL:-postgres://synveda_worker:synveda-dev@postgres:5432/synveda}
+      SYNVEDA_GATEWAY_DATABASE_URL: ""
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+      RUST_LOG: ${RUST_LOG:-info}
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/synveda-container", "probe", "worker", "ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 24
 volumes:
   pg-data:
   rauthy-data:

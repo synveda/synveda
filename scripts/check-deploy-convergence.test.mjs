@@ -143,6 +143,11 @@ test("the product launcher execs closed roles without deployment branching", () 
   );
   assert.ok(
     productLauncherFindings(
+      current.replace("exec /usr/local/bin/synveda-worker", "# exec /usr/local/bin/synveda-worker"),
+    ).includes("worker role does not exec the worker binary"),
+  );
+  assert.ok(
+    productLauncherFindings(
       current.replace(
         "\n    *)\n        usage",
         "\n        shell) exec /bin/sh ;;\n    *)\n        usage",
@@ -165,7 +170,7 @@ test("the product launcher rejects an unknown role without interpretation", () =
   assert.equal(result.stdout, "");
   assert.equal(
     result.stderr,
-    "usage: synveda-container {gateway|migrate|probe gateway {live|ready}}\n",
+    "usage: synveda-container {gateway|worker|migrate|probe {gateway|worker} {live|ready}}\n",
   );
 });
 
@@ -175,12 +180,14 @@ test("the product launcher dispatches every implemented role exactly", () => {
   try {
     const instrumented = readFileSync(PRODUCT_LAUNCHER, "utf8")
       .replace("exec /usr/local/bin/synveda-gateway", "exec /bin/echo gateway")
+      .replace("exec /usr/local/bin/synveda-worker", "exec /bin/echo worker")
       .replace("exec /usr/local/bin/synveda db migrate", "exec /bin/echo migrate")
       .replace("exec /usr/bin/curl \\\n", "exec /bin/echo curl \\\n");
     writeFileSync(launcher, instrumented);
 
     const cases = [
       [["gateway"], "gateway\n"],
+      [["worker"], "worker\n"],
       [["migrate"], "migrate\n"],
       [
         ["probe", "gateway", "live"],
@@ -189,6 +196,14 @@ test("the product launcher dispatches every implemented role exactly", () => {
       [
         ["probe", "gateway", "ready"],
         "curl --disable --noproxy * --fail --silent --show-error --connect-timeout 1 --max-time 2 http://127.0.0.1:8120/readyz\n",
+      ],
+      [
+        ["probe", "worker", "live"],
+        "curl --disable --noproxy * --fail --silent --show-error --connect-timeout 1 --max-time 2 http://127.0.0.1:8121/healthz\n",
+      ],
+      [
+        ["probe", "worker", "ready"],
+        "curl --disable --noproxy * --fail --silent --show-error --connect-timeout 1 --max-time 2 http://127.0.0.1:8121/readyz\n",
       ],
     ];
     for (const [args, expected] of cases) {

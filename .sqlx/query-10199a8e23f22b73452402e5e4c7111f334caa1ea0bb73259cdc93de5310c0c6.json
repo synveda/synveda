@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "grant synveda_app to synveda_gateway with admin true, inherit true, set true granted by synveda_cli_role_grantor",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "10199a8e23f22b73452402e5e4c7111f334caa1ea0bb73259cdc93de5310c0c6"
+}

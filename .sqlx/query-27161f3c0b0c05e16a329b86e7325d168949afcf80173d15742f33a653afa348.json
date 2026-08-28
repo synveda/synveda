@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "alter role synveda_worker_process_grantor\n              with nologin inherit nosuperuser nocreatedb nocreaterole\n                   noreplication nobypassrls connection limit -1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "27161f3c0b0c05e16a329b86e7325d168949afcf80173d15742f33a653afa348"
+}

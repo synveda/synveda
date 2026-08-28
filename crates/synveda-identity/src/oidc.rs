@@ -134,8 +134,8 @@ pub struct IssuerConfig {
     ///
     /// Only meaningful with [`TenantBinding::Static`]: a pull sync runs on
     /// a timer with no request in front of it, so there is no token whose
-    /// claim could say which tenant it is for. The gateway refuses to boot
-    /// on the other combination rather than syncing the wrong tenant or
+    /// claim could say which tenant it is for. The core worker refuses to
+    /// start work on the other combination rather than syncing the wrong tenant or
     /// silently syncing none.
     #[serde(default)]
     pub directory_sync: Option<crate::directory::DirectorySyncConfig>,

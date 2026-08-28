@@ -1,0 +1,185 @@
+{{- /*
+The core worker is a separate process from the synchronous gateway and uses
+the exact same product image (CPR-45, ADR-0102). One replica is deliberate:
+Capture has a fenced lease, but the other owned maintenance loops have not yet
+passed concurrent-worker acceptance. The private health server binds loopback,
+so probes execute inside the container and no Service or container port exists.
+*/ -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "synveda.fullname" . }}-worker
+  labels:
+    {{- include "synveda.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "synveda.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: worker
+  template:
+    metadata:
+      labels:
+        {{- include "synveda.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: worker
+      {{- with .Values.worker.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "synveda.serviceAccountName" . }}
+      automountServiceAccountToken: false
+      terminationGracePeriodSeconds: {{ add (int .Values.worker.shutdownSeconds) 10 }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      initContainers:
+        # This uses only the worker credential. It becomes reachable after
+        # the install job has created the fixed non-owner login and granted
+        # `synveda_app`; it proves the schema sentinel before the process is
+        # allowed to start.
+        - name: wait-for-schema
+          image: {{ .Values.postgres.image }}
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          command:
+            - sh
+            - -ec
+            - |
+              DATABASE_URL=
+              IFS= read -r DATABASE_URL < /run/secrets/synveda-worker/database_url || [ -n "$DATABASE_URL" ]
+              until PGDATABASE="$DATABASE_URL" psql -v ON_ERROR_STOP=1 -tAc \
+                "select current_user = '{{ include "synveda.workerRole" . }}'
+                        and to_regclass('public.tenants') is not null
+                        and has_table_privilege(current_user, 'public.tenants', 'select')" \
+                2>/dev/null | grep -qx t; do
+                echo "waiting for the install job: schema and the synveda_worker grant"
+                sleep 3
+              done
+              echo "schema present and readable by the worker role"
+          volumeMounts:
+            - name: worker-database
+              mountPath: /run/secrets/synveda-worker
+              readOnly: true
+      containers:
+        - name: worker
+          image: {{ include "synveda.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: ["worker"]
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          env:
+            - name: DATABASE_URL_FILE
+              value: /run/secrets/synveda-worker/database_url
+            - name: SYNVEDA_WORKER_DB_MAX_CONNECTIONS
+              value: {{ .Values.worker.dbMaxConnections | quote }}
+            - name: SYNVEDA_WORKER_SHUTDOWN_SECS
+              value: {{ .Values.worker.shutdownSeconds | quote }}
+            - name: SYNVEDA_WORKER_LISTEN_ADDR
+              value: 127.0.0.1:8121
+            - name: SYNVEDA_EXPECTED_DATABASE_ROLE
+              value: {{ include "synveda.workerRole" . }}
+            - name: SYNVEDA_OIDC_ISSUERS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.oidc.existingSecret }}
+                  key: {{ .Values.oidc.secretKey }}
+            - name: SYNVEDA_KMS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.kms.existingSecret }}
+                  key: {{ .Values.kms.secretKey }}
+            - name: SYNVEDA_KMS_KEY_REF
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.kms.existingSecret }}
+                  key: {{ .Values.kms.keyRefSecretKey }}
+            - name: SYNVEDA_EMBEDDER
+              value: {{ .Values.embedder | quote }}
+            {{- with .Values.embedderModel }}
+            - name: SYNVEDA_EMBEDDER_MODEL
+              value: {{ . | quote }}
+            {{- end }}
+            {{- if eq .Values.embedder "tei" }}
+            - name: SYNVEDA_TEI_URL
+              value: {{ if .Values.tei.enabled }}http://{{ include "synveda.fullname" . }}-tei:80{{ else }}{{ .Values.tei.url }}{{ end }}
+            {{- end }}
+            - name: SYNVEDA_EXTRACTOR
+              value: {{ .Values.extractor.kind | quote }}
+            {{- with .Values.extractor.model }}
+            - name: SYNVEDA_EXTRACTOR_MODEL
+              value: {{ . | quote }}
+            {{- end }}
+            {{- if eq .Values.extractor.kind "claude" }}
+            - name: ANTHROPIC_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.extractor.existingSecret }}
+                  key: ANTHROPIC_API_KEY
+            {{- end }}
+            {{- if eq .Values.extractor.kind "vllm" }}
+            - name: SYNVEDA_VLLM_BASE_URL
+              value: {{ .Values.extractor.baseUrl | quote }}
+            {{- end }}
+            {{- with .Values.otel.endpoint }}
+            - name: OTEL_EXPORTER_OTLP_ENDPOINT
+              value: {{ . | quote }}
+            {{- end }}
+            - name: RUST_LOG
+              value: {{ .Values.worker.logLevel | quote }}
+          livenessProbe:
+            exec:
+              command:
+                - /usr/local/bin/synveda-container
+                - probe
+                - worker
+                - live
+            periodSeconds: 10
+            timeoutSeconds: 3
+          readinessProbe:
+            exec:
+              command:
+                - /usr/local/bin/synveda-container
+                - probe
+                - worker
+                - ready
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          volumeMounts:
+            - name: worker-database
+              mountPath: /run/secrets/synveda-worker
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+          {{- with .Values.worker.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      volumes:
+        - name: worker-database
+          secret:
+            secretName: {{ .Values.worker.databaseExistingSecret }}
+            defaultMode: 0440
+            items:
+              - key: {{ .Values.worker.databaseUrlSecretKey }}
+                path: database_url
+        - name: tmp
+          emptyDir: {}
+      {{- with .Values.worker.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.worker.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.worker.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

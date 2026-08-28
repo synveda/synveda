@@ -36,7 +36,7 @@ it does not substitute for the still-open restore and failover evidence.
 |---|---|---|---|
 | Authorisation (PDP) | **Cedar** (embedded) | Apache-2.0 | Amazon's policy language, **pure Rust, in-process** — no network hop on the hot read path; formally verified evaluator; policies-as-data suits VedaFlow versioning |
 | Relationship checks | Cedar entities and governed scope ancestry | Apache-2.0 | The current runtime has one authority engine. AUTHZ-6 tracks an OpenFGA spike; no adapter is implemented or claimed. |
-| Why not OPA | Rego is powerful but adds a Go sidecar + network hop on every context decision; Cedar embeds in the gateway binary | | OPA remains a possible adapter for shops that mandate it, not a shipped runtime |
+| Why not OPA | Rego is powerful but adds a Go sidecar + network hop on every context decision; Cedar embeds in-process in the product binaries | | OPA remains a possible adapter for shops that mandate it, not a shipped runtime |
 | OIDC provider (bundled reference) | **Keycloak** (Apache-2.0) | Apache-2.0 | ADR-0102 selects production-mode Keycloak behind the generic OIDC/PKCE boundary. Rauthy remains only until CPR-45 cutover acceptance and is then deleted without a compatibility mode. |
 | Enterprise IdP | Bring-your-own: Entra ID, Okta, Keycloak, Zitadel — standard OIDC + SCIM 2.0 | — | Synveda is an OIDC *client*, never the source of truth for identity |
 | Secrets/PII detection | Rust regex+ML pipeline; **gitleaks** ruleset port for secrets | MIT | Runs in `synveda-ingest` before persistence |
@@ -49,13 +49,14 @@ it does not substitute for the still-open restore and failover evidence.
 | ORM/queries | **sqlx** (compile-time checked SQL — auditability again) |
 | Embeddings serving | Optional **text-embeddings-inference** serving BGE-M3 for the measured dense path. Production model support, generation cutover and re-embedding remain open. |
 | Summarisation/extraction LLM | Pluggable: Claude API, or self-hosted via vLLM for air-gapped; behind `Extractor` trait |
-| Observability | Current OpenTelemetry traces and private Prometheus metrics; the accepted CPR-45 target (implementation open) routes application telemetry through a private Collector with optional bounded Prometheus/Jaeger/Perses evaluation visibility |
-| Packaging | Accepted CPR-45 target (implementation open): one product image/configuration contract and Docker Compose as the single-host reference. Later Helm implements the same contract and currently enforces one gateway replica. |
+| Observability | Current OpenTelemetry traces, a loopback-private worker Prometheus surface and an unauthenticated gateway Prometheus route that still shares the public listener; the accepted CPR-45 target (implementation open) removes application scrape routes and sends telemetry through a private Collector with optional bounded Prometheus/Jaeger/Perses evaluation visibility |
+| Packaging | Accepted CPR-45 target (implementation open): one product image/configuration contract and Docker Compose as the single-host reference. Later Helm implements the same contract and currently enforces one gateway and one core-worker replica. |
 
 ### 1.4 Explicit non-choices
 
 - **No Elasticsearch/OpenSearch** (Postgres FTS is the current lexical leg),
-  **no Redis**, **no Kafka** (leased Postgres jobs), and **no Neo4j,
+  **no Redis**, **no Kafka** (Postgres-backed scheduled work; Capture uses a
+  fenced lease), and **no Neo4j,
   SurrealDB or Memgraph** in the current runtime. A future engine needs an
   evidenced feature and accepted ADR; no speculative trait is promised here.
 

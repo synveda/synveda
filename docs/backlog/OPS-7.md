@@ -14,10 +14,12 @@ size: L
 
 Helm pins one gateway replica and Recreate. Pending OIDC login/CLI handoff
 state is process-local in crates/synveda-identity/src/flow.rs, and PDP entity
-invalidation is process-local in the gateway. Background capture, Knowledge
-indexing, directory and expiry work also runs inside each gateway process.
-SIGTERM now enters Axum graceful request shutdown, but workers are aborted
-rather than drained. These gaps are recorded in
+invalidation is process-local in the gateway. Capture, Knowledge indexing,
+directory pull and relaxation expiry now run in a separate supervised core
+worker, but only one worker replica is supported and concurrent-worker recovery
+has not been proved. Worker SIGTERM withdraws readiness and performs a bounded
+cancel/join, while gateway readiness still remains true during graceful request
+shutdown. Claimed-work termination remains unproved. These gaps are recorded in
 [production readiness](../PRODUCTION_READINESS.md) and the one-replica refusal
 is governed by [ADR-0062](../adr/adr-0062-enterprise-profile-and-helm-chart.md).
 
@@ -27,15 +29,17 @@ is governed by [ADR-0062](../adr/adr-0062-enterprise-profile-and-helm-chart.md).
   TTL and atomic consume semantics.
 - Propagate scope, grant, policy and entity invalidation across replicas within
   a stated bound.
-- Give every background job explicit multi-replica ownership, lease,
-  idempotency and provider-concurrency behaviour.
-- Withdraw readiness on termination, finish or safely release claimed work,
-  flush telemetry and exit within a bounded grace period.
+- Prove every core-worker job's multi-replica ownership, lease, idempotency and
+  provider-concurrency behaviour before lifting the one-worker limit.
+- Withdraw gateway readiness on termination, drain requests, and prove that
+  core workers finish or safely release claimed work, flush telemetry and exit
+  within a bounded grace period.
 - Lift the chart refusal only after a three-replica acceptance passes.
 
 ## Non-goals
 
-- No distributed cache or separate worker service without measured need.
+- No distributed cache, second queue product or orchestration framework merely
+  to lift the replica limits.
 - No weakening of fresh PDP decisions, forced RLS or live re-authorisation on
   idempotent replay.
 - No claim that CloudNativePG replication makes the request plane available.
@@ -47,8 +51,9 @@ Login state belongs beside durable console sessions in synveda-store. Scope
 and grant mutations already invalidate local PDP entities; add one
 cross-process generation or notification contract rather than a second
 authorisation cache. Existing durable batch/job tables remain the worker seam.
-Gateway readiness and task cancellation own drain; Helm owns replica and
-termination settings.
+Gateway readiness owns request drain. The core-worker supervisor owns task
+cancellation and bounded join; each durable aggregate owns its claim/recovery
+semantics. Helm owns the separate replica and termination settings.
 
 ## Acceptance criteria
 
@@ -57,10 +62,12 @@ termination settings.
 - A scope move, grant revoke, identity disable and Configuration/policy change
   become visible to every replica within the documented bound, with no stale
   permit after the bound.
-- Concurrent workers across three replicas produce one durable effect, respect
-  provider concurrency and recover every lease after pod loss.
-- SIGTERM makes readiness fail first, drains requests and claimed work or
-  releases it safely, and exits inside the pod grace period.
+- Three gateway replicas and separately scaled core-worker replicas produce one
+  durable effect, respect provider concurrency and recover every lease after
+  pod loss.
+- SIGTERM makes the affected process's readiness fail first, drains gateway
+  requests, and lets core workers finish or safely release claimed work before
+  exiting inside the pod grace period.
 - Sustained traffic loses a pod and a rolling upgrade without incorrect
   decisions or avoidable login failure.
 - The chart accepts only tested replica counts and no longer requires Recreate.

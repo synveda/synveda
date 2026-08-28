@@ -49,7 +49,7 @@ async fn spawn_tei_mock(status: StatusCode, response: Value) -> (String, Capture
 }
 
 fn embedder(base_url: String) -> TeiEmbedder {
-    TeiEmbedder::new("mock-model".to_owned(), base_url)
+    TeiEmbedder::new("mock-model".to_owned(), base_url).expect("configure TEI client")
 }
 
 /// The success contract: one `POST /embed` with the inputs in order,
@@ -86,13 +86,13 @@ async fn empty_batch_never_calls_the_endpoint() {
     );
 }
 
-/// TEI's error statuses surface as `Dependency` with the body's error
-/// detail — the worker's signal-redelivery trigger.
+/// TEI error statuses surface as a content-free `Dependency` code. Provider
+/// bodies can echo inputs and must never reach logs or spans.
 #[tokio::test]
 async fn error_status_is_a_dependency_error() {
     let (base_url, _) = spawn_tei_mock(
         StatusCode::UNPROCESSABLE_ENTITY,
-        json!({"error": "input exceeds the model context", "error_type": "validation"}),
+        json!({"error": "SYNVEDA_SECRET_SENTINEL_PROVIDER_BODY", "error_type": "validation"}),
     )
     .await;
     let err = embedder(base_url)
@@ -103,10 +103,8 @@ async fn error_status_is_a_dependency_error() {
         panic!("expected Dependency, got {err:?}");
     };
     assert_eq!(service, "tei");
-    assert!(
-        message.contains("input exceeds the model context"),
-        "the TEI error detail must surface: {message}"
-    );
+    assert_eq!(message, "upstream_http_422");
+    assert!(!err.to_string().contains("SYNVEDA_SECRET_SENTINEL"));
 }
 
 /// A vector count that deviates from the input count is a dependency

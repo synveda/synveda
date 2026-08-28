@@ -1025,10 +1025,10 @@ async fn capture_worker_renews_blocked_extraction_and_discards_a_reclaimed_resul
     let deps = capture_worker::Deps {
         pool: state.pool.clone(),
         pdp: Arc::clone(&state.pdp),
-        extractor: Arc::new(AnyExtractor::Vllm(VllmExtractor::new(
-            "cpr45-blocking@1".to_owned(),
-            blocked.base_url.clone(),
-        ))),
+        extractor: Arc::new(AnyExtractor::Vllm(
+            VllmExtractor::new("cpr45-blocking@1".to_owned(), blocked.base_url.clone())
+                .expect("configure blocking extractor"),
+        )),
     };
     let config = capture_worker::Config {
         poll_interval: Duration::from_secs(1),
@@ -1084,10 +1084,10 @@ async fn capture_worker_renews_blocked_extraction_and_discards_a_reclaimed_resul
     let deps = capture_worker::Deps {
         pool: state.pool.clone(),
         pdp: Arc::clone(&state.pdp),
-        extractor: Arc::new(AnyExtractor::Vllm(VllmExtractor::new(
-            "cpr45-blocking@1".to_owned(),
-            lost.base_url.clone(),
-        ))),
+        extractor: Arc::new(AnyExtractor::Vllm(
+            VllmExtractor::new("cpr45-blocking@1".to_owned(), lost.base_url.clone())
+                .expect("configure blocking extractor"),
+        )),
     };
     let config = capture_worker::Config {
         poll_interval: Duration::from_secs(1),
@@ -1188,10 +1188,10 @@ async fn capture_worker_reproves_a_preflight_lease_before_calling_the_extractor(
     let deps = capture_worker::Deps {
         pool: worker_pool,
         pdp: Arc::clone(&state.pdp),
-        extractor: Arc::new(AnyExtractor::Vllm(VllmExtractor::new(
-            "cpr45-blocking@1".to_owned(),
-            fixture.base_url.clone(),
-        ))),
+        extractor: Arc::new(AnyExtractor::Vllm(
+            VllmExtractor::new("cpr45-blocking@1".to_owned(), fixture.base_url.clone())
+                .expect("configure blocking extractor"),
+        )),
     };
     let config = capture_worker::Config {
         poll_interval: Duration::from_secs(1),

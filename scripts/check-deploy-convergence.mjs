@@ -120,6 +120,10 @@ export function productImageFindings(source) {
       "synveda-gateway",
       "COPY --from=build /src/target/release/synveda-gateway /usr/local/bin/synveda-gateway",
     ],
+    [
+      "synveda-worker",
+      "COPY --from=build /src/target/release/synveda-worker /usr/local/bin/synveda-worker",
+    ],
     ["synveda", "COPY --from=build /src/target/release/synveda /usr/local/bin/synveda"],
     [
       "synveda-container",
@@ -193,15 +197,27 @@ export function productLauncherFindings(source) {
     .filter((line) => !/^[a-zA-Z_][a-zA-Z0-9_]*\(\)[ \t]*\{/.test(line))
     .map((line) => line.match(/^([^)]*)\)/)?.[1]?.trim())
     .filter((label) => label !== undefined);
-  const expectedCaseLabels = ["gateway", "migrate", "probe", "live", "ready", "*", "*"];
+  const expectedCaseLabels = [
+    "gateway",
+    "worker",
+    "migrate",
+    "probe",
+    "gateway",
+    "worker",
+    "*",
+    "live",
+    "ready",
+    "*",
+    "*",
+  ];
   if (JSON.stringify(caseLabels) !== JSON.stringify(expectedCaseLabels)) {
     findings.push("launcher case vocabulary is not closed and ordered");
   }
-  const roleMatches = [...active.matchAll(/^ {4}(gateway|migrate|probe|\*)\)[ \t]*$/gm)];
+  const roleMatches = [...active.matchAll(/^ {4}(gateway|worker|migrate|probe|\*)\)[ \t]*$/gm)];
   const labels = roleMatches.map(
     (match) => match[1],
   );
-  if (JSON.stringify(labels) !== JSON.stringify(["gateway", "migrate", "probe", "*"])) {
+  if (JSON.stringify(labels) !== JSON.stringify(["gateway", "worker", "migrate", "probe", "*"])) {
     findings.push("launcher role vocabulary is not closed and ordered");
   }
 
@@ -214,6 +230,7 @@ export function productLauncherFindings(source) {
     return active.slice(start, next?.index);
   };
   const gateway = roleBlock("gateway");
+  const worker = roleBlock("worker");
   const migrate = roleBlock("migrate");
   const probe = roleBlock("probe").replace(/\\\r?\n\s*/g, " ");
   const unknown = roleBlock("*").replace(/\s+/g, " ").trim();
@@ -224,6 +241,12 @@ export function productLauncherFindings(source) {
   if (!gateway.includes("exec /usr/local/bin/synveda-gateway")) {
     findings.push("gateway role does not exec the gateway binary");
   }
+  if (!worker.includes('[ "$#" -eq 1 ] || usage')) {
+    findings.push("worker role does not enforce exact arity");
+  }
+  if (!worker.includes("exec /usr/local/bin/synveda-worker")) {
+    findings.push("worker role does not exec the worker binary");
+  }
   if (!migrate.includes('[ "$#" -eq 1 ] || usage')) {
     findings.push("migrate role does not enforce exact arity");
   }
@@ -233,8 +256,11 @@ export function productLauncherFindings(source) {
   if (!probe.includes('[ "$#" -eq 3 ] || usage')) {
     findings.push("probe role does not enforce exact arity");
   }
-  if (!probe.includes('[ "$2" = "gateway" ] || usage')) {
-    findings.push("probe role accepts an undeclared target");
+  if (!/gateway\)\s+port=8120\s+;;/.test(probe)) {
+    findings.push("gateway probe does not select the fixed 8120 port");
+  }
+  if (!/worker\)\s+port=8121\s+;;/.test(probe)) {
+    findings.push("worker probe does not select the fixed 8121 port");
   }
   if (!/live\)\s+path=healthz\s+;;/.test(probe)) {
     findings.push("live probe does not select /healthz");
@@ -242,8 +268,8 @@ export function productLauncherFindings(source) {
   if (!/ready\)\s+path=readyz\s+;;/.test(probe)) {
     findings.push("ready probe does not select /readyz");
   }
-  if (!probe.includes('"http://127.0.0.1:8120/${path}"')) {
-    findings.push("probe does not use the fixed loopback gateway endpoint");
+  if (!probe.includes('"http://127.0.0.1:${port}/${path}"')) {
+    findings.push("probe does not use the selected fixed loopback endpoint");
   }
   if (!/exec \/usr\/bin\/curl\s+--disable(?:\s|$)/.test(probe)) {
     findings.push("probe permits curl configuration loading");
@@ -304,12 +330,49 @@ function checkCompose(relative, release) {
   if (!gateway.includes("SYNVEDA_GATEWAY_DATABASE_URL")) {
     fail(`${relative} cannot receive a separately provisioned runtime DSN`);
   }
+  if (!gateway.includes('SYNVEDA_WORKER_DATABASE_URL: ""')) {
+    fail(`${relative} leaves the worker DSN in the gateway environment`);
+  }
   if (
     !gateway.includes(
       '"/usr/local/bin/synveda-container", "probe", "gateway", "live"',
     )
   ) {
     fail(`${relative} does not attach the gateway role-specific liveness probe`);
+  }
+  const worker = serviceBlock(`\n${source}`, "worker");
+  if (!worker) fail(`${relative} has no worker service`);
+  if (!worker.includes("synveda_worker")) {
+    fail(`${relative} does not connect the worker as synveda_worker`);
+  }
+  if (/postgres:\/\/synveda:/.test(worker)) {
+    fail(`${relative} hands the database-owner DSN to the worker`);
+  }
+  if (!worker.includes("SYNVEDA_WORKER_DATABASE_URL")) {
+    fail(`${relative} cannot receive a separately provisioned worker DSN`);
+  }
+  if (!worker.includes('SYNVEDA_GATEWAY_DATABASE_URL: ""')) {
+    fail(`${relative} leaves the gateway DSN in the worker environment`);
+  }
+  if (!worker.includes('command: ["worker"]')) {
+    fail(`${relative} does not select the worker image command`);
+  }
+  if (!worker.includes("stop_grace_period: 85s")) {
+    fail(`${relative} can kill the worker before its bounded drain completes`);
+  }
+  if (release && !worker.includes("restart: unless-stopped")) {
+    fail(`${relative} does not restart a failed installed worker`);
+  }
+  if (!worker.includes('"/usr/local/bin/synveda-container", "probe", "worker", "ready"')) {
+    fail(`${relative} does not attach the worker readiness probe`);
+  }
+  if (/^\s*ports:/m.test(worker)) {
+    fail(`${relative} publishes the worker health surface`);
+  }
+  const gatewayImage = gateway.match(/^\s*image:\s*(\S+)/m)?.[1];
+  const workerImage = worker.match(/^\s*image:\s*(\S+)/m)?.[1];
+  if (!gatewayImage || gatewayImage !== workerImage) {
+    fail(`${relative} does not use one image for gateway and worker`);
   }
   if (release && /^\s*build:/m.test(source)) {
     fail(`${relative} is a release manifest with a source build`);
@@ -335,6 +398,49 @@ function checkHelm() {
   if (!rendered.includes("synveda-pg-app")) fail("Helm does not use CloudNativePG's app Secret");
   if (!rendered.includes("synveda_app")) fail("Helm does not grant the runtime capability role");
   if (!rendered.includes("/readyz")) fail("Helm lost the schema-epoch readiness check");
+  const documents = rendered.split(/^---\s*$/m);
+  const resource = (kind, component) =>
+    documents.find(
+      (document) =>
+        new RegExp(`^kind: ${kind}$`, "m").test(document) &&
+        document.includes(`app.kubernetes.io/component: ${component}`),
+    );
+  const containerImage = (document, name) =>
+    document?.match(new RegExp(`\\n\\s+- name: ${name}\\n\\s+image: (\\S+)`))?.[1];
+  const gateway = resource("Deployment", "gateway");
+  const worker = resource("Deployment", "worker");
+  if (!gateway || !worker) fail("Helm does not render separate gateway and worker Deployments");
+  if (containerImage(gateway, "gateway") !== containerImage(worker, "worker")) {
+    fail("Helm does not use one image for gateway and worker");
+  }
+  for (const marker of [
+    'args: ["worker"]',
+    "- name: DATABASE_URL_FILE",
+    "value: /run/secrets/synveda-worker/database_url",
+    "value: 127.0.0.1:8121",
+    "- name: SYNVEDA_EXPECTED_DATABASE_ROLE",
+    "value: synveda_worker",
+    'IFS= read -r DATABASE_URL < /run/secrets/synveda-worker/database_url || [ -n "$DATABASE_URL" ]',
+    "- worker\n",
+    "- ready\n",
+    "timeoutSeconds: 3",
+  ]) {
+    if (!worker.includes(marker)) fail(`Helm worker is missing ${marker.trim()}`);
+  }
+  if (/^\s*ports:/m.test(worker) || resource("Service", "worker")) {
+    fail("Helm publishes the worker health surface");
+  }
+  if (gateway.includes("SYNVEDA_EXTRACTOR") || !worker.includes("SYNVEDA_EXTRACTOR")) {
+    fail("Helm does not assign extractor configuration exclusively to the worker");
+  }
+  const install = resource("Job", "install");
+  for (const marker of [
+    "create role synveda_worker",
+    "alter role synveda_worker",
+    "grant synveda_app to synveda_worker",
+  ]) {
+    if (!install?.includes(marker)) fail(`Helm install job is missing ${marker}`);
+  }
   for (const secret of ["synveda-dev", "Synveda-Demo-Passw0rd", "API-Key synveda-dev"]) {
     if (rendered.includes(secret)) fail(`Helm rendered a plaintext credential marker: ${secret}`);
   }
@@ -361,6 +467,24 @@ function checkPublicContract() {
   const cli = `${read("crates/synveda-cli/src/main.rs")}\n${read("crates/synveda-cli/src/init.rs")}`;
   if (hasRetiredDemoField(cli)) {
     fail("the removed init demo switch remains in the CLI model");
+  }
+  const gatewayMain = read("crates/synveda-gateway/src/main.rs");
+  for (const marker of [
+    "capture_worker::run",
+    "knowledge_index::run",
+    "run_expiry_sweep",
+    "directory_sync::run",
+  ]) {
+    if (gatewayMain.includes(marker)) fail(`gateway still owns worker loop ${marker}`);
+  }
+  const worker = read("crates/synveda-gateway/src/worker.rs");
+  for (const marker of [
+    "capture_worker::run",
+    "knowledge_index::run",
+    "run_expiry_sweep",
+    "directory_sync::run",
+  ]) {
+    if (!worker.includes(marker)) fail(`worker does not own loop ${marker}`);
   }
 }
 
@@ -444,6 +568,9 @@ function checkReleaseUpgradeShape() {
     if (!serviceBlock(`\n${packaged}`, "gateway").includes("synveda_gateway")) {
       fail("packaged release drifted from the least-privilege gateway DSN");
     }
+    if (!serviceBlock(`\n${packaged}`, "worker").includes("synveda_worker")) {
+      fail("packaged release drifted from the least-privilege worker DSN");
+    }
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }
@@ -459,7 +586,7 @@ export function main() {
   checkReleaseUpgradeShape();
   console.log(
     "deployment convergence holds: 2 Compose renders, Helm render, product image inputs, " +
-      "current OpenAPI, least-privilege runtime DSNs and repeatable release replacement",
+      "current OpenAPI, distinct Compose runtime DSNs, a separate Helm worker credential and repeatable release replacement",
   );
 }
 

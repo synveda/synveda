@@ -21,7 +21,12 @@ The repository has no Semantic Kernel connector or verified support. The intende
 
 ## Architecture seam
 
-Language packages translate Semantic Kernel contracts into the same versioned REST operations and shared golden wire fixtures. Python builds on ADPT-4; .NET uses a minimal generated/thin public client owned by this feature unless a separately supported base SDK is approved. All identity, PDP, RLS, capture, VedaFlow, and audit decisions remain in the gateway.
+Language packages translate Semantic Kernel contracts into the same versioned
+REST operations and shared golden wire fixtures. Python builds on ADPT-4; .NET
+uses a minimal generated/thin public client owned by this feature unless a
+separately supported base SDK is approved. All identity, PDP, RLS, Capture,
+VedaFlow and audit decisions remain within the Synveda gateway/core-worker
+application boundary.
 
 ## Acceptance criteria
 

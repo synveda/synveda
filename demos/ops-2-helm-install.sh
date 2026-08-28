@@ -9,9 +9,10 @@
 # readiness check cannot (ADR-0062 decision 7):
 #
 #   1. a governed round trip — a real OIDC login, AUTH-2 manufacturing the
-#      org root from it, a PDP-decided hierarchy write, observe →
-#      extraction → embed → inject returning the memory, and the audit
-#      chain verifying over all of it;
+#      org root from it, a PDP-decided hierarchy write, Session delivery,
+#      synchronous context composition, and the audit chain verifying over
+#      all of it. This demo does not wait for worker-owned Capture/Knowledge;
+#      worker readiness and database-failover recovery are separate checks;
 #   2. a failover — delete the CNPG primary and do it again;
 #   3. a live backstop — the gateway's own database role is not a
 #      superuser and holds no BYPASSRLS, so TEN-2's forced RLS is actually
@@ -50,6 +51,7 @@ IMAGE_TAG=$(awk -F'"' '/^appVersion:/{print $2; exit}' deploy/helm/synveda/Chart
 [ -n "$IMAGE_TAG" ] || { echo "no appVersion in deploy/helm/synveda/Chart.yaml" >&2; exit 1; }
 KEEP=${KEEP:-0}
 REUSE=${REUSE:-0}
+SECRET_SCRATCH=""
 
 cd "$(dirname "$0")/.."
 
@@ -81,6 +83,9 @@ diagnostics() {
 
 cleanup() {
   [ -n "${PORT_FORWARD_PID:-}" ] && kill "$PORT_FORWARD_PID" 2>/dev/null || true
+  if [ -n "$SECRET_SCRATCH" ] && [ -d "$SECRET_SCRATCH" ]; then
+    rm -rf -- "$SECRET_SCRATCH"
+  fi
   if [ "$KEEP" = "1" ]; then
     echo
     echo "KEEP=1: the cluster stays. Delete it with:  kind delete cluster --name $CLUSTER"
@@ -90,7 +95,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-for tool in docker kind kubectl helm node; do
+for tool in docker kind kubectl helm node openssl; do
   command -v "$tool" >/dev/null 2>&1 || fail "$tool is not installed"
 done
 
@@ -155,10 +160,33 @@ echo "    issuer, as the discovery document states it: $ISSUER"
 
 # ── the chart ────────────────────────────────────────────────────────────
 echo "==> the disposable key plane"
-kubectl create secret generic synveda-kms -n "$NS" \
-  --from-literal=SYNVEDA_KMS_KEY=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef \
-  --from-literal=SYNVEDA_KMS_KEY_REF=local:ops-2-test \
-  --dry-run=client -o yaml | kubectl apply -f - >/dev/null
+umask 077
+SECRET_SCRATCH=$(mktemp -d "${TMPDIR:-/tmp}/synveda-ops2-secrets.XXXXXX")
+if kubectl get secret synveda-kms -n "$NS" >/dev/null 2>&1; then
+  echo "    preserving the existing KMS Secret"
+else
+  openssl rand -hex 32 > "$SECRET_SCRATCH/kms_key"
+  printf '%s' 'local:ops-2-test' > "$SECRET_SCRATCH/kms_key_ref"
+  chmod 0600 "$SECRET_SCRATCH/kms_key" "$SECRET_SCRATCH/kms_key_ref"
+  kubectl create secret generic synveda-kms -n "$NS" \
+    --from-file=SYNVEDA_KMS_KEY="$SECRET_SCRATCH/kms_key" \
+    --from-file=SYNVEDA_KMS_KEY_REF="$SECRET_SCRATCH/kms_key_ref" >/dev/null
+fi
+
+echo "==> the disposable worker database credential"
+if kubectl get secret synveda-worker-db -n "$NS" >/dev/null 2>&1; then
+  echo "    preserving the existing worker database Secret"
+else
+  WORKER_DATABASE_PASSWORD=$(openssl rand -hex 32)
+  printf '%s' "$WORKER_DATABASE_PASSWORD" > "$SECRET_SCRATCH/worker_password"
+  printf 'postgres://synveda_worker:%s@synveda-pg-rw:5432/synveda' \
+    "$WORKER_DATABASE_PASSWORD" > "$SECRET_SCRATCH/worker_database_url"
+  chmod 0600 "$SECRET_SCRATCH/worker_password" "$SECRET_SCRATCH/worker_database_url"
+  kubectl create secret generic synveda-worker-db -n "$NS" \
+    --from-file=DATABASE_URL="$SECRET_SCRATCH/worker_database_url" \
+    --from-file=password="$SECRET_SCRATCH/worker_password" >/dev/null
+  unset WORKER_DATABASE_PASSWORD
+fi
 
 echo "==> helm install"
 helm upgrade --install "$RELEASE" deploy/helm/synveda \
@@ -204,10 +232,13 @@ kubectl create secret generic synveda-oidc -n "$NS" \
   --from-literal=SYNVEDA_OIDC_ISSUERS="[{\"issuer\":\"$ISSUER\",\"client_id\":\"synveda\",\"tenant\":{\"static\":{\"tenant_id\":\"$TENANT_ID\"}}}]" \
   --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 
-echo "==> the gateway"
+echo "==> the gateway and core worker"
 kubectl rollout status -n "$NS" deployment/synveda --timeout=600s ||
   fail "the gateway never became ready" \
     "$(kubectl logs -n "$NS" deployment/synveda --all-containers --tail=50 2>&1 || true)"
+kubectl rollout status -n "$NS" deployment/synveda-worker --timeout=600s ||
+  fail "the core worker never became ready" \
+    "$(kubectl logs -n "$NS" deployment/synveda-worker --all-containers --tail=50 2>&1 || true)"
 
 # ── assertion 3, first because it is cheap and unconditional ─────────────
 # The backstop. Decision 2 is worth nothing if the chart can be
@@ -231,6 +262,32 @@ ROLE_FACTS=$(kubectl exec -n "$NS" "$PG_POD" -c postgres -- \
 echo "    the gateway connects as $GATEWAY_ROLE — superuser|bypassrls|synveda_app: $ROLE_FACTS"
 [ "$ROLE_FACTS" = "f|f|t" ] ||
   fail "$GATEWAY_ROLE is a superuser, holds BYPASSRLS, or is not in synveda_app: $ROLE_FACTS"
+
+echo "==> the worker uses its distinct non-owner runtime role"
+WORKER_FACTS=$(kubectl exec -n "$NS" "$PG_POD" -c postgres -- \
+  psql -U postgres -d synveda -tAc \
+  "select roles.rolcanlogin, roles.rolinherit, roles.rolsuper,
+          roles.rolcreatedb, roles.rolcreaterole, roles.rolreplication,
+          roles.rolbypassrls,
+          pg_has_role(roles.rolname,'synveda_app','member'),
+          exists (
+            select 1 from pg_database databases
+             where databases.datname = current_database()
+               and databases.datdba = roles.oid
+          ),
+          exists (
+            select 1
+              from pg_auth_members memberships
+              join pg_roles granted_roles on granted_roles.oid = memberships.roleid
+             where memberships.member = roles.oid
+               and granted_roles.rolname <> 'synveda_app'
+          )
+     from pg_roles roles where roles.rolname = 'synveda_worker'" \
+  2>/dev/null | tr -d '\r ') ||
+  fail "could not ask the database about synveda_worker"
+echo "    login|inherit|superuser|createdb|createrole|replication|bypassrls|synveda_app|database-owner|other-role: $WORKER_FACTS"
+[ "$WORKER_FACTS" = "t|t|f|f|f|f|f|t|f|f" ] ||
+  fail "synveda_worker is elevated, ungranted or owns the database: $WORKER_FACTS"
 
 # ── assertion 1: the governed round trip ─────────────────────────────────
 echo "==> the test client: a real login, and everything downstream of it"
@@ -328,17 +385,35 @@ kubectl exec -n "$NS" synveda-install-test -c client -- sh -ec '
 ' || fail "the deployment did not survive losing its primary" \
   "$(kubectl get cluster -n "$NS" synveda-pg -o wide 2>&1 || true)"
 
+echo "==> the private worker is ready after the same failover"
+WORKER_POD=$(kubectl get pods -n "$NS" -l app.kubernetes.io/component=worker \
+  -o jsonpath='{.items[0].metadata.name}') || fail "no worker pod to probe"
+worker_ready=0
+for _ in $(seq 1 60); do
+  if kubectl exec -n "$NS" "$WORKER_POD" -- \
+    /usr/local/bin/synveda-container probe worker ready >/dev/null 2>&1; then
+    worker_ready=1
+    break
+  fi
+  sleep 2
+done
+[ "$worker_ready" = "1" ] || fail "the worker was not ready after failover" \
+  "$(kubectl logs -n "$NS" deployment/synveda-worker --all-containers --tail=60 2>&1 || true)"
+
 echo
 echo "================================================================"
 echo "OPS-2 AC: a kind-cluster install of the one Synveda runtime"
 echo "  the chart installed, the job migrated under the admin identity,"
-echo "  and the gateway came up as a non-superuser role"
+echo "  and separate gateway/worker processes came up with distinct roles"
 echo "  a real authorization-code + PKCE login provisioned the tenant root"
 echo "  a governed write, session append → context run, audit verified"
 echo "  the primary was deleted and the same run composed again"
+echo "  the separate worker's private readiness was healthy after failover"
 echo
 echo "  what this does not prove: no browser was involved. This is the"
 echo "  protocol path — discovery, JWKS, PKCE, iss and nonce — driven by"
 echo "  a script, which is ADPT-2's honesty applied to this feature's"
 echo "  own claim."
+echo "  It also does not exercise worker-owned Capture/Knowledge, claimed-work"
+echo "  SIGTERM or concurrent workers; those remain separate CPR-45/OPS-7 gates."
 echo "================================================================"

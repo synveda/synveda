@@ -3088,9 +3088,11 @@ async fn connect() -> Result<sqlx::PgPool, String> {
     // an installed operator does not have (OPS-8). Erroring on a missing
     // variable was right while a checkout was the only way to get here.
     let url = init::database_url();
+    let connect_options = synveda_store::database_url::parse("DATABASE_URL", &url)
+        .map_err(|error| error.to_string())?;
     PgPoolOptions::new()
         .max_connections(2)
-        .connect(&url)
+        .connect_with(connect_options)
         .await
         .map_err(|err| {
             let safe_url = init::redacted_database_url(&url);

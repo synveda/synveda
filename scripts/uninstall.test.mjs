@@ -42,6 +42,7 @@ function fixture(t) {
     mkdirSync(path, { recursive: true });
   }
   writeFileSync(join(install, "bin/synveda-gateway"), "gateway\n");
+  writeFileSync(join(install, "bin/synveda-worker"), "worker\n");
   writeFileSync(join(install, "console/index.html"), "console\n");
   writeFileSync(join(install, "profile/docker-compose.yml"), "name: synveda\n");
   writeFileSync(join(install, "plugin/manifest.json"), "{}\n");

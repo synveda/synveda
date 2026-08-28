@@ -465,16 +465,22 @@ async fn live_precision() {
     let selected = std::env::var("SYNVEDA_EXTRACTOR").unwrap_or_default();
     let model = std::env::var("SYNVEDA_EXTRACTOR_MODEL").ok();
     let extractor = match selected.as_str() {
-        "claude" => AnyExtractor::Claude(ClaudeExtractor::new(
-            std::env::var("ANTHROPIC_API_KEY").expect("ANTHROPIC_API_KEY"),
-            model.unwrap_or_else(|| ClaudeExtractor::DEFAULT_MODEL.to_owned()),
-            std::env::var("SYNVEDA_ANTHROPIC_BASE_URL")
-                .unwrap_or_else(|_| ClaudeExtractor::DEFAULT_BASE_URL.to_owned()),
-        )),
-        "vllm" => AnyExtractor::Vllm(VllmExtractor::new(
-            model.expect("SYNVEDA_EXTRACTOR_MODEL"),
-            std::env::var("SYNVEDA_VLLM_BASE_URL").expect("SYNVEDA_VLLM_BASE_URL"),
-        )),
+        "claude" => AnyExtractor::Claude(
+            ClaudeExtractor::new(
+                std::env::var("ANTHROPIC_API_KEY").expect("ANTHROPIC_API_KEY"),
+                model.unwrap_or_else(|| ClaudeExtractor::DEFAULT_MODEL.to_owned()),
+                std::env::var("SYNVEDA_ANTHROPIC_BASE_URL")
+                    .unwrap_or_else(|_| ClaudeExtractor::DEFAULT_BASE_URL.to_owned()),
+            )
+            .expect("configure Claude client"),
+        ),
+        "vllm" => AnyExtractor::Vllm(
+            VllmExtractor::new(
+                model.expect("SYNVEDA_EXTRACTOR_MODEL"),
+                std::env::var("SYNVEDA_VLLM_BASE_URL").expect("SYNVEDA_VLLM_BASE_URL"),
+            )
+            .expect("configure vLLM client"),
+        ),
         other => panic!("set SYNVEDA_EXTRACTOR=claude|vllm (got {other:?})"),
     };
     let report = measure(&extractor, &fixtures()).await;

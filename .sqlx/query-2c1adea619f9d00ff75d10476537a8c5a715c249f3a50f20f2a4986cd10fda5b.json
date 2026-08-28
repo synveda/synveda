@@ -1,0 +1,100 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select rolcanlogin as \"can_login!\", rolinherit as \"inherits!\",\n                  rolsuper as \"superuser!\", rolcreatedb as \"create_db!\",\n                  rolcreaterole as \"create_role!\", rolreplication as \"replication!\",\n                  rolbypassrls as \"bypass_rls!\",\n                  pg_has_role($1, 'synveda_app', 'member') as \"app_member!\",\n                  exists (\n                    select 1\n                      from pg_catalog.pg_auth_members as membership\n                      join pg_catalog.pg_roles as granted_role\n                        on granted_role.oid = membership.roleid\n                     where membership.member = roles.oid\n                       and granted_role.rolname = 'synveda_app'\n                       and not membership.admin_option\n                       and membership.inherit_option\n                       and membership.set_option\n                  ) as \"app_membership_safe!\",\n                  exists (\n                    select 1\n                      from pg_catalog.pg_auth_members as membership\n                      join pg_catalog.pg_roles as granted_role\n                        on granted_role.oid = membership.roleid\n                     where membership.member = roles.oid\n                       and granted_role.rolname = 'synveda_app'\n                       and (\n                         membership.admin_option\n                         or not membership.inherit_option\n                         or not membership.set_option\n                       )\n                  ) as \"app_membership_unsafe!\",\n                  exists (\n                    select 1 from pg_catalog.pg_database\n                     where datdba = roles.oid\n                  ) as \"database_owner!\",\n                  exists (\n                    select 1 from pg_catalog.pg_namespace\n                     where nspowner = roles.oid\n                  ) as \"schema_owner!\",\n                  exists (\n                    select 1 from pg_catalog.pg_class as objects\n                     where objects.relowner = roles.oid\n                    union all\n                    select 1 from pg_catalog.pg_proc as routines\n                     where routines.proowner = roles.oid\n                  ) as \"application_object_owner!\",\n                  exists (\n                    select 1\n                      from pg_catalog.pg_auth_members as memberships\n                      join pg_catalog.pg_roles as granted_roles\n                        on granted_roles.oid = memberships.roleid\n                     where memberships.member = roles.oid\n                       and granted_roles.rolname <> 'synveda_app'\n                  ) as \"unexpected_membership!\"\n             from pg_catalog.pg_roles as roles\n            where rolname = $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "can_login!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 1,
+        "name": "inherits!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 2,
+        "name": "superuser!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 3,
+        "name": "create_db!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 4,
+        "name": "create_role!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 5,
+        "name": "replication!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 6,
+        "name": "bypass_rls!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 7,
+        "name": "app_member!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 8,
+        "name": "app_membership_safe!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 9,
+        "name": "app_membership_unsafe!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 10,
+        "name": "database_owner!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 11,
+        "name": "schema_owner!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 12,
+        "name": "application_object_owner!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 13,
+        "name": "unexpected_membership!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Name"
+      ]
+    },
+    "nullable": [
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "2c1adea619f9d00ff75d10476537a8c5a715c249f3a50f20f2a4986cd10fda5b"
+}

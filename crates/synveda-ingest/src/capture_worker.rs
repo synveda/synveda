@@ -198,9 +198,10 @@ impl LeaseGuard {
                     timeout_ms = RENEWAL_STOP_TIMEOUT.as_millis() as u64,
                     "capture lease renewal task exceeded its stop bound; aborting"
                 );
-                let task = self.task.as_mut().expect("renewal task remains owned");
-                task.abort();
-                let _ = tokio::time::timeout(RENEWAL_STOP_TIMEOUT, task).await;
+                if let Some(task) = self.task.as_mut() {
+                    task.abort();
+                    let _ = tokio::time::timeout(RENEWAL_STOP_TIMEOUT, task).await;
+                }
             }
         }
         self.task.take();
@@ -243,19 +244,89 @@ fn renewal_interval(duration: Duration) -> Duration {
     (duration / 3).clamp(MIN_RENEWAL_INTERVAL, MAX_RENEWAL_INTERVAL)
 }
 
-/// Starts one immediate pass and then one per configured interval.
-#[must_use]
-pub fn spawn(deps: Deps, config: Config) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(async move {
-        let mut ticker = tokio::time::interval(config.poll_interval);
-        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        loop {
-            ticker.tick().await;
-            if let Err(error) = sweep_once(&deps, &config).await {
-                tracing::warn!(%error, "capture sweep failed; retrying");
+/// Runs one immediate pass and then one per configured interval until
+/// shutdown.
+///
+/// Shutdown is observed before tenant discovery and each claim. If it arrives
+/// during an attempt, dropping the attempt cancels the provider request,
+/// rolls back any open transaction and drops the renewal guard; the fenced
+/// row becomes reclaimable only after its database-time lease expires.
+pub async fn run(deps: Deps, config: Config, mut shutdown: watch::Receiver<bool>) {
+    let mut ticker = tokio::time::interval(config.poll_interval);
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    loop {
+        tokio::select! {
+            changed = shutdown.changed() => {
+                if changed.is_err() || *shutdown.borrow() {
+                    return;
+                }
+            }
+            _ = ticker.tick() => {}
+        }
+        if *shutdown.borrow() {
+            return;
+        }
+        match sweep_until_shutdown(&deps, &config, &mut shutdown).await {
+            Ok(Some(_)) => {}
+            Ok(None) => return,
+            Err(error) => tracing::warn!(%error, "capture sweep failed; retrying"),
+        }
+    }
+}
+
+async fn sweep_until_shutdown(
+    deps: &Deps,
+    config: &Config,
+    shutdown: &mut watch::Receiver<bool>,
+) -> Result<Option<SweepSummary>> {
+    let active = tokio::select! {
+        biased;
+        () = shutdown_requested(shutdown) => return Ok(None),
+        result = tenants::active(&deps.pool) => result?,
+    };
+    let mut summary = SweepSummary::default();
+    for tenant in active {
+        if *shutdown.borrow() {
+            return Ok(None);
+        }
+        summary.tenants += 1;
+        for _ in 0..config.batches_per_tenant.max(1) {
+            let outcome = tokio::select! {
+                biased;
+                () = shutdown_requested(shutdown) => {
+                    tracing::info!(
+                        tenant.id = %tenant.id,
+                        "capture attempt cancelled for worker shutdown; any fenced claim waits for lease expiry"
+                    );
+                    return Ok(None);
+                }
+                result = process_one(deps, config, tenant.id) => result,
+            };
+            match outcome {
+                Ok(ProcessOutcome::Empty) => break,
+                Ok(ProcessOutcome::Completed) => summary.completed += 1,
+                Ok(ProcessOutcome::FailedAttempt) => summary.failed_attempts += 1,
+                Ok(ProcessOutcome::Abandoned) => {
+                    summary.abandoned_attempts += 1;
+                    break;
+                }
+                Err(error) => {
+                    summary.failed_attempts += 1;
+                    tracing::warn!(tenant.id = %tenant.id, %error, "capture tenant pass failed");
+                    break;
+                }
             }
         }
-    })
+    }
+    Ok(Some(summary))
+}
+
+async fn shutdown_requested(shutdown: &mut watch::Receiver<bool>) {
+    loop {
+        if *shutdown.borrow() || shutdown.changed().await.is_err() {
+            return;
+        }
+    }
 }
 
 /// Sweeps active tenants without allowing one tenant failure to starve the
@@ -296,6 +367,12 @@ enum ProcessOutcome {
 /// Processes at most one batch for a tenant. Public behavior is exposed by
 /// [`sweep_once`]; keeping this function private prevents callers from
 /// inventing a second claim discipline.
+#[tracing::instrument(
+    name = "capture.worker.tenant_attempt",
+    skip_all,
+    fields(tenant.id = %tenant_id, worker = %config.lease_owner),
+    err(Display)
+)]
 async fn process_one(deps: &Deps, config: &Config, tenant_id: TenantId) -> Result<ProcessOutcome> {
     let lease_seconds = lease_seconds(config.lease_duration);
     let mut claim_tx = rls::begin_tenant_tx(&deps.pool, tenant_id).await?;
@@ -514,7 +591,10 @@ async fn process_one(deps: &Deps, config: &Config, tenant_id: TenantId) -> Resul
         model_versions.insert("none@0".to_owned());
     }
     let model_version = if model_versions.len() == 1 {
-        model_versions.into_iter().next().expect("one model")
+        model_versions
+            .into_iter()
+            .next()
+            .unwrap_or_else(|| "none@0".to_owned())
     } else {
         let digest = blake3::hash(
             model_versions

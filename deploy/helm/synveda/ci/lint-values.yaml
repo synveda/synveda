@@ -3,6 +3,8 @@
 # of decisions an operator cannot avoid making.
 gateway:
   publicUrl: https://synveda.example.com
+worker:
+  databaseExistingSecret: synveda-worker-db
 oidc:
   existingSecret: synveda-oidc
 kms:

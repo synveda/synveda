@@ -1408,6 +1408,12 @@ pub async fn expire_once(pool: &sqlx::PgPool) -> Result<usize> {
     Ok(chained)
 }
 
+#[tracing::instrument(
+    name = "relaxations.expiry_tenant",
+    skip_all,
+    fields(tenant.id = %tenant),
+    err(Display)
+)]
 async fn expire_tenant(pool: &sqlx::PgPool, tenant: TenantId) -> Result<usize> {
     let mut tx = rls::begin_tenant_tx(pool, tenant).await?;
     let due = store::due_for_expiry_event(&mut tx, tenant, EXPIRY_BATCH).await?;
@@ -1461,20 +1467,63 @@ async fn expire_tenant(pool: &sqlx::PgPool, tenant: TenantId) -> Result<usize> {
     Ok(chained)
 }
 
-/// Spawn the periodic expiry bookkeeping loop. Abort on gateway shutdown.
-#[must_use]
-pub fn spawn_expiry_sweep(
+/// Runs periodic expiry bookkeeping until the worker begins shutdown.
+///
+/// Shutdown is selected against each tenant transaction; cancellation rolls
+/// an unfinished tenant back and prevents the next tenant from starting.
+pub(crate) async fn run_expiry_sweep(
     pool: sqlx::PgPool,
     interval: std::time::Duration,
-) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(async move {
-        let mut ticker = tokio::time::interval(interval);
-        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        loop {
-            ticker.tick().await;
-            if let Err(error) = expire_once(&pool).await {
-                tracing::warn!(error = %error, "relaxation expiry sweep failed");
+    mut shutdown: tokio::sync::watch::Receiver<bool>,
+) {
+    let mut ticker = tokio::time::interval(interval);
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    loop {
+        tokio::select! {
+            changed = shutdown.changed() => {
+                if changed.is_err() || *shutdown.borrow() {
+                    return;
+                }
             }
+            _ = ticker.tick() => {}
         }
-    })
+        if *shutdown.borrow() {
+            return;
+        }
+        match expire_until_shutdown(&pool, &mut shutdown).await {
+            Ok(true) => {}
+            Ok(false) => return,
+            Err(error) => tracing::warn!(error = %error, "relaxation expiry sweep failed"),
+        }
+    }
+}
+
+async fn expire_until_shutdown(
+    pool: &sqlx::PgPool,
+    shutdown: &mut tokio::sync::watch::Receiver<bool>,
+) -> Result<bool> {
+    let active = tokio::select! {
+        biased;
+        () = crate::shutdown::requested(shutdown) => return Ok(false),
+        result = synveda_store::tenants::active(pool) => result?,
+    };
+    for tenant in active {
+        if *shutdown.borrow() {
+            return Ok(false);
+        }
+        let result = tokio::select! {
+            biased;
+            () = crate::shutdown::requested(shutdown) => return Ok(false),
+            result = expire_tenant(pool, tenant.id) => result,
+        };
+        match result {
+            Ok(_) => {}
+            Err(error) => tracing::error!(
+                tenant.id = %tenant.id,
+                error = %error,
+                "relaxation expiry bookkeeping failed for one tenant"
+            ),
+        }
+    }
+    Ok(true)
 }

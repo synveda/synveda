@@ -17,8 +17,6 @@
 //!
 use std::time::Instant;
 
-use sqlx::postgres::PgConnectOptions;
-
 use crate::init;
 
 /// What one `reset` was asked for.
@@ -59,13 +57,17 @@ pub async fn reset(plan: Plan) -> Result<(), String> {
     println!();
     println!("    database   {}", describe(&url));
 
-    // Before the drop, not after: a gateway holding this database open would
-    // be evicted by `WITH (FORCE)` and stay alive, serving from caches that
-    // describe rows nobody can read any more.
+    // Before the drop, not after: a gateway or worker holding this database
+    // open would be evicted by `WITH (FORCE)` and stay alive with caches,
+    // claims or timers that describe rows nobody can read any more.
     let stopped = init::stop_host_gateway();
     match stopped {
         Some(pid) => println!("    gateway    stopped (pid {pid})"),
         None => println!("    gateway    none running as a host process"),
+    }
+    if let Some(compose) = init::compose_file_if_any().filter(|path| path.exists()) {
+        init::stop_compose_product_processes(&compose)?;
+        println!("    containers stopped (gateway, worker)");
     }
 
     let outcome = synveda_store::reset::recreate(&url)
@@ -102,26 +104,6 @@ pub async fn reset(plan: Plan) -> Result<(), String> {
     println!();
     println!("    synveda init");
     println!("    synveda login");
-    // The gateway runs as a *container* when `init` was given an external
-    // issuer (ADR-0055 decision 9), and nothing here records which shape this
-    // deployment took — so this is a conditional note rather than an
-    // inference. It matters: a containerised gateway was evicted by
-    // `WITH (FORCE)` rather than stopped, so it is alive, holding a scope
-    // chain and a policy pack for rows that no longer exist, and `init` will
-    // not restart it because its configuration did not change.
-    if stopped.is_none()
-        && let Some(compose) = init::compose_file_if_any()
-    {
-        println!();
-        println!("If your gateway runs as a container (`synveda init --issuer …`),");
-        println!("restart it — it was disconnected rather than stopped, and it still");
-        println!("holds caches describing rows that no longer exist:");
-        println!();
-        println!(
-            "    docker compose -f {} restart gateway",
-            compose.display()
-        );
-    }
     Ok(())
 }
 
@@ -130,12 +112,11 @@ pub async fn reset(plan: Plan) -> Result<(), String> {
 /// `DATABASE_URL` usually carries one, and this command prints the target
 /// twice — in the refusal that asks for `--force` and in the run that follows
 /// — so printing it verbatim would put a credential in the shell history of
-/// every operator who read the refusal before deciding. Falls back to the
-/// raw string only when it does not parse, which is a string that is not a
-/// connection URL and therefore holds no credential to leak.
+/// every operator who read the refusal before deciding. A malformed value is
+/// named generically because arbitrary invalid text can still carry secrets.
 fn describe(url: &str) -> String {
-    url.parse::<PgConnectOptions>().map_or_else(
-        |_| url.to_owned(),
+    synveda_store::database_url::parse("DATABASE_URL", url).map_or_else(
+        |_| "configured PostgreSQL database".to_owned(),
         |options| {
             format!(
                 "postgres://{}@{}:{}/{}",
@@ -158,9 +139,8 @@ fn describe(url: &str) -> String {
 /// keeps the escape hatch open without putting it behind a flag that would
 /// eventually be pasted into a runbook.
 fn refuse_a_database_that_is_not_this_machine_s(url: &str) -> Result<(), String> {
-    let options: PgConnectOptions = url
-        .parse()
-        .map_err(|err| format!("{url} is not a Postgres connection URL: {err}"))?;
+    let options = synveda_store::database_url::parse("DATABASE_URL", url)
+        .map_err(|_| "DATABASE_URL is not a valid PostgreSQL connection URL".to_owned())?;
     let host = options.get_host();
     let local = host.starts_with('/')       // a unix socket
         || host.eq_ignore_ascii_case("localhost")
@@ -226,9 +206,24 @@ mod tests {
         let described = describe("postgres://synveda:synveda-dev@localhost:5432/synveda");
         assert_eq!(described, "postgres://synveda@localhost:5432/synveda");
         assert!(!described.contains("synveda-dev"), "{described}");
-        // A string that is not a connection URL holds no credential to
-        // leak, and saying it back is more use than saying nothing.
-        assert_eq!(describe("not a url"), "not a url");
+
+        let malformed = "not a url?password=SYNVEDA_RESET_SECRET#SYNVEDA_RESET_FRAGMENT_SECRET";
+        let described = describe(malformed);
+        let refusal = refuse_a_database_that_is_not_this_machine_s(malformed)
+            .expect_err("a malformed URL must be refused");
+        for diagnostic in [&described, &refusal] {
+            assert!(!diagnostic.contains("SYNVEDA_RESET_SECRET"), "{diagnostic}");
+            assert!(
+                !diagnostic.contains("SYNVEDA_RESET_FRAGMENT_SECRET"),
+                "{diagnostic}"
+            );
+            assert!(!diagnostic.contains("password="), "{diagnostic}");
+        }
+        assert_eq!(described, "configured PostgreSQL database");
+        assert_eq!(
+            refusal,
+            "DATABASE_URL is not a valid PostgreSQL connection URL"
+        );
     }
 
     /// `synveda reset` with nothing else, and with only one of the two flags,

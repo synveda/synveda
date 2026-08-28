@@ -44,7 +44,7 @@ use synveda_store::directory::UserAttributes;
 use synveda_store::{access, directory, directory_sync, rls, tenants};
 use synveda_types::{DirectoryUserId, GroupId, IdentityId, Result, Tenant, TenantId};
 
-use crate::app::AppState;
+use crate::app::{AppState, DirectoryRuntime};
 use crate::audit;
 use crate::scim::reconcile::{self, DirectorySource};
 
@@ -104,14 +104,23 @@ pub struct PassReport {
 /// Storage failures. A connector failure is not an error — it is an
 /// incomplete pass, which is a result this function returns rather than
 /// something it raises.
+pub async fn run_once(
+    state: &AppState,
+    tenant: &Tenant,
+    connector: &dyn DirectoryConnector,
+    config: &SyncConfig,
+) -> Result<PassReport> {
+    run_once_runtime(&state.directory_runtime(), tenant, connector, config).await
+}
+
 #[tracing::instrument(
     name = "directory_sync.pass",
     skip_all,
     fields(tenant.id = %tenant.id, sync.connector = connector.name()),
     err(Display)
 )]
-pub async fn run_once(
-    state: &AppState,
+async fn run_once_runtime(
+    state: &DirectoryRuntime,
     tenant: &Tenant,
     connector: &dyn DirectoryConnector,
     config: &SyncConfig,
@@ -167,11 +176,7 @@ pub async fn run_once(
     report.groups_archived = presence.groups_archived;
     let seen = presence.users;
 
-    let Enumeration::Complete(_) = &enumeration else {
-        let failure = match &enumeration {
-            Enumeration::Partial { failure, .. } => failure.clone(),
-            Enumeration::Complete(_) => unreachable!(),
-        };
+    if let Enumeration::Partial { failure, .. } = &enumeration {
         // No `complete_pass`, so `passes_completed` does not move and this
         // pass cannot contribute to anybody's absence count. That omission
         // is the enforcement of decision 3.1.
@@ -183,7 +188,7 @@ pub async fn run_once(
             "directory pass incomplete; presence recorded, absence not counted"
         );
         return Ok(report);
-    };
+    }
 
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant.id).await?;
     directory_sync::mark_present(&mut *tx, tenant.id, connector.name(), &seen).await?;
@@ -333,7 +338,7 @@ fn storage(err: sqlx::Error) -> synveda_types::Error {
 /// which is the decision's sharp end: expiry is an operational failure rather
 /// than a handover, and a tenant that stops syncing loudly is a better
 /// failure than one that silently changes which plane decides who has left.
-async fn push_plane_owns(state: &AppState, tenant_id: TenantId) -> Result<bool> {
+async fn push_plane_owns(state: &DirectoryRuntime, tenant_id: TenantId) -> Result<bool> {
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
     let credentials = directory::credentials(&mut *tx, tenant_id).await?;
     tx.commit().await.map_err(storage)?;
@@ -364,7 +369,7 @@ struct PresenceReport {
 
 /// Projects everything safely established by the pass.
 async fn record_presence(
-    state: &AppState,
+    state: &DirectoryRuntime,
     tenant: &Tenant,
     connector: &'static str,
     enumeration: &Enumeration,
@@ -402,7 +407,7 @@ async fn record_presence(
         tx.commit().await.map_err(storage)?;
         seen.push(user.id);
 
-        reconcile::reconcile(state, tenant, source, &user).await?;
+        reconcile::reconcile_runtime(state, tenant, source, &user).await?;
         let mut tx = rls::begin_tenant_tx(&state.pool, tenant.id).await?;
         let projected = directory::user(&mut *tx, tenant.id, connector, user.id).await?;
         tx.commit().await.map_err(storage)?;
@@ -430,7 +435,7 @@ async fn record_presence(
 /// complete group snapshots already read, but only a complete pass may archive
 /// a group it did not see.
 async fn sync_groups(
-    state: &AppState,
+    state: &DirectoryRuntime,
     tenant: &Tenant,
     connector: &'static str,
     enumeration: &Enumeration,
@@ -542,7 +547,7 @@ fn directory_slug(id: GroupId, connector: &str) -> String {
 /// reading this row afterwards is being told what this product now believes,
 /// which is that the directory stopped listing them.
 async fn seal(
-    state: &AppState,
+    state: &DirectoryRuntime,
     tenant: &Tenant,
     connector: &'static str,
     user: &synveda_types::DirectoryUser,
@@ -561,7 +566,7 @@ async fn seal(
     let deactivated = directory::replace_user(&mut *tx, tenant.id, user.id, &attributes).await?;
     tx.commit().await.map_err(storage)?;
     if let Some(deactivated) = deactivated {
-        reconcile::reconcile(
+        reconcile::reconcile_runtime(
             state,
             tenant,
             DirectorySource::Pull { connector },
@@ -590,7 +595,7 @@ async fn seal(
     err(Display)
 )]
 async fn stored_connector(
-    state: &AppState,
+    state: &DirectoryRuntime,
     tenant_id: TenantId,
 ) -> Result<Option<Box<dyn DirectoryConnector>>> {
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id).await?;
@@ -676,61 +681,111 @@ pub async fn sweep(
     connectors: &HashMap<TenantId, Box<dyn DirectoryConnector>>,
     config: &SyncConfig,
 ) -> Result<()> {
+    sweep_runtime(&state.directory_runtime(), connectors, config).await
+}
+
+pub(crate) async fn sweep_runtime(
+    state: &DirectoryRuntime,
+    connectors: &HashMap<TenantId, Box<dyn DirectoryConnector>>,
+    config: &SyncConfig,
+) -> Result<()> {
     let tenants = tenants::active(&state.pool).await?;
     for tenant in tenants {
-        // Precedence, stated in one place (ADR-0064 decision 9): the tenant's
-        // own sealed credential, then the deployment's configuration.
-        //
-        // **A stored credential that fails to open skips the tenant rather
-        // than falling back.** Falling back would quietly re-point a customer
-        // at whatever directory the deployment happens to configure, on the
-        // day their key or their row broke — a different directory's answer
-        // to "who still works here", which is the input this feature turns
-        // into departures.
-        let stored = match stored_connector(state, tenant.id).await {
-            Ok(stored) => stored,
-            Err(error) => {
-                tracing::warn!(
-                    tenant.id = %tenant.id,
-                    %error,
-                    "a tenant's stored directory credential could not be used; \
-                     skipping rather than falling back to the deployment's"
-                );
-                continue;
-            }
-        };
-        let connector = match stored.as_deref() {
-            Some(connector) => connector,
-            None => match connectors.get(&tenant.id) {
-                Some(connector) => connector.as_ref(),
-                None => continue,
-            },
-        };
-        if let Err(error) = run_once(state, &tenant, connector, config).await {
-            tracing::warn!(tenant.id = %tenant.id, error = %error, "directory sync pass failed");
-        }
+        sync_tenant(state, connectors, config, &tenant).await;
     }
     Ok(())
 }
 
-/// Spawns the sync loop — the pack refresher's shape. Abort the handle on
-/// shutdown.
-#[must_use]
-pub fn spawn(
-    state: AppState,
+async fn sync_tenant(
+    state: &DirectoryRuntime,
+    connectors: &HashMap<TenantId, Box<dyn DirectoryConnector>>,
+    config: &SyncConfig,
+    tenant: &synveda_types::Tenant,
+) {
+    // Precedence, stated in one place (ADR-0064 decision 9): the tenant's
+    // own sealed credential, then the deployment's configuration.
+    //
+    // **A stored credential that fails to open skips the tenant rather than
+    // falling back.** Falling back could quietly point a customer at a
+    // different directory on the day its key or credential row broke.
+    let stored = match stored_connector(state, tenant.id).await {
+        Ok(stored) => stored,
+        Err(error) => {
+            tracing::warn!(
+                tenant.id = %tenant.id,
+                %error,
+                "a tenant's stored directory credential could not be used; \
+                 skipping rather than falling back to the deployment's"
+            );
+            return;
+        }
+    };
+    let connector = match stored.as_deref() {
+        Some(connector) => connector,
+        None => match connectors.get(&tenant.id) {
+            Some(connector) => connector.as_ref(),
+            None => return,
+        },
+    };
+    if let Err(error) = run_once_runtime(state, tenant, connector, config).await {
+        tracing::warn!(tenant.id = %tenant.id, error = %error, "directory sync pass failed");
+    }
+}
+
+/// Runs one immediate sync pass and then one per interval until shutdown.
+///
+/// Shutdown is selected against each tenant pass. Dropping an unfinished
+/// pass cancels its provider request and rolls back its tenant transaction.
+pub(crate) async fn run(
+    state: DirectoryRuntime,
     connectors: HashMap<TenantId, Box<dyn DirectoryConnector>>,
     config: SyncConfig,
-) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(async move {
-        let mut ticker = tokio::time::interval(config.interval);
-        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        loop {
-            ticker.tick().await;
-            if let Err(error) = sweep(&state, &connectors, &config).await {
-                tracing::warn!(error = %error, "directory sync sweep failed");
+    mut shutdown: tokio::sync::watch::Receiver<bool>,
+) {
+    let mut ticker = tokio::time::interval(config.interval);
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    loop {
+        tokio::select! {
+            changed = shutdown.changed() => {
+                if changed.is_err() || *shutdown.borrow() {
+                    return;
+                }
             }
+            _ = ticker.tick() => {}
         }
-    })
+        if *shutdown.borrow() {
+            return;
+        }
+        match sweep_until_shutdown(&state, &connectors, &config, &mut shutdown).await {
+            Ok(true) => {}
+            Ok(false) => return,
+            Err(error) => tracing::warn!(error = %error, "directory sync sweep failed"),
+        }
+    }
+}
+
+async fn sweep_until_shutdown(
+    state: &DirectoryRuntime,
+    connectors: &HashMap<TenantId, Box<dyn DirectoryConnector>>,
+    config: &SyncConfig,
+    shutdown: &mut tokio::sync::watch::Receiver<bool>,
+) -> Result<bool> {
+    let active = tokio::select! {
+        biased;
+        () = crate::shutdown::requested(shutdown) => return Ok(false),
+        result = tenants::active(&state.pool) => result?,
+    };
+    for tenant in active {
+        if *shutdown.borrow() {
+            return Ok(false);
+        }
+        tokio::select! {
+            biased;
+            () = crate::shutdown::requested(shutdown) => return Ok(false),
+            () = sync_tenant(state, connectors, config, &tenant) => {}
+        }
+    }
+    Ok(true)
 }
 
 #[cfg(test)]

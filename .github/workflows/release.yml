@@ -5,7 +5,8 @@
 #
 # On `v*`:
 #
-#   binaries   synveda + synveda-gateway for darwin-arm64 and linux-x86_64,
+#   binaries   synveda + synveda-gateway + synveda-worker for darwin-arm64 and
+#              linux-x86_64,
 #              built SQLX_OFFLINE=true against the committed query cache
 #   console    the CNSL-1 bundle, so `/console/` serves on the host-gateway
 #              path — which is the default install (ADR-0055 decision 8)
@@ -109,12 +110,12 @@ jobs:
           version="${{ needs.version.outputs.version }}"
           out="target/${{ matrix.rust-target }}/release"
           stage="$(mktemp -d)"
-          cp "$out/synveda" "$out/synveda-gateway" "$stage/"
+          cp "$out/synveda" "$out/synveda-gateway" "$out/synveda-worker" "$stage/"
           # Stripped: these are release binaries a tester downloads, and the
           # debug info is tens of megabytes of a download nobody symbolises.
-          strip "$stage/synveda" "$stage/synveda-gateway" || true
+          strip "$stage/synveda" "$stage/synveda-gateway" "$stage/synveda-worker" || true
           tar -czf "synveda-$version-${{ matrix.target }}.tar.gz" -C "$stage" \
-            synveda synveda-gateway
+            synveda synveda-gateway synveda-worker
           ls -lh "synveda-$version-${{ matrix.target }}.tar.gz"
       - name: It runs, and it is the version it claims
         run: |
@@ -123,6 +124,7 @@ jobs:
           # Both targets are native to their runner, so a smoke test is free
           # and catches a binary that will not dynamically link.
           "$out/synveda" --version
+          test -x "$out/synveda-worker"
           # Only on a tag. A `workflow_dispatch` dry run names its own
           # version and the binary still reports CARGO_PKG_VERSION, so
           # asserting agreement there would fail every dry run — and the
@@ -258,7 +260,7 @@ jobs:
       # tag `deploy/release/docker-compose.yml` names. Cache scopes are
       # per-arch because two architectures sharing one scope evict each
       # other on every run.
-      - name: The gateway
+      - name: The product image
         uses: docker/build-push-action@v6
         with:
           context: .

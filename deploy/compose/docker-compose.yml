@@ -153,6 +153,10 @@ services:
       # The database owner remains bootstrap-only and never reaches the
       # gateway process. An explicit deployment DSN can replace the local one.
       DATABASE_URL: ${SYNVEDA_GATEWAY_DATABASE_URL:-postgres://synveda_gateway:synveda-dev@postgres:5432/synveda}
+      # `.env` is still a transitional shared configuration file. Mask the
+      # worker credential from the request process until canonical Compose
+      # mounts one role-specific secret file per service.
+      SYNVEDA_WORKER_DATABASE_URL: ""
       # gRPC, not HTTP: telemetry.rs builds the exporter `.with_tonic()`.
       OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
       RUST_LOG: ${RUST_LOG:-info}
@@ -163,6 +167,38 @@ services:
       retries: 24
     ports:
       - "8120:8120"
+
+  worker:
+    # CPR-45 / ADR-0102: timed Capture, Knowledge indexing, relaxation
+    # expiry and directory pull run outside the request process, from the
+    # exact same product image. The private health listener is not published.
+    profiles: ["deployed"]
+    build:
+      context: ../..
+      dockerfile: deploy/compose/gateway/Dockerfile
+    image: synveda/gateway:dev
+    command: ["worker"]
+    init: true
+    # The worker's default supervised-task join is 75 seconds. Compose must
+    # leave a larger outer window before sending SIGKILL.
+    stop_grace_period: 85s
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: ${SYNVEDA_WORKER_DATABASE_URL:-postgres://synveda_worker:synveda-dev@postgres:5432/synveda}
+      # Do not retain the request-plane credential inherited from `env_file`.
+      SYNVEDA_GATEWAY_DATABASE_URL: ""
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4317
+      RUST_LOG: ${RUST_LOG:-info}
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/synveda-container", "probe", "worker", "ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 24
 volumes:
   pg-data:
   rauthy-data:

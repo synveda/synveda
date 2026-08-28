@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "alter role synveda_worker_process_test bypassrls",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "82b449c0d6179a6cd284846fd532207c1af5102aa15f6e6c98e2da8b0f95f2f7"
+}

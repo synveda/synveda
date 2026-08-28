@@ -31,6 +31,14 @@ pub const TENANT_RESOLUTIONS_TOTAL: &str = "synveda_tenant_resolutions_total";
 /// Request latency in seconds, labelled by method/route/status.
 pub const HTTP_REQUEST_DURATION_SECONDS: &str = "synveda_http_request_duration_seconds";
 
+/// Core-worker readiness: 1 only while the supervisor is running and its
+/// most recent dependency probe accepted the schema and runtime role.
+pub const WORKER_READY: &str = "synveda_worker_ready";
+
+/// Age in seconds of the core worker supervisor's scheduler heartbeat. This
+/// is process-loop liveness, not progress of every owned task.
+pub const WORKER_HEARTBEAT_AGE_SECONDS: &str = "synveda_worker_heartbeat_age_seconds";
+
 /// Scope admin operations (CPR-7, ADR-0074), labelled by `op`
 /// (`list`/`create`/`get`/`update`/`ancestors`/`descendants`) and
 /// `outcome` (`ok`, `rejected` — the caller's fault, `error` — ours or an
@@ -316,6 +324,15 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
         HTTP_REQUEST_DURATION_SECONDS,
         metrics::Unit::Seconds,
         "Gateway HTTP request latency"
+    );
+    metrics::describe_gauge!(
+        WORKER_READY,
+        "Core-worker supervisor readiness after lifecycle, database, schema and runtime-role checks"
+    );
+    metrics::describe_gauge!(
+        WORKER_HEARTBEAT_AGE_SECONDS,
+        metrics::Unit::Seconds,
+        "Age of the core worker supervisor scheduler heartbeat; not per-task progress"
     );
     metrics::describe_counter!(
         SCOPE_OPERATIONS_TOTAL,

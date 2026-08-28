@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "alter role synveda_worker_process_test set default_transaction_read_only = on",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "20037b1eac98ba15d14de07c5471bfd87691be4d0099003efca0d2b91672903c"
+}

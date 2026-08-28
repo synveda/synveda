@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "revoke synveda_app from synveda_worker_process_grantor",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "812f8f73b09d7aa6fe76774e645fd93a526e8c0c847e9b303024efc9083f1185"
+}

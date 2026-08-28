@@ -133,9 +133,9 @@ pub(crate) fn parse_candidates(
     value: serde_json::Value,
     event_type: SessionEventType,
 ) -> Result<Vec<CandidateKnowledge>> {
-    let wire: WireCandidates = serde_json::from_value(value).map_err(|err| Error::Dependency {
+    let wire: WireCandidates = serde_json::from_value(value).map_err(|_| Error::Dependency {
         service: service.to_owned(),
-        message: format!("extractor returned candidates outside the contract: {err}"),
+        message: "candidates_invalid".to_owned(),
     })?;
     Ok(wire
         .candidates

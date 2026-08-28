@@ -18,10 +18,11 @@ upgrade has to be able to run it again.
 Three steps, in order:
   1. migrate  — `synveda db migrate` as the superuser (it creates a role
                 and an extension)
-  2. grant    — hand the gateway's login role membership of `synveda_app`,
-                the least-privilege role every migration has been granting
-                since 0003. Membership rather than a second grant set: one
-                place to be wrong is better than two that must agree.
+  2. grant    — hand the gateway's login role membership of `synveda_app`;
+                create/converge the fixed `synveda_worker` login from an
+                operator-owned Secret and grant the same capability role.
+                Membership rather than a second grant set leaves one schema
+                permission contract to audit.
   3. tenant   — optional, install only, and convergent.
 */ -}}
 apiVersion: batch/v1
@@ -64,7 +65,7 @@ spec:
             - sh
             - -ec
             - |
-              until psql "$DATABASE_URL" -tAc 'select 1' >/dev/null 2>&1; do
+              until PGDATABASE="$DATABASE_URL" psql -tAc 'select 1' >/dev/null 2>&1; do
                 echo "waiting for {{ include "synveda.clusterName" . }} to accept connections"
                 sleep 3
               done
@@ -87,22 +88,204 @@ spec:
             - -ec
             - |
               # `synveda_app` is NOLOGIN and holds exactly the grants the
-              # migrations gave it. The gateway's role inherits them by
-              # membership, so nothing here has to be kept in sync with a
-              # migration. Re-granting is a no-op, which is what makes the
-              # job safe to run on every upgrade.
-              psql "$DATABASE_URL" -v ON_ERROR_STOP=1 \
+              # migrations gave it. Runtime logins inherit those grants by
+              # membership, so nothing here duplicates a migration-owned
+              # permission list. Re-granting is a no-op on every upgrade.
+              PGDATABASE="$DATABASE_URL" psql -v ON_ERROR_STOP=1 \
                 -c 'grant synveda_app to "{{ include "synveda.appRole" . }}"'
-              # Prove it, rather than assume it: this is the exact read the
-              # gateway's sentinel waits on.
-              psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc \
-                "select rolcanlogin || '|' || rolsuper || '|' || rolbypassrls || '|' ||
-                        pg_has_role('{{ include "synveda.appRole" . }}', 'synveda_app', 'member')
-                   from pg_catalog.pg_roles
-                  where rolname = '{{ include "synveda.appRole" . }}'" \
-                | grep -qx 'true|false|false|true'
+
+              # Read the password from the inherited Secret environment inside
+              # psql so it never appears in the child argv. `format(%L)` quotes
+              # every byte accepted by PostgreSQL, and psql does not print the
+              # generated statement.
+              PGDATABASE="$DATABASE_URL" psql -q -v ON_ERROR_STOP=1 <<'SQL'
+              \getenv worker_password SYNVEDA_WORKER_PASSWORD
+              select format(
+                'create role {{ include "synveda.workerRole" . }} login password %L',
+                :'worker_password'
+              )
+              where not exists (
+                select 1 from pg_catalog.pg_roles
+                 where rolname = '{{ include "synveda.workerRole" . }}'
+              )
+              \gexec
+              select format(
+                'alter role {{ include "synveda.workerRole" . }} with login inherit nosuperuser nocreatedb nocreaterole noreplication nobypassrls connection limit -1 password %L',
+                :'worker_password'
+              )
+              \gexec
+              grant synveda_app to {{ include "synveda.workerRole" . }}
+                with admin false, inherit true, set true;
+              SQL
+
+              # The inherited capability role must be safe to SET ROLE into,
+              # not merely NOLOGIN. Refuse drift rather than granting through
+              # an elevated or owning role.
+              PGDATABASE="$DATABASE_URL" psql -v ON_ERROR_STOP=1 -tAc \
+                "select case when exists (
+                          select 1 from pg_catalog.pg_roles app
+                           where app.rolname = 'synveda_app'
+                             and not app.rolcanlogin and app.rolinherit
+                             and not app.rolsuper and not app.rolcreatedb
+                             and not app.rolcreaterole and not app.rolreplication
+                             and not app.rolbypassrls
+                             and not exists (
+                               select 1 from pg_catalog.pg_database
+                                where datdba = app.oid
+                             )
+                             and not exists (
+                               select 1 from pg_catalog.pg_namespace
+                                where nspowner = app.oid
+                             )
+                             and not exists (
+                               select 1 from pg_catalog.pg_class
+                                where relowner = app.oid
+                               union all
+                               select 1 from pg_catalog.pg_proc
+                                where proowner = app.oid
+                             )
+                             and not exists (
+                               select 1 from pg_catalog.pg_auth_members
+                                where member = app.oid
+                             )
+                        ) then 'ok' else 'invalid' end" \
+                | grep -qx 'ok'
+
+              # Prove both runtime identities. The worker is additionally
+              # refused if it owns the database/schema/application objects or
+              # inherits any role other than `synveda_app`; its process repeats
+              # this sentinel before becoming ready.
+              PGDATABASE="$DATABASE_URL" psql -v ON_ERROR_STOP=1 -tAc \
+                "select case when
+                          roles.rolcanlogin
+                          and not roles.rolsuper and not roles.rolbypassrls
+                          and pg_has_role(roles.rolname, 'synveda_app', 'member')
+                          and exists (
+                            select 1
+                              from pg_catalog.pg_auth_members membership
+                              join pg_catalog.pg_roles granted_role
+                                on granted_role.oid = membership.roleid
+                             where membership.member = roles.oid
+                               and granted_role.rolname = 'synveda_app'
+                               and not membership.admin_option
+                               and membership.inherit_option
+                               and membership.set_option
+                          )
+                          and not exists (
+                            select 1
+                              from pg_catalog.pg_auth_members membership
+                              join pg_catalog.pg_roles granted_role
+                                on granted_role.oid = membership.roleid
+                             where membership.member = roles.oid
+                               and granted_role.rolname = 'synveda_app'
+                               and (
+                                 membership.admin_option
+                                 or not membership.inherit_option
+                                 or not membership.set_option
+                               )
+                          )
+                        then 'ok' else 'invalid' end
+                   from pg_catalog.pg_roles roles
+                  where roles.rolname = '{{ include "synveda.appRole" . }}'" \
+                | grep -qx 'ok'
+              PGDATABASE="$DATABASE_URL" psql -v ON_ERROR_STOP=1 -tAc \
+                "select case when
+                          roles.rolcanlogin and roles.rolinherit
+                          and not roles.rolsuper and not roles.rolcreatedb
+                          and not roles.rolcreaterole and not roles.rolreplication
+                          and not roles.rolbypassrls
+                          and pg_has_role(roles.rolname, 'synveda_app', 'member')
+                          and exists (
+                            select 1
+                              from pg_catalog.pg_auth_members membership
+                              join pg_catalog.pg_roles granted_role
+                                on granted_role.oid = membership.roleid
+                             where membership.member = roles.oid
+                               and granted_role.rolname = 'synveda_app'
+                               and not membership.admin_option
+                               and membership.inherit_option
+                               and membership.set_option
+                          )
+                          and not exists (
+                            select 1
+                              from pg_catalog.pg_auth_members membership
+                              join pg_catalog.pg_roles granted_role
+                                on granted_role.oid = membership.roleid
+                             where membership.member = roles.oid
+                               and granted_role.rolname = 'synveda_app'
+                               and (
+                                 membership.admin_option
+                                 or not membership.inherit_option
+                                 or not membership.set_option
+                               )
+                          )
+                          and not exists (
+                            select 1 from pg_catalog.pg_database
+                             where datdba = roles.oid
+                          )
+                          and not exists (
+                            select 1 from pg_catalog.pg_namespace
+                             where nspowner = roles.oid
+                          )
+                          and not exists (
+                            select 1 from pg_catalog.pg_class objects
+                             where objects.relowner = roles.oid
+                            union all
+                            select 1 from pg_catalog.pg_proc routines
+                             where routines.proowner = roles.oid
+                          )
+                          and not exists (
+                            select 1
+                              from pg_catalog.pg_auth_members memberships
+                              join pg_catalog.pg_roles granted_roles
+                                on granted_roles.oid = memberships.roleid
+                             where memberships.member = roles.oid
+                               and granted_roles.rolname <> 'synveda_app'
+                          )
+                        then 'ok' else 'invalid' end
+                   from pg_catalog.pg_roles roles
+                  where roles.rolname = '{{ include "synveda.workerRole" . }}'" \
+                | grep -qx 'ok'
+
+              # Individually valid epoch-3 credentials are still unsafe if
+              # they split one deployment across databases. Connect through
+              # the mounted worker URL and compare server-observed identities,
+              # including the live postmaster generation; neither URL nor
+              # password is placed in a child argv or output.
+              WORKER_DATABASE_URL=
+              IFS= read -r WORKER_DATABASE_URL < /run/secrets/synveda-worker/database_url || [ -n "$WORKER_DATABASE_URL" ]
+              ADMIN_DATABASE_IDENTITY=$(PGDATABASE="$DATABASE_URL" psql -v ON_ERROR_STOP=1 -tAc \
+                "select control.system_identifier::text || '|' || database.oid::text || '|' ||
+                        extract(epoch from pg_catalog.pg_postmaster_start_time())::text
+                   from pg_catalog.pg_control_system() control
+                   join pg_catalog.pg_database database
+                     on database.datname = current_database()
+                  where not pg_catalog.pg_is_in_recovery()
+                    and not current_setting('transaction_read_only')::boolean")
+              WORKER_DATABASE_IDENTITY=$(PGDATABASE="$WORKER_DATABASE_URL" psql -v ON_ERROR_STOP=1 -tAc \
+                "select control.system_identifier::text || '|' || database.oid::text || '|' ||
+                        extract(epoch from pg_catalog.pg_postmaster_start_time())::text
+                   from pg_catalog.pg_control_system() control
+                   join pg_catalog.pg_database database
+                     on database.datname = current_database()
+                  where current_user = '{{ include "synveda.workerRole" . }}'
+                    and not pg_catalog.pg_is_in_recovery()
+                    and not current_setting('transaction_read_only')::boolean")
+              if [ -z "$ADMIN_DATABASE_IDENTITY" ] || [ -z "$WORKER_DATABASE_IDENTITY" ] || [ "$ADMIN_DATABASE_IDENTITY" != "$WORKER_DATABASE_IDENTITY" ]; then
+                echo "the install and worker credentials must target one live PostgreSQL primary instance and database" >&2
+                exit 1
+              fi
           env:
             {{- include "synveda.adminDsnEnv" . | nindent 12 }}
+            - name: SYNVEDA_WORKER_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.worker.databaseExistingSecret }}
+                  key: {{ .Values.worker.databasePasswordSecretKey }}
+          volumeMounts:
+            - name: worker-database
+              mountPath: /run/secrets/synveda-worker
+              readOnly: true
       containers:
         - name: tenant
           image: {{ include "synveda.image" . }}
@@ -140,7 +323,7 @@ spec:
             - sh
             - -ec
             - |
-              echo "schema migrated and the gateway role granted."
+              echo "schema migrated and the gateway and worker roles converged."
               {{- if .Values.install.tenant.slug }}
               echo "tenant admission runs on install only; this is revision {{ .Release.Revision }}."
               {{- else }}
@@ -149,4 +332,12 @@ spec:
               echo "see 'admitting a tenant' in the chart's NOTES."
               {{- end }}
           {{- end }}
+      volumes:
+        - name: worker-database
+          secret:
+            secretName: {{ .Values.worker.databaseExistingSecret }}
+            defaultMode: 0440
+            items:
+              - key: {{ .Values.worker.databaseUrlSecretKey }}
+                path: database_url
 {{- end }}

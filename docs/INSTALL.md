@@ -1,9 +1,9 @@
 # Installing Synveda — one runtime, single-node deployment
 
-The single-node form of Synveda's context-platform runtime: one gateway,
-Postgres, a bundled OIDC provider and optional TEI. Personal, team and
-enterprise are governed Configuration documents, not different binaries,
-schemas or deployment modes (CPR-36, ADR-0095).
+The single-node form of Synveda's context-platform runtime: separate gateway
+and core-worker processes, Postgres, a bundled OIDC provider and optional TEI.
+Personal, team and enterprise are governed Configuration documents, not
+different binaries, schemas or deployment modes (CPR-36, ADR-0095).
 
 For the same runtime on CloudNativePG with your own IdP, see
 [the chart](../deploy/helm/synveda) (OPS-2).
@@ -25,24 +25,41 @@ curl -fsSL https://raw.githubusercontent.com/synveda/synveda/main/scripts/instal
 synveda init --slug acme --name "ACME"
 ```
 
-The installer downloads one release — the `synveda` CLI, the gateway binary,
-the admin console and a self-contained compose profile — and puts the CLI on
-your `PATH` and the rest under `~/.synveda`. macOS arm64 and Linux x86_64;
+The installer downloads one release — the `synveda` CLI, gateway and worker
+binaries, the admin console and a self-contained compose profile — and puts the
+CLI on your `PATH` and the rest under `~/.synveda`. macOS arm64 and Linux x86_64;
 the binaries are unsigned, and the checksums prove a download arrived intact
 rather than who built it (OPS-8, ADR-0065).
 
 `init` starts Postgres, Jaeger and bundled Rauthy; applies migrations; admits
-one tenant; converges a non-superuser/non-BYPASSRLS gateway login; registers
-the OIDC client/operator; and starts the gateway on
-`http://127.0.0.1:8120`. The database owner remains bootstrap-only, so the
-same forced-RLS backstop used by Helm is live here too.
+one tenant; converges distinct gateway and worker logins that own no database
+and own no schema, relation or routine in the selected Synveda database and are
+non-superuser/non-`BYPASSRLS`; registers the OIDC client/operator; starts the gateway on
+`http://127.0.0.1:8120`; and starts the private core worker. The database owner
+remains bootstrap-only in this installed shape, so forced RLS backs both
+runtime roles.
 
-An external database operator may set `SYNVEDA_GATEWAY_DATABASE_URL` to a
-separately provisioned application login before running `init`. The named role
-must already be LOGIN, non-superuser, non-BYPASSRLS and a `synveda_app` member;
-init verifies those facts and refuses otherwise. The bootstrap-owner
-`DATABASE_URL` is never handed to the gateway, and both URLs are password-
-redacted in diagnostics.
+When `DATABASE_URL` is explicit—even when its host is loopback—`init` treats it
+as an operator-owned bootstrap target and also requires both
+`SYNVEDA_GATEWAY_DATABASE_URL` and `SYNVEDA_WORKER_DATABASE_URL` to name
+separately provisioned application logins. Only the implicit bundled default
+derives and converges the fixed development credentials. The roles must be
+different and each must be LOGIN/INHERIT, owner of no database and no schema,
+relation or routine in the selected Synveda database, non-superuser,
+non-`BYPASSRLS`, with `synveda_app` as its
+only membership. Init connects through each exact URL, proves the role, epoch
+and writable-primary state, and compares the PostgreSQL cluster identity,
+database OID and live postmaster start marker with the bootstrap connection. A
+different live primary instance or read-only target is refused. The marker is
+not persisted across database restarts. The bootstrap-owner `DATABASE_URL` is
+never handed to either
+runtime, and all URLs are password-redacted in diagnostics.
+
+All product database URLs must use the `postgres` or `postgresql` scheme and
+name the database explicitly in their path or effective `dbname` parameter.
+Fragments and query keys the pinned SQLx PostgreSQL driver does not understand
+are rejected before parsing, so an ignored query value cannot enter WARN logs
+and `reset` cannot infer its destructive target from ambient `PGDATABASE`.
 
 <details>
 <summary>From a checkout instead</summary>
@@ -50,7 +67,7 @@ redacted in diagnostics.
 Contributors, and anyone on a platform the release does not ship:
 
 ```sh
-cargo build -p synveda-cli -p synveda-gateway
+cargo build -p synveda-cli -p synveda-gateway --bins
 pnpm --filter @synveda/console build     # optional; without it /console/ 404s
 ./target/debug/synveda init --slug acme --name "ACME"
 ```
@@ -62,7 +79,7 @@ release, so having both is fine and the tree you are editing wins.
 
 `init` converges — run it again as often as you like. It never drops a
 database, a volume or a tenant, and if you change something it restarts the
-gateway to match.
+gateway and worker to match.
 
 ### What it deliberately does not do
 
@@ -654,11 +671,14 @@ directory-owned rows and tell the operator to change the directory or use the
 dedicated assignment route. No live Entra or Okta verification is claimed by
 the repository fixtures; they remain labelled captured or transcribed.
 
-With a real issuer the gateway runs as the compose `gateway` container. With
-the bundled one it runs as a host process, because the bundled issuer's URL
-is `http://localhost:8100/...` and RFC 6761 makes every resolver answer
-`localhost` with the *container's own* loopback — a container cannot reach
-it, by any configuration. ADR-0055 decision 8 has the measurements.
+With a real issuer the gateway and worker run as separate Compose services from
+the same product image. During the remaining bundled-Rauthy transition only the
+gateway runs as a host process, because the issuer's URL is
+`http://localhost:8100/...` and RFC 6761 makes every resolver answer
+`localhost` with the *container's own* loopback — a container cannot reach it,
+by any configuration. The worker remains containerised and private. ADR-0055
+decision 8 has the localhost measurements; CPR-45 removes the workaround with
+one proxy-routed Keycloak issuer name.
 
 ## PulseBoard product walkthrough
 
@@ -813,7 +833,8 @@ synveda init --slug <your slug> --name "<your name>"
 ```
 
 The installer carries your `.env` across, `init` reuses the key it minted
-rather than replacing it, and the gateway restarts onto the new binary. There
+rather than replacing it, and the gateway and core worker restart onto the new
+release. There
 is no in-place upgrade and no migration story beyond that — reinstalling is
 how you upgrade (ADR-0065 decision 1's reversal trigger is somebody wanting
 more).
@@ -958,10 +979,11 @@ Everything is idempotent — a second run finds nothing, says so, and exits 0.
 |---|---|
 | `synveda` | the CLI, on your `PATH` |
 | `~/.synveda/bin/synveda-gateway` | the gateway, run as a host process |
+| `~/.synveda/bin/synveda-worker` | the private core-worker direct-binary artefact; Compose runs its image-contained copy |
 | `~/.synveda/console/` | the admin console bundle |
 | `~/.synveda/profile/` | the compose file, the Rauthy config, the version |
 | `~/.synveda/plugin/` | the Claude Code marketplace, installed into no client |
-| `~/.synveda/data/` | the gateway's pidfile, log and rendered configuration |
+| `~/.synveda/data/` | the transitional gateway pidfile/log and rendered configuration |
 | `~/.synveda/data/kms.key` | the deployment's key-encryption key, `0600` — **back this up** |
 
 `SYNVEDA_HOME` moves all of it; `SYNVEDA_BIN` moves the CLI.
@@ -986,9 +1008,10 @@ separate, explicit step above, and the OPS-8 demo asserts the absence rather
 than trusting it.
 
 The gateway runs on the host rather than in a container **only** on the
-bundled-issuer path, and that is a measurement rather than a preference —
-see the note under "Using your own IdP" above. With `--issuer` it runs as the
-`gateway` container from `ghcr.io/synveda/gateway`.
+transitional bundled-issuer path, and that is a measurement rather than a
+preference — see the note under "Using your own IdP" above. The worker is a
+Compose service in both paths. With `--issuer`, gateway and worker use the same
+`ghcr.io/synveda/gateway` image with distinct commands.
 
 The CLI and the profile ship together and `init` refuses to mix them: a
 profile from another release stops the install with the two versions named,
@@ -1006,6 +1029,18 @@ path and generated install contract. The release-install CI job additionally
 installs packaged artefacts with `cargo`, `rustc` and `rustup` shadowed by
 failing shims, so “no Rust toolchain” is evidence rather than prose. CPR-36's
 deployment gate renders Compose and Helm, packages the release twice and proves
-the gateway DSN is never the database owner; the chart's kind job adds a real
-OIDC/public-API round trip, forced-RLS role assertion and CloudNativePG primary
+process/credential separation. With an explicit runtime-URL pair, local init
+connects through both actual DSNs and refuses a different live PostgreSQL
+primary instance or database, or a read-only target. In the default local path it verifies the derived host-side
+`localhost` connections; Compose then reaches that service through its
+`postgres` network alias, so this is not evidence that init connected through
+the exact container DSN. The worker independently repeats its role/epoch check
+against its real container session and writable-primary state at boot and
+while running; the gateway still
+lacks that boot-time sentinel. Helm's install job compares the system
+identifier, database OID and current postmaster start marker of its bootstrap
+target with the mounted worker DSN. Helm currently proves non-ownership only for the
+worker; its gateway still uses CloudNativePG's owner application Secret and
+remains a documented pre-reference gap. The chart's kind job adds a real
+OIDC/public-API round trip, worker-role assertion and CloudNativePG primary
 failover.

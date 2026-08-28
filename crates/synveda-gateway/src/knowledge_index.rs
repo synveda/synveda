@@ -61,23 +61,84 @@ pub struct SweepSummary {
     pub errors: usize,
 }
 
-/// Starts one immediate sweep and then one per configured interval.
-#[must_use]
-pub fn spawn(
+/// Runs one immediate sweep and then one per configured interval until
+/// shutdown.
+///
+/// Shutdown cancels the current tenant future. Provider output is written
+/// only after the embedding call returns and inside a tenant transaction, so
+/// cancellation cannot leave a partial sidecar write.
+pub(crate) async fn run(
     pool: PgPool,
     embedder: Arc<AnyEmbedder>,
     config: Config,
-) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(async move {
-        let mut ticker = tokio::time::interval(config.poll_interval);
-        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        loop {
-            ticker.tick().await;
-            if let Err(error) = sweep_once(&pool, &embedder, &config).await {
-                tracing::warn!(%error, "Knowledge embedding sweep failed; retrying");
+    mut shutdown: tokio::sync::watch::Receiver<bool>,
+) {
+    let mut ticker = tokio::time::interval(config.poll_interval);
+    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    loop {
+        tokio::select! {
+            changed = shutdown.changed() => {
+                if changed.is_err() || *shutdown.borrow() {
+                    return;
+                }
+            }
+            _ = ticker.tick() => {}
+        }
+        if *shutdown.borrow() {
+            return;
+        }
+        match sweep_until_shutdown(&pool, &embedder, &config, &mut shutdown).await {
+            Ok(true) => {}
+            Ok(false) => return,
+            Err(error) => tracing::warn!(%error, "Knowledge embedding sweep failed; retrying"),
+        }
+    }
+}
+
+async fn sweep_until_shutdown(
+    pool: &PgPool,
+    embedder: &AnyEmbedder,
+    config: &Config,
+    shutdown: &mut tokio::sync::watch::Receiver<bool>,
+) -> Result<bool> {
+    let active = tokio::select! {
+        biased;
+        () = crate::shutdown::requested(shutdown) => return Ok(false),
+        result = tenants::active(pool) => result?,
+    };
+    for tenant in active {
+        if *shutdown.borrow() {
+            return Ok(false);
+        }
+        let result = tokio::select! {
+            biased;
+            () = crate::shutdown::requested(shutdown) => {
+                tracing::info!(tenant.id = %tenant.id, "Knowledge embedding tenant pass cancelled for worker shutdown");
+                return Ok(false);
+            }
+            result = sweep_tenant(pool, embedder, tenant.id, config.batch) => result,
+        };
+        match result {
+            Ok(sweep) => {
+                let outcome = if sweep == TenantSweep::default() {
+                    "empty"
+                } else {
+                    "updated"
+                };
+                metrics::counter!(KNOWLEDGE_EMBED_SWEEPS_TOTAL, "outcome" => outcome).increment(1);
+            }
+            Err(error) => {
+                metrics::counter!(KNOWLEDGE_EMBED_SWEEPS_TOTAL, "outcome" => "error").increment(1);
+                tracing::warn!(
+                    tenant.id = %tenant.id,
+                    model = embedder.model(),
+                    %error,
+                    "tenant Knowledge embedding sweep failed; retrying"
+                );
             }
         }
-    })
+    }
+    Ok(true)
 }
 
 /// Sweeps every active tenant without allowing one tenant or one dependency
@@ -118,7 +179,7 @@ pub async fn sweep_once(
 }
 
 /// Embeds one tenant's next immutable batch. Public for deterministic tests
-/// and acceptance demos; production reaches it only through [`spawn`].
+/// and acceptance demos; production reaches it only through [`run`].
 #[tracing::instrument(
     name = "knowledge.embedding.sweep_tenant",
     skip_all,

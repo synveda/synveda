@@ -6,6 +6,7 @@
 //! statuses are `Error::Dependency`, which the worker maps to a
 //! visibility-timeout retry (ADR-0022 decisions 3 and 6).
 
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use axum::extract::State;
@@ -97,7 +98,8 @@ async fn claude_request_and_response_contract() {
     }))
     .await;
     let extractor =
-        ClaudeExtractor::new(API_KEY.to_owned(), "claude-opus-4-8".to_owned(), base_url);
+        ClaudeExtractor::new(API_KEY.to_owned(), "claude-opus-4-8".to_owned(), base_url)
+            .expect("configure Claude client");
     let outcome = extractor.extract(&sample_input()).await.expect("extract");
 
     let (headers, body) = captured
@@ -152,12 +154,13 @@ async fn claude_malformed_output_is_a_dependency_error() {
             "type": "tool_use",
             "id": "tu-1",
             "name": "emit_extraction",
-            "input": { "candidates": "not-a-list" }
+            "input": { "candidates": "SYNVEDA_SECRET_SENTINEL_NOT_A_LIST" }
         }]
     }))
     .await;
     let extractor =
-        ClaudeExtractor::new(API_KEY.to_owned(), "claude-opus-4-8".to_owned(), base_url);
+        ClaudeExtractor::new(API_KEY.to_owned(), "claude-opus-4-8".to_owned(), base_url)
+            .expect("configure Claude client");
     let error = extractor
         .extract(&sample_input())
         .await
@@ -166,28 +169,75 @@ async fn claude_malformed_output_is_a_dependency_error() {
         matches!(&error, Error::Dependency { service, .. } if service == "claude-api"),
         "wrong error: {error:?}"
     );
+    assert!(!error.to_string().contains("SYNVEDA_SECRET_SENTINEL"));
 }
 
-/// A refusal (or any response without the forced tool call) fails with
-/// the stop reason named — diagnosable from the log line alone.
+/// A refusal (or any response without the forced tool call) uses a closed
+/// diagnostic code; provider response fields are not copied into logs.
 #[tokio::test]
-async fn claude_missing_tool_call_names_the_stop_reason() {
+async fn claude_missing_tool_call_uses_a_content_free_code() {
     let (base_url, _) = spawn_claude_mock(json!({
         "model": "claude-opus-4-8",
-        "stop_reason": "refusal",
+        "stop_reason": "SYNVEDA_SECRET_SENTINEL_REFUSAL",
         "content": []
     }))
     .await;
     let extractor =
-        ClaudeExtractor::new(API_KEY.to_owned(), "claude-opus-4-8".to_owned(), base_url);
+        ClaudeExtractor::new(API_KEY.to_owned(), "claude-opus-4-8".to_owned(), base_url)
+            .expect("configure Claude client");
     let error = extractor
         .extract(&sample_input())
         .await
         .expect_err("must fail");
     assert!(
-        matches!(&error, Error::Dependency { message, .. } if message.contains("refusal")),
+        matches!(&error, Error::Dependency { message, .. } if message == "required_tool_call_missing"),
         "wrong error: {error:?}"
     );
+    assert!(!error.to_string().contains("SYNVEDA_SECRET_SENTINEL"));
+}
+
+/// Provider redirects are configuration failures, not an instruction to
+/// forward the API credential to another origin.
+#[tokio::test]
+async fn claude_does_not_follow_redirects() {
+    let redirected_requests = Arc::new(AtomicUsize::new(0));
+    let redirected_counter = Arc::clone(&redirected_requests);
+    let router = Router::new()
+        .route(
+            "/v1/messages",
+            post(|| async {
+                (
+                    axum::http::StatusCode::TEMPORARY_REDIRECT,
+                    [(axum::http::header::LOCATION, "/redirect-target")],
+                )
+            }),
+        )
+        .route(
+            "/redirect-target",
+            post(move || {
+                let redirected_counter = Arc::clone(&redirected_counter);
+                async move {
+                    redirected_counter.fetch_add(1, Ordering::SeqCst);
+                    Json(json!({}))
+                }
+            }),
+        );
+    let base_url = spawn_mock(router).await;
+    let extractor =
+        ClaudeExtractor::new(API_KEY.to_owned(), "claude-opus-4-8".to_owned(), base_url)
+            .expect("configure Claude client");
+
+    let error = extractor
+        .extract(&sample_input())
+        .await
+        .expect_err("redirect must fail closed");
+
+    assert!(
+        matches!(&error, Error::Dependency { message, .. } if message == "upstream_http_307"),
+        "wrong error: {error:?}"
+    );
+    assert_eq!(redirected_requests.load(Ordering::SeqCst), 0);
+    assert!(!error.to_string().contains(API_KEY));
 }
 
 /// The vLLM impl speaks OpenAI-compatible chat completions, tolerates a
@@ -218,7 +268,8 @@ async fn vllm_parses_fenced_json_completions() {
         ),
     );
     let base_url = spawn_mock(router).await;
-    let extractor = VllmExtractor::new("qwen-72b-instruct".to_owned(), base_url);
+    let extractor = VllmExtractor::new("qwen-72b-instruct".to_owned(), base_url)
+        .expect("configure vLLM client");
     let outcome = extractor.extract(&sample_input()).await.expect("extract");
 
     let (_, body) = captured
@@ -236,8 +287,8 @@ async fn vllm_parses_fenced_json_completions() {
     assert_eq!(outcome.candidates[0].knowledge_type, KnowledgeType::Fact);
 }
 
-/// An error status is a `Dependency` error carrying the status, with the
-/// body truncated — never a panic, never a silent empty outcome.
+/// An error status is a `Dependency` error carrying only the status. The
+/// upstream body may contain prompts or credentials and is never surfaced.
 #[tokio::test]
 async fn error_statuses_are_dependency_errors() {
     let router = Router::new().route(
@@ -245,12 +296,12 @@ async fn error_statuses_are_dependency_errors() {
         post(|| async {
             (
                 axum::http::StatusCode::INTERNAL_SERVER_ERROR,
-                "vllm exploded",
+                "SYNVEDA_SECRET_SENTINEL_PROVIDER_BODY",
             )
         }),
     );
     let base_url = spawn_mock(router).await;
-    let extractor = VllmExtractor::new("m".to_owned(), base_url);
+    let extractor = VllmExtractor::new("m".to_owned(), base_url).expect("configure vLLM client");
     let error = extractor
         .extract(&sample_input())
         .await
@@ -259,4 +310,5 @@ async fn error_statuses_are_dependency_errors() {
         matches!(&error, Error::Dependency { message, .. } if message.contains("500")),
         "wrong error: {error:?}"
     );
+    assert!(!error.to_string().contains("SYNVEDA_SECRET_SENTINEL"));
 }

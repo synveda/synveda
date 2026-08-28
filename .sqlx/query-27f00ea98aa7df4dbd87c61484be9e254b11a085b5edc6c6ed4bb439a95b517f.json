@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "revoke pg_read_all_data from synveda_worker_process_test",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "27f00ea98aa7df4dbd87c61484be9e254b11a085b5edc6c6ed4bb439a95b517f"
+}

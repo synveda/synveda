@@ -1,10 +1,19 @@
 [package]
 name = "synveda-gateway"
-description = "HTTP/gRPC gateway — the only binary that speaks to the outside"
+description = "Synveda request gateway and private core-worker product processes"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
+default-run = "synveda-gateway"
+
+[[bin]]
+name = "synveda-gateway"
+path = "src/main.rs"
+
+[[bin]]
+name = "synveda-worker"
+path = "src/bin/synveda-worker.rs"
 
 [dependencies]
 synveda-audit = { workspace = true }

@@ -54,7 +54,7 @@ spec:
             - sh
             - -ec
             - |
-              until psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -tAc 'select 1 from tenants limit 1' >/dev/null 2>&1; do
+              until PGDATABASE="$DATABASE_URL" psql -v ON_ERROR_STOP=1 -tAc 'select 1 from tenants limit 1' >/dev/null 2>&1; do
                 echo "waiting for the install job: schema and the synveda_app grant"
                 sleep 3
               done
@@ -117,23 +117,6 @@ spec:
             {{- if eq .Values.embedder "tei" }}
             - name: SYNVEDA_TEI_URL
               value: {{ if .Values.tei.enabled }}http://{{ include "synveda.fullname" . }}-tei:80{{ else }}{{ .Values.tei.url }}{{ end }}
-            {{- end }}
-            - name: SYNVEDA_EXTRACTOR
-              value: {{ .Values.extractor.kind | quote }}
-            {{- with .Values.extractor.model }}
-            - name: SYNVEDA_EXTRACTOR_MODEL
-              value: {{ . | quote }}
-            {{- end }}
-            {{- if eq .Values.extractor.kind "claude" }}
-            - name: ANTHROPIC_API_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ .Values.extractor.existingSecret }}
-                  key: ANTHROPIC_API_KEY
-            {{- end }}
-            {{- if eq .Values.extractor.kind "vllm" }}
-            - name: SYNVEDA_VLLM_BASE_URL
-              value: {{ .Values.extractor.baseUrl | quote }}
             {{- end }}
             {{- with .Values.otel.endpoint }}
             - name: OTEL_EXPORTER_OTLP_ENDPOINT

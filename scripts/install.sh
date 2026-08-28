@@ -15,6 +15,7 @@
 #
 #   $SYNVEDA_BIN/synveda          the CLI            (default /usr/local/bin)
 #   $SYNVEDA_HOME/bin/synveda-gateway                (default ~/.synveda)
+#   $SYNVEDA_HOME/bin/synveda-worker                 (default ~/.synveda)
 #   $SYNVEDA_HOME/console/        the admin console bundle
 #   $SYNVEDA_HOME/profile/        compose file, Rauthy config, version
 #   $SYNVEDA_HOME/plugin/         the Claude Code plugin, as a marketplace
@@ -63,7 +64,7 @@ case "$os/$arch" in
   Everything still works from source on any platform Rust and Docker do:
 
     git clone https://github.com/$REPO
-    cd synveda && cargo build --release -p synveda-cli -p synveda-gateway
+    cd synveda && cargo build --release -p synveda-cli -p synveda-gateway --bins
     ./target/release/synveda init
 
   If this platform matters to you, say so — adding one is a build matrix row."
@@ -160,6 +161,7 @@ tar -xzf "$work/$plugin"   -C "$work"
 
 [ -f "$work/synveda" ]          || die "$archive did not contain a synveda binary"
 [ -f "$work/synveda-gateway" ]  || die "$archive did not contain a synveda-gateway binary"
+[ -f "$work/synveda-worker" ]   || die "$archive did not contain a synveda-worker binary"
 
 install_file() { # src dst — install(1) is not on every minimal image
   cp "$1" "$2.tmp" && chmod 755 "$2.tmp" && mv "$2.tmp" "$2"
@@ -182,6 +184,7 @@ sudo_install_file() { # src dst — install_file's rename dance, as root
 }
 
 install_file "$work/synveda-gateway" "$HOME_DIR/bin/synveda-gateway"
+install_file "$work/synveda-worker" "$HOME_DIR/bin/synveda-worker"
 rm -rf "$HOME_DIR/console"
 cp -R "$work/console" "$HOME_DIR/console"
 
@@ -248,6 +251,7 @@ fi
 if [ "$os" = "Darwin" ] && command -v xattr >/dev/null 2>&1; then
   xattr -d com.apple.quarantine "$BIN_DIR/synveda" 2>/dev/null || true
   xattr -d com.apple.quarantine "$HOME_DIR/bin/synveda-gateway" 2>/dev/null || true
+  xattr -d com.apple.quarantine "$HOME_DIR/bin/synveda-worker" 2>/dev/null || true
 fi
 
 # ── What it got ──────────────────────────────────────────────────────────
@@ -256,6 +260,7 @@ say "synveda $version installed."
 say ""
 say "  CLI       $BIN_DIR/synveda"
 say "  gateway   $HOME_DIR/bin/synveda-gateway"
+say "  worker    $HOME_DIR/bin/synveda-worker"
 say "  profile   $HOME_DIR/profile"
 say "  console   $HOME_DIR/console"
 say "  plugin    $HOME_DIR/plugin        (not installed into any client)"

@@ -136,8 +136,8 @@ Only the reverse proxy publishes host ports in reference mode.
 | Service | Container port | Exposure | Health/readiness |
 |---|---:|---|---|
 | reverse proxy | 80, 443 | public reference; loopback-only development | process/config health; upstream probes are separate |
-| gateway | 8120 | private application network | `/healthz` process; `/readyz` PostgreSQL + schema epoch + drain state |
-| worker | 8121 | bound to container loopback for self-health only; not host/network published | `/healthz` process; `/readyz` database, claimed-work/drain and heartbeat state |
+| gateway | 8120 | private application network | current `/healthz` process and `/readyz` PostgreSQL + schema epoch; reference target adds drain-state withdrawal before shutdown |
+| worker | 8121 | bound to container loopback for self-health only; not host/network published | `/healthz` process; `/readyz` lifecycle, scheduler heartbeat, database/schema and exact runtime-role state; permanent epoch/role drift faults the supervised process; `/metrics` is transitional |
 | PostgreSQL | 5432 | private data networks | `pg_isready` plus schema/role sentinels |
 | Keycloak frontend | 8080 | not host-published; reverse proxy is the only configured public route | public flow is probed through proxy |
 | Keycloak management | 9000 | not host-published or routed; reachable only by private network peers | `/health/started`, `/health/live`, `/health/ready`; metrics private |
@@ -276,7 +276,12 @@ superuser and `BYPASSRLS` credentials never reach gateway or worker.
    leaving schema epoch 3 unchanged. Fresh installs run `0001` then `0002`;
    databases at epoch 1/2 or without a marker are still refused.
 3. Gateway and worker start only after the schema sentinel is readable through
-   their ordinary runtime roles.
+   their ordinary runtime roles. Bootstrap convergence connects through each
+   configured runtime credential and refuses read-only targets, different
+   PostgreSQL cluster identities, database OIDs or live postmaster start
+   markers; a valid epoch alone does not bind one deployment to one live
+   writable database primary. The start marker is compared only during
+   bootstrap and is not persisted across an ordinary database restart.
 4. Keycloak owns and automatically migrates only its database. Upgrade first
    takes a verified backup and follows the pinned release's supported path.
 5. Apalis schema setup is a one-shot migration command; workers never migrate
@@ -334,6 +339,15 @@ materialise the same per-service paths, but does not change setting meaning.
 | PostgreSQL bootstrap | `POSTGRES_USER`, database/role names | `POSTGRES_PASSWORD_FILE=/run/secrets/postgres_owner_password`; exact role files `/run/secrets/synveda_migrator_password`, `/run/secrets/synveda_gateway_password`, `/run/secrets/synveda_worker_password`, `/run/secrets/keycloak_database_password`, `/run/secrets/apalis_migrator_password`, `/run/secrets/apalis_runtime_password` |
 | backup | `SYNVEDA_BACKUP_REPOSITORY=posix|s3`, `SYNVEDA_BACKUP_POSIX_PATH`, `SYNVEDA_BACKUP_S3_ENDPOINT`, `SYNVEDA_BACKUP_S3_REGION`, `SYNVEDA_BACKUP_S3_BUCKET`, `SYNVEDA_BACKUP_S3_PATH_STYLE` | `SYNVEDA_BACKUP_REPOSITORY_KEY_FILE=/run/secrets/pgbackrest_repository_key`; `SYNVEDA_BACKUP_S3_ACCESS_KEY_FILE=/run/secrets/backup_s3_access_key`; `SYNVEDA_BACKUP_S3_SECRET_KEY_FILE=/run/secrets/backup_s3_secret_key`; `SYNVEDA_BACKUP_S3_SESSION_TOKEN_FILE=/run/secrets/backup_s3_session_token` |
 | demo identities | non-secret usernames only under `demo` | `SYNVEDA_DEMO_ADMIN_PASSWORD_FILE=/run/secrets/demo_admin_password`; `SYNVEDA_DEMO_MEMBER_PASSWORD_FILE=/run/secrets/demo_member_password` |
+
+Every Synveda PostgreSQL URL uses the `postgres` or `postgresql` scheme and
+explicitly names its database in the path or effective `dbname` parameter; it
+never inherits a target from `PGDATABASE`. Fragments and query keys not
+understood by the pinned SQLx PostgreSQL driver are refused before the driver
+parses them. This is both fail-closed configuration and a secrecy boundary:
+SQLx 0.8.6 otherwise logs an ignored query key together with its value.
+Diagnostics name only the application-owned setting and never the URL, parser
+detail or query value.
 
 Upstreams without native file support use a reviewed entrypoint that reads
 only its allowlisted `/run/secrets` paths into the child environment, unsets
@@ -517,13 +531,18 @@ ordinary RLS/PDP/audit evidence, content-free payloads and bounded retry.
 
 ## OpenTelemetry contract
 
-Gateway, core worker, operation dispatcher and Apalis executor emit traces and
-metrics over OTLP/gRPC only to the private Collector. Keycloak metrics are
-scraped only on its private management network. The Collector, not an
-application process, exposes a private Prometheus exporter for the optional
-local backend. The current gateway `/metrics` scrape surface is a cutover seam
-to retire; it is not part of the reference target. Health endpoints remain
-separate from telemetry.
+The current gateway and core worker emit traces over OTLP/gRPC. The worker's
+Prometheus `/metrics` listener is loopback-private, but the gateway's
+unauthenticated `/metrics` route shares its application listener and is exposed
+by the transitional Compose host port and Helm ingress. That is an explicit
+pre-reference gap, not private monitoring evidence. The reference target cuts
+application metrics over to OTLP/gRPC, so gateway, core worker, operation
+dispatcher and Apalis executor have the private Collector as their only
+telemetry egress seam. Keycloak metrics are scraped only on its private
+management network. The Collector, not an application process, exposes a
+private Prometheus exporter for the optional local backend. Current application
+`/metrics` surfaces are transitional cutover seams, not part of the reference
+target. Health endpoints remain separate from telemetry.
 
 The Collector owns receiver limits, memory limiting, attribute
 allowlisting/redaction, sampling, batching, bounded queues/retry and external
@@ -708,12 +727,13 @@ not substitutes for live provider support evidence.
 
 ## Single-host limits
 
-The reference has one host, one public proxy, one gateway and one PostgreSQL
-server. Restart policies reduce manual recovery time but do not survive host or
-volume loss. Login/handoff and some caches remain process-local until their
-separate scale feature lands. There is no zero-downtime upgrade, multi-region
-routing, certified compliance, owned RPO/RTO, general rate-limit/quota plane,
-complete tenant lifecycle, 24-hour mixed soak or general client-support claim.
+The reference has one host, one public proxy, one gateway, one core worker and
+one PostgreSQL server. Restart policies reduce manual recovery time but do not
+survive host or volume loss. Neither gateway nor worker is HA. Login/handoff and
+some caches remain process-local until their separate scale feature lands.
+There is no zero-downtime upgrade, multi-region routing, certified compliance,
+owned RPO/RTO, general rate-limit/quota plane, complete tenant lifecycle,
+24-hour mixed soak or general client-support claim.
 
 Allowed labels are `development`, `reference` and `playground`. Never label
 this topology HA, production SaaS, host-loss resilient, disaster-recovery

@@ -35,7 +35,7 @@ use synveda_audit::{Actor, AuditAction, Outcome};
 use synveda_store::{directory, identities, rls, scopes};
 use synveda_types::{DirectoryUser, Identity, IdentityId, IdentityKind, Result, Tenant};
 
-use crate::app::AppState;
+use crate::app::{AppState, DirectoryRuntime};
 use crate::audit;
 use crate::telemetry::SCIM_RECONCILES_TOTAL;
 
@@ -120,6 +120,15 @@ pub async fn reconcile(
     source: DirectorySource,
     user: &DirectoryUser,
 ) -> Result<Reconciled> {
+    reconcile_runtime(&state.directory_runtime(), tenant, source, user).await
+}
+
+pub(crate) async fn reconcile_runtime(
+    state: &DirectoryRuntime,
+    tenant: &Tenant,
+    source: DirectorySource,
+    user: &DirectoryUser,
+) -> Result<Reconciled> {
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant.id).await?;
     let existing = find_identity(&mut tx, tenant, user).await?;
 
@@ -138,7 +147,7 @@ pub async fn reconcile(
         // reactivation could undo is not a retention hold.
         let existing = existing.filter(|identity| !identity.sealed());
         match existing {
-            None => (place(state, &mut tx, tenant, source, user).await?, true),
+            None => (place(&mut tx, tenant, source, user).await?, true),
             Some(identity) => {
                 // The link is written even when nothing else changes: an
                 // adopted JIT identity has to stop being findable only by
@@ -324,7 +333,6 @@ async fn seal(
 /// A first placement: AUTH-2's resolver, a personal scope, an identity with
 /// no subject yet (ADR-0059 decisions 5 and 6).
 async fn place(
-    state: &AppState,
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     tenant: &Tenant,
     source: DirectorySource,
@@ -422,6 +430,5 @@ async fn place(
         ),
     )
     .await?;
-    let _ = state;
     Ok(Reconciled::Provisioned)
 }

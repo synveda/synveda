@@ -77,6 +77,43 @@ const OPERATOR_PASSWORD: &str = "Synveda-Demo-Passw0rd!";
 /// deployment owns this LOGIN identity (CPR-36, ADR-0095).
 const COMPOSE_GATEWAY_DATABASE_URL: &str =
     "postgres://synveda_gateway:synveda-dev@localhost:5432/synveda";
+const COMPOSE_WORKER_DATABASE_URL: &str =
+    "postgres://synveda_worker:synveda-dev@localhost:5432/synveda";
+
+/// Settings owned by worker/bootstrap planes that a transitional host gateway
+/// must not inherit from the operator shell. `Command::env_remove` records the
+/// removal in the child environment without mutating the parent process.
+const HOST_GATEWAY_REMOVED_ENV: &[&str] = &[
+    "DATABASE_URL_FILE",
+    "SYNVEDA_GATEWAY_DATABASE_URL",
+    "SYNVEDA_GATEWAY_DATABASE_URL_FILE",
+    "SYNVEDA_WORKER_DATABASE_URL",
+    "SYNVEDA_WORKER_DATABASE_URL_FILE",
+    "SYNVEDA_OIDC_ISSUERS_FILE",
+    "SYNVEDA_DEV_JWT_SECRET",
+    "SYNVEDA_DEV_JWT_SECRET_FILE",
+    "SYNVEDA_KMS_KEY_FILE",
+    "SYNVEDA_EXPECTED_DATABASE_ROLE",
+    "SYNVEDA_EXPECTED_DATABASE_ROLE_FILE",
+    "SYNVEDA_WORKER_DB_MAX_CONNECTIONS",
+    "SYNVEDA_WORKER_LISTEN_ADDR",
+    "SYNVEDA_WORKER_SHUTDOWN_SECS",
+    "SYNVEDA_RELAXATION_SWEEP_SECS",
+    "SYNVEDA_DIRECTORY_SYNC",
+    "SYNVEDA_DIRECTORY_SYNC_INTERVAL_SECS",
+    "SYNVEDA_KNOWLEDGE_EMBED_POLL_MS",
+    "SYNVEDA_KNOWLEDGE_EMBED_BATCH",
+    "SYNVEDA_CAPTURE_LEASE_OWNER",
+    "SYNVEDA_CAPTURE_POLL_MS",
+    "SYNVEDA_CAPTURE_LEASE_SECS",
+    "SYNVEDA_CAPTURE_BATCHES_PER_TENANT",
+    "SYNVEDA_EXTRACTOR",
+    "SYNVEDA_EXTRACTOR_MODEL",
+    "SYNVEDA_ANTHROPIC_BASE_URL",
+    "ANTHROPIC_API_KEY",
+    "ANTHROPIC_API_KEY_FILE",
+    "SYNVEDA_VLLM_BASE_URL",
+];
 
 pub async fn init(plan: Plan) -> Result<(), String> {
     let started = Instant::now();
@@ -96,6 +133,11 @@ pub async fn init(plan: Plan) -> Result<(), String> {
         .issuer
         .clone()
         .unwrap_or_else(|| RAUTHY_ISSUER.to_owned());
+
+    // The plan is not viable when its bootstrap target is not. Validate
+    // before the dry-run branch so preview and execution share the exact
+    // provider/query/database-name boundary and content-free refusal.
+    validate_bootstrap_database_url(&database_url())?;
 
     if plan.dry_run {
         return dry_run(&plan, &profile, &issuer, bundled);
@@ -135,10 +177,12 @@ pub async fn init(plan: Plan) -> Result<(), String> {
     // ── 2. schema ───────────────────────────────────────────────────────
     step(2, "applying migrations");
     let database_url = database_url();
+    let bootstrap_options = synveda_store::database_url::parse("DATABASE_URL", &database_url)
+        .map_err(|error| error.to_string())?;
     let pool = sqlx::postgres::PgPoolOptions::new()
         .max_connections(2)
         .acquire_timeout(Duration::from_secs(30))
-        .connect(&database_url)
+        .connect_with(bootstrap_options)
         .await
         .map_err(|err| format!("connect to {}: {err}", redacted_database_url(&database_url)))?;
     // The epoch guard before the migrator (CPR-2, ADR-0069), so that an
@@ -155,14 +199,46 @@ pub async fn init(plan: Plan) -> Result<(), String> {
         "    schema epoch {} at migration {}",
         schema.epoch, schema.migration_head
     );
-    let runtime_database_url = gateway_database_url()?;
-    let runtime_role = runtime_database_role(&runtime_database_url)?;
-    if std::env::var("SYNVEDA_GATEWAY_DATABASE_URL").is_ok_and(|value| !value.is_empty()) {
-        verify_runtime_role(&pool, &runtime_role).await?;
+    let (gateway_database_url, worker_database_url, runtime_urls_explicit) =
+        runtime_database_urls()?;
+    let (gateway_role, worker_role) =
+        distinct_runtime_database_roles(&gateway_database_url, &worker_database_url)?;
+    let bootstrap_database = synveda_store::runtime_role::database_identity(&pool)
+        .await
+        .map_err(|error| format!("verify bootstrap database target: {error}"))?;
+    let (gateway_database, worker_database) = if runtime_urls_explicit {
+        let gateway = verify_runtime_database_url(
+            "SYNVEDA_GATEWAY_DATABASE_URL",
+            &gateway_database_url,
+            &gateway_role,
+        )
+        .await?;
+        let worker = verify_runtime_database_url(
+            "SYNVEDA_WORKER_DATABASE_URL",
+            &worker_database_url,
+            &worker_role,
+        )
+        .await?;
+        (gateway, worker)
     } else {
-        provision_compose_gateway_role(&pool).await?;
-    }
-    println!("    runtime role {runtime_role}: LOGIN, RLS-enforced, synveda_app member");
+        provision_compose_runtime_roles(&pool).await?;
+        let gateway = verify_runtime_database_url(
+            "SYNVEDA_GATEWAY_DATABASE_URL",
+            &gateway_database_url,
+            &gateway_role,
+        )
+        .await?;
+        let worker = verify_runtime_database_url(
+            "SYNVEDA_WORKER_DATABASE_URL",
+            &worker_database_url,
+            &worker_role,
+        )
+        .await?;
+        (gateway, worker)
+    };
+    require_one_database_target(&bootstrap_database, &gateway_database, &worker_database)?;
+    println!("    gateway role {gateway_role}: LOGIN, RLS-enforced, synveda_app member");
+    println!("    worker role {worker_role}: LOGIN, RLS-enforced, synveda_app member");
 
     // ── 3. the tenant ───────────────────────────────────────────────────
     //
@@ -211,24 +287,33 @@ pub async fn init(plan: Plan) -> Result<(), String> {
         print_external_issuer_instructions(&issuer);
     }
 
-    // ── 5. the gateway ──────────────────────────────────────────────────
-    step(5, "starting the gateway");
+    // ── 5. the product processes ────────────────────────────────────────
+    step(5, "starting the gateway and worker");
     let kek = ensure_kek(&profile)?;
     // Beside the compose file, which is where compose's `env_file` looks
     // and where its own variable substitution reads a `.env` from.
     let env_file = compose_file.with_file_name(".env");
     write_env_file(&env_file, &plan, tenant_id, &issuer, &kek)?;
     println!("    configuration: {}", env_file.display());
+    let mut product_services = vec!["worker"];
+    if containerised(&plan) {
+        product_services.push("gateway");
+    }
+    // The worker never contacts the bundled localhost issuer. It can
+    // therefore use the product container even during the temporary Rauthy
+    // host-gateway shape, preserving one worker process contract.
+    let mut up = vec!["up", "--detach", "--wait"];
+    if profile.may_build() {
+        up.push("--build");
+    }
+    up.extend(product_services);
+    compose(&compose_file, &up)?;
+    println!("    worker: container healthy");
+
     let gateway = if containerised(&plan) {
         // `--build` only where there is something to build from. A release
         // bundle's compose file has no build context by construction, and
         // asking compose to build one is an error rather than a no-op.
-        let mut up = vec!["up", "--detach", "--wait"];
-        if profile.may_build() {
-            up.push("--build");
-        }
-        up.push("gateway");
-        compose(&compose_file, &up)?;
         // Compose owns liveness here: `--wait` already gates on the
         // container's own health check, and there is no host pid to watch.
         None
@@ -239,7 +324,7 @@ pub async fn init(plan: Plan) -> Result<(), String> {
             tenant_id,
             &issuer,
             &kek,
-            &runtime_database_url,
+            &gateway_database_url,
         )?)
     };
     wait_for_health(
@@ -280,6 +365,9 @@ pub async fn init(plan: Plan) -> Result<(), String> {
 }
 
 fn dry_run(plan: &Plan, profile: &Profile, issuer: &str, bundled: bool) -> Result<(), String> {
+    let (gateway_database_url, worker_database_url, runtime_urls_explicit) =
+        runtime_database_urls()?;
+    distinct_runtime_database_roles(&gateway_database_url, &worker_database_url)?;
     println!("synveda init --dry-run");
     println!();
     println!("  profile        {}", profile.describe());
@@ -310,11 +398,18 @@ fn dry_run(plan: &Plan, profile: &Profile, issuer: &str, bundled: bool) -> Resul
     );
     println!();
     println!(
-        "  would start    postgres, jaeger{}{}",
+        "  would start    postgres, jaeger{}, gateway, worker{}",
         if bundled { ", rauthy" } else { "" },
         if plan.embedder == "tei" { ", tei" } else { "" },
     );
-    println!("  would write    migrations, one tenant row and a least-privilege runtime login");
+    if runtime_urls_explicit {
+        println!("  would write    migrations and one tenant row");
+        println!("  would verify   two pre-provisioned least-privilege runtime logins");
+    } else {
+        println!(
+            "  would write    migrations, one tenant row and converge two least-privilege runtime logins"
+        );
+    }
     println!("  would NOT      write any scope, identity, grant, Configuration or Knowledge");
     Ok(())
 }
@@ -671,9 +766,10 @@ fn start_host_gateway(
     // ADR-0065 decision 5 deliberately lets coexist, or the reverse.
     //
     // This is a pre-flight rather than a liveness check because liveness
-    // loses the race. The gateway connects to Postgres, reads its key and
-    // starts five workers before it binds, so the child is still alive for
-    // the first second — while the *stranger* answers `/healthz`
+    // loses the race. The gateway completes database/schema, identity and
+    // key-plane setup before it binds,
+    // so the child is still alive for the first second — while the *stranger*
+    // answers `/healthz`
     // immediately. Measured: `init` printed `pid 51544`, `healthy` and
     // `initialised in 6s`, exit 0, for a process that died with
     // `AddrInUse` and never bound anything. Watching our own pid narrows
@@ -699,12 +795,9 @@ fn start_host_gateway(
         // `Kms::Disabled` and the console cannot be signed in to, because a
         // console session seals its tokens under the deployment key.
         .env("SYNVEDA_KMS_KEY", kek)
-        // ADR-0010 decision 3: one auth mode, never two. The dev secret is
-        // removed rather than merely not set, so an operator who exported
-        // it in this shell does not get a gateway that trusts it.
-        .env_remove("SYNVEDA_DEV_JWT_SECRET")
         .stdout(log)
         .stderr(errors);
+    sanitize_host_gateway_environment(&mut command);
     if plan.embedder == "tei" {
         command.env("SYNVEDA_TEI_URL", "http://localhost:8110");
     }
@@ -737,6 +830,12 @@ fn start_host_gateway(
         pid: child.id(),
         logfile,
     })
+}
+
+fn sanitize_host_gateway_environment(command: &mut Command) {
+    for setting in HOST_GATEWAY_REMOVED_ENV {
+        command.env_remove(setting);
+    }
 }
 
 /// A host gateway this `init` is responsible for: the pid to watch while
@@ -862,9 +961,8 @@ fn running_gateway(pidfile: &Path) -> Option<u32> {
 /// more. `DROP DATABASE ... WITH (FORCE)` would evict its connections and
 /// leave the process alive and confidently wrong.
 ///
-/// Deliberately only the host process. The containerised gateway is compose's
-/// (`init --issuer`), and stopping somebody else's container is not this
-/// command's to do — the caller says so instead.
+/// Deliberately only the host process. [`stop_compose_product_processes`]
+/// owns the paired container gateway/worker lifecycle.
 pub fn stop_host_gateway() -> Option<u32> {
     let pidfile = state_dir()?.join("gateway.pid");
     let pid = running_gateway(&pidfile)?;
@@ -881,6 +979,16 @@ pub fn compose_file_if_any() -> Option<PathBuf> {
     Profile::discover()
         .ok()
         .map(|profile| profile.compose_file())
+}
+
+/// Stops the Compose-owned gateway and worker before destructive local
+/// database maintenance. The worker receives its normal 75-second SIGTERM
+/// cancellation/join budget inside Compose's slightly larger stop bound.
+pub fn stop_compose_product_processes(compose_file: &Path) -> Result<(), String> {
+    compose(
+        compose_file,
+        &["stop", "--timeout", "90", "gateway", "worker"],
+    )
 }
 
 /// The state directory of the deployment this CLI would drive — the pidfile,
@@ -994,17 +1102,24 @@ fn write_env_file(
     issuer: &str,
     kek: &str,
 ) -> Result<(), String> {
-    // One line, no quotes: compose's env_file takes the rest of the line
-    // verbatim, and a quoted JSON value arrives at the gateway with the
-    // quotes still on it.
+    // One line, no quotes: quoting the JSON value makes those quote bytes
+    // part of the value delivered to the gateway. This transitional raw
+    // env-file handoff is not accepted for arbitrary secret characters; the
+    // CPR-45 file-secret cutover replaces it.
     let issuers = issuers_json(tenant_id, issuer);
     let tei = if plan.embedder == "tei" {
         "SYNVEDA_TEI_URL=http://tei:80\n"
     } else {
         ""
     };
-    let runtime_database = match std::env::var("SYNVEDA_GATEWAY_DATABASE_URL") {
-        Ok(value) if !value.is_empty() => format!("SYNVEDA_GATEWAY_DATABASE_URL={value}\n"),
+    let runtime_databases = match (
+        std::env::var("SYNVEDA_GATEWAY_DATABASE_URL").ok(),
+        std::env::var("SYNVEDA_WORKER_DATABASE_URL").ok(),
+    ) {
+        (Some(gateway), Some(worker)) if !gateway.is_empty() && !worker.is_empty() => format!(
+            "SYNVEDA_GATEWAY_DATABASE_URL={gateway}\n\
+             SYNVEDA_WORKER_DATABASE_URL={worker}\n"
+        ),
         _ => String::new(),
     };
     let body = format!(
@@ -1016,7 +1131,7 @@ fn write_env_file(
          SYNVEDA_LISTEN_ADDR=0.0.0.0:8120\n\
          SYNVEDA_EMBEDDER={}\n\
          SYNVEDA_KMS_KEY={kek}\n\
-         {runtime_database}{tei}",
+         {runtime_databases}{tei}",
         plan.embedder,
     );
     std::fs::write(path, body).map_err(|err| format!("write {}: {err}", path.display()))?;
@@ -1179,6 +1294,11 @@ pub(crate) fn redacted_database_url(value: &str) -> String {
     if parsed.password().is_some() {
         let _ = parsed.set_password(Some("REDACTED"));
     }
+    // PostgreSQL accepts credentials in URL query parameters too. None of
+    // the query or fragment is needed to identify the failed target, so drop
+    // both instead of trying to maintain an incomplete secret-key vocabulary.
+    parsed.set_query(None);
+    parsed.set_fragment(None);
     parsed.to_string()
 }
 
@@ -1189,62 +1309,148 @@ fn secret_fingerprint(value: &str) -> String {
     format!("{:x}", Sha256::digest(value.as_bytes()))
 }
 
-/// Runtime DSN for the host gateway. An operator can provide a separately
-/// provisioned login; otherwise the local Compose owner URL is reduced to the
-/// fixed `synveda_gateway` identity that [`provision_compose_gateway_role`]
-/// converges. The password is never printed.
-fn gateway_database_url() -> Result<String, String> {
-    if let Ok(value) = std::env::var("SYNVEDA_GATEWAY_DATABASE_URL")
-        && !value.is_empty()
-    {
-        return Ok(value);
-    }
-
-    let admin = std::env::var("DATABASE_URL")
+/// Resolves distinct gateway and worker runtime DSNs. Operators override both
+/// together; a half-overridden pair is refused because it silently mixes an
+/// external credential with the local development login.
+fn runtime_database_urls() -> Result<(String, String, bool), String> {
+    let gateway = std::env::var("SYNVEDA_GATEWAY_DATABASE_URL")
         .ok()
         .filter(|value| !value.is_empty());
-    gateway_database_url_from_admin(admin.as_deref())
+    let worker = std::env::var("SYNVEDA_WORKER_DATABASE_URL")
+        .ok()
+        .filter(|value| !value.is_empty());
+    let admin_configured = std::env::var("DATABASE_URL").is_ok_and(|value| !value.is_empty());
+    runtime_database_urls_from(gateway, worker, admin_configured)
 }
 
-/// Pure half of [`gateway_database_url`], kept separate so URL handling is
-/// covered without mutating process-global environment variables in tests.
-fn gateway_database_url_from_admin(admin: Option<&str>) -> Result<String, String> {
-    let Some(admin) = admin else {
-        return Ok(COMPOSE_GATEWAY_DATABASE_URL.to_owned());
-    };
-    let mut parsed = url::Url::parse(admin)
-        .map_err(|_| "DATABASE_URL is not a valid PostgreSQL URL".to_owned())?;
-    parsed
-        .set_username("synveda_gateway")
-        .map_err(|()| "DATABASE_URL cannot carry a gateway login".to_owned())?;
-    parsed
-        .set_password(Some("synveda-dev"))
-        .map_err(|()| "DATABASE_URL cannot carry a gateway password".to_owned())?;
-    Ok(parsed.to_string())
+/// Pure half of [`runtime_database_urls`]. An explicit bootstrap target is an
+/// external/operator boundary, even when it happens to resolve to localhost;
+/// fixed development credentials may only be converged for the bundled
+/// default whose address and lifecycle this binary owns.
+fn runtime_database_urls_from(
+    gateway: Option<String>,
+    worker: Option<String>,
+    admin_configured: bool,
+) -> Result<(String, String, bool), String> {
+    match (gateway, worker) {
+        (Some(gateway), Some(worker)) => return Ok((gateway, worker, true)),
+        (Some(_), None) | (None, Some(_)) => {
+            return Err(
+                "SYNVEDA_GATEWAY_DATABASE_URL and SYNVEDA_WORKER_DATABASE_URL must be configured together"
+                    .to_owned(),
+            );
+        }
+        (None, None) => {}
+    }
+    if admin_configured {
+        return Err(
+            "an explicit DATABASE_URL requires explicit SYNVEDA_GATEWAY_DATABASE_URL and \
+             SYNVEDA_WORKER_DATABASE_URL; fixed local development credentials are only \
+             provisioned for the bundled default database"
+                .to_owned(),
+        );
+    }
+    Ok((
+        COMPOSE_GATEWAY_DATABASE_URL.to_owned(),
+        COMPOSE_WORKER_DATABASE_URL.to_owned(),
+        false,
+    ))
 }
 
 /// Database principal named by a runtime DSN. Deployment validation happens
 /// through the admin connection before the credential is ever given to the
 /// gateway. Percent-encoded role names are refused because PostgreSQL and URL
 /// decoding must not disagree about which cluster-global role was checked.
-fn runtime_database_role(runtime_url: &str) -> Result<String, String> {
+fn runtime_database_role(setting: &str, runtime_url: &str) -> Result<String, String> {
+    synveda_store::database_url::parse(setting, runtime_url)
+        .map_err(|_| format!("{setting} is not a valid PostgreSQL URL"))?;
     let parsed = url::Url::parse(runtime_url)
-        .map_err(|_| "SYNVEDA_GATEWAY_DATABASE_URL is not a valid PostgreSQL URL".to_owned())?;
+        .map_err(|_| format!("{setting} is not a valid PostgreSQL URL"))?;
     let role = parsed.username();
     if role.is_empty() || role.contains('%') {
-        return Err(
-            "SYNVEDA_GATEWAY_DATABASE_URL must name an unescaped PostgreSQL login role".to_owned(),
-        );
+        return Err(format!(
+            "{setting} must name an unescaped PostgreSQL login role"
+        ));
     }
     Ok(role.to_owned())
 }
 
+fn validate_bootstrap_database_url(database_url: &str) -> Result<(), String> {
+    synveda_store::database_url::parse("DATABASE_URL", database_url)
+        .map(|_| ())
+        .map_err(|error| error.to_string())
+}
+
+fn distinct_runtime_database_roles(
+    gateway_database_url: &str,
+    worker_database_url: &str,
+) -> Result<(String, String), String> {
+    let gateway_role = runtime_database_role("SYNVEDA_GATEWAY_DATABASE_URL", gateway_database_url)?;
+    let worker_role = runtime_database_role("SYNVEDA_WORKER_DATABASE_URL", worker_database_url)?;
+    if gateway_role == worker_role {
+        return Err("gateway and worker database URLs must name distinct login roles".to_owned());
+    }
+    Ok((gateway_role, worker_role))
+}
+
 async fn verify_runtime_role(pool: &sqlx::PgPool, role: &str) -> Result<(), String> {
+    synveda_store::runtime_role::verify_capability_role(pool)
+        .await
+        .map_err(|error| format!("verify synveda_app capability role: {error}"))?;
     let facts = sqlx::query!(
-        r#"select rolcanlogin as "rolcanlogin!", rolsuper as "rolsuper!",
-                  rolbypassrls as "rolbypassrls!",
-                  pg_has_role($1, 'synveda_app', 'member') as "member!"
-             from pg_catalog.pg_roles
+        r#"select rolcanlogin as "can_login!", rolinherit as "inherits!",
+                  rolsuper as "superuser!", rolcreatedb as "create_db!",
+                  rolcreaterole as "create_role!", rolreplication as "replication!",
+                  rolbypassrls as "bypass_rls!",
+                  pg_has_role($1, 'synveda_app', 'member') as "app_member!",
+                  exists (
+                    select 1
+                      from pg_catalog.pg_auth_members as membership
+                      join pg_catalog.pg_roles as granted_role
+                        on granted_role.oid = membership.roleid
+                     where membership.member = roles.oid
+                       and granted_role.rolname = 'synveda_app'
+                       and not membership.admin_option
+                       and membership.inherit_option
+                       and membership.set_option
+                  ) as "app_membership_safe!",
+                  exists (
+                    select 1
+                      from pg_catalog.pg_auth_members as membership
+                      join pg_catalog.pg_roles as granted_role
+                        on granted_role.oid = membership.roleid
+                     where membership.member = roles.oid
+                       and granted_role.rolname = 'synveda_app'
+                       and (
+                         membership.admin_option
+                         or not membership.inherit_option
+                         or not membership.set_option
+                       )
+                  ) as "app_membership_unsafe!",
+                  exists (
+                    select 1 from pg_catalog.pg_database
+                     where datdba = roles.oid
+                  ) as "database_owner!",
+                  exists (
+                    select 1 from pg_catalog.pg_namespace
+                     where nspowner = roles.oid
+                  ) as "schema_owner!",
+                  exists (
+                    select 1 from pg_catalog.pg_class as objects
+                     where objects.relowner = roles.oid
+                    union all
+                    select 1 from pg_catalog.pg_proc as routines
+                     where routines.proowner = roles.oid
+                  ) as "application_object_owner!",
+                  exists (
+                    select 1
+                      from pg_catalog.pg_auth_members as memberships
+                      join pg_catalog.pg_roles as granted_roles
+                        on granted_roles.oid = memberships.roleid
+                     where memberships.member = roles.oid
+                       and granted_roles.rolname <> 'synveda_app'
+                  ) as "unexpected_membership!"
+             from pg_catalog.pg_roles as roles
             where rolname = $1"#,
         role,
     )
@@ -1252,10 +1458,76 @@ async fn verify_runtime_role(pool: &sqlx::PgPool, role: &str) -> Result<(), Stri
     .await
     .map_err(|error| format!("verify runtime database login {role}: {error}"))?
     .ok_or_else(|| format!("runtime database login {role} is not provisioned"))?;
-    if !facts.rolcanlogin || facts.rolsuper || facts.rolbypassrls || !facts.member {
+    if !facts.can_login
+        || !facts.inherits
+        || facts.superuser
+        || facts.create_db
+        || facts.create_role
+        || facts.replication
+        || facts.bypass_rls
+        || !facts.app_member
+        || !facts.app_membership_safe
+        || facts.app_membership_unsafe
+        || facts.database_owner
+        || facts.schema_owner
+        || facts.application_object_owner
+        || facts.unexpected_membership
+    {
         return Err(format!(
-            "runtime database login {role} is not LOGIN/non-superuser/non-BYPASSRLS/synveda_app"
+            "runtime database login {role} is not an inheriting, non-elevated synveda_app login that owns no database and no schema, relation or routine in the selected database"
         ));
+    }
+    Ok(())
+}
+
+/// Connects the resolved runtime DSN and proves the session, role, schema and
+/// target it will actually give the process. Looking up a same-named role
+/// through the bootstrap pool is insufficient when an explicitly configured
+/// runtime URL may name another host or database.
+async fn verify_runtime_database_url(
+    setting: &str,
+    runtime_url: &str,
+    role: &str,
+) -> Result<synveda_store::runtime_role::DatabaseIdentity, String> {
+    let connect_options = synveda_store::database_url::parse(setting, runtime_url)
+        .map_err(|_| format!("{setting} is not a valid PostgreSQL URL"))?;
+    let runtime = sqlx::postgres::PgPoolOptions::new()
+        .max_connections(1)
+        .acquire_timeout(Duration::from_secs(15))
+        .connect_with(connect_options)
+        .await
+        .map_err(|_| {
+            format!(
+                "connect through {setting} ({}) failed",
+                redacted_database_url(runtime_url)
+            )
+        })?;
+    let result = async {
+        synveda_store::epoch::verify(&runtime)
+            .await
+            .map_err(|error| format!("{setting} schema check failed: {error}"))?;
+        synveda_store::runtime_role::verify(&runtime, role)
+            .await
+            .map_err(|error| format!("{setting} runtime-role check failed: {error}"))?;
+        synveda_store::runtime_role::database_identity(&runtime)
+            .await
+            .map_err(|error| format!("{setting} database-target check failed: {error}"))
+    }
+    .await;
+    runtime.close().await;
+    result
+}
+
+fn require_one_database_target(
+    bootstrap: &synveda_store::runtime_role::DatabaseIdentity,
+    gateway: &synveda_store::runtime_role::DatabaseIdentity,
+    worker: &synveda_store::runtime_role::DatabaseIdentity,
+) -> Result<(), String> {
+    if bootstrap != gateway || bootstrap != worker {
+        return Err("DATABASE_URL, SYNVEDA_GATEWAY_DATABASE_URL and \
+             SYNVEDA_WORKER_DATABASE_URL must target one live PostgreSQL primary instance \
+             and database"
+            .to_owned());
     }
     Ok(())
 }
@@ -1264,7 +1536,7 @@ async fn verify_runtime_role(pool: &sqlx::PgPool, role: &str) -> Result<(), Stri
 /// the NOLOGIN capability role. This is deployment bootstrap, not schema or
 /// domain data: Helm performs the equivalent grant to CloudNativePG's generated
 /// login and neither path hands its admin credential to the gateway.
-async fn provision_compose_gateway_role(pool: &sqlx::PgPool) -> Result<(), String> {
+async fn provision_compose_runtime_roles(pool: &sqlx::PgPool) -> Result<(), String> {
     let mut tx = pool
         .begin()
         .await
@@ -1283,12 +1555,17 @@ async fn provision_compose_gateway_role(pool: &sqlx::PgPool) -> Result<(), Strin
              ) then
                create role synveda_gateway login password 'synveda-dev';
              end if;
+             if not exists (
+               select 1 from pg_catalog.pg_roles where rolname = 'synveda_worker'
+             ) then
+               create role synveda_worker login password 'synveda-dev';
+             end if;
            end
            $synveda$"#
     )
     .execute(&mut *tx)
     .await
-    .map_err(|error| format!("provision the runtime database login: {error}"))?;
+    .map_err(|error| format!("provision the runtime database logins: {error}"))?;
     sqlx::query!(
         r#"alter role synveda_gateway
               with login inherit nosuperuser nocreatedb nocreaterole
@@ -1297,16 +1574,30 @@ async fn provision_compose_gateway_role(pool: &sqlx::PgPool) -> Result<(), Strin
     )
     .execute(&mut *tx)
     .await
-    .map_err(|error| format!("converge the runtime database login: {error}"))?;
-    sqlx::query!("grant synveda_app to synveda_gateway")
+    .map_err(|error| format!("converge the gateway database login: {error}"))?;
+    sqlx::query!(
+        r#"alter role synveda_worker
+              with login inherit nosuperuser nocreatedb nocreaterole
+                   noreplication nobypassrls connection limit -1
+                   password 'synveda-dev'"#
+    )
+    .execute(&mut *tx)
+    .await
+    .map_err(|error| format!("converge the worker database login: {error}"))?;
+    sqlx::query!("grant synveda_app to synveda_gateway with admin false, inherit true, set true")
         .execute(&mut *tx)
         .await
-        .map_err(|error| format!("grant the runtime database capability role: {error}"))?;
+        .map_err(|error| format!("grant the gateway database capability role: {error}"))?;
+    sqlx::query!("grant synveda_app to synveda_worker with admin false, inherit true, set true")
+        .execute(&mut *tx)
+        .await
+        .map_err(|error| format!("grant the worker database capability role: {error}"))?;
 
     tx.commit()
         .await
         .map_err(|error| format!("commit runtime-role provisioning: {error}"))?;
     verify_runtime_role(pool, "synveda_gateway").await?;
+    verify_runtime_role(pool, "synveda_worker").await?;
     Ok(())
 }
 
@@ -1611,11 +1902,11 @@ mod tests {
     /// A port somebody else holds is refused before anything is spawned.
     ///
     /// The pre-flight rather than the liveness check is what closes this,
-    /// and the reason is timing: the gateway talks to Postgres, reads its
-    /// key and starts five workers before it binds, so a child that is
-    /// doomed to `AddrInUse` is still alive for the first second — while
-    /// the process already on the port answers `/healthz` at once. Watching
-    /// our own pid narrows the window; asking for the port closes it.
+    /// and the reason is timing: the gateway completes database/schema,
+    /// identity and key-plane setup before it binds, so a child that is doomed to
+    /// `AddrInUse` is still alive for the first second — while the process
+    /// already on the port answers `/healthz` at once. Watching our own pid
+    /// narrows the window; asking for the port closes it.
     #[test]
     fn a_port_somebody_else_holds_is_refused() {
         // An ephemeral port, held for the length of the test, standing in
@@ -1636,6 +1927,44 @@ mod tests {
         // test in this binary, since the kernel is free to hand the number
         // straight to one of them. It failed that way once here.
         assert!(port_available("http://127.0.0.1:0").is_ok());
+    }
+
+    #[test]
+    fn a_host_gateway_does_not_inherit_worker_or_ambiguous_file_settings() {
+        let mut command = Command::new("synveda-gateway");
+        command
+            .env("DATABASE_URL", "gateway-dsn")
+            .env("SYNVEDA_OIDC_ISSUERS", "issuer-json")
+            .env("SYNVEDA_KMS_KEY", "gateway-key")
+            .env("SYNVEDA_KMS_KEY_REF_FILE", "/operator/key-ref");
+        for setting in HOST_GATEWAY_REMOVED_ENV {
+            command.env(setting, "must-not-reach-gateway");
+        }
+
+        sanitize_host_gateway_environment(&mut command);
+
+        for setting in HOST_GATEWAY_REMOVED_ENV {
+            let inherited = command
+                .get_envs()
+                .find(|(name, _)| *name == std::ffi::OsStr::new(setting))
+                .map(|(_, value)| value);
+            assert!(
+                matches!(inherited, Some(None)),
+                "{setting} was not removed from the host gateway environment"
+            );
+        }
+        for retained in [
+            "DATABASE_URL",
+            "SYNVEDA_OIDC_ISSUERS",
+            "SYNVEDA_KMS_KEY",
+            "SYNVEDA_KMS_KEY_REF_FILE",
+        ] {
+            let value = command
+                .get_envs()
+                .find(|(name, _)| *name == std::ffi::OsStr::new(retained))
+                .and_then(|(_, value)| value);
+            assert!(value.is_some(), "{retained} was removed unexpectedly");
+        }
     }
 
     /// The other direction, so the check cannot pass by always failing.
@@ -1988,30 +2317,110 @@ mod tests {
 
     #[test]
     fn database_errors_redact_passwords() {
-        let rendered = redacted_database_url("postgres://admin:secret@example.test/synveda");
-        assert!(!rendered.contains("secret"), "password leaked: {rendered}");
+        let rendered = redacted_database_url(
+            "postgres://admin:user-secret@example.test/synveda?sslmode=require&password=query-secret#fragment-secret",
+        );
+        assert!(
+            !rendered.contains("secret"),
+            "credential leaked: {rendered}"
+        );
         assert!(
             rendered.contains("REDACTED"),
             "redaction absent: {rendered}"
         );
+        assert!(!rendered.contains('?'), "query retained: {rendered}");
+        assert!(!rendered.contains('#'), "fragment retained: {rendered}");
     }
 
     #[test]
-    fn an_admin_dsn_derives_only_the_local_runtime_identity() {
-        let derived = gateway_database_url_from_admin(Some(
-            "postgres://owner:owner-secret@db.example.test:5544/customer?sslmode=require",
-        ))
+    fn dry_run_and_execution_share_bootstrap_database_url_validation() {
+        validate_bootstrap_database_url("postgres://admin:secret@db.example.test/synveda")
+            .expect("explicit PostgreSQL database URL");
+
+        const SENTINEL: &str = "SYNVEDA_DRY_RUN_DATABASE_SECRET";
+        let invalid_urls = [
+            format!("https://admin:{SENTINEL}@db.example.test/synveda"),
+            format!("postgres://admin:{SENTINEL}@db.example.test"),
+            format!("postgres://admin@db.example.test/synveda?token={SENTINEL}"),
+        ];
+        for invalid in &invalid_urls {
+            let error = validate_bootstrap_database_url(invalid)
+                .expect_err("dry-run must refuse the same invalid URL as execution");
+            assert!(!error.contains(SENTINEL), "{error}");
+            assert!(error.contains("DATABASE_URL"), "{error}");
+        }
+    }
+
+    #[test]
+    fn only_the_bundled_default_derives_development_runtime_credentials() {
+        let (gateway, worker, explicit) = runtime_database_urls_from(None, None, false).unwrap();
+        assert_eq!(gateway, COMPOSE_GATEWAY_DATABASE_URL);
+        assert_eq!(worker, COMPOSE_WORKER_DATABASE_URL);
+        assert!(!explicit);
+
+        let refusal = runtime_database_urls_from(None, None, true).unwrap_err();
+        assert!(refusal.contains("explicit DATABASE_URL"), "{refusal}");
+        assert!(
+            refusal.contains("SYNVEDA_GATEWAY_DATABASE_URL")
+                && refusal.contains("SYNVEDA_WORKER_DATABASE_URL"),
+            "{refusal}"
+        );
+
+        let explicit_gateway = "postgres://gateway:secret@db.example.test/synveda".to_owned();
+        let explicit_worker = "postgres://worker:secret@db.example.test/synveda".to_owned();
+        let (gateway, worker, explicit) = runtime_database_urls_from(
+            Some(explicit_gateway.clone()),
+            Some(explicit_worker.clone()),
+            true,
+        )
         .unwrap();
-        let parsed = url::Url::parse(&derived).unwrap();
-        assert_eq!(parsed.username(), "synveda_gateway");
-        assert_eq!(parsed.password(), Some("synveda-dev"));
-        assert_eq!(parsed.host_str(), Some("db.example.test"));
-        assert_eq!(parsed.port(), Some(5544));
-        assert_eq!(parsed.path(), "/customer");
-        assert_eq!(parsed.query(), Some("sslmode=require"));
-        assert!(!derived.contains("owner-secret"));
-        assert_eq!(runtime_database_role(&derived).unwrap(), "synveda_gateway");
-        assert!(runtime_database_role("postgres://escaped%2Drole:secret@db/synveda").is_err());
+        assert_eq!(gateway, explicit_gateway);
+        assert_eq!(worker, explicit_worker);
+        assert!(explicit);
+        assert_eq!(
+            distinct_runtime_database_roles(&gateway, &worker).unwrap(),
+            ("gateway".to_owned(), "worker".to_owned())
+        );
+        assert!(
+            distinct_runtime_database_roles(&gateway, &gateway).is_err(),
+            "dry-run and real init must both refuse one shared runtime role"
+        );
+        assert!(
+            distinct_runtime_database_roles("not-a-postgres-url", &worker).is_err(),
+            "dry-run and real init must both refuse malformed runtime URLs"
+        );
+        assert!(
+            distinct_runtime_database_roles(
+                "https://gateway:secret@db.example.test/synveda",
+                &worker
+            )
+            .is_err(),
+            "dry-run and real init must both refuse a non-PostgreSQL URL scheme"
+        );
+        assert_eq!(
+            runtime_database_role("SYNVEDA_GATEWAY_DATABASE_URL", &gateway).unwrap(),
+            "gateway"
+        );
+        assert_eq!(
+            runtime_database_role("SYNVEDA_WORKER_DATABASE_URL", &worker).unwrap(),
+            "worker"
+        );
+        assert!(
+            runtime_database_role(
+                "SYNVEDA_WORKER_DATABASE_URL",
+                "postgres://escaped%2Drole:secret@db/synveda"
+            )
+            .is_err()
+        );
+    }
+
+    fn test_runtime_database_url(admin: &str, role: &str) -> String {
+        let mut parsed = url::Url::parse(admin).expect("test admin URL");
+        parsed.set_username(role).expect("test runtime role");
+        parsed
+            .set_password(Some("synveda-dev"))
+            .expect("test runtime password");
+        parsed.to_string()
     }
 
     #[test]
@@ -2026,12 +2435,54 @@ mod tests {
         assert!(!first.contains("secret"));
     }
 
-    /// The deployment login is subject to forced RLS and can see a tenant
+    #[test]
+    fn runtime_targets_cannot_split_one_deployment_across_databases() {
+        let bootstrap = synveda_store::runtime_role::DatabaseIdentity {
+            database: "synveda".to_owned(),
+            cluster_system_identifier: "cluster-1".to_owned(),
+            database_oid: 16_384,
+            postmaster_started_at: chrono::DateTime::UNIX_EPOCH,
+        };
+        assert!(
+            require_one_database_target(&bootstrap, &bootstrap, &bootstrap).is_ok(),
+            "three credentials for one target are accepted"
+        );
+
+        let another_database = synveda_store::runtime_role::DatabaseIdentity {
+            database: "another".to_owned(),
+            ..bootstrap.clone()
+        };
+        assert!(
+            require_one_database_target(&bootstrap, &bootstrap, &another_database).is_err(),
+            "a worker database split is refused"
+        );
+
+        let another_server = synveda_store::runtime_role::DatabaseIdentity {
+            cluster_system_identifier: "cluster-2".to_owned(),
+            ..bootstrap.clone()
+        };
+        assert!(
+            require_one_database_target(&bootstrap, &another_server, &bootstrap).is_err(),
+            "a gateway server split is refused"
+        );
+
+        let another_primary_generation = synveda_store::runtime_role::DatabaseIdentity {
+            postmaster_started_at: bootstrap.postmaster_started_at + chrono::Duration::seconds(1),
+            ..bootstrap.clone()
+        };
+        assert!(
+            require_one_database_target(&bootstrap, &bootstrap, &another_primary_generation)
+                .is_err(),
+            "a separately started writable fork is refused"
+        );
+    }
+
+    /// Both deployment logins are subject to forced RLS and can see a tenant
     /// only after the application establishes its transaction-local tenant
     /// context. This is the executable boundary between bootstrap authority
     /// and the one normal gateway runtime (CPR-36, ADR-0095).
     #[tokio::test]
-    async fn compose_gateway_login_is_rls_enforced() {
+    async fn compose_runtime_logins_are_distinct_and_rls_enforced() {
         let Some(admin_url) = std::env::var("DATABASE_URL")
             .ok()
             .filter(|value| !value.is_empty())
@@ -2044,12 +2495,15 @@ mod tests {
             .connect(&admin_url)
             .await
             .expect("connect as deployment owner");
-        provision_compose_gateway_role(&admin)
+        provision_compose_runtime_roles(&admin)
             .await
-            .expect("converge the runtime login");
+            .expect("converge the runtime logins");
         verify_runtime_role(&admin, "synveda_gateway")
             .await
-            .expect("accept the least-privilege runtime login");
+            .expect("accept the least-privilege gateway login");
+        verify_runtime_role(&admin, "synveda_worker")
+            .await
+            .expect("accept the least-privilege worker login");
         assert!(
             verify_runtime_role(&admin, "synveda").await.is_err(),
             "the bootstrap owner must never pass runtime-role validation",
@@ -2066,12 +2520,134 @@ mod tests {
         .expect("admit an isolated tenant");
         let tenant_id = tenant.id;
 
-        let runtime_url = gateway_database_url_from_admin(Some(&admin_url)).unwrap();
+        let runtime_url = test_runtime_database_url(&admin_url, "synveda_gateway");
         let runtime = sqlx::postgres::PgPoolOptions::new()
             .max_connections(2)
             .connect(&runtime_url)
             .await
             .expect("connect as synveda_gateway");
+        let worker_url = test_runtime_database_url(&admin_url, "synveda_worker");
+        let worker = sqlx::postgres::PgPoolOptions::new()
+            .max_connections(2)
+            .connect(&worker_url)
+            .await
+            .expect("connect as synveda_worker");
+        synveda_store::runtime_role::verify(&runtime, "synveda_gateway")
+            .await
+            .expect("gateway session role sentinel");
+        synveda_store::runtime_role::verify(&worker, "synveda_worker")
+            .await
+            .expect("worker session role sentinel");
+        let admin_identity = synveda_store::runtime_role::database_identity(&admin)
+            .await
+            .expect("bootstrap database identity");
+        let gateway_identity = synveda_store::runtime_role::database_identity(&runtime)
+            .await
+            .expect("healthy gateway database identity");
+        let worker_identity = synveda_store::runtime_role::database_identity(&worker)
+            .await
+            .expect("healthy worker database identity");
+        require_one_database_target(&admin_identity, &gateway_identity, &worker_identity)
+            .expect("all healthy deployment credentials target one database");
+        assert!(
+            synveda_store::runtime_role::verify(&worker, "synveda_gateway")
+                .await
+                .is_err(),
+            "worker credentials must not pass as gateway credentials"
+        );
+
+        sqlx::query!("drop schema if exists synveda_cli_role_drift cascade")
+            .execute(&admin)
+            .await
+            .expect("remove stale role-drift schema");
+        sqlx::query!("create schema synveda_cli_role_drift authorization synveda_gateway")
+            .execute(&admin)
+            .await
+            .expect("give gateway a non-public schema");
+        let catalogue_rejected = verify_runtime_role(&admin, "synveda_gateway")
+            .await
+            .is_err();
+        let connection_rejected = verify_runtime_database_url(
+            "SYNVEDA_GATEWAY_DATABASE_URL",
+            &runtime_url,
+            "synveda_gateway",
+        )
+        .await
+        .is_err();
+        sqlx::query!("drop schema synveda_cli_role_drift")
+            .execute(&admin)
+            .await
+            .expect("restore non-owning gateway role");
+        assert!(
+            catalogue_rejected && connection_rejected,
+            "non-public schema ownership must fail both deployment sentinels"
+        );
+
+        sqlx::query!(
+            r#"do $synveda$
+               begin
+                 if not exists (
+                   select 1 from pg_catalog.pg_roles
+                    where rolname = 'synveda_cli_role_grantor'
+                 ) then
+                   create role synveda_cli_role_grantor nologin;
+                 end if;
+               end
+               $synveda$"#
+        )
+        .execute(&admin)
+        .await
+        .expect("create alternate CLI membership grantor");
+        sqlx::query!(
+            r#"alter role synveda_cli_role_grantor
+                  with nologin inherit nosuperuser nocreatedb nocreaterole
+                       noreplication nobypassrls connection limit -1"#
+        )
+        .execute(&admin)
+        .await
+        .expect("converge alternate CLI membership grantor");
+        sqlx::query!(
+            "grant synveda_app to synveda_cli_role_grantor with admin true, inherit true, set true"
+        )
+        .execute(&admin)
+        .await
+        .expect("authorise alternate CLI membership grantor");
+        sqlx::query!("revoke synveda_app from synveda_gateway granted by synveda_cli_role_grantor")
+            .execute(&admin)
+            .await
+            .expect("remove stale alternate gateway grant");
+        sqlx::query!(
+            "grant synveda_app to synveda_gateway with admin true, inherit true, set true granted by synveda_cli_role_grantor"
+        )
+        .execute(&admin)
+        .await
+        .expect("add concurrent unsafe gateway grant");
+        let duplicate_catalogue_rejected = verify_runtime_role(&admin, "synveda_gateway")
+            .await
+            .is_err();
+        let duplicate_connection_rejected = verify_runtime_database_url(
+            "SYNVEDA_GATEWAY_DATABASE_URL",
+            &runtime_url,
+            "synveda_gateway",
+        )
+        .await
+        .is_err();
+        sqlx::query!("revoke synveda_app from synveda_gateway granted by synveda_cli_role_grantor")
+            .execute(&admin)
+            .await
+            .expect("remove concurrent unsafe gateway grant");
+        sqlx::query!("revoke synveda_app from synveda_cli_role_grantor")
+            .execute(&admin)
+            .await
+            .expect("remove alternate CLI grantor capability");
+        sqlx::query!("drop role synveda_cli_role_grantor")
+            .execute(&admin)
+            .await
+            .expect("drop alternate CLI membership grantor");
+        assert!(
+            duplicate_catalogue_rejected && duplicate_connection_rejected,
+            "a safe grant must not hide an unsafe grant from another grantor"
+        );
 
         let without_context = sqlx::query_scalar!("select count(*) from scopes")
             .fetch_one(&runtime)
@@ -2117,5 +2693,20 @@ mod tests {
             .rollback()
             .await
             .expect("close the cross-tenant transaction");
+
+        let mut worker_visible = synveda_store::rls::begin_tenant_tx(&worker, tenant_id)
+            .await
+            .expect("establish worker tenant context");
+        assert_eq!(
+            synveda_store::scopes::get(&mut *worker_visible, tenant_id, root.id)
+                .await
+                .expect("worker reads through forced RLS")
+                .map(|scope| scope.id),
+            Some(root.id),
+        );
+        worker_visible
+            .rollback()
+            .await
+            .expect("close worker tenant transaction");
     }
 }

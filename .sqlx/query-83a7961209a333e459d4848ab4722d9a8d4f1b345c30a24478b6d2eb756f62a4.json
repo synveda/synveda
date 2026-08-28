@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "drop role synveda_worker_process_grantor",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "83a7961209a333e459d4848ab4722d9a8d4f1b345c30a24478b6d2eb756f62a4"
+}

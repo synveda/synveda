@@ -18,6 +18,13 @@ gateway:
   publicUrl: http://synveda.synveda-test.svc.cluster.local:8120
   dbMaxConnections: 10
 
+worker:
+  # The demo creates this Secret with a fresh URL-safe password before Helm
+  # starts. The chart owns the role convergence, never the credential.
+  databaseExistingSecret: synveda-worker-db
+  dbMaxConnections: 5
+  resources: {}
+
 oidc:
   # Written by the demo *after* the install job admits the tenant: a trust
   # entry binds an issuer to a tenant id, and that id does not exist until

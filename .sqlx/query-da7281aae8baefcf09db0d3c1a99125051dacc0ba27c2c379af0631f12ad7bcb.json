@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "drop schema synveda_worker_process_owned",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "da7281aae8baefcf09db0d3c1a99125051dacc0ba27c2c379af0631f12ad7bcb"
+}

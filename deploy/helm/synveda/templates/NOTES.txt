@@ -1,14 +1,17 @@
-Synveda {{ .Chart.AppVersion }} — one context-platform runtime (CPR-36, ADR-0095)
+Synveda {{ .Chart.AppVersion }} — one context-platform runtime (CPR-45, ADR-0102)
 
   gateway    {{ include "synveda.fullname" . }} (1 replica; see limits below)
+  worker     {{ include "synveda.fullname" . }}-worker (1 replica; private health)
   database   {{ include "synveda.clusterName" . }} — {{ .Values.postgres.instances }} CloudNativePG instances
   embedder   {{ .Values.embedder }}{{ if eq .Values.embedder "tei" }} ({{ if .Values.tei.enabled }}in-cluster{{ else }}{{ .Values.tei.url }}{{ end }}){{ end }}
   extractor  {{ .Values.extractor.kind }}
   public URL {{ .Values.gateway.publicUrl }}
 
 1. Watch the install job. It migrates with the admin identity, grants the
-   generated gateway login membership of the NOLOGIN `synveda_app` role and
-   optionally admits one tenant. The gateway never receives the admin DSN.
+   generated gateway login membership of the NOLOGIN `synveda_app` role,
+   creates/converges the fixed non-owner `synveda_worker` login from
+   `{{ .Values.worker.databaseExistingSecret }}`, and optionally admits one
+   tenant. Neither runtime process receives the admin DSN.
 
      kubectl logs -l app.kubernetes.io/component=install -f
 
@@ -22,11 +25,11 @@ Synveda {{ .Chart.AppVersion }} — one context-platform runtime (CPR-36, ADR-00
    they are created and audited under the first `synveda-admins` member who
    logs in.
 
-   The gateway reads its local KMS key from `{{ .Values.kms.existingSecret }}`.
-   This chart does not create or own that Secret. Back it up outside Postgres
-   and test restoring it: losing the key makes wrapped tenant keys and console
-   sessions unrecoverable. The stable key reference is evidence metadata, not
-   a cloud KMS/HSM custody integration.
+   Gateway and worker read the local KMS key from
+   `{{ .Values.kms.existingSecret }}`. This chart does not create or own that
+   Secret. Back it up outside Postgres and test restoring it: losing the key
+   makes wrapped tenant keys and console sessions unrecoverable. The stable
+   key reference is evidence metadata, not a cloud KMS/HSM custody integration.
 
 {{ if not .Values.install.tenant.slug }}3. Admit a tenant with the admin credential. Tenant admission is the retained
    bootstrap boundary and is intentionally unavailable to the gateway role:
@@ -57,10 +60,21 @@ OPERATIONAL LIMITS
   deletes its primary before repeating a public context request. That is not a
   claim of gateway HA.
 
-  The gateway remains one replica and upgrades use `Recreate`. Pending login
-  state and cross-process cache invalidation have not passed OPS-7's
-  multi-replica criterion, so a gateway upgrade has a brief outage. The chart
-  refuses a replicas key instead of accepting a configuration it cannot honour.
+  Gateway and core worker remain one replica each and upgrades use `Recreate`.
+  Pending login state and cross-process cache invalidation have not passed
+  OPS-7's multi-gateway criterion. Only Capture has passed concurrent lease
+  fencing; the other core loops have not passed multi-worker acceptance. The
+  chart refuses replica keys instead of accepting unsupported availability.
+
+  Worker SIGTERM withdraws readiness, requests cancellation and applies
+  `worker.shutdownSeconds` as the hard supervised-task join deadline. Bounded
+  idle shutdown is proved. Real process interruption during claimed Capture or
+  provider work and subsequent claim recovery remain unproved; a deadline may
+  abort unfinished work and provider calls are not exactly once.
+
+  Rotating `{{ .Values.worker.databaseExistingSecret }}` does not restart a
+  Pod automatically. Converge the login password and roll the worker as one
+  operator action; do not replace the Secret and leave the old process alive.
 
   Provider credentials and the local KMS key remain Kubernetes Secret
   references. Rendered diagnostics, ordinary APIs and audit rows do not

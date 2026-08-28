@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "drop schema if exists synveda_worker_process_owned cascade",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "7cc3cd021f1b411c0e853d6084f2a4a93c7a6819388c1433713487281c97ed01"
+}

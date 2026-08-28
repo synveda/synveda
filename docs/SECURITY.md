@@ -8,13 +8,28 @@ been fully compromised.
 
 ## Trust boundaries
 
-- The gateway is the only ordinary application service. Console, CLI and
-  adapters use its public API; tightly scoped database reset, migration and
+- The gateway is the only public application service. Console, CLI and adapters
+  use its public API. A separate private core worker runs Capture, Knowledge
+  indexing, relaxation expiry and optional directory pull through ordinary
+  runtime credentials; tightly scoped database reset, migration and
   first-operator bootstrap are documented operator exceptions.
 - Tenant-bound tables enable and force PostgreSQL row-level security. The
-  request transaction sets its tenant after authentication, and the Cedar PDP
-  decides the governed action and resource. Tests use policy packs rather than
-  bypassing the PDP.
+  request transaction sets its tenant after authentication. Each worker unit
+  re-enters an ordinary tenant-scoped transaction. Governed actions preserve
+  their Cedar decision and audit boundary; derivative maintenance such as
+  Knowledge indexing is constrained by the already-governed aggregate and
+  forced RLS rather than inventing a second authorisation path. Tests use policy
+  packs rather than bypassing the PDP.
+- Local gateway and worker logins, and the Helm worker login, are verified as
+  exact inheriting, non-elevated members of only the safe NOLOGIN `synveda_app`
+  role, without membership administration or ownership of any database or of
+  any schema, relation or routine in the selected Synveda database. The current Helm
+  gateway is an explicit exception: it still uses CloudNativePG's
+  database-owner application Secret and must be cut over before the reference
+  contract passes. The worker re-proves its own runtime session and the schema
+  epoch while running; conclusive drift is a fatal supervised task that cancels
+  work and exits non-zero. A transient database outage withdraws readiness and
+  is retried rather than mislabelled as authority drift.
 - Cedar is the authority even when navigation capabilities predict what the UI
   should show. A hidden or enabled control never grants server authority.
 - Knowledge, Skill, Tool server/binding, Configuration and relaxation writes
@@ -99,12 +114,16 @@ higher. No production route uses an unbounded raw-body extractor as a bypass.
 
 ## Secrets and sensitive content
 
-Tool, provider and directory credentials are stable secret references in
-ordinary domain records. APIs, generated clients, audit metadata and console
-state expose reference status and version metadata, not plaintext. Rotation
-changes the secret material behind a stable reference or runs an explicit
-re-encryption job; it does not rewrite immutable artifact history. Failed or
-deleted references fail closed and cannot fall back to a deployment credential.
+Tool, provider and per-tenant directory credentials are stable secret
+references in ordinary domain records. APIs, generated clients, audit metadata
+and console state expose reference status and version metadata, not plaintext.
+Rotation changes the secret material behind a stable reference or runs an
+explicit re-encryption job; it does not rewrite immutable artifact history. A
+revoked or unusable per-tenant directory reference fails closed and cannot fall
+back. The current deployment-level directory connector embedded in issuer
+configuration remains an explicit exception; CPR-45 replaces its credential
+value with a mounted file reference. Helm currently supplies the issuer Secret
+to both gateway and worker pending that role-specific file cutover.
 
 Knowledge source payloads and session event bodies require their own narrower
 authority. Ordinary timelines and audit rows carry identifiers, hashes,
@@ -112,12 +131,28 @@ counts, timestamps and content-free summaries. Forget removes authorised
 plaintext, embeddings and owned source payloads, invalidates retrieval and
 retains a content-free tombstone and chain evidence.
 
+Model-provider clients used by Capture and embedding use bounded requests,
+refuse redirects and map transport, status and parsing failures to closed
+diagnostic codes. Their response bodies and configured credentials are not
+copied into application errors. The core worker's private readiness surface
+proves schema epoch, its exact runtime role, a writable primary target, initial policy
+convergence, process lifecycle and the supervisor heartbeat; that heartbeat is
+not evidence that every work loop made progress.
+
 ## Residual and external limits
 
-- A PostgreSQL superuser, compromised gateway process or compromised host is
-  outside the isolation promised by RLS and the embedded PDP.
+- A PostgreSQL superuser, compromised gateway or worker process, or compromised
+  host is outside the isolation promised by RLS and the embedded PDP.
 - Audit is tamper-evident, not WORM. SIEM streaming, external transparency
   anchoring and customer-managed HSM keys are not implemented.
+- The worker metrics listener is loopback-private, but the current gateway's
+  unauthenticated `/metrics` route shares its application listener and remains
+  host/ingress-reachable in transitional Compose and Helm. CPR-45 must remove
+  that scrape route when application metrics move behind the private Collector.
+- Transitional Compose also host-publishes the Jaeger UI and OTLP receivers;
+  these development/evaluation endpoints are not private telemetry evidence.
+  The canonical reference must remove those host ports and accept telemetry
+  only on its private network.
 - The local adapter cannot observe a turn when the host dies before any hook,
   and it cannot authenticate state against an attacker controlling the same
   account. Corrupt or cross-gateway spool bytes are held, not repaired

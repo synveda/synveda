@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "create schema synveda_worker_process_owned authorization synveda_worker_process_test",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "63a5b9370c23b8feb8bb42fe1594c850ba412a02883b3a6d34ca175eb399e05b"
+}

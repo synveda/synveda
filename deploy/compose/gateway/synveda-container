@@ -4,7 +4,7 @@
 set -eu
 
 usage() {
-    echo "usage: synveda-container {gateway|migrate|probe gateway {live|ready}}" >&2
+    echo "usage: synveda-container {gateway|worker|migrate|probe {gateway|worker} {live|ready}}" >&2
     exit 64
 }
 
@@ -13,13 +13,21 @@ case "${1:-}" in
         [ "$#" -eq 1 ] || usage
         exec /usr/local/bin/synveda-gateway
         ;;
+    worker)
+        [ "$#" -eq 1 ] || usage
+        exec /usr/local/bin/synveda-worker
+        ;;
     migrate)
         [ "$#" -eq 1 ] || usage
         exec /usr/local/bin/synveda db migrate
         ;;
     probe)
         [ "$#" -eq 3 ] || usage
-        [ "$2" = "gateway" ] || usage
+        case "$2" in
+            gateway) port=8120 ;;
+            worker) port=8121 ;;
+            *) usage ;;
+        esac
         case "$3" in
             live) path=healthz ;;
             ready) path=readyz ;;
@@ -33,7 +41,7 @@ case "${1:-}" in
             --show-error \
             --connect-timeout 1 \
             --max-time 2 \
-            "http://127.0.0.1:8120/${path}"
+            "http://127.0.0.1:${port}/${path}"
         ;;
     *)
         usage

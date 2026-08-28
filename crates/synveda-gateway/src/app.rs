@@ -29,6 +29,33 @@ use crate::error::ApiError;
 use crate::telemetry::{HTTP_REQUEST_DURATION_SECONDS, HTTP_REQUESTS_TOTAL};
 use crate::tenant;
 
+/// Narrow state used by scheduled directory reconciliation.
+///
+/// It deliberately excludes HTTP authentication, login and origin state. A
+/// worker that reconciles directory facts needs only ordinary tenant
+/// transactions, the process-local PDP cache it invalidates after structural
+/// writes, and tenant key custody for stored connector configuration.
+#[derive(Clone)]
+pub(crate) struct DirectoryRuntime {
+    pub(crate) pool: PgPool,
+    pub(crate) pdp: Arc<Pdp>,
+    pub(crate) keys: Arc<synveda_store::keys::KeyRing>,
+}
+
+impl DirectoryRuntime {
+    pub(crate) fn new(
+        pool: PgPool,
+        pdp: Arc<Pdp>,
+        keys: Arc<synveda_store::keys::KeyRing>,
+    ) -> Self {
+        Self { pool, pdp, keys }
+    }
+
+    pub(crate) fn invalidate_scopes(&self, tenant_id: synveda_types::TenantId) {
+        self.pdp.flush_entities(tenant_id);
+    }
+}
+
 /// Shared state for all routes.
 #[derive(Clone)]
 pub struct AppState {
@@ -71,6 +98,14 @@ pub struct AppState {
 }
 
 impl AppState {
+    pub(crate) fn directory_runtime(&self) -> DirectoryRuntime {
+        DirectoryRuntime::new(
+            self.pool.clone(),
+            Arc::clone(&self.pdp),
+            Arc::clone(&self.keys),
+        )
+    }
+
     /// The one post-commit seam for every scope-tree mutation (ADR-0017
     /// decision 5, kept when the chain cache left with the hierarchy —
     /// CPR-7, ADR-0074): flushes the tenant's Cedar entity fragments, so

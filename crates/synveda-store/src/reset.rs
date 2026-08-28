@@ -25,7 +25,7 @@
 //! is stricter than Postgres's own rules because a database name that needs
 //! escaping to be safe is a database name this command declines to destroy.
 
-use sqlx::postgres::{PgConnectOptions, PgPoolOptions};
+use sqlx::postgres::PgPoolOptions;
 use sqlx::{ConnectOptions, PgPool};
 use synveda_types::{Error, Result};
 
@@ -70,13 +70,11 @@ const REQUIRED_EXTENSIONS: &[&str] = &["vector", "btree_gin"];
 /// DDL, because a session cannot drop the database it is connected to.
 #[tracing::instrument(name = "store.reset.recreate", skip_all, err(Display))]
 pub async fn recreate(database_url: &str) -> Result<Recreated> {
-    let options: PgConnectOptions = database_url.parse().map_err(|err| Error::Invalid {
-        message: format!("{database_url} is not a Postgres connection URL: {err}"),
-    })?;
+    let options = crate::database_url::parse("DATABASE_URL", database_url)?;
     let database = options
         .get_database()
         .ok_or_else(|| Error::Invalid {
-            message: format!("{database_url} names no database to reset"),
+            message: "DATABASE_URL must name the PostgreSQL database to reset".to_owned(),
         })?
         .to_owned();
     if !is_safe_identifier(&database) {
@@ -254,5 +252,22 @@ mod tests {
     #[test]
     fn the_required_extensions_are_the_ones_a_migration_needs() {
         assert_eq!(REQUIRED_EXTENSIONS, &["vector", "btree_gin"]);
+    }
+
+    #[tokio::test]
+    async fn invalid_reset_urls_never_disclose_their_credentials() {
+        const SENTINEL: &str = "SYNVEDA_STORE_RESET_SECRET";
+        let database_urls = [
+            format!("postgres://admin:{SENTINEL}@localhost"),
+            format!("https://admin:{SENTINEL}@localhost/synveda"),
+            format!("postgres://admin@localhost/synveda?access_token={SENTINEL}"),
+        ];
+        for database_url in &database_urls {
+            let error = recreate(database_url)
+                .await
+                .expect_err("unsafe reset URL must be refused before connecting");
+            assert!(!error.to_string().contains(SENTINEL), "{error}");
+            assert!(!error.to_string().contains(database_url), "{error}");
+        }
     }
 }

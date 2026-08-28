@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "drop schema synveda_cli_role_drift",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "f2bb5012e395af225cf2219e6cef8a4085ba92e96386d3cc1913809de9b97d32"
+}
