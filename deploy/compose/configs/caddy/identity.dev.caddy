@@ -1,0 +1,19 @@
+http://{$SYNVEDA_AUTH_HOST} {
+	import synveda_response_headers
+	request_body {
+		max_size 2MB
+	}
+	handle /realms/synveda/* {
+		reverse_proxy keycloak:8080 {
+			import synveda_upstream
+		}
+	}
+	handle /resources/* {
+		reverse_proxy keycloak:8080 {
+			import synveda_upstream
+		}
+	}
+	handle {
+		respond 404
+	}
+}

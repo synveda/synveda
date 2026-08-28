@@ -1,0 +1,73 @@
+#!/bin/bash
+# Keycloak lacks native file settings for all three bootstrap credentials.
+# Read only the allowlisted files, export only to the child, and never print a
+# value or place it in argv (CPR-45, ADR-0102).
+set -eu
+
+for direct_setting in KC_DB_PASSWORD KC_BOOTSTRAP_ADMIN_USERNAME KC_BOOTSTRAP_ADMIN_PASSWORD; do
+    case "$direct_setting" in
+        KC_DB_PASSWORD) configured=${KC_DB_PASSWORD+x} ;;
+        KC_BOOTSTRAP_ADMIN_USERNAME) configured=${KC_BOOTSTRAP_ADMIN_USERNAME+x} ;;
+        KC_BOOTSTRAP_ADMIN_PASSWORD) configured=${KC_BOOTSTRAP_ADMIN_PASSWORD+x} ;;
+    esac
+    [ -z "${configured:-}" ] || {
+        echo "keycloak-entrypoint: direct $direct_setting is forbidden; configure its file setting only" >&2
+        exit 78
+    }
+done
+
+read_secret() {
+    setting=$1
+    path=$2
+    # Bash character counts are locale-sensitive. Keep the bound in bytes
+    # without changing the locale inherited by the Keycloak process.
+    LC_ALL=C
+    export LC_ALL
+    [ -n "$path" ] || {
+        echo "keycloak-entrypoint: ${setting}_FILE must name a file" >&2
+        exit 78
+    }
+    [ ! -L "$path" ] && [ -f "$path" ] || {
+        echo "keycloak-entrypoint: ${setting}_FILE must name a regular non-symlink file" >&2
+        exit 78
+    }
+    file_bytes=$(LC_ALL=C wc -c < "$path")
+    [ "$file_bytes" -le 4096 ] || {
+        echo "keycloak-entrypoint: ${setting}_FILE exceeds 4096 bytes" >&2
+        exit 78
+    }
+    nul_prefix=
+    if IFS= read -r -d '' nul_prefix < "$path"; then
+        echo "keycloak-entrypoint: ${setting}_FILE contains a NUL byte" >&2
+        exit 78
+    fi
+    value=
+    trailing=
+    exec 3< "$path"
+    IFS= read -r -n 4096 value <&3 || [ -n "$value" ]
+    if IFS= read -r -n 1 trailing <&3; then
+        echo "keycloak-entrypoint: ${setting}_FILE must contain one line" >&2
+        exit 78
+    fi
+    exec 3<&-
+    case "$value" in
+        *$'\r') value=${value%$'\r'} ;;
+    esac
+    [ -n "$value" ] || {
+        echo "keycloak-entrypoint: ${setting}_FILE must not be empty" >&2
+        exit 78
+    }
+    printf '%s' "$value"
+}
+
+KC_DB_PASSWORD=$(read_secret KC_DB_PASSWORD "${KC_DB_PASSWORD_FILE:-}")
+KC_BOOTSTRAP_ADMIN_USERNAME=$(
+    read_secret KC_BOOTSTRAP_ADMIN_USERNAME "${KC_BOOTSTRAP_ADMIN_USERNAME_FILE:-}"
+)
+KC_BOOTSTRAP_ADMIN_PASSWORD=$(
+    read_secret KC_BOOTSTRAP_ADMIN_PASSWORD "${KC_BOOTSTRAP_ADMIN_PASSWORD_FILE:-}"
+)
+export KC_DB_PASSWORD KC_BOOTSTRAP_ADMIN_USERNAME KC_BOOTSTRAP_ADMIN_PASSWORD
+unset KC_DB_PASSWORD_FILE KC_BOOTSTRAP_ADMIN_USERNAME_FILE KC_BOOTSTRAP_ADMIN_PASSWORD_FILE
+
+exec /opt/keycloak/bin/kc.sh "$@"

@@ -29,6 +29,8 @@
 //! here does: the gateway starts once, in OIDC mode, and the dev secret
 //! never appears on the install path (ADR-0010 decision 3).
 
+use std::ffi::OsString;
+use std::io::Read as _;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
@@ -79,6 +81,8 @@ const COMPOSE_GATEWAY_DATABASE_URL: &str =
     "postgres://synveda_gateway:synveda-dev@localhost:5432/synveda";
 const COMPOSE_WORKER_DATABASE_URL: &str =
     "postgres://synveda_worker:synveda-dev@localhost:5432/synveda";
+const DEFAULT_DATABASE_URL: &str = "postgres://synveda:synveda-dev@localhost:5432/synveda";
+const MAX_DATABASE_URL_FILE_BYTES: u64 = 1_048_576;
 
 /// Settings owned by worker/bootstrap planes that a transitional host gateway
 /// must not inherit from the operator shell. `Command::env_remove` records the
@@ -137,10 +141,17 @@ pub async fn init(plan: Plan) -> Result<(), String> {
     // The plan is not viable when its bootstrap target is not. Validate
     // before the dry-run branch so preview and execution share the exact
     // provider/query/database-name boundary and content-free refusal.
-    validate_bootstrap_database_url(&database_url())?;
+    let database_url = database_url()?;
+    validate_bootstrap_database_url(&database_url.value)?;
 
     if plan.dry_run {
-        return dry_run(&plan, &profile, &issuer, bundled);
+        return dry_run(
+            &plan,
+            &profile,
+            &issuer,
+            bundled,
+            database_url.explicitly_configured,
+        );
     }
 
     // ── 1. the stack ────────────────────────────────────────────────────
@@ -176,15 +187,19 @@ pub async fn init(plan: Plan) -> Result<(), String> {
 
     // ── 2. schema ───────────────────────────────────────────────────────
     step(2, "applying migrations");
-    let database_url = database_url();
-    let bootstrap_options = synveda_store::database_url::parse("DATABASE_URL", &database_url)
+    let bootstrap_options = synveda_store::database_url::parse("DATABASE_URL", &database_url.value)
         .map_err(|error| error.to_string())?;
     let pool = sqlx::postgres::PgPoolOptions::new()
         .max_connections(2)
         .acquire_timeout(Duration::from_secs(30))
         .connect_with(bootstrap_options)
         .await
-        .map_err(|err| format!("connect to {}: {err}", redacted_database_url(&database_url)))?;
+        .map_err(|err| {
+            format!(
+                "connect to {}: {err}",
+                redacted_database_url(&database_url.value)
+            )
+        })?;
     // The epoch guard before the migrator (CPR-2, ADR-0069), so that an
     // operator re-running `init` over a database from before the
     // context-platform cut is told to reset it — as itself, rather than
@@ -200,7 +215,7 @@ pub async fn init(plan: Plan) -> Result<(), String> {
         schema.epoch, schema.migration_head
     );
     let (gateway_database_url, worker_database_url, runtime_urls_explicit) =
-        runtime_database_urls()?;
+        runtime_database_urls(database_url.explicitly_configured)?;
     let (gateway_role, worker_role) =
         distinct_runtime_database_roles(&gateway_database_url, &worker_database_url)?;
     let bootstrap_database = synveda_store::runtime_role::database_identity(&pool)
@@ -364,9 +379,15 @@ pub async fn init(plan: Plan) -> Result<(), String> {
     Ok(())
 }
 
-fn dry_run(plan: &Plan, profile: &Profile, issuer: &str, bundled: bool) -> Result<(), String> {
+fn dry_run(
+    plan: &Plan,
+    profile: &Profile,
+    issuer: &str,
+    bundled: bool,
+    admin_database_explicit: bool,
+) -> Result<(), String> {
     let (gateway_database_url, worker_database_url, runtime_urls_explicit) =
-        runtime_database_urls()?;
+        runtime_database_urls(admin_database_explicit)?;
     distinct_runtime_database_roles(&gateway_database_url, &worker_database_url)?;
     println!("synveda init --dry-run");
     println!();
@@ -1275,14 +1296,91 @@ fn ensure_kek(profile: &Profile) -> Result<String, String> {
     Ok(hex)
 }
 
-/// `DATABASE_URL`, or the single-node profile's own Postgres. Shared with
-/// `main::connect` so that an installed CLI and the installer it came with
+/// The selected bootstrap database and whether an operator supplied it.
+#[derive(Debug, Eq, PartialEq)]
+pub(crate) struct DatabaseUrlSetting {
+    pub(crate) value: String,
+    pub(crate) explicitly_configured: bool,
+}
+
+/// `DATABASE_URL`, `DATABASE_URL_FILE`, or the single-node profile's own
+/// Postgres. Shared with `main::connect` so direct binaries and containers
 /// cannot disagree about which database this deployment is.
-pub fn database_url() -> String {
-    std::env::var("DATABASE_URL")
-        .ok()
-        .filter(|url| !url.is_empty())
-        .unwrap_or_else(|| "postgres://synveda:synveda-dev@localhost:5432/synveda".to_owned())
+pub(crate) fn database_url() -> Result<DatabaseUrlSetting, String> {
+    resolve_database_url(
+        std::env::var_os("DATABASE_URL"),
+        std::env::var_os("DATABASE_URL_FILE"),
+    )
+}
+
+fn resolve_database_url(
+    direct: Option<OsString>,
+    file: Option<OsString>,
+) -> Result<DatabaseUrlSetting, String> {
+    match (direct, file) {
+        (Some(_), Some(_)) => Err(
+            "DATABASE_URL and DATABASE_URL_FILE are mutually exclusive; configure exactly one"
+                .to_owned(),
+        ),
+        (Some(value), None) => value
+            .into_string()
+            .map(|value| DatabaseUrlSetting {
+                value,
+                explicitly_configured: true,
+            })
+            .map_err(|_| "DATABASE_URL must be valid UTF-8".to_owned()),
+        (None, Some(path)) => {
+            read_database_url_file(Path::new(&path)).map(|value| DatabaseUrlSetting {
+                value,
+                explicitly_configured: true,
+            })
+        }
+        (None, None) => Ok(DatabaseUrlSetting {
+            value: DEFAULT_DATABASE_URL.to_owned(),
+            explicitly_configured: false,
+        }),
+    }
+}
+
+fn read_database_url_file(path: &Path) -> Result<String, String> {
+    if path.as_os_str().is_empty() {
+        return Err("DATABASE_URL_FILE must name a file".to_owned());
+    }
+    let file =
+        std::fs::File::open(path).map_err(|_| "DATABASE_URL_FILE cannot be read".to_owned())?;
+    let metadata = file
+        .metadata()
+        .map_err(|_| "DATABASE_URL_FILE cannot be read".to_owned())?;
+    if !metadata.is_file() {
+        return Err("DATABASE_URL_FILE must name a regular file".to_owned());
+    }
+    if metadata.len() > MAX_DATABASE_URL_FILE_BYTES {
+        return Err(format!(
+            "DATABASE_URL_FILE exceeds the {MAX_DATABASE_URL_FILE_BYTES} byte startup bound"
+        ));
+    }
+    let capacity = usize::try_from(metadata.len().min(MAX_DATABASE_URL_FILE_BYTES + 1))
+        .map_err(|_| "DATABASE_URL_FILE exceeds the startup bound".to_owned())?;
+    let mut bytes = Vec::with_capacity(capacity);
+    file.take(MAX_DATABASE_URL_FILE_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|_| "DATABASE_URL_FILE cannot be read".to_owned())?;
+    if bytes.len() as u64 > MAX_DATABASE_URL_FILE_BYTES {
+        return Err(format!(
+            "DATABASE_URL_FILE exceeds the {MAX_DATABASE_URL_FILE_BYTES} byte startup bound"
+        ));
+    }
+    let mut value = String::from_utf8(bytes)
+        .map_err(|_| "DATABASE_URL_FILE must contain valid UTF-8".to_owned())?;
+    if let Some(stripped) = value.strip_suffix("\r\n") {
+        value.truncate(stripped.len());
+    } else if value.ends_with('\n') {
+        value.pop();
+    }
+    if value.contains('\0') {
+        return Err("DATABASE_URL_FILE must not contain NUL bytes".to_owned());
+    }
+    Ok(value)
 }
 
 /// A credential-safe rendering for operator errors. `DATABASE_URL` is an
@@ -1312,14 +1410,13 @@ fn secret_fingerprint(value: &str) -> String {
 /// Resolves distinct gateway and worker runtime DSNs. Operators override both
 /// together; a half-overridden pair is refused because it silently mixes an
 /// external credential with the local development login.
-fn runtime_database_urls() -> Result<(String, String, bool), String> {
+fn runtime_database_urls(admin_configured: bool) -> Result<(String, String, bool), String> {
     let gateway = std::env::var("SYNVEDA_GATEWAY_DATABASE_URL")
         .ok()
         .filter(|value| !value.is_empty());
     let worker = std::env::var("SYNVEDA_WORKER_DATABASE_URL")
         .ok()
         .filter(|value| !value.is_empty());
-    let admin_configured = std::env::var("DATABASE_URL").is_ok_and(|value| !value.is_empty());
     runtime_database_urls_from(gateway, worker, admin_configured)
 }
 
@@ -2330,6 +2427,102 @@ mod tests {
         );
         assert!(!rendered.contains('?'), "query retained: {rendered}");
         assert!(!rendered.contains('#'), "fragment retained: {rendered}");
+    }
+
+    #[test]
+    fn database_url_direct_file_resolution_is_bounded_and_content_free() {
+        let implicit = resolve_database_url(None, None).unwrap();
+        assert_eq!(implicit.value, DEFAULT_DATABASE_URL);
+        assert!(!implicit.explicitly_configured);
+
+        let direct = resolve_database_url(Some(OsString::from("direct-value")), None).unwrap();
+        assert_eq!(direct.value, "direct-value");
+        assert!(direct.explicitly_configured);
+
+        let empty = resolve_database_url(Some(OsString::new()), None).unwrap();
+        assert!(empty.value.is_empty());
+        assert!(empty.explicitly_configured);
+
+        let dir = scratch("database-url-file");
+        let path = dir.join("database-url");
+        std::fs::write(&path, "postgres://app:secret@db.example.test/synveda\r\n").unwrap();
+        let from_file = resolve_database_url(None, Some(path.clone().into_os_string())).unwrap();
+        assert_eq!(
+            from_file.value,
+            "postgres://app:secret@db.example.test/synveda"
+        );
+        assert!(from_file.explicitly_configured);
+
+        std::fs::write(&path, "\n").unwrap();
+        let empty_file = resolve_database_url(None, Some(path.clone().into_os_string())).unwrap();
+        assert!(empty_file.value.is_empty());
+        assert!(empty_file.explicitly_configured);
+
+        const SENTINEL: &str = "SYNVEDA_DATABASE_URL_FILE_SECRET";
+        let ambiguity = resolve_database_url(
+            Some(OsString::from(SENTINEL)),
+            Some(dir.join(SENTINEL).into_os_string()),
+        )
+        .expect_err("direct and file settings must be refused before either is read");
+        assert_eq!(
+            ambiguity,
+            "DATABASE_URL and DATABASE_URL_FILE are mutually exclusive; configure exactly one"
+        );
+        assert!(!ambiguity.contains(SENTINEL), "{ambiguity}");
+
+        for (file_name, bytes, expected) in [
+            (
+                "invalid-utf8",
+                vec![0xff],
+                "DATABASE_URL_FILE must contain valid UTF-8",
+            ),
+            (
+                "nul",
+                format!("postgres://app:{SENTINEL}@db.example.test/synveda\0").into_bytes(),
+                "DATABASE_URL_FILE must not contain NUL bytes",
+            ),
+            (
+                "oversized",
+                vec![b'x'; (MAX_DATABASE_URL_FILE_BYTES + 1) as usize],
+                "DATABASE_URL_FILE exceeds the 1048576 byte startup bound",
+            ),
+        ] {
+            let invalid = dir.join(file_name);
+            std::fs::write(&invalid, bytes).unwrap();
+            let error = resolve_database_url(None, Some(invalid.into_os_string()))
+                .expect_err("invalid file must be refused");
+            assert_eq!(error, expected);
+            assert!(!error.contains(SENTINEL), "{error}");
+        }
+
+        let directory_error = resolve_database_url(None, Some(dir.clone().into_os_string()))
+            .expect_err("directory must not be treated as a setting file");
+        assert_eq!(
+            directory_error,
+            "DATABASE_URL_FILE must name a regular file"
+        );
+        let missing = dir.join(SENTINEL);
+        let missing_error = resolve_database_url(None, Some(missing.into_os_string()))
+            .expect_err("missing file must be refused");
+        assert_eq!(missing_error, "DATABASE_URL_FILE cannot be read");
+        assert!(!missing_error.contains(SENTINEL), "{missing_error}");
+        assert_eq!(
+            resolve_database_url(None, Some(OsString::new()))
+                .expect_err("empty file path must be refused"),
+            "DATABASE_URL_FILE must name a file"
+        );
+
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn database_url_direct_non_utf8_is_content_free() {
+        use std::os::unix::ffi::OsStringExt as _;
+
+        let error = resolve_database_url(Some(OsString::from_vec(vec![0xff])), None)
+            .expect_err("non-UTF-8 direct setting must be refused");
+        assert_eq!(error, "DATABASE_URL must be valid UTF-8");
     }
 
     #[test]

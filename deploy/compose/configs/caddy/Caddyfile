@@ -1,0 +1,56 @@
+{
+	admin off
+	http_port {$SYNVEDA_PROXY_HTTP_PORT}
+	https_port {$SYNVEDA_PROXY_HTTPS_PORT}
+	servers {
+		max_header_size 32KB
+		timeouts {
+			read_body 30s
+			read_header 10s
+			write 60s
+			idle 2m
+		}
+	}
+}
+
+(synveda_response_headers) {
+	header {
+		-Server
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy no-referrer
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+	}
+}
+
+(synveda_upstream) {
+	header_up -Forwarded
+	header_up -X-Forwarded-For
+	header_up -X-Forwarded-Host
+	header_up -X-Forwarded-Proto
+	header_up -X-Forwarded-Port
+	header_up -X-Original-*
+	header_up -X-Remote-User
+	header_up -X-Authenticated-User
+	header_up -X-User
+	header_up -Remote-User
+	header_up -traceparent
+	header_up -tracestate
+	header_up -baggage
+	header_up -b3
+	header_up -X-B3-*
+	header_up -uber-trace-id
+	header_up -ot-tracer-*
+	header_up X-Forwarded-For {remote_host}
+	header_up X-Forwarded-Host {host}
+	header_up X-Forwarded-Proto {scheme}
+	header_up X-Forwarded-Port {$SYNVEDA_PUBLIC_PORT}
+	transport http {
+		dial_timeout 5s
+		response_header_timeout 30s
+		keepalive_idle_conns_per_host 32
+	}
+}
+
+import /etc/caddy/app.caddy
+import /etc/caddy/identity-*.caddy

@@ -1,0 +1,21 @@
+https://{$SYNVEDA_AUTH_HOST} {
+	tls /run/secrets/tls_cert /run/secrets/tls_key
+	import synveda_response_headers
+	header Strict-Transport-Security "max-age=31536000; includeSubDomains"
+	request_body {
+		max_size 2MB
+	}
+	handle /realms/synveda/* {
+		reverse_proxy keycloak:8080 {
+			import synveda_upstream
+		}
+	}
+	handle /resources/* {
+		reverse_proxy keycloak:8080 {
+			import synveda_upstream
+		}
+	}
+	handle {
+		respond 404
+	}
+}

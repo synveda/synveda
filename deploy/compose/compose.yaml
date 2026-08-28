@@ -1,0 +1,243 @@
+# CPR-45 / ADR-0102: provider-neutral single-host deployment graph.
+#
+# This file intentionally defines neither PostgreSQL nor an OIDC provider.
+# Select exactly one runtime overlay and the required provider fragments through
+# deploy/compose/scripts/compose.sh. Until the convergence jobs land, only the
+# `config` action is supported; deploy/compose/README.md records that boundary.
+
+x-synveda-product: &synveda-product
+  image: ${SYNVEDA_PRODUCT_IMAGE:?set SYNVEDA_PRODUCT_IMAGE}
+  user: "${SYNVEDA_RUNTIME_UID:?set SYNVEDA_RUNTIME_UID}:${SYNVEDA_RUNTIME_GID:?set SYNVEDA_RUNTIME_GID}"
+  read_only: true
+  init: true
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  pids_limit: 256
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,nodev,mode=1777,size=64m
+
+x-synveda-long-running: &synveda-long-running
+  restart: ${SYNVEDA_COMPOSE_RESTART_POLICY:?set SYNVEDA_COMPOSE_RESTART_POLICY}
+
+services:
+  proxy:
+    image: ${SYNVEDA_CADDY_IMAGE:?set SYNVEDA_CADDY_IMAGE}
+    user: "${SYNVEDA_RUNTIME_UID}:${SYNVEDA_RUNTIME_GID}"
+    command: ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]
+    read_only: true
+    init: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 128
+    restart: ${SYNVEDA_COMPOSE_RESTART_POLICY}
+    stop_grace_period: 15s
+    environment:
+      SYNVEDA_APP_HOST: ${SYNVEDA_APP_HOST:?set SYNVEDA_APP_HOST}
+      SYNVEDA_AUTH_HOST: ${SYNVEDA_AUTH_HOST:?set SYNVEDA_AUTH_HOST}
+      SYNVEDA_PUBLIC_PORT: ${SYNVEDA_PUBLIC_PORT:?set SYNVEDA_PUBLIC_PORT}
+      SYNVEDA_PROXY_HTTP_PORT: ${SYNVEDA_PROXY_HTTP_PORT:?set SYNVEDA_PROXY_HTTP_PORT}
+      SYNVEDA_PROXY_HTTPS_PORT: ${SYNVEDA_PROXY_HTTPS_PORT:?set SYNVEDA_PROXY_HTTPS_PORT}
+      XDG_CONFIG_HOME: /tmp/caddy-config
+      XDG_DATA_HOME: /tmp/caddy-data
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,mode=1777,size=64m
+    volumes:
+      - type: bind
+        source: ./configs/caddy/Caddyfile
+        target: /etc/caddy/Caddyfile
+        read_only: true
+      - type: bind
+        source: ${SYNVEDA_CADDY_APP_CONFIG:?set SYNVEDA_CADDY_APP_CONFIG}
+        target: /etc/caddy/app.caddy
+        read_only: true
+    healthcheck:
+      test: ["CMD", "caddy", "validate", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+    networks:
+      public-edge: {}
+      app-backend: {}
+
+  migrate:
+    <<: *synveda-product
+    command: ["migrate"]
+    restart: "no"
+    environment:
+      DATABASE_URL_FILE: /run/secrets/database_url
+      RUST_LOG: ${RUST_LOG:-info}
+    secrets:
+      - source: synveda_migrator_database_url
+        target: database_url
+    networks:
+      synveda-data: {}
+      application-egress: {}
+
+  gateway:
+    <<: [*synveda-product, *synveda-long-running]
+    command: ["gateway"]
+    stop_grace_period: 30s
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL_FILE: /run/secrets/database_url
+      SYNVEDA_EXPECTED_DATABASE_ROLE: synveda_gateway
+      SYNVEDA_LISTEN_ADDR: 0.0.0.0:8120
+      SYNVEDA_PUBLIC_URL: ${SYNVEDA_PUBLIC_APP_URL:?set SYNVEDA_PUBLIC_APP_URL}
+      SYNVEDA_OIDC_ISSUERS_FILE: /etc/synveda/oidc/issuers.json
+      SYNVEDA_KMS_KEY_FILE: /run/secrets/kms_key
+      SYNVEDA_KMS_KEY_REF_FILE: /run/secrets/kms_key_ref
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      RUST_LOG: ${RUST_LOG:-info}
+    secrets:
+      - source: synveda_gateway_database_url
+        target: database_url
+      - source: synveda_kms_key
+        target: kms_key
+      - source: synveda_kms_key_ref
+        target: kms_key_ref
+    volumes:
+      - type: bind
+        source: ${SYNVEDA_OIDC_ISSUERS_FILE:?set SYNVEDA_OIDC_ISSUERS_FILE}
+        target: /etc/synveda/oidc/issuers.json
+        read_only: true
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/synveda-container", "probe", "gateway", "ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 24
+    networks:
+      app-backend: {}
+      synveda-data: {}
+      telemetry: {}
+      application-egress: {}
+
+  worker:
+    <<: [*synveda-product, *synveda-long-running]
+    command: ["worker"]
+    stop_grace_period: 85s
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL_FILE: /run/secrets/database_url
+      SYNVEDA_EXPECTED_DATABASE_ROLE: synveda_worker
+      SYNVEDA_WORKER_LISTEN_ADDR: 127.0.0.1:8121
+      SYNVEDA_OIDC_ISSUERS_FILE: /etc/synveda/oidc/issuers.json
+      SYNVEDA_KMS_KEY_FILE: /run/secrets/kms_key
+      SYNVEDA_KMS_KEY_REF_FILE: /run/secrets/kms_key_ref
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      RUST_LOG: ${RUST_LOG:-info}
+    secrets:
+      - source: synveda_worker_database_url
+        target: database_url
+      - source: synveda_kms_key
+        target: kms_key
+      - source: synveda_kms_key_ref
+        target: kms_key_ref
+    volumes:
+      - type: bind
+        source: ${SYNVEDA_OIDC_ISSUERS_FILE}
+        target: /etc/synveda/oidc/issuers.json
+        read_only: true
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/synveda-container", "probe", "worker", "ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 24
+    networks:
+      synveda-data: {}
+      telemetry: {}
+      application-egress: {}
+
+  otel-collector:
+    image: ${SYNVEDA_OTEL_COLLECTOR_IMAGE:?set SYNVEDA_OTEL_COLLECTOR_IMAGE}
+    user: "${SYNVEDA_RUNTIME_UID}:${SYNVEDA_RUNTIME_GID}"
+    command: ["--config=/etc/otelcol/config.yaml"]
+    read_only: true
+    init: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 256
+    restart: ${SYNVEDA_COMPOSE_RESTART_POLICY}
+    stop_grace_period: 15s
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,mode=1777,size=64m
+    volumes:
+      - type: bind
+        source: ./configs/otel/collector.yaml
+        target: /etc/otelcol/config.yaml
+        read_only: true
+    healthcheck:
+      test: ["CMD", "/otelcol-contrib", "validate", "--config=http://127.0.0.1:13133/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    networks:
+      telemetry: {}
+      keycloak-management: {}
+      telemetry-egress: {}
+
+networks:
+  public-edge:
+    labels:
+      com.synveda.contract: cpr-45
+      com.synveda.network: public-edge
+  app-backend:
+    internal: true
+    labels:
+      com.synveda.contract: cpr-45
+      com.synveda.network: app-backend
+  synveda-data:
+    internal: true
+    labels:
+      com.synveda.contract: cpr-45
+      com.synveda.network: synveda-data
+  keycloak-data:
+    internal: true
+    labels:
+      com.synveda.contract: cpr-45
+      com.synveda.network: keycloak-data
+  identity-backend:
+    internal: true
+    ipam:
+      config:
+        - subnet: ${SYNVEDA_IDENTITY_SUBNET:?set SYNVEDA_IDENTITY_SUBNET}
+    labels:
+      com.synveda.contract: cpr-45
+      com.synveda.network: identity-backend
+  keycloak-management:
+    internal: true
+    labels:
+      com.synveda.contract: cpr-45
+      com.synveda.network: keycloak-management
+  telemetry:
+    internal: true
+    labels:
+      com.synveda.contract: cpr-45
+      com.synveda.network: telemetry
+  application-egress:
+    labels:
+      com.synveda.contract: cpr-45
+      com.synveda.network: application-egress
+  identity-egress:
+    labels:
+      com.synveda.contract: cpr-45
+      com.synveda.network: identity-egress
+  telemetry-egress:
+    labels:
+      com.synveda.contract: cpr-45
+      com.synveda.network: telemetry-egress
+
+secrets:
+  synveda_migrator_database_url:
+    file: ${SYNVEDA_SECRETS_DIR:?set SYNVEDA_SECRETS_DIR}/synveda_migrator_database_url
+  synveda_gateway_database_url:
+    file: ${SYNVEDA_SECRETS_DIR}/synveda_gateway_database_url
+  synveda_worker_database_url:
+    file: ${SYNVEDA_SECRETS_DIR}/synveda_worker_database_url
+  synveda_kms_key:
+    file: ${SYNVEDA_SECRETS_DIR}/synveda_kms_key
+  synveda_kms_key_ref:
+    file: ${SYNVEDA_SECRETS_DIR}/synveda_kms_key_ref

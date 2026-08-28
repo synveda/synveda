@@ -1,0 +1,14 @@
+http://{$SYNVEDA_APP_HOST} {
+	import synveda_response_headers
+	request_body {
+		max_size 16MB
+	}
+	handle /metrics {
+		respond 404
+	}
+	handle {
+		reverse_proxy gateway:8120 {
+			import synveda_upstream
+		}
+	}
+}

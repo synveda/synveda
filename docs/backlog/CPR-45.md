@@ -123,9 +123,9 @@ optional directory pull are supervised by the worker. It still owns request
 state, policy refresh, pool monitoring and startup KMS provisioning. The worker
 refuses work until schema epoch, exact non-elevated runtime role that owns no
 database and no schema/relation/routine in the selected Synveda database,
-writable-primary state and initial
-policy convergence pass, binds health/readiness/metrics to loopback, and treats an
-unexpected critical task exit as fatal. A supervised authority sentinel
+writable-primary state and initial policy convergence pass, binds
+health/readiness/metrics to loopback, and treats an unexpected critical task
+exit as fatal. A supervised authority sentinel
 continues to re-prove epoch and runtime role; a conclusive refusal faults the
 process, cancels every loop and exits non-zero rather than merely changing
 readiness.
@@ -141,11 +141,11 @@ persisted across a database restart. The transitional raw
 characters. The worker therefore independently proves the resolved container
 session's exact role/epoch/writable-primary state at boot and while running;
 init's host-side check alone is not container-resolution evidence. The gateway
-has no equivalent boot-time role sentinel yet. Helm
-renders a private worker Deployment from the
-same image and a separately owned Secret, and its install job refuses a mounted
-worker URL targeting a different live primary instance/database. Helm's gateway still uses
-the CloudNativePG application-owner Secret, and the transitional Compose
+has no equivalent boot-time role sentinel yet. Helm renders a private worker
+Deployment from the same image and a separately owned Secret, and its install
+job refuses a mounted worker URL targeting a different live primary
+instance/database. Helm's gateway still uses the CloudNativePG
+application-owner Secret, and the transitional Compose
 manifests still use a monolithic rendered environment file (the other runtime
 DSN is explicitly masked in each service); both are explicit gaps before the
 locked secret/role-isolation contract is satisfied.
@@ -156,6 +156,20 @@ or query keys not consumed by pinned SQLx before SQLx can log an ignored value.
 Content-free unit, reset and real gateway/worker process sentinels prove wrong
 schemes, ambient database fallback and unknown query secrets are refused
 without disclosure.
+
+The additive canonical Compose checkpoint now has a closed selector for all
+eight development/reference and bundled/external PostgreSQL/OIDC rows. Static
+evidence proves role-scoped mode-0600 file inputs, provider-specific service
+sets, internal trust networks, explicit egress seams, one product image across
+gateway/worker/migration, reverse-proxy-only host ports and no Rauthy/Temporal
+entry in the new graph. `synveda db migrate`, init, reset and other direct store
+commands resolve `DATABASE_URL` or bounded `DATABASE_URL_FILE` with ambiguity
+and content-free failure tests. Pinned Keycloak, Caddy, PostgreSQL and Collector
+configuration exists, but the new graph is deliberately not startable yet:
+database/role convergence, Keycloak realm convergence and the product-owned
+exact issuer diagnostic are the next cutover prerequisites. The legacy
+Rauthy/Temporal lifecycle remains authoritative until those acceptance paths
+pass; static configuration is not deployment validation.
 
 Deterministic evidence covers worker boot outage, live/not-ready semantics,
 exact role, any-schema ownership, elevation, unexpected membership and

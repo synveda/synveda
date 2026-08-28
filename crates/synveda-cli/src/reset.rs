@@ -39,18 +39,19 @@ pub async fn reset(plan: Plan) -> Result<(), String> {
                 .to_owned(),
         );
     }
+    let database_url = init::database_url()?;
     if !plan.force {
         return Err(format!(
             "this destroys the whole of {} — every tenant, every record, every \
              audit event.\n\nRe-run with --force if that is what you want:\n\n    \
              {}\n",
-            describe(&init::database_url()),
+            describe(&database_url.value),
             synveda_store::epoch::RESET_COMMAND,
         ));
     }
 
     let started = Instant::now();
-    let url = init::database_url();
+    let url = database_url.value;
     refuse_a_database_that_is_not_this_machine_s(&url)?;
 
     println!("synveda reset");

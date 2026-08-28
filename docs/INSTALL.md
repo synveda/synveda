@@ -39,8 +39,9 @@ non-superuser/non-`BYPASSRLS`; registers the OIDC client/operator; starts the ga
 remains bootstrap-only in this installed shape, so forced RLS backs both
 runtime roles.
 
-When `DATABASE_URL` is explicit—even when its host is loopback—`init` treats it
-as an operator-owned bootstrap target and also requires both
+When `DATABASE_URL` or `DATABASE_URL_FILE` is explicit—even when its host is
+loopback—`init` treats it as an operator-owned bootstrap target and also
+requires both
 `SYNVEDA_GATEWAY_DATABASE_URL` and `SYNVEDA_WORKER_DATABASE_URL` to name
 separately provisioned application logins. Only the implicit bundled default
 derives and converges the fixed development credentials. The roles must be
@@ -52,8 +53,11 @@ and writable-primary state, and compares the PostgreSQL cluster identity,
 database OID and live postmaster start marker with the bootstrap connection. A
 different live primary instance or read-only target is refused. The marker is
 not persisted across database restarts. The bootstrap-owner `DATABASE_URL` is
-never handed to either
-runtime, and all URLs are password-redacted in diagnostics.
+never handed to either runtime; containers use the mutually exclusive
+`DATABASE_URL_FILE` form so the credential is not rendered into their
+environment.
+
+All URLs are password-redacted in diagnostics.
 
 All product database URLs must use the `postgres` or `postgresql` scheme and
 name the database explicitly in their path or effective `dbname` parameter.
@@ -882,10 +886,10 @@ the extensions, migrates to the current epoch, removes the derived search
 index, and is idempotent: running it twice leaves the same thing.
 
 It requires both flags. `synveda reset --database` on its own tells you what
-it would destroy and destroys nothing. It also refuses a `DATABASE_URL` that
-points at another machine, and prints the two statements to run there by hand
-instead — `--force` says "yes, destroy it", not "and I checked which server I
-am pointed at".
+it would destroy and destroys nothing. It also refuses a `DATABASE_URL` or
+`DATABASE_URL_FILE` target that points at another machine, and prints the two
+statements to run there by hand instead — `--force` says "yes, destroy it", not
+"and I checked which server I am pointed at".
 
 If instead you are told the database is at a *newer* epoch than the build,
 **do not reset it**: that database holds data this installation cannot read,

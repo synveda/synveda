@@ -1423,7 +1423,7 @@ enum AuditCommand {
 
 #[derive(Subcommand)]
 enum DbCommand {
-    /// Apply all pending migrations to DATABASE_URL.
+    /// Apply all pending migrations to DATABASE_URL or DATABASE_URL_FILE.
     Migrate,
 }
 
@@ -3063,13 +3063,13 @@ pub(crate) async fn record_break_glass(
 
 /// [`connect`], then the schema epoch guard (CPR-2, ADR-0069).
 ///
-/// Every store-level command goes through this. They open `DATABASE_URL`
-/// directly and write with the owner role — which makes them the one family
-/// of verbs that could quietly succeed against a database from before the
-/// context-platform cut, writing new-model rows beside old-model ones with
-/// nothing in the process to notice. The two that do not are the two that
-/// cannot: `db migrate`, which creates the epoch, and `reset`, which is what
-/// a refusal tells you to run.
+/// Every store-level command goes through this. They open `DATABASE_URL` or
+/// `DATABASE_URL_FILE` directly and write with the owner role — which makes
+/// them the one family of verbs that could quietly succeed against a database
+/// from before the context-platform cut, writing new-model rows beside
+/// old-model ones with nothing in the process to notice. The two that do not
+/// are the two that cannot: `db migrate`, which creates the epoch, and `reset`,
+/// which is what a refusal tells you to run.
 async fn connect_current_epoch() -> Result<sqlx::PgPool, String> {
     let pool = connect().await?;
     synveda_store::epoch::verify(&pool)
@@ -3079,15 +3079,15 @@ async fn connect_current_epoch() -> Result<sqlx::PgPool, String> {
 }
 
 async fn connect() -> Result<sqlx::PgPool, String> {
-    // `DATABASE_URL`, or the single-node profile's own Postgres — which is
-    // the same default `synveda init` installs against, so the commands
-    // INSTALL.md tells a new operator to run next (`audit tail`, `audit
-    // verify`) work on a machine that has one deployment and no Makefile.
+    // `DATABASE_URL`, `DATABASE_URL_FILE`, or the single-node profile's own
+    // Postgres — the same default `synveda init` installs against, so the
+    // commands INSTALL.md tells a new operator to run next (`audit tail`,
+    // `audit verify`) work on a machine that has one deployment and no Makefile.
     //
     // The message this replaces named the Makefile, which is in a checkout
     // an installed operator does not have (OPS-8). Erroring on a missing
     // variable was right while a checkout was the only way to get here.
-    let url = init::database_url();
+    let url = init::database_url()?.value;
     let connect_options = synveda_store::database_url::parse("DATABASE_URL", &url)
         .map_err(|error| error.to_string())?;
     PgPoolOptions::new()
@@ -3098,7 +3098,7 @@ async fn connect() -> Result<sqlx::PgPool, String> {
             let safe_url = init::redacted_database_url(&url);
             format!(
                 "connect to {safe_url}: {err}\n\
-                 (set DATABASE_URL to reach a database other than the one \
+                 (set DATABASE_URL or DATABASE_URL_FILE to reach a database other than the one \
                  `synveda init` installs)"
             )
         })

@@ -1,0 +1,12 @@
+[
+  {
+    "issuer": "http://auth.synveda.test:8080/realms/synveda",
+    "client_id": "synveda",
+    "tenant": {
+      "static": {
+        "tenant_id": "00000000-0000-0000-0000-000000000000"
+      }
+    },
+    "login_scopes": ["openid", "profile", "email", "groups"]
+  }
+]

@@ -1,0 +1,41 @@
+extensions:
+  health_check:
+    endpoint: 127.0.0.1:13133
+    response_body:
+      healthy: '{"receivers":{"nop":{}},"exporters":{"nop":{}},"service":{"pipelines":{"traces":{"receivers":["nop"],"exporters":["nop"]}}}}'
+      unhealthy: '{}'
+
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+        max_recv_msg_size_mib: 4
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  memory_limiter:
+    check_interval: 1s
+    limit_mib: 384
+    spike_limit_mib: 96
+  batch:
+    send_batch_size: 512
+    send_batch_max_size: 1024
+    timeout: 5s
+
+exporters:
+  nop: {}
+
+service:
+  extensions: [health_check]
+  telemetry:
+    logs:
+      level: warn
+    metrics:
+      level: basic
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [nop]

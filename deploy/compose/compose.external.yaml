@@ -1,0 +1,18 @@
+# This fragment adds no provider service. It records the selected external
+# boundaries while the base services continue to consume the same mounted
+# database and issuer contracts used by bundled mode.
+services:
+  migrate:
+    labels:
+      com.synveda.postgres.provider: ${SYNVEDA_POSTGRES_MODE:?set SYNVEDA_POSTGRES_MODE}
+  gateway:
+    labels:
+      com.synveda.postgres.provider: ${SYNVEDA_POSTGRES_MODE}
+      com.synveda.oidc.provider: ${SYNVEDA_OIDC_MODE:?set SYNVEDA_OIDC_MODE}
+  worker:
+    labels:
+      com.synveda.postgres.provider: ${SYNVEDA_POSTGRES_MODE}
+      com.synveda.oidc.provider: ${SYNVEDA_OIDC_MODE}
+  otel-collector:
+    labels:
+      com.synveda.otlp.provider: external-capable
