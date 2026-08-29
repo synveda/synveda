@@ -8,9 +8,9 @@
 #   binaries   synveda + synveda-gateway + synveda-worker for darwin-arm64 and
 #              linux-x86_64,
 #              built SQLX_OFFLINE=true against the committed query cache
-#   console    the CNSL-1 bundle, so `/console/` serves on the host-gateway
-#              path — which is the default install (ADR-0055 decision 8)
-#   profile    the self-contained compose bundle `synveda init` runs from
+#   console    the CNSL-1 bundle carried by product artifacts
+#   profile    the transitional, unaccepted Compose artifact retained during
+#              the CPR-45 cutover
 #   images     ghcr.io/synveda/{gateway,postgres}, multi-arch, public
 #   SHA256SUMS over every asset above
 #
@@ -57,10 +57,10 @@ jobs:
             version="${{ inputs.version }}"
             publish=false
           fi
-          # `synveda init` refuses a profile whose version is not the CLI's
-          # (ADR-0065 decision 5), and the CLI's is CARGO_PKG_VERSION. A tag
-          # that disagrees with the workspace would ship a release that
-          # refuses to run — so it fails here instead.
+          # Binaries and profile artifacts are one versioned release contract,
+          # even while the profile lifecycle is withdrawn. A tag that disagrees
+          # with the workspace would make the artifact set internally
+          # inconsistent, so it fails here instead.
           # awk rather than `sed | head`, for the reason the console step
           # above now carries: under `pipefail`, a reader that closes early
           # fails the writer. This one survived only because its output fits
@@ -68,8 +68,7 @@ jobs:
           crate="$(awk -F'"' '/^version = /{print $2; exit}' Cargo.toml)"
           if [ "$publish" = "true" ] && [ "$version" != "$crate" ]; then
             echo "tag v$version does not match the workspace version $crate." >&2
-            echo "They ship together: synveda init compares a profile's version" >&2
-            echo "against CARGO_PKG_VERSION and refuses a mismatch." >&2
+            echo "The binaries and profile artifact must use one workspace version." >&2
             exit 1
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
@@ -152,8 +151,7 @@ jobs:
       - run: corepack enable
       - name: The console bundle
         # CNSL-1's static assets. The image has carried them since ADR-0056;
-        # this is the copy the *host* gateway serves, which is the default
-        # install and has been 404ing at `/console/` until OPS-8.
+        # this copy is also packaged for direct-binary evaluation.
         run: |
           set -euo pipefail
           version="${{ needs.version.outputs.version }}"
@@ -275,7 +273,9 @@ jobs:
         # is not "dev-" because this one is what a customer installs.
         uses: docker/build-push-action@v6
         with:
-          context: deploy/compose/postgres
+          context: .
+          file: deploy/compose/postgres/Dockerfile
+          target: reference
           platforms: ${{ matrix.platform }}
           push: ${{ needs.version.outputs.publish == 'true' }}
           tags: ghcr.io/synveda/postgres:${{ needs.version.outputs.version }}-${{ matrix.arch }}
@@ -359,13 +359,15 @@ jobs:
           # with fenced code in it, and quoting that through a shell is the
           # kind of cleverness that ships a release note full of backslashes.
           cat > notes.md <<NOTES
-          Install — Docker is the only prerequisite:
+          Development/evaluation artifacts for macOS arm64 and Linux x86_64.
+          Docker reference deployment acceptance is pending; this release does
+          not claim a turnkey single-host installation. Follow the current
+          CPR-45 status and explicit operator prerequisites in the install
+          documentation instead of running the retired implicit init flow.
 
           \`\`\`sh
           curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/${GITHUB_REF_NAME}/scripts/install.sh | sh
-          synveda init --slug pulseboard --name PulseBoard --embedder tei
-          synveda login
-          synveda demo start --profile personal
+          synveda --help
           \`\`\`
 
           Then give an AI client your team's governed memory:
@@ -375,9 +377,8 @@ jobs:
           synveda mcp install --client claude-desktop   # or cursor, or zed
           \`\`\`
 
-          macOS arm64 and Linux x86_64. The binaries are **unsigned and not
-          notarized** — the checksums prove a download arrived intact, not who
-          built it (ADR-0065 decision 8).
+          The binaries are **unsigned and not notarized** — the checksums prove
+          a download arrived intact, not who built it (ADR-0065 decision 8).
 
           Images: \`ghcr.io/synveda/gateway:${{ needs.version.outputs.version }}\`
           and \`ghcr.io/synveda/postgres:${{ needs.version.outputs.version }}\`.

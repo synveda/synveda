@@ -27,9 +27,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use synveda_audit::{AuditAction, Outcome};
 use synveda_policy::{Action, Resource};
-use synveda_store::{identities, rls, scopes};
+use synveda_store::{access, identities, rls, scopes};
+use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
 use synveda_types::scope::ScopeKind;
-use synveda_types::{Error, Identity, IdentityId, IdentityKind, Result, ScopeId};
+use synveda_types::{Error, GrantId, Identity, IdentityId, IdentityKind, Result, ScopeId};
 
 use crate::app::AppState;
 use crate::audit;
@@ -178,6 +179,28 @@ pub(crate) async fn register(
             leaf.id,
         )
         .await?;
+        // A service principal's leaf has the same closed privacy boundary as
+        // a user's own scope. Registration therefore mints the same direct
+        // owner grant as `ensure_principal_scope`, atomically with the leaf
+        // and identity (ADR-0074 decision 8). Without it the service could
+        // read its private material through the base privacy clause but could
+        // never govern that material under any shipped policy pack.
+        let owner_grant = access::create_grant(
+            &mut *tx,
+            &access::NewGrant {
+                id: GrantId::new(),
+                tenant_id,
+                scope_id: leaf.id,
+                subject: GrantSubject::Principal {
+                    principal_id: body.subject.clone(),
+                },
+                role_key: RoleKey::Owner,
+                source: GrantSource::Owner,
+                invite_id: None,
+                granted_by: None,
+            },
+        )
+        .await?;
         audit::record(
             &mut tx,
             tenant_id,
@@ -189,6 +212,24 @@ pub(crate) async fn register(
                 "identity": {"id": identity.id, "subject": identity.subject},
                 "leaf_scope_id": leaf.id,
                 "anchor": {"slug": anchor.slug},
+            }),
+        )
+        .await?;
+        audit::record(
+            &mut tx,
+            tenant_id,
+            AuditAction::AccessGranted,
+            Resource::Scope(leaf.id).to_string(),
+            Outcome::Success,
+            json!({
+                "origin": "service-identity-registration",
+                "grant": {
+                    "id": owner_grant.id,
+                    "scope_id": owner_grant.scope_id,
+                    "subject": body.subject,
+                    "role": owner_grant.role_key,
+                    "source": owner_grant.source,
+                },
             }),
         )
         .await?;

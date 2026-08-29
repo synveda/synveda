@@ -27,6 +27,9 @@
 //! Skips, with a message, when `DATABASE_URL` is unset (CI has no database) or
 //! when `adapters/claude-code/dist/hook.mjs` has not been built.
 
+#[path = "../../synveda-store/tests/support/tenant_fixture.rs"]
+mod tenant_fixture;
+
 use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
@@ -40,7 +43,7 @@ use sha2::{Digest as _, Sha256};
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 use synveda_audit::ChainVerification;
-use synveda_gateway::app::{AppState, router};
+use synveda_gateway::app::{AppState, behavior_test_router as router};
 use synveda_gateway::telemetry;
 use synveda_identity::{Hs256Verifier, ProvisioningClaims};
 use synveda_ingest::capture_worker::{self, Config as CaptureConfig, Deps as CaptureDeps};
@@ -232,12 +235,12 @@ async fn harness() -> Option<Harness> {
         .connect(&url)
         .await
         .expect("connect to DATABASE_URL");
-    synveda_store::migrate(&pool)
+    synveda_store::epoch::verify(&pool)
         .await
         .expect("apply migrations");
     let tenant_id = TenantId::new();
     let slug = format!("cpr14-{}", tenant_id.as_uuid().simple());
-    let tenant = synveda_store::tenants::create(
+    let tenant = tenant_fixture::create(
         &pool,
         tenant_id,
         &slug,
@@ -525,53 +528,65 @@ impl Harness {
 
     /// The one session this run opened, straight from the table.
     async fn session_row(&self) -> Option<(uuid::Uuid, String, Option<String>, i64)> {
-        sqlx::query_as::<_, (uuid::Uuid, String, Option<String>, i64)>(
+        let mut tx = tenant_fixture::begin(&self.pool, self.tenant_id).await;
+        let row = sqlx::query_as::<_, (uuid::Uuid, String, Option<String>, i64)>(
             "select s.id, s.status::text, s.end_reason, \
              (select count(*) from session_events e where e.session_id = s.id) \
              from sessions s where s.tenant_id = $1 and s.external_session_id = $2",
         )
         .bind(self.tenant_id.as_uuid())
         .bind(&self.external_session_id)
-        .fetch_optional(&self.pool)
+        .fetch_optional(&mut *tx)
         .await
-        .expect("read the session row")
+        .expect("read the session row");
+        tx.commit().await.expect("commit session row read");
+        row
     }
 
     /// Every appended event, in server-assigned order.
     async fn events(&self) -> Vec<(i64, String, String)> {
-        sqlx::query_as::<_, (i64, String, String)>(
+        let mut tx = tenant_fixture::begin(&self.pool, self.tenant_id).await;
+        let events = sqlx::query_as::<_, (i64, String, String)>(
             "select e.sequence, e.event_type::text, e.client_event_id \
              from session_events e join sessions s on s.id = e.session_id \
              where s.tenant_id = $1 and s.external_session_id = $2 order by e.sequence",
         )
         .bind(self.tenant_id.as_uuid())
         .bind(&self.external_session_id)
-        .fetch_all(&self.pool)
+        .fetch_all(&mut *tx)
         .await
-        .expect("read the events")
+        .expect("read the events");
+        tx.commit().await.expect("commit event read");
+        events
     }
 
     async fn event_hashes(&self) -> Vec<(String, String)> {
-        sqlx::query_as::<_, (String, String)>(
+        let mut tx = tenant_fixture::begin(&self.pool, self.tenant_id).await;
+        let hashes = sqlx::query_as::<_, (String, String)>(
             "select e.client_event_id, e.payload_hash \
              from session_events e join sessions s on s.id = e.session_id \
              where s.tenant_id = $1 and s.external_session_id = $2 order by e.sequence",
         )
         .bind(self.tenant_id.as_uuid())
         .bind(&self.external_session_id)
-        .fetch_all(&self.pool)
+        .fetch_all(&mut *tx)
         .await
-        .expect("read the server event hashes")
+        .expect("read the server event hashes");
+        tx.commit().await.expect("commit event hash read");
+        hashes
     }
 
     async fn chain_actions(&self) -> Vec<String> {
-        sqlx::query_scalar::<_, String>(
+        let mut tx = tenant_fixture::begin(&self.pool, self.tenant_id).await;
+        let actions = sqlx::query_scalar::<_, String>(
             "select action from audit_log where tenant_id = $1 order by seq",
         )
         .bind(self.tenant_id.as_uuid())
-        .fetch_all(&self.pool)
+        .fetch_all(&mut *tx)
         .await
-        .expect("read the chain")
+        .expect("read the chain");
+        tx.commit().await.expect("commit chain read");
+        actions
     }
 
     /// What the spool holds for this run, if anything, and the file that owns
@@ -729,6 +744,7 @@ async fn a_claude_code_session_is_a_governed_run_from_start_to_end() {
     );
 
     // ── 2. Context comes through the session context endpoint ────────────────
+    let mut tx = tenant_fixture::begin(&h.pool, h.tenant_id).await;
     let context_run: (i32, String, String) = sqlx::query_as(
         "select entry_count, rendered, block_hash \
          from session_context_runs \
@@ -736,9 +752,10 @@ async fn a_claude_code_session_is_a_governed_run_from_start_to_end() {
     )
     .bind(h.tenant_id.as_uuid())
     .bind(session_id)
-    .fetch_one(&h.pool)
+    .fetch_one(&mut *tx)
     .await
     .expect("SessionStart context run");
+    tx.commit().await.expect("commit context-run read");
     assert_eq!(
         context_run.0, 0,
         "CPR-18 publishes Knowledge without dual-writing the temporary record index"
@@ -1073,6 +1090,7 @@ async fn a_claude_code_session_is_a_governed_run_from_start_to_end() {
             "{action} is missing from the chain: {chain:?}"
         );
     }
+    let mut tx = tenant_fixture::begin(&h.pool, h.tenant_id).await;
     for action in ["session.opened", "session.ended"] {
         let count: i64 = sqlx::query_scalar(
             "select count(*) from audit_log \
@@ -1081,7 +1099,7 @@ async fn a_claude_code_session_is_a_governed_run_from_start_to_end() {
         .bind(h.tenant_id.as_uuid())
         .bind(action)
         .bind(session_id.to_string())
-        .fetch_one(&h.pool)
+        .fetch_one(&mut *tx)
         .await
         .expect("count this run's lifecycle audit action");
         assert_eq!(
@@ -1089,6 +1107,7 @@ async fn a_claude_code_session_is_a_governed_run_from_start_to_end() {
             "one {action} for the accepted run; the seed session is separate: {chain:?}"
         );
     }
+    tx.commit().await.expect("commit lifecycle audit count");
     let mut tx = synveda_store::rls::begin_tenant_tx(&h.pool, h.tenant_id)
         .await
         .expect("begin tenant tx");
@@ -1101,12 +1120,14 @@ async fn a_claude_code_session_is_a_governed_run_from_start_to_end() {
         "the chain must verify after a whole session: {verification:?}"
     );
     // Nothing a transcript said reaches the chain — the chain carries counts.
+    let mut tx = tenant_fixture::begin(&h.pool, h.tenant_id).await;
     let payloads: Vec<String> =
         sqlx::query_scalar("select payload::text from audit_log where tenant_id = $1")
             .bind(h.tenant_id.as_uuid())
-            .fetch_all(&h.pool)
+            .fetch_all(&mut *tx)
             .await
             .expect("read the append payloads");
+    tx.commit().await.expect("commit audit payload read");
     for payload in &payloads {
         for sensitive in [
             "full jitter",
@@ -1131,6 +1152,7 @@ async fn a_claude_code_session_is_a_governed_run_from_start_to_end() {
     // Terminal close freezes the complete eligible event set into one
     // restart-safe batch. It does not wait on a model and it does not publish
     // unreviewed output as Knowledge.
+    let mut tx = tenant_fixture::begin(&h.pool, h.tenant_id).await;
     let capture: (String, i32, i64) = sqlx::query_as(
         "select state, event_count, \
                 (select count(*) from capture_candidates candidate \
@@ -1141,9 +1163,10 @@ async fn a_claude_code_session_is_a_governed_run_from_start_to_end() {
     )
     .bind(h.tenant_id.as_uuid())
     .bind(session_id)
-    .fetch_one(&h.pool)
+    .fetch_one(&mut *tx)
     .await
     .expect("terminal capture batch");
+    tx.commit().await.expect("commit Capture batch read");
     assert_eq!(capture.0, "pending", "the hook never waits on extraction");
     assert_eq!(capture.1, 6, "the batch freezes every eligible event once");
     assert_eq!(capture.2, 0, "unprocessed output is not active Knowledge");
@@ -1461,14 +1484,16 @@ async fn an_installed_claude_executable_completes_the_session_plane() {
     assert!(hashes.iter().all(|(_, hash)| {
         hash.len() == 64 && hash.bytes().all(|byte| byte.is_ascii_hexdigit())
     }));
+    let mut tx = tenant_fixture::begin(&h.pool, h.tenant_id).await;
     let context_runs: i64 = sqlx::query_scalar(
         "select count(*) from session_context_runs where tenant_id = $1 and session_id = $2",
     )
     .bind(h.tenant_id.as_uuid())
     .bind(session_id)
-    .fetch_one(&h.pool)
+    .fetch_one(&mut *tx)
     .await
     .expect("live context runs");
+    tx.commit().await.expect("commit live context-run read");
     assert_eq!(context_runs, 1, "SessionStart composed exactly once");
     let actions = h.chain_actions().await;
     for action in [
@@ -1496,12 +1521,14 @@ async fn an_installed_claude_executable_completes_the_session_plane() {
             "the live timeline contains transcript content"
         );
     }
+    let mut tx = tenant_fixture::begin(&h.pool, h.tenant_id).await;
     let audit_payloads: Vec<String> =
         sqlx::query_scalar("select payload::text from audit_log where tenant_id = $1")
             .bind(h.tenant_id.as_uuid())
-            .fetch_all(&h.pool)
+            .fetch_all(&mut *tx)
             .await
             .expect("read live audit payloads");
+    tx.commit().await.expect("commit live audit payload read");
     for payload in audit_payloads {
         for sensitive in ["retry-budget", "notes.txt", "Use the Read tool"] {
             assert!(

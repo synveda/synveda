@@ -20,43 +20,12 @@ SET check_function_bodies = false;
 SET xmloption = content;
 SET client_min_messages = warning;
 
--- The application role is cluster-global. Deployments provision a separate LOGIN
--- granted to this NOLOGIN role; the gateway itself is never the schema owner.
-do $$
-begin
-    create role synveda_app nologin;
-exception
-    when duplicate_object or unique_violation then
-        null; -- The shared role exists or a concurrent database created it.
-end
-$$;
-
---
--- Name: btree_gin; Type: EXTENSION; Schema: -; Owner: -
---
-
-CREATE EXTENSION IF NOT EXISTS btree_gin WITH SCHEMA public;
-
-
---
--- Name: EXTENSION btree_gin; Type: COMMENT; Schema: -; Owner: -
---
-
-COMMENT ON EXTENSION btree_gin IS 'support for indexing common datatypes in GIN';
-
-
---
--- Name: vector; Type: EXTENSION; Schema: -; Owner: -
---
-
-CREATE EXTENSION IF NOT EXISTS vector WITH SCHEMA public;
-
-
---
--- Name: EXTENSION vector; Type: COMMENT; Schema: -; Owner: -
---
-
-COMMENT ON EXTENSION vector IS 'vector data type and ivfflat and hnsw access methods';
+-- Cluster roles and required extensions are deployment infrastructure, not
+-- application schema history (ADR-0069 decision 13; CPR-45). The deployment
+-- bootstrap must establish the safe NOLOGIN `synveda_app` role and install
+-- `btree_gin` and `vector` before this narrow migration owner runs the
+-- baseline. Keeping that authority out of 0001 lets the migrator own domain
+-- objects without CREATEROLE or superuser privileges.
 
 
 --
@@ -81,6 +50,10 @@ CREATE FUNCTION public.synveda_capture_append_only() RETURNS trigger
     AS $$
 begin
     if tg_op = 'DELETE'
+       and current_user = pg_catalog.pg_get_userbyid((
+           select database.datdba from pg_catalog.pg_database as database
+           where database.datname = pg_catalog.current_database()
+       ))
        and (current_setting('synveda.knowledge_erasure', true) = 'on'
             or current_setting('synveda.retention_purge', true) = 'on') then
         -- This is a statement trigger: returning NULL allows the statement
@@ -202,7 +175,11 @@ begin
        or new.content_hash <> old.content_hash or new.created_at <> old.created_at then
         raise exception 'capture candidate identity and proposal are immutable';
     end if;
-    if current_setting('synveda.knowledge_erasure', true) = 'on' then
+    if current_setting('synveda.knowledge_erasure', true) = 'on'
+       and current_user = pg_catalog.pg_get_userbyid((
+           select database.datdba from pg_catalog.pg_database as database
+           where database.datname = pg_catalog.current_database()
+       )) then
         if not new.content_erased or old.content_erased then
             raise exception 'capture candidate erasure is one-way';
         end if;
@@ -242,7 +219,11 @@ begin
        or new.payload_hash <> old.payload_hash or new.created_at <> old.created_at then
         raise exception 'capture decision intent is immutable';
     end if;
-    if current_setting('synveda.knowledge_erasure', true) = 'on' then
+    if current_setting('synveda.knowledge_erasure', true) = 'on'
+       and current_user = pg_catalog.pg_get_userbyid((
+           select database.datdba from pg_catalog.pg_database as database
+           where database.datname = pg_catalog.current_database()
+       )) then
         if new.payload is not null then
             raise exception 'capture decision erasure may only clear payload';
         end if;
@@ -267,7 +248,11 @@ CREATE FUNCTION public.synveda_capture_scrub_for_knowledge() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
 begin
-    if current_setting('synveda.knowledge_erasure', true) <> 'on' then
+    if current_setting('synveda.knowledge_erasure', true) <> 'on'
+       or current_user <> pg_catalog.pg_get_userbyid((
+           select database.datdba from pg_catalog.pg_database as database
+           where database.datname = pg_catalog.current_database()
+       )) then
         return old;
     end if;
     update capture_candidate_decisions decision
@@ -469,7 +454,11 @@ declare
     new_row jsonb;
     old_row jsonb;
 begin
-    if current_setting('synveda.knowledge_erasure', true) = 'on' then
+    if current_setting('synveda.knowledge_erasure', true) = 'on'
+       and current_user = pg_catalog.pg_get_userbyid((
+           select database.datdba from pg_catalog.pg_database as database
+           where database.datname = pg_catalog.current_database()
+       )) then
         if tg_table_name = 'context_feedback' and tg_op = 'DELETE' then
             return old;
         end if;
@@ -957,7 +946,11 @@ CREATE FUNCTION public.synveda_import_mapping_transition() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
 begin
-    if current_setting('synveda.knowledge_erasure', true) = 'on' then
+    if current_setting('synveda.knowledge_erasure', true) = 'on'
+       and current_user = pg_catalog.pg_get_userbyid((
+           select database.datdba from pg_catalog.pg_database as database
+           where database.datname = pg_catalog.current_database()
+       )) then
         if not new.content_erased or old.content_erased
            or new.title <> '' or new.body_markdown <> '' or new.summary <> ''
            or new.tags <> '{}'::text[]
@@ -1047,7 +1040,11 @@ CREATE FUNCTION public.synveda_knowledge_append_only() RETURNS trigger
     AS $$
 begin
     if tg_op = 'DELETE'
-       and current_setting('synveda.knowledge_erasure', true) = 'on' then
+       and current_setting('synveda.knowledge_erasure', true) = 'on'
+       and current_user = pg_catalog.pg_get_userbyid((
+           select database.datdba from pg_catalog.pg_database as database
+           where database.datname = pg_catalog.current_database()
+       )) then
         return null;
     end if;
     raise exception '% is append-only (CPR-15/16, ADR-0080/0081)', tg_table_name;
@@ -1096,7 +1093,11 @@ begin
         raise exception 'Knowledge change identity and reviewed manifest are immutable';
     end if;
 
-    if current_setting('synveda.knowledge_erasure', true) = 'on' then
+    if current_setting('synveda.knowledge_erasure', true) = 'on'
+       and current_user = pg_catalog.pg_get_userbyid((
+           select database.datdba from pg_catalog.pg_database as database
+           where database.datname = pg_catalog.current_database()
+       )) then
         if new.payload is not null
            or new.resulting_item_id is distinct from old.resulting_item_id
            or new.resulting_revision_id is distinct from old.resulting_revision_id
@@ -1126,7 +1127,11 @@ CREATE FUNCTION public.synveda_knowledge_conflict_member_immutable() RETURNS tri
     AS $$
 begin
     if tg_op = 'DELETE'
-       and current_setting('synveda.knowledge_erasure', true) = 'on' then
+       and current_setting('synveda.knowledge_erasure', true) = 'on'
+       and current_user = pg_catalog.pg_get_userbyid((
+           select database.datdba from pg_catalog.pg_database as database
+           where database.datname = pg_catalog.current_database()
+       )) then
         return null;
     end if;
     raise exception 'Knowledge conflict members are immutable'
@@ -1144,7 +1149,11 @@ CREATE FUNCTION public.synveda_knowledge_conflict_set_transition() RETURNS trigg
     AS $$
 begin
     if tg_op = 'DELETE' then
-        if current_setting('synveda.knowledge_erasure', true) = 'on' then
+        if current_setting('synveda.knowledge_erasure', true) = 'on'
+           and current_user = pg_catalog.pg_get_userbyid((
+               select database.datdba from pg_catalog.pg_database as database
+               where database.datname = pg_catalog.current_database()
+           )) then
             return old;
         end if;
         raise exception 'Knowledge conflict sets are durable evidence'
@@ -1197,7 +1206,11 @@ declare
     changed_at timestamptz;
 begin
     if tg_op = 'DELETE' then
-        if current_setting('synveda.knowledge_erasure', true) = 'on' then
+        if current_setting('synveda.knowledge_erasure', true) = 'on'
+           and current_user = pg_catalog.pg_get_userbyid((
+               select database.datdba from pg_catalog.pg_database as database
+               where database.datname = pg_catalog.current_database()
+           )) then
             return old;
         end if;
         raise exception 'Knowledge items have a governed lifecycle and are never directly deleted';
@@ -1536,6 +1549,10 @@ CREATE FUNCTION public.synveda_session_event_quarantine_immutable() RETURNS trig
 begin
     if tg_op = 'DELETE'
        and coalesce(current_setting('synveda.retention_purge', true), 'off') = 'on'
+       and current_user = pg_catalog.pg_get_userbyid((
+           select database.datdba from pg_catalog.pg_database as database
+           where database.datname = pg_catalog.current_database()
+       ))
     then
         return old;
     end if;
@@ -1584,6 +1601,10 @@ CREATE FUNCTION public.synveda_session_events_immutable() RETURNS trigger
 begin
     if tg_op = 'DELETE'
        and coalesce(current_setting('synveda.retention_purge', true), 'off') = 'on'
+       and current_user = pg_catalog.pg_get_userbyid((
+           select database.datdba from pg_catalog.pg_database as database
+           where database.datname = pg_catalog.current_database()
+       ))
     then
         return old;
     end if;
@@ -3693,11 +3714,13 @@ ALTER TABLE ONLY public.prompts FORCE ROW LEVEL SECURITY;
 CREATE TABLE public.schema_metadata (
     id boolean DEFAULT true NOT NULL,
     epoch integer NOT NULL,
+    baseline_revision integer NOT NULL,
     migration_head text NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     created_by_version text NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     CONSTRAINT schema_metadata_created_by_version_check CHECK (((length(created_by_version) >= 1) AND (length(created_by_version) <= 64))),
+    CONSTRAINT schema_metadata_baseline_revision_check CHECK ((baseline_revision >= 1)),
     CONSTRAINT schema_metadata_epoch_check CHECK ((epoch >= 1)),
     CONSTRAINT schema_metadata_migration_head_check CHECK (((length(migration_head) >= 1) AND (length(migration_head) <= 64))),
     CONSTRAINT schema_metadata_single_row CHECK (id),

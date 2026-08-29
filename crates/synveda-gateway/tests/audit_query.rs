@@ -16,6 +16,9 @@
 //! Tests need a live Postgres: they read `DATABASE_URL` and skip with a
 //! message when it is unset (CI has no database), the house convention.
 
+#[path = "../../synveda-store/tests/support/tenant_fixture.rs"]
+mod tenant_fixture;
+
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
@@ -28,12 +31,12 @@ use metrics_exporter_prometheus::PrometheusHandle;
 use serde_json::{Value, json};
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
-use synveda_gateway::app::{AppState, router};
+use synveda_gateway::app::{AppState, behavior_test_router as router};
 use synveda_gateway::telemetry;
 use synveda_identity::Hs256Verifier;
 use synveda_ingest::embedding::{AnyEmbedder, DeterministicEmbedder};
 use synveda_policy::Pdp;
-use synveda_store::{access, identities, knowledge as stored, rls, scopes, tenants};
+use synveda_store::{access, identities, knowledge as stored, rls, scopes};
 use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
 use synveda_types::knowledge::{
     KnowledgeOrigin, KnowledgeRevisionContent, KnowledgeSourceType, KnowledgeType,
@@ -123,12 +126,12 @@ async fn admitted_tenant() -> Option<(PgPool, TenantId)> {
         .connect(&url)
         .await
         .expect("connect to DATABASE_URL");
-    synveda_store::migrate(&pool)
+    synveda_store::epoch::verify(&pool)
         .await
         .expect("apply migrations");
     let id = TenantId::new();
     let slug = format!("aud2-{}", id.as_uuid().simple());
-    tenants::create(&pool, id, &slug, "AUD-2 test tenant", TenantStatus::Active)
+    tenant_fixture::create(&pool, id, &slug, "AUD-2 test tenant", TenantStatus::Active)
         .await
         .expect("admit tenant");
     Some((pool, id))
@@ -405,10 +408,14 @@ async fn world() -> Option<World> {
     seed_user(&pool, tenant, "dana").await;
     seed_user(&pool, tenant, "erin").await;
     seed_user(&pool, tenant, "olive").await;
-    let root = scopes::tenant_root(&pool, tenant)
+    let mut tx = rls::begin_tenant_tx(&pool, tenant)
+        .await
+        .expect("begin root read");
+    let root = scopes::tenant_root(&mut *tx, tenant)
         .await
         .expect("read root")
         .expect("the world minted one");
+    tx.commit().await.expect("commit root read");
     // The bootstrap is a direct write, exactly as AUTHZ-3 describes it:
     // the CLI break-glass grant is how a tenant gets its first
     // administrator, and it chains as break-glass rather than as a
@@ -825,13 +832,13 @@ async fn the_instant_decides_what_the_answer_contains() {
 #[tokio::test]
 async fn hashes_only_disclosures_remain_visible_as_unresolved_hash_evidence() {
     let Some(w) = world().await else { return };
-    let root = scopes::tenant_root(&w.pool, w.tenant)
-        .await
-        .expect("read tenant root")
-        .expect("tenant root exists");
     let mut tx = rls::begin_tenant_tx(&w.pool, w.tenant)
         .await
         .expect("begin hashes-only Configuration change");
+    let root = scopes::tenant_root(&mut *tx, w.tenant)
+        .await
+        .expect("read tenant root")
+        .expect("tenant root exists");
     configuration_support::set_trace_retention(
         &mut tx,
         w.tenant,

@@ -1,94 +1,44 @@
-# Installing Synveda — one runtime, single-node deployment
+# Installing Synveda during the Docker reference cutover
 
-The single-node form of Synveda's context-platform runtime: separate gateway
-and core-worker processes, Postgres, a bundled OIDC provider and optional TEI.
-Personal, team and enterprise are governed Configuration documents, not
-different binaries, schemas or deployment modes (CPR-36, ADR-0095).
+Synveda has one context-platform runtime: separate gateway and worker
+processes, PostgreSQL, generic OIDC, one public API and the same governed
+configuration semantics in direct binaries, Compose and later Helm. Personal,
+team and enterprise are Configuration documents, not deployment editions.
 
-For the same runtime on CloudNativePG with your own IdP, see
-[the chart](../deploy/helm/synveda) (OPS-2).
+The CPR-45 Docker reference deployment has not yet passed clean-volume
+acceptance. There is therefore no currently supported Docker-only turnkey
+install command. The release installer downloads development/evaluation
+artifacts, but does not claim to create a runnable single-host deployment.
+`synveda init` is closed by a cutover gate and refuses before profile
+discovery, Compose, secret-file or database mutation. The old Rauthy profile
+cannot establish the new exact database-authority, endpoint and file-secret
+contract safely, and the explicit legacy path still round-tripped credentials
+through `.env` and lacked a whole-operation deadline. Neither path is
+advertised during the cutover.
 
-> **Deployment transition:** CPR-45 is replacing this Rauthy-based installed
-> profile with the canonical Docker reference defined in
-> [the deployment contract](DEPLOYMENT_CONTRACT.md). Until its clean-volume
-> acceptance passes, the commands below describe the currently shipped profile;
-> the new contract is not yet a Keycloak or recovery-support claim.
-
-## Prerequisites
-
-**Docker** (Docker Desktop or OrbStack), running. That is the whole list.
-
-## Install
-
-```sh
-curl -fsSL https://raw.githubusercontent.com/synveda/synveda/main/scripts/install.sh | sh
-synveda init --slug acme --name "ACME"
-```
-
-The installer downloads one release — the `synveda` CLI, gateway and worker
-binaries, the admin console and a self-contained compose profile — and puts the
-CLI on your `PATH` and the rest under `~/.synveda`. macOS arm64 and Linux x86_64;
-the binaries are unsigned, and the checksums prove a download arrived intact
-rather than who built it (OPS-8, ADR-0065).
-
-`init` starts Postgres, Jaeger and bundled Rauthy; applies migrations; admits
-one tenant; converges distinct gateway and worker logins that own no database
-and own no schema, relation or routine in the selected Synveda database and are
-non-superuser/non-`BYPASSRLS`; registers the OIDC client/operator; starts the gateway on
-`http://127.0.0.1:8120`; and starts the private core worker. The database owner
-remains bootstrap-only in this installed shape, so forced RLS backs both
-runtime roles.
-
-When `DATABASE_URL` or `DATABASE_URL_FILE` is explicit—even when its host is
-loopback—`init` treats it as an operator-owned bootstrap target and also
-requires both
-`SYNVEDA_GATEWAY_DATABASE_URL` and `SYNVEDA_WORKER_DATABASE_URL` to name
-separately provisioned application logins. Only the implicit bundled default
-derives and converges the fixed development credentials. The roles must be
-different and each must be LOGIN/INHERIT, owner of no database and no schema,
-relation or routine in the selected Synveda database, non-superuser,
-non-`BYPASSRLS`, with `synveda_app` as its
-only membership. Init connects through each exact URL, proves the role, epoch
-and writable-primary state, and compares the PostgreSQL cluster identity,
-database OID and live postmaster start marker with the bootstrap connection. A
-different live primary instance or read-only target is refused. The marker is
-not persisted across database restarts. The bootstrap-owner `DATABASE_URL` is
-never handed to either runtime; containers use the mutually exclusive
-`DATABASE_URL_FILE` form so the credential is not rendered into their
-environment.
-
-All URLs are password-redacted in diagnostics.
-
-All product database URLs must use the `postgres` or `postgresql` scheme and
-name the database explicitly in their path or effective `dbname` parameter.
-Fragments and query keys the pinned SQLx PostgreSQL driver does not understand
-are rejected before parsing, so an ignored query value cannot enter WARN logs
-and `reset` cannot infer its destructive target from ambient `PGDATABASE`.
-
-<details>
-<summary>From a checkout instead</summary>
-
-Contributors, and anyone on a platform the release does not ship:
+The target contract and current limits are in
+[DEPLOYMENT_CONTRACT.md](DEPLOYMENT_CONTRACT.md). Static canonical Compose
+configuration can be validated with:
 
 ```sh
-cargo build -p synveda-cli -p synveda-gateway --bins
-pnpm --filter @synveda/console build     # optional; without it /console/ 404s
-./target/debug/synveda init --slug acme --name "ACME"
+deploy/compose/scripts/generate-secrets.sh
+make compose-config
 ```
 
-`init` prefers a checkout in the working directory over an installed
-release, so having both is fine and the tree you are editing wins.
-`SYNVEDA_COMPOSE_FILE` overrides both.
-</details>
+This proves configuration shape only. It does not prove Keycloak realm
+convergence, exact issuer login, backup/restore or a clean reference lifecycle.
+External PostgreSQL bootstrap deliberately refuses before secret reads or SQL
+until the authenticated-TLS contract is implemented.
 
-`init` converges — run it again as often as you like. It never drops a
-database, a volume or a tenant, and if you change something it restarts the
-gateway and worker to match.
+The remaining sections describe product use only after a gateway has been
+started through separately validated development/test infrastructure. They are
+not deployment instructions or evidence that the reference is complete.
 
-### What it deliberately does not do
+### Bootstrap policy retained for the accepted lifecycle
 
-It creates **no organisation**. After `init` your tenant contains one row,
-and the audit chain contains one break-glass event to say so:
+The resumed reference bootstrap will create **no organisation**. After tenant
+admission the tenant contains one row and the audit chain contains one
+break-glass event to say so:
 
 ```
 1  tenant.created  BREAK-GLASS
@@ -107,8 +57,9 @@ product to keep a shortcut past the policy engine (seed §2.2). See ADR-0055.
 synveda login --gateway http://127.0.0.1:8120
 ```
 
-`init` printed your operator's email and password. The browser opens, you
-sign in, and **that login is where the tenant starts to exist**: the tenant
+Use credentials provisioned by the deployment's identity operator; no current
+`init` path prints demo credentials. The browser opens, you sign in, and
+**that login is where the tenant starts to exist**: the tenant
 root scope is minted from the tenant's own slug and name, your identity gets
 its own `principal`-shaped scope under it, and you are granted
 `administrator` **at the tenant root** because you are in the
@@ -592,10 +543,11 @@ a scheduled Git synchroniser, database seeder or direct-publication shortcut.
 
 ## Choosing an embedder for semantic Knowledge search
 
-```sh
-synveda init --embedder tei      # BGE-M3; downloads ~2.3 GB once
-synveda init --embedder deterministic   # the default; no download
-```
+A separately validated deployment selects `tei` for BGE-M3 or `deterministic`
+for reproducible lexical-only evaluation through the ordinary runtime
+configuration contract. The canonical Compose semantic profile and its
+endpoint acceptance remain pending; the withdrawn `init` flags are not a
+selection path.
 
 The public Knowledge collection is always lexically searchable from its
 immutable current revision. With `tei`, a restart-safe indexer also stores a
@@ -617,20 +569,17 @@ a third model shape requires an explicit schema decision.
 
 ## Using your own IdP
 
-```sh
-synveda init --issuer https://login.microsoftonline.com/<tenant>/v2.0
-```
-
-Nothing is created in your directory. `init` writes the gateway's issuer
-configuration and prints the client registration to perform there — a public
-client, PKCE S256, redirect `http://127.0.0.1:8120/auth/callback`, scopes
-`openid profile email groups`.
+An external issuer remains part of the generic application contract, but the
+withdrawn `init` verb is not an external-IdP setup path. A separately validated
+deployment must mount the issuer configuration and provision a public
+authorization-code client with PKCE S256, its exact deployment callback/origin,
+and the `openid profile email groups` scopes. The issuer in discovery, tokens
+and gateway configuration must be byte-for-byte identical.
 
 One group claim is read: `synveda-admins` upserts an `administrator` grant at
 the tenant root on every login. There is no placement convention — everybody
 arrives at their own scope and reaches anything else through a grant
-(ADR-0074 decision 3). `init` configures an issuer; it does not sync a
-directory.
+(ADR-0074 decision 3). Issuer configuration does not sync a directory.
 
 Directory *synchronisation* — joiners, movers, leavers — is a separate,
 deliberate step (AUTH-4, ADR-0059). Once the instance is up:
@@ -675,14 +624,12 @@ directory-owned rows and tell the operator to change the directory or use the
 dedicated assignment route. No live Entra or Okta verification is claimed by
 the repository fixtures; they remain labelled captured or transcribed.
 
-With a real issuer the gateway and worker run as separate Compose services from
-the same product image. During the remaining bundled-Rauthy transition only the
-gateway runs as a host process, because the issuer's URL is
-`http://localhost:8100/...` and RFC 6761 makes every resolver answer
-`localhost` with the *container's own* loopback — a container cannot reach it,
-by any configuration. The worker remains containerised and private. ADR-0055
-decision 8 has the localhost measurements; CPR-45 removes the workaround with
-one proxy-routed Keycloak issuer name.
+The retained bundled-Rauthy profile used a host gateway because its issuer was
+`http://localhost:8100/...`; the closed `init` entrypoint means that shape is
+cutover residue, not an executable or supported install. Canonical Keycloak
+Compose removes the workaround only after its exact-issuer acceptance. ADR-0055
+decision 8 has the localhost measurements; CPR-45 replaces it with one
+proxy-routed Keycloak issuer name.
 
 ## PulseBoard product walkthrough
 
@@ -715,8 +662,9 @@ database-backed Profile and PulseBoard scenarios.
 ## The admin console
 
 `http://127.0.0.1:8120/console/`, served by the gateway from its own origin —
-no second process and no second port. Sign in with the operator `init`
-printed; the session is an `HttpOnly` cookie, so there is no token to paste.
+no second process and no second port. Sign in with credentials provisioned by
+the deployment's identity operator; the session is an `HttpOnly` cookie, so
+there is no token to paste.
 
 **Since CPR-8 the console is the product rather than a review queue.** The
 first sign-in on a fresh deployment goes to a six-step **getting started**
@@ -798,13 +746,15 @@ change links to Advanced Reviews and remains explicitly unpublished. Raw source
 payloads still require `session.diagnostics` at the run.
 
 Signing in needs a **key plane**, because a console session seals its tokens
-under the deployment's encryption key (TEN-4). `init` mints one at
-`~/.synveda/data/kms.key` on first run and reuses it after — **back that file
-up**, since every tenant key in the database is wrapped by it. Set
-`SYNVEDA_KMS_KEY` and `init` uses yours instead. It ships with the release; from a
-checkout it needs `pnpm --filter @synveda/console build` first, and without a
-bundle the route 404s rather than failing the boot, because a static asset
-must not be a dependency of the audit log (CNSL-1, ADR-0056).
+under the deployment's encryption key (TEN-4). Gateway and worker accept the
+same mutually exclusive direct/file KMS settings; canonical Compose mounts a
+mode-0600 key file. The deployment must generate, retain and back up that key
+separately from PostgreSQL, since every tenant key in the database is wrapped
+by it. No accepted turnkey lifecycle currently creates or restores it. The
+console ships with release artifacts; from a checkout it needs
+`pnpm --filter @synveda/console build` first, and without a bundle the route
+404s rather than failing boot, because a static asset must not be a dependency
+of the audit log (CNSL-1, ADR-0056).
 
 Each tenant has its own versioned data key. `synveda tenant key status
 --tenant <uuid>` lists only credential-free secret metadata and durable
@@ -829,19 +779,19 @@ customer-managed keys or secret-manager resolution inside the gateway.
 
 ## Upgrading
 
-Re-run the installer and then `synveda init`:
+There is no accepted Docker reference upgrade path yet. Re-running the release
+installer replaces the downloaded CLI, gateway/worker binaries, console and
+transitional profile, but it is not evidence that a database, issuer or
+running service was upgraded. Do not follow it with implicit `synveda init`.
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/synveda/synveda/main/scripts/install.sh | sh
-synveda init --slug <your slug> --name "<your name>"
 ```
 
-The installer carries your `.env` across, `init` reuses the key it minted
-rather than replacing it, and the gateway and core worker restart onto the new
-release. There
-is no in-place upgrade and no migration story beyond that — reinstalling is
-how you upgrade (ADR-0065 decision 1's reversal trigger is somebody wanting
-more).
+No transitional operator path substitutes for deployment validation. The
+accepted reference upgrade/rollback smoke test remains CPR-45 work and must
+cover the binaries, schema migration, role contract, issuer and rollback
+limits together; zero downtime is not claimed.
 
 ### If the upgrade refuses to start: the schema epoch
 
@@ -874,9 +824,11 @@ new model; see ADR-0068 for why that is a decision rather than an omission.
 
 ```sh
 synveda reset --database --force   # destroys the database, builds a fresh one
-synveda init                       # brings the deployment back up
-synveda login                      # provisions your identity and admin grant again
 ```
+
+After a reset, re-run the deployment-owned database bootstrap and only then
+use the complete explicit authority plan. The withdrawn implicit init command
+cannot bring the deployment back up.
 
 `reset` drops and recreates **the application database** — not the volumes,
 not the installation. Your `kms.key`, the compose profile, the console bundle,
@@ -911,6 +863,9 @@ ended on; start a new Claude Code session to pick it up.
 
 ## Stopping and starting
 
+The following commands apply only to a transitional profile an operator has
+explicitly validated. They are not the pending canonical reference lifecycle:
+
 ```sh
 docker compose -f ~/.synveda/profile/docker-compose.yml down     # state persists in volumes
 docker compose -f ~/.synveda/profile/docker-compose.yml down -v  # wipe persistent volumes; kms.key remains
@@ -921,11 +876,9 @@ To remove the product rather than stop it, see **Uninstalling** below.
 From a checkout, the compose file is `deploy/compose/docker-compose.yml`
 instead.
 
-The gateway's pid and log are under `~/.synveda/data/` (`data/` in a
-checkout). `synveda init` restarts it when anything it was started with
-changes — the issuer, the tenant, the embedder, the key, **or the gateway
-binary itself**, so re-running `init` after an upgrade actually puts the
-new release on the port rather than reporting the old one as healthy.
+The legacy host gateway's pid and log are under `~/.synveda/data/` (`data/` in
+a checkout). No current reference claim is based on that host-process
+workaround; canonical Compose keeps the gateway in its container.
 
 ## Uninstalling
 
@@ -946,9 +899,9 @@ touch, states when the key would be retained, and changes nothing.
 
 **Your data and its key survive by default.** The three named volumes stay,
 and so does the local KEK at `~/.synveda/data/kms.key`; the output names both
-and the command that would remove them. Reinstalling and running `synveda
-init` reuses that key rather than minting one that cannot open the retained
-database. A governed Knowledge `forget` removes one authorised item's
+and the command that would remove them. Preserve that key for any later
+explicitly validated deployment using the retained database. A governed
+Knowledge `forget` removes one authorised item's
 plaintext, sources and index state while retaining content-free audit
 evidence; it does not delete a tenant. A tenant row still cannot be deleted
 (TEN-5), so a volume purge remains the only whole-tenant wipe. That is a
@@ -977,7 +930,7 @@ us so you know which ones to run it for.
 
 Everything is idempotent — a second run finds nothing, says so, and exits 0.
 
-## What an install is made of
+## What the artifact installer places
 
 | | |
 |---|---|
@@ -985,7 +938,7 @@ Everything is idempotent — a second run finds nothing, says so, and exits 0.
 | `~/.synveda/bin/synveda-gateway` | the gateway, run as a host process |
 | `~/.synveda/bin/synveda-worker` | the private core-worker direct-binary artefact; Compose runs its image-contained copy |
 | `~/.synveda/console/` | the admin console bundle |
-| `~/.synveda/profile/` | the compose file, the Rauthy config, the version |
+| `~/.synveda/profile/` | the transitional Compose file, Rauthy config and version; not an accepted reference deployment |
 | `~/.synveda/plugin/` | the Claude Code marketplace, installed into no client |
 | `~/.synveda/data/` | the transitional gateway pidfile/log and rendered configuration |
 | `~/.synveda/data/kms.key` | the deployment's key-encryption key, `0600` — **back this up** |
@@ -1011,40 +964,26 @@ curl -fsSL https://raw.githubusercontent.com/synveda/synveda/main/scripts/instal
 separate, explicit step above, and the OPS-8 demo asserts the absence rather
 than trusting it.
 
-The gateway runs on the host rather than in a container **only** on the
-transitional bundled-issuer path, and that is a measurement rather than a
-preference — see the note under "Using your own IdP" above. The worker is a
-Compose service in both paths. With `--issuer`, gateway and worker use the same
-`ghcr.io/synveda/gateway` image with distinct commands.
+The host-gateway shape exists only in the unaccepted bundled-Rauthy transition.
+It is not part of the deployment contract and is deleted after Keycloak
+acceptance. The accepted target uses one product image with distinct gateway
+and worker commands, both containerised.
 
-The CLI and the profile ship together and `init` refuses to mix them: a
-profile from another release stops the install with the two versions named,
-because the alternative presents as a service that will not start.
+The CLI and transitional profile still ship together, but `init` currently
+refuses at the CPR-45 cutover gate before reading or comparing that profile.
+Version comparison resumes only with the accepted reference lifecycle; it is
+not current executable behavior.
 
-## Verifying the whole thing
+## Current verification boundary
 
-```sh
-sh demos/ops-1-smb-profile.sh       # from a checkout
-sh demos/ops-8-release-install.sh   # from a downloaded release
-```
+`make compose-config` and `make check-deploy` prove static Compose/Helm and
+release-package contracts. `make db-test` proves exact database bootstrap,
+preflight, migration, forced RLS and authority drift behavior against fresh
+PostgreSQL fixtures. They do not prove a browser login, clean canonical
+Compose lifecycle, backup/restore, upgrade or desktop/Linux parity.
 
-The fast feature demos assert the current session/capture/Knowledge/context
-path and generated install contract. The release-install CI job additionally
-installs packaged artefacts with `cargo`, `rustc` and `rustup` shadowed by
-failing shims, so “no Rust toolchain” is evidence rather than prose. CPR-36's
-deployment gate renders Compose and Helm, packages the release twice and proves
-process/credential separation. With an explicit runtime-URL pair, local init
-connects through both actual DSNs and refuses a different live PostgreSQL
-primary instance or database, or a read-only target. In the default local path it verifies the derived host-side
-`localhost` connections; Compose then reaches that service through its
-`postgres` network alias, so this is not evidence that init connected through
-the exact container DSN. The worker independently repeats its role/epoch check
-against its real container session and writable-primary state at boot and
-while running; the gateway still
-lacks that boot-time sentinel. Helm's install job compares the system
-identifier, database OID and current postmaster start marker of its bootstrap
-target with the mounted worker DSN. Helm currently proves non-ownership only for the
-worker; its gateway still uses CloudNativePG's owner application Secret and
-remains a documented pre-reference gap. The chart's kind job adds a real
-OIDC/public-API round trip, worker-role assertion and CloudNativePG primary
-failover.
+The Docker reference may be called validated only after
+`make compose-acceptance`, `make compose-backup`,
+`make compose-restore-smoke` and `make compose-upgrade-smoke` exist and pass
+with the Keycloak issuer path. Until then the verdict remains “Docker reference
+implementation incomplete.”

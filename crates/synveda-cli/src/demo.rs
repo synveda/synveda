@@ -1289,7 +1289,7 @@ fn render(receipt: &Receipt, json_output: bool) -> Result<(), String> {
                 "    semantic        unavailable: deterministic hash is labelled lexical-only"
             );
             println!(
-                "                    re-run the deployment with `synveda init --embedder tei`"
+                "                    configure TEI in the validated deployment before restart"
             );
         }
     }

@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select not exists (\n              select 1\n                from pg_catalog.pg_shdepend as dependency\n                join pg_catalog.pg_roles as role\n                  on role.oid = dependency.refobjid\n                join pg_catalog.pg_database as database\n                  on database.datname = pg_catalog.current_database()\n               where dependency.refclassid = 'pg_catalog.pg_authid'::regclass\n                 and role.rolname = $1\n                 and not (\n                   dependency.deptype = 'o'\n                   and dependency.objsubid = 0\n                   and (\n                     dependency.dbid = 0\n                     and dependency.classid = 'pg_catalog.pg_database'::regclass\n                     and dependency.objid = database.oid\n                     or dependency.dbid = database.oid\n                     and dependency.classid = 'pg_catalog.pg_namespace'::regclass\n                     and dependency.objid = (\n                       select namespace.oid\n                         from pg_catalog.pg_namespace as namespace\n                        where namespace.nspname = 'public'\n                          and namespace.nspowner = role.oid\n                     )\n                     or dependency.dbid = database.oid\n                     and dependency.classid = 'pg_catalog.pg_class'::regclass\n                     and dependency.objid in (\n                       select object.oid\n                         from pg_catalog.pg_class as object\n                         join pg_catalog.pg_namespace as namespace\n                           on namespace.oid = object.relnamespace\n                        where namespace.nspname = 'public'\n                          and object.relowner = role.oid\n                     )\n                     or dependency.dbid = database.oid\n                     and dependency.classid = 'pg_catalog.pg_proc'::regclass\n                     and dependency.objid in (\n                       select routine.oid\n                         from pg_catalog.pg_proc as routine\n                         join pg_catalog.pg_namespace as namespace\n                           on namespace.oid = routine.pronamespace\n                        where namespace.nspname = 'public'\n                          and routine.proowner = role.oid\n                     )\n                     or dependency.dbid = database.oid\n                     and dependency.classid = 'pg_catalog.pg_type'::regclass\n                     and dependency.objid in (\n                       select data_type.oid\n                         from pg_catalog.pg_type as data_type\n                         join pg_catalog.pg_namespace as namespace\n                           on namespace.oid = data_type.typnamespace\n                        where namespace.nspname = 'public'\n                          and data_type.typowner = role.oid\n                     )\n                   )\n                 )\n            ) as \"safe!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "safe!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Name"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "1d75f86317f8fcfeead1d83caedfdf855a45a2ee26b594260a48c82fc02bed03"
+}

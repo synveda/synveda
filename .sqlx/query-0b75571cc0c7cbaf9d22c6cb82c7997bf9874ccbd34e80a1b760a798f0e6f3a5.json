@@ -1,0 +1,50 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select pg_catalog.current_database() as \"database!\",\n                  control.system_identifier::text as \"cluster_system_identifier!\",\n                  database.oid::bigint as \"database_oid!\",\n                  pg_catalog.pg_postmaster_start_time() as \"postmaster_started_at!\",\n                  pg_catalog.pg_is_in_recovery() as \"in_recovery!\",\n                  pg_catalog.current_setting('transaction_read_only')::boolean\n                    as \"transaction_read_only!\"\n             from pg_catalog.pg_control_system() as control\n             join pg_catalog.pg_database as database\n               on database.datname = pg_catalog.current_database()",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "database!",
+        "type_info": "Name"
+      },
+      {
+        "ordinal": 1,
+        "name": "cluster_system_identifier!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "database_oid!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "postmaster_started_at!",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 4,
+        "name": "in_recovery!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 5,
+        "name": "transaction_read_only!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "0b75571cc0c7cbaf9d22c6cb82c7997bf9874ccbd34e80a1b760a798f0e6f3a5"
+}

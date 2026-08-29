@@ -15,6 +15,9 @@
 //! when it is unset (CI has no database); run them locally with
 //! `make db-test`.
 
+#[path = "../../synveda-store/tests/support/tenant_fixture.rs"]
+mod tenant_fixture;
+
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
@@ -25,7 +28,7 @@ use http_body_util::BodyExt;
 use metrics_exporter_prometheus::PrometheusHandle;
 use serde_json::{Value, json};
 use sqlx::postgres::PgPoolOptions;
-use synveda_gateway::app::{AppState, router};
+use synveda_gateway::app::{AppState, behavior_test_router as router};
 use synveda_gateway::telemetry;
 use synveda_identity::Hs256Verifier;
 use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
@@ -101,12 +104,12 @@ async fn admitted_tenant() -> Option<(AppState, TenantId)> {
         .connect(&url)
         .await
         .expect("connect to DATABASE_URL");
-    synveda_store::migrate(&pool)
+    synveda_store::epoch::verify(&pool)
         .await
         .expect("apply migrations");
     let id = TenantId::new();
     let slug = format!("cpr10-{}", id.as_uuid().simple());
-    synveda_store::tenants::create(
+    tenant_fixture::create(
         &pool,
         id,
         &slug,
@@ -249,26 +252,32 @@ fn at_event(client_event_id: &str, event_type: &str, at: &str, payload: Value) -
 
 /// Every audit action in the tenant's chain, in order.
 async fn chain_actions(state: &AppState, tenant_id: TenantId) -> Vec<String> {
-    sqlx::query_scalar::<_, String>(
+    let mut tx = tenant_fixture::begin(&state.pool, tenant_id).await;
+    let actions = sqlx::query_scalar::<_, String>(
         "select action from audit_log where tenant_id = $1 order by seq",
     )
     .bind(tenant_id.as_uuid())
-    .fetch_all(&state.pool)
+    .fetch_all(&mut *tx)
     .await
-    .expect("read the chain")
+    .expect("read the chain");
+    tx.commit().await.expect("commit chain read");
+    actions
 }
 
 /// The payload of the newest event with this action.
 async fn newest_payload(state: &AppState, tenant_id: TenantId, action: &str) -> Value {
-    sqlx::query_scalar::<_, Value>(
+    let mut tx = tenant_fixture::begin(&state.pool, tenant_id).await;
+    let payload = sqlx::query_scalar::<_, Value>(
         "select payload from audit_log where tenant_id = $1 and action = $2 \
          order by seq desc limit 1",
     )
     .bind(tenant_id.as_uuid())
     .bind(action)
-    .fetch_one(&state.pool)
+    .fetch_one(&mut *tx)
     .await
-    .expect("read the payload")
+    .expect("read the payload");
+    tx.commit().await.expect("commit payload read");
+    payload
 }
 
 // ── The whole path, once ─────────────────────────────────────────────────────
@@ -1129,13 +1138,15 @@ async fn a_session_s_metadata_never_reaches_the_audit_chain() {
 
     // The whole chain, not just this event — a second writer would be the
     // failure this test exists to catch.
+    let mut tx = tenant_fixture::begin(&state.pool, tenant_id).await;
     let everything: Vec<Value> = sqlx::query_scalar::<_, Value>(
         "select payload from audit_log where tenant_id = $1 order by seq",
     )
     .bind(tenant_id.as_uuid())
-    .fetch_all(&state.pool)
+    .fetch_all(&mut *tx)
     .await
     .expect("read the chain");
+    tx.commit().await.expect("commit chain read");
     assert!(
         !everything.iter().any(|p| p.to_string().contains(secret)),
         "no event anywhere carries it"
@@ -1312,9 +1323,11 @@ async fn a_tenant_with_no_scopes_is_answered_rather_than_errored() {
         .connect(&url)
         .await
         .expect("connect");
-    synveda_store::migrate(&pool).await.expect("migrate");
+    synveda_store::epoch::verify(&pool)
+        .await
+        .expect("verify current schema");
     let tenant_id = TenantId::new();
-    synveda_store::tenants::create(
+    tenant_fixture::create(
         &pool,
         tenant_id,
         &format!("cpr10-bare-{}", tenant_id.as_uuid().simple()),
@@ -2064,13 +2077,15 @@ async fn a_payload_takes_diagnostics_and_a_timeline_does_not() {
     // The chain says which event was expanded and **never what was in it**:
     // an audit log that copied every prompt somebody read would be a second
     // transcript store with weaker access rules than the first.
+    let mut tx = tenant_fixture::begin(&state.pool, tenant_id).await;
     let chain = sqlx::query_scalar::<_, Value>(
         "select payload from audit_log where tenant_id = $1 order by seq",
     )
     .bind(tenant_id.as_uuid())
-    .fetch_all(&state.pool)
+    .fetch_all(&mut *tx)
     .await
     .expect("read the chain");
+    tx.commit().await.expect("commit diagnostic chain read");
     let whole = serde_json::to_string(&chain).expect("serialise");
     assert!(!whole.contains("hunter2"), "the chain carries no payload");
     assert!(

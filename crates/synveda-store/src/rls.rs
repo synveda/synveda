@@ -12,6 +12,8 @@
 use sqlx::{PgPool, Postgres, Transaction};
 use synveda_types::{Error, Result, TenantId};
 
+use crate::runtime_role::DatabaseRoles;
+
 /// The stable prefix every module's `storage_error` mapper puts on a
 /// backstop trip (SQLSTATE 42501). The taxonomy stays coarse (FND-3:
 /// detail in messages, not variants); [`is_backstop_trip`] is the one
@@ -62,6 +64,48 @@ pub async fn begin_tenant_tx(
     .await
     .map_err(|err| Error::Storage {
         message: format!("set tenant GUC: {err}"),
+    })?;
+    Ok(tx)
+}
+
+/// Begins one tenant-scoped transaction only after the same physical
+/// connection has proved the closed migrator authority contract.
+///
+/// Tenant admission is the one governed bootstrap mutation that must run as
+/// the schema owner. Proving a pooled connection and then borrowing another
+/// for the write would leave a target/role swap between proof and effect. This
+/// helper keeps session initialisation, repeatable-read authority proof, the
+/// transaction-local tenant GUC and every caller write on one transaction.
+#[tracing::instrument(
+    name = "store.rls.begin_migrator_tenant_tx",
+    skip_all,
+    fields(tenant.id = %tenant_id),
+    err(Display)
+)]
+pub async fn begin_migrator_tenant_tx(
+    pool: &PgPool,
+    tenant_id: TenantId,
+    database_roles: &DatabaseRoles,
+) -> Result<Transaction<'static, Postgres>> {
+    let mut tx = pool.begin().await.map_err(|error| Error::Storage {
+        message: format!("begin migrator tenant transaction: {error}"),
+    })?;
+    crate::runtime_role::configure_authority_snapshot_connection(&mut tx).await?;
+    crate::runtime_role::initialize_product_session_connection(&mut tx).await?;
+    crate::runtime_role::verify_migrator_connection(&mut tx, database_roles).await?;
+    crate::epoch::verify_connection(&mut tx)
+        .await
+        .map_err(|error| Error::Invalid {
+            message: format!("the migrator database is not at the required schema epoch: {error}"),
+        })?;
+    sqlx::query_scalar!(
+        "select set_config('synveda.tenant_id', $1, true)",
+        tenant_id.as_uuid().to_string(),
+    )
+    .fetch_one(&mut *tx)
+    .await
+    .map_err(|error| Error::Storage {
+        message: format!("set tenant GUC after migrator authority proof: {error}"),
     })?;
     Ok(tx)
 }

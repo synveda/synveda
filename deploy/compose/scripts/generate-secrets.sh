@@ -1,5 +1,8 @@
 #!/bin/sh
 # Generate the local bundled-provider secret set without revealing values.
+# A caller may enable shell tracing before execution. Disable it before the
+# first value-bearing expansion so generated credentials cannot reach logs.
+set +x
 set -eu
 
 force=0
@@ -29,14 +32,22 @@ case "$configured_secret_dir" in
     ./*) secret_dir=$compose_dir/${configured_secret_dir#./} ;;
     *) secret_dir=$compose_dir/$configured_secret_dir ;;
 esac
+configured_authority_dir=${SYNVEDA_DATABASE_AUTHORITY_DIR:-./runtime/database-authority}
+case "$configured_authority_dir" in
+    /*) authority_dir=$configured_authority_dir ;;
+    ./*) authority_dir=$compose_dir/${configured_authority_dir#./} ;;
+    *) authority_dir=$compose_dir/$configured_authority_dir ;;
+esac
 
-if [ -L "$secret_dir" ]; then
-    echo "generate-secrets: secret directory must not be a symlink" >&2
+if [ -L "$secret_dir" ] || [ -L "$authority_dir" ]; then
+    echo "generate-secrets: private directories must not be symlinks" >&2
     exit 73
 fi
 umask 077
 mkdir -p "$secret_dir"
 chmod 700 "$secret_dir"
+mkdir -p "$authority_dir"
+chmod 700 "$authority_dir"
 
 files='postgres_owner_password
 synveda_migrator_password

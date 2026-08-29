@@ -32,6 +32,8 @@ data/**
 !**/.env.example
 deploy/compose/secrets
 deploy/compose/secrets/**
+deploy/compose/runtime
+deploy/compose/runtime/**
 deploy/compose/backups
 deploy/compose/backups/**
 

@@ -31,6 +31,22 @@ pub const TENANT_RESOLUTIONS_TOTAL: &str = "synveda_tenant_resolutions_total";
 /// Request latency in seconds, labelled by method/route/status.
 pub const HTTP_REQUEST_DURATION_SECONDS: &str = "synveda_http_request_duration_seconds";
 
+/// Gateway application-plane authority: 1 only after the complete bounded
+/// database proof accepted and 0 during boot, outage, drain or refusal.
+pub const GATEWAY_AUTHORITY_READY: &str = "synveda_gateway_authority_ready";
+
+/// Complete gateway database-authority checks, labelled by the closed outcome
+/// vocabulary `accepted|unavailable|timeout|refused`.
+pub const GATEWAY_AUTHORITY_CHECKS_TOTAL: &str = "synveda_gateway_authority_checks_total";
+
+/// Worker application-plane authority: 1 only after the complete bounded
+/// database proof accepted and 0 during boot, outage, drain or refusal.
+pub const WORKER_AUTHORITY_READY: &str = "synveda_worker_authority_ready";
+
+/// Complete worker database-authority checks, labelled by the closed outcome
+/// vocabulary `accepted|unavailable|timeout|refused`.
+pub const WORKER_AUTHORITY_CHECKS_TOTAL: &str = "synveda_worker_authority_checks_total";
+
 /// Core-worker readiness: 1 only while the supervisor is running and its
 /// most recent dependency probe accepted the schema and runtime role.
 pub const WORKER_READY: &str = "synveda_worker_ready";
@@ -328,6 +344,14 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
     metrics::describe_gauge!(
         WORKER_READY,
         "Core-worker supervisor readiness after lifecycle, database, schema and runtime-role checks"
+    );
+    metrics::describe_gauge!(
+        WORKER_AUTHORITY_READY,
+        "Core-worker application-plane database authority"
+    );
+    metrics::describe_counter!(
+        WORKER_AUTHORITY_CHECKS_TOTAL,
+        "Complete core-worker database-authority checks by closed outcome"
     );
     metrics::describe_gauge!(
         WORKER_HEARTBEAT_AGE_SECONDS,

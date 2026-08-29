@@ -33,6 +33,54 @@ services:
       synveda-data: {}
       keycloak-data: {}
 
+  database-bootstrap:
+    image: ${SYNVEDA_POSTGRES_IMAGE}
+    user: "${SYNVEDA_RUNTIME_UID}:${SYNVEDA_RUNTIME_GID}"
+    entrypoint: ["/usr/local/bin/synveda-database-bootstrap"]
+    command: ["synveda"]
+    environment:
+      SYNVEDA_POSTGRES_BOOTSTRAP_URL: ${SYNVEDA_POSTGRES_BOOTSTRAP_URL:?set SYNVEDA_POSTGRES_BOOTSTRAP_URL}
+      SYNVEDA_POSTGRES_BUNDLED_CLUSTER: "true"
+      SYNVEDA_DATABASE_ROLES_FILE: /run/secrets/database_roles.json
+    read_only: true
+    init: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 64
+    restart: "no"
+    mem_limit: 256m
+    cpus: 0.5
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,mode=1777,size=16m
+    depends_on:
+      postgres:
+        condition: service_healthy
+    secrets:
+      - source: postgres_owner_password
+        target: postgres_bootstrap_password
+      - source: synveda_migrator_password
+        target: synveda_migrator_password
+      - source: synveda_gateway_password
+        target: synveda_gateway_password
+      - source: synveda_worker_password
+        target: synveda_worker_password
+    volumes:
+      - type: bind
+        source: ${SYNVEDA_DATABASE_ROLES_FILE:?set SYNVEDA_DATABASE_ROLES_FILE}
+        target: /run/secrets/database_roles.json
+        read_only: true
+    networks:
+      synveda-data: {}
+
+  database-preflight:
+    environment:
+      SYNVEDA_DATABASE_EXPECTED_HOST: ${SYNVEDA_DATABASE_EXPECTED_HOST:?set SYNVEDA_DATABASE_EXPECTED_HOST}
+      SYNVEDA_DATABASE_EXPECTED_PORT: ${SYNVEDA_DATABASE_EXPECTED_PORT:?set SYNVEDA_DATABASE_EXPECTED_PORT}
+      SYNVEDA_DATABASE_EXPECTED_NAME: ${SYNVEDA_DATABASE_EXPECTED_NAME:?set SYNVEDA_DATABASE_EXPECTED_NAME}
+    depends_on:
+      database-bootstrap:
+        condition: service_completed_successfully
+
 volumes:
   postgres-data:
     labels:
@@ -42,3 +90,9 @@ volumes:
 secrets:
   postgres_owner_password:
     file: ${SYNVEDA_SECRETS_DIR:?set SYNVEDA_SECRETS_DIR}/postgres_owner_password
+  synveda_migrator_password:
+    file: ${SYNVEDA_SECRETS_DIR}/synveda_migrator_password
+  synveda_gateway_password:
+    file: ${SYNVEDA_SECRETS_DIR}/synveda_gateway_password
+  synveda_worker_password:
+    file: ${SYNVEDA_SECRETS_DIR}/synveda_worker_password

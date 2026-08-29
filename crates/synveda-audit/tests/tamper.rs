@@ -10,9 +10,13 @@
 //! are missing (run `synveda db migrate` / any store test first); run them
 //! locally with `make db-test`.
 //!
-//! Layering note: `synveda-audit` sits beside `synveda-store`, so this
-//! suite carries its own three-line tenant-GUC helper instead of importing
-//! `rls::begin_tenant_tx` — same GUC, same transaction-local shape.
+//! Layering note: `synveda-audit` sits beside `synveda-store`, so this suite
+//! carries its own tenant-GUC helper. The separately compiled workspace test
+//! support validates privileged file credentials without adding a production
+//! crate dependency.
+
+#[path = "../../../tests/support/database_authority.rs"]
+mod database_authority;
 
 use std::sync::OnceLock;
 
@@ -169,9 +173,11 @@ fn tail_returns_newest_first() {
 // ── The AC: mutating any historic row breaks verification ────────────────────
 
 #[test]
+#[ignore = "serial administrator tamper acceptance"]
 fn mutating_any_historic_column_breaks_verification() {
     let Some(db) = db() else { return };
     db.rt.block_on(async {
+        let administrator = database_authority::administrator_pool(&db.pool).await;
         // Every hashed column, mutated one at a time on the same historic
         // row of a fresh chain. Values satisfy the schema's constraints:
         // the *database* accepts each rewrite — only verification objects.
@@ -212,7 +218,7 @@ fn mutating_any_historic_column_breaks_verification() {
         ];
         for (column, sql) in mutations {
             let tenant = chain_of(&db.pool, 4).await;
-            tamper(&db.pool, tenant, sql).await;
+            tamper(&administrator, tenant, sql).await;
             assert_eq!(
                 verified(&db.pool, tenant).await,
                 ChainVerification::Broken {
@@ -222,16 +228,19 @@ fn mutating_any_historic_column_breaks_verification() {
                 "mutating {column} must break verification at the mutated row"
             );
         }
+        administrator.close().await;
     });
 }
 
 #[test]
+#[ignore = "serial administrator tamper acceptance"]
 fn removing_a_row_leaves_a_gap() {
     let Some(db) = db() else { return };
     db.rt.block_on(async {
         let tenant = chain_of(&db.pool, 5).await;
+        let administrator = database_authority::administrator_pool(&db.pool).await;
         tamper(
-            &db.pool,
+            &administrator,
             tenant,
             "delete from audit_log where tenant_id = $1 and seq = 2",
         )
@@ -243,16 +252,19 @@ fn removing_a_row_leaves_a_gap() {
                 reason: BreakReason::Gap { expected: 2 },
             }
         );
+        administrator.close().await;
     });
 }
 
 #[test]
+#[ignore = "serial administrator tamper acceptance"]
 fn relinking_a_row_breaks_linkage() {
     let Some(db) = db() else { return };
     db.rt.block_on(async {
         let tenant = chain_of(&db.pool, 4).await;
+        let administrator = database_authority::administrator_pool(&db.pool).await;
         tamper(
-            &db.pool,
+            &administrator,
             tenant,
             "update audit_log set prev_hash = decode(repeat('00', 32), 'hex') \
              where tenant_id = $1 and seq = 3",
@@ -265,17 +277,20 @@ fn relinking_a_row_breaks_linkage() {
                 reason: BreakReason::Linkage,
             }
         );
+        administrator.close().await;
     });
 }
 
 #[test]
+#[ignore = "serial administrator tamper acceptance"]
 fn moving_or_faking_the_head_is_detected() {
     let Some(db) = db() else { return };
     db.rt.block_on(async {
+        let administrator = database_authority::administrator_pool(&db.pool).await;
         // A rewritten head hash.
         let tenant = chain_of(&db.pool, 3).await;
         tamper(
-            &db.pool,
+            &administrator,
             tenant,
             "update audit_chain_heads set head_hash = decode(repeat('ff', 32), 'hex') \
              where tenant_id = $1",
@@ -292,7 +307,7 @@ fn moving_or_faking_the_head_is_detected() {
         // A truncated tail: the last event removed, head left behind.
         let tenant = chain_of(&db.pool, 3).await;
         tamper(
-            &db.pool,
+            &administrator,
             tenant,
             "delete from audit_log where tenant_id = $1 and seq = 3",
         )
@@ -308,7 +323,7 @@ fn moving_or_faking_the_head_is_detected() {
         // The head row removed entirely.
         let tenant = chain_of(&db.pool, 2).await;
         tamper(
-            &db.pool,
+            &administrator,
             tenant,
             "delete from audit_chain_heads where tenant_id = $1",
         )
@@ -320,25 +335,28 @@ fn moving_or_faking_the_head_is_detected() {
                 reason: BreakReason::MissingHead,
             }
         );
+        administrator.close().await;
     });
 }
 
 // ── The append-only guard (what tampering had to suppress) ───────────────────
 
 #[test]
+#[ignore = "serial administrator tamper acceptance"]
 fn triggers_reject_mutation_even_for_the_highest_privilege() {
     let Some(db) = db() else { return };
     db.rt.block_on(async {
         let tenant = chain_of(&db.pool, 2).await;
-        // The test connection is the compose superuser: grants and RLS do
-        // not bind it — only the triggers do. Every mutation path raises.
+        let administrator = database_authority::administrator_pool(&db.pool).await;
+        // The explicit administrator bypasses RLS: only the triggers bind it.
+        // Every mutation path raises.
         for sql in [
             "update audit_log set resource = 'rewritten' where tenant_id = $1",
             "delete from audit_log where tenant_id = $1",
         ] {
             let error = sqlx::query(sql)
                 .bind(tenant.as_uuid())
-                .execute(&db.pool)
+                .execute(&administrator)
                 .await
                 .expect_err("the append-only trigger must raise");
             assert!(
@@ -347,7 +365,7 @@ fn triggers_reject_mutation_even_for_the_highest_privilege() {
             );
         }
         let error = sqlx::raw_sql("truncate audit_log")
-            .execute(&db.pool)
+            .execute(&administrator)
             .await
             .expect_err("the truncate trigger must raise");
         assert!(
@@ -359,5 +377,6 @@ fn triggers_reject_mutation_even_for_the_highest_privilege() {
             verified(&db.pool, tenant).await,
             ChainVerification::Valid { events: 2 }
         );
+        administrator.close().await;
     });
 }

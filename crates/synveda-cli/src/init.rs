@@ -1,6 +1,12 @@
-//! `synveda init` — a laptop to working governed memory (OPS-1, ADR-0055).
+//! Dormant pre-CPR-45 `synveda init` lifecycle (OPS-1, ADR-0055).
 //!
-//! The whole design of this file is what it *does not* do. It applies
+//! The public entrypoint is unconditionally closed before profile discovery,
+//! Compose, secret-file or database work while the canonical Docker reference
+//! lifecycle is cut over to deployment-owned Keycloak and database authority.
+//! The retained private implementation compiles so its useful boundary code can
+//! be reused deliberately, but it is not an operator path or compatibility mode.
+//!
+//! The intended design is defined as much by what it *does not* do. It applies
 //! migrations and admits a tenant, both of which are pre-existing audited
 //! break-glass paths with no governed surface and no operator to run them
 //! yet (ADR-0055 decision 1). It writes no scope, no identity, no grant and no
@@ -30,14 +36,16 @@
 //! never appears on the install path (ADR-0010 decision 3).
 
 use std::ffi::OsString;
-use std::io::Read as _;
+use std::io::{Read as _, Write as _};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
 use sha2::{Digest as _, Sha256};
 use synveda_types::{TenantId, TenantStatus};
+use zeroize::Zeroizing;
 
 /// The bundled dev IdP, as `deploy/compose/docker-compose.yml` publishes
 /// it. Dev-only credentials; the API key is the one in
@@ -73,16 +81,16 @@ pub struct Plan {
 /// printed by `init`; it is not a production or customer secret.
 const OPERATOR_PASSWORD: &str = "Synveda-Demo-Passw0rd!";
 
-/// The fixed local Compose login. Its credential is deliberately the existing
-/// dev-only Compose credential; Helm provisions a generated login instead.
-/// Domain migrations own the NOLOGIN `synveda_app` capability role, while the
-/// deployment owns this LOGIN identity (CPR-36, ADR-0095).
-const COMPOSE_GATEWAY_DATABASE_URL: &str =
-    "postgres://synveda_gateway:synveda-dev@localhost:5432/synveda";
-const COMPOSE_WORKER_DATABASE_URL: &str =
-    "postgres://synveda_worker:synveda-dev@localhost:5432/synveda";
 const DEFAULT_DATABASE_URL: &str = "postgres://synveda:synveda-dev@localhost:5432/synveda";
 const MAX_DATABASE_URL_FILE_BYTES: u64 = 1_048_576;
+
+struct InitDatabasePlan {
+    roles: synveda_store::runtime_role::DatabaseRoles,
+    roles_json: String,
+    migrator_url: Zeroizing<String>,
+    gateway_url: Zeroizing<String>,
+    worker_url: Zeroizing<String>,
+}
 
 /// Settings owned by worker/bootstrap planes that a transitional host gateway
 /// must not inherit from the operator shell. `Command::env_remove` records the
@@ -93,12 +101,11 @@ const HOST_GATEWAY_REMOVED_ENV: &[&str] = &[
     "SYNVEDA_GATEWAY_DATABASE_URL_FILE",
     "SYNVEDA_WORKER_DATABASE_URL",
     "SYNVEDA_WORKER_DATABASE_URL_FILE",
+    "SYNVEDA_DATABASE_ROLES_FILE",
     "SYNVEDA_OIDC_ISSUERS_FILE",
     "SYNVEDA_DEV_JWT_SECRET",
     "SYNVEDA_DEV_JWT_SECRET_FILE",
     "SYNVEDA_KMS_KEY_FILE",
-    "SYNVEDA_EXPECTED_DATABASE_ROLE",
-    "SYNVEDA_EXPECTED_DATABASE_ROLE_FILE",
     "SYNVEDA_WORKER_DB_MAX_CONNECTIONS",
     "SYNVEDA_WORKER_LISTEN_ADDR",
     "SYNVEDA_WORKER_SHUTDOWN_SECS",
@@ -119,7 +126,12 @@ const HOST_GATEWAY_REMOVED_ENV: &[&str] = &[
     "SYNVEDA_VLLM_BASE_URL",
 ];
 
-pub async fn init(plan: Plan) -> Result<(), String> {
+pub async fn init(_plan: Plan) -> Result<(), String> {
+    reference_cutover_gate()
+}
+
+#[allow(dead_code)]
+async fn init_after_cutover(plan: Plan) -> Result<(), String> {
     let started = Instant::now();
     let profile = Profile::discover()?;
     profile.check_version()?;
@@ -138,20 +150,13 @@ pub async fn init(plan: Plan) -> Result<(), String> {
         .clone()
         .unwrap_or_else(|| RAUTHY_ISSUER.to_owned());
 
-    // The plan is not viable when its bootstrap target is not. Validate
-    // before the dry-run branch so preview and execution share the exact
-    // provider/query/database-name boundary and content-free refusal.
-    let database_url = database_url()?;
-    validate_bootstrap_database_url(&database_url.value)?;
+    // Database authority is deployment-owned. Resolve the same explicit
+    // migrator/gateway/worker/role plan before dry-run or any Compose command;
+    // init never infers or provisions PostgreSQL principals.
+    let database = init_database_plan()?;
 
     if plan.dry_run {
-        return dry_run(
-            &plan,
-            &profile,
-            &issuer,
-            bundled,
-            database_url.explicitly_configured,
-        );
+        return dry_run(&plan, &profile, &issuer, bundled, &database);
     }
 
     // ── 1. the stack ────────────────────────────────────────────────────
@@ -187,73 +192,61 @@ pub async fn init(plan: Plan) -> Result<(), String> {
 
     // ── 2. schema ───────────────────────────────────────────────────────
     step(2, "applying migrations");
-    let bootstrap_options = synveda_store::database_url::parse("DATABASE_URL", &database_url.value)
-        .map_err(|error| error.to_string())?;
+    let migrator_options =
+        synveda_store::database_url::parse("DATABASE_URL", &database.migrator_url)
+            .map_err(|error| error.to_string())?;
     let pool = sqlx::postgres::PgPoolOptions::new()
         .max_connections(2)
         .acquire_timeout(Duration::from_secs(30))
-        .connect_with(bootstrap_options)
+        .connect_with(migrator_options)
         .await
         .map_err(|err| {
             format!(
                 "connect to {}: {err}",
-                redacted_database_url(&database_url.value)
+                redacted_database_url(&database.migrator_url)
             )
         })?;
     // The epoch guard before the migrator (CPR-2, ADR-0069), so that an
     // operator re-running `init` over a database from before the
     // context-platform cut is told to reset it — as itself, rather than
-    // wrapped in "apply migrations: storage:" three layers down.
+    // wrapped in "apply migrations: storage:" three layers down. It also
+    // precedes cluster-role convergence: a refused database is not mutated.
     synveda_store::epoch::preflight(&pool)
         .await
         .map_err(|refusal| refusal.to_string())?;
-    let schema = synveda_store::migrate_reporting(&pool)
+    let schema = synveda_store::migrate_reporting(&pool, &database.roles)
         .await
         .map_err(|err| format!("apply migrations: {err}"))?;
     println!(
-        "    schema epoch {} at migration {}",
-        schema.epoch, schema.migration_head
+        "    schema epoch {}, baseline revision {} at migration {}",
+        schema.epoch, schema.baseline_revision, schema.migration_head
     );
-    let (gateway_database_url, worker_database_url, runtime_urls_explicit) =
-        runtime_database_urls(database_url.explicitly_configured)?;
-    let (gateway_role, worker_role) =
-        distinct_runtime_database_roles(&gateway_database_url, &worker_database_url)?;
-    let bootstrap_database = synveda_store::runtime_role::database_identity(&pool)
+    let migrator_database = synveda_store::runtime_role::database_identity(&pool)
         .await
-        .map_err(|error| format!("verify bootstrap database target: {error}"))?;
-    let (gateway_database, worker_database) = if runtime_urls_explicit {
-        let gateway = verify_runtime_database_url(
-            "SYNVEDA_GATEWAY_DATABASE_URL",
-            &gateway_database_url,
-            &gateway_role,
-        )
-        .await?;
-        let worker = verify_runtime_database_url(
-            "SYNVEDA_WORKER_DATABASE_URL",
-            &worker_database_url,
-            &worker_role,
-        )
-        .await?;
-        (gateway, worker)
-    } else {
-        provision_compose_runtime_roles(&pool).await?;
-        let gateway = verify_runtime_database_url(
-            "SYNVEDA_GATEWAY_DATABASE_URL",
-            &gateway_database_url,
-            &gateway_role,
-        )
-        .await?;
-        let worker = verify_runtime_database_url(
-            "SYNVEDA_WORKER_DATABASE_URL",
-            &worker_database_url,
-            &worker_role,
-        )
-        .await?;
-        (gateway, worker)
-    };
-    require_one_database_target(&bootstrap_database, &gateway_database, &worker_database)?;
-    println!("    gateway role {gateway_role}: LOGIN, RLS-enforced, synveda_app member");
-    println!("    worker role {worker_role}: LOGIN, RLS-enforced, synveda_app member");
+        .map_err(|error| format!("verify migrator database target: {error}"))?;
+    let gateway_database = verify_runtime_database_url(
+        "SYNVEDA_GATEWAY_DATABASE_URL",
+        &database.gateway_url,
+        database.roles.gateway(),
+        &database.roles,
+    )
+    .await?;
+    let worker_database = verify_runtime_database_url(
+        "SYNVEDA_WORKER_DATABASE_URL",
+        &database.worker_url,
+        database.roles.worker(),
+        &database.roles,
+    )
+    .await?;
+    require_one_database_target(&migrator_database, &gateway_database, &worker_database)?;
+    println!(
+        "    gateway role {}: LOGIN, RLS-enforced, synveda_app member",
+        database.roles.gateway()
+    );
+    println!(
+        "    worker role {}: LOGIN, RLS-enforced, synveda_app member",
+        database.roles.worker()
+    );
 
     // ── 3. the tenant ───────────────────────────────────────────────────
     //
@@ -277,16 +270,22 @@ pub async fn init(plan: Plan) -> Result<(), String> {
             existing.id
         }
         None => {
-            let tenant = crate::create_tenant(&pool, &plan.slug, &plan.name, TenantStatus::Active)
-                .await
-                .map_err(|err| {
-                    format!(
-                        "admit tenant `{}`: {err}\n\
+            let tenant = crate::create_tenant(
+                &pool,
+                &database.roles,
+                &plan.slug,
+                &plan.name,
+                TenantStatus::Active,
+            )
+            .await
+            .map_err(|err| {
+                format!(
+                    "admit tenant `{}`: {err}\n\
                          (a suspended tenant holds its slug but is not listed as active — \
                          `synveda tenant create --slug <other>` or resume that one)",
-                        plan.slug
-                    )
-                })?;
+                    plan.slug
+                )
+            })?;
             println!("    {} ({})", tenant.slug, tenant.id);
             tenant.id
         }
@@ -308,7 +307,7 @@ pub async fn init(plan: Plan) -> Result<(), String> {
     // Beside the compose file, which is where compose's `env_file` looks
     // and where its own variable substitution reads a `.env` from.
     let env_file = compose_file.with_file_name(".env");
-    write_env_file(&env_file, &plan, tenant_id, &issuer, &kek)?;
+    write_env_file(&env_file, &plan, tenant_id, &issuer, &kek, Some(&database))?;
     println!("    configuration: {}", env_file.display());
     let mut product_services = vec!["worker"];
     if containerised(&plan) {
@@ -334,12 +333,7 @@ pub async fn init(plan: Plan) -> Result<(), String> {
         None
     } else {
         Some(start_host_gateway(
-            &profile,
-            &plan,
-            tenant_id,
-            &issuer,
-            &kek,
-            &gateway_database_url,
+            &profile, &plan, tenant_id, &issuer, &kek, &database,
         )?)
     };
     wait_for_health(
@@ -379,16 +373,20 @@ pub async fn init(plan: Plan) -> Result<(), String> {
     Ok(())
 }
 
+fn reference_cutover_gate() -> Result<(), String> {
+    Err(
+        "synveda init is unavailable during the CPR-45 Docker reference cutover; it refuses before profile discovery, Compose, secret-file or database mutation. Validate the additive topology with `make compose-config`; a turnkey init returns only after clean-volume Keycloak, exact-issuer and database-authority acceptance passes"
+            .to_owned(),
+    )
+}
+
 fn dry_run(
     plan: &Plan,
     profile: &Profile,
     issuer: &str,
     bundled: bool,
-    admin_database_explicit: bool,
+    _database: &InitDatabasePlan,
 ) -> Result<(), String> {
-    let (gateway_database_url, worker_database_url, runtime_urls_explicit) =
-        runtime_database_urls(admin_database_explicit)?;
-    distinct_runtime_database_roles(&gateway_database_url, &worker_database_url)?;
     println!("synveda init --dry-run");
     println!();
     println!("  profile        {}", profile.describe());
@@ -423,14 +421,8 @@ fn dry_run(
         if bundled { ", rauthy" } else { "" },
         if plan.embedder == "tei" { ", tei" } else { "" },
     );
-    if runtime_urls_explicit {
-        println!("  would write    migrations and one tenant row");
-        println!("  would verify   two pre-provisioned least-privilege runtime logins");
-    } else {
-        println!(
-            "  would write    migrations, one tenant row and converge two least-privilege runtime logins"
-        );
-    }
+    println!("  would write    migrations and one tenant row");
+    println!("  would verify   explicit migrator, gateway and worker database principals");
     println!("  would NOT      write any scope, identity, grant, Configuration or Knowledge");
     Ok(())
 }
@@ -715,7 +707,7 @@ fn start_host_gateway(
     tenant_id: TenantId,
     issuer: &str,
     kek: &str,
-    runtime_database_url: &str,
+    database: &InitDatabasePlan,
 ) -> Result<Started, String> {
     let state = profile.state_dir();
     std::fs::create_dir_all(&state).map_err(|err| format!("create {}: {err}", state.display()))?;
@@ -754,7 +746,7 @@ fn start_host_gateway(
         "{issuers}\n{}\n{GATEWAY_URL}\nkek:{}\ndatabase:{}\ngateway:{stamp}\n",
         plan.embedder,
         secret_fingerprint(kek),
-        secret_fingerprint(runtime_database_url),
+        secret_fingerprint(&database.gateway_url),
     );
     match (
         running_gateway(&pidfile),
@@ -807,7 +799,8 @@ fn start_host_gateway(
     let mut command = Command::new(&binary);
     command
         .current_dir(profile.working_dir())
-        .env("DATABASE_URL", runtime_database_url)
+        .env("DATABASE_URL", &*database.gateway_url)
+        .env("SYNVEDA_DATABASE_ROLES", &database.roles_json)
         .env("SYNVEDA_OIDC_ISSUERS", &issuers)
         .env("SYNVEDA_PUBLIC_URL", GATEWAY_URL)
         .env("SYNVEDA_LISTEN_ADDR", "127.0.0.1:8120")
@@ -1122,6 +1115,7 @@ fn write_env_file(
     tenant_id: TenantId,
     issuer: &str,
     kek: &str,
+    database: Option<&InitDatabasePlan>,
 ) -> Result<(), String> {
     // One line, no quotes: quoting the JSON value makes those quote bytes
     // part of the value delivered to the gateway. This transitional raw
@@ -1133,17 +1127,18 @@ fn write_env_file(
     } else {
         ""
     };
-    let runtime_databases = match (
-        std::env::var("SYNVEDA_GATEWAY_DATABASE_URL").ok(),
-        std::env::var("SYNVEDA_WORKER_DATABASE_URL").ok(),
-    ) {
-        (Some(gateway), Some(worker)) if !gateway.is_empty() && !worker.is_empty() => format!(
-            "SYNVEDA_GATEWAY_DATABASE_URL={gateway}\n\
-             SYNVEDA_WORKER_DATABASE_URL={worker}\n"
-        ),
-        _ => String::new(),
+    let runtime_databases = match database {
+        Some(database) => Zeroizing::new(format!(
+            "SYNVEDA_GATEWAY_DATABASE_URL={}\n\
+             SYNVEDA_WORKER_DATABASE_URL={}\n\
+             SYNVEDA_DATABASE_ROLES={}\n",
+            database.gateway_url.as_str(),
+            database.worker_url.as_str(),
+            database.roles_json,
+        )),
+        None => Zeroizing::new(String::new()),
     };
-    let body = format!(
+    let body = Zeroizing::new(format!(
         "# Written by `synveda init` (CPR-36, ADR-0095). Regenerate by re-running it.\n\
          # Local deployment material. Runtime behaviour comes from governed Configuration.\n\
          SYNVEDA_TENANT_ID={tenant_id}\n\
@@ -1152,18 +1147,222 @@ fn write_env_file(
          SYNVEDA_LISTEN_ADDR=0.0.0.0:8120\n\
          SYNVEDA_EMBEDDER={}\n\
          SYNVEDA_KMS_KEY={kek}\n\
-         {runtime_databases}{tei}",
+         {}{tei}",
         plan.embedder,
-    );
-    std::fs::write(path, body).map_err(|err| format!("write {}: {err}", path.display()))?;
-    // The KEK is in this file, so it is not a file to leave world-readable.
+        runtime_databases.as_str(),
+    ));
+    write_private_file_atomically(path, body.as_bytes())
+}
+
+static PRIVATE_WRITE_SEQUENCE: AtomicU64 = AtomicU64::new(0);
+
+/// Replaces one local secret file without ever creating the destination with
+/// permissive permissions or exposing a partially written value. The
+/// temporary lives beside the destination, so the final rename is one
+/// filesystem operation. Its name is not a security boundary: `create_new`
+/// and the private deployment-state directory are.
+fn write_private_file_atomically(path: &Path, contents: &[u8]) -> Result<(), String> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| format!("{} has no parent directory", path.display()))?;
+    let file_name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .ok_or_else(|| format!("{} must have a UTF-8 file name", path.display()))?;
+    if let Ok(metadata) = std::fs::symlink_metadata(path)
+        && (metadata.file_type().is_symlink() || !metadata.is_file())
+    {
+        return Err(format!(
+            "{} must be a regular non-symlink file",
+            path.display()
+        ));
+    }
+
+    let mut opened = None;
+    for _ in 0..64 {
+        let sequence = PRIVATE_WRITE_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+        let temporary = parent.join(format!(
+            ".{file_name}.{}.{}.tmp",
+            std::process::id(),
+            sequence
+        ));
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt as _;
+            options.mode(0o600);
+        }
+        match options.open(&temporary) {
+            Ok(file) => {
+                opened = Some((temporary, file));
+                break;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(error) => {
+                return Err(format!(
+                    "create private file for {}: {error}",
+                    path.display()
+                ));
+            }
+        }
+    }
+    let Some((temporary, mut file)) = opened else {
+        return Err(format!(
+            "create private file for {}: temporary-name attempts exhausted",
+            path.display()
+        ));
+    };
+    let result = (|| -> Result<(), String> {
+        file.write_all(contents)
+            .map_err(|error| format!("write private file for {}: {error}", path.display()))?;
+        file.sync_all()
+            .map_err(|error| format!("sync private file for {}: {error}", path.display()))?;
+        drop(file);
+        std::fs::rename(&temporary, path)
+            .map_err(|error| format!("replace {} atomically: {error}", path.display()))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt as _;
+            let metadata = std::fs::symlink_metadata(path)
+                .map_err(|error| format!("inspect {}: {error}", path.display()))?;
+            if metadata.file_type().is_symlink()
+                || !metadata.is_file()
+                || metadata.permissions().mode() & 0o777 != 0o600
+            {
+                return Err(format!(
+                    "{} was not installed as a regular mode-0600 file",
+                    path.display()
+                ));
+            }
+            std::fs::File::open(parent)
+                .and_then(|directory| directory.sync_all())
+                .map_err(|error| format!("sync {}: {error}", parent.display()))?;
+        }
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = std::fs::remove_file(&temporary);
+    }
+    result
+}
+
+fn ensure_private_directory(path: &Path) -> Result<(), String> {
+    std::fs::create_dir_all(path).map_err(|error| format!("create {}: {error}", path.display()))?;
+    let metadata = std::fs::symlink_metadata(path)
+        .map_err(|error| format!("inspect {}: {error}", path.display()))?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(format!(
+            "{} must be a private non-symlink directory",
+            path.display()
+        ));
+    }
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
-            .map_err(|err| format!("restrict {} to 0600: {err}", path.display()))?;
+        use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
+            .map_err(|error| format!("restrict {} to 0700: {error}", path.display()))?;
+        let metadata = std::fs::symlink_metadata(path)
+            .map_err(|error| format!("inspect {}: {error}", path.display()))?;
+        if metadata.mode() & 0o7777 != 0o700
+            || metadata.uid() != rustix::process::geteuid().as_raw()
+            || metadata.gid() != rustix::process::getegid().as_raw()
+        {
+            return Err(format!(
+                "{} must be a private process-owned directory",
+                path.display()
+            ));
+        }
     }
     Ok(())
+}
+
+fn read_private_file(path: &Path, maximum_bytes: u64) -> Result<String, String> {
+    let parent = path
+        .parent()
+        .ok_or_else(|| format!("{} has no parent directory", path.display()))?;
+    let path_metadata = std::fs::symlink_metadata(path)
+        .map_err(|error| format!("read {}: {error}", path.display()))?;
+    if path_metadata.file_type().is_symlink() || !path_metadata.is_file() {
+        return Err(format!(
+            "{} must be a regular non-symlink file",
+            path.display()
+        ));
+    }
+    let mut file =
+        open_nonblocking_read(path).map_err(|error| format!("read {}: {error}", path.display()))?;
+    let opened_metadata = file
+        .metadata()
+        .map_err(|error| format!("inspect {}: {error}", path.display()))?;
+    if !opened_metadata.is_file() || opened_metadata.len() > maximum_bytes {
+        return Err(format!("{} exceeds its private-file bound", path.display()));
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt as _;
+        let parent_metadata = std::fs::symlink_metadata(parent)
+            .map_err(|error| format!("inspect {}: {error}", parent.display()))?;
+        if parent_metadata.file_type().is_symlink()
+            || !parent_metadata.is_dir()
+            || parent_metadata.mode() & 0o7777 != 0o700
+            || parent_metadata.uid() != rustix::process::geteuid().as_raw()
+            || parent_metadata.gid() != rustix::process::getegid().as_raw()
+            || opened_metadata.mode() & 0o7777 != 0o600
+            || opened_metadata.uid() != rustix::process::geteuid().as_raw()
+            || opened_metadata.gid() != rustix::process::getegid().as_raw()
+            || opened_metadata.nlink() != 1
+            || opened_metadata.dev() != path_metadata.dev()
+            || opened_metadata.ino() != path_metadata.ino()
+        {
+            return Err(format!(
+                "{} must remain one private process-owned regular file",
+                path.display()
+            ));
+        }
+    }
+    let mut bytes = Vec::with_capacity(
+        usize::try_from(opened_metadata.len().min(maximum_bytes))
+            .map_err(|_| format!("{} exceeds its private-file bound", path.display()))?,
+    );
+    std::io::Read::by_ref(&mut file)
+        .take(maximum_bytes + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| format!("read {}: {error}", path.display()))?;
+    if bytes.len() as u64 > maximum_bytes {
+        return Err(format!("{} exceeds its private-file bound", path.display()));
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt as _;
+        let opened_after = file
+            .metadata()
+            .map_err(|error| format!("inspect {}: {error}", path.display()))?;
+        let path_after = std::fs::symlink_metadata(path)
+            .map_err(|error| format!("inspect {}: {error}", path.display()))?;
+        let snapshot = |metadata: &std::fs::Metadata| {
+            (
+                metadata.dev(),
+                metadata.ino(),
+                metadata.mode(),
+                metadata.uid(),
+                metadata.gid(),
+                metadata.nlink(),
+                metadata.len(),
+                metadata.mtime(),
+                metadata.mtime_nsec(),
+                metadata.ctime(),
+                metadata.ctime_nsec(),
+            )
+        };
+        if snapshot(&opened_metadata) != snapshot(&opened_after)
+            || path_after.file_type().is_symlink()
+            || snapshot(&opened_after) != snapshot(&path_after)
+            || bytes.len() as u64 != opened_metadata.len()
+        {
+            return Err(format!("{} changed while it was read", path.display()));
+        }
+    }
+    String::from_utf8(bytes).map_err(|_| format!("{} must contain valid UTF-8", path.display()))
 }
 
 /// The gateway's `SYNVEDA_OIDC_ISSUERS`, in one place so the host process
@@ -1257,43 +1456,65 @@ async fn wait_for_health(
 /// configuration, so this defends a dumped table and a stolen archive
 /// rather than somebody who can read this machine.
 fn ensure_kek(profile: &Profile) -> Result<String, String> {
-    if let Ok(from_env) = std::env::var("SYNVEDA_KMS_KEY")
-        && !from_env.is_empty()
-    {
-        println!("    key plane: SYNVEDA_KMS_KEY from your environment");
-        return Ok(from_env);
-    }
-
     let state = profile.state_dir();
-    std::fs::create_dir_all(&state).map_err(|err| format!("create {}: {err}", state.display()))?;
+    ensure_private_directory(&state)?;
     let path = state.join("kms.key");
 
-    if let Ok(existing) = std::fs::read_to_string(&path) {
-        let key = existing.trim().to_owned();
-        if !key.is_empty() {
-            println!("    key plane: {}", path.display());
-            return Ok(key);
+    let configured = std::env::var("SYNVEDA_KMS_KEY")
+        .ok()
+        .filter(|value| !value.is_empty())
+        .map(|value| canonical_local_kek("SYNVEDA_KMS_KEY", &value).map(Zeroizing::new))
+        .transpose()?;
+    let persisted = match std::fs::symlink_metadata(&path) {
+        Ok(_) => {
+            let existing = Zeroizing::new(read_private_file(&path, 65)?);
+            Some(Zeroizing::new(canonical_local_kek(
+                "the local KMS key file",
+                existing.as_str(),
+            )?))
         }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => return Err(format!("inspect {}: {error}", path.display())),
+    };
+    match (configured, persisted) {
+        (Some(configured), Some(persisted)) => {
+            if configured.as_str() != persisted.as_str() {
+                return Err("SYNVEDA_KMS_KEY does not match the persisted local KMS key".to_owned());
+            }
+            println!("    key plane: SYNVEDA_KMS_KEY matches {}", path.display());
+            return Ok(configured.to_string());
+        }
+        (Some(configured), None) => {
+            write_private_file_atomically(&path, format!("{}\n", configured.as_str()).as_bytes())?;
+            println!(
+                "    key plane: persisted SYNVEDA_KMS_KEY at {}",
+                path.display()
+            );
+            println!("    ** back this file up. Every tenant key in this database is");
+            println!("       wrapped by it, and losing it is losing them. **");
+            return Ok(configured.to_string());
+        }
+        (None, Some(persisted)) => {
+            println!("    key plane: {}", path.display());
+            return Ok(persisted.to_string());
+        }
+        (None, None) => {}
     }
 
     let key = synveda_crypto::DataKey::generate()
         .map_err(|err| format!("mint a key-encryption key: {err}"))?;
     let hex = key.to_hex().to_string();
-    std::fs::write(&path, format!("{hex}\n"))
-        .map_err(|err| format!("write {}: {err}", path.display()))?;
-    // Written before the permissions are narrowed, so narrow them now and
-    // fail loudly if that cannot be done — a world-readable KEK is worse
-    // than no KEK, because it looks like one.
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
-            .map_err(|err| format!("restrict {} to 0600: {err}", path.display()))?;
-    }
+    write_private_file_atomically(&path, format!("{hex}\n").as_bytes())?;
     println!("    key plane: minted {}", path.display());
     println!("    ** back this file up. Every tenant key in this database is");
     println!("       wrapped by it, and losing it is losing them. **");
     Ok(hex)
+}
+
+fn canonical_local_kek(label: &str, value: &str) -> Result<String, String> {
+    let key = synveda_crypto::DataKey::from_hex(value)
+        .map_err(|_| format!("{label} must contain one 32-byte hexadecimal key"))?;
+    Ok(key.to_hex().to_string())
 }
 
 /// The selected bootstrap database and whether an operator supplied it.
@@ -1313,6 +1534,164 @@ pub(crate) fn database_url() -> Result<DatabaseUrlSetting, String> {
     )
 }
 
+/// Reads one sensitive CLI setting from `NAME` or `NAME_FILE` without ever
+/// putting its value in an error. This is the direct-binary half of the same
+/// mounted-secret contract used by gateway and worker configuration.
+pub(crate) fn sensitive_setting(name: &str) -> Result<Option<String>, String> {
+    let file_name = format!("{name}_FILE");
+    match (std::env::var_os(name), std::env::var_os(&file_name)) {
+        (Some(_), Some(_)) => Err(format!(
+            "{name} and {file_name} are mutually exclusive; configure exactly one"
+        )),
+        (Some(value), None) => value
+            .into_string()
+            .map(Some)
+            .map_err(|_| format!("{name} must be valid UTF-8")),
+        (None, Some(path)) => read_database_url_file(&file_name, Path::new(&path)).map(Some),
+        (None, None) => Ok(None),
+    }
+}
+
+/// Closed deployment database-role contract used by migration, preflight and
+/// every long-running product process.
+pub(crate) fn database_roles() -> Result<synveda_store::runtime_role::DatabaseRoles, String> {
+    database_roles_with_json().map(|(roles, _)| roles)
+}
+
+fn database_roles_with_json() -> Result<(synveda_store::runtime_role::DatabaseRoles, String), String>
+{
+    let direct = std::env::var_os("SYNVEDA_DATABASE_ROLES");
+    let file = std::env::var_os("SYNVEDA_DATABASE_ROLES_FILE");
+    let value = match (direct, file) {
+        (Some(_), Some(_)) => {
+            return Err(
+                "SYNVEDA_DATABASE_ROLES and SYNVEDA_DATABASE_ROLES_FILE are mutually exclusive"
+                    .to_owned(),
+            );
+        }
+        (Some(value), None) => value
+            .into_string()
+            .map_err(|_| "SYNVEDA_DATABASE_ROLES must be valid UTF-8".to_owned())?,
+        (None, Some(path)) => {
+            read_database_url_file("SYNVEDA_DATABASE_ROLES_FILE", Path::new(&path))?
+        }
+        (None, None) => {
+            return Err(
+                "SYNVEDA_DATABASE_ROLES or SYNVEDA_DATABASE_ROLES_FILE is required".to_owned(),
+            );
+        }
+    };
+    if value.len() > 4_096 {
+        return Err("SYNVEDA_DATABASE_ROLES exceeds the 4096-byte startup bound".to_owned());
+    }
+    let roles = synveda_store::runtime_role::DatabaseRoles::parse_json(&value)
+        .map_err(|error| error.to_string())?;
+    let compact = serde_json::from_str::<Value>(&value)
+        .map_err(|_| "SYNVEDA_DATABASE_ROLES is not valid JSON".to_owned())?
+        .to_string();
+    Ok((roles, compact))
+}
+
+fn init_database_plan() -> Result<InitDatabasePlan, String> {
+    let migrator = database_url()?;
+    if !migrator.explicitly_configured {
+        return Err(
+            "synveda init requires explicit DATABASE_URL or DATABASE_URL_FILE for the pre-provisioned migrator; database authority is never inferred or provisioned by init"
+                .to_owned(),
+        );
+    }
+    let gateway = resolve_required_database_url(
+        "SYNVEDA_GATEWAY_DATABASE_URL",
+        "SYNVEDA_GATEWAY_DATABASE_URL_FILE",
+        std::env::var_os("SYNVEDA_GATEWAY_DATABASE_URL"),
+        std::env::var_os("SYNVEDA_GATEWAY_DATABASE_URL_FILE"),
+    )?;
+    let worker = resolve_required_database_url(
+        "SYNVEDA_WORKER_DATABASE_URL",
+        "SYNVEDA_WORKER_DATABASE_URL_FILE",
+        std::env::var_os("SYNVEDA_WORKER_DATABASE_URL"),
+        std::env::var_os("SYNVEDA_WORKER_DATABASE_URL_FILE"),
+    )?;
+    let (roles, roles_json) = database_roles_with_json()?;
+    validate_init_database_plan(roles, roles_json, migrator.value, gateway, worker)
+}
+
+fn resolve_required_database_url(
+    direct_setting: &str,
+    file_setting: &str,
+    direct: Option<OsString>,
+    file: Option<OsString>,
+) -> Result<String, String> {
+    match (direct, file) {
+        (Some(_), Some(_)) => Err(format!(
+            "{direct_setting} and {file_setting} are mutually exclusive; configure exactly one"
+        )),
+        (Some(value), None) => value
+            .into_string()
+            .map_err(|_| format!("{direct_setting} must be valid UTF-8")),
+        (None, Some(path)) => read_database_url_file(file_setting, Path::new(&path)),
+        (None, None) => Err(format!(
+            "{direct_setting} or {file_setting} is required for synveda init"
+        )),
+    }
+}
+
+fn validate_init_database_plan(
+    roles: synveda_store::runtime_role::DatabaseRoles,
+    roles_json: String,
+    migrator_url: String,
+    gateway_url: String,
+    worker_url: String,
+) -> Result<InitDatabasePlan, String> {
+    let migrator = synveda_store::database_url::parse("DATABASE_URL", &migrator_url)
+        .map_err(|error| error.to_string())?;
+    let gateway = synveda_store::database_url::parse("SYNVEDA_GATEWAY_DATABASE_URL", &gateway_url)
+        .map_err(|error| error.to_string())?;
+    let worker = synveda_store::database_url::parse("SYNVEDA_WORKER_DATABASE_URL", &worker_url)
+        .map_err(|error| error.to_string())?;
+    if migrator.get_username() != roles.migrator()
+        || gateway.get_username() != roles.gateway()
+        || worker.get_username() != roles.worker()
+    {
+        return Err(
+            "the database role contract must exactly match the migrator, gateway and worker URL principals"
+                .to_owned(),
+        );
+    }
+    let one_target = |candidate: &sqlx::postgres::PgConnectOptions| {
+        candidate.get_host() == migrator.get_host()
+            && candidate.get_port() == migrator.get_port()
+            && candidate.get_socket() == migrator.get_socket()
+            && candidate.get_database() == migrator.get_database()
+    };
+    if !one_target(&gateway) || !one_target(&worker) {
+        return Err(
+            "DATABASE_URL and the gateway and worker database URLs must declare one exact PostgreSQL host, port, socket and database"
+                .to_owned(),
+        );
+    }
+    let target_database = migrator.get_database().ok_or_else(|| {
+        "DATABASE_URL must name the PostgreSQL database managed by synveda init".to_owned()
+    })?;
+    if roles
+        .forbidden_databases()
+        .iter()
+        .any(|forbidden| forbidden == target_database)
+    {
+        return Err(
+            "the init database target cannot be one of the configured isolated peer databases"
+                .to_owned(),
+        );
+    }
+    Ok(InitDatabasePlan {
+        roles,
+        roles_json,
+        migrator_url: Zeroizing::new(migrator_url),
+        gateway_url: Zeroizing::new(gateway_url),
+        worker_url: Zeroizing::new(worker_url),
+    })
+}
+
 fn resolve_database_url(
     direct: Option<OsString>,
     file: Option<OsString>,
@@ -1330,9 +1709,11 @@ fn resolve_database_url(
             })
             .map_err(|_| "DATABASE_URL must be valid UTF-8".to_owned()),
         (None, Some(path)) => {
-            read_database_url_file(Path::new(&path)).map(|value| DatabaseUrlSetting {
-                value,
-                explicitly_configured: true,
+            read_database_url_file("DATABASE_URL_FILE", Path::new(&path)).map(|value| {
+                DatabaseUrlSetting {
+                    value,
+                    explicitly_configured: true,
+                }
             })
         }
         (None, None) => Ok(DatabaseUrlSetting {
@@ -1342,45 +1723,59 @@ fn resolve_database_url(
     }
 }
 
-fn read_database_url_file(path: &Path) -> Result<String, String> {
+pub(crate) fn read_database_url_file(setting: &str, path: &Path) -> Result<String, String> {
     if path.as_os_str().is_empty() {
-        return Err("DATABASE_URL_FILE must name a file".to_owned());
+        return Err(format!("{setting} must name a file"));
     }
-    let file =
-        std::fs::File::open(path).map_err(|_| "DATABASE_URL_FILE cannot be read".to_owned())?;
+    let file = open_nonblocking_read(path).map_err(|_| format!("{setting} cannot be read"))?;
     let metadata = file
         .metadata()
-        .map_err(|_| "DATABASE_URL_FILE cannot be read".to_owned())?;
+        .map_err(|_| format!("{setting} cannot be read"))?;
     if !metadata.is_file() {
-        return Err("DATABASE_URL_FILE must name a regular file".to_owned());
+        return Err(format!("{setting} must name a regular file"));
     }
     if metadata.len() > MAX_DATABASE_URL_FILE_BYTES {
         return Err(format!(
-            "DATABASE_URL_FILE exceeds the {MAX_DATABASE_URL_FILE_BYTES} byte startup bound"
+            "{setting} exceeds the {MAX_DATABASE_URL_FILE_BYTES} byte startup bound"
         ));
     }
     let capacity = usize::try_from(metadata.len().min(MAX_DATABASE_URL_FILE_BYTES + 1))
-        .map_err(|_| "DATABASE_URL_FILE exceeds the startup bound".to_owned())?;
+        .map_err(|_| format!("{setting} exceeds the startup bound"))?;
     let mut bytes = Vec::with_capacity(capacity);
     file.take(MAX_DATABASE_URL_FILE_BYTES + 1)
         .read_to_end(&mut bytes)
-        .map_err(|_| "DATABASE_URL_FILE cannot be read".to_owned())?;
+        .map_err(|_| format!("{setting} cannot be read"))?;
     if bytes.len() as u64 > MAX_DATABASE_URL_FILE_BYTES {
         return Err(format!(
-            "DATABASE_URL_FILE exceeds the {MAX_DATABASE_URL_FILE_BYTES} byte startup bound"
+            "{setting} exceeds the {MAX_DATABASE_URL_FILE_BYTES} byte startup bound"
         ));
     }
-    let mut value = String::from_utf8(bytes)
-        .map_err(|_| "DATABASE_URL_FILE must contain valid UTF-8".to_owned())?;
+    let mut value =
+        String::from_utf8(bytes).map_err(|_| format!("{setting} must contain valid UTF-8"))?;
     if let Some(stripped) = value.strip_suffix("\r\n") {
         value.truncate(stripped.len());
     } else if value.ends_with('\n') {
         value.pop();
     }
     if value.contains('\0') {
-        return Err("DATABASE_URL_FILE must not contain NUL bytes".to_owned());
+        return Err(format!("{setting} must not contain NUL bytes"));
     }
     Ok(value)
+}
+
+fn open_nonblocking_read(path: &Path) -> std::io::Result<std::fs::File> {
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        // Open first, then classify the descriptor. O_NONBLOCK makes FIFOs
+        // and device-like paths observable without waiting for a writer,
+        // while following Kubernetes' projected-secret symlink to its regular
+        // immutable target remains supported.
+        options.custom_flags(libc::O_NONBLOCK | libc::O_CLOEXEC);
+    }
+    options.open(path)
 }
 
 /// A credential-safe rendering for operator errors. `DATABASE_URL` is an
@@ -1407,91 +1802,13 @@ fn secret_fingerprint(value: &str) -> String {
     format!("{:x}", Sha256::digest(value.as_bytes()))
 }
 
-/// Resolves distinct gateway and worker runtime DSNs. Operators override both
-/// together; a half-overridden pair is refused because it silently mixes an
-/// external credential with the local development login.
-fn runtime_database_urls(admin_configured: bool) -> Result<(String, String, bool), String> {
-    let gateway = std::env::var("SYNVEDA_GATEWAY_DATABASE_URL")
-        .ok()
-        .filter(|value| !value.is_empty());
-    let worker = std::env::var("SYNVEDA_WORKER_DATABASE_URL")
-        .ok()
-        .filter(|value| !value.is_empty());
-    runtime_database_urls_from(gateway, worker, admin_configured)
-}
-
-/// Pure half of [`runtime_database_urls`]. An explicit bootstrap target is an
-/// external/operator boundary, even when it happens to resolve to localhost;
-/// fixed development credentials may only be converged for the bundled
-/// default whose address and lifecycle this binary owns.
-fn runtime_database_urls_from(
-    gateway: Option<String>,
-    worker: Option<String>,
-    admin_configured: bool,
-) -> Result<(String, String, bool), String> {
-    match (gateway, worker) {
-        (Some(gateway), Some(worker)) => return Ok((gateway, worker, true)),
-        (Some(_), None) | (None, Some(_)) => {
-            return Err(
-                "SYNVEDA_GATEWAY_DATABASE_URL and SYNVEDA_WORKER_DATABASE_URL must be configured together"
-                    .to_owned(),
-            );
-        }
-        (None, None) => {}
-    }
-    if admin_configured {
-        return Err(
-            "an explicit DATABASE_URL requires explicit SYNVEDA_GATEWAY_DATABASE_URL and \
-             SYNVEDA_WORKER_DATABASE_URL; fixed local development credentials are only \
-             provisioned for the bundled default database"
-                .to_owned(),
-        );
-    }
-    Ok((
-        COMPOSE_GATEWAY_DATABASE_URL.to_owned(),
-        COMPOSE_WORKER_DATABASE_URL.to_owned(),
-        false,
-    ))
-}
-
-/// Database principal named by a runtime DSN. Deployment validation happens
-/// through the admin connection before the credential is ever given to the
-/// gateway. Percent-encoded role names are refused because PostgreSQL and URL
-/// decoding must not disagree about which cluster-global role was checked.
-fn runtime_database_role(setting: &str, runtime_url: &str) -> Result<String, String> {
-    synveda_store::database_url::parse(setting, runtime_url)
-        .map_err(|_| format!("{setting} is not a valid PostgreSQL URL"))?;
-    let parsed = url::Url::parse(runtime_url)
-        .map_err(|_| format!("{setting} is not a valid PostgreSQL URL"))?;
-    let role = parsed.username();
-    if role.is_empty() || role.contains('%') {
-        return Err(format!(
-            "{setting} must name an unescaped PostgreSQL login role"
-        ));
-    }
-    Ok(role.to_owned())
-}
-
-fn validate_bootstrap_database_url(database_url: &str) -> Result<(), String> {
-    synveda_store::database_url::parse("DATABASE_URL", database_url)
-        .map(|_| ())
-        .map_err(|error| error.to_string())
-}
-
-fn distinct_runtime_database_roles(
-    gateway_database_url: &str,
-    worker_database_url: &str,
-) -> Result<(String, String), String> {
-    let gateway_role = runtime_database_role("SYNVEDA_GATEWAY_DATABASE_URL", gateway_database_url)?;
-    let worker_role = runtime_database_role("SYNVEDA_WORKER_DATABASE_URL", worker_database_url)?;
-    if gateway_role == worker_role {
-        return Err("gateway and worker database URLs must name distinct login roles".to_owned());
-    }
-    Ok((gateway_role, worker_role))
-}
-
-async fn verify_runtime_role(pool: &sqlx::PgPool, role: &str) -> Result<(), String> {
-    synveda_store::runtime_role::verify_capability_role(pool)
+#[cfg(test)]
+async fn verify_runtime_role(
+    pool: &sqlx::PgPool,
+    role: &str,
+    database_roles: &synveda_store::runtime_role::DatabaseRoles,
+) -> Result<(), String> {
+    synveda_store::runtime_role::verify_capability_role(pool, database_roles)
         .await
         .map_err(|error| format!("verify synveda_app capability role: {error}"))?;
     let facts = sqlx::query!(
@@ -1538,6 +1855,9 @@ async fn verify_runtime_role(pool: &sqlx::PgPool, role: &str) -> Result<(), Stri
                     union all
                     select 1 from pg_catalog.pg_proc as routines
                      where routines.proowner = roles.oid
+                    union all
+                    select 1 from pg_catalog.pg_type as data_type
+                     where data_type.typowner = roles.oid
                   ) as "application_object_owner!",
                   exists (
                     select 1
@@ -1546,7 +1866,70 @@ async fn verify_runtime_role(pool: &sqlx::PgPool, role: &str) -> Result<(), Stri
                         on granted_roles.oid = memberships.roleid
                      where memberships.member = roles.oid
                        and granted_roles.rolname <> 'synveda_app'
-                  ) as "unexpected_membership!"
+                  ) as "unexpected_membership!",
+                  exists (
+                    select 1 from pg_catalog.pg_auth_members as memberships
+                     where memberships.roleid = roles.oid
+                       and (
+                         not memberships.admin_option
+                         or memberships.inherit_option
+                         or memberships.set_option
+                       )
+                  ) as "unsafe_inbound_membership!",
+                  exists (
+                    select 1
+                      from pg_catalog.pg_database as database,
+                           lateral pg_catalog.aclexplode(
+                             coalesce(
+                               database.datacl,
+                               pg_catalog.acldefault('d', database.datdba)
+                             )
+                           ) as acl
+                     where database.datname = current_database()
+                       and acl.grantee = roles.oid
+                       and acl.privilege_type = 'CONNECT'
+                       and not acl.is_grantable
+                  ) as "direct_connect!",
+                  exists (
+                    select 1
+                      from pg_catalog.pg_database as database,
+                           lateral pg_catalog.aclexplode(
+                             coalesce(
+                               database.datacl,
+                               pg_catalog.acldefault('d', database.datdba)
+                             )
+                           ) as acl
+                     where database.datname = current_database()
+                       and acl.grantee = roles.oid
+                       and (
+                         acl.privilege_type <> 'CONNECT'
+                         or acl.is_grantable
+                       )
+                  ) as "unsafe_direct_database_acl!",
+                  exists (
+                    select 1
+                      from pg_catalog.pg_database as database,
+                           lateral pg_catalog.aclexplode(
+                             coalesce(
+                               database.datacl,
+                               pg_catalog.acldefault('d', database.datdba)
+                             )
+                           ) as acl
+                     where database.datname = current_database()
+                       and acl.grantee = 0
+                  ) as "public_database_acl!",
+                  exists (
+                    select 1
+                      from pg_catalog.pg_database as database,
+                           lateral pg_catalog.aclexplode(
+                             coalesce(
+                               database.datacl,
+                               pg_catalog.acldefault('d', database.datdba)
+                             )
+                           ) as acl
+                     where database.datname <> current_database()
+                       and acl.grantee = roles.oid
+                  ) as "other_database_acl!"
              from pg_catalog.pg_roles as roles
             where rolname = $1"#,
         role,
@@ -1569,9 +1952,14 @@ async fn verify_runtime_role(pool: &sqlx::PgPool, role: &str) -> Result<(), Stri
         || facts.schema_owner
         || facts.application_object_owner
         || facts.unexpected_membership
+        || facts.unsafe_inbound_membership
+        || !facts.direct_connect
+        || facts.unsafe_direct_database_acl
+        || facts.public_database_acl
+        || facts.other_database_acl
     {
         return Err(format!(
-            "runtime database login {role} is not an inheriting, non-elevated synveda_app login that owns no database and no schema, relation or routine in the selected database"
+            "runtime database login {role} is not an exact inheriting, non-elevated synveda_app login with only direct CONNECT on the selected database, no PUBLIC or other-database ACL, no privilege-bearing inbound membership, and no database, schema, relation, routine or type ownership"
         ));
     }
     Ok(())
@@ -1585,34 +1973,39 @@ async fn verify_runtime_database_url(
     setting: &str,
     runtime_url: &str,
     role: &str,
+    database_roles: &synveda_store::runtime_role::DatabaseRoles,
 ) -> Result<synveda_store::runtime_role::DatabaseIdentity, String> {
     let connect_options = synveda_store::database_url::parse(setting, runtime_url)
         .map_err(|_| format!("{setting} is not a valid PostgreSQL URL"))?;
-    let runtime = sqlx::postgres::PgPoolOptions::new()
-        .max_connections(1)
-        .acquire_timeout(Duration::from_secs(15))
-        .connect_with(connect_options)
-        .await
-        .map_err(|_| {
-            format!(
-                "connect through {setting} ({}) failed",
-                redacted_database_url(runtime_url)
-            )
-        })?;
-    let result = async {
-        synveda_store::epoch::verify(&runtime)
+    tokio::time::timeout(Duration::from_secs(15), async move {
+        let runtime = sqlx::postgres::PgPoolOptions::new()
+            .max_connections(1)
+            .acquire_timeout(Duration::from_secs(15))
+            .connect_with(connect_options)
             .await
-            .map_err(|error| format!("{setting} schema check failed: {error}"))?;
-        synveda_store::runtime_role::verify(&runtime, role)
-            .await
-            .map_err(|error| format!("{setting} runtime-role check failed: {error}"))?;
-        synveda_store::runtime_role::database_identity(&runtime)
-            .await
-            .map_err(|error| format!("{setting} database-target check failed: {error}"))
-    }
-    .await;
-    runtime.close().await;
-    result
+            .map_err(|_| {
+                format!(
+                    "connect through {setting} ({}) failed",
+                    redacted_database_url(runtime_url)
+                )
+            })?;
+        let result = async {
+            synveda_store::epoch::verify(&runtime)
+                .await
+                .map_err(|error| format!("{setting} schema check failed: {error}"))?;
+            synveda_store::runtime_role::verify(&runtime, role, database_roles)
+                .await
+                .map_err(|error| format!("{setting} runtime-role check failed: {error}"))?;
+            synveda_store::runtime_role::database_identity(&runtime)
+                .await
+                .map_err(|error| format!("{setting} database-target check failed: {error}"))
+        }
+        .await;
+        runtime.close().await;
+        result
+    })
+    .await
+    .map_err(|_| format!("{setting} verification exceeded the 15-second startup bound"))?
 }
 
 fn require_one_database_target(
@@ -1626,75 +2019,6 @@ fn require_one_database_target(
              and database"
             .to_owned());
     }
-    Ok(())
-}
-
-/// Provision the local Compose login after the migrations have established
-/// the NOLOGIN capability role. This is deployment bootstrap, not schema or
-/// domain data: Helm performs the equivalent grant to CloudNativePG's generated
-/// login and neither path hands its admin credential to the gateway.
-async fn provision_compose_runtime_roles(pool: &sqlx::PgPool) -> Result<(), String> {
-    let mut tx = pool
-        .begin()
-        .await
-        .map_err(|error| format!("begin runtime-role provisioning: {error}"))?;
-    // Roles are cluster-global while `make db-test` databases are not. Keep
-    // two concurrent initialisers from both observing the role as absent.
-    sqlx::query!("select pg_advisory_xact_lock(hashtext('synveda.deployment.runtime-role'))")
-        .execute(&mut *tx)
-        .await
-        .map_err(|error| format!("lock runtime-role provisioning: {error}"))?;
-    sqlx::query!(
-        r#"do $synveda$
-           begin
-             if not exists (
-               select 1 from pg_catalog.pg_roles where rolname = 'synveda_gateway'
-             ) then
-               create role synveda_gateway login password 'synveda-dev';
-             end if;
-             if not exists (
-               select 1 from pg_catalog.pg_roles where rolname = 'synveda_worker'
-             ) then
-               create role synveda_worker login password 'synveda-dev';
-             end if;
-           end
-           $synveda$"#
-    )
-    .execute(&mut *tx)
-    .await
-    .map_err(|error| format!("provision the runtime database logins: {error}"))?;
-    sqlx::query!(
-        r#"alter role synveda_gateway
-              with login inherit nosuperuser nocreatedb nocreaterole
-                   noreplication nobypassrls connection limit -1
-                   password 'synveda-dev'"#
-    )
-    .execute(&mut *tx)
-    .await
-    .map_err(|error| format!("converge the gateway database login: {error}"))?;
-    sqlx::query!(
-        r#"alter role synveda_worker
-              with login inherit nosuperuser nocreatedb nocreaterole
-                   noreplication nobypassrls connection limit -1
-                   password 'synveda-dev'"#
-    )
-    .execute(&mut *tx)
-    .await
-    .map_err(|error| format!("converge the worker database login: {error}"))?;
-    sqlx::query!("grant synveda_app to synveda_gateway with admin false, inherit true, set true")
-        .execute(&mut *tx)
-        .await
-        .map_err(|error| format!("grant the gateway database capability role: {error}"))?;
-    sqlx::query!("grant synveda_app to synveda_worker with admin false, inherit true, set true")
-        .execute(&mut *tx)
-        .await
-        .map_err(|error| format!("grant the worker database capability role: {error}"))?;
-
-    tx.commit()
-        .await
-        .map_err(|error| format!("commit runtime-role provisioning: {error}"))?;
-    verify_runtime_role(pool, "synveda_gateway").await?;
-    verify_runtime_role(pool, "synveda_worker").await?;
     Ok(())
 }
 
@@ -1959,6 +2283,95 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
         std::fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    fn init_test_roles(forbidden_databases: &[&str]) -> synveda_store::runtime_role::DatabaseRoles {
+        synveda_store::runtime_role::DatabaseRoles::new(
+            "migrator".to_owned(),
+            "gateway".to_owned(),
+            "worker".to_owned(),
+            vec!["administrator".to_owned()],
+            Vec::new(),
+            forbidden_databases
+                .iter()
+                .map(|database| (*database).to_owned())
+                .collect(),
+            Vec::new(),
+        )
+        .expect("init test roles")
+    }
+
+    fn private_test_database_url(setting: &str) -> Option<String> {
+        let path = std::env::var_os(setting)?;
+        Some(
+            read_database_url_file(setting, Path::new(&path))
+                .expect("read isolated test database URL"),
+        )
+    }
+
+    async fn tenant_admission_footprint(pool: &sqlx::PgPool, tenant_id: TenantId) -> [i64; 4] {
+        let mut tx = synveda_store::rls::begin_tenant_tx(pool, tenant_id)
+            .await
+            .expect("open tenant-scoped footprint transaction");
+        let row = sqlx::query!(
+            r#"
+            select (select count(*) from public.tenants
+                     where id = $1) as "tenants!",
+                   (select count(*) from public.scopes
+                     where tenant_id = $1) as "scopes!",
+                   (select count(*) from public.scope_grants
+                     where tenant_id = $1) as "grants!",
+                   (select count(*) from public.audit_log
+                     where tenant_id = $1) as "audits!"
+            "#,
+            tenant_id.as_uuid(),
+        )
+        .fetch_one(&mut *tx)
+        .await
+        .expect("measure tenant-admission footprint");
+        tx.rollback()
+            .await
+            .expect("roll back footprint transaction");
+        [row.tenants, row.scopes, row.grants, row.audits]
+    }
+
+    struct TestSchemaEpoch {
+        epoch: i32,
+        updated_at: chrono::DateTime<chrono::Utc>,
+    }
+
+    async fn test_schema_epoch(pool: &sqlx::PgPool) -> TestSchemaEpoch {
+        let row = sqlx::query!(
+            r#"
+            select epoch as "epoch!",
+                   updated_at as "updated_at!"
+              from public.schema_metadata
+             where id
+            "#,
+        )
+        .fetch_one(pool)
+        .await
+        .expect("snapshot test schema epoch");
+        TestSchemaEpoch {
+            epoch: row.epoch,
+            updated_at: row.updated_at,
+        }
+    }
+
+    async fn set_test_schema_epoch(pool: &sqlx::PgPool, state: &TestSchemaEpoch) {
+        sqlx::query!(
+            r#"
+            update public.schema_metadata
+               set epoch = $1,
+                   updated_at = $2
+             where id
+            "#,
+            state.epoch,
+            state.updated_at,
+        )
+        .execute(pool)
+        .await
+        .expect("set test schema epoch");
     }
 
     /// A gateway that died on startup names the pid *and* the reason.
@@ -2248,6 +2661,65 @@ mod tests {
         std::fs::remove_dir_all(&home).ok();
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn a_local_key_file_is_private_bounded_and_key_shaped() {
+        use std::os::unix::fs::symlink;
+
+        let home = scratch("kek-refusals");
+        let profile = Profile::Bundle {
+            home: home.clone(),
+            version: env!("CARGO_PKG_VERSION").to_owned(),
+        };
+        let state = home.join("data");
+        ensure_private_directory(&state).expect("private state directory");
+        let path = state.join("kms.key");
+
+        write_private_file_atomically(&path, b"not-a-key\n").expect("malformed key fixture");
+        let malformed = ensure_kek(&profile).expect_err("malformed existing key must be refused");
+        assert!(malformed.contains("32-byte hexadecimal key"), "{malformed}");
+        assert!(!malformed.contains("not-a-key"), "{malformed}");
+
+        write_private_file_atomically(&path, &[b'a'; 66]).expect("oversized key fixture");
+        let oversized = ensure_kek(&profile).expect_err("oversized existing key must be refused");
+        assert!(oversized.contains("private-file bound"), "{oversized}");
+
+        std::fs::remove_file(&path).expect("remove owned fixture");
+        let target = state.join("attacker-key");
+        write_private_file_atomically(&target, format!("{}\n", "ab".repeat(32)).as_bytes())
+            .expect("symlink target fixture");
+        symlink(&target, &path).expect("key symlink fixture");
+        let linked = ensure_kek(&profile).expect_err("linked existing key must be refused");
+        assert!(linked.contains("regular non-symlink"), "{linked}");
+
+        std::fs::remove_dir_all(&home).ok();
+    }
+
+    #[test]
+    fn private_file_replacement_is_complete_and_idempotent() {
+        let dir = scratch("private-file-replacement");
+        let path = dir.join("secret");
+        write_private_file_atomically(&path, b"first\n").expect("first private write");
+        write_private_file_atomically(&path, b"second\n").expect("replacement private write");
+        assert_eq!(std::fs::read(&path).expect("read replacement"), b"second\n");
+        let temporary_prefix = format!(
+            ".{}.{}.",
+            path.file_name().and_then(|name| name.to_str()).unwrap(),
+            std::process::id()
+        );
+        assert!(
+            std::fs::read_dir(&dir)
+                .expect("list private-write fixture")
+                .filter_map(Result::ok)
+                .all(|entry| !entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with(&temporary_prefix)),
+            "atomic replacement retained a temporary file"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
     #[test]
     fn the_env_file_carries_the_key_the_container_path_needs() {
         let dir = scratch("kek-env");
@@ -2265,6 +2737,7 @@ mod tests {
             TenantId::new(),
             RAUTHY_ISSUER,
             &kek,
+            None,
         )
         .unwrap();
         let written = std::fs::read_to_string(&path).unwrap();
@@ -2278,6 +2751,59 @@ mod tests {
             let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
             assert_eq!(mode, 0o600, "this file now holds the KEK");
         }
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn the_env_file_uses_the_validated_runtime_authorities() {
+        const ROLES_JSON: &str = r#"{"migrator":"migrator","gateway":"gateway","worker":"worker","administrators":["administrator"],"administrative_memberships":[],"forbidden_databases":["identity"],"isolated_peer_roles":[]}"#;
+        let dir = scratch("database-authorities-env");
+        let path = dir.join(".env");
+        let database = validate_init_database_plan(
+            init_test_roles(&["identity"]),
+            ROLES_JSON.to_owned(),
+            "postgres://migrator:migrator-secret@db.example.test/synveda".to_owned(),
+            "postgres://gateway:gateway-secret@db.example.test/synveda".to_owned(),
+            "postgres://worker:worker-secret@db.example.test/synveda".to_owned(),
+        )
+        .expect("one validated authority plan");
+        write_env_file(
+            &path,
+            &Plan {
+                slug: "acme".to_owned(),
+                name: "ACME".to_owned(),
+                embedder: "deterministic".to_owned(),
+                issuer: None,
+                dry_run: false,
+            },
+            TenantId::new(),
+            RAUTHY_ISSUER,
+            &"00".repeat(32),
+            Some(&database),
+        )
+        .expect("write resolved runtime authorities");
+
+        let written = std::fs::read_to_string(&path).expect("read generated env file");
+        assert!(
+            written.contains(
+                "SYNVEDA_GATEWAY_DATABASE_URL=postgres://gateway:gateway-secret@db.example.test/synveda\n"
+            ),
+            "gateway authority was not preserved"
+        );
+        assert!(
+            written.contains(
+                "SYNVEDA_WORKER_DATABASE_URL=postgres://worker:worker-secret@db.example.test/synveda\n"
+            ),
+            "worker authority was not preserved"
+        );
+        assert!(
+            written.contains(&format!("SYNVEDA_DATABASE_ROLES={ROLES_JSON}\n")),
+            "role contract was not preserved"
+        );
+        assert!(
+            !written.contains("migrator-secret"),
+            "the migrator credential must never enter runtime configuration"
+        );
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -2348,6 +2874,7 @@ mod tests {
             tenant,
             RAUTHY_ISSUER,
             "00".repeat(32).as_str(),
+            None,
         )
         .unwrap();
         let written = std::fs::read_to_string(&path).unwrap();
@@ -2393,6 +2920,7 @@ mod tests {
             TenantId::new(),
             RAUTHY_ISSUER,
             "00".repeat(32).as_str(),
+            None,
         )
         .unwrap();
         let written = std::fs::read_to_string(&path).unwrap();
@@ -2525,95 +3053,187 @@ mod tests {
         assert_eq!(error, "DATABASE_URL must be valid UTF-8");
     }
 
+    #[cfg(unix)]
     #[test]
-    fn dry_run_and_execution_share_bootstrap_database_url_validation() {
-        validate_bootstrap_database_url("postgres://admin:secret@db.example.test/synveda")
-            .expect("explicit PostgreSQL database URL");
+    fn database_url_file_refuses_a_fifo_without_waiting_for_a_writer() {
+        let dir = scratch("database-url-fifo");
+        let path = dir.join("database-url");
+        let status = std::process::Command::new("mkfifo")
+            .arg(&path)
+            .status()
+            .expect("create FIFO fixture");
+        assert!(status.success(), "mkfifo failed");
 
-        const SENTINEL: &str = "SYNVEDA_DRY_RUN_DATABASE_SECRET";
-        let invalid_urls = [
-            format!("https://admin:{SENTINEL}@db.example.test/synveda"),
-            format!("postgres://admin:{SENTINEL}@db.example.test"),
-            format!("postgres://admin@db.example.test/synveda?token={SENTINEL}"),
-        ];
-        for invalid in &invalid_urls {
-            let error = validate_bootstrap_database_url(invalid)
-                .expect_err("dry-run must refuse the same invalid URL as execution");
+        let (sender, receiver) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = sender.send(read_database_url_file("DATABASE_URL_FILE", &path));
+        });
+        let result = receiver
+            .recv_timeout(Duration::from_secs(2))
+            .expect("FIFO path blocked the configuration boundary");
+        let error = result.expect_err("FIFO must not be accepted as a setting file");
+        assert!(error.contains("regular file"), "{error}");
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn database_url_file_accepts_a_projected_secret_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let dir = scratch("database-url-projected-secret");
+        let target = dir.join("..data-url");
+        let path = dir.join("database-url");
+        std::fs::write(&target, b"postgres://app:secret@db.example.test/synveda\n")
+            .expect("write projected-secret target");
+        symlink(&target, &path).expect("link projected-secret path");
+        assert_eq!(
+            read_database_url_file("DATABASE_URL_FILE", &path).expect("read projected secret"),
+            "postgres://app:secret@db.example.test/synveda"
+        );
+        std::fs::remove_dir_all(dir).ok();
+    }
+
+    #[test]
+    fn init_accepts_only_one_explicit_database_authority_plan() {
+        const ROLES_JSON: &str = r#"{"migrator":"migrator","gateway":"gateway","worker":"worker","administrators":["administrator"],"administrative_memberships":[],"forbidden_databases":["identity"],"isolated_peer_roles":[]}"#;
+        let accepted = validate_init_database_plan(
+            init_test_roles(&["identity"]),
+            ROLES_JSON.to_owned(),
+            "postgres://migrator:secret@db.example.test:5432/synveda".to_owned(),
+            "postgres://gateway:secret@db.example.test:5432/synveda".to_owned(),
+            "postgres://worker:secret@db.example.test:5432/synveda".to_owned(),
+        )
+        .expect("one explicit provider-neutral database plan");
+        assert_eq!(accepted.roles.migrator(), "migrator");
+        assert_eq!(accepted.roles.gateway(), "gateway");
+        assert_eq!(accepted.roles.worker(), "worker");
+
+        const SENTINEL: &str = "SYNVEDA_INIT_PLAN_SECRET";
+        for (migrator, gateway, worker) in [
+            (
+                format!("postgres://wrong:{SENTINEL}@db.example.test/synveda"),
+                format!("postgres://gateway:{SENTINEL}@db.example.test/synveda"),
+                format!("postgres://worker:{SENTINEL}@db.example.test/synveda"),
+            ),
+            (
+                format!("postgres://migrator:{SENTINEL}@db.example.test/synveda"),
+                format!("postgres://wrong:{SENTINEL}@db.example.test/synveda"),
+                format!("postgres://worker:{SENTINEL}@db.example.test/synveda"),
+            ),
+            (
+                format!("postgres://migrator:{SENTINEL}@db.example.test/synveda"),
+                format!("postgres://gateway:{SENTINEL}@db.example.test/synveda"),
+                format!("postgres://wrong:{SENTINEL}@db.example.test/synveda"),
+            ),
+        ] {
+            let error = validate_init_database_plan(
+                init_test_roles(&["identity"]),
+                ROLES_JSON.to_owned(),
+                migrator,
+                gateway,
+                worker,
+            )
+            .err()
+            .expect("every principal mismatch is refused");
+            assert!(error.contains("role contract"), "{error}");
             assert!(!error.contains(SENTINEL), "{error}");
-            assert!(error.contains("DATABASE_URL"), "{error}");
+        }
+
+        for (gateway, worker) in [
+            (
+                "postgres://gateway:secret@other.example.test/synveda",
+                "postgres://worker:secret@db.example.test/synveda",
+            ),
+            (
+                "postgres://gateway:secret@db.example.test:5440/synveda",
+                "postgres://worker:secret@db.example.test/synveda",
+            ),
+            (
+                "postgres://gateway:secret@db.example.test/other",
+                "postgres://worker:secret@db.example.test/synveda",
+            ),
+        ] {
+            let error = validate_init_database_plan(
+                init_test_roles(&["identity"]),
+                ROLES_JSON.to_owned(),
+                "postgres://migrator:secret@db.example.test/synveda".to_owned(),
+                gateway.to_owned(),
+                worker.to_owned(),
+            )
+            .err()
+            .expect("split database endpoints are refused");
+            assert!(error.contains("one exact PostgreSQL"), "{error}");
+        }
+
+        let socket_error = validate_init_database_plan(
+            init_test_roles(&["identity"]),
+            ROLES_JSON.to_owned(),
+            "postgres:///synveda?host=%2Fvar%2Frun%2Fpostgresql&user=migrator&password=secret"
+                .to_owned(),
+            "postgres://gateway:secret@localhost/synveda".to_owned(),
+            "postgres:///synveda?host=%2Fvar%2Frun%2Fpostgresql&user=worker&password=secret"
+                .to_owned(),
+        )
+        .err()
+        .expect("a socket/TCP split is refused");
+        assert!(socket_error.contains("socket"), "{socket_error}");
+
+        let forbidden = validate_init_database_plan(
+            init_test_roles(&["identity"]),
+            ROLES_JSON.to_owned(),
+            "postgres://migrator:secret@db.example.test?dbname=identity".to_owned(),
+            "postgres://gateway:secret@db.example.test?dbname=identity".to_owned(),
+            "postgres://worker:secret@db.example.test?dbname=identity".to_owned(),
+        )
+        .err()
+        .expect("an isolated peer target is refused");
+        assert!(forbidden.contains("isolated peer"), "{forbidden}");
+    }
+
+    #[test]
+    fn init_database_urls_have_no_implicit_or_half_configured_fallback() {
+        assert!(
+            !resolve_database_url(None, None)
+                .expect("legacy direct-command default")
+                .explicitly_configured,
+            "the legacy default remains identifiable so init can reject it"
+        );
+        for (direct, file) in [
+            (None, None),
+            (Some(OsString::from("direct")), Some(OsString::from("file"))),
+        ] {
+            let error = resolve_required_database_url(
+                "SYNVEDA_GATEWAY_DATABASE_URL",
+                "SYNVEDA_GATEWAY_DATABASE_URL_FILE",
+                direct,
+                file,
+            )
+            .expect_err("init requires exactly one source for each runtime URL");
+            assert!(error.contains("SYNVEDA_GATEWAY_DATABASE_URL"), "{error}");
         }
     }
 
-    #[test]
-    fn only_the_bundled_default_derives_development_runtime_credentials() {
-        let (gateway, worker, explicit) = runtime_database_urls_from(None, None, false).unwrap();
-        assert_eq!(gateway, COMPOSE_GATEWAY_DATABASE_URL);
-        assert_eq!(worker, COMPOSE_WORKER_DATABASE_URL);
-        assert!(!explicit);
-
-        let refusal = runtime_database_urls_from(None, None, true).unwrap_err();
-        assert!(refusal.contains("explicit DATABASE_URL"), "{refusal}");
+    #[tokio::test]
+    async fn init_cutover_gate_refuses_before_any_lifecycle_work() {
+        let refusal = init(Plan {
+            slug: "must-not-be-read".to_owned(),
+            name: "must-not-be-read".to_owned(),
+            embedder: "must-not-be-read".to_owned(),
+            issuer: Some("not-a-url".to_owned()),
+            dry_run: true,
+        })
+        .await
+        .expect_err("CPR-45 init must remain closed");
         assert!(
-            refusal.contains("SYNVEDA_GATEWAY_DATABASE_URL")
-                && refusal.contains("SYNVEDA_WORKER_DATABASE_URL"),
+            refusal.contains("CPR-45 Docker reference cutover"),
             "{refusal}"
         );
-
-        let explicit_gateway = "postgres://gateway:secret@db.example.test/synveda".to_owned();
-        let explicit_worker = "postgres://worker:secret@db.example.test/synveda".to_owned();
-        let (gateway, worker, explicit) = runtime_database_urls_from(
-            Some(explicit_gateway.clone()),
-            Some(explicit_worker.clone()),
-            true,
-        )
-        .unwrap();
-        assert_eq!(gateway, explicit_gateway);
-        assert_eq!(worker, explicit_worker);
-        assert!(explicit);
-        assert_eq!(
-            distinct_runtime_database_roles(&gateway, &worker).unwrap(),
-            ("gateway".to_owned(), "worker".to_owned())
-        );
         assert!(
-            distinct_runtime_database_roles(&gateway, &gateway).is_err(),
-            "dry-run and real init must both refuse one shared runtime role"
+            refusal.contains("before profile discovery, Compose, secret-file or database mutation"),
+            "{refusal}"
         );
-        assert!(
-            distinct_runtime_database_roles("not-a-postgres-url", &worker).is_err(),
-            "dry-run and real init must both refuse malformed runtime URLs"
-        );
-        assert!(
-            distinct_runtime_database_roles(
-                "https://gateway:secret@db.example.test/synveda",
-                &worker
-            )
-            .is_err(),
-            "dry-run and real init must both refuse a non-PostgreSQL URL scheme"
-        );
-        assert_eq!(
-            runtime_database_role("SYNVEDA_GATEWAY_DATABASE_URL", &gateway).unwrap(),
-            "gateway"
-        );
-        assert_eq!(
-            runtime_database_role("SYNVEDA_WORKER_DATABASE_URL", &worker).unwrap(),
-            "worker"
-        );
-        assert!(
-            runtime_database_role(
-                "SYNVEDA_WORKER_DATABASE_URL",
-                "postgres://escaped%2Drole:secret@db/synveda"
-            )
-            .is_err()
-        );
-    }
-
-    fn test_runtime_database_url(admin: &str, role: &str) -> String {
-        let mut parsed = url::Url::parse(admin).expect("test admin URL");
-        parsed.set_username(role).expect("test runtime role");
-        parsed
-            .set_password(Some("synveda-dev"))
-            .expect("test runtime password");
-        parsed.to_string()
+        assert!(refusal.contains("clean-volume Keycloak"), "{refusal}");
     }
 
     #[test]
@@ -2676,11 +3296,11 @@ mod tests {
     /// and the one normal gateway runtime (CPR-36, ADR-0095).
     #[tokio::test]
     async fn compose_runtime_logins_are_distinct_and_rls_enforced() {
-        let Some(admin_url) = std::env::var("DATABASE_URL")
-            .ok()
-            .filter(|value| !value.is_empty())
+        let Some(admin_url) = private_test_database_url("SYNVEDA_TEST_ADMIN_DATABASE_URL_FILE")
         else {
-            eprintln!("DATABASE_URL not set; skipping CPR-36 database acceptance");
+            eprintln!(
+                "SYNVEDA_TEST_ADMIN_DATABASE_URL_FILE not set; skipping CPR-36 database acceptance"
+            );
             return;
         };
         let admin = sqlx::postgres::PgPoolOptions::new()
@@ -2688,23 +3308,129 @@ mod tests {
             .connect(&admin_url)
             .await
             .expect("connect as deployment owner");
-        provision_compose_runtime_roles(&admin)
-            .await
-            .expect("converge the runtime logins");
-        verify_runtime_role(&admin, "synveda_gateway")
+        let database_roles = database_roles().expect("read the exact test role contract");
+        verify_runtime_role(&admin, database_roles.gateway(), &database_roles)
             .await
             .expect("accept the least-privilege gateway login");
-        verify_runtime_role(&admin, "synveda_worker")
+        verify_runtime_role(&admin, database_roles.worker(), &database_roles)
             .await
             .expect("accept the least-privilege worker login");
         assert!(
-            verify_runtime_role(&admin, "synveda").await.is_err(),
+            verify_runtime_role(&admin, database_roles.migrator(), &database_roles)
+                .await
+                .is_err(),
             "the bootstrap owner must never pass runtime-role validation",
+        );
+
+        let migrator_url = private_test_database_url("SYNVEDA_TEST_MIGRATOR_DATABASE_URL_FILE")
+            .expect("test harness migrator URL file");
+        let migrator = sqlx::postgres::PgPoolOptions::new()
+            .max_connections(2)
+            .connect(&migrator_url)
+            .await
+            .expect("connect as synveda_migrator");
+        let runtime_url = private_test_database_url("SYNVEDA_TEST_GATEWAY_DATABASE_URL_FILE")
+            .expect("test harness gateway URL file");
+        let runtime = sqlx::postgres::PgPoolOptions::new()
+            .max_connections(2)
+            .connect(&runtime_url)
+            .await
+            .expect("connect as synveda_gateway");
+
+        let refused_id = TenantId::new();
+        let refused_suffix = refused_id.to_string();
+        let refused_slug = format!(
+            "cpr36-refused-{}",
+            &refused_suffix[refused_suffix.len() - 12..]
+        );
+        assert_eq!(
+            tenant_admission_footprint(&runtime, refused_id).await,
+            [0; 4]
+        );
+        assert!(
+            crate::create_tenant_with_admission_id(
+                &admin,
+                &database_roles,
+                refused_id,
+                &refused_slug,
+                "CPR-36 refused owner admission",
+                TenantStatus::Active,
+                crate::TenantAdmission::Standard,
+            )
+            .await
+            .is_err(),
+            "the deployment owner must not admit a tenant"
+        );
+        assert_eq!(
+            tenant_admission_footprint(&runtime, refused_id).await,
+            [0; 4],
+            "refused owner admission wrote tenant, scope, grant or audit state"
+        );
+
+        let wrong_role_id = TenantId::new();
+        let wrong_role_suffix = wrong_role_id.to_string();
+        assert!(
+            crate::create_tenant_with_admission_id(
+                &runtime,
+                &database_roles,
+                wrong_role_id,
+                &format!(
+                    "cpr45-wrong-role-{}",
+                    &wrong_role_suffix[wrong_role_suffix.len() - 12..]
+                ),
+                "CPR-45 refused gateway admission",
+                TenantStatus::Active,
+                crate::TenantAdmission::Standard,
+            )
+            .await
+            .is_err(),
+            "the gateway login must not admit a tenant"
+        );
+        assert_eq!(
+            tenant_admission_footprint(&runtime, wrong_role_id).await,
+            [0; 4],
+            "wrong-role admission wrote tenant, scope, grant or audit state"
+        );
+
+        let wrong_epoch_id = TenantId::new();
+        let wrong_epoch_suffix = wrong_epoch_id.to_string();
+        let original_epoch = test_schema_epoch(&admin).await;
+        let future_epoch = TestSchemaEpoch {
+            epoch: synveda_store::epoch::CURRENT_EPOCH + 1,
+            updated_at: chrono::Utc::now(),
+        };
+        set_test_schema_epoch(&admin, &future_epoch).await;
+        let wrong_epoch_result = crate::create_tenant_with_admission_id(
+            &migrator,
+            &database_roles,
+            wrong_epoch_id,
+            &format!(
+                "cpr45-wrong-epoch-{}",
+                &wrong_epoch_suffix[wrong_epoch_suffix.len() - 12..]
+            ),
+            "CPR-45 refused future-epoch admission",
+            TenantStatus::Active,
+            crate::TenantAdmission::Standard,
+        )
+        .await;
+        // This test runs only through db-test.sh's disposable fixture. Restore
+        // the exact marker before inspecting the refusal; on abnormal process
+        // termination the harness retains the whole failed fixture as evidence.
+        set_test_schema_epoch(&admin, &original_epoch).await;
+        assert!(
+            wrong_epoch_result.is_err(),
+            "a future schema epoch must refuse tenant admission"
+        );
+        assert_eq!(
+            tenant_admission_footprint(&runtime, wrong_epoch_id).await,
+            [0; 4],
+            "wrong-epoch admission wrote tenant, scope, grant or audit state"
         );
 
         let suffix_source = TenantId::new().to_string();
         let tenant = crate::create_tenant(
-            &admin,
+            &migrator,
+            &database_roles,
             &format!("cpr36-{}", &suffix_source[suffix_source.len() - 12..]),
             "CPR-36 deployment acceptance",
             TenantStatus::Active,
@@ -2713,37 +3439,36 @@ mod tests {
         .expect("admit an isolated tenant");
         let tenant_id = tenant.id;
 
-        let runtime_url = test_runtime_database_url(&admin_url, "synveda_gateway");
-        let runtime = sqlx::postgres::PgPoolOptions::new()
-            .max_connections(2)
-            .connect(&runtime_url)
-            .await
-            .expect("connect as synveda_gateway");
-        let worker_url = test_runtime_database_url(&admin_url, "synveda_worker");
+        let worker_url = private_test_database_url("SYNVEDA_TEST_WORKER_DATABASE_URL_FILE")
+            .expect("test harness worker URL file");
         let worker = sqlx::postgres::PgPoolOptions::new()
             .max_connections(2)
             .connect(&worker_url)
             .await
             .expect("connect as synveda_worker");
-        synveda_store::runtime_role::verify(&runtime, "synveda_gateway")
+        synveda_store::runtime_role::verify(&runtime, database_roles.gateway(), &database_roles)
             .await
             .expect("gateway session role sentinel");
-        synveda_store::runtime_role::verify(&worker, "synveda_worker")
+        synveda_store::runtime_role::verify(&worker, database_roles.worker(), &database_roles)
             .await
             .expect("worker session role sentinel");
-        let admin_identity = synveda_store::runtime_role::database_identity(&admin)
+        let migrator_identity = synveda_store::runtime_role::database_identity(&migrator)
             .await
-            .expect("bootstrap database identity");
+            .expect("migrator database identity");
         let gateway_identity = synveda_store::runtime_role::database_identity(&runtime)
             .await
             .expect("healthy gateway database identity");
         let worker_identity = synveda_store::runtime_role::database_identity(&worker)
             .await
             .expect("healthy worker database identity");
-        require_one_database_target(&admin_identity, &gateway_identity, &worker_identity)
+        require_one_database_target(&migrator_identity, &gateway_identity, &worker_identity)
             .expect("all healthy deployment credentials target one database");
         assert!(
-            synveda_store::runtime_role::verify(&worker, "synveda_gateway")
+            synveda_store::runtime_role::verify(
+                &worker,
+                database_roles.gateway(),
+                &database_roles,
+            )
                 .await
                 .is_err(),
             "worker credentials must not pass as gateway credentials"
@@ -2757,13 +3482,15 @@ mod tests {
             .execute(&admin)
             .await
             .expect("give gateway a non-public schema");
-        let catalogue_rejected = verify_runtime_role(&admin, "synveda_gateway")
-            .await
-            .is_err();
+        let catalogue_rejected =
+            verify_runtime_role(&admin, database_roles.gateway(), &database_roles)
+                .await
+                .is_err();
         let connection_rejected = verify_runtime_database_url(
             "SYNVEDA_GATEWAY_DATABASE_URL",
             &runtime_url,
-            "synveda_gateway",
+            database_roles.gateway(),
+            &database_roles,
         )
         .await
         .is_err();
@@ -2815,13 +3542,15 @@ mod tests {
         .execute(&admin)
         .await
         .expect("add concurrent unsafe gateway grant");
-        let duplicate_catalogue_rejected = verify_runtime_role(&admin, "synveda_gateway")
-            .await
-            .is_err();
+        let duplicate_catalogue_rejected =
+            verify_runtime_role(&admin, database_roles.gateway(), &database_roles)
+                .await
+                .is_err();
         let duplicate_connection_rejected = verify_runtime_database_url(
             "SYNVEDA_GATEWAY_DATABASE_URL",
             &runtime_url,
-            "synveda_gateway",
+            database_roles.gateway(),
+            &database_roles,
         )
         .await
         .is_err();

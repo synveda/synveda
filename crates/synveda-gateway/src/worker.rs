@@ -14,7 +14,6 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
-use sqlx::postgres::PgPoolOptions;
 use synveda_ingest::embedding::Embedder as _;
 use synveda_ingest::extraction::Extractor as _;
 use synveda_policy::Pdp;
@@ -22,7 +21,10 @@ use tokio::sync::{oneshot, watch};
 use tokio::task::JoinSet;
 
 use crate::app::DirectoryRuntime;
-use crate::{authz, directory_sync, knowledge_index, relaxations, runtime_config, shutdown};
+use crate::authority::{AuthorityGate, AuthorityMonitor, CheckOutcome};
+use crate::{
+    authority, authz, directory_sync, knowledge_index, relaxations, runtime_config, shutdown,
+};
 
 const STARTING: u8 = 0;
 const RUNNING: u8 = 1;
@@ -30,9 +32,8 @@ const DRAINING: u8 = 2;
 const FAULTED: u8 = 3;
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(1);
 const HEARTBEAT_STALE_AFTER: Duration = Duration::from_secs(5);
-const AUTHORITY_CHECK_INTERVAL: Duration = Duration::from_secs(1);
-const READINESS_TIMEOUT: Duration = Duration::from_secs(2);
-const BOOT_RETRY_INTERVAL: Duration = Duration::from_secs(2);
+const CONVERGENCE_RETRY_INTERVAL: Duration = Duration::from_secs(2);
+const ABORT_JOIN_RESERVE: Duration = Duration::from_secs(1);
 
 /// Initializes telemetry and runs the supervised worker until process
 /// shutdown.
@@ -56,22 +57,21 @@ async fn run_process(
     let database_url = runtime_config::required_setting("DATABASE_URL")?;
     let max_connections =
         runtime_config::positive_connection_limit("SYNVEDA_WORKER_DB_MAX_CONNECTIONS", 8)?;
+    let database_roles = runtime_config::database_roles()?;
     let connect_options = synveda_store::database_url::parse("DATABASE_URL", &database_url)?
         .application_name("synveda-worker");
     let database_role = connect_options.get_username();
-    let expected_database_role = runtime_config::setting("SYNVEDA_EXPECTED_DATABASE_ROLE")?
-        .filter(|role| !role.is_empty())
-        .unwrap_or_else(|| database_role.to_owned());
-    if database_role != expected_database_role {
-        return Err("DATABASE_URL login does not match SYNVEDA_EXPECTED_DATABASE_ROLE".into());
+    if database_role != database_roles.worker() {
+        return Err("the worker database authority was conclusively refused".into());
     }
     // Lazy connection lets the private health surface report an outage while
     // the process waits; no work starts before the boot sentinel succeeds.
-    let pool = PgPoolOptions::new()
-        .max_connections(max_connections)
-        .acquire_timeout(Duration::from_secs(5))
-        .connect_lazy_with(connect_options);
-
+    let (pool_options, pool_refusal) = runtime_config::runtime_pool_options(
+        max_connections,
+        Duration::from_secs(5),
+        database_roles.worker().to_owned(),
+    );
+    let pool = pool_options.connect_lazy_with(connect_options);
     let pdp = Arc::new(Pdp::new()?);
     let extractor = Arc::new(runtime_config::extractor_from_env()?);
     let embedder = Arc::new(runtime_config::embedder_from_env()?);
@@ -84,7 +84,7 @@ async fn run_process(
     let relaxation_interval =
         runtime_config::bounded_duration_setting("SYNVEDA_RELAXATION_SWEEP_SECS", 60, 1, 3_600)?;
     let shutdown_grace =
-        runtime_config::bounded_duration_setting("SYNVEDA_WORKER_SHUTDOWN_SECS", 75, 1, 300)?;
+        runtime_config::bounded_duration_setting("SYNVEDA_WORKER_SHUTDOWN_SECS", 75, 3, 300)?;
     let knowledge_config = knowledge_config_from_env()?;
     let (directory_connectors, directory_config) = directory_config_from_env()?;
     if directory_config.is_some()
@@ -93,6 +93,7 @@ async fn run_process(
     {
         return Err("SYNVEDA_DIRECTORY_SYNC requires a configured KMS key when no issuer carries a static directory connector".into());
     }
+    drop(directory_connectors);
 
     tracing::info!(
         extractor = extractor.method(),
@@ -103,7 +104,14 @@ async fn run_process(
         "core worker configuration accepted"
     );
 
-    let health = WorkerHealth::new(pool.clone(), expected_database_role.clone(), metrics);
+    let authority = AuthorityMonitor::new_worker(
+        pool.clone(),
+        pool_refusal,
+        database_roles.worker().to_owned(),
+        database_roles,
+    );
+    let gate = authority.gate();
+    let health = WorkerHealth::new(gate.clone(), metrics);
     let listen_addr =
         std::env::var("SYNVEDA_WORKER_LISTEN_ADDR").unwrap_or_else(|_| "127.0.0.1:8121".to_owned());
     let listen_addr = listen_addr
@@ -117,160 +125,474 @@ async fn run_process(
     let mut health_task = tokio::spawn(serve_health(listener, health.clone(), health_stop_rx));
     tracing::info!(addr = %listen_addr, "synveda-worker private health listening");
 
+    let generation = GenerationRuntime {
+        pool: pool.clone(),
+        pdp,
+        extractor,
+        embedder,
+        keys,
+        capture_config,
+        knowledge_config,
+        policy_refresh,
+        relaxation_interval,
+        directory_config,
+        drain_grace: shutdown_grace
+            .saturating_sub(ABORT_JOIN_RESERVE)
+            .max(Duration::from_millis(1)),
+    };
+    let (process_stop_tx, process_stop_rx) = watch::channel(false);
+    let mut sentinel_task =
+        tokio::spawn(authority::run_sentinel(authority, process_stop_rx.clone()));
+    let mut pool_task = tokio::spawn(pool_monitor(
+        pool.clone(),
+        max_connections,
+        process_stop_rx.clone(),
+    ));
+    let mut heartbeat_task = tokio::spawn(heartbeat(health.clone(), process_stop_rx.clone()));
     let signal = shutdown::signal();
     tokio::pin!(signal);
-    let booted = {
-        // Keep the database-convergence future in this block. On SIGTERM the
-        // losing future must be dropped before `pool.close()`; retaining a
-        // pinned, no-longer-polled acquire until function exit can otherwise
-        // make shutdown wait on the very work it cancelled.
-        let boot = wait_until_authoritative(&pool, &pdp, &expected_database_role);
-        tokio::pin!(boot);
-        tokio::select! {
-            result = &mut boot => {
-                result?;
-                true
+    let mut health_finished = false;
+    let mut sentinel_finished = false;
+    let mut pool_finished = false;
+    let mut heartbeat_finished = false;
+    let mut exit_error = None;
+    let mut active_task = Some(tokio::spawn(run_authority_generation(
+        generation.clone(),
+        gate.clone(),
+        health.clone(),
+        process_stop_rx.clone(),
+    )));
+
+    loop {
+        enum SupervisorEvent {
+            Generation(Result<Result<GenerationEnd, String>, tokio::task::JoinError>),
+            Signal,
+            Health(Result<Result<(), std::io::Error>, tokio::task::JoinError>),
+            Sentinel(Result<CheckOutcome, tokio::task::JoinError>),
+            Pool,
+            Heartbeat,
+        }
+        let event = tokio::select! {
+            result = async {
+                match active_task.as_mut() {
+                    Some(task) => task.await,
+                    None => std::future::pending().await,
+                }
+            } => {
+                SupervisorEvent::Generation(result)
+            },
+            () = &mut signal => SupervisorEvent::Signal,
+            result = &mut health_task => SupervisorEvent::Health(result),
+            result = &mut sentinel_task => SupervisorEvent::Sentinel(result),
+            _result = &mut pool_task => SupervisorEvent::Pool,
+            _result = &mut heartbeat_task => SupervisorEvent::Heartbeat,
+        };
+        match event {
+            SupervisorEvent::Generation(Ok(Ok(GenerationEnd::AuthorityClosed))) => {
+                active_task = Some(tokio::spawn(run_authority_generation(
+                    generation.clone(),
+                    gate.clone(),
+                    health.clone(),
+                    process_stop_rx.clone(),
+                )));
+                continue;
             }
-            () = &mut signal => false,
-            result = &mut health_task => {
+            SupervisorEvent::Generation(Ok(Ok(GenerationEnd::Shutdown))) => {
+                active_task = None;
+                break;
+            }
+            SupervisorEvent::Signal => {
+                break;
+            }
+            SupervisorEvent::Generation(Ok(Ok(GenerationEnd::AuthorityRefused))) => {
+                active_task = None;
+                exit_error =
+                    Some("the worker database authority was conclusively refused".to_owned());
+                break;
+            }
+            SupervisorEvent::Generation(Ok(Err(reason))) => {
+                active_task = None;
                 health.fault();
-                return Err(health_exit_error(result));
+                exit_error = Some(reason);
+                break;
+            }
+            SupervisorEvent::Generation(Err(_)) => {
+                active_task = None;
+                health.fault();
+                exit_error = Some("the worker generation supervisor task failed".to_owned());
+                break;
+            }
+            SupervisorEvent::Health(result) => {
+                health_finished = true;
+                health.fault();
+                exit_error = Some(health_exit_error(result).to_string());
+                break;
+            }
+            SupervisorEvent::Sentinel(result) => {
+                sentinel_finished = true;
+                health.fault();
+                exit_error = Some(match result {
+                    Ok(CheckOutcome::Refused { .. }) => {
+                        "the worker database authority was conclusively refused".to_owned()
+                    }
+                    Ok(_) => "the worker authority sentinel stopped unexpectedly".to_owned(),
+                    Err(_) => "the worker authority sentinel task failed".to_owned(),
+                });
+                break;
+            }
+            SupervisorEvent::Pool => {
+                pool_finished = true;
+                health.fault();
+                exit_error = Some("the worker pool monitor stopped unexpectedly".to_owned());
+                break;
+            }
+            SupervisorEvent::Heartbeat => {
+                heartbeat_finished = true;
+                health.fault();
+                exit_error = Some("the worker heartbeat stopped unexpectedly".to_owned());
+                break;
             }
         }
-    };
-
-    if !booted {
-        health.begin_drain();
-        let _ = health_stop_tx.send(());
-        finish_health(health_task).await?;
-        pool.close().await;
-        return Ok(());
     }
 
+    health.begin_drain();
+    let _ = process_stop_tx.send(true);
+    let _ = health_stop_tx.send(());
+    let cleanup_grace = shutdown_grace.saturating_sub(ABORT_JOIN_RESERVE);
+    let cleanup = tokio::time::timeout(cleanup_grace, async {
+        if let Some(task) = active_task.as_mut() {
+            let result = task.await;
+            if exit_error.is_none() {
+                exit_error = generation_cleanup_error(result);
+                if exit_error.is_some() {
+                    health.fault();
+                }
+            }
+            active_task = None;
+        }
+        if !sentinel_finished {
+            let _ = (&mut sentinel_task).await;
+            sentinel_finished = true;
+        }
+        if !pool_finished {
+            let _ = (&mut pool_task).await;
+            pool_finished = true;
+        }
+        if !heartbeat_finished {
+            let _ = (&mut heartbeat_task).await;
+            heartbeat_finished = true;
+        }
+        if !health_finished {
+            let _ = (&mut health_task).await;
+            health_finished = true;
+        }
+        pool.close().await;
+    })
+    .await;
+    if cleanup.is_err() {
+        sentinel_task.abort();
+        if !pool_finished {
+            pool_task.abort();
+        }
+        if !heartbeat_finished {
+            heartbeat_task.abort();
+        }
+        health_task.abort();
+        let active_task = active_task.take();
+        if let Some(task) = active_task.as_ref() {
+            task.abort();
+        }
+        let _ = tokio::time::timeout(ABORT_JOIN_RESERVE, async {
+            if let Some(task) = active_task {
+                let _ = task.await;
+            }
+            if !sentinel_finished {
+                let _ = sentinel_task.await;
+            }
+            if !pool_finished {
+                let _ = pool_task.await;
+            }
+            if !heartbeat_finished {
+                let _ = heartbeat_task.await;
+            }
+            if !health_finished {
+                let _ = health_task.await;
+            }
+        })
+        .await;
+        tracing::warn!(
+            grace_secs = shutdown_grace.as_secs(),
+            "worker shutdown reached its hard deadline; unfinished supervisors were cancelled and joined"
+        );
+        if exit_error.is_none() {
+            exit_error = Some("worker shutdown required forced supervisor cancellation".to_owned());
+            health.fault();
+        }
+    }
+
+    if let Some(reason) = exit_error {
+        return Err(reason.into());
+    }
+    tracing::info!("core worker stopped cleanly");
+    Ok(())
+}
+
+fn generation_cleanup_error(
+    result: Result<Result<GenerationEnd, String>, tokio::task::JoinError>,
+) -> Option<String> {
+    match result {
+        Ok(Ok(GenerationEnd::Shutdown | GenerationEnd::AuthorityClosed)) => None,
+        Ok(Ok(GenerationEnd::AuthorityRefused)) => {
+            Some("the worker database authority was conclusively refused".to_owned())
+        }
+        Ok(Err(reason)) => Some(reason),
+        Err(_) => Some("the worker generation supervisor task failed".to_owned()),
+    }
+}
+
+#[derive(Clone)]
+struct GenerationRuntime {
+    pool: sqlx::PgPool,
+    pdp: Arc<Pdp>,
+    extractor: Arc<synveda_ingest::extraction::AnyExtractor>,
+    embedder: Arc<synveda_ingest::embedding::AnyEmbedder>,
+    keys: Arc<synveda_store::keys::KeyRing>,
+    capture_config: synveda_ingest::capture_worker::Config,
+    knowledge_config: knowledge_index::Config,
+    policy_refresh: Duration,
+    relaxation_interval: Duration,
+    directory_config: Option<directory_sync::SyncConfig>,
+    drain_grace: Duration,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum GenerationEnd {
+    AuthorityClosed,
+    AuthorityRefused,
+    Shutdown,
+}
+
+async fn run_authority_generation(
+    runtime: GenerationRuntime,
+    gate: AuthorityGate,
+    health: WorkerHealth,
+    mut shutdown: watch::Receiver<bool>,
+) -> Result<GenerationEnd, String> {
+    health.waiting();
+    let generation = tokio::select! {
+        biased;
+        () = shutdown::requested(&mut shutdown) => return Ok(GenerationEnd::Shutdown),
+        generation = gate.wait_until_open() => match generation {
+            Ok(generation) => generation,
+            Err(()) if gate.is_terminal() => return Ok(GenerationEnd::AuthorityRefused),
+            Err(()) => return Err("the worker authority gate lost its sentinel".to_owned()),
+        },
+    };
+    let mut permit = gate.permit();
+    if gate.open_generation() != Some(generation) || !permit.is_open() {
+        return Ok(if gate.is_terminal() {
+            GenerationEnd::AuthorityRefused
+        } else {
+            GenerationEnd::AuthorityClosed
+        });
+    }
+
+    loop {
+        let convergence = tokio::time::timeout(
+            authority::CHECK_TIMEOUT,
+            authz::converge_packs_once(&runtime.pool, &runtime.pdp),
+        );
+        tokio::pin!(convergence);
+        let converged = tokio::select! {
+            biased;
+            () = permit.revoked() => {
+                return Ok(if gate.is_terminal() {
+                    GenerationEnd::AuthorityRefused
+                } else {
+                    GenerationEnd::AuthorityClosed
+                });
+            }
+            () = shutdown::requested(&mut shutdown) => return Ok(GenerationEnd::Shutdown),
+            result = &mut convergence => matches!(result, Ok(Ok(()))),
+        };
+        if converged {
+            break;
+        }
+        tracing::warn!("initial policy-pack convergence unavailable");
+        tokio::select! {
+            biased;
+            () = permit.revoked() => {
+                return Ok(if gate.is_terminal() {
+                    GenerationEnd::AuthorityRefused
+                } else {
+                    GenerationEnd::AuthorityClosed
+                });
+            }
+            () = shutdown::requested(&mut shutdown) => return Ok(GenerationEnd::Shutdown),
+            () = tokio::time::sleep(CONVERGENCE_RETRY_INTERVAL) => {}
+        }
+    }
+    if !permit.is_open() {
+        return Ok(if gate.is_terminal() {
+            GenerationEnd::AuthorityRefused
+        } else {
+            GenerationEnd::AuthorityClosed
+        });
+    }
+
+    let directory_connectors = if runtime.directory_config.is_some() {
+        directory_config_from_env()
+            .map_err(|_| "worker directory configuration could not be rebuilt".to_owned())?
+            .0
+    } else {
+        DirectoryConnectors::new()
+    };
     let (work_stop_tx, work_stop_rx) = watch::channel(false);
     let mut tasks = JoinSet::new();
-
-    spawn_named(
-        &mut tasks,
-        "heartbeat",
-        heartbeat(health.clone(), work_stop_rx.clone()),
-    );
-    spawn_named(
-        &mut tasks,
-        "authority-sentinel",
-        authority_sentinel(
-            pool.clone(),
-            expected_database_role.clone(),
-            work_stop_rx.clone(),
-        ),
-    );
-    spawn_named(
-        &mut tasks,
-        "pool-monitor",
-        pool_monitor(pool.clone(), max_connections, work_stop_rx.clone()),
-    );
-    spawn_named(
+    spawn_governed_named(
         &mut tasks,
         "policy-refresh",
+        gate.clone(),
+        generation,
         authz::run_pack_refresher(
-            pool.clone(),
-            Arc::clone(&pdp),
-            policy_refresh,
+            runtime.pool.clone(),
+            Arc::clone(&runtime.pdp),
+            runtime.policy_refresh,
             work_stop_rx.clone(),
         ),
     );
-    spawn_named(
+    spawn_governed_named(
         &mut tasks,
         "capture",
+        gate.clone(),
+        generation,
         synveda_ingest::capture_worker::run(
             synveda_ingest::capture_worker::Deps {
-                pool: pool.clone(),
-                pdp: Arc::clone(&pdp),
-                extractor,
+                pool: runtime.pool.clone(),
+                pdp: Arc::clone(&runtime.pdp),
+                extractor: Arc::clone(&runtime.extractor),
             },
-            capture_config,
+            runtime.capture_config.clone(),
             work_stop_rx.clone(),
         ),
     );
-    spawn_named(
+    spawn_governed_named(
         &mut tasks,
         "knowledge-index",
+        gate.clone(),
+        generation,
         knowledge_index::run(
-            pool.clone(),
-            embedder,
-            knowledge_config,
+            runtime.pool.clone(),
+            Arc::clone(&runtime.embedder),
+            runtime.knowledge_config.clone(),
             work_stop_rx.clone(),
         ),
     );
-    spawn_named(
+    spawn_governed_named(
         &mut tasks,
         "relaxation-expiry",
-        relaxations::run_expiry_sweep(pool.clone(), relaxation_interval, work_stop_rx.clone()),
+        gate.clone(),
+        generation,
+        relaxations::run_expiry_sweep(
+            runtime.pool.clone(),
+            runtime.relaxation_interval,
+            work_stop_rx.clone(),
+        ),
     );
-    if let Some(config) = directory_config {
-        spawn_named(
+    if let Some(config) = runtime.directory_config {
+        spawn_governed_named(
             &mut tasks,
             "directory-sync",
+            gate.clone(),
+            generation,
             directory_sync::run(
-                DirectoryRuntime::new(pool.clone(), Arc::clone(&pdp), keys),
+                DirectoryRuntime::new(
+                    runtime.pool.clone(),
+                    Arc::clone(&runtime.pdp),
+                    Arc::clone(&runtime.keys),
+                ),
                 directory_connectors,
                 config,
-                work_stop_rx,
+                work_stop_rx.clone(),
             ),
         );
     }
 
     health.beat();
-    health.running();
-    tracing::info!("core worker running");
-
-    let mut health_finished = false;
-    let unexpected = tokio::select! {
-        () = &mut signal => None,
+    health.running(generation);
+    tracing::info!(authority.generation = generation, "core worker running");
+    let end = tokio::select! {
+        biased;
+        () = permit.revoked() => {
+            if gate.is_terminal() {
+                GenerationEnd::AuthorityRefused
+            } else {
+                GenerationEnd::AuthorityClosed
+            }
+        }
+        () = shutdown::requested(&mut shutdown) => GenerationEnd::Shutdown,
         result = tasks.join_next() => {
             health.fault();
-            Some(unexpected_task_exit(result))
-        }
-        result = &mut health_task => {
-            health.fault();
-            health_finished = true;
-            Some(health_exit_error(result).to_string())
+            let reason = unexpected_task_exit(result);
+            let _ = work_stop_tx.send(true);
+            let _ = drain_tasks(&mut tasks, runtime.drain_grace).await;
+            return Err(reason);
         }
     };
-
-    if unexpected.is_none() {
-        health.begin_drain();
-    }
+    health.waiting();
     let _ = work_stop_tx.send(true);
-    let drain = drain_tasks(&mut tasks, shutdown_grace).await;
-    let _ = health_stop_tx.send(());
-    let health_result = if health_finished {
-        Ok(())
-    } else {
-        finish_health(health_task).await
-    };
-    pool.close().await;
-
-    if let Some(reason) = unexpected {
-        return Err(reason.into());
-    }
-    if drain? == DrainOutcome::Forced {
-        tracing::warn!(
-            grace_secs = shutdown_grace.as_secs(),
-            "worker shutdown reached its hard deadline; unfinished work was cancelled and joined"
-        );
-    }
-    health_result?;
-    tracing::info!("core worker stopped cleanly");
-    Ok(())
+    finish_generation_drain(&mut tasks, runtime.drain_grace, end).await
 }
 
+async fn finish_generation_drain(
+    tasks: &mut JoinSet<&'static str>,
+    grace: Duration,
+    end: GenerationEnd,
+) -> Result<GenerationEnd, String> {
+    match drain_tasks(tasks, grace)
+        .await
+        .map_err(|_| "worker generation drain failed".to_owned())?
+    {
+        DrainOutcome::Graceful => Ok(end),
+        DrainOutcome::Forced => {
+            tracing::warn!(
+                grace_secs = grace.as_secs(),
+                "worker generation drain reached its hard deadline"
+            );
+            Err("worker generation shutdown required forced task cancellation".to_owned())
+        }
+    }
+}
+
+#[cfg(test)]
 fn spawn_named<F>(tasks: &mut JoinSet<&'static str>, name: &'static str, task: F)
 where
     F: std::future::Future<Output = ()> + Send + 'static,
 {
     tasks.spawn(async move {
         task.await;
+        name
+    });
+}
+
+fn spawn_governed_named<F>(
+    tasks: &mut JoinSet<&'static str>,
+    name: &'static str,
+    gate: AuthorityGate,
+    generation: u64,
+    task: F,
+) where
+    F: std::future::Future<Output = ()> + Send + 'static,
+{
+    let mut permit = gate.permit();
+    tasks.spawn(async move {
+        if permit.is_for(generation) {
+            tokio::select! {
+                biased;
+                () = permit.revoked() => {}
+                () = task => {}
+            }
+        }
         name
     });
 }
@@ -285,7 +607,9 @@ async fn drain_tasks(
     tasks: &mut JoinSet<&'static str>,
     grace: Duration,
 ) -> Result<DrainOutcome, Box<dyn std::error::Error>> {
-    let joined = tokio::time::timeout(grace, async {
+    let abort_reserve = grace.min(ABORT_JOIN_RESERVE);
+    let graceful_grace = grace.saturating_sub(abort_reserve);
+    let joined = tokio::time::timeout(graceful_grace, async {
         let mut first_error = None;
         while let Some(result) = tasks.join_next().await {
             match result {
@@ -303,7 +627,11 @@ async fn drain_tasks(
         Ok(result) => result.map_err(Into::into),
         Err(_) => {
             tasks.abort_all();
-            while tasks.join_next().await.is_some() {}
+            tokio::time::timeout(abort_reserve, async {
+                while tasks.join_next().await.is_some() {}
+            })
+            .await
+            .map_err(|_| "worker tasks did not join before the hard deadline")?;
             Ok(DrainOutcome::Forced)
         }
     }
@@ -324,58 +652,6 @@ fn health_exit_error(
         Ok(Ok(())) => "worker health server returned unexpectedly".into(),
         Ok(Err(error)) => format!("worker health server failed: {error}").into(),
         Err(error) => format!("worker health server task failed: {error}").into(),
-    }
-}
-
-async fn finish_health(
-    task: tokio::task::JoinHandle<Result<(), std::io::Error>>,
-) -> Result<(), Box<dyn std::error::Error>> {
-    match task.await {
-        Ok(Ok(())) => Ok(()),
-        Ok(Err(error)) => Err(format!("worker health server failed: {error}").into()),
-        Err(error) => Err(format!("worker health server task failed: {error}").into()),
-    }
-}
-
-async fn wait_until_authoritative(
-    pool: &sqlx::PgPool,
-    pdp: &Pdp,
-    expected_database_role: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
-    loop {
-        match synveda_store::epoch::verify(pool).await {
-            Ok(metadata) => {
-                match synveda_store::runtime_role::verify(pool, expected_database_role).await {
-                    Ok(role) => match synveda_store::runtime_role::database_identity(pool).await {
-                        Ok(_) => match authz::converge_packs_once(pool, pdp).await {
-                            Ok(()) => {
-                                tracing::info!(
-                                    schema.epoch = metadata.epoch,
-                                    schema.migration_head = %metadata.migration_head,
-                                    db.role = role.name,
-                                    "worker writable database, runtime role and initial policy packs accepted"
-                                );
-                                return Ok(());
-                            }
-                            Err(error) => {
-                                tracing::warn!(%error, "initial policy-pack convergence unavailable")
-                            }
-                        },
-                        Err(synveda_types::Error::Invalid { message }) => {
-                            return Err(message.into());
-                        }
-                        Err(error) => {
-                            tracing::warn!(%error, "worker writable-primary check unavailable")
-                        }
-                    },
-                    Err(synveda_types::Error::Invalid { message }) => return Err(message.into()),
-                    Err(error) => tracing::warn!(%error, "worker runtime-role check unavailable"),
-                }
-            }
-            Err(error) if error.is_refusal() => return Err(error.to_string().into()),
-            Err(error) => tracing::warn!(%error, "worker database/schema unavailable"),
-        }
-        tokio::time::sleep(BOOT_RETRY_INTERVAL).await;
     }
 }
 
@@ -427,26 +703,25 @@ fn directory_config_from_env()
 
 #[derive(Clone)]
 struct WorkerHealth {
-    pool: sqlx::PgPool,
-    expected_database_role: Arc<str>,
+    authority: AuthorityGate,
     metrics: metrics_exporter_prometheus::PrometheusHandle,
     lifecycle: Arc<AtomicU8>,
+    active_generation: Arc<AtomicU64>,
     started: Instant,
     heartbeat_ms: Arc<AtomicU64>,
 }
 
 impl WorkerHealth {
     fn new(
-        pool: sqlx::PgPool,
-        expected_database_role: String,
+        authority: AuthorityGate,
         metrics: metrics_exporter_prometheus::PrometheusHandle,
     ) -> Self {
         metrics::gauge!(crate::telemetry::WORKER_READY).set(0.0);
         let state = Self {
-            pool,
-            expected_database_role: expected_database_role.into(),
+            authority,
             metrics,
             lifecycle: Arc::new(AtomicU8::new(STARTING)),
+            active_generation: Arc::new(AtomicU64::new(0)),
             started: Instant::now(),
             heartbeat_ms: Arc::new(AtomicU64::new(0)),
         };
@@ -454,18 +729,28 @@ impl WorkerHealth {
         state
     }
 
-    fn running(&self) {
+    fn running(&self, generation: u64) {
+        self.active_generation
+            .store(generation.max(1), Ordering::Release);
         self.lifecycle.store(RUNNING, Ordering::Release);
         metrics::gauge!(crate::telemetry::WORKER_READY).set(1.0);
     }
 
+    fn waiting(&self) {
+        self.active_generation.store(0, Ordering::Release);
+        self.lifecycle.store(STARTING, Ordering::Release);
+        metrics::gauge!(crate::telemetry::WORKER_READY).set(0.0);
+    }
+
     fn begin_drain(&self) {
+        self.active_generation.store(0, Ordering::Release);
         self.lifecycle.store(DRAINING, Ordering::Release);
         metrics::gauge!(crate::telemetry::WORKER_READY).set(0.0);
         tracing::info!("worker readiness withdrawn; cancelling and joining supervised tasks");
     }
 
     fn fault(&self) {
+        self.active_generation.store(0, Ordering::Release);
         self.lifecycle.store(FAULTED, Ordering::Release);
         metrics::gauge!(crate::telemetry::WORKER_READY).set(0.0);
     }
@@ -484,7 +769,10 @@ impl WorkerHealth {
     }
 
     fn is_running(&self) -> bool {
+        let generation = self.active_generation.load(Ordering::Acquire);
         self.lifecycle.load(Ordering::Acquire) == RUNNING
+            && generation != 0
+            && self.authority.open_generation() == Some(generation)
     }
 }
 
@@ -499,84 +787,6 @@ async fn heartbeat(health: WorkerHealth, mut shutdown: watch::Receiver<bool>) {
                 }
             }
             _ = ticker.tick() => health.beat(),
-        }
-    }
-}
-
-#[derive(Debug)]
-enum AuthorityCheckError {
-    Refusal(String),
-    Unavailable(String),
-}
-
-async fn verify_authority_once(
-    pool: &sqlx::PgPool,
-    expected_database_role: &str,
-) -> Result<(), AuthorityCheckError> {
-    match synveda_store::epoch::verify(pool).await {
-        Ok(_) => {}
-        Err(error) if error.is_refusal() => {
-            return Err(AuthorityCheckError::Refusal(error.to_string()));
-        }
-        Err(error) => return Err(AuthorityCheckError::Unavailable(error.to_string())),
-    }
-    match synveda_store::runtime_role::verify(pool, expected_database_role).await {
-        Ok(_) => {}
-        Err(synveda_types::Error::Storage { message }) => {
-            return Err(AuthorityCheckError::Unavailable(message));
-        }
-        Err(error) => return Err(AuthorityCheckError::Refusal(error.to_string())),
-    }
-    match synveda_store::runtime_role::database_identity(pool).await {
-        Ok(_) => Ok(()),
-        Err(synveda_types::Error::Storage { message }) => {
-            Err(AuthorityCheckError::Unavailable(message))
-        }
-        Err(error) => Err(AuthorityCheckError::Refusal(error.to_string())),
-    }
-}
-
-/// Re-proves the immutable schema and runtime authority while work is live.
-/// A database outage keeps the process unready and is retried; a conclusive
-/// epoch or role refusal ends this critical task so the supervisor faults,
-/// cancels every loop and exits non-zero.
-async fn authority_sentinel(
-    pool: sqlx::PgPool,
-    expected_database_role: String,
-    mut shutdown: watch::Receiver<bool>,
-) {
-    let mut ticker = tokio::time::interval(AUTHORITY_CHECK_INTERVAL);
-    ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-    loop {
-        tokio::select! {
-            changed = shutdown.changed() => {
-                if changed.is_err() || *shutdown.borrow() {
-                    return;
-                }
-            }
-            _ = ticker.tick() => {
-                match tokio::time::timeout(
-                    READINESS_TIMEOUT,
-                    verify_authority_once(&pool, &expected_database_role),
-                )
-                .await
-                {
-                    Ok(Ok(())) => {}
-                    Ok(Err(AuthorityCheckError::Unavailable(reason))) => {
-                        tracing::warn!(%reason, "worker authority sentinel unavailable");
-                    }
-                    Err(_) => {
-                        tracing::warn!(
-                            timeout_ms = READINESS_TIMEOUT.as_millis() as u64,
-                            "worker authority sentinel timed out"
-                        );
-                    }
-                    Ok(Err(AuthorityCheckError::Refusal(reason))) => {
-                        tracing::error!(%reason, "worker authority sentinel refused runtime state");
-                        return;
-                    }
-                }
-            }
         }
     }
 }
@@ -640,7 +850,7 @@ async fn worker_metrics(State(state): State<WorkerHealth>) -> String {
 }
 
 async fn worker_readyz(State(state): State<WorkerHealth>) -> Response {
-    if !state.is_running() {
+    if !state.is_running() || !state.authority.is_open() {
         metrics::gauge!(crate::telemetry::WORKER_READY).set(0.0);
         return (StatusCode::SERVICE_UNAVAILABLE, "not ready").into_response();
     }
@@ -651,50 +861,39 @@ async fn worker_readyz(State(state): State<WorkerHealth>) -> Response {
         metrics::gauge!(crate::telemetry::WORKER_READY).set(0.0);
         return (StatusCode::SERVICE_UNAVAILABLE, "not ready").into_response();
     }
-    let ready = tokio::time::timeout(READINESS_TIMEOUT, async {
-        synveda_store::runtime_role::verify(&state.pool, &state.expected_database_role).await?;
-        synveda_store::runtime_role::database_identity(&state.pool).await?;
-        synveda_store::epoch::verify(&state.pool)
-            .await
-            .map(|_| ())
-            .map_err(|error| synveda_types::Error::Storage {
-                message: error.to_string(),
-            })
-    })
-    .await;
-    match ready {
-        Ok(Ok(())) => {
-            metrics::gauge!(crate::telemetry::WORKER_READY).set(1.0);
-            (StatusCode::OK, "ready").into_response()
-        }
-        Ok(Err(error)) => {
-            metrics::gauge!(crate::telemetry::WORKER_READY).set(0.0);
-            tracing::warn!(%error, "worker readiness dependency failed");
-            (StatusCode::SERVICE_UNAVAILABLE, "not ready").into_response()
-        }
-        Err(_) => {
-            metrics::gauge!(crate::telemetry::WORKER_READY).set(0.0);
-            tracing::warn!(
-                timeout_ms = READINESS_TIMEOUT.as_millis() as u64,
-                "worker readiness timed out"
-            );
-            (StatusCode::SERVICE_UNAVAILABLE, "not ready").into_response()
-        }
-    }
+    metrics::gauge!(crate::telemetry::WORKER_READY).set(1.0);
+    (StatusCode::OK, "ready").into_response()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    #[test]
+    fn signal_cleanup_preserves_generation_failures() {
+        assert_eq!(
+            generation_cleanup_error(Ok(Ok(GenerationEnd::Shutdown))),
+            None
+        );
+        assert_eq!(
+            generation_cleanup_error(Ok(Ok(GenerationEnd::AuthorityClosed))),
+            None
+        );
+        assert_eq!(
+            generation_cleanup_error(Ok(Ok(GenerationEnd::AuthorityRefused))),
+            Some("the worker database authority was conclusively refused".to_owned())
+        );
+        assert_eq!(
+            generation_cleanup_error(Ok(Err("drain failed".to_owned()))),
+            Some("drain failed".to_owned())
+        );
+    }
+
     #[tokio::test]
     async fn draining_withdraws_readiness_before_a_current_unit_finishes() {
-        let pool = PgPoolOptions::new()
-            .connect_lazy("postgres://invalid:invalid@127.0.0.1:1/invalid")
-            .expect("lazy pool");
-        let health = WorkerHealth::new(pool, "invalid".to_owned(), test_metrics());
+        let health = WorkerHealth::new(AuthorityGate::open_for_test(), test_metrics());
         health.beat();
-        health.running();
+        health.running(1);
         let (stop_tx, stop_rx) = watch::channel(false);
         let (started_tx, started_rx) = oneshot::channel();
         let (release_tx, release_rx) = oneshot::channel();
@@ -724,6 +923,29 @@ mod tests {
         let result = drain_tasks(&mut tasks, Duration::from_millis(20)).await;
         assert_eq!(result.expect("bounded abort"), DrainOutcome::Forced);
         assert!(tasks.is_empty(), "aborted task was joined");
+        assert!(started.elapsed() < Duration::from_secs(1));
+    }
+
+    #[tokio::test]
+    async fn a_forced_generation_drain_is_bounded_and_fails_closed() {
+        let mut tasks = JoinSet::new();
+        spawn_named(&mut tasks, "non-cooperative", std::future::pending());
+        let started = Instant::now();
+        let error = finish_generation_drain(
+            &mut tasks,
+            Duration::from_millis(20),
+            GenerationEnd::Shutdown,
+        )
+        .await
+        .expect_err("forced generation cancellation must be a failed worker exit");
+        assert_eq!(
+            error,
+            "worker generation shutdown required forced task cancellation"
+        );
+        assert!(
+            tasks.is_empty(),
+            "the forced task was joined before refusal"
+        );
         assert!(started.elapsed() < Duration::from_secs(1));
     }
 

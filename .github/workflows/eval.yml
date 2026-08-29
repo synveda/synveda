@@ -1,11 +1,9 @@
 name: Eval
 
-# The eval gate (EVAL-1, ADR-0028 decision 8). It needs a live stack, so
-# it runs nightly rather than on every pull request — that is the trade:
-# a regression is caught within a day, and `ci.yml` stays database-free
-# and fast. `workflow_dispatch` is there for the day you want it before a
-# merge; EVAL-4's composition scenarios are the trigger to move it onto
-# the pull-request path for good.
+# The full eval gate (EVAL-1, ADR-0028 decision 8) runs nightly; `ci.yml`
+# carries the bounded deterministic pull-request slice. Both paths own a fresh
+# exact-role PostgreSQL fixture rather than relying on an ambient database.
+# `workflow_dispatch` makes the full slice available before a merge.
 #
 # `make eval` covers both suites: the scenario suite and EVAL-2's labelled
 # extraction corpus (ADR-0046), which needs no wiring here because the
@@ -34,12 +32,6 @@ jobs:
         with:
           node-version: 22
 
-      # The harness brings up its own scratch database inside the compose
-      # postgres; nothing else from the dev environment is needed — no
-      # IdP, no model server (ADR-0028 decision 6).
-      - name: Start Postgres
-        run: docker compose -f deploy/compose/docker-compose.yml up --detach --wait postgres
-
       # The report is the artefact: axis by axis, scenario by scenario,
       # and class by class, with each block's watermark and — for the
       # extraction half — what the pipeline committed beside what a reader
@@ -47,6 +39,8 @@ jobs:
       # extraction. A failed gate still uploads it: that is the run
       # someone needs to read.
       - name: Run the suite against the gate
+        # The harness owns one fresh exact-role PostgreSQL fixture; no legacy
+        # owner database, IdP or model server participates.
         run: mkdir -p eval-report && make eval
         env:
           EVAL_REPORT: eval-report/report.json
@@ -67,7 +61,7 @@ jobs:
   # mode that is not a product regression, and folding it into the job above
   # would let it mask a composition result someone needs. It is also why
   # this half is not on the pull-request path — `ci.yml` runs the
-  # deterministic suite, which needs Postgres and nothing else.
+  # deterministic suite with its isolated exact-role PostgreSQL fixture.
   retrieval:
     runs-on: ubuntu-latest
     # The healthcheck this job now relies on allows a first model load
@@ -82,17 +76,9 @@ jobs:
         with:
           node-version: 22
 
-      # `--wait` means something here now: the `tei` service declares a
-      # healthcheck (2026-08-01). Before that it returned the moment the
-      # container started, ~2.3 GB of model download early. A cold load
-      # measures 2m01s, and this step is where that time is spent now —
-      # previously the Rust build happened to absorb it.
-      - name: Start Postgres and TEI
-        run: |
-          docker compose -f deploy/compose/docker-compose.yml \
-            up --detach --wait postgres tei
-
       - name: Run the Q&A corpus with real embeddings
+        # The Make target starts TEI once; the harness independently owns its
+        # exact-role PostgreSQL fixture.
         run: mkdir -p retrieval-report && make eval-retrieval
         env:
           EVAL_REPORT: retrieval-report/report.json
@@ -140,10 +126,8 @@ jobs:
         with:
           node-version: 22
 
-      - name: Start Postgres
-        run: docker compose -f deploy/compose/docker-compose.yml up --detach --wait postgres
-
       - name: Run the security corpus at the full variant budget
+        # The harness owns one fresh exact-role PostgreSQL fixture.
         run: mkdir -p security-report && make eval-security
         env:
           EVAL_REPORT: security-report/report.json

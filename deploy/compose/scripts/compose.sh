@@ -265,11 +265,13 @@ proxy_d=$ipv4_d
     exit 64
 }
 
-for setting in DATABASE_URL SYNVEDA_GATEWAY_DATABASE_URL SYNVEDA_WORKER_DATABASE_URL \
+for setting in DATABASE_URL SYNVEDA_MIGRATOR_DATABASE_URL SYNVEDA_GATEWAY_DATABASE_URL \
+    SYNVEDA_WORKER_DATABASE_URL \
     SYNVEDA_KMS_KEY SYNVEDA_KMS_KEY_REF POSTGRES_PASSWORD KC_DB_PASSWORD KC_BOOTSTRAP_ADMIN_USERNAME \
     KC_BOOTSTRAP_ADMIN_PASSWORD; do
     case "$setting" in
         DATABASE_URL) present=${DATABASE_URL+x} ;;
+        SYNVEDA_MIGRATOR_DATABASE_URL) present=${SYNVEDA_MIGRATOR_DATABASE_URL+x} ;;
         SYNVEDA_GATEWAY_DATABASE_URL) present=${SYNVEDA_GATEWAY_DATABASE_URL+x} ;;
         SYNVEDA_WORKER_DATABASE_URL) present=${SYNVEDA_WORKER_DATABASE_URL+x} ;;
         SYNVEDA_KMS_KEY) present=${SYNVEDA_KMS_KEY+x} ;;
@@ -295,6 +297,22 @@ absolute_from_compose() {
 
 secret_dir=$(absolute_from_compose "${SYNVEDA_SECRETS_DIR:-./secrets}")
 issuer_file=$(absolute_from_compose "${SYNVEDA_OIDC_ISSUERS_FILE:-./runtime/issuers.json}")
+database_authority_dir=$(absolute_from_compose "${SYNVEDA_DATABASE_AUTHORITY_DIR:-./runtime/database-authority}")
+if [ "${SYNVEDA_DATABASE_ROLES_FILE+x}" = x ]; then
+    [ -n "$SYNVEDA_DATABASE_ROLES_FILE" ] || {
+        echo "compose: SYNVEDA_DATABASE_ROLES_FILE must not be empty" >&2
+        exit 78
+    }
+    database_roles_input=$SYNVEDA_DATABASE_ROLES_FILE
+elif [ "$postgres_mode" = external ]; then
+    echo "compose: external PostgreSQL requires an explicit topology-specific SYNVEDA_DATABASE_ROLES_FILE" >&2
+    exit 78
+elif [ "$oidc_mode" = bundled ]; then
+    database_roles_input=./configs/database/roles.reference.json
+else
+    database_roles_input=./configs/database/roles.external-oidc.json
+fi
+database_roles_file=$(absolute_from_compose "$database_roles_input")
 mode_of() {
     stat -f '%Lp' "$1" 2>/dev/null || stat -c '%a' "$1" 2>/dev/null
 }
@@ -303,6 +321,9 @@ owner_of() {
 }
 group_of() {
     stat -f '%g' "$1" 2>/dev/null || stat -c '%g' "$1" 2>/dev/null
+}
+size_of() {
+    stat -f '%z' "$1" 2>/dev/null || stat -c '%s' "$1" 2>/dev/null
 }
 require_private_directory() {
     directory=$1
@@ -323,6 +344,10 @@ require_private_directory() {
 }
 require_private_directory "$secret_dir" secret
 secret_dir=$(CDPATH= cd "$secret_dir" && pwd -P)
+if [ "$oidc_mode" = bundled ]; then
+    require_private_directory "$database_authority_dir" database-authority
+    database_authority_dir=$(CDPATH= cd "$database_authority_dir" && pwd -P)
+fi
 issuer_parent=$(dirname "$issuer_file")
 require_private_directory "$issuer_parent" issuer-configuration
 issuer_parent=$(CDPATH= cd "$issuer_parent" && pwd -P)
@@ -356,8 +381,12 @@ for name in synveda_migrator_database_url synveda_gateway_database_url \
 done
 if [ "$postgres_mode" = bundled ]; then
     require_private_file "$secret_dir/postgres_owner_password" postgres_owner_password
+    require_private_file "$secret_dir/synveda_migrator_password" synveda_migrator_password
+    require_private_file "$secret_dir/synveda_gateway_password" synveda_gateway_password
+    require_private_file "$secret_dir/synveda_worker_password" synveda_worker_password
 fi
 if [ "$oidc_mode" = bundled ]; then
+    require_private_file "$secret_dir/postgres_owner_password" postgres_owner_password
     require_private_file "$secret_dir/keycloak_database_password" keycloak_database_password
     require_private_file "$secret_dir/keycloak_admin_username" keycloak_admin_username
     require_private_file "$secret_dir/keycloak_admin_password" keycloak_admin_password
@@ -367,6 +396,27 @@ if [ "$runtime" = reference ]; then
     require_private_file "$secret_dir/tls_key" tls_key
 fi
 require_private_file "$issuer_file" issuer_configuration
+
+[ ! -L "$database_roles_file" ] && [ -f "$database_roles_file" ] || {
+    echo "compose: database role contract file is missing or is a symlink" >&2
+    exit 78
+}
+database_roles_bytes=$(size_of "$database_roles_file") || {
+    echo "compose: database role contract size cannot be inspected" >&2
+    exit 78
+}
+case "$database_roles_bytes" in
+    ''|*[!0-9]*)
+        echo "compose: database role contract size cannot be inspected" >&2
+        exit 78
+        ;;
+esac
+[ "$database_roles_bytes" -gt 0 ] && [ "$database_roles_bytes" -le 4096 ] || {
+    echo "compose: database role contract must contain 1 through 4096 bytes" >&2
+    exit 78
+}
+database_roles_parent=$(CDPATH= cd "$(dirname "$database_roles_file")" && pwd -P)
+database_roles_file=$database_roles_parent/$(basename "$database_roles_file")
 
 if [ "$oidc_mode" = bundled ]; then
     oidc_issuer=$public_auth_url/realms/synveda
@@ -392,11 +442,93 @@ else
         esac
     fi
 fi
-issuer_bytes=$(wc -c < "$issuer_file")
+issuer_bytes=$(size_of "$issuer_file") || {
+    echo "compose: issuer configuration size cannot be inspected" >&2
+    exit 78
+}
+case "$issuer_bytes" in
+    ''|*[!0-9]*)
+        echo "compose: issuer configuration size cannot be inspected" >&2
+        exit 78
+        ;;
+esac
 [ "$issuer_bytes" -le 1048576 ] || {
     echo "compose: issuer configuration exceeds the 1048576 byte startup bound" >&2
     exit 78
 }
+
+postgres_bootstrap_url_set=${SYNVEDA_POSTGRES_BOOTSTRAP_URL+x}
+database_expected_host=
+database_expected_port=
+database_expected_name=
+if [ "$postgres_mode" = bundled ]; then
+    [ -z "${postgres_bootstrap_url_set:-}" ] || {
+        echo "compose: SYNVEDA_POSTGRES_BOOTSTRAP_URL is not accepted with bundled PostgreSQL" >&2
+        exit 64
+    }
+    postgres_bootstrap_url=postgresql://synveda_owner@postgres:5432/postgres
+    postgres_bundled_cluster=true
+    database_expected_host=postgres
+    database_expected_port=5432
+    database_expected_name=synveda
+elif [ "$oidc_mode" = bundled ]; then
+    postgres_bootstrap_url=${SYNVEDA_POSTGRES_BOOTSTRAP_URL:-}
+    case "$postgres_bootstrap_url" in
+        postgres://*|postgresql://*) ;;
+        *)
+            echo "compose: external PostgreSQL with bundled Keycloak requires SYNVEDA_POSTGRES_BOOTSTRAP_URL" >&2
+            exit 64
+            ;;
+    esac
+    case "$postgres_bootstrap_url" in
+        *'?'*|*'#'*|*[![:print:]]*|*' '*)
+            echo "compose: SYNVEDA_POSTGRES_BOOTSTRAP_URL must contain no query, fragment or whitespace" >&2
+            exit 64
+            ;;
+    esac
+    pg_location=${postgres_bootstrap_url#*://}
+    pg_authority=${pg_location%%/*}
+    pg_database=${pg_location#*/}
+    [ "$pg_authority" != "$pg_location" ] && [ -n "$pg_database" ] && \
+        [ "$pg_database" = "${pg_database##*/}" ] || {
+        echo "compose: SYNVEDA_POSTGRES_BOOTSTRAP_URL must identify one database" >&2
+        exit 64
+    }
+    case "$pg_authority" in
+        *@*)
+            pg_user=${pg_authority%%@*}
+            pg_endpoint=${pg_authority#*@}
+            ;;
+        *)
+            echo "compose: SYNVEDA_POSTGRES_BOOTSTRAP_URL must name a login without a password" >&2
+            exit 64
+            ;;
+    esac
+    case "$pg_user" in
+        ''|*:*|*'@'*|*[!A-Za-z0-9_-]*)
+            echo "compose: SYNVEDA_POSTGRES_BOOTSTRAP_URL must name a login without a password" >&2
+            exit 64
+            ;;
+    esac
+    pg_host=${pg_endpoint%:*}
+    pg_port=${pg_endpoint##*:}
+    [ "$pg_host" != "$pg_endpoint" ] && valid_host "$pg_host" && \
+    valid_runtime_id "$pg_port" && [ "$pg_port" -le 65535 ] || {
+        echo "compose: SYNVEDA_POSTGRES_BOOTSTRAP_URL must identify one canonical DNS host and port" >&2
+        exit 64
+    }
+    postgres_bundled_cluster=false
+    database_expected_host=$pg_host
+    database_expected_port=$pg_port
+    database_expected_name=synveda
+else
+    [ -z "${postgres_bootstrap_url_set:-}" ] || {
+        echo "compose: SYNVEDA_POSTGRES_BOOTSTRAP_URL is not accepted without a bundled database bootstrap" >&2
+        exit 64
+    }
+    postgres_bootstrap_url=
+    postgres_bundled_cluster=false
+fi
 
 product_image=${SYNVEDA_PRODUCT_IMAGE:-synveda/product:dev}
 postgres_image=${SYNVEDA_POSTGRES_IMAGE:-synveda/postgres:17.11-dev}
@@ -432,9 +564,9 @@ if [ "$runtime" = reference ]; then
         echo "compose: reference product image must use an OCI sha256 digest" >&2
         exit 64
     }
-    if [ "$postgres_mode" = bundled ]; then
+    if [ "$postgres_mode" = bundled ] || [ "$oidc_mode" = bundled ]; then
         digest_image "$postgres_image" || {
-            echo "compose: reference PostgreSQL image must use an OCI sha256 digest" >&2
+            echo "compose: reference PostgreSQL server/client image must use an OCI sha256 digest" >&2
             exit 64
         }
     fi
@@ -502,6 +634,11 @@ if [ "$oidc_mode" = bundled ]; then
             echo "compose: SYNVEDA_KEYCLOAK_DATABASE_URL must identify one canonical DNS host, port and database" >&2
             exit 64
         }
+        [ "$pg_database" = postgres ] && [ "$jdbc_database" = keycloak ] && \
+            [ "$pg_host" = "$jdbc_host" ] && [ "$pg_port" = "$jdbc_port" ] || {
+            echo "compose: Keycloak bootstrap and JDBC settings must use one endpoint, with postgres and keycloak databases" >&2
+            exit 64
+        }
     fi
 else
     [ -z "${keycloak_database_url_set:-}" ] || {
@@ -538,6 +675,11 @@ export SYNVEDA_PUBLIC_PORT=$public_port
 export SYNVEDA_PUBLIC_APP_URL=$public_app_url
 export SYNVEDA_PUBLIC_AUTH_URL=$public_auth_url
 export SYNVEDA_OIDC_ISSUER=$oidc_issuer
+export SYNVEDA_POSTGRES_BOOTSTRAP_URL=$postgres_bootstrap_url
+export SYNVEDA_POSTGRES_BUNDLED_CLUSTER=$postgres_bundled_cluster
+export SYNVEDA_DATABASE_EXPECTED_HOST=$database_expected_host
+export SYNVEDA_DATABASE_EXPECTED_PORT=$database_expected_port
+export SYNVEDA_DATABASE_EXPECTED_NAME=$database_expected_name
 export SYNVEDA_DEV_HTTP_PORT=$public_port
 export SYNVEDA_PROXY_HTTP_PORT=$proxy_http_port
 export SYNVEDA_PROXY_HTTPS_PORT=$proxy_https_port
@@ -547,6 +689,8 @@ export SYNVEDA_CADDY_APP_CONFIG=$caddy_app_config
 export SYNVEDA_CADDY_IDENTITY_CONFIG=$caddy_identity_config
 export SYNVEDA_SECRETS_DIR=$secret_dir
 export SYNVEDA_OIDC_ISSUERS_FILE=$issuer_file
+export SYNVEDA_DATABASE_ROLES_FILE=$database_roles_file
+export SYNVEDA_DATABASE_AUTHORITY_DIR=$database_authority_dir
 export SYNVEDA_PRODUCT_IMAGE=$product_image
 export SYNVEDA_POSTGRES_IMAGE=$postgres_image
 export SYNVEDA_KEYCLOAK_IMAGE=$keycloak_image
@@ -562,6 +706,15 @@ if [ "$postgres_mode" = bundled ]; then
 fi
 if [ "$oidc_mode" = bundled ]; then
     set -- "$@" -f "$compose_dir/compose.keycloak.yaml"
+fi
+if [ "$postgres_mode" = bundled ] && [ "$oidc_mode" = bundled ]; then
+    set -- "$@" -f "$compose_dir/compose.keycloak-postgres.yaml"
+fi
+if [ "$postgres_mode" = external ] && [ "$oidc_mode" = bundled ]; then
+    set -- "$@" -f "$compose_dir/compose.keycloak-external-postgres.yaml"
+fi
+if [ "$postgres_mode" = external ]; then
+    set -- "$@" -f "$compose_dir/compose.external-postgres.yaml"
 fi
 if [ "$postgres_mode" = external ] || [ "$oidc_mode" = external ]; then
     set -- "$@" -f "$compose_dir/compose.external.yaml"

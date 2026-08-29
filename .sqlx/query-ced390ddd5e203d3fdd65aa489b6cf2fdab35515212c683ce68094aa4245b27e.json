@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "create or replace function public.synveda_knowledge_tags_canonical(value text[])\n               returns boolean\n               language sql immutable parallel safe\n               as 'select false'",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "ced390ddd5e203d3fdd65aa489b6cf2fdab35515212c683ce68094aa4245b27e"
+}

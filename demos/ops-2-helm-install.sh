@@ -34,7 +34,8 @@ set -euo pipefail
 CLUSTER=${CLUSTER:-synveda-ops2}
 NS=synveda-test
 RELEASE=synveda
-CNPG_VERSION=${CNPG_VERSION:-1.25.0}
+CNPG_VERSION=${CNPG_VERSION:-1.30.0}
+CNPG_MANIFEST_SHA256=${CNPG_MANIFEST_SHA256:-f8bede43fe4ee0d478c2355b204a36876b2ae4faac60f2a9452280b293da3b88}
 FIXTURES=demos/fixtures/ops-2
 # The chart's own appVersion, never a copy of it. `values.yaml` leaves
 # `image.tag` empty so `_helpers.tpl` resolves it from appVersion, and this
@@ -52,6 +53,7 @@ IMAGE_TAG=$(awk -F'"' '/^appVersion:/{print $2; exit}' deploy/helm/synveda/Chart
 KEEP=${KEEP:-0}
 REUSE=${REUSE:-0}
 SECRET_SCRATCH=""
+CNPG_MANIFEST=""
 
 cd "$(dirname "$0")/.."
 
@@ -86,6 +88,9 @@ cleanup() {
   if [ -n "$SECRET_SCRATCH" ] && [ -d "$SECRET_SCRATCH" ]; then
     rm -rf -- "$SECRET_SCRATCH"
   fi
+  if [ -n "$CNPG_MANIFEST" ] && [ -f "$CNPG_MANIFEST" ]; then
+    rm -f -- "$CNPG_MANIFEST"
+  fi
   if [ "$KEEP" = "1" ]; then
     echo
     echo "KEEP=1: the cluster stays. Delete it with:  kind delete cluster --name $CLUSTER"
@@ -95,7 +100,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-for tool in docker kind kubectl helm node openssl; do
+for tool in curl docker kind kubectl helm node openssl; do
   command -v "$tool" >/dev/null 2>&1 || fail "$tool is not installed"
 done
 
@@ -115,7 +120,7 @@ kubectl config use-context "kind-$CLUSTER" >/dev/null
 echo "==> building the product image (this is the slow part; layers cache)"
 docker build -t "synveda/gateway:$IMAGE_TAG" -f deploy/compose/gateway/Dockerfile .
 echo "==> building the enterprise Postgres image (CNPG base + pgvector)"
-docker build -t synveda/enterprise-postgres:17 deploy/helm/postgres
+docker build -t synveda/enterprise-postgres:17 -f deploy/helm/postgres/Dockerfile .
 echo "==> loading both into the cluster"
 kind load docker-image --name "$CLUSTER" "synveda/gateway:$IMAGE_TAG" synveda/enterprise-postgres:17
 # Two multi-stage Rust builds leave a build cache the size of the images
@@ -129,8 +134,14 @@ docker builder prune --force >/dev/null 2>&1 || true
 # decision 1 gives: a product chart that owns cluster-scoped CRDs fights the
 # next chart that wants them.
 echo "==> CloudNativePG $CNPG_VERSION"
-kubectl apply --server-side -f \
-  "https://raw.githubusercontent.com/cloudnative-pg/cloudnative-pg/release-${CNPG_VERSION%.*}/releases/cnpg-${CNPG_VERSION}.yaml" >/dev/null
+CNPG_MANIFEST=$(mktemp "${TMPDIR:-/tmp}/synveda-cnpg-manifest.XXXXXX")
+curl -fsSLo "$CNPG_MANIFEST" \
+  "https://github.com/cloudnative-pg/cloudnative-pg/releases/download/v${CNPG_VERSION}/cnpg-${CNPG_VERSION}.yaml" ||
+  fail "could not download the pinned CloudNativePG manifest"
+ACTUAL_CNPG_SHA256=$(openssl dgst -sha256 -r "$CNPG_MANIFEST" | awk '{print $1}')
+[ "$ACTUAL_CNPG_SHA256" = "$CNPG_MANIFEST_SHA256" ] ||
+  fail "the CloudNativePG manifest did not match its pinned SHA-256"
+kubectl apply --server-side -f "$CNPG_MANIFEST" >/dev/null
 kubectl wait --for=condition=Available --timeout=300s \
   -n cnpg-system deployment/cnpg-controller-manager ||
   fail "the CloudNativePG operator never became available"
@@ -173,6 +184,21 @@ else
     --from-file=SYNVEDA_KMS_KEY_REF="$SECRET_SCRATCH/kms_key_ref" >/dev/null
 fi
 
+echo "==> the disposable gateway database credential"
+if kubectl get secret synveda-gateway-db -n "$NS" >/dev/null 2>&1; then
+  echo "    preserving the existing gateway database Secret"
+else
+  GATEWAY_DATABASE_PASSWORD=$(openssl rand -hex 32)
+  printf '%s' "$GATEWAY_DATABASE_PASSWORD" > "$SECRET_SCRATCH/gateway_password"
+  printf 'postgres://synveda_gateway:%s@synveda-pg-rw:5432/synveda' \
+    "$GATEWAY_DATABASE_PASSWORD" > "$SECRET_SCRATCH/gateway_database_url"
+  chmod 0600 "$SECRET_SCRATCH/gateway_password" "$SECRET_SCRATCH/gateway_database_url"
+  kubectl create secret generic synveda-gateway-db -n "$NS" \
+    --from-file=DATABASE_URL="$SECRET_SCRATCH/gateway_database_url" \
+    --from-file=password="$SECRET_SCRATCH/gateway_password" >/dev/null
+  unset GATEWAY_DATABASE_PASSWORD
+fi
+
 echo "==> the disposable worker database credential"
 if kubectl get secret synveda-worker-db -n "$NS" >/dev/null 2>&1; then
   echo "    preserving the existing worker database Secret"
@@ -193,7 +219,7 @@ helm upgrade --install "$RELEASE" deploy/helm/synveda \
   --namespace "$NS" -f "$FIXTURES/values.yaml" --wait=false ||
   fail "helm install failed"
 
-echo "==> the install job: migrate under the admin identity, grant, admit a tenant"
+echo "==> the install job: bootstrap, preflight, migrate, admit a tenant"
 for _ in $(seq 1 120); do
   phase=$(kubectl get job -n "$NS" -l app.kubernetes.io/component=install \
     -o jsonpath='{.items[0].status.succeeded}' 2>/dev/null || true)
@@ -245,23 +271,57 @@ kubectl rollout status -n "$NS" deployment/synveda-worker --timeout=600s ||
 # misconfigured back to a superuser DSN with nothing noticing, and until
 # this deployment every gateway connected as the compose superuser — which
 # bypasses row-level security even where it is FORCED.
-echo "==> the backstop is live: the gateway's role is not a superuser"
-# Two halves, so the claim is about the gateway and not about a role that
-# merely exists: who the gateway's own credential says it is, and what that
-# role may do. Asked over the instance's local socket rather than by handing
-# a throwaway pod the application password.
-GATEWAY_ROLE=$(kubectl get secret -n "$NS" synveda-pg-app -o jsonpath='{.data.username}' |
-  base64 -d) || fail "could not read the gateway's database identity"
+echo "==> the backstop is live: migration ownership and runtime authority are separate"
+# Prove the generated CloudNativePG application Secret still belongs to the
+# migrator, then derive the runtime identity from the exact Secret mounted by
+# the gateway. Passwords stay on stdin and are never printed or handed to a
+# throwaway pod.
+MIGRATOR_ROLE=$(kubectl get secret -n "$NS" synveda-pg-app -o jsonpath='{.data.username}' |
+  base64 -d) || fail "could not read the migrator's database identity"
+[ "$MIGRATOR_ROLE" = "synveda_migrator" ] ||
+  fail "the CloudNativePG application Secret belongs to $MIGRATOR_ROLE, not synveda_migrator"
+GATEWAY_ROLE=$(kubectl get secret -n "$NS" synveda-gateway-db -o jsonpath='{.data.DATABASE_URL}' |
+  base64 -d |
+  node -e '
+    let input = "";
+    process.stdin.setEncoding("utf8");
+    process.stdin.on("data", (chunk) => { input += chunk; });
+    process.stdin.on("end", () => {
+      try {
+        process.stdout.write(new URL(input).username);
+      } catch (_) {
+        process.exitCode = 1;
+      }
+    });
+  ') || fail "could not read the gateway database identity"
+[ "$GATEWAY_ROLE" = "synveda_gateway" ] ||
+  fail "the gateway Secret selects $GATEWAY_ROLE, not synveda_gateway"
 PG_POD=$(kubectl get pods -n "$NS" -l cnpg.io/cluster=synveda-pg,role=primary \
   -o jsonpath='{.items[0].metadata.name}') || fail "no Postgres primary to ask"
 ROLE_FACTS=$(kubectl exec -n "$NS" "$PG_POD" -c postgres -- \
   psql -U postgres -d synveda -tAc \
-  "select rolsuper, rolbypassrls, pg_has_role('$GATEWAY_ROLE','synveda_app','member')
-     from pg_roles where rolname = '$GATEWAY_ROLE'" 2>/dev/null | tr -d '\r ') ||
+  "select roles.rolcanlogin, roles.rolinherit, roles.rolsuper,
+          roles.rolcreatedb, roles.rolcreaterole, roles.rolreplication,
+          roles.rolbypassrls,
+          pg_has_role(roles.rolname,'synveda_app','member'),
+          exists (
+            select 1 from pg_database databases
+             where databases.datname = current_database()
+               and databases.datdba = roles.oid
+          ),
+          exists (
+            select 1
+              from pg_auth_members memberships
+              join pg_roles granted_roles on granted_roles.oid = memberships.roleid
+             where memberships.member = roles.oid
+               and granted_roles.rolname <> 'synveda_app'
+          )
+     from pg_roles roles where roles.rolname = '$GATEWAY_ROLE'" \
+  2>/dev/null | tr -d '\r ') ||
   fail "could not ask the database about $GATEWAY_ROLE"
-echo "    the gateway connects as $GATEWAY_ROLE — superuser|bypassrls|synveda_app: $ROLE_FACTS"
-[ "$ROLE_FACTS" = "f|f|t" ] ||
-  fail "$GATEWAY_ROLE is a superuser, holds BYPASSRLS, or is not in synveda_app: $ROLE_FACTS"
+echo "    gateway login|inherit|superuser|createdb|createrole|replication|bypassrls|synveda_app|database-owner|other-role: $ROLE_FACTS"
+[ "$ROLE_FACTS" = "t|t|f|f|f|f|f|t|f|f" ] ||
+  fail "$GATEWAY_ROLE is elevated, ungranted or owns the database: $ROLE_FACTS"
 
 echo "==> the worker uses its distinct non-owner runtime role"
 WORKER_FACTS=$(kubectl exec -n "$NS" "$PG_POD" -c postgres -- \
@@ -403,8 +463,8 @@ done
 echo
 echo "================================================================"
 echo "OPS-2 AC: a kind-cluster install of the one Synveda runtime"
-echo "  the chart installed, the job migrated under the admin identity,"
-echo "  and separate gateway/worker processes came up with distinct roles"
+echo "  the chart installed, the job bootstrapped then migrated as its owner,"
+echo "  and separate gateway/worker processes came up with non-owner roles"
 echo "  a real authorization-code + PKCE login provisioned the tenant root"
 echo "  a governed write, session append → context run, audit verified"
 echo "  the primary was deleted and the same run composed again"

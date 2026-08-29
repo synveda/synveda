@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "alter function public.synveda_knowledge_tags_canonical(text[]) volatile",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "94d21e129156c1cd0c00b054bfa93bd29f230558123ccbbb6ade1137bc69c8a6"
+}

@@ -35,6 +35,9 @@
 //! Tests need a live Postgres: they read `DATABASE_URL` and skip with a
 //! message when it is unset (CI has no database), the house convention.
 
+#[path = "../../synveda-store/tests/support/tenant_fixture.rs"]
+mod tenant_fixture;
+
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -47,7 +50,7 @@ use metrics_exporter_prometheus::PrometheusHandle;
 use serde_json::{Value, json};
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
-use synveda_gateway::app::{AppState, router};
+use synveda_gateway::app::{AppState, behavior_test_router as router};
 use synveda_gateway::telemetry;
 use synveda_identity::Hs256Verifier;
 use synveda_ingest::embedding::{AnyEmbedder, DeterministicEmbedder};
@@ -92,13 +95,13 @@ async fn world() -> Option<World> {
         .connect(&url)
         .await
         .expect("connect to DATABASE_URL");
-    synveda_store::migrate(&pool)
+    synveda_store::epoch::verify(&pool)
         .await
         .expect("apply migrations");
 
     let tenant = TenantId::new();
     let slug = format!("auth4-{}", tenant.as_uuid().simple());
-    tenants::create(&pool, tenant, &slug, "AUTH-4 tenant", TenantStatus::Active)
+    tenant_fixture::create(&pool, tenant, &slug, "AUTH-4 tenant", TenantStatus::Active)
         .await
         .expect("admit tenant");
 
@@ -108,7 +111,7 @@ async fn world() -> Option<World> {
     // now (CPR-6), never a mapping to a scope, and a person's scope is
     // their own principal scope under the root, wherever their groups
     // put them (CPR-7, ADR-0074 decision 3).
-    let mut tx = pool.begin().await.expect("begin");
+    let mut tx = tenant_fixture::begin(&pool, tenant).await;
     let org = scopes::ensure_tenant_root(&mut tx, tenant)
         .await
         .expect("mint root");
@@ -331,14 +334,16 @@ async fn a_second_record_for_one_person_is_refused_before_anything_is_written() 
         1,
         "one person, one identity"
     );
+    let mut tx = tenant_fixture::begin(&w.pool, w.tenant).await;
     let orphans = sqlx::query_scalar!(
         r#"select count(*) as "count!" from scim_users
            where tenant_id = $1 and identity_id is null"#,
         w.tenant.as_uuid(),
     )
-    .fetch_one(&w.pool)
+    .fetch_one(&mut *tx)
     .await
     .expect("count orphans");
+    tx.commit().await.expect("commit orphan check");
     assert_eq!(
         orphans, 0,
         "a refused create leaves no record behind — the 409 is not about a \
@@ -604,7 +609,7 @@ async fn a_provisioning_credential_reaches_this_plane_and_nothing_else() {
     // much as absent, because the lookup runs inside the tenant its own
     // token names.
     let other = TenantId::new();
-    tenants::create(
+    tenant_fixture::create(
         &w.pool,
         other,
         &format!("other-{}", other.as_uuid().simple()),
@@ -682,7 +687,8 @@ async fn a_directory_group_becomes_a_governed_group_with_its_members() {
         .await
         .expect("the joiner reconciled onto an identity");
 
-    let group = access::list_groups(&w.pool, w.tenant)
+    let mut tx = tenant_fixture::begin(&w.pool, w.tenant).await;
+    let group = access::list_groups(&mut *tx, w.tenant)
         .await
         .expect("list governed groups")
         .into_iter()
@@ -691,6 +697,7 @@ async fn a_directory_group_becomes_a_governed_group_with_its_members() {
                 && group.directory_resource_id.as_deref() == Some(group_id.as_str())
         })
         .expect("the directory group was projected");
+    tx.commit().await.expect("commit group read");
     assert_eq!(group.source, GroupSource::Directory);
     assert_eq!(group.display_name, "synveda-eng-core");
     assert_eq!(
@@ -705,9 +712,11 @@ async fn a_directory_group_becomes_a_governed_group_with_its_members() {
         None,
         "a SCIM-created person has no subject until they log in"
     );
-    let before_login = access::group_members(&w.pool, w.tenant, group.id)
+    let mut tx = tenant_fixture::begin(&w.pool, w.tenant).await;
+    let before_login = access::group_members(&mut *tx, w.tenant, group.id)
         .await
         .expect("read members");
+    tx.commit().await.expect("commit pre-login member read");
     assert_eq!(before_login.len(), 1);
     assert_eq!(before_login[0].identity_id, identity);
     assert_eq!(before_login[0].principal_id, None);
@@ -717,9 +726,11 @@ async fn a_directory_group_becomes_a_governed_group_with_its_members() {
     let subject = "dana-subject";
     provision_via_login(&w, subject, "dana@example.test", "synveda-eng-core").await;
 
-    let members = access::group_members(&w.pool, w.tenant, group.id)
+    let mut tx = tenant_fixture::begin(&w.pool, w.tenant).await;
+    let members = access::group_members(&mut *tx, w.tenant, group.id)
         .await
         .expect("read members");
+    tx.commit().await.expect("commit post-login member read");
     assert_eq!(members.len(), 1);
     assert_eq!(members[0].identity_id, identity);
     assert_eq!(members[0].principal_id.as_deref(), Some(subject));
@@ -731,9 +742,11 @@ async fn a_directory_group_becomes_a_governed_group_with_its_members() {
     // `owner` grant each principal scope carries at itself (CPR-7,
     // ADR-0074 decision 8) — minted by the scope, not by the directory,
     // and reaching nothing but the person's own material.
-    let grants = access::list_grants(&w.pool, w.tenant, &access::GrantFilter::default())
+    let mut tx = tenant_fixture::begin(&w.pool, w.tenant).await;
+    let grants = access::list_grants(&mut *tx, w.tenant, &access::GrantFilter::default())
         .await
         .expect("list grants");
+    tx.commit().await.expect("commit grant read");
     let invented: Vec<_> = grants
         .iter()
         .filter(|grant| grant.source != synveda_types::access::GrantSource::Owner)
@@ -746,9 +759,11 @@ async fn a_directory_group_becomes_a_governed_group_with_its_members() {
     // Removing them from the directory group removes them here, on the next
     // sync rather than on a sweep.
     remove_member(&w, &group_id, &user_id).await;
-    let members = access::group_members(&w.pool, w.tenant, group.id)
+    let mut tx = tenant_fixture::begin(&w.pool, w.tenant).await;
+    let members = access::group_members(&mut *tx, w.tenant, group.id)
         .await
         .expect("read members again");
+    tx.commit().await.expect("commit removed-member read");
     assert!(
         members.is_empty(),
         "leaving the directory group leaves this one"
@@ -758,10 +773,12 @@ async fn a_directory_group_becomes_a_governed_group_with_its_members() {
     // and an archived group resolves to nobody.
     let (status, body) = scim_delete(&w, &format!("/scim/v2/Groups/{group_id}")).await;
     assert_eq!(status, StatusCode::NO_CONTENT, "{body}");
-    let after = access::get_group(&w.pool, w.tenant, group.id)
+    let mut tx = tenant_fixture::begin(&w.pool, w.tenant).await;
+    let after = access::get_group(&mut *tx, w.tenant, group.id)
         .await
         .expect("read the governed group")
         .expect("it is archived, not deleted");
+    tx.commit().await.expect("commit archived group read");
     assert_eq!(
         after.status,
         synveda_types::workspace::LifecycleStatus::Archived
@@ -956,14 +973,17 @@ async fn subject_of(w: &World, identity: IdentityId) -> Option<String> {
 }
 
 async fn identity_count(w: &World, email: &str) -> i64 {
-    sqlx::query_scalar!(
+    let mut tx = tenant_fixture::begin(&w.pool, w.tenant).await;
+    let count = sqlx::query_scalar!(
         r#"select count(*) as "count!" from identities where tenant_id = $1 and lower(email) = lower($2)"#,
         w.tenant.as_uuid(),
         email,
     )
-    .fetch_one(&w.pool)
+    .fetch_one(&mut *tx)
     .await
-    .expect("count identities")
+    .expect("count identities");
+    tx.commit().await.expect("commit identity count");
+    count
 }
 
 async fn bind_subject(w: &World, identity: IdentityId, subject: &str) {

@@ -18,6 +18,9 @@
 //! message when it is unset (CI has no database); run them locally with
 //! `make dev-up` then `make db-test`.
 
+#[path = "../../synveda-store/tests/support/tenant_fixture.rs"]
+mod tenant_fixture;
+
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
@@ -29,7 +32,7 @@ use metrics_exporter_prometheus::PrometheusHandle;
 use serde_json::{Value, json};
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
-use synveda_gateway::app::{AppState, router};
+use synveda_gateway::app::{AppState, behavior_test_router as router};
 use synveda_gateway::telemetry;
 use synveda_identity::Hs256Verifier;
 use synveda_policy::{Action, AuthzContext, Pdp, Principal, Resource, STANDARD, ScopeNode};
@@ -87,7 +90,7 @@ fn issue(tenant_id: TenantId, subject: &str) -> String {
 async fn admitted_tenant(pool: &PgPool) -> TenantId {
     let id = TenantId::new();
     let slug = format!("hier3-{}", id.as_uuid().simple());
-    synveda_store::tenants::create(
+    tenant_fixture::create(
         pool,
         id,
         &slug,
@@ -203,14 +206,16 @@ async fn member_reads(
     target: ScopeId,
     granted: ScopeId,
 ) -> bool {
-    let mut conn = state.pool.acquire().await.expect("acquire connection");
+    let mut tx = rls::begin_tenant_tx(&state.pool, tenant_id)
+        .await
+        .expect("begin decision fixture");
     // The resource's chain: the scope and its ancestors, nearest first.
-    let target_scope = scopes::get(&mut *conn, tenant_id, target)
+    let target_scope = scopes::get(&mut *tx, tenant_id, target)
         .await
         .expect("read target")
         .expect("target exists");
     let mut chain = vec![ScopeNode::from_scope(&target_scope, false)];
-    for ancestor in scopes::ancestors(&mut *conn, tenant_id, target)
+    for ancestor in scopes::ancestors(&mut *tx, tenant_id, target)
         .await
         .expect("resolve resource chain")
     {
@@ -218,7 +223,7 @@ async fn member_reads(
     }
     // The member's own chain.
     let own = scopes::get(
-        &mut *conn,
+        &mut *tx,
         tenant_id,
         member.scope_id.expect("member has an own scope"),
     )
@@ -227,7 +232,7 @@ async fn member_reads(
     .expect("own scope exists");
     let mut own_chain = vec![ScopeNode::from_scope(&own, false)];
     for ancestor in scopes::ancestors(
-        &mut *conn,
+        &mut *tx,
         tenant_id,
         member.scope_id.expect("member has an own scope"),
     )
@@ -239,7 +244,7 @@ async fn member_reads(
     // Their anchors: the grant the world wrote for them, and the tenant
     // root that is always applicable (roles empty there — the resolver's
     // own shape).
-    let granted_scope = scopes::get(&mut *conn, tenant_id, granted)
+    let granted_scope = scopes::get(&mut *tx, tenant_id, granted)
         .await
         .expect("read granted scope")
         .expect("granted scope exists");
@@ -267,6 +272,7 @@ async fn member_reads(
             via_groups: Vec::new(),
         },
     ];
+    tx.commit().await.expect("commit decision fixture read");
     state
         .pdp
         .authorize(
@@ -305,7 +311,7 @@ async fn a_scope_move_governs_the_very_next_decision() {
     let state = state(&url);
     let pool = state.pool.clone();
     let handle = state.metrics.clone();
-    synveda_store::migrate(&pool)
+    synveda_store::epoch::verify(&pool)
         .await
         .expect("apply migrations");
     let tenant_id = admitted_tenant(&pool).await;

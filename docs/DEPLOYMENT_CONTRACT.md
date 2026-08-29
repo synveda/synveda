@@ -31,7 +31,7 @@ compose.yaml             provider-neutral proxy, product, migration and Collecto
 compose.reference.yaml   HTTPS, resource bounds and reference restart policy
 compose.dev.yaml         source builds, explicit HTTP and loopback operator UI
 compose.postgres.yaml    bundled PostgreSQL and idempotent role/database bootstrap
-compose.keycloak.yaml    bundled Keycloak, database bootstrap and realm convergence
+compose.keycloak.yaml    bundled Keycloak and database bootstrap; realm convergence remains open
 compose.external.yaml    external dependency configuration and diagnostics, no provider services
 compose.apalis.yaml      atomic experimental routing plus dispatcher/executor
 .env.example             non-secret selectors and hostnames only
@@ -47,17 +47,23 @@ their simultaneous use. Provider fragments are then selected independently:
 
 | Mode | Required file set after `compose.yaml` |
 |---|---|
-| bundled reference | `compose.reference.yaml`, `compose.postgres.yaml`, `compose.keycloak.yaml` |
-| bundled development | `compose.dev.yaml`, `compose.postgres.yaml`, `compose.keycloak.yaml` |
+| bundled reference | `compose.reference.yaml`, `compose.postgres.yaml`, `compose.keycloak.yaml`, `compose.keycloak-postgres.yaml` |
+| bundled development | `compose.dev.yaml`, `compose.postgres.yaml`, `compose.keycloak.yaml`, `compose.keycloak-postgres.yaml` |
 | bundled PostgreSQL, external OIDC | one runtime overlay, `compose.postgres.yaml`, `compose.external.yaml` |
-| external PostgreSQL, bundled Keycloak | one runtime overlay, `compose.keycloak.yaml`, `compose.external.yaml` |
-| fully external | one runtime overlay, `compose.external.yaml` |
+| external PostgreSQL, bundled Keycloak (configuration only) | one runtime overlay, `compose.keycloak.yaml`, `compose.keycloak-external-postgres.yaml`, `compose.external-postgres.yaml`, `compose.external.yaml` |
+| fully external (configuration only while PostgreSQL is external) | one runtime overlay, `compose.external-postgres.yaml`, `compose.external.yaml` |
 
 `compose.external.yaml` supplies mounts and diagnostics for whichever
 dependencies are external; it never defines a service named `postgres` or
-`keycloak`. The Keycloak database bootstrap supports either the bundled server
-or an explicitly supplied external bootstrap connection. In pre-provisioned
-external mode it only proves the database, ownership and denial sentinels.
+`keycloak`. External PostgreSQL rows currently prove configuration shape only.
+The database bootstrap refuses before mounted-input reads or `psql` whenever
+`SYNVEDA_POSTGRES_BUNDLED_CLUSTER=false`: the compiled SQLx surface and
+bootstrap transport do not yet have an accepted authenticated-TLS contract.
+Consequently bundled Keycloak with external PostgreSQL and the fully external
+PostgreSQL row are not startable product modes. Their checked configuration
+still requires an explicit topology-specific database-role contract so the
+future implementation cannot infer or silently omit peer databases. Fully
+external OIDC omits Keycloak and its database bootstrap entirely.
 
 Optional services use only these profiles: `semantic`, `observability`,
 `apalis-board`, `demo` and `backup-test`. Apalis execution is activated by the
@@ -157,7 +163,7 @@ reference opens no pgBackRest daemon port.
 
 ## Service graph and lifecycle
 
-The provider-neutral graph is deterministic:
+The provider-neutral target graph is deterministic:
 
 ```text
 bundled postgres healthy -> database bootstrap complete -> Synveda migrate complete
@@ -172,6 +178,11 @@ Synveda migrate complete + issuer diagnostic complete -> gateway ready -> revers
 Apalis schema migration complete -> operation dispatcher + Apalis executor
 product processes and Keycloak -> Collector -> optional visibility/external OTLP
 ```
+
+The current additive checkpoint implements the bundled database bootstrap but
+not realm convergence or the issuer diagnostic. Its external-PostgreSQL
+bootstrap path deliberately stops before the graph above until authenticated
+TLS and pre-provisioned-provider acceptance are implemented.
 
 Base one-shot services retry their dependency with a bounded deadline rather
 than naming a provider that may be external. Provider fragments add
@@ -264,24 +275,44 @@ only the selected certificate and private-key files read-only.
 Database bootstrap revokes default `PUBLIC CONNECT` and `TEMPORARY`, grants
 only intended roles, and tests connection denial in both directions. Owner,
 superuser and `BYPASSRLS` credentials never reach gateway or worker.
+Before any persistent mutation, bootstrap also proves that the PostgreSQL
+owner, Synveda migrator, gateway and worker passwords are pairwise distinct.
+When bundled Keycloak shares that server, the same locked Synveda preflight
+includes the Keycloak database password and proves all five values are
+pairwise distinct; the Keycloak branch independently rechecks owner versus
+Keycloak. Refusals are content-free and external-OIDC mode does not mount a
+Keycloak credential.
+The closed role contract names both `forbidden_databases` (Synveda roles may
+not connect to them) and `isolated_peer_roles` (those roles may not connect
+to the selected Synveda database), so an inherited grant cannot silently
+reopen either edge.
 
 ## Migration contract
 
 1. PostgreSQL initialization creates databases and narrowly scoped roles from
-   secret files. It does not run application requests.
+   secret files. CloudNativePG leaves its application database in the exact
+   closed/null-ACL bootstrap state; the shared convergence transaction
+   publishes the explicit terminal ACL before reopening it. Initialization
+   does not run application requests.
 2. `synveda db migrate` runs once under the Synveda migration owner, protected
-   by the existing advisory lock and epoch checks.
-   CPR-45's ordinary forward migration is
-   `0002_portable_operations.sql`; it adds operation/outbox/attempt state while
-   leaving schema epoch 3 unchanged. Fresh installs run `0001` then `0002`;
-   databases at epoch 1/2 or without a marker are still refused.
+   by the existing advisory lock and epoch checks. The current embedded chain
+   is exactly the transactional epoch-3 baseline
+   `0001_context_platform.sql`. If SQLx commits that baseline and its exact
+   checksum but the process exits before the separate marker transaction,
+   restart recognises only the empty marker plus exact sole success ledger,
+   repeats the full authority proof and stamps it. Every partial, additional,
+   failed or checksum-drifted state remains refused.
 3. Gateway and worker start only after the schema sentinel is readable through
    their ordinary runtime roles. Bootstrap convergence connects through each
    configured runtime credential and refuses read-only targets, different
    PostgreSQL cluster identities, database OIDs or live postmaster start
    markers; a valid epoch alone does not bind one deployment to one live
-   writable database primary. The start marker is compared only during
-   bootstrap and is not persisted across an ordinary database restart.
+   writable database primary. Bundled Keycloak bootstrap atomically publishes
+   a content-free, mode-0600 witness containing its database OID, cluster
+   system identifier and postmaster start. Database preflight reads that same
+   authority directory read-only for all three Synveda credentials. An
+   ordinary PostgreSQL restart makes the witness stale and blocks startup
+   until idempotent Keycloak bootstrap republishes it.
 4. Keycloak owns and automatically migrates only its database. Upgrade first
    takes a verified backup and follows the pinned release's supported path.
 5. Apalis schema setup is a one-shot migration command; workers never migrate
@@ -367,7 +398,7 @@ Secret visibility is deny-by-default:
 | Service/job | Sensitive files it may mount |
 |---|---|
 | PostgreSQL server | PostgreSQL owner password; pgBackRest repository/S3 credentials needed by `archive_command` |
-| database bootstrap | PostgreSQL bootstrap connection and only the role-password files it converges |
+| database bootstrap | PostgreSQL owner plus the fixed role-password set it converges; bundled shared-cluster Synveda preflight additionally receives the Keycloak database password only to prove the complete set is pairwise distinct |
 | Synveda migrate | Synveda migration-owner database URL |
 | gateway | gateway runtime database URL, issuer config/CA, Synveda KMS reference/key, only gateway-used provider credentials |
 | core worker | worker runtime database URL, Synveda KMS reference/key, only credentials required by its owned work |

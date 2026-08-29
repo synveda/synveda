@@ -11,6 +11,9 @@
 //! message when it is unset (CI has no database), same convention as
 //! tests/jit_provisioning.rs.
 
+#[path = "../../synveda-store/tests/support/tenant_fixture.rs"]
+mod tenant_fixture;
+
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -27,10 +30,11 @@ use metrics_exporter_prometheus::PrometheusHandle;
 use serde_json::{Value, json};
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
-use synveda_gateway::app::{AppState, router};
+use synveda_audit::AuditAction;
+use synveda_gateway::app::{AppState, behavior_test_router as router};
 use synveda_gateway::telemetry;
 use synveda_identity::{OidcVerifier, parse_issuers};
-use synveda_store::{access, identities, scopes, tenants};
+use synveda_store::{access, identities, scopes};
 use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
 use synveda_types::scope::Scope;
 use synveda_types::{GrantId, Identity, IdentityId, IdentityKind, ScopeId, TenantId, TenantStatus};
@@ -300,12 +304,12 @@ async fn admitted_tenant() -> Option<(PgPool, TenantId, String)> {
         .connect(&url)
         .await
         .expect("connect to DATABASE_URL");
-    synveda_store::migrate(&pool)
+    synveda_store::epoch::verify(&pool)
         .await
         .expect("apply migrations");
     let id = TenantId::new();
     let slug = format!("auth3-{}", id.as_uuid().simple());
-    tenants::create(&pool, id, &slug, "AUTH-3 test tenant", TenantStatus::Active)
+    tenant_fixture::create(&pool, id, &slug, "AUTH-3 test tenant", TenantStatus::Active)
         .await
         .expect("admit tenant");
     Some((pool, id, url))
@@ -314,7 +318,7 @@ async fn admitted_tenant() -> Option<(PgPool, TenantId, String)> {
 /// Seeds the tenant root with an `eng` org unit and a platform unit under
 /// it. Returns (root, eng, platform).
 async fn seed_hierarchy(pool: &PgPool, tenant: TenantId) -> (Scope, Scope, Scope) {
-    let mut tx = pool.begin().await.expect("begin");
+    let mut tx = tenant_fixture::begin(pool, tenant).await;
     let org = scopes::ensure_tenant_root(&mut tx, tenant)
         .await
         .expect("mint root");
@@ -357,7 +361,7 @@ async fn seed_hierarchy(pool: &PgPool, tenant: TenantId) -> (Scope, Scope, Scope
 /// Provisions a *user* identity at the store level (the JIT shape) so an
 /// IdP-verified subject is not quarantined at the seam.
 async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str) -> Identity {
-    let mut tx = pool.begin().await.expect("begin");
+    let mut tx = tenant_fixture::begin(pool, tenant).await;
     let own = scopes::ensure_principal_scope(&mut tx, tenant, subject, subject)
         .await
         .expect("mint principal scope");
@@ -700,6 +704,107 @@ async fn registration_is_pdp_gated_on_the_anchor() {
     // Subject collision: one identity per (tenant, subject).
     let response = register(idp.user_token("team-steward"), platform.id, "agent-a").await;
     assert_eq!(response.status(), StatusCode::CONFLICT);
+}
+
+/// Registration applies ADR-0074's "your own scope is yours" rule to service
+/// principals too. The automatic owner grant is atomic and audited; it lets
+/// the service govern its private leaf while the tenant administrator remains
+/// outside that privacy boundary.
+#[tokio::test]
+async fn registered_service_owns_and_can_govern_its_private_leaf() {
+    let _serial = serial().await;
+    let Some((pool, tenant, db_url)) = admitted_tenant().await else {
+        return;
+    };
+    let (_, _, platform) = seed_hierarchy(&pool, tenant).await;
+    let idp = MockIdp::spawn().await;
+    let app = router(state(&db_url, &idp.issuer, tenant));
+
+    seed_user(&pool, tenant, "admin").await;
+    bind(&pool, tenant, "admin", None, RoleKey::Administrator).await;
+    let admin = idp.user_token("admin");
+    let registered = register_agent(&app, &admin, platform.id).await;
+    let leaf: ScopeId = registered["scope_id"]
+        .as_str()
+        .expect("service leaf id")
+        .parse()
+        .expect("parse service leaf id");
+
+    let mut tx = synveda_store::rls::begin_tenant_tx(&pool, tenant)
+        .await
+        .expect("tenant tx");
+    let grants = access::list_grants(
+        &mut *tx,
+        tenant,
+        &access::GrantFilter {
+            scope_id: Some(leaf),
+            principal_id: Some(AGENT_CLIENT.to_owned()),
+        },
+    )
+    .await
+    .expect("read service owner grant");
+    assert!(
+        grants.iter().any(|grant| {
+            grant.role_key == RoleKey::Owner && grant.source == GrantSource::Owner
+        }),
+        "registration must atomically mint the service owner grant"
+    );
+    let audit = synveda_audit::search(
+        &mut tx,
+        tenant,
+        &synveda_audit::EventFilter {
+            actions: vec![AuditAction::AccessGranted],
+            resource: Some(format!("scope {leaf}")),
+            ..synveda_audit::EventFilter::default()
+        },
+        0,
+        20,
+    )
+    .await
+    .expect("read service grant audit");
+    assert!(
+        audit.items.iter().any(|event| {
+            event.payload["origin"] == "service-identity-registration"
+                && event.payload["grant"]["subject"] == AGENT_CLIENT
+        }),
+        "registration must chain a content-free access.granted event"
+    );
+    drop(tx);
+
+    let grant_body = json!({
+        "principal_id": "service-collaborator",
+        "role": "member",
+        "scope_id": leaf,
+    });
+    let mut admin_request = request(
+        Method::POST,
+        "/v1/admin/grants",
+        &admin,
+        Some(grant_body.clone()),
+    );
+    admin_request.headers_mut().insert(
+        "idempotency-key",
+        "service-private-admin-denied".parse().expect("header"),
+    );
+    let (status, _) = send(&app, admin_request).await;
+    assert_eq!(
+        status,
+        StatusCode::FORBIDDEN,
+        "tenant administration must not cross another principal's privacy boundary"
+    );
+
+    let service = idp.service_token(AGENT_CLIENT, 600, true);
+    let mut service_request = request(Method::POST, "/v1/admin/grants", &service, Some(grant_body));
+    service_request.headers_mut().insert(
+        "idempotency-key",
+        "service-private-owner-grant".parse().expect("header"),
+    );
+    let (status, body) = send(&app, service_request).await;
+    assert_eq!(
+        status,
+        StatusCode::CREATED,
+        "the service owner must govern its own leaf: {body}"
+    );
 }
 
 /// Revocation deletes the registration and its personal leaf; the agent's

@@ -2,6 +2,9 @@
 //! versions, revisioned project bindings, exact-version usage, and controlled
 //! non-executing tests. Every mutation enters as a typed VedaFlow change.
 
+#[path = "../../synveda-store/tests/support/tenant_fixture.rs"]
+mod tenant_fixture;
+
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
@@ -12,12 +15,12 @@ use metrics_exporter_prometheus::PrometheusHandle;
 use serde_json::{Value, json};
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
-use synveda_gateway::app::{AppState, router};
+use synveda_gateway::app::{AppState, behavior_test_router as router};
 use synveda_gateway::telemetry;
 use synveda_identity::Hs256Verifier;
 use synveda_ingest::embedding::{AnyEmbedder, DeterministicEmbedder};
 use synveda_policy::Pdp;
-use synveda_store::{access, identities, rls, scopes, tenants};
+use synveda_store::{access, identities, rls, scopes};
 use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
 use synveda_types::scope::{Scope, ScopeKind};
 use synveda_types::{GrantId, IdentityId, IdentityKind, ScopeId, Tenant, TenantId, TenantStatus};
@@ -162,11 +165,11 @@ async fn world() -> Option<World> {
         .connect(&url)
         .await
         .expect("connect to database");
-    synveda_store::migrate(&pool)
+    synveda_store::epoch::verify(&pool)
         .await
         .expect("apply migrations");
     let tenant_id = TenantId::new();
-    let tenant = tenants::create(
+    let tenant = tenant_fixture::create(
         &pool,
         tenant_id,
         &format!("cpr23-{}", tenant_id.as_uuid().simple()),
@@ -641,7 +644,7 @@ async fn immutable_versions_bindings_usage_and_tests_share_one_governed_path() {
     assert_eq!(suppressed["skills"], json!([]));
 
     let second_tenant_id = TenantId::new();
-    let second_tenant = tenants::create(
+    let second_tenant = tenant_fixture::create(
         &world.pool,
         second_tenant_id,
         &format!("cpr23-other-{}", second_tenant_id.as_uuid().simple()),

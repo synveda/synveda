@@ -105,6 +105,21 @@ synveda scope list
   assert.match(findings[0], /docs\/backlog\/DELETED\.md/u);
 });
 
+test("a demo cannot restore the retired owner-style Compose database probe", () => {
+  const directory = fixture(`#!/bin/sh
+synveda scope list
+rows=$($DEMO_COMPOSE exec -T postgres psql -U synveda -d "$DEMO_DATABASE")
+`);
+  const findings = checkCorpus({
+    demoDir: directory,
+    routes: [],
+    cliInventory: inventory(),
+  });
+  assert.equal(findings.length, 2, findings.join("\n"));
+  assert.match(findings[0], /DEMO_COMPOSE.*retired owner-style/u);
+  assert.match(findings[1], /DEMO_DATABASE.*retired owner-style/u);
+});
+
 test("container command arrays cannot hide a removed CLI option", () => {
   const directory = fixture(
     'command: ["/usr/local/bin/synveda", "audit", "verify", "--tenant", "abc"]\n',

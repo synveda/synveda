@@ -19,7 +19,7 @@ pub async fn signal() {
 }
 
 /// Completes when a cooperative worker-stop channel is set or closed.
-pub(crate) async fn requested(shutdown: &mut tokio::sync::watch::Receiver<bool>) {
+pub async fn requested(shutdown: &mut tokio::sync::watch::Receiver<bool>) {
     loop {
         if *shutdown.borrow() || shutdown.changed().await.is_err() {
             return;

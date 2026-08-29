@@ -33,6 +33,9 @@ const CORE_SECRETS = [
 ];
 const PROVIDER_SECRETS = [
   "postgres_owner_password",
+  "synveda_migrator_password",
+  "synveda_gateway_password",
+  "synveda_worker_password",
   "keycloak_database_password",
   "keycloak_admin_username",
   "keycloak_admin_password",
@@ -61,6 +64,10 @@ export function makeComposeFixture() {
   for (const name of [...CORE_SECRETS, ...PROVIDER_SECRETS, "tls_cert", "tls_key"]) {
     writePrivate(join(secrets, name), `${SECRET_SENTINEL}-${name}`, owner);
   }
+  const databaseAuthority = join(scratch, "database-authority");
+  mkdirSync(databaseAuthority, { mode: 0o700 });
+  chmodSync(databaseAuthority, 0o700);
+  if (processUid === 0) chownSync(databaseAuthority, owner.uid, owner.gid);
   const issuers = join(scratch, "issuers.json");
   writePrivate(
     issuers,
@@ -74,7 +81,7 @@ export function makeComposeFixture() {
     ]),
     owner,
   );
-  return { scratch, secrets, issuers, ...owner };
+  return { scratch, secrets, issuers, databaseAuthority, ...owner };
 }
 
 export function composeEnvironment(fixture, overrides = {}) {
@@ -91,6 +98,16 @@ export function composeEnvironment(fixture, overrides = {}) {
   ]) {
     delete environment[name];
   }
+  const postgresMode = overrides.SYNVEDA_POSTGRES_MODE ?? "bundled";
+  const oidcMode = overrides.SYNVEDA_OIDC_MODE ?? "bundled";
+  const externalRoleContract =
+    postgresMode === "external"
+      ? join(
+          COMPOSE,
+          "configs/database",
+          oidcMode === "bundled" ? "roles.reference.json" : "roles.external-oidc.json",
+        )
+      : undefined;
   return {
     ...environment,
     COMPOSE_DISABLE_ENV_FILE: "0",
@@ -100,6 +117,10 @@ export function composeEnvironment(fixture, overrides = {}) {
     SYNVEDA_RUNTIME_GID: String(fixture.gid),
     SYNVEDA_SECRETS_DIR: fixture.secrets,
     SYNVEDA_OIDC_ISSUERS_FILE: fixture.issuers,
+    SYNVEDA_DATABASE_AUTHORITY_DIR: fixture.databaseAuthority,
+    ...(externalRoleContract === undefined
+      ? {}
+      : { SYNVEDA_DATABASE_ROLES_FILE: externalRoleContract }),
     ...overrides,
   };
 }
@@ -114,6 +135,12 @@ function keys(value) {
 
 function secretBindings(service) {
   return sorted((service.secrets ?? []).map(({ source, target }) => `${source}:${target}`));
+}
+
+function bindMount(service, target) {
+  return (service.volumes ?? []).find(
+    (mount) => mount.type === "bind" && mount.target === target,
+  );
 }
 
 function publishedPorts(model) {
@@ -178,9 +205,18 @@ export function collectorConfigFindings(config) {
 export function canonicalComposeFindings(model, expected) {
   const findings = [];
   const services = model.services ?? {};
-  const expectedServices = ["gateway", "migrate", "otel-collector", "proxy", "worker"];
-  if (expected.postgres === "bundled") expectedServices.push("postgres");
-  if (expected.oidc === "bundled") expectedServices.push("keycloak");
+  const expectedServices = [
+    "database-preflight",
+    "gateway",
+    "migrate",
+    "otel-collector",
+    "proxy",
+    "worker",
+  ];
+  if (expected.postgres === "bundled") expectedServices.push("database-bootstrap", "postgres");
+  if (expected.oidc === "bundled") {
+    expectedServices.push("keycloak", "keycloak-database-bootstrap");
+  }
   if (JSON.stringify(keys(services)) !== JSON.stringify(sorted(expectedServices))) {
     findings.push("service set does not match the selected provider row");
   }
@@ -213,22 +249,49 @@ export function canonicalComposeFindings(model, expected) {
     findings.push("proxy port exposure does not match the runtime mode");
   }
 
-  const product = [services.gateway, services.worker, services.migrate].filter(Boolean);
+  const product = [
+    services["database-preflight"],
+    services.gateway,
+    services.worker,
+    services.migrate,
+  ].filter(Boolean);
   if (new Set(product.map(({ image }) => image)).size !== 1) {
-    findings.push("gateway, worker and migration do not use one product image");
+    findings.push("database preflight, gateway, worker and migration do not use one product image");
   }
   const commands = {
+    "database-preflight": ["database-preflight"],
     gateway: ["gateway"],
     worker: ["worker"],
     migrate: ["migrate"],
     proxy: ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"],
     "otel-collector": ["--config=/etc/otelcol/config.yaml"],
   };
+  if (expected.postgres === "bundled") commands["database-bootstrap"] = ["synveda"];
+  if (expected.oidc === "bundled") commands["keycloak-database-bootstrap"] = ["keycloak"];
   if (expected.oidc === "bundled") commands.keycloak = ["start", "--optimized"];
   for (const [name, command] of Object.entries(commands)) {
     if (JSON.stringify(services[name]?.command) !== JSON.stringify(command)) {
       findings.push(`${name} command drifted`);
     }
+  }
+  const roleContractTarget = "/etc/synveda/database/roles.json";
+  const roleContractSources = new Set();
+  for (const name of ["database-preflight", "gateway", "migrate", "worker"]) {
+    if (services[name]?.environment?.SYNVEDA_DATABASE_ROLES_FILE !== roleContractTarget) {
+      findings.push(`${name} database role contract setting drifted`);
+    }
+    if (services[name]?.environment?.SYNVEDA_EXPECTED_DATABASE_ROLE !== undefined) {
+      findings.push(`${name} retains the obsolete inferred-role setting`);
+    }
+    const mount = bindMount(services[name] ?? {}, roleContractTarget);
+    if (!mount || mount.read_only !== true) {
+      findings.push(`${name} database role contract mount is absent or writable`);
+    } else {
+      roleContractSources.add(mount.source);
+    }
+  }
+  if (roleContractSources.size !== 1) {
+    findings.push("product phases do not mount one byte-identical database role contract");
   }
   if (services.worker?.stop_grace_period !== "1m25s") {
     findings.push("worker stop grace is shorter than its bounded drain");
@@ -257,6 +320,77 @@ export function canonicalComposeFindings(model, expected) {
       findings.push("Keycloak database endpoint differs from the selected provider");
     }
   }
+  const expectedDatabaseEndpoint =
+    expected.postgres === "bundled"
+      ? { host: "postgres", port: "5432", database: "synveda" }
+      : expected.oidc === "bundled"
+        ? { host: "database.compose.example", port: "5432", database: "synveda" }
+        : undefined;
+  const preflightEnvironment = services["database-preflight"]?.environment ?? {};
+  if (
+    expectedDatabaseEndpoint !== undefined &&
+    (preflightEnvironment.SYNVEDA_DATABASE_EXPECTED_HOST !== expectedDatabaseEndpoint.host ||
+      preflightEnvironment.SYNVEDA_DATABASE_EXPECTED_PORT !== expectedDatabaseEndpoint.port ||
+      preflightEnvironment.SYNVEDA_DATABASE_EXPECTED_NAME !== expectedDatabaseEndpoint.database)
+  ) {
+    findings.push("database target preflight is not bound to the selected PostgreSQL endpoint");
+  }
+  if (
+    expectedDatabaseEndpoint === undefined &&
+    (preflightEnvironment.SYNVEDA_DATABASE_EXPECTED_HOST !== undefined ||
+      preflightEnvironment.SYNVEDA_DATABASE_EXPECTED_PORT !== undefined ||
+      preflightEnvironment.SYNVEDA_DATABASE_EXPECTED_NAME !== undefined)
+  ) {
+    findings.push("database target preflight has an unexpected endpoint binding");
+  }
+  if (
+    preflightEnvironment.SYNVEDA_DATABASE_REQUIRED_PEER !==
+    (expected.oidc === "bundled" ? "keycloak" : undefined)
+  ) {
+    findings.push("database target preflight peer requirement differs from the OIDC topology");
+  }
+  for (const processName of ["gateway", "worker"]) {
+    if (
+      services[processName]?.environment?.SYNVEDA_DATABASE_REQUIRED_PEER !==
+      (expected.oidc === "bundled" ? "keycloak" : undefined)
+    ) {
+      findings.push(
+        `${processName} runtime peer requirement differs from the OIDC topology`,
+      );
+    }
+  }
+  if (
+    preflightEnvironment.SYNVEDA_DATABASE_PEER_WITNESS_FILE !==
+    (expected.oidc === "bundled"
+      ? "/run/synveda/database-authority/keycloak-cluster.json"
+      : undefined)
+  ) {
+    findings.push("database target preflight witness differs from the OIDC topology");
+  }
+  const authorityTarget = "/run/synveda/database-authority";
+  const authorityMounts = Object.entries(services)
+    .map(([name, service]) => ({ name, mount: bindMount(service, authorityTarget) }))
+    .filter(({ mount }) => mount !== undefined);
+  if (expected.oidc === "bundled") {
+    const writer = authorityMounts.find(
+      ({ name }) => name === "keycloak-database-bootstrap",
+    )?.mount;
+    const reader = authorityMounts.find(({ name }) => name === "database-preflight")?.mount;
+    if (
+      authorityMounts.length !== 2 ||
+      !writer ||
+      writer.read_only === true ||
+      !reader ||
+      reader.read_only !== true ||
+      writer.source !== reader.source
+    ) {
+      findings.push(
+        "database authority witness must have one shared read-write producer and read-only preflight mount",
+      );
+    }
+  } else if (authorityMounts.length !== 0) {
+    findings.push("external OIDC topology unexpectedly mounts database authority state");
+  }
   if (services.proxy?.environment?.SYNVEDA_PUBLIC_PORT !== String(expected.publicPort)) {
     findings.push("proxy forwarded port differs from the selected browser port");
   }
@@ -276,8 +410,48 @@ export function canonicalComposeFindings(model, expected) {
   if (services.worker?.depends_on?.migrate?.condition !== "service_completed_successfully") {
     findings.push("worker does not wait for migration completion");
   }
+  if (
+    services.migrate?.depends_on?.["database-preflight"]?.condition !==
+    "service_completed_successfully"
+  ) {
+    findings.push("migration does not wait for database target preflight");
+  }
+  if (
+    expected.postgres === "bundled" &&
+    services["database-preflight"]?.depends_on?.["database-bootstrap"]?.condition !==
+      "service_completed_successfully"
+  ) {
+    findings.push("database target preflight does not wait for database bootstrap completion");
+  }
+  if (
+    expected.oidc === "bundled" &&
+    services.keycloak?.depends_on?.["keycloak-database-bootstrap"]?.condition !==
+      "service_completed_successfully"
+  ) {
+    findings.push("Keycloak does not wait for database bootstrap completion");
+  }
+  if (
+    expected.oidc === "bundled" &&
+    services["database-preflight"]?.depends_on?.["keycloak-database-bootstrap"]?.condition !==
+      "service_completed_successfully"
+  ) {
+    findings.push("database target preflight does not wait for Keycloak database bootstrap");
+  }
+  if (
+    expected.postgres === "bundled" &&
+    expected.oidc === "bundled" &&
+    services["keycloak-database-bootstrap"]?.depends_on?.postgres?.condition !==
+      "service_healthy"
+  ) {
+    findings.push("Keycloak database bootstrap does not wait for bundled PostgreSQL readiness");
+  }
 
   const expectedSecrets = {
+    "database-preflight": [
+      "synveda_gateway_database_url:synveda_gateway_database_url",
+      "synveda_migrator_database_url:synveda_migrator_database_url",
+      "synveda_worker_database_url:synveda_worker_database_url",
+    ],
     gateway: [
       "synveda_gateway_database_url:database_url",
       "synveda_kms_key:kms_key",
@@ -297,7 +471,50 @@ export function canonicalComposeFindings(model, expected) {
       findings.push(`${name} secret mounts are not role-scoped or have drifted targets`);
     }
   }
+  if (expected.postgres === "bundled") {
+    const bindings = [
+      "postgres_owner_password:postgres_bootstrap_password",
+      "synveda_gateway_password:synveda_gateway_password",
+      "synveda_migrator_password:synveda_migrator_password",
+      "synveda_worker_password:synveda_worker_password",
+    ];
+    if (expected.oidc === "bundled") {
+      bindings.push("keycloak_database_password:keycloak_database_password");
+    }
+    if (
+      JSON.stringify(secretBindings(services["database-bootstrap"] ?? {})) !==
+      JSON.stringify(sorted(bindings))
+    ) {
+      findings.push("Synveda database bootstrap secret boundary drifted");
+    }
+    const requiresKeycloakPassword =
+      services["database-bootstrap"]?.environment
+        ?.SYNVEDA_DATABASE_REQUIRE_KEYCLOAK_PASSWORD;
+    if (
+      (expected.oidc === "bundled" && requiresKeycloakPassword !== "true") ||
+      (expected.oidc === "external" && requiresKeycloakPassword !== undefined)
+    ) {
+      findings.push("Synveda database bootstrap credential-set boundary drifted");
+    }
+  }
+  if (expected.oidc === "bundled") {
+    const bindings = sorted([
+      "keycloak_database_password:keycloak_database_password",
+      "postgres_owner_password:postgres_bootstrap_password",
+    ]);
+    if (
+      JSON.stringify(secretBindings(services["keycloak-database-bootstrap"] ?? {})) !==
+      JSON.stringify(bindings)
+    ) {
+      findings.push("Keycloak database bootstrap secret boundary drifted");
+    }
+  }
   const expectedSecretFiles = {
+    "database-preflight": {
+      SYNVEDA_GATEWAY_DATABASE_URL_FILE: "/run/secrets/synveda_gateway_database_url",
+      SYNVEDA_MIGRATOR_DATABASE_URL_FILE: "/run/secrets/synveda_migrator_database_url",
+      SYNVEDA_WORKER_DATABASE_URL_FILE: "/run/secrets/synveda_worker_database_url",
+    },
     gateway: {
       DATABASE_URL_FILE: "/run/secrets/database_url",
       SYNVEDA_KMS_KEY_FILE: "/run/secrets/kms_key",
@@ -350,9 +567,18 @@ export function canonicalComposeFindings(model, expected) {
   ) {
     findings.push("Keycloak file-secret settings drifted");
   }
+  if (
+    expected.oidc === "bundled" &&
+    services.keycloak?.environment?.KC_LOG_LEVEL_ORG_KEYCLOAK_SERVICES !== "warn"
+  ) {
+    findings.push("Keycloak bootstrap-identifier log suppression drifted");
+  }
 
   const directSecretKeys = new Set([
     "DATABASE_URL",
+    "SYNVEDA_MIGRATOR_DATABASE_URL",
+    "SYNVEDA_GATEWAY_DATABASE_URL",
+    "SYNVEDA_WORKER_DATABASE_URL",
     "SYNVEDA_KMS_KEY",
     "SYNVEDA_KMS_KEY_REF",
     "POSTGRES_PASSWORD",
@@ -367,9 +593,16 @@ export function canonicalComposeFindings(model, expected) {
   }
 
   const expectedNetworks = {
+    "database-preflight":
+      expected.postgres === "external"
+        ? ["application-egress", "synveda-data"]
+        : ["synveda-data"],
     gateway: ["app-backend", "application-egress", "synveda-data", "telemetry"],
     worker: ["application-egress", "synveda-data", "telemetry"],
-    migrate: ["application-egress", "synveda-data"],
+    migrate:
+      expected.postgres === "external"
+        ? ["application-egress", "synveda-data"]
+        : ["synveda-data"],
     "otel-collector": ["keycloak-management", "telemetry", "telemetry-egress"],
     proxy:
       expected.oidc === "bundled"
@@ -378,14 +611,19 @@ export function canonicalComposeFindings(model, expected) {
   };
   if (expected.postgres === "bundled") {
     expectedNetworks.postgres = ["keycloak-data", "synveda-data"];
+    expectedNetworks["database-bootstrap"] = ["synveda-data"];
   }
   if (expected.oidc === "bundled") {
+    expectedNetworks["keycloak-database-bootstrap"] =
+      expected.postgres === "external"
+        ? ["identity-egress", "keycloak-data"]
+        : ["keycloak-data"];
     expectedNetworks.keycloak = [
       "identity-backend",
-      "identity-egress",
       "keycloak-data",
       "keycloak-management",
     ];
+    if (expected.postgres === "external") expectedNetworks.keycloak.push("identity-egress");
   }
   for (const [name, networks] of Object.entries(expectedNetworks)) {
     if (JSON.stringify(keys(services[name]?.networks)) !== JSON.stringify(sorted(networks))) {
@@ -397,9 +635,18 @@ export function canonicalComposeFindings(model, expected) {
     if (Object.values(services).some((service) => service.build !== undefined)) {
       findings.push("reference mode contains a source build");
     }
+    const oneShot = new Set([
+      "database-bootstrap",
+      "database-preflight",
+      "keycloak-database-bootstrap",
+      "migrate",
+    ]);
     for (const [name, service] of Object.entries(services)) {
-      if (name !== "migrate" && service.restart !== "unless-stopped") {
+      if (!oneShot.has(name) && service.restart !== "unless-stopped") {
         findings.push(`${name} lacks the reference restart policy`);
+      }
+      if (oneShot.has(name) && service.restart !== "no") {
+        findings.push(`${name} one-shot restart policy drifted`);
       }
     }
     if (
@@ -422,7 +669,7 @@ export function canonicalComposeFindings(model, expected) {
       findings.push("a non-proxy service changes kernel namespace settings");
     }
   } else {
-    for (const name of ["gateway", "worker", "migrate"]) {
+    for (const name of ["database-preflight", "gateway", "worker", "migrate"]) {
       if (services[name]?.build?.dockerfile !== "deploy/compose/gateway/Dockerfile") {
         findings.push(`${name} does not use the development product build`);
       }
@@ -465,7 +712,10 @@ export function canonicalComposeFindings(model, expected) {
     expectedNetworkNames.push("keycloak-data");
   }
   if (expected.oidc === "bundled") {
-    expectedNetworkNames.push("identity-backend", "identity-egress");
+    expectedNetworkNames.push("identity-backend");
+  }
+  if (expected.postgres === "external" && expected.oidc === "bundled") {
+    expectedNetworkNames.push("identity-egress");
   }
   if (
     JSON.stringify(keys(model.networks)) !==
@@ -490,10 +740,10 @@ export function canonicalComposeFindings(model, expected) {
       "CMD",
       "/otelcol-contrib",
       "validate",
-      "--config=http://127.0.0.1:13133/",
+      "--config=/etc/otelcol/config.yaml",
     ])
   ) {
-    findings.push("Collector health does not probe its running private endpoint");
+    findings.push("Collector health does not validate its mounted configuration");
   }
 
   const rendered = JSON.stringify(model);
@@ -552,6 +802,8 @@ function render(fixture, expected) {
     environment.SYNVEDA_OIDC_ISSUER = expected.issuer;
   }
   if (expected.postgres === "external" && expected.oidc === "bundled") {
+    environment.SYNVEDA_POSTGRES_BOOTSTRAP_URL =
+      "postgresql://bootstrap@database.compose.example:5432/postgres";
     environment.SYNVEDA_KEYCLOAK_DATABASE_URL =
       "jdbc:postgresql://database.compose.example:5432/keycloak";
   }
@@ -574,9 +826,29 @@ function checkStaticInputs() {
     "compose.reference.yaml",
     "compose.postgres.yaml",
     "compose.keycloak.yaml",
+    "compose.keycloak-postgres.yaml",
     "compose.external.yaml",
+    "compose.external-postgres.yaml",
   ].map((name) => readFileSync(join(COMPOSE, name), "utf8"));
   assert.doesNotMatch(canonicalFiles.join("\n"), /rauthy|temporal/i);
+
+  const databaseBootstrap = readFileSync(
+    join(COMPOSE, "postgres/synveda-database-bootstrap"),
+    "utf8",
+  );
+  for (const marker of [
+    "SYNVEDA_DATABASE_REQUIRE_KEYCLOAK_PASSWORD",
+    "validate_distinct_credentials",
+    'first_value=$(read_secret database_credential "$first")',
+    'candidate_value=$(read_secret database_credential "$candidate")',
+    '[ "$first_value" = "$candidate_value" ]',
+    "database-bootstrap: database credentials must be pairwise distinct",
+  ]) {
+    assert.ok(
+      databaseBootstrap.includes(marker),
+      `database credential boundary is missing ${marker}`,
+    );
+  }
 
   const caddy = readFileSync(join(COMPOSE, "configs/caddy/Caddyfile"), "utf8");
   for (const marker of [
@@ -610,14 +882,57 @@ function checkStaticInputs() {
   assert.doesNotMatch(collector, /debug:|logging:/);
   assert.doesNotMatch(collector, /^\s+address:/m);
 
-  const keycloak = readFileSync(join(COMPOSE, "keycloak/Dockerfile"), "utf8");
-  assert.match(keycloak, /keycloak:26\.7\.2@sha256:9d1f1b2b/);
+	  const keycloak = readFileSync(join(COMPOSE, "keycloak/Dockerfile"), "utf8");
+	  assert.match(
+	    keycloak,
+	    /FROM rust:1\.96\.0-bookworm@sha256:5e2214abe154fe26e39f64488952e5c991eeed1d6d6da7cc8381ae83927f0cfc AS snapshot-builder/,
+	  );
+	  assert.match(keycloak, /keycloak:26\.7\.2@sha256:9d1f1b2b/);
   assert.match(keycloak, /KC_DB=postgres/);
   assert.match(keycloak, /KC_HEALTH_ENABLED=true/);
   assert.match(keycloak, /KC_METRICS_ENABLED=true/);
-  assert.match(keycloak, /KC_FEATURES_DISABLED=identity-brokering-api,twitter-broker/);
-  assert.match(keycloak, /kc\.sh build/);
-  assert.doesNotMatch(keycloak, /start-dev|--features[^\n]*preview/);
+	  assert.match(keycloak, /KC_FEATURES_DISABLED=identity-brokering-api,twitter-broker/);
+	  assert.match(keycloak, /ENV KC_LOG_LEVEL_ORG_KEYCLOAK_SERVICES=warn/);
+	  assert.match(keycloak, /kc\.sh build/);
+	  assert.match(
+	    keycloak,
+	    /COPY --from=snapshot-builder --chmod=0555 \/opt\/synveda-input-snapshot \/opt\/keycloak\/bin\/synveda-input-snapshot/,
+	  );
+	  assert.match(keycloak, /RUN test -x \/usr\/bin\/timeout/);
+	  assert.match(keycloak, /\/opt\/keycloak\/bin\/synveda-input-snapshot \\\n+\s*\/tmp\/synveda-snapshot-input \/tmp\/synveda-snapshot-output/);
+	  assert.doesNotMatch(keycloak, /apt-get install[^\n]*(?:gcc|libc6-dev)/);
+	  assert.doesNotMatch(keycloak, /start-dev|--features[^\n]*preview/);
+
+  const keycloakEntrypoint = readFileSync(
+    join(COMPOSE, "keycloak/keycloak-entrypoint"),
+    "utf8",
+  );
+  assert.match(keycloakEntrypoint, /^#!\/bin\/bash -p\n/);
+  assert.match(
+    keycloakEntrypoint,
+    /^unset BASH_ENV ENV CDPATH GLOBIGNORE PS4$/m,
+  );
+  assert.match(keycloakEntrypoint, /^set \+x\nset -eu$/m);
+  assert.match(
+    keycloakEntrypoint,
+    /^exec \/bin\/bash -p -e \/opt\/keycloak\/bin\/kc\.sh "\$@"$/m,
+  );
+  assert.match(
+    keycloakEntrypoint,
+    /^PATH=\/opt\/keycloak\/bin:\/usr\/local\/sbin:\/usr\/local\/bin:\/usr\/sbin:\/usr\/bin:\/sbin:\/bin$/m,
+  );
+  assert.match(keycloakEntrypoint, /rm -f -- "\$secret_snapshot" \|\| cleanup_status=1/);
+  assert.match(
+    keycloakEntrypoint,
+    /cleanup_secret_snapshot \|\| \{\n\s*echo "keycloak-entrypoint: secret snapshot cleanup failed" >&2\n\s*exit 70/,
+  );
+
+  const product = readFileSync(join(COMPOSE, "gateway/Dockerfile"), "utf8");
+  const productBuilds = product
+    .split("\n")
+    .filter((line) => !line.trimStart().startsWith("#") && /\bcargo build\b/.test(line));
+  assert.equal(productBuilds.length, 2);
+  for (const build of productBuilds) assert.match(build, /\bcargo build --locked\b/);
 
   const proxy = readFileSync(join(COMPOSE, "proxy/Dockerfile"), "utf8");
   assert.match(proxy, /caddy:2\.11\.4-alpine@sha256:5f5c8640aae0/);
@@ -626,6 +941,10 @@ function checkStaticInputs() {
 
   const postgres = readFileSync(join(COMPOSE, "postgres/Dockerfile"), "utf8");
   assert.match(postgres, /postgres:17\.11-bookworm@sha256:051f7b7b/);
+  assert.equal(
+    postgres.split("postgresql-17-pgvector=0.8.6-1.pgdg12+1").length - 1,
+    1,
+  );
 
   const example = readFileSync(join(COMPOSE, ".env.example"), "utf8");
   assert.doesNotMatch(

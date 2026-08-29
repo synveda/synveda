@@ -14,7 +14,7 @@
 # This is also what keeps decision 1's promise concrete — the image gains a
 # static directory, not a second runtime. Node appears here and never in
 # the runtime stage.
-FROM node:22-bookworm-slim AS console
+FROM node:22-bookworm-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5 AS console
 WORKDIR /src
 RUN corepack enable
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
@@ -26,7 +26,7 @@ COPY tsconfig.base.json ./
 COPY console console
 RUN pnpm --filter @synveda/console build
 
-FROM rust:1.96.0-bookworm AS build
+FROM rust:1.96.0-bookworm@sha256:5e2214abe154fe26e39f64488952e5c991eeed1d6d6da7cc8381ae83927f0cfc AS build
 WORKDIR /src
 
 # The toolchain file pins the same version this image starts from; copying
@@ -43,6 +43,7 @@ COPY crates/synveda-cli/Cargo.toml         crates/synveda-cli/
 COPY crates/synveda-crypto/Cargo.toml      crates/synveda-crypto/
 COPY crates/synveda-eval/Cargo.toml        crates/synveda-eval/
 COPY crates/synveda-gateway/Cargo.toml     crates/synveda-gateway/
+COPY crates/synveda-gateway/test-support-enabler/Cargo.toml crates/synveda-gateway/test-support-enabler/
 COPY crates/synveda-identity/Cargo.toml    crates/synveda-identity/
 COPY crates/synveda-ingest/Cargo.toml      crates/synveda-ingest/
 COPY crates/synveda-okf/Cargo.toml         crates/synveda-okf/
@@ -61,11 +62,13 @@ RUN set -eux; \
     echo 'fn main() {}' > crates/synveda-eval/src/main.rs; \
     echo 'fn main() {}' > crates/synveda-gateway/src/main.rs; \
     mkdir -p crates/synveda-gateway/src/bin; \
-    echo 'fn main() {}' > crates/synveda-gateway/src/bin/synveda-worker.rs
+    echo 'fn main() {}' > crates/synveda-gateway/src/bin/synveda-worker.rs; \
+    mkdir -p crates/synveda-gateway/test-support-enabler/src; \
+    : > crates/synveda-gateway/test-support-enabler/src/lib.rs
 # sqlx macros compile against the committed query cache; this image has no
 # database, exactly like CI.
 ENV SQLX_OFFLINE=true
-RUN cargo build --release -p synveda-gateway -p synveda-cli
+RUN cargo build --locked --release -p synveda-gateway -p synveda-cli
 
 # The real sources. Touching them invalidates only from here down.
 COPY .sqlx .sqlx
@@ -73,9 +76,9 @@ COPY adapters/registry.json adapters/registry.json
 COPY crates crates
 RUN set -eux; \
     find crates -name '*.rs' -newermt '1970-01-01' -exec touch {} +; \
-    cargo build --release -p synveda-gateway -p synveda-cli
+    cargo build --locked --release -p synveda-gateway -p synveda-cli
 
-FROM debian:bookworm-slim AS runtime
+FROM debian:bookworm-slim@sha256:88200866dfff7ea7f5cbcb6ec7c8a701889efe6fe859fe64d6990e4b07ea4171 AS runtime
 # ca-certificates for OIDC discovery against an external issuer over TLS;
 # curl for the healthcheck compose waits on.
 RUN apt-get update \

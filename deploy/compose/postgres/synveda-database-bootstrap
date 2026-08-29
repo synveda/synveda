@@ -1,0 +1,4623 @@
+#!/bin/sh
+# CPR-45 / ADR-0102: converge one fixed deployment database and its roles.
+# Passwords arrive only through mounted files. Runtime-role passwords enter
+# PostgreSQL through COPY data and are consumed by fixed, exception-sanitised
+# server code; neither plaintext nor verifiers are part of a logged statement.
+set -eu
+# Never inherit caller tracing into path validation or secret-file reads.
+set +x
+
+LC_ALL=C
+export LC_ALL
+umask 077
+
+usage() {
+    echo "usage: synveda-database-bootstrap {synveda|keycloak}" >&2
+    exit 64
+}
+
+file_size() {
+    stat -c %s "$1" 2>/dev/null || stat -Lf %z "$1" 2>/dev/null
+}
+
+file_mode() {
+    stat -c %a "$1" 2>/dev/null || stat -f %Lp "$1" 2>/dev/null
+}
+
+file_owner() {
+    stat -c %u "$1" 2>/dev/null || stat -f %u "$1" 2>/dev/null
+}
+
+[ "$#" -eq 1 ] || usage
+case "$1" in
+    synveda|keycloak) target=$1 ;;
+    validate-synveda-passwords|validate-keycloak-password) target=$1 ;;
+    *) usage ;;
+esac
+
+# Every mounted input is opened once and copied through one 4097-byte read into
+# a process-private tmpfs directory. Validators and psql consume only those
+# immutable-by-convention snapshots, so a mutable bind cannot turn a bounded
+# preflight into an unbounded later read or change bytes between validation and
+# COPY. The fixed path is required because psql deliberately does not expand
+# variables in \copy arguments.
+snapshot_dir=/tmp/synveda-database-bootstrap
+snapshot_dir_owned=false
+bootstrap_pgpass=
+witness_dir=
+witness_temp=
+snapshot_temp=
+
+cleanup_private_files() {
+    if [ -n "$bootstrap_pgpass" ]; then
+        rm -f "$bootstrap_pgpass"
+    fi
+    if [ -n "$witness_temp" ]; then
+        rm -f "$witness_temp"
+        sync "$witness_dir" 2>/dev/null || :
+    fi
+    if [ -n "$snapshot_temp" ]; then
+        rm -f "$snapshot_temp"
+    fi
+    if [ "$snapshot_dir_owned" = true ]; then
+        rm -f \
+            "$snapshot_dir/database_roles.json" \
+            "$snapshot_dir/postgres_bootstrap_password" \
+            "$snapshot_dir/synveda_migrator_password" \
+            "$snapshot_dir/synveda_gateway_password" \
+            "$snapshot_dir/synveda_worker_password" \
+            "$snapshot_dir/keycloak_database_password"
+        rmdir "$snapshot_dir" 2>/dev/null || :
+    fi
+}
+trap cleanup_private_files EXIT
+trap 'exit 129' HUP
+trap 'exit 130' INT
+trap 'exit 143' TERM
+
+case "$target" in
+    synveda|keycloak)
+        [ "${SYNVEDA_DATABASE_BOOTSTRAP_SHARED_SNAPSHOTS+x}" != x ] || {
+            echo "database-bootstrap: internal snapshot setting is reserved" >&2
+            exit 78
+        }
+        mkdir "$snapshot_dir" 2>/dev/null || {
+            echo "database-bootstrap: private input snapshot directory is unavailable" >&2
+            exit 70
+        }
+        chmod 700 "$snapshot_dir"
+        snapshot_dir_owned=true
+        SYNVEDA_DATABASE_BOOTSTRAP_SHARED_SNAPSHOTS=1
+        export SYNVEDA_DATABASE_BOOTSTRAP_SHARED_SNAPSHOTS
+        ;;
+    validate-synveda-passwords|validate-keycloak-password)
+        if [ "${SYNVEDA_DATABASE_BOOTSTRAP_SHARED_SNAPSHOTS:-}" = 1 ]; then
+                [ ! -L "$snapshot_dir" ] && [ -d "$snapshot_dir" ] && \
+                    [ "$(file_mode "$snapshot_dir")" = 700 ] && \
+                    [ "$(file_owner "$snapshot_dir")" = "$(id -u)" ] || {
+                echo "database-bootstrap: shared input snapshot directory was refused" >&2
+                exit 78
+            }
+        else
+            mkdir "$snapshot_dir" 2>/dev/null || {
+                echo "database-bootstrap: private input snapshot directory is unavailable" >&2
+                exit 70
+            }
+            chmod 700 "$snapshot_dir"
+            snapshot_dir_owned=true
+        fi
+        ;;
+esac
+
+snapshot_input() {
+    label=$1
+    source=$2
+    destination=$3
+    temporary=$destination.tmp.$$
+    snapshot_temp=$temporary
+    rm -f "$temporary" "$destination"
+    if ! command timeout --foreground --signal=TERM --kill-after=1s 5s \
+        /usr/local/bin/synveda-input-snapshot "$source" "$temporary" \
+        >/dev/null 2>&1; then
+        rm -f "$temporary"
+        echo "database-bootstrap: $label could not be snapshotted safely" >&2
+        exit 78
+    fi
+    [ ! -L "$temporary" ] && [ -f "$temporary" ] && \
+        [ "$(file_mode "$temporary")" = 600 ] && \
+        [ "$(file_owner "$temporary")" = "$(id -u)" ] || {
+        rm -f "$temporary"
+        echo "database-bootstrap: $label snapshot metadata was refused" >&2
+        exit 78
+    }
+    bytes=$(file_size "$temporary") || {
+        rm -f "$temporary"
+        echo "database-bootstrap: $label size cannot be inspected" >&2
+        exit 78
+    }
+    case "$bytes" in
+        ''|*[!0-9]*)
+            rm -f "$temporary"
+            echo "database-bootstrap: $label size cannot be inspected" >&2
+            exit 78
+            ;;
+    esac
+    [ "$bytes" -le 4096 ] || {
+        rm -f "$temporary"
+        echo "database-bootstrap: $label exceeds 4096 bytes" >&2
+        exit 78
+    }
+    mv "$temporary" "$destination"
+    snapshot_temp=
+}
+
+read_secret() {
+    label=$1
+    path=$2
+    [ ! -L "$path" ] && [ -f "$path" ] || {
+        echo "database-bootstrap: $label must be a regular non-symlink file" >&2
+        exit 78
+    }
+    bytes=$(file_size "$path") || {
+        echo "database-bootstrap: $label size cannot be inspected" >&2
+        exit 78
+    }
+    case "$bytes" in
+        ''|*[!0-9]*)
+            echo "database-bootstrap: $label size cannot be inspected" >&2
+            exit 78
+            ;;
+    esac
+    [ "$bytes" -le 4096 ] || {
+        echo "database-bootstrap: $label exceeds 4096 bytes" >&2
+        exit 78
+    }
+    without_nul=$(tr -d '\000' < "$path" | wc -c)
+    [ "$bytes" -eq "$without_nul" ] || {
+        echo "database-bootstrap: $label contains a NUL byte" >&2
+        exit 78
+    }
+    newlines=$(tr -cd '\n' < "$path" | wc -c | tr -d ' ')
+    case "$newlines" in
+        0) ;;
+        1)
+            last_byte=$(tail -c 1 "$path" | od -An -tu1 | tr -d ' ')
+            [ "$last_byte" = 10 ] || {
+                echo "database-bootstrap: $label must contain one line" >&2
+                exit 78
+            }
+            ;;
+        *)
+            echo "database-bootstrap: $label must contain one line" >&2
+            exit 78
+            ;;
+    esac
+    value=
+    IFS= read -r value < "$path" || :
+    case "$value" in
+        *"$(printf '\r')") value=${value%"$(printf '\r')"} ;;
+    esac
+    [ -n "$value" ] || {
+        echo "database-bootstrap: $label must not be empty" >&2
+        exit 78
+    }
+    printf '%s' "$value"
+}
+
+validate_role_password_content() {
+    label=$1
+    path=$2
+    value=$(read_secret "$label" "$path")
+    case "$value" in
+        SCRAM-SHA-256\$*)
+            echo "database-bootstrap: $label must be plaintext, not a PostgreSQL verifier" >&2
+            exit 78
+            ;;
+    esac
+    case "$value" in
+        md5*)
+            verifier=${value#md5}
+            case "$verifier" in
+                *[!0-9A-Fa-f]*) ;;
+                *)
+                    if [ "${#verifier}" -eq 32 ]; then
+                        echo "database-bootstrap: $label must be plaintext, not a PostgreSQL verifier" >&2
+                        exit 78
+                    fi
+                    ;;
+            esac
+            ;;
+    esac
+    case "$value" in
+        *[!A-Za-z0-9._~-]*)
+            echo "database-bootstrap: $label contains unsupported bytes" >&2
+            exit 78
+            ;;
+    esac
+}
+
+snapshot_bootstrap_password_for_validator() {
+    if [ "${SYNVEDA_DATABASE_BOOTSTRAP_SHARED_SNAPSHOTS:-}" != 1 ]; then
+        snapshot_input postgres_bootstrap_password /run/secrets/postgres_bootstrap_password \
+            "$snapshot_dir/postgres_bootstrap_password"
+    fi
+    # Validate the owner snapshot without retaining its value in this shell.
+    (read_secret postgres_bootstrap_password \
+        "$snapshot_dir/postgres_bootstrap_password") >/dev/null
+}
+
+validate_distinct_credentials() {
+    while [ "$#" -gt 1 ]; do
+        first=$1
+        shift
+        first_value=$(read_secret database_credential "$first")
+        for candidate do
+            candidate_value=$(read_secret database_credential "$candidate")
+            if [ "$first_value" = "$candidate_value" ]; then
+                echo "database-bootstrap: database credentials must be pairwise distinct" >&2
+                exit 78
+            fi
+            unset candidate_value
+        done
+        unset first_value
+    done
+}
+
+validate_role_contract_file() {
+    path=$1
+    [ ! -L "$path" ] && [ -f "$path" ] && [ -r "$path" ] || {
+        echo "database-bootstrap: database role contract must be a readable regular non-symlink file" >&2
+        exit 78
+    }
+    bytes=$(file_size "$path") || {
+        echo "database-bootstrap: database role contract size cannot be inspected" >&2
+        exit 78
+    }
+    case "$bytes" in
+        ''|*[!0-9]*)
+            echo "database-bootstrap: database role contract size cannot be inspected" >&2
+            exit 78
+            ;;
+    esac
+    [ "$bytes" -gt 0 ] && [ "$bytes" -le 4096 ] || {
+        echo "database-bootstrap: database role contract must contain 1 through 4096 bytes" >&2
+        exit 78
+    }
+    without_nul=$(tr -d '\000' < "$path" | wc -c)
+    [ "$bytes" -eq "$without_nul" ] || {
+        echo "database-bootstrap: database role contract contains a NUL byte" >&2
+        exit 78
+    }
+    newlines=$(tr -cd '\n' < "$path" | wc -c | tr -d ' ')
+    [ "$newlines" -eq 1 ] && [ "$(tail -c 1 "$path" | od -An -tu1 | tr -d ' ')" = 10 ] || {
+        echo "database-bootstrap: database role contract must be one newline-terminated JSON line" >&2
+        exit 78
+    }
+}
+
+# Password bytes are deliberately read only by a subprocess invoked from the
+# locked PostgreSQL preflight, after every non-secret cluster refusal and just
+# before its persistent mutation boundary. The target transaction repeats the
+# same validation in SQL after COPY as defence against a changed mount.
+case "$target" in
+    validate-synveda-passwords)
+        require_keycloak_password=${SYNVEDA_DATABASE_REQUIRE_KEYCLOAK_PASSWORD:-false}
+        case "$require_keycloak_password" in
+            true|false) ;;
+            *)
+                echo "database-bootstrap: SYNVEDA_DATABASE_REQUIRE_KEYCLOAK_PASSWORD must be true or false" >&2
+                exit 78
+                ;;
+        esac
+        snapshot_bootstrap_password_for_validator
+        snapshot_input synveda_migrator_password /run/secrets/synveda_migrator_password \
+            "$snapshot_dir/synveda_migrator_password"
+        snapshot_input synveda_gateway_password /run/secrets/synveda_gateway_password \
+            "$snapshot_dir/synveda_gateway_password"
+        snapshot_input synveda_worker_password /run/secrets/synveda_worker_password \
+            "$snapshot_dir/synveda_worker_password"
+        validate_role_password_content synveda_migrator_password \
+            "$snapshot_dir/synveda_migrator_password"
+        validate_role_password_content synveda_gateway_password \
+            "$snapshot_dir/synveda_gateway_password"
+        validate_role_password_content synveda_worker_password \
+            "$snapshot_dir/synveda_worker_password"
+        if [ "$require_keycloak_password" = true ]; then
+            snapshot_input keycloak_database_password /run/secrets/keycloak_database_password \
+                "$snapshot_dir/keycloak_database_password"
+            validate_role_password_content keycloak_database_password \
+                "$snapshot_dir/keycloak_database_password"
+            validate_distinct_credentials \
+                "$snapshot_dir/postgres_bootstrap_password" \
+                "$snapshot_dir/synveda_migrator_password" \
+                "$snapshot_dir/synveda_gateway_password" \
+                "$snapshot_dir/synveda_worker_password" \
+                "$snapshot_dir/keycloak_database_password"
+        else
+            validate_distinct_credentials \
+                "$snapshot_dir/postgres_bootstrap_password" \
+                "$snapshot_dir/synveda_migrator_password" \
+                "$snapshot_dir/synveda_gateway_password" \
+                "$snapshot_dir/synveda_worker_password"
+        fi
+        exit 0
+        ;;
+    validate-keycloak-password)
+        snapshot_bootstrap_password_for_validator
+        snapshot_input keycloak_database_password /run/secrets/keycloak_database_password \
+            "$snapshot_dir/keycloak_database_password"
+        validate_role_password_content keycloak_database_password \
+            "$snapshot_dir/keycloak_database_password"
+        validate_distinct_credentials \
+            "$snapshot_dir/postgres_bootstrap_password" \
+            "$snapshot_dir/keycloak_database_password"
+        exit 0
+        ;;
+esac
+
+bundled_cluster=${SYNVEDA_POSTGRES_BUNDLED_CLUSTER:-false}
+case "$bundled_cluster" in
+    true) ;;
+    false)
+        echo "database-bootstrap: external PostgreSQL mutation is unavailable until the authenticated TLS bootstrap contract is implemented" >&2
+        exit 78
+        ;;
+    *)
+        echo "database-bootstrap: SYNVEDA_POSTGRES_BUNDLED_CLUSTER must be true or false" >&2
+        exit 78
+        ;;
+esac
+export SYNVEDA_POSTGRES_BUNDLED_CLUSTER=$bundled_cluster
+
+role_contract_file=${SYNVEDA_DATABASE_ROLES_FILE:-}
+[ "$role_contract_file" = /run/secrets/database_roles.json ] || {
+    echo "database-bootstrap: SYNVEDA_DATABASE_ROLES_FILE must name the fixed mounted contract path" >&2
+    exit 78
+}
+snapshot_input "database role contract" "$role_contract_file" \
+    "$snapshot_dir/database_roles.json"
+role_contract_file=$snapshot_dir/database_roles.json
+validate_role_contract_file "$role_contract_file"
+
+witness_dir=
+witness_file=
+witness_temp=
+if [ "$target" = keycloak ]; then
+    witness_dir=${SYNVEDA_DATABASE_AUTHORITY_DIR:-}
+    case "$witness_dir" in
+        /*) ;;
+        *)
+            echo "database-bootstrap: database authority directory must be absolute" >&2
+            exit 78
+            ;;
+    esac
+    [ ! -L "$witness_dir" ] && [ -d "$witness_dir" ] && [ -w "$witness_dir" ] || {
+        echo "database-bootstrap: database authority directory is unavailable" >&2
+        exit 78
+    }
+    [ "$(file_mode "$witness_dir")" = 700 ] && \
+        [ "$(file_owner "$witness_dir")" = "$(id -u)" ] || {
+        echo "database-bootstrap: database authority directory must be private and process-owned" >&2
+        exit 78
+    }
+    witness_file=$witness_dir/keycloak-cluster.json
+    if [ -e "$witness_file" ] || [ -L "$witness_file" ]; then
+        [ ! -L "$witness_file" ] && [ -f "$witness_file" ] && \
+            [ "$(file_mode "$witness_file")" = 600 ] && \
+            [ "$(file_owner "$witness_file")" = "$(id -u)" ] || {
+            echo "database-bootstrap: existing database authority witness was refused" >&2
+            exit 78
+        }
+        rm -f "$witness_file"
+        sync "$witness_dir"
+    fi
+fi
+
+bootstrap_url=${SYNVEDA_POSTGRES_BOOTSTRAP_URL:-}
+case "$bootstrap_url" in
+    postgres://*|postgresql://*) ;;
+    *)
+        echo "database-bootstrap: SYNVEDA_POSTGRES_BOOTSTRAP_URL must be a PostgreSQL URL" >&2
+        exit 78
+        ;;
+esac
+case "$bootstrap_url" in
+    *'?'*|*'#'*|*[![:print:]]*|*' '*)
+        echo "database-bootstrap: bootstrap URL must contain no query, fragment or whitespace" >&2
+        exit 78
+        ;;
+esac
+location=${bootstrap_url#*://}
+authority=${location%%/*}
+database_name=${location#*/}
+[ "$authority" != "$location" ] && [ -n "$database_name" ] && \
+    [ "$database_name" = "${database_name##*/}" ] || {
+    echo "database-bootstrap: bootstrap URL must identify one database" >&2
+    exit 78
+}
+[ "${#database_name}" -le 63 ] || {
+    echo "database-bootstrap: bootstrap URL database name is invalid" >&2
+    exit 78
+}
+case "$database_name" in
+    [A-Za-z0-9_]*) ;;
+    *) echo "database-bootstrap: bootstrap URL database name is invalid" >&2; exit 78 ;;
+esac
+case "$database_name" in
+    *[!A-Za-z0-9_-]*)
+        echo "database-bootstrap: bootstrap URL database name is invalid" >&2
+        exit 78
+        ;;
+esac
+case "$authority" in
+    *@*)
+        bootstrap_user=${authority%%@*}
+        endpoint=${authority#*@}
+        ;;
+    *)
+        echo "database-bootstrap: bootstrap URL must name one login" >&2
+        exit 78
+        ;;
+esac
+[ -n "$bootstrap_user" ] && [ "${#bootstrap_user}" -le 63 ] || {
+    echo "database-bootstrap: bootstrap URL login is invalid" >&2
+    exit 78
+}
+case "$bootstrap_user" in
+    *:*)
+        echo "database-bootstrap: bootstrap URL must not contain a password" >&2
+        exit 78
+        ;;
+    *[!A-Za-z0-9_-]*)
+        echo "database-bootstrap: bootstrap URL login is invalid" >&2
+        exit 78
+        ;;
+esac
+case "$endpoint" in
+    *@*|*:*:*)
+        echo "database-bootstrap: bootstrap URL authority is invalid" >&2
+        exit 78
+        ;;
+esac
+bootstrap_host=${endpoint%:*}
+bootstrap_port=${endpoint##*:}
+[ "$bootstrap_host" != "$endpoint" ] && [ "${#bootstrap_host}" -le 253 ] || {
+    echo "database-bootstrap: bootstrap URL endpoint is invalid" >&2
+    exit 78
+}
+case "$bootstrap_host" in
+    ''|*[!a-z0-9.-]*|.*|*.|*..*|localhost|*.localhost)
+        echo "database-bootstrap: bootstrap URL endpoint is invalid" >&2
+        exit 78
+        ;;
+    *[a-z]*) ;;
+    *) echo "database-bootstrap: bootstrap URL endpoint is invalid" >&2; exit 78 ;;
+esac
+case "$bootstrap_port" in
+    ''|0|0*|*[!0-9]*|??????*)
+        echo "database-bootstrap: bootstrap URL endpoint is invalid" >&2
+        exit 78
+        ;;
+esac
+[ "$bootstrap_port" -le 65535 ] || {
+    echo "database-bootstrap: bootstrap URL endpoint is invalid" >&2
+    exit 78
+}
+
+case "$database_name" in
+    synveda|keycloak)
+        echo "database-bootstrap: bootstrap URL must identify a maintenance database" >&2
+        exit 78
+        ;;
+esac
+export SYNVEDA_POSTGRES_BOOTSTRAP_DATABASE=$database_name
+
+if [ "${PGHOST+x}" = x ] || [ "${PGHOSTADDR+x}" = x ] || \
+    [ "${PGPORT+x}" = x ] || [ "${PGDATABASE+x}" = x ] || \
+    [ "${PGUSER+x}" = x ] || [ "${PGPASSWORD+x}" = x ] || \
+    [ "${PGPASSFILE+x}" = x ] || [ "${PGSERVICE+x}" = x ] || \
+    [ "${PGSERVICEFILE+x}" = x ] || [ "${PGOPTIONS+x}" = x ] || \
+    [ "${PGAPPNAME+x}" = x ] || [ "${PGCONNECT_TIMEOUT+x}" = x ] || \
+    [ "${PGCLIENTENCODING+x}" = x ] || [ "${PGDATESTYLE+x}" = x ] || \
+    [ "${PGTZ+x}" = x ] || [ "${PGGEQO+x}" = x ] || \
+    [ "${PGSSLMODE+x}" = x ] || [ "${PGREQUIRESSL+x}" = x ] || \
+    [ "${PGSSLCOMPRESSION+x}" = x ] || [ "${PGSSLCERT+x}" = x ] || \
+    [ "${PGSSLKEY+x}" = x ] || [ "${PGSSLROOTCERT+x}" = x ] || \
+    [ "${PGSSLCRL+x}" = x ] || [ "${PGSSLCRLDIR+x}" = x ] || \
+    [ "${PGSSLSNI+x}" = x ] || [ "${PGREQUIREPEER+x}" = x ] || \
+    [ "${PGSSLMINPROTOCOLVERSION+x}" = x ] || \
+    [ "${PGSSLMAXPROTOCOLVERSION+x}" = x ] || \
+    [ "${PGSSLCERTMODE+x}" = x ] || [ "${PGSSLNEGOTIATION+x}" = x ] || \
+    [ "${PGGSSLIB+x}" = x ] || [ "${PGGSSENCMODE+x}" = x ] || \
+    [ "${PGGSSDELEGATION+x}" = x ] || \
+    [ "${PGKRBSRVNAME+x}" = x ] || [ "${PGREALM+x}" = x ] || \
+    [ "${PGCHANNELBINDING+x}" = x ] || \
+    [ "${PGTARGETSESSIONATTRS+x}" = x ] || \
+    [ "${PGLOADBALANCEHOSTS+x}" = x ] || [ "${PGREQUIREAUTH+x}" = x ] || \
+    [ "${PGKEEPALIVES+x}" = x ] || [ "${PGTCPKEEPALIVESIDLE+x}" = x ] || \
+    [ "${PGTCPKEEPALIVESINTERVAL+x}" = x ] || \
+    [ "${PGTCPKEEPALIVESCOUNT+x}" = x ] || \
+    [ "${PGTCPUSER_TIMEOUT+x}" = x ] || [ "${PGREPLICATION+x}" = x ] || \
+    [ "${PGOAUTHCLIENTID+x}" = x ] || [ "${PGOAUTHCLIENTSECRET+x}" = x ] || \
+    [ "${PGOAUTHISSUER+x}" = x ] || [ "${PGOAUTHSCOPE+x}" = x ] || \
+    [ "${PGSYSCONFDIR+x}" = x ] || [ "${PGLOCALEDIR+x}" = x ] || \
+    [ "${PSQLRC+x}" = x ]; then
+    echo "database-bootstrap: ambient PostgreSQL connection settings are forbidden" >&2
+    exit 78
+fi
+bootstrap_private_dir=${SYNVEDA_DATABASE_BOOTSTRAP_PRIVATE_DIR:-/tmp}
+case "$bootstrap_private_dir" in
+    /tmp|/run/secrets) ;;
+    *)
+        echo "database-bootstrap: SYNVEDA_DATABASE_BOOTSTRAP_PRIVATE_DIR is not an approved memory-backed path" >&2
+        exit 78
+        ;;
+esac
+[ ! -L "$bootstrap_private_dir" ] && [ -d "$bootstrap_private_dir" ] && [ -w "$bootstrap_private_dir" ] || {
+    echo "database-bootstrap: the private PostgreSQL password directory is unavailable" >&2
+    exit 78
+}
+snapshot_input postgres_bootstrap_password /run/secrets/postgres_bootstrap_password \
+    "$snapshot_dir/postgres_bootstrap_password"
+bootstrap_password=$(read_secret postgres_bootstrap_password \
+    "$snapshot_dir/postgres_bootstrap_password")
+bootstrap_pgpass=$(mktemp "$bootstrap_private_dir/synveda-bootstrap-pgpass.XXXXXX") || {
+    echo "database-bootstrap: could not create the private PostgreSQL password file" >&2
+    exit 70
+}
+{
+    for pgpass_database in "$database_name" synveda keycloak; do
+        printf '%s:%s:%s:%s:' \
+            "$bootstrap_host" "$bootstrap_port" "$pgpass_database" "$bootstrap_user"
+        printf '%s' "$bootstrap_password" | sed -e 's/\\/\\\\/g' -e 's/:/\\:/g'
+        printf '\n'
+    done
+} > "$bootstrap_pgpass"
+chmod 600 "$bootstrap_pgpass"
+unset bootstrap_password
+export PGPASSFILE=$bootstrap_pgpass
+export PGCONNECT_TIMEOUT=5
+export PGOPTIONS='-c search_path=pg_catalog -c role=none -c session_preload_libraries= -c local_preload_libraries= -c default_table_access_method=heap -c client_encoding=UTF8 -c jit=off -c lock_timeout=30000 -c statement_timeout=120000 -c idle_in_transaction_session_timeout=30000 -c client_min_messages=error'
+export PSQLRC=/dev/null
+
+publish_peer_witness() {
+    witness_value=$1
+    witness_bytes=$(printf '%s' "$witness_value" | wc -c | tr -d ' ')
+    case "$witness_bytes" in
+        ''|*[!0-9]*)
+            echo "database-bootstrap: peer database witness was refused" >&2
+            exit 1
+            ;;
+    esac
+    [ "$witness_bytes" -gt 0 ] && [ "$witness_bytes" -lt 256 ] || {
+        echo "database-bootstrap: peer database witness was refused" >&2
+        exit 1
+    }
+    witness_newlines=$(printf '%s' "$witness_value" | tr -cd '\n' | wc -c | tr -d ' ')
+    [ "$witness_newlines" = 0 ] || {
+        echo "database-bootstrap: peer database witness was refused" >&2
+        exit 1
+    }
+    case "$witness_value" in
+        *"$(printf '\r')"*)
+            echo "database-bootstrap: peer database witness was refused" >&2
+            exit 1
+            ;;
+        '{"version":1,"database":"keycloak","cluster_system_identifier":"'*'","postmaster_started_at":"'*'Z","database_oid":'*'}') ;;
+        *)
+            echo "database-bootstrap: peer database witness was refused" >&2
+            exit 1
+            ;;
+    esac
+    witness_temp=$(mktemp "$witness_dir/.keycloak-cluster.XXXXXX") || {
+        echo "database-bootstrap: peer database witness could not be staged" >&2
+        exit 1
+    }
+    printf '%s\n' "$witness_value" > "$witness_temp"
+    chmod 600 "$witness_temp"
+    sync "$witness_temp"
+    mv -f "$witness_temp" "$witness_file"
+    witness_temp=
+    sync "$witness_dir"
+    unset witness_value
+}
+
+bootstrap_psql() {
+    command timeout --foreground --signal=TERM --kill-after=5s 300s psql "$@"
+}
+
+bootstrap_psql_readiness() {
+    command timeout --foreground --signal=TERM --kill-after=1s 6s psql "$@"
+}
+
+pin_existing_keycloak_database_oid() {
+    bootstrap_psql --dbname="$bootstrap_url" -X -qAt -v ON_ERROR_STOP=1 <<'SQL'
+\o /dev/null
+\set VERBOSITY terse
+\set SHOW_CONTEXT never
+select pg_catalog.pg_advisory_lock(pg_catalog.hashtext('synveda.compose.bootstrap.cluster'));
+\getenv bootstrap_system_identifier SYNVEDA_POSTGRES_BOOTSTRAP_SYSTEM_IDENTIFIER
+\getenv synveda_bootstrap_database SYNVEDA_POSTGRES_BOOTSTRAP_DATABASE
+\getenv keycloak_initial_state SYNVEDA_KEYCLOAK_INITIAL_STATE
+\getenv keycloak_initial_database_oid SYNVEDA_KEYCLOAK_INITIAL_DATABASE_OID
+select 1 / case when exists (
+  select 1
+    from pg_catalog.pg_control_system() control
+   where control.system_identifier::text = :'bootstrap_system_identifier'
+     and not pg_catalog.pg_is_in_recovery()
+     and pg_catalog.current_setting('transaction_read_only') = 'off'
+) and pg_catalog.current_database() = :'synveda_bootstrap_database'
+  and current_user = session_user
+  and pg_catalog.current_setting('role') = 'none'
+then 1 else 0 end;
+\o
+select database.oid::bigint
+  from pg_catalog.pg_database database
+  join pg_catalog.pg_roles owner on owner.oid = database.datdba
+ where database.datname = 'keycloak'
+   and owner.rolname = 'keycloak'
+   and (
+     :'keycloak_initial_state' = 'absent'
+     or database.oid = :'keycloak_initial_database_oid'::pg_catalog.oid
+   );
+SQL
+}
+
+# A target-local refusal can occur on a pre-existing terminal target or after
+# this run publishes the Keycloak ACL. The maintenance-database lock serializes
+# quarantine with global role/database convergence. Target sessions use a
+# different database-local lock namespace, so quarantine fences them by first
+# committing NOLOGIN and ALLOW_CONNECTIONS=false, then terminating every
+# already-admitted target session and proving none remain. Existing data is
+# preserved for explicit operator diagnosis/reset; no witness is published
+# from a quarantined target.
+quarantine_keycloak_database() {
+    bootstrap_psql --dbname="$bootstrap_url" -X -q -v ON_ERROR_STOP=1 <<'SQL'
+\o /dev/null
+\set VERBOSITY terse
+\set SHOW_CONTEXT never
+select pg_catalog.pg_advisory_lock(pg_catalog.hashtext('synveda.compose.bootstrap.cluster'));
+\getenv bootstrap_system_identifier SYNVEDA_POSTGRES_BOOTSTRAP_SYSTEM_IDENTIFIER
+\getenv synveda_bootstrap_database SYNVEDA_POSTGRES_BOOTSTRAP_DATABASE
+\getenv keycloak_database_oid SYNVEDA_KEYCLOAK_DATABASE_OID
+\getenv bundled_cluster SYNVEDA_POSTGRES_BUNDLED_CLUSTER
+select 1 / case when exists (
+  select 1
+    from pg_catalog.pg_control_system() control
+   where control.system_identifier::text = :'bootstrap_system_identifier'
+     and not pg_catalog.pg_is_in_recovery()
+     and pg_catalog.current_setting('transaction_read_only') = 'off'
+) and pg_catalog.current_database() = :'synveda_bootstrap_database'
+  and current_user = session_user
+  and pg_catalog.current_setting('role') = 'none'
+  and pg_catalog.current_setting('shared_preload_libraries') = ''
+  and pg_catalog.current_setting('session_preload_libraries') = ''
+  and pg_catalog.current_setting('local_preload_libraries') = ''
+  and pg_catalog.current_setting('default_table_access_method') = 'heap'
+  and pg_catalog.current_setting('client_encoding') = 'UTF8'
+  and pg_catalog.current_setting('jit') = 'off'
+  and not exists (select 1 from pg_catalog.pg_event_trigger)
+  and exists (
+    select 1
+      from pg_catalog.pg_database database
+      join pg_catalog.pg_roles owner on owner.oid = database.datdba
+     where database.oid = :'keycloak_database_oid'::pg_catalog.oid
+       and database.datname = 'keycloak'
+       and owner.rolname = 'keycloak'
+       and database.datacl is not null
+       and (
+         database.datallowconn
+         or not database.datallowconn and not owner.rolcanlogin
+       )
+       and not exists (
+         select 1 from pg_catalog.aclexplode(database.datacl) acl
+          left join pg_catalog.pg_roles grantee on grantee.oid = acl.grantee
+          where not (
+            grantee.rolname = 'keycloak'
+            and acl.grantor = database.datdba
+            and acl.privilege_type in ('CREATE', 'CONNECT', 'TEMPORARY')
+            and not acl.is_grantable
+          ) and not (
+            grantee.rolname = session_user
+            and acl.grantor = database.datdba
+            and acl.privilege_type = 'CONNECT'
+            and not acl.is_grantable
+          )
+       )
+       and (
+         select count(*)
+           from pg_catalog.aclexplode(database.datacl) acl
+          where acl.grantee = database.datdba
+            and acl.grantor = database.datdba
+            and acl.privilege_type in ('CREATE', 'CONNECT', 'TEMPORARY')
+            and not acl.is_grantable
+       ) = 3
+       and (
+         select count(*)
+           from pg_catalog.aclexplode(database.datacl) acl
+          where acl.grantee = (
+            select administrator.oid
+              from pg_catalog.pg_roles administrator
+             where administrator.rolname = session_user
+          )
+            and acl.grantor = database.datdba
+            and acl.privilege_type = 'CONNECT'
+            and not acl.is_grantable
+       ) = 1
+  )
+then 1 else 0 end;
+begin;
+alter role keycloak nologin;
+alter database keycloak allow_connections false;
+select 1 / case when exists (
+  select 1
+    from pg_catalog.pg_database database
+    join pg_catalog.pg_roles owner on owner.oid = database.datdba
+   where database.oid = :'keycloak_database_oid'::pg_catalog.oid
+     and database.datname = 'keycloak'
+     and owner.rolname = 'keycloak'
+     and not database.datallowconn
+) and exists (
+  select 1
+    from pg_catalog.pg_roles role
+   where role.rolname = 'keycloak'
+     and not role.rolcanlogin
+) then 1 else 0 end;
+commit;
+select 1 / case when coalesce(
+  pg_catalog.bool_and(pg_catalog.pg_terminate_backend(startup.pid, 5000)),
+  true
+) then 1 else 0 end
+  from (
+    select distinct lock.pid
+      from pg_catalog.pg_locks lock
+     where lock.locktype = 'object'
+       and lock.database = 0
+       and lock.classid = 'pg_catalog.pg_database'::pg_catalog.regclass
+       and lock.objid = :'keycloak_database_oid'::pg_catalog.oid
+       and lock.objsubid = 0
+       and lock.mode = 'RowExclusiveLock'
+       and lock.pid is not null
+       and lock.pid <> pg_catalog.pg_backend_pid()
+  ) startup;
+select 1 / case when coalesce(
+  pg_catalog.bool_and(pg_catalog.pg_terminate_backend(activity.pid, 5000)),
+  true
+) then 1 else 0 end
+  from pg_catalog.pg_stat_activity activity
+ where activity.datid = :'keycloak_database_oid'::pg_catalog.oid;
+select 1 / case when not exists (
+  select 1
+    from pg_catalog.pg_locks lock
+   where lock.locktype = 'object'
+     and lock.database = 0
+     and lock.classid = 'pg_catalog.pg_database'::pg_catalog.regclass
+     and lock.objid = :'keycloak_database_oid'::pg_catalog.oid
+     and lock.objsubid = 0
+     and lock.mode = 'RowExclusiveLock'
+     and lock.pid is not null
+) then 1 else 0 end;
+select pg_catalog.pg_stat_clear_snapshot();
+select 1 / case when not exists (
+  select 1
+    from pg_catalog.pg_stat_activity activity
+   where activity.datid = :'keycloak_database_oid'::pg_catalog.oid
+) then 1 else 0 end;
+select 1 / case when not exists (
+  select 1
+    from pg_catalog.pg_prepared_xacts prepared
+    join pg_catalog.pg_database database on database.datname = prepared.database
+   where database.oid = :'keycloak_database_oid'::pg_catalog.oid
+) then 1 else 0 end;
+-- A terminated target lock holder can wake an already-admitted waiter. After
+-- the exact zero-session barrier, reassert closure transactionally before the
+-- final proof. No ordinary target session can enter after ALLOW_CONNECTIONS
+-- became false in the first transaction.
+begin;
+alter role keycloak nologin;
+alter database keycloak allow_connections false;
+select 1 / case when exists (
+  select 1
+    from pg_catalog.pg_database database
+    join pg_catalog.pg_roles owner on owner.oid = database.datdba
+   where database.oid = :'keycloak_database_oid'::pg_catalog.oid
+     and database.datname = 'keycloak'
+     and owner.rolname = 'keycloak'
+     and not database.datallowconn
+     and database.datacl is not null
+     and not exists (
+       select 1 from pg_catalog.aclexplode(database.datacl) acl
+        left join pg_catalog.pg_roles grantee on grantee.oid = acl.grantee
+        where not (
+          grantee.rolname = 'keycloak'
+          and acl.grantor = database.datdba
+          and acl.privilege_type in ('CREATE', 'CONNECT', 'TEMPORARY')
+          and not acl.is_grantable
+        ) and not (
+          grantee.rolname = session_user
+          and acl.grantor = database.datdba
+          and acl.privilege_type = 'CONNECT'
+          and not acl.is_grantable
+        )
+     )
+     and (
+       select count(*)
+         from pg_catalog.aclexplode(database.datacl) acl
+        where acl.grantee = database.datdba
+          and acl.grantor = database.datdba
+          and acl.privilege_type in ('CREATE', 'CONNECT', 'TEMPORARY')
+          and not acl.is_grantable
+     ) = 3
+     and (
+       select count(*)
+         from pg_catalog.aclexplode(database.datacl) acl
+        where acl.grantee = (
+          select administrator.oid
+            from pg_catalog.pg_roles administrator
+           where administrator.rolname = session_user
+        )
+          and acl.grantor = database.datdba
+          and acl.privilege_type = 'CONNECT'
+          and not acl.is_grantable
+     ) = 1
+) and exists (
+  select 1
+    from pg_catalog.pg_roles role
+   where role.rolname = 'keycloak'
+     and not role.rolcanlogin
+) and not exists (
+  select 1
+    from pg_catalog.pg_auth_members membership
+    join pg_catalog.pg_roles member on member.oid = membership.member
+    join pg_catalog.pg_roles granted on granted.oid = membership.roleid
+   where member.rolname = session_user
+     and granted.rolname = 'keycloak'
+     and not (
+       :'bundled_cluster' <> 'true'
+       and membership.admin_option
+       and not membership.inherit_option
+       and not membership.set_option
+     )
+) then 1 else 0 end;
+commit;
+select 1 / case when not exists (
+  select 1
+    from pg_catalog.pg_locks lock
+   where lock.locktype = 'object'
+     and lock.database = 0
+     and lock.classid = 'pg_catalog.pg_database'::pg_catalog.regclass
+     and lock.objid = :'keycloak_database_oid'::pg_catalog.oid
+     and lock.objsubid = 0
+     and lock.mode = 'RowExclusiveLock'
+     and lock.pid is not null
+) then 1 else 0 end;
+select pg_catalog.pg_stat_clear_snapshot();
+select 1 / case when not exists (
+  select 1
+    from pg_catalog.pg_stat_activity activity
+   where activity.datid = :'keycloak_database_oid'::pg_catalog.oid
+) then 1 else 0 end;
+select 1 / case when not exists (
+  select 1
+    from pg_catalog.pg_prepared_xacts prepared
+    join pg_catalog.pg_database database on database.datname = prepared.database
+   where database.oid = :'keycloak_database_oid'::pg_catalog.oid
+) then 1 else 0 end;
+select 1 / case when exists (
+  select 1
+    from pg_catalog.pg_database database
+    join pg_catalog.pg_roles owner on owner.oid = database.datdba
+   where database.oid = :'keycloak_database_oid'::pg_catalog.oid
+     and database.datname = 'keycloak'
+     and owner.rolname = 'keycloak'
+     and not database.datallowconn
+) and exists (
+  select 1
+    from pg_catalog.pg_roles role
+   where role.rolname = 'keycloak'
+     and not role.rolcanlogin
+) then 1 else 0 end;
+SQL
+}
+
+attempt=1
+while ! bootstrap_psql_readiness --dbname="$bootstrap_url" -X -q -tAc 'select 1' >/dev/null 2>&1; do
+    if [ "$attempt" -ge 20 ]; then
+        echo "database-bootstrap: PostgreSQL did not become reachable before the bounded deadline" >&2
+        exit 69
+    fi
+    attempt=$((attempt + 1))
+    sleep 2
+done
+
+if ! bootstrap_cluster_system_identifier=$(bootstrap_psql \
+    --dbname="$bootstrap_url" -X -qAt -v ON_ERROR_STOP=1 <<'SQL'
+\getenv synveda_bootstrap_database SYNVEDA_POSTGRES_BOOTSTRAP_DATABASE
+select control.system_identifier::text
+  from pg_catalog.pg_control_system() control
+ where pg_catalog.current_database() = :'synveda_bootstrap_database'
+   and not pg_catalog.pg_is_in_recovery()
+   and pg_catalog.current_setting('transaction_read_only') = 'off';
+SQL
+); then
+    echo "database-bootstrap: PostgreSQL cluster identity could not be pinned" >&2
+    exit 1
+fi
+case "$bootstrap_cluster_system_identifier" in
+    ''|*[!0-9]*|?????????????????????*)
+        echo "database-bootstrap: PostgreSQL cluster identity could not be pinned" >&2
+        exit 1
+        ;;
+esac
+SYNVEDA_POSTGRES_BOOTSTRAP_SYSTEM_IDENTIFIER=$bootstrap_cluster_system_identifier
+export SYNVEDA_POSTGRES_BOOTSTRAP_SYSTEM_IDENTIFIER
+unset bootstrap_cluster_system_identifier
+
+if [ "$target" = synveda ]; then
+    synveda_btree_gin_present=false
+    synveda_vector_present=false
+    synveda_state=$(bootstrap_psql --dbname="$bootstrap_url" -X -qAt -v ON_ERROR_STOP=1 <<'SQL'
+with target as (
+  select database.*
+    from pg_catalog.pg_database database
+   where database.datname = 'synveda'
+), template as (
+  select database.*
+    from pg_catalog.pg_database database
+   where database.datname = 'template0'
+)
+select case
+  when not exists (select 1 from target) then 'absent'
+  when exists (
+    select 1
+      from target database
+      join pg_catalog.pg_roles owner on owner.oid = database.datdba
+      cross join template
+     where owner.rolname = 'synveda_migrator'
+       and not database.datistemplate
+       and not database.dathasloginevt
+       and database.datconnlimit = -1
+       and database.encoding = pg_catalog.pg_char_to_encoding('UTF8')
+       and database.datlocprovider = template.datlocprovider
+       and database.datcollate = template.datcollate
+       and database.datctype = template.datctype
+       and database.datlocale is not distinct from template.datlocale
+       and database.daticurules is not distinct from template.daticurules
+       and database.datcollversion is not distinct from
+           pg_catalog.pg_database_collation_actual_version(database.oid)
+       and database.dattablespace = template.dattablespace
+       and not exists (
+         select 1
+           from pg_catalog.pg_db_role_setting settings
+          where settings.setdatabase = database.oid
+       )
+       and not exists (
+         select 1
+           from pg_catalog.aclexplode(
+             coalesce(database.datacl, pg_catalog.acldefault('d', database.datdba))
+           ) acl
+           left join pg_catalog.pg_roles grantee on grantee.oid = acl.grantee
+          where not (
+            grantee.rolname = 'synveda_migrator'
+            and acl.grantor = database.datdba
+            and acl.privilege_type in ('CREATE', 'CONNECT', 'TEMPORARY')
+            and not acl.is_grantable
+          ) and not (
+            acl.grantee = 0
+            and not database.datallowconn
+            and database.datacl is null
+            and acl.grantor = database.datdba
+            and acl.privilege_type in ('CONNECT', 'TEMPORARY')
+            and not acl.is_grantable
+          ) and not (
+            grantee.rolname in ('synveda_gateway', 'synveda_worker')
+            and acl.grantor = database.datdba
+            and acl.privilege_type = 'CONNECT'
+            and not acl.is_grantable
+          ) and not (
+            grantee.rolname = session_user
+            and acl.grantor = database.datdba
+            and acl.privilege_type = 'CONNECT'
+            and not acl.is_grantable
+          )
+       )
+       and (
+         not database.datallowconn
+         and database.datacl is null
+         or database.datallowconn
+         and database.datacl is not null
+         and (
+           select count(*)
+             from pg_catalog.aclexplode(database.datacl) acl
+            where acl.grantee = (
+              select administrator.oid
+                from pg_catalog.pg_roles administrator
+               where administrator.rolname = session_user
+            )
+              and acl.grantor = database.datdba
+              and acl.privilege_type = 'CONNECT'
+              and not acl.is_grantable
+         ) = 1
+       )
+  ) then case
+    when (select not database.datallowconn from target database) then 'closed'
+    else 'terminal'
+  end
+  else 'unsafe'
+end;
+SQL
+    )
+    case "$synveda_state" in
+        terminal)
+            if ! bootstrap_psql --dbname="$bootstrap_url" -X -q -v ON_ERROR_STOP=1 <<'SQL'
+\o /dev/null
+\set VERBOSITY terse
+\set SHOW_CONTEXT never
+\connect synveda
+reset role;
+select 1 / case when current_user = session_user
+  and current_setting('role') = 'none'
+then 1 else 0 end
+\g /dev/null
+select 1 / case when not exists (
+  select 1 from pg_catalog.pg_event_trigger
+) then 1 else 0 end;
+select 1 / case when exists (
+  select 1
+    from pg_catalog.pg_namespace namespace
+    join pg_catalog.pg_roles owner on owner.oid = namespace.nspowner
+   where namespace.nspname = 'public'
+     and owner.rolname in ('pg_database_owner', 'synveda_migrator')
+) and not exists (
+  select 1
+    from pg_catalog.pg_namespace namespace,
+         lateral pg_catalog.aclexplode(
+           coalesce(namespace.nspacl, pg_catalog.acldefault('n', namespace.nspowner))
+         ) acl
+    left join pg_catalog.pg_roles grantee on grantee.oid = acl.grantee
+   where namespace.nspname = 'public'
+     and not (
+       grantee.rolname in ('pg_database_owner', 'synveda_migrator')
+       and acl.grantor = namespace.nspowner
+       and acl.privilege_type in ('CREATE', 'USAGE')
+       and not acl.is_grantable
+     )
+     and not (
+       acl.grantee = 0
+       and acl.grantor = namespace.nspowner
+       and acl.privilege_type = 'USAGE'
+       and not acl.is_grantable
+     )
+     and not (
+       grantee.rolname = 'synveda_app'
+       and acl.grantor = namespace.nspowner
+       and acl.privilege_type = 'USAGE'
+       and not acl.is_grantable
+     )
+) and not exists (
+  select 1
+    from pg_catalog.pg_class object
+    join pg_catalog.pg_namespace namespace on namespace.oid = object.relnamespace
+    join pg_catalog.pg_roles owner on owner.oid = object.relowner
+   where namespace.nspname = 'public'
+     and owner.rolname <> 'synveda_migrator'
+     and not exists (
+       select 1
+         from pg_catalog.pg_depend dependency
+         join pg_catalog.pg_extension extension on extension.oid = dependency.refobjid
+        where dependency.classid = 'pg_catalog.pg_class'::regclass
+          and dependency.objid = object.oid
+          and dependency.refclassid = 'pg_catalog.pg_extension'::regclass
+          and dependency.deptype = 'e'
+          and extension.extname in ('btree_gin', 'vector')
+     )
+  union all
+  select 1
+    from pg_catalog.pg_proc object
+    join pg_catalog.pg_namespace namespace on namespace.oid = object.pronamespace
+    join pg_catalog.pg_roles owner on owner.oid = object.proowner
+   where namespace.nspname = 'public'
+     and owner.rolname <> 'synveda_migrator'
+     and not exists (
+       select 1
+         from pg_catalog.pg_depend dependency
+         join pg_catalog.pg_extension extension on extension.oid = dependency.refobjid
+        where dependency.classid = 'pg_catalog.pg_proc'::regclass
+          and dependency.objid = object.oid
+          and dependency.refclassid = 'pg_catalog.pg_extension'::regclass
+          and dependency.deptype = 'e'
+          and extension.extname in ('btree_gin', 'vector')
+     )
+  union all
+  select 1
+    from pg_catalog.pg_type object
+    join pg_catalog.pg_namespace namespace on namespace.oid = object.typnamespace
+    join pg_catalog.pg_roles owner on owner.oid = object.typowner
+   where namespace.nspname = 'public'
+     and owner.rolname <> 'synveda_migrator'
+     and not exists (
+       select 1
+         from pg_catalog.pg_depend dependency
+         join pg_catalog.pg_extension extension on extension.oid = dependency.refobjid
+        where dependency.classid = 'pg_catalog.pg_type'::regclass
+          and dependency.objid = object.oid
+          and dependency.refclassid = 'pg_catalog.pg_extension'::regclass
+          and dependency.deptype = 'e'
+          and extension.extname in ('btree_gin', 'vector')
+     )
+) and not exists (
+  select 1
+    from pg_catalog.pg_extension extension
+    join pg_catalog.pg_namespace namespace on namespace.oid = extension.extnamespace
+   where extension.extname in ('btree_gin', 'vector')
+     and (
+       namespace.nspname <> 'public'
+       or extension.extowner <> (
+         select role.oid from pg_catalog.pg_roles role where role.rolname = session_user
+       )
+       or extension.extname = 'btree_gin' and extension.extversion <> '1.3'
+       or extension.extname = 'vector' and extension.extversion <> '0.8.6'
+     )
+) and not exists (
+  select 1
+    from pg_catalog.pg_extension extension
+    join pg_catalog.pg_namespace namespace on namespace.oid = extension.extnamespace
+   where namespace.nspname = 'public'
+     and extension.extname not in ('btree_gin', 'vector')
+) and not exists (
+  select 1
+    from (values ('btree_gin', '1.3'), ('vector', '0.8.6')) required(name, version)
+   where not exists (
+     select 1 from pg_catalog.pg_extension extension where extension.extname = required.name
+   ) and not exists (
+     select 1 from pg_catalog.pg_roles principal
+      where principal.rolname = session_user and principal.rolsuper
+   ) and not exists (
+     select 1
+       from pg_catalog.pg_available_extension_versions available
+      where available.name = required.name
+        and available.version = required.version
+        and available.trusted
+   )
+) then 1 else 0 end;
+-- Refuse hostile local ownership or direct runtime-login ACLs before the
+-- cluster phase changes any role, membership, database or credential.
+select 1 / case when not exists (
+  select 1
+    from pg_catalog.pg_namespace object
+    join pg_catalog.pg_roles owner on owner.oid = object.nspowner
+   where owner.rolname in ('synveda_app', 'synveda_gateway', 'synveda_worker')
+  union all
+  select 1
+    from pg_catalog.pg_class object
+    join pg_catalog.pg_roles owner on owner.oid = object.relowner
+   where owner.rolname in ('synveda_app', 'synveda_gateway', 'synveda_worker')
+  union all
+  select 1
+    from pg_catalog.pg_proc object
+    join pg_catalog.pg_roles owner on owner.oid = object.proowner
+   where owner.rolname in ('synveda_app', 'synveda_gateway', 'synveda_worker')
+  union all
+  select 1
+    from pg_catalog.pg_type object
+    join pg_catalog.pg_roles owner on owner.oid = object.typowner
+   where owner.rolname in ('synveda_app', 'synveda_gateway', 'synveda_worker')
+  union all
+  select 1
+    from pg_catalog.pg_extension object
+    join pg_catalog.pg_roles owner on owner.oid = object.extowner
+   where owner.rolname in ('synveda_app', 'synveda_gateway', 'synveda_worker')
+) and not exists (
+  select 1
+    from pg_catalog.pg_class object
+    join pg_catalog.pg_namespace namespace on namespace.oid = object.relnamespace,
+         lateral pg_catalog.aclexplode(object.relacl) acl
+   where namespace.nspname = 'public'
+     and (
+       acl.grantor <> object.relowner
+       or acl.grantee not in (
+         object.relowner,
+         coalesce((select role.oid from pg_catalog.pg_roles role where role.rolname = 'synveda_app'), 0)
+       )
+       or acl.grantee = (
+         select role.oid from pg_catalog.pg_roles role where role.rolname = 'synveda_app'
+       ) and not (
+         object.relowner = (
+           select role.oid from pg_catalog.pg_roles role where role.rolname = 'synveda_migrator'
+         )
+         and object.relkind in ('r', 'p', 'v', 'm')
+         and acl.privilege_type in ('SELECT', 'INSERT', 'UPDATE', 'DELETE')
+         and not acl.is_grantable
+       )
+     )
+  union all
+  select 1
+    from pg_catalog.pg_proc object
+    join pg_catalog.pg_namespace namespace on namespace.oid = object.pronamespace,
+         lateral pg_catalog.aclexplode(object.proacl) acl
+   where namespace.nspname = 'public'
+     and (
+       acl.grantor <> object.proowner
+       or acl.grantee not in (
+         object.proowner,
+         coalesce((select role.oid from pg_catalog.pg_roles role where role.rolname = 'synveda_app'), 0)
+       )
+       or acl.grantee = (
+         select role.oid from pg_catalog.pg_roles role where role.rolname = 'synveda_app'
+       ) and not (
+         object.proowner = (
+           select role.oid from pg_catalog.pg_roles role where role.rolname = 'synveda_migrator'
+         )
+         and acl.privilege_type = 'EXECUTE'
+         and not acl.is_grantable
+       )
+     )
+  union all
+  select 1
+    from pg_catalog.pg_type object
+    join pg_catalog.pg_namespace namespace on namespace.oid = object.typnamespace,
+         lateral pg_catalog.aclexplode(object.typacl) acl
+   where namespace.nspname = 'public'
+     and (
+       acl.grantor <> object.typowner
+       or acl.grantee not in (
+         object.typowner,
+         coalesce((select role.oid from pg_catalog.pg_roles role where role.rolname = 'synveda_app'), 0)
+       )
+       or acl.grantee = (
+         select role.oid from pg_catalog.pg_roles role where role.rolname = 'synveda_app'
+       ) and not (
+         object.typowner = (
+           select role.oid from pg_catalog.pg_roles role where role.rolname = 'synveda_migrator'
+         )
+         and acl.privilege_type = 'USAGE'
+         and not acl.is_grantable
+       )
+     )
+  union all
+  select 1
+    from pg_catalog.pg_attribute object
+    join pg_catalog.pg_class relation on relation.oid = object.attrelid
+    join pg_catalog.pg_namespace namespace on namespace.oid = relation.relnamespace,
+         lateral pg_catalog.aclexplode(object.attacl) acl
+   where namespace.nspname = 'public'
+     and (
+       acl.grantor <> relation.relowner
+       or acl.grantee not in (
+         relation.relowner,
+         coalesce((select role.oid from pg_catalog.pg_roles role where role.rolname = 'synveda_app'), 0)
+       )
+       or acl.grantee = (
+         select role.oid from pg_catalog.pg_roles role where role.rolname = 'synveda_app'
+       ) and not (
+         relation.relowner = (
+           select role.oid from pg_catalog.pg_roles role where role.rolname = 'synveda_migrator'
+         )
+         and relation.relkind in ('r', 'p')
+         and acl.privilege_type = 'UPDATE'
+         and not acl.is_grantable
+       )
+     )
+  union all
+  select 1
+    from pg_catalog.pg_proc object
+    join pg_catalog.pg_namespace namespace on namespace.oid = object.pronamespace,
+         lateral pg_catalog.aclexplode(
+           coalesce(object.proacl, pg_catalog.acldefault('f', object.proowner))
+         ) acl
+   where namespace.nspname <> 'information_schema'
+     and namespace.nspname !~ '^pg_'
+     and object.prosecdef
+     and acl.grantee = 0
+     and acl.privilege_type = 'EXECUTE'
+) and not exists (
+  select 1
+    from pg_catalog.pg_namespace namespace
+   where namespace.nspname <> 'public'
+     and namespace.nspname <> 'information_schema'
+     and namespace.nspname !~ '^pg_'
+) and not exists (
+  select 1
+    from pg_catalog.pg_largeobject_metadata object,
+         lateral pg_catalog.aclexplode(object.lomacl) acl
+   where acl.grantee = 0
+      or acl.grantee in (
+        select role.oid from pg_catalog.pg_roles role
+         where role.rolname in (
+           'synveda_app', 'synveda_migrator', 'synveda_gateway', 'synveda_worker'
+         )
+      )
+  union all
+  select 1
+    from pg_catalog.pg_foreign_data_wrapper object,
+         lateral pg_catalog.aclexplode(object.fdwacl) acl
+   where acl.grantee = 0
+      or acl.grantee in (
+        select role.oid from pg_catalog.pg_roles role
+         where role.rolname in (
+           'synveda_app', 'synveda_migrator', 'synveda_gateway', 'synveda_worker'
+         )
+      )
+  union all
+  select 1
+    from pg_catalog.pg_foreign_server object,
+         lateral pg_catalog.aclexplode(object.srvacl) acl
+   where acl.grantee = 0
+      or acl.grantee in (
+        select role.oid from pg_catalog.pg_roles role
+         where role.rolname in (
+           'synveda_app', 'synveda_migrator', 'synveda_gateway', 'synveda_worker'
+         )
+      )
+  union all
+  select 1
+    from pg_catalog.pg_language object,
+         lateral pg_catalog.aclexplode(object.lanacl) acl
+   where acl.grantee in (
+     select role.oid from pg_catalog.pg_roles role
+      where role.rolname in (
+        'synveda_app', 'synveda_migrator', 'synveda_gateway', 'synveda_worker'
+      )
+   )
+  union all
+  select 1
+    from pg_catalog.pg_default_acl defaults
+   where defaults.defaclrole in (
+     select role.oid from pg_catalog.pg_roles role
+      where role.rolname in (
+        'synveda_app', 'synveda_migrator', 'synveda_gateway', 'synveda_worker'
+      )
+   ) or exists (
+     select 1
+       from pg_catalog.aclexplode(defaults.defaclacl) acl
+      where acl.grantee in (
+        select role.oid from pg_catalog.pg_roles role
+         where role.rolname in (
+           'synveda_app', 'synveda_migrator', 'synveda_gateway', 'synveda_worker'
+         )
+      )
+   )
+) then 1 else 0 end;
+\i /usr/local/share/synveda/local-authority-contract.sql
+\set synveda_require_complete_extensions false
+\i /usr/local/share/synveda/extension-contract.sql
+SQL
+            then
+                echo "database-bootstrap: Synveda local authority preflight was refused" >&2
+                exit 1
+            fi
+            synveda_btree_gin_present=$(bootstrap_psql --dbname="$bootstrap_url" -X -qAt -v ON_ERROR_STOP=1 <<'SQL'
+\connect synveda
+reset role;
+select 1 / case when current_user = session_user
+  and current_setting('role') = 'none'
+then 1 else 0 end
+\g /dev/null
+select case when exists (
+  select 1 from pg_catalog.pg_extension extension where extension.extname = 'btree_gin'
+) then 'true' else 'false' end;
+SQL
+            )
+            synveda_vector_present=$(bootstrap_psql --dbname="$bootstrap_url" -X -qAt -v ON_ERROR_STOP=1 <<'SQL'
+\connect synveda
+reset role;
+select 1 / case when current_user = session_user
+  and current_setting('role') = 'none'
+then 1 else 0 end
+\g /dev/null
+select case when exists (
+  select 1 from pg_catalog.pg_extension extension where extension.extname = 'vector'
+) then 'true' else 'false' end;
+SQL
+            )
+            ;;
+        absent|closed) ;;
+        unsafe)
+            echo "database-bootstrap: Synveda existing database shape was refused" >&2
+            exit 1
+            ;;
+        *)
+            echo "database-bootstrap: Synveda database shape check returned an invalid result" >&2
+            exit 1
+            ;;
+    esac
+    case "$synveda_btree_gin_present:$synveda_vector_present" in
+        true:true|true:false|false:true|false:false) ;;
+        *)
+            echo "database-bootstrap: Synveda extension preflight returned an invalid result" >&2
+            exit 1
+            ;;
+    esac
+    export SYNVEDA_BOOTSTRAP_BTREE_GIN_PRESENT=$synveda_btree_gin_present
+    export SYNVEDA_BOOTSTRAP_VECTOR_PRESENT=$synveda_vector_present
+
+    if ! bootstrap_psql --dbname="$bootstrap_url" -X -q -v ON_ERROR_STOP=1 <<'SQL'
+\o /dev/null
+\set VERBOSITY terse
+\set SHOW_CONTEXT never
+\getenv bootstrap_system_identifier SYNVEDA_POSTGRES_BOOTSTRAP_SYSTEM_IDENTIFIER
+select 1 / case when exists (
+  select 1
+    from pg_catalog.pg_control_system() control
+   where control.system_identifier::text = :'bootstrap_system_identifier'
+     and not pg_catalog.pg_is_in_recovery()
+     and pg_catalog.current_setting('transaction_read_only') = 'off'
+) then 1 else 0 end;
+select pg_catalog.pg_advisory_lock(pg_catalog.hashtext('synveda.compose.bootstrap.cluster'));
+\getenv bundled_cluster SYNVEDA_POSTGRES_BUNDLED_CLUSTER
+\getenv synveda_bootstrap_database SYNVEDA_POSTGRES_BOOTSTRAP_DATABASE
+\getenv btree_gin_present SYNVEDA_BOOTSTRAP_BTREE_GIN_PRESENT
+\getenv vector_present SYNVEDA_BOOTSTRAP_VECTOR_PRESENT
+select 1 / case when :'btree_gin_present' in ('true', 'false')
+  and :'vector_present' in ('true', 'false') then 1 else 0 end;
+-- ProcessUtility hooks can observe CREATE TEMP TABLE. Refuse every preload
+-- route and re-prove the startup execution envelope before the first DDL.
+select 1 / case when current_user = session_user
+  and current_setting('role') = 'none'
+  and current_setting('shared_preload_libraries') = ''
+  and current_setting('session_preload_libraries') = ''
+  and current_setting('local_preload_libraries') = ''
+  and current_setting('default_table_access_method') = 'heap'
+  and current_setting('client_encoding') = 'UTF8'
+  and current_setting('jit') = 'off'
+then 1 else 0 end;
+select 1 / case when not exists (
+  select 1 from pg_catalog.pg_event_trigger
+) then 1 else 0 end;
+
+create temporary table pg_temp.synveda_database_roles (
+  document jsonb not null
+) using heap;
+\copy pg_temp.synveda_database_roles(document) from '/tmp/synveda-database-bootstrap/database_roles.json'
+select 1 / case when (
+  select count(*)
+    from pg_temp.synveda_database_roles contract
+   where pg_catalog.jsonb_typeof(contract.document) = 'object'
+     and (select count(*) from pg_catalog.jsonb_object_keys(contract.document)) = 7
+     and contract.document->>'migrator' = 'synveda_migrator'
+     and contract.document->>'gateway' = 'synveda_gateway'
+     and contract.document->>'worker' = 'synveda_worker'
+     and contract.document->'administrators' = pg_catalog.jsonb_build_array(session_user)
+     and pg_catalog.jsonb_typeof(contract.document->'administrative_memberships') = 'array'
+     and pg_catalog.jsonb_typeof(contract.document->'forbidden_databases') = 'array'
+     and pg_catalog.jsonb_typeof(contract.document->'isolated_peer_roles') = 'array'
+     and (
+       contract.document->'forbidden_databases' ? 'keycloak'
+       and contract.document->'isolated_peer_roles' =
+           pg_catalog.jsonb_build_array('keycloak')
+       or not (contract.document->'forbidden_databases' ? 'keycloak')
+       and contract.document->'isolated_peer_roles' = '[]'::jsonb
+     )
+     and (
+       :'bundled_cluster' <> 'true'
+       or contract.document->'forbidden_databases' in (
+         pg_catalog.jsonb_build_array('postgres', 'template1'),
+         pg_catalog.jsonb_build_array('keycloak', 'postgres', 'template1')
+       )
+     )
+) = 1 and session_user not in (
+  'synveda_app', 'synveda_migrator', 'synveda_gateway', 'synveda_worker', 'keycloak'
+) then 1 else 0 end;
+select 1 / case when :'bundled_cluster' = 'true' or (
+  select count(*)
+    from pg_catalog.pg_roles role
+   where role.rolname in ('synveda_app', 'synveda_migrator', 'synveda_gateway', 'synveda_worker')
+) = 4 then 1 else 0 end;
+\set synveda_bootstrap_target synveda
+\set synveda_require_complete_roles false
+\set synveda_allow_target_owner_membership true
+\set synveda_allow_target_default_acl true
+\i /usr/local/share/synveda/cluster-authority-contract.sql
+
+-- Prove every conditional cluster capability before the persistent mutation
+-- boundary. PostgreSQL 17 CREATEROLE does not imply ADMIN authority over an
+-- existing role, and an ordinary provider principal cannot install vector.
+select 1 / case when current_user = session_user and exists (
+  select 1
+    from pg_catalog.pg_roles principal
+   where principal.rolname = session_user
+     and (principal.rolsuper or principal.rolcreaterole)
+     and (
+       principal.rolsuper
+       or exists (select 1 from pg_catalog.pg_database database where database.datname = 'synveda')
+       or principal.rolcreatedb
+     )
+     and (
+       principal.rolsuper
+       or (
+         (:'btree_gin_present' = 'true' or exists (
+           select 1
+             from pg_catalog.pg_available_extension_versions available
+            where available.name = 'btree_gin'
+              and available.version = '1.3'
+              and available.trusted
+         )) and (:'vector_present' = 'true' or exists (
+           select 1
+             from pg_catalog.pg_available_extension_versions available
+            where available.name = 'vector'
+              and available.version = '0.8.6'
+              and available.trusted
+         ))
+       )
+     )
+     and (
+       :'bundled_cluster' <> 'true'
+       or principal.rolsuper
+       or not exists (
+         select 1
+           from pg_catalog.pg_database database
+          where database.datname in ('postgres', 'template1')
+            and database.datdba <> principal.oid
+       )
+     )
+) and not exists (
+  select 1
+    from pg_catalog.pg_roles role
+   where role.rolname in ('synveda_app', 'synveda_migrator', 'synveda_gateway', 'synveda_worker')
+     and not exists (
+       select 1 from pg_catalog.pg_roles principal
+        where principal.rolname = session_user and principal.rolsuper
+     )
+     and not exists (
+       select 1
+         from pg_catalog.pg_auth_members membership
+         join pg_catalog.pg_roles member on member.oid = membership.member
+        where membership.roleid = role.oid
+          and member.rolname = session_user
+          and membership.admin_option
+     )
+) then 1 else 0 end;
+
+-- Refuse immutable/elevated pre-existing catalog shapes before any role,
+-- grant, ACL or database mutation. This also makes a refused convergence
+-- leave an unsafe role byte-for-byte untouched. A wrong-owner Synveda
+-- database is never repaired.
+select 1 / case when not exists (
+  select 1
+    from pg_catalog.pg_roles role
+   where role.rolname in ('synveda_app', 'synveda_migrator', 'synveda_gateway', 'synveda_worker')
+     and (
+       role.rolsuper or role.rolcreatedb or role.rolcreaterole
+       or role.rolreplication or role.rolbypassrls
+     )
+) and not exists (
+  select 1
+    from pg_catalog.pg_auth_members membership
+    join pg_catalog.pg_roles member on member.oid = membership.member
+    join pg_catalog.pg_roles granted on granted.oid = membership.roleid
+    join pg_catalog.pg_roles grantor on grantor.oid = membership.grantor
+   where (
+     granted.rolname in ('synveda_app', 'synveda_migrator', 'synveda_gateway', 'synveda_worker')
+     and not (
+       granted.rolname = 'synveda_app'
+       and member.rolname in ('synveda_gateway', 'synveda_worker')
+       and grantor.rolname = session_user
+       and not membership.admin_option
+       and membership.inherit_option
+       and membership.set_option
+       or member.rolname = session_user
+       and membership.admin_option
+       and not membership.inherit_option
+       and not membership.set_option
+       or granted.rolname = 'synveda_migrator'
+       and member.rolname = session_user
+       and grantor.rolname = session_user
+       and not membership.admin_option
+       and membership.inherit_option
+       and membership.set_option
+     )
+   ) or (
+     member.rolname in ('synveda_app', 'synveda_migrator', 'synveda_gateway', 'synveda_worker')
+     and not (
+       member.rolname in ('synveda_gateway', 'synveda_worker')
+       and granted.rolname = 'synveda_app'
+       and grantor.rolname = session_user
+       and not membership.admin_option
+       and membership.inherit_option
+       and membership.set_option
+     )
+   )
+) and not exists (
+  select 1
+    from pg_catalog.pg_database database
+    join pg_catalog.pg_roles owner on owner.oid = database.datdba
+   where owner.rolname in ('synveda_app', 'synveda_migrator', 'synveda_gateway', 'synveda_worker')
+     and not (database.datname = 'synveda' and owner.rolname = 'synveda_migrator')
+) and not exists (
+  select 1
+    from pg_catalog.pg_tablespace tablespace
+    join pg_catalog.pg_roles owner on owner.oid = tablespace.spcowner
+   where owner.rolname in ('synveda_app', 'synveda_migrator', 'synveda_gateway', 'synveda_worker')
+) and not exists (
+  select 1
+    from pg_catalog.pg_database database,
+         lateral pg_catalog.aclexplode(database.datacl) acl
+    join pg_catalog.pg_roles grantee on grantee.oid = acl.grantee
+  where grantee.rolname in ('synveda_app', 'synveda_migrator', 'synveda_gateway', 'synveda_worker')
+     and not (
+       database.datname = 'synveda'
+       and (
+         grantee.rolname = 'synveda_migrator'
+         and acl.grantor = database.datdba
+         and acl.privilege_type in ('CREATE', 'CONNECT', 'TEMPORARY')
+         and not acl.is_grantable
+         or grantee.rolname in ('synveda_gateway', 'synveda_worker')
+         and acl.grantor = database.datdba
+         and acl.privilege_type = 'CONNECT'
+         and not acl.is_grantable
+       )
+     )
+) and not exists (
+  select 1
+    from pg_catalog.pg_database database
+    join pg_catalog.pg_roles owner on owner.oid = database.datdba
+   where database.datname = 'synveda'
+     and not (
+       owner.rolname = 'synveda_migrator'
+       and not database.datistemplate
+       and not database.dathasloginevt
+       and database.datconnlimit = -1
+       and database.encoding = pg_catalog.pg_char_to_encoding('UTF8')
+       and database.datlocprovider = (
+         select template.datlocprovider
+           from pg_catalog.pg_database template
+          where template.datname = 'template0'
+       )
+       and database.datcollate = (
+         select template.datcollate
+           from pg_catalog.pg_database template
+          where template.datname = 'template0'
+       )
+       and database.datctype = (
+         select template.datctype
+           from pg_catalog.pg_database template
+          where template.datname = 'template0'
+       )
+       and database.datlocale is not distinct from (
+         select template.datlocale
+           from pg_catalog.pg_database template
+          where template.datname = 'template0'
+       )
+       and database.daticurules is not distinct from (
+         select template.daticurules
+           from pg_catalog.pg_database template
+          where template.datname = 'template0'
+       )
+       and database.datcollversion is not distinct from
+           pg_catalog.pg_database_collation_actual_version(database.oid)
+       and database.dattablespace = (
+         select template.dattablespace
+           from pg_catalog.pg_database template
+          where template.datname = 'template0'
+       )
+       and not exists (
+         select 1
+           from pg_catalog.pg_db_role_setting settings
+          where settings.setdatabase = database.oid
+       )
+       and not exists (
+         select 1
+           from pg_catalog.aclexplode(
+             coalesce(database.datacl, pg_catalog.acldefault('d', database.datdba))
+           ) acl
+           left join pg_catalog.pg_roles grantee on grantee.oid = acl.grantee
+          where not (
+            grantee.rolname = 'synveda_migrator'
+            and acl.grantor = database.datdba
+            and acl.privilege_type in ('CREATE', 'CONNECT', 'TEMPORARY')
+            and not acl.is_grantable
+          ) and not (
+            acl.grantee = 0
+            and not database.datallowconn
+            and database.datacl is null
+            and acl.grantor = database.datdba
+            and acl.privilege_type in ('CONNECT', 'TEMPORARY')
+            and not acl.is_grantable
+          ) and not (
+            grantee.rolname in ('synveda_gateway', 'synveda_worker')
+            and acl.grantor = database.datdba
+            and acl.privilege_type = 'CONNECT'
+            and not acl.is_grantable
+          ) and not (
+            grantee.rolname = session_user
+            and acl.grantor = database.datdba
+            and acl.privilege_type = 'CONNECT'
+            and not acl.is_grantable
+          )
+       )
+       and (
+         not database.datallowconn
+         and database.datacl is null
+         or database.datallowconn
+         and database.datacl is not null
+         and (
+           select count(*)
+             from pg_catalog.aclexplode(database.datacl) acl
+            where acl.grantee = (
+              select administrator.oid
+                from pg_catalog.pg_roles administrator
+               where administrator.rolname = session_user
+            )
+              and acl.grantor = database.datdba
+              and acl.privilege_type = 'CONNECT'
+              and not acl.is_grantable
+         ) = 1
+       )
+     )
+) and not exists (
+  select 1
+    from pg_catalog.pg_largeobject_metadata object,
+         lateral pg_catalog.aclexplode(object.lomacl) acl
+   where acl.grantee = 0
+      or acl.grantee in (
+        select role.oid from pg_catalog.pg_roles role
+         where role.rolname in (
+           'synveda_app', 'synveda_migrator', 'synveda_gateway', 'synveda_worker'
+         )
+      )
+  union all
+  select 1
+    from pg_catalog.pg_foreign_data_wrapper object,
+         lateral pg_catalog.aclexplode(object.fdwacl) acl
+   where acl.grantee = 0
+      or acl.grantee in (
+        select role.oid from pg_catalog.pg_roles role
+         where role.rolname in (
+           'synveda_app', 'synveda_migrator', 'synveda_gateway', 'synveda_worker'
+         )
+      )
+  union all
+  select 1
+    from pg_catalog.pg_foreign_server object,
+         lateral pg_catalog.aclexplode(object.srvacl) acl
+   where acl.grantee = 0
+      or acl.grantee in (
+        select role.oid from pg_catalog.pg_roles role
+         where role.rolname in (
+           'synveda_app', 'synveda_migrator', 'synveda_gateway', 'synveda_worker'
+         )
+      )
+  union all
+  select 1
+    from pg_catalog.pg_language object,
+         lateral pg_catalog.aclexplode(object.lanacl) acl
+   where acl.grantee in (
+     select role.oid from pg_catalog.pg_roles role
+      where role.rolname in (
+        'synveda_app', 'synveda_migrator', 'synveda_gateway', 'synveda_worker'
+      )
+   )
+  union all
+  select 1
+    from pg_catalog.pg_tablespace object,
+         lateral pg_catalog.aclexplode(object.spcacl) acl
+   where acl.grantee = 0
+      or acl.grantee in (
+        select role.oid from pg_catalog.pg_roles role
+         where role.rolname in (
+           'synveda_app', 'synveda_migrator', 'synveda_gateway', 'synveda_worker'
+         )
+      )
+  union all
+  select 1
+    from pg_catalog.pg_parameter_acl object,
+         lateral pg_catalog.aclexplode(object.paracl) acl
+   where acl.grantee = 0
+      or acl.grantee in (
+        select role.oid from pg_catalog.pg_roles role
+         where role.rolname in (
+           'synveda_app', 'synveda_migrator', 'synveda_gateway', 'synveda_worker'
+         )
+      )
+  union all
+  select 1
+    from pg_catalog.pg_default_acl defaults
+   where defaults.defaclrole in (
+     select role.oid from pg_catalog.pg_roles role
+      where role.rolname in (
+        'synveda_app', 'synveda_migrator', 'synveda_gateway', 'synveda_worker'
+      )
+   ) or exists (
+     select 1
+       from pg_catalog.aclexplode(defaults.defaclacl) acl
+      where acl.grantee in (
+        select role.oid from pg_catalog.pg_roles role
+         where role.rolname in (
+           'synveda_app', 'synveda_migrator', 'synveda_gateway', 'synveda_worker'
+         )
+      )
+   )
+) then 1 else 0 end;
+
+-- Bundled Keycloak is optional for the Synveda-only topology. Admit only the
+-- two exact interruption states which the ordered Keycloak phase can repair:
+-- its ordinary NOLOGIN role without a database, and that role owning a
+-- template0-derived database which is closed with PostgreSQL's NULL default ACL.
+-- Every other existing peer must already have the complete terminal envelope.
+select 1 / case when (
+  not exists (select 1 from pg_catalog.pg_roles role where role.rolname = 'keycloak')
+  and not exists (select 1 from pg_catalog.pg_database database where database.datname = 'keycloak')
+  or exists (
+    select 1
+      from pg_catalog.pg_roles role
+     where role.rolname = 'keycloak'
+       and not exists (
+         select 1 from pg_catalog.pg_database database
+          where database.datname = 'keycloak'
+       )
+       and role.rolinherit
+       and not role.rolsuper and not role.rolcreatedb and not role.rolcreaterole
+       and not role.rolreplication and not role.rolbypassrls
+       and role.rolconnlimit = -1
+       and not role.rolcanlogin
+       and (
+         role.rolvaliduntil is null
+         or role.rolvaliduntil is not distinct from 'infinity'::timestamptz
+       )
+       and role.rolconfig is null
+       and not exists (
+         select 1 from pg_catalog.pg_db_role_setting settings
+          where settings.setrole = role.oid
+       )
+  )
+  or exists (
+    select 1
+      from pg_catalog.pg_roles role
+      join pg_catalog.pg_database database on database.datname = 'keycloak'
+      join pg_catalog.pg_roles owner on owner.oid = database.datdba
+      cross join pg_catalog.pg_database template
+     where role.rolname = 'keycloak'
+       and template.datname = 'template0'
+       and owner.oid = role.oid
+       and role.rolinherit
+       and not role.rolsuper and not role.rolcreatedb and not role.rolcreaterole
+       and not role.rolreplication and not role.rolbypassrls
+       and role.rolconnlimit = -1
+       and (
+         role.rolcanlogin
+         and role.rolvaliduntil is not distinct from 'infinity'::timestamptz
+         or not role.rolcanlogin
+         and (
+           role.rolvaliduntil is null
+           or role.rolvaliduntil is not distinct from 'infinity'::timestamptz
+         )
+       )
+       and not database.datistemplate
+       and not database.dathasloginevt and database.datconnlimit = -1
+       and database.encoding = pg_catalog.pg_char_to_encoding('UTF8')
+       and database.datlocprovider = template.datlocprovider
+       and database.datcollate = template.datcollate
+       and database.datctype = template.datctype
+       and database.datlocale is not distinct from template.datlocale
+       and database.daticurules is not distinct from template.daticurules
+       and database.datcollversion is not distinct from
+           pg_catalog.pg_database_collation_actual_version(database.oid)
+       and database.dattablespace = template.dattablespace
+       and not exists (
+         select 1 from pg_catalog.pg_db_role_setting settings
+          where settings.setrole = role.oid
+             or settings.setdatabase = database.oid
+       )
+       and (
+         database.datallowconn
+         or :'synveda_keycloak_no_startup_locks' = 'true'
+         and :'synveda_keycloak_no_activity' = 'true'
+         and :'synveda_keycloak_no_prepared_xacts' = 'true'
+       )
+       and (
+         not database.datallowconn
+         and database.datacl is null
+         or database.datallowconn
+         and database.datacl is not null
+         and (
+           (
+             select count(*)
+               from pg_catalog.aclexplode(database.datacl) acl
+              where acl.grantee = role.oid
+                and acl.grantor = role.oid
+                and acl.privilege_type in ('CREATE', 'CONNECT', 'TEMPORARY')
+                and not acl.is_grantable
+           ) = 3
+           and (
+             select count(*)
+               from pg_catalog.aclexplode(database.datacl) acl
+              where acl.grantee = (
+                select administrator.oid
+                  from pg_catalog.pg_roles administrator
+                 where administrator.rolname = session_user
+              )
+                and acl.grantor = role.oid
+                and acl.privilege_type = 'CONNECT'
+                and not acl.is_grantable
+           ) = 1
+           and not exists (
+             select 1
+               from pg_catalog.aclexplode(database.datacl) acl
+              where not (
+                acl.grantee = role.oid
+                and acl.grantor = role.oid
+                and acl.privilege_type in ('CREATE', 'CONNECT', 'TEMPORARY')
+                and not acl.is_grantable
+              ) and not (
+                acl.grantee = (
+                  select administrator.oid
+                    from pg_catalog.pg_roles administrator
+                   where administrator.rolname = session_user
+                )
+                and acl.privilege_type = 'CONNECT'
+                and not acl.is_grantable
+                and acl.grantor = role.oid
+              )
+           )
+         )
+       )
+  )
+) and not exists (
+  select 1
+    from pg_catalog.pg_auth_members membership
+    join pg_catalog.pg_roles member on member.oid = membership.member
+    join pg_catalog.pg_roles granted on granted.oid = membership.roleid
+   where member.rolname = 'keycloak'
+      or granted.rolname = 'keycloak'
+     and not (
+       member.rolname = session_user
+       and membership.admin_option
+       and not membership.inherit_option
+       and not membership.set_option
+       or member.rolname = session_user
+       and membership.grantor = membership.member
+       and not membership.admin_option
+       and membership.inherit_option
+       and membership.set_option
+     )
+) and not exists (
+  select 1
+    from pg_catalog.pg_database database
+    join pg_catalog.pg_roles owner on owner.oid = database.datdba
+   where owner.rolname = 'keycloak' and database.datname <> 'keycloak'
+) and not exists (
+  select 1
+    from pg_catalog.pg_tablespace tablespace
+    join pg_catalog.pg_roles owner on owner.oid = tablespace.spcowner
+   where owner.rolname = 'keycloak'
+) and not exists (
+  select 1
+    from pg_catalog.pg_database database,
+         lateral pg_catalog.aclexplode(database.datacl) acl
+   where database.datname <> 'keycloak'
+     and acl.grantee = (
+       select role.oid from pg_catalog.pg_roles role where role.rolname = 'keycloak'
+     )
+) then 1 else 0 end;
+
+-- Refuse before mutation unless this principal can close every PostgreSQL 17
+-- standard logging path for the credential window. Preload hooks are outside
+-- that envelope and therefore forbidden rather than silently trusted.
+select 1 / case when not exists (
+  select 1
+    from (values
+      ('log_min_messages'),
+      ('log_min_error_statement'),
+      ('log_error_verbosity'),
+      ('log_statement'),
+      ('log_min_duration_statement'),
+      ('log_min_duration_sample'),
+      ('log_statement_sample_rate'),
+      ('log_transaction_sample_rate'),
+      ('log_parameter_max_length'),
+      ('log_parameter_max_length_on_error'),
+      ('debug_print_parse'),
+      ('debug_print_rewritten'),
+      ('debug_print_plan')
+    ) required(name)
+   where not pg_catalog.has_parameter_privilege(session_user, required.name, 'SET')
+) and current_setting('shared_preload_libraries') = ''
+  and current_setting('session_preload_libraries') = ''
+  and current_setting('local_preload_libraries') = ''
+then 1 else 0 end;
+
+\! /usr/local/bin/synveda-database-bootstrap validate-synveda-passwords
+\if :SHELL_ERROR
+select 1 / 0;
+\endif
+
+-- MUTATION BOUNDARY: every persistent Synveda refusal above is read-only.
+-- CREATE DATABASE is always closed. Role convergence may commit first, but no
+-- client can enter the database until the later ACL transaction publishes all
+-- CONNECT grants and ALLOW_CONNECTIONS together.
+
+-- Close bundled maintenance databases before a protected role can exist. If
+-- this process is interrupted later, restart preflight still observes the
+-- terminal effective-CONNECT boundary.
+select 'revoke connect, temporary on database postgres, template1 from public'
+where :'bundled_cluster' = 'true'
+\gexec
+select format(
+  'create role synveda_app nologin inherit nosuperuser nocreatedb nocreaterole noreplication nobypassrls connection limit -1'
+)
+where :'bundled_cluster' = 'true'
+  and not exists (select 1 from pg_catalog.pg_roles where rolname = 'synveda_app')
+\gexec
+-- SUPERUSER, REPLICATION and BYPASSRLS changes themselves require superuser,
+-- even when spelling the narrowing NO* form. The final predicates refuse
+-- those flags; this convergence changes only attributes a CREATEROLE
+-- deployment principal is allowed to narrow.
+alter role synveda_app with nologin inherit nocreatedb nocreaterole connection limit -1;
+alter role synveda_app reset all;
+
+select format(
+  'create role synveda_migrator nologin inherit nosuperuser nocreatedb nocreaterole noreplication nobypassrls connection limit -1'
+)
+where :'bundled_cluster' = 'true'
+  and not exists (select 1 from pg_catalog.pg_roles where rolname = 'synveda_migrator')
+\gexec
+alter role synveda_migrator with nologin inherit nocreatedb nocreaterole connection limit -1 valid until 'infinity';
+alter role synveda_migrator reset all;
+
+-- PostgreSQL 16+ records a non-superuser creator's ADMIN-only grant under the
+-- cluster bootstrap superuser's grantor identity. The contract proves that
+-- provider row exactly. Remove only a recoverable self-granted row left by an
+-- interrupted prior run, then add it for database creation and target access.
+revoke synveda_migrator from current_user granted by current_user;
+grant synveda_migrator to current_user
+  with admin false, inherit true, set true granted by current_user;
+
+select format(
+  'create role synveda_gateway nologin inherit nosuperuser nocreatedb nocreaterole noreplication nobypassrls connection limit -1'
+)
+where :'bundled_cluster' = 'true'
+  and not exists (select 1 from pg_catalog.pg_roles where rolname = 'synveda_gateway')
+\gexec
+alter role synveda_gateway with nologin inherit nocreatedb nocreaterole connection limit -1 valid until 'infinity';
+alter role synveda_gateway reset all;
+
+select format(
+  'create role synveda_worker nologin inherit nosuperuser nocreatedb nocreaterole noreplication nobypassrls connection limit -1'
+)
+where :'bundled_cluster' = 'true'
+  and not exists (select 1 from pg_catalog.pg_roles where rolname = 'synveda_worker')
+\gexec
+alter role synveda_worker with nologin inherit nocreatedb nocreaterole connection limit -1 valid until 'infinity';
+alter role synveda_worker reset all;
+
+select format('alter role %I in database %I reset all', role.rolname, database.datname)
+  from pg_catalog.pg_db_role_setting settings
+  join pg_catalog.pg_roles role on role.oid = settings.setrole
+  join pg_catalog.pg_database database on database.oid = settings.setdatabase
+ where role.rolname in ('synveda_app', 'synveda_migrator', 'synveda_gateway', 'synveda_worker')
+   and settings.setdatabase <> 0
+\gexec
+
+revoke admin option for synveda_app from synveda_gateway, synveda_worker;
+grant synveda_app to synveda_gateway, synveda_worker
+  with admin false, inherit true, set true granted by current_user;
+
+select format(
+  'create database synveda with owner synveda_migrator template template0 encoding %L allow_connections false',
+  'UTF8'
+)
+where not exists (select 1 from pg_catalog.pg_database where datname = 'synveda')
+\gexec
+
+select 1 / case when exists (
+  select 1
+    from pg_catalog.pg_database database
+    join pg_catalog.pg_roles owner on owner.oid = database.datdba
+     where database.datname = 'synveda'
+     and owner.rolname = 'synveda_migrator'
+     and (
+       not database.datallowconn and database.datacl is null
+       or database.datallowconn and database.datacl is not null
+     )
+     and not database.datistemplate
+     and not database.dathasloginevt
+     and database.datconnlimit = -1
+     and database.encoding = pg_catalog.pg_char_to_encoding('UTF8')
+) then 1 else 0 end;
+
+begin;
+-- Object GRANT records current_user as its grantor. Remove a prior bootstrap-
+-- administrator row, then execute the complete ACL as the database owner so
+-- the terminal catalog has one unambiguous grantor.
+revoke connect on database synveda from current_user granted by current_user;
+set role synveda_migrator;
+revoke connect, temporary on database synveda from public;
+grant create, connect, temporary on database synveda to synveda_migrator;
+grant connect on database synveda to synveda_gateway, synveda_worker;
+select format('grant connect on database synveda to %I', session_user)
+\gexec
+alter database synveda allow_connections true;
+reset role;
+select 1 / case when current_user = session_user then 1 else 0 end;
+
+-- Database creation needs a SET-capable owner membership. Keep it only for
+-- this cluster session; the target phase reacquires it transactionally after
+-- connecting through the administrator's explicit CONNECT-only ACL.
+revoke synveda_migrator from current_user granted by current_user;
+select format(
+  'revoke keycloak from %I granted by %I', session_user, session_user
+)
+where exists (select 1 from pg_catalog.pg_roles where rolname = 'keycloak')
+\gexec
+commit;
+
+select 'revoke connect, temporary on database postgres, template1 from public'
+where :'bundled_cluster' = 'true'
+\gexec
+
+select 1 / case when not exists (
+  select 1
+    from pg_catalog.pg_roles role
+   where role.rolname in ('synveda_app', 'synveda_migrator', 'synveda_gateway', 'synveda_worker')
+     and (
+       role.rolsuper or role.rolcreatedb or role.rolcreaterole or role.rolreplication or role.rolbypassrls
+       or role.rolconnlimit <> -1
+       or not role.rolinherit
+       or role.rolcanlogin
+       or exists (
+         select 1 from pg_catalog.pg_db_role_setting settings
+          where settings.setrole = role.oid
+       )
+     )
+) then 1 else 0 end;
+
+select 1 / case when not exists (
+  select 1
+    from pg_catalog.pg_auth_members membership
+    join pg_catalog.pg_roles member on member.oid = membership.member
+    join pg_catalog.pg_roles granted on granted.oid = membership.roleid
+    join pg_catalog.pg_roles grantor on grantor.oid = membership.grantor
+   where (
+     granted.rolname in ('synveda_app', 'synveda_migrator', 'synveda_gateway', 'synveda_worker')
+     and not (
+       (
+         granted.rolname = 'synveda_app'
+         and member.rolname in ('synveda_gateway', 'synveda_worker')
+         and grantor.rolname = session_user
+         and not membership.admin_option
+         and membership.inherit_option
+         and membership.set_option
+       ) or (
+         member.rolname = session_user
+         and membership.admin_option
+         and not membership.inherit_option
+         and not membership.set_option
+       )
+     )
+   ) or (
+     member.rolname in ('synveda_app', 'synveda_migrator', 'synveda_gateway', 'synveda_worker')
+     and not (
+       member.rolname in ('synveda_gateway', 'synveda_worker')
+       and granted.rolname = 'synveda_app'
+       and grantor.rolname = session_user
+       and not membership.admin_option
+       and membership.inherit_option
+       and membership.set_option
+     )
+   )
+) then 1 else 0 end;
+
+-- Re-prove the exact configured ADMIN member/grantor catalogue after role
+-- convergence. The shared contract is symmetric, so missing and extra rows
+-- are both refusals.
+\set synveda_bootstrap_target synveda
+\set synveda_require_complete_roles true
+\set synveda_allow_target_owner_membership false
+\set synveda_allow_target_default_acl false
+\i /usr/local/share/synveda/cluster-authority-contract.sql
+
+select 1 / case when (
+  select count(*)
+    from pg_catalog.pg_database database,
+         lateral pg_catalog.aclexplode(
+           coalesce(database.datacl, pg_catalog.acldefault('d', database.datdba))
+         ) acl
+    join pg_catalog.pg_roles grantee on grantee.oid = acl.grantee
+   where database.datname = 'synveda'
+     and grantee.rolname in ('synveda_gateway', 'synveda_worker')
+     and acl.grantor = database.datdba
+     and acl.privilege_type = 'CONNECT'
+     and not acl.is_grantable
+) = 2 and (
+  select count(*)
+    from pg_catalog.pg_database database,
+         lateral pg_catalog.aclexplode(
+           coalesce(database.datacl, pg_catalog.acldefault('d', database.datdba))
+         ) acl
+   where database.datname = 'synveda'
+     and acl.grantee = database.datdba
+     and acl.grantor = database.datdba
+     and acl.privilege_type in ('CREATE', 'CONNECT', 'TEMPORARY')
+     and not acl.is_grantable
+) = 3 and (
+  select count(*)
+    from pg_catalog.pg_database database,
+         lateral pg_catalog.aclexplode(
+           coalesce(database.datacl, pg_catalog.acldefault('d', database.datdba))
+         ) acl
+   where database.datname = 'synveda'
+     and acl.grantee = (
+       select administrator.oid
+         from pg_catalog.pg_roles administrator
+        where administrator.rolname = session_user
+     )
+     and acl.grantor = database.datdba
+     and acl.privilege_type = 'CONNECT'
+     and not acl.is_grantable
+) = 1 and not exists (
+  select 1
+    from pg_catalog.pg_database database,
+         lateral pg_catalog.aclexplode(
+           coalesce(database.datacl, pg_catalog.acldefault('d', database.datdba))
+         ) acl
+    left join pg_catalog.pg_roles grantee on grantee.oid = acl.grantee
+   where database.datname = 'synveda'
+     and not (
+       grantee.rolname = 'synveda_migrator'
+       and acl.privilege_type in ('CREATE', 'CONNECT', 'TEMPORARY')
+       and acl.grantor = database.datdba
+       and not acl.is_grantable
+     )
+     and not (
+       grantee.rolname in ('synveda_gateway', 'synveda_worker')
+       and acl.privilege_type = 'CONNECT'
+       and acl.grantor = database.datdba
+       and not acl.is_grantable
+     )
+     and not (
+       grantee.rolname = session_user
+       and acl.privilege_type = 'CONNECT'
+       and acl.grantor = database.datdba
+       and not acl.is_grantable
+     )
+) and not exists (
+  select 1
+    from pg_catalog.pg_database database,
+         lateral pg_catalog.aclexplode(
+           coalesce(database.datacl, pg_catalog.acldefault('d', database.datdba))
+         ) acl
+   where database.datname <> 'synveda'
+     and acl.grantee in (
+       select role.oid from pg_catalog.pg_roles role
+        where role.rolname in (
+          'synveda_app', 'synveda_migrator', 'synveda_gateway', 'synveda_worker'
+        )
+     )
+) and (
+  :'bundled_cluster' <> 'true'
+  or (
+    not pg_catalog.has_database_privilege('synveda_gateway', 'postgres', 'CONNECT')
+    and not pg_catalog.has_database_privilege('synveda_worker', 'postgres', 'CONNECT')
+    and not pg_catalog.has_database_privilege('synveda_app', 'postgres', 'CONNECT')
+    and not pg_catalog.has_database_privilege('synveda_migrator', 'postgres', 'CONNECT')
+    and not pg_catalog.has_database_privilege('synveda_gateway', 'template1', 'CONNECT')
+    and not pg_catalog.has_database_privilege('synveda_worker', 'template1', 'CONNECT')
+    and not pg_catalog.has_database_privilege('synveda_app', 'template1', 'CONNECT')
+    and not pg_catalog.has_database_privilege('synveda_migrator', 'template1', 'CONNECT')
+  )
+) then 1 else 0 end;
+
+SQL
+    then
+        echo "database-bootstrap: Synveda role or database convergence was refused" >&2
+        exit 1
+    fi
+
+    if ! bootstrap_psql --dbname="$bootstrap_url" -X -q -v ON_ERROR_STOP=1 <<'SQL'
+\o /dev/null
+\set VERBOSITY terse
+\set SHOW_CONTEXT never
+\connect synveda
+reset role;
+\getenv bootstrap_system_identifier SYNVEDA_POSTGRES_BOOTSTRAP_SYSTEM_IDENTIFIER
+select 1 / case when exists (
+  select 1
+    from pg_catalog.pg_control_system() control
+   where control.system_identifier::text = :'bootstrap_system_identifier'
+     and not pg_catalog.pg_is_in_recovery()
+     and pg_catalog.current_setting('transaction_read_only') = 'off'
+) then 1 else 0 end;
+select 1 / case when current_user = session_user
+  and current_setting('role') = 'none'
+then 1 else 0 end
+\g /dev/null
+\i /usr/local/share/synveda/credential-log-contract.sql
+select pg_catalog.pg_advisory_lock(pg_catalog.hashtext('synveda.compose.bootstrap.cluster'));
+select pg_catalog.pg_advisory_lock(pg_catalog.hashtext('synveda.compose.bootstrap.synveda'));
+\getenv bundled_cluster SYNVEDA_POSTGRES_BUNDLED_CLUSTER
+\getenv synveda_bootstrap_database SYNVEDA_POSTGRES_BOOTSTRAP_DATABASE
+select 1 / case when not exists (
+  select 1 from pg_catalog.pg_event_trigger
+) then 1 else 0 end;
+-- TARGET MUTATION BOUNDARY: every target change, including the temporary
+-- owner membership and role-contract staging table, is rolled back on refusal.
+begin;
+reset role;
+select 1 / case when current_user = session_user
+  and current_setting('role') = 'none'
+  and not exists (select 1 from pg_catalog.pg_event_trigger)
+then 1 else 0 end
+\g /dev/null
+grant synveda_migrator to current_user
+  with admin false, inherit true, set true granted by current_user;
+create temporary table pg_temp.synveda_database_roles (
+  document jsonb not null
+) using heap;
+\copy pg_temp.synveda_database_roles(document) from '/tmp/synveda-database-bootstrap/database_roles.json'
+select 1 / case when (
+  select count(*)
+    from pg_temp.synveda_database_roles contract
+   where pg_catalog.jsonb_typeof(contract.document) = 'object'
+     and (select count(*) from pg_catalog.jsonb_object_keys(contract.document)) = 7
+     and contract.document->>'migrator' = 'synveda_migrator'
+     and contract.document->>'gateway' = 'synveda_gateway'
+     and contract.document->>'worker' = 'synveda_worker'
+     and contract.document->'administrators' = pg_catalog.jsonb_build_array(session_user)
+     and pg_catalog.jsonb_typeof(contract.document->'administrative_memberships') = 'array'
+     and pg_catalog.jsonb_typeof(contract.document->'forbidden_databases') = 'array'
+     and pg_catalog.jsonb_typeof(contract.document->'isolated_peer_roles') = 'array'
+     and (
+       contract.document->'forbidden_databases' ? 'keycloak'
+       and contract.document->'isolated_peer_roles' =
+           pg_catalog.jsonb_build_array('keycloak')
+       or not (contract.document->'forbidden_databases' ? 'keycloak')
+       and contract.document->'isolated_peer_roles' = '[]'::jsonb
+     )
+     and (
+       :'bundled_cluster' <> 'true'
+       or contract.document->'forbidden_databases' in (
+         pg_catalog.jsonb_build_array('postgres', 'template1'),
+         pg_catalog.jsonb_build_array('keycloak', 'postgres', 'template1')
+       )
+     )
+) = 1 then 1 else 0 end;
+select 1 / case when :'bundled_cluster' = 'true' or (
+  select count(*)
+    from pg_catalog.pg_roles role
+   where role.rolname in ('synveda_app', 'synveda_migrator', 'synveda_gateway', 'synveda_worker')
+) = 4 then 1 else 0 end;
+select 1 / case when not exists (
+  select 1 from pg_catalog.pg_event_trigger
+) then 1 else 0 end;
+select 1 / case when exists (
+  select 1
+    from pg_catalog.pg_namespace namespace
+    join pg_catalog.pg_roles owner on owner.oid = namespace.nspowner
+   where namespace.nspname = 'public'
+     and owner.rolname in ('pg_database_owner', 'synveda_migrator')
+) and not exists (
+  select 1
+    from pg_catalog.pg_namespace namespace,
+         lateral pg_catalog.aclexplode(
+           coalesce(namespace.nspacl, pg_catalog.acldefault('n', namespace.nspowner))
+         ) acl
+    left join pg_catalog.pg_roles grantee on grantee.oid = acl.grantee
+   where namespace.nspname = 'public'
+     and not (
+       grantee.rolname in ('pg_database_owner', 'synveda_migrator')
+       and acl.grantor = namespace.nspowner
+       and acl.privilege_type in ('CREATE', 'USAGE')
+       and not acl.is_grantable
+     )
+     and not (
+       acl.grantee = 0
+       and acl.grantor = namespace.nspowner
+       and acl.privilege_type = 'USAGE'
+       and not acl.is_grantable
+     )
+     and not (
+       grantee.rolname = 'synveda_app'
+       and acl.grantor = namespace.nspowner
+       and acl.privilege_type = 'USAGE'
+       and not acl.is_grantable
+     )
+) and not exists (
+  select 1
+    from pg_catalog.pg_class object
+    join pg_catalog.pg_namespace namespace on namespace.oid = object.relnamespace
+    join pg_catalog.pg_roles owner on owner.oid = object.relowner
+   where namespace.nspname = 'public'
+     and owner.rolname <> 'synveda_migrator'
+     and not exists (
+       select 1
+         from pg_catalog.pg_depend dependency
+         join pg_catalog.pg_extension extension on extension.oid = dependency.refobjid
+        where dependency.classid = 'pg_catalog.pg_class'::regclass
+          and dependency.objid = object.oid
+          and dependency.refclassid = 'pg_catalog.pg_extension'::regclass
+          and dependency.deptype = 'e'
+          and extension.extname in ('btree_gin', 'vector')
+     )
+  union all
+  select 1
+    from pg_catalog.pg_proc object
+    join pg_catalog.pg_namespace namespace on namespace.oid = object.pronamespace
+    join pg_catalog.pg_roles owner on owner.oid = object.proowner
+   where namespace.nspname = 'public'
+     and owner.rolname <> 'synveda_migrator'
+     and not exists (
+       select 1
+         from pg_catalog.pg_depend dependency
+         join pg_catalog.pg_extension extension on extension.oid = dependency.refobjid
+        where dependency.classid = 'pg_catalog.pg_proc'::regclass
+          and dependency.objid = object.oid
+          and dependency.refclassid = 'pg_catalog.pg_extension'::regclass
+          and dependency.deptype = 'e'
+          and extension.extname in ('btree_gin', 'vector')
+     )
+  union all
+  select 1
+    from pg_catalog.pg_type object
+    join pg_catalog.pg_namespace namespace on namespace.oid = object.typnamespace
+    join pg_catalog.pg_roles owner on owner.oid = object.typowner
+   where namespace.nspname = 'public'
+     and owner.rolname <> 'synveda_migrator'
+     and not exists (
+       select 1
+         from pg_catalog.pg_depend dependency
+         join pg_catalog.pg_extension extension on extension.oid = dependency.refobjid
+        where dependency.classid = 'pg_catalog.pg_type'::regclass
+          and dependency.objid = object.oid
+          and dependency.refclassid = 'pg_catalog.pg_extension'::regclass
+          and dependency.deptype = 'e'
+          and extension.extname in ('btree_gin', 'vector')
+     )
+) and not exists (
+  select 1
+    from pg_catalog.pg_extension extension
+    join pg_catalog.pg_namespace namespace on namespace.oid = extension.extnamespace
+   where extension.extname in ('btree_gin', 'vector')
+     and (
+       namespace.nspname <> 'public'
+       or extension.extowner <> (
+         select role.oid from pg_catalog.pg_roles role where role.rolname = session_user
+       )
+       or extension.extname = 'btree_gin' and extension.extversion <> '1.3'
+       or extension.extname = 'vector' and extension.extversion <> '0.8.6'
+     )
+) and not exists (
+  select 1
+    from pg_catalog.pg_extension extension
+    join pg_catalog.pg_namespace namespace on namespace.oid = extension.extnamespace
+   where namespace.nspname = 'public'
+     and extension.extname not in ('btree_gin', 'vector')
+) and not exists (
+  select 1
+    from (values ('btree_gin', '1.3'), ('vector', '0.8.6')) required(name, version)
+   where not exists (
+     select 1 from pg_catalog.pg_extension extension where extension.extname = required.name
+   ) and not exists (
+     select 1 from pg_catalog.pg_roles principal
+      where principal.rolname = session_user and principal.rolsuper
+   ) and not exists (
+     select 1
+       from pg_catalog.pg_available_extension_versions available
+      where available.name = required.name
+        and available.version = required.version
+        and available.trusted
+   )
+) then 1 else 0 end;
+-- Recheck local authority under the target-database lock before changing its
+-- schema or extensions. Runtime logins may inherit only through synveda_app;
+-- neither they nor the capability role may own product objects, and the
+-- logins receive no direct local ACL.
+select 1 / case when not exists (
+  select 1
+    from pg_catalog.pg_namespace object
+    join pg_catalog.pg_roles owner on owner.oid = object.nspowner
+   where owner.rolname in ('synveda_app', 'synveda_gateway', 'synveda_worker')
+  union all
+  select 1
+    from pg_catalog.pg_class object
+    join pg_catalog.pg_roles owner on owner.oid = object.relowner
+   where owner.rolname in ('synveda_app', 'synveda_gateway', 'synveda_worker')
+  union all
+  select 1
+    from pg_catalog.pg_proc object
+    join pg_catalog.pg_roles owner on owner.oid = object.proowner
+   where owner.rolname in ('synveda_app', 'synveda_gateway', 'synveda_worker')
+  union all
+  select 1
+    from pg_catalog.pg_type object
+    join pg_catalog.pg_roles owner on owner.oid = object.typowner
+   where owner.rolname in ('synveda_app', 'synveda_gateway', 'synveda_worker')
+  union all
+  select 1
+    from pg_catalog.pg_extension object
+    join pg_catalog.pg_roles owner on owner.oid = object.extowner
+   where owner.rolname in ('synveda_app', 'synveda_gateway', 'synveda_worker')
+) and not exists (
+  select 1
+    from pg_catalog.pg_class object
+    join pg_catalog.pg_namespace namespace on namespace.oid = object.relnamespace,
+         lateral pg_catalog.aclexplode(object.relacl) acl
+   where namespace.nspname = 'public'
+     and (
+       acl.grantor <> object.relowner
+       or acl.grantee not in (
+         object.relowner,
+         coalesce((select role.oid from pg_catalog.pg_roles role where role.rolname = 'synveda_app'), 0)
+       )
+       or acl.grantee = (
+         select role.oid from pg_catalog.pg_roles role where role.rolname = 'synveda_app'
+       ) and not (
+         object.relowner = (
+           select role.oid from pg_catalog.pg_roles role where role.rolname = 'synveda_migrator'
+         )
+         and object.relkind in ('r', 'p', 'v', 'm')
+         and acl.privilege_type in ('SELECT', 'INSERT', 'UPDATE', 'DELETE')
+         and not acl.is_grantable
+       )
+     )
+  union all
+  select 1
+    from pg_catalog.pg_proc object
+    join pg_catalog.pg_namespace namespace on namespace.oid = object.pronamespace,
+         lateral pg_catalog.aclexplode(object.proacl) acl
+   where namespace.nspname = 'public'
+     and (
+       acl.grantor <> object.proowner
+       or acl.grantee not in (
+         object.proowner,
+         coalesce((select role.oid from pg_catalog.pg_roles role where role.rolname = 'synveda_app'), 0)
+       )
+       or acl.grantee = (
+         select role.oid from pg_catalog.pg_roles role where role.rolname = 'synveda_app'
+       ) and not (
+         object.proowner = (
+           select role.oid from pg_catalog.pg_roles role where role.rolname = 'synveda_migrator'
+         )
+         and acl.privilege_type = 'EXECUTE'
+         and not acl.is_grantable
+       )
+     )
+  union all
+  select 1
+    from pg_catalog.pg_type object
+    join pg_catalog.pg_namespace namespace on namespace.oid = object.typnamespace,
+         lateral pg_catalog.aclexplode(object.typacl) acl
+   where namespace.nspname = 'public'
+     and (
+       acl.grantor <> object.typowner
+       or acl.grantee not in (
+         object.typowner,
+         coalesce((select role.oid from pg_catalog.pg_roles role where role.rolname = 'synveda_app'), 0)
+       )
+       or acl.grantee = (
+         select role.oid from pg_catalog.pg_roles role where role.rolname = 'synveda_app'
+       ) and not (
+         object.typowner = (
+           select role.oid from pg_catalog.pg_roles role where role.rolname = 'synveda_migrator'
+         )
+         and acl.privilege_type = 'USAGE'
+         and not acl.is_grantable
+       )
+     )
+  union all
+  select 1
+    from pg_catalog.pg_attribute object
+    join pg_catalog.pg_class relation on relation.oid = object.attrelid
+    join pg_catalog.pg_namespace namespace on namespace.oid = relation.relnamespace,
+         lateral pg_catalog.aclexplode(object.attacl) acl
+   where namespace.nspname = 'public'
+     and (
+       acl.grantor <> relation.relowner
+       or acl.grantee not in (
+         relation.relowner,
+         coalesce((select role.oid from pg_catalog.pg_roles role where role.rolname = 'synveda_app'), 0)
+       )
+       or acl.grantee = (
+         select role.oid from pg_catalog.pg_roles role where role.rolname = 'synveda_app'
+       ) and not (
+         relation.relowner = (
+           select role.oid from pg_catalog.pg_roles role where role.rolname = 'synveda_migrator'
+         )
+         and relation.relkind in ('r', 'p')
+         and acl.privilege_type = 'UPDATE'
+         and not acl.is_grantable
+       )
+     )
+  union all
+  select 1
+    from pg_catalog.pg_proc object
+    join pg_catalog.pg_namespace namespace on namespace.oid = object.pronamespace,
+         lateral pg_catalog.aclexplode(
+           coalesce(object.proacl, pg_catalog.acldefault('f', object.proowner))
+         ) acl
+   where namespace.nspname <> 'information_schema'
+     and namespace.nspname !~ '^pg_'
+     and object.prosecdef
+     and acl.grantee = 0
+     and acl.privilege_type = 'EXECUTE'
+) and not exists (
+  select 1
+    from pg_catalog.pg_namespace namespace
+   where namespace.nspname <> 'public'
+     and namespace.nspname <> 'information_schema'
+     and namespace.nspname !~ '^pg_'
+) and not exists (
+  select 1
+    from pg_catalog.pg_largeobject_metadata object,
+         lateral pg_catalog.aclexplode(object.lomacl) acl
+   where acl.grantee = 0
+      or acl.grantee in (
+        select role.oid from pg_catalog.pg_roles role
+         where role.rolname in (
+           'synveda_app', 'synveda_migrator', 'synveda_gateway', 'synveda_worker'
+         )
+      )
+  union all
+  select 1
+    from pg_catalog.pg_foreign_data_wrapper object,
+         lateral pg_catalog.aclexplode(object.fdwacl) acl
+   where acl.grantee = 0
+      or acl.grantee in (
+        select role.oid from pg_catalog.pg_roles role
+         where role.rolname in (
+           'synveda_app', 'synveda_migrator', 'synveda_gateway', 'synveda_worker'
+         )
+      )
+  union all
+  select 1
+    from pg_catalog.pg_foreign_server object,
+         lateral pg_catalog.aclexplode(object.srvacl) acl
+   where acl.grantee = 0
+      or acl.grantee in (
+        select role.oid from pg_catalog.pg_roles role
+         where role.rolname in (
+           'synveda_app', 'synveda_migrator', 'synveda_gateway', 'synveda_worker'
+         )
+      )
+  union all
+  select 1
+    from pg_catalog.pg_language object,
+         lateral pg_catalog.aclexplode(object.lanacl) acl
+   where acl.grantee in (
+     select role.oid from pg_catalog.pg_roles role
+      where role.rolname in (
+        'synveda_app', 'synveda_migrator', 'synveda_gateway', 'synveda_worker'
+      )
+   )
+  union all
+  select 1
+    from pg_catalog.pg_default_acl defaults
+   where defaults.defaclrole in (
+     select role.oid from pg_catalog.pg_roles role
+      where role.rolname in (
+        'synveda_app', 'synveda_migrator', 'synveda_gateway', 'synveda_worker'
+      )
+   ) or exists (
+     select 1
+       from pg_catalog.aclexplode(defaults.defaclacl) acl
+      where acl.grantee in (
+        select role.oid from pg_catalog.pg_roles role
+         where role.rolname in (
+           'synveda_app', 'synveda_migrator', 'synveda_gateway', 'synveda_worker'
+         )
+      )
+   )
+) then 1 else 0 end;
+\i /usr/local/share/synveda/local-authority-contract.sql
+\set synveda_require_complete_extensions false
+\i /usr/local/share/synveda/extension-contract.sql
+\set synveda_bootstrap_target synveda
+\set synveda_require_complete_roles true
+\set synveda_allow_target_owner_membership true
+\set synveda_allow_target_default_acl false
+\i /usr/local/share/synveda/cluster-authority-contract.sql
+alter schema public owner to synveda_migrator;
+select format(
+         'create extension %I with schema public version %L',
+         required.name,
+         required.version
+       )
+  from (values ('btree_gin', '1.3'), ('vector', '0.8.6')) as required(name, version)
+ where not exists (
+   select 1 from pg_catalog.pg_extension extension
+    where extension.extname = required.name
+ )
+\gexec
+\set synveda_require_complete_extensions true
+\i /usr/local/share/synveda/extension-contract.sql
+revoke all on schema public from public;
+select 1 / case when (
+  select count(*)
+    from pg_catalog.pg_extension extension
+    join pg_catalog.pg_namespace namespace on namespace.oid = extension.extnamespace
+   where extension.extname in ('btree_gin', 'vector')
+     and namespace.nspname = 'public'
+     and extension.extowner = (
+       select role.oid from pg_catalog.pg_roles role where role.rolname = session_user
+     )
+     and (
+       extension.extname = 'btree_gin' and extension.extversion = '1.3'
+       or extension.extname = 'vector' and extension.extversion = '0.8.6'
+     )
+) = 2 and exists (
+  select 1
+    from pg_catalog.pg_namespace namespace
+    join pg_catalog.pg_roles owner on owner.oid = namespace.nspowner
+   where namespace.nspname = 'public'
+     and owner.rolname = 'synveda_migrator'
+) and not exists (
+  select 1
+    from pg_catalog.pg_namespace namespace,
+         lateral pg_catalog.aclexplode(namespace.nspacl) acl
+   where namespace.nspname = 'public'
+     and acl.grantee = 0
+) and not exists (
+  select 1
+    from pg_catalog.pg_auth_members membership
+    join pg_catalog.pg_roles member on member.oid = membership.member
+    join pg_catalog.pg_roles granted on granted.oid = membership.roleid
+   where granted.rolname = 'synveda_migrator'
+     and member.rolname = session_user
+     and not (
+       (
+         :'bundled_cluster' <> 'true'
+         and membership.admin_option
+         and not membership.inherit_option
+         and not membership.set_option
+       ) or (
+         membership.grantor = membership.member
+         and not membership.admin_option
+         and membership.inherit_option
+         and membership.set_option
+       )
+     )
+) then 1 else 0 end;
+
+-- The bundled cluster owns every database ACL. An external provider owns its
+-- unrelated maintenance databases, so only the paired product database is an
+-- isolation boundary there; direct ACL/ownership checks above remain global.
+select 1 / case when not exists (
+  select 1
+    from pg_catalog.pg_database database
+   where database.datname <> current_database()
+     and database.datallowconn
+     and (:'bundled_cluster' = 'true' or database.datname = 'keycloak')
+     and (
+       pg_catalog.has_database_privilege('synveda_gateway', database.oid, 'CONNECT')
+       or pg_catalog.has_database_privilege('synveda_worker', database.oid, 'CONNECT')
+       or pg_catalog.has_database_privilege('synveda_app', database.oid, 'CONNECT')
+       or pg_catalog.has_database_privilege('synveda_migrator', database.oid, 'CONNECT')
+     )
+) then 1 else 0 end;
+
+\i /usr/local/share/synveda/credential-log-contract.sql
+set local password_encryption = 'scram-sha-256';
+select 1 / case when current_setting('password_encryption') = 'scram-sha-256'
+  then 1 else 0 end;
+create temporary table pg_temp.synveda_migrator_credential (
+  secret text not null
+) using heap on commit drop;
+create temporary table pg_temp.synveda_gateway_credential (
+  secret text not null
+) using heap on commit drop;
+create temporary table pg_temp.synveda_worker_credential (
+  secret text not null
+) using heap on commit drop;
+\copy pg_temp.synveda_migrator_credential(secret) from '/tmp/synveda-database-bootstrap/synveda_migrator_password'
+\copy pg_temp.synveda_gateway_credential(secret) from '/tmp/synveda-database-bootstrap/synveda_gateway_password'
+\copy pg_temp.synveda_worker_credential(secret) from '/tmp/synveda-database-bootstrap/synveda_worker_password'
+select 1 / case when
+  (select count(*) from pg_temp.synveda_migrator_credential) = 1
+  and (select count(*) from pg_temp.synveda_gateway_credential) = 1
+  and (select count(*) from pg_temp.synveda_worker_credential) = 1
+  and not exists (
+    select 1
+      from (
+        select secret from pg_temp.synveda_migrator_credential
+        union all
+        select secret from pg_temp.synveda_gateway_credential
+        union all
+        select secret from pg_temp.synveda_worker_credential
+      ) credential
+     where pg_catalog.octet_length(credential.secret) not between 1 and 4096
+        or credential.secret !~ '^[A-Za-z0-9._~-]+$'
+        or credential.secret ~ '^(md5[0-9A-Fa-f]{32}|SCRAM-SHA-256[$])'
+  )
+then 1 else 0 end;
+do $credential$
+declare
+  migrator_password text;
+  gateway_password text;
+  worker_password text;
+begin
+  select secret into strict migrator_password from pg_temp.synveda_migrator_credential;
+  select secret into strict gateway_password from pg_temp.synveda_gateway_credential;
+  select secret into strict worker_password from pg_temp.synveda_worker_credential;
+  begin
+    execute format(
+      'alter role synveda_migrator with login inherit password %L valid until ''infinity''',
+      migrator_password
+    );
+    execute format(
+      'alter role synveda_gateway with login inherit password %L valid until ''infinity''',
+      gateway_password
+    );
+    execute format(
+      'alter role synveda_worker with login inherit password %L valid until ''infinity''',
+      worker_password
+    );
+  exception when query_canceled or assert_failure or others then
+    raise exception using
+      errcode = 'P0001',
+      message = 'Synveda credential convergence was refused';
+  end;
+end
+$credential$;
+\if :bundled_cluster
+select 1 / case when (
+  select count(*)
+    from pg_catalog.pg_authid role
+   where role.rolname in ('synveda_migrator', 'synveda_gateway', 'synveda_worker')
+     and role.rolpassword like 'SCRAM-SHA-256$%'
+) = 3 then 1 else 0 end;
+\endif
+reset role;
+select 1 / case when current_user = session_user
+  and current_setting('role') = 'none'
+then 1 else 0 end
+\g /dev/null
+revoke synveda_migrator from session_user granted by session_user;
+select 1 / case when not exists (
+  select 1
+    from pg_catalog.pg_roles role
+   where role.rolname in ('synveda_migrator', 'synveda_gateway', 'synveda_worker')
+     and (
+       not role.rolcanlogin
+       or role.rolvaliduntil is distinct from 'infinity'::timestamptz
+     )
+) then 1 else 0 end;
+select 1 / case when not exists (
+  select 1
+    from pg_catalog.pg_auth_members membership
+    join pg_catalog.pg_roles member on member.oid = membership.member
+    join pg_catalog.pg_roles granted on granted.oid = membership.roleid
+   where granted.rolname = 'synveda_migrator'
+     and member.rolname = session_user
+     and not (
+       :'bundled_cluster' <> 'true'
+       and membership.admin_option
+       and not membership.inherit_option
+       and not membership.set_option
+     )
+) then 1 else 0 end;
+reset role;
+select 1 / case when current_user = session_user
+  and current_setting('role') = 'none'
+then 1 else 0 end
+\g /dev/null
+commit;
+SQL
+    then
+        echo "database-bootstrap: Synveda extension convergence was refused" >&2
+        exit 1
+    fi
+else
+    keycloak_state_record=$(bootstrap_psql --dbname="$bootstrap_url" -X -qAt -v ON_ERROR_STOP=1 <<'SQL'
+select coalesce((
+  select database.oid::bigint
+    from pg_catalog.pg_database database
+   where database.datname = 'keycloak'
+), 0) as keycloak_candidate_database_oid
+\gset
+select (not exists (
+  select 1
+    from pg_catalog.pg_locks lock
+   where lock.locktype = 'object'
+     and lock.database = 0
+     and lock.classid = 'pg_catalog.pg_database'::pg_catalog.regclass
+     and lock.objid = :'keycloak_candidate_database_oid'::pg_catalog.oid
+     and lock.objsubid = 0
+     and lock.mode = 'RowExclusiveLock'
+     and lock.pid is not null
+))::text as keycloak_no_startup_locks
+\gset
+select pg_catalog.pg_stat_clear_snapshot()
+\g /dev/null
+select (not exists (
+  select 1
+    from pg_catalog.pg_stat_activity activity
+   where activity.datid = :'keycloak_candidate_database_oid'::pg_catalog.oid
+))::text as keycloak_no_activity
+\gset
+select (not exists (
+  select 1
+    from pg_catalog.pg_prepared_xacts prepared
+    join pg_catalog.pg_database database on database.datname = prepared.database
+   where database.oid = :'keycloak_candidate_database_oid'::pg_catalog.oid
+))::text as keycloak_no_prepared_xacts
+\gset
+with target as (
+  select database.*
+    from pg_catalog.pg_database database
+   where database.datname = 'keycloak'
+     and database.oid = :'keycloak_candidate_database_oid'::pg_catalog.oid
+), template as (
+  select database.*
+    from pg_catalog.pg_database database
+   where database.datname = 'template0'
+)
+select case
+  when not exists (select 1 from target) then 'absent'
+  when exists (
+    select 1
+      from target database
+      join pg_catalog.pg_roles owner on owner.oid = database.datdba
+      cross join template
+     where owner.rolname = 'keycloak'
+       and not database.datistemplate
+       and not database.dathasloginevt
+       and database.datconnlimit = -1
+       and database.encoding = pg_catalog.pg_char_to_encoding('UTF8')
+       and database.datlocprovider = template.datlocprovider
+       and database.datcollate = template.datcollate
+       and database.datctype = template.datctype
+       and database.datlocale is not distinct from template.datlocale
+       and database.daticurules is not distinct from template.daticurules
+       and database.datcollversion is not distinct from
+           pg_catalog.pg_database_collation_actual_version(database.oid)
+       and database.dattablespace = template.dattablespace
+       and not exists (
+         select 1
+           from pg_catalog.pg_db_role_setting settings
+          where settings.setdatabase = database.oid
+       )
+       and (
+         database.datallowconn
+         or not owner.rolcanlogin
+         and (
+           database.datacl is not null
+           or database.datacl is null
+           and :'keycloak_no_startup_locks' = 'true'
+           and :'keycloak_no_activity' = 'true'
+           and :'keycloak_no_prepared_xacts' = 'true'
+         )
+       )
+       and not exists (
+         select 1
+           from pg_catalog.aclexplode(
+             coalesce(database.datacl, pg_catalog.acldefault('d', database.datdba))
+           ) acl
+           left join pg_catalog.pg_roles grantee on grantee.oid = acl.grantee
+          where not (
+            grantee.rolname = 'keycloak'
+            and acl.grantor = database.datdba
+            and acl.privilege_type in ('CREATE', 'CONNECT', 'TEMPORARY')
+            and not acl.is_grantable
+          ) and not (
+            acl.grantee = 0
+            and not database.datallowconn
+            and database.datacl is null
+            and acl.grantor = database.datdba
+            and acl.privilege_type in ('CONNECT', 'TEMPORARY')
+            and not acl.is_grantable
+          ) and not (
+            grantee.rolname = session_user
+            and acl.grantor = database.datdba
+            and acl.privilege_type = 'CONNECT'
+            and not acl.is_grantable
+          )
+       )
+       and (
+         not database.datallowconn
+         and database.datacl is null
+         or database.datacl is not null
+         and (
+           select count(*)
+             from pg_catalog.aclexplode(database.datacl) acl
+            where acl.grantee = (
+              select administrator.oid
+                from pg_catalog.pg_roles administrator
+               where administrator.rolname = session_user
+            )
+              and acl.grantor = database.datdba
+              and acl.privilege_type = 'CONNECT'
+              and not acl.is_grantable
+         ) = 1
+       )
+  ) then case
+    when (select not database.datallowconn and database.datacl is null from target database)
+      then 'closed'
+    when (select not database.datallowconn from target database) then 'quarantined'
+    else 'terminal'
+  end
+  else 'unsafe'
+end || ':' || coalesce(
+  (select database.oid::text from target database),
+  '0'
+);
+SQL
+    )
+    case "$keycloak_state_record" in
+        absent:0)
+            keycloak_state=absent
+            keycloak_initial_database_oid=0
+            ;;
+        closed:*|quarantined:*|terminal:*|unsafe:*)
+            keycloak_state=${keycloak_state_record%%:*}
+            keycloak_initial_database_oid=${keycloak_state_record#*:}
+            case "$keycloak_initial_database_oid" in
+                ''|0|*[!0-9]*|???????????*)
+                    echo "database-bootstrap: Keycloak database shape check returned an invalid result" >&2
+                    exit 1
+                    ;;
+            esac
+            ;;
+        *)
+            echo "database-bootstrap: Keycloak database shape check returned an invalid result" >&2
+            exit 1
+            ;;
+    esac
+    SYNVEDA_KEYCLOAK_INITIAL_STATE=$keycloak_state
+    SYNVEDA_KEYCLOAK_INITIAL_DATABASE_OID=$keycloak_initial_database_oid
+    SYNVEDA_KEYCLOAK_DATABASE_OID=$keycloak_initial_database_oid
+    export SYNVEDA_KEYCLOAK_INITIAL_STATE SYNVEDA_KEYCLOAK_INITIAL_DATABASE_OID \
+        SYNVEDA_KEYCLOAK_DATABASE_OID
+    unset keycloak_state_record keycloak_initial_database_oid
+    case "$keycloak_state" in
+        terminal)
+            if ! bootstrap_psql --dbname="$bootstrap_url" -X -q -v ON_ERROR_STOP=1 <<'SQL'
+\o /dev/null
+\set VERBOSITY terse
+\set SHOW_CONTEXT never
+\connect keycloak
+reset role;
+\getenv bootstrap_system_identifier SYNVEDA_POSTGRES_BOOTSTRAP_SYSTEM_IDENTIFIER
+\getenv keycloak_initial_database_oid SYNVEDA_KEYCLOAK_INITIAL_DATABASE_OID
+select 1 / case when exists (
+  select 1
+    from pg_catalog.pg_control_system() control
+    join pg_catalog.pg_database database
+      on database.datname = pg_catalog.current_database()
+   where control.system_identifier::text = :'bootstrap_system_identifier'
+     and not pg_catalog.pg_is_in_recovery()
+     and pg_catalog.current_setting('transaction_read_only') = 'off'
+     and pg_catalog.current_database() = 'keycloak'
+     and database.oid = :'keycloak_initial_database_oid'::pg_catalog.oid
+) and current_user = session_user
+  and pg_catalog.current_setting('role') = 'none'
+then 1 else 0 end
+\g /dev/null
+select 1 / case when not exists (
+  select 1 from pg_catalog.pg_event_trigger
+) then 1 else 0 end;
+select 1 / case when exists (
+  select 1
+    from pg_catalog.pg_namespace namespace
+    join pg_catalog.pg_roles owner on owner.oid = namespace.nspowner
+   where namespace.nspname = 'public'
+     and owner.rolname in ('pg_database_owner', 'keycloak')
+) and not exists (
+  select 1
+    from pg_catalog.pg_namespace namespace,
+         lateral pg_catalog.aclexplode(
+           coalesce(namespace.nspacl, pg_catalog.acldefault('n', namespace.nspowner))
+         ) acl
+    left join pg_catalog.pg_roles grantee on grantee.oid = acl.grantee
+   where namespace.nspname = 'public'
+     and not (
+       grantee.rolname in ('pg_database_owner', 'keycloak')
+       and acl.grantor = namespace.nspowner
+       and acl.privilege_type in ('CREATE', 'USAGE')
+       and not acl.is_grantable
+     )
+     and not (
+       acl.grantee = 0
+       and acl.grantor = namespace.nspowner
+       and acl.privilege_type = 'USAGE'
+       and not acl.is_grantable
+     )
+) and not exists (
+  select 1
+    from pg_catalog.pg_class object
+    join pg_catalog.pg_namespace namespace on namespace.oid = object.relnamespace
+    join pg_catalog.pg_roles owner on owner.oid = object.relowner
+   where namespace.nspname = 'public'
+     and owner.rolname <> 'keycloak'
+  union all
+  select 1
+    from pg_catalog.pg_proc object
+    join pg_catalog.pg_namespace namespace on namespace.oid = object.pronamespace
+    join pg_catalog.pg_roles owner on owner.oid = object.proowner
+   where namespace.nspname = 'public'
+     and owner.rolname <> 'keycloak'
+  union all
+  select 1
+    from pg_catalog.pg_type object
+    join pg_catalog.pg_namespace namespace on namespace.oid = object.typnamespace
+    join pg_catalog.pg_roles owner on owner.oid = object.typowner
+   where namespace.nspname = 'public'
+     and owner.rolname <> 'keycloak'
+) and not exists (
+  select 1
+    from pg_catalog.pg_extension extension
+    join pg_catalog.pg_namespace namespace on namespace.oid = extension.extnamespace
+   where namespace.nspname = 'public'
+) then 1 else 0 end;
+-- A pre-existing identity database may contain Keycloak-owned application
+-- objects, but no Synveda role may own or receive a direct local data path.
+select 1 / case when not exists (
+  select 1
+    from pg_catalog.pg_namespace object
+    join pg_catalog.pg_roles owner on owner.oid = object.nspowner
+   where owner.rolname in ('synveda_app', 'synveda_migrator', 'synveda_gateway', 'synveda_worker')
+  union all
+  select 1
+    from pg_catalog.pg_class object
+    join pg_catalog.pg_roles owner on owner.oid = object.relowner
+   where owner.rolname in ('synveda_app', 'synveda_migrator', 'synveda_gateway', 'synveda_worker')
+  union all
+  select 1
+    from pg_catalog.pg_proc object
+    join pg_catalog.pg_roles owner on owner.oid = object.proowner
+   where owner.rolname in ('synveda_app', 'synveda_migrator', 'synveda_gateway', 'synveda_worker')
+  union all
+  select 1
+    from pg_catalog.pg_type object
+    join pg_catalog.pg_roles owner on owner.oid = object.typowner
+   where owner.rolname in ('synveda_app', 'synveda_migrator', 'synveda_gateway', 'synveda_worker')
+  union all
+  select 1
+    from pg_catalog.pg_extension object
+    join pg_catalog.pg_roles owner on owner.oid = object.extowner
+   where owner.rolname in ('synveda_app', 'synveda_migrator', 'synveda_gateway', 'synveda_worker')
+) and not exists (
+  select 1
+    from pg_catalog.pg_class object
+    join pg_catalog.pg_namespace namespace on namespace.oid = object.relnamespace,
+         lateral pg_catalog.aclexplode(object.relacl) acl
+   where namespace.nspname = 'public'
+     and (acl.grantee <> object.relowner or acl.grantor <> object.relowner)
+  union all
+  select 1
+    from pg_catalog.pg_proc object
+    join pg_catalog.pg_namespace namespace on namespace.oid = object.pronamespace,
+         lateral pg_catalog.aclexplode(object.proacl) acl
+   where namespace.nspname = 'public'
+     and (acl.grantee <> object.proowner or acl.grantor <> object.proowner)
+  union all
+  select 1
+    from pg_catalog.pg_type object
+    join pg_catalog.pg_namespace namespace on namespace.oid = object.typnamespace,
+         lateral pg_catalog.aclexplode(object.typacl) acl
+   where namespace.nspname = 'public'
+     and (acl.grantee <> object.typowner or acl.grantor <> object.typowner)
+  union all
+  select 1
+    from pg_catalog.pg_attribute object
+    join pg_catalog.pg_class relation on relation.oid = object.attrelid
+    join pg_catalog.pg_namespace namespace on namespace.oid = relation.relnamespace,
+         lateral pg_catalog.aclexplode(object.attacl) acl
+   where namespace.nspname = 'public'
+     and (acl.grantee <> relation.relowner or acl.grantor <> relation.relowner)
+  union all
+  select 1
+    from pg_catalog.pg_proc object
+    join pg_catalog.pg_namespace namespace on namespace.oid = object.pronamespace,
+         lateral pg_catalog.aclexplode(
+           coalesce(object.proacl, pg_catalog.acldefault('f', object.proowner))
+         ) acl
+   where namespace.nspname <> 'information_schema'
+     and namespace.nspname !~ '^pg_'
+     and object.prosecdef
+     and acl.grantee = 0
+     and acl.privilege_type = 'EXECUTE'
+) and not exists (
+  select 1
+    from pg_catalog.pg_namespace namespace
+   where namespace.nspname <> 'public'
+     and namespace.nspname <> 'information_schema'
+     and namespace.nspname !~ '^pg_'
+) and not exists (
+  select 1
+    from pg_catalog.pg_largeobject_metadata object,
+         lateral pg_catalog.aclexplode(object.lomacl) acl
+   where acl.grantee = 0
+      or acl.grantee in (
+        select role.oid from pg_catalog.pg_roles role
+         where role.rolname in (
+           'synveda_app', 'synveda_migrator', 'synveda_gateway', 'synveda_worker', 'keycloak'
+         )
+      )
+  union all
+  select 1
+    from pg_catalog.pg_foreign_data_wrapper object,
+         lateral pg_catalog.aclexplode(object.fdwacl) acl
+   where acl.grantee = 0
+      or acl.grantee in (
+        select role.oid from pg_catalog.pg_roles role
+         where role.rolname in (
+           'synveda_app', 'synveda_migrator', 'synveda_gateway', 'synveda_worker', 'keycloak'
+         )
+      )
+  union all
+  select 1
+    from pg_catalog.pg_foreign_server object,
+         lateral pg_catalog.aclexplode(object.srvacl) acl
+   where acl.grantee = 0
+      or acl.grantee in (
+        select role.oid from pg_catalog.pg_roles role
+         where role.rolname in (
+           'synveda_app', 'synveda_migrator', 'synveda_gateway', 'synveda_worker', 'keycloak'
+         )
+      )
+  union all
+  select 1
+    from pg_catalog.pg_language object,
+         lateral pg_catalog.aclexplode(object.lanacl) acl
+   where acl.grantee in (
+     select role.oid from pg_catalog.pg_roles role
+      where role.rolname in (
+        'synveda_app', 'synveda_migrator', 'synveda_gateway', 'synveda_worker', 'keycloak'
+      )
+   )
+  union all
+  select 1
+    from pg_catalog.pg_default_acl defaults
+   where defaults.defaclrole in (
+     select role.oid from pg_catalog.pg_roles role
+      where role.rolname in (
+        'synveda_app', 'synveda_migrator', 'synveda_gateway', 'synveda_worker', 'keycloak'
+      )
+   ) or exists (
+     select 1
+       from pg_catalog.aclexplode(defaults.defaclacl) acl
+      where acl.grantee in (
+        select role.oid from pg_catalog.pg_roles role
+         where role.rolname in (
+           'synveda_app', 'synveda_migrator', 'synveda_gateway', 'synveda_worker', 'keycloak'
+         )
+      )
+   )
+) then 1 else 0 end;
+\i /usr/local/share/synveda/local-authority-contract.sql
+SQL
+            then
+                if ! quarantine_keycloak_database; then
+                    echo "database-bootstrap: Keycloak quarantine was refused" >&2
+                fi
+                echo "database-bootstrap: Keycloak local authority preflight was refused" >&2
+                exit 1
+            fi
+            ;;
+        quarantined)
+            if ! quarantine_keycloak_database; then
+                echo "database-bootstrap: Keycloak quarantine was refused" >&2
+                exit 1
+            fi
+            echo "database-bootstrap: interrupted Keycloak quarantine remains closed" >&2
+            exit 1
+            ;;
+        absent|closed) ;;
+        unsafe)
+            echo "database-bootstrap: Keycloak existing database shape was refused" >&2
+            exit 1
+            ;;
+        *)
+            echo "database-bootstrap: Keycloak database shape check returned an invalid result" >&2
+            exit 1
+            ;;
+    esac
+
+    keycloak_database_oid=
+    if ! keycloak_database_oid=$(
+        bootstrap_psql --dbname="$bootstrap_url" -X -qAt -v ON_ERROR_STOP=1 <<'SQL'
+\o /dev/null
+\set VERBOSITY terse
+\set SHOW_CONTEXT never
+\getenv bootstrap_system_identifier SYNVEDA_POSTGRES_BOOTSTRAP_SYSTEM_IDENTIFIER
+select 1 / case when exists (
+  select 1
+    from pg_catalog.pg_control_system() control
+   where control.system_identifier::text = :'bootstrap_system_identifier'
+     and not pg_catalog.pg_is_in_recovery()
+     and pg_catalog.current_setting('transaction_read_only') = 'off'
+) then 1 else 0 end;
+select pg_catalog.pg_advisory_lock(pg_catalog.hashtext('synveda.compose.bootstrap.cluster'));
+\getenv bundled_cluster SYNVEDA_POSTGRES_BUNDLED_CLUSTER
+\getenv synveda_bootstrap_database SYNVEDA_POSTGRES_BOOTSTRAP_DATABASE
+\getenv keycloak_initial_state SYNVEDA_KEYCLOAK_INITIAL_STATE
+\getenv keycloak_initial_database_oid SYNVEDA_KEYCLOAK_INITIAL_DATABASE_OID
+select 1 / case when (
+  :'keycloak_initial_state' = 'absent'
+  and :'keycloak_initial_database_oid' = '0'
+  and not exists (
+    select 1 from pg_catalog.pg_database database
+     where database.datname = 'keycloak'
+  )
+) or (
+  :'keycloak_initial_state' in ('closed', 'terminal')
+  and exists (
+    select 1
+      from pg_catalog.pg_database database
+     where database.oid = :'keycloak_initial_database_oid'::pg_catalog.oid
+       and database.datname = 'keycloak'
+       and (
+         :'keycloak_initial_state' = 'closed'
+         and not database.datallowconn
+         and database.datacl is null
+         or :'keycloak_initial_state' = 'terminal'
+         and database.datallowconn
+         and database.datacl is not null
+       )
+  )
+) then 1 else 0 end;
+select 1 / case when current_user = session_user
+  and current_setting('role') = 'none'
+  and current_setting('shared_preload_libraries') = ''
+  and current_setting('session_preload_libraries') = ''
+  and current_setting('local_preload_libraries') = ''
+  and current_setting('default_table_access_method') = 'heap'
+  and current_setting('client_encoding') = 'UTF8'
+  and current_setting('jit') = 'off'
+then 1 else 0 end;
+select 1 / case when not exists (
+  select 1 from pg_catalog.pg_event_trigger
+) then 1 else 0 end;
+
+create temporary table pg_temp.synveda_database_roles (
+  document jsonb not null
+) using heap;
+\copy pg_temp.synveda_database_roles(document) from '/tmp/synveda-database-bootstrap/database_roles.json'
+select 1 / case when (
+  select count(*)
+    from pg_temp.synveda_database_roles contract
+   where pg_catalog.jsonb_typeof(contract.document) = 'object'
+     and (select count(*) from pg_catalog.jsonb_object_keys(contract.document)) = 7
+     and contract.document->>'migrator' = 'synveda_migrator'
+     and contract.document->>'gateway' = 'synveda_gateway'
+     and contract.document->>'worker' = 'synveda_worker'
+     and contract.document->'administrators' = pg_catalog.jsonb_build_array(session_user)
+     and pg_catalog.jsonb_typeof(contract.document->'administrative_memberships') = 'array'
+     and pg_catalog.jsonb_typeof(contract.document->'forbidden_databases') = 'array'
+     and contract.document->'isolated_peer_roles' =
+         pg_catalog.jsonb_build_array('keycloak')
+     and (
+       :'bundled_cluster' = 'true'
+       and contract.document->'forbidden_databases' =
+           pg_catalog.jsonb_build_array('keycloak', 'postgres', 'template1')
+       or :'bundled_cluster' = 'false'
+       and contract.document->'forbidden_databases' @>
+           pg_catalog.jsonb_build_array('keycloak')
+     )
+) = 1 and session_user not in (
+  'synveda_app', 'synveda_migrator', 'synveda_gateway', 'synveda_worker', 'keycloak'
+) then 1 else 0 end;
+select 1 / case when :'bundled_cluster' = 'true' or (
+  select count(*)
+    from pg_catalog.pg_roles role
+   where role.rolname in (
+     'synveda_app', 'synveda_migrator', 'synveda_gateway', 'synveda_worker', 'keycloak'
+   )
+) = 5 then 1 else 0 end;
+\set synveda_bootstrap_target keycloak
+\set synveda_require_complete_roles false
+\set synveda_allow_target_owner_membership true
+\set synveda_allow_target_default_acl true
+\i /usr/local/share/synveda/cluster-authority-contract.sql
+
+select 1 / case when current_user = session_user and exists (
+  select 1
+    from pg_catalog.pg_roles principal
+   where principal.rolname = session_user
+     and (principal.rolsuper or principal.rolcreaterole)
+     and (
+       principal.rolsuper
+       or exists (select 1 from pg_catalog.pg_database database where database.datname = 'keycloak')
+       or principal.rolcreatedb
+     )
+     and (
+       :'bundled_cluster' <> 'true'
+       or principal.rolsuper
+       or not exists (
+         select 1
+           from pg_catalog.pg_database database
+          where database.datname in ('postgres', 'template1')
+            and database.datdba <> principal.oid
+       )
+     )
+) and not exists (
+  select 1
+    from pg_catalog.pg_roles role
+   where role.rolname = 'keycloak'
+     and not exists (
+       select 1 from pg_catalog.pg_roles principal
+        where principal.rolname = session_user and principal.rolsuper
+     )
+     and not exists (
+       select 1
+         from pg_catalog.pg_auth_members membership
+         join pg_catalog.pg_roles member on member.oid = membership.member
+        where membership.roleid = role.oid
+          and member.rolname = session_user
+          and membership.admin_option
+     )
+) then 1 else 0 end;
+
+-- Refuse the existing database and role shape before any role, grant, ACL or
+-- credential mutation. A wrong-owner identity database is never repaired.
+select 1 / case when not exists (
+  select 1
+    from pg_catalog.pg_roles role
+   where role.rolname = 'keycloak'
+     and (
+       role.rolsuper or role.rolcreatedb or role.rolcreaterole
+       or role.rolreplication or role.rolbypassrls
+     )
+) and not exists (
+  select 1
+    from pg_catalog.pg_auth_members membership
+    join pg_catalog.pg_roles member on member.oid = membership.member
+    join pg_catalog.pg_roles granted on granted.oid = membership.roleid
+    join pg_catalog.pg_roles grantor on grantor.oid = membership.grantor
+   where (member.rolname = 'keycloak')
+      or (
+        granted.rolname = 'keycloak'
+        and not (
+          member.rolname = session_user
+          and membership.admin_option
+          and not membership.inherit_option
+          and not membership.set_option
+          or member.rolname = session_user
+          and grantor.rolname = session_user
+          and not membership.admin_option
+          and membership.inherit_option
+          and membership.set_option
+        )
+      )
+) and not exists (
+  select 1
+    from pg_catalog.pg_database database
+    join pg_catalog.pg_roles owner on owner.oid = database.datdba
+   where owner.rolname = 'keycloak'
+     and database.datname <> 'keycloak'
+) and not exists (
+  select 1
+    from pg_catalog.pg_tablespace tablespace
+    join pg_catalog.pg_roles owner on owner.oid = tablespace.spcowner
+   where owner.rolname = 'keycloak'
+) and not exists (
+  select 1
+    from pg_catalog.pg_database database,
+         lateral pg_catalog.aclexplode(database.datacl) acl
+    join pg_catalog.pg_roles grantee on grantee.oid = acl.grantee
+  where grantee.rolname = 'keycloak'
+     and not (
+       database.datname = 'keycloak'
+       and acl.grantor = database.datdba
+       and acl.privilege_type in ('CREATE', 'CONNECT', 'TEMPORARY')
+       and not acl.is_grantable
+     )
+) and not exists (
+  select 1
+    from pg_catalog.pg_database database
+    join pg_catalog.pg_roles owner on owner.oid = database.datdba
+   where database.datname = 'keycloak'
+     and not (
+       owner.rolname = 'keycloak'
+       and not database.datistemplate
+       and not database.dathasloginevt
+       and database.datconnlimit = -1
+       and database.encoding = pg_catalog.pg_char_to_encoding('UTF8')
+       and database.datlocprovider = (
+         select template.datlocprovider
+           from pg_catalog.pg_database template
+          where template.datname = 'template0'
+       )
+       and database.datcollate = (
+         select template.datcollate
+           from pg_catalog.pg_database template
+          where template.datname = 'template0'
+       )
+       and database.datctype = (
+         select template.datctype
+           from pg_catalog.pg_database template
+          where template.datname = 'template0'
+       )
+       and database.datlocale is not distinct from (
+         select template.datlocale
+           from pg_catalog.pg_database template
+          where template.datname = 'template0'
+       )
+       and database.daticurules is not distinct from (
+         select template.daticurules
+           from pg_catalog.pg_database template
+          where template.datname = 'template0'
+       )
+       and database.datcollversion is not distinct from
+           pg_catalog.pg_database_collation_actual_version(database.oid)
+       and database.dattablespace = (
+         select template.dattablespace
+           from pg_catalog.pg_database template
+          where template.datname = 'template0'
+       )
+       and not exists (
+         select 1
+           from pg_catalog.pg_db_role_setting settings
+          where settings.setdatabase = database.oid
+       )
+       and (
+         database.datallowconn
+         or :'synveda_keycloak_no_startup_locks' = 'true'
+         and :'synveda_keycloak_no_activity' = 'true'
+         and :'synveda_keycloak_no_prepared_xacts' = 'true'
+       )
+       and not exists (
+         select 1
+           from pg_catalog.aclexplode(
+             coalesce(database.datacl, pg_catalog.acldefault('d', database.datdba))
+           ) acl
+           left join pg_catalog.pg_roles grantee on grantee.oid = acl.grantee
+          where not (
+            grantee.rolname = 'keycloak'
+            and acl.grantor = database.datdba
+            and acl.privilege_type in ('CREATE', 'CONNECT', 'TEMPORARY')
+            and not acl.is_grantable
+          ) and not (
+            acl.grantee = 0
+            and not database.datallowconn
+            and database.datacl is null
+            and acl.grantor = database.datdba
+            and acl.privilege_type in ('CONNECT', 'TEMPORARY')
+            and not acl.is_grantable
+          ) and not (
+            grantee.rolname = session_user
+            and acl.grantor = database.datdba
+            and acl.privilege_type = 'CONNECT'
+            and not acl.is_grantable
+          )
+       )
+       and (
+         not database.datallowconn
+         and database.datacl is null
+         or database.datallowconn
+         and database.datacl is not null
+         and (
+           select count(*)
+             from pg_catalog.aclexplode(database.datacl) acl
+            where acl.grantee = (
+              select administrator.oid
+                from pg_catalog.pg_roles administrator
+               where administrator.rolname = session_user
+            )
+              and acl.grantor = database.datdba
+              and acl.privilege_type = 'CONNECT'
+              and not acl.is_grantable
+         ) = 1
+       )
+     )
+) and not exists (
+  select 1
+    from pg_catalog.pg_largeobject_metadata object,
+         lateral pg_catalog.aclexplode(object.lomacl) acl
+   where acl.grantee = 0
+      or acl.grantee = (
+        select role.oid from pg_catalog.pg_roles role where role.rolname = 'keycloak'
+      )
+  union all
+  select 1
+    from pg_catalog.pg_foreign_data_wrapper object,
+         lateral pg_catalog.aclexplode(object.fdwacl) acl
+   where acl.grantee = 0
+      or acl.grantee = (
+        select role.oid from pg_catalog.pg_roles role where role.rolname = 'keycloak'
+      )
+  union all
+  select 1
+    from pg_catalog.pg_foreign_server object,
+         lateral pg_catalog.aclexplode(object.srvacl) acl
+   where acl.grantee = 0
+      or acl.grantee = (
+        select role.oid from pg_catalog.pg_roles role where role.rolname = 'keycloak'
+      )
+  union all
+  select 1
+    from pg_catalog.pg_language object,
+         lateral pg_catalog.aclexplode(object.lanacl) acl
+          where acl.grantee = (
+     select role.oid from pg_catalog.pg_roles role where role.rolname = 'keycloak'
+   )
+  union all
+  select 1
+    from pg_catalog.pg_tablespace object,
+         lateral pg_catalog.aclexplode(object.spcacl) acl
+   where acl.grantee = 0
+      or acl.grantee = (
+        select role.oid from pg_catalog.pg_roles role where role.rolname = 'keycloak'
+      )
+  union all
+  select 1
+    from pg_catalog.pg_parameter_acl object,
+         lateral pg_catalog.aclexplode(object.paracl) acl
+   where acl.grantee = 0
+      or acl.grantee = (
+        select role.oid from pg_catalog.pg_roles role where role.rolname = 'keycloak'
+      )
+  union all
+  select 1
+    from pg_catalog.pg_default_acl defaults
+   where defaults.defaclrole = (
+     select role.oid from pg_catalog.pg_roles role where role.rolname = 'keycloak'
+   ) or exists (
+     select 1
+       from pg_catalog.aclexplode(defaults.defaclacl) acl
+      where acl.grantee = (
+        select role.oid from pg_catalog.pg_roles role where role.rolname = 'keycloak'
+      )
+   )
+) then 1 else 0 end;
+
+-- Keycloak shares the cluster only after the complete Synveda identity plane
+-- is ordinary and closed. This is also the external-PostgreSQL hand-off: the
+-- same administrator which converges Keycloak must be the trusted Synveda
+-- bootstrap principal represented by the exact membership and CONNECT ACL.
+with expected_admin as (
+  select membership.value->>'member' as member_name,
+         membership.value->>'grantor' as grantor_name
+    from pg_temp.synveda_database_roles contract,
+         lateral pg_catalog.jsonb_array_elements(
+           contract.document->'administrative_memberships'
+         ) membership(value)
+)
+select 1 / case when (
+  select count(*)
+    from pg_catalog.pg_roles role
+   where role.rolname in ('synveda_app', 'synveda_migrator', 'synveda_gateway', 'synveda_worker')
+) = 4 and not exists (
+  select 1
+    from pg_catalog.pg_roles role
+   where role.rolname in ('synveda_app', 'synveda_migrator', 'synveda_gateway', 'synveda_worker')
+     and (
+       not role.rolinherit
+       or role.rolsuper or role.rolcreatedb or role.rolcreaterole
+       or role.rolreplication or role.rolbypassrls
+       or role.rolconnlimit <> -1
+       or role.rolname = 'synveda_app' and role.rolcanlogin
+       or role.rolname <> 'synveda_app' and (
+         not role.rolcanlogin
+         or role.rolvaliduntil is distinct from 'infinity'::timestamptz
+       )
+     )
+) and not exists (
+  select 1
+    from pg_catalog.pg_db_role_setting settings
+   where settings.setrole in (
+     select role.oid from pg_catalog.pg_roles role
+      where role.rolname in ('synveda_app', 'synveda_migrator', 'synveda_gateway', 'synveda_worker')
+   )
+) and not exists (
+  select 1
+    from pg_catalog.pg_auth_members membership
+    join pg_catalog.pg_roles member on member.oid = membership.member
+    join pg_catalog.pg_roles granted on granted.oid = membership.roleid
+    join pg_catalog.pg_roles grantor on grantor.oid = membership.grantor
+   where (
+     granted.rolname in ('synveda_app', 'synveda_migrator', 'synveda_gateway', 'synveda_worker')
+     or member.rolname in ('synveda_app', 'synveda_migrator', 'synveda_gateway', 'synveda_worker')
+     or grantor.rolname in ('synveda_app', 'synveda_migrator', 'synveda_gateway', 'synveda_worker')
+   ) and not (
+     granted.rolname in ('synveda_app', 'synveda_migrator', 'synveda_gateway', 'synveda_worker')
+     and membership.admin_option
+     and not membership.inherit_option
+     and not membership.set_option
+     and exists (
+       select 1
+         from expected_admin expected
+        where expected.member_name = member.rolname
+          and expected.grantor_name = grantor.rolname
+     )
+   ) and not (
+     granted.rolname = 'synveda_app'
+     and member.rolname in ('synveda_gateway', 'synveda_worker')
+     and grantor.rolname = session_user
+     and not membership.admin_option
+     and membership.inherit_option
+     and membership.set_option
+   )
+) and exists (
+  select 1
+    from pg_catalog.pg_roles migrator
+    join pg_catalog.pg_database database on database.datname = 'synveda'
+    join pg_catalog.pg_roles owner on owner.oid = database.datdba
+    cross join pg_catalog.pg_database template
+   where migrator.rolname = 'synveda_migrator'
+     and owner.oid = migrator.oid
+     and template.datname = 'template0'
+     and database.datallowconn and not database.datistemplate
+     and not database.dathasloginevt and database.datconnlimit = -1
+     and database.encoding = pg_catalog.pg_char_to_encoding('UTF8')
+     and database.datlocprovider = template.datlocprovider
+     and database.datcollate = template.datcollate
+     and database.datctype = template.datctype
+     and database.datlocale is not distinct from template.datlocale
+     and database.daticurules is not distinct from template.daticurules
+     and database.datcollversion is not distinct from
+         pg_catalog.pg_database_collation_actual_version(database.oid)
+     and database.dattablespace = template.dattablespace
+     and not exists (
+       select 1 from pg_catalog.pg_db_role_setting settings
+        where settings.setdatabase = database.oid
+     )
+     and (
+       select count(*)
+         from pg_catalog.aclexplode(
+           coalesce(database.datacl, pg_catalog.acldefault('d', database.datdba))
+         ) acl
+        where acl.grantee = migrator.oid
+          and acl.grantor = migrator.oid
+          and acl.privilege_type in ('CREATE', 'CONNECT', 'TEMPORARY')
+          and not acl.is_grantable
+     ) = 3
+     and (
+       select count(*)
+         from pg_catalog.aclexplode(
+           coalesce(database.datacl, pg_catalog.acldefault('d', database.datdba))
+         ) acl
+        where acl.grantee in (
+          select runtime.oid from pg_catalog.pg_roles runtime
+           where runtime.rolname in ('synveda_gateway', 'synveda_worker')
+        )
+          and acl.grantor = migrator.oid
+          and acl.privilege_type = 'CONNECT'
+          and not acl.is_grantable
+     ) = 2
+     and (
+       select count(*)
+         from pg_catalog.aclexplode(
+           coalesce(database.datacl, pg_catalog.acldefault('d', database.datdba))
+         ) acl
+        where acl.grantee = (
+          select administrator.oid
+            from pg_catalog.pg_roles administrator
+           where administrator.rolname = session_user
+        )
+          and acl.privilege_type = 'CONNECT'
+          and not acl.is_grantable
+     ) = 1
+     and not exists (
+       select 1
+         from pg_catalog.aclexplode(
+           coalesce(database.datacl, pg_catalog.acldefault('d', database.datdba))
+         ) acl
+        where not (
+          acl.grantee = migrator.oid
+          and acl.grantor = migrator.oid
+          and acl.privilege_type in ('CREATE', 'CONNECT', 'TEMPORARY')
+          and not acl.is_grantable
+        ) and not (
+          acl.grantee in (
+            select runtime.oid from pg_catalog.pg_roles runtime
+             where runtime.rolname in ('synveda_gateway', 'synveda_worker')
+          )
+          and acl.grantor = migrator.oid
+          and acl.privilege_type = 'CONNECT'
+          and not acl.is_grantable
+        ) and not (
+          acl.grantee = (
+            select administrator.oid
+              from pg_catalog.pg_roles administrator
+             where administrator.rolname = session_user
+          )
+          and acl.grantor = migrator.oid
+          and acl.privilege_type = 'CONNECT'
+          and not acl.is_grantable
+          and acl.grantor = migrator.oid
+        )
+     )
+) and not exists (
+  select 1
+    from pg_catalog.pg_database database
+    join pg_catalog.pg_roles owner on owner.oid = database.datdba
+   where owner.rolname in ('synveda_app', 'synveda_migrator', 'synveda_gateway', 'synveda_worker')
+     and not (database.datname = 'synveda' and owner.rolname = 'synveda_migrator')
+) and not exists (
+  select 1
+    from pg_catalog.pg_tablespace tablespace
+    join pg_catalog.pg_roles owner on owner.oid = tablespace.spcowner
+   where owner.rolname in ('synveda_app', 'synveda_migrator', 'synveda_gateway', 'synveda_worker')
+) and not exists (
+  select 1
+    from pg_catalog.pg_database database,
+         lateral pg_catalog.aclexplode(database.datacl) acl
+   where database.datname <> 'synveda'
+     and acl.grantee in (
+       select role.oid from pg_catalog.pg_roles role
+        where role.rolname in ('synveda_app', 'synveda_migrator', 'synveda_gateway', 'synveda_worker')
+     )
+) then 1 else 0 end;
+
+select 1 / case when not exists (
+  select 1
+    from (values
+      ('log_min_messages'),
+      ('log_min_error_statement'),
+      ('log_error_verbosity'),
+      ('log_statement'),
+      ('log_min_duration_statement'),
+      ('log_min_duration_sample'),
+      ('log_statement_sample_rate'),
+      ('log_transaction_sample_rate'),
+      ('log_parameter_max_length'),
+      ('log_parameter_max_length_on_error'),
+      ('debug_print_parse'),
+      ('debug_print_rewritten'),
+      ('debug_print_plan')
+    ) required(name)
+   where not pg_catalog.has_parameter_privilege(session_user, required.name, 'SET')
+) and current_setting('shared_preload_libraries') = ''
+  and current_setting('session_preload_libraries') = ''
+  and current_setting('local_preload_libraries') = ''
+then 1 else 0 end;
+
+\! /usr/local/bin/synveda-database-bootstrap validate-keycloak-password
+\if :SHELL_ERROR
+select 1 / 0;
+\endif
+
+-- MUTATION BOUNDARY: every persistent Keycloak refusal above is read-only.
+-- CREATE DATABASE is always closed. The later transaction publishes the ACL
+-- and ALLOW_CONNECTIONS together; open default-ACL legacy state was refused
+-- before this boundary.
+select format(
+  'create role keycloak nologin inherit nosuperuser nocreatedb nocreaterole noreplication nobypassrls connection limit -1'
+)
+where :'bundled_cluster' = 'true'
+  and not exists (select 1 from pg_catalog.pg_roles where rolname = 'keycloak')
+\gexec
+alter role keycloak with nologin inherit nocreatedb nocreaterole connection limit -1 valid until 'infinity';
+alter role keycloak reset all;
+
+revoke keycloak from current_user granted by current_user;
+revoke synveda_migrator from current_user granted by current_user;
+grant keycloak to current_user
+  with admin false, inherit true, set true granted by current_user;
+
+select format('alter role keycloak in database %I reset all', database.datname)
+  from pg_catalog.pg_db_role_setting settings
+  join pg_catalog.pg_roles role on role.oid = settings.setrole
+  join pg_catalog.pg_database database on database.oid = settings.setdatabase
+ where role.rolname = 'keycloak'
+   and settings.setdatabase <> 0
+\gexec
+
+select format(
+  'create database keycloak with owner keycloak template template0 encoding %L allow_connections false',
+  'UTF8'
+)
+where not exists (select 1 from pg_catalog.pg_database where datname = 'keycloak')
+\gexec
+
+select 1 / case when exists (
+  select 1
+    from pg_catalog.pg_database database
+    join pg_catalog.pg_roles owner on owner.oid = database.datdba
+    join pg_catalog.pg_roles role on role.rolname = 'keycloak'
+     where database.datname = 'keycloak'
+     and owner.rolname = 'keycloak'
+     and (
+       not database.datallowconn and database.datacl is null
+       or database.datallowconn and database.datacl is not null
+     )
+     and not database.datistemplate
+     and not database.dathasloginevt
+     and database.datconnlimit = -1
+     and database.encoding = pg_catalog.pg_char_to_encoding('UTF8')
+     and not role.rolcanlogin and role.rolinherit
+     and not role.rolsuper and not role.rolcreatedb and not role.rolcreaterole
+     and not role.rolreplication and not role.rolbypassrls
+     and role.rolconnlimit = -1
+     and not exists (
+       select 1 from pg_catalog.pg_db_role_setting settings
+        where settings.setrole = role.oid
+     )
+     and not exists (
+       select 1
+         from pg_catalog.pg_auth_members membership
+         join pg_catalog.pg_roles member on member.oid = membership.member
+         join pg_catalog.pg_roles grantor on grantor.oid = membership.grantor
+        where membership.member = role.oid
+           or (
+             membership.roleid = role.oid
+             and not (
+               member.rolname = session_user
+               and (
+                 (
+                   membership.admin_option
+                   and not membership.inherit_option
+                   and not membership.set_option
+                 ) or (
+                   grantor.rolname = session_user
+                   and not membership.admin_option
+                   and membership.inherit_option
+                   and membership.set_option
+                 )
+               )
+             )
+           )
+     )
+) then 1 else 0 end;
+
+-- Capture the exact target before the transaction can open admission. POSIX
+-- command substitution retains this output even when a later psql statement
+-- fails, so every post-open failure can quarantine the same database OID.
+\o
+select database.oid::bigint
+  from pg_catalog.pg_database database
+  join pg_catalog.pg_roles owner on owner.oid = database.datdba
+ where database.datname = 'keycloak'
+   and owner.rolname = 'keycloak'
+   and (
+     :'keycloak_initial_state' = 'absent'
+     or database.oid = :'keycloak_initial_database_oid'::pg_catalog.oid
+   );
+\o /dev/null
+
+begin;
+revoke connect on database keycloak from current_user granted by current_user;
+set role keycloak;
+revoke connect, temporary on database keycloak from public;
+grant create, connect, temporary on database keycloak to keycloak;
+select format('grant connect on database keycloak to %I', session_user)
+\gexec
+alter database keycloak allow_connections true;
+reset role;
+select 1 / case when current_user = session_user then 1 else 0 end;
+
+-- As above, do not leave the cross-session SET path behind if the target
+-- phase is interrupted or refuses the local database.
+revoke keycloak from current_user granted by current_user;
+commit;
+
+select 'revoke connect, temporary on database postgres, template1 from public'
+where :'bundled_cluster' = 'true'
+\gexec
+
+select 1 / case when not exists (
+  select 1
+    from pg_catalog.pg_database database,
+         lateral pg_catalog.aclexplode(
+           coalesce(database.datacl, pg_catalog.acldefault('d', database.datdba))
+         ) acl
+    left join pg_catalog.pg_roles grantee on grantee.oid = acl.grantee
+   where database.datname = 'keycloak'
+     and not (
+       grantee.rolname = 'keycloak'
+       and acl.privilege_type in ('CREATE', 'CONNECT', 'TEMPORARY')
+       and acl.grantor = database.datdba
+       and not acl.is_grantable
+     )
+     and not (
+       grantee.rolname = session_user
+       and acl.privilege_type = 'CONNECT'
+       and acl.grantor = database.datdba
+       and not acl.is_grantable
+     )
+) and (
+  select count(*)
+    from pg_catalog.pg_database database,
+         lateral pg_catalog.aclexplode(
+           coalesce(database.datacl, pg_catalog.acldefault('d', database.datdba))
+         ) acl
+   where database.datname = 'keycloak'
+     and acl.grantee = database.datdba
+     and acl.grantor = database.datdba
+     and acl.privilege_type in ('CREATE', 'CONNECT', 'TEMPORARY')
+     and not acl.is_grantable
+) = 3 and (
+  select count(*)
+    from pg_catalog.pg_database database,
+         lateral pg_catalog.aclexplode(
+           coalesce(database.datacl, pg_catalog.acldefault('d', database.datdba))
+         ) acl
+   where database.datname = 'keycloak'
+     and acl.grantee = (
+       select administrator.oid
+         from pg_catalog.pg_roles administrator
+        where administrator.rolname = session_user
+     )
+     and acl.grantor = database.datdba
+     and acl.privilege_type = 'CONNECT'
+     and not acl.is_grantable
+) = 1 and not exists (
+  select 1
+    from pg_catalog.pg_database database,
+         lateral pg_catalog.aclexplode(
+           coalesce(database.datacl, pg_catalog.acldefault('d', database.datdba))
+         ) acl
+   where database.datname <> 'keycloak'
+     and acl.grantee = (
+       select role.oid from pg_catalog.pg_roles role where role.rolname = 'keycloak'
+     )
+) and (
+  :'bundled_cluster' <> 'true'
+  or (
+    not pg_catalog.has_database_privilege('keycloak', 'postgres', 'CONNECT')
+    and not pg_catalog.has_database_privilege('keycloak', 'template1', 'CONNECT')
+  )
+) then 1 else 0 end;
+\set synveda_bootstrap_target keycloak
+\set synveda_require_complete_roles true
+\set synveda_allow_target_owner_membership false
+\set synveda_allow_target_default_acl false
+\i /usr/local/share/synveda/cluster-authority-contract.sql
+SQL
+    )
+    then
+        case "$keycloak_database_oid" in
+            ''|0|*[!0-9]*|???????????*)
+                echo "database-bootstrap: Keycloak quarantine identity was not captured" >&2
+                ;;
+            *)
+                SYNVEDA_KEYCLOAK_DATABASE_OID=$keycloak_database_oid
+                export SYNVEDA_KEYCLOAK_DATABASE_OID
+                if ! quarantine_keycloak_database; then
+                    echo "database-bootstrap: Keycloak quarantine was refused" >&2
+                fi
+                ;;
+        esac
+        echo "database-bootstrap: Keycloak role or database convergence was refused" >&2
+        exit 1
+    fi
+    case "$keycloak_database_oid" in
+        ''|0|*[!0-9]*|???????????*)
+            keycloak_database_oid=$(pin_existing_keycloak_database_oid) || keycloak_database_oid=
+            case "$keycloak_database_oid" in
+                ''|0|*[!0-9]*|???????????*) ;;
+                *)
+                    SYNVEDA_KEYCLOAK_DATABASE_OID=$keycloak_database_oid
+                    export SYNVEDA_KEYCLOAK_DATABASE_OID
+                    if ! quarantine_keycloak_database; then
+                        echo "database-bootstrap: Keycloak quarantine was refused" >&2
+                    fi
+                    ;;
+            esac
+            echo "database-bootstrap: Keycloak database identity was refused" >&2
+            exit 1
+            ;;
+    esac
+    SYNVEDA_KEYCLOAK_DATABASE_OID=$keycloak_database_oid
+    export SYNVEDA_KEYCLOAK_DATABASE_OID
+    unset keycloak_database_oid
+
+    keycloak_witness=
+    if ! keycloak_witness=$(
+        bootstrap_psql --dbname="$bootstrap_url" -X -qAt -v ON_ERROR_STOP=1 <<'SQL'
+\o /dev/null
+\set VERBOSITY terse
+\set SHOW_CONTEXT never
+\connect keycloak
+reset role;
+\getenv bootstrap_system_identifier SYNVEDA_POSTGRES_BOOTSTRAP_SYSTEM_IDENTIFIER
+select 1 / case when exists (
+  select 1
+    from pg_catalog.pg_control_system() control
+   where control.system_identifier::text = :'bootstrap_system_identifier'
+     and not pg_catalog.pg_is_in_recovery()
+     and pg_catalog.current_setting('transaction_read_only') = 'off'
+) then 1 else 0 end;
+select 1 / case when current_user = session_user
+  and current_setting('role') = 'none'
+then 1 else 0 end
+\g /dev/null
+\i /usr/local/share/synveda/credential-log-contract.sql
+select pg_catalog.pg_advisory_lock(pg_catalog.hashtext('synveda.compose.bootstrap.cluster'));
+select pg_catalog.set_config(
+  'application_name', 'synveda-keycloak-bootstrap-target', false
+)
+\g /dev/null
+select pg_catalog.pg_advisory_lock(pg_catalog.hashtext('synveda.compose.bootstrap.keycloak'));
+\getenv keycloak_database_oid SYNVEDA_KEYCLOAK_DATABASE_OID
+select 1 / case when exists (
+  select 1
+    from pg_catalog.pg_database database
+   where database.oid = :'keycloak_database_oid'::pg_catalog.oid
+     and database.datname = pg_catalog.current_database()
+) then 1 else 0 end;
+\getenv bundled_cluster SYNVEDA_POSTGRES_BUNDLED_CLUSTER
+\getenv synveda_bootstrap_database SYNVEDA_POSTGRES_BOOTSTRAP_DATABASE
+select 1 / case when not exists (
+  select 1 from pg_catalog.pg_event_trigger
+) then 1 else 0 end;
+-- The same transaction boundary protects the Keycloak owner grant and every
+-- target-local refusal.
+begin;
+reset role;
+select 1 / case when current_user = session_user
+  and current_setting('role') = 'none'
+  and not exists (select 1 from pg_catalog.pg_event_trigger)
+then 1 else 0 end
+\g /dev/null
+\getenv keycloak_initial_state SYNVEDA_KEYCLOAK_INITIAL_STATE
+select 1 / case when :'keycloak_initial_state' in ('absent', 'closed', 'terminal')
+  then 1 else 0 end;
+-- An open terminal database may contain the normal Keycloak application schema.
+-- A database observed closed or absent before convergence is a CREATE crash
+-- boundary and must still have the empty template0-derived local envelope.
+-- Schema dependencies catch every schema-bound object (including tables,
+-- routines, types, operators and text-search objects); the remaining clauses
+-- close the meaningful non-schema object classes.
+select 1 / case when :'keycloak_initial_state' = 'terminal' or (
+  (select count(*)
+     from pg_catalog.pg_namespace namespace
+    where namespace.nspname = 'public'
+       or namespace.nspname <> 'information_schema'
+       and namespace.nspname !~ '^pg_') = 1
+  and exists (
+    select 1
+      from pg_catalog.pg_namespace namespace
+      join pg_catalog.pg_roles owner on owner.oid = namespace.nspowner
+     where namespace.nspname = 'public'
+       and owner.rolname = 'pg_database_owner'
+  )
+  and (
+    select count(*)
+      from pg_catalog.pg_namespace namespace,
+           lateral pg_catalog.aclexplode(
+             coalesce(namespace.nspacl, pg_catalog.acldefault('n', namespace.nspowner))
+           ) acl
+     where namespace.nspname = 'public'
+       and acl.grantee = namespace.nspowner
+       and acl.grantor = namespace.nspowner
+       and acl.privilege_type in ('CREATE', 'USAGE')
+       and not acl.is_grantable
+  ) = 2
+  and (
+    select count(*)
+      from pg_catalog.pg_namespace namespace,
+           lateral pg_catalog.aclexplode(
+             coalesce(namespace.nspacl, pg_catalog.acldefault('n', namespace.nspowner))
+           ) acl
+     where namespace.nspname = 'public'
+       and acl.grantee = 0
+       and acl.grantor = namespace.nspowner
+       and acl.privilege_type = 'USAGE'
+       and not acl.is_grantable
+  ) = 1
+  and not exists (
+    select 1
+      from pg_catalog.pg_namespace namespace,
+           lateral pg_catalog.aclexplode(
+             coalesce(namespace.nspacl, pg_catalog.acldefault('n', namespace.nspowner))
+           ) acl
+     where namespace.nspname = 'public'
+       and not (
+         acl.grantee = namespace.nspowner
+         and acl.grantor = namespace.nspowner
+         and acl.privilege_type in ('CREATE', 'USAGE')
+         and not acl.is_grantable
+       )
+       and not (
+         acl.grantee = 0
+         and acl.grantor = namespace.nspowner
+         and acl.privilege_type = 'USAGE'
+         and not acl.is_grantable
+       )
+  )
+  and not exists (
+    select 1
+      from pg_catalog.pg_depend dependency
+      join pg_catalog.pg_namespace namespace on namespace.oid = dependency.refobjid
+     where dependency.refclassid = 'pg_catalog.pg_namespace'::regclass
+       and namespace.nspname = 'public'
+  )
+  and not exists (
+    select 1
+      from pg_catalog.pg_shdepend dependency
+      join pg_catalog.pg_database database
+        on database.datname = pg_catalog.current_database()
+     where dependency.dbid = database.oid
+  )
+  and not exists (select 1 from pg_catalog.pg_default_acl)
+  and not exists (select 1 from pg_catalog.pg_largeobject_metadata)
+  and not exists (select 1 from pg_catalog.pg_event_trigger)
+  and not exists (select 1 from pg_catalog.pg_foreign_data_wrapper)
+  and not exists (select 1 from pg_catalog.pg_foreign_server)
+  and not exists (select 1 from pg_catalog.pg_user_mapping)
+  and not exists (select 1 from pg_catalog.pg_publication)
+  and not exists (select 1 from pg_catalog.pg_subscription)
+  and not exists (select 1 from pg_catalog.pg_transform)
+  and not exists (select 1 from pg_catalog.pg_seclabel)
+  and not exists (
+    select 1
+      from pg_catalog.pg_depend dependency
+     where dependency.classid = 'pg_catalog.pg_cast'::regclass
+  )
+  and (
+    select count(*)
+      from pg_catalog.pg_extension extension
+      join pg_catalog.pg_namespace namespace on namespace.oid = extension.extnamespace
+     where extension.extname = 'plpgsql'
+       and namespace.nspname = 'pg_catalog'
+  ) = 1
+  and (select count(*) from pg_catalog.pg_extension) = 1
+) then 1 else 0 end;
+grant keycloak to current_user
+  with admin false, inherit true, set true granted by current_user;
+create temporary table pg_temp.synveda_database_roles (
+  document jsonb not null
+) using heap;
+\copy pg_temp.synveda_database_roles(document) from '/tmp/synveda-database-bootstrap/database_roles.json'
+select 1 / case when (
+  select count(*)
+    from pg_temp.synveda_database_roles contract
+   where pg_catalog.jsonb_typeof(contract.document) = 'object'
+     and (select count(*) from pg_catalog.jsonb_object_keys(contract.document)) = 7
+     and contract.document->>'migrator' = 'synveda_migrator'
+     and contract.document->>'gateway' = 'synveda_gateway'
+     and contract.document->>'worker' = 'synveda_worker'
+     and contract.document->'administrators' = pg_catalog.jsonb_build_array(session_user)
+     and pg_catalog.jsonb_typeof(contract.document->'administrative_memberships') = 'array'
+     and pg_catalog.jsonb_typeof(contract.document->'forbidden_databases') = 'array'
+     and contract.document->'isolated_peer_roles' =
+         pg_catalog.jsonb_build_array('keycloak')
+     and (
+       :'bundled_cluster' = 'true'
+       and contract.document->'forbidden_databases' =
+           pg_catalog.jsonb_build_array('keycloak', 'postgres', 'template1')
+       or :'bundled_cluster' = 'false'
+       and contract.document->'forbidden_databases' @>
+           pg_catalog.jsonb_build_array('keycloak')
+     )
+) = 1 then 1 else 0 end;
+select 1 / case when :'bundled_cluster' = 'true' or (
+  select count(*)
+    from pg_catalog.pg_roles role
+   where role.rolname in (
+     'synveda_app', 'synveda_migrator', 'synveda_gateway', 'synveda_worker', 'keycloak'
+   )
+) = 5 then 1 else 0 end;
+select 1 / case when not exists (
+  select 1 from pg_catalog.pg_event_trigger
+) then 1 else 0 end;
+select 1 / case when exists (
+  select 1
+    from pg_catalog.pg_namespace namespace
+    join pg_catalog.pg_roles owner on owner.oid = namespace.nspowner
+   where namespace.nspname = 'public'
+     and owner.rolname in ('pg_database_owner', 'keycloak')
+) and not exists (
+  select 1
+    from pg_catalog.pg_namespace namespace,
+         lateral pg_catalog.aclexplode(
+           coalesce(namespace.nspacl, pg_catalog.acldefault('n', namespace.nspowner))
+         ) acl
+    left join pg_catalog.pg_roles grantee on grantee.oid = acl.grantee
+   where namespace.nspname = 'public'
+     and not (
+       grantee.rolname in ('pg_database_owner', 'keycloak')
+       and acl.grantor = namespace.nspowner
+       and acl.privilege_type in ('CREATE', 'USAGE')
+       and not acl.is_grantable
+     )
+     and not (
+       acl.grantee = 0
+       and acl.grantor = namespace.nspowner
+       and acl.privilege_type = 'USAGE'
+       and not acl.is_grantable
+     )
+) and not exists (
+  select 1
+    from pg_catalog.pg_class object
+    join pg_catalog.pg_namespace namespace on namespace.oid = object.relnamespace
+    join pg_catalog.pg_roles owner on owner.oid = object.relowner
+   where namespace.nspname = 'public'
+     and owner.rolname <> 'keycloak'
+  union all
+  select 1
+    from pg_catalog.pg_proc object
+    join pg_catalog.pg_namespace namespace on namespace.oid = object.pronamespace
+    join pg_catalog.pg_roles owner on owner.oid = object.proowner
+   where namespace.nspname = 'public'
+     and owner.rolname <> 'keycloak'
+  union all
+  select 1
+    from pg_catalog.pg_type object
+    join pg_catalog.pg_namespace namespace on namespace.oid = object.typnamespace
+    join pg_catalog.pg_roles owner on owner.oid = object.typowner
+   where namespace.nspname = 'public'
+     and owner.rolname <> 'keycloak'
+) and not exists (
+  select 1
+    from pg_catalog.pg_extension extension
+    join pg_catalog.pg_namespace namespace on namespace.oid = extension.extnamespace
+   where namespace.nspname = 'public'
+) then 1 else 0 end;
+-- Keycloak owns its application objects, but the identity database must not
+-- give any Synveda role local ownership or a direct ACL. Recheck under the
+-- target lock before changing the public schema.
+select 1 / case when not exists (
+  select 1
+    from pg_catalog.pg_namespace object
+    join pg_catalog.pg_roles owner on owner.oid = object.nspowner
+   where owner.rolname in ('synveda_app', 'synveda_migrator', 'synveda_gateway', 'synveda_worker')
+  union all
+  select 1
+    from pg_catalog.pg_class object
+    join pg_catalog.pg_roles owner on owner.oid = object.relowner
+   where owner.rolname in ('synveda_app', 'synveda_migrator', 'synveda_gateway', 'synveda_worker')
+  union all
+  select 1
+    from pg_catalog.pg_proc object
+    join pg_catalog.pg_roles owner on owner.oid = object.proowner
+   where owner.rolname in ('synveda_app', 'synveda_migrator', 'synveda_gateway', 'synveda_worker')
+  union all
+  select 1
+    from pg_catalog.pg_type object
+    join pg_catalog.pg_roles owner on owner.oid = object.typowner
+   where owner.rolname in ('synveda_app', 'synveda_migrator', 'synveda_gateway', 'synveda_worker')
+  union all
+  select 1
+    from pg_catalog.pg_extension object
+    join pg_catalog.pg_roles owner on owner.oid = object.extowner
+   where owner.rolname in ('synveda_app', 'synveda_migrator', 'synveda_gateway', 'synveda_worker')
+) and not exists (
+  select 1
+    from pg_catalog.pg_class object
+    join pg_catalog.pg_namespace namespace on namespace.oid = object.relnamespace,
+         lateral pg_catalog.aclexplode(object.relacl) acl
+   where namespace.nspname = 'public'
+     and (acl.grantee <> object.relowner or acl.grantor <> object.relowner)
+  union all
+  select 1
+    from pg_catalog.pg_proc object
+    join pg_catalog.pg_namespace namespace on namespace.oid = object.pronamespace,
+         lateral pg_catalog.aclexplode(object.proacl) acl
+   where namespace.nspname = 'public'
+     and (acl.grantee <> object.proowner or acl.grantor <> object.proowner)
+  union all
+  select 1
+    from pg_catalog.pg_type object
+    join pg_catalog.pg_namespace namespace on namespace.oid = object.typnamespace,
+         lateral pg_catalog.aclexplode(object.typacl) acl
+   where namespace.nspname = 'public'
+     and (acl.grantee <> object.typowner or acl.grantor <> object.typowner)
+  union all
+  select 1
+    from pg_catalog.pg_attribute object
+    join pg_catalog.pg_class relation on relation.oid = object.attrelid
+    join pg_catalog.pg_namespace namespace on namespace.oid = relation.relnamespace,
+         lateral pg_catalog.aclexplode(object.attacl) acl
+   where namespace.nspname = 'public'
+     and (acl.grantee <> relation.relowner or acl.grantor <> relation.relowner)
+  union all
+  select 1
+    from pg_catalog.pg_proc object
+    join pg_catalog.pg_namespace namespace on namespace.oid = object.pronamespace,
+         lateral pg_catalog.aclexplode(
+           coalesce(object.proacl, pg_catalog.acldefault('f', object.proowner))
+         ) acl
+   where namespace.nspname <> 'information_schema'
+     and namespace.nspname !~ '^pg_'
+     and object.prosecdef
+     and acl.grantee = 0
+     and acl.privilege_type = 'EXECUTE'
+) and not exists (
+  select 1
+    from pg_catalog.pg_namespace namespace
+   where namespace.nspname <> 'public'
+     and namespace.nspname <> 'information_schema'
+     and namespace.nspname !~ '^pg_'
+) and not exists (
+  select 1
+    from pg_catalog.pg_largeobject_metadata object,
+         lateral pg_catalog.aclexplode(object.lomacl) acl
+   where acl.grantee = 0
+      or acl.grantee in (
+        select role.oid from pg_catalog.pg_roles role
+         where role.rolname in (
+           'synveda_app', 'synveda_migrator', 'synveda_gateway', 'synveda_worker', 'keycloak'
+         )
+      )
+  union all
+  select 1
+    from pg_catalog.pg_foreign_data_wrapper object,
+         lateral pg_catalog.aclexplode(object.fdwacl) acl
+   where acl.grantee = 0
+      or acl.grantee in (
+        select role.oid from pg_catalog.pg_roles role
+         where role.rolname in (
+           'synveda_app', 'synveda_migrator', 'synveda_gateway', 'synveda_worker', 'keycloak'
+         )
+      )
+  union all
+  select 1
+    from pg_catalog.pg_foreign_server object,
+         lateral pg_catalog.aclexplode(object.srvacl) acl
+   where acl.grantee = 0
+      or acl.grantee in (
+        select role.oid from pg_catalog.pg_roles role
+         where role.rolname in (
+           'synveda_app', 'synveda_migrator', 'synveda_gateway', 'synveda_worker', 'keycloak'
+         )
+      )
+  union all
+  select 1
+    from pg_catalog.pg_language object,
+         lateral pg_catalog.aclexplode(object.lanacl) acl
+   where acl.grantee in (
+     select role.oid from pg_catalog.pg_roles role
+      where role.rolname in (
+        'synveda_app', 'synveda_migrator', 'synveda_gateway', 'synveda_worker', 'keycloak'
+      )
+   )
+  union all
+  select 1
+    from pg_catalog.pg_default_acl defaults
+   where defaults.defaclrole in (
+     select role.oid from pg_catalog.pg_roles role
+      where role.rolname in (
+        'synveda_app', 'synveda_migrator', 'synveda_gateway', 'synveda_worker', 'keycloak'
+      )
+   ) or exists (
+     select 1
+       from pg_catalog.aclexplode(defaults.defaclacl) acl
+      where acl.grantee in (
+        select role.oid from pg_catalog.pg_roles role
+         where role.rolname in (
+           'synveda_app', 'synveda_migrator', 'synveda_gateway', 'synveda_worker', 'keycloak'
+         )
+      )
+   )
+) then 1 else 0 end;
+-- As for Synveda, the owner grant follows every target-local refusal and is
+-- scoped to this transaction.
+\i /usr/local/share/synveda/local-authority-contract.sql
+\set synveda_bootstrap_target keycloak
+\set synveda_require_complete_roles true
+\set synveda_allow_target_owner_membership true
+\set synveda_allow_target_default_acl false
+\i /usr/local/share/synveda/cluster-authority-contract.sql
+alter schema public owner to keycloak;
+revoke all on schema public from public;
+select 1 / case when exists (
+  select 1
+    from pg_catalog.pg_namespace namespace
+    join pg_catalog.pg_roles owner on owner.oid = namespace.nspowner
+   where namespace.nspname = 'public'
+     and owner.rolname = 'keycloak'
+) and not exists (
+  select 1
+    from pg_catalog.pg_namespace namespace,
+         lateral pg_catalog.aclexplode(namespace.nspacl) acl
+   where namespace.nspname = 'public'
+     and acl.grantee = 0
+) and not exists (
+  select 1
+    from pg_catalog.pg_auth_members membership
+    join pg_catalog.pg_roles member on member.oid = membership.member
+    join pg_catalog.pg_roles granted on granted.oid = membership.roleid
+   where granted.rolname = 'keycloak'
+     and member.rolname = session_user
+     and not (
+       (
+         :'bundled_cluster' <> 'true'
+         and membership.admin_option
+         and not membership.inherit_option
+         and not membership.set_option
+       ) or (
+         membership.grantor = membership.member
+         and not membership.admin_option
+         and membership.inherit_option
+         and membership.set_option
+       )
+     )
+) then 1 else 0 end;
+
+select 1 / case when not exists (
+  select 1
+    from pg_catalog.pg_database database
+   where database.datname <> current_database()
+     and database.datallowconn
+     and (:'bundled_cluster' = 'true' or database.datname = 'synveda')
+     and pg_catalog.has_database_privilege('keycloak', database.oid, 'CONNECT')
+) then 1 else 0 end;
+
+\i /usr/local/share/synveda/credential-log-contract.sql
+set local password_encryption = 'scram-sha-256';
+select 1 / case when current_setting('password_encryption') = 'scram-sha-256'
+  then 1 else 0 end;
+create temporary table pg_temp.keycloak_credential (
+  secret text not null
+) using heap on commit drop;
+\copy pg_temp.keycloak_credential(secret) from '/tmp/synveda-database-bootstrap/keycloak_database_password'
+select 1 / case when (select count(*) from pg_temp.keycloak_credential) = 1
+  and not exists (
+    select 1 from pg_temp.keycloak_credential credential
+     where pg_catalog.octet_length(credential.secret) not between 1 and 4096
+        or credential.secret !~ '^[A-Za-z0-9._~-]+$'
+        or credential.secret ~ '^(md5[0-9A-Fa-f]{32}|SCRAM-SHA-256[$])'
+  ) then 1 else 0 end;
+do $credential$
+declare
+  database_password text;
+begin
+  select secret into strict database_password from pg_temp.keycloak_credential;
+  begin
+    execute format(
+      'alter role keycloak with login inherit password %L valid until ''infinity''',
+      database_password
+    );
+  exception when query_canceled or assert_failure or others then
+    raise exception using
+      errcode = 'P0001',
+      message = 'Keycloak credential convergence was refused';
+  end;
+end
+$credential$;
+\if :bundled_cluster
+select 1 / case when exists (
+  select 1
+    from pg_catalog.pg_authid role
+   where role.rolname = 'keycloak'
+     and role.rolpassword like 'SCRAM-SHA-256$%'
+) then 1 else 0 end;
+\endif
+reset role;
+select 1 / case when current_user = session_user
+  and current_setting('role') = 'none'
+then 1 else 0 end
+\g /dev/null
+revoke keycloak from session_user granted by session_user;
+select 1 / case when exists (
+  select 1
+    from pg_catalog.pg_roles role
+   where role.rolname = 'keycloak'
+     and role.rolcanlogin
+     and role.rolvaliduntil is not distinct from 'infinity'::timestamptz
+) then 1 else 0 end;
+select 1 / case when not exists (
+  select 1
+    from pg_catalog.pg_auth_members membership
+    join pg_catalog.pg_roles member on member.oid = membership.member
+    join pg_catalog.pg_roles granted on granted.oid = membership.roleid
+   where granted.rolname = 'keycloak'
+     and member.rolname = session_user
+     and not (
+       :'bundled_cluster' <> 'true'
+       and membership.admin_option
+       and not membership.inherit_option
+       and not membership.set_option
+     )
+) then 1 else 0 end;
+reset role;
+select 1 / case when current_user = session_user
+  and current_setting('role') = 'none'
+then 1 else 0 end
+\g /dev/null
+\o
+select pg_catalog.format(
+  '{"version":1,"database":"keycloak","cluster_system_identifier":"%s","postmaster_started_at":"%s","database_oid":%s}',
+  control.system_identifier::text,
+  pg_catalog.to_char(
+    pg_catalog.pg_postmaster_start_time() at time zone 'UTC',
+    'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'
+  ),
+  database.oid::bigint
+)
+  from pg_catalog.pg_control_system() control
+  join pg_catalog.pg_database database
+    on database.datname = pg_catalog.current_database()
+ where pg_catalog.current_database() = 'keycloak'
+   and not pg_catalog.pg_is_in_recovery()
+   and pg_catalog.current_setting('transaction_read_only') = 'off';
+commit;
+SQL
+    )
+    then
+        if ! quarantine_keycloak_database; then
+            echo "database-bootstrap: Keycloak quarantine was refused" >&2
+            exit 1
+        fi
+        echo "database-bootstrap: Keycloak schema convergence was refused" >&2
+        exit 1
+    fi
+    publish_peer_witness "$keycloak_witness"
+    unset keycloak_witness
+fi
+
+unset PGPASSFILE PGCONNECT_TIMEOUT PGOPTIONS PSQLRC SYNVEDA_KEYCLOAK_INITIAL_STATE \
+    SYNVEDA_KEYCLOAK_INITIAL_DATABASE_OID SYNVEDA_KEYCLOAK_DATABASE_OID
+echo "$target database convergence complete"

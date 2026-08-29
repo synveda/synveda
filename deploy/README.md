@@ -14,15 +14,14 @@ OIDC wiring, supported model implementations, secret references and telemetry;
 they do not select policy, capture rules, context budgets, trace retention,
 freshness or Skill/Tool advertisement.
 
-- `compose/` is the contributor/single-node infrastructure: Postgres with the
-  development extensions, bundled Rauthy, optional TEI and Jaeger. It also
-  contains the product Dockerfile. During the CPR-45 cutover, `make dev-up`
-  starts contributor services and `synveda init` starts the profiled gateway
-  plus the Compose worker. This transitional layout is replaced, not retained,
-  when canonical Keycloak Compose acceptance passes.
-- `release/` is the pull-only single-node manifest installed under
-  `~/.synveda/profile`. `scripts/package-release.sh` substitutes one release
-  version and includes no source build or retired demo seeder.
+- `compose/` contains the additive canonical Docker reference graph and the
+  still-present Rauthy/Temporal contributor residue. `make compose-config`
+  proves the new graph statically; it is not a runnable-reference claim until
+  clean-volume Keycloak acceptance passes. `make dev-up` remains a source
+  dependency loop, not the reference product lifecycle.
+- `release/` is the pull-only transitional artifact manifest installed under
+  `~/.synveda/profile`. It is retained for cutover evidence but is no longer
+  advertised as a turnkey single-host install.
 - `helm/` is the Kubernetes infrastructure: separate gateway and worker
   Deployments from the same image, CloudNativePG, optional TEI, ingress and
   external IdP/secret wiring. The CloudNativePG operator is deliberately a
@@ -30,13 +29,18 @@ freshness or Skill/Tool advertisement.
 
 ## Bootstrap boundary
 
-Both `synveda init` and the Helm install job do only the operations for which no
-authenticated product principal exists yet:
+Deployment-owned bootstrap and the Helm install job do only the operations for
+which no authenticated product principal exists yet:
 
-1. apply the current schema chain;
-2. provision/grant distinct gateway and worker runtime LOGINs;
+1. provision the exact migrator, gateway and worker roles and extensions;
+2. prove database/peer isolation and apply the current schema chain;
 3. optionally admit the first tenant;
-4. establish deployment key/issuer material.
+4. establish deployment key and issuer material.
+
+The `synveda init` verb is closed by a CPR-45 cutover gate before profile
+discovery or mutation. It neither infers nor provisions database authority.
+It reopens only when the canonical Compose lifecycle owns the same bounded
+file inputs and complete startup deadline.
 
 The first `synveda-admins` login creates the tenant root, the caller's principal
 scope and its root `administrator` grant. Workspaces, projects, sessions,
@@ -45,48 +49,27 @@ audit acts after that. No deployment script inserts those tables directly.
 
 ## Runtime database roles and forced RLS
 
-Migrations create `synveda_app` as a NOLOGIN capability role. Runtime-role
-sentinels require it to remain non-elevated and membership-free, own no
-database, and own no schema, relation or routine in the selected Synveda
-database. Local application processes use fixed,
-distinct LOGINs that inherit only that capability:
+Deployment bootstrap creates `synveda_app` as a NOLOGIN capability role. The
+ordinary `synveda_migrator` owns only the selected database and public
+application objects. Distinct `synveda_gateway` and `synveda_worker` LOGINs
+inherit only `synveda_app`; they own no database, schema or object and carry no
+elevation, database-wide setting or other membership.
 
-- `synveda init` converges `synveda_gateway` and `synveda_worker` as LOGIN,
-  INHERIT, owner of no database and no schema, relation or routine in the
-  selected Synveda database, non-superuser and non-`BYPASSRLS`, each with
-  `synveda_app` as its only, inheriting, non-admin membership, then verifies
-  each resolved host-side runtime connection;
-- the Helm install job converges the fixed `synveda_worker` role from a
-  separately owned Secret, connects through its mounted URL, and refuses a
-  live PostgreSQL primary instance/database target different from the install
-  connection;
-  the worker verifies that exact role and epoch again before readiness.
+Gateway and worker continuously re-prove the same epoch, catalog authority,
+forced-RLS contract, peer isolation and database identity. Authority closure
+withdraws readiness and governed work; conclusive refusal terminates the
+process. This is process enforcement, not only a readiness probe.
 
-The current Helm gateway remains an explicit pre-reference gap: CloudNativePG's
-generated application Secret is also the database owner. The chart refuses to
-reuse it for the worker, but a later migrator/runtime credential cutover must
-give the gateway a separate runtime Secret whose login owns no database and no
-schema, relation or routine in the selected Synveda database before Helm satisfies the locked deployment
-contract. No current evidence claims otherwise.
+Compose supplies role-scoped files. Helm renders separate migrator, gateway
+and worker Secrets and the same explicit role contract; runtime Deployments do
+not receive the database owner or superuser credential. Its bootstrap,
+preflight and migration stages are bounded and ordered. Remaining Helm gaps
+include file-mount parity for issuer/KMS material and full promotion
+acceptance, not gateway-owner credential reuse.
 
-When `DATABASE_URL` is explicit—even when its host is loopback—`init` treats it
-as an operator-owned bootstrap target and also requires both
-`SYNVEDA_GATEWAY_DATABASE_URL` and `SYNVEDA_WORKER_DATABASE_URL`. Only the
-implicit bundled default derives and converges the fixed development
-credentials. The explicit URLs must name different, separately provisioned
-roles on their actual target servers.
-Init connects through each URL and verifies LOGIN/INHERIT, exact session
-identity, ownership of no database and no schema, relation or routine in the
-selected Synveda database, non-elevation and sole `synveda_app` membership; it
-also compares the cluster system identifier, database OID and live postmaster
-start marker with the bootstrap connection and requires a writable primary,
-refusing a different live primary instance or read-only installation. The
-marker is used only for the concurrent bootstrap comparison, not persisted
-across restarts. For the implicit bundled default,
-init instead checks the derived `localhost` URLs; the
-container services use the Compose `postgres` alias, and the worker rechecks
-its real session at runtime. The gateway has no equivalent runtime sentinel
-yet. Diagnostics redact credentials.
+The closed `synveda init` implementation retains explicit URL validation for
+the future lifecycle, but none of it is currently executable. There is no
+implicit bundled fallback or host/container endpoint claim.
 
 The worker's default supervised join is 75 seconds. Both transitional Compose
 manifests give it an 85-second outer stop grace; the installed release also
@@ -98,21 +81,21 @@ worker join plus ten seconds.
 asserts distinct process commands/credentials and private worker probes,
 packages the release twice and checks the upgrade-shaped replacement. The
 CPR-36 database acceptance test also proves a runtime login with no tenant GUC
-cannot read tenant data. The kind acceptance script asserts the worker role
-facts before a governed round trip and repeats its private readiness check
-after CloudNativePG primary failover.
+cannot read tenant data. The kind acceptance script is written to assert the
+worker role before a governed round trip and repeat private readiness after
+CloudNativePG primary failover, but that script has not been rerun since the
+current three-credential install-job cutover.
 
-## Why the Compose gateway may run on the host
+## Legacy host-gateway residue
 
-The bundled Rauthy issuer is `http://localhost:8100/auth/v1/`. An OIDC issuer
-identifier must be the same URL for the browser, discovery document, token and
-gateway; RFC 6761 resolves `localhost` to each caller's own loopback. The
-default installed gateway therefore still runs as a host process during this
-transition; the core worker is already a Compose service. An external issuer
-has a mutually reachable DNS name and `synveda init --issuer ...` runs both
-processes as separate services from the same product image. Canonical Keycloak
-Compose removes this workaround by giving browser and containers one exact
-proxy issuer name.
+The retained Rauthy profile used `http://localhost:8100/auth/v1/`. An OIDC
+issuer identifier must be the same URL for the browser, discovery document,
+token and gateway, while RFC 6761 resolves `localhost` to each caller's own
+loopback. That forced its gateway onto the host. The CPR-45 cutover gate now
+refuses the lifecycle before it can start either the bundled or external-issuer
+legacy shape. Canonical Keycloak Compose removes the workaround by running both
+product processes in containers behind one browser/container-reachable proxy
+issuer name; this becomes executable only after exact-issuer acceptance.
 
 ## Embeddings
 

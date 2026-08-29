@@ -13,11 +13,23 @@ use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
 use metrics_exporter_prometheus::PrometheusHandle;
 use sqlx::postgres::PgPoolOptions;
-use synveda_gateway::app::{AppState, router};
+use synveda_gateway::app::{AppState, behavior_test_router as router, governed_router};
+use synveda_gateway::authority::{self, AuthorityMonitor, CheckOutcome};
+use synveda_gateway::runtime_config;
 use synveda_gateway::telemetry;
 use tower::ServiceExt;
 use tracing_subscriber::layer::{Context, SubscriberExt};
 use tracing_subscriber::registry::LookupSpan;
+
+fn private_database_url(setting: &str) -> Option<String> {
+    let path = std::env::var_os(setting)?;
+    Some(
+        std::fs::read_to_string(path)
+            .expect("read isolated test database URL")
+            .trim_end_matches('\n')
+            .to_owned(),
+    )
+}
 
 /// The Prometheus recorder and tracing's callsite-interest cache are both
 /// process-global: a test running with no subscriber can race another test's
@@ -72,6 +84,44 @@ fn state(url: &str) -> AppState {
 /// A URL that parses but connects nowhere, for tests that must not touch a
 /// database.
 const UNREACHABLE_URL: &str = "postgres://nobody:nothing@127.0.0.1:1/void";
+
+struct RuntimeDatabase {
+    admin: sqlx::PgPool,
+    role: String,
+    url: String,
+    roles: synveda_store::runtime_role::DatabaseRoles,
+}
+
+fn quote_postgres_identifier(value: &str) -> String {
+    assert!(
+        !value.contains('\0'),
+        "PostgreSQL identifiers cannot contain NUL"
+    );
+    format!("\"{}\"", value.replace('"', "\"\""))
+}
+
+/// Use the exact ordinary gateway and narrow lifecycle administrator supplied
+/// by the isolated database harness.
+async fn authority_runtime_database() -> Option<RuntimeDatabase> {
+    let admin_url = private_database_url("SYNVEDA_TEST_ADMIN_DATABASE_URL_FILE")?;
+    let url = std::env::var("DATABASE_URL").ok()?;
+    let roles = runtime_config::database_roles().expect("read exact test database roles");
+    let admin = PgPoolOptions::new()
+        .max_connections(2)
+        .connect(&admin_url)
+        .await
+        .expect("connect as isolated test administrator");
+    Some(RuntimeDatabase {
+        admin,
+        role: roles.gateway().to_owned(),
+        url,
+        roles,
+    })
+}
+
+async fn remove_runtime_database(runtime: RuntimeDatabase) {
+    runtime.admin.close().await;
+}
 
 async fn body_text(response: axum::response::Response) -> String {
     let bytes = response
@@ -133,6 +183,126 @@ async fn readyz_degrades_to_503_when_storage_is_unreachable() {
     assert_eq!(body_text(response).await, "not ready");
 }
 
+#[tokio::test]
+async fn governed_routes_stay_closed_while_storage_is_unreachable() {
+    let _serial = serial().await;
+    let mut state = state(UNREACHABLE_URL);
+    let roles = synveda_store::runtime_role::DatabaseRoles::parse_json(
+        r#"{"migrator":"migrator","gateway":"nobody","worker":"worker","administrators":["administrator"],"administrative_memberships":[],"forbidden_databases":["postgres"],"isolated_peer_roles":[]}"#,
+    )
+    .expect("closed unreachable role contract");
+    let options = synveda_store::database_url::parse("DATABASE_URL", UNREACHABLE_URL)
+        .expect("parse unreachable database URL");
+    let (pool_options, pool_refusal) =
+        runtime_config::runtime_pool_options(2, authority::CHECK_TIMEOUT, "nobody".to_owned());
+    state.pool = pool_options.connect_lazy_with(options);
+    let monitor =
+        AuthorityMonitor::new(state.pool.clone(), pool_refusal, "nobody".to_owned(), roles);
+    let app = governed_router(state, monitor.gate());
+
+    let health = app
+        .clone()
+        .oneshot(Request::get("/healthz").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(health.status(), StatusCode::OK);
+
+    let application = app
+        .clone()
+        .oneshot(Request::get("/v1/whoami").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(application.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(body_text(application).await, "service unavailable");
+
+    let readiness = app
+        .oneshot(Request::get("/readyz").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(readiness.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(body_text(readiness).await, "not ready");
+}
+
+#[tokio::test]
+async fn governed_routes_open_only_for_exact_authority_and_terminal_drift_stays_closed() {
+    let _serial = serial().await;
+    let Some(runtime) = authority_runtime_database().await else {
+        eprintln!(
+            "skipping governed authority routes: isolated admin/runtime URLs are not set \
+             (run through `make db-test`)"
+        );
+        return;
+    };
+    let mut state = state(&runtime.url);
+    let options = synveda_store::database_url::parse("DATABASE_URL", &runtime.url)
+        .expect("parse governed runtime URL");
+    let (pool_options, pool_refusal) =
+        runtime_config::runtime_pool_options(2, authority::CHECK_TIMEOUT, runtime.role.clone());
+    state.pool = pool_options.connect_lazy_with(options);
+    let monitor = AuthorityMonitor::new(
+        state.pool.clone(),
+        pool_refusal,
+        runtime.role.clone(),
+        runtime.roles.clone(),
+    );
+    let gate = monitor.gate();
+    let (_stop_tx, stop_rx) = tokio::sync::watch::channel(false);
+    let sentinel = tokio::spawn(authority::run_sentinel(monitor, stop_rx));
+    tokio::time::timeout(authority::CHECK_TIMEOUT, gate.wait_until_open())
+        .await
+        .expect("initial authority proof is bounded")
+        .expect("initial authority proof accepts");
+    let app = governed_router(state, gate.clone());
+
+    let accepted = app
+        .clone()
+        .oneshot(Request::get("/v1/whoami").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(
+        accepted.status(),
+        StatusCode::UNAUTHORIZED,
+        "the open gate reaches the normal disabled-auth boundary"
+    );
+
+    let quoted_role = quote_postgres_identifier(&runtime.role);
+    sqlx::query(&format!("alter role {quoted_role} bypassrls"))
+        .execute(&runtime.admin)
+        .await
+        .expect("introduce conclusive runtime-role drift");
+    tokio::time::timeout(
+        authority::CHECK_INTERVAL + authority::CHECK_TIMEOUT,
+        gate.wait_until_terminal(),
+    )
+    .await
+    .expect("runtime-role drift is detected within one sentinel interval");
+    assert!(matches!(
+        sentinel.await.expect("join refused authority sentinel"),
+        CheckOutcome::Refused { .. }
+    ));
+    let refused = app
+        .clone()
+        .oneshot(Request::get("/v1/whoami").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(refused.status(), StatusCode::SERVICE_UNAVAILABLE);
+
+    sqlx::query(&format!("alter role {quoted_role} nobypassrls"))
+        .execute(&runtime.admin)
+        .await
+        .expect("repair runtime role for cleanup");
+    assert!(
+        gate.is_terminal(),
+        "terminal drift cannot reopen in-process"
+    );
+    let still_refused = app
+        .oneshot(Request::get("/v1/whoami").body(Body::empty()).unwrap())
+        .await
+        .unwrap();
+    assert_eq!(still_refused.status(), StatusCode::SERVICE_UNAVAILABLE);
+    remove_runtime_database(runtime).await;
+}
+
 /// Readiness carries the schema epoch guard (CPR-2, ADR-0069).
 ///
 /// The gateway also refuses to *boot* against a database at the wrong epoch,
@@ -148,26 +318,34 @@ async fn readyz_degrades_to_503_when_storage_is_unreachable() {
 #[tokio::test]
 async fn readyz_refuses_a_database_that_is_not_at_this_schema_epoch() {
     let _serial = serial().await;
-    let Ok(source) = std::env::var("DATABASE_URL").map_err(|_| ()) else {
+    let (Some(admin_source), Some(migrator_source), Some(gateway_source)) = (
+        private_database_url("SYNVEDA_EPOCH_TEST_ADMIN_DATABASE_URL_FILE"),
+        private_database_url("SYNVEDA_EPOCH_TEST_MIGRATOR_DATABASE_URL_FILE"),
+        private_database_url("SYNVEDA_EPOCH_TEST_GATEWAY_DATABASE_URL_FILE"),
+    ) else {
         eprintln!(
-            "skipping the schema epoch readiness test: DATABASE_URL is not set \
-             (run `make dev-up` then `make db-test`)"
+            "skipping the schema epoch readiness test: isolated lifecycle URLs are not set \
+             (run `make db-test`)"
         );
         return;
     };
-    // `DATABASE_URL` with the database name swapped, as `scripts/db-test.sh`
-    // builds its own.
-    let head = source.split('?').next().unwrap_or(&source);
-    let base = &head[..head.rfind('/').expect("a database name in DATABASE_URL")];
+    let roles = runtime_config::database_roles().expect("read exact lifecycle roles");
     let name = format!("synveda_readyz_epoch_{}", std::process::id());
-    let url = format!("{base}/{name}{}", &source[head.len()..]);
+    let migrator_url = database_url_for(&migrator_source, &name);
+    let gateway_url = database_url_for(&gateway_source, &name);
+    let admin_url = database_url_for(&admin_source, &name);
 
-    synveda_store::reset::recreate(&url)
+    synveda_store::reset::recreate(&admin_source, &migrator_url, &roles)
         .await
         .expect("build a current-epoch database");
+    let admin = PgPoolOptions::new()
+        .max_connections(1)
+        .connect(&admin_url)
+        .await
+        .expect("connect lifecycle administrator to the scratch database");
 
     // A database at this epoch is ready.
-    let response = router(state(&url))
+    let response = router(state(&gateway_url))
         .oneshot(Request::get("/readyz").body(Body::empty()).unwrap())
         .await
         .unwrap();
@@ -175,18 +353,12 @@ async fn readyz_refuses_a_database_that_is_not_at_this_schema_epoch() {
 
     // The same database with the marker taken away — which is what every
     // database written before the context-platform cut looks like — is not.
-    let pool = PgPoolOptions::new()
-        .max_connections(1)
-        .connect(&url)
-        .await
-        .expect("connect to the scratch database");
     sqlx::query("drop table schema_metadata")
-        .execute(&pool)
+        .execute(&admin)
         .await
         .expect("remove the marker");
-    pool.close().await;
 
-    let response = router(state(&url))
+    let response = router(state(&gateway_url))
         .oneshot(Request::get("/readyz").body(Body::empty()).unwrap())
         .await
         .unwrap();
@@ -197,9 +369,10 @@ async fn readyz_refuses_a_database_that_is_not_at_this_schema_epoch() {
          behind it are in a model it does not implement"
     );
     assert_eq!(body_text(response).await, "not ready");
+    admin.close().await;
 
     // Tidy up; a failure here is not worth failing a passing test over.
-    if let Ok(mut admin) = source.parse::<sqlx::postgres::PgConnectOptions>() {
+    if let Ok(mut admin) = admin_source.parse::<sqlx::postgres::PgConnectOptions>() {
         use sqlx::ConnectOptions as _;
         admin = admin.database("postgres");
         if let Ok(mut connection) = admin.connect().await {
@@ -208,6 +381,12 @@ async fn readyz_refuses_a_database_that_is_not_at_this_schema_epoch() {
                 .await;
         }
     }
+}
+
+fn database_url_for(source: &str, database: &str) -> String {
+    let mut url = url::Url::parse(source).expect("parse lifecycle database URL");
+    url.set_path(&format!("/{database}"));
+    url.to_string()
 }
 
 // ── Span-chain test (needs a live Postgres) ─────────────────────────────────
@@ -249,15 +428,12 @@ where
 #[tokio::test]
 async fn readyz_produces_the_gateway_core_store_span_chain() {
     let _serial = serial().await;
-    let url = match std::env::var("DATABASE_URL") {
-        Ok(url) => url,
-        Err(_) => {
-            eprintln!(
-                "skipping span-chain test: DATABASE_URL is not set \
-                 (run `make dev-up` then `make db-test`)"
-            );
-            return;
-        }
+    let Ok(runtime_url) = std::env::var("DATABASE_URL") else {
+        eprintln!(
+            "skipping span-chain test: isolated runtime URL is not set \
+             (run `make db-test`)"
+        );
+        return;
     };
 
     let spans = Arc::new(Mutex::new(Vec::new()));
@@ -268,7 +444,7 @@ async fn readyz_produces_the_gateway_core_store_span_chain() {
     // span this request opens lands in the collector.
     let _guard = tracing::subscriber::set_default(subscriber);
 
-    let response = router(state(&url))
+    let response = router(state(&runtime_url))
         .oneshot(Request::get("/readyz").body(Body::empty()).unwrap())
         .await
         .unwrap();
@@ -297,6 +473,8 @@ async fn readyz_produces_the_gateway_core_store_span_chain() {
         parent_of("store.ping").as_deref(),
         Some("retrieval.readiness")
     );
+    drop(spans);
+    drop(_guard);
 }
 
 // ── W3C trace context (ADR-0007's deferred clause) ─────────────────────

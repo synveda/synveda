@@ -1,0 +1,12 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "alter table public.audit_log disable trigger audit_log_no_update",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": []
+  },
+  "hash": "20538ca52bde55074a6220334fb0fd638e58170d3a40e272f5a3c55358738a90"
+}

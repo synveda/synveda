@@ -23,7 +23,7 @@ use axum::http::{Request, StatusCode, header};
 use http_body_util::BodyExt;
 use metrics_exporter_prometheus::PrometheusHandle;
 use sqlx::postgres::PgPoolOptions;
-use synveda_gateway::app::{AppState, router};
+use synveda_gateway::app::{AppState, behavior_test_router as router};
 use synveda_gateway::telemetry;
 use synveda_identity::Hs256Verifier;
 use tower::ServiceExt;

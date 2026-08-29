@@ -29,42 +29,13 @@ spec:
       {{- end }}
     spec:
       serviceAccountName: {{ include "synveda.serviceAccountName" . }}
+      automountServiceAccountToken: false
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
-      initContainers:
-        # The sentinel. `/readyz` cannot serve this purpose: it is
-        # `select 1`, so it answers "the pool reached Postgres", which is
-        # true of an unmigrated database and of a role with no grants
-        # alike. This asks the question that actually gates the gateway —
-        # does the schema exist, and may this role read it — using only the
-        # gateway's own credential, so nothing here holds an admin one.
-        #
-        # `tenants` is the right table to ask about: `synveda_app` holds
-        # SELECT on it (ADR-0009 decision 5) and it is not tenant-scoped,
-        # so no RLS GUC is needed to read zero rows from it.
-        - name: wait-for-schema
-          image: {{ .Values.postgres.image }}
-          securityContext:
-            {{- toYaml .Values.securityContext | nindent 12 }}
-          command:
-            - sh
-            - -ec
-            - |
-              until PGDATABASE="$DATABASE_URL" psql -v ON_ERROR_STOP=1 -tAc 'select 1 from tenants limit 1' >/dev/null 2>&1; do
-                echo "waiting for the install job: schema and the synveda_app grant"
-                sleep 3
-              done
-              echo "schema present and readable by this role"
-          env:
-            - name: DATABASE_URL
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "synveda.appSecret" . }}
-                  key: uri
       containers:
         - name: gateway
           image: {{ include "synveda.image" . }}
@@ -75,16 +46,10 @@ spec:
             - name: http
               containerPort: 8120
           env:
-            # CNPG's app secret: not a superuser, no BYPASSRLS, and a
-            # member of `synveda_app` since the install job ran. This is
-            # the first deployment in which TEN-2's forced row-level
-            # security is enforced against the gateway rather than
-            # bypassed by it (ADR-0062 decision 2).
-            - name: DATABASE_URL
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "synveda.appSecret" . }}
-                  key: uri
+            - name: DATABASE_URL_FILE
+              value: /run/secrets/synveda-gateway/database_url
+            - name: SYNVEDA_DATABASE_ROLES_FILE
+              value: /etc/synveda/database/roles.json
             # The image's default is 127.0.0.1:8120. A pod that binds
             # loopback is a pod no Service can reach.
             - name: SYNVEDA_LISTEN_ADDR
@@ -134,23 +99,31 @@ spec:
             # schema *epoch* beside it. It is honest about a database
             # outage — which is the property CNPG failover needs, since the
             # pool is `connect_lazy` and a lost primary must take this pod
-            # out of the Service rather than crash-loop it — and it still
-            # says nothing about the grants. The initContainer above covers
-            # those, once, at start.
+            # out of the Service rather than crash-loop it. The continuously
+            # evaluated product authority sentinel also proves the exact
+            # role, grants, RLS, routines and schema surface before this
+            # endpoint can report ready; no weaker init-container probe sits
+            # in front of it.
             #
             # The epoch check is per-probe rather than at start for the same
             # reason the pool is lazy: a database that arrives *after* the
             # process would otherwise be behind a check that already ran. A
             # pod pointed at a pre-cut database therefore leaves the Service
             # rather than serving rows in a model it does not implement —
-            # though in practice the install job's `db migrate` refuses first
-            # and this pod never starts.
+            # the product authority gate stays closed until the install job
+            # has completed the exact deployment contract.
             httpGet:
               path: /readyz
               port: http
             periodSeconds: 5
             failureThreshold: 3
           volumeMounts:
+            - name: gateway-database
+              mountPath: /run/secrets/synveda-gateway
+              readOnly: true
+            - name: database-roles
+              mountPath: /etc/synveda/database
+              readOnly: true
             - name: tmp
               mountPath: /tmp
           {{- with .Values.gateway.resources }}
@@ -158,6 +131,19 @@ spec:
             {{- toYaml . | nindent 12 }}
           {{- end }}
       volumes:
+        - name: gateway-database
+          secret:
+            secretName: {{ .Values.gateway.databaseExistingSecret }}
+            defaultMode: 0440
+            items:
+              - key: {{ .Values.gateway.databaseUrlSecretKey }}
+                path: database_url
+        - name: database-roles
+          configMap:
+            name: {{ include "synveda.fullname" . }}-database-roles
+            items:
+              - key: roles.json
+                path: roles.json
         - name: tmp
           emptyDir: {}
       {{- with .Values.gateway.nodeSelector }}

@@ -1,16 +1,13 @@
 {{- /*
-The HA data plane (OPS-2, ADR-0062 decision 1). CloudNativePG runs the
-cluster, elects the primary and publishes two secrets:
+The Kubernetes data plane (OPS-2, ADR-0062 decision 1). CloudNativePG runs
+the cluster, elects the primary and publishes two secrets:
 
-  <cluster>-app         the gateway's identity — not a superuser, no
-                        BYPASSRLS, so TEN-2's forced row-level security is
-                        actually enforced against it (ADR-0009, decision 2)
-  <cluster>-superuser   the install job's identity, and nothing else's
+  <cluster>-app         the ordinary `synveda_migrator` database/schema owner
+  <cluster>-superuser   the bootstrap container's identity, and nothing else's
 
-`enableSuperuserAccess` is set on purpose: migration 0003 creates a role
-and 0015 creates an extension, neither of which the app role may do. It is
-the one credential in this deployment that can bypass RLS, which is why the
-gateway never sees it.
+`enableSuperuserAccess` is deliberate: deployment bootstrap converges roles,
+extensions and ACLs before the ordinary migrator runs the application DDL.
+No product operation or runtime process receives this credential.
 */ -}}
 apiVersion: postgresql.cnpg.io/v1
 kind: Cluster
@@ -26,16 +23,21 @@ spec:
   bootstrap:
     initdb:
       database: {{ include "synveda.dbName" . }}
-      owner: {{ include "synveda.appRole" . }}
-      # The extension binaries are in the image; creating them is a
-      # bootstrap act because it needs a superuser.
-      #
-      # Keep extension installation an explicit superuser bootstrap act; the
-      # migration repeats these idempotently so every deployment shape has
-      # the same self-describing baseline.
-      postInitApplicationSQL:
-        - create extension if not exists vector;
-        - create extension if not exists btree_gin;
+      owner: {{ include "synveda.migratorRole" . }}
+      # The shared cluster authority proof is deliberately first. PostgreSQL
+      # grants PUBLIC CONNECT to these maintenance databases by default; the
+      # required install Job refuses that cross-database path and must not be
+      # asked to repair it after its read-only guard. CNPG also creates the
+      # application database with a default/null ACL; close it before the Job
+      # so the shared bootstrap sees its only recoverable initial state and
+      # transactionally publishes the terminal explicit ACL before reopening.
+      postInitSQL:
+        - revoke connect, temporary on database postgres, template1 from public;
+        - alter database {{ include "synveda.dbName" . }} allow_connections false;
+      # Extension binaries are image inputs only. The required install Job
+      # creates and proves the exact extension versions as its declared
+      # bootstrap administrator; CNPG's application-owner hook must not create
+      # a conflicting ownership shape first.
 
   postgresql:
     parameters:

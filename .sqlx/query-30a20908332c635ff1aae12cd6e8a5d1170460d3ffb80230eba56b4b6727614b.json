@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select exists (\n              select 1\n                from pg_catalog.pg_largeobject_metadata as object,\n                     lateral pg_catalog.aclexplode(object.lomacl) as acl\n               where acl.grantee = 0\n                  or acl.grantee in (\n                    select role.oid from pg_catalog.pg_roles as role\n                     where role.rolname = any($1::text[])\n                  )\n              union all\n              select 1\n                from pg_catalog.pg_foreign_data_wrapper as object,\n                     lateral pg_catalog.aclexplode(object.fdwacl) as acl\n               where acl.grantee = 0\n                  or acl.grantee in (\n                    select role.oid from pg_catalog.pg_roles as role\n                     where role.rolname = any($1::text[])\n                  )\n              union all\n              select 1\n                from pg_catalog.pg_foreign_server as object,\n                     lateral pg_catalog.aclexplode(object.srvacl) as acl\n               where acl.grantee = 0\n                  or acl.grantee in (\n                    select role.oid from pg_catalog.pg_roles as role\n                     where role.rolname = any($1::text[])\n                  )\n              union all\n              select 1\n                from pg_catalog.pg_language as object,\n                     lateral pg_catalog.aclexplode(object.lanacl) as acl\n               where acl.grantee in (\n                 select role.oid from pg_catalog.pg_roles as role\n                  where role.rolname = any($1::text[])\n               )\n              union all\n              select 1\n                from pg_catalog.pg_tablespace as object,\n                     lateral pg_catalog.aclexplode(object.spcacl) as acl\n               where acl.grantee = 0\n                  or acl.grantee in (\n                    select role.oid from pg_catalog.pg_roles as role\n                     where role.rolname = any($1::text[])\n                  )\n              union all\n              select 1\n                from pg_catalog.pg_parameter_acl as object,\n                     lateral pg_catalog.aclexplode(object.paracl) as acl\n               where acl.grantee = 0\n                  or acl.grantee in (\n                    select role.oid from pg_catalog.pg_roles as role\n                     where role.rolname = any($1::text[])\n                  )\n              union all\n              select 1\n                from pg_catalog.pg_default_acl as defaults\n               where defaults.defaclrole in (\n                       select role.oid from pg_catalog.pg_roles as role\n                        where role.rolname = any($1::text[])\n                     )\n                  or exists (\n                    select 1\n                      from pg_catalog.aclexplode(defaults.defaclacl) as acl\n                     where acl.grantee in (\n                       select role.oid from pg_catalog.pg_roles as role\n                        where role.rolname = any($1::text[])\n                     )\n                  )\n            ) as \"unsafe!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "unsafe!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "30a20908332c635ff1aae12cd6e8a5d1170460d3ffb80230eba56b4b6727614b"
+}

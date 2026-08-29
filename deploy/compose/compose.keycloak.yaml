@@ -1,4 +1,25 @@
 services:
+  database-preflight:
+    environment:
+      SYNVEDA_DATABASE_REQUIRED_PEER: keycloak
+      SYNVEDA_DATABASE_PEER_WITNESS_FILE: /run/synveda/database-authority/keycloak-cluster.json
+    volumes:
+      - type: bind
+        source: ${SYNVEDA_DATABASE_AUTHORITY_DIR:?set SYNVEDA_DATABASE_AUTHORITY_DIR}
+        target: /run/synveda/database-authority
+        read_only: true
+    depends_on:
+      keycloak-database-bootstrap:
+        condition: service_completed_successfully
+
+  gateway:
+    environment:
+      SYNVEDA_DATABASE_REQUIRED_PEER: keycloak
+
+  worker:
+    environment:
+      SYNVEDA_DATABASE_REQUIRED_PEER: keycloak
+
   proxy:
     volumes:
       - type: bind
@@ -11,6 +32,42 @@ services:
           - ${SYNVEDA_AUTH_HOST:?set SYNVEDA_AUTH_HOST}
       identity-backend:
         ipv4_address: ${SYNVEDA_PROXY_IDENTITY_ADDRESS:?set SYNVEDA_PROXY_IDENTITY_ADDRESS}
+
+  keycloak-database-bootstrap:
+    image: ${SYNVEDA_POSTGRES_IMAGE:?set SYNVEDA_POSTGRES_IMAGE}
+    user: "${SYNVEDA_RUNTIME_UID:?set SYNVEDA_RUNTIME_UID}:${SYNVEDA_RUNTIME_GID:?set SYNVEDA_RUNTIME_GID}"
+    entrypoint: ["/usr/local/bin/synveda-database-bootstrap"]
+    command: ["keycloak"]
+    environment:
+      SYNVEDA_POSTGRES_BOOTSTRAP_URL: ${SYNVEDA_POSTGRES_BOOTSTRAP_URL:?set SYNVEDA_POSTGRES_BOOTSTRAP_URL}
+      SYNVEDA_POSTGRES_BUNDLED_CLUSTER: ${SYNVEDA_POSTGRES_BUNDLED_CLUSTER:?set SYNVEDA_POSTGRES_BUNDLED_CLUSTER}
+      SYNVEDA_DATABASE_ROLES_FILE: /run/secrets/database_roles.json
+      SYNVEDA_DATABASE_AUTHORITY_DIR: /run/synveda/database-authority
+    read_only: true
+    init: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 64
+    restart: "no"
+    mem_limit: 256m
+    cpus: 0.5
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,mode=1777,size=16m
+    secrets:
+      - source: postgres_owner_password
+        target: postgres_bootstrap_password
+      - source: keycloak_database_password
+        target: keycloak_database_password
+    volumes:
+      - type: bind
+        source: ${SYNVEDA_DATABASE_ROLES_FILE:?set SYNVEDA_DATABASE_ROLES_FILE}
+        target: /run/secrets/database_roles.json
+        read_only: true
+      - type: bind
+        source: ${SYNVEDA_DATABASE_AUTHORITY_DIR:?set SYNVEDA_DATABASE_AUTHORITY_DIR}
+        target: /run/synveda/database-authority
+    networks:
+      keycloak-data: {}
 
   keycloak:
     image: ${SYNVEDA_KEYCLOAK_IMAGE:?set SYNVEDA_KEYCLOAK_IMAGE}
@@ -33,6 +90,8 @@ services:
       KC_PROXY_HEADERS: xforwarded
       KC_PROXY_TRUSTED_ADDRESSES: ${SYNVEDA_PROXY_IDENTITY_ADDRESS}/32
       KC_CACHE: local
+      # KC-SERVICES0077 otherwise logs the mounted bootstrap identifier.
+      KC_LOG_LEVEL_ORG_KEYCLOAK_SERVICES: warn
     read_only: true
     init: true
     cap_drop: [ALL]
@@ -45,6 +104,9 @@ services:
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev,mode=1777,size=128m
       - /opt/keycloak/data/tmp:rw,noexec,nosuid,nodev,mode=0700,size=128m,uid=${SYNVEDA_RUNTIME_UID},gid=${SYNVEDA_RUNTIME_GID}
+    depends_on:
+      keycloak-database-bootstrap:
+        condition: service_completed_successfully
     secrets:
       - source: keycloak_database_password
         target: keycloak_database_password
@@ -67,11 +129,12 @@ services:
       identity-backend: {}
       keycloak-data: {}
       keycloak-management: {}
-      identity-egress: {}
 
 secrets:
+  postgres_owner_password:
+    file: ${SYNVEDA_SECRETS_DIR:?set SYNVEDA_SECRETS_DIR}/postgres_owner_password
   keycloak_database_password:
-    file: ${SYNVEDA_SECRETS_DIR:?set SYNVEDA_SECRETS_DIR}/keycloak_database_password
+    file: ${SYNVEDA_SECRETS_DIR}/keycloak_database_password
   keycloak_admin_username:
     file: ${SYNVEDA_SECRETS_DIR}/keycloak_admin_username
   keycloak_admin_password:

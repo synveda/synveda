@@ -1,0 +1,67 @@
+#!/bin/sh
+# CPR-45: test-only bridge for Rust integration binaries which still consume
+# DATABASE_URL. The database gate supplies one private file; this wrapper reads
+# it without rendering content or path and immediately execs Cargo.
+# A caller can enable tracing before execution; disable it before any setting
+# or file expansion can render a credential or its private path.
+set +x
+set -eu
+
+[ "$#" -gt 0 ] || {
+    echo "cargo-database-url: a command is required" >&2
+    exit 64
+}
+[ "${DATABASE_URL+x}" != x ] || {
+    echo "cargo-database-url: direct DATABASE_URL is forbidden" >&2
+    exit 78
+}
+path=${SYNVEDA_CARGO_DATABASE_URL_FILE:-}
+[ -n "$path" ] && [ ! -L "$path" ] && [ -f "$path" ] || {
+    echo "cargo-database-url: the private URL file is unavailable" >&2
+    exit 78
+}
+mode=$(stat -f '%Lp' "$path" 2>/dev/null || stat -c '%a' "$path" 2>/dev/null) || {
+    echo "cargo-database-url: the private URL file metadata is unavailable" >&2
+    exit 78
+}
+owner=$(stat -f '%u' "$path" 2>/dev/null || stat -c '%u' "$path" 2>/dev/null) || {
+    echo "cargo-database-url: the private URL file metadata is unavailable" >&2
+    exit 78
+}
+[ "$mode" = 600 ] && [ "$owner" = "$(id -u)" ] || {
+    echo "cargo-database-url: the private URL file is not private" >&2
+    exit 78
+}
+bytes=$(wc -c < "$path")
+[ "$bytes" -gt 0 ] && [ "$bytes" -le 4096 ] || {
+    echo "cargo-database-url: the private URL file has an invalid size" >&2
+    exit 78
+}
+without_nul=$(tr -d '\000' < "$path" | wc -c)
+[ "$bytes" -eq "$without_nul" ] || {
+    echo "cargo-database-url: the private URL file contains invalid bytes" >&2
+    exit 78
+}
+newlines=$(tr -cd '\n' < "$path" | wc -c | tr -d ' ')
+case "$newlines" in
+    0) ;;
+    1)
+        [ "$(tail -c 1 "$path" | od -An -tu1 | tr -d ' ')" = 10 ] || {
+            echo "cargo-database-url: the private URL file must contain one line" >&2
+            exit 78
+        }
+        ;;
+    *)
+        echo "cargo-database-url: the private URL file must contain one line" >&2
+        exit 78
+        ;;
+esac
+DATABASE_URL=
+IFS= read -r DATABASE_URL < "$path" || :
+[ -n "$DATABASE_URL" ] || {
+    echo "cargo-database-url: the private URL file must not be empty" >&2
+    exit 78
+}
+export DATABASE_URL
+unset SYNVEDA_CARGO_DATABASE_URL_FILE
+exec "$@"

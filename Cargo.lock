@@ -3600,8 +3600,10 @@ dependencies = [
  "clap",
  "getrandom 0.3.4",
  "jsonc-parser",
+ "libc",
  "reqwest",
  "rmcp",
+ "rustix",
  "serde",
  "serde_json",
  "sha2",
@@ -3660,6 +3662,7 @@ dependencies = [
  "chrono",
  "http-body-util",
  "jsonwebtoken",
+ "libc",
  "metrics",
  "metrics-exporter-prometheus",
  "opentelemetry",
@@ -3672,6 +3675,7 @@ dependencies = [
  "sqlx",
  "synveda-audit",
  "synveda-crypto",
+ "synveda-gateway-test-support-enabler",
  "synveda-identity",
  "synveda-ingest",
  "synveda-okf",
@@ -3689,6 +3693,13 @@ dependencies = [
  "url",
  "utoipa",
  "uuid",
+]
+
+[[package]]
+name = "synveda-gateway-test-support-enabler"
+version = "0.0.0"
+dependencies = [
+ "synveda-gateway",
 ]
 
 [[package]]

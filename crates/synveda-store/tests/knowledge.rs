@@ -5,6 +5,9 @@
 //! These tests need Postgres and skip when `DATABASE_URL` is absent. The
 //! database-backed gate runs them through `make db-test`.
 
+#[path = "support/tenant_fixture.rs"]
+mod tenant_fixture;
+
 use std::collections::HashSet;
 use std::sync::OnceLock;
 use std::time::Duration;
@@ -17,7 +20,7 @@ use synveda_store::knowledge::{
 };
 use synveda_store::sessions::{NewSession, NewSessionEvent};
 use synveda_store::workspaces::NewWorkspace;
-use synveda_store::{rls, scopes, sessions, tenants, workspaces};
+use synveda_store::{rls, scopes, sessions, workspaces};
 use synveda_types::knowledge::{
     KnowledgeLifecycleState, KnowledgeOrigin, KnowledgeRelationType, KnowledgeRevisionContent,
     KnowledgeSourceType, KnowledgeType,
@@ -56,7 +59,7 @@ fn db() -> Option<&'static Db> {
                 .connect(&url)
                 .await
                 .expect("connect to DATABASE_URL");
-            synveda_store::migrate(&pool)
+            synveda_store::epoch::verify(&pool)
                 .await
                 .expect("apply migrations");
             pool
@@ -73,7 +76,7 @@ async fn tick() {
 async fn new_tenant(pool: &PgPool) -> (TenantId, ScopeId) {
     let tenant_id = TenantId::new();
     let slug = format!("knowledge-{}", tenant_id.as_uuid().simple());
-    tenants::create(
+    tenant_fixture::create(
         pool,
         tenant_id,
         &slug,
@@ -82,7 +85,7 @@ async fn new_tenant(pool: &PgPool) -> (TenantId, ScopeId) {
     )
     .await
     .expect("create tenant");
-    let mut tx = pool.begin().await.expect("begin root transaction");
+    let mut tx = tenant_fixture::begin(pool, tenant_id).await;
     let root = scopes::ensure_tenant_root(&mut tx, tenant_id)
         .await
         .expect("ensure tenant root");
@@ -158,7 +161,7 @@ fn revisions_are_immutable_and_current_projection_is_bitemporal() {
         let new_item = item(tenant_id, root_scope_id, KnowledgeType::Convention);
         let first_revision = revision("Request correlation", "Use `X-Request-Id`.");
 
-        let mut tx = db.pool.begin().await.expect("begin create");
+        let mut tx = tenant_fixture::begin(&db.pool, tenant_id).await;
         knowledge::create_source(&mut tx, &source)
             .await
             .expect("create source");
@@ -167,7 +170,7 @@ fn revisions_are_immutable_and_current_projection_is_bitemporal() {
 
         tick().await;
         let second_revision = revision("Trace propagation", "Use `traceparent`.");
-        let mut tx = db.pool.begin().await.expect("begin revision");
+        let mut tx = tenant_fixture::begin(&db.pool, tenant_id).await;
         let second = knowledge::append_revision(
             &mut tx,
             tenant_id,
@@ -181,7 +184,8 @@ fn revisions_are_immutable_and_current_projection_is_bitemporal() {
         .expect("item exists");
         tx.commit().await.expect("commit second revision");
 
-        let current = knowledge::current(&db.pool, tenant_id, new_item.id)
+        let mut tx = tenant_fixture::begin(&db.pool, tenant_id).await;
+        let current = knowledge::current(&mut *tx, tenant_id, new_item.id)
             .await
             .expect("read current")
             .expect("current item");
@@ -191,7 +195,7 @@ fn revisions_are_immutable_and_current_projection_is_bitemporal() {
         assert_eq!(current.revision.content.body_markdown, "Use `traceparent`.");
 
         let history = knowledge::as_known_at(
-            &db.pool,
+            &mut *tx,
             tenant_id,
             new_item.id,
             first.item.transaction_from,
@@ -206,16 +210,18 @@ fn revisions_are_immutable_and_current_projection_is_bitemporal() {
         );
         assert!(history.transaction_to.is_some());
 
-        let revisions = knowledge::revisions(&db.pool, tenant_id, new_item.id)
+        let revisions = knowledge::revisions(&mut *tx, tenant_id, new_item.id)
             .await
             .expect("list revisions");
         assert_eq!(revisions.len(), 2);
         assert_eq!(revisions[0].id, first_revision.id);
         assert_eq!(revisions[1].id, second_revision.id);
         assert_ne!(revisions[0].content_hash, revisions[1].content_hash);
+        tx.commit().await.expect("commit Knowledge reads");
 
+        let mut tx = tenant_fixture::begin(&db.pool, tenant_id).await;
         let stale = knowledge::append_revision(
-            &mut db.pool.begin().await.expect("begin stale append"),
+            &mut tx,
             tenant_id,
             new_item.id,
             first_revision.id,
@@ -225,13 +231,15 @@ fn revisions_are_immutable_and_current_projection_is_bitemporal() {
         .await
         .expect_err("stale precondition is rejected");
         assert!(matches!(stale, Error::Conflict { .. }));
+        drop(tx);
 
+        let mut tx = tenant_fixture::begin(&db.pool, tenant_id).await;
         let mutation = sqlx::query!(
             "update knowledge_revisions set title = 'mutated' where tenant_id = $1 and id = $2",
             tenant_id.as_uuid(),
             first_revision.id.as_uuid(),
         )
-        .execute(&db.pool)
+        .execute(&mut *tx)
         .await;
         assert!(
             mutation.is_err(),
@@ -245,7 +253,7 @@ fn all_source_shapes_are_real_and_disclosed_by_their_own_scope() {
     let Some(db) = db() else { return };
     db.rt.block_on(async {
         let (tenant_id, root_scope_id) = new_tenant(&db.pool).await;
-        let mut tx = db.pool.begin().await.expect("begin fixture");
+        let mut tx = tenant_fixture::begin(&db.pool, tenant_id).await;
         let workspace = workspaces::create(
             &mut tx,
             &NewWorkspace {
@@ -358,8 +366,9 @@ fn all_source_shapes_are_real_and_disclosed_by_their_own_scope() {
             .expect("create item with all source families");
         tx.commit().await.expect("commit source fixture");
 
+        let mut tx = tenant_fixture::begin(&db.pool, tenant_id).await;
         let root_visible =
-            knowledge::visible_sources(&db.pool, tenant_id, new_revision.id, &[root_scope_id])
+            knowledge::visible_sources(&mut *tx, tenant_id, new_revision.id, &[root_scope_id])
                 .await
                 .expect("root-visible sources");
         assert_eq!(
@@ -370,14 +379,14 @@ fn all_source_shapes_are_real_and_disclosed_by_their_own_scope() {
             [KnowledgeSourceType::Manual, KnowledgeSourceType::Document]
         );
         let workspace_visible =
-            knowledge::visible_sources(&db.pool, tenant_id, new_revision.id, &[workspace.scope_id])
+            knowledge::visible_sources(&mut *tx, tenant_id, new_revision.id, &[workspace.scope_id])
                 .await
                 .expect("workspace-visible sources");
         assert_eq!(workspace_visible.len(), 5);
         assert_eq!(workspace_visible[0].session_event_id, Some(event.id));
         assert_eq!(
             knowledge::visible_sources(
-                &db.pool,
+                &mut *tx,
                 tenant_id,
                 new_revision.id,
                 &[root_scope_id, workspace.scope_id],
@@ -387,8 +396,9 @@ fn all_source_shapes_are_real_and_disclosed_by_their_own_scope() {
             .len(),
             KnowledgeSourceType::ALL.len()
         );
+        tx.commit().await.expect("commit visible-source reads");
 
-        let mut tx = db.pool.begin().await.expect("begin scope-confusion check");
+        let mut tx = tenant_fixture::begin(&db.pool, tenant_id).await;
         let confused = NewKnowledgeSource {
             id: KnowledgeSourceId::new(),
             tenant_id,
@@ -438,7 +448,7 @@ fn relation_vocabulary_is_append_only() {
         let target_item = item(tenant_id, root_scope_id, KnowledgeType::Convention);
         let source_revision = revision("New convention", "Use `traceparent`.");
         let target_revision = revision("Old convention", "Use `X-Request-Id`.");
-        let mut tx = db.pool.begin().await.expect("begin relation fixture");
+        let mut tx = tenant_fixture::begin(&db.pool, tenant_id).await;
         knowledge::create_source(&mut tx, &source)
             .await
             .expect("create relation source");
@@ -463,7 +473,8 @@ fn relation_vocabulary_is_append_only() {
         }
         tx.commit().await.expect("commit relations");
 
-        let relations = knowledge::relations(&db.pool, tenant_id, source_item.id)
+        let mut tx = tenant_fixture::begin(&db.pool, tenant_id).await;
+        let relations = knowledge::relations(&mut *tx, tenant_id, source_item.id)
             .await
             .expect("list relations");
         assert_eq!(relations.len(), KnowledgeRelationType::ALL.len());
@@ -473,13 +484,15 @@ fn relation_vocabulary_is_append_only() {
             .collect();
         let expected: HashSet<_> = KnowledgeRelationType::ALL.iter().copied().collect();
         assert_eq!(actual, expected);
+        tx.commit().await.expect("commit relation read");
 
+        let mut tx = tenant_fixture::begin(&db.pool, tenant_id).await;
         let mutation = sqlx::query!(
             "update knowledge_relations set relation_type = 'supports' where tenant_id = $1 and id = $2",
             tenant_id.as_uuid(),
             relation_ids[1].as_uuid(),
         )
-        .execute(&db.pool)
+        .execute(&mut *tx)
         .await;
         assert!(mutation.is_err(), "relation claims are append-only");
     });
@@ -495,7 +508,7 @@ fn forced_rls_hides_every_knowledge_relation_from_another_tenant() {
         let second_item = item(hidden_tenant, root_scope_id, KnowledgeType::Fact);
         let first_revision = revision("First", "First revision.");
         let second_revision = revision("Second", "Second item.");
-        let mut tx = db.pool.begin().await.expect("begin hidden fixture");
+        let mut tx = tenant_fixture::begin(&db.pool, hidden_tenant).await;
         knowledge::create_source(&mut tx, &source)
             .await
             .expect("create hidden source");
@@ -579,7 +592,7 @@ fn lifecycle_changes_preserve_content_and_head_history() {
         let source = manual_source(tenant_id, root_scope_id);
         let new_item = item(tenant_id, root_scope_id, KnowledgeType::Warning);
         let new_revision = revision("Temporary warning", "Do not deploy during maintenance.");
-        let mut tx = db.pool.begin().await.expect("begin lifecycle fixture");
+        let mut tx = tenant_fixture::begin(&db.pool, tenant_id).await;
         knowledge::create_source(&mut tx, &source)
             .await
             .expect("create lifecycle source");
@@ -587,7 +600,7 @@ fn lifecycle_changes_preserve_content_and_head_history() {
         tx.commit().await.expect("commit lifecycle fixture");
 
         tick().await;
-        let mut tx = db.pool.begin().await.expect("begin lifecycle update");
+        let mut tx = tenant_fixture::begin(&db.pool, tenant_id).await;
         let archived = knowledge::set_lifecycle(
             &mut tx,
             tenant_id,
@@ -605,14 +618,16 @@ fn lifecycle_changes_preserve_content_and_head_history() {
             KnowledgeLifecycleState::Archived
         );
         assert_eq!(archived.revision.id, new_revision.id);
+        let mut tx = tenant_fixture::begin(&db.pool, tenant_id).await;
         assert_eq!(
-            knowledge::revisions(&db.pool, tenant_id, new_item.id)
+            knowledge::revisions(&mut *tx, tenant_id, new_item.id)
                 .await
                 .expect("revisions after lifecycle update")
                 .len(),
             1,
             "a lifecycle transition does not invent a content revision"
         );
+        tx.commit().await.expect("commit lifecycle revision read");
     });
 }
 
@@ -626,7 +641,7 @@ fn sealed_export_projection_contains_complete_knowledge_history_and_provenance()
         let current = item(tenant_id, root_scope_id, KnowledgeType::Convention);
         let former_revision = revision("Request id", "Use `X-Request-Id`.");
         let current_revision = revision("Trace context", "Use `traceparent`.");
-        let mut tx = db.pool.begin().await.expect("begin export fixture");
+        let mut tx = tenant_fixture::begin(&db.pool, tenant_id).await;
         knowledge::create_source(&mut tx, &source)
             .await
             .expect("create export source");

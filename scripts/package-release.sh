@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Assembles the release profile bundle (OPS-8, ADR-0065 decision 3) — the
-# self-contained directory `synveda init` runs from on a machine with no
-# checkout. Run by .github/workflows/release.yml, and by the OPS-8 demo,
-# which installs from what this produces rather than from the tree.
+# Assembles the transitional release profile bundle (OPS-8, ADR-0065 decision
+# 3). CPR-45 retains this artifact for release/replacement evidence while its
+# lifecycle is withdrawn; it is not a turnkey reference profile. The release
+# workflow and OPS-8 packaging checks consume the artifact directly.
 #
 # Usage: scripts/package-release.sh <version> <output-dir>
 #
@@ -11,8 +11,7 @@
 #   docker-compose.yml    deploy/release's, with the version substituted in
 #   rauthy/config.toml    copied from deploy/compose — one Rauthy config
 #                         exists in this repository and this is it
-#   version               the tag, which `synveda init` compares against its
-#                         own before it starts anything (decision 5)
+#   version               the tag paired with the binaries (decision 5)
 #
 # It writes nothing outside <output-dir>.
 set -euo pipefail

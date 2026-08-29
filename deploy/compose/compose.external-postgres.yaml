@@ -1,0 +1,11 @@
+# Only database clients that must reach an operator-owned PostgreSQL endpoint
+# receive this egress seam. External OIDC alone must not widen migration or
+# preflight networking when PostgreSQL remains on the internal data network.
+services:
+  database-preflight:
+    networks:
+      application-egress: {}
+
+  migrate:
+    networks:
+      application-egress: {}

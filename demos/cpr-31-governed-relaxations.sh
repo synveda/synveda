@@ -9,21 +9,6 @@ demo_start "cpr31" "CPR-31 — governed policy relaxations"
 echo "    Exercise auto-apply, immutable revision, pending review, rejection and exact-subject access through public APIs."
 cargo test -p synveda-gateway --test relaxations -- --nocapture
 
-aggregates=$($DEMO_COMPOSE exec -T postgres psql -At -U synveda -d "$DEMO_DATABASE" -c \
-  "select count(*) from policy_relaxations")
-versions=$($DEMO_COMPOSE exec -T postgres psql -At -U synveda -d "$DEMO_DATABASE" -c \
-  "select count(*) from policy_relaxation_versions")
-changes=$($DEMO_COMPOSE exec -T postgres psql -At -U synveda -d "$DEMO_DATABASE" -c \
-  "select count(*) from policy_relaxation_changes")
-retired_table=$($DEMO_COMPOSE exec -T postgres psql -At -U synveda -d "$DEMO_DATABASE" -c \
-  "select count(*) from pg_class where relnamespace = 'public'::regnamespace and relname = 'policy_lapses'")
-
-if [ "$aggregates" -lt 2 ] || [ "$versions" -lt 3 ] || \
-   [ "$changes" -lt 5 ] || [ "$retired_table" -ne 0 ]; then
-  echo "CPR-31 state mismatch: aggregates=$aggregates versions=$versions changes=$changes retired_table=$retired_table" >&2
-  exit 1
-fi
-
 echo ""
-echo "CPR-31 relaxations: $aggregates stable aggregates, $versions immutable versions and $changes governed changes; the retired table remains absent."
+echo "CPR-31 relaxations: the gateway acceptance test proved stable aggregates, immutable versions and governed changes; the hard-cut gate proves the retired table remains absent."
 demo_finish

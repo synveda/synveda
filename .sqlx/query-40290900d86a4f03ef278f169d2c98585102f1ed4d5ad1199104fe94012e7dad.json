@@ -1,0 +1,115 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select namespace.nspname::text as \"schema_name!\",\n                  relation.relname::text as \"relation_name!\",\n                  relation.relkind::text as \"relation_kind!\",\n                  trigger.tgname::text as \"trigger_name!\",\n                  function_namespace.nspname::text as \"function_schema!\",\n                  trigger_function.proname::text as \"function_name!\",\n                  pg_catalog.pg_get_function_identity_arguments(trigger_function.oid)::text\n                    as \"function_identity_arguments!\",\n                  (relation_owner.rolname = $1) as \"relation_owned_by_migrator!\",\n                  (function_owner.rolname = $1) as \"function_owned_by_migrator!\",\n                  trigger.tgenabled::text as \"enabled_state!\",\n                  trigger.tgtype::text as \"trigger_type!\",\n                  (trigger.tgparentid = 0) as \"is_root_trigger!\",\n                  (trigger.tgconstraint = 0) as \"is_non_constraint_trigger!\",\n                  trigger.tgdeferrable as \"deferrable!\",\n                  trigger.tginitdeferred as \"initially_deferred!\",\n                  case\n                    when pg_catalog.octet_length(trigger.tgargs) > $2\n                      or pg_catalog.octet_length(\n                           coalesce(trigger.tgqual::text, '')\n                         ) > $2\n                      or trigger.tgnargs > $3\n                    then '<oversized>'\n                    when pg_catalog.octet_length(\n                           pg_catalog.pg_get_triggerdef(trigger.oid, false)\n                         ) <= $2\n                    then pg_catalog.pg_get_triggerdef(trigger.oid, false)\n                    else '<oversized>'\n                  end as \"definition!\"\n             from pg_catalog.pg_trigger as trigger\n             join pg_catalog.pg_class as relation on relation.oid = trigger.tgrelid\n             join pg_catalog.pg_namespace as namespace\n               on namespace.oid = relation.relnamespace\n             join pg_catalog.pg_roles as relation_owner\n               on relation_owner.oid = relation.relowner\n             join pg_catalog.pg_proc as trigger_function\n               on trigger_function.oid = trigger.tgfoid\n             join pg_catalog.pg_namespace as function_namespace\n               on function_namespace.oid = trigger_function.pronamespace\n             join pg_catalog.pg_roles as function_owner\n               on function_owner.oid = trigger_function.proowner\n            where namespace.nspname = 'public'\n              and not trigger.tgisinternal\n            order by namespace.nspname collate \"C\", relation.relname collate \"C\",\n                     trigger.tgname collate \"C\"\n            limit $4",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "schema_name!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "relation_name!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "relation_kind!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "trigger_name!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "function_schema!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "function_name!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "function_identity_arguments!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "relation_owned_by_migrator!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 8,
+        "name": "function_owned_by_migrator!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 9,
+        "name": "enabled_state!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "trigger_type!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "is_root_trigger!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 12,
+        "name": "is_non_constraint_trigger!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 13,
+        "name": "deferrable!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 14,
+        "name": "initially_deferred!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 15,
+        "name": "definition!",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Name",
+        "Int4",
+        "Int2",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      false,
+      false,
+      null
+    ]
+  },
+  "hash": "40290900d86a4f03ef278f169d2c98585102f1ed4d5ad1199104fe94012e7dad"
+}

@@ -48,14 +48,16 @@ pub struct SeededRun {
     pub session_id: SessionId,
 }
 
-/// Creates a workspace and opens a run in it, on the (RLS-exempt) test pool.
+/// Creates a workspace and opens a run in one ordinary tenant transaction.
 ///
 /// `slug` must be unique per tenant; suites derive it from whatever they
 /// already use to keep fixtures apart. `principal` is the token subject the
 /// run is attributed to — the same subject the suite's bearer carries, because
 /// extraction re-decides `KnowledgeWrite` for it at commit time.
 pub async fn seed_run(pool: &PgPool, tenant: TenantId, slug: &str, principal: &str) -> SeededRun {
-    let mut tx = pool.begin().await.expect("begin session fixture");
+    let mut tx = synveda_store::rls::begin_tenant_tx(pool, tenant)
+        .await
+        .expect("begin tenant-scoped session fixture");
     let workspace = workspaces::create(
         &mut tx,
         &workspaces::NewWorkspace {
@@ -107,7 +109,9 @@ pub async fn open_run(
     slug: &str,
     principal: &str,
 ) -> SessionId {
-    let mut tx = pool.begin().await.expect("begin run fixture");
+    let mut tx = synveda_store::rls::begin_tenant_tx(pool, tenant)
+        .await
+        .expect("begin tenant-scoped run fixture");
     let session = sessions::create(
         &mut tx,
         &sessions::NewSession {
@@ -146,7 +150,9 @@ pub async fn grant_at(
     scope: ScopeId,
     role: RoleKey,
 ) {
-    let mut tx = pool.begin().await.expect("begin grant");
+    let mut tx = synveda_store::rls::begin_tenant_tx(pool, tenant)
+        .await
+        .expect("begin tenant-scoped grant");
     access::create_grant(
         &mut *tx,
         &access::NewGrant {

@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select pg_catalog.current_setting('search_path') as \"search_path!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "search_path!",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "894c2d2c162ca26ad3628d24a687d1131ea03585ac09b9e10907c3b3a377ec08"
+}

@@ -104,11 +104,63 @@ export function baselineFindings(source) {
   if (/\bCREATE\s+(?:TABLE|VIEW)\s+(?:IF NOT EXISTS\s+)?(?:public\.)?records\b/iu.test(source)) {
     findings.push("0001_context_platform.sql: retired table: records");
   }
-  const extensions = [...source.matchAll(/CREATE EXTENSION IF NOT EXISTS\s+([a-z0-9_]+)/giu)]
-    .map((match) => match[1].toLowerCase())
-    .sort();
-  if (JSON.stringify(extensions) !== JSON.stringify(["btree_gin", "vector"])) {
-    findings.push(`baseline extensions are ${extensions.join(", ") || "none"}, expected btree_gin, vector`);
+  if (
+    /\b(?:CREATE|ALTER|DROP)\s+(?:ROLE|USER|EXTENSION)\b/iu.test(source)
+  ) {
+    findings.push("0001_context_platform.sql contains deployment-owned role or extension DDL");
+  }
+  return findings;
+}
+
+export function databaseBootstrapFindings(source) {
+  const findings = [];
+  const normalized = source.toLowerCase().replace(/\s+/gu, " ").trim();
+  const exactRoles = [
+    "synveda_app",
+    "synveda_migrator",
+    "synveda_gateway",
+    "synveda_worker",
+    "keycloak",
+  ];
+  const safeRoleSuffix =
+    "nologin inherit nosuperuser nocreatedb nocreaterole noreplication nobypassrls connection limit -1";
+  const createRoleCount = (normalized.match(/\bcreate role\b/gu) ?? []).length;
+  if (
+    createRoleCount !== exactRoles.length ||
+    exactRoles.some(
+      (role) =>
+        normalized.split(`create role ${role} ${safeRoleSuffix}`).length - 1 !== 1,
+    )
+  ) {
+    findings.push(
+      "deployment database bootstrap must create only the five exact initially-NOLOGIN, non-elevated product roles",
+    );
+  }
+  if (
+    /\b(?:create|alter|drop)\s+user\b/gu.test(normalized) ||
+    /\bdrop\s+role\b/gu.test(normalized) ||
+    /\balter\s+role\b[^;']{0,300}\b(?:superuser|createdb|createrole|replication|bypassrls)\b/gu.test(
+      normalized,
+    )
+  ) {
+    findings.push("deployment database bootstrap contains unsafe or destructive role DDL");
+  }
+  if (/\b(?:alter|drop)\s+extension\b/gu.test(normalized)) {
+    findings.push("deployment database bootstrap contains extension mutation outside creation");
+  }
+  const extensionLoop =
+    "select format( 'create extension %i with schema public version %l', " +
+    "required.name, required.version ) from (values ('btree_gin', '1.3'), " +
+    "('vector', '0.8.6')) as required(name, version) where not exists ( " +
+    "select 1 from pg_catalog.pg_extension extension where extension.extname = " +
+    "required.name ) \\gexec";
+  if (
+    !normalized.includes(extensionLoop) ||
+    (normalized.match(/create extension/gu) ?? []).length !== 1
+  ) {
+    findings.push(
+      "deployment database bootstrap must converge exactly version-pinned btree_gin and vector through the bounded identifier-safe extension loop",
+    );
   }
   return findings;
 }
@@ -141,6 +193,11 @@ export function main() {
   }
   const baseline = readFileSync(join(migrationDir, "0001_context_platform.sql"), "utf8");
   findings.push(...baselineFindings(baseline));
+  const databaseBootstrap = readFileSync(
+    join(ROOT, "deploy/compose/postgres/synveda-database-bootstrap"),
+    "utf8",
+  );
+  findings.push(...databaseBootstrapFindings(databaseBootstrap));
 
   const epoch = readFileSync(join(ROOT, "crates/synveda-store/src/epoch.rs"), "utf8");
   if (!/pub const CURRENT_EPOCH: i32 = 3;/u.test(epoch)) {
@@ -164,7 +221,7 @@ export function main() {
   if (findings.length > 0) fail(findings);
   console.log(
     `context hard cut holds: ${productionFiles().length} active files, one epoch-3 migration, ` +
-      "vector + btree_gin extension shape, current OpenAPI and SQLx metadata",
+      "deployment-owned vector + btree_gin bootstrap, current OpenAPI and SQLx metadata",
   );
 }
 

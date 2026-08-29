@@ -10,15 +10,15 @@
 #
 # `__SYNVEDA_VERSION__` is a placeholder. `scripts/package-release.sh`
 # replaces it with the release tag when it assembles the bundle, so the
-# packaged file is self-contained and depends on no environment variable —
-# which matters because `synveda init` writes `.env` beside it, and compose
-# reads that same file for substitution.
+# packaged file is self-contained and depends on no environment variable. This
+# transitional artifact may still read a preserved `.env`, but the CPR-45
+# cutover does not advertise or start this profile as a reference lifecycle.
 #
 # One contributor-only service is deliberately absent:
 #
 #   temporal, temporal-admin-tools — VedaFlow runs in Postgres (ADR-0003).
-#     `synveda init` has never started them and nothing in this profile
-#     consumes them; shipping a cluster nobody calls is 700 MB of pull and
+#     Nothing in this profile consumes them; shipping a cluster nobody calls
+#     is 700 MB of pull and
 #     a second thing to explain when it is unhealthy.
 name: synveda
 
@@ -64,11 +64,9 @@ services:
     # embedder is `tei`. A first start downloads ~2.3 GB into tei-cache.
     #
     # The image is per-architecture because upstream publishes two builds
-    # and versions only one of them; `synveda init` sets SYNVEDA_TEI_IMAGE
-    # from the host's architecture, the same table the Makefile uses for
-    # `make dev-up`. The default here is the amd64 release, which is what
-    # CI runs. See deploy/compose/docker-compose.yml for the measurement
-    # that says the two agree to float32 rounding.
+    # and versions only one of them. The retained artifact accepts an explicit
+    # SYNVEDA_TEI_IMAGE; its amd64 default is what CI renders. See
+    # deploy/compose/docker-compose.yml for the cross-architecture measurement.
     image: ${SYNVEDA_TEI_IMAGE:-ghcr.io/huggingface/text-embeddings-inference:cpu-1.8.1}
     command:
       ["--model-id", "BAAI/bge-m3", "--max-batch-tokens", "4096", "--auto-truncate"]
@@ -95,26 +93,22 @@ services:
       - "4318:4318" # OTLP HTTP
 
   gateway:
-    # The product, for the `--issuer` path only. A default install runs the
-    # gateway binary on the host instead — see the rauthy comment above —
-    # so this service stays behind a profile and `synveda init` brings it
-    # up by name when, and only when, it is serving a real directory.
+    # Retained external-issuer-era service. It stays behind a profile, but the
+    # CPR-45 cutover advertises no command that starts it as a supported
+    # deployment.
     profiles: ["deployed"]
     image: ghcr.io/synveda/gateway:__SYNVEDA_VERSION__
     depends_on:
       postgres:
         condition: service_healthy
-    # Written by `synveda init`: the issuer, the tenant it resolves to, and
-    # the embedder chosen at install time. Absent, the gateway starts with
-    # no issuer configured and refuses every request — the correct failure
-    # for an uninitialised deployment, not a reason to default one.
+    # A preserved legacy `.env` may contain issuer, tenant and embedder state.
+    # Absent, the gateway starts with no issuer and refuses every request.
     env_file:
       - path: .env
         required: false
     environment:
-      # `synveda init` provisions this separate least-privilege LOGIN after
-      # migrations. It observes the same forced-RLS path as Helm's generated
-      # application role; the database owner remains bootstrap-only.
+      # This legacy DSN names a least-privilege LOGIN on the forced-RLS path.
+      # Canonical Compose replaces it with a role-scoped mounted secret.
       DATABASE_URL: ${SYNVEDA_GATEWAY_DATABASE_URL:-postgres://synveda_gateway:synveda-dev@postgres:5432/synveda}
       # The transition still uses one env file; mask the worker credential
       # from this request process until role-specific Compose secrets replace it.

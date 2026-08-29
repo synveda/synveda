@@ -82,6 +82,13 @@ external seams. A shared reference PostgreSQL server may host separate
 Synveda, Keycloak and experimental queue databases/roles, but their access and
 migration ownership never merge.
 
+Application migration runs under an ordinary `synveda_migrator`-equivalent
+login which owns only the selected Synveda database and its `public` schema.
+Deployment bootstrap separately owns role/database creation and extension
+installation. Gateway and worker are distinct non-owner `synveda_app` members
+with direct CONNECT only to Synveda; the same authority split applies to
+Compose and Helm and is validated before either runtime becomes ready.
+
 ## Options considered
 
 1. **Keep contributor and installed Compose separate** — preserves current

@@ -1,0 +1,17 @@
+# CPR-45: bundled Keycloak reaches an operator-owned PostgreSQL endpoint only
+# in the explicit external-Postgres provider row. The bundled row keeps the
+# cluster-owner bootstrap secret on the internal keycloak-data network.
+services:
+  database-preflight:
+    environment:
+      SYNVEDA_DATABASE_EXPECTED_HOST: ${SYNVEDA_DATABASE_EXPECTED_HOST:?set SYNVEDA_DATABASE_EXPECTED_HOST}
+      SYNVEDA_DATABASE_EXPECTED_PORT: ${SYNVEDA_DATABASE_EXPECTED_PORT:?set SYNVEDA_DATABASE_EXPECTED_PORT}
+      SYNVEDA_DATABASE_EXPECTED_NAME: ${SYNVEDA_DATABASE_EXPECTED_NAME:?set SYNVEDA_DATABASE_EXPECTED_NAME}
+
+  keycloak-database-bootstrap:
+    networks:
+      identity-egress: {}
+
+  keycloak:
+    networks:
+      identity-egress: {}

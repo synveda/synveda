@@ -49,7 +49,7 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- printf "%s-pg" (include "synveda.fullname" .) | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
-{{- define "synveda.appSecret" -}}
+{{- define "synveda.migratorSecret" -}}
 {{- printf "%s-app" (include "synveda.clusterName" .) -}}
 {{- end -}}
 
@@ -57,38 +57,13 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- printf "%s-superuser" (include "synveda.clusterName" .) -}}
 {{- end -}}
 
-{{/*
-The application database and the role that reaches it. CNPG owns both
-names; they are here so the install job's GRANT and the gateway's DSN
-cannot drift apart.
-*/}}
+{{/* Fixed database principals in the portable deployment contract. */}}
 {{- define "synveda.dbName" -}}synveda{{- end -}}
-{{- define "synveda.appRole" -}}synveda_gateway{{- end -}}
+{{- define "synveda.migratorRole" -}}synveda_migrator{{- end -}}
+{{- define "synveda.gatewayRole" -}}synveda_gateway{{- end -}}
 {{- define "synveda.workerRole" -}}synveda_worker{{- end -}}
-
-{{/*
-The admin identity, for the install job and nothing else. Assembled from
-the parts rather than CNPG's own `uri` key, because that one names the
-cluster's default database and the schema lives in ours.
-
-Kubernetes expands $(VAR) against earlier entries in the same list, so the
-password never appears in a manifest. CNPG generates alphanumeric
-passwords, so it needs no URI escaping — if that ever changes, this breaks
-loudly at connect time rather than quietly at parse time.
-*/}}
-{{- define "synveda.adminDsnEnv" -}}
-- name: SYNVEDA_PG_ADMIN_USER
-  valueFrom:
-    secretKeyRef:
-      name: {{ include "synveda.superuserSecret" . }}
-      key: username
-- name: SYNVEDA_PG_ADMIN_PASSWORD
-  valueFrom:
-    secretKeyRef:
-      name: {{ include "synveda.superuserSecret" . }}
-      key: password
-- name: DATABASE_URL
-  value: postgres://$(SYNVEDA_PG_ADMIN_USER):$(SYNVEDA_PG_ADMIN_PASSWORD)@{{ include "synveda.clusterName" . }}-rw:5432/{{ include "synveda.dbName" . }}
+{{- define "synveda.databaseRolesJson" -}}
+{"migrator":"{{ include "synveda.migratorRole" . }}","gateway":"{{ include "synveda.gatewayRole" . }}","worker":"{{ include "synveda.workerRole" . }}","administrators":["postgres"],"administrative_memberships":[],"forbidden_databases":["postgres","template1"],"isolated_peer_roles":[]}
 {{- end -}}
 
 {{/*
@@ -146,9 +121,20 @@ silent if the chart rendered it anyway.
 {{- fail "kms.keyRefSecretKey must name the Secret key containing the stable KMS key reference" -}}
 {{- end -}}
 
-{{- /* The worker login is a fixed, non-owner runtime principal. Its Secret
-       remains operator-owned because Helm must not generate a rotating
-       password or render a database credential. */ -}}
+{{- /* Runtime credentials are operator-owned. The chart converges the fixed
+       roles but never generates, copies or renders their passwords. */ -}}
+{{- if not .Values.gateway.databaseExistingSecret -}}
+{{- fail "gateway.databaseExistingSecret is required: name an operator-owned Secret holding DATABASE_URL and password for the fixed synveda_gateway login.\n  Database bootstrap consumes the password; the gateway mounts only the DSN file." -}}
+{{- end -}}
+{{- if not .Values.gateway.databaseUrlSecretKey -}}
+{{- fail "gateway.databaseUrlSecretKey must name the Secret key containing the gateway PostgreSQL URL" -}}
+{{- end -}}
+{{- if not .Values.gateway.databasePasswordSecretKey -}}
+{{- fail "gateway.databasePasswordSecretKey must name the Secret key containing the gateway login password" -}}
+{{- end -}}
+{{- if eq .Values.gateway.databaseUrlSecretKey .Values.gateway.databasePasswordSecretKey -}}
+{{- fail "gateway database URL and password Secret keys must be distinct" -}}
+{{- end -}}
 {{- if not .Values.worker.databaseExistingSecret -}}
 {{- fail "worker.databaseExistingSecret is required: name an operator-owned Secret holding DATABASE_URL and password for the fixed synveda_worker login.\n  The install job creates/converges that non-owner login; the worker mounts only the DSN file." -}}
 {{- end -}}
@@ -158,8 +144,24 @@ silent if the chart rendered it anyway.
 {{- if not .Values.worker.databasePasswordSecretKey -}}
 {{- fail "worker.databasePasswordSecretKey must name the Secret key containing the worker login password" -}}
 {{- end -}}
-{{- if eq .Values.worker.databaseExistingSecret (include "synveda.appSecret" .) -}}
-{{- fail "worker.databaseExistingSecret must not be the CloudNativePG app Secret: that credential owns the database and the worker refuses owner roles" -}}
+{{- if eq .Values.worker.databaseUrlSecretKey .Values.worker.databasePasswordSecretKey -}}
+{{- fail "worker database URL and password Secret keys must be distinct" -}}
+{{- end -}}
+{{- if eq .Values.gateway.databaseExistingSecret .Values.worker.databaseExistingSecret -}}
+{{- fail "gateway and worker database Secrets must be distinct" -}}
+{{- end -}}
+{{- range $component := list "gateway" "worker" -}}
+{{- $secret := index (index $.Values $component) "databaseExistingSecret" -}}
+{{- if eq $secret (include "synveda.migratorSecret" $) -}}
+{{- fail (printf "%s.databaseExistingSecret must not be the CloudNativePG migrator Secret: runtime processes refuse database-owner roles" $component) -}}
+{{- end -}}
+{{- if eq $secret (include "synveda.superuserSecret" $) -}}
+{{- fail (printf "%s.databaseExistingSecret must not be the CloudNativePG superuser Secret" $component) -}}
+{{- end -}}
+{{- end -}}
+
+{{- if hasKey .Values.install "enabled" -}}
+{{- fail "install.enabled was removed: role convergence, three-way database preflight and migration are mandatory chart resources" -}}
 {{- end -}}
 
 {{- /* Decision 10. The embedder is a property of the corpus. */ -}}
@@ -206,8 +208,17 @@ silent if the chart rendered it anyway.
 {{- if ge $runtimeConnections (int .Values.postgres.maxConnections) -}}
 {{- fail (printf "gateway.dbMaxConnections + worker.dbMaxConnections (%d) must be below postgres.maxConnections (%d): the cluster needs headroom for migration, operator and probe connections" $runtimeConnections (int .Values.postgres.maxConnections)) -}}
 {{- end -}}
-{{- if or (lt (int .Values.worker.shutdownSeconds) 1) (gt (int .Values.worker.shutdownSeconds) 300) -}}
-{{- fail "worker.shutdownSeconds must be between 1 and 300, matching the worker's bounded cancellation/join contract" -}}
+{{- if or (lt (int .Values.worker.shutdownSeconds) 3) (gt (int .Values.worker.shutdownSeconds) 300) -}}
+{{- fail "worker.shutdownSeconds must be between 3 and 300, preserving cooperative drain and both forced-join windows" -}}
+{{- end -}}
+{{- if or (lt (int .Values.install.activeDeadlineSeconds) 300) (gt (int .Values.install.activeDeadlineSeconds) 3600) -}}
+{{- fail "install.activeDeadlineSeconds must be between 300 and 3600" -}}
+{{- end -}}
+{{- if or (lt (int .Values.install.backoffLimit) 0) (gt (int .Values.install.backoffLimit) 6) -}}
+{{- fail "install.backoffLimit must be between 0 and 6" -}}
+{{- end -}}
+{{- if or (lt (int .Values.install.ttlSecondsAfterFinished) 300) (gt (int .Values.install.ttlSecondsAfterFinished) 604800) -}}
+{{- fail "install.ttlSecondsAfterFinished must be between 300 and 604800" -}}
 {{- end -}}
 
 {{- /*

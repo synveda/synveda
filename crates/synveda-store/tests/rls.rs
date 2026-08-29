@@ -2,10 +2,9 @@
 //! direct SQL with the wrong tenant GUC returns zero rows on every
 //! tenant-scoped table (ADR-0009).
 //!
-//! These tests need a live Postgres and a connection role allowed to
-//! `SET ROLE synveda_app` (the dev compose superuser is; any role with
-//! membership works). They read `DATABASE_URL` and skip with a message when
-//! it is unset (CI has no database); run them locally with `make db-test`.
+//! These tests need a live Postgres and an ordinary runtime connection that
+//! inherits `synveda_app`. They read `DATABASE_URL` and skip with a message
+//! when it is unset (CI has no database); run them locally with `make db-test`.
 //! Isolation is by freshly minted UUIDv7 tenants, so a shared dev database
 //! is fine.
 //!
@@ -14,13 +13,16 @@
 //! compose superuser) with the GUC set transaction-locally via
 //! `rls::begin_tenant_tx`, exactly the shape data-path code must use.
 
+#[path = "support/tenant_fixture.rs"]
+mod tenant_fixture;
+
 use std::sync::OnceLock;
 
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{PgPool, Postgres, Transaction};
 use synveda_store::{
     access, configuration, context, idempotency, identities, knowledge, policy_packs, projects,
-    quarantine, relaxations, repositories, rls, scopes, sessions, tenants, workspaces,
+    quarantine, relaxations, repositories, rls, scopes, sessions, workspaces,
 };
 // The generic scope vocabulary, reached through its module because the old
 // hierarchy still owns the root name until Prompt 6 (CPR-3, ADR-0070).
@@ -73,7 +75,7 @@ fn db() -> Option<&'static Db> {
                 .connect(&url)
                 .await
                 .expect("connect to DATABASE_URL");
-            synveda_store::migrate(&pool)
+            synveda_store::epoch::verify(&pool)
                 .await
                 .expect("apply migrations");
             pool
@@ -84,8 +86,8 @@ fn db() -> Option<&'static Db> {
 }
 
 /// Begins a transaction with the GUC set for `tenant` (unset when `None`),
-/// then demotes it to `synveda_app` for the rest of the transaction. `SET
-/// LOCAL ROLE` reverts with the transaction, like the GUC itself.
+/// then selects the inherited `synveda_app` role for the rest of the
+/// transaction. `SET LOCAL ROLE` reverts with the transaction, like the GUC.
 async fn app_tx(pool: &PgPool, tenant: Option<TenantId>) -> Transaction<'static, Postgres> {
     let mut tx = match tenant {
         Some(tenant) => rls::begin_tenant_tx(pool, tenant)
@@ -386,11 +388,11 @@ fn new_scope(
 }
 
 /// Admits a tenant with a root scope and one workspace: 2 scopes, 3 closure
-/// rows (two self-rows + one edge). Runs on the (RLS-exempt) test connection.
+/// rows (two self-rows + one edge). Runs as an ordinary tenant transaction.
 async fn seed_scopes(pool: &PgPool) -> (TenantId, ScopeId) {
     let tenant = TenantId::new();
     let slug = format!("rlss-{}", tenant.as_uuid().simple());
-    tenants::create(
+    tenant_fixture::create(
         pool,
         tenant,
         &slug,
@@ -399,7 +401,7 @@ async fn seed_scopes(pool: &PgPool) -> (TenantId, ScopeId) {
     )
     .await
     .expect("create tenant");
-    let mut tx = pool.begin().await.expect("begin transaction");
+    let mut tx = tenant_fixture::begin(pool, tenant).await;
     let root = scopes::create(
         &mut tx,
         &new_scope(tenant, None, scope::ScopeKind::Tenant, "acme"),
@@ -584,12 +586,12 @@ fn a_principal_scope_is_not_findable_across_tenants() {
     });
 }
 
-/// Whose a private scope is cannot be edited — by the **owner** role either,
-/// which is what migrations, break-glass psql and a restore run as and what
-/// forced RLS does not bind. Re-pointing one would hand somebody's material to
-/// a new subject without a single grant row changing.
+/// Whose a private scope is cannot be edited by an explicitly configured
+/// RLS-bypassing administrator either. Re-pointing one would hand somebody's
+/// material to a new subject without a single grant row changing.
 #[test]
-fn a_principal_scope_cannot_be_re_pointed_even_by_the_owner() {
+#[ignore = "serial administrator tamper acceptance"]
+fn an_administrator_cannot_re_point_a_principal_scope() {
     let Some(db) = db() else { return };
     db.rt.block_on(async {
         let (tenant, _) = seed_scopes(&db.pool).await;
@@ -601,16 +603,18 @@ fn a_principal_scope_cannot_be_re_pointed_even_by_the_owner() {
 
         // The owner connection: no RLS, no application grants, nothing but the
         // trigger between this and somebody else's notes.
+        let administrator = tenant_fixture::administrator_pool(&db.pool).await;
         let result = sqlx::query!(
             "update scopes set principal_id = 'mallory' where id = $1",
             mine.id.as_uuid()
         )
-        .execute(&db.pool)
+        .execute(&administrator)
         .await;
         assert!(
             result.is_err(),
             "the owner must not be able to re-point a private scope"
         );
+        administrator.close().await;
     });
 }
 
@@ -654,11 +658,11 @@ async fn visible_subtype_rows(
 }
 
 /// Admits a tenant with one workspace, one project, one repository and one
-/// idempotency record. Runs on the (RLS-exempt) test connection.
+/// idempotency record. Runs as an ordinary tenant transaction.
 async fn seed_subtypes(pool: &PgPool) -> (TenantId, WorkspaceId, ProjectId) {
     let tenant = TenantId::new();
     let slug = format!("rlsw-{}", tenant.as_uuid().simple());
-    tenants::create(
+    tenant_fixture::create(
         pool,
         tenant,
         &slug,
@@ -667,7 +671,7 @@ async fn seed_subtypes(pool: &PgPool) -> (TenantId, WorkspaceId, ProjectId) {
     )
     .await
     .expect("create tenant");
-    let mut tx = pool.begin().await.expect("begin transaction");
+    let mut tx = tenant_fixture::begin(pool, tenant).await;
     let workspace = workspaces::create(
         &mut tx,
         &workspaces::NewWorkspace {
@@ -947,11 +951,11 @@ struct AccessFixture {
 
 /// Admits a tenant with a workspace, a group holding one member, a grant to
 /// that group at the workspace's scope, and one outstanding invitation. Runs on
-/// the (RLS-exempt) test connection.
+/// an ordinary tenant transaction.
 async fn seed_access(pool: &PgPool) -> AccessFixture {
     let tenant = TenantId::new();
     let slug = format!("rlsa-{}", tenant.as_uuid().simple());
-    tenants::create(
+    tenant_fixture::create(
         pool,
         tenant,
         &slug,
@@ -960,7 +964,7 @@ async fn seed_access(pool: &PgPool) -> AccessFixture {
     )
     .await
     .expect("create tenant");
-    let mut tx = pool.begin().await.expect("begin transaction");
+    let mut tx = tenant_fixture::begin(pool, tenant).await;
     let workspace = workspaces::create(
         &mut tx,
         &workspaces::NewWorkspace {
@@ -1278,12 +1282,12 @@ fn the_app_role_cannot_delete_a_group_or_edit_a_grant() {
 
 // ── Policy packs (AUTHZ-1, ADR-0012) ────────────────────────────────────────
 
-/// Admits a tenant with one stored pack. Runs on the (RLS-exempt) test
-/// connection.
+/// Admits a tenant with one stored pack through an ordinary tenant
+/// transaction.
 async fn seed_policy_pack(pool: &PgPool) -> TenantId {
     let tenant = TenantId::new();
     let slug = format!("rlsp-{}", tenant.as_uuid().simple());
-    tenants::create(
+    tenant_fixture::create(
         pool,
         tenant,
         &slug,
@@ -1292,8 +1296,9 @@ async fn seed_policy_pack(pool: &PgPool) -> TenantId {
     )
     .await
     .expect("create tenant");
+    let mut tx = tenant_fixture::begin(pool, tenant).await;
     policy_packs::apply(
-        pool,
+        &mut *tx,
         tenant,
         "rls-fixture",
         "permit (principal, action, resource);",
@@ -1301,6 +1306,7 @@ async fn seed_policy_pack(pool: &PgPool) -> TenantId {
     )
     .await
     .expect("apply pack");
+    tx.commit().await.expect("commit policy pack");
     tenant
 }
 
@@ -1550,7 +1556,7 @@ async fn seed_configuration(
     // this RLS fixture binds typed Configuration changes to that commit. The
     // semantic gateway lifecycle is covered by CPR-30's API acceptance test.
     let (tenant, _) = seed_vedaflow(pool).await;
-    let mut tx = pool.begin().await.expect("begin Configuration seed");
+    let mut tx = tenant_fixture::begin(pool, tenant).await;
     let root = scopes::ensure_tenant_root(&mut tx, tenant)
         .await
         .expect("create Configuration root");
@@ -1687,11 +1693,11 @@ fn same_tenant_configuration_projection_works_under_rls() {
 // ── Identities & group mappings (AUTH-2, ADR-0013) ──────────────────────────
 
 /// Admits a tenant with an org root, a provisioned identity under it, and
-/// one group-mapping override. Runs on the (RLS-exempt) test connection.
+/// one group-mapping override. Runs as an ordinary tenant transaction.
 async fn seed_identity(pool: &PgPool) -> TenantId {
     let tenant = TenantId::new();
     let slug = format!("rlsi-{}", tenant.as_uuid().simple());
-    tenants::create(
+    tenant_fixture::create(
         pool,
         tenant,
         &slug,
@@ -1700,7 +1706,7 @@ async fn seed_identity(pool: &PgPool) -> TenantId {
     )
     .await
     .expect("create tenant");
-    let mut tx = pool.begin().await.expect("begin transaction");
+    let mut tx = tenant_fixture::begin(pool, tenant).await;
     let root = scopes::ensure_tenant_root(&mut tx, tenant)
         .await
         .expect("ensure tenant root");
@@ -1873,7 +1879,7 @@ fn same_tenant_identity_lifecycle_works_under_rls() {
 /// A tenant with a run holding one quarantined event, and that event's id.
 async fn seed_quarantined(pool: &PgPool) -> (TenantId, SessionId, synveda_types::SessionEventId) {
     let fixture = seed_session(pool).await;
-    let mut tx = pool.begin().await.expect("begin");
+    let mut tx = tenant_fixture::begin(pool, fixture.tenant).await;
     let admitted = sessions::append_events(
         &mut tx,
         fixture.tenant,
@@ -1975,13 +1981,11 @@ fn cross_tenant_session_append_is_rejected() {
 /// UPDATE on `session_events` was never granted, so immutability is a
 /// privilege rather than a discipline (migration 0044).
 ///
-/// DELETE *is* granted since migration 0046, and deliberately: disposal is the
-/// obligation 0044 parked on the retention plane. What bounds it is the
-/// transaction-local `synveda.retention_purge` flag, not the absence of a
-/// grant — so a handler that has not declared itself a disposal still cannot
-/// retire a run's transcript.
+/// DELETE remains granted for a future controlled retention boundary, but an
+/// ordinary application role cannot manufacture that authority merely by
+/// setting the transaction-local maintenance marker.
 #[test]
-fn session_events_are_immutable_and_only_retention_removes_them() {
+fn session_events_are_immutable_for_the_application_role() {
     let Some(db) = db() else { return };
     db.rt.block_on(async {
         let fixture = seed_session(&db.pool).await;
@@ -2008,20 +2012,63 @@ fn session_events_are_immutable_and_only_retention_removes_them() {
         );
         drop(tx);
 
-        // The sanctioned path removes whole rows, and only this tenant's.
+        // The marker is not authority: an ordinary role still cannot dispose
+        // transcript evidence by setting a custom GUC itself.
         let mut tx = app_tx(&db.pool, Some(fixture.tenant)).await;
         sqlx::raw_sql("set local synveda.retention_purge = 'on'")
             .execute(&mut *tx)
             .await
             .expect("declare the purge");
-        let disposed = sqlx::raw_sql("delete from session_events")
+        let disguised = sqlx::raw_sql("delete from session_events")
+            .execute(&mut *tx)
+            .await;
+        assert!(
+            disguised.is_err(),
+            "the application role must not forge retention authority"
+        );
+    });
+}
+
+/// The database-owner retention seam is exercised only with the separately
+/// verified administrator credential and an explicit tenant predicate. The
+/// custom GUC permits the trigger transition; it does not provide isolation
+/// to an owner that bypasses RLS.
+#[test]
+#[ignore = "serial administrator tamper acceptance"]
+fn database_owner_can_perform_an_explicitly_scoped_retention_disposal() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let victim = seed_session(&db.pool).await;
+        let survivor = seed_session(&db.pool).await;
+        let migrator = tenant_fixture::migrator_pool(&db.pool).await;
+        let mut tx = rls::begin_tenant_tx(&migrator, victim.tenant)
+            .await
+            .expect("begin owner retention probe");
+        sqlx::raw_sql("set local synveda.retention_purge = 'on'")
             .execute(&mut *tx)
             .await
-            .expect("disposal is granted since CPR-12")
-            .rows_affected();
-        assert!(disposed > 0, "and it takes whole rows, never part of one");
-        let left = visible_event_rows(&mut tx, fixture.tenant).await;
-        assert_eq!(left, 0, "the tenant's own events, and only its own");
+            .expect("declare owner retention disposal");
+        let disposed = sqlx::query!(
+            "delete from session_events where tenant_id = $1",
+            victim.tenant.as_uuid()
+        )
+        .execute(&mut *tx)
+        .await
+        .expect("perform explicitly scoped owner disposal")
+        .rows_affected();
+        assert!(disposed > 0, "the scoped disposal must remove whole rows");
+        tx.commit().await.expect("commit owner retention probe");
+        migrator.close().await;
+
+        let mut tx = tenant_fixture::begin(&db.pool, victim.tenant).await;
+        assert_eq!(visible_event_rows(&mut tx, victim.tenant).await, 0);
+        tx.commit().await.expect("commit disposed tenant read");
+        let mut tx = tenant_fixture::begin(&db.pool, survivor.tenant).await;
+        assert!(
+            visible_event_rows(&mut tx, survivor.tenant).await > 0,
+            "the explicitly scoped disposal must preserve another tenant"
+        );
+        tx.commit().await.expect("commit surviving tenant read");
     });
 }
 
@@ -2377,14 +2424,15 @@ fn releasing_a_quarantined_event_makes_it_capture_eligible() {
 
 // ── Audit chain tables (AUD-1, ADR-0019) ────────────────────────────────────
 
-/// Seeds one audit chain: the head row and two events, structurally-valid
-/// rows via raw SQL on the (RLS-exempt) test connection — the store crate
-/// sits beside `synveda-audit`, so this suite fabricates chain rows rather
-/// than importing append. Chain *semantics* are the audit crate's tamper
-/// suite; this suite covers isolation and grants only.
+/// Seeds one audit chain: the head row and two structurally valid events via
+/// raw SQL in an ordinary tenant transaction. The store crate sits beside
+/// `synveda-audit`, so this suite fabricates chain rows rather than importing
+/// append. Chain semantics are the audit crate's tamper suite; this suite
+/// covers isolation and grants only.
 async fn seed_audit_chain(pool: &PgPool) -> TenantId {
     let tenant = TenantId::new();
     let hash = [0xabu8; 32];
+    let mut tx = tenant_fixture::begin(pool, tenant).await;
     for seq in 1i64..=2 {
         sqlx::query!(
             r#"
@@ -2398,7 +2446,7 @@ async fn seed_audit_chain(pool: &PgPool) -> TenantId {
             seq,
             &hash[..],
         )
-        .execute(pool)
+        .execute(&mut *tx)
         .await
         .expect("insert audit event");
     }
@@ -2407,9 +2455,10 @@ async fn seed_audit_chain(pool: &PgPool) -> TenantId {
         tenant.as_uuid(),
         &hash[..],
     )
-    .execute(pool)
+    .execute(&mut *tx)
     .await
     .expect("insert chain head");
+    tx.commit().await.expect("commit audit chain");
     tenant
 }
 
@@ -2517,7 +2566,7 @@ fn audit_log_is_append_only_for_the_app_role() {
 async fn seed_vedaflow(pool: &PgPool) -> (TenantId, ScopeId) {
     let tenant = TenantId::new();
     let slug = format!("rls-vf-{}", tenant.as_uuid().simple());
-    tenants::create(
+    tenant_fixture::create(
         pool,
         tenant,
         &slug,
@@ -2528,6 +2577,7 @@ async fn seed_vedaflow(pool: &PgPool) -> (TenantId, ScopeId) {
     .expect("create tenant");
     let scope = ScopeId::new();
     let author = IdentityId::new();
+    let mut tx = tenant_fixture::begin(pool, tenant).await;
 
     sqlx::query!(
         "insert into vedaflow_objects (tenant_id, hash, kind, content, size_bytes)
@@ -2536,7 +2586,7 @@ async fn seed_vedaflow(pool: &PgPool) -> (TenantId, ScopeId) {
         &[1u8; 32][..],
         &b"abc"[..],
     )
-    .execute(pool)
+    .execute(&mut *tx)
     .await
     .expect("seed object");
     sqlx::query!(
@@ -2544,7 +2594,7 @@ async fn seed_vedaflow(pool: &PgPool) -> (TenantId, ScopeId) {
         tenant.as_uuid(),
         &[2u8; 32][..],
     )
-    .execute(pool)
+    .execute(&mut *tx)
     .await
     .expect("seed tree");
     sqlx::query!(
@@ -2554,7 +2604,7 @@ async fn seed_vedaflow(pool: &PgPool) -> (TenantId, ScopeId) {
         &[2u8; 32][..],
         &[1u8; 32][..],
     )
-    .execute(pool)
+    .execute(&mut *tx)
     .await
     .expect("seed tree entry");
     for hash in [[3u8; 32], [4u8; 32]] {
@@ -2569,7 +2619,7 @@ async fn seed_vedaflow(pool: &PgPool) -> (TenantId, ScopeId) {
             author.as_uuid(),
             &[5u8; 32][..],
         )
-        .execute(pool)
+        .execute(&mut *tx)
         .await
         .expect("seed commit");
     }
@@ -2580,7 +2630,7 @@ async fn seed_vedaflow(pool: &PgPool) -> (TenantId, ScopeId) {
         &[4u8; 32][..],
         &[3u8; 32][..],
     )
-    .execute(pool)
+    .execute(&mut *tx)
     .await
     .expect("seed commit parent");
     sqlx::query!(
@@ -2591,9 +2641,10 @@ async fn seed_vedaflow(pool: &PgPool) -> (TenantId, ScopeId) {
         &[4u8; 32][..],
         author.as_uuid(),
     )
-    .execute(pool)
+    .execute(&mut *tx)
     .await
     .expect("seed ref");
+    tx.commit().await.expect("commit VedaFlow fixture");
     (tenant, scope)
 }
 
@@ -2822,15 +2873,10 @@ fn vedaflow_history_is_append_only_for_the_app_role() {
 /// FLOW-7's one deletion (migration 0021, ADR-0036 decision 8): a pin can
 /// be released, and a channel pointer still never disappears.
 ///
-/// Both halves of the narrowing are asserted, because they answer to
-/// different attackers. The **restrictive policy** is what the product
-/// runs under: the app role's delete of a channel ref is a legal statement
-/// that matches nothing, even with the right tenant GUC set and even
-/// without a `where` clause. The **trigger** is what someone bypassing RLS
-/// meets: the superuser pool — no GUC, no policies — gets an exception
-/// naming the rule instead of a quiet success. That is migration 0018's
-/// own split, extended to the first ref that is a decision rather than a
-/// pointer into history.
+/// The restrictive policy is what the product runs under: the app role's
+/// delete of a channel ref is a legal statement that matches nothing, even
+/// with the right tenant GUC set and without a `where` clause. The separate
+/// serial administrator test below proves the owner-bypass trigger.
 #[test]
 fn only_pins_can_be_deleted_and_only_in_their_own_tenant() {
     let Some(db) = db() else { return };
@@ -2841,6 +2887,7 @@ fn only_pins_can_be_deleted_and_only_in_their_own_tenant() {
 
         // A pin at each tenant, on the seeded channel's own commit.
         for (tenant, scope) in [(tenant, scope), (other_tenant, other_scope)] {
+            let mut tx = tenant_fixture::begin(&db.pool, tenant).await;
             sqlx::query!(
                 "insert into vedaflow_refs (tenant_id, scope_id, name, commit_hash, updated_by)
                  values ($1, $2, 'pin/prompt/published', $3, $4)",
@@ -2849,9 +2896,10 @@ fn only_pins_can_be_deleted_and_only_in_their_own_tenant() {
                 &[4u8; 32][..],
                 pinner.as_uuid(),
             )
-            .execute(&db.pool)
+            .execute(&mut *tx)
             .await
             .expect("seed pin");
+            tx.commit().await.expect("commit pin");
         }
 
         let mut tx = app_tx(&db.pool, Some(tenant)).await;
@@ -2894,32 +2942,43 @@ fn only_pins_can_be_deleted_and_only_in_their_own_tenant() {
         tx.commit().await.expect("commit");
 
         // The other tenant's pin is untouched, and its channel is too.
+        let mut tx = tenant_fixture::begin(&db.pool, other_tenant).await;
         let survivors = sqlx::query_scalar!(
             "select count(*) as \"count!\" from vedaflow_refs where tenant_id = $1",
             other_tenant.as_uuid(),
         )
-        .fetch_one(&db.pool)
+        .fetch_one(&mut *tx)
         .await
         .expect("count surviving refs");
         assert_eq!(
             survivors, 2,
             "the other tenant keeps its channel and its pin"
         );
+        tx.commit().await.expect("commit survivor read");
+    });
+}
 
-        // And the trigger, for whoever is not running under RLS: the
-        // superuser pool deleting a channel pointer must raise rather than
-        // silently succeed.
+/// The immutable channel trigger also binds a configured administrator that
+/// bypasses forced RLS. This runs only in the explicit serial phase.
+#[test]
+#[ignore = "serial administrator tamper acceptance"]
+fn channel_pointer_delete_guard_binds_an_rls_bypassing_administrator() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let (tenant, _) = seed_vedaflow(&db.pool).await;
+        let administrator = tenant_fixture::administrator_pool(&db.pool).await;
         let raised = sqlx::query!(
             "delete from vedaflow_refs where tenant_id = $1 and name = 'prompt/published'",
             tenant.as_uuid(),
         )
-        .execute(&db.pool)
+        .execute(&administrator)
         .await
         .expect_err("the delete guard must raise for a channel pointer");
         assert!(
             raised.to_string().contains("channel pointer"),
             "unexpected error: {raised}"
         );
+        administrator.close().await;
     });
 }
 
@@ -3023,6 +3082,7 @@ async fn seed_proposal(pool: &PgPool) -> (TenantId, ScopeId, uuid::Uuid) {
     let proposal = uuid::Uuid::now_v7();
     let approver = IdentityId::new();
     let artifact_references = fixture_knowledge_references(proposal, "apply", [4_u8; 32]);
+    let mut tx = tenant_fixture::begin(pool, tenant).await;
     sqlx::query!(
         "insert into vedaflow_proposals
              (tenant_id, id, target_scope_id, source_scope_id, asset_kind,
@@ -3037,7 +3097,7 @@ async fn seed_proposal(pool: &PgPool) -> (TenantId, ScopeId, uuid::Uuid) {
         approver.as_uuid(),
         artifact_references,
     )
-    .execute(pool)
+    .execute(&mut *tx)
     .await
     .expect("seed proposal");
     sqlx::query!(
@@ -3050,9 +3110,10 @@ async fn seed_proposal(pool: &PgPool) -> (TenantId, ScopeId, uuid::Uuid) {
         approver.as_uuid(),
         &[4u8; 32][..],
     )
-    .execute(pool)
+    .execute(&mut *tx)
     .await
     .expect("seed approval");
+    tx.commit().await.expect("commit proposal fixture");
     (tenant, scope, proposal)
 }
 
@@ -3338,7 +3399,7 @@ async fn seed_relaxation(
     ProposalId,
 ) {
     let (tenant, target, _, _) = seed_configuration(pool).await;
-    let mut tx = pool.begin().await.expect("begin Relaxation fixture");
+    let mut tx = tenant_fixture::begin(pool, tenant).await;
     let principal = scopes::create(
         &mut tx,
         &new_scope(
@@ -3472,7 +3533,7 @@ async fn visible_relaxation_rows(
 fn relaxation_rows_are_tenant_isolated_and_versions_are_immutable() {
     let Some(db) = db() else { return };
     db.rt.block_on(async {
-        let (victim, _, _, _, relaxation_id, version_id, _) =
+        let (victim, _, _, _, relaxation_id, _, _) =
             seed_relaxation(&db.pool, chrono::TimeDelta::hours(1)).await;
         let (adversary, _, _, _, _, _, _) =
             seed_relaxation(&db.pool, chrono::TimeDelta::hours(1)).await;
@@ -3497,28 +3558,44 @@ fn relaxation_rows_are_tenant_isolated_and_versions_are_immutable() {
         assert_eq!(visible_relaxation_rows(&mut tx, victim).await, (0, 0, 0));
         drop(tx);
 
+        let mut tx = app_tx(&db.pool, Some(victim)).await;
+        let deleted = sqlx::raw_sql("delete from policy_relaxation_versions")
+            .execute(&mut *tx)
+            .await;
+        assert!(deleted.is_err(), "the app role holds no version DELETE");
+    });
+}
+
+#[test]
+#[ignore = "serial administrator tamper acceptance"]
+fn relaxation_identity_and_versions_bind_an_rls_bypassing_administrator() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let (tenant, _, _, _, relaxation_id, version_id, _) =
+            seed_relaxation(&db.pool, chrono::TimeDelta::hours(1)).await;
+        let administrator = tenant_fixture::administrator_pool(&db.pool).await;
         let changed = sqlx::query!(
             "update policy_relaxation_versions set reason = 'rewritten after approval'
              where tenant_id = $1 and id = $2",
-            victim.as_uuid(),
+            tenant.as_uuid(),
             version_id.as_uuid(),
         )
-        .execute(&db.pool)
+        .execute(&administrator)
         .await;
         assert!(
             changed
                 .expect_err("a reviewed version must be immutable")
                 .to_string()
                 .contains("immutable"),
-            "the schema trigger must refuse privileged rewrites too"
+            "the schema trigger must refuse administrator rewrites too"
         );
         let moved = sqlx::query!(
             "update policy_relaxations set governing_scope_id = gen_random_uuid()
              where tenant_id = $1 and id = $2",
-            victim.as_uuid(),
+            tenant.as_uuid(),
             relaxation_id.as_uuid(),
         )
-        .execute(&db.pool)
+        .execute(&administrator)
         .await;
         assert!(
             moved
@@ -3526,12 +3603,7 @@ fn relaxation_rows_are_tenant_isolated_and_versions_are_immutable() {
                 .to_string()
                 .contains("identity is immutable")
         );
-
-        let mut tx = app_tx(&db.pool, Some(victim)).await;
-        let deleted = sqlx::raw_sql("delete from policy_relaxation_versions")
-            .execute(&mut *tx)
-            .await;
-        assert!(deleted.is_err(), "the app role holds no version DELETE");
+        administrator.close().await;
     });
 }
 
@@ -3575,8 +3647,8 @@ fn relaxation_expiry_is_authoritative_and_chained_once() {
 
 // ── PRMT-1: the prompt registry's draft table ────────────────────────────────
 
-/// A tenant with one prompt draft at one scope, seeded on the RLS-exempt
-/// test connection — the world the backstop must then hide.
+/// A tenant with one prompt draft at one scope, seeded through an ordinary
+/// tenant transaction — the world the backstop must then hide.
 ///
 /// The object it references is `seed_vedaflow`'s, because migration 0029's
 /// foreign key is the schema's way of saying a draft's bytes are always in
@@ -3585,6 +3657,7 @@ fn relaxation_expiry_is_authoritative_and_chained_once() {
 async fn seed_prompt(pool: &PgPool) -> (TenantId, ScopeId) {
     let (tenant, scope) = seed_vedaflow(pool).await;
     let author = IdentityId::new();
+    let mut tx = tenant_fixture::begin(pool, tenant).await;
     sqlx::query!(
         "insert into prompts
              (tenant_id, scope_id, name, description, template, variables,
@@ -3596,9 +3669,10 @@ async fn seed_prompt(pool: &PgPool) -> (TenantId, ScopeId) {
         &[1u8; 32][..],
         author.as_uuid(),
     )
-    .execute(pool)
+    .execute(&mut *tx)
     .await
     .expect("seed prompt draft");
+    tx.commit().await.expect("commit prompt fixture");
     (tenant, scope)
 }
 
@@ -3769,6 +3843,7 @@ async fn seed_context_pack(pool: &PgPool) -> (TenantId, ScopeId, ContextPackChun
     let (tenant, scope) = seed_vedaflow(pool).await;
     let author = IdentityId::new();
     let chunk = ContextPackChunkId::new();
+    let mut tx = tenant_fixture::begin(pool, tenant).await;
     sqlx::query!(
         "insert into context_packs
              (tenant_id, scope_id, name, description, created_by, updated_by)
@@ -3777,7 +3852,7 @@ async fn seed_context_pack(pool: &PgPool) -> (TenantId, ScopeId, ContextPackChun
         scope.as_uuid(),
         author.as_uuid(),
     )
-    .execute(pool)
+    .execute(&mut *tx)
     .await
     .expect("seed pack");
     sqlx::query!(
@@ -3791,7 +3866,7 @@ async fn seed_context_pack(pool: &PgPool) -> (TenantId, ScopeId, ContextPackChun
         &[1u8; 32][..],
         author.as_uuid(),
     )
-    .execute(pool)
+    .execute(&mut *tx)
     .await
     .expect("seed document");
     let content_hash = blake3::hash(b"Escalate refunds over \xC2\xA3500.");
@@ -3808,9 +3883,12 @@ async fn seed_context_pack(pool: &PgPool) -> (TenantId, ScopeId, ContextPackChun
         "Escalate refunds over £500.",
         content_hash.as_bytes(),
     )
-    .execute(pool)
+    .execute(&mut *tx)
     .await
     .expect("seed immutable authored chunk");
+    tx.commit()
+        .await
+        .expect("commit authored context pack fixture");
     (tenant, scope, chunk)
 }
 
@@ -3907,12 +3985,12 @@ fn authored_chunks_are_tenant_isolated_address_bound_and_immutable() {
 // ── CPR-23: immutable Skill versions and bindings ──────────────────────────
 
 /// Seed one stable Skill, one immutable version with two content-addressed
-/// files, and one principal-scope binding. The fixture uses privileged setup;
-/// every assertion below runs as the forced-RLS application role.
+/// files, and one principal-scope binding. Setup and assertions both use an
+/// ordinary forced-RLS tenant transaction.
 async fn seed_skill(pool: &PgPool) -> (TenantId, ScopeId) {
     let (tenant, _) = seed_vedaflow(pool).await;
     let author = IdentityId::new();
-    let mut tx = pool.begin().await.expect("begin Skill fixture");
+    let mut tx = tenant_fixture::begin(pool, tenant).await;
     let root = scopes::ensure_tenant_root(&mut tx, tenant)
         .await
         .expect("ensure tenant root");
@@ -4822,11 +4900,11 @@ struct SessionFixture {
 }
 
 /// Admits a tenant with a workspace, one session in it, two events and one
-/// context run. Runs on the (RLS-exempt) test connection.
+/// context run. Runs as an ordinary tenant transaction.
 async fn seed_session(pool: &PgPool) -> SessionFixture {
     let tenant = TenantId::new();
     let slug = format!("rlss-{}", tenant.as_uuid().simple());
-    tenants::create(
+    tenant_fixture::create(
         pool,
         tenant,
         &slug,
@@ -4835,7 +4913,7 @@ async fn seed_session(pool: &PgPool) -> SessionFixture {
     )
     .await
     .expect("create tenant");
-    let mut tx = pool.begin().await.expect("begin transaction");
+    let mut tx = tenant_fixture::begin(pool, tenant).await;
     let workspace = workspaces::create(
         &mut tx,
         &workspaces::NewWorkspace {
@@ -5355,14 +5433,17 @@ fn the_app_role_cannot_rewrite_or_delete_a_transcript() {
     });
 }
 
-/// CPR-20 trace immutability also binds the migration owner. Missing app-role
-/// grants are not enough: break-glass SQL must be unable to rewrite the
-/// historical explanation without an explicit future retention design.
+/// CPR-20 trace immutability also binds a configured RLS-bypassing
+/// administrator. Missing app-role grants are not enough: break-glass SQL must
+/// be unable to rewrite the historical explanation without an explicit future
+/// retention design.
 #[test]
-fn the_database_owner_cannot_rewrite_context_trace_history() {
+#[ignore = "serial administrator tamper acceptance"]
+fn an_administrator_cannot_rewrite_context_trace_history() {
     let Some(db) = db() else { return };
     db.rt.block_on(async {
         let fixture = seed_session(&db.pool).await;
+        let administrator = tenant_fixture::administrator_pool(&db.pool).await;
         for statement in [
             "update session_context_runs set rendered = '' where id = $1",
             "delete from session_context_runs where id = $1",
@@ -5375,7 +5456,10 @@ fn the_database_owner_cannot_rewrite_context_trace_history() {
             "update context_feedback set feedback_type = 'unhelpful' where context_run_id = $1",
             "delete from context_feedback where context_run_id = $1",
         ] {
-            let mut tx = db.pool.begin().await.expect("begin owner trace probe");
+            let mut tx = administrator
+                .begin()
+                .await
+                .expect("begin owner trace probe");
             let err = sqlx::query(statement)
                 .bind(fixture.run.as_uuid())
                 .execute(&mut *tx)
@@ -5386,10 +5470,11 @@ fn the_database_owner_cannot_rewrite_context_trace_history() {
                     .and_then(sqlx::error::DatabaseError::code)
                     .as_deref(),
                 Some("P0001"),
-                "{statement}: owner bypassed immutable trace trigger: {err:?}"
+                "{statement}: administrator bypassed immutable trace trigger: {err:?}"
             );
             tx.rollback().await.expect("roll back owner trace probe");
         }
+        administrator.close().await;
     });
 }
 

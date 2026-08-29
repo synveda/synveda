@@ -1,0 +1,56 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select namespace.nspname::text as \"schema_name!\",\n                  routine.proname::text as \"routine_name!\",\n                  pg_catalog.pg_get_function_identity_arguments(routine.oid)::text\n                    as \"identity_arguments!\",\n                  routine.prokind::text as \"routine_kind!\",\n                  (owner.rolname = $1) as \"owned_by_migrator!\",\n                  case\n                    when pg_catalog.octet_length(routine.prosrc) > $2\n                      or pg_catalog.octet_length(\n                           coalesce(routine.probin, '')\n                         ) > $2\n                      or pg_catalog.octet_length(\n                           coalesce(routine.prosqlbody::text, '')\n                         ) > $2\n                      or pg_catalog.octet_length(\n                           coalesce(routine.proargdefaults::text, '')\n                         ) > $2\n                      or coalesce(pg_catalog.cardinality(routine.proconfig), 0) > $3\n                      or exists (\n                        select 1\n                          from pg_catalog.unnest(\n                                 coalesce(routine.proconfig, array[]::text[])\n                               ) as setting(value)\n                         where pg_catalog.octet_length(setting.value) > $4\n                      )\n                    then '<oversized>'\n                    when routine.prokind = 'a' then '<unsupported-kind>'\n                    when pg_catalog.octet_length(\n                           pg_catalog.pg_get_functiondef(routine.oid)\n                         ) <= $2\n                    then pg_catalog.pg_get_functiondef(routine.oid)\n                    else '<oversized>'\n                  end as \"definition!\"\n             from pg_catalog.pg_proc as routine\n             join pg_catalog.pg_namespace as namespace\n               on namespace.oid = routine.pronamespace\n             join pg_catalog.pg_roles as owner on owner.oid = routine.proowner\n            where namespace.nspname = 'public'\n              and not exists (\n                select 1\n                  from pg_catalog.pg_depend as dependency\n                  join pg_catalog.pg_extension as extension\n                    on extension.oid = dependency.refobjid\n                 where dependency.classid = 'pg_catalog.pg_proc'::regclass\n                   and dependency.objid = routine.oid\n                   and dependency.objsubid = 0\n                   and dependency.deptype = 'e'\n                   and extension.extname in ('btree_gin', 'vector')\n                   and extension.extnamespace = namespace.oid\n              )\n            order by namespace.nspname collate \"C\", routine.proname collate \"C\",\n                     pg_catalog.pg_get_function_identity_arguments(routine.oid) collate \"C\",\n                     routine.prokind::text collate \"C\"\n            limit $5",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "schema_name!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "routine_name!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "identity_arguments!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "routine_kind!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "owned_by_migrator!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 5,
+        "name": "definition!",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Name",
+        "Int4",
+        "Int4",
+        "Int4",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "b5ecf2df7b4ad5c3632b113f975da628e2e7d41ae041879a6ac91c7880ad45b1"
+}

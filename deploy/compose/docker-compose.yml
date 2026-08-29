@@ -10,7 +10,10 @@ name: synveda
 
 services:
   postgres:
-    build: ./postgres
+    build:
+      context: ../..
+      dockerfile: deploy/compose/postgres/Dockerfile
+      target: development
     image: synveda/dev-postgres:17
     environment:
       POSTGRES_USER: synveda
@@ -128,10 +131,9 @@ services:
       - "4318:4318" # OTLP HTTP
 
   gateway:
-    # The product itself (OPS-1; CPR-36, ADR-0095). Not started by
-    # `make dev-up`, which is the
-    # contributor's loop and runs the gateway from `cargo run`; this is what
-    # an installed deployment runs, and `synveda init` brings it up.
+    # Retained Rauthy-era product service (OPS-1; CPR-36, ADR-0095). It is not
+    # started by the contributor loop and the CPR-45 cutover advertises no
+    # command that starts it as a supported deployment.
     profiles: ["deployed"]
     build:
       context: ../..
@@ -140,18 +142,15 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    # Written by `synveda init`: the issuer, the tenant it resolves to, and
-    # the embedder chosen at install time. Absent, the gateway starts with
-    # no issuer configured and refuses every request — which is the correct
-    # failure for an uninitialised deployment, not a reason to default one.
+    # A preserved legacy `.env` may contain issuer, tenant and embedder state.
+    # Absent, the gateway starts with no issuer and refuses every request.
     env_file:
       - path: .env
         required: false
     environment:
-      # `synveda init` converges this LOGIN as a non-superuser,
-      # non-BYPASSRLS member of the migrations' NOLOGIN `synveda_app` role.
-      # The database owner remains bootstrap-only and never reaches the
-      # gateway process. An explicit deployment DSN can replace the local one.
+      # This legacy DSN names a non-superuser, non-BYPASSRLS member of the
+      # migrations' NOLOGIN `synveda_app` role. The canonical graph replaces
+      # this default with a role-scoped mounted secret.
       DATABASE_URL: ${SYNVEDA_GATEWAY_DATABASE_URL:-postgres://synveda_gateway:synveda-dev@postgres:5432/synveda}
       # `.env` is still a transitional shared configuration file. Mask the
       # worker credential from the request process until canonical Compose

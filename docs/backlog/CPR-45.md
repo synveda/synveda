@@ -130,25 +130,26 @@ continues to re-prove epoch and runtime role; a conclusive refusal faults the
 process, cancels every loop and exits non-zero rather than merely changing
 readiness.
 
-For the implicit bundled default, init verifies derived host-side `localhost`
-URLs while Compose supplies the `postgres` alias to the containers. Any
-explicit `DATABASE_URL`, including a loopback one, requires an explicit
-runtime-URL pair; init verifies those exact host-side URLs against the bootstrap
-cluster identity, database OID, live postmaster generation and writable-primary
-state. The generation marker is compared only during bootstrap and is not
-persisted across a database restart. The transitional raw
-`.env`/Compose handoff has no accepted byte-for-byte evidence for arbitrary URL
-characters. The worker therefore independently proves the resolved container
-session's exact role/epoch/writable-primary state at boot and while running;
-init's host-side check alone is not container-resolution evidence. The gateway
-has no equivalent boot-time role sentinel yet. Helm renders a private worker
-Deployment from the same image and a separately owned Secret, and its install
-job refuses a mounted worker URL targeting a different live primary
-instance/database. Helm's gateway still uses the CloudNativePG
-application-owner Secret, and the transitional Compose
-manifests still use a monolithic rendered environment file (the other runtime
-DSN is explicitly masked in each service); both are explicit gaps before the
-locked secret/role-isolation contract is satisfied.
+The public `synveda init` entrypoint is now an unconditional cutover refusal;
+its private legacy lifecycle cannot discover a profile, start Compose, read or
+write secrets, or contact a database. This hard withdrawal is necessary because
+the Rauthy-era host/container URL split, raw `.env` credential handoff and
+unbounded whole lifecycle cannot satisfy the locked reference contract. A
+static mutant test pins the gate-only public boundary. Reopening it requires a
+wrapper around the accepted deployment-owned lifecycle, not a legacy escape
+hatch.
+
+Canonical Compose and Helm use distinct migrator, gateway and worker
+credentials. The bootstrap refuses reused owner/runtime credentials before
+mutation; bundled shared-cluster mode extends that content-free comparison to
+the Keycloak database credential. Their preflight binds all three sessions to one exact cluster,
+database OID, authority contract and writable primary, while a peer-cluster
+witness prevents a copied authority file from turning a second cluster into the
+same trust domain. Gateway and worker each maintain a fail-closed runtime
+authority gate. Helm still supplies issuer/KMS values through Secret-backed
+environment variables rather than the file-mount contract, and the retained
+transitional manifests still carry legacy environment handoff; neither is
+reference acceptance.
 
 The shared product database-URL boundary accepts only `postgres`/`postgresql`,
 requires an explicit database path or effective `dbname`, and rejects fragments
@@ -162,14 +163,38 @@ eight development/reference and bundled/external PostgreSQL/OIDC rows. Static
 evidence proves role-scoped mode-0600 file inputs, provider-specific service
 sets, internal trust networks, explicit egress seams, one product image across
 gateway/worker/migration, reverse-proxy-only host ports and no Rauthy/Temporal
-entry in the new graph. `synveda db migrate`, init, reset and other direct store
-commands resolve `DATABASE_URL` or bounded `DATABASE_URL_FILE` with ambiguity
-and content-free failure tests. Pinned Keycloak, Caddy, PostgreSQL and Collector
-configuration exists, but the new graph is deliberately not startable yet:
-database/role convergence, Keycloak realm convergence and the product-owned
-exact issuer diagnostic are the next cutover prerequisites. The legacy
-Rauthy/Temporal lifecycle remains authoritative until those acceptance paths
-pass; static configuration is not deployment validation.
+entry in the new graph. `synveda db migrate`, reset and other executable direct
+store commands resolve `DATABASE_URL` or bounded `DATABASE_URL_FILE` with
+ambiguity and content-free failure tests; `init` is closed before resolution.
+External-PostgreSQL rows remain configuration-only and the bootstrap now
+refuses before mounted-input reads or SQL until an authenticated-TLS transport
+exists; an ordinary pre-provisioned CREATEROLE/CREATEDB principal is covered by
+a live no-mutation sentinel. Mounted database and Keycloak inputs are copied by
+the same bounded, non-following descriptor helper before parsing, including
+writerless-FIFO and symlink refusal tests.
+Pinned Keycloak, Caddy, PostgreSQL and Collector configuration plus exact
+database-role/authority convergence now exist, but the new graph is deliberately
+not startable yet: Keycloak realm convergence and the product-owned exact issuer
+diagnostic are the next cutover prerequisites. The legacy Rauthy/Temporal
+lifecycle is retained only as non-authoritative cutover residue; static
+configuration is not deployment validation.
+
+A final fresh isolated full `make db-test` run
+(`synveda-db-test-92484-15wf2p`) passed and self-cleaned its Compose project and
+private fixture state. It proved normalized pairwise credential refusal,
+idempotent Synveda/Keycloak convergence, the fixed
+owner/migrator/gateway/worker and separate Keycloak role topology, migration,
+forced RLS, gateway/worker terminal authority drift, pre-open read-only
+refusal, post-open Keycloak quarantine, a PostgreSQL startup process not yet
+visible in `pg_stat_activity`, crash-resumable closure and exact cleanup. Fresh
+exact-role fixtures also passed the eight remediated CPR demos (CPR-23,
+CPR-25, CPR-27 and CPR-30–34). `make ci`, `make check-deploy`,
+`make compose-config` and deterministic Claude lifecycle acceptance pass, and
+three final read-only integration/evidence reviews returned `READY`.
+
+This is database-authority and regression-review evidence only; it is not a
+runnable canonical Compose lifecycle, Keycloak login, current Helm/kind
+validation or reference-deployment completion claim.
 
 Deterministic evidence covers worker boot outage, live/not-ready semantics,
 exact role, any-schema ownership, elevation, unexpected membership and

@@ -4,6 +4,9 @@
 //! Fixture bootstrap creates only tenants, identities and grants; no test
 //! writes planner rows or active Knowledge behind the application layer.
 
+#[path = "../../synveda-store/tests/support/tenant_fixture.rs"]
+mod tenant_fixture;
+
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
@@ -14,11 +17,11 @@ use http_body_util::BodyExt;
 use metrics_exporter_prometheus::PrometheusHandle;
 use serde_json::{Value, json};
 use sqlx::postgres::PgPoolOptions;
-use synveda_gateway::app::{AppState, router};
+use synveda_gateway::app::{AppState, behavior_test_router as router};
 use synveda_gateway::telemetry;
 use synveda_identity::Hs256Verifier;
 use synveda_policy::Pdp;
-use synveda_store::{access, identities, knowledge_conflicts, rls, scopes, tenants};
+use synveda_store::{access, identities, knowledge_conflicts, rls, scopes};
 use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
 use synveda_types::knowledge::ConflictClassification;
 use synveda_types::{
@@ -193,11 +196,11 @@ async fn admitted_world() -> Option<World> {
         .connect(&url)
         .await
         .expect("connect to DATABASE_URL");
-    synveda_store::migrate(&pool)
+    synveda_store::epoch::verify(&pool)
         .await
         .expect("apply migrations");
     let tenant_id = TenantId::new();
-    tenants::create(
+    tenant_fixture::create(
         &pool,
         tenant_id,
         &format!("cpr20-{}", tenant_id.as_uuid().simple()),

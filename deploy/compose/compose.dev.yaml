@@ -10,6 +10,10 @@ services:
         published: ${SYNVEDA_DEV_HTTP_PORT:-8080}
         host_ip: 127.0.0.1
         protocol: tcp
+  database-preflight:
+    build:
+      context: ../..
+      dockerfile: deploy/compose/gateway/Dockerfile
   migrate:
     build:
       context: ../..

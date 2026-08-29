@@ -38,34 +38,6 @@ spec:
       {{- end }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
-      initContainers:
-        # This uses only the worker credential. It becomes reachable after
-        # the install job has created the fixed non-owner login and granted
-        # `synveda_app`; it proves the schema sentinel before the process is
-        # allowed to start.
-        - name: wait-for-schema
-          image: {{ .Values.postgres.image }}
-          securityContext:
-            {{- toYaml .Values.securityContext | nindent 12 }}
-          command:
-            - sh
-            - -ec
-            - |
-              DATABASE_URL=
-              IFS= read -r DATABASE_URL < /run/secrets/synveda-worker/database_url || [ -n "$DATABASE_URL" ]
-              until PGDATABASE="$DATABASE_URL" psql -v ON_ERROR_STOP=1 -tAc \
-                "select current_user = '{{ include "synveda.workerRole" . }}'
-                        and to_regclass('public.tenants') is not null
-                        and has_table_privilege(current_user, 'public.tenants', 'select')" \
-                2>/dev/null | grep -qx t; do
-                echo "waiting for the install job: schema and the synveda_worker grant"
-                sleep 3
-              done
-              echo "schema present and readable by the worker role"
-          volumeMounts:
-            - name: worker-database
-              mountPath: /run/secrets/synveda-worker
-              readOnly: true
       containers:
         - name: worker
           image: {{ include "synveda.image" . }}
@@ -76,14 +48,14 @@ spec:
           env:
             - name: DATABASE_URL_FILE
               value: /run/secrets/synveda-worker/database_url
+            - name: SYNVEDA_DATABASE_ROLES_FILE
+              value: /etc/synveda/database/roles.json
             - name: SYNVEDA_WORKER_DB_MAX_CONNECTIONS
               value: {{ .Values.worker.dbMaxConnections | quote }}
             - name: SYNVEDA_WORKER_SHUTDOWN_SECS
               value: {{ .Values.worker.shutdownSeconds | quote }}
             - name: SYNVEDA_WORKER_LISTEN_ADDR
               value: 127.0.0.1:8121
-            - name: SYNVEDA_EXPECTED_DATABASE_ROLE
-              value: {{ include "synveda.workerRole" . }}
             - name: SYNVEDA_OIDC_ISSUERS
               valueFrom:
                 secretKeyRef:
@@ -155,6 +127,9 @@ spec:
             - name: worker-database
               mountPath: /run/secrets/synveda-worker
               readOnly: true
+            - name: database-roles
+              mountPath: /etc/synveda/database
+              readOnly: true
             - name: tmp
               mountPath: /tmp
           {{- with .Values.worker.resources }}
@@ -169,6 +144,12 @@ spec:
             items:
               - key: {{ .Values.worker.databaseUrlSecretKey }}
                 path: database_url
+        - name: database-roles
+          configMap:
+            name: {{ include "synveda.fullname" . }}-database-roles
+            items:
+              - key: roles.json
+                path: roles.json
         - name: tmp
           emptyDir: {}
       {{- with .Values.worker.nodeSelector }}

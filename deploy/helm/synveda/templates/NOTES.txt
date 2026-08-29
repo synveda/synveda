@@ -7,11 +7,14 @@ Synveda {{ .Chart.AppVersion }} — one context-platform runtime (CPR-45, ADR-01
   extractor  {{ .Values.extractor.kind }}
   public URL {{ .Values.gateway.publicUrl }}
 
-1. Watch the install job. It migrates with the admin identity, grants the
-   generated gateway login membership of the NOLOGIN `synveda_app` role,
-   creates/converges the fixed non-owner `synveda_worker` login from
-   `{{ .Values.worker.databaseExistingSecret }}`, and optionally admits one
-   tenant. Neither runtime process receives the admin DSN.
+1. Watch the install job. Its ordered stages use the superuser only to
+   converge extensions, fixed roles, ownership and ACLs; prove the migrator,
+   gateway and worker credentials select one writable target with their exact
+   authority; migrate as the ordinary `synveda_migrator` owner; and optionally
+   admit one tenant. Gateway and worker receive only their distinct non-owner
+   credentials from `{{ .Values.gateway.databaseExistingSecret }}` and
+   `{{ .Values.worker.databaseExistingSecret }}`. Neither runtime process
+   receives the bootstrap or migrator DSN.
 
      kubectl logs -l app.kubernetes.io/component=install -f
 
@@ -31,15 +34,12 @@ Synveda {{ .Chart.AppVersion }} — one context-platform runtime (CPR-45, ADR-01
    makes wrapped tenant keys and console sessions unrecoverable. The stable
    key reference is evidence metadata, not a cloud KMS/HSM custody integration.
 
-{{ if not .Values.install.tenant.slug }}3. Admit a tenant with the admin credential. Tenant admission is the retained
-   bootstrap boundary and is intentionally unavailable to the gateway role:
-
-     ADMIN=$(kubectl get secret {{ include "synveda.superuserSecret" . }} \
-       -o jsonpath='{.data.password}' | base64 -d)
-     kubectl run synveda-admit --rm -i --restart=Never \
-       --image={{ include "synveda.image" . }} \
-       --env DATABASE_URL="postgres://postgres:$ADMIN@{{ include "synveda.clusterName" . }}-rw:5432/{{ include "synveda.dbName" . }}" \
-       -- synveda tenant create --slug <slug> --name "<name>"
+{{ if not .Values.install.tenant.slug }}3. No tenant was requested. Tenant admission is the retained deployment
+   boundary and is intentionally unavailable to the gateway and worker roles.
+   Admit the first tenant with a bounded operator Job that mounts the
+   `{{ include "synveda.migratorSecret" . }}` `uri` as `DATABASE_URL_FILE`, or
+   set `install.tenant.slug` and `install.tenant.name` on the initial install.
+   Never supply the superuser or a runtime credential to a product command.
 
 {{ else }}3. Tenant `{{ .Values.install.tenant.slug }}` was admitted by the install job.
 
@@ -72,9 +72,11 @@ OPERATIONAL LIMITS
   provider work and subsequent claim recovery remain unproved; a deadline may
   abort unfinished work and provider calls are not exactly once.
 
-  Rotating `{{ .Values.worker.databaseExistingSecret }}` does not restart a
-  Pod automatically. Converge the login password and roll the worker as one
-  operator action; do not replace the Secret and leave the old process alive.
+  Rotating `{{ .Values.gateway.databaseExistingSecret }}` or
+  `{{ .Values.worker.databaseExistingSecret }}` does not restart a Pod
+  automatically. Converge the login password and roll the matching process as
+  one operator action; do not replace a Secret and leave the old process
+  alive.
 
   Provider credentials and the local KMS key remain Kubernetes Secret
   references. Rendered diagnostics, ordinary APIs and audit rows do not

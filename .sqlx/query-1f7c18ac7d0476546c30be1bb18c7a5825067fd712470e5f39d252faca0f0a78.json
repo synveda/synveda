@@ -1,0 +1,20 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select (\n              current_user = session_user\n              and pg_catalog.current_setting('row_security') = 'on'\n              and pg_catalog.current_setting('session_replication_role') = 'origin'\n              and pg_catalog.current_setting('transaction_read_only') = 'off'\n              and pg_catalog.current_setting('synchronous_commit') = 'on'\n              and pg_catalog.current_setting('search_path') = 'public'\n              and pg_catalog.current_schemas(false) in (\n                    array['public'::name],\n                    array[]::name[]\n                  )\n              and coalesce(\n                    nullif(pg_catalog.current_setting('synveda.tenant_id', true), ''),\n                    ''\n                  ) = ''\n              and coalesce(\n                    nullif(pg_catalog.current_setting('synveda.knowledge_erasure', true), ''),\n                    'off'\n                  ) = 'off'\n              and coalesce(\n                    nullif(pg_catalog.current_setting('synveda.retention_purge', true), ''),\n                    'off'\n                  ) = 'off'\n              and not exists (\n                select 1\n                  from pg_catalog.pg_db_role_setting as settings\n                  left join pg_catalog.pg_roles as role on role.oid = settings.setrole\n                 where settings.setdatabase in (\n                         0,\n                         (select database.oid from pg_catalog.pg_database as database\n                           where database.datname = pg_catalog.current_database())\n                       )\n                   and (settings.setrole = 0 or role.rolname = current_user)\n              )\n            ) as \"safe!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "safe!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "1f7c18ac7d0476546c30be1bb18c7a5825067fd712470e5f39d252faca0f0a78"
+}

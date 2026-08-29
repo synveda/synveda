@@ -49,8 +49,8 @@
 //!
 //! # Why the absolute path
 //!
-//! ADR-0057 decision 1: "the config line both AC clients get is the
-//! absolute path to a binary they already have after `synveda init`". Not
+//! ADR-0057 decision 1 requires both AC clients to receive the absolute path
+//! to the binary whose installer the user just invoked. This is not
 //! a convenience — Claude Desktop is a GUI application launched by the
 //! window manager, so it inherits none of the `PATH` a shell would have,
 //! and a bare `synveda` there fails at spawn with nothing useful said.

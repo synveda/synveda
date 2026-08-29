@@ -5,6 +5,9 @@
 //! `make db-test`. Isolation is by freshly minted UUIDv7 ids and per-run
 //! slugs, so a shared dev database is fine.
 
+#[path = "support/tenant_fixture.rs"]
+mod tenant_fixture;
+
 use std::sync::OnceLock;
 
 use sqlx::PgPool;
@@ -42,7 +45,7 @@ fn db() -> Option<&'static Db> {
                 .connect(&url)
                 .await
                 .expect("connect to DATABASE_URL");
-            synveda_store::migrate(&pool)
+            synveda_store::epoch::verify(&pool)
                 .await
                 .expect("apply migrations");
             pool
@@ -64,9 +67,10 @@ fn create_then_resolve_by_id_roundtrips() {
     db.rt.block_on(async {
         let id = TenantId::new();
         let slug = fresh_slug("acme");
-        let created = tenants::create(&db.pool, id, &slug, "ACME Bank", TenantStatus::Active)
-            .await
-            .expect("create tenant");
+        let created =
+            tenant_fixture::create(&db.pool, id, &slug, "ACME Bank", TenantStatus::Active)
+                .await
+                .expect("create tenant");
         assert_eq!(created.id, id);
         assert_eq!(created.slug, slug);
         assert_eq!(created.name, "ACME Bank");
@@ -96,7 +100,7 @@ fn suspended_status_is_stored_and_returned() {
     let Some(db) = db() else { return };
     db.rt.block_on(async {
         let id = TenantId::new();
-        let created = tenants::create(
+        let created = tenant_fixture::create(
             &db.pool,
             id,
             &fresh_slug("frozen"),
@@ -115,11 +119,11 @@ fn duplicate_id_and_duplicate_slug_are_conflicts() {
     db.rt.block_on(async {
         let id = TenantId::new();
         let slug = fresh_slug("dup");
-        tenants::create(&db.pool, id, &slug, "First", TenantStatus::Active)
+        tenant_fixture::create(&db.pool, id, &slug, "First", TenantStatus::Active)
             .await
             .expect("create tenant");
 
-        let dup_id = tenants::create(
+        let dup_id = tenant_fixture::create(
             &db.pool,
             id,
             &fresh_slug("dup"),
@@ -132,7 +136,7 @@ fn duplicate_id_and_duplicate_slug_are_conflicts() {
             "duplicate id must be a conflict, got {dup_id:?}"
         );
 
-        let dup_slug = tenants::create(
+        let dup_slug = tenant_fixture::create(
             &db.pool,
             TenantId::new(),
             &slug,
@@ -153,7 +157,8 @@ fn malformed_slug_is_invalid_not_storage() {
     db.rt.block_on(async {
         for bad in ["", "-leading-hyphen", "Has-Uppercase", "spaced out"] {
             let result =
-                tenants::create(&db.pool, TenantId::new(), bad, "Bad", TenantStatus::Active).await;
+                tenant_fixture::create(&db.pool, TenantId::new(), bad, "Bad", TenantStatus::Active)
+                    .await;
             assert!(
                 matches!(result, Err(Error::Invalid { .. })),
                 "slug {bad:?} must be rejected as invalid, got {result:?}"

@@ -17,6 +17,7 @@ gateway:
   # client, which is the property this whole test turns on.
   publicUrl: http://synveda.synveda-test.svc.cluster.local:8120
   dbMaxConnections: 10
+  databaseExistingSecret: synveda-gateway-db
 
 worker:
   # The demo creates this Secret with a fresh URL-safe password before Helm

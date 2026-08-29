@@ -665,9 +665,10 @@ pub async fn refresh_packs_once(pool: &PgPool, pdp: &Pdp) -> Result<()> {
 /// tenant or pack failure.
 ///
 /// A periodic refresher may retain a previous in-memory compile after a bad
-/// update. A fresh worker has no last-good tenant pack, so it must not claim
-/// Capture work until every active tenant has been read and compiled once.
-pub(crate) async fn converge_packs_once(pool: &PgPool, pdp: &Pdp) -> Result<()> {
+/// update. A fresh process has no last-good tenant pack, so its governed
+/// background plane cannot start until every active tenant has been read and
+/// compiled once.
+pub async fn converge_packs_once(pool: &PgPool, pdp: &Pdp) -> Result<()> {
     for tenant in tenants::active(pool).await? {
         let outcomes = refresh_tenant(pool, pdp, tenant.id).await?;
         if record_refresh_outcomes(&outcomes) == "error" {
@@ -762,33 +763,12 @@ async fn refresh_tenant(
     Ok(outcomes)
 }
 
-/// Spawns the reload loop: one sweep immediately, then one per `interval`.
-/// Sweep-level failures (e.g. the database down) are logged and retried
-/// next tick — policy distribution degrades to the last-good state, it
-/// never takes the gateway down.
-pub fn spawn_pack_refresher(
-    pool: PgPool,
-    pdp: Arc<Pdp>,
-    interval: Duration,
-) -> tokio::task::JoinHandle<()> {
-    tokio::spawn(async move {
-        let mut ticker = tokio::time::interval(interval);
-        ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-        loop {
-            ticker.tick().await;
-            if let Err(error) = refresh_packs_once(&pool, &pdp).await {
-                tracing::warn!(error = %error, "policy pack refresh sweep failed");
-            }
-        }
-    })
-}
-
-/// Runs the process-local policy-pack refresh loop until worker shutdown.
+/// Runs the process-local policy-pack refresh loop until process shutdown.
 ///
 /// The worker performs one successful refresh before this loop is started,
 /// so Capture cannot decide against a fresh process that has not installed
 /// stored tenant packs yet.
-pub(crate) async fn run_pack_refresher(
+pub async fn run_pack_refresher(
     pool: PgPool,
     pdp: Arc<Pdp>,
     interval: Duration,

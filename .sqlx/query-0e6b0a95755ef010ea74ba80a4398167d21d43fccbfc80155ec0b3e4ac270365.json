@@ -1,0 +1,168 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select current_user as \"name!\", session_user as \"session_name!\",\n                  rolcanlogin as \"can_login!\",\n                  rolinherit as \"inherits!\",\n                  rolsuper as \"superuser!\", rolcreatedb as \"create_db!\",\n                  rolcreaterole as \"create_role!\", rolreplication as \"replication!\",\n                  rolbypassrls as \"bypass_rls!\",\n                  rolconnlimit as \"connection_limit!\",\n                  (rolvaliduntil is null\n                   or rolvaliduntil > pg_catalog.statement_timestamp())\n                    as \"credential_current!\",\n                  pg_catalog.pg_has_role(current_user, 'synveda_app', 'member') as \"app_member!\",\n                  exists (\n                    select 1\n                      from pg_catalog.pg_auth_members as membership\n                      join pg_catalog.pg_roles as granted_role\n                        on granted_role.oid = membership.roleid\n                     where membership.member = roles.oid\n                       and granted_role.rolname = 'synveda_app'\n                       and not membership.admin_option\n                       and membership.inherit_option\n                       and membership.set_option\n                  ) as \"app_membership_safe!\",\n                  exists (\n                    select 1\n                      from pg_catalog.pg_auth_members as membership\n                      join pg_catalog.pg_roles as granted_role\n                        on granted_role.oid = membership.roleid\n                     where membership.member = roles.oid\n                       and granted_role.rolname = 'synveda_app'\n                       and (\n                         membership.admin_option\n                         or not membership.inherit_option\n                         or not membership.set_option\n                       )\n                  ) as \"app_membership_unsafe!\",\n                  exists (\n                    select 1 from pg_catalog.pg_database\n                     where datdba = roles.oid\n                  ) as \"database_owner!\",\n                  exists (\n                    select 1 from pg_catalog.pg_namespace\n                     where nspowner = roles.oid\n                  ) as \"schema_owner!\",\n                  exists (\n                    select 1\n                      from pg_catalog.pg_class as objects\n                     where objects.relowner = roles.oid\n                    union all\n                    select 1\n                      from pg_catalog.pg_proc as routines\n                     where routines.proowner = roles.oid\n                    union all\n                    select 1\n                      from pg_catalog.pg_type as data_type\n                     where data_type.typowner = roles.oid\n                  ) as \"application_object_owner!\",\n                  exists (\n                    select 1\n                      from pg_catalog.pg_auth_members as memberships\n                      join pg_catalog.pg_roles as granted_roles\n                        on granted_roles.oid = memberships.roleid\n                     where memberships.member = roles.oid\n                       and granted_roles.rolname <> 'synveda_app'\n                  ) as \"unexpected_membership!\",\n                  exists (\n                    select 1\n                      from pg_catalog.pg_auth_members as memberships\n                      join pg_catalog.pg_roles as member\n                        on member.oid = memberships.member\n                      join pg_catalog.pg_roles as grantor\n                        on grantor.oid = memberships.grantor\n                     where memberships.roleid = roles.oid\n                       and not (\n                         exists (\n                           select 1\n                             from pg_catalog.unnest($2::text[]) with ordinality\n                                    as expected_member(role_name, position)\n                             join pg_catalog.unnest($3::text[]) with ordinality\n                                    as expected_grantor(role_name, position)\n                               using (position)\n                            where expected_member.role_name = member.rolname\n                              and expected_grantor.role_name = grantor.rolname\n                         )\n                         and memberships.admin_option\n                         and not memberships.inherit_option\n                         and not memberships.set_option\n                       )\n                  ) as \"unsafe_inbound_membership!\",\n                  exists (\n                    select 1\n                      from pg_catalog.pg_database as database,\n                           lateral pg_catalog.aclexplode(\n                             coalesce(\n                               database.datacl,\n                               pg_catalog.acldefault('d', database.datdba)\n                             )\n                           ) as acl\n                     where database.datname = pg_catalog.current_database()\n                       and acl.grantee = roles.oid\n                       and acl.privilege_type = 'CONNECT'\n                       and not acl.is_grantable\n                  ) as \"direct_connect!\",\n                  exists (\n                    select 1\n                      from pg_catalog.pg_database as database,\n                           lateral pg_catalog.aclexplode(\n                             coalesce(\n                               database.datacl,\n                               pg_catalog.acldefault('d', database.datdba)\n                             )\n                           ) as acl\n                     where database.datname = pg_catalog.current_database()\n                       and acl.grantee = roles.oid\n                       and (\n                         acl.privilege_type <> 'CONNECT'\n                         or acl.is_grantable\n                       )\n                  ) as \"unsafe_direct_database_acl!\",\n                  exists (\n                    select 1\n                      from pg_catalog.pg_database as database,\n                           lateral pg_catalog.aclexplode(\n                             coalesce(\n                               database.datacl,\n                               pg_catalog.acldefault('d', database.datdba)\n                             )\n                           ) as acl\n                     where database.datname = pg_catalog.current_database()\n                       and acl.grantee = 0\n                  ) as \"public_database_acl!\",\n                  exists (\n                    select 1\n                      from pg_catalog.pg_database as database,\n                           lateral pg_catalog.aclexplode(\n                             coalesce(\n                               database.datacl,\n                               pg_catalog.acldefault('d', database.datdba)\n                             )\n                           ) as acl\n                     where database.datname <> pg_catalog.current_database()\n                       and acl.grantee = roles.oid\n                  ) as \"other_database_acl!\",\n                  exists (\n                    select 1\n                      from pg_catalog.pg_namespace as namespace,\n                           lateral pg_catalog.aclexplode(namespace.nspacl) as acl\n                     where acl.grantee = roles.oid\n                    union all\n                    select 1\n                      from pg_catalog.pg_attribute as attribute,\n                           lateral pg_catalog.aclexplode(attribute.attacl) as acl\n                     where acl.grantee = roles.oid\n                    union all\n                    select 1\n                      from pg_catalog.pg_class as object,\n                           lateral pg_catalog.aclexplode(object.relacl) as acl\n                     where acl.grantee = roles.oid\n                    union all\n                    select 1\n                      from pg_catalog.pg_proc as routine,\n                           lateral pg_catalog.aclexplode(routine.proacl) as acl\n                     where acl.grantee = roles.oid\n                    union all\n                    select 1\n                      from pg_catalog.pg_type as data_type,\n                           lateral pg_catalog.aclexplode(data_type.typacl) as acl\n                     where acl.grantee = roles.oid\n                    union all\n                    select 1\n                      from pg_catalog.pg_default_acl as defaults,\n                           lateral pg_catalog.aclexplode(defaults.defaclacl) as acl\n                     where acl.grantee = roles.oid\n                  ) as \"direct_object_acl!\",\n                  exists (\n                    select 1\n                      from pg_catalog.pg_db_role_setting\n                     where setrole = roles.oid\n                  ) as \"role_setting!\"\n             from pg_catalog.pg_roles as roles\n            where rolname = current_user\n              and ($1::text is null or current_user = $1)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "name!",
+        "type_info": "Name"
+      },
+      {
+        "ordinal": 1,
+        "name": "session_name!",
+        "type_info": "Name"
+      },
+      {
+        "ordinal": 2,
+        "name": "can_login!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 3,
+        "name": "inherits!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 4,
+        "name": "superuser!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 5,
+        "name": "create_db!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 6,
+        "name": "create_role!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 7,
+        "name": "replication!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 8,
+        "name": "bypass_rls!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 9,
+        "name": "connection_limit!",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 10,
+        "name": "credential_current!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 11,
+        "name": "app_member!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 12,
+        "name": "app_membership_safe!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 13,
+        "name": "app_membership_unsafe!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 14,
+        "name": "database_owner!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 15,
+        "name": "schema_owner!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 16,
+        "name": "application_object_owner!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 17,
+        "name": "unexpected_membership!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 18,
+        "name": "unsafe_inbound_membership!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 19,
+        "name": "direct_connect!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 20,
+        "name": "unsafe_direct_database_acl!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 21,
+        "name": "public_database_acl!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 22,
+        "name": "other_database_acl!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 23,
+        "name": "direct_object_acl!",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 24,
+        "name": "role_setting!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "TextArray",
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "0e6b0a95755ef010ea74ba80a4398167d21d43fccbfc80155ec0b3e4ac270365"
+}

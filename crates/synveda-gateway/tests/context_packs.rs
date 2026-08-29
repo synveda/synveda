@@ -31,6 +31,9 @@
 //! Tests need a live Postgres: they read `DATABASE_URL` and skip with a
 //! message when it is unset (CI has no database), the house convention.
 
+#[path = "../../synveda-store/tests/support/tenant_fixture.rs"]
+mod tenant_fixture;
+
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
@@ -42,12 +45,12 @@ use metrics_exporter_prometheus::PrometheusHandle;
 use serde_json::{Value, json};
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
-use synveda_gateway::app::{AppState, router};
+use synveda_gateway::app::{AppState, behavior_test_router as router};
 use synveda_gateway::telemetry;
 use synveda_identity::Hs256Verifier;
 use synveda_ingest::embedding::{AnyEmbedder, DeterministicEmbedder};
 use synveda_policy::Pdp;
-use synveda_store::{access, identities, scopes, tenants};
+use synveda_store::{access, identities, scopes};
 use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
 use synveda_types::scope::{Scope, ScopeKind};
 use synveda_types::{
@@ -180,12 +183,12 @@ async fn world() -> Option<World> {
         .connect(&url)
         .await
         .expect("connect to DATABASE_URL");
-    synveda_store::migrate(&pool)
+    synveda_store::epoch::verify(&pool)
         .await
         .expect("apply migrations");
     let tenant = TenantId::new();
     let slug = format!("prmt2-{}", tenant.as_uuid().simple());
-    tenants::create(
+    tenant_fixture::create(
         &pool,
         tenant,
         &slug,
@@ -195,7 +198,7 @@ async fn world() -> Option<World> {
     .await
     .expect("admit tenant");
 
-    let mut tx = pool.begin().await.expect("begin");
+    let mut tx = tenant_fixture::begin(&pool, tenant).await;
     let root = scopes::ensure_tenant_root(&mut tx, tenant)
         .await
         .expect("mint root");
@@ -276,7 +279,7 @@ async fn unit(
 }
 
 async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str) -> Identity {
-    let mut tx = pool.begin().await.expect("begin");
+    let mut tx = tenant_fixture::begin(pool, tenant).await;
     let own = scopes::ensure_principal_scope(&mut tx, tenant, subject, subject)
         .await
         .expect("mint principal scope");
@@ -297,7 +300,7 @@ async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str) -> Identity {
 }
 
 async fn bind(pool: &PgPool, tenant: TenantId, subject: &str, scope: ScopeId, role: RoleKey) {
-    let mut tx = pool.begin().await.expect("begin");
+    let mut tx = tenant_fixture::begin(pool, tenant).await;
     access::create_grant(
         &mut *tx,
         &access::NewGrant {
@@ -698,7 +701,7 @@ async fn a_pack_reaches_a_session_only_through_review_and_costs_two_people_above
 async fn a_pack_published_at_a_local_scope_still_costs_one_curator() {
     let Some(w) = world().await else { return };
     let bea_scope = {
-        let mut tx = w.pool.begin().await.expect("begin");
+        let mut tx = tenant_fixture::begin(&w.pool, w.tenant).await;
         let identity = synveda_store::identities::by_subject(&mut *tx, w.tenant, "bea")
             .await
             .expect("read bea")
@@ -978,7 +981,7 @@ async fn a_reader_with_no_readable_memory_at_a_scope_still_gets_its_conventions(
             PackConfig::default(),
         )
         .expect("install a pack that grants packs and not memories");
-    let mut tx = w.pool.begin().await.expect("begin");
+    let mut tx = tenant_fixture::begin(&w.pool, w.tenant).await;
     configuration_support::bind_pack(&mut tx, w.tenant, w.eng, "packs-not-memories").await;
     tx.commit().await.expect("commit assignment");
 

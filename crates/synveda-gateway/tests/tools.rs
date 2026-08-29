@@ -2,6 +2,9 @@
 //! reports discovery and connection-test evidence through the public API; the
 //! gateway never launches or calls the represented server.
 
+#[path = "../../synveda-store/tests/support/tenant_fixture.rs"]
+mod tenant_fixture;
+
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
@@ -12,12 +15,12 @@ use metrics_exporter_prometheus::PrometheusHandle;
 use serde_json::{Value, json};
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
-use synveda_gateway::app::{AppState, router};
+use synveda_gateway::app::{AppState, behavior_test_router as router};
 use synveda_gateway::telemetry;
 use synveda_identity::Hs256Verifier;
 use synveda_ingest::embedding::{AnyEmbedder, DeterministicEmbedder};
 use synveda_policy::Pdp;
-use synveda_store::{access, identities, rls, scopes, tenant_secrets, tenants};
+use synveda_store::{access, identities, rls, scopes, tenant_secrets};
 use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
 use synveda_types::secret::{TenantSecretKind, tenant_secret_reference};
 use synveda_types::{
@@ -183,11 +186,11 @@ async fn world() -> Option<World> {
         .connect(&url)
         .await
         .expect("connect to database");
-    synveda_store::migrate(&pool)
+    synveda_store::epoch::verify(&pool)
         .await
         .expect("apply migrations");
     let tenant = TenantId::new();
-    tenants::create(
+    tenant_fixture::create(
         &pool,
         tenant,
         &format!("cpr25-{}", tenant.as_uuid().simple()),
@@ -748,7 +751,7 @@ async fn versions_discovery_bindings_config_and_tests_share_one_governed_path() 
     assert_eq!(page["servers"].as_array().map(Vec::len), Some(1));
 
     let second_tenant = TenantId::new();
-    tenants::create(
+    tenant_fixture::create(
         &world.pool,
         second_tenant,
         &format!("cpr25-other-{}", second_tenant.as_uuid().simple()),
@@ -873,7 +876,7 @@ async fn stable_tool_secret_references_fail_closed_rotate_without_rewriting_vers
     assert!(!missing.to_string().contains(&missing_id.to_string()));
 
     let other_tenant = TenantId::new();
-    tenants::create(
+    tenant_fixture::create(
         &world.pool,
         other_tenant,
         &format!("cpr35-other-{}", other_tenant.as_uuid().simple()),

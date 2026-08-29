@@ -11,6 +11,9 @@
 //! they read `DATABASE_URL` and skip with a message when it is unset (CI
 //! has no database), same convention as tests/oidc_login.rs.
 
+#[path = "../../synveda-store/tests/support/tenant_fixture.rs"]
+mod tenant_fixture;
+
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -28,10 +31,10 @@ use metrics_exporter_prometheus::PrometheusHandle;
 use serde_json::{Value, json};
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
-use synveda_gateway::app::{AppState, router};
+use synveda_gateway::app::{AppState, behavior_test_router as router};
 use synveda_gateway::telemetry;
 use synveda_identity::{LoginFlow, OidcVerifier, parse_issuers};
-use synveda_store::{identities, scopes, tenants};
+use synveda_store::{identities, scopes};
 use synveda_types::scope::ScopeKind;
 use synveda_types::{GrantId, TenantId, TenantStatus};
 use tower::ServiceExt;
@@ -325,12 +328,12 @@ async fn admitted_tenant() -> Option<(PgPool, TenantId, String)> {
         .connect(&url)
         .await
         .expect("connect to DATABASE_URL");
-    synveda_store::migrate(&pool)
+    synveda_store::epoch::verify(&pool)
         .await
         .expect("apply migrations");
     let id = TenantId::new();
     let slug = format!("auth2-{}", id.as_uuid().simple());
-    tenants::create(&pool, id, &slug, "AUTH-2 test tenant", TenantStatus::Active)
+    tenant_fixture::create(&pool, id, &slug, "AUTH-2 test tenant", TenantStatus::Active)
         .await
         .expect("admit tenant");
     Some((pool, id, url))
@@ -377,12 +380,12 @@ async fn first_login_mints_the_identity_and_its_own_scope_with_zero_admin_action
 
     // The store agrees: a principal-shaped scope hanging at the tenant
     // root, with her identity bound to it.
-    let identity = identities::by_subject(&pool, tenant_id, "alice-sub")
+    let mut tx = tenant_fixture::begin(&pool, tenant_id).await;
+    let identity = identities::by_subject(&mut *tx, tenant_id, "alice-sub")
         .await
         .expect("read identity")
         .expect("alice is provisioned");
     assert_eq!(identity.email.as_deref(), Some("alice@example.test"));
-    let mut tx = pool.begin().await.expect("begin");
     let personal = scopes::get(&mut *tx, tenant_id, identity.scope_id)
         .await
         .expect("read personal scope")
@@ -520,7 +523,7 @@ async fn an_ungranted_login_reaches_nothing_beyond_its_own_scope() {
     // Writes too — being a principal holds no carve-outs. The parent is
     // the real tenant root, so the ownership check passes and the PDP is
     // what says no (a made-up parent would be a 404 before the decision).
-    let mut tx = pool.begin().await.expect("begin");
+    let mut tx = tenant_fixture::begin(&pool, tenant_id).await;
     let root = scopes::ensure_tenant_root(&mut tx, tenant_id)
         .await
         .expect("mint root");
@@ -572,7 +575,7 @@ async fn a_fresh_tenant_needs_no_admin_before_the_first_login() {
     idp.login_as("eve-sub", &[], None);
     let session = login(&app).await;
 
-    let mut tx = pool.begin().await.expect("begin");
+    let mut tx = tenant_fixture::begin(&pool, tenant_id).await;
     let root = scopes::ensure_tenant_root(&mut tx, tenant_id)
         .await
         .expect("read root");
@@ -620,11 +623,15 @@ async fn an_idp_bearer_that_skipped_login_is_refused_fail_closed() {
         (StatusCode::FORBIDDEN, "policy_denied"),
         "an unprovisioned IdP subject holds nothing"
     );
+    let mut tx = tenant_fixture::begin(&pool, tenant_id).await;
+    let skipped = identities::by_subject(&mut *tx, tenant_id, "dave-sub")
+        .await
+        .expect("read identity");
+    tx.commit()
+        .await
+        .expect("commit skipped-login identity read");
     assert_eq!(
-        identities::by_subject(&pool, tenant_id, "dave-sub")
-            .await
-            .expect("read identity"),
-        None,
+        skipped, None,
         "the bearer path never provisions (ADR-0013 decision 2)"
     );
 }
@@ -651,7 +658,7 @@ async fn admin_group_login_bootstraps_a_governable_tenant() {
     );
     let session = login(&app).await;
 
-    let mut tx = pool.begin().await.expect("begin");
+    let mut tx = tenant_fixture::begin(&pool, tenant_id).await;
     let root = scopes::ensure_tenant_root(&mut tx, tenant_id)
         .await
         .expect("read root");

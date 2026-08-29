@@ -13,10 +13,13 @@
 //! missing; run them locally with `make db-test` or via
 //! `demos/flow-1-object-store.sh`.
 //!
-//! Layering note: `synveda-vedaflow` sits beside `synveda-store`, so this
-//! suite carries its own tenant-GUC helper instead of importing
-//! `rls::begin_tenant_tx` — same GUC, same transaction-local shape. Same
-//! reason `synveda-audit`'s tamper suite carries one.
+//! Layering note: `synveda-vedaflow` sits beside `synveda-store`, so this suite
+//! carries its own tenant-GUC helper. The separately compiled workspace test
+//! support validates privileged file credentials without adding a production
+//! crate dependency.
+
+#[path = "../../../tests/support/database_authority.rs"]
+mod database_authority;
 
 use std::collections::{BTreeSet, HashSet};
 use std::sync::OnceLock;
@@ -25,7 +28,7 @@ use chrono::{DateTime, TimeZone, Utc};
 use proptest::prelude::*;
 use proptest::test_runner::{Config, TestRunner};
 use sqlx::postgres::PgPoolOptions;
-use sqlx::{PgPool, Postgres, Transaction};
+use sqlx::{Connection as _, PgPool, Postgres, Transaction};
 use synveda_types::{AssetKind, Error, IdentityId, Result, ScopeId, TenantId};
 use synveda_vedaflow::{
     CommitHash, Ed25519Signer, NewCommit, ObjectClass, PolicySnapshot, RefUpdate, Signer,
@@ -103,14 +106,16 @@ async fn tenant_tx(pool: &PgPool, tenant: TenantId) -> Transaction<'static, Post
 /// Admits a fresh tenant. The FK from every VedaFlow table means history
 /// cannot exist without one.
 async fn create_tenant(pool: &PgPool) -> TenantId {
+    let mut admission = database_authority::migrator_connection(pool).await;
     let tenant = TenantId::new();
     sqlx::query("insert into tenants (id, slug, name, status) values ($1, $2, $3, 'active')")
         .bind(tenant.as_uuid())
         .bind(format!("flow1-{}", tenant.as_uuid().simple()))
         .bind("FLOW-1 property test")
-        .execute(pool)
+        .execute(&mut admission)
         .await
         .expect("admit tenant");
+    admission.close().await.expect("close test migrator");
     tenant
 }
 
@@ -344,28 +349,22 @@ fn dedup_is_per_tenant_never_across_one() {
         // content this tenant never wrote (ADR-0030 decision 3).
         assert!(!in_left.deduplicated && !in_right.deduplicated);
 
-        // Counted per tenant, not globally: this suite shares a long-lived
-        // dev database with every previous run of itself.
-        let mut tx = tenant_tx(pool, left).await;
-        let rows = sqlx::query!(
-            r#"select
-                 (select count(*) from vedaflow_objects
-                  where tenant_id = $1 and hash = $3) as "left!",
-                 (select count(*) from vedaflow_objects
-                  where tenant_id = $2 and hash = $3) as "right!""#,
-            left.as_uuid(),
-            right.as_uuid(),
-            in_left.hash.as_slice(),
-        )
-        .fetch_one(&mut *tx)
-        .await
-        .expect("count rows at that address");
-        assert_eq!(
-            (rows.left, rows.right),
-            (1, 1),
-            "one row per tenant, at the same address"
-        );
-        tx.rollback().await.expect("rollback");
+        // Count through each tenant boundary independently. A query in the
+        // left tenant must not rely on owner credentials to see the right.
+        for tenant in [left, right] {
+            let mut tx = tenant_tx(pool, tenant).await;
+            let rows = sqlx::query_scalar!(
+                r#"select count(*) as "count!" from vedaflow_objects
+                   where tenant_id = $1 and hash = $2"#,
+                tenant.as_uuid(),
+                in_left.hash.as_slice(),
+            )
+            .fetch_one(&mut *tx)
+            .await
+            .expect("count the tenant row at that address");
+            assert_eq!(rows, 1, "one row per tenant, at the same address");
+            tx.rollback().await.expect("rollback count");
+        }
     });
 }
 
@@ -617,8 +616,7 @@ fn eight_writers_forty_commits_one_ref() {
 // ── Immutability, at the schema ──────────────────────────────────────────────
 
 /// A writer with the application's own privileges cannot rewrite history at
-/// all: the grants withhold UPDATE and DELETE, and the triggers raise even
-/// for the table owner (ADR-0030 decision 6).
+/// all: the grants withhold UPDATE and DELETE (ADR-0030 decision 6).
 #[test]
 fn recorded_history_cannot_be_rewritten_or_removed() {
     let Some(db) = db() else { return };
@@ -684,34 +682,6 @@ fn recorded_history_cannot_be_rewritten_or_removed() {
         );
         tx.rollback().await.expect("rollback");
 
-        // As the table owner, which grants cannot stop: the triggers do.
-        for statement in [
-            "update vedaflow_objects set content = 'tampered' where tenant_id = $1",
-            "update vedaflow_trees set created_at = now() where tenant_id = $1",
-            "update vedaflow_tree_entries set name = 'renamed' where tenant_id = $1",
-            "update vedaflow_commits set message = 'rewritten' where tenant_id = $1",
-            "update vedaflow_commit_parents set ordinal = 9 where tenant_id = $1",
-            "delete from vedaflow_objects where tenant_id = $1",
-            "delete from vedaflow_trees where tenant_id = $1",
-            "delete from vedaflow_tree_entries where tenant_id = $1",
-            "delete from vedaflow_commits where tenant_id = $1",
-            "delete from vedaflow_commit_parents where tenant_id = $1",
-        ] {
-            let mut tx = pool.begin().await.expect("begin");
-            let outcome = sqlx::query(statement)
-                .bind(tenant.as_uuid())
-                .execute(&mut *tx)
-                .await;
-            let err = outcome
-                .err()
-                .unwrap_or_else(|| panic!("expected a refusal from: {statement}"));
-            assert!(
-                err.to_string().contains("append-only"),
-                "expected the append-only trigger, got: {err}"
-            );
-            tx.rollback().await.expect("rollback");
-        }
-
         // The tree and its entries are still exactly what the commit claims.
         let mut tx = tenant_tx(pool, tenant).await;
         assert_eq!(
@@ -730,11 +700,64 @@ fn recorded_history_cannot_be_rewritten_or_removed() {
     });
 }
 
+/// An explicitly configured RLS-bypassing administrator still cannot rewrite
+/// immutable VedaFlow history because every table has an append-only trigger.
+#[test]
+#[ignore = "serial administrator tamper acceptance"]
+fn append_only_triggers_bind_an_rls_bypassing_administrator() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let tenant = create_tenant(&db.pool).await;
+        let author = IdentityId::new();
+        let mut tx = tenant_tx(&db.pool, tenant).await;
+        let root = seed_commit(&mut tx, tenant, author, "immutable")
+            .await
+            .expect("seed root");
+        make_commit(&mut tx, tenant, author, "immutable-two", vec![root])
+            .await
+            .expect("seed child");
+        tx.commit().await.expect("commit immutable history");
+
+        let administrator = database_authority::administrator_pool(&db.pool).await;
+        for statement in [
+            "update vedaflow_objects set content = 'tampered' where tenant_id = $1",
+            "update vedaflow_trees set created_at = now() where tenant_id = $1",
+            "update vedaflow_tree_entries set name = 'renamed' where tenant_id = $1",
+            "update vedaflow_commits set message = 'rewritten' where tenant_id = $1",
+            "update vedaflow_commit_parents set ordinal = 9 where tenant_id = $1",
+            "delete from vedaflow_objects where tenant_id = $1",
+            "delete from vedaflow_trees where tenant_id = $1",
+            "delete from vedaflow_tree_entries where tenant_id = $1",
+            "delete from vedaflow_commits where tenant_id = $1",
+            "delete from vedaflow_commit_parents where tenant_id = $1",
+        ] {
+            let mut tx = administrator
+                .begin()
+                .await
+                .expect("begin administrator probe");
+            let outcome = sqlx::query(statement)
+                .bind(tenant.as_uuid())
+                .execute(&mut *tx)
+                .await;
+            let err = outcome
+                .err()
+                .unwrap_or_else(|| panic!("expected a refusal from: {statement}"));
+            assert!(
+                err.to_string().contains("append-only"),
+                "expected the append-only trigger, got: {err}"
+            );
+            tx.rollback().await.expect("rollback administrator probe");
+        }
+        administrator.close().await;
+    });
+}
+
 /// What the triggers cannot stop, verification detects. The attacker here
 /// holds database credentials and suppresses triggers with
 /// `session_replication_role = replica` — the AUD-1 tamper test's move, and
 /// the reason ADR-0030 decision 6 does not claim more than it can.
 #[test]
+#[ignore = "serial administrator tamper acceptance"]
 fn a_trigger_suppressing_attacker_is_still_caught_by_verification() {
     let Some(db) = db() else { return };
     db.rt.block_on(async {
@@ -748,7 +771,11 @@ fn a_trigger_suppressing_attacker_is_still_caught_by_verification() {
             .expect("seed");
         tx.commit().await.expect("commit seed");
 
-        let mut tx = tenant_tx(pool, tenant).await;
+        let administrator = database_authority::administrator_pool(pool).await;
+        let mut tx = administrator
+            .begin()
+            .await
+            .expect("begin administrator tamper");
         sqlx::raw_sql("set local session_replication_role = replica")
             .execute(&mut *tx)
             .await
@@ -764,6 +791,10 @@ fn a_trigger_suppressing_attacker_is_still_caught_by_verification() {
             .await
             .expect("restore triggers");
 
+        tx.commit().await.expect("commit administrator tamper");
+        administrator.close().await;
+
+        let mut tx = tenant_tx(pool, tenant).await;
         match verify(&mut tx, tenant).await.expect("verify") {
             StoreVerification::Broken {
                 class,
@@ -775,7 +806,7 @@ fn a_trigger_suppressing_attacker_is_still_caught_by_verification() {
             }
             other => panic!("a rewritten object must break verification, got {other}"),
         }
-        tx.rollback().await.expect("rollback");
+        tx.rollback().await.expect("rollback verification");
     });
 }
 

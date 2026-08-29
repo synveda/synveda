@@ -39,14 +39,12 @@ const ARCHIVE_MAGIC: &[u8; 8] = b"SVCTXEX2";
 /// better than this function guessing that an operator running
 /// `tenant key rotate` did not mean it.
 pub fn kms_from_env() -> Result<Kms, String> {
-    let Some(key) = std::env::var("SYNVEDA_KMS_KEY")
-        .ok()
-        .filter(|value| !value.trim().is_empty())
+    let Some(key) =
+        crate::init::sensitive_setting("SYNVEDA_KMS_KEY")?.filter(|value| !value.trim().is_empty())
     else {
         return Ok(Kms::Disabled);
     };
-    let key_ref = std::env::var("SYNVEDA_KMS_KEY_REF")
-        .ok()
+    let key_ref = crate::init::sensitive_setting("SYNVEDA_KMS_KEY_REF")?
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| "local:default".to_string());
     LocalKms::from_hex(&key, key_ref)

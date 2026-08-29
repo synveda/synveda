@@ -17,11 +17,14 @@
 //! `make dev-up` then `make db-test`. Isolation is by freshly minted UUIDv7
 //! tenants, so a shared dev database is fine.
 
+#[path = "support/tenant_fixture.rs"]
+mod tenant_fixture;
+
 use std::sync::OnceLock;
 
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{PgPool, Postgres, Transaction};
-use synveda_store::{idempotency, projects, repositories, scopes, tenants, workspaces};
+use synveda_store::{idempotency, projects, repositories, scopes, workspaces};
 use synveda_types::repository::{self, RepositoryProvider};
 use synveda_types::scope::ScopeKind;
 use synveda_types::workspace::LifecycleStatus;
@@ -57,7 +60,7 @@ fn db() -> Option<&'static Db> {
                 .connect(&url)
                 .await
                 .expect("connect to DATABASE_URL");
-            synveda_store::migrate(&pool)
+            synveda_store::epoch::verify(&pool)
                 .await
                 .expect("apply migrations");
             pool
@@ -72,14 +75,14 @@ fn db() -> Option<&'static Db> {
 async fn admit(pool: &PgPool) -> TenantId {
     let tenant = TenantId::new();
     let slug = format!("wsp-{}", tenant.as_uuid().simple());
-    tenants::create(pool, tenant, &slug, "CPR-4 fixture", TenantStatus::Active)
+    tenant_fixture::create(pool, tenant, &slug, "CPR-4 fixture", TenantStatus::Active)
         .await
         .expect("admit tenant");
     tenant
 }
 
-async fn begin(pool: &PgPool) -> Transaction<'static, Postgres> {
-    pool.begin().await.expect("begin transaction")
+async fn begin(pool: &PgPool, tenant: TenantId) -> Transaction<'static, Postgres> {
+    tenant_fixture::begin(pool, tenant).await
 }
 
 async fn new_workspace(
@@ -124,24 +127,30 @@ async fn new_project(
 
 /// Counts scopes of a kind in a tenant. The orphan checks read this.
 async fn scope_count(pool: &PgPool, tenant: TenantId, kind: ScopeKind) -> i64 {
-    sqlx::query_scalar!(
+    let mut tx = tenant_fixture::begin(pool, tenant).await;
+    let count = sqlx::query_scalar!(
         r#"select count(*) as "count!" from scopes where tenant_id = $1 and kind = $2"#,
         tenant.as_uuid(),
         kind.as_str(),
     )
-    .fetch_one(pool)
+    .fetch_one(&mut *tx)
     .await
-    .expect("count scopes")
+    .expect("count scopes");
+    tx.commit().await.expect("commit scope count");
+    count
 }
 
 async fn workspace_count(pool: &PgPool, tenant: TenantId) -> i64 {
-    sqlx::query_scalar!(
+    let mut tx = tenant_fixture::begin(pool, tenant).await;
+    let count = sqlx::query_scalar!(
         r#"select count(*) as "count!" from workspaces where tenant_id = $1"#,
         tenant.as_uuid(),
     )
-    .fetch_one(pool)
+    .fetch_one(&mut *tx)
     .await
-    .expect("count workspaces")
+    .expect("count workspaces");
+    tx.commit().await.expect("commit workspace count");
+    count
 }
 
 // ── Creation, and the scope it mints ─────────────────────────────────────────
@@ -153,15 +162,17 @@ fn a_workspace_and_a_project_mint_the_scopes_the_model_claims() {
     let Some(db) = db() else { return };
     db.rt.block_on(async {
         let tenant = admit(&db.pool).await;
+        let mut tx = begin(&db.pool, tenant).await;
         assert!(
-            scopes::tenant_root(&db.pool, tenant)
+            scopes::tenant_root(&mut *tx, tenant)
                 .await
                 .expect("read root")
                 .is_none(),
             "a fresh tenant has no scope tree: nobody has been asked to declare one"
         );
+        tx.commit().await.expect("commit empty-tree read");
 
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, tenant).await;
         let workspace = new_workspace(&mut tx, tenant, "payments")
             .await
             .expect("create workspace");
@@ -170,13 +181,14 @@ fn a_workspace_and_a_project_mint_the_scopes_the_model_claims() {
             .expect("create project");
         tx.commit().await.expect("commit");
 
-        let root = scopes::tenant_root(&db.pool, tenant)
+        let mut tx = begin(&db.pool, tenant).await;
+        let root = scopes::tenant_root(&mut *tx, tenant)
             .await
             .expect("read root")
             .expect("the first workspace minted the tenant root");
         assert_eq!(root.kind, ScopeKind::Tenant);
 
-        let workspace_scope = scopes::get(&db.pool, tenant, workspace.scope_id)
+        let workspace_scope = scopes::get(&mut *tx, tenant, workspace.scope_id)
             .await
             .expect("read scope")
             .expect("the workspace's scope exists");
@@ -187,7 +199,7 @@ fn a_workspace_and_a_project_mint_the_scopes_the_model_claims() {
             "the workspace and its scope are one name, held together by a foreign key"
         );
 
-        let project_scope = scopes::get(&db.pool, tenant, project.scope_id)
+        let project_scope = scopes::get(&mut *tx, tenant, project.scope_id)
             .await
             .expect("read scope")
             .expect("the project's scope exists");
@@ -199,12 +211,13 @@ fn a_workspace_and_a_project_mint_the_scopes_the_model_claims() {
         );
 
         assert_eq!(
-            scopes::path(&db.pool, tenant, project.scope_id)
+            scopes::path(&mut *tx, tenant, project.scope_id)
                 .await
                 .expect("path"),
             Some(format!("{}/payments/ledger", root.slug)),
             "the scope path reads as the product nouns do"
         );
+        tx.commit().await.expect("commit scope-tree reads");
     });
 }
 
@@ -216,7 +229,7 @@ fn a_failed_creation_leaves_no_orphan_scope_and_no_orphan_subtype() {
     let Some(db) = db() else { return };
     db.rt.block_on(async {
         let tenant = admit(&db.pool).await;
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, tenant).await;
         new_workspace(&mut tx, tenant, "payments")
             .await
             .expect("first workspace");
@@ -225,7 +238,7 @@ fn a_failed_creation_leaves_no_orphan_scope_and_no_orphan_subtype() {
         let before_scopes = scope_count(&db.pool, tenant, ScopeKind::Workspace).await;
         let before_rows = workspace_count(&db.pool, tenant).await;
 
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, tenant).await;
         let error = new_workspace(&mut tx, tenant, "payments")
             .await
             .expect_err("a duplicate slug is refused");
@@ -248,7 +261,7 @@ fn a_failed_project_leaves_no_orphan_scope() {
     let Some(db) = db() else { return };
     db.rt.block_on(async {
         let tenant = admit(&db.pool).await;
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, tenant).await;
         let workspace = new_workspace(&mut tx, tenant, "payments")
             .await
             .expect("workspace");
@@ -258,7 +271,7 @@ fn a_failed_project_leaves_no_orphan_scope() {
         tx.commit().await.expect("commit");
 
         let before = scope_count(&db.pool, tenant, ScopeKind::Project).await;
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, tenant).await;
         let error = new_project(&mut tx, tenant, workspace.id, "ledger")
             .await
             .expect_err("a duplicate slug is refused");
@@ -280,7 +293,7 @@ fn project_slugs_are_scoped_to_their_workspace() {
     let Some(db) = db() else { return };
     db.rt.block_on(async {
         let tenant = admit(&db.pool).await;
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, tenant).await;
         let one = new_workspace(&mut tx, tenant, "one").await.expect("one");
         let two = new_workspace(&mut tx, tenant, "two").await.expect("two");
         new_project(&mut tx, tenant, one.id, "ledger")
@@ -291,17 +304,19 @@ fn project_slugs_are_scoped_to_their_workspace() {
             .expect("ledger in two is a different project");
         tx.commit().await.expect("commit");
 
+        let mut tx = begin(&db.pool, tenant).await;
         assert_eq!(
-            projects::in_workspace(&db.pool, tenant, one.id)
+            projects::in_workspace(&mut *tx, tenant, one.id)
                 .await
                 .expect("list")
                 .len(),
             1
         );
         assert_eq!(
-            projects::list(&db.pool, tenant).await.expect("list").len(),
+            projects::list(&mut *tx, tenant).await.expect("list").len(),
             2
         );
+        tx.commit().await.expect("commit project reads");
     });
 }
 
@@ -312,7 +327,7 @@ fn an_archived_workspace_takes_no_new_projects() {
     let Some(db) = db() else { return };
     db.rt.block_on(async {
         let tenant = admit(&db.pool).await;
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, tenant).await;
         let workspace = new_workspace(&mut tx, tenant, "payments")
             .await
             .expect("workspace");
@@ -343,7 +358,7 @@ fn archiving_a_subtype_archives_the_scope_it_owns() {
     let Some(db) = db() else { return };
     db.rt.block_on(async {
         let tenant = admit(&db.pool).await;
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, tenant).await;
         let workspace = new_workspace(&mut tx, tenant, "payments")
             .await
             .expect("workspace");
@@ -364,15 +379,17 @@ fn archiving_a_subtype_archives_the_scope_it_owns() {
         .expect("archive the project");
         tx.commit().await.expect("commit");
 
-        let scope = scopes::get(&db.pool, tenant, project.scope_id)
+        let mut tx = begin(&db.pool, tenant).await;
+        let scope = scopes::get(&mut *tx, tenant, project.scope_id)
             .await
             .expect("read scope")
             .expect("scope");
         assert_eq!(scope.status, synveda_types::scope::ScopeStatus::Archived);
+        tx.commit().await.expect("commit archived-scope read");
 
         // And back again — a retirement that could not be undone would be a
         // delete with a nicer name.
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, tenant).await;
         projects::update(
             &mut tx,
             tenant,
@@ -386,11 +403,13 @@ fn archiving_a_subtype_archives_the_scope_it_owns() {
         .await
         .expect("restore");
         tx.commit().await.expect("commit");
-        let scope = scopes::get(&db.pool, tenant, project.scope_id)
+        let mut tx = begin(&db.pool, tenant).await;
+        let scope = scopes::get(&mut *tx, tenant, project.scope_id)
             .await
             .expect("read scope")
             .expect("scope");
         assert_eq!(scope.status, synveda_types::scope::ScopeStatus::Active);
+        tx.commit().await.expect("commit active-scope read");
     });
 }
 
@@ -403,7 +422,7 @@ fn a_stale_revision_is_refused_and_writes_nothing() {
     let Some(db) = db() else { return };
     db.rt.block_on(async {
         let tenant = admit(&db.pool).await;
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, tenant).await;
         let workspace = new_workspace(&mut tx, tenant, "payments")
             .await
             .expect("workspace");
@@ -411,7 +430,7 @@ fn a_stale_revision_is_refused_and_writes_nothing() {
         assert_eq!(workspace.revision, 1, "a fresh subtype is at revision 1");
 
         // Two readers see revision 1. The first writes.
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, tenant).await;
         let first = workspaces::update(
             &mut tx,
             tenant,
@@ -428,7 +447,7 @@ fn a_stale_revision_is_refused_and_writes_nothing() {
         assert_eq!(first.revision, 2);
 
         // The second still holds revision 1.
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, tenant).await;
         let error = workspaces::update(
             &mut tx,
             tenant,
@@ -450,7 +469,8 @@ fn a_stale_revision_is_refused_and_writes_nothing() {
         );
         tx.rollback().await.expect("rollback");
 
-        let current = workspaces::get(&db.pool, tenant, workspace.id)
+        let mut tx = begin(&db.pool, tenant).await;
+        let current = workspaces::get(&mut *tx, tenant, workspace.id)
             .await
             .expect("read")
             .expect("workspace");
@@ -459,6 +479,7 @@ fn a_stale_revision_is_refused_and_writes_nothing() {
             current.revision, 2,
             "a refused update does not bump anything"
         );
+        tx.commit().await.expect("commit current-workspace read");
     });
 }
 
@@ -470,7 +491,7 @@ fn another_tenants_subtype_is_absent_rather_than_conflicting() {
     db.rt.block_on(async {
         let mine = admit(&db.pool).await;
         let theirs = admit(&db.pool).await;
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, theirs).await;
         let workspace = new_workspace(&mut tx, theirs, "payments")
             .await
             .expect("their workspace");
@@ -479,38 +500,40 @@ fn another_tenants_subtype_is_absent_rather_than_conflicting() {
             .expect("their project");
         tx.commit().await.expect("commit");
 
+        let mut tx = begin(&db.pool, mine).await;
         assert!(
-            workspaces::get(&db.pool, mine, workspace.id)
+            workspaces::get(&mut *tx, mine, workspace.id)
                 .await
                 .expect("read")
                 .is_none()
         );
         assert!(
-            projects::get(&db.pool, mine, project.id)
+            projects::get(&mut *tx, mine, project.id)
                 .await
                 .expect("read")
                 .is_none()
         );
         assert!(
-            workspaces::list(&db.pool, mine)
+            workspaces::list(&mut *tx, mine)
                 .await
                 .expect("list")
                 .is_empty()
         );
         assert!(
-            projects::in_workspace(&db.pool, mine, workspace.id)
+            projects::in_workspace(&mut *tx, mine, workspace.id)
                 .await
                 .expect("list")
                 .is_empty()
         );
         assert!(
-            repositories::for_project(&db.pool, mine, project.id)
+            repositories::for_project(&mut *tx, mine, project.id)
                 .await
                 .expect("list")
                 .is_empty()
         );
+        tx.commit().await.expect("commit cross-tenant reads");
 
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, mine).await;
         let error = workspaces::update(
             &mut tx,
             mine,
@@ -537,7 +560,7 @@ fn an_empty_update_is_refused() {
     let Some(db) = db() else { return };
     db.rt.block_on(async {
         let tenant = admit(&db.pool).await;
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, tenant).await;
         let workspace = new_workspace(&mut tx, tenant, "payments")
             .await
             .expect("workspace");
@@ -561,7 +584,7 @@ fn a_description_can_be_set_cleared_and_left_alone() {
     let Some(db) = db() else { return };
     db.rt.block_on(async {
         let tenant = admit(&db.pool).await;
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, tenant).await;
         let workspace = workspaces::create(
             &mut tx,
             &workspaces::NewWorkspace {
@@ -634,7 +657,7 @@ fn the_structural_rules_hold_against_direct_sql() {
     let Some(db) = db() else { return };
     db.rt.block_on(async {
         let tenant = admit(&db.pool).await;
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, tenant).await;
         let workspace = new_workspace(&mut tx, tenant, "payments")
             .await
             .expect("workspace");
@@ -645,7 +668,7 @@ fn the_structural_rules_hold_against_direct_sql() {
 
         // A workspace cannot point at a scope of the wrong shape: the composite
         // key has no referent for (tenant, project scope, 'workspace', slug).
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, tenant).await;
         let wrong_shape = sqlx::query(
             "insert into workspaces (id, tenant_id, scope_id, scope_kind, slug, display_name)
              values ($1, $2, $3, 'workspace', $4, 'Forged')",
@@ -663,7 +686,7 @@ fn the_structural_rules_hold_against_direct_sql() {
         tx.rollback().await.expect("rollback");
 
         // The slug and the scope's slug are one name.
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, tenant).await;
         let disagreeing_slug = sqlx::query(
             "insert into workspaces (id, tenant_id, scope_id, scope_kind, slug, display_name)
              values ($1, $2, $3, 'workspace', 'something-else', 'Forged')",
@@ -682,7 +705,7 @@ fn the_structural_rules_hold_against_direct_sql() {
         // A revision cannot be rewound or skipped — the precondition would be
         // worth nothing if it could.
         for revision in [1_i64, 3, 7] {
-            let mut tx = begin(&db.pool).await;
+            let mut tx = begin(&db.pool, tenant).await;
             let result = sqlx::query("update workspaces set revision = $2 where id = $1")
                 .bind(workspace.id.as_uuid())
                 .bind(revision)
@@ -696,7 +719,7 @@ fn the_structural_rules_hold_against_direct_sql() {
         }
 
         // A project never moves between workspaces.
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, tenant).await;
         let other = new_workspace(&mut tx, tenant, "other")
             .await
             .expect("second workspace");
@@ -724,7 +747,7 @@ fn a_projects_scope_cannot_leave_its_workspace() {
     let Some(db) = db() else { return };
     db.rt.block_on(async {
         let tenant = admit(&db.pool).await;
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, tenant).await;
         let one = new_workspace(&mut tx, tenant, "one").await.expect("one");
         let two = new_workspace(&mut tx, tenant, "two").await.expect("two");
         let project = new_project(&mut tx, tenant, one.id, "ledger")
@@ -732,7 +755,7 @@ fn a_projects_scope_cannot_leave_its_workspace() {
             .expect("project");
         tx.commit().await.expect("commit");
 
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, tenant).await;
         let moved = scopes::move_scope(&mut tx, tenant, project.scope_id, two.scope_id).await;
         assert!(
             moved.is_err(),
@@ -740,11 +763,13 @@ fn a_projects_scope_cannot_leave_its_workspace() {
         );
         tx.rollback().await.expect("rollback");
 
-        let scope = scopes::get(&db.pool, tenant, project.scope_id)
+        let mut tx = begin(&db.pool, tenant).await;
+        let scope = scopes::get(&mut *tx, tenant, project.scope_id)
             .await
             .expect("read")
             .expect("scope");
         assert_eq!(scope.parent_scope_id, Some(one.scope_id));
+        tx.commit().await.expect("commit project-scope read");
     });
 }
 
@@ -759,8 +784,9 @@ async fn attach(
     name: Option<&str>,
 ) -> Result<synveda_types::repository::ProjectRepository> {
     let identity = repository::identify(remote, fingerprint, name, None)?;
-    repositories::attach(
-        pool,
+    let mut tx = begin(pool, tenant).await;
+    let attached = repositories::attach(
+        &mut *tx,
         &repositories::NewRepository {
             id: synveda_types::RepositoryId::new(),
             tenant_id: tenant,
@@ -771,12 +797,14 @@ async fn attach(
             created_by: None,
         },
     )
-    .await
+    .await?;
+    tx.commit().await.expect("commit repository attachment");
+    Ok(attached)
 }
 
 async fn seeded_project(pool: &PgPool) -> (TenantId, ProjectId) {
     let tenant = admit(pool).await;
-    let mut tx = begin(pool).await;
+    let mut tx = begin(pool, tenant).await;
     let workspace = new_workspace(&mut tx, tenant, "payments")
         .await
         .expect("workspace");
@@ -825,13 +853,15 @@ fn one_repository_written_two_ways_is_one_attachment() {
             );
         }
 
+        let mut tx = begin(&db.pool, tenant).await;
         assert_eq!(
-            repositories::for_project(&db.pool, tenant, project)
+            repositories::for_project(&mut *tx, tenant, project)
                 .await
                 .expect("list")
                 .len(),
             1
         );
+        tx.commit().await.expect("commit repository read");
     });
 }
 
@@ -856,16 +886,18 @@ fn a_filesystem_path_is_refused_before_it_reaches_a_row() {
             panic!("expected Invalid, got {error:?}");
         };
         assert!(message.contains("local_fingerprint"), "{message}");
+        let mut tx = begin(&db.pool, tenant).await;
         assert!(
-            repositories::for_project(&db.pool, tenant, project)
+            repositories::for_project(&mut *tx, tenant, project)
                 .await
                 .expect("list")
                 .is_empty()
         );
+        tx.commit().await.expect("commit empty repository read");
 
         // And the constraint behind it: a row that reached the table another
         // way still cannot hold a path.
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, tenant).await;
         let forged = sqlx::query(
             "insert into project_repositories
                 (id, tenant_id, project_id, provider, canonical_uri, repository_name)
@@ -937,16 +969,20 @@ fn detaching_is_idempotent_in_effect_and_honest_about_it() {
         )
         .await
         .expect("attach");
+        let mut tx = begin(&db.pool, tenant).await;
         assert!(
-            repositories::detach(&db.pool, tenant, project, attached.id)
+            repositories::detach(&mut *tx, tenant, project, attached.id)
                 .await
                 .expect("detach")
         );
+        tx.commit().await.expect("commit detach");
+        let mut tx = begin(&db.pool, tenant).await;
         assert!(
-            !repositories::detach(&db.pool, tenant, project, attached.id)
+            !repositories::detach(&mut *tx, tenant, project, attached.id)
                 .await
                 .expect("detach again")
         );
+        tx.commit().await.expect("commit repeated detach");
     });
 }
 
@@ -958,7 +994,7 @@ fn a_repository_handle_is_scoped_to_its_project() {
     let Some(db) = db() else { return };
     db.rt.block_on(async {
         let tenant = admit(&db.pool).await;
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, tenant).await;
         let workspace = new_workspace(&mut tx, tenant, "payments")
             .await
             .expect("workspace");
@@ -981,19 +1017,21 @@ fn a_repository_handle_is_scoped_to_its_project() {
         .await
         .expect("attach");
 
+        let mut tx = begin(&db.pool, tenant).await;
         assert!(
-            repositories::get(&db.pool, tenant, two.id, attached.id)
+            repositories::get(&mut *tx, tenant, two.id, attached.id)
                 .await
                 .expect("read")
                 .is_none(),
             "another project's attachment must read as absent"
         );
         assert!(
-            !repositories::detach(&db.pool, tenant, two.id, attached.id)
+            !repositories::detach(&mut *tx, tenant, two.id, attached.id)
                 .await
                 .expect("detach"),
             "another project's attachment must not be detachable"
         );
+        tx.commit().await.expect("commit scoped repository checks");
     });
 }
 
@@ -1004,7 +1042,7 @@ fn two_projects_may_be_about_the_same_repository() {
     let Some(db) = db() else { return };
     db.rt.block_on(async {
         let tenant = admit(&db.pool).await;
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, tenant).await;
         let workspace = new_workspace(&mut tx, tenant, "payments")
             .await
             .expect("workspace");
@@ -1041,8 +1079,9 @@ fn an_idempotency_record_remembers_one_request() {
     db.rt.block_on(async {
         let tenant = admit(&db.pool).await;
         let resource = ScopeId::new().as_uuid();
+        let mut tx = begin(&db.pool, tenant).await;
         idempotency::remember(
-            &db.pool,
+            &mut *tx,
             tenant,
             "sam",
             "workspace.create",
@@ -1052,18 +1091,22 @@ fn an_idempotency_record_remembers_one_request() {
         )
         .await
         .expect("remember");
+        tx.commit().await.expect("commit idempotency record");
 
-        let found = idempotency::find(&db.pool, tenant, "sam", "workspace.create", "k-1")
+        let mut tx = begin(&db.pool, tenant).await;
+        let found = idempotency::find(&mut *tx, tenant, "sam", "workspace.create", "k-1")
             .await
             .expect("find")
             .expect("record");
         assert_eq!(found.resource_id, resource);
         assert_eq!(found.request_digest, vec![1u8; 32]);
+        tx.commit().await.expect("commit idempotency read");
 
         // The same key again is refused at the primary key — which is what the
         // gateway turns into a replay.
+        let mut tx = begin(&db.pool, tenant).await;
         let again = idempotency::remember(
-            &db.pool,
+            &mut *tx,
             tenant,
             "sam",
             "workspace.create",
@@ -1073,11 +1116,13 @@ fn an_idempotency_record_remembers_one_request() {
         )
         .await;
         assert!(matches!(again, Err(Error::Conflict { .. })), "{again:?}");
+        drop(tx);
 
         // A different subject's identical key is a different record: a key is a
         // token a client mints for itself, with no coordination.
+        let mut tx = begin(&db.pool, tenant).await;
         idempotency::remember(
-            &db.pool,
+            &mut *tx,
             tenant,
             "alex",
             "workspace.create",
@@ -1087,10 +1132,12 @@ fn an_idempotency_record_remembers_one_request() {
         )
         .await
         .expect("another subject's key is its own");
+        tx.commit().await.expect("commit other-subject record");
 
         // And a different operation's, likewise.
+        let mut tx = begin(&db.pool, tenant).await;
         idempotency::remember(
-            &db.pool,
+            &mut *tx,
             tenant,
             "sam",
             "project.create",
@@ -1100,13 +1147,16 @@ fn an_idempotency_record_remembers_one_request() {
         )
         .await
         .expect("another operation's key is its own");
+        tx.commit().await.expect("commit other-operation record");
 
+        let mut tx = begin(&db.pool, tenant).await;
         assert!(
-            idempotency::find(&db.pool, tenant, "sam", "workspace.create", "k-2")
+            idempotency::find(&mut *tx, tenant, "sam", "workspace.create", "k-2")
                 .await
                 .expect("find")
                 .is_none()
         );
+        tx.commit().await.expect("commit missing-idempotency read");
     });
 }
 
@@ -1117,8 +1167,9 @@ fn a_malformed_digest_is_refused_as_a_defect() {
     let Some(db) = db() else { return };
     db.rt.block_on(async {
         let tenant = admit(&db.pool).await;
+        let mut tx = begin(&db.pool, tenant).await;
         let error = idempotency::remember(
-            &db.pool,
+            &mut *tx,
             tenant,
             "sam",
             "workspace.create",

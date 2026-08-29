@@ -15,12 +15,15 @@
 //! `make dev-up` then `make db-test`. Isolation is by freshly minted UUIDv7
 //! tenants, so a shared dev database is fine.
 
+#[path = "support/tenant_fixture.rs"]
+mod tenant_fixture;
+
 use std::sync::OnceLock;
 
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 use synveda_store::directory::UserAttributes;
-use synveda_store::{directory, directory_sync, rls, tenants};
+use synveda_store::{directory, directory_sync, rls};
 use synveda_types::{DirectoryUserId, TenantId, TenantStatus};
 
 const DIRECTORY_SOURCE: &str = "entra";
@@ -57,7 +60,7 @@ fn db() -> Option<&'static Db> {
                 .connect(&url)
                 .await
                 .expect("connect to DATABASE_URL");
-            synveda_store::migrate(&pool)
+            synveda_store::epoch::verify(&pool)
                 .await
                 .expect("apply migrations");
             pool
@@ -71,7 +74,7 @@ fn db() -> Option<&'static Db> {
 async fn seed(pool: &PgPool, count: usize) -> (TenantId, Vec<DirectoryUserId>) {
     let tenant = TenantId::new();
     let slug = format!("sync-{}", tenant.as_uuid().simple());
-    tenants::create(pool, tenant, &slug, "sync fixture", TenantStatus::Active)
+    tenant_fixture::create(pool, tenant, &slug, "sync fixture", TenantStatus::Active)
         .await
         .expect("create tenant");
     let mut tx = rls::begin_tenant_tx(pool, tenant)

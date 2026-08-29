@@ -36,7 +36,7 @@ use axum::http::{Request, StatusCode};
 use metrics_exporter_prometheus::PrometheusHandle;
 use serde_json::Value;
 use sqlx::postgres::PgPoolOptions;
-use synveda_gateway::app::{AppState, router};
+use synveda_gateway::app::{AppState, behavior_test_router as router};
 use synveda_gateway::{openapi, routes, telemetry};
 use synveda_identity::Hs256Verifier;
 use tower::ServiceExt;

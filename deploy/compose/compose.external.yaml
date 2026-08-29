@@ -2,6 +2,9 @@
 # boundaries while the base services continue to consume the same mounted
 # database and issuer contracts used by bundled mode.
 services:
+  database-preflight:
+    labels:
+      com.synveda.postgres.provider: ${SYNVEDA_POSTGRES_MODE:?set SYNVEDA_POSTGRES_MODE}
   migrate:
     labels:
       com.synveda.postgres.provider: ${SYNVEDA_POSTGRES_MODE:?set SYNVEDA_POSTGRES_MODE}

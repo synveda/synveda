@@ -8,10 +8,13 @@ use std::collections::HashMap;
 use std::ffi::OsString;
 use std::io::Read as _;
 use std::path::Path;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use sqlx::postgres::PgPoolOptions;
 use synveda_identity::directory::DirectoryConnector;
 use synveda_types::TenantId;
+use tokio::sync::watch;
 
 const MAX_SETTING_FILE_BYTES: u64 = 1_048_576;
 
@@ -25,6 +28,272 @@ pub fn setting(name: &str) -> Result<Option<String>, String> {
 /// Reads a required direct/file setting.
 pub fn required_setting(name: &str) -> Result<String, String> {
     setting(name)?.ok_or_else(|| format!("{name} or {name}_FILE must be set"))
+}
+
+/// Reads the provider-neutral database role contract shared by gateway,
+/// worker, migrator and deployment preflight.
+pub fn database_roles() -> Result<synveda_store::runtime_role::DatabaseRoles, String> {
+    let value = required_setting("SYNVEDA_DATABASE_ROLES")?;
+    if value.len() > 4_096 {
+        return Err("SYNVEDA_DATABASE_ROLES exceeds the 4096 byte startup bound".to_owned());
+    }
+    let roles = synveda_store::runtime_role::DatabaseRoles::parse_json(&value)
+        .map_err(|error| error.to_string())?;
+    let required_peer = setting("SYNVEDA_DATABASE_REQUIRED_PEER")?;
+    validate_required_database_peer(&roles, required_peer.as_deref())?;
+    Ok(roles)
+}
+
+fn validate_required_database_peer(
+    roles: &synveda_store::runtime_role::DatabaseRoles,
+    required_peer: Option<&str>,
+) -> Result<(), String> {
+    let Some(required_peer) = required_peer else {
+        return Ok(());
+    };
+    let peer_is_forbidden = roles
+        .forbidden_databases()
+        .iter()
+        .any(|database| database == required_peer);
+    let peer_is_isolated = roles
+        .isolated_peer_roles()
+        .iter()
+        .any(|role| role == required_peer);
+    if !peer_is_forbidden || !peer_is_isolated {
+        return Err(
+            "SYNVEDA_DATABASE_REQUIRED_PEER is absent from the configured bidirectional isolation contract"
+                .to_owned(),
+        );
+    }
+    Ok(())
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct PinnedDatabaseTarget {
+    database: String,
+    cluster_system_identifier: String,
+    database_oid: i64,
+}
+
+impl From<synveda_store::runtime_role::DatabaseIdentity> for PinnedDatabaseTarget {
+    fn from(identity: synveda_store::runtime_role::DatabaseIdentity) -> Self {
+        Self {
+            database: identity.database,
+            cluster_system_identifier: identity.cluster_system_identifier,
+            database_oid: identity.database_oid,
+        }
+    }
+}
+
+/// Content-free stage at which a strict pool hook conclusively refused a
+/// physical database connection.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PoolRefusalStage {
+    /// Effective session settings could not satisfy the product contract.
+    Session,
+    /// The selected login was not the configured runtime principal.
+    Role,
+    /// The connection selected a different writable database identity.
+    Identity,
+}
+
+/// Absorbing refusal signal paired with one runtime pool.
+///
+/// SQLx retries failed connection callbacks until the acquire deadline and
+/// consequently reports only a pool timeout. This side channel retains the
+/// first conclusive, content-free refusal so the authority sentinel can close
+/// the application plane terminally instead of treating it as an outage.
+#[derive(Clone)]
+pub struct PoolRefusal {
+    state: watch::Receiver<Option<PoolRefusalStage>>,
+    // Keep the channel live even before SQLx has cloned either callback.
+    _keepalive: watch::Sender<Option<PoolRefusalStage>>,
+}
+
+impl PoolRefusal {
+    pub(crate) fn current(&self) -> Option<PoolRefusalStage> {
+        *self.state.borrow()
+    }
+
+    pub(crate) async fn wait_until_refused(&mut self) -> PoolRefusalStage {
+        loop {
+            if let Some(stage) = *self.state.borrow_and_update() {
+                return stage;
+            }
+            if self.state.changed().await.is_err() {
+                // `_keepalive` makes sender loss unreachable through the
+                // public constructor. Fail closed if that invariant changes.
+                return PoolRefusalStage::Identity;
+            }
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn refuse_for_test(&self, stage: PoolRefusalStage) {
+        self._keepalive.send_if_modified(|current| {
+            if current.is_some() {
+                false
+            } else {
+                *current = Some(stage);
+                true
+            }
+        });
+    }
+}
+
+#[derive(Clone)]
+struct PoolRefusalWriter {
+    state: watch::Sender<Option<PoolRefusalStage>>,
+}
+
+impl PoolRefusalWriter {
+    fn refuse(&self, stage: PoolRefusalStage) {
+        self.state.send_if_modified(|current| {
+            if current.is_some() {
+                false
+            } else {
+                *current = Some(stage);
+                true
+            }
+        });
+    }
+}
+
+fn pool_refusal_pair() -> (PoolRefusalWriter, PoolRefusal) {
+    let (state, receiver) = watch::channel(None);
+    (
+        PoolRefusalWriter {
+            state: state.clone(),
+        },
+        PoolRefusal {
+            state: receiver,
+            _keepalive: state,
+        },
+    )
+}
+
+fn refused_pool_connection() -> sqlx::Error {
+    sqlx::Error::Configuration(Box::new(std::io::Error::other(
+        "runtime database connection was refused",
+    )))
+}
+
+fn classify_pool_connection_error(
+    error: synveda_types::Error,
+    stage: PoolRefusalStage,
+    refusal: &PoolRefusalWriter,
+) -> sqlx::Error {
+    if !matches!(error, synveda_types::Error::Storage { .. }) {
+        refusal.refuse(stage);
+    }
+    refused_pool_connection()
+}
+
+/// Builds the shared gateway/worker pool contract. Every physical connection
+/// is session-initialized and pinned to one writable database identity; every
+/// checkout clears tenant/maintenance state before application SQL can run.
+/// The options and refusal handle are an inseparable pair: the pool built from
+/// these options must be passed to the authority monitor with this handle.
+pub fn runtime_pool_options(
+    max_connections: u32,
+    acquire_timeout: Duration,
+    expected_principal: String,
+) -> (PgPoolOptions, PoolRefusal) {
+    let expected_principal: Arc<str> = expected_principal.into();
+    let pinned_target = Arc::new(Mutex::new(None::<PinnedDatabaseTarget>));
+    let (refusal_writer, refusal) = pool_refusal_pair();
+    let options = PgPoolOptions::new()
+        .max_connections(max_connections)
+        .acquire_timeout(acquire_timeout)
+        .after_connect({
+            let expected_principal = Arc::clone(&expected_principal);
+            let pinned_target = Arc::clone(&pinned_target);
+            let refusal_writer = refusal_writer.clone();
+            move |connection, _metadata| {
+                let expected_principal = Arc::clone(&expected_principal);
+                let pinned_target = Arc::clone(&pinned_target);
+                let refusal_writer = refusal_writer.clone();
+                Box::pin(async move {
+                    synveda_store::runtime_role::initialize_product_session_connection(connection)
+                        .await
+                        .map_err(|error| {
+                            classify_pool_connection_error(
+                                error,
+                                PoolRefusalStage::Session,
+                                &refusal_writer,
+                            )
+                        })?;
+                    synveda_store::runtime_role::verify_selected_principal_connection(
+                        connection,
+                        &expected_principal,
+                    )
+                    .await
+                    .map_err(|error| {
+                        classify_pool_connection_error(
+                            error,
+                            PoolRefusalStage::Role,
+                            &refusal_writer,
+                        )
+                    })?;
+                    let candidate =
+                        synveda_store::runtime_role::database_identity_connection(connection)
+                            .await
+                            .map(PinnedDatabaseTarget::from)
+                            .map_err(|error| {
+                                classify_pool_connection_error(
+                                    error,
+                                    PoolRefusalStage::Identity,
+                                    &refusal_writer,
+                                )
+                            })?;
+                    let mut pinned = pinned_target.lock().map_err(|_| {
+                        refusal_writer.refuse(PoolRefusalStage::Identity);
+                        refused_pool_connection()
+                    })?;
+                    match pinned.as_ref() {
+                        Some(expected) if expected != &candidate => {
+                            refusal_writer.refuse(PoolRefusalStage::Identity);
+                            return Err(refused_pool_connection());
+                        }
+                        Some(_) => {}
+                        None => *pinned = Some(candidate),
+                    }
+                    Ok(())
+                })
+            }
+        })
+        .before_acquire({
+            let expected_principal = Arc::clone(&expected_principal);
+            move |connection, _metadata| {
+                let expected_principal = Arc::clone(&expected_principal);
+                let refusal_writer = refusal_writer.clone();
+                Box::pin(async move {
+                    synveda_store::runtime_role::initialize_product_session_connection(connection)
+                        .await
+                        .map_err(|error| {
+                            classify_pool_connection_error(
+                                error,
+                                PoolRefusalStage::Session,
+                                &refusal_writer,
+                            )
+                        })?;
+                    synveda_store::runtime_role::verify_selected_principal_connection(
+                        connection,
+                        &expected_principal,
+                    )
+                    .await
+                    .map_err(|error| {
+                        classify_pool_connection_error(
+                            error,
+                            PoolRefusalStage::Role,
+                            &refusal_writer,
+                        )
+                    })?;
+                    Ok(true)
+                })
+            }
+        });
+    (options, refusal)
 }
 
 fn resolve_setting(
@@ -49,7 +318,7 @@ fn read_setting_file(name: &str, path: &Path) -> Result<String, String> {
     if path.as_os_str().is_empty() {
         return Err(format!("{name}_FILE must name a file"));
     }
-    let file = std::fs::File::open(path).map_err(|_| format!("{name}_FILE cannot be read"))?;
+    let file = open_nonblocking_read(path).map_err(|_| format!("{name}_FILE cannot be read"))?;
     let metadata = file
         .metadata()
         .map_err(|_| format!("{name}_FILE cannot be read"))?;
@@ -83,6 +352,20 @@ fn read_setting_file(name: &str, path: &Path) -> Result<String, String> {
         return Err(format!("{name}_FILE must not contain NUL bytes"));
     }
     Ok(value)
+}
+
+fn open_nonblocking_read(path: &Path) -> std::io::Result<std::fs::File> {
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        // Refuse a FIFO/device from its opened descriptor without ever
+        // waiting for a producer. Projected-secret symlinks remain valid
+        // because their target descriptor is a regular file.
+        options.custom_flags(libc::O_NONBLOCK | libc::O_CLOEXEC);
+    }
+    options.open(path)
 }
 
 /// Builds the local key-management provider from the current environment.
@@ -408,6 +691,77 @@ mod tests {
         }
     }
 
+    fn database_roles_with_topology(
+        forbidden_databases: &str,
+        isolated_peer_roles: &str,
+    ) -> synveda_store::runtime_role::DatabaseRoles {
+        let json = format!(
+            r#"{{"migrator":"migrator","gateway":"gateway","worker":"worker","administrators":["administrator"],"administrative_memberships":[],"forbidden_databases":{forbidden_databases},"isolated_peer_roles":{isolated_peer_roles}}}"#
+        );
+        synveda_store::runtime_role::DatabaseRoles::parse_json(&json)
+            .expect("parse database role fixture")
+    }
+
+    #[tokio::test]
+    async fn pool_refusal_retains_the_first_terminal_stage() {
+        let (writer, mut refusal) = pool_refusal_pair();
+        assert_eq!(refusal.current(), None);
+
+        writer.refuse(PoolRefusalStage::Session);
+        assert_eq!(
+            refusal.wait_until_refused().await,
+            PoolRefusalStage::Session
+        );
+
+        writer.refuse(PoolRefusalStage::Identity);
+        drop(writer);
+        assert_eq!(refusal.current(), Some(PoolRefusalStage::Session));
+    }
+
+    #[test]
+    fn only_non_storage_hook_errors_publish_a_terminal_refusal() {
+        let (writer, refusal) = pool_refusal_pair();
+        let _ = classify_pool_connection_error(
+            synveda_types::Error::Storage {
+                message: "transient fixture".to_owned(),
+            },
+            PoolRefusalStage::Session,
+            &writer,
+        );
+        assert_eq!(refusal.current(), None);
+
+        let _ = classify_pool_connection_error(
+            synveda_types::Error::Invalid {
+                message: "terminal fixture".to_owned(),
+            },
+            PoolRefusalStage::Role,
+            &writer,
+        );
+        assert_eq!(refusal.current(), Some(PoolRefusalStage::Role));
+    }
+
+    #[test]
+    fn required_database_peer_must_be_bidirectional() {
+        let exact = database_roles_with_topology(
+            r#"["keycloak","postgres","template1"]"#,
+            r#"["keycloak"]"#,
+        );
+        validate_required_database_peer(&exact, Some("keycloak"))
+            .expect("accept exact bidirectional peer");
+        validate_required_database_peer(&exact, None).expect("peer is optional");
+
+        for one_sided in [
+            database_roles_with_topology(r#"["postgres","template1"]"#, r#"["keycloak"]"#),
+            database_roles_with_topology(r#"["keycloak","postgres","template1"]"#, r#"[]"#),
+        ] {
+            assert_eq!(
+                validate_required_database_peer(&one_sided, Some("keycloak"))
+                    .expect_err("one-sided peer must be refused"),
+                "SYNVEDA_DATABASE_REQUIRED_PEER is absent from the configured bidirectional isolation contract"
+            );
+        }
+    }
+
     #[test]
     fn a_pull_sync_needs_a_statically_bound_issuer() {
         let mut claim_bound = issuer(synveda_identity::TenantBinding::Claim {
@@ -536,5 +890,56 @@ mod tests {
             .expect_err("oversized setting is refused");
         let _ = std::fs::remove_file(path);
         assert!(refused.contains("startup bound"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn file_settings_refuse_a_fifo_without_waiting_for_a_writer() {
+        let path = std::env::temp_dir().join(format!(
+            "synveda-setting-fifo-{}-{}",
+            std::process::id(),
+            synveda_types::CaptureBatchId::new()
+        ));
+        let status = std::process::Command::new("mkfifo")
+            .arg(&path)
+            .status()
+            .expect("create FIFO fixture");
+        assert!(status.success(), "mkfifo failed");
+
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let thread_path = path.clone();
+        std::thread::spawn(move || {
+            let _ = sender.send(read_setting_file("SYNVEDA_TEST_SECRET", &thread_path));
+        });
+        let result = receiver
+            .recv_timeout(Duration::from_secs(2))
+            .expect("FIFO path blocked the runtime configuration boundary");
+        let error = result.expect_err("FIFO must not be accepted as a setting file");
+        assert!(error.contains("regular file"), "{error}");
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn file_settings_accept_a_projected_secret_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let stem = format!(
+            "synveda-setting-projected-{}-{}",
+            std::process::id(),
+            synveda_types::CaptureBatchId::new()
+        );
+        let directory = std::env::temp_dir().join(stem);
+        std::fs::create_dir_all(&directory).expect("create projected-secret fixture");
+        let target = directory.join("..data-secret");
+        let path = directory.join("secret");
+        std::fs::write(&target, b"SYNVEDA_SECRET_SENTINEL\n")
+            .expect("write projected-secret target");
+        symlink(&target, &path).expect("link projected-secret path");
+        assert_eq!(
+            read_setting_file("SYNVEDA_TEST_SECRET", &path).expect("read projected secret"),
+            "SYNVEDA_SECRET_SENTINEL"
+        );
+        let _ = std::fs::remove_dir_all(directory);
     }
 }

@@ -25,6 +25,7 @@ use tower_http::trace::TraceLayer;
 use tracing_opentelemetry::OpenTelemetrySpanExt as _;
 
 use crate::auth;
+use crate::authority::AuthorityGate;
 use crate::error::ApiError;
 use crate::telemetry::{HTTP_REQUEST_DURATION_SECONDS, HTTP_REQUESTS_TOTAL};
 use crate::tenant;
@@ -196,9 +197,47 @@ fn console_routes() -> Router<AppState> {
     }
 }
 
-/// Builds the gateway router: ops-plane routes plus the authenticated `/v1`
-/// plane, wrapped in the per-request trace span and HTTP metrics middleware.
-pub fn router(state: AppState) -> Router {
+/// Builds the in-process behavior-test router.
+///
+/// The product binary uses [`governed_router`], which applies the process-owned
+/// authority gate. This explicitly named seam retains direct dependency
+/// probing for focused route and FND-5 behavior tests that do not run the
+/// process supervisor. It is not a product assembly path.
+#[doc(hidden)]
+#[cfg(feature = "test-support")]
+pub fn behavior_test_router(state: AppState) -> Router {
+    let application = application_routes(&state);
+    let ops = Router::new()
+        .route("/healthz", get(healthz))
+        .route("/readyz", get(behavior_test_readyz))
+        .route("/metrics", get(render_metrics));
+    finish_router(state, application, ops)
+}
+
+/// Builds the product router with a fail-closed database-authority gate.
+///
+/// Liveness and private metrics remain available while the gate is closed;
+/// readiness runs the same bounded serialized proof as the process sentinel;
+/// every auth, console, SCIM and `/v1` route is structurally gated.
+pub fn governed_router(state: AppState, gate: AuthorityGate) -> Router {
+    let application = application_routes(&state).route_layer(middleware::from_fn_with_state(
+        gate.clone(),
+        require_authority,
+    ));
+    let ops = Router::new()
+        .route("/healthz", get(healthz))
+        .route(
+            "/readyz",
+            get(move || {
+                let gate = gate.clone();
+                async move { governed_readyz(gate).await }
+            }),
+        )
+        .route("/metrics", get(render_metrics));
+    finish_router(state, application, ops)
+}
+
+fn application_routes(state: &AppState) -> Router<AppState> {
     // Every /v1 route sits behind tenant resolution; ops routes do not.
     // The admin planes authorize every operation through the PDP inside
     // their handlers (AUTHZ-1, ADR-0012).
@@ -207,9 +246,6 @@ pub fn router(state: AppState) -> Router {
         tenant::resolve_tenant,
     ));
     Router::new()
-        .route("/healthz", get(healthz))
-        .route("/readyz", get(readyz))
-        .route("/metrics", get(render_metrics))
         // The auth plane is unauthenticated by nature: it is how a caller
         // becomes authenticated (AUTH-1, ADR-0010). The two CLI routes
         // serve `synveda login` over the same flow (ADPT-1, ADR-0027
@@ -235,6 +271,10 @@ pub fn router(state: AppState) -> Router {
         // tenant from that credential (`synveda_identity::scim`).
         .merge(crate::scim::router(state.clone()))
         .merge(authenticated)
+}
+
+fn finish_router(state: AppState, application: Router<AppState>, ops: Router<AppState>) -> Router {
+    ops.merge(application)
         .layer(middleware::from_fn(track_http_metrics))
         // Added last so the request span is outermost and every inner span —
         // middleware included — nests under it.
@@ -244,6 +284,32 @@ pub fn router(state: AppState) -> Router {
                 .on_response(record_response),
         )
         .with_state(state)
+}
+
+async fn require_authority(
+    State(gate): State<AuthorityGate>,
+    request: Request,
+    next: Next,
+) -> Response {
+    let mut permit = gate.permit();
+    if !permit.is_open() {
+        return (StatusCode::SERVICE_UNAVAILABLE, "service unavailable").into_response();
+    }
+    let response = next.run(request);
+    tokio::pin!(response);
+    tokio::select! {
+        biased;
+        () = permit.revoked() => {
+            (StatusCode::SERVICE_UNAVAILABLE, "service unavailable").into_response()
+        }
+        response = &mut response => {
+            if permit.is_open() {
+                response
+            } else {
+                (StatusCode::SERVICE_UNAVAILABLE, "service unavailable").into_response()
+            }
+        }
+    }
 }
 
 /// Liveness: the process is up. No dependencies touched.
@@ -262,18 +328,41 @@ async fn healthz() -> &'static str {
 /// boot would therefore be a check a database could arrive after. Answering it
 /// per probe costs one single-row select and closes that window: nothing that
 /// routes on readiness sends traffic to a gateway sitting on the wrong epoch.
-async fn readyz(State(state): State<AppState>) -> Response {
+#[cfg(feature = "test-support")]
+async fn behavior_test_readyz(State(state): State<AppState>) -> Response {
     if let Err(err) = synveda_retrieval::readiness(&state.pool).await {
         tracing::error!(error = %err, "readiness check failed");
         // The detail is in the trace and the log; the body stays generic.
         return (StatusCode::SERVICE_UNAVAILABLE, "not ready").into_response();
     }
-    match synveda_store::epoch::verify(&state.pool).await {
+    if let Err(err) = synveda_store::epoch::verify(&state.pool).await {
+        tracing::error!(error = %err, "readiness check failed: schema epoch");
+        return (StatusCode::SERVICE_UNAVAILABLE, "not ready").into_response();
+    }
+    match synveda_store::runtime_role::database_identity(&state.pool).await {
         Ok(_) => (StatusCode::OK, "ready").into_response(),
         Err(err) => {
-            tracing::error!(error = %err, "readiness check failed: schema epoch");
+            tracing::error!(error = %err, "readiness check failed: database target");
             (StatusCode::SERVICE_UNAVAILABLE, "not ready").into_response()
         }
+    }
+}
+
+#[cfg(all(test, feature = "test-support"))]
+mod assembly_tests {
+    #[test]
+    fn the_product_entrypoint_uses_only_the_governed_router() {
+        let entrypoint = include_str!("main.rs");
+        assert!(entrypoint.contains("app::governed_router"));
+        assert!(!entrypoint.contains("behavior_test_router"));
+    }
+}
+
+async fn governed_readyz(gate: AuthorityGate) -> Response {
+    if gate.is_open() {
+        (StatusCode::OK, "ready").into_response()
+    } else {
+        (StatusCode::SERVICE_UNAVAILABLE, "not ready").into_response()
     }
 }
 

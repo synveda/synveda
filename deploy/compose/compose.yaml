@@ -59,19 +59,54 @@ services:
       public-edge: {}
       app-backend: {}
 
+  database-preflight:
+    <<: *synveda-product
+    command: ["database-preflight"]
+    restart: "no"
+    mem_limit: 256m
+    cpus: 0.5
+    environment:
+      SYNVEDA_MIGRATOR_DATABASE_URL_FILE: /run/secrets/synveda_migrator_database_url
+      SYNVEDA_GATEWAY_DATABASE_URL_FILE: /run/secrets/synveda_gateway_database_url
+      SYNVEDA_WORKER_DATABASE_URL_FILE: /run/secrets/synveda_worker_database_url
+      SYNVEDA_DATABASE_ROLES_FILE: /etc/synveda/database/roles.json
+      RUST_LOG: ${RUST_LOG:-info}
+    secrets:
+      - source: synveda_migrator_database_url
+        target: synveda_migrator_database_url
+      - source: synveda_gateway_database_url
+        target: synveda_gateway_database_url
+      - source: synveda_worker_database_url
+        target: synveda_worker_database_url
+    volumes:
+      - type: bind
+        source: ${SYNVEDA_DATABASE_ROLES_FILE:?set SYNVEDA_DATABASE_ROLES_FILE}
+        target: /etc/synveda/database/roles.json
+        read_only: true
+    networks:
+      synveda-data: {}
+
   migrate:
     <<: *synveda-product
     command: ["migrate"]
     restart: "no"
+    depends_on:
+      database-preflight:
+        condition: service_completed_successfully
     environment:
       DATABASE_URL_FILE: /run/secrets/database_url
+      SYNVEDA_DATABASE_ROLES_FILE: /etc/synveda/database/roles.json
       RUST_LOG: ${RUST_LOG:-info}
     secrets:
       - source: synveda_migrator_database_url
         target: database_url
+    volumes:
+      - type: bind
+        source: ${SYNVEDA_DATABASE_ROLES_FILE}
+        target: /etc/synveda/database/roles.json
+        read_only: true
     networks:
       synveda-data: {}
-      application-egress: {}
 
   gateway:
     <<: [*synveda-product, *synveda-long-running]
@@ -82,7 +117,7 @@ services:
         condition: service_completed_successfully
     environment:
       DATABASE_URL_FILE: /run/secrets/database_url
-      SYNVEDA_EXPECTED_DATABASE_ROLE: synveda_gateway
+      SYNVEDA_DATABASE_ROLES_FILE: /etc/synveda/database/roles.json
       SYNVEDA_LISTEN_ADDR: 0.0.0.0:8120
       SYNVEDA_PUBLIC_URL: ${SYNVEDA_PUBLIC_APP_URL:?set SYNVEDA_PUBLIC_APP_URL}
       SYNVEDA_OIDC_ISSUERS_FILE: /etc/synveda/oidc/issuers.json
@@ -98,6 +133,10 @@ services:
       - source: synveda_kms_key_ref
         target: kms_key_ref
     volumes:
+      - type: bind
+        source: ${SYNVEDA_DATABASE_ROLES_FILE}
+        target: /etc/synveda/database/roles.json
+        read_only: true
       - type: bind
         source: ${SYNVEDA_OIDC_ISSUERS_FILE:?set SYNVEDA_OIDC_ISSUERS_FILE}
         target: /etc/synveda/oidc/issuers.json
@@ -122,7 +161,7 @@ services:
         condition: service_completed_successfully
     environment:
       DATABASE_URL_FILE: /run/secrets/database_url
-      SYNVEDA_EXPECTED_DATABASE_ROLE: synveda_worker
+      SYNVEDA_DATABASE_ROLES_FILE: /etc/synveda/database/roles.json
       SYNVEDA_WORKER_LISTEN_ADDR: 127.0.0.1:8121
       SYNVEDA_OIDC_ISSUERS_FILE: /etc/synveda/oidc/issuers.json
       SYNVEDA_KMS_KEY_FILE: /run/secrets/kms_key
@@ -137,6 +176,10 @@ services:
       - source: synveda_kms_key_ref
         target: kms_key_ref
     volumes:
+      - type: bind
+        source: ${SYNVEDA_DATABASE_ROLES_FILE}
+        target: /etc/synveda/database/roles.json
+        read_only: true
       - type: bind
         source: ${SYNVEDA_OIDC_ISSUERS_FILE}
         target: /etc/synveda/oidc/issuers.json
@@ -170,7 +213,7 @@ services:
         target: /etc/otelcol/config.yaml
         read_only: true
     healthcheck:
-      test: ["CMD", "/otelcol-contrib", "validate", "--config=http://127.0.0.1:13133/"]
+      test: ["CMD", "/otelcol-contrib", "validate", "--config=/etc/otelcol/config.yaml"]
       interval: 30s
       timeout: 5s
       retries: 3

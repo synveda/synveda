@@ -14,6 +14,9 @@
 //! Tests that need a live Postgres read `DATABASE_URL` and skip with a
 //! message when it is unset; run them locally with `make db-test`.
 
+#[path = "../../synveda-store/tests/support/tenant_fixture.rs"]
+mod tenant_fixture;
+
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
@@ -24,7 +27,7 @@ use http_body_util::BodyExt;
 use metrics_exporter_prometheus::PrometheusHandle;
 use serde_json::{Value, json};
 use sqlx::postgres::PgPoolOptions;
-use synveda_gateway::app::{AppState, router};
+use synveda_gateway::app::{AppState, behavior_test_router as router};
 use synveda_gateway::telemetry;
 use synveda_identity::Hs256Verifier;
 use synveda_types::TenantId;
@@ -98,12 +101,12 @@ async fn admitted_tenant() -> Option<(AppState, TenantId)> {
         .connect(&url)
         .await
         .expect("connect to DATABASE_URL");
-    synveda_store::migrate(&pool)
+    synveda_store::epoch::verify(&pool)
         .await
         .expect("apply migrations");
     let id = TenantId::new();
     let slug = format!("cpr7-{}", id.as_uuid().simple());
-    synveda_store::tenants::create(
+    tenant_fixture::create(
         &pool,
         id,
         &slug,
@@ -594,13 +597,15 @@ async fn a_move_is_decided_at_both_ends_and_refused_into_its_own_subtree() {
     assert_eq!(status, StatusCode::BAD_REQUEST, "{cycle}");
 
     // The audit event names both ends.
+    let mut tx = tenant_fixture::begin(&pool, tenant).await;
     let rows: Vec<(String, serde_json::Value)> = sqlx::query_as(
         "select action, payload from audit_log where tenant_id = $1 and action = 'scope.updated'",
     )
     .bind(tenant.as_uuid())
-    .fetch_all(&pool)
+    .fetch_all(&mut *tx)
     .await
     .expect("read audit events");
+    tx.commit().await.expect("commit audit event read");
     let moving = rows
         .iter()
         .find(|(_, payload)| payload["moved_to"].is_object())

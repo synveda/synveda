@@ -21,7 +21,7 @@ pub use compose::{
     SKILL_INDEX_TOKENS, compose_authored, estimated_tokens,
 };
 
-use sqlx::PgPool;
+use sqlx::{PgConnection, PgPool};
 use synveda_types::Result;
 
 /// Histogram: estimated tokens per authored-context block.
@@ -32,4 +32,10 @@ pub const TOKENS_PER_CONTEXT_RUN: &str = "synveda_tokens_per_context_run";
 #[tracing::instrument(name = "retrieval.readiness", skip_all, err(Display))]
 pub async fn readiness(pool: &PgPool) -> Result<()> {
     synveda_store::ping(pool).await
+}
+
+/// Connection-scoped read-path probe used by the process authority sentinel.
+#[tracing::instrument(name = "retrieval.readiness_connection", skip_all, err(Display))]
+pub async fn readiness_connection(connection: &mut PgConnection) -> Result<()> {
+    synveda_store::ping(&mut *connection).await
 }

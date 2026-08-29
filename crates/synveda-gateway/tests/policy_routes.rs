@@ -2,6 +2,9 @@
 //! runtime selector is the immutable Configuration aggregate rather than the
 //! deleted default/assignment plane.
 
+#[path = "../../synveda-store/tests/support/tenant_fixture.rs"]
+mod tenant_fixture;
+
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
@@ -13,7 +16,7 @@ use metrics_exporter_prometheus::PrometheusHandle;
 use serde_json::{Value, json};
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
-use synveda_gateway::app::{AppState, router};
+use synveda_gateway::app::{AppState, behavior_test_router as router};
 use synveda_gateway::{authz, telemetry};
 use synveda_identity::Hs256Verifier;
 use synveda_policy::Pdp;
@@ -107,7 +110,7 @@ async fn node(
 
 async fn admitted(pool: &PgPool, label: &str) -> (TenantId, ScopeId, ScopeId, ScopeId) {
     let tenant = TenantId::new();
-    synveda_store::tenants::create(
+    tenant_fixture::create(
         pool,
         tenant,
         &format!("{label}-{}", tenant.as_uuid().simple()),
@@ -203,7 +206,7 @@ async fn immutable_configuration_selects_policy_per_scope() {
         return;
     };
     let state = state(&url);
-    synveda_store::migrate(&state.pool)
+    synveda_store::epoch::verify(&state.pool)
         .await
         .expect("apply migrations");
     let (tenant, workspace, project_a, project_b) = admitted(&state.pool, "authz2").await;
@@ -310,7 +313,7 @@ async fn cross_tenant_configuration_probes_are_not_found() {
         return;
     };
     let state = state(&url);
-    synveda_store::migrate(&state.pool)
+    synveda_store::epoch::verify(&state.pool)
         .await
         .expect("apply migrations");
     let (victim, _, victim_project, _) = admitted(&state.pool, "authz2-victim").await;

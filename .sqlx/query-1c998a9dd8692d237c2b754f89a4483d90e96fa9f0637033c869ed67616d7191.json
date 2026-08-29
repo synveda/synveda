@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            select (select count(*) from public.tenants\n                     where id = $1) as \"tenants!\",\n                   (select count(*) from public.scopes\n                     where tenant_id = $1) as \"scopes!\",\n                   (select count(*) from public.scope_grants\n                     where tenant_id = $1) as \"grants!\",\n                   (select count(*) from public.audit_log\n                     where tenant_id = $1) as \"audits!\"\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "tenants!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 1,
+        "name": "scopes!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 2,
+        "name": "grants!",
+        "type_info": "Int8"
+      },
+      {
+        "ordinal": 3,
+        "name": "audits!",
+        "type_info": "Int8"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "1c998a9dd8692d237c2b754f89a4483d90e96fa9f0637033c869ed67616d7191"
+}

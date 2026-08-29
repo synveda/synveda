@@ -9,6 +9,9 @@
 //! message when it is unset (CI has no database); run them locally with
 //! `make db-test`.
 
+#[path = "../../synveda-store/tests/support/tenant_fixture.rs"]
+mod tenant_fixture;
+
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
@@ -21,7 +24,7 @@ use serde_json::{Value, json};
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 use synveda_audit::{ChainVerification, StoredEvent};
-use synveda_gateway::app::{AppState, router};
+use synveda_gateway::app::{AppState, behavior_test_router as router};
 use synveda_gateway::telemetry;
 use synveda_identity::Hs256Verifier;
 use synveda_policy::Pdp;
@@ -77,7 +80,7 @@ fn issue(subject: &str, tenant_id: TenantId) -> String {
 async fn admitted_tenant(pool: &PgPool, label: &str, status: TenantStatus) -> TenantId {
     let id = TenantId::new();
     let slug = format!("{label}-{}", id.as_uuid().simple());
-    synveda_store::tenants::create(pool, id, &slug, "AUD-1 events test", status)
+    tenant_fixture::create(pool, id, &slug, "AUD-1 events test", status)
         .await
         .expect("admit tenant");
     id

@@ -10,9 +10,12 @@
 //! message when it is unset (CI has no database); run them locally with
 //! `make db-test`.
 
+#[path = "support/tenant_fixture.rs"]
+mod tenant_fixture;
+
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
-use synveda_store::{configuration, policy_assignments, policy_packs, rls, tenants};
+use synveda_store::{configuration, policy_assignments, policy_packs, rls};
 use synveda_types::configuration::{
     ConfigurationCommand, ConfigurationDocument, ConfigurationTemplate,
 };
@@ -72,7 +75,7 @@ async fn db() -> Option<PgPool> {
         .connect(&url)
         .await
         .expect("connect to DATABASE_URL");
-    synveda_store::migrate(&pool)
+    synveda_store::epoch::verify(&pool)
         .await
         .expect("apply migrations");
     Some(pool)
@@ -81,7 +84,7 @@ async fn db() -> Option<PgPool> {
 async fn admit_tenant(pool: &PgPool) -> TenantId {
     let id = TenantId::new();
     let slug = format!("pack-{}", id.as_uuid().simple());
-    tenants::create(pool, id, &slug, "AUTHZ-2 pack test", TenantStatus::Active)
+    tenant_fixture::create(pool, id, &slug, "AUTHZ-2 pack test", TenantStatus::Active)
         .await
         .expect("admit tenant");
     id

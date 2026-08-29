@@ -4,8 +4,9 @@
 # selects personal, team or enterprise product behaviour: those are immutable
 # governed Configuration versions and scope bindings in the one runtime.
 #
-# Six values have no default and the chart refuses to render without them:
-# `gateway.publicUrl`, `worker.databaseExistingSecret`, `embedder`,
+# Seven values have no default and the chart refuses to render without them:
+# `gateway.publicUrl`, `gateway.databaseExistingSecret`,
+# `worker.databaseExistingSecret`, `embedder`,
 # `oidc.existingSecret`, `kms.existingSecret`, and — if the embedder is `tei`
 # — one of `tei.enabled` or `tei.url`. Each is a decision somebody has to
 # make on purpose; a default would make it silently.
@@ -40,6 +41,18 @@ gateway:
   # that reads like a bug. Required.
   publicUrl: ""
 
+  # Operator-owned Secret with two distinct keys:
+  #
+  #   DATABASE_URL  postgres://synveda_gateway:<password>@<rw-service>:5432/synveda
+  #   password      the exact password embedded in DATABASE_URL
+  #
+  # Database bootstrap consumes only `password`; preflight and the gateway
+  # mount only `DATABASE_URL`. It must be distinct from both the CNPG
+  # migration-owner Secret and the worker Secret. Required.
+  databaseExistingSecret: ""
+  databaseUrlSecretKey: DATABASE_URL
+  databasePasswordSecretKey: password
+
   # The synchronous request pool. Size it together with the worker pool
   # against postgres.maxConnections; migration/operator connections still
   # need headroom.
@@ -64,7 +77,7 @@ worker:
   #   DATABASE_URL  postgres://synveda_worker:<password>@<rw-service>:5432/synveda
   #   password      the exact password embedded in DATABASE_URL
   #
-  # The install job uses `password` only to create/converge the fixed
+  # Database bootstrap uses `password` only to create/converge the fixed
   # `synveda_worker` login. The process mounts only `DATABASE_URL` as a file;
   # neither value is rendered into the Pod manifest. Required.
   databaseExistingSecret: ""
@@ -197,17 +210,19 @@ extractor:
 
 # ── The install job ──────────────────────────────────────────────────────
 install:
-  # Runs `synveda db migrate` under the cluster's superuser, then grants the
-  # gateway's login role membership of `synveda_app` and converges the fixed
-  # non-owner worker login from its existing Secret. Runtime processes never
-  # hold an admin credential (ADR-0062 decision 2; ADR-0102).
-  enabled: true
+  # The required Job converges roles/extensions under the CNPG superuser,
+  # proves the migrator/gateway/worker targets through the product preflight,
+  # then migrates and optionally admits one tenant under `synveda_migrator`.
+  # No product or runtime container receives the superuser credential.
   # Optionally admit the first tenant in the same job. Leave the slug empty
   # and NOTES.txt prints the command instead; a chart that hardcodes one
   # tenant into a multi-tenant product is guessing.
   tenant:
     slug: ""
     name: ""
+  # Bounds bootstrap, authority preflight, schema migration and optional
+  # first-tenant admission as one deployment operation.
+  activeDeadlineSeconds: 900
   backoffLimit: 3
   ttlSecondsAfterFinished: 3600
 

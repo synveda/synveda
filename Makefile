@@ -40,10 +40,10 @@ compose-secrets:
 
 # The eval harness (EVAL-1, ADR-0028; EVAL-2, ADR-0046; EVAL-4, ADR-0047):
 # the scenario suite, the labelled extraction corpus and the Q&A corpus
-# against a live stack on a scratch database, gated by
-# evals/baseline.json. Needs the dev compose (postgres) and node. Exit
-# status is the gate's, and since EVAL-4 this is what `ci.yml` runs on
-# every pull request.
+# against a live stack on one fresh exact-role database fixture, gated by
+# evals/baseline.json. The target owns that database lifecycle and needs Docker
+# plus node. Exit status is the gate's, and since EVAL-4 this is what `ci.yml`
+# runs on every pull request.
 eval:
 	sh evals/run.sh
 
@@ -107,7 +107,7 @@ eval-check:
 # the deterministic path.
 eval-product:
 	SYNVEDA_DB_TEST_TASK=product-evaluation \
-		DATABASE_URL="$(DATABASE_URL)" bash scripts/db-test.sh
+		bash scripts/db-test.sh
 
 check-product-eval:
 	node scripts/product-evaluation.mjs --check
@@ -186,7 +186,7 @@ eval-read:
 # long-lived dev database and leave every tenant it admitted behind — see
 # scripts/db-test.sh for what that cost.
 db-test:
-	DATABASE_URL=$(DATABASE_URL) bash scripts/db-test.sh
+	bash scripts/db-test.sh
 
 # CPR-14's deterministic tier: authentic Claude Code frames through the built
 # hook, the real gateway/PDP/schema, persisted events, timeline and audit chain.
@@ -196,7 +196,7 @@ claude-acceptance:
 	pnpm --filter @synveda/claude-code-adapter build
 	cargo test -q -p synveda-gateway --test claude_lifecycle -- --list | \
 		grep -Fqx '$(CLAUDE_ACCEPTANCE_TEST): test'
-	DATABASE_URL=$(DATABASE_URL) bash scripts/db-test.sh \
+	bash scripts/db-test.sh \
 		-p synveda-gateway --test claude_lifecycle \
 		$(CLAUDE_ACCEPTANCE_TEST) \
 		-- --exact --nocapture --test-threads=1

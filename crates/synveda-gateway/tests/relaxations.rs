@@ -6,6 +6,9 @@
 //! widens one exact subject's Knowledge read, then closes it by revocation;
 //! and that a stricter profile retains pending and rejected outcomes.
 
+#[path = "../../synveda-store/tests/support/tenant_fixture.rs"]
+mod tenant_fixture;
+
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
@@ -17,12 +20,12 @@ use http_body_util::BodyExt;
 use metrics_exporter_prometheus::PrometheusHandle;
 use serde_json::{Value, json};
 use sqlx::postgres::PgPoolOptions;
-use synveda_gateway::app::{AppState, router};
+use synveda_gateway::app::{AppState, behavior_test_router as router};
 use synveda_gateway::telemetry;
 use synveda_identity::Hs256Verifier;
 use synveda_ingest::embedding::{AnyEmbedder, DeterministicEmbedder};
 use synveda_policy::Pdp;
-use synveda_store::{access, identities, rls, scopes, tenants};
+use synveda_store::{access, identities, rls, scopes};
 use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
 use synveda_types::{GrantId, IdentityId, IdentityKind, ScopeId, TenantId, TenantStatus};
 use tower::ServiceExt;
@@ -190,11 +193,11 @@ async fn admitted(pack: &str) -> Option<World> {
         .connect(&url)
         .await
         .expect("connect to DATABASE_URL");
-    synveda_store::migrate(&pool)
+    synveda_store::epoch::verify(&pool)
         .await
         .expect("apply migrations");
     let tenant = TenantId::new();
-    tenants::create(
+    tenant_fixture::create(
         &pool,
         tenant,
         &format!("cpr31-{}", tenant.as_uuid().simple()),
@@ -420,12 +423,13 @@ async fn personal_auto_apply_uses_vedaflow_and_immutable_versions() {
         assert_eq!(status, StatusCode::NOT_FOUND, "old route survived: {path}");
     }
 
+    let mut tx = tenant_fixture::begin(&world.state.pool, world.tenant).await;
     let opened = sqlx::query_scalar!(
         r#"select count(*) as "count!" from audit_log
            where tenant_id = $1 and action = 'policy.relaxation.change.opened'"#,
         world.tenant.as_uuid(),
     )
-    .fetch_one(&world.state.pool)
+    .fetch_one(&mut *tx)
     .await
     .expect("count opened audit events");
     let applied = sqlx::query_scalar!(
@@ -433,7 +437,7 @@ async fn personal_auto_apply_uses_vedaflow_and_immutable_versions() {
            where tenant_id = $1 and action = 'policy.relaxation.change.applied'"#,
         world.tenant.as_uuid(),
     )
-    .fetch_one(&world.state.pool)
+    .fetch_one(&mut *tx)
     .await
     .expect("count applied audit events");
     assert_eq!((opened, applied), (3, 3));
@@ -446,9 +450,10 @@ async fn personal_auto_apply_uses_vedaflow_and_immutable_versions() {
              and not (payload @> '{"artifact_references":[{"family":"policy_relaxation"}]}'::jsonb)"#,
         world.tenant.as_uuid(),
     )
-    .fetch_one(&world.state.pool)
+    .fetch_one(&mut *tx)
     .await
     .expect("check terminal relaxation artifact references");
+    tx.commit().await.expect("commit Relaxation audit read");
     assert_eq!(
         untyped_terminal, 0,
         "terminal relaxation evidence lost its typed address"
@@ -732,12 +737,13 @@ async fn standard_profile_returns_pending_and_rejected_without_a_fast_path() {
     assert_eq!(status, StatusCode::OK, "{cancelled_detail}");
     assert_eq!(cancelled_detail["timeline"][1]["kind"], "withdrawn");
 
+    let mut tx = tenant_fixture::begin(&world.state.pool, world.tenant).await;
     let changes = sqlx::query_scalar!(
         r#"select count(*) as "count!" from policy_relaxation_changes
            where tenant_id = $1"#,
         world.tenant.as_uuid(),
     )
-    .fetch_one(&world.state.pool)
+    .fetch_one(&mut *tx)
     .await
     .expect("count typed changes");
     assert_eq!(
@@ -749,9 +755,10 @@ async fn standard_profile_returns_pending_and_rejected_without_a_fast_path() {
            where tenant_id = $1"#,
         world.tenant.as_uuid(),
     )
-    .fetch_one(&world.state.pool)
+    .fetch_one(&mut *tx)
     .await
     .expect("count applied versions");
+    tx.commit().await.expect("commit Relaxation evidence read");
     assert_eq!(versions, 1, "a rejected command published no version");
     assert_ne!(world.root.to_string(), scope);
 }

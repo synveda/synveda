@@ -29,8 +29,8 @@ jobs:
     timeout-minutes: 30
     env:
       # sqlx macros compile against the committed .sqlx query cache; CI has no
-      # database. Regenerate with `cargo sqlx prepare --workspace -- --all-targets`
-      # against the dev compose Postgres whenever queries or migrations change.
+      # database. Regenerate and immediately verify through the fresh exact-role
+      # fixture with `SYNVEDA_DB_TEST_TASK=sqlx-prepare bash scripts/db-test.sh`.
       SQLX_OFFLINE: "true"
     steps:
       - uses: actions/checkout@v4
@@ -147,11 +147,9 @@ jobs:
         with:
           node-version: 22
 
-      # Postgres only; no IdP and no model server (ADR-0028 decision 6).
-      - name: Start Postgres
-        run: docker compose -f deploy/compose/docker-compose.yml up --detach --wait postgres
-
       - name: Run the suite against the gate
+        # `make eval` owns one fresh exact-role PostgreSQL fixture. No legacy
+        # owner database, IdP or model server participates in this job.
         run: mkdir -p eval-report && make eval
         env:
           EVAL_REPORT: eval-report/report.json

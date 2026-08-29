@@ -4,6 +4,7 @@
 gateway:
   publicUrl: https://synveda.example.com
   dbMaxConnections: 40
+  databaseExistingSecret: synveda-gateway-db
 worker:
   databaseExistingSecret: synveda-worker-db
 ingress:

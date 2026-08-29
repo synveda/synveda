@@ -32,6 +32,9 @@
 //! Tests need a live Postgres: they read `DATABASE_URL` and skip with a
 //! message when it is unset (CI has no database), the house convention.
 
+#[path = "../../synveda-store/tests/support/tenant_fixture.rs"]
+mod tenant_fixture;
+
 use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -167,13 +170,13 @@ async fn world() -> Option<World> {
         .connect(&url)
         .await
         .expect("connect to DATABASE_URL");
-    synveda_store::migrate(&pool)
+    synveda_store::epoch::verify(&pool)
         .await
         .expect("apply migrations");
 
     let tenant = TenantId::new();
     let slug = format!("auth5-{}", tenant.as_uuid().simple());
-    tenants::create(&pool, tenant, &slug, "AUTH-5 tenant", TenantStatus::Active)
+    tenant_fixture::create(&pool, tenant, &slug, "AUTH-5 tenant", TenantStatus::Active)
         .await
         .expect("admit tenant");
 
@@ -416,7 +419,8 @@ async fn directory_groups_converge_only_on_complete_snapshots() {
 
     let first = pass(&w, &directory).await;
     assert_eq!(first.groups, 1);
-    let groups = access::directory_groups(&w.pool, w.tenant, "scripted")
+    let mut tx = tenant_fixture::begin(&w.pool, w.tenant).await;
+    let groups = access::directory_groups(&mut *tx, w.tenant, "scripted")
         .await
         .expect("list projected groups");
     assert_eq!(groups.len(), 1);
@@ -424,33 +428,38 @@ async fn directory_groups_converge_only_on_complete_snapshots() {
         groups[0].directory_resource_id.as_deref(),
         Some("g-eng-core")
     );
-    let members = access::group_members(&w.pool, w.tenant, groups[0].id)
+    let members = access::group_members(&mut *tx, w.tenant, groups[0].id)
         .await
         .expect("list projected membership");
     assert_eq!(members.len(), 1);
     assert_eq!(members[0].principal_id, None, "membership predates login");
+    tx.commit().await.expect("commit initial directory read");
 
     let incomplete = pass(&w, &directory).await;
     assert!(!incomplete.complete);
     assert_eq!(incomplete.groups_archived, 0);
-    let still_active = access::directory_groups(&w.pool, w.tenant, "scripted")
+    let mut tx = tenant_fixture::begin(&w.pool, w.tenant).await;
+    let still_active = access::directory_groups(&mut *tx, w.tenant, "scripted")
         .await
         .expect("list after partial pass");
     assert_eq!(
         still_active[0].status,
         synveda_types::workspace::LifecycleStatus::Active
     );
+    tx.commit().await.expect("commit partial directory read");
 
     let complete = pass(&w, &directory).await;
     assert!(complete.complete);
     assert_eq!(complete.groups_archived, 1);
-    let archived = access::directory_groups(&w.pool, w.tenant, "scripted")
+    let mut tx = tenant_fixture::begin(&w.pool, w.tenant).await;
+    let archived = access::directory_groups(&mut *tx, w.tenant, "scripted")
         .await
         .expect("list after complete pass");
     assert_eq!(
         archived[0].status,
         synveda_types::workspace::LifecycleStatus::Archived
     );
+    tx.commit().await.expect("commit archived directory read");
 }
 
 // ── 4. Deactivation is an act; absence is not ───────────────────────────────
@@ -785,7 +794,7 @@ async fn the_release_is_signed_on_v1_and_never_by_the_directory() {
     )])]);
     pass(&w, &directory).await;
 
-    let app = synveda_gateway::app::router(w.state.clone());
+    let app = synveda_gateway::app::behavior_test_router(w.state.clone());
 
     // 1. Nobody in particular: the PDP refuses. If this passed, the new
     //    action would be decorative.
@@ -884,7 +893,7 @@ async fn an_authorisation_to_seal_nobody_is_refused() {
     )])]);
     pass(&w, &directory).await;
     bind_org_admin(&w, "signer").await;
-    let app = synveda_gateway::app::router(w.state.clone());
+    let app = synveda_gateway::app::behavior_test_router(w.state.clone());
 
     for body in [
         json!({"ceiling": 0, "reason": "nothing at all"}),

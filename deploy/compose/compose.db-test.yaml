@@ -1,0 +1,273 @@
+# CPR-45 database acceptance fixture. This is not a product deployment mode:
+# it gives `make db-test` two isolated PostgreSQL clusters so normal tests run
+# as the gateway role while destructive epoch/reset tests cannot affect them.
+
+x-postgres: &postgres
+  image: ${SYNVEDA_DB_TEST_POSTGRES_IMAGE:-synveda-db-test-postgres:local}
+  environment:
+    POSTGRES_USER: synveda_owner
+    POSTGRES_DB: postgres
+    POSTGRES_PASSWORD_FILE: /run/secrets/postgres_owner_password
+  read_only: true
+  init: true
+  cap_drop: [ALL]
+  cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
+  security_opt: [no-new-privileges:true]
+  pids_limit: 512
+  restart: "no"
+  stop_grace_period: 30s
+  shm_size: 256m
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,nodev,mode=1777,size=64m
+    - /var/run/postgresql:rw,nosuid,nodev,mode=3775,size=16m
+  secrets:
+    - source: postgres_owner_password
+      target: postgres_owner_password
+  healthcheck:
+    test: ["CMD-SHELL", "pg_isready -U synveda_owner -d postgres"]
+    interval: 2s
+    timeout: 3s
+    retries: 30
+
+x-bootstrap: &bootstrap
+  image: ${SYNVEDA_DB_TEST_POSTGRES_IMAGE:-synveda-db-test-postgres:local}
+  user: "${SYNVEDA_DB_TEST_UID:?set SYNVEDA_DB_TEST_UID}:${SYNVEDA_DB_TEST_GID:?set SYNVEDA_DB_TEST_GID}"
+  entrypoint: ["/usr/local/bin/synveda-database-bootstrap"]
+  command: ["synveda"]
+  environment:
+    SYNVEDA_POSTGRES_BUNDLED_CLUSTER: "true"
+  read_only: true
+  init: true
+  cap_drop: [ALL]
+  security_opt: [no-new-privileges:true]
+  pids_limit: 64
+  restart: "no"
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,nodev,mode=1777,size=16m
+  secrets:
+    - source: postgres_owner_password
+      target: postgres_bootstrap_password
+    - source: synveda_migrator_password
+      target: synveda_migrator_password
+    - source: synveda_gateway_password
+      target: synveda_gateway_password
+    - source: synveda_worker_password
+      target: synveda_worker_password
+
+services:
+  postgres-main:
+    <<: *postgres
+    build:
+      context: ../..
+      dockerfile: deploy/compose/postgres/Dockerfile
+      target: reference
+    ports:
+      - "127.0.0.1:49152-65535:5432"
+    volumes:
+      - main-data:/var/lib/postgresql/data
+    networks:
+      main-data: {}
+      main-host: {}
+
+  database-bootstrap-main:
+    <<: *bootstrap
+    environment:
+      SYNVEDA_POSTGRES_BOOTSTRAP_URL: postgres://synveda_owner@postgres-main:5432/postgres
+      SYNVEDA_POSTGRES_BUNDLED_CLUSTER: "true"
+      SYNVEDA_DATABASE_ROLES_FILE: /run/secrets/database_roles.json
+      SYNVEDA_DATABASE_REQUIRE_KEYCLOAK_PASSWORD: "true"
+    depends_on:
+      postgres-main:
+        condition: service_healthy
+    networks:
+      main-data: {}
+    secrets:
+      - source: postgres_owner_password
+        target: postgres_bootstrap_password
+      - source: synveda_migrator_password
+        target: synveda_migrator_password
+      - source: synveda_gateway_password
+        target: synveda_gateway_password
+      - source: synveda_worker_password
+        target: synveda_worker_password
+      - source: keycloak_database_password
+        target: keycloak_database_password
+    volumes:
+      - type: bind
+        source: ${SYNVEDA_DB_TEST_ROLES_FILE:?set SYNVEDA_DB_TEST_ROLES_FILE}
+        target: /run/secrets/database_roles.json
+        read_only: true
+
+  keycloak-database-bootstrap-main:
+    <<: *bootstrap
+    command: ["keycloak"]
+    environment:
+      SYNVEDA_POSTGRES_BOOTSTRAP_URL: postgres://synveda_owner@postgres-main:5432/postgres
+      SYNVEDA_POSTGRES_BUNDLED_CLUSTER: "true"
+      SYNVEDA_DATABASE_ROLES_FILE: /run/secrets/database_roles.json
+      SYNVEDA_DATABASE_AUTHORITY_DIR: /run/synveda/database-authority
+    depends_on:
+      postgres-main:
+        condition: service_healthy
+    secrets:
+      - source: postgres_owner_password
+        target: postgres_bootstrap_password
+      - source: keycloak_database_password
+        target: keycloak_database_password
+    networks:
+      main-data: {}
+    volumes:
+      - type: bind
+        source: ${SYNVEDA_DB_TEST_ROLES_FILE:?set SYNVEDA_DB_TEST_ROLES_FILE}
+        target: /run/secrets/database_roles.json
+        read_only: true
+      - type: bind
+        source: ${SYNVEDA_DB_TEST_MAIN_AUTHORITY_DIR:?set SYNVEDA_DB_TEST_MAIN_AUTHORITY_DIR}
+        target: /run/synveda/database-authority
+
+  postgres-lifecycle:
+    <<: *postgres
+    secrets:
+      - source: postgres_owner_password
+        target: postgres_owner_password
+      - source: external_provider_password
+        target: external_provider_password
+    ports:
+      - "127.0.0.1:49152-65535:5432"
+    volumes:
+      - lifecycle-data:/var/lib/postgresql/data
+    networks:
+      lifecycle-data: {}
+      lifecycle-host: {}
+
+  database-bootstrap-lifecycle:
+    <<: *bootstrap
+    environment:
+      SYNVEDA_POSTGRES_BOOTSTRAP_URL: postgres://synveda_owner@postgres-lifecycle:5432/postgres
+      SYNVEDA_POSTGRES_BUNDLED_CLUSTER: "true"
+      SYNVEDA_DATABASE_ROLES_FILE: /run/secrets/database_roles.json
+      SYNVEDA_DATABASE_REQUIRE_KEYCLOAK_PASSWORD: "true"
+    depends_on:
+      postgres-lifecycle:
+        condition: service_healthy
+    networks:
+      lifecycle-data: {}
+    secrets:
+      - source: postgres_owner_password
+        target: postgres_bootstrap_password
+      - source: synveda_migrator_password
+        target: synveda_migrator_password
+      - source: synveda_gateway_password
+        target: synveda_gateway_password
+      - source: synveda_worker_password
+        target: synveda_worker_password
+      - source: keycloak_database_password
+        target: keycloak_database_password
+    volumes:
+      - type: bind
+        source: ${SYNVEDA_DB_TEST_LIFECYCLE_ROLES_FILE:?set SYNVEDA_DB_TEST_LIFECYCLE_ROLES_FILE}
+        target: /run/secrets/database_roles.json
+        read_only: true
+
+  keycloak-database-bootstrap-lifecycle:
+    <<: *bootstrap
+    command: ["keycloak"]
+    environment:
+      SYNVEDA_POSTGRES_BOOTSTRAP_URL: postgres://synveda_owner@postgres-lifecycle:5432/postgres
+      SYNVEDA_POSTGRES_BUNDLED_CLUSTER: "true"
+      SYNVEDA_DATABASE_ROLES_FILE: /run/secrets/database_roles.json
+      SYNVEDA_DATABASE_AUTHORITY_DIR: /run/synveda/database-authority
+    depends_on:
+      postgres-lifecycle:
+        condition: service_healthy
+    secrets:
+      - source: postgres_owner_password
+        target: postgres_bootstrap_password
+      - source: keycloak_database_password
+        target: keycloak_database_password
+    networks:
+      lifecycle-data: {}
+    volumes:
+      - type: bind
+        source: ${SYNVEDA_DB_TEST_ROLES_FILE:?set SYNVEDA_DB_TEST_ROLES_FILE}
+        target: /run/secrets/database_roles.json
+        read_only: true
+      - type: bind
+        source: ${SYNVEDA_DB_TEST_LIFECYCLE_AUTHORITY_DIR:?set SYNVEDA_DB_TEST_LIFECYCLE_AUTHORITY_DIR}
+        target: /run/synveda/database-authority
+
+  database-bootstrap-external-lifecycle:
+    <<: *bootstrap
+    environment:
+      SYNVEDA_POSTGRES_BOOTSTRAP_URL: postgres://cpr45_external_bootstrap@postgres-lifecycle:5432/postgres
+      SYNVEDA_POSTGRES_BUNDLED_CLUSTER: "false"
+      SYNVEDA_DATABASE_ROLES_FILE: /run/secrets/database_roles.json
+      SYNVEDA_DATABASE_AUTHORITY_DIR: /run/synveda/database-authority
+    depends_on:
+      postgres-lifecycle:
+        condition: service_healthy
+    secrets:
+      - source: external_provider_password
+        target: postgres_bootstrap_password
+      - source: synveda_migrator_password
+        target: synveda_migrator_password
+      - source: synveda_gateway_password
+        target: synveda_gateway_password
+      - source: synveda_worker_password
+        target: synveda_worker_password
+      - source: keycloak_database_password
+        target: keycloak_database_password
+    networks:
+      lifecycle-data: {}
+    volumes:
+      - type: bind
+        source: ${SYNVEDA_DB_TEST_EXTERNAL_ROLES_FILE:?set SYNVEDA_DB_TEST_EXTERNAL_ROLES_FILE}
+        target: /run/secrets/database_roles.json
+        read_only: true
+      - type: bind
+        source: ${SYNVEDA_DB_TEST_LIFECYCLE_AUTHORITY_DIR:?set SYNVEDA_DB_TEST_LIFECYCLE_AUTHORITY_DIR}
+        target: /run/synveda/database-authority
+
+volumes:
+  main-data:
+    labels:
+      com.synveda.contract: cpr-45-db-test
+      com.synveda.volume: main-data
+  lifecycle-data:
+    labels:
+      com.synveda.contract: cpr-45-db-test
+      com.synveda.volume: lifecycle-data
+
+networks:
+  main-data:
+    internal: true
+    ipam:
+      config:
+        - subnet: ${SYNVEDA_DB_TEST_MAIN_DATA_SUBNET:?set SYNVEDA_DB_TEST_MAIN_DATA_SUBNET}
+  lifecycle-data:
+    internal: true
+    ipam:
+      config:
+        - subnet: ${SYNVEDA_DB_TEST_LIFECYCLE_DATA_SUBNET:?set SYNVEDA_DB_TEST_LIFECYCLE_DATA_SUBNET}
+  main-host:
+    ipam:
+      config:
+        - subnet: ${SYNVEDA_DB_TEST_MAIN_HOST_SUBNET:?set SYNVEDA_DB_TEST_MAIN_HOST_SUBNET}
+  lifecycle-host:
+    ipam:
+      config:
+        - subnet: ${SYNVEDA_DB_TEST_LIFECYCLE_HOST_SUBNET:?set SYNVEDA_DB_TEST_LIFECYCLE_HOST_SUBNET}
+
+secrets:
+  postgres_owner_password:
+    file: ${SYNVEDA_DB_TEST_SECRETS_DIR:?set SYNVEDA_DB_TEST_SECRETS_DIR}/postgres_owner_password
+  synveda_migrator_password:
+    file: ${SYNVEDA_DB_TEST_SECRETS_DIR}/synveda_migrator_password
+  synveda_gateway_password:
+    file: ${SYNVEDA_DB_TEST_SECRETS_DIR}/synveda_gateway_password
+  synveda_worker_password:
+    file: ${SYNVEDA_DB_TEST_SECRETS_DIR}/synveda_worker_password
+  keycloak_database_password:
+    file: ${SYNVEDA_DB_TEST_SECRETS_DIR}/keycloak_database_password
+  external_provider_password:
+    file: ${SYNVEDA_DB_TEST_SECRETS_DIR}/external_provider_password

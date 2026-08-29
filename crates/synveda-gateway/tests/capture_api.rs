@@ -5,6 +5,9 @@
 //! candidate is deliberately inspected before and after every transition: the
 //! extraction half may propose, but only the decision half may publish.
 
+#[path = "../../synveda-store/tests/support/tenant_fixture.rs"]
+mod tenant_fixture;
+
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
@@ -19,13 +22,13 @@ use http_body_util::BodyExt;
 use metrics_exporter_prometheus::PrometheusHandle;
 use serde_json::{Value, json};
 use sqlx::postgres::PgPoolOptions;
-use synveda_gateway::app::{AppState, router};
+use synveda_gateway::app::{AppState, behavior_test_router as router};
 use synveda_gateway::telemetry;
 use synveda_identity::Hs256Verifier;
 use synveda_ingest::capture_worker;
 use synveda_ingest::extraction::{AnyExtractor, DeterministicExtractor, VllmExtractor};
 use synveda_store::capture::{self as capture_store, NewCaptureCandidate};
-use synveda_store::{access, identities, rls, scopes, tenants};
+use synveda_store::{access, identities, rls, scopes};
 use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
 use synveda_types::capture::{CaptureBatch, CaptureBatchState};
 use synveda_types::knowledge::{
@@ -148,11 +151,11 @@ async fn admitted_tenant(pack: &str) -> Option<(AppState, TenantId)> {
         .connect(&url)
         .await
         .expect("connect to DATABASE_URL");
-    synveda_store::migrate(&pool)
+    synveda_store::epoch::verify(&pool)
         .await
         .expect("apply migrations");
     let tenant_id = TenantId::new();
-    tenants::create(
+    tenant_fixture::create(
         &pool,
         tenant_id,
         &format!("cpr18-{}", tenant_id.as_uuid().simple()),
@@ -1134,6 +1137,7 @@ async fn capture_worker_renews_blocked_extraction_and_discards_a_reclaimed_resul
 }
 
 #[tokio::test]
+#[ignore = "serial migrator lock acceptance"]
 async fn capture_worker_reproves_a_preflight_lease_before_calling_the_extractor() {
     let _guard = serial().await;
     let Some((state, tenant_id)) = admitted_tenant(synveda_policy::STANDARD).await else {
@@ -1169,13 +1173,12 @@ async fn capture_worker_reproves_a_preflight_lease_before_calling_the_extractor(
         .parse::<CaptureBatchId>()
         .expect("parse preflight batch id");
 
-    // AccessExclusive is a test synchronisation barrier, not an authority
-    // shortcut: the worker still claims and later reads through its ordinary
-    // tenant transaction. pg_stat_activity below proves it has reached the
-    // configuration read before this barrier is held past lease expiry.
-    let mut blocker = rls::begin_tenant_tx(&state.pool, tenant_id)
-        .await
-        .expect("begin preflight barrier");
+    // AccessExclusive is a serial test synchronisation barrier, not worker
+    // authority. PostgreSQL 17 correctly withholds that lock from the gateway,
+    // so the barrier uses the separately verified migrator/database owner;
+    // the worker still claims and reads through its ordinary tenant role.
+    let barrier_pool = tenant_fixture::migrator_pool(&state.pool).await;
+    let mut blocker = barrier_pool.begin().await.expect("begin preflight barrier");
     sqlx::query("lock table configuration_versions in access exclusive mode")
         .execute(&mut *blocker)
         .await
@@ -1203,6 +1206,7 @@ async fn capture_worker_reproves_a_preflight_lease_before_calling_the_extractor(
     wait_for_database_lock(&state, tenant_id, &application_name).await;
     tokio::time::sleep(Duration::from_millis(1_250)).await;
     blocker.rollback().await.expect("release preflight barrier");
+    barrier_pool.close().await;
 
     let summary = tokio::time::timeout(Duration::from_secs(3), sweep)
         .await
@@ -1361,21 +1365,25 @@ async fn candidates_are_reviewable_only_and_every_decision_uses_vedaflow() {
     assert_eq!(same_snapshot, StatusCode::OK, "{other_key}");
     assert_eq!(other_key["id"], batch_id);
 
+    let mut tx = tenant_fixture::begin(&state.pool, tenant_id).await;
     let before_knowledge: i64 =
         sqlx::query_scalar("select count(*) from knowledge_items where tenant_id = $1")
             .bind(tenant_id.as_uuid())
-            .fetch_one(&state.pool)
+            .fetch_one(&mut *tx)
             .await
             .expect("count Knowledge before extraction");
+    tx.commit().await.expect("commit pre-extraction read");
     assert_eq!(before_knowledge, 0);
     run_capture(&state).await;
 
+    let mut tx = tenant_fixture::begin(&state.pool, tenant_id).await;
     let after_extraction: i64 =
         sqlx::query_scalar("select count(*) from knowledge_items where tenant_id = $1")
             .bind(tenant_id.as_uuid())
-            .fetch_one(&state.pool)
+            .fetch_one(&mut *tx)
             .await
             .expect("count Knowledge after extraction");
+    tx.commit().await.expect("commit post-extraction read");
     let retired_table: Option<String> =
         sqlx::query_scalar("select to_regclass('public.records')::text")
             .fetch_one(&state.pool)
@@ -1579,6 +1587,7 @@ async fn candidates_are_reviewable_only_and_every_decision_uses_vedaflow() {
     .await;
     assert_eq!(status, StatusCode::CREATED, "{forgotten}");
     assert_eq!(forgotten["outcome"], "applied");
+    let mut tx = tenant_fixture::begin(&state.pool, tenant_id).await;
     let scrubbed: (String, String, bool, Option<Value>) = sqlx::query_as(
         "select candidate.title, candidate.body_markdown, candidate.content_erased, decision.payload \
          from capture_candidates candidate \
@@ -1588,7 +1597,7 @@ async fn candidates_are_reviewable_only_and_every_decision_uses_vedaflow() {
     )
     .bind(tenant_id.as_uuid())
     .bind(uuid::Uuid::parse_str(values[5]["id"].as_str().expect("candidate id")).expect("uuid"))
-    .fetch_one(&state.pool)
+    .fetch_one(&mut *tx)
     .await
     .expect("read scrubbed candidate");
     assert_eq!(scrubbed, (String::new(), String::new(), true, None));
@@ -1598,7 +1607,7 @@ async fn candidates_are_reviewable_only_and_every_decision_uses_vedaflow() {
          where tenant_id = $1 and action like 'capture.%'",
     )
     .bind(tenant_id.as_uuid())
-    .fetch_one(&state.pool)
+    .fetch_one(&mut *tx)
     .await
     .expect("read capture audit payloads");
     for plaintext in phrases
@@ -1614,9 +1623,12 @@ async fn candidates_are_reviewable_only_and_every_decision_uses_vedaflow() {
         "select count(*) from audit_log where tenant_id = $1 and action = 'capture.candidate.decided'",
     )
     .bind(tenant_id.as_uuid())
-    .fetch_one(&state.pool)
+    .fetch_one(&mut *tx)
     .await
     .expect("count decision audit events");
+    tx.commit()
+        .await
+        .expect("commit Capture erasure evidence read");
     assert_eq!(decisions, 6, "retries must not duplicate decision audits");
 
     // A changed event set is a new snapshot. Session end freezes it without
@@ -1734,12 +1746,16 @@ async fn strict_profile_retains_a_pending_review_instead_of_publishing() {
     assert_eq!(pending["candidate"]["resulting_outcome"], "pending_review");
     assert!(pending["candidate"]["resulting_change_id"].is_string());
     assert!(pending["candidate"]["resulting_revision_id"].is_null());
+    let mut tx = tenant_fixture::begin(&state.pool, tenant_id).await;
     let active: i64 =
         sqlx::query_scalar("select count(*) from knowledge_items where tenant_id = $1")
             .bind(tenant_id.as_uuid())
-            .fetch_one(&state.pool)
+            .fetch_one(&mut *tx)
             .await
             .expect("count unpublished Knowledge");
+    tx.commit()
+        .await
+        .expect("commit unpublished Knowledge read");
     assert_eq!(active, 0, "pending review is not active Knowledge");
     let (status, replay) = decide(&app, &token, id, "accept", "strict-accept", json!({})).await;
     assert_eq!(status, StatusCode::OK, "{replay}");
@@ -2035,12 +2051,14 @@ async fn pulseboard_cross_session_team_knowledge_loop_is_governed_end_to_end() {
     assert_eq!(batch_status, StatusCode::CREATED, "{batch}");
     let alice_batch = batch["id"].as_str().expect("Alice batch id");
 
+    let mut tx = tenant_fixture::begin(&state.pool, tenant_id).await;
     let unpublished: i64 =
         sqlx::query_scalar("select count(*) from knowledge_items where tenant_id = $1")
             .bind(tenant_id.as_uuid())
-            .fetch_one(&state.pool)
+            .fetch_one(&mut *tx)
             .await
             .expect("count pre-review Knowledge");
+    tx.commit().await.expect("commit pre-review Knowledge read");
     assert_eq!(
         unpublished, 0,
         "extraction intent must not publish Knowledge"
@@ -2302,6 +2320,7 @@ async fn pulseboard_cross_session_team_knowledge_loop_is_governed_end_to_end() {
     .await;
     assert_eq!(old_status, StatusCode::OK, "{old_detail}");
     assert_eq!(old_detail["lifecycle_state"], "superseded");
+    let mut tx = tenant_fixture::begin(&state.pool, tenant_id).await;
     let relation_count: i64 = sqlx::query_scalar(
         "select count(*) from knowledge_relations where tenant_id = $1 \
          and source_item_id = $2 and target_item_id = $3 and relation_type = 'supersedes'",
@@ -2309,9 +2328,10 @@ async fn pulseboard_cross_session_team_knowledge_loop_is_governed_end_to_end() {
     .bind(tenant_id.as_uuid())
     .bind(uuid::Uuid::parse_str(&replacement_item).expect("replacement item UUID"))
     .bind(uuid::Uuid::parse_str(&request_id_item).expect("old item UUID"))
-    .fetch_one(&state.pool)
+    .fetch_one(&mut *tx)
     .await
     .expect("count explicit supersession");
+    tx.commit().await.expect("commit supersession read");
     assert_eq!(relation_count, 1);
 
     // A third clean run receives the correction, never the superseded head.
@@ -2454,6 +2474,7 @@ async fn pulseboard_cross_session_team_knowledge_loop_is_governed_end_to_end() {
     // The product path remains one model: every publication has a VedaFlow
     // change, the retired aggregate is absent, and the deleted global runtime
     // endpoints are still hard 404s.
+    let mut tx = tenant_fixture::begin(&state.pool, tenant_id).await;
     let counts: (i64, i64, i64, i64, i64, i64, i64, i64, i64, bool) = sqlx::query_as(
         "select \
            (select count(*) from sessions where tenant_id = $1), \
@@ -2468,7 +2489,7 @@ async fn pulseboard_cross_session_team_knowledge_loop_is_governed_end_to_end() {
            (select to_regclass('public.records') is not null)",
     )
     .bind(tenant_id.as_uuid())
-    .fetch_one(&state.pool)
+    .fetch_one(&mut *tx)
     .await
     .expect("read MVP database state");
     assert_eq!(counts, (3, 5, 2, 5, 5, 4, 4, 4, 2, false));
@@ -2476,17 +2497,18 @@ async fn pulseboard_cross_session_team_knowledge_loop_is_governed_end_to_end() {
         "select count(*) from knowledge_items where tenant_id = $1 and lifecycle_state = 'active'",
     )
     .bind(tenant_id.as_uuid())
-    .fetch_one(&state.pool)
+    .fetch_one(&mut *tx)
     .await
     .expect("count current Knowledge");
     let superseded: i64 = sqlx::query_scalar(
         "select count(*) from knowledge_items where tenant_id = $1 and lifecycle_state = 'superseded'",
     )
     .bind(tenant_id.as_uuid())
-    .fetch_one(&state.pool)
+    .fetch_one(&mut *tx)
     .await
     .expect("count superseded Knowledge");
     assert_eq!((active, superseded), (3, 1));
+    tx.commit().await.expect("commit MVP state read");
 
     for path in ["/v1/observe", "/v1/inject", "/v1/recall"] {
         let (status, body) = call(&app, "POST", path, &alice, None, Some(json!({}))).await;
@@ -2557,6 +2579,7 @@ async fn pulseboard_cross_session_team_knowledge_loop_is_governed_end_to_end() {
     // joins them with independently executed Skill, Tool, OKF, graph and
     // isolation scenarios rather than manufacturing counters from test names.
     if let Ok(path) = std::env::var("SYNVEDA_PRODUCT_EVAL_EVIDENCE") {
+        let mut tx = tenant_fixture::begin(&state.pool, tenant_id).await;
         let funnel: (i64, i64, i64, i64) = sqlx::query_as(
             "select \
                (select coalesce(sum(candidate_count), 0) from session_context_runs where tenant_id = $1), \
@@ -2566,7 +2589,7 @@ async fn pulseboard_cross_session_team_knowledge_loop_is_governed_end_to_end() {
                (select coalesce(sum(token_count), 0) from context_selections where tenant_id = $1)",
         )
         .bind(tenant_id.as_uuid())
-        .fetch_one(&state.pool)
+        .fetch_one(&mut *tx)
         .await
         .expect("read CPR-40 funnel measurements");
         let feedback: Vec<(String, i64)> = sqlx::query_as(
@@ -2574,7 +2597,7 @@ async fn pulseboard_cross_session_team_knowledge_loop_is_governed_end_to_end() {
              where tenant_id = $1 group by feedback_type order by feedback_type",
         )
         .bind(tenant_id.as_uuid())
-        .fetch_all(&state.pool)
+        .fetch_all(&mut *tx)
         .await
         .expect("read CPR-40 feedback measurements");
         let feedback = feedback
@@ -2590,7 +2613,7 @@ async fn pulseboard_cross_session_team_knowledge_loop_is_governed_end_to_end() {
                    and link.knowledge_revision_id = selected.knowledge_revision_id)",
         )
         .bind(tenant_id.as_uuid())
-        .fetch_one(&state.pool)
+        .fetch_one(&mut *tx)
         .await
         .expect("measure selected Knowledge provenance gaps");
         let model_versions: Vec<String> = sqlx::query_scalar(
@@ -2598,9 +2621,10 @@ async fn pulseboard_cross_session_team_knowledge_loop_is_governed_end_to_end() {
              where tenant_id = $1 and model_version is not null order by model_version",
         )
         .bind(tenant_id.as_uuid())
-        .fetch_all(&state.pool)
+        .fetch_all(&mut *tx)
         .await
         .expect("read CPR-40 extraction model versions");
+        tx.commit().await.expect("commit product measurements read");
         assert_eq!(
             model_versions.len(),
             1,

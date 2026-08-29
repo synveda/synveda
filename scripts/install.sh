@@ -3,9 +3,10 @@
 #
 #   curl -fsSL https://synveda.dev/install.sh | sh
 #
-# Downloads one release's binaries, console bundle and profile bundle, and
-# leaves the machine able to run `synveda init`. Docker is the only other
-# thing it needs; there is no Rust toolchain and no source tree involved.
+# Downloads one release's binaries, console bundle and transitional profile
+# bundle. During CPR-45 this installs artifacts only: the Docker reference
+# deployment is not advertised as turnkey until clean-volume acceptance
+# passes. There is no Rust toolchain and no source tree involved.
 #
 # POSIX sh on purpose — this is the one file that runs before anything of
 # ours does, on a machine we know nothing about, so it uses no bashism and
@@ -65,7 +66,10 @@ case "$os/$arch" in
 
     git clone https://github.com/$REPO
     cd synveda && cargo build --release -p synveda-cli -p synveda-gateway --bins
-    ./target/release/synveda init
+
+  That builds development/evaluation artifacts only. The Docker reference
+  lifecycle is unavailable until CPR-45 clean-volume acceptance passes; see
+  docs/INSTALL.md in the checkout.
 
   If this platform matters to you, say so — adding one is a build matrix row."
     ;;
@@ -104,7 +108,7 @@ if [ -z "$version" ]; then
   Pick one explicitly:  SYNVEDA_VERSION=v0.2.0 sh install.sh"
 fi
 # Assets are named by the version without its leading `v`, matching the
-# crate version `synveda init` compares a profile against.
+# workspace crate version carried by the matching artifacts.
 plain="${version#v}"
 base="${SYNVEDA_BASE_URL:-https://github.com/$REPO/releases/download/$version}"
 
@@ -194,15 +198,11 @@ cp -R "$work/console" "$HOME_DIR/console"
 rm -rf "$HOME_DIR/plugin"
 cp -R "$work/plugin" "$HOME_DIR/plugin"
 
-# The profile directory is replaced wholesale, so that a file dropped from
-# one release does not linger into the next — with one exception. `.env` is
-# the *deployment's* configuration (the issuer, the tenant, the embedder),
-# written into this directory by `synveda init` because that is where
-# compose reads it from. It is state that happens to live among release
-# content, and deleting it would leave a gateway that starts with no issuer
-# and refuses every request. Re-running `init` would rewrite it, but an
-# installer that silently unconfigures a working deployment is not a thing
-# to make somebody discover.
+# The transitional profile directory is replaced wholesale, so a file dropped
+# from one release does not linger into the next — with one exception. Preserve
+# a pre-existing `.env` byte-for-byte because it may belong to an earlier
+# evaluation. The installer does not interpret it, start it or claim it can be
+# reproduced by the currently withdrawn lifecycle.
 if [ -f "$HOME_DIR/profile/.env" ]; then
   cp "$HOME_DIR/profile/.env" "$work/carried.env"
   say "    carrying over the existing deployment configuration (.env)"
@@ -284,15 +284,15 @@ case ":${PATH}:" in
     say ""
     ;;
 esac
-say "Docker has to be running. Then:"
+say "Docker reference deployment acceptance is pending."
 say ""
-say "  synveda init                       # one runtime, schema and tenant"
-say "  synveda login                      # identity, principal scope, first grant"
+say "This installer placed development/evaluation artifacts only; it did not"
+say "create or start a supported single-host deployment. Every synveda init"
+say "invocation is withdrawn during the CPR-45 authority cutover."
 say ""
-say "  http://127.0.0.1:8120/console/     # the admin console"
-say "  Advanced > Configuration           # bind personal, team or enterprise data"
+say "  https://github.com/$REPO/blob/main/docs/INSTALL.md"
 say ""
-say "To give an AI client your team's governed memory:"
+say "Once a separately validated gateway exists, client setup remains explicit:"
 say ""
 say "  synveda plugin install             # Claude Code: hooks + MCP, one command"
 say "  synveda mcp install --client claude-desktop   # or cursor, or zed"

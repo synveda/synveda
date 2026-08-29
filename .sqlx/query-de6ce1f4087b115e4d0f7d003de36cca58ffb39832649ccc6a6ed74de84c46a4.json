@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select current_user = session_user and current_user = $1 as \"selected!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "selected!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Name"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "de6ce1f4087b115e4d0f7d003de36cca58ffb39832649ccc6a6ed74de84c46a4"
+}

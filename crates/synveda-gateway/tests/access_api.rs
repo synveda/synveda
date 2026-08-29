@@ -13,6 +13,9 @@
 //! Tests that need a live Postgres read `DATABASE_URL` and skip with a message
 //! when it is unset (CI has no database); run them locally with `make db-test`.
 
+#[path = "../../synveda-store/tests/support/tenant_fixture.rs"]
+mod tenant_fixture;
+
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
@@ -23,7 +26,7 @@ use http_body_util::BodyExt;
 use metrics_exporter_prometheus::PrometheusHandle;
 use serde_json::{Value, json};
 use sqlx::postgres::PgPoolOptions;
-use synveda_gateway::app::{AppState, router};
+use synveda_gateway::app::{AppState, behavior_test_router as router};
 use synveda_gateway::telemetry;
 use synveda_identity::Hs256Verifier;
 use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
@@ -105,12 +108,12 @@ async fn admitted_tenant() -> Option<(AppState, TenantId)> {
         .connect(&url)
         .await
         .expect("connect to DATABASE_URL");
-    synveda_store::migrate(&pool)
+    synveda_store::epoch::verify(&pool)
         .await
         .expect("apply migrations");
     let id = TenantId::new();
     let slug = format!("cpr5-{}", id.as_uuid().simple());
-    synveda_store::tenants::create(
+    tenant_fixture::create(
         &pool,
         id,
         &slug,
@@ -257,28 +260,34 @@ async fn seed(app: &Router, token: &str) -> (String, String) {
 
 /// Every audit action in the tenant's chain, in order.
 async fn chain_actions(state: &AppState, tenant_id: TenantId) -> Vec<String> {
-    sqlx::query_scalar::<_, String>(
+    let mut tx = tenant_fixture::begin(&state.pool, tenant_id).await;
+    let actions = sqlx::query_scalar::<_, String>(
         "select action from audit_log where tenant_id = $1 order by seq",
     )
     .bind(tenant_id.as_uuid())
-    .fetch_all(&state.pool)
+    .fetch_all(&mut *tx)
     .await
-    .expect("read the chain")
+    .expect("read the chain");
+    tx.commit().await.expect("commit chain read");
+    actions
 }
 
 /// Every audit payload in the tenant's chain, concatenated — for sweeping.
 async fn chain_text(state: &AppState, tenant_id: TenantId) -> String {
-    sqlx::query_scalar::<_, Value>(
+    let mut tx = tenant_fixture::begin(&state.pool, tenant_id).await;
+    let payloads = sqlx::query_scalar::<_, Value>(
         "select payload from audit_log where tenant_id = $1 order by seq",
     )
     .bind(tenant_id.as_uuid())
-    .fetch_all(&state.pool)
+    .fetch_all(&mut *tx)
     .await
-    .expect("read the chain")
-    .iter()
-    .map(std::string::ToString::to_string)
-    .collect::<Vec<_>>()
-    .join("\n")
+    .expect("read the chain");
+    tx.commit().await.expect("commit chain read");
+    payloads
+        .iter()
+        .map(std::string::ToString::to_string)
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 // ── Ownership ────────────────────────────────────────────────────────────────
@@ -517,12 +526,14 @@ async fn the_invitation_token_never_reaches_the_audit_chain() {
     );
 
     // And the database stores a hash rather than the token.
+    let mut tx = tenant_fixture::begin(&state.pool, tenant_id).await;
     let stored: Vec<u8> =
         sqlx::query_scalar("select token_hash from pending_invites where tenant_id = $1")
             .bind(tenant_id.as_uuid())
-            .fetch_one(&state.pool)
+            .fetch_one(&mut *tx)
             .await
             .expect("read the hash");
+    tx.commit().await.expect("commit invitation hash read");
     assert_eq!(stored.len(), 32);
     assert_ne!(
         stored,

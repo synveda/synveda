@@ -21,6 +21,7 @@ mod approvals;
 mod audit;
 mod audit_query;
 mod auth;
+pub mod authority;
 pub mod authz;
 mod capabilities;
 mod capture;

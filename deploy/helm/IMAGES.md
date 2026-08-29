@@ -40,18 +40,18 @@ reason the chart's `<appVersion>` is.
 
 | Image | Where | Licence | Why it is here |
 |---|---|---|---|
-| `ghcr.io/synveda/gateway:<version>` | `gateway`, `--issuer` path only | ours | The product. Same image and same Dockerfile the chart runs, published rather than built. A default install runs the binary on the host instead — ADR-0055 decision 8. |
+| `ghcr.io/synveda/gateway:<version>` | `gateway`, retained profile | ours | The product image also used by the chart. The profile lifecycle is withdrawn during CPR-45 and is not a default install. |
 | `ghcr.io/synveda/postgres:<version>` | `postgres` | ours (see bases) | Postgres 17 with pgvector, from `deploy/compose/postgres/Dockerfile`. The same epoch-3 extension shape is used by dev, release and Helm. |
-| `ghcr.io/sebadob/rauthy:0.35.2` | `rauthy` | Apache-2.0 | The bundled OIDC provider. Dev-shaped credentials, and the reason the default install's gateway is a host process. |
+| `ghcr.io/sebadob/rauthy:0.35.2` | `rauthy` | Apache-2.0 | Cutover residue in the withdrawn release profile; not a current provider claim. |
 | `jaegertracing/jaeger:2.19.0` | `jaeger` | Apache-2.0 | Traces on port 16686. FND-5's exporter targets it; the profile starts it because an install nobody can see inside is harder to trust. |
 | `ghcr.io/huggingface/text-embeddings-inference:cpu-1.8.1` | `tei`, optional | **read on every bump** | The amd64 embedder, when `--embedder tei`. See the arm64 row below. |
 
 ## The per-architecture embedder pins
 
 Upstream publishes two TEI builds and versions only one of them. The pins
-live in the `Makefile` (`TEI_IMAGE_*`), which is what `make dev-up` resolves
-and what `synveda init` carries its own copy of for an operator with no
-Makefile.
+live in the `Makefile` (`TEI_IMAGE_*`), which is what the contributor loop
+resolves. The withdrawn release artifact carries an explicit/default image
+selection for deterministic packaging evidence only.
 
 | Image | Where | Licence | Why it is here |
 |---|---|---|---|
@@ -62,17 +62,18 @@ Makefile.
 | Image | Where | Licence | Why it is here |
 |---|---|---|---|
 | `synveda/gateway:<appVersion>` | `image.repository` | ours | The product. Both binaries: the gateway serves, the CLI migrates and issues SCIM credentials. Built from `deploy/compose/gateway/Dockerfile`. |
-| `synveda/enterprise-postgres:17` | `postgres.image` | ours (see bases) | Postgres for CloudNativePG plus pgvector. Built from `deploy/helm/postgres/Dockerfile`; its schema and extension shape match the single-node profile. |
+| `synveda/enterprise-postgres:17` | `postgres.image` | ours (see bases) | Postgres for CloudNativePG plus pgvector and the shared content-free database bootstrap command. Built from the repository root with `deploy/helm/postgres/Dockerfile`; its schema and role contract match the Compose reference. |
 | `ghcr.io/huggingface/text-embeddings-inference:cpu-1.8.1` | `tei.image`, optional | **read on every bump** | The embedder, when `embedder: tei` and `tei.enabled`. Serves BAAI/bge-m3, whose weights are a separate licence from the server's. |
 
 ## Base images we build on
 
 | Image | Built into | Licence | Notes |
 |---|---|---|---|
-| `ghcr.io/cloudnative-pg/postgresql:17` | enterprise-postgres | Apache-2.0 (CNPG) over PostgreSQL-licensed Postgres | The operator's own base. Pinned by tag family here; a release pins the digest. |
-| `rust:1.96.0-bookworm` | gateway (build stage) | MIT/Apache-2.0 | Matches `rust-toolchain.toml`; a mismatch is a build error rather than a silent upgrade. |
-| `node:22-bookworm-slim` | gateway (console stage) | MIT | Builds the console bundle. Never in the runtime stage. |
-| `debian:bookworm-slim` | gateway (runtime stage) | various, all Debian-main | Runtime: `ca-certificates` for OIDC discovery, `curl` for the healthcheck. |
+| `ghcr.io/cloudnative-pg/postgresql:17@sha256:fa6e2b2e14d19a109cc142cf857d328420bb7f1656b08c96e08be377692247ab` | enterprise-postgres | Apache-2.0 (CNPG) over PostgreSQL-licensed Postgres | Exact multi-architecture CNPG PostgreSQL 17 base; the helper is executed again in this final image. |
+| `rust:1.96.0-bookworm@sha256:5e2214abe154fe26e39f64488952e5c991eeed1d6d6da7cc8381ae83927f0cfc` | gateway, Compose PostgreSQL and Keycloak mounted-input helper build stages | MIT/Apache-2.0 toolchain; build-only system compiler | Matches `rust-toolchain.toml`; also provides the digest-pinned native C compiler so no mutable apt compiler packages enter helper builds. |
+| `rust:1.96.0-bullseye@sha256:7069898d5edfc11b0ba498ecefbcc5438f6390b3ce0be11a9750cf39cab7e02f` | CloudNativePG mounted-input helper build stage | MIT/Apache-2.0 toolchain; build-only system compiler | Matches the Debian 11 glibc ABI in the pinned CloudNativePG final image; a final-stage execution probe rejects ABI drift. |
+| `node:22-bookworm-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5` | gateway console stage | MIT | Builds the console bundle. Never in the runtime stage. |
+| `debian:bookworm-slim@sha256:88200866dfff7ea7f5cbcb6ec7c8a701889efe6fe859fe64d6990e4b07ea4171` | gateway runtime stage | various, all Debian-main | Runtime: `ca-certificates` for OIDC discovery, `curl` for the healthcheck. |
 
 ## Images the install test runs, and the chart never does
 
@@ -84,7 +85,7 @@ bar, not none.
 | Image | Where | Licence | Why it is here |
 |---|---|---|---|
 | `ghcr.io/sebadob/rauthy:0.35.2` | `demos/fixtures/ops-2/idp.yaml` | Apache-2.0 | The test issuer, at a Service DNS name. Same version the dev compose runs. |
-| `node:22-bookworm-slim` | `demos/fixtures/ops-2/client-pod.yaml` | MIT | Plays the browser half of `synveda login`. |
+| `node:22-bookworm-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5` | `demos/fixtures/ops-2/client-pod.yaml` | MIT | Plays the browser half of `synveda login`. |
 | CloudNativePG operator | applied by the demo, version pinned in it | Apache-2.0 | Installed separately by design; the chart renders a `Cluster` for it. |
 
 ## Extensions compiled into `synveda/enterprise-postgres`

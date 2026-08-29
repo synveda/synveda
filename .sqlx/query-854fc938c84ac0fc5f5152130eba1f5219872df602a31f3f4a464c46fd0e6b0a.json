@@ -1,0 +1,24 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select (\n              select count(*)::integer\n                from pg_catalog.pg_database as database\n               where database.datname = any($1::text[])\n            ) = pg_catalog.cardinality($1::text[])\n            and (\n              select count(*)::integer\n                from pg_catalog.pg_roles as role\n               where role.rolname = any($3::text[])\n            ) = pg_catalog.cardinality($3::text[])\n            and not exists (\n              select 1\n                from pg_catalog.pg_database as database\n                join pg_catalog.pg_roles as role\n                  on role.rolname = any($2::text[])\n               where database.datname = any($1::text[])\n                 and pg_catalog.has_database_privilege(\n                       role.oid,\n                       database.oid,\n                       'CONNECT'\n                     )\n            )\n            and not exists (\n              select 1\n                from pg_catalog.pg_roles as role\n               where role.rolname = any($3::text[])\n                 and pg_catalog.has_database_privilege(\n                       role.oid,\n                       pg_catalog.current_database(),\n                       'CONNECT'\n                     )\n            ) as \"safe!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "safe!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "TextArray",
+        "TextArray",
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "854fc938c84ac0fc5f5152130eba1f5219872df602a31f3f4a464c46fd0e6b0a"
+}

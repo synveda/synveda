@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select current_user = session_user\n              and current_user = any($2::text[])\n              and exists (\n                select 1\n                  from pg_catalog.pg_namespace as namespace\n                  join pg_catalog.pg_roles as owner on owner.oid = namespace.nspowner\n                 where namespace.nspname = 'public'\n                   and owner.rolname = $1\n                   and not exists (\n                     select 1\n                       from pg_catalog.aclexplode(namespace.nspacl) as acl\n                      where not (\n                        acl.grantee = owner.oid\n                        and acl.grantor = owner.oid\n                        and acl.privilege_type in ('CREATE', 'USAGE')\n                        and not acl.is_grantable\n                      )\n                   )\n                   and (\n                     select count(*)\n                       from pg_catalog.aclexplode(namespace.nspacl) as acl\n                      where acl.grantee = owner.oid\n                        and acl.grantor = owner.oid\n                        and acl.privilege_type in ('CREATE', 'USAGE')\n                        and not acl.is_grantable\n                   ) = 2\n              )\n              and (\n                select count(*)\n                  from pg_catalog.pg_extension as extension\n                  join pg_catalog.pg_namespace as namespace\n                    on namespace.oid = extension.extnamespace\n                 where extension.extname in ('btree_gin', 'vector')\n                   and namespace.nspname = 'public'\n                   and extension.extowner = (\n                     select role.oid from pg_catalog.pg_roles as role\n                      where role.rolname = current_user\n                   )\n                   and (\n                     extension.extname = 'btree_gin' and extension.extversion = '1.3'\n                     or extension.extname = 'vector' and extension.extversion = '0.8.6'\n                   )\n              ) = 2\n              and not exists (\n                select 1\n                  from pg_catalog.pg_extension as extension\n                 where extension.extname not in ('plpgsql', 'btree_gin', 'vector')\n              ) as \"safe!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "safe!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Name",
+        "TextArray"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "a375861519f794dd1860bcaf032d0331bb2bae35f0002b7a98a9f9e26c184644"
+}

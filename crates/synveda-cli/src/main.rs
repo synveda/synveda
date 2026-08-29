@@ -16,11 +16,15 @@
 // they hold a lock while they do it.
 #![cfg_attr(not(test), forbid(unsafe_code))]
 
+#[cfg(all(feature = "eval-fixture", not(test), not(debug_assertions)))]
+compile_error!("the CLI release binary cannot include the eval-fixture feature");
+
 mod api;
 mod audit;
 mod channel;
 mod configuration;
 mod credentials;
+mod database_preflight;
 mod demo;
 mod diff;
 mod directory;
@@ -54,6 +58,10 @@ use serde_json::json;
 use sqlx::postgres::PgPoolOptions;
 use synveda_audit::{Actor, AuditAction, AuditEvent, Outcome};
 use synveda_identity::Hs256Verifier;
+#[cfg(feature = "eval-fixture")]
+use synveda_types::GrantId;
+#[cfg(feature = "eval-fixture")]
+use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
 use synveda_types::{
     CompositionConfig, IdentityId, PackConfig, ProposalId, ProposalState, RedactionConfig,
     RedactionMode, ScanSeverity, ScopeId, SkillIndex, SkillScanConfig, TenantId, TenantStatus,
@@ -68,44 +76,34 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Bring up the single-node form of the shared runtime and admit its
-    /// first tenant (OPS-1; CPR-36, ADR-0095).
+    /// Reserved bootstrap verb; unavailable during the CPR-45 Docker
+    /// reference cutover (ADR-0102).
     ///
-    /// What it does is deliberately small, because everything else the
-    /// product has a governed surface for is created *through* that
-    /// surface: `init` applies migrations, admits the tenant, configures
-    /// the issuer, and starts the stack. The operator's identity, their own
-    /// scope and their `administrator` grant at the tenant root all arrive
-    /// on the first `synveda login`, from AUTH-2's provisioning transaction,
-    /// chained under the operator's own subject. Workspaces, projects and
-    /// org units are `POST /v1/workspaces` and `synveda scope create` after
-    /// that.
+    /// The cutover gate refuses every invocation before profile discovery,
+    /// Compose, secret-file or database mutation. The retained flags are
+    /// reserved inputs for the future canonical lifecycle; none currently
+    /// changes that refusal. The verb reopens only after the file-secret,
+    /// Keycloak issuer and whole-operation lifecycle pass clean-volume
+    /// acceptance.
     ///
     /// There is no path in here that writes a scope, an identity, a grant,
     /// Configuration or Knowledge behind the PDP's back — an installer runs once, as
     /// root-equivalent, before anybody is watching, which makes it the
     /// worst place in the product to keep a shortcut (seed §2.2).
     Init {
-        /// Tenant slug to admit: lowercase, hyphenated. Also becomes the
-        /// tenant root scope's slug when the first thing that needs a parent
-        /// mints it.
+        /// Reserved tenant slug input; not consumed while init is unavailable.
         #[arg(long, default_value = "acme")]
         slug: String,
-        /// Tenant display name; becomes the tenant root scope's name.
+        /// Reserved tenant display-name input; not consumed during cutover.
         #[arg(long, default_value = "ACME")]
         name: String,
-        /// Which embedder new Knowledge indexes use. `deterministic` needs no
-        /// model download and is lexical-only; `tei` serves BGE-M3 and
-        /// downloads ~2.3 GB once. Index rows retain their model/dimension.
+        /// Reserved embedder input; not consumed while init is unavailable.
         #[arg(long, value_parser = ["deterministic", "tei"], default_value = "deterministic")]
         embedder: String,
-        /// An external OIDC issuer URL. Omitted, the bundled Rauthy is
-        /// configured for you; given, nothing is created in your directory
-        /// and the client registration you must perform there is printed
-        /// (ADR-0055 decision 4).
+        /// Reserved external OIDC issuer input; not consumed during cutover.
         #[arg(long)]
         issuer: Option<String>,
-        /// Print what would happen and change nothing.
+        /// Reserved dry-run flag; init still returns the same cutover refusal.
         #[arg(long)]
         dry_run: bool,
     },
@@ -1423,6 +1421,8 @@ enum AuditCommand {
 
 #[derive(Subcommand)]
 enum DbCommand {
+    /// Prove migrator, gateway and worker files select one writable database.
+    Preflight,
     /// Apply all pending migrations to DATABASE_URL or DATABASE_URL_FILE.
     Migrate,
 }
@@ -1691,6 +1691,11 @@ enum TenantCommand {
         /// Admit in suspended state (its tokens will not resolve).
         #[arg(long)]
         suspended: bool,
+        /// Evaluation fixture only: establish this out-of-band HS256 subject
+        /// as the first administrator in the same audited admission.
+        #[cfg(feature = "eval-fixture")]
+        #[arg(long, hide = true)]
+        dev_administrator_subject: Option<String>,
     },
     /// A tenant's encryption keys (TEN-4, ADR-0064).
     #[command(subcommand)]
@@ -2203,17 +2208,11 @@ async fn run(cli: Cli) -> Result<(), String> {
             );
             Ok(())
         }
+        Command::Db(DbCommand::Preflight) => database_preflight::run().await,
         Command::Db(DbCommand::Migrate) => {
             let pool = connect().await?;
-            // Asked here as well as inside `migrate`, so the refusal reaches
-            // a terminal as itself rather than wrapped in `storage:` — this
-            // is the command whose whole job is to advance a schema, and the
-            // answer "this one cannot be advanced, here is what to run" is
-            // the answer (CPR-2, ADR-0069).
-            synveda_store::epoch::preflight(&pool)
-                .await
-                .map_err(|refusal| refusal.to_string())?;
-            synveda_store::migrate(&pool)
+            let database_roles = init::database_roles()?;
+            synveda_store::migrate(&pool, &database_roles)
                 .await
                 .map_err(|err| err.to_string())?;
             eprintln!("migrations applied");
@@ -2224,14 +2223,47 @@ async fn run(cli: Cli) -> Result<(), String> {
             slug,
             name,
             suspended,
+            #[cfg(feature = "eval-fixture")]
+            dev_administrator_subject,
         }) => {
             let status = if suspended {
                 TenantStatus::Suspended
             } else {
                 TenantStatus::Active
             };
-            let pool = connect_current_epoch().await?;
-            let tenant = create_tenant(&pool, &slug, &name, status).await?;
+            #[cfg(feature = "eval-fixture")]
+            if suspended && dev_administrator_subject.is_some() {
+                return Err(
+                    "--dev-administrator-subject cannot admit an administrator into a suspended tenant"
+                        .to_owned(),
+                );
+            }
+            #[cfg(feature = "eval-fixture")]
+            if dev_administrator_subject.is_some() {
+                if std::env::var("SYNVEDA_EVAL_FIXTURE").as_deref() != Ok("1") {
+                    return Err(
+                        "--dev-administrator-subject requires SYNVEDA_EVAL_FIXTURE=1".to_owned(),
+                    );
+                }
+                init::sensitive_setting("SYNVEDA_DEV_JWT_SECRET")?
+                    .filter(|secret| !secret.is_empty())
+                    .ok_or(
+                        "--dev-administrator-subject requires SYNVEDA_DEV_JWT_SECRET or SYNVEDA_DEV_JWT_SECRET_FILE",
+                    )?;
+            }
+            let database_roles = init::database_roles()?;
+            let pool = connect_tenant_admission().await?;
+            #[cfg(feature = "eval-fixture")]
+            let tenant = if let Some(subject) = dev_administrator_subject.as_deref() {
+                if subject.is_empty() {
+                    return Err("--dev-administrator-subject cannot be empty".to_owned());
+                }
+                create_eval_tenant(&pool, &database_roles, &slug, &name, status, subject).await?
+            } else {
+                create_tenant(&pool, &database_roles, &slug, &name, status).await?
+            };
+            #[cfg(not(feature = "eval-fixture"))]
+            let tenant = create_tenant(&pool, &database_roles, &slug, &name, status).await?;
             // The tenant's key, in the same command that admits it (TEN-4,
             // ADR-0064). Not in `create_tenant`'s transaction: wrapping a key
             // is a KMS call, and a network call inside the transaction that
@@ -2971,10 +3003,11 @@ async fn run(cli: Cli) -> Result<(), String> {
             subject,
             ttl_secs,
         }) => {
-            let secret = std::env::var("SYNVEDA_DEV_JWT_SECRET")
-                .ok()
+            let secret = init::sensitive_setting("SYNVEDA_DEV_JWT_SECRET")?
                 .filter(|secret| !secret.is_empty())
-                .ok_or("SYNVEDA_DEV_JWT_SECRET must be set to issue dev tokens")?;
+                .ok_or(
+                    "SYNVEDA_DEV_JWT_SECRET or SYNVEDA_DEV_JWT_SECRET_FILE must be set to issue dev tokens",
+                )?;
             let token = Hs256Verifier::new(secret.as_bytes()).issue(
                 &subject,
                 tenant,
@@ -3005,14 +3038,84 @@ fn break_glass() -> Actor {
 /// path, and both predate it.
 pub(crate) async fn create_tenant(
     pool: &sqlx::PgPool,
+    database_roles: &synveda_store::runtime_role::DatabaseRoles,
     slug: &str,
     name: &str,
     status: TenantStatus,
 ) -> Result<synveda_types::Tenant, String> {
-    let tenant_id = TenantId::new();
-    let mut tx = synveda_store::rls::begin_tenant_tx(pool, tenant_id)
+    create_tenant_with_admission(
+        pool,
+        database_roles,
+        slug,
+        name,
+        status,
+        TenantAdmission::Standard,
+    )
+    .await
+}
+
+#[cfg(feature = "eval-fixture")]
+async fn create_eval_tenant(
+    pool: &sqlx::PgPool,
+    database_roles: &synveda_store::runtime_role::DatabaseRoles,
+    slug: &str,
+    name: &str,
+    status: TenantStatus,
+    administrator_subject: &str,
+) -> Result<synveda_types::Tenant, String> {
+    create_tenant_with_admission(
+        pool,
+        database_roles,
+        slug,
+        name,
+        status,
+        TenantAdmission::EvalAdministrator(administrator_subject.to_owned()),
+    )
+    .await
+}
+
+enum TenantAdmission {
+    Standard,
+    #[cfg(feature = "eval-fixture")]
+    EvalAdministrator(String),
+}
+
+async fn create_tenant_with_admission(
+    pool: &sqlx::PgPool,
+    database_roles: &synveda_store::runtime_role::DatabaseRoles,
+    slug: &str,
+    name: &str,
+    status: TenantStatus,
+    admission: TenantAdmission,
+) -> Result<synveda_types::Tenant, String> {
+    create_tenant_with_admission_id(
+        pool,
+        database_roles,
+        TenantId::new(),
+        slug,
+        name,
+        status,
+        admission,
+    )
+    .await
+}
+
+async fn create_tenant_with_admission_id(
+    pool: &sqlx::PgPool,
+    database_roles: &synveda_store::runtime_role::DatabaseRoles,
+    tenant_id: TenantId,
+    slug: &str,
+    name: &str,
+    status: TenantStatus,
+    admission: TenantAdmission,
+) -> Result<synveda_types::Tenant, String> {
+    let mut tx = synveda_store::rls::begin_migrator_tenant_tx(pool, tenant_id, database_roles)
         .await
-        .map_err(|err| err.to_string())?;
+        .map_err(|error| {
+            format!(
+                "tenant admission requires the exact configured migrator principal, database target and schema epoch: {error}"
+            )
+        })?;
     let tenant = synveda_store::tenants::create(&mut *tx, tenant_id, slug, name, status)
         .await
         .map_err(|err| err.to_string())?;
@@ -3024,6 +3127,48 @@ pub(crate) async fn create_tenant(
         json!({"slug": tenant.slug, "name": tenant.name, "status": tenant.status}),
     )
     .await?;
+    match admission {
+        TenantAdmission::Standard => {}
+        #[cfg(feature = "eval-fixture")]
+        TenantAdmission::EvalAdministrator(subject) => {
+            let root = synveda_store::scopes::ensure_tenant_root(&mut *tx, tenant_id)
+                .await
+                .map_err(|err| err.to_string())?;
+            let grant = synveda_store::access::create_grant(
+                &mut *tx,
+                &synveda_store::access::NewGrant {
+                    id: GrantId::new(),
+                    tenant_id,
+                    scope_id: root.id,
+                    subject: GrantSubject::Principal {
+                        principal_id: subject.clone(),
+                    },
+                    role_key: RoleKey::Administrator,
+                    source: GrantSource::Automation,
+                    invite_id: None,
+                    granted_by: None,
+                },
+            )
+            .await
+            .map_err(|err| err.to_string())?;
+            record_break_glass(
+                &mut tx,
+                tenant_id,
+                AuditAction::AccessGranted,
+                format!("scope {}", root.id),
+                json!({
+                    "origin": "eval-fixture-tenant-admission",
+                    "grant": {
+                        "id": grant.id,
+                        "scope_id": grant.scope_id,
+                        "subject": subject,
+                        "role": RoleKey::Administrator,
+                    },
+                }),
+            )
+            .await?;
+        }
+    }
     tx.commit().await.map_err(|err| err.to_string())?;
     Ok(tenant)
 }
@@ -3078,28 +3223,45 @@ async fn connect_current_epoch() -> Result<sqlx::PgPool, String> {
     Ok(pool)
 }
 
+/// Connects the tenant-admission command only to an explicitly selected
+/// deployment database. The legacy contributor default is not authority to
+/// admit a tenant, even if its login happens to retain owner capability.
+async fn connect_tenant_admission() -> Result<sqlx::PgPool, String> {
+    let setting = init::database_url()?;
+    if !setting.explicitly_configured {
+        return Err(
+            "tenant create requires explicit DATABASE_URL or DATABASE_URL_FILE for the configured migrator"
+                .to_owned(),
+        );
+    }
+    connect_url(&setting.value).await
+}
+
 async fn connect() -> Result<sqlx::PgPool, String> {
-    // `DATABASE_URL`, `DATABASE_URL_FILE`, or the single-node profile's own
-    // Postgres — the same default `synveda init` installs against, so the
-    // commands INSTALL.md tells a new operator to run next (`audit tail`,
-    // `audit verify`) work on a machine that has one deployment and no Makefile.
+    // `DATABASE_URL`, `DATABASE_URL_FILE`, or the legacy local development
+    // Postgres default used by direct operator commands. CPR-45 deliberately
+    // refuses that implicit value in `synveda init`: only the deployment
+    // bootstrap may establish the exact migrator/runtime role contract.
     //
     // The message this replaces named the Makefile, which is in a checkout
     // an installed operator does not have (OPS-8). Erroring on a missing
     // variable was right while a checkout was the only way to get here.
     let url = init::database_url()?.value;
-    let connect_options = synveda_store::database_url::parse("DATABASE_URL", &url)
+    connect_url(&url).await
+}
+
+async fn connect_url(url: &str) -> Result<sqlx::PgPool, String> {
+    let connect_options = synveda_store::database_url::parse("DATABASE_URL", url)
         .map_err(|error| error.to_string())?;
     PgPoolOptions::new()
         .max_connections(2)
         .connect_with(connect_options)
         .await
         .map_err(|err| {
-            let safe_url = init::redacted_database_url(&url);
+            let safe_url = init::redacted_database_url(url);
             format!(
                 "connect to {safe_url}: {err}\n\
-                 (set DATABASE_URL or DATABASE_URL_FILE to reach a database other than the one \
-                 `synveda init` installs)"
+                 (set DATABASE_URL or DATABASE_URL_FILE to select the deployment database)"
             )
         })
 }

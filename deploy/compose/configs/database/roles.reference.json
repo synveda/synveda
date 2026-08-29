@@ -1,0 +1,1 @@
+{"migrator":"synveda_migrator","gateway":"synveda_gateway","worker":"synveda_worker","administrators":["synveda_owner"],"administrative_memberships":[],"forbidden_databases":["keycloak","postgres","template1"],"isolated_peer_roles":["keycloak"]}

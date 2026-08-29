@@ -1,5 +1,8 @@
 //! CPR-27 acceptance evidence for bounded OKF v0.2 exchange.
 
+#[path = "../../synveda-store/tests/support/tenant_fixture.rs"]
+mod tenant_fixture;
+
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
@@ -12,10 +15,10 @@ use http_body_util::BodyExt;
 use metrics_exporter_prometheus::PrometheusHandle;
 use serde_json::{Value, json};
 use sqlx::postgres::PgPoolOptions;
-use synveda_gateway::app::{AppState, router};
+use synveda_gateway::app::{AppState, behavior_test_router as router};
 use synveda_gateway::telemetry;
 use synveda_identity::Hs256Verifier;
-use synveda_store::{access, identities, rls, scopes, tenants};
+use synveda_store::{access, identities, rls, scopes};
 use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
 use synveda_types::{CaptureBatchId, GrantId, IdentityId, IdentityKind, TenantId, TenantStatus};
 use tower::ServiceExt;
@@ -78,11 +81,11 @@ async fn admitted_tenant() -> Option<(AppState, TenantId)> {
         .connect(&url)
         .await
         .expect("connect to DATABASE_URL");
-    synveda_store::migrate(&pool)
+    synveda_store::epoch::verify(&pool)
         .await
         .expect("apply migrations");
     let tenant_id = TenantId::new();
-    tenants::create(
+    tenant_fixture::create(
         &pool,
         tenant_id,
         &format!("cpr27-{}", tenant_id.as_uuid().simple()),
@@ -289,12 +292,14 @@ async fn okf_plan_materialization_vedaflow_provenance_export_and_isolation() {
         "platform"
     );
     let job_id = plan["job"]["id"].as_str().expect("job id").to_owned();
+    let mut tx = tenant_fixture::begin(&state.pool, tenant).await;
     let before: i64 =
         sqlx::query_scalar("select count(*) from knowledge_items where tenant_id = $1")
             .bind(tenant.as_uuid())
-            .fetch_one(&state.pool)
+            .fetch_one(&mut *tx)
             .await
             .expect("count Knowledge after planning");
+    tx.commit().await.expect("commit planning observation");
     assert_eq!(before, 0, "a dry-run plan must not publish Knowledge");
 
     let (status, replay) = call(
@@ -332,7 +337,14 @@ async fn okf_plan_materialization_vedaflow_provenance_export_and_isolation() {
     .execute(&mut *tx)
     .await
     .expect_err("artifact must be immutable");
-    assert!(error.to_string().contains("append-only"), "{error}");
+    assert_eq!(
+        error
+            .as_database_error()
+            .and_then(|error| error.code())
+            .as_deref(),
+        Some("42501"),
+        "the application role must hold no UPDATE on immutable artifacts: {error}"
+    );
     tx.rollback().await.expect("rollback immutability probe");
 
     let (status, materialized) = call(
@@ -382,12 +394,16 @@ async fn okf_plan_materialization_vedaflow_provenance_export_and_isolation() {
         candidate["source_artifact_ids"].as_array().map(Vec::len),
         Some(1)
     );
+    let mut tx = tenant_fixture::begin(&state.pool, tenant).await;
     let still_none: i64 =
         sqlx::query_scalar("select count(*) from knowledge_items where tenant_id = $1")
             .bind(tenant.as_uuid())
-            .fetch_one(&state.pool)
+            .fetch_one(&mut *tx)
             .await
             .expect("count Knowledge after materialisation");
+    tx.commit()
+        .await
+        .expect("commit materialisation observation");
     assert_eq!(still_none, 0, "materialisation may only create candidates");
 
     let candidate_id = candidate["id"].as_str().expect("candidate id");
@@ -514,13 +530,15 @@ async fn okf_plan_materialization_vedaflow_provenance_export_and_isolation() {
     .await;
     assert_eq!(status, StatusCode::NOT_FOUND, "{hidden}");
 
+    let mut tx = tenant_fixture::begin(&state.pool, tenant).await;
     let audit_rows: Vec<(String, Value)> = sqlx::query_as(
         "select action, payload from audit_log where tenant_id = $1 and action like 'okf.%' order by seq",
     )
     .bind(tenant.as_uuid())
-    .fetch_all(&state.pool)
+    .fetch_all(&mut *tx)
     .await
     .expect("load OKF audit rows");
+    tx.commit().await.expect("commit OKF audit read");
     assert!(
         audit_rows
             .iter()
@@ -542,4 +560,38 @@ async fn okf_plan_materialization_vedaflow_provenance_export_and_isolation() {
         assert!(!text.contains("traceparent on public"));
         assert!(!text.contains("vendor_extension"));
     }
+}
+
+#[tokio::test]
+#[ignore = "serial administrator tamper acceptance"]
+async fn import_artifact_trigger_binds_an_rls_bypassing_administrator() {
+    let _guard = serial().await;
+    let Some((state, tenant)) = admitted_tenant().await else {
+        return;
+    };
+    let app = router(state.clone());
+    let token = issue(ADMIN, tenant);
+    let (_, project_id) = workspace_and_project(&app, &token).await;
+    let (status, plan) = call(
+        &app,
+        "POST",
+        &format!("/v1/projects/{project_id}/okf/imports"),
+        &token,
+        Some("okf-admin-trigger-plan"),
+        Some(bundle()),
+    )
+    .await;
+    assert_eq!(status, StatusCode::CREATED, "{plan}");
+    let artifact_id = plan["artifacts"][0]["id"].as_str().expect("artifact id");
+    let administrator = tenant_fixture::administrator_pool(&state.pool).await;
+    let error = sqlx::query(
+        "update import_artifacts set body_markdown = 'tampered' where tenant_id = $1 and id = $2",
+    )
+    .bind(tenant.as_uuid())
+    .bind(uuid::Uuid::parse_str(artifact_id).expect("artifact uuid"))
+    .execute(&administrator)
+    .await
+    .expect_err("append-only trigger must bind the administrator");
+    assert!(error.to_string().contains("append-only"), "{error}");
+    administrator.close().await;
 }

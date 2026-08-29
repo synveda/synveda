@@ -7,6 +7,9 @@
 //! message when it is unset (CI has no database); run them locally with
 //! `make db-test` or via `demos/ten-1-tenant-resolution.sh`.
 
+#[path = "../../synveda-store/tests/support/tenant_fixture.rs"]
+mod tenant_fixture;
+
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
@@ -16,7 +19,7 @@ use http_body_util::BodyExt;
 use metrics_exporter_prometheus::PrometheusHandle;
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
-use synveda_gateway::app::{AppState, router};
+use synveda_gateway::app::{AppState, behavior_test_router as router};
 use synveda_gateway::telemetry;
 use synveda_identity::Hs256Verifier;
 use synveda_types::{TenantId, TenantStatus};
@@ -208,12 +211,12 @@ async fn admitted_tenant(status: TenantStatus) -> Option<(String, TenantId)> {
         .connect(&url)
         .await
         .expect("connect to DATABASE_URL");
-    synveda_store::migrate(&pool)
+    synveda_store::epoch::verify(&pool)
         .await
         .expect("apply migrations");
     let id = TenantId::new();
     let slug = format!("ten1-{}", id.as_uuid().simple());
-    synveda_store::tenants::create(&pool, id, &slug, "TEN-1 test tenant", status)
+    tenant_fixture::create(&pool, id, &slug, "TEN-1 test tenant", status)
         .await
         .expect("admit tenant");
     Some((url, id))

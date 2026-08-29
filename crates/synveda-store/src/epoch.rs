@@ -28,7 +28,7 @@
 //! not exist is worse than no instruction at all.
 
 use chrono::{DateTime, Utc};
-use sqlx::PgPool;
+use sqlx::{PgConnection, PgPool};
 
 /// The schema epoch this build serves.
 ///
@@ -42,6 +42,14 @@ use sqlx::PgPool;
 /// migration is not that; every ordinary release leaves this number alone.
 pub const CURRENT_EPOCH: i32 = 3;
 
+/// The immutable revision of the single epoch-3 baseline this build serves.
+///
+/// CPR-45 changed the contents of migration `0001` without changing the
+/// domain model or epoch. This discriminator makes that pre-release hard cut
+/// an explicit startup verdict rather than leaving SQLx checksum comparison
+/// as the first component to notice it.
+pub const CURRENT_BASELINE_REVISION: i32 = 1;
+
 /// The exact command that makes a refused database usable again. Quoted
 /// verbatim by every refusal below, and by the gateway, the CLI and the
 /// installation documentation — one string, so a message cannot name a verb
@@ -53,6 +61,8 @@ pub const RESET_COMMAND: &str = "synveda reset --database --force";
 pub struct SchemaMetadata {
     /// The schema epoch. Compared against [`CURRENT_EPOCH`] by [`verify`].
     pub epoch: i32,
+    /// The immutable baseline revision within the epoch.
+    pub baseline_revision: i32,
     /// The migration head reached, as its four-digit file prefix (`0039`).
     /// Diagnostic: it tells two databases at the same epoch apart.
     pub migration_head: String,
@@ -76,6 +86,9 @@ pub struct SchemaMetadata {
 pub enum SchemaEpochError {
     /// The database could not be asked. Not a verdict about the epoch.
     Unreachable(String),
+    /// The database answered but the configured principal cannot read the
+    /// marker catalogue. Retrying the same authority cannot change that.
+    Unreadable,
     /// There is no marker: either no `schema_metadata` table, or no row in
     /// it. This is what a database from before the cut looks like.
     Missing,
@@ -90,6 +103,17 @@ pub enum SchemaEpochError {
     /// installation is behind, and a reset would destroy readable data.
     Newer {
         /// The epoch the database carries.
+        found: i32,
+    },
+    /// The epoch is current but its immutable baseline predates this build.
+    OlderRevision {
+        /// The baseline revision the database carries. Zero is the
+        /// unversioned interim epoch-3 baseline.
+        found: i32,
+    },
+    /// The epoch is current but its baseline was created by a newer build.
+    NewerRevision {
+        /// The baseline revision the database carries.
         found: i32,
     },
 }
@@ -123,6 +147,10 @@ impl std::fmt::Display for SchemaEpochError {
             Self::Unreachable(detail) => {
                 write!(f, "could not read the schema epoch marker: {detail}")
             }
+            Self::Unreadable => write!(
+                f,
+                "the configured database principal cannot read the Synveda schema epoch marker; correct the deployment database grants"
+            ),
             Self::Missing => write!(
                 f,
                 "this database carries no Synveda schema epoch marker, so it \
@@ -146,6 +174,21 @@ impl std::fmt::Display for SchemaEpochError {
                  The database holds data a newer Synveda\ncan read, and \
                  `{RESET_COMMAND}` would destroy it."
             ),
+            Self::OlderRevision { found } => write!(
+                f,
+                "this database is at schema epoch {CURRENT_EPOCH}, baseline \
+                 revision {found}; this build serves baseline revision \
+                 {CURRENT_BASELINE_REVISION}.\n\n{HARD_RESET_ADVICE}"
+            ),
+            Self::NewerRevision { found } => write!(
+                f,
+                "this database is at schema epoch {CURRENT_EPOCH}, baseline \
+                 revision {found}, and this build serves baseline revision \
+                 {CURRENT_BASELINE_REVISION}, so this installation is behind \
+                 the database.\n\nUpgrade this installation rather than resetting. \
+                 The database holds data a newer Synveda\ncan read, and \
+                 `{RESET_COMMAND}` would destroy it."
+            ),
         }
     }
 }
@@ -161,20 +204,46 @@ impl std::error::Error for SchemaEpochError {}
 /// and "ours, corrupted" are indistinguishable from here and neither is safe
 /// to serve. Everything else is an outage.
 pub async fn read(pool: &PgPool) -> Result<SchemaMetadata, SchemaEpochError> {
+    let mut connection = pool
+        .acquire()
+        .await
+        .map_err(|_| SchemaEpochError::Unreachable("database unavailable".to_owned()))?;
+    read_connection(&mut connection).await
+}
+
+/// Connection-scoped marker read for indivisible startup authority proofs.
+pub async fn read_connection(
+    connection: &mut PgConnection,
+) -> Result<SchemaMetadata, SchemaEpochError> {
     let row = sqlx::query!(
         r#"
-        select epoch              as "epoch!",
-               migration_head     as "migration_head!",
-               created_at         as "created_at!",
-               created_by_version as "created_by_version!",
-               updated_at         as "updated_at!"
-        from schema_metadata
+        select marker.epoch              as "epoch!",
+               coalesce(
+                 (pg_catalog.to_jsonb(marker) ->> 'baseline_revision')::integer,
+                 0
+               )                         as "baseline_revision!",
+               case
+                 when pg_catalog.octet_length(marker.migration_head) <= 16
+                 then marker.migration_head
+               end                       as "migration_head?",
+               marker.created_at         as "created_at!",
+               case
+                 when pg_catalog.octet_length(marker.created_by_version) <= 64
+                 then marker.created_by_version
+               end                       as "created_by_version?",
+               marker.updated_at         as "updated_at!"
+        from public.schema_metadata marker
+        limit 2
         "#
     )
-    .fetch_optional(pool)
+    .fetch_all(&mut *connection)
     .await
-    .map_err(classify)?
-    .ok_or(SchemaEpochError::Missing)?;
+    .map_err(classify)?;
+    let mut rows = row.into_iter();
+    let row = rows.next().ok_or(SchemaEpochError::Missing)?;
+    if rows.next().is_some() {
+        return Err(malformed_values());
+    }
 
     // Validated here as well as by the CHECK constraints, because the
     // constraints only bind a table migration 0039 created. A marker that
@@ -186,17 +255,24 @@ pub async fn read(pool: &PgPool) -> Result<SchemaMetadata, SchemaEpochError> {
     // number malformed would report the ordinary case (a database this build
     // has moved past) as corruption, and send its operator looking for the
     // wrong problem.
-    if row.migration_head.trim().is_empty() || row.created_by_version.trim().is_empty() {
-        return Err(SchemaEpochError::Malformed(
-            "the migration head or the creating version is blank".to_owned(),
-        ));
+    let migration_head = row.migration_head.ok_or_else(malformed_values)?;
+    let created_by_version = row.created_by_version.ok_or_else(malformed_values)?;
+    if migration_head.len() != 4
+        || !migration_head.bytes().all(|byte| byte.is_ascii_digit())
+        || created_by_version.is_empty()
+        || !created_by_version
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'-' | b'+' | b'_'))
+    {
+        return Err(malformed_values());
     }
 
     Ok(SchemaMetadata {
         epoch: row.epoch,
-        migration_head: row.migration_head,
+        baseline_revision: row.baseline_revision,
+        migration_head,
         created_at: row.created_at,
-        created_by_version: row.created_by_version,
+        created_by_version,
         updated_at: row.updated_at,
     })
 }
@@ -209,11 +285,29 @@ pub async fn read(pool: &PgPool) -> Result<SchemaMetadata, SchemaEpochError> {
 /// [`crate::migrate`] — which is [`preflight`]'s job instead.
 #[tracing::instrument(name = "store.epoch.verify", skip_all)]
 pub async fn verify(pool: &PgPool) -> Result<SchemaMetadata, SchemaEpochError> {
-    let metadata = read(pool).await?;
+    let mut connection = pool
+        .acquire()
+        .await
+        .map_err(|_| SchemaEpochError::Unreachable("database unavailable".to_owned()))?;
+    verify_connection(&mut connection).await
+}
+
+/// Connection-scoped epoch verdict for one-session authority proofs.
+pub async fn verify_connection(
+    connection: &mut PgConnection,
+) -> Result<SchemaMetadata, SchemaEpochError> {
+    let metadata = read_connection(connection).await?;
     match metadata.epoch {
-        epoch if epoch == CURRENT_EPOCH => Ok(metadata),
-        found if found < CURRENT_EPOCH => Err(SchemaEpochError::Older { found }),
-        found => Err(SchemaEpochError::Newer { found }),
+        found if found < CURRENT_EPOCH => return Err(SchemaEpochError::Older { found }),
+        found if found > CURRENT_EPOCH => return Err(SchemaEpochError::Newer { found }),
+        _ => {}
+    }
+    match metadata.baseline_revision {
+        revision if revision == CURRENT_BASELINE_REVISION => Ok(metadata),
+        found if found < CURRENT_BASELINE_REVISION => {
+            Err(SchemaEpochError::OlderRevision { found })
+        }
+        found => Err(SchemaEpochError::NewerRevision { found }),
     }
 }
 
@@ -230,30 +324,114 @@ pub async fn verify(pool: &PgPool) -> Result<SchemaMetadata, SchemaEpochError> {
 /// failed on its first run, not a pre-cut database, and is allowed through.
 #[tracing::instrument(name = "store.epoch.preflight", skip_all)]
 pub async fn preflight(pool: &PgPool) -> Result<(), SchemaEpochError> {
+    let mut connection = pool
+        .acquire()
+        .await
+        .map_err(|_| SchemaEpochError::Unreachable("database unavailable".to_owned()))?;
+    preflight_connection(&mut connection).await
+}
+
+/// Connection-scoped migration hard-cut preflight.
+pub async fn preflight_connection(connection: &mut PgConnection) -> Result<(), SchemaEpochError> {
+    migration_preflight_connection(connection).await.map(|_| ())
+}
+
+/// Whether the migration boundary found a clean database, the one recoverable
+/// post-SQLx/pre-stamp boundary, or an already accepted current baseline.
+/// Callers use this only to select the matching read-only authority proof
+/// before SQLx may execute or validate a migration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum MigrationPreflight {
+    /// No application table exists; only SQLx bookkeeping may be present.
+    Clean,
+    /// The transactional baseline and its exact SQLx ledger row committed,
+    /// but the separate epoch-stamp transaction did not.
+    PendingStamp,
+    /// The current epoch and baseline revision were verified.
+    Current,
+}
+
+/// Connection-scoped hard-cut verdict with the state needed by the migration
+/// authority gate.
+pub(crate) async fn migration_preflight_connection(
+    connection: &mut PgConnection,
+) -> Result<MigrationPreflight, SchemaEpochError> {
     let row = sqlx::query!(
         r#"
         select exists (
                    select
-                   from pg_class c
-                   join pg_namespace n on n.oid = c.relnamespace
+                   from pg_catalog.pg_class c
+                   join pg_catalog.pg_namespace n on n.oid = c.relnamespace
                    where n.nspname = 'public'
                      and c.relkind = 'r'
                      and c.relname not in ('schema_metadata', '_sqlx_migrations')
                ) as "has_tables!",
-               to_regclass('public.schema_metadata') is not null as "has_marker!"
+               pg_catalog.to_regclass('public.schema_metadata') is not null as "has_marker!"
         "#
     )
-    .fetch_one(pool)
+    .fetch_one(&mut *connection)
     .await
     .map_err(classify)?;
 
     if row.has_marker {
-        return verify(pool).await.map(|_| ());
+        return match verify_connection(connection).await {
+            Ok(_) => Ok(MigrationPreflight::Current),
+            Err(SchemaEpochError::Missing)
+                if exact_applied_baseline_without_marker(connection).await? =>
+            {
+                Ok(MigrationPreflight::PendingStamp)
+            }
+            Err(error) => Err(error),
+        };
     }
     if row.has_tables {
         return Err(SchemaEpochError::Missing);
     }
-    Ok(())
+    Ok(MigrationPreflight::Clean)
+}
+
+/// Recognises only the crash boundary created by SQLx after the single
+/// transactional epoch-3 baseline commits and before Synveda stamps it.
+///
+/// The empty marker table proves the migration reached the current DDL, while
+/// the exact sole success row and embedded SHA-384 checksum prove which DDL
+/// SQLx committed. Any additional, failed, missing or drifted ledger row is a
+/// hard-cut refusal rather than a repair candidate.
+async fn exact_applied_baseline_without_marker(
+    connection: &mut PgConnection,
+) -> Result<bool, SchemaEpochError> {
+    let [migration] = crate::MIGRATOR.migrations.as_ref() else {
+        return Err(SchemaEpochError::Malformed(
+            "embedded baseline migration contract drifted".to_owned(),
+        ));
+    };
+    if migration.no_tx {
+        return Err(SchemaEpochError::Malformed(
+            "embedded baseline migration is not transactional".to_owned(),
+        ));
+    }
+    sqlx::query_scalar!(
+        r#"
+        select count(*) = 1
+           and coalesce(
+                 pg_catalog.bool_and(
+                   version = $1
+                   and description = $2
+                   and success
+                   and checksum = $3
+                   and execution_time >= -1
+                 ),
+                 false
+               ) as "exact!"
+          from public._sqlx_migrations
+        "#,
+        migration.version,
+        migration.description.as_ref(),
+        migration.checksum.as_ref(),
+    )
+    .fetch_one(&mut *connection)
+    .await
+    .map_err(classify)
 }
 
 /// Writes the marker after a successful migration.
@@ -268,38 +446,53 @@ pub async fn stamp(
     pool: &PgPool,
     product_version: &str,
 ) -> Result<SchemaMetadata, synveda_types::Error> {
+    let mut connection = pool.acquire().await.map_err(storage)?;
+    stamp_connection(&mut connection, product_version).await
+}
+
+/// Connection-scoped epoch stamp used by the indivisible migration boundary.
+pub async fn stamp_connection(
+    connection: &mut PgConnection,
+    product_version: &str,
+) -> Result<SchemaMetadata, synveda_types::Error> {
     // The head as the database has it, not as this binary's migrator would
     // have applied it: they agree here (this runs after a successful run) and
     // the database is the one that gets quoted back in a refusal.
-    let head: Option<i64> = sqlx::query_scalar!(r#"select max(version) from _sqlx_migrations"#)
-        .fetch_one(pool)
-        .await
-        .map_err(storage)?;
+    let head: Option<i64> =
+        sqlx::query_scalar!(r#"select max(version) from public._sqlx_migrations"#)
+            .fetch_one(&mut *connection)
+            .await
+            .map_err(storage)?;
     let head = head.map_or_else(|| "none".to_owned(), |version| format!("{version:04}"));
 
     let row = sqlx::query!(
         r#"
-        insert into schema_metadata (id, epoch, migration_head, created_by_version)
-        values (true, $1, $2, $3)
+        insert into public.schema_metadata (
+            id, epoch, baseline_revision, migration_head, created_by_version
+        )
+        values (true, $1, $2, $3, $4)
         on conflict (id) do update
             set migration_head = excluded.migration_head,
-                updated_at     = now()
+                updated_at     = pg_catalog.statement_timestamp()
         returning epoch              as "epoch!",
+                  baseline_revision  as "baseline_revision!",
                   migration_head     as "migration_head!",
                   created_at         as "created_at!",
                   created_by_version as "created_by_version!",
                   updated_at         as "updated_at!"
         "#,
         CURRENT_EPOCH,
+        CURRENT_BASELINE_REVISION,
         head,
         product_version,
     )
-    .fetch_one(pool)
+    .fetch_one(&mut *connection)
     .await
     .map_err(storage)?;
 
     Ok(SchemaMetadata {
         epoch: row.epoch,
+        baseline_revision: row.baseline_revision,
         migration_head: row.migration_head,
         created_at: row.created_at,
         created_by_version: row.created_by_version,
@@ -317,16 +510,29 @@ fn classify(error: sqlx::Error) -> SchemaEpochError {
     match &error {
         sqlx::Error::Database(db) => match db.code().as_deref() {
             Some("42P01") => SchemaEpochError::Missing,
-            Some("42703") => SchemaEpochError::Malformed(db.message().to_owned()),
-            _ => SchemaEpochError::Unreachable(error.to_string()),
+            Some("42501") => SchemaEpochError::Unreadable,
+            Some(code)
+                if code.starts_with("21") || code.starts_with("22") || code.starts_with("42") =>
+            {
+                malformed_shape()
+            }
+            _ => SchemaEpochError::Unreachable("database unavailable".to_owned()),
         },
         sqlx::Error::RowNotFound => SchemaEpochError::Missing,
         sqlx::Error::ColumnNotFound(_)
         | sqlx::Error::ColumnDecode { .. }
         | sqlx::Error::Decode(_)
-        | sqlx::Error::TypeNotFound { .. } => SchemaEpochError::Malformed(error.to_string()),
-        _ => SchemaEpochError::Unreachable(error.to_string()),
+        | sqlx::Error::TypeNotFound { .. } => malformed_shape(),
+        _ => SchemaEpochError::Unreachable("database unavailable".to_owned()),
     }
+}
+
+fn malformed_shape() -> SchemaEpochError {
+    SchemaEpochError::Malformed("the marker shape is incompatible".to_owned())
+}
+
+fn malformed_values() -> SchemaEpochError {
+    SchemaEpochError::Malformed("the marker values are invalid".to_owned())
 }
 
 fn storage(error: sqlx::Error) -> synveda_types::Error {
@@ -345,17 +551,25 @@ mod tests {
     #[test]
     fn every_refusal_prints_the_reset_command_except_the_one_that_must_not() {
         for refusal in [
+            SchemaEpochError::Unreadable,
             SchemaEpochError::Missing,
             SchemaEpochError::Malformed("no column `epoch`".to_owned()),
             SchemaEpochError::Older { found: 0 },
+            SchemaEpochError::OlderRevision { found: 0 },
         ] {
             let rendered = refusal.to_string();
-            assert!(
-                rendered.contains(RESET_COMMAND),
-                "a refusal that does not say how to recover: {rendered}"
-            );
             assert!(refusal.is_refusal(), "{rendered}");
+            if !matches!(refusal, SchemaEpochError::Unreadable) {
+                assert!(
+                    rendered.contains(RESET_COMMAND),
+                    "a refusal that does not say how to recover: {rendered}"
+                );
+            }
         }
+
+        let unreadable = SchemaEpochError::Unreadable.to_string();
+        assert!(unreadable.contains("database grants"), "{unreadable}");
+        assert!(!unreadable.contains(RESET_COMMAND), "{unreadable}");
 
         // The exception, and it is the point of having a `Newer` variant at
         // all: a database from a *later* build holds data this one cannot
@@ -364,6 +578,15 @@ mod tests {
         let newer = SchemaEpochError::Newer { found: 99 }.to_string();
         assert!(newer.contains("Upgrade this installation"), "{newer}");
         assert!(newer.contains("would destroy it"), "{newer}");
+        let newer_revision = SchemaEpochError::NewerRevision { found: 99 }.to_string();
+        assert!(
+            newer_revision.contains("Upgrade this installation"),
+            "{newer_revision}"
+        );
+        assert!(
+            newer_revision.contains("would destroy it"),
+            "{newer_revision}"
+        );
 
         // An outage is not a verdict, and must not read as one.
         let outage = SchemaEpochError::Unreachable("connection refused".to_owned());

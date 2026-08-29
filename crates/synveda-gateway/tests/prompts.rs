@@ -26,6 +26,9 @@
 //! Tests need a live Postgres: they read `DATABASE_URL` and skip with a
 //! message when it is unset (CI has no database), the house convention.
 
+#[path = "../../synveda-store/tests/support/tenant_fixture.rs"]
+mod tenant_fixture;
+
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
@@ -37,12 +40,12 @@ use metrics_exporter_prometheus::PrometheusHandle;
 use serde_json::{Value, json};
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
-use synveda_gateway::app::{AppState, router};
+use synveda_gateway::app::{AppState, behavior_test_router as router};
 use synveda_gateway::telemetry;
 use synveda_identity::Hs256Verifier;
 use synveda_ingest::embedding::{AnyEmbedder, DeterministicEmbedder};
 use synveda_policy::Pdp;
-use synveda_store::{access, identities, rls, scopes, tenants};
+use synveda_store::{access, identities, rls, scopes};
 use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
 use synveda_types::scope::{Scope, ScopeKind};
 use synveda_types::{
@@ -145,12 +148,12 @@ async fn world() -> Option<World> {
         .connect(&url)
         .await
         .expect("connect to DATABASE_URL");
-    synveda_store::migrate(&pool)
+    synveda_store::epoch::verify(&pool)
         .await
         .expect("apply migrations");
     let tenant = TenantId::new();
     let slug = format!("prmt1-{}", tenant.as_uuid().simple());
-    tenants::create(
+    tenant_fixture::create(
         &pool,
         tenant,
         &slug,
@@ -160,7 +163,7 @@ async fn world() -> Option<World> {
     .await
     .expect("admit tenant");
 
-    let mut tx = pool.begin().await.expect("begin");
+    let mut tx = tenant_fixture::begin(&pool, tenant).await;
     let root = scopes::ensure_tenant_root(&mut tx, tenant)
         .await
         .expect("mint root");
@@ -230,7 +233,7 @@ async fn unit(
 }
 
 async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str) -> Identity {
-    let mut tx = pool.begin().await.expect("begin");
+    let mut tx = tenant_fixture::begin(pool, tenant).await;
     let own = scopes::ensure_principal_scope(&mut tx, tenant, subject, subject)
         .await
         .expect("mint principal scope");
@@ -255,7 +258,7 @@ async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str) -> Identity {
 /// (`POST /v1/admin/service-identities`), and the only chain that runs
 /// leaf → team → department → org since placement became identity.
 async fn seed_agent(pool: &PgPool, tenant: TenantId, subject: &str, anchor: ScopeId) -> Identity {
-    let mut tx = pool.begin().await.expect("begin");
+    let mut tx = tenant_fixture::begin(pool, tenant).await;
     let leaf = scopes::create(
         &mut tx,
         &scopes::NewScope {
@@ -289,7 +292,7 @@ async fn seed_agent(pool: &PgPool, tenant: TenantId, subject: &str, anchor: Scop
 }
 
 async fn bind(pool: &PgPool, tenant: TenantId, subject: &str, scope: ScopeId, role: RoleKey) {
-    let mut tx = pool.begin().await.expect("begin");
+    let mut tx = tenant_fixture::begin(pool, tenant).await;
     access::create_grant(
         &mut *tx,
         &access::NewGrant {

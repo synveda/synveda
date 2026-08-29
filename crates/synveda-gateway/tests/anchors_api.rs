@@ -17,6 +17,9 @@
 //! Tests that need a live Postgres read `DATABASE_URL` and skip with a message
 //! when it is unset (CI has no database); run them locally with `make db-test`.
 
+#[path = "../../synveda-store/tests/support/tenant_fixture.rs"]
+mod tenant_fixture;
+
 use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
@@ -27,7 +30,7 @@ use http_body_util::BodyExt;
 use metrics_exporter_prometheus::PrometheusHandle;
 use serde_json::{Value, json};
 use sqlx::postgres::PgPoolOptions;
-use synveda_gateway::app::{AppState, router};
+use synveda_gateway::app::{AppState, behavior_test_router as router};
 use synveda_gateway::telemetry;
 use synveda_identity::Hs256Verifier;
 use synveda_types::{IdentityId, IdentityKind, TenantId};
@@ -128,12 +131,12 @@ async fn admitted_tenant() -> Option<(AppState, TenantId)> {
         .connect(&url)
         .await
         .expect("connect to DATABASE_URL");
-    synveda_store::migrate(&pool)
+    synveda_store::epoch::verify(&pool)
         .await
         .expect("apply migrations");
     let id = TenantId::new();
     let slug = format!("cpr6-{}", id.as_uuid().simple());
-    synveda_store::tenants::create(
+    tenant_fixture::create(
         &pool,
         id,
         &slug,

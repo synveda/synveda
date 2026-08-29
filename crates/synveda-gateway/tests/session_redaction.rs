@@ -22,6 +22,9 @@
 //! is unset (CI has no database), same convention as tests/observe.rs
 //! (whose harness this copies).
 
+#[path = "../../synveda-store/tests/support/tenant_fixture.rs"]
+mod tenant_fixture;
+
 use std::sync::{Arc, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -36,10 +39,10 @@ use serde_json::{Value, json};
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 use synveda_audit::ChainVerification;
-use synveda_gateway::app::{AppState, router};
+use synveda_gateway::app::{AppState, behavior_test_router as router};
 use synveda_gateway::telemetry;
 use synveda_identity::{OidcVerifier, parse_issuers};
-use synveda_store::{access, identities, policy_packs, rls, scopes, tenants};
+use synveda_store::{access, identities, policy_packs, rls, scopes};
 use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
 use synveda_types::scope::{Scope, ScopeKind};
 use synveda_types::{
@@ -236,12 +239,12 @@ async fn admitted_tenant() -> Option<(PgPool, TenantId, String)> {
         .connect(&url)
         .await
         .expect("connect to DATABASE_URL");
-    synveda_store::migrate(&pool)
+    synveda_store::epoch::verify(&pool)
         .await
         .expect("apply migrations");
     let id = TenantId::new();
     let slug = format!("mem2-{}", id.as_uuid().simple());
-    tenants::create(&pool, id, &slug, "MEM-2 test tenant", TenantStatus::Active)
+    tenant_fixture::create(&pool, id, &slug, "MEM-2 test tenant", TenantStatus::Active)
         .await
         .expect("admit tenant");
     Some((pool, id, url))
@@ -250,7 +253,7 @@ async fn admitted_tenant() -> Option<(PgPool, TenantId, String)> {
 /// Seeds acme-org → eng (dept) → platform (team). Returns (org, eng,
 /// platform).
 async fn seed_hierarchy(pool: &PgPool, tenant: TenantId) -> (Scope, Scope, Scope) {
-    let mut tx = pool.begin().await.expect("begin");
+    let mut tx = tenant_fixture::begin(pool, tenant).await;
     let org = scopes::ensure_tenant_root(&mut tx, tenant)
         .await
         .expect("mint root");
@@ -292,7 +295,7 @@ async fn seed_hierarchy(pool: &PgPool, tenant: TenantId) -> (Scope, Scope, Scope
 
 /// Provisions a user identity at the store level (the JIT shape).
 async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str) -> Identity {
-    let mut tx = pool.begin().await.expect("begin");
+    let mut tx = tenant_fixture::begin(pool, tenant).await;
     let own = scopes::ensure_principal_scope(&mut tx, tenant, subject, subject)
         .await
         .expect("mint principal scope");
@@ -354,7 +357,8 @@ fn batch(_session: &str, events: Vec<Value>) -> Value {
 /// rejected quarantine rows are excluded; a released row becomes eligible
 /// without creating a second signal or copy.
 async fn capture_eligible(pool: &PgPool, tenant: TenantId) -> i64 {
-    sqlx::query_scalar!(
+    let mut tx = tenant_fixture::begin(pool, tenant).await;
+    let count = sqlx::query_scalar!(
         r#"
         select count(*) as "count!"
         from session_events event
@@ -366,18 +370,21 @@ async fn capture_eligible(pool: &PgPool, tenant: TenantId) -> i64 {
         "#,
         tenant.as_uuid(),
     )
-    .fetch_one(pool)
+    .fetch_one(&mut *tx)
     .await
-    .expect("count capture-eligible events")
+    .expect("count capture-eligible events");
+    tx.commit().await.expect("commit capture-eligible count");
+    count
 }
 
 /// The AC's adversarial sweep: every storage surface the tenant's data
 /// touched, searched for a seeded literal (spaces stripped too, so a
-/// reformatted card cannot hide). Runs on the RLS-exempt test
-/// connection — if the secret is anywhere, this finds it.
+/// reformatted card cannot hide). It runs through the ordinary tenant-scoped
+/// runtime role; if the secret is anywhere in that tenant, this finds it.
 async fn storage_contains(pool: &PgPool, tenant: TenantId, seed: &str) -> bool {
     let compact = seed.replace(' ', "");
-    sqlx::query_scalar!(
+    let mut tx = tenant_fixture::begin(pool, tenant).await;
+    let found = sqlx::query_scalar!(
         r#"
         select exists (
             select 1 from session_events
@@ -413,9 +420,11 @@ async fn storage_contains(pool: &PgPool, tenant: TenantId, seed: &str) -> bool {
         seed,
         compact,
     )
-    .fetch_one(pool)
+    .fetch_one(&mut *tx)
     .await
-    .expect("sweep storage")
+    .expect("sweep storage");
+    tx.commit().await.expect("commit storage sweep");
+    found
 }
 
 async fn assert_storage_clean(pool: &PgPool, tenant: TenantId) {
@@ -509,18 +518,20 @@ async fn seeded_secrets_never_reach_storage_in_any_mode() {
         "quarantine must not be capture-eligible"
     );
     // The staged PII payload holds placeholders, not the finding.
+    let mut tx = tenant_fixture::begin(&pool, tenant).await;
     let pii_payload = sqlx::query_scalar!(
         r#"select payload::text as "payload!" from session_events
            where tenant_id = $1 and client_event_id = 'q-pii'"#,
         tenant.as_uuid(),
     )
-    .fetch_one(&pool)
+    .fetch_one(&mut *tx)
     .await
     .expect("read staged payload");
     assert!(
         pii_payload.contains("[REDACTED:email]") && pii_payload.contains("[REDACTED:payment-card]"),
         "staged payload must carry placeholders: {pii_payload}"
     );
+    tx.commit().await.expect("commit redacted-payload read");
 
     // ── Redact mode: standard assigned at the org root. ──
     let mut tx = rls::begin_tenant_tx(&pool, tenant).await.expect("tx");
@@ -591,13 +602,15 @@ async fn seeded_secrets_never_reach_storage_in_any_mode() {
     tx.commit().await.expect("commit deny pack");
     synveda_gateway::authz::refresh_tenant_packs(&pool, &pdp, tenant).await;
 
+    let mut tx = tenant_fixture::begin(&pool, tenant).await;
     let staged_before = sqlx::query_scalar!(
         r#"select count(*) as "count!" from session_events where tenant_id = $1"#,
         tenant.as_uuid(),
     )
-    .fetch_one(&pool)
+    .fetch_one(&mut *tx)
     .await
     .expect("count staged");
+    tx.commit().await.expect("commit pre-deny count");
     let deny_batch = batch(
         "deny-session",
         vec![
@@ -624,13 +637,15 @@ async fn seeded_secrets_never_reach_storage_in_any_mode() {
         "a denied event has no id — nothing was persisted: {body}"
     );
     assert_eq!(body["events"][1]["outcome"], "appended", "{body}");
+    let mut tx = tenant_fixture::begin(&pool, tenant).await;
     let staged_after = sqlx::query_scalar!(
         r#"select count(*) as "count!" from session_events where tenant_id = $1"#,
         tenant.as_uuid(),
     )
-    .fetch_one(&pool)
+    .fetch_one(&mut *tx)
     .await
     .expect("count staged");
+    tx.commit().await.expect("commit post-deny count");
     assert_eq!(
         staged_after,
         staged_before + 1,
@@ -889,13 +904,15 @@ async fn quarantine_review_contract_holds() {
         event_id.as_str(),
         "a redelivery is answered with the row this deployment holds: {retry}"
     );
+    let mut tx = tenant_fixture::begin(&pool, tenant).await;
     let quarantine_rows = sqlx::query_scalar!(
         r#"select count(*) as "count!" from session_event_quarantine where tenant_id = $1"#,
         tenant.as_uuid(),
     )
-    .fetch_one(&pool)
+    .fetch_one(&mut *tx)
     .await
     .expect("count quarantine rows");
+    tx.commit().await.expect("commit quarantine count");
     assert_eq!(quarantine_rows, 1, "redelivery must not re-quarantine");
     assert_eq!(
         capture_eligible(&pool, tenant).await,

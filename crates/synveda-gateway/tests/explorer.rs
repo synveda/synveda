@@ -23,6 +23,9 @@
 //! Tests need a live Postgres: they read `DATABASE_URL` and skip with a
 //! message when it is unset (CI has no database), the house convention.
 
+#[path = "../../synveda-store/tests/support/tenant_fixture.rs"]
+mod tenant_fixture;
+
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -35,12 +38,12 @@ use metrics_exporter_prometheus::PrometheusHandle;
 use serde_json::{Value, json};
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
-use synveda_gateway::app::{AppState, router};
+use synveda_gateway::app::{AppState, behavior_test_router as router};
 use synveda_gateway::telemetry;
 use synveda_identity::Hs256Verifier;
 use synveda_ingest::embedding::{AnyEmbedder, DeterministicEmbedder};
 use synveda_policy::Pdp;
-use synveda_store::{access, identities, rls, scopes, tenants};
+use synveda_store::{access, identities, rls, scopes};
 use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
 use synveda_types::scope::{Scope, ScopeKind};
 use synveda_types::{
@@ -82,17 +85,17 @@ async fn world() -> Option<World> {
         .connect(&url)
         .await
         .expect("connect to DATABASE_URL");
-    synveda_store::migrate(&pool)
+    synveda_store::epoch::verify(&pool)
         .await
         .expect("apply migrations");
 
     let tenant = TenantId::new();
     let slug = format!("cnsl2-{}", tenant.as_uuid().simple());
-    tenants::create(&pool, tenant, &slug, "CNSL-2 tenant", TenantStatus::Active)
+    tenant_fixture::create(&pool, tenant, &slug, "CNSL-2 tenant", TenantStatus::Active)
         .await
         .expect("admit tenant");
 
-    let mut tx = pool.begin().await.expect("begin");
+    let mut tx = tenant_fixture::begin(&pool, tenant).await;
     let org = scopes::ensure_tenant_root(&mut tx, tenant)
         .await
         .expect("mint root");
@@ -514,7 +517,7 @@ async fn unit(
 }
 
 async fn seed_user(pool: &PgPool, tenant: TenantId, subject: &str) -> IdentityId {
-    let mut tx = pool.begin().await.expect("begin");
+    let mut tx = tenant_fixture::begin(pool, tenant).await;
     let own = scopes::ensure_principal_scope(&mut tx, tenant, subject, subject)
         .await
         .expect("mint principal scope");
@@ -542,7 +545,7 @@ async fn bind(
     scope: Option<ScopeId>,
     role: RoleKey,
 ) {
-    let mut tx = pool.begin().await.expect("begin");
+    let mut tx = tenant_fixture::begin(pool, tenant).await;
     let scope = match scope {
         Some(scope) => scope,
         None => {
@@ -1058,7 +1061,7 @@ async fn a_ten_thousand_node_tree_renders_without_fetching_or_probing_it() {
     // thousand of them there would make the root's own level the
     // subtree — the exact fetch this test exists to refuse.
     let seeded = std::time::Instant::now();
-    let mut tx = w.pool.begin().await.expect("begin");
+    let mut tx = tenant_fixture::begin(&w.pool, w.tenant).await;
     let root = scopes::ensure_tenant_root(&mut tx, w.tenant)
         .await
         .expect("mint root");
@@ -1221,13 +1224,13 @@ async fn wide_world() -> Option<World> {
         .connect(&url)
         .await
         .expect("connect to DATABASE_URL");
-    synveda_store::migrate(&pool)
+    synveda_store::epoch::verify(&pool)
         .await
         .expect("apply migrations");
 
     let tenant = TenantId::new();
     let slug = format!("cnsl2w-{}", tenant.as_uuid().simple());
-    tenants::create(&pool, tenant, &slug, "CNSL-2 scale", TenantStatus::Active)
+    tenant_fixture::create(&pool, tenant, &slug, "CNSL-2 scale", TenantStatus::Active)
         .await
         .expect("admit tenant");
     // Tenant-wide, because the fixture's own scopes do not exist yet and

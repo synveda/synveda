@@ -8,6 +8,22 @@
 // synveda crate outside its allowed set, or if a workspace crate is unknown here
 // (new crates must be placed in a tier deliberately).
 import { execFileSync } from "node:child_process";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+
+const GATEWAY_TEST_SUPPORT_NAME = "synveda-gateway-test-support-enabler";
+const GATEWAY_TEST_SUPPORT_PATH = fileURLToPath(
+  new URL("../crates/synveda-gateway/test-support-enabler", import.meta.url),
+);
+
+function isGatewayTestSupportDependency(pkg, dep) {
+  return (
+    pkg.name === "synveda-gateway" &&
+    dep.name === GATEWAY_TEST_SUPPORT_NAME &&
+    dep.kind === "dev" &&
+    dep.path === GATEWAY_TEST_SUPPORT_PATH
+  );
+}
 
 // Below the middle band rather than in it: store, identity and vedaflow all
 // seal or open payloads, and the rule forbids middle-band crates depending on
@@ -106,12 +122,45 @@ for (const pkg of metadata.packages) {
   }
   const allowedSet = new Set(allowed);
   for (const dep of pkg.dependencies) {
-    if (dep.name.startsWith("synveda-") && !allowedSet.has(dep.name)) {
+    if (
+      dep.name.startsWith("synveda-") &&
+      !allowedSet.has(dep.name) &&
+      !isGatewayTestSupportDependency(pkg, dep)
+    ) {
       console.error(
         `FAIL: ${pkg.name} -> ${dep.name} violates the layering rule (seed §8)`,
       );
       failed = true;
     }
+  }
+}
+
+const gateway = metadata.packages.find((pkg) => pkg.name === "synveda-gateway");
+const supportDependencies = gateway?.dependencies.filter(
+  (dep) => dep.name === GATEWAY_TEST_SUPPORT_NAME,
+) ?? [];
+if (
+  supportDependencies.length !== 1 ||
+  !isGatewayTestSupportDependency(gateway, supportDependencies[0])
+) {
+  console.error(
+    "FAIL: the gateway test-support enabler must be one exact path-only dev dependency",
+  );
+  failed = true;
+}
+
+const supportManifest = readFileSync(
+  new URL("../crates/synveda-gateway/test-support-enabler/Cargo.toml", import.meta.url),
+  "utf8",
+);
+for (const required of [
+  `name = "${GATEWAY_TEST_SUPPORT_NAME}"`,
+  "publish = false",
+  'synveda-gateway = { path = "..", features = ["test-support"] }',
+]) {
+  if (!supportManifest.includes(required)) {
+    console.error(`FAIL: gateway test-support enabler omits exact contract: ${required}`);
+    failed = true;
   }
 }
 

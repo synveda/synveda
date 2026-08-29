@@ -6,6 +6,12 @@ edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
 
+[features]
+# The deterministic evaluation harness needs one audited first-administrator
+# admission before an OIDC provider exists. The normal CLI does not parse that
+# input, and release binaries reject this feature at compile time.
+eval-fixture = []
+
 [[bin]]
 name = "synveda"
 path = "src/main.rs"
@@ -46,6 +52,8 @@ getrandom = { workspace = true }
 # hand (ADR-0057 decision 10 as amended); this parses JSONC for byte ranges
 # so the splice keeps their comments.
 jsonc-parser = { workspace = true }
+libc = { workspace = true }
+rustix = { workspace = true }
 # The CLI is a gateway client for `login`, `auth token`, and everything
 # else a running gateway serves (ADR-0027 decision 4).
 reqwest = { workspace = true }

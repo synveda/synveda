@@ -19,12 +19,15 @@
 //! `make dev-up` then `make db-test`. Isolation is by freshly minted UUIDv7
 //! tenants, so a shared dev database is fine.
 
+#[path = "support/tenant_fixture.rs"]
+mod tenant_fixture;
+
 use std::sync::OnceLock;
 
+use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
-use sqlx::{PgPool, Postgres, Transaction};
 use synveda_store::anchors::{self, AnchorSelection};
-use synveda_store::{access, identities, projects, scopes, tenants, workspaces};
+use synveda_store::{access, identities, projects, scopes, workspaces};
 use synveda_types::access::{GrantSource, GrantSubject, GroupSource, RoleKey};
 use synveda_types::anchor::{AnchorSet, AnchorSource};
 use synveda_types::scope::ScopeKind;
@@ -68,7 +71,7 @@ fn db() -> Option<&'static Db> {
                 .connect(&url)
                 .await
                 .expect("connect to DATABASE_URL");
-            synveda_store::migrate(&pool)
+            synveda_store::epoch::verify(&pool)
                 .await
                 .expect("apply migrations");
             pool
@@ -90,14 +93,10 @@ macro_rules! db {
 async fn admit(pool: &PgPool) -> TenantId {
     let tenant = TenantId::new();
     let slug = format!("anc-{}", tenant.as_uuid().simple());
-    tenants::create(pool, tenant, &slug, "CPR-6 fixture", TenantStatus::Active)
+    tenant_fixture::create(pool, tenant, &slug, "CPR-6 fixture", TenantStatus::Active)
         .await
         .expect("admit tenant");
     tenant
-}
-
-async fn begin(pool: &PgPool) -> Transaction<'static, Postgres> {
-    pool.begin().await.expect("begin transaction")
 }
 
 /// ```text
@@ -118,7 +117,7 @@ struct Tree {
 
 async fn seed(pool: &PgPool) -> Tree {
     let tenant = admit(pool).await;
-    let mut tx = begin(pool).await;
+    let mut tx = tenant_fixture::begin(pool, tenant).await;
     // The root is minted by the first thing that needs a parent.
     let root = scopes::ensure_tenant_root(&mut tx, tenant)
         .await
@@ -141,7 +140,7 @@ async fn seed(pool: &PgPool) -> Tree {
     .expect("create org unit");
     tx.commit().await.expect("commit scopes");
 
-    let mut tx = begin(pool).await;
+    let mut tx = tenant_fixture::begin(pool, tenant).await;
     let payments = workspaces::create(
         &mut tx,
         &workspaces::NewWorkspace {
@@ -225,7 +224,7 @@ async fn resolve(
     principal_id: &str,
     selection: AnchorSelection,
 ) -> AnchorSet {
-    let mut tx = begin(pool).await;
+    let mut tx = tenant_fixture::begin(pool, tree.tenant).await;
     let identity_id = identities::by_subject(&mut *tx, tree.tenant, principal_id)
         .await
         .expect("look up identity")
@@ -244,7 +243,7 @@ async fn grant_to(
     subject: GrantSubject,
     role: RoleKey,
 ) -> GrantId {
-    let mut tx = begin(pool).await;
+    let mut tx = tenant_fixture::begin(pool, tenant).await;
     let grant = access::create_grant(
         &mut *tx,
         &access::NewGrant {
@@ -298,7 +297,7 @@ fn the_callers_own_scope_sorts_first_and_inherits_nothing() {
     let db = db!();
     db.rt.block_on(async {
         let tree = seed(&db.pool).await;
-        let mut tx = begin(&db.pool).await;
+        let mut tx = tenant_fixture::begin(&db.pool, tree.tenant).await;
         let own = scopes::ensure_principal_scope(&mut tx, tree.tenant, "alice", "Alice")
             .await
             .expect("mint alice's scope");
@@ -400,7 +399,7 @@ fn order_is_depth_and_never_a_rank() {
     let db = db!();
     db.rt.block_on(async {
         let tree = seed(&db.pool).await;
-        let mut tx = begin(&db.pool).await;
+        let mut tx = tenant_fixture::begin(&db.pool, tree.tenant).await;
         let deeper = scopes::create(
             &mut tx,
             &scopes::NewScope {
@@ -520,14 +519,16 @@ fn a_workspace_grant_reaches_its_projects_with_no_row_written() {
         );
         assert!(!project.is_direct(), "and not at the project");
 
+        let mut tx = tenant_fixture::begin(&db.pool, tree.tenant).await;
         let at_project: i64 = sqlx::query_scalar(
             "select count(*) from scope_grants where tenant_id = $1 and scope_id = $2",
         )
         .bind(tree.tenant.as_uuid())
         .bind(tree.ledger_scope.as_uuid())
-        .fetch_one(&db.pool)
+        .fetch_one(&mut *tx)
         .await
         .expect("count");
+        tx.commit().await.expect("commit count");
         assert_eq!(at_project, 0, "inheritance writes nothing");
     });
 }
@@ -611,7 +612,7 @@ fn a_group_grant_follows_its_membership() {
     let db = db!();
     db.rt.block_on(async {
         let tree = seed(&db.pool).await;
-        let mut tx = begin(&db.pool).await;
+        let mut tx = tenant_fixture::begin(&db.pool, tree.tenant).await;
         let carol_scope = scopes::ensure_principal_scope(&mut tx, tree.tenant, "carol", "Carol")
             .await
             .expect("create Carol's scope");
@@ -668,15 +669,17 @@ fn a_group_grant_follows_its_membership() {
         let project = set.get(tree.ledger_scope).expect("project");
         assert_eq!(project.roles, vec![RoleKey::Curator]);
         assert_eq!(project.via_groups, vec![group.id], "the group is recorded");
+        let mut tx = tenant_fixture::begin(&db.pool, tree.tenant).await;
         assert_eq!(
-            anchors::groups_of(&db.pool, tree.tenant, Some(carol.id))
+            anchors::groups_of(&mut *tx, tree.tenant, Some(carol.id))
                 .await
                 .expect("groups"),
             vec![group.id]
         );
+        tx.commit().await.expect("commit group read");
 
         // Archived: it resolves to nobody, on the very next resolution.
-        let mut tx = begin(&db.pool).await;
+        let mut tx = tenant_fixture::begin(&db.pool, tree.tenant).await;
         access::update_group(
             &mut tx,
             tree.tenant,
@@ -708,13 +711,15 @@ fn a_group_grant_follows_its_membership() {
                 .is_empty(),
             "an archived group confers nothing"
         );
+        let mut tx = tenant_fixture::begin(&db.pool, tree.tenant).await;
         assert!(
-            anchors::groups_of(&db.pool, tree.tenant, Some(carol.id))
+            anchors::groups_of(&mut *tx, tree.tenant, Some(carol.id))
                 .await
                 .expect("groups")
                 .is_empty(),
             "and is not a group the PDP materialises"
         );
+        tx.commit().await.expect("commit archived group read");
     });
 }
 
@@ -748,7 +753,7 @@ fn revoking_a_grant_is_in_force_on_the_next_resolution() {
             vec![RoleKey::Owner]
         );
 
-        let mut tx = begin(&db.pool).await;
+        let mut tx = tenant_fixture::begin(&db.pool, tree.tenant).await;
         access::revoke_grant(&mut tx, tree.tenant, id)
             .await
             .expect("revoke");
@@ -809,12 +814,14 @@ fn another_tenants_rows_are_absent_from_a_resolution() {
             0,
             "and their grant reaches nothing here"
         );
+        let mut tx = tenant_fixture::begin(&db.pool, ours.tenant).await;
         assert!(
-            anchors::groups_of(&db.pool, ours.tenant, None)
+            anchors::groups_of(&mut *tx, ours.tenant, None)
                 .await
                 .expect("groups")
                 .is_empty()
         );
+        tx.commit().await.expect("commit tenant-filtered read");
     });
 }
 
@@ -826,7 +833,7 @@ fn a_principal_scope_is_minted_once_and_found_by_its_subject() {
     let db = db!();
     db.rt.block_on(async {
         let tree = seed(&db.pool).await;
-        let mut tx = begin(&db.pool).await;
+        let mut tx = tenant_fixture::begin(&db.pool, tree.tenant).await;
         let first = scopes::ensure_principal_scope(&mut tx, tree.tenant, "alice", "Alice")
             .await
             .expect("mint");
@@ -843,19 +850,21 @@ fn a_principal_scope_is_minted_once_and_found_by_its_subject() {
             Some(tree.root),
             "a principal scope hangs off the tenant root"
         );
+        let mut tx = tenant_fixture::begin(&db.pool, tree.tenant).await;
         assert_eq!(
-            scopes::principal_scope(&db.pool, tree.tenant, "alice")
+            scopes::principal_scope(&mut *tx, tree.tenant, "alice")
                 .await
                 .expect("look up")
                 .map(|scope| scope.id),
             Some(first.id)
         );
         assert_eq!(
-            scopes::principal_scope(&db.pool, tree.tenant, "nobody")
+            scopes::principal_scope(&mut *tx, tree.tenant, "nobody")
                 .await
                 .expect("look up"),
             None
         );
+        tx.commit().await.expect("commit principal-scope reads");
     });
 }
 
@@ -871,6 +880,7 @@ fn the_principal_id_rules_hold_against_direct_sql() {
         let tree = seed(&db.pool).await;
 
         // A non-principal scope may not name a subject.
+        let mut tx = tenant_fixture::begin(&db.pool, tree.tenant).await;
         let forbidden = sqlx::query(
             "insert into scopes (id, tenant_id, kind, parent_scope_id, parent_kind, slug,
                                  display_name, status, attributes, principal_id)
@@ -880,11 +890,13 @@ fn the_principal_id_rules_hold_against_direct_sql() {
         .bind(ScopeId::new().as_uuid())
         .bind(tree.tenant.as_uuid())
         .bind(tree.root.as_uuid())
-        .execute(&db.pool)
+        .execute(&mut *tx)
         .await;
         assert!(forbidden.is_err(), "only a principal scope names a subject");
+        drop(tx);
 
         // A principal scope must.
+        let mut tx = tenant_fixture::begin(&db.pool, tree.tenant).await;
         let missing = sqlx::query(
             "insert into scopes (id, tenant_id, kind, parent_scope_id, parent_kind, slug,
                                  display_name, status, attributes, principal_id)
@@ -894,27 +906,30 @@ fn the_principal_id_rules_hold_against_direct_sql() {
         .bind(ScopeId::new().as_uuid())
         .bind(tree.tenant.as_uuid())
         .bind(tree.root.as_uuid())
-        .execute(&db.pool)
+        .execute(&mut *tx)
         .await;
         assert!(missing.is_err(), "a principal scope must name one");
+        drop(tx);
 
         // And whose it is cannot be edited.
-        let mut tx = begin(&db.pool).await;
+        let mut tx = tenant_fixture::begin(&db.pool, tree.tenant).await;
         let mine = scopes::ensure_principal_scope(&mut tx, tree.tenant, "alice", "Alice")
             .await
             .expect("mint");
         tx.commit().await.expect("commit");
+        let mut tx = tenant_fixture::begin(&db.pool, tree.tenant).await;
         let repointed = sqlx::query("update scopes set principal_id = 'mallory' where id = $1")
             .bind(mine.id.as_uuid())
-            .execute(&db.pool)
+            .execute(&mut *tx)
             .await;
         assert!(
             repointed.is_err(),
             "re-pointing a private scope would hand somebody's material to a new subject"
         );
+        drop(tx);
 
         // Two subjects cannot share one.
-        let mut tx = begin(&db.pool).await;
+        let mut tx = tenant_fixture::begin(&db.pool, tree.tenant).await;
         let second = scopes::create(
             &mut tx,
             &scopes::NewScope {

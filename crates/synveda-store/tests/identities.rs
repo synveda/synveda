@@ -8,11 +8,14 @@
 //! with `make dev-up` then `make db-test`. Isolation is by freshly minted
 //! UUIDv7 tenants, so a shared dev database is fine.
 
+#[path = "support/tenant_fixture.rs"]
+mod tenant_fixture;
+
 use std::sync::OnceLock;
 
+use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
-use sqlx::{PgPool, Postgres, Transaction};
-use synveda_store::{identities, scopes, tenants};
+use synveda_store::{identities, scopes};
 use synveda_types::scope::{Scope, ScopeKind};
 use synveda_types::{Error, IdentityId, IdentityKind, ScopeId, TenantId, TenantStatus};
 
@@ -48,7 +51,7 @@ fn db() -> Option<&'static Db> {
                 .connect(&url)
                 .await
                 .expect("connect to DATABASE_URL");
-            synveda_store::migrate(&pool)
+            synveda_store::epoch::verify(&pool)
                 .await
                 .expect("apply migrations");
             pool
@@ -61,14 +64,10 @@ fn db() -> Option<&'static Db> {
 async fn admit_tenant(pool: &PgPool) -> TenantId {
     let tenant = TenantId::new();
     let slug = format!("auth2-{}", tenant.as_uuid().simple());
-    tenants::create(pool, tenant, &slug, "AUTH-2 fixture", TenantStatus::Active)
+    tenant_fixture::create(pool, tenant, &slug, "AUTH-2 fixture", TenantStatus::Active)
         .await
         .expect("create tenant");
     tenant
-}
-
-async fn tx(pool: &PgPool) -> Transaction<'static, Postgres> {
-    pool.begin().await.expect("begin transaction")
 }
 
 /// Creates a scope in its own committed transaction.
@@ -79,7 +78,7 @@ async fn add(
     kind: ScopeKind,
     slug: &str,
 ) -> Scope {
-    let mut tx = tx(pool).await;
+    let mut tx = tenant_fixture::begin(pool, tenant).await;
     let root = scopes::ensure_tenant_root(&mut tx, tenant)
         .await
         .expect("ensure root");
@@ -107,7 +106,7 @@ async fn add(
 /// convention used to seed, minus everything the cutover deleted (CPR-7,
 /// ADR-0074). Returns (root, eng, platform).
 async fn seed(pool: &PgPool, tenant: TenantId) -> (Scope, Scope, Scope) {
-    let mut tx = tx(pool).await;
+    let mut tx = tenant_fixture::begin(pool, tenant).await;
     let root = scopes::ensure_tenant_root(&mut tx, tenant)
         .await
         .expect("ensure root");
@@ -125,7 +124,7 @@ async fn provision(
     subject: &str,
     _parent: ScopeId,
 ) -> synveda_types::Identity {
-    let mut tx = tx(pool).await;
+    let mut tx = tenant_fixture::begin(pool, tenant).await;
     let personal = scopes::ensure_principal_scope(&mut tx, tenant, subject, subject)
         .await
         .expect("mint own scope");
@@ -155,7 +154,11 @@ fn create_then_by_subject_roundtrips_bound_to_the_own_scope() {
         let (root, _, _) = seed(&db.pool, tenant).await;
 
         let alice = provision(&db.pool, tenant, "alice", root.id).await;
-        let read = identities::by_subject(&db.pool, tenant, "alice")
+        let bob = provision(&db.pool, tenant, "bob", root.id).await;
+        assert_ne!(alice.scope_id, bob.scope_id);
+
+        let mut tx = tenant_fixture::begin(&db.pool, tenant).await;
+        let read = identities::by_subject(&mut *tx, tenant, "alice")
             .await
             .expect("read alice")
             .expect("alice exists");
@@ -165,7 +168,7 @@ fn create_then_by_subject_roundtrips_bound_to_the_own_scope() {
         // placement is identity, not convention (CPR-7, ADR-0074).
         assert_eq!(
             alice.scope_id,
-            scopes::principal_scope(&db.pool, tenant, "alice")
+            scopes::principal_scope(&mut *tx, tenant, "alice")
                 .await
                 .expect("read own scope")
                 .expect("alice has a scope")
@@ -174,22 +177,20 @@ fn create_then_by_subject_roundtrips_bound_to_the_own_scope() {
 
         // A second subject gets a second own scope; nobody is quarantined,
         // because quarantine is only ever "not provisioned" now.
-        let bob = provision(&db.pool, tenant, "bob", root.id).await;
-        assert_ne!(alice.scope_id, bob.scope_id);
-
         // Unknown subjects and foreign tenants read as absent.
         assert_eq!(
-            identities::by_subject(&db.pool, tenant, "nobody")
+            identities::by_subject(&mut *tx, tenant, "nobody")
                 .await
                 .expect("read nobody"),
             None
         );
         assert_eq!(
-            identities::by_subject(&db.pool, TenantId::new(), "alice")
+            identities::by_subject(&mut *tx, TenantId::new(), "alice")
                 .await
                 .expect("read cross-tenant"),
             None
         );
+        tx.commit().await.expect("commit reads");
     });
 }
 
@@ -203,7 +204,7 @@ fn duplicate_subject_is_a_conflict() {
         let (root, _, _) = seed(&db.pool, tenant).await;
         provision(&db.pool, tenant, "alice", root.id).await;
 
-        let mut tx = tx(&db.pool).await;
+        let mut tx = tenant_fixture::begin(&db.pool, tenant).await;
         let second_scope = scopes::ensure_principal_scope(&mut tx, tenant, "alice-second", "alice")
             .await
             .expect("mint second own scope");

@@ -15,6 +15,8 @@
 //! volume as ours (`deploy/compose/docker-compose.yml`), which is exactly why
 //! this drops a *database* rather than a volume.
 //!
+use std::ffi::OsString;
+use std::path::Path;
 use std::time::Instant;
 
 use crate::init;
@@ -52,7 +54,9 @@ pub async fn reset(plan: Plan) -> Result<(), String> {
 
     let started = Instant::now();
     let url = database_url.value;
+    let admin_url = reset_admin_database_url()?;
     refuse_a_database_that_is_not_this_machine_s(&url)?;
+    refuse_a_database_that_is_not_this_machine_s(&admin_url)?;
 
     println!("synveda reset");
     println!();
@@ -71,7 +75,8 @@ pub async fn reset(plan: Plan) -> Result<(), String> {
         println!("    containers stopped (gateway, worker)");
     }
 
-    let outcome = synveda_store::reset::recreate(&url)
+    let database_roles = init::database_roles()?;
+    let outcome = synveda_store::reset::recreate(&admin_url, &url, &database_roles)
         .await
         .map_err(|err| err.to_string())?;
 
@@ -87,8 +92,9 @@ pub async fn reset(plan: Plan) -> Result<(), String> {
         println!("    extension  {} ready", extension.name);
     }
     println!(
-        "    schema     epoch {} at migration {} ({} — {})",
+        "    schema     epoch {}, baseline revision {} at migration {} ({} — {})",
         outcome.metadata.epoch,
+        outcome.metadata.baseline_revision,
         outcome.metadata.migration_head,
         outcome.metadata.created_by_version,
         outcome.metadata.created_at.to_rfc3339(),
@@ -101,11 +107,35 @@ pub async fn reset(plan: Plan) -> Result<(), String> {
     println!("carried across — there is no migration from the previous model, which");
     println!("is what this command exists to make true rather than to work around.");
     println!();
-    println!("Bring the deployment back up, and log in to provision it again:");
+    println!("Re-run the separately validated deployment-owned bootstrap, then log in");
+    println!("through that deployment. `synveda init` remains unavailable during CPR-45.");
     println!();
-    println!("    synveda init");
-    println!("    synveda login");
+    println!("See docs/INSTALL.md for the current cutover boundary.");
     Ok(())
+}
+
+fn reset_admin_database_url() -> Result<String, String> {
+    let direct = std::env::var_os("SYNVEDA_RESET_ADMIN_DATABASE_URL");
+    let file = std::env::var_os("SYNVEDA_RESET_ADMIN_DATABASE_URL_FILE");
+    match (direct, file) {
+        (Some(_), Some(_)) => Err("SYNVEDA_RESET_ADMIN_DATABASE_URL and \
+             SYNVEDA_RESET_ADMIN_DATABASE_URL_FILE are mutually exclusive"
+            .to_owned()),
+        (Some(value), None) => os_string_setting("SYNVEDA_RESET_ADMIN_DATABASE_URL", value),
+        (None, Some(path)) => {
+            init::read_database_url_file("SYNVEDA_RESET_ADMIN_DATABASE_URL_FILE", Path::new(&path))
+        }
+        (None, None) => Err("SYNVEDA_RESET_ADMIN_DATABASE_URL or \
+             SYNVEDA_RESET_ADMIN_DATABASE_URL_FILE is required; reset never reuses the \
+             application migrator credential as cluster administrator"
+            .to_owned()),
+    }
+}
+
+fn os_string_setting(name: &str, value: OsString) -> Result<String, String> {
+    value
+        .into_string()
+        .map_err(|_| format!("{name} must be valid UTF-8"))
 }
 
 /// Names a database without its password.
@@ -156,15 +186,9 @@ fn refuse_a_database_that_is_not_this_machine_s(url: &str) -> Result<(), String>
     Err(format!(
         "DATABASE_URL points at {host}, which is not this machine.\n\
          \n\
-         `reset` is the local reset and refuses to destroy a database it \
-         cannot see as\n\
-         yours. If you meant it, do it deliberately, from a client on that \
-         server:\n\
-         \n\
-         \x20 drop database \"{database}\" with (force);\n\
-         \x20 create database \"{database}\";\n\
-         \n\
-         then `synveda db migrate` against it."
+         `reset` is the local reset and refuses to destroy database `{database}` through \
+         a remote connection. Use the deployment's authenticated recovery procedure on \
+         that server instead."
     ))
 }
 
@@ -178,24 +202,24 @@ mod tests {
     fn only_a_database_on_this_machine_is_destroyable() {
         for local in [
             "postgres://synveda:synveda-dev@localhost:5432/synveda",
-            "postgres://synveda@127.0.0.1:5432/synveda",
-            "postgres://synveda@[::1]:5432/synveda",
-            "postgres://synveda@pg.localhost:5432/synveda",
+            "postgres://synveda@127.0.0.1:5432/synveda?password=",
+            "postgres://synveda@[::1]:5432/synveda?password=",
+            "postgres://synveda@pg.localhost:5432/synveda?password=",
         ] {
             refuse_a_database_that_is_not_this_machine_s(local)
                 .unwrap_or_else(|err| panic!("{local} is local: {err}"));
         }
 
         for remote in [
-            "postgres://synveda@db.internal:5432/synveda",
-            "postgres://synveda@10.0.0.7:5432/synveda",
-            "postgres://synveda@synveda-prod.eu-west-1.rds.amazonaws.com/synveda",
+            "postgres://synveda@db.internal:5432/synveda?password=",
+            "postgres://synveda@10.0.0.7:5432/synveda?password=",
+            "postgres://synveda@synveda-prod.eu-west-1.rds.amazonaws.com/synveda?password=",
         ] {
             let refusal = refuse_a_database_that_is_not_this_machine_s(remote)
                 .expect_err("a remote database must not be destroyed by this command");
             assert!(
-                refusal.contains("drop database"),
-                "a refusal has to leave the deliberate path open: {refusal}"
+                refusal.contains("authenticated recovery procedure"),
+                "a refusal has to name the deployment-owned path: {refusal}"
             );
         }
     }

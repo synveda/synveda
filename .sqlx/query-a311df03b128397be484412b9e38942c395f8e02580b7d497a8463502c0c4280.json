@@ -1,0 +1,38 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select pg_catalog.set_config('search_path', 'public', false) as \"search_path!\",\n                  pg_catalog.set_config('synveda.tenant_id', '', false) as \"tenant_id!\",\n                  pg_catalog.set_config('synveda.knowledge_erasure', 'off', false)\n                    as \"knowledge_erasure!\",\n                  pg_catalog.set_config('synveda.retention_purge', 'off', false)\n                    as \"retention_purge!\"",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "search_path!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 1,
+        "name": "tenant_id!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "knowledge_erasure!",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "retention_purge!",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      null,
+      null,
+      null,
+      null
+    ]
+  },
+  "hash": "a311df03b128397be484412b9e38942c395f8e02580b7d497a8463502c0c4280"
+}

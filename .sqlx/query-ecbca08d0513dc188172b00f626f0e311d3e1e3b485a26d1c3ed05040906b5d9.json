@@ -1,0 +1,23 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "select count(*) = 1\n                  and pg_catalog.bool_and(\n                    owner.rolname = $1\n                    and language.lanname = 'sql'\n                    and routine.prosrc = $2\n                    and pg_catalog.pg_get_function_identity_arguments(routine.oid) = ''\n                    and pg_catalog.format_type(routine.prorettype, null) = 'uuid'\n                    and routine.provolatile = 's'\n                    and routine.proparallel = 's'\n                    and not routine.prosecdef\n                    and not routine.proleakproof\n                    and not routine.proisstrict\n                    and routine.prokind = 'f'\n                    and routine.proconfig is null\n                    and routine.proacl is null\n                  ) as \"accepted!\"\n             from pg_catalog.pg_proc as routine\n             join pg_catalog.pg_namespace as namespace\n               on namespace.oid = routine.pronamespace\n             join pg_catalog.pg_roles as owner on owner.oid = routine.proowner\n             join pg_catalog.pg_language as language on language.oid = routine.prolang\n            where namespace.nspname = 'public'\n              and routine.proname = 'synveda_current_tenant'",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "accepted!",
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Name",
+        "Text"
+      ]
+    },
+    "nullable": [
+      null
+    ]
+  },
+  "hash": "ecbca08d0513dc188172b00f626f0e311d3e1e3b485a26d1c3ed05040906b5d9"
+}

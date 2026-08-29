@@ -159,7 +159,7 @@ destructive reset instruction. There is no epoch-2-to-3 migration.
 `0001_context_platform.sql`.** It is pure schema DDL for a fresh database. It
 contains the `schema_metadata` table but no marker row; Rust still stamps that
 row only after sqlx has reached the embedded head. `_sqlx_migrations` remains
-sqlx bookkeeping and is never treated as model identity.
+sqlx bookkeeping and is not the model identity.
 
 **13. The baseline is mechanically derived from a fresh epoch-2 schema, then
 reviewed as source.** Dumping schema objects from a disposable empty database
@@ -177,6 +177,48 @@ missing-version/checksum error and never applies the baseline over populated
 rows. Reset creates an empty database, installs its required extensions and
 runs only the new baseline. No compatibility view, export-on-start, table
 rename or row translator bridges the boundary.
+
+### 2026-08-28 amendment — deployment-owned prerequisites (CPR-45)
+
+This amendment corrects implementation drift from decision 13 without
+changing the epoch-3 application model.
+
+**15. Cluster roles and extensions are not migration history.** The interim
+epoch-3 baseline still created `synveda_app` and installed extensions despite
+decision 13. CPR-45 removes those statements. Deployment bootstrap creates
+and verifies the NOLOGIN capability role, the distinct migration and runtime
+logins, and the `btree_gin`/`vector` extensions before the one application
+baseline runs. The migration owns application schema only; it has neither
+`CREATEROLE` nor extension authority.
+
+**16. This correction is one deliberate pre-release epoch-3 checksum hard
+cut.** Removing deployment DDL changes migration 1's checksum but changes no
+served table, row or model vocabulary, so the schema epoch remains 3. A
+database stamped by the interim epoch-3 baseline is refused with deployment
+reset guidance. Operators back up its data and KMS key, invoke the
+deployment's explicit destructive reset under bootstrap authority, then run
+the narrow migrator. `_sqlx_migrations` is never edited and there is no old
+baseline translator.
+
+**17. Reset and migration authority are distinct.** The canonical reference
+deployment migrates as the ordinary role which owns only the selected
+Synveda database and its `public` schema. That role cannot create roles,
+install extensions, drop the database or reach the separately owned Keycloak
+database. `synveda reset --database --force` remains a source-development
+break-glass operation for a local bootstrap credential; it is not a command
+the canonical migration credential can perform. Compose/Helm reset and restore
+orchestration must run bootstrap convergence and migration as separate steps.
+
+**18. One exact post-migration crash boundary is recoverable.** SQLx commits
+the transactional baseline and its success ledger before Synveda begins the
+separate epoch-stamp transaction. Restart may stamp only when
+`schema_metadata` has its exact baseline shape and zero rows,
+`_sqlx_migrations` contains exactly the sole embedded successful migration
+with the byte-identical SHA-384 checksum, and the complete post-migration
+authority proof passes. SQLx validates the ledger again under its normal
+advisory lock before the stamp. A missing, failed, additional or drifted row
+is still a hard-cut refusal; this recovery seam does not make SQLx bookkeeping
+the schema epoch.
 
 ## Options considered
 

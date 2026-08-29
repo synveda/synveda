@@ -74,7 +74,6 @@ cargo build -p synveda-cli --bin synveda
 
 SYNVEDA_CLAUDE_LIVE=1 \
 SYNVEDA_CLAUDE_BIN="$CLAUDE_BIN" \
-DATABASE_URL=${DATABASE_URL:-postgres://synveda:synveda-dev@localhost:5432/synveda} \
   bash scripts/db-test.sh \
     -p synveda-gateway \
     --test claude_lifecycle \

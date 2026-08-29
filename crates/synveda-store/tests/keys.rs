@@ -19,13 +19,16 @@
 //! message when it is unset (CI has no database); run them with
 //! `make db-test`.
 
+#[path = "support/tenant_fixture.rs"]
+mod tenant_fixture;
+
 use std::sync::OnceLock;
 
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
 use synveda_crypto::{KeyScope, KeyVersion, Kms, LocalKms, Purpose, RowKey};
 use synveda_store::keys::KeyRing;
-use synveda_store::{tenant_secrets, tenants};
+use synveda_store::tenant_secrets;
 use synveda_types::secret::{TenantSecretKind, TenantSecretState};
 use synveda_types::{TenantId, TenantSecretId, TenantSecretReencryptionJobId, TenantStatus};
 
@@ -57,7 +60,7 @@ fn db() -> Option<&'static Db> {
                 .connect(&url)
                 .await
                 .expect("connect to DATABASE_URL");
-            synveda_store::migrate(&pool)
+            synveda_store::epoch::verify(&pool)
                 .await
                 .expect("apply migrations");
             pool
@@ -99,7 +102,7 @@ fn cold_ring() -> KeyRing {
 async fn seed_tenant(pool: &PgPool) -> TenantId {
     let id = TenantId::new();
     let slug = format!("ten4-{}", uuid::Uuid::now_v7().simple());
-    tenants::create(pool, id, &slug, "TEN-4", TenantStatus::Active)
+    tenant_fixture::create(pool, id, &slug, "TEN-4", TenantStatus::Active)
         .await
         .expect("admit tenant");
     id
@@ -169,14 +172,16 @@ fn a_round_trip_goes_through_a_wrapped_row() {
         assert_eq!(&opened[..], b"s3cret");
 
         // And the database holds no plaintext.
+        let mut tx = tenant_fixture::begin(&db.pool, tenant).await;
         let stored: Vec<u8> = sqlx::query_scalar("select wrapped_dek from tenant_keys limit 1")
-            .fetch_one(&db.pool)
+            .fetch_one(&mut *tx)
             .await
             .expect("read a wrapped key");
         assert!(
             !stored.windows(6).any(|window| window == b"s3cret"),
             "the key row must not contain the payload"
         );
+        tx.commit().await.expect("commit wrapped-key read");
     });
 }
 
@@ -270,11 +275,12 @@ fn exactly_one_generation_is_current_at_a_time() {
         ring.rotate(&db.pool, scope).await.expect("rotate");
         ring.rotate(&db.pool, scope).await.expect("rotate again");
 
+        let mut tx = tenant_fixture::begin(&db.pool, tenant).await;
         let current: i64 = sqlx::query_scalar(
             "select count(*) from tenant_keys where tenant_id = $1 and retired_at is null",
         )
         .bind(tenant.as_uuid())
-        .fetch_one(&db.pool)
+        .fetch_one(&mut *tx)
         .await
         .expect("count current keys");
         assert_eq!(current, 1, "the partial unique index is the enforcement");
@@ -282,10 +288,11 @@ fn exactly_one_generation_is_current_at_a_time() {
         let total: i64 =
             sqlx::query_scalar("select count(*) from tenant_keys where tenant_id = $1")
                 .bind(tenant.as_uuid())
-                .fetch_one(&db.pool)
+                .fetch_one(&mut *tx)
                 .await
                 .expect("count all keys");
         assert_eq!(total, 3, "retired generations stay, or their data is lost");
+        tx.commit().await.expect("commit generation counts");
     });
 }
 
@@ -320,12 +327,14 @@ fn a_disabled_kms_refuses_rather_than_storing_a_plaintext() {
             "an operator reading this needs to know what to set: {error}"
         );
 
+        let mut tx = tenant_fixture::begin(&db.pool, tenant).await;
         let rows: i64 = sqlx::query_scalar("select count(*) from tenant_keys where tenant_id = $1")
             .bind(tenant.as_uuid())
-            .fetch_one(&db.pool)
+            .fetch_one(&mut *tx)
             .await
             .expect("count");
         assert_eq!(rows, 0, "a refused provision must write nothing");
+        tx.commit().await.expect("commit refused-provision read");
     });
 }
 

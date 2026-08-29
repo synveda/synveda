@@ -1,8 +1,42 @@
-#!/bin/bash
+#!/bin/bash -p
 # Keycloak lacks native file settings for all three bootstrap credentials.
 # Read only the allowlisted files, export only to the child, and never print a
 # value or place it in argv (CPR-45, ADR-0102).
+# Privileged mode makes Bash ignore startup-controlled BASH_ENV, ENV,
+# SHELLOPTS, CDPATH and GLOBIGNORE before this first command. Clear them and
+# PS4 so neither this shell nor the upstream Bash child can reinterpret them.
+unset BASH_ENV ENV CDPATH GLOBIGNORE PS4
+set +x
 set -eu
+umask 077
+PATH=/opt/keycloak/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
+secret_snapshot=
+secret_snapshot_directory=
+
+cleanup_secret_snapshot() {
+    cleanup_status=0
+    if [ -n "${secret_snapshot:-}" ]; then
+        rm -f -- "$secret_snapshot" || cleanup_status=1
+    fi
+    if [ -n "${secret_snapshot_directory:-}" ]; then
+        rmdir -- "$secret_snapshot_directory" 2>/dev/null || cleanup_status=1
+    fi
+    [ "$cleanup_status" -eq 0 ]
+}
+
+file_size() {
+    stat -c %s "$1" 2>/dev/null || stat -Lf %z "$1" 2>/dev/null
+}
+
+file_mode() {
+    stat -c %a "$1" 2>/dev/null || stat -f %Lp "$1" 2>/dev/null
+}
+
+file_owner() {
+    stat -c %u "$1" 2>/dev/null || stat -f %u "$1" 2>/dev/null
+}
 
 for direct_setting in KC_DB_PASSWORD KC_BOOTSTRAP_ADMIN_USERNAME KC_BOOTSTRAP_ADMIN_PASSWORD; do
     case "$direct_setting" in
@@ -17,8 +51,9 @@ for direct_setting in KC_DB_PASSWORD KC_BOOTSTRAP_ADMIN_USERNAME KC_BOOTSTRAP_AD
 done
 
 read_secret() {
-    setting=$1
-    path=$2
+    local setting=$1
+    local path=$2
+    local file_bytes nul_prefix value trailing
     # Bash character counts are locale-sensitive. Keep the bound in bytes
     # without changing the locale inherited by the Keycloak process.
     LC_ALL=C
@@ -27,23 +62,47 @@ read_secret() {
         echo "keycloak-entrypoint: ${setting}_FILE must name a file" >&2
         exit 78
     }
-    [ ! -L "$path" ] && [ -f "$path" ] || {
-        echo "keycloak-entrypoint: ${setting}_FILE must name a regular non-symlink file" >&2
+    secret_snapshot_directory=$(mktemp -d "/tmp/keycloak-entrypoint.${setting}.XXXXXX") || {
+        echo "keycloak-entrypoint: ${setting}_FILE could not be snapshotted" >&2
+        exit 70
+    }
+    chmod 700 "$secret_snapshot_directory"
+    secret_snapshot=$secret_snapshot_directory/value
+    trap cleanup_secret_snapshot EXIT
+    if ! /usr/bin/timeout --foreground --signal=TERM --kill-after=1s 5s \
+        /opt/keycloak/bin/synveda-input-snapshot "$path" "$secret_snapshot" \
+        >/dev/null 2>&1; then
+        echo "keycloak-entrypoint: ${setting}_FILE could not be snapshotted safely" >&2
+        exit 78
+    fi
+    [ ! -L "$secret_snapshot" ] && [ -f "$secret_snapshot" ] && \
+        [ "$(file_mode "$secret_snapshot")" = 600 ] && \
+        [ "$(file_owner "$secret_snapshot")" = "$(id -u)" ] || {
+        echo "keycloak-entrypoint: ${setting}_FILE snapshot metadata was refused" >&2
         exit 78
     }
-    file_bytes=$(LC_ALL=C wc -c < "$path")
+    file_bytes=$(file_size "$secret_snapshot") || {
+        echo "keycloak-entrypoint: ${setting}_FILE size cannot be inspected" >&2
+        exit 78
+    }
+    case "$file_bytes" in
+        ''|*[!0-9]*)
+            echo "keycloak-entrypoint: ${setting}_FILE size cannot be inspected" >&2
+            exit 78
+            ;;
+    esac
     [ "$file_bytes" -le 4096 ] || {
         echo "keycloak-entrypoint: ${setting}_FILE exceeds 4096 bytes" >&2
         exit 78
     }
     nul_prefix=
-    if IFS= read -r -d '' nul_prefix < "$path"; then
+    if IFS= read -r -d '' nul_prefix < "$secret_snapshot"; then
         echo "keycloak-entrypoint: ${setting}_FILE contains a NUL byte" >&2
         exit 78
     fi
     value=
     trailing=
-    exec 3< "$path"
+    exec 3< "$secret_snapshot"
     IFS= read -r -n 4096 value <&3 || [ -n "$value" ]
     if IFS= read -r -n 1 trailing <&3; then
         echo "keycloak-entrypoint: ${setting}_FILE must contain one line" >&2
@@ -57,6 +116,13 @@ read_secret() {
         echo "keycloak-entrypoint: ${setting}_FILE must not be empty" >&2
         exit 78
     }
+    cleanup_secret_snapshot || {
+        echo "keycloak-entrypoint: secret snapshot cleanup failed" >&2
+        exit 70
+    }
+    secret_snapshot=
+    secret_snapshot_directory=
+    trap - EXIT
     printf '%s' "$value"
 }
 
@@ -70,4 +136,4 @@ KC_BOOTSTRAP_ADMIN_PASSWORD=$(
 export KC_DB_PASSWORD KC_BOOTSTRAP_ADMIN_USERNAME KC_BOOTSTRAP_ADMIN_PASSWORD
 unset KC_DB_PASSWORD_FILE KC_BOOTSTRAP_ADMIN_USERNAME_FILE KC_BOOTSTRAP_ADMIN_PASSWORD_FILE
 
-exec /opt/keycloak/bin/kc.sh "$@"
+exec /bin/bash -p -e /opt/keycloak/bin/kc.sh "$@"

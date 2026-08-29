@@ -20,12 +20,15 @@
 //! `make dev-up` then `make db-test`. Isolation is by freshly minted UUIDv7
 //! tenants, so a shared dev database is fine.
 
+#[path = "support/tenant_fixture.rs"]
+mod tenant_fixture;
+
 use std::sync::OnceLock;
 
 use chrono::{Duration, Utc};
 use sqlx::postgres::PgPoolOptions;
 use sqlx::{PgPool, Postgres, Transaction};
-use synveda_store::{access, identities, projects, scopes, tenants, workspaces};
+use synveda_store::{access, identities, projects, scopes, workspaces};
 use synveda_types::access::{
     GrantSource, GrantSubject, GroupSource, InviteStatus, RoleKey, SubjectKind,
 };
@@ -66,7 +69,7 @@ fn db() -> Option<&'static Db> {
                 .connect(&url)
                 .await
                 .expect("connect to DATABASE_URL");
-            synveda_store::migrate(&pool)
+            synveda_store::epoch::verify(&pool)
                 .await
                 .expect("apply migrations");
             pool
@@ -79,14 +82,14 @@ fn db() -> Option<&'static Db> {
 async fn admit(pool: &PgPool) -> TenantId {
     let tenant = TenantId::new();
     let slug = format!("acc-{}", tenant.as_uuid().simple());
-    tenants::create(pool, tenant, &slug, "CPR-5 fixture", TenantStatus::Active)
+    tenant_fixture::create(pool, tenant, &slug, "CPR-5 fixture", TenantStatus::Active)
         .await
         .expect("admit tenant");
     tenant
 }
 
-async fn begin(pool: &PgPool) -> Transaction<'static, Postgres> {
-    pool.begin().await.expect("begin transaction")
+async fn begin(pool: &PgPool, tenant: TenantId) -> Transaction<'static, Postgres> {
+    tenant_fixture::begin(pool, tenant).await
 }
 
 /// A workspace with one project under it, and the scopes both own.
@@ -100,7 +103,7 @@ struct Tree {
 
 async fn seed_tree(pool: &PgPool) -> Tree {
     let tenant = admit(pool).await;
-    let mut tx = begin(pool).await;
+    let mut tx = begin(pool, tenant).await;
     let workspace = workspaces::create(
         &mut tx,
         &workspaces::NewWorkspace {
@@ -144,7 +147,7 @@ async fn seed_tree(pool: &PgPool) -> Tree {
 
 /// A `principal`-shaped scope hanging off the tenant root — somebody's own.
 async fn seed_principal_scope(pool: &PgPool, tree: &Tree, slug: &str) -> ScopeId {
-    let mut tx = begin(pool).await;
+    let mut tx = begin(pool, tree.tenant).await;
     let scope = scopes::create(
         &mut tx,
         &scopes::NewScope {
@@ -173,7 +176,7 @@ async fn grant(
     role: RoleKey,
     source: GrantSource,
 ) -> synveda_types::access::ScopeGrant {
-    let mut tx = begin(pool).await;
+    let mut tx = begin(pool, tenant).await;
     let grant = access::create_grant(
         &mut *tx,
         &access::NewGrant {
@@ -200,7 +203,7 @@ fn principal(id: &str) -> GrantSubject {
 }
 
 async fn new_group(pool: &PgPool, tenant: TenantId, slug: &str, members: &[&str]) -> GroupId {
-    let mut tx = begin(pool).await;
+    let mut tx = begin(pool, tenant).await;
     let group = access::create_group(
         &mut *tx,
         &access::NewGroup {
@@ -262,7 +265,7 @@ async fn new_group(pool: &PgPool, tenant: TenantId, slug: &str, members: &[&str]
 }
 
 async fn new_identity(pool: &PgPool, tenant: TenantId, subject: &str) -> IdentityId {
-    let mut tx = begin(pool).await;
+    let mut tx = begin(pool, tenant).await;
     let identity_id = IdentityId::new();
     let root = scopes::ensure_tenant_root(&mut tx, tenant)
         .await
@@ -300,9 +303,12 @@ async fn new_identity(pool: &PgPool, tenant: TenantId, subject: &str) -> Identit
 }
 
 async fn members_at(pool: &PgPool, tenant: TenantId, scope: ScopeId) -> Vec<access::AccessEntry> {
-    access::members_of(pool, tenant, scope)
+    let mut tx = begin(pool, tenant).await;
+    let members = access::members_of(&mut *tx, tenant, scope)
         .await
-        .expect("resolve members")
+        .expect("resolve members");
+    tx.commit().await.expect("commit member resolution");
+    members
 }
 
 // ── Inheritance ──────────────────────────────────────────────────────────────
@@ -335,8 +341,11 @@ fn a_workspace_grant_reaches_its_projects_without_a_second_row() {
              makes 'why can this person see my project' answerable"
         );
 
+        let mut tx = synveda_store::rls::begin_tenant_tx(&db.pool, tree.tenant)
+            .await
+            .expect("begin tenant transaction");
         let rows = access::list_grants(
-            &db.pool,
+            &mut *tx,
             tree.tenant,
             &access::GrantFilter {
                 scope_id: Some(tree.project_scope),
@@ -349,6 +358,7 @@ fn a_workspace_grant_reaches_its_projects_without_a_second_row() {
             rows.is_empty(),
             "inheritance must not materialise a per-project row: {rows:?}"
         );
+        tx.commit().await.expect("commit tenant transaction");
     });
 }
 
@@ -359,7 +369,7 @@ fn a_project_grant_stays_in_its_project() {
     let Some(db) = db() else { return };
     db.rt.block_on(async {
         let tree = seed_tree(&db.pool).await;
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, tree.tenant).await;
         let sibling = projects::create(
             &mut tx,
             &projects::NewProject {
@@ -551,7 +561,7 @@ fn a_group_grant_resolves_to_its_members_and_follows_them() {
 
         // A third person joins the group; nothing is written on the grant.
         let sam = new_identity(&db.pool, tree.tenant, "sam").await;
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, tree.tenant).await;
         let mut members: Vec<IdentityId> = access::group_members(&mut *tx, tree.tenant, group)
             .await
             .expect("current members")
@@ -608,7 +618,7 @@ fn an_archived_group_confers_nothing() {
             1
         );
 
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, tree.tenant).await;
         access::update_group(
             &mut tx,
             tree.tenant,
@@ -630,14 +640,16 @@ fn an_archived_group_confers_nothing() {
                 .is_empty(),
             "an archived group resolves to nobody"
         );
+        let mut tx = begin(&db.pool, tree.tenant).await;
         assert_eq!(
-            access::list_grants(&db.pool, tree.tenant, &access::GrantFilter::default())
+            access::list_grants(&mut *tx, tree.tenant, &access::GrantFilter::default())
                 .await
                 .expect("list")
                 .len(),
             1,
             "and the grant is still there — archiving is not revoking"
         );
+        tx.commit().await.expect("commit archived-group read");
     });
 }
 
@@ -676,15 +688,17 @@ fn a_membership_replacement_is_the_whole_list() {
         let tree = seed_tree(&db.pool).await;
         let group = new_group(&db.pool, tree.tenant, "eng", &["robin", "kim", "sam"]).await;
 
-        let sam = access::group_members(&db.pool, tree.tenant, group)
+        let mut tx = begin(&db.pool, tree.tenant).await;
+        let sam = access::group_members(&mut *tx, tree.tenant, group)
             .await
             .expect("members")
             .into_iter()
             .find(|member| member.principal_id.as_deref() == Some("sam"))
             .expect("sam")
             .identity_id;
+        tx.commit().await.expect("commit member lookup");
 
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, tree.tenant).await;
         access::update_group(
             &mut tx,
             tree.tenant,
@@ -700,11 +714,13 @@ fn a_membership_replacement_is_the_whole_list() {
         .expect("replace");
         tx.commit().await.expect("commit");
 
-        let members = access::group_members(&db.pool, tree.tenant, group)
+        let mut tx = begin(&db.pool, tree.tenant).await;
+        let members = access::group_members(&mut *tx, tree.tenant, group)
             .await
             .expect("read members");
         assert_eq!(members.len(), 1, "a duplicate is one membership");
         assert_eq!(members[0].principal_id.as_deref(), Some("sam"));
+        tx.commit().await.expect("commit replacement read");
     });
 }
 
@@ -717,7 +733,7 @@ fn a_stale_group_update_writes_nothing() {
         let tree = seed_tree(&db.pool).await;
         let group = new_group(&db.pool, tree.tenant, "eng", &["robin"]).await;
 
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, tree.tenant).await;
         access::update_group(
             &mut tx,
             tree.tenant,
@@ -733,7 +749,7 @@ fn a_stale_group_update_writes_nothing() {
         .expect("first update");
         tx.commit().await.expect("commit");
 
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, tree.tenant).await;
         let stale = access::update_group(
             &mut tx,
             tree.tenant,
@@ -752,14 +768,16 @@ fn a_stale_group_update_writes_nothing() {
         );
         drop(tx);
 
+        let mut tx = begin(&db.pool, tree.tenant).await;
         assert_eq!(
-            access::group_members(&db.pool, tree.tenant, group)
+            access::group_members(&mut *tx, tree.tenant, group)
                 .await
                 .expect("read members")
                 .len(),
             1,
             "the refused update must not have emptied the group"
         );
+        tx.commit().await.expect("commit stale-update read");
     });
 }
 
@@ -771,7 +789,7 @@ fn an_empty_group_update_is_refused() {
     db.rt.block_on(async {
         let tree = seed_tree(&db.pool).await;
         let group = new_group(&db.pool, tree.tenant, "eng", &[]).await;
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, tree.tenant).await;
         let result = access::update_group(
             &mut tx,
             tree.tenant,
@@ -801,8 +819,9 @@ fn a_directory_group_carries_source_identity_and_a_direct_one_does_not() {
                 Some("00u1a2b3".to_owned()),
             ),
         ] {
+            let mut tx = begin(&db.pool, tenant).await;
             let result = access::create_group(
-                &db.pool,
+                &mut *tx,
                 &access::NewGroup {
                     id: GroupId::new(),
                     tenant_id: tenant,
@@ -821,10 +840,12 @@ fn a_directory_group_carries_source_identity_and_a_direct_one_does_not() {
                 matches!(result, Err(Error::Invalid { .. })),
                 "{source} with the wrong reference shape must be refused, got {result:?}"
             );
+            drop(tx);
         }
 
         // And the CHECK holds against direct SQL, for a writer that never went
         // through the service.
+        let mut tx = begin(&db.pool, tenant).await;
         let err = sqlx::query(
             "insert into groups (id, tenant_id, slug, display_name, source, \
              directory_source, directory_resource_id) \
@@ -832,7 +853,7 @@ fn a_directory_group_carries_source_identity_and_a_direct_one_does_not() {
         )
         .bind(GroupId::new().as_uuid())
         .bind(tenant.as_uuid())
-        .execute(&db.pool)
+        .execute(&mut *tx)
         .await
         .expect_err("the CHECK refuses it");
         assert_eq!(
@@ -849,8 +870,9 @@ fn a_directory_group_cannot_be_edited_here() {
     let Some(db) = db() else { return };
     db.rt.block_on(async {
         let tenant = admit(&db.pool).await;
+        let mut tx = begin(&db.pool, tenant).await;
         let group = access::create_group(
-            &db.pool,
+            &mut *tx,
             &access::NewGroup {
                 id: GroupId::new(),
                 tenant_id: tenant,
@@ -866,8 +888,9 @@ fn a_directory_group_cannot_be_edited_here() {
         )
         .await
         .expect("create directory group");
+        tx.commit().await.expect("commit directory group");
 
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, tenant).await;
         let result = access::update_group(
             &mut tx,
             tenant,
@@ -892,11 +915,13 @@ fn a_directory_group_cannot_be_edited_here() {
 /// forward by exactly one — against direct SQL, so the rule holds for the owner
 /// role that migrations and break-glass psql run as.
 #[test]
+#[ignore = "serial administrator tamper acceptance"]
 fn a_groups_identity_is_immutable_against_direct_sql() {
     let Some(db) = db() else { return };
     db.rt.block_on(async {
         let tenant = admit(&db.pool).await;
         let group = new_group(&db.pool, tenant, "eng", &[]).await;
+        let administrator = tenant_fixture::administrator_pool(&db.pool).await;
 
         for (statement, what) in [
             (
@@ -922,7 +947,7 @@ fn a_groups_identity_is_immutable_against_direct_sql() {
         ] {
             let err = sqlx::query(statement)
                 .bind(group.as_uuid())
-                .execute(&db.pool)
+                .execute(&administrator)
                 .await
                 .expect_err(what);
             assert_eq!(
@@ -952,8 +977,9 @@ fn one_subject_holds_one_role_once_per_scope() {
             GrantSource::Direct,
         )
         .await;
+        let mut tx = begin(&db.pool, tree.tenant).await;
         let again = access::create_grant(
-            &db.pool,
+            &mut *tx,
             &access::NewGrant {
                 id: GrantId::new(),
                 tenant_id: tree.tenant,
@@ -967,6 +993,7 @@ fn one_subject_holds_one_role_once_per_scope() {
         )
         .await;
         assert!(matches!(again, Err(Error::Conflict { .. })), "{again:?}");
+        drop(tx);
 
         // A *different* role for the same person is a different grant: they
         // are additive, and revoked separately.
@@ -1012,6 +1039,7 @@ fn a_grant_has_exactly_one_subject_against_direct_sql() {
             ),
             ("principal", None, None, "a grant naming nobody"),
         ] {
+            let mut tx = begin(&db.pool, tree.tenant).await;
             let err = sqlx::query(
                 "insert into scope_grants \
                  (id, tenant_id, scope_id, subject_kind, principal_id, group_id, role_key, source) \
@@ -1023,7 +1051,7 @@ fn a_grant_has_exactly_one_subject_against_direct_sql() {
             .bind(kind)
             .bind(principal_id)
             .bind(group_id.map(|id| id.as_uuid()))
-            .execute(&db.pool)
+            .execute(&mut *tx)
             .await
             .expect_err(what);
             assert_eq!(
@@ -1031,6 +1059,7 @@ fn a_grant_has_exactly_one_subject_against_direct_sql() {
                 Some("23514"),
                 "{what} must be refused by a CHECK, got {err:?}"
             );
+            drop(tx);
         }
     });
 }
@@ -1042,8 +1071,9 @@ fn only_an_invite_grant_names_an_invitation() {
     let Some(db) = db() else { return };
     db.rt.block_on(async {
         let tree = seed_tree(&db.pool).await;
+        let mut tx = begin(&db.pool, tree.tenant).await;
         let claimed = access::create_grant(
-            &db.pool,
+            &mut *tx,
             &access::NewGrant {
                 id: GrantId::new(),
                 tenant_id: tree.tenant,
@@ -1057,9 +1087,11 @@ fn only_an_invite_grant_names_an_invitation() {
         )
         .await;
         assert!(matches!(claimed, Err(Error::Invalid { .. })), "{claimed:?}");
+        drop(tx);
 
         // And the CHECK behind it, for a writer that never went through the
         // service.
+        let mut tx = begin(&db.pool, tree.tenant).await;
         let err = sqlx::query(
             "insert into scope_grants \
              (id, tenant_id, scope_id, subject_kind, principal_id, role_key, source) \
@@ -1068,7 +1100,7 @@ fn only_an_invite_grant_names_an_invitation() {
         .bind(GrantId::new().as_uuid())
         .bind(tree.tenant.as_uuid())
         .bind(tree.workspace_scope.as_uuid())
-        .execute(&db.pool)
+        .execute(&mut *tx)
         .await
         .expect_err("the CHECK refuses it");
         assert_eq!(
@@ -1082,6 +1114,7 @@ fn only_an_invite_grant_names_an_invitation() {
 /// nothing holding a connection can quietly turn a `viewer` into an `owner`
 /// while `created_at` still says "since when".
 #[test]
+#[ignore = "serial administrator tamper acceptance"]
 fn a_grant_is_never_edited_against_direct_sql() {
     let Some(db) = db() else { return };
     db.rt.block_on(async {
@@ -1095,9 +1128,10 @@ fn a_grant_is_never_edited_against_direct_sql() {
             GrantSource::Direct,
         )
         .await;
+        let administrator = tenant_fixture::administrator_pool(&db.pool).await;
         let err = sqlx::query("update scope_grants set role_key = 'owner' where id = $1")
             .bind(existing.id.as_uuid())
-            .execute(&db.pool)
+            .execute(&administrator)
             .await
             .expect_err("the trigger refuses every update");
         assert_eq!(
@@ -1116,7 +1150,7 @@ fn a_directory_grant_cannot_be_revoked_here() {
     db.rt.block_on(async {
         let tree = seed_tree(&db.pool).await;
         let robin = new_identity(&db.pool, tree.tenant, "robin").await;
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, tree.tenant).await;
         let group = access::sync_directory_group(
             &mut tx,
             GroupId::new(),
@@ -1140,7 +1174,7 @@ fn a_directory_grant_cannot_be_revoked_here() {
             GrantSource::Directory,
         )
         .await;
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, tree.tenant).await;
         let result = access::revoke_grant(&mut tx, tree.tenant, managed.id).await;
         let Err(Error::Conflict { message }) = result else {
             panic!("expected a conflict naming the directory, got {result:?}");
@@ -1153,7 +1187,7 @@ fn a_directory_grant_cannot_be_revoked_here() {
         let members = members_at(&db.pool, tree.tenant, tree.workspace_scope).await;
         assert!(members[0].directory_managed);
 
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, tree.tenant).await;
         let revoked = access::revoke_directory_grant(&mut tx, tree.tenant, managed.id)
             .await
             .expect("directory surface revokes its own assignment");
@@ -1189,7 +1223,7 @@ fn revoking_a_grant_removes_what_it_conferred() {
             1
         );
 
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, tree.tenant).await;
         let revoked = access::revoke_grant(&mut tx, tree.tenant, held.id)
             .await
             .expect("revoke");
@@ -1203,7 +1237,7 @@ fn revoking_a_grant_removes_what_it_conferred() {
             "the project stops inheriting it immediately"
         );
         let again = {
-            let mut tx = begin(&db.pool).await;
+            let mut tx = begin(&db.pool, tree.tenant).await;
             access::revoke_grant(&mut tx, tree.tenant, held.id).await
         };
         assert!(matches!(again, Err(Error::NotFound { .. })), "{again:?}");
@@ -1219,7 +1253,7 @@ fn removing_a_member_refuses_what_it_cannot_actually_remove() {
         let tree = seed_tree(&db.pool).await;
 
         // Nothing at all.
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, tree.tenant).await;
         let missing =
             access::remove_member(&mut tx, tree.tenant, tree.project_scope, "nobody").await;
         assert!(
@@ -1239,7 +1273,7 @@ fn removing_a_member_refuses_what_it_cannot_actually_remove() {
             GrantSource::Direct,
         )
         .await;
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, tree.tenant).await;
         let inherited =
             access::remove_member(&mut tx, tree.tenant, tree.project_scope, "robin").await;
         let Err(Error::Conflict { message }) = inherited else {
@@ -1262,7 +1296,7 @@ fn removing_a_member_refuses_what_it_cannot_actually_remove() {
             GrantSource::Direct,
         )
         .await;
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, tree.tenant).await;
         let via_group =
             access::remove_member(&mut tx, tree.tenant, tree.project_scope, "kim").await;
         let Err(Error::Conflict { message }) = via_group else {
@@ -1290,7 +1324,7 @@ fn removing_a_member_refuses_what_it_cannot_actually_remove() {
             GrantSource::Direct,
         )
         .await;
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, tree.tenant).await;
         let removed = access::remove_member(&mut tx, tree.tenant, tree.project_scope, "sam")
             .await
             .expect("remove");
@@ -1308,8 +1342,9 @@ async fn invite(
     hash: [u8; 32],
     ttl: Duration,
 ) -> InviteId {
-    access::create_invite(
-        pool,
+    let mut tx = begin(pool, tenant).await;
+    let invite = access::create_invite(
+        &mut *tx,
         &access::NewInvite {
             id: InviteId::new(),
             tenant_id: tenant,
@@ -1322,8 +1357,9 @@ async fn invite(
         },
     )
     .await
-    .expect("create invite")
-    .id
+    .expect("create invite");
+    tx.commit().await.expect("commit invite");
+    invite.id
 }
 
 /// Redeeming an invitation mints the grant it carries, with the provenance
@@ -1343,7 +1379,7 @@ fn redeeming_an_invitation_mints_a_grant_that_says_where_it_came_from() {
         )
         .await;
 
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, tree.tenant).await;
         let accepted = access::accept_invite(&mut tx, tree.tenant, &hash, "robin", Utc::now())
             .await
             .expect("redeem");
@@ -1380,13 +1416,13 @@ fn an_invitation_is_one_time_and_a_retry_is_not_a_second_redemption() {
         )
         .await;
 
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, tree.tenant).await;
         let first = access::accept_invite(&mut tx, tree.tenant, &hash, "robin", Utc::now())
             .await
             .expect("first redemption");
         tx.commit().await.expect("commit");
 
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, tree.tenant).await;
         let replay = access::accept_invite(&mut tx, tree.tenant, &hash, "robin", Utc::now())
             .await
             .expect("the same principal replays");
@@ -1397,7 +1433,7 @@ fn an_invitation_is_one_time_and_a_retry_is_not_a_second_redemption() {
             "the same grant, not a second"
         );
 
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, tree.tenant).await;
         let stolen =
             access::accept_invite(&mut tx, tree.tenant, &hash, "intruder", Utc::now()).await;
         let Err(Error::Conflict { message }) = stolen else {
@@ -1406,14 +1442,16 @@ fn an_invitation_is_one_time_and_a_retry_is_not_a_second_redemption() {
         assert!(message.contains("already been accepted"), "{message}");
         drop(tx);
 
+        let mut tx = begin(&db.pool, tree.tenant).await;
         assert_eq!(
-            access::list_grants(&db.pool, tree.tenant, &access::GrantFilter::default())
+            access::list_grants(&mut *tx, tree.tenant, &access::GrantFilter::default())
                 .await
                 .expect("list")
                 .len(),
             1,
             "one invitation minted one grant, whatever was retried"
         );
+        tx.commit().await.expect("commit replay read");
     });
 }
 
@@ -1436,7 +1474,7 @@ fn an_invitation_expires_without_anything_running() {
 
         // No sweep, no job: just a later instant.
         let later = Utc::now() + Duration::days(1);
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, tree.tenant).await;
         let result = access::accept_invite(&mut tx, tree.tenant, &hash, "robin", later).await;
         let Err(Error::Conflict { message }) = result else {
             panic!("expected an expiry conflict, got {result:?}");
@@ -1446,18 +1484,21 @@ fn an_invitation_expires_without_anything_running() {
 
         // And the stored status is still `pending` — `expired` is derived, so
         // the row does not lie about what happened to it.
-        let stored = access::get_invite(&db.pool, tree.tenant, id)
+        let mut tx = begin(&db.pool, tree.tenant).await;
+        let stored = access::get_invite(&mut *tx, tree.tenant, id)
             .await
             .expect("read")
             .expect("still there");
         assert_eq!(stored.status, InviteStatus::Pending);
         assert_eq!(stored.effective_status(later), InviteStatus::Expired);
+        tx.commit().await.expect("commit expired-invite read");
     });
 }
 
 /// Withdrawing an invitation ends it, and neither terminal state can be
 /// reopened — including against direct SQL.
 #[test]
+#[ignore = "serial administrator tamper acceptance"]
 fn a_terminal_invitation_cannot_be_reopened() {
     let Some(db) = db() else { return };
     db.rt.block_on(async {
@@ -1472,14 +1513,14 @@ fn a_terminal_invitation_cannot_be_reopened() {
         )
         .await;
 
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, tree.tenant).await;
         let withdrawn = access::revoke_invite(&mut tx, tree.tenant, id, Some("granter"))
             .await
             .expect("withdraw");
         tx.commit().await.expect("commit");
         assert_eq!(withdrawn.status, InviteStatus::Revoked);
 
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, tree.tenant).await;
         let redeem = access::accept_invite(&mut tx, tree.tenant, &hash, "robin", Utc::now()).await;
         let Err(Error::Conflict { message }) = redeem else {
             panic!("expected a conflict, got {redeem:?}");
@@ -1487,14 +1528,15 @@ fn a_terminal_invitation_cannot_be_reopened() {
         assert!(message.contains("withdrawn"), "{message}");
         drop(tx);
 
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, tree.tenant).await;
         let twice = access::revoke_invite(&mut tx, tree.tenant, id, Some("granter")).await;
         assert!(matches!(twice, Err(Error::Conflict { .. })), "{twice:?}");
         drop(tx);
 
+        let administrator = tenant_fixture::administrator_pool(&db.pool).await;
         let err = sqlx::query("update pending_invites set status = 'pending' where id = $1")
             .bind(id.as_uuid())
-            .execute(&db.pool)
+            .execute(&administrator)
             .await
             .expect_err("the trigger refuses a reopened invitation");
         assert_eq!(
@@ -1508,6 +1550,7 @@ fn a_terminal_invitation_cannot_be_reopened() {
 /// An invitation's terms are immutable: re-pointing one at a different scope or
 /// a fatter role is issuing another, not editing this one.
 #[test]
+#[ignore = "serial administrator tamper acceptance"]
 fn an_invitations_terms_are_immutable_against_direct_sql() {
     let Some(db) = db() else { return };
     db.rt.block_on(async {
@@ -1520,6 +1563,7 @@ fn an_invitations_terms_are_immutable_against_direct_sql() {
             Duration::days(7),
         )
         .await;
+        let administrator = tenant_fixture::administrator_pool(&db.pool).await;
         for (statement, what) in [
             ("update pending_invites set role_key = 'owner' where id = $1", "the role"),
             ("update pending_invites set scope_id = scope_id where id = $1 and false", "a no-op"),
@@ -1528,7 +1572,7 @@ fn an_invitations_terms_are_immutable_against_direct_sql() {
         ] {
             let result = sqlx::query(statement)
                 .bind(id.as_uuid())
-                .execute(&db.pool)
+                .execute(&administrator)
                 .await;
             match result {
                 // The no-op statement matches no row; the rest must be refused.
@@ -1550,8 +1594,9 @@ fn an_invitation_cannot_be_born_expired() {
     let Some(db) = db() else { return };
     db.rt.block_on(async {
         let tree = seed_tree(&db.pool).await;
+        let mut tx = begin(&db.pool, tree.tenant).await;
         let result = access::create_invite(
-            &db.pool,
+            &mut *tx,
             &access::NewInvite {
                 id: InviteId::new(),
                 tenant_id: tree.tenant,
@@ -1595,21 +1640,23 @@ fn redeeming_for_access_already_held_consumes_the_invitation_and_conflicts_with_
         )
         .await;
 
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, tree.tenant).await;
         let accepted = access::accept_invite(&mut tx, tree.tenant, &hash, "robin", Utc::now())
             .await
             .expect("redeem");
         tx.commit().await.expect("commit");
         assert_eq!(accepted.grant.id, existing.id, "the grant they already had");
         assert_eq!(accepted.invite.status, InviteStatus::Accepted);
+        let mut tx = begin(&db.pool, tree.tenant).await;
         assert_eq!(
-            access::list_grants(&db.pool, tree.tenant, &access::GrantFilter::default())
+            access::list_grants(&mut *tx, tree.tenant, &access::GrantFilter::default())
                 .await
                 .expect("list")
                 .len(),
             1,
             "and no duplicate row"
         );
+        tx.commit().await.expect("commit existing-grant read");
     });
 }
 
@@ -1632,10 +1679,10 @@ fn an_unknown_token_is_indistinguishable_from_a_foreign_one() {
         )
         .await;
 
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, mine.tenant).await;
         let foreign = access::accept_invite(&mut tx, mine.tenant, &hash, "robin", Utc::now()).await;
         drop(tx);
-        let mut tx = begin(&db.pool).await;
+        let mut tx = begin(&db.pool, mine.tenant).await;
         let unknown =
             access::accept_invite(&mut tx, mine.tenant, &[99u8; 32], "robin", Utc::now()).await;
         drop(tx);
@@ -1678,65 +1725,70 @@ fn another_tenants_rows_are_absent_on_every_surface() {
         )
         .await;
 
+        let mut tx = begin(&db.pool, mine.tenant).await;
         assert!(
-            access::get_group(&db.pool, mine.tenant, their_group)
+            access::get_group(&mut *tx, mine.tenant, their_group)
                 .await
                 .expect("read")
                 .is_none()
         );
         assert!(
-            access::get_grant(&db.pool, mine.tenant, their_grant.id)
+            access::get_grant(&mut *tx, mine.tenant, their_grant.id)
                 .await
                 .expect("read")
                 .is_none()
         );
         assert!(
-            access::get_invite(&db.pool, mine.tenant, their_invite)
+            access::get_invite(&mut *tx, mine.tenant, their_invite)
                 .await
                 .expect("read")
                 .is_none()
         );
         assert!(
-            access::list_groups(&db.pool, mine.tenant)
+            access::list_groups(&mut *tx, mine.tenant)
                 .await
                 .expect("list")
                 .is_empty()
         );
         assert!(
-            access::list_grants(&db.pool, mine.tenant, &access::GrantFilter::default())
+            access::list_grants(&mut *tx, mine.tenant, &access::GrantFilter::default())
                 .await
                 .expect("list")
                 .is_empty()
         );
         assert!(
-            access::list_invites(&db.pool, mine.tenant, theirs.workspace_scope)
+            access::list_invites(&mut *tx, mine.tenant, theirs.workspace_scope)
                 .await
                 .expect("list")
                 .is_empty(),
             "another tenant's scope resolves to no invitations rather than theirs"
         );
         assert!(
-            members_at(&db.pool, mine.tenant, theirs.workspace_scope)
+            access::members_of(&mut *tx, mine.tenant, theirs.workspace_scope)
                 .await
+                .expect("resolve foreign members")
                 .is_empty(),
             "and to nobody"
         );
         assert!(
-            access::group_members(&db.pool, mine.tenant, their_group)
+            access::group_members(&mut *tx, mine.tenant, their_group)
                 .await
                 .expect("read")
                 .is_empty()
         );
+        tx.commit().await.expect("commit cross-tenant reads");
 
         // The same slug in two tenants is two groups, not a collision.
         new_group(&db.pool, mine.tenant, "eng", &["kim"]).await;
+        let mut tx = begin(&db.pool, mine.tenant).await;
         assert_eq!(
-            access::list_groups(&db.pool, mine.tenant)
+            access::list_groups(&mut *tx, mine.tenant)
                 .await
                 .expect("list")
                 .len(),
             1
         );
+        tx.commit().await.expect("commit same-slug read");
     });
 }
 
@@ -1766,8 +1818,9 @@ fn the_grant_filters_select_rows_rather_than_authority() {
         )
         .await;
 
+        let mut tx = begin(&db.pool, tree.tenant).await;
         let at_project = access::list_grants(
-            &db.pool,
+            &mut *tx,
             tree.tenant,
             &access::GrantFilter {
                 scope_id: Some(tree.project_scope),
@@ -1784,7 +1837,7 @@ fn the_grant_filters_select_rows_rather_than_authority() {
         assert_eq!(at_project[0].principal_id.as_deref(), Some("kim"));
 
         let robins = access::list_grants(
-            &db.pool,
+            &mut *tx,
             tree.tenant,
             &access::GrantFilter {
                 scope_id: None,
@@ -1796,12 +1849,13 @@ fn the_grant_filters_select_rows_rather_than_authority() {
         assert_eq!(robins.len(), 1);
 
         assert_eq!(
-            access::list_grants(&db.pool, tree.tenant, &access::GrantFilter::default())
+            access::list_grants(&mut *tx, tree.tenant, &access::GrantFilter::default())
                 .await
                 .expect("list")
                 .len(),
             2,
             "and no filter is the tenant's grants"
         );
+        tx.commit().await.expect("commit grant-filter reads");
     });
 }
