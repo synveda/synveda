@@ -4,10 +4,9 @@
 //! (vLLM, the air-gapped path), and a deterministic rule-based extractor
 //! that keeps dev, demos, and tests network-free (seed §2.1).
 //!
-//! Every type here is serde-serializable on purpose: the pipeline stages
-//! are Temporal-shaped activities (ADR-0022 decision 1), and serializable
-//! inputs/outputs are what lets the enterprise profile host the same
-//! stages under a workflow engine without redesign.
+//! Every type here is serde-serializable on purpose: durable execution can
+//! persist and replay bounded stage inputs and outputs without coupling this
+//! domain boundary to a particular scheduler or queue implementation.
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -26,7 +25,7 @@ pub use vllm::VllmExtractor;
 
 /// Everything one extraction sees: the event's redacted content plus the run's
 /// own provenance (`synveda_store::sessions::StagedEvent`, re-shaped as a
-/// serializable activity input).
+/// serializable stage input).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ExtractionInput {
     /// The exact frozen session event being classified.

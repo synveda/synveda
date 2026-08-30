@@ -143,7 +143,7 @@ async fn admitted(pool: &PgPool, label: &str) -> (TenantId, ScopeId, ScopeId, Sc
     )
     .await;
     access::create_grant(
-        &mut *tx,
+        &mut tx,
         &access::NewGrant {
             id: GrantId::new(),
             tenant_id: tenant,

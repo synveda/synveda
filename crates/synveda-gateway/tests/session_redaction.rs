@@ -57,6 +57,7 @@ mod configuration_support;
 const KEY_PEM: &str = include_str!("fixtures/idp_key_a.pem");
 const KEY_JWK: &str = include_str!("fixtures/idp_key_a.jwk.json");
 const CLIENT_ID: &str = "synveda-test";
+const API_AUDIENCE: &str = "synveda-test-api";
 
 // The seeded findings — well-known documentation examples, never real
 // credentials. The AWS pair and the Luhn-valid test PAN are the exact
@@ -111,6 +112,10 @@ impl MockIdp {
                 "authorization_endpoint": format!("{issuer}/authorize"),
                 "token_endpoint": format!("{issuer}/token"),
                 "jwks_uri": format!("{issuer}/jwks"),
+                "code_challenge_methods_supported": ["S256"],
+                "id_token_signing_alg_values_supported": ["RS256"],
+                "response_types_supported": ["code"],
+                "grant_types_supported": ["authorization_code"],
             }))
         }
         async fn jwks() -> Json<Value> {
@@ -135,7 +140,7 @@ impl MockIdp {
             &json!({
                 "iss": self.issuer,
                 "sub": subject,
-                "aud": CLIENT_ID,
+                "aud": API_AUDIENCE,
                 "iat": now_secs(),
                 "exp": now_secs() + 600,
             }),
@@ -150,6 +155,7 @@ impl MockIdp {
 fn state(url: &str, issuer: &str, tenant: TenantId) -> AppState {
     let config = format!(
         r#"[{{"issuer":"{issuer}","client_id":"{CLIENT_ID}",
+             "audience":"{API_AUDIENCE}",
              "tenant":{{"static":{{"tenant_id":"{tenant}"}}}}}}]"#
     );
     let verifier = Arc::new(
@@ -321,7 +327,7 @@ async fn bind_role(pool: &PgPool, tenant: TenantId, subject: &str, role: RoleKey
         .await
         .expect("mint root");
     access::create_grant(
-        &mut *tx,
+        &mut tx,
         &access::NewGrant {
             id: GrantId::new(),
             tenant_id: tenant,

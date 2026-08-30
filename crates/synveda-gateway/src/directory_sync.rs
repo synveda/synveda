@@ -394,13 +394,11 @@ async fn record_presence(
             directory::user_by_external_id(&mut *tx, tenant.id, connector, &record.external_id)
                 .await?;
         let user = match existing {
-            Some(existing) => {
-                directory::replace_user(&mut *tx, tenant.id, existing.id, &attributes)
-                    .await?
-                    .unwrap_or(existing)
-            }
+            Some(existing) => directory::replace_user(&mut tx, tenant.id, existing.id, &attributes)
+                .await?
+                .unwrap_or(existing),
             None => {
-                directory::create_user(&mut *tx, DirectoryUserId::new(), tenant.id, &attributes)
+                directory::create_user(&mut tx, DirectoryUserId::new(), tenant.id, &attributes)
                     .await?
             }
         };
@@ -563,7 +561,7 @@ async fn seal(
         work_email: user.work_email.clone(),
     };
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant.id).await?;
-    let deactivated = directory::replace_user(&mut *tx, tenant.id, user.id, &attributes).await?;
+    let deactivated = directory::replace_user(&mut tx, tenant.id, user.id, &attributes).await?;
     tx.commit().await.map_err(storage)?;
     if let Some(deactivated) = deactivated {
         reconcile::reconcile_runtime(

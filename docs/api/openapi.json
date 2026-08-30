@@ -21584,7 +21584,7 @@
           },
           "subject": {
             "type": "string",
-            "description": "The `sub` the IdP will put in the agent's client-credentials\ntokens (for Rauthy, the client id)."
+            "description": "The stable subject identifier expected from the agent's\nclient-credentials access tokens."
           }
         }
       },

@@ -24,7 +24,7 @@ esac
 
 db_test_task=${SYNVEDA_DB_TEST_TASK:-workspace}
 case "$db_test_task" in
-  workspace|demo|product-evaluation|evaluation|longmemeval-evaluation|sqlx-prepare) ;;
+  workspace|demo|product-evaluation|evaluation|longmemeval-evaluation|authority-fingerprints|sqlx-prepare) ;;
   *)
     echo "db-test: unknown SYNVEDA_DB_TEST_TASK" >&2
     exit 64
@@ -32,9 +32,13 @@ case "$db_test_task" in
 esac
 case "$db_test_task" in
   demo|product-evaluation|evaluation|longmemeval-evaluation) fast_fixture=true ;;
-  sqlx-prepare) fast_fixture=true ;;
+  authority-fingerprints|sqlx-prepare) fast_fixture=true ;;
   workspace) fast_fixture=false ;;
 esac
+if [ "$db_test_task" = authority-fingerprints ] && [ "$#" -ne 0 ]; then
+  echo "db-test: authority-fingerprints takes no cargo-test arguments" >&2
+  exit 64
+fi
 if [ "$db_test_task" = sqlx-prepare ] && [ "$#" -ne 0 ]; then
   echo "db-test: sqlx-prepare takes no cargo-test arguments" >&2
   exit 64
@@ -52,6 +56,42 @@ command -v "$docker_bin" >/dev/null 2>&1 || {
 
 tmp_root=${TMPDIR:-/tmp}
 tmp_root=${tmp_root%/}
+case "$tmp_root" in
+  ""|/|*[[:space:]]*|*//*|*/./*|*/../*|*/.|*/..)
+    echo "db-test: temporary root has an unsafe shape" >&2
+    exit 70
+    ;;
+  /*) ;;
+  *)
+    echo "db-test: temporary root must be absolute" >&2
+    exit 70
+    ;;
+esac
+# macOS exposes its physical per-user temporary tree through `/var`, which is
+# itself a compatibility symlink to `/private/var`. Secret generation rightly
+# rejects caller-controlled symlink ancestors, so resolve the already-existing
+# temporary root once and create every private fixture beneath that physical
+# path. `pwd -P` is portable across the supported Unix shells; no `readlink -f`
+# dependency is introduced.
+tmp_root=$(CDPATH= cd -- "$tmp_root" 2>/dev/null && pwd -P) || {
+  echo "db-test: temporary root is unavailable" >&2
+  exit 70
+}
+case "$tmp_root" in
+  ""|/|*[[:space:]]*|*//*|*/./*|*/../*|*/.|*/..)
+    echo "db-test: physical temporary root has an unsafe shape" >&2
+    exit 70
+    ;;
+  /*) ;;
+  *)
+    echo "db-test: physical temporary root must be absolute" >&2
+    exit 70
+    ;;
+esac
+[ -d "$tmp_root" ] && [ ! -L "$tmp_root" ] || {
+  echo "db-test: physical temporary root was refused" >&2
+  exit 70
+}
 state_dir=$(mktemp -d "$tmp_root/synveda-db-test.XXXXXX")
 chmod 700 "$state_dir"
 state_prefix=$(dirname "$state_dir")/synveda-db-test.
@@ -79,47 +119,239 @@ lifecycle_roles_file=$state_dir/lifecycle-database-roles.json
 external_roles_file=$state_dir/external-database-roles.json
 main_authority_dir=$state_dir/main-database-authority
 lifecycle_authority_dir=$state_dir/lifecycle-database-authority
-# Docker Desktop's automatic /24 allocator is finite and retained failed
-# evidence can exhaust it. Allocate four tiny, project-derived subnets from
-# the IANA benchmarking range so this isolated fixture has a closed network
-# budget without sharing a product or host network.
-network_seed=$(printf '%s\n' "$project" | cksum | awk '{print $1}')
-network_start=$((network_seed % 512))
-used_subnets_file=$state_dir/docker-subnets
-: > "$used_subnets_file"
-chmod 600 "$used_subnets_file"
-for network_id in $("$docker_bin" network ls --quiet); do
-  "$docker_bin" network inspect \
-    --format '{{range .IPAM.Config}}{{println .Subnet}}{{end}}' \
-    "$network_id" >> "$used_subnets_file"
-done
-network_attempt=0
-network_allocated=false
-while [ "$network_attempt" -lt 512 ]; do
-  network_slot=$(((network_start + network_attempt) % 512))
-  network_second=$((18 + network_slot / 256))
-  network_third=$((network_slot % 256))
-  main_data_subnet=198.$network_second.$network_third.0/28
-  lifecycle_data_subnet=198.$network_second.$network_third.16/28
-  main_host_subnet=198.$network_second.$network_third.32/28
-  lifecycle_host_subnet=198.$network_second.$network_third.48/28
-  if ! LC_ALL=C grep -Fqx "$main_data_subnet" "$used_subnets_file" \
-      && ! LC_ALL=C grep -Fqx "$lifecycle_data_subnet" "$used_subnets_file" \
-      && ! LC_ALL=C grep -Fqx "$main_host_subnet" "$used_subnets_file" \
-      && ! LC_ALL=C grep -Fqx "$lifecycle_host_subnet" "$used_subnets_file"; then
-    export SYNVEDA_DB_TEST_MAIN_DATA_SUBNET=$main_data_subnet
-    export SYNVEDA_DB_TEST_LIFECYCLE_DATA_SUBNET=$lifecycle_data_subnet
-    export SYNVEDA_DB_TEST_MAIN_HOST_SUBNET=$main_host_subnet
-    export SYNVEDA_DB_TEST_LIFECYCLE_HOST_SUBNET=$lifecycle_host_subnet
-    network_allocated=true
-    break
+network_ownership_file=$state_dir/network-ownership.tsv
+network_receipt_dir=$state_dir/network-receipts
+: > "$network_ownership_file"
+chmod 600 "$network_ownership_file"
+mkdir "$network_receipt_dir"
+chmod 700 "$network_receipt_dir"
+owned_network_ids=()
+owned_network_receipt_files=()
+owned_network_count=0
+network_logicals=(main-data lifecycle-data main-host lifecycle-host)
+network_names=(
+  "$project-main-data"
+  "$project-lifecycle-data"
+  "$project-main-host"
+  "$project-lifecycle-host"
+)
+network_subnets=("" "" "" "")
+network_attempt_counts=(0 0 0 0)
+network_reservation_limit=64
+cleanup_started=false
+
+report_preserved_state() {
+  local status=$?
+  if [ "$status" -ne 0 ]; then
+    echo >&2
+    if [ "$cleanup_started" = true ]; then
+      echo "db-test: failed during success-path cleanup; teardown for $project may be partial" >&2
+      echo "db-test: private state and any remaining resources were retained" >&2
+    else
+      echo "db-test: failed; retained private fixture state and any created resources for $project" >&2
+    fi
+    echo "db-test: private state is in $state_dir (mode 0700; contains credentials)" >&2
+    echo "db-test: network reservation evidence is in $network_ownership_file (mode 0600)" >&2
   fi
-  network_attempt=$((network_attempt + 1))
-done
-[ "$network_allocated" = true ] || {
-  echo "db-test: no isolated test subnet quartet is available" >&2
-  exit 69
+  return "$status"
 }
+trap report_preserved_state EXIT
+trap 'exit 130' INT TERM
+
+# Each logical network walks its own lane through a full-cycle permutation of
+# the 2,048 /26 quartets in the IANA benchmarking range. Docker remains the
+# race authority: only its exact overlap refusal is contention that created no
+# resource and may advance the candidate. Every other failure retains the
+# fixture and every network already created by this run. No existing Docker
+# resource is listed or inspected.
+network_seed=$(printf '%s\n' "$project" | cksum | awk '{print $1}')
+network_start_slot=$((network_seed % 2048))
+unset network_seed
+
+network_candidate_subnet() {
+  local logical_index=$1
+  local attempt=$2
+  local network_quartet_slot
+  local network_slot
+  local network_second
+  local network_within
+  local network_third
+  local network_fourth
+
+  # 1265 is odd and therefore coprime with 2048. The logical index selects one
+  # of four disjoint /28 lanes, so no two candidates in this fixture coincide.
+  network_quartet_slot=$(((network_start_slot + attempt * 1265) % 2048))
+  network_slot=$((network_quartet_slot * 4 + logical_index))
+  network_second=$((18 + network_slot / 4096))
+  network_within=$((network_slot % 4096))
+  network_third=$((network_within / 16))
+  network_fourth=$(((network_within % 16) * 16))
+  printf '198.%s.%s.%s/28\n' \
+    "$network_second" "$network_third" "$network_fourth"
+}
+
+network_create_is_pool_contention() {
+  local receipt_file=$1
+  local error_file=$2
+  local create_status=$3
+
+  [ "$create_status" -eq 1 ] && [ ! -s "$receipt_file" ] && cmp -s -- \
+    <(printf '%s\n' \
+      'Error response from daemon: invalid pool request: Pool overlaps with other one on this address space') \
+    "$error_file"
+}
+
+record_network_ownership() {
+  local record_kind=$1
+  local logical_name=$2
+  local network_name=$3
+  local subnet=$4
+  local network_id=$5
+
+  printf '%s\t%s\t%s\t%s\t%s\n' \
+    "$record_kind" "$logical_name" "$network_name" "$subnet" "$network_id" \
+    >> "$network_ownership_file" || {
+    echo "db-test: could not record network ownership" >&2
+    return 70
+  }
+}
+
+reserve_test_network() {
+  local logical_index=$1
+  local logical_name=$2
+  local network_name=$3
+  local internal=$4
+  local attempt=0
+  local created_network_id
+  local existing_network_id
+  local network_create_status
+  local network_error_file
+  local network_receipt_bytes
+  local network_receipt_file
+  local network_status_file
+  local subnet
+
+  while [ "$attempt" -lt "$network_reservation_limit" ]; do
+    subnet=$(network_candidate_subnet "$logical_index" "$attempt") || {
+      echo "db-test: could not derive a network candidate" >&2
+      return 70
+    }
+    record_network_ownership \
+      intent "$logical_name" "$network_name" "$subnet" - || return 70
+    network_receipt_file=$network_receipt_dir/$logical_index-$attempt.stdout
+    network_error_file=$network_receipt_dir/$logical_index-$attempt.stderr
+    network_status_file=$network_receipt_dir/$logical_index-$attempt.status
+    : > "$network_receipt_file" || {
+      echo "db-test: could not prepare a private network receipt" >&2
+      return 70
+    }
+    : > "$network_error_file" || {
+      echo "db-test: could not prepare a private network receipt" >&2
+      return 70
+    }
+    : > "$network_status_file" || {
+      echo "db-test: could not prepare a private network receipt" >&2
+      return 70
+    }
+    chmod 600 \
+        "$network_receipt_file" "$network_error_file" "$network_status_file" || {
+      echo "db-test: could not protect a private network receipt" >&2
+      return 70
+    }
+    if [ "$internal" = true ]; then
+      if "$docker_bin" network create \
+        --driver bridge --internal --subnet "$subnet" \
+        --label com.synveda.contract=cpr-45-db-test \
+        --label "com.synveda.project=$project" \
+        --label "com.synveda.network=$logical_name" \
+        "$network_name" >"$network_receipt_file" 2>"$network_error_file"; then
+        network_create_status=0
+      else
+        network_create_status=$?
+      fi
+    else
+      if "$docker_bin" network create \
+        --driver bridge --subnet "$subnet" \
+        --label com.synveda.contract=cpr-45-db-test \
+        --label "com.synveda.project=$project" \
+        --label "com.synveda.network=$logical_name" \
+        "$network_name" >"$network_receipt_file" 2>"$network_error_file"; then
+        network_create_status=0
+      else
+        network_create_status=$?
+      fi
+    fi
+    printf '%s\n' "$network_create_status" > "$network_status_file" || {
+      echo "db-test: could not record the Docker reservation status" >&2
+      return 70
+    }
+    if [ "$network_create_status" -eq 0 ]; then
+      break
+    fi
+    if network_create_is_pool_contention \
+        "$network_receipt_file" "$network_error_file" "$network_create_status"; then
+      record_network_ownership \
+        contended "$logical_name" "$network_name" "$subnet" - || return 70
+      attempt=$((attempt + 1))
+      continue
+    fi
+    echo "db-test: Docker could not reserve the $logical_name network" >&2
+    return 69
+  done
+  if [ "$attempt" -eq "$network_reservation_limit" ]; then
+    echo "db-test: no uncontended /28 is available for the $logical_name network" >&2
+    return 69
+  fi
+  network_receipt_bytes=$(LC_ALL=C wc -c < "$network_receipt_file") || {
+    echo "db-test: could not read a private network receipt" >&2
+    return 70
+  }
+  if [ "$network_receipt_bytes" -ne 65 ]; then
+    echo "db-test: Docker returned a malformed network identifier" >&2
+    return 69
+  fi
+  IFS= read -r created_network_id < "$network_receipt_file" || {
+    echo "db-test: Docker returned a malformed network identifier" >&2
+    return 69
+  }
+  if [ "${#created_network_id}" -ne 64 ]; then
+    echo "db-test: Docker returned a malformed network identifier" >&2
+    return 69
+  fi
+  case "$created_network_id" in
+    *[!0-9a-f]*)
+      echo "db-test: Docker returned a malformed network identifier" >&2
+      return 69
+      ;;
+  esac
+  if [ "$owned_network_count" -gt 0 ]; then
+    for existing_network_id in "${owned_network_ids[@]}"; do
+      if [ "$existing_network_id" = "$created_network_id" ]; then
+        echo "db-test: Docker reused a network identifier within one fixture" >&2
+        return 69
+      fi
+    done
+  fi
+  record_network_ownership \
+    owned "$logical_name" "$network_name" "$subnet" "$created_network_id" || return 70
+  network_subnets[$logical_index]=$subnet
+  network_attempt_counts[$logical_index]=$attempt
+  owned_network_ids+=("$created_network_id")
+  owned_network_receipt_files+=("$network_receipt_file")
+  owned_network_count=$((owned_network_count + 1))
+}
+
+reserve_test_network 0 "${network_logicals[0]}" "${network_names[0]}" true
+reserve_test_network 1 "${network_logicals[1]}" "${network_names[1]}" true
+reserve_test_network 2 "${network_logicals[2]}" "${network_names[2]}" false
+reserve_test_network 3 "${network_logicals[3]}" "${network_names[3]}" false
+
+export SYNVEDA_DB_TEST_MAIN_DATA_NETWORK=${network_names[0]}
+export SYNVEDA_DB_TEST_LIFECYCLE_DATA_NETWORK=${network_names[1]}
+export SYNVEDA_DB_TEST_MAIN_HOST_NETWORK=${network_names[2]}
+export SYNVEDA_DB_TEST_LIFECYCLE_HOST_NETWORK=${network_names[3]}
+unset SYNVEDA_DB_TEST_MAIN_DATA_SUBNET SYNVEDA_DB_TEST_LIFECYCLE_DATA_SUBNET
+unset SYNVEDA_DB_TEST_MAIN_HOST_SUBNET SYNVEDA_DB_TEST_LIFECYCLE_HOST_SUBNET
 export SYNVEDA_DB_TEST_ROLES_FILE=$roles_file
 export SYNVEDA_DB_TEST_LIFECYCLE_ROLES_FILE=$lifecycle_roles_file
 export SYNVEDA_DB_TEST_EXTERNAL_ROLES_FILE=$external_roles_file
@@ -135,12 +367,116 @@ else
   test_image_owned=true
 fi
 export SYNVEDA_DB_TEST_POSTGRES_IMAGE
-unset network_seed network_start network_slot network_second network_third \
-  network_attempt network_allocated main_data_subnet lifecycle_data_subnet \
-  main_host_subnet lifecycle_host_subnet network_id used_subnets_file
 
 compose() {
   "$docker_bin" compose --project-name "$project" --file "$manifest" "$@"
+}
+
+validate_owned_network_ledger() {
+  local network_index
+  local receipt_bytes
+  local receipt_id
+  local receipt_status
+
+  [ "$owned_network_count" -eq 4 ] \
+    && [ "${#owned_network_ids[@]}" -eq 4 ] \
+    && [ "${#owned_network_receipt_files[@]}" -eq 4 ] || {
+    echo "db-test: refusing cleanup without four immutable network identifiers" >&2
+    return 1
+  }
+  [ -f "$network_ownership_file" ] && [ ! -L "$network_ownership_file" ] || {
+    echo "db-test: refusing cleanup without the regular ownership ledger" >&2
+    return 1
+  }
+  if ! cmp -s -- <(expected_owned_network_ledger) "$network_ownership_file"; then
+    echo "db-test: refusing cleanup after ownership ledger drift" >&2
+    return 1
+  fi
+  network_index=0
+  while [ "$network_index" -lt 4 ]; do
+    case "${owned_network_receipt_files[$network_index]}" in
+      "$network_receipt_dir"/[0-3]-*.stdout) ;;
+      *)
+        echo "db-test: refusing cleanup without a fixture-local network receipt" >&2
+        return 1
+        ;;
+    esac
+    [ -f "${owned_network_receipt_files[$network_index]}" ] \
+      && [ ! -L "${owned_network_receipt_files[$network_index]}" ] || {
+      echo "db-test: refusing cleanup without a regular network receipt" >&2
+      return 1
+    }
+    receipt_bytes=$(LC_ALL=C wc -c \
+      < "${owned_network_receipt_files[$network_index]}") || return 1
+    [ "$receipt_bytes" -eq 65 ] || {
+      echo "db-test: refusing cleanup after network receipt drift" >&2
+      return 1
+    }
+    IFS= read -r receipt_id \
+      < "${owned_network_receipt_files[$network_index]}" || return 1
+    [ "$receipt_id" = "${owned_network_ids[$network_index]}" ] || {
+      echo "db-test: refusing cleanup after network receipt drift" >&2
+      return 1
+    }
+    receipt_status=${owned_network_receipt_files[$network_index]%.stdout}.status
+    [ -f "$receipt_status" ] && [ ! -L "$receipt_status" ] \
+      && cmp -s -- <(printf '0\n') "$receipt_status" || {
+      echo "db-test: refusing cleanup without a successful network receipt" >&2
+      return 1
+    }
+    network_index=$((network_index + 1))
+  done
+}
+
+expected_owned_network_ledger() {
+  local network_attempt
+  local network_index
+  local subnet
+
+  network_index=0
+  while [ "$network_index" -lt 4 ]; do
+    network_attempt=0
+    while [ "$network_attempt" -le "${network_attempt_counts[$network_index]}" ]; do
+      subnet=$(network_candidate_subnet \
+        "$network_index" "$network_attempt")
+      printf 'intent\t%s\t%s\t%s\t-\n' \
+        "${network_logicals[$network_index]}" \
+        "${network_names[$network_index]}" \
+        "$subnet"
+      if [ "$network_attempt" -lt "${network_attempt_counts[$network_index]}" ]; then
+        printf 'contended\t%s\t%s\t%s\t-\n' \
+          "${network_logicals[$network_index]}" \
+          "${network_names[$network_index]}" \
+          "$subnet"
+      else
+        printf 'owned\t%s\t%s\t%s\t%s\n' \
+          "${network_logicals[$network_index]}" \
+          "${network_names[$network_index]}" \
+          "${network_subnets[$network_index]}" \
+          "${owned_network_ids[$network_index]}"
+      fi
+      network_attempt=$((network_attempt + 1))
+    done
+    network_index=$((network_index + 1))
+  done
+}
+
+cleanup_successful_fixture() {
+  local network_index
+
+  validate_owned_network_ledger
+  cleanup_started=true
+  compose down --volumes --remove-orphans
+  network_index=$((owned_network_count - 1))
+  while [ "$network_index" -ge 0 ]; do
+    "$docker_bin" network rm "${owned_network_ids[$network_index]}" >/dev/null
+    network_index=$((network_index - 1))
+  done
+  if [ "$test_image_owned" = true ]; then
+    "$docker_bin" image rm "$SYNVEDA_DB_TEST_POSTGRES_IMAGE" >/dev/null
+  fi
+  rm -R -- "$state_dir"
+  trap - EXIT
 }
 
 private_evidence_file() {
@@ -223,17 +559,6 @@ SQL
   }
 }
 
-report_preserved_state() {
-  status=$?
-  if [ "$status" -ne 0 ]; then
-    echo >&2
-    echo "db-test: failed; retained isolated Compose project $project" >&2
-    echo "db-test: private state is in $state_dir (mode 0700; contains credentials)" >&2
-  fi
-}
-trap report_preserved_state EXIT
-trap 'exit 130' INT TERM
-
 # Test isolation is intentional: ambient connection settings must not turn a
 # repository gate into a mutation of an operator's database.
 unset DATABASE_URL DATABASE_URL_FILE
@@ -258,7 +583,12 @@ unset PGHOSTADDR PGHOST PGPORT PGUSER PGPASSWORD PGDATABASE
 unset PGSSLROOTCERT PGSSLCERT PGSSLKEY PGSSLMODE PGSSLCERTMODE PGAPPNAME PGOPTIONS PGPASSFILE
 unset PGGSSENCMODE PGGSSDELEGATION
 
-SYNVEDA_SECRETS_DIR=$secret_dir deploy/compose/scripts/generate-secrets.sh >/dev/null
+generator_project=synveda-development-acceptance-$state_token
+SYNVEDA_COMPOSE_PROJECT_SUFFIX=acceptance-$state_token \
+SYNVEDA_SECRETS_DIR=$secret_dir \
+SYNVEDA_DATABASE_AUTHORITY_DIR=$state_dir/generator/$generator_project/database-authority \
+SYNVEDA_KEYCLOAK_PUBLIC_GATE_DIR=$state_dir/generator/$generator_project/keycloak-public-gate \
+  deploy/compose/scripts/generate-secrets.sh >/dev/null
 mkdir "$main_authority_dir" "$lifecycle_authority_dir"
 chmod 700 "$main_authority_dir" "$lifecycle_authority_dir"
 external_provider_password=$(openssl rand -hex 32)
@@ -365,6 +695,40 @@ if [ "$fast_fixture" = true ]; then
   }
   assert_database_secrets_absent "$main_witness_file"
 
+  # A baseline-revision change makes the pinned authority fingerprints stale
+  # before the product preflight can accept the new schema. Derive the four
+  # content-free values from an isolated raw migration without treating that
+  # report as migration acceptance. Online compilation uses only the exact
+  # migrator URL; the ignored runtime reporter connects through the ordinary
+  # gateway role and emits one complete set or none.
+  if [ "$db_test_task" = authority-fingerprints ]; then
+    sqlx_library_version=$(awk '
+      $0 == "name = \"sqlx\"" { package = 1; next }
+      package && $1 == "version" { gsub(/\"/, "", $3); print $3; exit }
+    ' Cargo.lock)
+    sqlx_cli_banner=$(cargo sqlx --version)
+    [ -n "$sqlx_library_version" ] \
+      && [ "$sqlx_cli_banner" = "sqlx-cli-sqlx $sqlx_library_version" ] || {
+        echo "db-test: cargo-sqlx must exactly match the locked sqlx library" >&2
+        exit 69
+      }
+    env -u SYNVEDA_DB_TEST_SECRETS_DIR -u SQLX_OFFLINE \
+      SYNVEDA_CARGO_DATABASE_URL_FILE=$main_migrator_file \
+        scripts/cargo-with-database-url-file \
+          cargo sqlx migrate run --no-dotenv \
+            --source crates/synveda-store/migrations
+    env -u SYNVEDA_DB_TEST_SECRETS_DIR -u SQLX_OFFLINE \
+      SYNVEDA_REPORT_AUTHORITY_FINGERPRINTS=1 \
+      SYNVEDA_CARGO_DATABASE_URL_FILE=$main_migrator_file \
+      SYNVEDA_DATABASE_ROLES_FILE=$roles_file \
+      SYNVEDA_TEST_DATABASE_URL_FILE=$main_gateway_file \
+        scripts/cargo-with-database-url-file \
+          cargo test -q -p synveda-store --lib \
+            runtime_role::tests::report_live_catalog_fingerprints \
+            -- --ignored --exact --nocapture
+    unset sqlx_library_version sqlx_cli_banner
+  fi
+
   # Cache regeneration cannot compile Synveda before the new cache exists:
   # one uncached production query would make that path circular. The pinned
   # SQLx CLI therefore applies only the transactional baseline first. After
@@ -397,19 +761,21 @@ if [ "$fast_fixture" = true ]; then
     unset sqlx_library_version sqlx_cli_banner
   fi
 
-  run_main_database_preflight "$main_witness_file"
-  for _ in 1 2; do
-    env -u SYNVEDA_DB_TEST_SECRETS_DIR \
-      SQLX_OFFLINE=true \
-      DATABASE_URL_FILE=$main_migrator_file \
-      SYNVEDA_DATABASE_ROLES_FILE=$roles_file \
-        cargo run -q -p synveda-cli --bin synveda -- db migrate
-  done
-  echo "db-test: fast exact-role database fixture bootstrapped and migrated"
+  if [ "$db_test_task" != authority-fingerprints ]; then
+    run_main_database_preflight "$main_witness_file"
+    for _ in 1 2; do
+      env -u SYNVEDA_DB_TEST_SECRETS_DIR \
+        SQLX_OFFLINE=true \
+        DATABASE_URL_FILE=$main_migrator_file \
+        SYNVEDA_DATABASE_ROLES_FILE=$roles_file \
+          cargo run -q -p synveda-cli --bin synveda -- db migrate
+    done
+    echo "db-test: fast exact-role database fixture bootstrapped and migrated"
+  fi
 
   status=0
   case "$db_test_task" in
-    sqlx-prepare) ;;
+    authority-fingerprints|sqlx-prepare) ;;
     demo)
       demo_script=$1
       shift
@@ -478,12 +844,7 @@ if [ "$fast_fixture" = true ]; then
     echo "db-test: private state is in $state_dir (mode 0700; contains credentials)"
     exit 0
   fi
-  compose down --volumes --remove-orphans
-  if [ "$test_image_owned" = true ]; then
-    "$docker_bin" image rm "$SYNVEDA_DB_TEST_POSTGRES_IMAGE" >/dev/null
-  fi
-  rm -R -- "$state_dir"
-  trap - EXIT
+  cleanup_successful_fixture
   echo "db-test: passed; fast exact-role database volume removed"
   exit 0
 fi
@@ -3102,10 +3463,5 @@ if [ "${KEEP_TEST_DB:-}" = 1 ]; then
   exit 0
 fi
 
-compose down --volumes --remove-orphans
-if [ "$test_image_owned" = true ]; then
-  "$docker_bin" image rm "$SYNVEDA_DB_TEST_POSTGRES_IMAGE" >/dev/null
-fi
-rm -R -- "$state_dir"
-trap - EXIT
+cleanup_successful_fixture
 echo "db-test: passed; isolated database volumes removed"

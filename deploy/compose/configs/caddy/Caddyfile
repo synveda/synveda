@@ -53,4 +53,4 @@
 }
 
 import /etc/caddy/app.caddy
-import /etc/caddy/identity-*.caddy
+import /etc/caddy/identity.caddy

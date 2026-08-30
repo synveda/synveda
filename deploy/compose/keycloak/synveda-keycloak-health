@@ -1,0 +1,101 @@
+#!/bin/bash -p
+# Bounded Keycloak management readiness probe shared by Docker health and the
+# generation supervisor. Keycloak documents HTTP 200 as the authoritative
+# success signal and HTTP 503 as failure for /health/ready. The response body
+# is deliberately not interpreted as a second, weaker health oracle.
+unset BASH_ENV ENV CDPATH GLOBIGNORE PS4
+set +x
+set -eu
+umask 077
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+LC_ALL=C
+export LC_ALL
+
+mode=${1:-}
+case "$mode" in
+    local)
+        [ "$#" -eq 1 ] || exit 64
+        health_host=127.0.0.1
+        ;;
+    network)
+        [ "$#" -eq 1 ] || exit 64
+        health_host=keycloak
+        ;;
+    self-test)
+        [ "$#" -eq 1 ] || exit 64
+        health_host=
+        ;;
+    *) exit 64 ;;
+esac
+
+state_dir=$(mktemp -d /tmp/synveda-keycloak-health.XXXXXX) || exit 70
+chmod 0700 "$state_dir"
+response=$state_dir/response
+
+cleanup() {
+    status=$?
+    trap - EXIT
+    rm -f -- "$response"
+    rmdir -- "$state_dir" 2>/dev/null || status=70
+    exit "$status"
+}
+trap cleanup EXIT
+
+validate_response() (
+    response_to_validate=$1
+    response_size=$(stat -c %s "$response_to_validate" 2>/dev/null || \
+        stat -f %z "$response_to_validate" 2>/dev/null) || return 1
+    case "$response_size" in
+        ''|*[!0-9]*) return 1 ;;
+    esac
+    [ "$response_size" -gt 0 ] && [ "$response_size" -le 65536 ] || return 1
+    nul_prefix=
+    if IFS= read -r -d '' nul_prefix < "$response_to_validate"; then
+        return 1
+    fi
+
+    exec 3< "$response_to_validate"
+    status_line=
+    IFS= read -r status_line <&3 || return 1
+    status_line=${status_line%$'\r'}
+    headers_complete=false
+    while IFS= read -r header_line <&3; do
+        header_line=${header_line%$'\r'}
+        if [ -z "$header_line" ]; then
+            headers_complete=true
+            break
+        fi
+    done
+    [ "$headers_complete" = true ] || return 1
+    [[ "$status_line" =~ ^HTTP/1\.[01]\ 200\  ]]
+)
+
+if [ "$mode" = self-test ]; then
+    # A malformed body cannot turn a failure status into success, and a valid
+    # 200 remains authoritative even when the optional JSON body is truncated.
+    printf '%s' $'HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n{"status":"UP",' \
+        > "$response"
+    chmod 0600 "$response"
+    validate_response "$response" || exit 1
+    printf '%s' $'HTTP/1.1 503 Service Unavailable\r\n\r\n{"status":"DOWN","checks":[{"status":"UP"}]}' \
+        > "$response"
+    validate_response "$response" && exit 1
+    printf '%s' $'HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n' > "$response"
+    validate_response "$response" && exit 1
+    head -c 65537 /dev/zero > "$response"
+    validate_response "$response" && exit 1
+    exit 0
+fi
+
+if ! /usr/bin/timeout --foreground --signal=TERM --kill-after=1s 4s \
+    /bin/bash -p -c '
+        host=$1
+        exec 3<>"/dev/tcp/$host/9000"
+        printf "GET /health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n" >&3
+        head -c 65537 <&3
+    ' synveda-keycloak-health "$health_host" >"$response" 2>/dev/null; then
+    exit 1
+fi
+chmod 0600 "$response"
+validate_response "$response"

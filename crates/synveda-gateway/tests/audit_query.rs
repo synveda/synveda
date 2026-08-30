@@ -78,8 +78,7 @@ fn state_with(url: &str, pdp: Arc<Pdp>) -> AppState {
         pool: PgPoolOptions::new()
             // Each test owns one app and issues its requests sequentially. A
             // larger pool only multiplies the suite's potential connection
-            // footprint by the 16 tests Rust runs concurrently; on the full
-            // dev stack Temporal already holds its own Postgres pool.
+            // footprint by the tests Rust runs concurrently.
             .max_connections(1)
             .acquire_timeout(Duration::from_secs(5))
             .connect_lazy(url)
@@ -273,7 +272,7 @@ async fn grant(pool: &PgPool, tenant: TenantId, subject: &str, scope: ScopeId, r
         .await
         .expect("begin tenant tx");
     access::create_grant(
-        &mut *tx,
+        &mut tx,
         &access::NewGrant {
             id: GrantId::new(),
             tenant_id: tenant,

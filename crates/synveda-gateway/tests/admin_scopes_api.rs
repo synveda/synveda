@@ -122,7 +122,7 @@ async fn admitted_tenant() -> Option<(AppState, TenantId)> {
         .await
         .expect("mint root");
     synveda_store::access::create_grant(
-        &mut *tx,
+        &mut tx,
         &synveda_store::access::NewGrant {
             id: synveda_types::GrantId::new(),
             tenant_id: id,

@@ -12,6 +12,31 @@ umask 077
 PATH=/opt/keycloak/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 export PATH
 
+generation_gate=/opt/keycloak/bin/synveda-generation-gate
+
+[ -z "${SYNVEDA_KEYCLOAK_GENERATION+x}" ] || {
+    echo "keycloak-entrypoint: direct generation input was refused" >&2
+    exit 78
+}
+
+case "${1:-}" in
+    start)
+        [ "$#" -eq 2 ] && [ "$2" = --optimized ] || {
+            echo "keycloak-entrypoint: only start --optimized is supported" >&2
+            exit 64
+        }
+        "$generation_gate" rotate >/dev/null || {
+            echo "keycloak-entrypoint: Keycloak generation could not be rotated" >&2
+            exit 70
+        }
+        ;;
+    synveda-realm-supervise|synveda-realm-converge) ;;
+    *)
+        echo "keycloak-entrypoint: unsupported command was refused" >&2
+        exit 64
+        ;;
+esac
+
 secret_snapshot=
 secret_snapshot_directory=
 
@@ -38,17 +63,26 @@ file_owner() {
     stat -c %u "$1" 2>/dev/null || stat -f %u "$1" 2>/dev/null
 }
 
-for direct_setting in KC_DB_PASSWORD KC_BOOTSTRAP_ADMIN_USERNAME KC_BOOTSTRAP_ADMIN_PASSWORD; do
+for direct_setting in KC_DB_PASSWORD KC_BOOTSTRAP_ADMIN_USERNAME KC_BOOTSTRAP_ADMIN_PASSWORD SYNVEDA_KEYCLOAK_CONVERGENCE_PASSWORD; do
     case "$direct_setting" in
         KC_DB_PASSWORD) configured=${KC_DB_PASSWORD+x} ;;
         KC_BOOTSTRAP_ADMIN_USERNAME) configured=${KC_BOOTSTRAP_ADMIN_USERNAME+x} ;;
         KC_BOOTSTRAP_ADMIN_PASSWORD) configured=${KC_BOOTSTRAP_ADMIN_PASSWORD+x} ;;
+        SYNVEDA_KEYCLOAK_CONVERGENCE_PASSWORD) configured=${SYNVEDA_KEYCLOAK_CONVERGENCE_PASSWORD+x} ;;
     esac
     [ -z "${configured:-}" ] || {
         echo "keycloak-entrypoint: direct $direct_setting is forbidden; configure its file setting only" >&2
         exit 78
     }
 done
+
+if [ "${1:-}" = synveda-realm-supervise ]; then
+    [ "$#" -eq 1 ] || {
+        echo "keycloak-entrypoint: realm supervisor accepts no arguments" >&2
+        exit 64
+    }
+    exec /opt/keycloak/bin/synveda-realm-supervise
+fi
 
 read_secret() {
     local setting=$1
@@ -125,6 +159,42 @@ read_secret() {
     trap - EXIT
     printf '%s' "$value"
 }
+
+if [ "${1:-}" = synveda-realm-converge ]; then
+    [ "$#" -eq 2 ] || {
+        echo "keycloak-entrypoint: realm convergence requires one generation fence" >&2
+        exit 64
+    }
+    SYNVEDA_KEYCLOAK_GENERATION=$2
+    "$generation_gate" is-current "$SYNVEDA_KEYCLOAK_GENERATION" >/dev/null 2>&1 || {
+        echo "keycloak-entrypoint: stale realm convergence was refused" >&2
+        exit 75
+    }
+    "$generation_gate" withdraw "$SYNVEDA_KEYCLOAK_GENERATION" >/dev/null 2>&1 || {
+        echo "keycloak-entrypoint: realm generation could not be closed" >&2
+        exit 70
+    }
+    SYNVEDA_KEYCLOAK_ADMIN_USERNAME=$(
+        read_secret KC_BOOTSTRAP_ADMIN_USERNAME "${KC_BOOTSTRAP_ADMIN_USERNAME_FILE:-}"
+    )
+    SYNVEDA_KEYCLOAK_BOOTSTRAP_PASSWORD=$(
+        read_secret KC_BOOTSTRAP_ADMIN_PASSWORD "${KC_BOOTSTRAP_ADMIN_PASSWORD_FILE:-}"
+    )
+    SYNVEDA_KEYCLOAK_CONVERGENCE_PASSWORD=$(
+        read_secret SYNVEDA_KEYCLOAK_CONVERGENCE_PASSWORD \
+            "${SYNVEDA_KEYCLOAK_CONVERGENCE_PASSWORD_FILE:-}"
+    )
+    [ "$SYNVEDA_KEYCLOAK_ADMIN_USERNAME" != synveda-convergence ] && \
+        [ "$SYNVEDA_KEYCLOAK_BOOTSTRAP_PASSWORD" != "$SYNVEDA_KEYCLOAK_CONVERGENCE_PASSWORD" ] || {
+        echo "keycloak-entrypoint: convergence authority credentials were refused" >&2
+        exit 78
+    }
+    export SYNVEDA_KEYCLOAK_ADMIN_USERNAME SYNVEDA_KEYCLOAK_BOOTSTRAP_PASSWORD \
+        SYNVEDA_KEYCLOAK_CONVERGENCE_PASSWORD SYNVEDA_KEYCLOAK_GENERATION
+    unset KC_DB_PASSWORD_FILE KC_BOOTSTRAP_ADMIN_USERNAME_FILE KC_BOOTSTRAP_ADMIN_PASSWORD_FILE \
+        SYNVEDA_KEYCLOAK_CONVERGENCE_PASSWORD_FILE
+    exec /opt/keycloak/bin/synveda-realm-converge
+fi
 
 KC_DB_PASSWORD=$(read_secret KC_DB_PASSWORD "${KC_DB_PASSWORD_FILE:-}")
 KC_BOOTSTRAP_ADMIN_USERNAME=$(

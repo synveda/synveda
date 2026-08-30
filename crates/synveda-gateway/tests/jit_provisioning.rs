@@ -34,14 +34,15 @@ use sqlx::postgres::PgPoolOptions;
 use synveda_gateway::app::{AppState, behavior_test_router as router};
 use synveda_gateway::telemetry;
 use synveda_identity::{LoginFlow, OidcVerifier, parse_issuers};
-use synveda_store::{identities, scopes};
+use synveda_store::{access, anchors, directory, identities, scopes};
 use synveda_types::scope::ScopeKind;
-use synveda_types::{GrantId, TenantId, TenantStatus};
+use synveda_types::{DirectoryUserId, GrantId, IdentityId, IdentityKind, TenantId, TenantStatus};
 use tower::ServiceExt;
 
 const KEY_PEM: &str = include_str!("fixtures/idp_key_a.pem");
 const KEY_JWK: &str = include_str!("fixtures/idp_key_a.jwk.json");
 const CLIENT_ID: &str = "synveda-test";
+const API_AUDIENCE: &str = "synveda-test-api";
 const REDIRECT_URI: &str = "http://gateway.test/auth/callback";
 
 /// Serialises tests: the Prometheus recorder and tracing's callsite-interest
@@ -71,8 +72,10 @@ fn now_secs() -> u64 {
 #[derive(Clone)]
 struct CurrentUser {
     subject: String,
+    external_id: String,
     groups: Vec<String>,
     email: Option<String>,
+    email_verified: bool,
 }
 
 struct AuthCode {
@@ -103,8 +106,10 @@ impl MockIdp {
             tid: tenant_id.to_string(),
             user: Arc::new(Mutex::new(CurrentUser {
                 subject: "nobody".to_owned(),
+                external_id: "nobody".to_owned(),
                 groups: Vec::new(),
                 email: None,
+                email_verified: false,
             })),
             codes: Arc::new(Mutex::new(HashMap::new())),
             next_code: Arc::new(AtomicUsize::new(0)),
@@ -123,10 +128,33 @@ impl MockIdp {
 
     /// Sets who the next login (or minted bearer) authenticates as.
     fn login_as(&self, subject: &str, groups: &[&str], email: Option<&str>) {
+        self.login_as_with_email_verification(subject, groups, email, email.is_some());
+    }
+
+    fn login_as_with_email_verification(
+        &self,
+        subject: &str,
+        groups: &[&str],
+        email: Option<&str>,
+        email_verified: bool,
+    ) {
+        self.login_as_with_external_id(subject, subject, groups, email, email_verified);
+    }
+
+    fn login_as_with_external_id(
+        &self,
+        subject: &str,
+        external_id: &str,
+        groups: &[&str],
+        email: Option<&str>,
+        email_verified: bool,
+    ) {
         *self.user.lock().unwrap() = CurrentUser {
             subject: subject.to_owned(),
+            external_id: external_id.to_owned(),
             groups: groups.iter().map(|g| (*g).to_owned()).collect(),
             email: email.map(str::to_owned),
+            email_verified,
         };
     }
 
@@ -141,6 +169,7 @@ impl MockIdp {
         let mut claims = json!({
             "iss": self.issuer,
             "sub": user.subject,
+            "oid": user.external_id,
             "aud": aud,
             "exp": now_secs() + 600,
             "iat": now_secs(),
@@ -150,6 +179,7 @@ impl MockIdp {
         });
         if let Some(email) = &user.email {
             claims["email"] = json!(email);
+            claims["email_verified"] = json!(user.email_verified);
         }
         if let Some(nonce) = nonce {
             claims["nonce"] = json!(nonce);
@@ -161,7 +191,7 @@ impl MockIdp {
     /// path an API caller takes when it never touches `/auth/login`.
     fn access_token(&self) -> String {
         let user = self.user.lock().unwrap().clone();
-        let claims = self.claims(&user, CLIENT_ID, None);
+        let claims = self.claims(&user, API_AUDIENCE, None);
         self.sign(&claims)
     }
 }
@@ -172,6 +202,10 @@ async fn discovery(State(idp): State<MockIdp>) -> Json<Value> {
         "authorization_endpoint": format!("{}/authorize", idp.issuer),
         "token_endpoint": format!("{}/token", idp.issuer),
         "jwks_uri": format!("{}/jwks", idp.issuer),
+        "code_challenge_methods_supported": ["S256"],
+        "id_token_signing_alg_values_supported": ["RS256"],
+        "response_types_supported": ["code"],
+        "grant_types_supported": ["authorization_code"],
     }))
 }
 
@@ -213,7 +247,7 @@ async fn token_endpoint(
             .into_response();
     };
     let id_claims = idp.claims(&auth.user, CLIENT_ID, Some(&auth.nonce));
-    let access_claims = idp.claims(&auth.user, CLIENT_ID, None);
+    let access_claims = idp.claims(&auth.user, API_AUDIENCE, None);
     Json(json!({
         "access_token": idp.sign(&access_claims),
         "id_token": idp.sign(&id_claims),
@@ -226,7 +260,9 @@ async fn token_endpoint(
 // ── Gateway harness ──────────────────────────────────────────────────────────
 
 fn state(url: &str, issuer: &str) -> AppState {
-    let config = format!(r#"[{{"issuer":"{issuer}","client_id":"{CLIENT_ID}"}}]"#);
+    let config = format!(
+        r#"[{{"issuer":"{issuer}","client_id":"{CLIENT_ID}","audience":"{API_AUDIENCE}","external_id_claim":"oid"}}]"#
+    );
     let verifier = Arc::new(
         OidcVerifier::new(parse_issuers(&config).expect("issuer config"))
             .expect("build verifier")
@@ -279,8 +315,8 @@ fn get_request(uri: &str, bearer: Option<&str>) -> Request<Body> {
 }
 
 /// Drives login as the browser would (the mock IdP authenticates whoever
-/// `login_as` named) and returns the session body.
-async fn login(app: &Router) -> Value {
+/// `login_as` named) and returns the callback response.
+async fn login_response(app: &Router) -> Response {
     let response = app
         .clone()
         .oneshot(get_request("/auth/login", None))
@@ -301,13 +337,59 @@ async fn login(app: &Router) -> Value {
         .unwrap();
     let callback = url::Url::parse(callback).expect("callback url");
     let callback = format!("/auth/callback?{}", callback.query().expect("query"));
-    let response = app
-        .clone()
+    app.clone()
         .oneshot(get_request(&callback, None))
         .await
-        .unwrap();
+        .unwrap()
+}
+
+async fn login(app: &Router) -> Value {
+    let response = login_response(app).await;
     assert_eq!(response.status(), StatusCode::OK, "callback must succeed");
     body_json(response).await
+}
+
+async fn create_directory_mirror(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tenant_id: TenantId,
+    source: &str,
+    external_id: &str,
+    user_name: &str,
+    identity_id: Option<IdentityId>,
+) -> DirectoryUserId {
+    let id = DirectoryUserId::new();
+    directory::create_user(
+        tx,
+        id,
+        tenant_id,
+        &directory_user_attributes(source, external_id, user_name, true),
+    )
+    .await
+    .expect("create directory mirror");
+    if let Some(identity_id) = identity_id {
+        directory::link_identity(tx, tenant_id, source, id, identity_id)
+            .await
+            .expect("link directory mirror");
+    }
+    id
+}
+
+fn directory_user_attributes(
+    source: &str,
+    external_id: &str,
+    user_name: &str,
+    active: bool,
+) -> directory::UserAttributes {
+    directory::UserAttributes {
+        directory_source: source.to_owned(),
+        external_id: Some(external_id.to_owned()),
+        user_name: user_name.to_owned(),
+        active,
+        display_name: None,
+        given_name: None,
+        family_name: None,
+        work_email: Some(user_name.to_owned()),
+    }
 }
 
 /// Connects to `DATABASE_URL`, applies migrations, and admits one active
@@ -421,7 +503,7 @@ async fn first_login_mints_the_identity_and_its_own_scope_with_zero_admin_action
         .await
         .expect("begin tenant tx");
     synveda_store::access::create_grant(
-        &mut *tx,
+        &mut tx,
         &synveda_store::access::NewGrant {
             id: GrantId::new(),
             tenant_id,
@@ -477,6 +559,868 @@ async fn first_login_mints_the_identity_and_its_own_scope_with_zero_admin_action
             "outcome {outcome} missing from exposition:\n{exposition}"
         );
     }
+}
+
+#[tokio::test]
+async fn unverified_email_cannot_adopt_a_waiting_directory_identity() {
+    let _serial = serial().await;
+    let Some((pool, tenant_id, db_url)) = admitted_tenant().await else {
+        return;
+    };
+    let idp = MockIdp::spawn(tenant_id).await;
+    let app = router(state(&db_url, &idp.issuer));
+
+    let waiting_email = "waiting@example.test";
+    let waiting_id = synveda_types::IdentityId::new();
+    let mut tx = tenant_fixture::begin(&pool, tenant_id).await;
+    let waiting_scope = scopes::ensure_principal_scope(
+        &mut tx,
+        tenant_id,
+        "directory-anchor-waiting",
+        "Waiting directory identity",
+    )
+    .await
+    .expect("create waiting principal scope");
+    identities::create(
+        &mut tx,
+        waiting_id,
+        tenant_id,
+        None,
+        synveda_types::IdentityKind::User,
+        Some(waiting_email),
+        Some("Waiting directory identity"),
+        waiting_scope.id,
+    )
+    .await
+    .expect("create waiting directory identity");
+    create_directory_mirror(
+        &mut tx,
+        tenant_id,
+        "scim",
+        "verified-anchor-only",
+        waiting_email,
+        Some(waiting_id),
+    )
+    .await;
+    tx.commit()
+        .await
+        .expect("commit waiting directory identity");
+
+    idp.login_as_with_email_verification(
+        "unverified-email-sub",
+        &["everyone"],
+        Some(waiting_email),
+        false,
+    );
+    let session = login(&app).await;
+
+    let mut tx = tenant_fixture::begin(&pool, tenant_id).await;
+    let waiting = identities::by_id(&mut *tx, tenant_id, waiting_id)
+        .await
+        .expect("read waiting identity")
+        .expect("waiting identity remains");
+    let provisioned = identities::by_subject(&mut *tx, tenant_id, "unverified-email-sub")
+        .await
+        .expect("read newly provisioned identity")
+        .expect("unverified-email subject is provisioned independently");
+    tx.commit().await.expect("commit identity reads");
+
+    assert_eq!(
+        waiting.subject.as_deref(),
+        None,
+        "unverified email must not bind the waiting row"
+    );
+    assert_ne!(
+        provisioned.id, waiting.id,
+        "unverified email must not adopt by address"
+    );
+    assert_eq!(
+        provisioned.email, None,
+        "an unverified claim must not be persisted as an identity address"
+    );
+    assert_eq!(
+        session["identity"]["id"],
+        json!(provisioned.id),
+        "the login response must name the independently provisioned identity"
+    );
+}
+
+#[tokio::test]
+async fn pending_directory_projection_blocks_jit_until_the_mirror_is_linked() {
+    let _serial = serial().await;
+    let Some((pool, tenant_id, db_url)) = admitted_tenant().await else {
+        return;
+    };
+    let idp = MockIdp::spawn(tenant_id).await;
+    let app = router(state(&db_url, &idp.issuer));
+    let subject = "pending-directory-sub";
+    let external_id = "pending-directory-object-id";
+
+    let mut tx = tenant_fixture::begin(&pool, tenant_id).await;
+    let mirror_id = create_directory_mirror(
+        &mut tx,
+        tenant_id,
+        "entra",
+        external_id,
+        "pending-directory@example.test",
+        None,
+    )
+    .await;
+    tx.commit().await.expect("commit pending mirror");
+
+    idp.login_as_with_external_id(subject, external_id, &["everyone"], None, false);
+    let response = login_response(&app).await;
+    assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+    let error = body_json(response).await;
+    assert_eq!(error["kind"], "dependency");
+    assert_eq!(error["service"], "directory-projection");
+
+    let successor_id = IdentityId::new();
+    let mut tx = tenant_fixture::begin(&pool, tenant_id).await;
+    assert!(
+        identities::by_subject(&mut *tx, tenant_id, subject)
+            .await
+            .expect("read refused subject")
+            .is_none(),
+        "projection-in-progress must not mint a JIT identity"
+    );
+    let mirror = directory::user(&mut *tx, tenant_id, "entra", mirror_id)
+        .await
+        .expect("read pending mirror")
+        .expect("pending mirror remains");
+    assert_eq!(mirror.identity_id, None);
+    let successor_scope = scopes::ensure_principal_scope(
+        &mut tx,
+        tenant_id,
+        external_id,
+        "Pending directory successor",
+    )
+    .await
+    .expect("create successor scope");
+    identities::create(
+        &mut tx,
+        successor_id,
+        tenant_id,
+        None,
+        IdentityKind::User,
+        Some("pending-directory@example.test"),
+        Some("Pending directory successor"),
+        successor_scope.id,
+    )
+    .await
+    .expect("create successor identity");
+    directory::link_identity(&mut tx, tenant_id, "entra", mirror_id, successor_id)
+        .await
+        .expect("link projected successor");
+    tx.commit().await.expect("commit projected successor");
+
+    let session = login(&app).await;
+    assert_eq!(session["identity"]["id"], json!(successor_id));
+    let mut tx = tenant_fixture::begin(&pool, tenant_id).await;
+    assert_eq!(
+        identities::by_subject(&mut *tx, tenant_id, subject)
+            .await
+            .expect("read bound successor")
+            .expect("successor is bound")
+            .id,
+        successor_id
+    );
+    let resolved = anchors::resolve(
+        &mut tx,
+        tenant_id,
+        subject,
+        Some(successor_id),
+        anchors::AnchorSelection::none(),
+    )
+    .await
+    .expect("resolve adopted principal authority");
+    let home = resolved
+        .as_slice()
+        .iter()
+        .find(|anchor| anchor.scope_id == successor_scope.id)
+        .expect("adopted principal scope is an authority anchor");
+    assert_eq!(home.roles, [synveda_types::access::RoleKey::Owner]);
+    let owner_grants = access::list_grants(
+        &mut *tx,
+        tenant_id,
+        &access::GrantFilter {
+            scope_id: Some(successor_scope.id),
+            principal_id: None,
+        },
+    )
+    .await
+    .expect("read transferred structural owner");
+    assert!(owner_grants.iter().any(|grant| {
+        grant.role_key == synveda_types::access::RoleKey::Owner
+            && grant.source == synveda_types::access::GrantSource::Owner
+            && grant.principal_id.as_deref() == Some(subject)
+    }));
+    assert!(
+        !owner_grants
+            .iter()
+            .any(|grant| grant.principal_id.as_deref() == Some(external_id))
+    );
+    tx.commit().await.expect("commit successor read");
+}
+
+#[tokio::test]
+async fn repeat_login_repairs_a_preexisting_directory_owner_anchor() {
+    let _serial = serial().await;
+    let Some((pool, tenant_id, db_url)) = admitted_tenant().await else {
+        return;
+    };
+    let idp = MockIdp::spawn(tenant_id).await;
+    let app = router(state(&db_url, &idp.issuer));
+    let subject = "already-bound-pairwise-sub";
+    let external_id = "already-bound-directory-object-id";
+    let identity_id = IdentityId::new();
+
+    let mut tx = tenant_fixture::begin(&pool, tenant_id).await;
+    let scope = scopes::ensure_principal_scope(
+        &mut tx,
+        tenant_id,
+        external_id,
+        "Already-bound directory identity",
+    )
+    .await
+    .expect("create anchored principal scope");
+    identities::create(
+        &mut tx,
+        identity_id,
+        tenant_id,
+        Some(subject),
+        IdentityKind::User,
+        Some("already-bound-pairwise@example.test"),
+        Some("Already-bound directory identity"),
+        scope.id,
+    )
+    .await
+    .expect("seed identity bound by an earlier binary");
+    create_directory_mirror(
+        &mut tx,
+        tenant_id,
+        "entra",
+        external_id,
+        "already-bound-pairwise@example.test",
+        Some(identity_id),
+    )
+    .await;
+    tx.commit().await.expect("commit earlier binding shape");
+
+    idp.login_as_with_external_id(subject, external_id, &["everyone"], None, false);
+    let session = login(&app).await;
+    assert_eq!(session["identity"]["id"], json!(identity_id));
+
+    let mut tx = tenant_fixture::begin(&pool, tenant_id).await;
+    let grants = access::structural_owner_grants(&mut *tx, tenant_id, scope.id)
+        .await
+        .expect("read repaired owner");
+    assert_eq!(grants.len(), 1);
+    assert_eq!(grants[0].principal_id.as_deref(), Some(subject));
+    tx.commit().await.expect("commit repaired owner read");
+}
+
+#[tokio::test]
+async fn owner_anchor_repair_normalizes_a_redundant_direct_owner_grant() {
+    let _serial = serial().await;
+    let Some((pool, tenant_id, db_url)) = admitted_tenant().await else {
+        return;
+    };
+    let idp = MockIdp::spawn(tenant_id).await;
+    let app = router(state(&db_url, &idp.issuer));
+    let subject = "direct-owner-pairwise-sub";
+    let external_id = "direct-owner-directory-object-id";
+    let identity_id = IdentityId::new();
+
+    let mut tx = tenant_fixture::begin(&pool, tenant_id).await;
+    let scope = scopes::ensure_principal_scope(
+        &mut tx,
+        tenant_id,
+        external_id,
+        "Direct-owner directory identity",
+    )
+    .await
+    .expect("create anchored principal scope");
+    identities::create(
+        &mut tx,
+        identity_id,
+        tenant_id,
+        Some(subject),
+        IdentityKind::User,
+        Some("direct-owner-pairwise@example.test"),
+        Some("Direct-owner directory identity"),
+        scope.id,
+    )
+    .await
+    .expect("seed bound identity");
+    create_directory_mirror(
+        &mut tx,
+        tenant_id,
+        "entra",
+        external_id,
+        "direct-owner-pairwise@example.test",
+        Some(identity_id),
+    )
+    .await;
+    let direct_owner_id = GrantId::new();
+    access::create_grant(
+        &mut tx,
+        &access::NewGrant {
+            id: direct_owner_id,
+            tenant_id,
+            scope_id: scope.id,
+            subject: synveda_types::access::GrantSubject::Principal {
+                principal_id: subject.to_owned(),
+            },
+            role_key: synveda_types::access::RoleKey::Owner,
+            source: synveda_types::access::GrantSource::Direct,
+            invite_id: None,
+            granted_by: Some("fixture-admin".to_owned()),
+        },
+    )
+    .await
+    .expect("seed redundant direct owner");
+    tx.commit().await.expect("commit pre-cutover shape");
+
+    idp.login_as_with_external_id(subject, external_id, &["everyone"], None, false);
+    let session = login(&app).await;
+    assert_eq!(session["identity"]["id"], json!(identity_id));
+
+    let mut tx = tenant_fixture::begin(&pool, tenant_id).await;
+    let owner_grants = access::list_grants(
+        &mut *tx,
+        tenant_id,
+        &access::GrantFilter {
+            scope_id: Some(scope.id),
+            principal_id: Some(subject.to_owned()),
+        },
+    )
+    .await
+    .expect("read normalized owner grants")
+    .into_iter()
+    .filter(|grant| grant.role_key == synveda_types::access::RoleKey::Owner)
+    .collect::<Vec<_>>();
+    assert_eq!(owner_grants.len(), 1, "owner authority is canonicalized");
+    assert_eq!(
+        owner_grants[0].source,
+        synveda_types::access::GrantSource::Owner
+    );
+    assert_eq!(owner_grants[0].principal_id.as_deref(), Some(subject));
+    assert!(
+        access::get_grant(&mut *tx, tenant_id, direct_owner_id)
+            .await
+            .expect("read retired direct owner")
+            .is_none(),
+        "the redundant direct row is retired rather than hidden"
+    );
+    let structural = access::structural_owner_grants(&mut *tx, tenant_id, scope.id)
+        .await
+        .expect("read canonical structural owner");
+    assert_eq!(structural.len(), 1);
+    assert_eq!(
+        structural[0].source,
+        synveda_types::access::GrantSource::Owner
+    );
+    assert_eq!(structural[0].principal_id.as_deref(), Some(subject));
+    tx.commit().await.expect("commit normalized owner read");
+}
+
+#[tokio::test]
+async fn ambiguous_directory_anchor_is_not_treated_as_absent() {
+    let _serial = serial().await;
+    let Some((pool, tenant_id, db_url)) = admitted_tenant().await else {
+        return;
+    };
+    let idp = MockIdp::spawn(tenant_id).await;
+    let app = router(state(&db_url, &idp.issuer));
+    let subject = "ambiguous-directory-sub";
+
+    let mut tx = tenant_fixture::begin(&pool, tenant_id).await;
+    create_directory_mirror(
+        &mut tx,
+        tenant_id,
+        "entra",
+        subject,
+        "ambiguous-entra@example.test",
+        None,
+    )
+    .await;
+    create_directory_mirror(
+        &mut tx,
+        tenant_id,
+        "okta",
+        subject,
+        "ambiguous-okta@example.test",
+        None,
+    )
+    .await;
+    tx.commit().await.expect("commit ambiguous mirrors");
+
+    idp.login_as(subject, &["everyone"], None);
+    let response = login_response(&app).await;
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    assert_eq!(body_json(response).await["kind"], "unauthenticated");
+    let mut tx = tenant_fixture::begin(&pool, tenant_id).await;
+    assert!(
+        identities::by_subject(&mut *tx, tenant_id, subject)
+            .await
+            .expect("read ambiguous subject")
+            .is_none(),
+        "an ambiguous strong anchor must not fall back to JIT"
+    );
+    tx.commit().await.expect("commit ambiguous read");
+}
+
+#[tokio::test]
+async fn inactive_directory_correspondence_never_falls_through_to_jit() {
+    let _serial = serial().await;
+    let Some((pool, tenant_id, db_url)) = admitted_tenant().await else {
+        return;
+    };
+    let idp = MockIdp::spawn(tenant_id).await;
+    let app = router(state(&db_url, &idp.issuer));
+
+    let unprojected_subject = "inactive-unprojected-sub";
+    let mut tx = tenant_fixture::begin(&pool, tenant_id).await;
+    directory::create_user(
+        &mut tx,
+        DirectoryUserId::new(),
+        tenant_id,
+        &directory_user_attributes(
+            "entra",
+            unprojected_subject,
+            "inactive-unprojected@example.test",
+            false,
+        ),
+    )
+    .await
+    .expect("create retained inactive mirror");
+    tx.commit().await.expect("commit inactive mirror");
+
+    idp.login_as(unprojected_subject, &["synveda-admins"], None);
+    let response = login_response(&app).await;
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    let mut tx = tenant_fixture::begin(&pool, tenant_id).await;
+    assert!(
+        identities::by_subject(&mut *tx, tenant_id, unprojected_subject)
+            .await
+            .expect("read inactive subject")
+            .is_none(),
+        "an inactive pre-login mirror must block JIT"
+    );
+    assert!(
+        access::list_grants(
+            &mut *tx,
+            tenant_id,
+            &access::GrantFilter {
+                scope_id: None,
+                principal_id: Some(unprojected_subject.to_owned()),
+            },
+        )
+        .await
+        .expect("read refused admin grants")
+        .is_empty(),
+        "the refused admin-group claim must not commit a root grant"
+    );
+    tx.commit().await.expect("commit inactive read");
+
+    let transition_subject = "inactive-transition-sub";
+    let linked_id = IdentityId::new();
+    let mut tx = tenant_fixture::begin(&pool, tenant_id).await;
+    let linked_scope = scopes::ensure_principal_scope(
+        &mut tx,
+        tenant_id,
+        "inactive-transition-anchor",
+        "Inactive transition identity",
+    )
+    .await
+    .expect("create transition scope");
+    identities::create(
+        &mut tx,
+        linked_id,
+        tenant_id,
+        None,
+        IdentityKind::User,
+        Some("inactive-transition@example.test"),
+        Some("Inactive transition identity"),
+        linked_scope.id,
+    )
+    .await
+    .expect("create transition identity");
+    let mirror_id = create_directory_mirror(
+        &mut tx,
+        tenant_id,
+        "okta",
+        transition_subject,
+        "inactive-transition@example.test",
+        Some(linked_id),
+    )
+    .await;
+    directory::replace_user(
+        &mut tx,
+        tenant_id,
+        mirror_id,
+        &directory_user_attributes(
+            "okta",
+            transition_subject,
+            "inactive-transition@example.test",
+            false,
+        ),
+    )
+    .await
+    .expect("deactivate mirror")
+    .expect("mirror remains");
+    tx.commit()
+        .await
+        .expect("commit deactivation before reconciliation");
+
+    idp.login_as(transition_subject, &["synveda-admins"], None);
+    let response = login_response(&app).await;
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    let mut tx = tenant_fixture::begin(&pool, tenant_id).await;
+    assert!(
+        identities::by_subject(&mut *tx, tenant_id, transition_subject)
+            .await
+            .expect("read transition subject")
+            .is_none(),
+        "a committed deactivation must block JIT before reconciliation"
+    );
+    assert_eq!(
+        identities::by_id(&mut *tx, tenant_id, linked_id)
+            .await
+            .expect("read linked transition identity")
+            .expect("linked identity remains")
+            .subject,
+        None,
+        "the failed login must not bind the inactive mirror"
+    );
+    assert!(
+        access::list_grants(
+            &mut *tx,
+            tenant_id,
+            &access::GrantFilter {
+                scope_id: None,
+                principal_id: Some(transition_subject.to_owned()),
+            },
+        )
+        .await
+        .expect("read transition admin grants")
+        .is_empty(),
+        "the deactivation window must not commit an admin grant"
+    );
+    tx.commit().await.expect("commit transition reads");
+}
+
+#[tokio::test]
+async fn bound_directory_identity_is_refused_immediately_after_mirror_deactivation() {
+    let _serial = serial().await;
+    let Some((pool, tenant_id, db_url)) = admitted_tenant().await else {
+        return;
+    };
+    let idp = MockIdp::spawn(tenant_id).await;
+    let app = router(state(&db_url, &idp.issuer));
+    let subject = "bound-inactive-sub";
+    let identity_id = IdentityId::new();
+
+    let mut tx = tenant_fixture::begin(&pool, tenant_id).await;
+    let scope =
+        scopes::ensure_principal_scope(&mut tx, tenant_id, subject, "Bound inactive identity")
+            .await
+            .expect("create bound scope");
+    identities::create(
+        &mut tx,
+        identity_id,
+        tenant_id,
+        Some(subject),
+        IdentityKind::User,
+        Some("bound-inactive@example.test"),
+        Some("Bound inactive identity"),
+        scope.id,
+    )
+    .await
+    .expect("create bound identity");
+    let mirror_id = create_directory_mirror(
+        &mut tx,
+        tenant_id,
+        "entra",
+        subject,
+        "bound-inactive@example.test",
+        Some(identity_id),
+    )
+    .await;
+    directory::replace_user(
+        &mut tx,
+        tenant_id,
+        mirror_id,
+        &directory_user_attributes("entra", subject, "bound-inactive@example.test", false),
+    )
+    .await
+    .expect("deactivate bound mirror")
+    .expect("bound mirror remains");
+    tx.commit()
+        .await
+        .expect("commit bound deactivation before reconciliation");
+
+    idp.login_as(subject, &["synveda-admins"], None);
+    let response = login_response(&app).await;
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    let mut tx = tenant_fixture::begin(&pool, tenant_id).await;
+    let identity = identities::by_id(&mut *tx, tenant_id, identity_id)
+        .await
+        .expect("read bound identity")
+        .expect("bound identity remains");
+    assert!(
+        !identity.sealed(),
+        "reconciliation has deliberately not run"
+    );
+    assert_eq!(identity.subject.as_deref(), Some(subject));
+    assert!(
+        access::list_grants(
+            &mut *tx,
+            tenant_id,
+            &access::GrantFilter {
+                scope_id: None,
+                principal_id: Some(subject.to_owned()),
+            },
+        )
+        .await
+        .expect("read bound subject grants")
+        .iter()
+        .all(|grant| grant.role_key != synveda_types::access::RoleKey::Administrator),
+        "the deactivation window must not establish admin-group authority"
+    );
+    tx.commit().await.expect("commit bound refusal read");
+}
+
+#[tokio::test]
+async fn directory_anchor_bound_to_another_subject_is_refused_without_jit() {
+    let _serial = serial().await;
+    let Some((pool, tenant_id, db_url)) = admitted_tenant().await else {
+        return;
+    };
+    let idp = MockIdp::spawn(tenant_id).await;
+    let app = router(state(&db_url, &idp.issuer));
+    let subject = "claiming-directory-sub";
+    let bound_id = IdentityId::new();
+
+    let mut tx = tenant_fixture::begin(&pool, tenant_id).await;
+    let bound_scope = scopes::ensure_principal_scope(
+        &mut tx,
+        tenant_id,
+        "already-bound-directory-anchor",
+        "Already-bound directory identity",
+    )
+    .await
+    .expect("create bound scope");
+    identities::create(
+        &mut tx,
+        bound_id,
+        tenant_id,
+        Some("different-directory-sub"),
+        IdentityKind::User,
+        Some("already-bound@example.test"),
+        Some("Already-bound directory identity"),
+        bound_scope.id,
+    )
+    .await
+    .expect("create bound identity");
+    create_directory_mirror(
+        &mut tx,
+        tenant_id,
+        "entra",
+        subject,
+        "already-bound@example.test",
+        Some(bound_id),
+    )
+    .await;
+    tx.commit().await.expect("commit bound mirror");
+
+    idp.login_as(subject, &["everyone"], None);
+    let response = login_response(&app).await;
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    let mut tx = tenant_fixture::begin(&pool, tenant_id).await;
+    assert!(
+        identities::by_subject(&mut *tx, tenant_id, subject)
+            .await
+            .expect("read claiming subject")
+            .is_none(),
+        "a mirror already bound elsewhere must not mint a second identity"
+    );
+    assert_eq!(
+        identities::by_id(&mut *tx, tenant_id, bound_id)
+            .await
+            .expect("read bound identity")
+            .expect("bound identity remains")
+            .subject
+            .as_deref(),
+        Some("different-directory-sub")
+    );
+    tx.commit().await.expect("commit bound reads");
+}
+
+#[tokio::test]
+async fn departed_subject_can_bind_only_a_projected_directory_successor() {
+    let _serial = serial().await;
+    let Some((pool, tenant_id, db_url)) = admitted_tenant().await else {
+        return;
+    };
+    let idp = MockIdp::spawn(tenant_id).await;
+    let app = router(state(&db_url, &idp.issuer));
+    let subject = "rehired-directory-sub";
+    let departed_id = IdentityId::new();
+
+    let mut tx = tenant_fixture::begin(&pool, tenant_id).await;
+    let departed_scope = scopes::ensure_principal_scope(
+        &mut tx,
+        tenant_id,
+        "departed-directory-oid",
+        "Departed directory identity",
+    )
+    .await
+    .expect("create departed scope");
+    identities::create(
+        &mut tx,
+        departed_id,
+        tenant_id,
+        Some(subject),
+        IdentityKind::User,
+        Some("rehired@example.test"),
+        Some("Departed directory identity"),
+        departed_scope.id,
+    )
+    .await
+    .expect("create departed identity");
+    let old_structural_owner =
+        access::structural_owner_grants(&mut *tx, tenant_id, departed_scope.id)
+            .await
+            .expect("read departed structural owner")
+            .into_iter()
+            .next()
+            .expect("departed structural owner");
+    access::revoke_grant(&mut tx, tenant_id, old_structural_owner.id)
+        .await
+        .expect("retire provider-anchor owner");
+    access::create_grant(
+        &mut tx,
+        &access::NewGrant {
+            id: GrantId::new(),
+            tenant_id,
+            scope_id: departed_scope.id,
+            subject: synveda_types::access::GrantSubject::Principal {
+                principal_id: subject.to_owned(),
+            },
+            role_key: synveda_types::access::RoleKey::Owner,
+            source: synveda_types::access::GrantSource::Owner,
+            invite_id: None,
+            granted_by: None,
+        },
+    )
+    .await
+    .expect("bind departed structural owner to token subject");
+    let root = scopes::ensure_tenant_root(&mut tx, tenant_id)
+        .await
+        .expect("read tenant root");
+    access::create_grant(
+        &mut tx,
+        &access::NewGrant {
+            id: GrantId::new(),
+            tenant_id,
+            scope_id: root.id,
+            subject: synveda_types::access::GrantSubject::Principal {
+                principal_id: subject.to_owned(),
+            },
+            role_key: synveda_types::access::RoleKey::Curator,
+            source: synveda_types::access::GrantSource::Direct,
+            invite_id: None,
+            granted_by: None,
+        },
+    )
+    .await
+    .expect("grant former direct authority");
+    identities::depart(&mut tx, tenant_id, departed_id)
+        .await
+        .expect("depart identity")
+        .expect("active identity departed");
+    let mirror_id = create_directory_mirror(
+        &mut tx,
+        tenant_id,
+        "entra",
+        subject,
+        "rehired@example.test",
+        Some(departed_id),
+    )
+    .await;
+    tx.commit().await.expect("commit departed mirror");
+
+    idp.login_as(subject, &["everyone"], None);
+    let response = login_response(&app).await;
+    assert_eq!(response.status(), StatusCode::BAD_GATEWAY);
+
+    let successor_id = IdentityId::new();
+    let mut tx = tenant_fixture::begin(&pool, tenant_id).await;
+    let successor_scope =
+        scopes::ensure_principal_scope(&mut tx, tenant_id, subject, "Rehired directory successor")
+            .await
+            .expect("create rehire successor scope");
+    identities::create(
+        &mut tx,
+        successor_id,
+        tenant_id,
+        None,
+        IdentityKind::User,
+        Some("rehired@example.test"),
+        Some("Rehired directory successor"),
+        successor_scope.id,
+    )
+    .await
+    .expect("create rehire successor");
+    directory::link_identity(&mut tx, tenant_id, "entra", mirror_id, successor_id)
+        .await
+        .expect("link rehire successor");
+    tx.commit().await.expect("commit rehire successor");
+
+    let session = login(&app).await;
+    assert_eq!(session["identity"]["id"], json!(successor_id));
+    let mut tx = tenant_fixture::begin(&pool, tenant_id).await;
+    let departed = identities::by_id(&mut *tx, tenant_id, departed_id)
+        .await
+        .expect("read departed identity")
+        .expect("departed identity remains");
+    let successor = identities::by_id(&mut *tx, tenant_id, successor_id)
+        .await
+        .expect("read successor")
+        .expect("successor remains");
+    assert!(departed.sealed());
+    assert_eq!(
+        departed.subject, None,
+        "the successor released the old subject"
+    );
+    assert_eq!(successor.subject.as_deref(), Some(subject));
+    let successor_grants = access::list_grants(
+        &mut *tx,
+        tenant_id,
+        &access::GrantFilter {
+            scope_id: None,
+            principal_id: Some(subject.to_owned()),
+        },
+    )
+    .await
+    .expect("read successor authority");
+    assert_eq!(
+        successor_grants.len(),
+        1,
+        "rehire must not revive the old home-owner or arbitrary direct grant"
+    );
+    assert_eq!(successor_grants[0].scope_id, successor_scope.id);
+    assert_eq!(
+        successor_grants[0].role_key,
+        synveda_types::access::RoleKey::Owner
+    );
+    assert_eq!(
+        successor_grants[0].source,
+        synveda_types::access::GrantSource::Owner
+    );
+    tx.commit().await.expect("commit rehire reads");
 }
 
 // ── AC 2: the ungranted first login ──────────────────────────────────────────
@@ -747,15 +1691,11 @@ async fn admin_group_login_bootstraps_a_governable_tenant() {
 /// The door opens for somebody who was **already provisioned** — and the
 /// grant survives the transaction.
 ///
-/// The convention is upserted at *every* login completion, so the login
-/// that first establishes the grant is very often not a first login: a
-/// directory-created identity whose subject is already bound, or anybody
-/// added to `synveda-admins` after they joined, reaches the door down the
-/// `bound` branch. That branch looks read-only and is not, and a version
-/// of it that returned without committing dropped the grant and its
-/// `access.granted` event silently, on every such login — leaving the
-/// operator door of ADR-0074 decision 4 broken for exactly the population
-/// it exists for. This is the test that says so.
+/// The one-time convention can first be claimed on a later login: a
+/// directory-created identity whose subject is already bound, or the first
+/// tenant member added to `synveda-admins` after joining, reaches the door down
+/// the `bound` branch. That branch looks read-only and is not. This test proves
+/// that a winning claim and its `access.granted` event are committed there.
 #[tokio::test]
 async fn the_admin_door_opens_on_a_later_login_and_the_grant_is_committed() {
     let _serial = serial().await;
@@ -806,12 +1746,12 @@ async fn the_admin_door_opens_on_a_later_login_and_the_grant_is_committed() {
         "the committed grant carries the admin plane on the next request"
     );
 
-    // A third login is a no-op upsert, not a second grant.
+    // A third login observes the closed bootstrap, not a second grant.
     let _ = login(&app).await;
     assert_eq!(
         admin_door_grants_of(&pool, tenant_id, "late-admin").await,
         1,
-        "the convention is additive and idempotent"
+        "the one-time convention is idempotent"
     );
 
     // The metric names the branch this test is about.
@@ -825,11 +1765,108 @@ async fn the_admin_door_opens_on_a_later_login_and_the_grant_is_committed() {
     );
 }
 
+/// An IdP group is only an initial-administrator signal. Once consumed, later
+/// `synveda-admins` members need a governed Synveda grant, and revoking the
+/// original grant must not hand authority back to the provider.
+#[tokio::test]
+async fn later_admin_group_members_cannot_reopen_consumed_bootstrap() {
+    let _serial = serial().await;
+    let Some((pool, tenant_id, db_url)) = admitted_tenant().await else {
+        return;
+    };
+    let idp = MockIdp::spawn(tenant_id).await;
+    let app = router(state(&db_url, &idp.issuer));
+
+    idp.login_as(
+        "initial-admin",
+        &["everyone", "synveda-admins"],
+        Some("initial-admin@example.test"),
+    );
+    let _ = login(&app).await;
+    let initial_grants = admin_door_grant_ids_of(&pool, tenant_id, "initial-admin").await;
+    assert_eq!(
+        initial_grants.len(),
+        1,
+        "the first qualifying login claims initial administration"
+    );
+
+    idp.login_as(
+        "later-admin",
+        &["everyone", "synveda-admins"],
+        Some("later-admin@example.test"),
+    );
+    let later_session = login(&app).await;
+    assert_eq!(
+        admin_door_grants_of(&pool, tenant_id, "later-admin").await,
+        0,
+        "a later provider group member cannot mint Synveda authority"
+    );
+    let later_token = later_session["access_token"]
+        .as_str()
+        .expect("access_token");
+    let response = app
+        .clone()
+        .oneshot(get_request("/v1/admin/scopes", Some(later_token)))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+    let mut tx = synveda_store::rls::begin_tenant_tx(&pool, tenant_id)
+        .await
+        .expect("begin tenant tx");
+    access::revoke_grant(&mut tx, tenant_id, initial_grants[0])
+        .await
+        .expect("revoke initial administrator grant");
+    tx.commit().await.expect("commit revocation");
+    assert_eq!(
+        admin_door_grants_of(&pool, tenant_id, "initial-admin").await,
+        0,
+        "the original administrator grant is revoked"
+    );
+
+    let later_session = login(&app).await;
+    assert_eq!(
+        admin_door_grants_of(&pool, tenant_id, "later-admin").await,
+        0,
+        "revocation does not reopen provider-controlled bootstrap"
+    );
+    let later_token = later_session["access_token"]
+        .as_str()
+        .expect("access_token");
+    let response = app
+        .clone()
+        .oneshot(get_request("/v1/admin/scopes", Some(later_token)))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+
+    let exposition = metrics_handle().render();
+    for outcome in ["claimed", "closed"] {
+        assert!(
+            exposition.lines().any(|line| {
+                line.starts_with("synveda_jit_admin_bootstraps_total")
+                    && line.contains(&format!("outcome=\"{outcome}\""))
+            }),
+            "administrator bootstrap outcome {outcome} missing:\n{exposition}"
+        );
+    }
+}
+
 /// How many grants `principal` holds **at the tenant root** — the admin
 /// door, deliberately excluding the `owner` grant every principal scope
 /// carries at itself (ADR-0074 decision 8), which is not what this test
 /// is about.
 async fn admin_door_grants_of(pool: &PgPool, tenant_id: TenantId, principal: &str) -> usize {
+    admin_door_grant_ids_of(pool, tenant_id, principal)
+        .await
+        .len()
+}
+
+async fn admin_door_grant_ids_of(
+    pool: &PgPool,
+    tenant_id: TenantId,
+    principal: &str,
+) -> Vec<GrantId> {
     let mut tx = synveda_store::rls::begin_tenant_tx(pool, tenant_id)
         .await
         .expect("begin tenant tx");
@@ -846,5 +1883,5 @@ async fn admin_door_grants_of(pool: &PgPool, tenant_id: TenantId, principal: &st
     )
     .await
     .expect("read grants");
-    grants.len()
+    grants.into_iter().map(|grant| grant.id).collect()
 }

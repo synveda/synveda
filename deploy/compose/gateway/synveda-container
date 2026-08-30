@@ -4,7 +4,7 @@
 set -eu
 
 usage() {
-    echo "usage: synveda-container {gateway|worker|database-preflight|migrate|probe {gateway|worker} {live|ready}}" >&2
+    echo "usage: synveda-container {gateway|worker|issuer-diagnostic|database-preflight|migrate|probe {gateway|worker} {live|ready}}" >&2
     exit 64
 }
 
@@ -16,6 +16,15 @@ case "${1:-}" in
     worker)
         [ "$#" -eq 1 ] || usage
         exec /usr/local/bin/synveda-worker
+        ;;
+    issuer-diagnostic)
+        [ "$#" -eq 1 ] || usage
+        exec /usr/bin/timeout \
+            --foreground \
+            --signal=TERM \
+            --kill-after=2s \
+            50s \
+            /usr/local/bin/synveda-oidc-diagnostic
         ;;
     database-preflight)
         [ "$#" -eq 1 ] || usage

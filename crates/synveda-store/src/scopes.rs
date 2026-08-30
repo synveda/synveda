@@ -297,6 +297,16 @@ pub async fn create(conn: &mut PgConnection, new: &NewScope) -> Result<Scope> {
     validate_attributes(&new.attributes)?;
     validate_principal_id(new.kind, new.principal_id.as_deref())?;
 
+    // Principal grants use a transaction-scoped predicate fence. Take it
+    // before locking the parent scope so structural scope creation and an
+    // ordinary grant can never acquire those two locks in opposite order.
+    // The owner-grant insert later in the same transaction may acquire this
+    // advisory lock again; PostgreSQL transaction locks are re-entrant and
+    // remain held until the transaction ends.
+    if let Some(principal_id) = new.principal_id.as_deref() {
+        crate::access::lock_principal_grants(&mut *conn, new.tenant_id, principal_id).await?;
+    }
+
     let parent_kind = match new.parent_scope_id {
         None => {
             if !new.kind.is_tenant_root() {
@@ -501,6 +511,12 @@ pub async fn ensure_principal_scope(
         tracing::Span::current().record("scope.created", false);
         return Ok(scope);
     }
+    // The predicate fence must also precede creation of the tenant root. On a
+    // fresh tenant, taking it only inside `create` would allow this path to
+    // insert the root first, while workspace creation takes the principal
+    // fence before attempting the same root insert. Both later grant writes
+    // safely reacquire this transaction-scoped advisory lock.
+    crate::access::lock_principal_grants(&mut *conn, tenant_id, principal_id).await?;
     let root = ensure_tenant_root(&mut *conn, tenant_id).await?;
     let display_name = if display_name.trim().is_empty() {
         principal_id

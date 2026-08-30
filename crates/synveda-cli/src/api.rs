@@ -144,22 +144,22 @@ impl Api {
         profile_name: &str,
         client: &'static str,
     ) -> Result<(Self, Origin), String> {
-        let http = reqwest::Client::builder()
-            .connect_timeout(Duration::from_secs(5))
-            .timeout(Duration::from_secs(30))
-            .redirect(reqwest::redirect::Policy::none())
-            .build()
-            .map_err(|err| format!("build the HTTP client: {err}"))?;
+        let http = login::client_with_timeout(Duration::from_secs(30))?;
 
         let trace = TraceContext::new()?;
 
-        if let Some(token) = std::env::var("SYNVEDA_TOKEN")
-            .ok()
-            .filter(|token| !token.is_empty())
-        {
+        let environment_token = match std::env::var("SYNVEDA_TOKEN") {
+            Ok(token) if !token.is_empty() => Some(token),
+            Ok(_) => return Err("SYNVEDA_TOKEN must not be empty".to_owned()),
+            Err(std::env::VarError::NotPresent) => None,
+            Err(std::env::VarError::NotUnicode(_)) => {
+                return Err("SYNVEDA_TOKEN must be valid UTF-8".to_owned());
+            }
+        };
+        if let Some(token) = environment_token {
             return Ok((
                 Self {
-                    base: login::gateway_url(None),
+                    base: login::gateway_url(None)?,
                     bearer: token,
                     subject: "SYNVEDA_TOKEN".to_owned(),
                     http,
@@ -481,6 +481,8 @@ mod tests {
         // SAFETY: the lock above makes this the only thread touching the
         // environment for the duration of the test.
         unsafe {
+            std::env::remove_var("SYNVEDA_INSECURE_DEVELOPMENT_HTTP");
+            std::env::remove_var("SYNVEDA_INSECURE_DEVELOPMENT_HTTP_FILE");
             std::env::set_var("SYNVEDA_TOKEN", "test-bearer");
             std::env::set_var("SYNVEDA_GATEWAY", format!("http://127.0.0.1:{port}"));
         }
@@ -490,6 +492,8 @@ mod tests {
         unsafe {
             std::env::remove_var("SYNVEDA_TOKEN");
             std::env::remove_var("SYNVEDA_GATEWAY");
+            std::env::remove_var("SYNVEDA_INSECURE_DEVELOPMENT_HTTP");
+            std::env::remove_var("SYNVEDA_INSECURE_DEVELOPMENT_HTTP_FILE");
         }
         server.await.expect("server task");
 
@@ -515,6 +519,162 @@ mod tests {
         // silently stops being recorded on that one.
         assert_eq!(client, CLI_CLIENT, "the default caller is the CLI itself");
         assert_eq!(seen[0].1, seen[1].1, "one client name per command");
+    }
+
+    #[tokio::test]
+    async fn ambient_proxy_variables_cannot_receive_the_gateway_bearer() {
+        use tokio::io::AsyncWriteExt as _;
+
+        let _guard = crate::testing::ENV.lock().await;
+        let gateway = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .expect("bind gateway capture");
+        let gateway_port = gateway.local_addr().expect("gateway addr").port();
+        let proxy = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+            .await
+            .expect("bind proxy capture");
+        let proxy_port = proxy.local_addr().expect("proxy addr").port();
+        let gateway_task = tokio::spawn(async move {
+            let (mut stream, _) = gateway.accept().await.expect("accept direct request");
+            let mut request = vec![0u8; 4096];
+            let read = tokio::io::AsyncReadExt::read(&mut stream, &mut request)
+                .await
+                .expect("read direct request");
+            let request = String::from_utf8_lossy(&request[..read]);
+            assert!(request.contains("authorization: Bearer proxy-proof-bearer\r\n"));
+            stream
+                .write_all(
+                    b"HTTP/1.1 200 OK\r\ncontent-type: application/json\r\n\
+                      content-length: 2\r\nconnection: close\r\n\r\n{}",
+                )
+                .await
+                .expect("write direct response");
+        });
+        let proxy_task = tokio::spawn(async move {
+            match tokio::time::timeout(Duration::from_secs(1), proxy.accept()).await {
+                Ok(Ok((mut stream, _))) => {
+                    stream
+                        .write_all(
+                            b"HTTP/1.1 502 Bad Gateway\r\ncontent-length: 0\r\n\
+                              connection: close\r\n\r\n",
+                        )
+                        .await
+                        .expect("write proxy refusal");
+                    true
+                }
+                Ok(Err(error)) => panic!("proxy accept failed: {error}"),
+                Err(_) => false,
+            }
+        });
+
+        let proxy_url = format!("http://127.0.0.1:{proxy_port}");
+        let settings = [
+            "SYNVEDA_TOKEN",
+            "SYNVEDA_GATEWAY",
+            "SYNVEDA_INSECURE_DEVELOPMENT_HTTP",
+            "SYNVEDA_INSECURE_DEVELOPMENT_HTTP_FILE",
+            "HTTP_PROXY",
+            "http_proxy",
+            "HTTPS_PROXY",
+            "https_proxy",
+            "ALL_PROXY",
+            "all_proxy",
+            "NO_PROXY",
+            "no_proxy",
+        ];
+        let previous: Vec<_> = settings
+            .iter()
+            .map(|name| (*name, std::env::var_os(name)))
+            .collect();
+        unsafe {
+            std::env::set_var("SYNVEDA_TOKEN", "proxy-proof-bearer");
+            std::env::set_var(
+                "SYNVEDA_GATEWAY",
+                format!("http://127.0.0.1:{gateway_port}"),
+            );
+            std::env::remove_var("SYNVEDA_INSECURE_DEVELOPMENT_HTTP");
+            std::env::remove_var("SYNVEDA_INSECURE_DEVELOPMENT_HTTP_FILE");
+            for name in [
+                "HTTP_PROXY",
+                "http_proxy",
+                "HTTPS_PROXY",
+                "https_proxy",
+                "ALL_PROXY",
+                "all_proxy",
+            ] {
+                std::env::set_var(name, &proxy_url);
+            }
+            std::env::set_var("NO_PROXY", "");
+            std::env::set_var("no_proxy", "");
+        }
+
+        let result = async {
+            let (api, _) = Api::connect("default").await?;
+            api.get("/v1/whoami").await
+        }
+        .await;
+        unsafe {
+            for (name, value) in previous {
+                match value {
+                    Some(value) => std::env::set_var(name, value),
+                    None => std::env::remove_var(name),
+                }
+            }
+        }
+        let proxy_observed = proxy_task.await.expect("proxy capture task");
+        if proxy_observed {
+            gateway_task.abort();
+        } else {
+            gateway_task.await.expect("direct gateway task");
+        }
+        assert!(!proxy_observed, "ambient proxy received a gateway request");
+        result.expect("gateway request stayed direct");
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn non_unicode_environment_token_is_refused_instead_of_falling_back() {
+        use std::os::unix::ffi::OsStringExt as _;
+
+        let _guard = crate::testing::ENV.lock().await;
+        let previous = std::env::var_os("SYNVEDA_TOKEN");
+        unsafe {
+            std::env::set_var(
+                "SYNVEDA_TOKEN",
+                std::ffi::OsString::from_vec(vec![0xff, 0xfe]),
+            );
+        }
+        let result = Api::connect("default").await;
+        unsafe {
+            match previous {
+                Some(value) => std::env::set_var("SYNVEDA_TOKEN", value),
+                None => std::env::remove_var("SYNVEDA_TOKEN"),
+            }
+        }
+        let error = match result {
+            Ok(_) => panic!("non-Unicode token selected a credential path"),
+            Err(error) => error,
+        };
+        assert_eq!(error, "SYNVEDA_TOKEN must be valid UTF-8");
+    }
+
+    #[tokio::test]
+    async fn empty_environment_token_is_refused_instead_of_loading_a_profile() {
+        let _guard = crate::testing::ENV.lock().await;
+        let previous = std::env::var_os("SYNVEDA_TOKEN");
+        unsafe { std::env::set_var("SYNVEDA_TOKEN", "") };
+        let result = Api::connect("default").await;
+        unsafe {
+            match previous {
+                Some(value) => std::env::set_var("SYNVEDA_TOKEN", value),
+                None => std::env::remove_var("SYNVEDA_TOKEN"),
+            }
+        }
+        let error = match result {
+            Ok(_) => panic!("empty token selected a stored credential path"),
+            Err(error) => error,
+        };
+        assert_eq!(error, "SYNVEDA_TOKEN must not be empty");
     }
 
     /// The MCP server must not look like the CLI on the wire. Everything

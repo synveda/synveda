@@ -10,8 +10,10 @@ services:
 
   keycloak-database-bootstrap:
     networks:
-      identity-egress: {}
+      identity-egress:
+        gw_priority: 1
 
   keycloak:
     networks:
-      identity-egress: {}
+      identity-egress:
+        gw_priority: 1

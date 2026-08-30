@@ -1,0 +1,175 @@
+#!/bin/bash -p
+# Long-lived, content-free controller for generation-fenced realm convergence.
+# It owns no provider port and keeps secret values out of its environment;
+# each bounded child reads the mounted files through keycloak-entrypoint.
+unset BASH_ENV ENV CDPATH GLOBIGNORE PS4
+set +x
+set -eu
+umask 077
+PATH=/opt/keycloak/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
+[ "$#" -eq 0 ] || {
+    echo "keycloak-supervisor: arguments were refused" >&2
+    exit 64
+}
+
+gate=/opt/keycloak/bin/synveda-generation-gate
+public_gate_dir=${SYNVEDA_KEYCLOAK_PUBLIC_GATE_PATH:-}
+child_pid=
+shutdown_requested=false
+current_generation=
+failed_generation=
+
+management_ready() {
+    /opt/keycloak/bin/synveda-keycloak-health network >/dev/null 2>&1
+}
+
+withdraw_current_generation() {
+    observed=$($gate capture 2>/dev/null) || return 0
+    $gate withdraw "$observed" >/dev/null 2>&1 || return 1
+}
+
+signal_shutdown() {
+    shutdown_requested=true
+    if [ -n "${child_pid:-}" ]; then
+        kill -TERM "$child_pid" 2>/dev/null || true
+    fi
+}
+
+cleanup() {
+    entry_status=$?
+    trap '' HUP INT TERM
+    trap - EXIT
+    if [ -n "${child_pid:-}" ]; then
+        kill -TERM "$child_pid" 2>/dev/null || true
+        wait "$child_pid" 2>/dev/null || true
+    fi
+    if ! withdraw_current_generation; then
+        echo "keycloak-supervisor: public gate withdrawal failed" >&2
+        entry_status=70
+    fi
+    exit "$entry_status"
+}
+
+trap cleanup EXIT
+trap signal_shutdown HUP INT TERM
+
+# A controller restart never trusts a marker published by an earlier process.
+withdraw_current_generation || {
+    echo "keycloak-supervisor: startup gate withdrawal failed" >&2
+    exit 70
+}
+
+retire_old_generations() {
+    active=$1
+    for candidate in "$public_gate_dir"/.generation-*; do
+        [ "$candidate" != "$public_gate_dir/.generation-*" ] || break
+        generation=${candidate##*/}
+        [ "$generation" = "$active" ] || \
+            $gate retire "$generation" >/dev/null 2>&1 || true
+    done
+}
+
+while :; do
+    [ "$shutdown_requested" = false ] || exit 0
+    observed_generation=$($gate capture 2>/dev/null) || {
+        current_generation=
+        failed_generation=
+        sleep 2
+        continue
+    }
+
+    if [ "$observed_generation" != "$current_generation" ]; then
+        current_generation=$observed_generation
+        failed_generation=
+        $gate withdraw "$current_generation" >/dev/null 2>&1 || {
+            echo "keycloak-supervisor: new generation could not be closed" >&2
+            exit 70
+        }
+    fi
+
+    if ! management_ready; then
+        $gate withdraw "$current_generation" >/dev/null 2>&1 || {
+            if $gate is-current "$current_generation" >/dev/null 2>&1; then
+                echo "keycloak-supervisor: degraded generation could not be closed" >&2
+                exit 70
+            fi
+        }
+        sleep 2
+        continue
+    fi
+
+    if $gate ready >/dev/null 2>&1; then
+        retire_old_generations "$current_generation"
+        sleep 2
+        continue
+    fi
+
+    if [ "$failed_generation" = "$current_generation" ]; then
+        sleep 5
+        continue
+    fi
+
+    /opt/keycloak/bin/keycloak-entrypoint \
+        synveda-realm-converge "$current_generation" &
+    child_pid=$!
+    child_stale=false
+    dependency_degraded=false
+    while kill -0 "$child_pid" 2>/dev/null; do
+        sleep 1
+        if [ "$shutdown_requested" = true ]; then
+            kill -TERM "$child_pid" 2>/dev/null || true
+            break
+        fi
+        if ! $gate is-current "$current_generation" >/dev/null 2>&1; then
+            child_stale=true
+            kill -TERM "$child_pid" 2>/dev/null || true
+            break
+        fi
+        if ! management_ready; then
+            dependency_degraded=true
+            $gate withdraw "$current_generation" >/dev/null 2>&1 || true
+            kill -TERM "$child_pid" 2>/dev/null || true
+            break
+        fi
+    done
+    set +e
+    wait "$child_pid"
+    child_status=$?
+    set -e
+    child_pid=
+
+    [ "$shutdown_requested" = false ] || exit 0
+    if [ "$child_stale" = true ] || \
+        ! $gate is-current "$current_generation" >/dev/null 2>&1; then
+        current_generation=
+        failed_generation=
+        continue
+    fi
+    if [ "$dependency_degraded" = true ]; then
+        # Convergence suppresses signals while its bounded cleanup settles
+        # sessions and may have reached publication after the pre-kill
+        # withdrawal. Close the still-current generation again after wait.
+        $gate withdraw "$current_generation" >/dev/null 2>&1 || {
+            if $gate is-current "$current_generation" >/dev/null 2>&1; then
+                echo "keycloak-supervisor: post-child degraded generation could not be closed" >&2
+                exit 70
+            fi
+        }
+        sleep 2
+        continue
+    fi
+    if [ "$child_status" -eq 0 ] && $gate ready >/dev/null 2>&1; then
+        failed_generation=
+        retire_old_generations "$current_generation"
+        continue
+    fi
+
+    $gate withdraw "$current_generation" >/dev/null 2>&1 || {
+        echo "keycloak-supervisor: failed generation could not be closed" >&2
+        exit 70
+    }
+    failed_generation=$current_generation
+    echo "keycloak-supervisor: realm convergence failed for the current generation" >&2
+done

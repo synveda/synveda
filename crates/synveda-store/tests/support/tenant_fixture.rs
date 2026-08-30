@@ -61,6 +61,48 @@ pub async fn begin(pool: &PgPool, tenant: TenantId) -> Transaction<'static, Post
         .expect("begin tenant-scoped test transaction")
 }
 
+/// Returns the PostgreSQL backend running this transaction. Concurrency tests
+/// use it only with `pg_blocking_pids`, never as application identity.
+#[allow(dead_code)]
+pub async fn backend_pid(transaction: &mut Transaction<'_, Postgres>) -> i32 {
+    sqlx::query_scalar!(r#"select pg_catalog.pg_backend_pid() as "pid!""#)
+        .fetch_one(&mut **transaction)
+        .await
+        .expect("read test transaction backend pid")
+}
+
+/// Proves that `waiter_pid` is currently blocked by `holder_pid`.
+///
+/// The bounded catalogue poll makes the lock relationship the assertion; no
+/// wall-clock sleep is used as a proxy for whether a racing statement ran.
+#[allow(dead_code)]
+pub async fn wait_until_blocked_by(
+    observer: &mut Transaction<'_, Postgres>,
+    waiter_pid: i32,
+    holder_pid: i32,
+) {
+    tokio::time::timeout(std::time::Duration::from_secs(3), async {
+        loop {
+            let blocked = sqlx::query_scalar!(
+                r#"
+                select $2::int = any(pg_catalog.pg_blocking_pids($1::int)) as "blocked!"
+                "#,
+                waiter_pid,
+                holder_pid,
+            )
+            .fetch_one(&mut **observer)
+            .await
+            .expect("inspect PostgreSQL blocker graph");
+            if blocked {
+                return;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("waiter did not enter the expected PostgreSQL lock wait");
+}
+
 /// Opens the explicit administrator credential used only by serial tamper
 /// acceptance. The configured principal and live database identity are proved
 /// against the ordinary runtime pool before a test receives the handle.

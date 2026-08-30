@@ -477,6 +477,39 @@ impl fmt::Debug for Secret {
 /// and is the immutable reference identity.
 pub const CREDENTIAL_SECRET_NAME: &str = "directory.credential";
 
+/// Deployment-level directory connector settings carried in the issuer
+/// file. Credentials are references only; the core worker resolves them from
+/// separately mounted files, while gateway and issuer-diagnostic processes
+/// receive no directory credential mount (CPR-45, ADR-0102).
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[serde(tag = "connector", rename_all = "lowercase", deny_unknown_fields)]
+pub enum DirectorySyncReferenceConfig {
+    /// Microsoft Entra ID through Microsoft Graph.
+    Entra {
+        /// The Entra tenant the token is minted against.
+        tenant_id: String,
+        /// The application registered for this integration.
+        client_id: String,
+        /// Absolute mounted-file reference below the deployment's directory
+        /// credential root.
+        client_secret_file: String,
+        /// Graph base URL override for controlled testing.
+        #[serde(default)]
+        graph_base: Option<String>,
+        /// Login base URL override for controlled testing.
+        #[serde(default)]
+        login_base: Option<String>,
+    },
+    /// Okta through its Users and Groups APIs.
+    Okta {
+        /// The org's base URL.
+        org_url: String,
+        /// Absolute mounted-file reference below the deployment's directory
+        /// credential root.
+        api_token_file: String,
+    },
+}
+
 /// How a deployment configures the pull sync for one issuer.
 ///
 /// **Two sources since TEN-4, and the per-tenant one wins.** A tenant that has

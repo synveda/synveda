@@ -178,7 +178,7 @@ async fn grant(
 ) -> synveda_types::access::ScopeGrant {
     let mut tx = begin(pool, tenant).await;
     let grant = access::create_grant(
-        &mut *tx,
+        &mut tx,
         &access::NewGrant {
             id: GrantId::new(),
             tenant_id: tenant,
@@ -194,6 +194,54 @@ async fn grant(
     .expect("create grant");
     tx.commit().await.expect("commit grant");
     grant
+}
+
+async fn claim_initial_admin(
+    tx: &mut Transaction<'_, Postgres>,
+    tenant: TenantId,
+    root_scope: ScopeId,
+    subject: &str,
+) -> bool {
+    let grant_id = GrantId::new();
+    let claimed = access::claim_initial_administrator_bootstrap(tx, tenant, grant_id, subject)
+        .await
+        .expect("claim initial administrator bootstrap");
+    if claimed {
+        access::create_grant(
+            tx,
+            &access::NewGrant {
+                id: grant_id,
+                tenant_id: tenant,
+                scope_id: root_scope,
+                subject: principal(subject),
+                role_key: RoleKey::Administrator,
+                source: GrantSource::Automation,
+                invite_id: None,
+                granted_by: None,
+            },
+        )
+        .await
+        .expect("create initial administrator grant");
+    }
+    claimed
+}
+
+async fn tenant_root_grants(
+    pool: &PgPool,
+    tenant: TenantId,
+    root_scope: ScopeId,
+) -> Vec<synveda_types::access::ScopeGrant> {
+    let mut tx = begin(pool, tenant).await;
+    access::list_grants(
+        &mut *tx,
+        tenant,
+        &access::GrantFilter {
+            scope_id: Some(root_scope),
+            principal_id: None,
+        },
+    )
+    .await
+    .expect("list tenant-root grants")
 }
 
 fn principal(id: &str) -> GrantSubject {
@@ -979,7 +1027,7 @@ fn one_subject_holds_one_role_once_per_scope() {
         .await;
         let mut tx = begin(&db.pool, tree.tenant).await;
         let again = access::create_grant(
-            &mut *tx,
+            &mut tx,
             &access::NewGrant {
                 id: GrantId::new(),
                 tenant_id: tree.tenant,
@@ -1073,7 +1121,7 @@ fn only_an_invite_grant_names_an_invitation() {
         let tree = seed_tree(&db.pool).await;
         let mut tx = begin(&db.pool, tree.tenant).await;
         let claimed = access::create_grant(
-            &mut *tx,
+            &mut tx,
             &access::NewGrant {
                 id: GrantId::new(),
                 tenant_id: tree.tenant,
@@ -1244,6 +1292,148 @@ fn revoking_a_grant_removes_what_it_conferred() {
     });
 }
 
+#[test]
+fn a_root_administrator_grant_permanently_consumes_idp_bootstrap() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let tree = seed_tree(&db.pool).await;
+        let first = grant(
+            &db.pool,
+            tree.tenant,
+            tree.tenant_scope,
+            principal("initial-admin"),
+            RoleKey::Administrator,
+            GrantSource::Direct,
+        )
+        .await;
+
+        let mut tx = begin(&db.pool, tree.tenant).await;
+        assert!(
+            !access::claim_initial_administrator_bootstrap(
+                &mut tx,
+                tree.tenant,
+                GrantId::new(),
+                "later-admin",
+            )
+            .await
+            .expect("observe bootstrap claimed by trigger"),
+            "a governed root administrator grant closes the IdP door"
+        );
+        access::revoke_grant(&mut tx, tree.tenant, first.id)
+            .await
+            .expect("revoke first administrator");
+        tx.commit().await.expect("commit revocation");
+
+        let mut tx = begin(&db.pool, tree.tenant).await;
+        assert!(
+            !access::claim_initial_administrator_bootstrap(
+                &mut tx,
+                tree.tenant,
+                GrantId::new(),
+                "later-admin",
+            )
+            .await
+            .expect("observe persistent bootstrap marker"),
+            "revocation must not return authority to the identity provider"
+        );
+    });
+}
+
+#[test]
+fn concurrent_initial_admin_claims_are_single_winner_and_rollback_safe() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let tree = seed_tree(&db.pool).await;
+        let mut winner_tx = begin(&db.pool, tree.tenant).await;
+        assert!(
+            claim_initial_admin(
+                &mut winner_tx,
+                tree.tenant,
+                tree.tenant_scope,
+                "first-claimant",
+            )
+            .await
+        );
+        let winner_pid = tenant_fixture::backend_pid(&mut winner_tx).await;
+
+        let pool = db.pool.clone();
+        let tenant = tree.tenant;
+        let root_scope = tree.tenant_scope;
+        let (pid_tx, pid_rx) = tokio::sync::oneshot::channel();
+        let contender = tokio::spawn(async move {
+            let mut tx = begin(&pool, tenant).await;
+            let pid = tenant_fixture::backend_pid(&mut tx).await;
+            pid_tx.send(pid).expect("report second claimant pid");
+            let claimed = claim_initial_admin(&mut tx, tenant, root_scope, "second-claimant").await;
+            tx.commit().await.expect("commit second claimant");
+            claimed
+        });
+        let contender_pid = pid_rx.await.expect("receive second claimant pid");
+        let mut observer = begin(&db.pool, tree.tenant).await;
+        tenant_fixture::wait_until_blocked_by(&mut observer, contender_pid, winner_pid).await;
+        observer
+            .rollback()
+            .await
+            .expect("finish blocker observation");
+        winner_tx.commit().await.expect("commit first claimant");
+        let contender_claimed = tokio::time::timeout(std::time::Duration::from_secs(5), contender)
+            .await
+            .expect("second claimant must finish without deadlock")
+            .expect("second claimant task");
+        assert!(!contender_claimed, "only one claimant may win");
+        let grants = tenant_root_grants(&db.pool, tree.tenant, tree.tenant_scope).await;
+        assert_eq!(grants.len(), 1, "exactly one root grant commits");
+        assert_eq!(grants[0].principal_id.as_deref(), Some("first-claimant"));
+
+        let retry_tree = seed_tree(&db.pool).await;
+        let mut abandoned_tx = begin(&db.pool, retry_tree.tenant).await;
+        assert!(
+            claim_initial_admin(
+                &mut abandoned_tx,
+                retry_tree.tenant,
+                retry_tree.tenant_scope,
+                "abandoned-claimant",
+            )
+            .await
+        );
+        let abandoned_pid = tenant_fixture::backend_pid(&mut abandoned_tx).await;
+        let pool = db.pool.clone();
+        let tenant = retry_tree.tenant;
+        let root_scope = retry_tree.tenant_scope;
+        let (pid_tx, pid_rx) = tokio::sync::oneshot::channel();
+        let retry = tokio::spawn(async move {
+            let mut tx = begin(&pool, tenant).await;
+            let pid = tenant_fixture::backend_pid(&mut tx).await;
+            pid_tx.send(pid).expect("report retry claimant pid");
+            let claimed = claim_initial_admin(&mut tx, tenant, root_scope, "retry-claimant").await;
+            tx.commit().await.expect("commit retry claimant");
+            claimed
+        });
+        let retry_pid = pid_rx.await.expect("receive retry claimant pid");
+        let mut observer = begin(&db.pool, retry_tree.tenant).await;
+        tenant_fixture::wait_until_blocked_by(&mut observer, retry_pid, abandoned_pid).await;
+        observer
+            .rollback()
+            .await
+            .expect("finish blocker observation");
+        abandoned_tx
+            .rollback()
+            .await
+            .expect("roll back marker and grant");
+        let retry_claimed = tokio::time::timeout(std::time::Duration::from_secs(5), retry)
+            .await
+            .expect("retry must finish without deadlock")
+            .expect("retry claimant task");
+        assert!(
+            retry_claimed,
+            "rollback returns the claim to the next waiter"
+        );
+        let grants = tenant_root_grants(&db.pool, retry_tree.tenant, retry_tree.tenant_scope).await;
+        assert_eq!(grants.len(), 1, "only the retry grant commits");
+        assert_eq!(grants[0].principal_id.as_deref(), Some("retry-claimant"));
+    });
+}
+
 /// Removing a member touches only what was written here, and refuses — with
 /// the place to go — when the authority is somewhere else.
 #[test]
@@ -1330,6 +1520,281 @@ fn removing_a_member_refuses_what_it_cannot_actually_remove() {
             .expect("remove");
         tx.commit().await.expect("commit removal");
         assert_eq!(removed.len(), 2, "both roles written here go");
+    });
+}
+
+// ── Concurrency ─────────────────────────────────────────────────────────────
+
+/// The principal advisory fence excludes an insert phantom while a lifecycle
+/// transaction snapshots and retires that principal's existing authority.
+#[test]
+fn principal_grant_retirement_serializes_a_concurrent_insert() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let tree = seed_tree(&db.pool).await;
+        let subject = "fenced-principal";
+        let old = grant(
+            &db.pool,
+            tree.tenant,
+            tree.workspace_scope,
+            principal(subject),
+            RoleKey::Member,
+            GrantSource::Direct,
+        )
+        .await;
+
+        let mut holder = begin(&db.pool, tree.tenant).await;
+        access::lock_principal_grants(&mut holder, tree.tenant, subject)
+            .await
+            .expect("lock principal retirement predicate");
+        let snapshot =
+            access::principal_grants_bounded(&mut *holder, tree.tenant, subject, None, 16)
+                .await
+                .expect("snapshot authority under fence");
+        assert_eq!(
+            snapshot.iter().map(|grant| grant.id).collect::<Vec<_>>(),
+            [old.id]
+        );
+        let holder_pid = tenant_fixture::backend_pid(&mut holder).await;
+
+        let pool = db.pool.clone();
+        let tenant = tree.tenant;
+        let project_scope = tree.project_scope;
+        let waiter_subject = subject.to_owned();
+        let (pid_sender, pid_receiver) = tokio::sync::oneshot::channel();
+        let waiter = tokio::spawn(async move {
+            let mut tx = begin(&pool, tenant).await;
+            let pid = tenant_fixture::backend_pid(&mut tx).await;
+            pid_sender.send(pid).expect("report waiter pid");
+            let created = access::create_grant(
+                &mut tx,
+                &access::NewGrant {
+                    id: GrantId::new(),
+                    tenant_id: tenant,
+                    scope_id: project_scope,
+                    subject: principal(&waiter_subject),
+                    role_key: RoleKey::Reviewer,
+                    source: GrantSource::Direct,
+                    invite_id: None,
+                    granted_by: Some("concurrent-granter".to_owned()),
+                },
+            )
+            .await
+            .expect("create grant after retirement fence");
+            tx.commit().await.expect("commit concurrent grant");
+            created
+        });
+        let waiter_pid = pid_receiver.await.expect("receive waiter pid");
+        let mut observer = begin(&db.pool, tree.tenant).await;
+        tenant_fixture::wait_until_blocked_by(&mut observer, waiter_pid, holder_pid).await;
+        observer
+            .rollback()
+            .await
+            .expect("finish blocker observation");
+
+        access::revoke_grant(&mut holder, tree.tenant, old.id)
+            .await
+            .expect("retire snapshotted grant");
+        holder.commit().await.expect("commit retirement");
+        let created = tokio::time::timeout(std::time::Duration::from_secs(3), waiter)
+            .await
+            .expect("concurrent insert completes after fence release")
+            .expect("concurrent insert task");
+
+        let mut tx = begin(&db.pool, tree.tenant).await;
+        let final_grants =
+            access::principal_grants_bounded(&mut *tx, tree.tenant, subject, None, 16)
+                .await
+                .expect("read linearized authority");
+        assert_eq!(final_grants.len(), 1);
+        assert_eq!(final_grants[0].id, created.id);
+        assert_eq!(final_grants[0].role_key, RoleKey::Reviewer);
+        tx.commit().await.expect("commit final authority read");
+    });
+}
+
+/// Principal-scope creation must wait on the principal predicate fence before
+/// it locks the tenant-root parent. Otherwise an ordinary grant that already
+/// owns the fence and needs an FK lock on that root forms the opposite edge of
+/// a database deadlock.
+#[test]
+fn principal_scope_creation_locks_the_principal_before_its_parent() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let tree = seed_tree(&db.pool).await;
+        let subject = "ordered-principal";
+        let mut holder = begin(&db.pool, tree.tenant).await;
+        access::lock_principal_grants(&mut holder, tree.tenant, subject)
+            .await
+            .expect("hold principal predicate fence");
+        let holder_pid = tenant_fixture::backend_pid(&mut holder).await;
+
+        let pool = db.pool.clone();
+        let tenant = tree.tenant;
+        let parent_scope_id = tree.tenant_scope;
+        let waiter_subject = subject.to_owned();
+        let (pid_sender, pid_receiver) = tokio::sync::oneshot::channel();
+        let waiter = tokio::spawn(async move {
+            let mut tx = begin(&pool, tenant).await;
+            let pid = tenant_fixture::backend_pid(&mut tx).await;
+            pid_sender.send(pid).expect("report scope creator pid");
+            let scope = scopes::create(
+                &mut tx,
+                &scopes::NewScope {
+                    id: ScopeId::new(),
+                    tenant_id: tenant,
+                    kind: ScopeKind::Principal,
+                    parent_scope_id: Some(parent_scope_id),
+                    slug: scopes::principal_slug(&waiter_subject),
+                    display_name: "Ordered principal".to_owned(),
+                    attributes: serde_json::json!({}),
+                    principal_id: Some(waiter_subject.clone()),
+                    created_by: None,
+                },
+            )
+            .await
+            .expect("create principal scope after fence release");
+            tx.commit().await.expect("commit principal scope");
+            scope
+        });
+        let waiter_pid = pid_receiver.await.expect("receive scope creator pid");
+        let mut observer = begin(&db.pool, tree.tenant).await;
+        tenant_fixture::wait_until_blocked_by(&mut observer, waiter_pid, holder_pid).await;
+        observer
+            .rollback()
+            .await
+            .expect("finish blocker observation");
+
+        let parent_grant = tokio::time::timeout(
+            std::time::Duration::from_secs(3),
+            access::create_grant(
+                &mut holder,
+                &access::NewGrant {
+                    id: GrantId::new(),
+                    tenant_id: tree.tenant,
+                    scope_id: tree.tenant_scope,
+                    subject: principal(subject),
+                    role_key: RoleKey::Reviewer,
+                    source: GrantSource::Direct,
+                    invite_id: None,
+                    granted_by: Some("lock-order-probe".to_owned()),
+                },
+            ),
+        )
+        .await
+        .expect("parent grant cannot wait on the blocked scope creator")
+        .expect("create parent grant while holding the principal fence");
+        holder.commit().await.expect("release principal fence");
+
+        let scope = tokio::time::timeout(std::time::Duration::from_secs(3), waiter)
+            .await
+            .expect("scope creation completes after fence release")
+            .expect("scope creation task");
+        assert_eq!(parent_grant.scope_id, tree.tenant_scope);
+        assert_eq!(scope.parent_scope_id, Some(tree.tenant_scope));
+        assert_eq!(scope.kind, ScopeKind::Principal);
+        assert_eq!(scope.principal_id.as_deref(), Some(subject));
+    });
+}
+
+/// The principal fence also precedes minting a missing tenant root. Workspace
+/// creation takes that fence before it can mint the same root, so reversing
+/// those two operations would deadlock on a tenant's first structural write.
+#[test]
+fn principal_scope_creation_locks_the_principal_before_a_missing_root() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let tenant = admit(&db.pool).await;
+        let subject = "fresh-root-owner";
+        let mut holder = begin(&db.pool, tenant).await;
+        access::lock_principal_grants(&mut holder, tenant, subject)
+            .await
+            .expect("hold workspace owner principal fence");
+        let holder_pid = tenant_fixture::backend_pid(&mut holder).await;
+
+        let pool = db.pool.clone();
+        let waiter_subject = subject.to_owned();
+        let (pid_sender, pid_receiver) = tokio::sync::oneshot::channel();
+        let waiter = tokio::spawn(async move {
+            let mut tx = begin(&pool, tenant).await;
+            let pid = tenant_fixture::backend_pid(&mut tx).await;
+            pid_sender.send(pid).expect("report principal creator pid");
+            let scope = scopes::ensure_principal_scope(
+                &mut tx,
+                tenant,
+                &waiter_subject,
+                "Fresh root owner",
+            )
+            .await
+            .expect("create principal scope after fence release");
+            tx.commit().await.expect("commit principal scope");
+            scope
+        });
+        let waiter_pid = pid_receiver.await.expect("receive principal creator pid");
+        let mut observer = begin(&db.pool, tenant).await;
+        tenant_fixture::wait_until_blocked_by(&mut observer, waiter_pid, holder_pid).await;
+        observer
+            .rollback()
+            .await
+            .expect("finish blocker observation");
+
+        let (workspace, owner, root_id) =
+            tokio::time::timeout(std::time::Duration::from_secs(3), async {
+                let workspace = workspaces::create(
+                    &mut holder,
+                    &workspaces::NewWorkspace {
+                        id: WorkspaceId::new(),
+                        tenant_id: tenant,
+                        slug: "first-workspace".to_owned(),
+                        display_name: "First workspace".to_owned(),
+                        description: None,
+                        created_by: None,
+                    },
+                )
+                .await
+                .expect("workspace owner can mint the missing root");
+                let owner = access::create_grant(
+                    &mut holder,
+                    &access::NewGrant {
+                        id: GrantId::new(),
+                        tenant_id: tenant,
+                        scope_id: workspace.scope_id,
+                        subject: principal(subject),
+                        role_key: RoleKey::Owner,
+                        source: GrantSource::Owner,
+                        invite_id: None,
+                        granted_by: None,
+                    },
+                )
+                .await
+                .expect("mint workspace owner grant under the held fence");
+                let root_id = scopes::tenant_root(&mut *holder, tenant)
+                    .await
+                    .expect("read minted tenant root")
+                    .expect("workspace minted tenant root")
+                    .id;
+                (workspace, owner, root_id)
+            })
+            .await
+            .expect("workspace creation cannot wait on the blocked principal creator");
+        holder.commit().await.expect("release principal fence");
+
+        let principal_scope = tokio::time::timeout(std::time::Duration::from_secs(3), waiter)
+            .await
+            .expect("principal creation completes after fence release")
+            .expect("principal creation task");
+        assert_eq!(owner.scope_id, workspace.scope_id);
+        assert_eq!(principal_scope.parent_scope_id, Some(root_id));
+        assert_eq!(principal_scope.kind, ScopeKind::Principal);
+        assert_eq!(principal_scope.principal_id.as_deref(), Some(subject));
+
+        let mut tx = begin(&db.pool, tenant).await;
+        let owner_grants = access::structural_owner_grants(&mut *tx, tenant, principal_scope.id)
+            .await
+            .expect("read principal structural owner grant");
+        assert_eq!(owner_grants.len(), 1);
+        assert_eq!(owner_grants[0].principal_id.as_deref(), Some(subject));
+        tx.commit().await.expect("commit owner grant read");
     });
 }
 

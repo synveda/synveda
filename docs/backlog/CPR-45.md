@@ -18,10 +18,10 @@ programme start the Compose files exposed infrastructure directly, bundled
 Rauthy, retained an unused Temporal development service, ran the default
 gateway on the host to work around a loopback issuer, and kept background work
 inside the gateway. The core worker is now a separate process, but the other
-packaging gaps remain: there is no joint database/key restore, release-image
-parity, private Collector topology or clean-volume platform acceptance. Static
-deployment convergence is valuable but does not prove that a user can install,
-sign in, use, back up, restore or upgrade the product.
+packaging gaps remain: there is no joint database/key restore, signed
+multi-architecture release-image parity, or clean-volume cross-platform
+acceptance. Static deployment convergence is valuable but does not prove that
+a user can install, sign in, use, back up, restore or upgrade the product.
 
 [ADR-0102](../adr/adr-0102-portable-reference-deployment.md) fixes the target
 architecture. [The deployment contract](../DEPLOYMENT_CONTRACT.md) fixes its
@@ -172,40 +172,93 @@ exists; an ordinary pre-provisioned CREATEROLE/CREATEDB principal is covered by
 a live no-mutation sentinel. Mounted database and Keycloak inputs are copied by
 the same bounded, non-following descriptor helper before parsing, including
 writerless-FIFO and symlink refusal tests.
-Pinned Keycloak, Caddy, PostgreSQL and Collector configuration plus exact
-database-role/authority convergence now exist, but the new graph is deliberately
-not startable yet: Keycloak realm convergence and the product-owned exact issuer
-diagnostic are the next cutover prerequisites. The legacy Rauthy/Temporal
-lifecycle is retained only as non-authoritative cutover residue; static
-configuration is not deployment validation.
+Pinned Keycloak, Caddy, PostgreSQL and Collector configuration, exact
+database-role/authority convergence, idempotent realm convergence and a
+product-owned exact issuer diagnostic now exist. A source-locked arm64 image
+set was built from the complete 1,169-file input closure at source HEAD
+`48704d8878d62036e53645f39d9c70549fe18b09`; the complete-input manifest hash
+was `ce3b5ff12b4d77437bf23f95a4af1cb65cae4409d2777fa1f98c15475016be81`
+and the five-image ledger hash was
+`26e0b846bd466d4fd54f0292b1dbef1489ff0a650903757defe896ff973e87b6`.
+On Docker Desktop the frozen v13h development graph then passed its guarded lifecycle in dependency
+order: PostgreSQL; separate Synveda and Keycloak database bootstrap; repeated
+Synveda bootstrap; preflight; initial and repeated migration; optimized
+production-mode Keycloak; initial and repeated realm convergence; proxy;
+initial and repeated issuer diagnostic; private Collector; separate worker;
+and gateway. Every long-running service was healthy with zero restarts and
+every one-shot exited zero on its expected image.
 
-A final fresh isolated full `make db-test` run
-(`synveda-db-test-92484-15wf2p`) passed and self-cleaned its Compose project and
-private fixture state. It proved normalized pairwise credential refusal,
-idempotent Synveda/Keycloak convergence, the fixed
+That private, uncommitted bundle is bounded exploratory evidence, not durable
+deployment acceptance or proof of the current worktree. No committed
+environment manifest or evidence artifact reproduces the run, and subsequent
+identity, directory, proxy and harness hardening changed its source closure.
+
+Content-safe public probes through the sole loopback proxy also passed exact
+gateway liveness/readiness, security headers, OIDC discovery, issuer and
+endpoint equality, PKCE S256, authorization-code and RS256 metadata predicates.
+The required host resolver mapping had not been installed, so neither `.test`
+authority resolved from the host and this is not browser-login acceptance. The
+current source narrows the public identity matcher to the exact discovery,
+authorization, token, JWKS, logout, login-action, account and static-resource
+paths, but that revision post-dates the frozen candidate. The legacy
+Rauthy/Temporal lifecycle remains non-authoritative cutover residue until a
+later candidate passes real browser login, callback/token/audience/group/admin
+admission and the deletion gate.
+
+Fresh database-authority evidence previously proved normalized pairwise
+credential refusal, idempotent Synveda/Keycloak convergence, the fixed
 owner/migrator/gateway/worker and separate Keycloak role topology, migration,
 forced RLS, gateway/worker terminal authority drift, pre-open read-only
-refusal, post-open Keycloak quarantine, a PostgreSQL startup process not yet
-visible in `pg_stat_activity`, crash-resumable closure and exact cleanup. Fresh
-exact-role fixtures also passed the eight remediated CPR demos (CPR-23,
-CPR-25, CPR-27 and CPR-30–34). `make ci`, `make check-deploy`,
-`make compose-config` and deterministic Claude lifecycle acceptance pass, and
-three final read-only integration/evidence reviews returned `READY`.
+refusal, post-open Keycloak quarantine, crash-resumable closure and exact
+cleanup. Deterministic evidence also covers worker authority, shutdown and
+configuration boundaries. It does not yet cover real claimed-work SIGTERM,
+multi-worker execution, browser login, Linux lifecycle, reference HTTPS,
+external OIDC, backup/restore, upgrade or the Apalis canary.
 
-This is database-authority and regression-review evidence only; it is not a
-runnable canonical Compose lifecycle, Keycloak login, current Helm/kind
-validation or reference-deployment completion claim.
+Current source hardening requires explicit advertised PKCE S256, a mandatory
+closed API audience disjoint from the login client, service-tainted credential
+classification and active registered-service admission. Only a strict
+`email_verified: true` claim can participate in directory adoption. Directory
+correspondence workflows take a global tenant fence before their sorted
+principal-grant fences; SCIM create/projection is atomic, stale PATCH/DELETE
+snapshots are fenced, and ambiguous active user-email matches fail closed.
+The identity suite passes 91 unit, nine connector and one proxy test. The
+durable one-time administrator marker adds an eleventh uncached store query and
+advances the epoch-3 baseline to revision 2. A fresh isolated preparation now
+owns 657 validated SQLx records: ten additions and three stale removals relative
+to the starting tree. The ACL, routine, trigger and forced-RLS authority
+fingerprints were regenerated from the same revision and the complete fresh
+dual-cluster `make db-test` gate passes. Database acceptance includes
+deterministic PostgreSQL blocker-graph evidence for two distinct claimants,
+exactly one committed grant, no deadlock, and rollback handing the claim to the
+waiting transaction; sequential coverage retains the marker after grant
+revocation and denies later provider-group escalation.
 
-Deterministic evidence covers worker boot outage, live/not-ready semantics,
-exact role, any-schema ownership, elevation, unexpected membership and
-membership-administration refusal, live `BYPASSRLS` drift causing non-zero
-exit, bounded idle SIGTERM, configuration bounds and private Helm probes.
-Compose leaves an 85-second outer stop window around the worker's 75-second
-default join. Model-provider clients used by Capture and embedding validate
-absolute credential-free HTTP(S) base URLs, refuse redirects, redact credential
-debug output and expose only closed transport/status/parse errors. This evidence
-does not yet cover clean canonical Compose, Keycloak, claimed-work process
-interruption, multi-worker operation, backup/restore or upgrade.
+The first isolated SQLx-prepare candidate stopped before preparation because
+macOS exposed its per-user temporary directory through the `/var` compatibility
+symlink, which the private-path policy correctly refused. That failed fixture
+is retained and must not be reused or inspected. The generic DB harness now
+canonicalizes an existing temporary root with `pwd -P`, keeps every generated
+secret/authority/gate leaf under its unique fixture, and has a source-only
+post-generation sentinel regression. Later source-compilation and access/OIDC
+fixture failures were likewise retained without reuse. The final fresh
+database gate passed all ordinary workspace tests, every serial
+administrator/drift suite, epoch/reset acceptance and exact success cleanup.
+The collision-resistant database-network allocator has independently reviewed
+source and fake-engine concurrency evidence. Compose contract is 35/35 and
+deployment convergence is 38/38. A separate fresh deterministic
+authentic-frame Claude lifecycle passed 1/1 and self-cleaned, and the complete
+post-repair `make ci` gate passes with the generated API and 657-record SQLx
+cache current.
+
+### Immediate next slice
+
+The next content-addressed Compose candidate must add the bounded canonical
+lifecycle, a supported target-realm first-user boundary (or secret-file-backed
+`demo` profile), install and prove the explicit `.test` host mapping on Docker
+Desktop, repeat the same resolver contract on Linux, and complete a real
+browser authorization-code exchange. Only after that replacement acceptance
+may the Rauthy/Temporal callers and assets be deleted atomically.
 
 ## Acceptance criteria
 

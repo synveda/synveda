@@ -122,7 +122,7 @@ async fn admitted_tenant() -> Option<(AppState, TenantId)> {
         .await
         .expect("mint root");
     synveda_store::access::create_grant(
-        &mut *tx,
+        &mut tx,
         &synveda_store::access::NewGrant {
             id: GrantId::new(),
             tenant_id: id,
@@ -518,7 +518,7 @@ async fn one_subjects_key_does_not_shadow_anothers() {
         .await
         .expect("mint root");
     synveda_store::access::create_grant(
-        &mut *tx,
+        &mut tx,
         &synveda_store::access::NewGrant {
             id: GrantId::new(),
             tenant_id,

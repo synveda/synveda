@@ -30,12 +30,14 @@ mod token;
 
 pub use context::{TenantContext, current_tenant, with_tenant};
 pub use flow::{
-    CliHandoff, LoginDestination, LoginFlow, LoginSession, OIDC_LOGINS_TOTAL, OIDC_REFRESHES_TOTAL,
-    RefreshedSession, validate_cli_redirect_uri,
+    CliHandoff, ConsoleLoginBinding, LoginDestination, LoginFlow, LoginSession, OIDC_LOGINS_TOTAL,
+    OIDC_REFRESHES_TOTAL, RefreshedSession, validate_cli_redirect_uri,
 };
 pub use mapping::{ADMIN_GROUP, contains_admin_group};
 pub use oidc::{
-    IssuerConfig, JWKS_REFRESHES_TOTAL, OidcVerifier, TOKEN_VERIFICATIONS_TOTAL, TenantBinding,
-    parse_issuers,
+    IssuerConfig, JWKS_REFRESHES_TOTAL, OIDC_DIAGNOSTICS_TOTAL, OidcVerifier,
+    TOKEN_VERIFICATIONS_TOTAL, TenantBinding, parse_issuers,
 };
-pub use token::{Claims, DisabledVerifier, Hs256Verifier, ProvisioningClaims, TokenVerifier};
+pub use token::{
+    Claims, CredentialClass, DisabledVerifier, Hs256Verifier, ProvisioningClaims, TokenVerifier,
+};

@@ -19,7 +19,7 @@
 mod tenant_fixture;
 
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicU16, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -48,10 +48,11 @@ const KEY_PEM: &str = include_str!("fixtures/idp_key_a.pem");
 const KEY_JWK: &str = include_str!("fixtures/idp_key_a.jwk.json");
 
 const CLIENT_ID: &str = "synveda-test";
+const API_AUDIENCE: &str = "synveda-test-api";
 const SUBJECT: &str = "alice@example.test";
 const REDIRECT_URI: &str = "http://gateway.test/auth/callback";
 const LOOPBACK: &str = "http://127.0.0.1:54321/callback";
-const CLI_STATE: &str = "cli-state-0123456789";
+const CLI_STATE: &str = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 
 const UNREACHABLE_URL: &str = "postgres://nobody:nothing@127.0.0.1:1/void";
 
@@ -69,6 +70,17 @@ fn metrics_handle() -> PrometheusHandle {
         .clone()
 }
 
+fn assert_private_response(response: &Response) {
+    assert_eq!(
+        response.headers().get(header::CACHE_CONTROL),
+        Some(&header::HeaderValue::from_static("no-store"))
+    );
+    assert_eq!(
+        response.headers().get(header::PRAGMA),
+        Some(&header::HeaderValue::from_static("no-cache"))
+    );
+}
+
 fn now_secs() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -83,12 +95,11 @@ struct AuthCode {
     code_challenge: String,
     client_id: String,
     redirect_uri: String,
-    scope: String,
 }
 
 /// The AUTH-1 mock IdP, plus what ADR-0027 decision 6 needs of it:
-/// `scopes_supported` in discovery, a refresh token when `offline_access`
-/// was requested, and a refresh grant that rotates.
+/// `scopes_supported` in discovery, an ordinary authorization-code refresh
+/// token, and a refresh grant that rotates.
 #[derive(Clone)]
 struct MockIdp {
     issuer: String,
@@ -99,6 +110,7 @@ struct MockIdp {
     next_refresh: Arc<AtomicUsize>,
     /// Whether discovery advertises `offline_access` at all.
     offline_access: bool,
+    token_status: Arc<AtomicU16>,
     tid: String,
 }
 
@@ -115,6 +127,7 @@ impl MockIdp {
             next_code: Arc::new(AtomicUsize::new(0)),
             next_refresh: Arc::new(AtomicUsize::new(0)),
             offline_access,
+            token_status: Arc::new(AtomicU16::new(StatusCode::OK.as_u16())),
             tid: tid.to_string(),
         };
         let app = Router::new()
@@ -147,7 +160,7 @@ impl MockIdp {
         self.sign(&json!({
             "iss": self.issuer,
             "sub": SUBJECT,
-            "aud": CLIENT_ID,
+            "aud": API_AUDIENCE,
             "tid": self.tid,
             "exp": now_secs() as i64 + exp_in,
             "iat": now_secs(),
@@ -158,6 +171,10 @@ impl MockIdp {
         let token = format!("rt-{}", self.next_refresh.fetch_add(1, Ordering::SeqCst));
         self.refresh_tokens.lock().unwrap().insert(token.clone(), 0);
         token
+    }
+
+    fn force_token_status(&self, status: StatusCode) {
+        self.token_status.store(status.as_u16(), Ordering::SeqCst);
     }
 }
 
@@ -172,6 +189,10 @@ async fn discovery(State(idp): State<MockIdp>) -> Json<Value> {
         "token_endpoint": format!("{}/token", idp.issuer),
         "jwks_uri": format!("{}/jwks", idp.issuer),
         "scopes_supported": scopes,
+        "code_challenge_methods_supported": ["S256"],
+        "id_token_signing_alg_values_supported": ["RS256"],
+        "response_types_supported": ["code"],
+        "grant_types_supported": ["authorization_code"],
     }))
 }
 
@@ -191,7 +212,6 @@ async fn authorize(
             code_challenge: query["code_challenge"].clone(),
             client_id: query["client_id"].clone(),
             redirect_uri: query["redirect_uri"].clone(),
-            scope: query["scope"].clone(),
         },
     );
     Redirect::temporary(&format!(
@@ -205,6 +225,11 @@ async fn token_endpoint(
     State(idp): State<MockIdp>,
     Form(form): Form<HashMap<String, String>>,
 ) -> Response {
+    let forced_status = StatusCode::from_u16(idp.token_status.load(Ordering::SeqCst))
+        .expect("configured test status");
+    if forced_status != StatusCode::OK {
+        return forced_status.into_response();
+    }
     let refuse = || {
         (
             StatusCode::BAD_REQUEST,
@@ -260,17 +285,13 @@ async fn token_endpoint(
                 "iat": now_secs(),
                 "nonce": auth.nonce,
             }));
-            let mut body = json!({
+            let body = json!({
                 "access_token": idp.access_token(600),
                 "id_token": id_token,
+                "refresh_token": idp.mint_refresh(),
                 "token_type": "Bearer",
                 "expires_in": 600,
             });
-            // Only a login that asked for it gets one — which is what
-            // makes "requested where advertised" observable from here.
-            if auth.scope.split(' ').any(|scope| scope == "offline_access") {
-                body["refresh_token"] = json!(idp.mint_refresh());
-            }
             Json(body).into_response()
         }
         _ => refuse(),
@@ -288,7 +309,17 @@ fn pool(url: &str) -> PgPool {
 }
 
 fn oidc_state(url: &str, issuer: &str) -> AppState {
-    let config = format!(r#"[{{"issuer":"{issuer}","client_id":"{CLIENT_ID}"}}]"#);
+    oidc_state_with_scopes(url, issuer, &["openid", "profile", "email"])
+}
+
+fn oidc_state_with_scopes(url: &str, issuer: &str, scopes: &[&str]) -> AppState {
+    let config = serde_json::to_string(&json!([{
+        "issuer": issuer,
+        "client_id": CLIENT_ID,
+        "audience": API_AUDIENCE,
+        "login_scopes": scopes,
+    }]))
+    .expect("serialize issuer config");
     let verifier = Arc::new(
         OidcVerifier::new(parse_issuers(&config).expect("issuer config"))
             .expect("build verifier")
@@ -479,13 +510,14 @@ async fn a_cli_login_hands_back_a_code_that_redeems_a_usable_session() {
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
+    assert_private_response(&response);
     let session = body_json(response).await;
     assert_eq!(session["subject"], SUBJECT, "session: {session}");
     assert_eq!(session["tenant"]["id"], tenant_id.to_string());
     assert_eq!(session["issuer"], idp.issuer, "the CLI needs it to refresh");
     assert!(
         session["refresh_token"].is_string(),
-        "an advertising issuer must yield a refresh token: {session}"
+        "an authorization-code issuer may yield an ordinary refresh token: {session}"
     );
 
     // "A usable session": the exchanged token IS the /v1 bearer.
@@ -509,6 +541,7 @@ async fn a_cli_login_hands_back_a_code_that_redeems_a_usable_session() {
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::OK);
+    assert_private_response(&response);
     let refreshed = body_json(response).await;
     let renewed = refreshed["access_token"].as_str().expect("access_token");
     assert!(
@@ -533,7 +566,11 @@ async fn a_browser_login_never_receives_a_refresh_token() {
         return;
     };
     let idp = MockIdp::spawn(tenant_id, true).await;
-    let app = router(oidc_state(&db_url, &idp.issuer));
+    let app = router(oidc_state_with_scopes(
+        &db_url,
+        &idp.issuer,
+        &["openid", "profile", "email", "offline_access"],
+    ));
 
     // No cli_redirect_uri: AUTH-1's original path, unchanged.
     let response = app
@@ -567,6 +604,7 @@ async fn a_browser_login_never_receives_a_refresh_token() {
         StatusCode::OK,
         "browser logins read JSON"
     );
+    assert_private_response(&response);
     let session = body_json(response).await;
     assert!(session["access_token"].is_string());
     assert!(
@@ -576,11 +614,12 @@ async fn a_browser_login_never_receives_a_refresh_token() {
 }
 
 #[tokio::test]
-async fn offline_access_is_requested_only_where_the_issuer_advertises_it() {
+async fn offline_access_requires_explicit_configuration_and_discovery_support() {
     let _serial = serial().await;
     let tenant = TenantId::new();
 
-    // Advertised: the CLI login asks for it.
+    // Provider-wide discovery is not authority to broaden this client's
+    // configured scopes.
     let idp = MockIdp::spawn(tenant, true).await;
     let app = router(oidc_state(UNREACHABLE_URL, &idp.issuer));
     let response = app
@@ -594,12 +633,15 @@ async fn offline_access_is_requested_only_where_the_issuer_advertises_it() {
         .await
         .unwrap();
     let scopes = query_of(&location(&response))["scope"].clone();
-    assert!(scopes.contains("offline_access"), "scopes: {scopes}");
+    assert!(!scopes.contains("offline_access"), "scopes: {scopes}");
 
-    // Not advertised: asking anyway is how logins break at IdPs that
-    // reject unknown scopes, so the flow does not.
-    let quiet = MockIdp::spawn(tenant, false).await;
-    let app = router(oidc_state(UNREACHABLE_URL, &quiet.issuer));
+    // Explicitly configured and advertised: CLI/console may ask for it.
+    let configured = MockIdp::spawn(tenant, true).await;
+    let app = router(oidc_state_with_scopes(
+        UNREACHABLE_URL,
+        &configured.issuer,
+        &["openid", "profile", "email", "offline_access"],
+    ));
     let response = app
         .oneshot(get_request(
             &format!(
@@ -610,8 +652,63 @@ async fn offline_access_is_requested_only_where_the_issuer_advertises_it() {
         ))
         .await
         .unwrap();
-    let scopes = query_of(&location(&response))["scope"].clone();
-    assert!(!scopes.contains("offline_access"), "scopes: {scopes}");
+    let authorize = query_of(&location(&response));
+    let scopes = authorize["scope"].clone();
+    assert!(scopes.contains("offline_access"), "scopes: {scopes}");
+    assert_eq!(authorize["prompt"], "consent");
+
+    // Explicitly configured but not advertised fails closed before a
+    // browser redirect rather than asking for an unsupported scope.
+    let quiet = MockIdp::spawn(tenant, false).await;
+    let app = router(oidc_state_with_scopes(
+        UNREACHABLE_URL,
+        &quiet.issuer,
+        &["openid", "profile", "email", "offline_access"],
+    ));
+    let response = app
+        .oneshot(get_request(
+            &format!(
+                "/auth/login?cli_redirect_uri={}&cli_state={CLI_STATE}",
+                urlencoding(LOOPBACK)
+            ),
+            None,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::TEMPORARY_REDIRECT);
+    let location = location(&response);
+    let reported = query_of(&location);
+    assert!(location.starts_with(LOOPBACK), "{location}");
+    assert_eq!(reported["state"], CLI_STATE);
+    assert_eq!(reported["error"], "login_unavailable");
+    assert!(
+        !location.contains(&quiet.issuer),
+        "provider URL leaked: {location}"
+    );
+}
+
+#[tokio::test]
+async fn a_begin_time_discovery_outage_returns_immediately_to_the_cli() {
+    let _serial = serial().await;
+    let issuer = "http://127.0.0.1:1/never-log-this-path";
+    let app = router(oidc_state(UNREACHABLE_URL, issuer));
+    let response = app
+        .oneshot(get_request(
+            &format!(
+                "/auth/login?cli_redirect_uri={}&cli_state={CLI_STATE}",
+                urlencoding(LOOPBACK)
+            ),
+            None,
+        ))
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::TEMPORARY_REDIRECT);
+    let location = location(&response);
+    let reported = query_of(&location);
+    assert!(location.starts_with(LOOPBACK), "{location}");
+    assert_eq!(reported["state"], CLI_STATE);
+    assert_eq!(reported["error"], "login_unavailable");
+    assert!(!location.contains("never-log-this-path"), "{location}");
 }
 
 // ── The allowlist and the code's contract (no database) ─────────────────────
@@ -814,13 +911,53 @@ async fn a_revoked_refresh_token_is_the_uniform_401() {
 }
 
 #[tokio::test]
+async fn transient_token_endpoint_client_statuses_are_dependency_failures() {
+    let _serial = serial().await;
+    let idp = MockIdp::spawn(TenantId::new(), true).await;
+    let app = router(oidc_state(UNREACHABLE_URL, &idp.issuer));
+
+    for status in [
+        StatusCode::REQUEST_TIMEOUT,
+        StatusCode::TOO_EARLY,
+        StatusCode::TOO_MANY_REQUESTS,
+    ] {
+        idp.force_token_status(status);
+        let response = app
+            .clone()
+            .oneshot(post_json(
+                "/auth/refresh",
+                &json!({ "refresh_token": "opaque", "issuer": idp.issuer }),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_GATEWAY, "{status}");
+        let body = body_json(response).await;
+        assert_eq!(body["kind"], "dependency", "{status}: {body}");
+        assert_eq!(body["message"], "dependency unavailable", "{body}");
+    }
+}
+
+#[tokio::test]
 async fn the_cli_auth_plane_is_404_without_oidc() {
     let _serial = serial().await;
     let state = AppState {
+        pool: pool(UNREACHABLE_URL),
+        metrics: metrics_handle(),
         verifier: Arc::new(synveda_identity::DisabledVerifier),
         login: None,
         public_origin: "http://127.0.0.1:8120".to_owned(),
-        ..oidc_state(UNREACHABLE_URL, "http://unused.test")
+        pdp: Arc::new(synveda_policy::Pdp::new().expect("build the embedded PDP")),
+        service_token_max_ttl: Duration::from_secs(3600),
+        embedder: Arc::new(synveda_ingest::embedding::AnyEmbedder::Deterministic(
+            synveda_ingest::embedding::DeterministicEmbedder::new(),
+        )),
+        context_embed_timeout: Duration::from_millis(100),
+        keys: Arc::new(synveda_store::keys::KeyRing::new(
+            synveda_crypto::Kms::Local(
+                synveda_crypto::LocalKms::from_hex(&"11".repeat(32), "local:test")
+                    .expect("test kek"),
+            ),
+        )),
     };
     for (uri, body) in [
         ("/auth/cli/exchange", json!({ "code": "c", "state": "s" })),

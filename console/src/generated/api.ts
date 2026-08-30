@@ -4567,8 +4567,8 @@ export type RegisterServiceIdentityBody = {
      */
     scope_id: string;
     /**
-     * The `sub` the IdP will put in the agent's client-credentials
-     * tokens (for Rauthy, the client id).
+     * The stable subject identifier expected from the agent's
+     * client-credentials access tokens.
      */
     subject: string;
   };

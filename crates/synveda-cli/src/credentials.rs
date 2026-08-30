@@ -75,13 +75,27 @@ impl Profile {
 /// `$XDG_CONFIG_HOME/synveda`, else `~/.config/synveda` — the same rule
 /// the adapter's `paths.mts` applies, so both agree on where the file is.
 pub fn config_dir() -> Result<PathBuf, String> {
-    if let Ok(configured) = std::env::var("XDG_CONFIG_HOME")
-        && configured.starts_with('/')
-    {
-        return Ok(PathBuf::from(configured).join("synveda"));
+    match std::env::var("XDG_CONFIG_HOME") {
+        Ok(configured) if configured.starts_with('/') => {
+            return Ok(PathBuf::from(configured).join("synveda"));
+        }
+        Ok(_) | Err(std::env::VarError::NotPresent) => {}
+        Err(std::env::VarError::NotUnicode(_)) => {
+            return Err("XDG_CONFIG_HOME must be valid UTF-8".to_owned());
+        }
     }
-    let home = std::env::var("HOME").map_err(|_| "HOME is not set".to_owned())?;
-    Ok(PathBuf::from(home).join(".config").join("synveda"))
+    let home = match std::env::var("HOME") {
+        Ok(home) => home,
+        Err(std::env::VarError::NotPresent) => return Err("HOME is not set".to_owned()),
+        Err(std::env::VarError::NotUnicode(_)) => {
+            return Err("HOME must be valid UTF-8".to_owned());
+        }
+    };
+    let home = PathBuf::from(home);
+    if !home.is_absolute() {
+        return Err("HOME must be an absolute path".to_owned());
+    }
+    Ok(home.join(".config").join("synveda"))
 }
 
 /// The credentials file path.
@@ -252,6 +266,54 @@ mod tests {
         assert!(load().expect("load").profiles.is_empty());
         let err = profile(DEFAULT_PROFILE).expect_err("no profile");
         assert!(err.contains("synveda login"), "unhelpful message: {err}");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn credential_path_refuses_non_unicode_environment_input() {
+        use std::os::unix::ffi::OsStringExt as _;
+
+        let _guard = crate::testing::ENV.blocking_lock();
+        let previous = std::env::var_os("XDG_CONFIG_HOME");
+        unsafe {
+            std::env::set_var(
+                "XDG_CONFIG_HOME",
+                std::ffi::OsString::from_vec(vec![0xff, 0xfe]),
+            );
+        }
+        let error = config_dir().expect_err("non-Unicode XDG path must be refused");
+        assert_eq!(error, "XDG_CONFIG_HOME must be valid UTF-8");
+        unsafe {
+            match previous {
+                Some(value) => std::env::set_var("XDG_CONFIG_HOME", value),
+                None => std::env::remove_var("XDG_CONFIG_HOME"),
+            }
+        }
+    }
+
+    #[test]
+    fn credential_path_never_falls_back_to_the_working_directory() {
+        let _guard = crate::testing::ENV.blocking_lock();
+        let previous_xdg = std::env::var_os("XDG_CONFIG_HOME");
+        let previous_home = std::env::var_os("HOME");
+        unsafe { std::env::remove_var("XDG_CONFIG_HOME") };
+        for unsafe_home in ["", "relative/home"] {
+            unsafe { std::env::set_var("HOME", unsafe_home) };
+            assert_eq!(
+                config_dir().expect_err("relative credential root must be refused"),
+                "HOME must be an absolute path"
+            );
+        }
+        unsafe {
+            match previous_xdg {
+                Some(value) => std::env::set_var("XDG_CONFIG_HOME", value),
+                None => std::env::remove_var("XDG_CONFIG_HOME"),
+            }
+            match previous_home {
+                Some(value) => std::env::set_var("HOME", value),
+                None => std::env::remove_var("HOME"),
+            }
+        }
     }
 
     #[test]

@@ -234,6 +234,10 @@ const COVERED: &[&str] = &[
     "skill_version_files",
     "skill_versions",
     "skills",
+    // CPR-45 (ADR-0102): the provider group may win initial administrator
+    // bootstrap once. The marker is tenant-bound and insert-only so removing
+    // that grant cannot silently reopen an IdP-controlled authority path.
+    "tenant_administrator_bootstraps",
     // TEN-4 (ADR-0064). `deployment_keys` is deliberately absent: it carries
     // no `tenant_id`, so this guard does not discover it and no exemption was
     // needed — the same structural satisfaction `console_sessions` has, and
@@ -1042,7 +1046,7 @@ async fn seed_access(pool: &PgPool) -> AccessFixture {
     .await
     .expect("set members");
     let grant = access::create_grant(
-        &mut *tx,
+        &mut tx,
         &access::NewGrant {
             id: GrantId::new(),
             tenant_id: tenant,
@@ -1127,7 +1131,7 @@ fn cross_tenant_grant_is_rejected() {
         let theirs = seed_access(&db.pool).await;
         let mut tx = app_tx(&db.pool, Some(mine.tenant)).await;
         let result = access::create_grant(
-            &mut *tx,
+            &mut tx,
             &access::NewGrant {
                 id: GrantId::new(),
                 tenant_id: theirs.tenant,
@@ -4196,7 +4200,7 @@ async fn seed_directory(pool: &PgPool) -> (TenantId, synveda_types::ScimCredenti
         .await
         .expect("begin tenant tx");
     let user = synveda_store::directory::create_user(
-        &mut *tx,
+        &mut tx,
         synveda_types::DirectoryUserId::new(),
         tenant,
         &synveda_store::directory::UserAttributes {
@@ -4216,7 +4220,7 @@ async fn seed_directory(pool: &PgPool) -> (TenantId, synveda_types::ScimCredenti
         .await
         .expect("read identity")
         .expect("fixture identity");
-    synveda_store::directory::link_identity(&mut *tx, tenant, "scim", user.id, identity.id)
+    synveda_store::directory::link_identity(&mut tx, tenant, "scim", user.id, identity.id)
         .await
         .expect("link directory user");
     access::sync_directory_group(

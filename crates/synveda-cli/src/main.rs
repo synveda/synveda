@@ -1868,8 +1868,8 @@ enum ServiceCommand {
         /// Credential profile. Defaults to $SYNVEDA_PROFILE, else `default`.
         #[arg(long)]
         profile: Option<String>,
-        /// The `sub` the IdP puts in the agent's client-credentials
-        /// tokens (for Rauthy, the client id).
+        /// Stable subject identifier expected from the agent's
+        /// client-credentials access tokens.
         #[arg(long)]
         subject: String,
         /// The anchor node UUID.
@@ -1960,10 +1960,21 @@ fn read_config_arg(path: &std::path::Path) -> Result<String, String> {
     std::fs::read_to_string(path).map_err(|err| format!("read {}: {err}", path.display()))
 }
 
-fn profile_name(flag: Option<String>) -> String {
-    flag.or_else(|| std::env::var("SYNVEDA_PROFILE").ok())
-        .filter(|name| !name.is_empty())
-        .unwrap_or_else(|| credentials::DEFAULT_PROFILE.to_owned())
+fn profile_name(flag: Option<String>) -> Result<String, String> {
+    if let Some(name) = flag {
+        if name.is_empty() {
+            return Err("--profile must not be empty".to_owned());
+        }
+        return Ok(name);
+    }
+    match std::env::var("SYNVEDA_PROFILE") {
+        Ok(name) if !name.is_empty() => Ok(name),
+        Ok(_) => Err("SYNVEDA_PROFILE must not be empty".to_owned()),
+        Err(std::env::VarError::NotPresent) => Ok(credentials::DEFAULT_PROFILE.to_owned()),
+        Err(std::env::VarError::NotUnicode(_)) => {
+            Err("SYNVEDA_PROFILE must be valid UTF-8".to_owned())
+        }
+    }
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -1989,9 +2000,9 @@ async fn run(cli: Cli) -> Result<(), String> {
             under,
             profile,
             json,
-        }) => scope::list(&profile_name(profile), under.as_ref().copied(), json).await,
+        }) => scope::list(&profile_name(profile)?, under.as_ref().copied(), json).await,
         Command::Scope(ScopeCommand::Show { id, profile, json }) => {
-            scope::show(&profile_name(profile), id, json).await
+            scope::show(&profile_name(profile)?, id, json).await
         }
         Command::Scope(ScopeCommand::Create {
             parent,
@@ -2000,24 +2011,24 @@ async fn run(cli: Cli) -> Result<(), String> {
             name,
             profile,
             json,
-        }) => scope::create(&profile_name(profile), parent, &kind, &slug, &name, json).await,
+        }) => scope::create(&profile_name(profile)?, parent, &kind, &slug, &name, json).await,
         Command::Scope(ScopeCommand::Move {
             id,
             parent,
             profile,
             json,
-        }) => scope::move_scope(&profile_name(profile), id, parent, json).await,
+        }) => scope::move_scope(&profile_name(profile)?, id, parent, json).await,
         Command::Scope(ScopeCommand::Tree { profile, json }) => {
-            scope::tree(&profile_name(profile), json).await
+            scope::tree(&profile_name(profile)?, json).await
         }
 
         Command::Whoami {
             capabilities,
             profile,
             json,
-        } => whoami::show(&profile_name(profile), capabilities, json).await,
+        } => whoami::show(&profile_name(profile)?, capabilities, json).await,
         Command::Directory(DirectoryCommand::Status { profile, json }) => {
-            directory::status(&profile_name(profile), json).await
+            directory::status(&profile_name(profile)?, json).await
         }
         Command::Directory(DirectoryCommand::AuthoriseSeals {
             ceiling,
@@ -2026,28 +2037,28 @@ async fn run(cli: Cli) -> Result<(), String> {
             profile,
             json,
         }) => {
-            directory::authorise_seals(&profile_name(profile), ceiling, &reason, hours, json).await
+            directory::authorise_seals(&profile_name(profile)?, ceiling, &reason, hours, json).await
         }
         Command::Scim(ScimCommand::Token(ScimTokenCommand::Issue {
             label,
             days,
             profile,
             json,
-        })) => scim::issue(&profile_name(profile), &label, days, json).await,
+        })) => scim::issue(&profile_name(profile)?, &label, days, json).await,
         Command::Scim(ScimCommand::Token(ScimTokenCommand::List { profile, json })) => {
-            scim::list(&profile_name(profile), json).await
+            scim::list(&profile_name(profile)?, json).await
         }
         Command::Scim(ScimCommand::Token(ScimTokenCommand::Revoke { id, profile })) => {
-            scim::revoke(&profile_name(profile), &id).await
+            scim::revoke(&profile_name(profile)?, &id).await
         }
         Command::Relaxation(RelaxationCommand::List {
             scope,
             status,
             profile,
             json,
-        }) => relaxation::list(&profile_name(profile), scope, status.as_deref(), json).await,
+        }) => relaxation::list(&profile_name(profile)?, scope, status.as_deref(), json).await,
         Command::Relaxation(RelaxationCommand::Show { id, profile, json }) => {
-            relaxation::show(&profile_name(profile), id, json).await
+            relaxation::show(&profile_name(profile)?, id, json).await
         }
         Command::Relaxation(RelaxationCommand::Create {
             scope,
@@ -2061,7 +2072,7 @@ async fn run(cli: Cli) -> Result<(), String> {
             json,
         }) => {
             relaxation::create(
-                &profile_name(profile),
+                &profile_name(profile)?,
                 scope,
                 subject,
                 &action,
@@ -2086,7 +2097,7 @@ async fn run(cli: Cli) -> Result<(), String> {
             json,
         }) => {
             relaxation::revise(
-                &profile_name(profile),
+                &profile_name(profile)?,
                 id,
                 expected,
                 subject,
@@ -2105,7 +2116,7 @@ async fn run(cli: Cli) -> Result<(), String> {
             reason,
             profile,
             json,
-        }) => relaxation::revoke(&profile_name(profile), id, expected, &reason, json).await,
+        }) => relaxation::revoke(&profile_name(profile)?, id, expected, &reason, json).await,
         Command::Login {
             gateway,
             issuer,
@@ -2113,15 +2124,15 @@ async fn run(cli: Cli) -> Result<(), String> {
             no_browser,
         } => {
             login::login(
-                login::gateway_url(gateway),
+                login::gateway_url(gateway)?,
                 issuer,
-                profile_name(profile),
+                profile_name(profile)?,
                 !no_browser,
             )
             .await
         }
         Command::Auth(AuthCommand::Token { profile, json }) => {
-            login::auth_token(profile_name(profile), json).await
+            login::auth_token(profile_name(profile)?, json).await
         }
         Command::Mcp {
             command: None,
@@ -2129,7 +2140,7 @@ async fn run(cli: Cli) -> Result<(), String> {
             workspace,
             project,
             profile,
-        } => mcp::serve(profile_name(profile), writes, workspace, project).await,
+        } => mcp::serve(profile_name(profile)?, writes, workspace, project).await,
         Command::Mcp {
             workspace,
             project,
@@ -2147,7 +2158,7 @@ async fn run(cli: Cli) -> Result<(), String> {
             &mcp::install::Plan {
                 client,
                 config,
-                profile: profile_name(profile),
+                profile: profile_name(profile)?,
                 dry_run,
                 force,
                 print,
@@ -2194,7 +2205,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                 credentials::save(&stored)?;
                 eprintln!("synveda: forgot {count} profile(s)");
             } else {
-                let name = profile_name(profile);
+                let name = profile_name(profile)?;
                 if stored.profiles.remove(&name).is_none() {
                     return Err(format!("no credentials for profile `{name}`"));
                 }
@@ -2457,21 +2468,21 @@ async fn run(cli: Cli) -> Result<(), String> {
             subject,
             scope,
             name,
-        }) => service::register(&profile_name(profile), &subject, scope, name.as_deref()).await,
+        }) => service::register(&profile_name(profile)?, &subject, scope, name.as_deref()).await,
         Command::Service(ServiceCommand::Remove { profile, id }) => {
-            service::remove(&profile_name(profile), id).await
+            service::remove(&profile_name(profile)?, id).await
         }
         Command::Service(ServiceCommand::List { profile }) => {
-            service::list(&profile_name(profile)).await
+            service::list(&profile_name(profile)?).await
         }
         Command::Audit(AuditCommand::Verify { profile, json }) => {
-            audit::verify(&profile_name(profile), json).await
+            audit::verify(&profile_name(profile)?, json).await
         }
         Command::Audit(AuditCommand::Tail {
             profile,
             limit,
             json,
-        }) => audit::tail(&profile_name(profile), limit, json).await,
+        }) => audit::tail(&profile_name(profile)?, limit, json).await,
         Command::Audit(AuditCommand::Events {
             profile,
             actor_subject,
@@ -2490,7 +2501,7 @@ async fn run(cli: Cli) -> Result<(), String> {
             json,
         }) => {
             audit::events(
-                &profile_name(profile),
+                &profile_name(profile)?,
                 audit::EventQuery {
                     actor_subject,
                     action,
@@ -2520,7 +2531,7 @@ async fn run(cli: Cli) -> Result<(), String> {
             json,
         }) => {
             audit::knowledge(
-                &profile_name(profile),
+                &profile_name(profile)?,
                 audit::KnowledgeQuery {
                     subject,
                     valid_at,
@@ -2536,7 +2547,7 @@ async fn run(cli: Cli) -> Result<(), String> {
             output,
             profile,
             page_size,
-        }) => audit::export(&profile_name(profile), &output, page_size).await,
+        }) => audit::export(&profile_name(profile)?, &output, page_size).await,
         Command::Audit(AuditCommand::VerifyExport { path, json }) => {
             audit::verify_export_file(&path, json)
         }
@@ -2547,39 +2558,39 @@ async fn run(cli: Cli) -> Result<(), String> {
                 limit,
                 json,
                 profile,
-            } => proposal::list(&profile_name(profile), scope, state, limit, json).await,
+            } => proposal::list(&profile_name(profile)?, scope, state, limit, json).await,
             ProposalCommand::Show { id, json, profile } => {
-                proposal::show(&profile_name(profile), id, json).await
+                proposal::show(&profile_name(profile)?, id, json).await
             }
             ProposalCommand::Review {
                 id,
                 scope,
                 limit,
                 profile,
-            } => proposal::review(&profile_name(profile), id, scope, limit).await,
+            } => proposal::review(&profile_name(profile)?, id, scope, limit).await,
             ProposalCommand::Approve {
                 id,
                 comment,
                 profile,
-            } => proposal::approve(&profile_name(profile), id, comment).await,
+            } => proposal::approve(&profile_name(profile)?, id, comment).await,
             ProposalCommand::Reject {
                 id,
                 reason,
                 profile,
-            } => proposal::reject(&profile_name(profile), id, reason).await,
+            } => proposal::reject(&profile_name(profile)?, id, reason).await,
             ProposalCommand::Withdraw { id, profile } => {
-                proposal::withdraw(&profile_name(profile), id).await
+                proposal::withdraw(&profile_name(profile)?, id).await
             }
             ProposalCommand::Publish { id, profile } => {
-                proposal::publish(&profile_name(profile), id).await
+                proposal::publish(&profile_name(profile)?, id).await
             }
             ProposalCommand::Apply { id, profile } => {
-                proposal::apply(&profile_name(profile), id).await
+                proposal::apply(&profile_name(profile)?, id).await
             }
         },
         Command::Prompt(command) => match command {
             PromptCommand::List { scope, profile } => {
-                prompt::list(&profile_name(profile), scope).await
+                prompt::list(&profile_name(profile)?, scope).await
             }
             PromptCommand::Show {
                 name,
@@ -2592,7 +2603,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                 profile,
             } => {
                 prompt::show(
-                    &profile_name(profile),
+                    &profile_name(profile)?,
                     prompt::Ask {
                         name: &name,
                         scope,
@@ -2621,7 +2632,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                     .transpose()
                     .map_err(|err| err.to_string())?;
                 prompt::author(
-                    &profile_name(profile),
+                    &profile_name(profile)?,
                     prompt::Draft {
                         name: &name,
                         scope,
@@ -2638,21 +2649,21 @@ async fn run(cli: Cli) -> Result<(), String> {
                 scope,
                 title,
                 profile,
-            } => prompt::propose(&profile_name(profile), &name, scope, title.as_deref()).await,
+            } => prompt::propose(&profile_name(profile)?, &name, scope, title.as_deref()).await,
         },
         Command::Skill(command) => match command {
             SkillCommand::List {
                 scope,
                 json,
                 profile,
-            } => skill::list(&profile_name(profile), scope, json).await,
+            } => skill::list(&profile_name(profile)?, scope, json).await,
             SkillCommand::Show {
                 name,
                 version,
                 json,
                 quiet,
                 profile,
-            } => skill::show(&profile_name(profile), &name, version, json, quiet).await,
+            } => skill::show(&profile_name(profile)?, &name, version, json, quiet).await,
             SkillCommand::Import {
                 dir,
                 scope,
@@ -2666,7 +2677,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                     .transpose()
                     .map_err(|err| err.to_string())?;
                 skill::import(
-                    &profile_name(profile),
+                    &profile_name(profile)?,
                     &dir,
                     scope,
                     name.as_deref(),
@@ -2683,7 +2694,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                 profile,
             } => {
                 skill::install(
-                    &profile_name(profile),
+                    &profile_name(profile)?,
                     &name,
                     scope,
                     &client,
@@ -2696,7 +2707,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                 scope,
                 json,
                 profile,
-            } => skill::available(&profile_name(profile), scope, json).await,
+            } => skill::available(&profile_name(profile)?, scope, json).await,
             SkillCommand::Sync {
                 scope,
                 client,
@@ -2706,7 +2717,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                 profile,
             } => {
                 skill::sync(
-                    &profile_name(profile),
+                    &profile_name(profile)?,
                     scope,
                     &client,
                     root.as_deref(),
@@ -2719,28 +2730,28 @@ async fn run(cli: Cli) -> Result<(), String> {
 
         Command::Configuration(command) => match command {
             ConfigurationCommand::Templates { json, profile } => {
-                configuration::templates(&profile_name(profile), json).await
+                configuration::templates(&profile_name(profile)?, json).await
             }
             ConfigurationCommand::List {
                 scope,
                 json,
                 profile,
-            } => configuration::list(&profile_name(profile), scope, json).await,
+            } => configuration::list(&profile_name(profile)?, scope, json).await,
             ConfigurationCommand::Show { id, json, profile } => {
-                configuration::show(&profile_name(profile), id, json).await
+                configuration::show(&profile_name(profile)?, id, json).await
             }
             ConfigurationCommand::Effective {
                 scope,
                 json,
                 profile,
-            } => configuration::effective(&profile_name(profile), scope, json).await,
+            } => configuration::effective(&profile_name(profile)?, scope, json).await,
             ConfigurationCommand::Compare {
                 id,
                 from,
                 to,
                 json,
                 profile,
-            } => configuration::compare(&profile_name(profile), id, from, to, json).await,
+            } => configuration::compare(&profile_name(profile)?, id, from, to, json).await,
             ConfigurationCommand::Create {
                 scope,
                 name,
@@ -2750,7 +2761,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                 profile,
             } => {
                 configuration::create(
-                    &profile_name(profile),
+                    &profile_name(profile)?,
                     scope,
                     &name,
                     template,
@@ -2766,21 +2777,21 @@ async fn run(cli: Cli) -> Result<(), String> {
                 json,
                 profile,
             } => {
-                configuration::publish(&profile_name(profile), id, expected_version, &file, json)
+                configuration::publish(&profile_name(profile)?, id, expected_version, &file, json)
                     .await
             }
             ConfigurationCommand::Bindings {
                 scope,
                 json,
                 profile,
-            } => configuration::bindings(&profile_name(profile), scope, json).await,
+            } => configuration::bindings(&profile_name(profile)?, scope, json).await,
             ConfigurationCommand::Bind {
                 scope,
                 artifact,
                 version,
                 json,
                 profile,
-            } => configuration::bind(&profile_name(profile), scope, artifact, version, json).await,
+            } => configuration::bind(&profile_name(profile)?, scope, artifact, version, json).await,
             ConfigurationCommand::UpdateBinding {
                 id,
                 expected_revision,
@@ -2793,7 +2804,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                 profile,
             } => {
                 configuration::update_binding(
-                    &profile_name(profile),
+                    &profile_name(profile)?,
                     id,
                     expected_revision,
                     artifact,
@@ -2812,7 +2823,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                 profile,
             } => {
                 configuration::rollback(
-                    &profile_name(profile),
+                    &profile_name(profile)?,
                     id,
                     expected_revision,
                     version,
@@ -2842,7 +2853,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                 profile,
             } => {
                 okf::import(
-                    &profile_name(profile),
+                    &profile_name(profile)?,
                     &path,
                     project,
                     source_revision.as_deref(),
@@ -2857,12 +2868,12 @@ async fn run(cli: Cli) -> Result<(), String> {
                 item_ids,
                 json,
                 profile,
-            } => okf::export(&profile_name(profile), project, &output, &item_ids, json).await,
+            } => okf::export(&profile_name(profile)?, project, &output, &item_ids, json).await,
         },
 
         Command::ContextPack(command) => match command {
             ContextPackCommand::List { scope, profile } => {
-                pack::list(&profile_name(profile), scope).await
+                pack::list(&profile_name(profile)?, scope).await
             }
             ContextPackCommand::Author {
                 name,
@@ -2879,7 +2890,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                     .transpose()
                     .map_err(|err| err.to_string())?;
                 pack::author(
-                    &profile_name(profile),
+                    &profile_name(profile)?,
                     pack::Bundle {
                         name: &name,
                         scope,
@@ -2896,14 +2907,14 @@ async fn run(cli: Cli) -> Result<(), String> {
                 scope,
                 title,
                 profile,
-            } => pack::propose(&profile_name(profile), &name, scope, title.as_deref()).await,
+            } => pack::propose(&profile_name(profile)?, &name, scope, title.as_deref()).await,
         },
         Command::Session(command) => match command {
             SessionCommand::Flush {
                 dir,
                 verbose,
                 profile,
-            } => session::flush(&profile_name(profile), dir, verbose).await,
+            } => session::flush(&profile_name(profile)?, dir, verbose).await,
             SessionCommand::Spool(command) => match command {
                 SpoolCommand::Status { dir, json } => session::status(dir, json),
                 SpoolCommand::Purge { acknowledged, dir } => session::purge(dir, acknowledged),
@@ -2918,7 +2929,7 @@ async fn run(cli: Cli) -> Result<(), String> {
             profile,
         } => {
             recall::recall(
-                &profile_name(profile),
+                &profile_name(profile)?,
                 recall::Ask {
                     query: &query,
                     workspace: workspace.as_deref(),
@@ -2937,31 +2948,31 @@ async fn run(cli: Cli) -> Result<(), String> {
         }) => {
             demo::start(
                 profile,
-                &profile_name(credentials),
+                &profile_name(credentials)?,
                 bob_credentials.as_deref(),
                 json,
             )
             .await
         }
         Command::Demo(DemoCommand::Status { credentials, json }) => {
-            demo::status(&profile_name(credentials), json).await
+            demo::status(&profile_name(credentials)?, json).await
         }
         Command::Demo(DemoCommand::Reset { force, credentials }) => {
-            demo::reset(&profile_name(credentials), force).await
+            demo::reset(&profile_name(credentials)?, force).await
         }
         Command::Channel(command) => match command {
             ChannelCommand::Status {
                 scope,
                 json,
                 profile,
-            } => channel::status(&profile_name(profile), scope, json).await,
+            } => channel::status(&profile_name(profile)?, scope, json).await,
             ChannelCommand::History {
                 scope,
                 channel,
                 limit,
                 json,
                 profile,
-            } => channel::history(&profile_name(profile), scope, channel, limit, json).await,
+            } => channel::history(&profile_name(profile)?, scope, channel, limit, json).await,
             ChannelCommand::Rollback {
                 scope,
                 from,
@@ -2972,7 +2983,7 @@ async fn run(cli: Cli) -> Result<(), String> {
                 profile,
             } => {
                 channel::rollback(
-                    &profile_name(profile),
+                    &profile_name(profile)?,
                     scope,
                     from,
                     to,
@@ -2989,14 +3000,24 @@ async fn run(cli: Cli) -> Result<(), String> {
                 channel,
                 json,
                 profile,
-            } => channel::pin(&profile_name(profile), scope, commit, reason, channel, json).await,
+            } => {
+                channel::pin(
+                    &profile_name(profile)?,
+                    scope,
+                    commit,
+                    reason,
+                    channel,
+                    json,
+                )
+                .await
+            }
             ChannelCommand::Unpin {
                 scope,
                 reason,
                 channel,
                 json,
                 profile,
-            } => channel::unpin(&profile_name(profile), scope, reason, channel, json).await,
+            } => channel::unpin(&profile_name(profile)?, scope, reason, channel, json).await,
         },
         Command::Token(TokenCommand::Issue {
             tenant,
@@ -3135,7 +3156,7 @@ async fn create_tenant_with_admission_id(
                 .await
                 .map_err(|err| err.to_string())?;
             let grant = synveda_store::access::create_grant(
-                &mut *tx,
+                &mut tx,
                 &synveda_store::access::NewGrant {
                     id: GrantId::new(),
                     tenant_id,
@@ -3336,6 +3357,42 @@ mod hard_cut_tests {
             ],
         ] {
             Cli::try_parse_from(args).expect("documented OKF command must parse");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn profile_selection_refuses_non_unicode_environment_input() {
+        use std::os::unix::ffi::OsStringExt as _;
+
+        let _guard = crate::testing::ENV.blocking_lock();
+        let previous = std::env::var_os("SYNVEDA_PROFILE");
+        unsafe {
+            std::env::set_var(
+                "SYNVEDA_PROFILE",
+                std::ffi::OsString::from_vec(vec![0xff, 0xfe]),
+            );
+        }
+        let error = profile_name(None).expect_err("non-Unicode profile must be refused");
+        assert_eq!(error, "SYNVEDA_PROFILE must be valid UTF-8");
+        assert_eq!(
+            profile_name(Some("explicit".to_owned())).expect("flag takes precedence"),
+            "explicit"
+        );
+        assert_eq!(
+            profile_name(Some(String::new())).expect_err("empty flag must be refused"),
+            "--profile must not be empty"
+        );
+        unsafe { std::env::set_var("SYNVEDA_PROFILE", "") };
+        assert_eq!(
+            profile_name(None).expect_err("empty environment profile must be refused"),
+            "SYNVEDA_PROFILE must not be empty"
+        );
+        unsafe {
+            match previous {
+                Some(value) => std::env::set_var("SYNVEDA_PROFILE", value),
+                None => std::env::remove_var("SYNVEDA_PROFILE"),
+            }
         }
     }
 }

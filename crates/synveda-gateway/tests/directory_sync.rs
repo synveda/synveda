@@ -218,13 +218,20 @@ async fn is_sealed(w: &World, email: &str) -> bool {
     let mut tx = rls::begin_tenant_tx(&w.pool, w.tenant)
         .await
         .expect("begin");
-    let identity = identities::by_email(&mut *tx, w.tenant, email)
-        .await
-        .expect("read identity");
+    let identity = identities::unique_user_by_email(
+        &mut *tx,
+        w.tenant,
+        email,
+        identities::EmailIdentityLifecycle::Any,
+    )
+    .await
+    .expect("read identity");
     tx.commit().await.expect("commit");
-    identity
-        .expect("the suite seeded this person, so an identity exists")
-        .sealed()
+    match identity {
+        identities::UniqueIdentityMatch::Unique(identity) => identity.sealed(),
+        identities::UniqueIdentityMatch::NoMatch => panic!("the suite seeded this identity"),
+        identities::UniqueIdentityMatch::Ambiguous => panic!("the fixture email is ambiguous"),
+    }
 }
 
 /// Where somebody has been placed.
@@ -232,11 +239,20 @@ async fn placed_at(w: &World, email: &str) -> Option<ScopeId> {
     let mut tx = rls::begin_tenant_tx(&w.pool, w.tenant)
         .await
         .expect("begin");
-    let identity = identities::by_email(&mut *tx, w.tenant, email)
-        .await
-        .expect("read identity");
+    let identity = identities::unique_user_by_email(
+        &mut *tx,
+        w.tenant,
+        email,
+        identities::EmailIdentityLifecycle::Any,
+    )
+    .await
+    .expect("read identity");
     tx.commit().await.expect("commit");
-    identity.map(|identity| identity.scope_id)
+    match identity {
+        identities::UniqueIdentityMatch::NoMatch => None,
+        identities::UniqueIdentityMatch::Unique(identity) => Some(identity.scope_id),
+        identities::UniqueIdentityMatch::Ambiguous => panic!("the fixture email is ambiguous"),
+    }
 }
 
 // ── 1. Drift bound A: one complete pass ─────────────────────────────────────
@@ -921,7 +937,7 @@ async fn bind_org_admin(w: &World, subject: &str) {
         .await
         .expect("mint root");
     access::create_grant(
-        &mut *tx,
+        &mut tx,
         &access::NewGrant {
             id: GrantId::new(),
             tenant_id: w.tenant,

@@ -275,8 +275,10 @@ Decisions, specifically:
    path. No other target is ever accepted. Tokens never travel in a URL
    or a browser history; only a single-use code does.
 6. **Refresh runs through the gateway; the CLI holds no client
-   credentials.** The login flow requests `offline_access` where the
-   issuer advertises it; the refresh token is returned on the handoff
+   credentials.** As amended by ADR-0102, the login flow requests
+   `offline_access` only when the issuer entry explicitly configures it and
+   discovery also advertises it; provider-wide discovery cannot authorise the
+   public client. The refresh token is returned on the handoff
    exchange only, never in the browser-facing response. `POST
    /auth/refresh` mints a new access token — the gateway remains the
    OAuth client, which is what lets the CLI stay configuration-free.

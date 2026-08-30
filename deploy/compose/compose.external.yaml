@@ -8,6 +8,9 @@ services:
   migrate:
     labels:
       com.synveda.postgres.provider: ${SYNVEDA_POSTGRES_MODE:?set SYNVEDA_POSTGRES_MODE}
+  issuer-diagnostic:
+    labels:
+      com.synveda.oidc.provider: ${SYNVEDA_OIDC_MODE:?set SYNVEDA_OIDC_MODE}
   gateway:
     labels:
       com.synveda.postgres.provider: ${SYNVEDA_POSTGRES_MODE}

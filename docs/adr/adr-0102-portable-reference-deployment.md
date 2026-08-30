@@ -30,11 +30,20 @@ schema, public API, OIDC semantics, OTLP interface and backup evidence
 contract. Helm will implement that contract with Kubernetes-native resources;
 it will not be generated from Compose.
 
+This ADR amends ADR-0027 decision 6: `login_scopes` is the client-specific
+authority for requesting `offline_access`. Discovery advertising that
+provider-wide scope is necessary but never sufficient. The bundled public
+Keycloak client omits it and uses ordinary authorization-code refresh tokens;
+live identity acceptance must prove that behavior.
+
 The reference bundles an optimized production-mode Keycloak and replaces
 Rauthy completely after conformance. Synveda remains a generic OIDC/OAuth 2.0
 authorization-code + PKCE client: Keycloak groups may signal the one-time first
 administrator bootstrap, but all continuing roles and grants are Synveda data
-decided by Cedar.
+decided by Cedar. The bootstrap is an insert-only forced-RLS tenant marker
+committed with the first root-administrator grant. A grant created through any
+other path consumes the same marker, and revocation never returns authority to
+the identity provider.
 
 Gateway and worker are separate commands in one immutable product image.
 PostgreSQL remains business-state authority. Pinned stable
@@ -109,7 +118,9 @@ Compose and Helm and is validated before either runtime becomes ready.
 - Only the reverse proxy is public. Management, data, worker, telemetry,
   optional board and backup surfaces are private by construction.
 - The exact issuer must be reachable identically by browser and containers.
-  Development uses reserved `.test` host mappings plus Docker aliases.
+  Bundled-OIDC development uses reserved `.test` host mappings plus a
+  Docker alias for the identity host. External OIDC maps only the application
+  host locally and retains the provider's DNS and edge.
   Although `.localhost` was an illustrative programme hostname, RFC 6761
   reserves it for each resolver's own loopback; accepting a Docker DNS alias
   as an override would make the exact-issuer contract platform-dependent.

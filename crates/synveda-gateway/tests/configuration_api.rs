@@ -157,7 +157,7 @@ async fn admitted_with_pack(
     .await
     .expect("create administrator identity");
     access::create_grant(
-        &mut *tx,
+        &mut tx,
         &access::NewGrant {
             id: GrantId::new(),
             tenant_id: tenant,
@@ -742,7 +742,7 @@ async fn immutable_versions_bindings_and_runtime_evidence_share_one_governed_pat
     .await
     .expect("create project-owner identity");
     access::create_grant(
-        &mut *tx,
+        &mut tx,
         &access::NewGrant {
             id: GrantId::new(),
             tenant_id: tenant,

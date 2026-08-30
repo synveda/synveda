@@ -63,6 +63,7 @@ RUN set -eux; \
     echo 'fn main() {}' > crates/synveda-gateway/src/main.rs; \
     mkdir -p crates/synveda-gateway/src/bin; \
     echo 'fn main() {}' > crates/synveda-gateway/src/bin/synveda-worker.rs; \
+    echo 'fn main() {}' > crates/synveda-gateway/src/bin/synveda-oidc-diagnostic.rs; \
     mkdir -p crates/synveda-gateway/test-support-enabler/src; \
     : > crates/synveda-gateway/test-support-enabler/src/lib.rs
 # sqlx macros compile against the committed query cache; this image has no
@@ -95,6 +96,7 @@ RUN apt-get update \
 # do not rebuild or reinterpret the application for a deployment shape.
 COPY --from=build /src/target/release/synveda-gateway /usr/local/bin/synveda-gateway
 COPY --from=build /src/target/release/synveda-worker /usr/local/bin/synveda-worker
+COPY --from=build /src/target/release/synveda-oidc-diagnostic /usr/local/bin/synveda-oidc-diagnostic
 COPY --from=build /src/target/release/synveda /usr/local/bin/synveda
 COPY --chmod=0755 deploy/compose/gateway/synveda-container /usr/local/bin/synveda-container
 

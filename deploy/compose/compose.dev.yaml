@@ -6,7 +6,7 @@ services:
       context: ../..
       dockerfile: deploy/compose/proxy/Dockerfile
     ports:
-      - target: 8080
+      - target: ${SYNVEDA_DEV_HTTP_PORT:-8080}
         published: ${SYNVEDA_DEV_HTTP_PORT:-8080}
         host_ip: 127.0.0.1
         protocol: tcp
@@ -15,6 +15,10 @@ services:
       context: ../..
       dockerfile: deploy/compose/gateway/Dockerfile
   migrate:
+    build:
+      context: ../..
+      dockerfile: deploy/compose/gateway/Dockerfile
+  issuer-diagnostic:
     build:
       context: ../..
       dockerfile: deploy/compose/gateway/Dockerfile

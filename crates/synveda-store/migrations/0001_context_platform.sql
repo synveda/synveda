@@ -780,6 +780,32 @@ $$;
 
 
 --
+-- Name: synveda_record_initial_administrator(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.synveda_record_initial_administrator() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+begin
+    if new.role_key = 'administrator'
+       and exists (
+           select 1
+             from public.scopes
+            where tenant_id = new.tenant_id
+              and id = new.scope_id
+              and kind = 'tenant'
+              and parent_scope_id is null
+       ) then
+        insert into public.tenant_administrator_bootstraps (tenant_id, grant_id)
+        values (new.tenant_id, new.id)
+        on conflict (tenant_id) do nothing;
+    end if;
+    return new;
+end
+$$;
+
+
+--
 -- Name: synveda_groups_immutable_columns(); Type: FUNCTION; Schema: public; Owner: -
 --
 
@@ -4220,6 +4246,19 @@ ALTER TABLE ONLY public.skills FORCE ROW LEVEL SECURITY;
 
 
 --
+-- Name: tenant_administrator_bootstraps; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.tenant_administrator_bootstraps (
+    tenant_id uuid NOT NULL,
+    grant_id uuid NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL
+);
+
+ALTER TABLE ONLY public.tenant_administrator_bootstraps FORCE ROW LEVEL SECURITY;
+
+
+--
 -- Name: tenant_keys; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -5915,6 +5954,14 @@ ALTER TABLE ONLY public.skills
 
 
 --
+-- Name: tenant_administrator_bootstraps tenant_administrator_bootstraps_pk; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.tenant_administrator_bootstraps
+    ADD CONSTRAINT tenant_administrator_bootstraps_pk PRIMARY KEY (tenant_id);
+
+
+--
 -- Name: tenant_keys tenant_keys_pk; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -7475,6 +7522,13 @@ CREATE TRIGGER prompts_transition BEFORE UPDATE ON public.prompts FOR EACH ROW E
 --
 
 CREATE TRIGGER scope_grants_immutable BEFORE UPDATE ON public.scope_grants FOR EACH ROW EXECUTE FUNCTION public.synveda_grants_are_immutable();
+
+
+--
+-- Name: scope_grants scope_grants_record_initial_administrator; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER scope_grants_record_initial_administrator AFTER INSERT ON public.scope_grants FOR EACH ROW EXECUTE FUNCTION public.synveda_record_initial_administrator();
 
 
 --
@@ -9325,6 +9379,14 @@ ALTER TABLE ONLY public.skills
 
 
 --
+-- Name: tenant_administrator_bootstraps tenant_administrator_bootstraps_tenant_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.tenant_administrator_bootstraps
+    ADD CONSTRAINT tenant_administrator_bootstraps_tenant_fk FOREIGN KEY (tenant_id) REFERENCES public.tenants(id);
+
+
+--
 -- Name: tenant_keys tenant_keys_tenant_fk; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -10452,6 +10514,19 @@ ALTER TABLE public.skills ENABLE ROW LEVEL SECURITY;
 --
 
 CREATE POLICY skills_tenant_isolation ON public.skills USING ((tenant_id = public.synveda_current_tenant())) WITH CHECK ((tenant_id = public.synveda_current_tenant()));
+
+
+--
+-- Name: tenant_administrator_bootstraps; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.tenant_administrator_bootstraps ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: tenant_administrator_bootstraps tenant_administrator_bootstraps_tenant_isolation; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY tenant_administrator_bootstraps_tenant_isolation ON public.tenant_administrator_bootstraps USING ((tenant_id = public.synveda_current_tenant())) WITH CHECK ((tenant_id = public.synveda_current_tenant()));
 
 
 --
@@ -11941,6 +12016,13 @@ GRANT UPDATE(updated_at) ON TABLE public.skills TO synveda_app;
 --
 
 GRANT UPDATE(updated_by) ON TABLE public.skills TO synveda_app;
+
+
+--
+-- Name: TABLE tenant_administrator_bootstraps; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT,INSERT ON TABLE public.tenant_administrator_bootstraps TO synveda_app;
 
 
 --

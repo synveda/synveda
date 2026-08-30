@@ -45,9 +45,22 @@ use synveda_policy::Pdp;
 
 const SHUTDOWN_ABORT_RESERVE: Duration = Duration::from_secs(1);
 const BACKGROUND_RETRY_INTERVAL: Duration = Duration::from_secs(2);
+const RUNTIME_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(1);
 
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .map_err(|_| "the gateway runtime could not be created")?;
+    let outcome = runtime.block_on(run());
+    // reqwest's system resolver may leave a blocking getaddrinfo call behind
+    // after the startup diagnostic's async deadline. Never let runtime drop
+    // turn that bounded refusal into an unbounded process shutdown.
+    runtime.shutdown_timeout(RUNTIME_SHUTDOWN_TIMEOUT);
+    outcome
+}
+
+async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let telemetry = telemetry::init("synveda-gateway")?;
     let metrics = telemetry::init_metrics()?;
 
@@ -77,22 +90,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // a console session is refused under a dev verifier too, and it is
     // refused for the right reason rather than because nothing was
     // configured to compare against.
-    let public_url = std::env::var("SYNVEDA_PUBLIC_URL")
-        .unwrap_or_else(|_| "http://127.0.0.1:8120".to_owned())
-        .trim_end_matches('/')
-        .to_owned();
-    // `Origin` is scheme://host[:port] and never carries a path, so a
-    // public URL that has one would never match. Derived rather than
-    // demanded as a second setting: two settings that must agree are two
-    // settings that will not (ADR-0055's second finding, one layer down).
-    let public_origin = url::Url::parse(&public_url)
-        .ok()
-        .and_then(|url| {
-            url.origin()
-                .is_tuple()
-                .then(|| url.origin().ascii_serialization())
-        })
-        .ok_or("SYNVEDA_PUBLIC_URL must be an absolute http(s) URL")?;
+    let public_url = runtime_config::public_application_url()?;
+    let public_origin = public_url.origin().to_owned();
 
     // One auth mode, never two (ADR-0010); fail closed when neither is
     // configured (ADR-0008).
@@ -111,8 +110,22 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             (Some(json), None) => {
                 let issuers = synveda_identity::parse_issuers(&json)?;
-                let redirect_uri = format!("{public_url}/auth/callback");
-                let oidc = Arc::new(OidcVerifier::new(issuers)?);
+                let redirect_uri = public_url.callback().to_owned();
+                let oidc = Arc::new(OidcVerifier::new_with_insecure_development_http(
+                    issuers,
+                    runtime_config::insecure_development_http_enabled()?,
+                )?);
+                // Prime this exact verifier before binding the public socket.
+                // Compose's one-shot protects initial graph creation, but a
+                // direct launch or automatic container restart must enforce
+                // the same provider-neutral discovery/JWKS contract itself.
+                if let Err(error) = oidc.initialize().await {
+                    return Err(format!(
+                        "OIDC startup diagnostic failed at the {} stage: {error}",
+                        error.stage()
+                    )
+                    .into());
+                }
                 tracing::info!(
                     redirect_uri,
                     issuers = %oidc.issuers().collect::<Vec<_>>().join(", "),

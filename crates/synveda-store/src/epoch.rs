@@ -44,11 +44,12 @@ pub const CURRENT_EPOCH: i32 = 3;
 
 /// The immutable revision of the single epoch-3 baseline this build serves.
 ///
-/// CPR-45 changed the contents of migration `0001` without changing the
-/// domain model or epoch. This discriminator makes that pre-release hard cut
+/// CPR-45 changes the contents of migration `0001` without changing the
+/// domain model or epoch. This discriminator makes each pre-release hard cut
 /// an explicit startup verdict rather than leaving SQLx checksum comparison
-/// as the first component to notice it.
-pub const CURRENT_BASELINE_REVISION: i32 = 1;
+/// as the first component to notice it. Revision 2 adds the insert-only
+/// initial-administrator bootstrap marker.
+pub const CURRENT_BASELINE_REVISION: i32 = 2;
 
 /// The exact command that makes a refused database usable again. Quoted
 /// verbatim by every refusal below, and by the gateway, the CLI and the

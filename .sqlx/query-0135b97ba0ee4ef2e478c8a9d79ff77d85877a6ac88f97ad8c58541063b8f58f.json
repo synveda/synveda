@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        select id, tenant_id, directory_source, external_id, user_name, active, display_name,\n               given_name, family_name, work_email, identity_id, version,\n               created_at, updated_at\n        from scim_users\n        where tenant_id = $1 and lower(user_name) = lower($2) and active\n        order by directory_source\n        limit 2\n        ",
+  "query": "\n        select id, tenant_id, scope_id, subject_kind, principal_id, group_id,\n               role_key, source, invite_id, directory_source,\n               directory_resource_id, granted_by, created_at\n        from scope_grants\n        where tenant_id = $1 and principal_id = $2\n          and ($3::uuid is null or id <> $3)\n        order by created_at, id\n        limit $4\n        ",
   "describe": {
     "columns": [
       {
@@ -15,75 +15,74 @@
       },
       {
         "ordinal": 2,
-        "name": "directory_source",
-        "type_info": "Text"
+        "name": "scope_id",
+        "type_info": "Uuid"
       },
       {
         "ordinal": 3,
-        "name": "external_id",
+        "name": "subject_kind",
         "type_info": "Text"
       },
       {
         "ordinal": 4,
-        "name": "user_name",
+        "name": "principal_id",
         "type_info": "Text"
       },
       {
         "ordinal": 5,
-        "name": "active",
-        "type_info": "Bool"
+        "name": "group_id",
+        "type_info": "Uuid"
       },
       {
         "ordinal": 6,
-        "name": "display_name",
+        "name": "role_key",
         "type_info": "Text"
       },
       {
         "ordinal": 7,
-        "name": "given_name",
+        "name": "source",
         "type_info": "Text"
       },
       {
         "ordinal": 8,
-        "name": "family_name",
-        "type_info": "Text"
+        "name": "invite_id",
+        "type_info": "Uuid"
       },
       {
         "ordinal": 9,
-        "name": "work_email",
+        "name": "directory_source",
         "type_info": "Text"
       },
       {
         "ordinal": 10,
-        "name": "identity_id",
-        "type_info": "Uuid"
+        "name": "directory_resource_id",
+        "type_info": "Text"
       },
       {
         "ordinal": 11,
-        "name": "version",
-        "type_info": "Int8"
+        "name": "granted_by",
+        "type_info": "Text"
       },
       {
         "ordinal": 12,
         "name": "created_at",
-        "type_info": "Timestamptz"
-      },
-      {
-        "ordinal": 13,
-        "name": "updated_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
         "Uuid",
-        "Text"
+        "Text",
+        "Uuid",
+        "Int8"
       ]
     },
     "nullable": [
       false,
       false,
       false,
+      false,
+      true,
       true,
       false,
       false,
@@ -91,11 +90,8 @@
       true,
       true,
       true,
-      true,
-      false,
-      false,
       false
     ]
   },
-  "hash": "0a3a32dd6ce0bb1c51f590a19802536f7af85eeb95e7cff9667aa55de56eb2ef"
+  "hash": "0135b97ba0ee4ef2e478c8a9d79ff77d85877a6ac88f97ad8c58541063b8f58f"
 }

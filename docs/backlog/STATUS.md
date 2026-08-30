@@ -166,6 +166,14 @@ retains their implementation evidence. Open entries link to current briefs.
 - [x] CPR-44: Production hardening and maintainability cut — delivered 2026-08-26; ADR-0101
 - [ ] [CPR-45: Docker-first portable reference deployment](CPR-45.md) — open
 
+CPR-45's current identity/database checkpoint has fresh revision-2 authority
+fingerprints, 657 validated SQLx records and a passing complete exact-role
+database gate. Its independently reviewed collision-resistant fixture
+allocator, fresh deterministic authentic-frame lifecycle and complete
+repository CI also pass. The next blocker is a bounded canonical lifecycle
+with a login-capable Keycloak demo boundary and real browser PKCE exchange
+before the legacy Rauthy/Temporal callers can be cut over and deleted.
+
 ## Unscheduled — not listed in the Sequencing section
 
 - [ ] [AUTH-6: Session & token hygiene](AUTH-6.md) — open

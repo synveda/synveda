@@ -294,7 +294,7 @@ async fn seed_agent(pool: &PgPool, tenant: TenantId, subject: &str, anchor: Scop
 async fn bind(pool: &PgPool, tenant: TenantId, subject: &str, scope: ScopeId, role: RoleKey) {
     let mut tx = tenant_fixture::begin(pool, tenant).await;
     access::create_grant(
-        &mut *tx,
+        &mut tx,
         &access::NewGrant {
             id: GrantId::new(),
             tenant_id: tenant,

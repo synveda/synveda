@@ -116,7 +116,7 @@ async fn admitted_tenant() -> Option<(AppState, TenantId)> {
     .await
     .expect("create identity");
     access::create_grant(
-        &mut *tx,
+        &mut tx,
         &access::NewGrant {
             id: GrantId::new(),
             tenant_id,

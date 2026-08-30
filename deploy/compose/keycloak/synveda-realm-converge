@@ -1,0 +1,1245 @@
+#!/bin/bash -p
+# CPR-45 / ADR-0102: converge the bundled realm while it is closed, replace
+# the temporary bootstrap super-administrator with a narrowly scoped master
+# realm identity, prove the complete managed projection, then open the realm
+# as the sole final mutation.
+unset BASH_ENV ENV CDPATH GLOBIGNORE PS4
+set +x
+set -eu
+umask 077
+PATH=/opt/keycloak/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+. /opt/keycloak/bin/synveda-authority-stage
+
+realm=synveda
+client=synveda
+convergence_username=synveda-convergence
+convergence_client=synveda-realm
+authentication_client=admin-cli
+contract=cpr45-keycloak-realm-v3
+admin_url=http://keycloak:8080
+generation_gate=/opt/keycloak/bin/synveda-generation-gate
+generation=${SYNVEDA_KEYCLOAK_GENERATION:-}
+bootstrap_username=${SYNVEDA_KEYCLOAK_ADMIN_USERNAME:-}
+bootstrap_password=${SYNVEDA_KEYCLOAK_BOOTSTRAP_PASSWORD:-}
+convergence_password=${SYNVEDA_KEYCLOAK_CONVERGENCE_PASSWORD:-}
+public_app_url=${SYNVEDA_PUBLIC_APP_URL:-}
+public_auth_url=${SYNVEDA_PUBLIC_AUTH_URL:-}
+ssl_required=${SYNVEDA_KEYCLOAK_SSL_REQUIRED:-}
+unset SYNVEDA_KEYCLOAK_ADMIN_USERNAME SYNVEDA_KEYCLOAK_BOOTSTRAP_PASSWORD
+unset SYNVEDA_KEYCLOAK_CONVERGENCE_PASSWORD SYNVEDA_KEYCLOAK_GENERATION
+
+refuse() {
+    echo "keycloak-converge: configuration was refused" >&2
+    exit 78
+}
+
+generation_stale=false
+
+require_current_generation() {
+    if "$generation_gate" is-current "$generation" >/dev/null 2>&1; then
+        return 0
+    fi
+    generation_stale=true
+    return 1
+}
+
+require_current_generation_or_exit() {
+    require_current_generation || exit 75
+}
+
+withdraw_public_gate() {
+    "$generation_gate" withdraw "$generation" >/dev/null 2>&1
+}
+
+publish_public_gate() {
+    require_current_generation || return
+    if ! "$generation_gate" publish "$generation" >/dev/null 2>&1; then
+        require_current_generation || true
+        return 1
+    fi
+    require_current_generation
+}
+
+require_current_generation || exit 75
+withdraw_public_gate || {
+    echo "keycloak-converge: public gate withdrawal was refused" >&2
+    exit 70
+}
+
+case "$bootstrap_username" in
+    ''|*[!A-Za-z0-9._-]*) refuse ;;
+esac
+[ "${#bootstrap_username}" -le 64 ] || refuse
+[ "$bootstrap_username" != "$convergence_username" ] || refuse
+[ -n "$bootstrap_password" ] && [ -n "$convergence_password" ] || refuse
+[ "$bootstrap_password" != "$convergence_password" ] || refuse
+case "$ssl_required:$public_app_url" in
+    NONE:http://*) ssl_value=none ;;
+    EXTERNAL:https://*) ssl_value=external ;;
+    *) refuse ;;
+esac
+case "$public_app_url" in
+    */) refuse ;;
+esac
+case "$public_auth_url" in
+    */) refuse ;;
+esac
+for configured_origin in "$public_app_url" "$public_auth_url"; do
+    if ! /usr/bin/timeout --foreground --signal=TERM --kill-after=1s 5s \
+        /usr/bin/java -cp '/opt/keycloak/bin:/opt/keycloak/lib/lib/main/*' \
+        SynvedaKeycloakProjection \
+        origin "$configured_origin" >/dev/null 2>&1; then
+        refuse
+    fi
+done
+
+state_dir=$(mktemp -d /tmp/synveda-keycloak-converge.XXXXXX) || {
+    echo "keycloak-converge: private state could not be created" >&2
+    exit 70
+}
+chmod 700 "$state_dir"
+bootstrap_config=$state_dir/bootstrap.config
+permanent_config=$state_dir/permanent.config
+realm_known=false
+bootstrap_authenticated=false
+permanent_authenticated=false
+permanent_authority_valid=false
+publish_gate_on_exit=false
+
+run_kcadm() {
+    run_config=$1
+    shift
+    require_current_generation_or_exit
+    /usr/bin/timeout --foreground --signal=TERM --kill-after=5s 20s \
+        /opt/keycloak/bin/kcadm.sh "$@" --config "$run_config"
+}
+
+run_cleanup_kcadm() {
+    cleanup_config=$1
+    shift
+    /usr/bin/timeout --foreground --signal=TERM --kill-after=1s 8s \
+        /opt/keycloak/bin/kcadm.sh "$@" --config "$cleanup_config"
+}
+
+cleanup_authenticate() {
+    cleanup_auth_config=$1
+    cleanup_auth_username=$2
+    cleanup_auth_password=$3
+    cleanup_auth_client=$4
+    cleanup_auth_dir=$5
+    [ ! -e "$cleanup_auth_config" ] && [ ! -L "$cleanup_auth_config" ] || return 1
+    rm -f -- "$cleanup_auth_dir/auth.out"
+    KC_CLI_PASSWORD=$cleanup_auth_password
+    export KC_CLI_PASSWORD
+    if run_cleanup_kcadm "$cleanup_auth_config" config credentials \
+        --server "$admin_url" --realm master --client "$cleanup_auth_client" \
+        --user "$cleanup_auth_username" \
+        >"$cleanup_auth_dir/auth.out" 2>&1; then
+        cleanup_auth_status=0
+    else
+        cleanup_auth_status=1
+    fi
+    unset KC_CLI_PASSWORD
+    rm -f -- "$cleanup_auth_dir/auth.out"
+    if [ "$cleanup_auth_status" -ne 0 ]; then
+        if [ -e "$cleanup_auth_config" ] || [ -L "$cleanup_auth_config" ]; then
+            settle_failed_admin_session \
+                "$cleanup_auth_config" "$cleanup_auth_dir" || return 1
+            rm -f -- "$cleanup_auth_config" || return 1
+            [ ! -e "$cleanup_auth_config" ] && \
+                [ ! -L "$cleanup_auth_config" ] || return 1
+        fi
+    fi
+    return "$cleanup_auth_status"
+}
+
+run_admin_quarantine() {
+    quarantine_config=$1
+    quarantine_dir=$2
+    rm -f -- "$quarantine_dir/quarantine.out" "$quarantine_dir/quarantine.error"
+    if /usr/bin/timeout --foreground --signal=TERM --kill-after=1s 10s \
+        /usr/bin/java -cp '/opt/keycloak/bin:/opt/keycloak/lib/lib/main/*' \
+        SynvedaKeycloakProjection admin-quarantine "$quarantine_config" \
+        >"$quarantine_dir/quarantine.out" \
+        2>"$quarantine_dir/quarantine.error"; then
+        quarantine_status=0
+    else
+        quarantine_status=1
+    fi
+    rm -f -- "$quarantine_dir/quarantine.out" "$quarantine_dir/quarantine.error"
+    return "$quarantine_status"
+}
+
+close_admin_session() {
+    close_config=$1
+    close_dir=$2
+    [ ! -L "$close_config" ] && [ -f "$close_config" ] || return 1
+    rm -f -- "$close_dir/session-close.out" "$close_dir/session-close.error"
+    if /usr/bin/timeout --foreground --signal=TERM --kill-after=1s 9s \
+        /usr/bin/java -cp '/opt/keycloak/bin:/opt/keycloak/lib/lib/main/*' \
+        SynvedaKeycloakProjection admin-session-close "$close_config" \
+        >"$close_dir/session-close.out" \
+        2>"$close_dir/session-close.error"; then
+        close_status=0
+    else
+        close_status=1
+    fi
+    [ ! -s "$close_dir/session-close.out" ] || close_status=1
+    rm -f -- "$close_dir/session-close.out" "$close_dir/session-close.error"
+    return "$close_status"
+}
+
+settle_failed_admin_session() {
+    failed_config=$1
+    failed_dir=$2
+    [ ! -L "$failed_config" ] && [ -f "$failed_config" ] || return 1
+    rm -f -- "$failed_dir/session-settle.out" "$failed_dir/session-settle.error"
+    if /usr/bin/timeout --foreground --signal=TERM --kill-after=1s 9s \
+        /usr/bin/java -cp '/opt/keycloak/bin:/opt/keycloak/lib/lib/main/*' \
+        SynvedaKeycloakProjection admin-session-settle-failed "$failed_config" \
+        >"$failed_dir/session-settle.out" \
+        2>"$failed_dir/session-settle.error"; then
+        failed_status=0
+    else
+        failed_status=1
+    fi
+    [ ! -s "$failed_dir/session-settle.out" ] || failed_status=1
+    rm -f -- "$failed_dir/session-settle.out" "$failed_dir/session-settle.error"
+    return "$failed_status"
+}
+
+try_admin_to_file() {
+    try_config=$1
+    try_output=$2
+    shift 2
+    rm -f -- "$try_output" "$try_output.error"
+    if ! run_kcadm "$try_config" "$@" >"$try_output" 2>"$try_output.error"; then
+        rm -f -- "$try_output" "$try_output.error"
+        return 1
+    fi
+    rm -f -- "$try_output.error"
+}
+
+admin_to_file() {
+    admin_config=$1
+    admin_output=$2
+    admin_action=$3
+    shift 3
+    if ! try_admin_to_file "$admin_config" "$admin_output" "$@"; then
+        echo "keycloak-converge: $admin_action failed" >&2
+        return 1
+    fi
+}
+
+try_admin_quiet() {
+    quiet_config=$1
+    quiet_action=$2
+    shift 2
+    try_admin_to_file "$quiet_config" "$state_dir/$quiet_action.out" "$@" || return
+    rm -f -- "$state_dir/$quiet_action.out"
+}
+
+admin_quiet() {
+    quiet_config=$1
+    quiet_action=$2
+    shift 2
+    if ! try_admin_quiet "$quiet_config" "$quiet_action" "$@"; then
+        echo "keycloak-converge: $quiet_action failed" >&2
+        return 1
+    fi
+}
+
+try_project_to_file() {
+    project_output=$1
+    shift
+    rm -f -- "$project_output" "$project_output.error"
+    if ! /usr/bin/timeout --foreground --signal=TERM --kill-after=1s 5s \
+        /usr/bin/java -cp '/opt/keycloak/bin:/opt/keycloak/lib/lib/main/*' \
+        SynvedaKeycloakProjection "$@" \
+        >"$project_output" 2>"$project_output.error"; then
+        rm -f -- "$project_output" "$project_output.error"
+        return 1
+    fi
+    rm -f -- "$project_output.error"
+}
+
+project_to_file() {
+    project_output=$1
+    project_action=$2
+    shift 2
+    if ! try_project_to_file "$project_output" "$@"; then
+        echo "keycloak-converge: $project_action was refused" >&2
+        return 1
+    fi
+}
+
+try_project_quiet() {
+    project_action=$1
+    shift
+    try_project_to_file "$state_dir/$project_action.projection" "$@" || return
+    rm -f -- "$state_dir/$project_action.projection"
+}
+
+project_quiet() {
+    project_action=$1
+    shift
+    if ! try_project_quiet "$project_action" "$@"; then
+        echo "keycloak-converge: $project_action was refused" >&2
+        return 1
+    fi
+}
+
+is_uuid() {
+    [ "${#1}" -eq 36 ] || return 1
+    case "$1" in
+        *[!0-9a-f-]*) return 1 ;;
+    esac
+}
+
+projection_value() {
+    value_input=$1
+    value_mode=$2
+    value_prefix=$3
+    shift 3
+    value_output=$state_dir/value.projection
+    project_to_file "$value_output" "$value_mode" "$value_mode" "$value_input" "$@" || return
+    value_first=
+    value_second=
+    exec 3< "$value_output"
+    IFS= read -r value_first <&3 || [ -n "$value_first" ]
+    if IFS= read -r value_second <&3; then
+        exec 3<&-
+        echo "keycloak-converge: $value_mode was refused" >&2
+        return 1
+    fi
+    exec 3<&-
+    rm -f -- "$value_output"
+    case "$value_first" in
+        "$value_prefix=missing")
+            printf '%s\n' missing
+            ;;
+        "$value_prefix="*)
+            value_uuid=${value_first#*=}
+            is_uuid "$value_uuid" || {
+                echo "keycloak-converge: $value_mode was refused" >&2
+                return 1
+            }
+            printf '%s\n' "$value_uuid"
+            ;;
+        *)
+            echo "keycloak-converge: $value_mode was refused" >&2
+            return 1
+            ;;
+    esac
+}
+
+read_witness_state() {
+    witness_input=$1
+    witness_state=
+    witness_bootstrap_user_id=
+    witness_permanent_user_id=
+    if try_project_quiet witness-absent realm-witness "$witness_input" absent; then
+        witness_state=absent
+        return 0
+    fi
+    for witness_candidate in pending complete; do
+        witness_output=$state_dir/witness-$witness_candidate.out
+        if ! try_project_to_file "$witness_output" realm-witness \
+            "$witness_input" "$witness_candidate"; then
+            continue
+        fi
+        mapfile -t witness_lines < "$witness_output"
+        rm -f -- "$witness_output"
+        [ "${#witness_lines[@]}" -eq 2 ] || return 1
+        case "${witness_lines[0]}" in
+            bootstrap=*) witness_bootstrap_user_id=${witness_lines[0]#bootstrap=} ;;
+            *) return 1 ;;
+        esac
+        case "${witness_lines[1]}" in
+            permanent=*) witness_permanent_user_id=${witness_lines[1]#permanent=} ;;
+            *) return 1 ;;
+        esac
+        is_uuid "$witness_bootstrap_user_id" && \
+            is_uuid "$witness_permanent_user_id" || return 1
+        witness_state=$witness_candidate
+        return 0
+    done
+    return 1
+}
+
+write_realm_witness() {
+    witness_config=$1
+    witness_target_state=$2
+    witness_realm_json=$3
+    witness_bootstrap_id=$4
+    witness_permanent_id=$5
+    witness_patch=$state_dir/witness-patch.json
+    project_to_file "$witness_patch" witness-patch realm-witness-patch \
+        "$witness_realm_json" "$witness_target_state" \
+        "$witness_bootstrap_id" "$witness_permanent_id" || return
+    admin_quiet "$witness_config" witness-update update "realms/$realm" \
+        -f "$witness_patch" || return
+    admin_to_file "$witness_config" "$witness_realm_json" witness-read \
+        get "realms/$realm" || return
+    read_witness_state "$witness_realm_json" || return
+    [ "$witness_state" = "$witness_target_state" ] && \
+        [ "$witness_bootstrap_user_id" = "$witness_bootstrap_id" ] && \
+        [ "$witness_permanent_user_id" = "$witness_permanent_id" ]
+}
+
+authenticate() {
+    auth_config=$1
+    auth_username=$2
+    auth_password=$3
+    auth_client=${4:-admin-cli}
+    if [ -e "$auth_config" ] || [ -L "$auth_config" ]; then
+        close_admin_session "$auth_config" "$state_dir" || return 70
+        rm -f -- "$auth_config" || return 70
+        [ ! -e "$auth_config" ] && [ ! -L "$auth_config" ] || return 70
+    fi
+    rm -f -- "$state_dir/auth.out"
+    KC_CLI_PASSWORD=$auth_password
+    export KC_CLI_PASSWORD
+    if run_kcadm "$auth_config" config credentials --server "$admin_url" \
+        --realm master --client "$auth_client" --user "$auth_username" \
+        >"$state_dir/auth.out" 2>&1; then
+        auth_status=0
+    else
+        auth_status=1
+    fi
+    unset KC_CLI_PASSWORD
+    rm -f -- "$state_dir/auth.out"
+    if [ "$auth_status" -ne 0 ]; then
+        if [ -e "$auth_config" ] || [ -L "$auth_config" ]; then
+            settle_failed_admin_session "$auth_config" "$state_dir" || return 70
+            rm -f -- "$auth_config" || return 70
+            [ ! -e "$auth_config" ] && [ ! -L "$auth_config" ] || return 70
+        fi
+    fi
+    return "$auth_status"
+}
+
+try_prove_exact_permanent_authority() {
+    inspector_config=$1
+    inspector_user_id=$2
+    try_admin_to_file "$inspector_config" "$state_dir/direct-role-mapping.json" \
+        get "users/$inspector_user_id/role-mappings" -r master || return
+    try_project_to_file "$state_dir/direct-role-mapping.out" \
+        direct-role-mapping "$state_dir/direct-role-mapping.json" || return
+    target_client_line=
+    audit_client_line=
+    audit_role_line=
+    exec 3< "$state_dir/direct-role-mapping.out"
+    IFS= read -r target_client_line <&3 || [ -n "$target_client_line" ]
+    IFS= read -r audit_client_line <&3 || [ -n "$audit_client_line" ]
+    IFS= read -r audit_role_line <&3 || [ -n "$audit_role_line" ]
+    if IFS= read -r extra_client_line <&3; then
+        exec 3<&-
+        return 1
+    fi
+    exec 3<&-
+    case "$target_client_line" in
+        target-client=*) target_client_id=${target_client_line#target-client=} ;;
+        *) return 1 ;;
+    esac
+    case "$audit_client_line" in
+        audit-client=*) audit_client_id=${audit_client_line#audit-client=} ;;
+        *) return 1 ;;
+    esac
+    case "$audit_role_line" in
+        audit-role=*) audit_role_id=${audit_role_line#audit-role=} ;;
+        *) return 1 ;;
+    esac
+    is_uuid "$target_client_id" && is_uuid "$audit_client_id" && \
+        is_uuid "$audit_role_id" && \
+        [ "$target_client_id" != "$audit_client_id" ] && \
+        [ "$target_client_id" != "$audit_role_id" ] && \
+        [ "$audit_client_id" != "$audit_role_id" ] || return
+
+    try_admin_to_file "$inspector_config" "$state_dir/permanent-groups-verify.json" \
+        get "users/$inspector_user_id/groups" -r master \
+        -q first=0 -q max=1 -q briefRepresentation=true || return
+    try_project_quiet permanent-groups-empty empty-array \
+        "$state_dir/permanent-groups-verify.json" || return
+    try_admin_to_file "$inspector_config" "$state_dir/effective-realm-roles.json" \
+        get "users/$inspector_user_id/role-mappings/realm/composite" -r master \
+        -q briefRepresentation=false || return
+    try_project_quiet effective-realm-roles-empty empty-array \
+        "$state_dir/effective-realm-roles.json" || return
+    try_admin_to_file "$inspector_config" "$state_dir/effective-target-roles.json" \
+        get "users/$inspector_user_id/role-mappings/clients/$target_client_id/composite" \
+        -r master -q briefRepresentation=false || return
+    try_project_quiet effective-target-roles effective-roles \
+        "$state_dir/effective-target-roles.json" "$target_client_id" || return
+    try_admin_to_file "$inspector_config" "$state_dir/effective-audit-role.json" \
+        get "users/$inspector_user_id/role-mappings/clients/$audit_client_id/composite" \
+        -r master -q briefRepresentation=false || return
+    try_project_quiet effective-audit-role effective-audit-role \
+        "$state_dir/effective-audit-role.json" "$audit_client_id" \
+        "$audit_role_id"
+}
+
+prove_exact_permanent_authority() {
+    if ! try_prove_exact_permanent_authority "$1" "$2"; then
+        echo "keycloak-converge: exact convergence authority was refused" >&2
+        return 1
+    fi
+}
+
+prove_bootstrap_refused() {
+    if KC_CLI_PASSWORD=$bootstrap_password \
+        SYNVEDA_PROBE_USERNAME=$bootstrap_username \
+        /usr/bin/timeout --foreground --signal=TERM --kill-after=1s 5s \
+        /usr/bin/java -cp '/opt/keycloak/bin:/opt/keycloak/lib/lib/main/*' \
+        SynvedaKeycloakProjection bootstrap-refused \
+        >"$state_dir/bootstrap-refused.out" \
+        2>"$state_dir/bootstrap-refused.error"; then
+        refused_status=0
+    else
+        refused_status=1
+    fi
+    rm -f -- "$state_dir/bootstrap-refused.out" "$state_dir/bootstrap-refused.error"
+    return "$refused_status"
+}
+
+try_prove_scoped_authority() {
+    scoped_config=$1
+    scoped_user_id=$2
+    scoped_bootstrap_user_id=$3
+    scoped_authority_stage=role-proof
+    try_prove_exact_permanent_authority "$scoped_config" "$scoped_user_id" || return
+    scoped_authority_stage=stored-admin-token
+    try_project_quiet scoped-token admin-token "$scoped_config" || return
+    scoped_authority_stage=capture-setup
+    rm -f -- "$state_dir/scoped-authority.out" \
+        "$state_dir/scoped-authority.error" 2>/dev/null || return
+    [ ! -e "$state_dir/scoped-authority.out" ] && \
+        [ ! -L "$state_dir/scoped-authority.out" ] && \
+        [ ! -e "$state_dir/scoped-authority.error" ] && \
+        [ ! -L "$state_dir/scoped-authority.error" ] || return
+    # The Java helper gives its proof phase an absolute
+    # 34-second bound. Revocation, refresh refusal and the unexpected-success
+    # cleanup path share a six-second absolute deadline. This outer bound
+    # leaves fifteen seconds for JVM startup, bounded parsing and teardown.
+    if KC_CLI_PASSWORD=$convergence_password \
+        SYNVEDA_PROBE_USERNAME=$convergence_username \
+        SYNVEDA_PROBE_BOOTSTRAP_USERNAME=$bootstrap_username \
+        SYNVEDA_PROBE_ISSUER=$public_auth_url/realms/master \
+        /usr/bin/timeout --foreground --signal=TERM --kill-after=1s 55s \
+        /usr/bin/java -cp '/opt/keycloak/bin:/opt/keycloak/lib/lib/main/*' \
+        SynvedaKeycloakProjection admin-authority-login "$scoped_user_id" \
+        "$scoped_bootstrap_user_id" \
+        >"$state_dir/scoped-authority.out" \
+        2>"$state_dir/scoped-authority.error"; then
+        scoped_status=0
+    else
+        scoped_status=$?
+    fi
+    synveda_finish_scoped_authority_probe "$state_dir" "$scoped_status"
+}
+
+prove_scoped_authority() {
+    if ! try_prove_scoped_authority "$1" "$2" "$3"; then
+        echo "keycloak-converge: scoped convergence authority was refused at stage $scoped_authority_stage" >&2
+        return 1
+    fi
+}
+
+quarantine() {
+    quarantine_candidate=1
+    while [ "$quarantine_candidate" -le 2 ]; do
+        case "$quarantine_candidate" in
+            1)
+                quarantine_config=$state_dir/quarantine-permanent.config
+                quarantine_username=$convergence_username
+                quarantine_password=$convergence_password
+                quarantine_client=$authentication_client
+                ;;
+            2)
+                [ "$bootstrap_authenticated" = true ] && \
+                    [ -f "$bootstrap_config" ] && \
+                    [ "${bootstrap_password+x}" = x ] || {
+                    quarantine_candidate=$((quarantine_candidate + 1))
+                    continue
+                }
+                quarantine_config=$state_dir/quarantine-bootstrap.config
+                quarantine_username=$bootstrap_username
+                quarantine_password=$bootstrap_password
+                quarantine_client=admin-cli
+                ;;
+        esac
+        quarantine_succeeded=false
+        if cleanup_authenticate "$quarantine_config" "$quarantine_username" \
+            "$quarantine_password" "$quarantine_client" "$state_dir"; then
+            if run_admin_quarantine "$quarantine_config" "$state_dir"; then
+                quarantine_succeeded=true
+            fi
+            if close_admin_session "$quarantine_config" "$state_dir"; then
+                rm -f -- "$quarantine_config" || return 1
+                [ ! -e "$quarantine_config" ] && \
+                    [ ! -L "$quarantine_config" ] || return 1
+                [ "$quarantine_succeeded" = true ] && return 0
+            fi
+        fi
+        quarantine_candidate=$((quarantine_candidate + 1))
+    done
+    return 1
+}
+
+quarantine_with_fresh_authority() {
+    recovery_dir=$(mktemp -d /tmp/synveda-keycloak-recovery.XXXXXX) || return 1
+    chmod 700 "$recovery_dir"
+    recovery_config=$recovery_dir/permanent.config
+    recovery_quarantined=false
+    recovery_session_closed=false
+    if cleanup_authenticate "$recovery_config" "$convergence_username" \
+        "$convergence_password" "$authentication_client" "$recovery_dir"; then
+        if run_admin_quarantine "$recovery_config" "$recovery_dir"; then
+            recovery_quarantined=true
+        fi
+        if close_admin_session "$recovery_config" "$recovery_dir"; then
+            recovery_session_closed=true
+        fi
+    fi
+    recovery_cleanup=true
+    rm -f -- "$recovery_dir"/* || recovery_cleanup=false
+    rmdir -- "$recovery_dir" 2>/dev/null || recovery_cleanup=false
+    [ "$recovery_quarantined" = true ] && \
+        [ "$recovery_session_closed" = true ] && \
+        [ "$recovery_cleanup" = true ]
+}
+
+cleanup() {
+    entry_status=$?
+    cleanup_status=$entry_status
+    trap '' HUP INT TERM
+    trap - EXIT
+    unset KC_CLI_PASSWORD SYNVEDA_PROBE_USERNAME
+    unset SYNVEDA_PROBE_BOOTSTRAP_USERNAME SYNVEDA_PROBE_ISSUER
+    if ! "$generation_gate" is-current "$generation" >/dev/null 2>&1; then
+        generation_stale=true
+    fi
+    quarantine_failed=false
+    gate_failed=false
+    if [ "$cleanup_status" -ne 0 ] && ! withdraw_public_gate; then
+        gate_failed=true
+        echo "keycloak-converge: public gate withdrawal failed" >&2
+    fi
+    if [ "$cleanup_status" -ne 0 ] && [ "$realm_known" = true ] && \
+        [ "$generation_stale" = false ]; then
+        if ! quarantine; then
+            quarantine_failed=true
+            echo "keycloak-converge: failed state could not be quarantined" >&2
+        fi
+    fi
+    session_close_failed=false
+    for session_config in \
+        "$permanent_config" \
+        "$bootstrap_config" \
+        "$state_dir/bootstrap-recheck.config" \
+        "$state_dir/quarantine-permanent.config" \
+        "$state_dir/quarantine-bootstrap.config"; do
+        if [ -e "$session_config" ] || [ -L "$session_config" ]; then
+            if close_admin_session "$session_config" "$state_dir"; then
+                rm -f -- "$session_config" || session_close_failed=true
+            else
+                session_close_failed=true
+            fi
+        fi
+    done
+    if [ "$session_close_failed" = true ]; then
+        echo "keycloak-converge: administrative session closure failed" >&2
+        cleanup_status=70
+        echo "keycloak-converge: server session expiry is required" >&2
+    fi
+    if ! rm -f -- "$state_dir"/*; then
+        echo "keycloak-converge: private state cleanup failed" >&2
+        cleanup_status=70
+    fi
+    if ! rmdir -- "$state_dir" 2>/dev/null; then
+        echo "keycloak-converge: private state cleanup failed" >&2
+        cleanup_status=70
+    fi
+    if [ "$quarantine_failed" = true ] || [ "$gate_failed" = true ]; then
+        cleanup_status=70
+    fi
+    if [ "$cleanup_status" -eq 0 ]; then
+        [ "$publish_gate_on_exit" = true ] || cleanup_status=70
+    fi
+    if [ "$cleanup_status" -eq 0 ]; then
+        if publish_public_gate; then
+            if ! echo "Keycloak realm convergence passed (contract $contract)"; then
+                cleanup_status=70
+            fi
+        else
+            echo "keycloak-converge: public gate publication failed" >&2
+            cleanup_status=70
+        fi
+    fi
+    if [ "$cleanup_status" -ne 0 ]; then
+        if ! withdraw_public_gate; then
+            echo "keycloak-converge: public gate withdrawal failed" >&2
+            cleanup_status=70
+        fi
+        if [ "$entry_status" -eq 0 ] && [ "$realm_known" = true ] && \
+            [ "$generation_stale" = false ] && \
+            ! quarantine_with_fresh_authority; then
+            echo "keycloak-converge: final failure could not be quarantined" >&2
+            cleanup_status=70
+        fi
+    fi
+    unset bootstrap_password convergence_password
+    exit "$cleanup_status"
+}
+
+signal_exit() {
+    exit "$1"
+}
+trap cleanup EXIT
+trap 'signal_exit 129' HUP
+trap 'signal_exit 130' INT
+trap 'signal_exit 143' TERM
+
+permanent_user_id=
+bootstrap_user_id=
+witness_state=
+witness_bootstrap_user_id=
+witness_permanent_user_id=
+
+if authenticate "$permanent_config" "$convergence_username" "$convergence_password" \
+    "$authentication_client"; then
+    permanent_authenticated=true
+else
+    permanent_auth_status=$?
+    [ "$permanent_auth_status" -eq 1 ] || exit 70
+fi
+if authenticate "$bootstrap_config" "$bootstrap_username" "$bootstrap_password" admin-cli; then
+    bootstrap_authenticated=true
+else
+    bootstrap_auth_status=$?
+    [ "$bootstrap_auth_status" -eq 1 ] || exit 70
+    if ! prove_bootstrap_refused; then
+        echo "keycloak-converge: bootstrap authority state was inconclusive" >&2
+        exit 69
+    fi
+fi
+[ "$permanent_authenticated" = true ] || [ "$bootstrap_authenticated" = true ] || {
+    echo "keycloak-converge: no convergence authority could authenticate" >&2
+    exit 69
+}
+
+authority_config=$permanent_config
+[ "$bootstrap_authenticated" = true ] && authority_config=$bootstrap_config
+realm_json=$state_dir/realm.json
+realm_was_open=false
+if try_admin_to_file "$authority_config" "$realm_json" get "realms/$realm"; then
+    realm_known=true
+    if try_project_quiet realm-open-state realm-state "$realm_json" true; then
+        realm_was_open=true
+    elif ! project_quiet realm-closed-state realm-state "$realm_json" false; then
+        exit 70
+    fi
+else
+    [ "$bootstrap_authenticated" = true ] || {
+        echo "keycloak-converge: missing realm cannot be recreated by scoped authority" >&2
+        exit 70
+    }
+    if admin_quiet "$bootstrap_config" realm-create create realms \
+        -s "realm=$realm" -s enabled=false; then
+        realm_known=true
+    fi
+    admin_to_file "$bootstrap_config" "$realm_json" realm-create-read \
+        get "realms/$realm"
+    realm_known=true
+    project_quiet realm-created-closed realm-state "$realm_json" false
+fi
+
+read_witness_state "$realm_json" || {
+    echo "keycloak-converge: bootstrap retirement witness was refused" >&2
+    exit 70
+}
+if [ "$bootstrap_authenticated" = false ]; then
+    [ "$witness_state" = complete ] || {
+        echo "keycloak-converge: bootstrap retirement requires offline operator recovery" >&2
+        exit 70
+    }
+    bootstrap_user_id=$witness_bootstrap_user_id
+    permanent_user_id=$witness_permanent_user_id
+    if try_prove_scoped_authority \
+        "$permanent_config" "$permanent_user_id" retired; then
+        permanent_authority_valid=true
+    else
+        echo "keycloak-converge: scoped convergence authority was refused at stage $scoped_authority_stage" >&2
+        exit 70
+    fi
+fi
+
+query_client_id() {
+    query_config=$1
+    query_realm=$2
+    query_name=$3
+    query_file=$state_dir/client-query.json
+    admin_to_file "$query_config" "$query_file" client-query get clients \
+        -r "$query_realm" -q "clientId=$query_name"
+    projection_value "$query_file" client-id client "$query_name"
+}
+
+query_user_id() {
+    query_config=$1
+    query_name=$2
+    query_file=$state_dir/user-query.json
+    admin_to_file "$query_config" "$query_file" user-query get users -r master \
+        -q "username=$query_name" -q exact=false
+    projection_value "$query_file" user-id user "$query_name"
+}
+
+reconcile_permanent_groups() {
+    group_batch=1
+    while [ "$group_batch" -le 16 ]; do
+        admin_to_file "$bootstrap_config" "$state_dir/permanent-groups.json" \
+            permanent-groups-read get "users/$permanent_user_id/groups" -r master \
+            -q first=0 -q max=100 -q briefRepresentation=true
+        project_to_file "$state_dir/permanent-group-ids.out" permanent-group-ids \
+            group-ids "$state_dir/permanent-groups.json"
+        group_seen=false
+        while IFS= read -r group_entry; do
+            [ -n "$group_entry" ] || continue
+            case "$group_entry" in
+                group=*) group_id=${group_entry#group=} ;;
+                *) exit 70 ;;
+            esac
+            is_uuid "$group_id" || exit 70
+            group_seen=true
+            admin_quiet "$bootstrap_config" permanent-group-remove \
+                delete "users/$permanent_user_id/groups/$group_id" -r master
+        done < "$state_dir/permanent-group-ids.out"
+        [ "$group_seen" = true ] || break
+        group_batch=$((group_batch + 1))
+    done
+    [ "$group_batch" -le 16 ] || return 1
+    admin_to_file "$bootstrap_config" "$state_dir/permanent-groups-verify.json" \
+        permanent-groups-verify-read get "users/$permanent_user_id/groups" \
+        -r master -q first=0 -q max=1 -q briefRepresentation=true
+    project_quiet permanent-groups-empty empty-array \
+        "$state_dir/permanent-groups-verify.json"
+}
+
+query_group_projection() {
+    query_config=$1
+    query_mode=$2
+    query_file=$state_dir/group-query.json
+    admin_to_file "$query_config" "$query_file" group-query get groups -r "$realm" \
+        -q search=synveda-admins -q exact=false -q briefRepresentation=false
+    projection_value "$query_file" "$query_mode" group
+}
+
+try_complete_projection() {
+    complete_config=$1
+    complete_bootstrap_user_id=$bootstrap_user_id
+    complete_permanent_user_id=$permanent_user_id
+    try_admin_to_file "$complete_config" "$state_dir/complete-realm.json" \
+        get "realms/$realm" || return
+    try_project_quiet complete-realm realm "$state_dir/complete-realm.json" true \
+        "$ssl_value" || return
+    read_witness_state "$state_dir/complete-realm.json" || return
+    [ "$witness_state" = complete ] && \
+        [ "$witness_bootstrap_user_id" = "$complete_bootstrap_user_id" ] && \
+        [ "$witness_permanent_user_id" = "$complete_permanent_user_id" ] || return
+
+    try_admin_to_file "$complete_config" "$state_dir/complete-client-query.json" \
+        get clients -r "$realm" -q "clientId=$client" || return
+    try_project_to_file "$state_dir/complete-client-id.out" client-id \
+        "$state_dir/complete-client-query.json" "$client" || return
+    complete_line=
+    exec 3< "$state_dir/complete-client-id.out"
+    IFS= read -r complete_line <&3 || [ -n "$complete_line" ]
+    if IFS= read -r complete_extra <&3; then
+        exec 3<&-
+        return 1
+    fi
+    exec 3<&-
+    case "$complete_line" in
+        client=*) complete_client_id=${complete_line#client=} ;;
+        *) return 1 ;;
+    esac
+    is_uuid "$complete_client_id" || return
+    try_admin_to_file "$complete_config" "$state_dir/complete-client.json" \
+        get "clients/$complete_client_id" -r "$realm" || return
+    try_project_quiet complete-client client "$state_dir/complete-client.json" \
+        "$public_app_url" || return
+    try_admin_to_file "$complete_config" "$state_dir/complete-mappers.json" \
+        get "clients/$complete_client_id/protocol-mappers/models" -r "$realm" || return
+    try_project_quiet complete-mappers mappers "$state_dir/complete-mappers.json" || return
+    try_admin_to_file "$complete_config" "$state_dir/complete-groups.json" \
+        get groups -r "$realm" -q search=synveda-admins -q exact=false \
+        -q briefRepresentation=false || return
+    try_project_quiet complete-group group "$state_dir/complete-groups.json" || return
+    try_prove_scoped_authority "$complete_config" \
+        "$complete_permanent_user_id" retired || return
+}
+
+require_current_generation_or_exit
+if [ "$realm_was_open" = true ] && \
+    [ "$permanent_authority_valid" = true ] && \
+    [ "$bootstrap_authenticated" = false ] && \
+    try_complete_projection "$permanent_config"; then
+    require_current_generation_or_exit
+    publish_gate_on_exit=true
+    exit 0
+fi
+
+# Every repair starts closed. Cleanup repeats this mutation on any failure.
+require_current_generation_or_exit
+admin_quiet "$authority_config" realm-disable update "realms/$realm" -s enabled=false
+admin_to_file "$authority_config" "$realm_json" realm-disabled-read \
+    get "realms/$realm"
+project_quiet realm-disabled realm-state "$realm_json" false
+realm_was_open=false
+
+if [ "$bootstrap_authenticated" = true ]; then
+    [ "$witness_state" != complete ] || {
+        echo "keycloak-converge: bootstrap retirement witness contradicted authentication" >&2
+        exit 70
+    }
+    bootstrap_user_id=$(query_user_id "$bootstrap_config" "$bootstrap_username")
+    is_uuid "$bootstrap_user_id" || exit 70
+    permanent_user_id=$(query_user_id "$bootstrap_config" "$convergence_username")
+    if [ "$permanent_user_id" = missing ]; then
+        [ "$witness_state" = absent ] || {
+            echo "keycloak-converge: pending bootstrap retirement identity was refused" >&2
+            exit 70
+        }
+        admin_quiet "$bootstrap_config" permanent-user-create create users -r master \
+            -s "username=$convergence_username" -s enabled=true \
+            -s emailVerified=false -s 'requiredActions=[]'
+        permanent_user_id=$(query_user_id "$bootstrap_config" "$convergence_username")
+    fi
+    is_uuid "$permanent_user_id" || exit 70
+    if [ "$witness_state" = pending ]; then
+        [ "$witness_bootstrap_user_id" = "$bootstrap_user_id" ] && \
+            [ "$witness_permanent_user_id" = "$permanent_user_id" ] || {
+            echo "keycloak-converge: pending bootstrap retirement identity was refused" >&2
+            exit 70
+        }
+    fi
+    admin_quiet "$bootstrap_config" permanent-user-update \
+        update "users/$permanent_user_id" -r master \
+        -s "username=$convergence_username" -s enabled=true \
+        -s emailVerified=false -s 'requiredActions=[]'
+
+    KC_CLI_PASSWORD=$convergence_password
+    export KC_CLI_PASSWORD
+    if ! admin_quiet "$bootstrap_config" permanent-password set-password -r master \
+        --userid "$permanent_user_id"; then
+        unset KC_CLI_PASSWORD
+        exit 70
+    fi
+    unset KC_CLI_PASSWORD
+
+    reconcile_permanent_groups
+
+    admin_to_file "$bootstrap_config" "$state_dir/role-mappings.json" role-mappings-read \
+        get "users/$permanent_user_id/role-mappings" -r master
+    project_to_file "$state_dir/role-mapping-ids.out" role-mapping-ids \
+        role-mapping-ids "$state_dir/role-mappings.json"
+    while IFS= read -r role_mapping; do
+        [ -n "$role_mapping" ] || continue
+        case "$role_mapping" in
+            realm=*)
+                role_id=${role_mapping#realm=}
+                is_uuid "$role_id" || exit 70
+                admin_quiet "$bootstrap_config" realm-role-remove remove-roles \
+                    -r master --uid "$permanent_user_id" --roleid "$role_id"
+                ;;
+            client=*:*)
+                role_pair=${role_mapping#client=}
+                role_client_id=${role_pair%%:*}
+                role_id=${role_pair#*:}
+                is_uuid "$role_client_id" && is_uuid "$role_id" || exit 70
+                admin_quiet "$bootstrap_config" client-role-remove remove-roles \
+                    -r master --uid "$permanent_user_id" --cid "$role_client_id" \
+                    --roleid "$role_id"
+                ;;
+            *) exit 70 ;;
+        esac
+    done < "$state_dir/role-mapping-ids.out"
+
+    admin_quiet "$bootstrap_config" convergence-roles-add add-roles -r master \
+        --uid "$permanent_user_id" --cclientid "$convergence_client" \
+        --rolename manage-realm --rolename manage-clients --rolename manage-users
+    admin_quiet "$bootstrap_config" convergence-audit-role-add add-roles -r master \
+        --uid "$permanent_user_id" --cclientid master-realm \
+        --rolename view-users
+    prove_exact_permanent_authority "$bootstrap_config" "$permanent_user_id"
+
+    authenticate "$permanent_config" "$convergence_username" "$convergence_password" \
+        "$authentication_client" || {
+        echo "keycloak-converge: scoped convergence identity could not authenticate" >&2
+        exit 70
+    }
+    permanent_authenticated=true
+    prove_scoped_authority \
+        "$permanent_config" "$permanent_user_id" "$bootstrap_user_id"
+    permanent_authority_valid=true
+
+    admin_to_file "$bootstrap_config" "$realm_json" witness-source-read \
+        get "realms/$realm"
+    write_realm_witness "$bootstrap_config" pending "$realm_json" \
+        "$bootstrap_user_id" "$permanent_user_id" || {
+        echo "keycloak-converge: pending bootstrap retirement witness failed" >&2
+        exit 70
+    }
+    # The exact-ID DELETE response is the retirement transition proof. After
+    # the 204 Keycloak intentionally invalidates this user's bearer token, so
+    # continued absence is bounded by the isolated database/operator boundary.
+    project_quiet bootstrap-user-delete admin-bootstrap-delete \
+        "$bootstrap_config" "$bootstrap_user_id"
+    close_admin_session "$bootstrap_config" "$state_dir" || {
+        echo "keycloak-converge: bootstrap administrative session closure failed" >&2
+        exit 70
+    }
+    rm -f -- "$bootstrap_config"
+    bootstrap_authenticated=false
+    if authenticate "$state_dir/bootstrap-recheck.config" \
+        "$bootstrap_username" "$bootstrap_password" admin-cli; then
+        echo "keycloak-converge: bootstrap administrator remained usable" >&2
+        exit 70
+    else
+        bootstrap_recheck_status=$?
+        [ "$bootstrap_recheck_status" -eq 1 ] || exit 70
+    fi
+    prove_bootstrap_refused || {
+        echo "keycloak-converge: bootstrap retirement was inconclusive" >&2
+        exit 70
+    }
+    prove_scoped_authority "$permanent_config" "$permanent_user_id" retired
+    admin_to_file "$permanent_config" "$realm_json" retirement-target-read \
+        get "realms/$realm"
+    write_realm_witness "$permanent_config" complete "$realm_json" \
+        "$bootstrap_user_id" "$permanent_user_id" || {
+        echo "keycloak-converge: bootstrap retirement completion failed" >&2
+        exit 70
+    }
+    prove_scoped_authority "$permanent_config" "$permanent_user_id" retired
+    unset bootstrap_password
+else
+    [ "$permanent_authority_valid" = true ] || {
+        echo "keycloak-converge: scoped convergence authority was refused at stage $scoped_authority_stage" >&2
+        exit 70
+    }
+fi
+
+authority_config=$permanent_config
+admin_quiet "$authority_config" realm-update update "realms/$realm" \
+    -s enabled=false \
+    -s "sslRequired=$ssl_value" \
+    -s registrationAllowed=false \
+    -s registrationEmailAsUsername=false \
+    -s rememberMe=false \
+    -s verifyEmail=false \
+    -s resetPasswordAllowed=false \
+    -s editUsernameAllowed=false \
+    -s loginWithEmailAllowed=true \
+    -s duplicateEmailsAllowed=false \
+    -s bruteForceProtected=true \
+    -s permanentLockout=false \
+    -s maxFailureWaitSeconds=900 \
+    -s minimumQuickLoginWaitSeconds=60 \
+    -s waitIncrementSeconds=60 \
+    -s quickLoginCheckMilliSeconds=1000 \
+    -s maxDeltaTimeSeconds=43200 \
+    -s failureFactor=5 \
+    -s accessTokenLifespan=300 \
+    -s ssoSessionIdleTimeout=1800 \
+    -s ssoSessionMaxLifespan=28800 \
+    -s revokeRefreshToken=true \
+    -s refreshTokenMaxReuse=0 \
+    -s defaultSignatureAlgorithm=RS256 \
+    -s eventsEnabled=true \
+    -s eventsExpiration=604800 \
+    -s adminEventsEnabled=true \
+    -s adminEventsDetailsEnabled=false
+
+client_id=$(query_client_id "$authority_config" "$realm" "$client")
+if [ "$client_id" = missing ]; then
+    admin_quiet "$authority_config" client-create create clients -r "$realm" \
+        -s "clientId=$client" -s enabled=false -s protocol=openid-connect
+    client_id=$(query_client_id "$authority_config" "$realm" "$client")
+fi
+is_uuid "$client_id" || exit 70
+
+redirect_uri=$public_app_url/auth/callback
+admin_quiet "$authority_config" client-update update "clients/$client_id" -r "$realm" \
+    -s "clientId=$client" \
+    -s enabled=true \
+    -s protocol=openid-connect \
+    -s publicClient=true \
+    -s bearerOnly=false \
+    -s standardFlowEnabled=true \
+    -s implicitFlowEnabled=false \
+    -s directAccessGrantsEnabled=false \
+    -s serviceAccountsEnabled=false \
+    -s authorizationServicesEnabled=false \
+    -s consentRequired=false \
+    -s fullScopeAllowed=false \
+    -s frontchannelLogout=true \
+    -s "rootUrl=\"$public_app_url\"" \
+    -s "baseUrl=\"$public_app_url/console/\"" \
+    -s "redirectUris=[\"$redirect_uri\"]" \
+    -s "webOrigins=[\"$public_app_url\"]" \
+    -s 'attributes={"pkce.code.challenge.method":"S256","use.refresh.tokens":"true","client_credentials.use_refresh_token":"false","dpop.bound.access.tokens":"false"}'
+
+reconcile_client_scopes() {
+    scope_kind=$1
+    scope_endpoint="clients/$client_id/$scope_kind-client-scopes"
+    scope_json=$state_dir/$scope_kind-scopes.json
+    scope_report=$state_dir/$scope_kind-scopes.out
+    admin_to_file "$authority_config" "$scope_json" "$scope_kind-scopes-read" \
+        get "$scope_endpoint" -r "$realm"
+    project_to_file "$scope_report" "$scope_kind-scope-ids" \
+        scope-ids "$scope_json" "$scope_kind"
+    while IFS= read -r scope_entry; do
+        [ -n "$scope_entry" ] || continue
+        case "$scope_entry" in
+            extra=*)
+                scope_id=${scope_entry#extra=}
+                is_uuid "$scope_id" || exit 70
+                admin_quiet "$authority_config" "$scope_kind-scope-delete" \
+                    delete "$scope_endpoint/$scope_id" -r "$realm"
+                ;;
+            profile=missing|email=missing)
+                scope_name=${scope_entry%=missing}
+                admin_to_file "$authority_config" "$state_dir/global-scopes.json" \
+                    global-scopes-read get client-scopes -r "$realm"
+                scope_id=$(projection_value "$state_dir/global-scopes.json" \
+                    scope-id scope "$scope_name")
+                is_uuid "$scope_id" || exit 70
+                admin_quiet "$authority_config" "$scope_kind-scope-add" \
+                    update "$scope_endpoint/$scope_id" -r "$realm" -n
+                ;;
+            profile=*|email=*)
+                scope_id=${scope_entry#*=}
+                is_uuid "$scope_id" || exit 70
+                ;;
+            *) exit 70 ;;
+        esac
+    done < "$scope_report"
+
+    admin_to_file "$authority_config" "$scope_json" "$scope_kind-scopes-verify-read" \
+        get "$scope_endpoint" -r "$realm"
+    project_to_file "$scope_report" "$scope_kind-scopes-verify" \
+        scope-ids "$scope_json" "$scope_kind"
+    profile_seen=false
+    email_seen=false
+    while IFS= read -r scope_entry; do
+        [ -n "$scope_entry" ] || continue
+        case "$scope_kind:$scope_entry" in
+            default:profile=*)
+                scope_id=${scope_entry#profile=}
+                is_uuid "$scope_id" || exit 70
+                profile_seen=true
+                ;;
+            default:email=*)
+                scope_id=${scope_entry#email=}
+                is_uuid "$scope_id" || exit 70
+                email_seen=true
+                ;;
+            *) exit 70 ;;
+        esac
+    done < "$scope_report"
+    if [ "$scope_kind" = default ]; then
+        [ "$profile_seen" = true ] && [ "$email_seen" = true ] || exit 70
+    fi
+}
+
+reconcile_client_scopes default
+reconcile_client_scopes optional
+
+admin_to_file "$authority_config" "$state_dir/mappers.json" mapper-read \
+    get "clients/$client_id/protocol-mappers/models" -r "$realm"
+project_to_file "$state_dir/mapper-ids.out" mapper-ids \
+    mapper-ids "$state_dir/mappers.json"
+audience_id=
+groups_id=
+while IFS= read -r mapper_entry; do
+    case "$mapper_entry" in
+        audience=missing) audience_id=missing ;;
+        audience=*)
+            audience_id=${mapper_entry#audience=}
+            is_uuid "$audience_id" || exit 70
+            ;;
+        groups=missing) groups_id=missing ;;
+        groups=*)
+            groups_id=${mapper_entry#groups=}
+            is_uuid "$groups_id" || exit 70
+            ;;
+        extra=*)
+            extra_id=${mapper_entry#extra=}
+            is_uuid "$extra_id" || exit 70
+            admin_quiet "$authority_config" mapper-extra-delete delete \
+                "clients/$client_id/protocol-mappers/models/$extra_id" -r "$realm"
+            ;;
+        *) exit 70 ;;
+    esac
+done < "$state_dir/mapper-ids.out"
+[ -n "$audience_id" ] && [ -n "$groups_id" ] || exit 70
+
+if [ "$audience_id" = missing ]; then
+    admin_quiet "$authority_config" audience-mapper-create create \
+        "clients/$client_id/protocol-mappers/models" -r "$realm" \
+        -f /opt/keycloak/conf/synveda-audience-mapper.json
+else
+    admin_quiet "$authority_config" audience-mapper-update update \
+        "clients/$client_id/protocol-mappers/models/$audience_id" -r "$realm" \
+        -s name=synveda-audience -s protocol=openid-connect \
+        -s protocolMapper=oidc-audience-mapper -s consentRequired=false \
+        -s 'config={"included.custom.audience":"synveda-api","id.token.claim":"false","access.token.claim":"true","userinfo.token.claim":"false","introspection.token.claim":"false"}'
+fi
+if [ "$groups_id" = missing ]; then
+    admin_quiet "$authority_config" groups-mapper-create create \
+        "clients/$client_id/protocol-mappers/models" -r "$realm" \
+        -f /opt/keycloak/conf/synveda-groups-mapper.json
+else
+    admin_quiet "$authority_config" groups-mapper-update update \
+        "clients/$client_id/protocol-mappers/models/$groups_id" -r "$realm" \
+        -s name=synveda-groups -s protocol=openid-connect \
+        -s protocolMapper=oidc-group-membership-mapper -s consentRequired=false \
+        -s 'config={"claim.name":"groups","full.path":"false","id.token.claim":"true","access.token.claim":"true","userinfo.token.claim":"false","introspection.token.claim":"false"}'
+fi
+
+admin_to_file "$authority_config" "$state_dir/mappers-verify.json" mapper-verify-read \
+    get "clients/$client_id/protocol-mappers/models" -r "$realm"
+project_quiet mapper-verify mappers "$state_dir/mappers-verify.json"
+
+group_id=$(query_group_projection "$authority_config" group-id)
+if [ "$group_id" = missing ]; then
+    admin_quiet "$authority_config" group-create create groups -r "$realm" \
+        -s name=synveda-admins
+    group_id=$(query_group_projection "$authority_config" group-id)
+fi
+is_uuid "$group_id" || exit 70
+admin_quiet "$authority_config" group-update update "groups/$group_id" -r "$realm" \
+    -s name=synveda-admins -s 'attributes={}'
+verified_group_id=$(query_group_projection "$authority_config" group)
+[ "$verified_group_id" = "$group_id" ] || exit 70
+
+admin_to_file "$authority_config" "$realm_json" closed-realm-read get "realms/$realm"
+project_quiet closed-realm realm "$realm_json" false "$ssl_value"
+admin_to_file "$authority_config" "$state_dir/client-verify.json" client-verify-read \
+    get "clients/$client_id" -r "$realm"
+project_quiet client-verify client "$state_dir/client-verify.json" "$public_app_url"
+prove_scoped_authority "$permanent_config" "$permanent_user_id" retired
+
+# This is deliberately the only mutation that opens authentication.
+require_current_generation_or_exit
+admin_quiet "$authority_config" realm-enable update "realms/$realm" -s enabled=true
+admin_to_file "$authority_config" "$realm_json" open-realm-read get "realms/$realm"
+project_quiet open-realm realm "$realm_json" true "$ssl_value"
+try_complete_projection "$authority_config" || {
+    echo "keycloak-converge: open projection was refused" >&2
+    exit 70
+}
+require_current_generation_or_exit
+
+publish_gate_on_exit=true

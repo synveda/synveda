@@ -7,12 +7,10 @@
 //!
 //! ## Why the database rather than the volume
 //!
-//! The single-node profile's Postgres holds more than this product's schema:
-//! Temporal's `temporal` and `temporal_visibility` databases live in the same
-//! `pg-data` volume (`deploy/compose/docker-compose.yml`). Removing the volume
-//! would be the blunt version of this and would take those with it, so what
-//! this does is `DROP DATABASE` — the smallest thing that leaves nothing of
-//! the old epoch behind and touches nothing that was never ours.
+//! A single PostgreSQL server can host separate Synveda and identity-provider
+//! databases. Removing its volume would destroy every database in that recovery
+//! unit, so this command uses `DROP DATABASE` — the smallest operation that
+//! leaves nothing of the old Synveda epoch behind and touches no peer database.
 //!
 //! ## The one place this crate builds SQL from a string
 //!

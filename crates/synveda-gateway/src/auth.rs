@@ -28,7 +28,9 @@ use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Json, Redirect, Response};
 use chrono::{Duration, Utc};
 use serde::{Deserialize, Serialize};
-use synveda_identity::{CliHandoff, LoginDestination};
+use synveda_identity::{
+    CliHandoff, ConsoleLoginBinding, LoginDestination, validate_cli_redirect_uri,
+};
 use synveda_types::{Error, IdentityId, ScopeId, Tenant};
 
 use crate::app::AppState;
@@ -50,6 +52,9 @@ pub const CONSOLE_SESSIONS_TOTAL: &str = "synveda_console_sessions_total";
 /// from this origin, and a login that redirects wherever it is told is an
 /// open redirector with an audience.
 const CONSOLE_HOME: &str = "/console/";
+
+/// The browser-correlation cookie expires with the in-memory pending login.
+const PENDING_LOGIN_MAX_SECS: i64 = 10 * 60;
 
 /// The console session's hard cap — 12 hours, one working day. A refresh
 /// token an IdP never rotates would otherwise make the session immortal;
@@ -171,9 +176,22 @@ pub async fn login(State(state): State<AppState>, Query(params): Query<LoginPara
     let Some(flow) = &state.login else {
         return not_configured();
     };
+    let mut console_correlation_cookie = None;
     let destination = match (params.cli_redirect_uri, params.cli_state, params.console) {
         (None, None, false) => LoginDestination::Json,
-        (None, None, true) => LoginDestination::Console,
+        (None, None, true) => {
+            let correlation = match synveda_identity::console::mint() {
+                Ok(correlation) => correlation,
+                Err(error) => return private_response(ApiError(error).into_response()),
+            };
+            let cookie = match login_cookie_header(&correlation.secret, PENDING_LOGIN_MAX_SECS) {
+                Ok(cookie) => cookie,
+                Err(error) => return private_response(ApiError(error).into_response()),
+            };
+            let destination = LoginDestination::Console(ConsoleLoginBinding::new(correlation.hash));
+            console_correlation_cookie = Some(cookie);
+            destination
+        }
         (Some(redirect_uri), Some(cli_state), false) => LoginDestination::Cli(CliHandoff {
             redirect_uri,
             state: cli_state,
@@ -194,17 +212,33 @@ pub async fn login(State(state): State<AppState>, Query(params): Query<LoginPara
             .into_response();
         }
     };
-    let is_cli = matches!(destination, LoginDestination::Cli(_));
+    let cli_handoff = match &destination {
+        LoginDestination::Cli(handoff) => {
+            if let Err(error) = validate_cli_redirect_uri(&handoff.redirect_uri) {
+                return ApiError(error).into_response();
+            }
+            Some(handoff.clone())
+        }
+        _ => None,
+    };
     match flow.begin(params.issuer.as_deref(), destination).await {
         Ok(url) => {
-            if is_cli {
+            if cli_handoff.is_some() {
                 metrics::counter!(CLI_LOGINS_TOTAL, "outcome" => "started").increment(1);
             }
-            Redirect::temporary(&url).into_response()
+            let mut response = Redirect::temporary(&url).into_response();
+            if let Some(cookie) = console_correlation_cookie {
+                response.headers_mut().append(header::SET_COOKIE, cookie);
+            }
+            private_response(response)
         }
         Err(error) => {
-            if is_cli {
-                metrics::counter!(CLI_LOGINS_TOTAL, "outcome" => "rejected").increment(1);
+            if let Some(handoff) = &cli_handoff {
+                return cli_error_redirect(
+                    handoff,
+                    "login_unavailable",
+                    "the gateway could not start the identity-provider login",
+                );
             }
             ApiError(error).into_response()
         }
@@ -217,6 +251,7 @@ pub async fn login(State(state): State<AppState>, Query(params): Query<LoginPara
 #[tracing::instrument(name = "auth.callback", skip_all)]
 pub async fn callback(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Query(params): Query<CallbackParams>,
 ) -> Response {
     let Some(flow) = &state.login else {
@@ -225,10 +260,12 @@ pub async fn callback(
     // Read the CLI's return address before anything consumes the pending
     // login: a login can fail in half a dozen ways below, and all of them
     // have to land back in the terminal, not on a page nobody sees.
+    let presented_correlation = login_correlation_cookie(&headers);
     let destination = params
         .state
         .as_deref()
-        .and_then(|login_state| flow.peek_destination(login_state));
+        .and_then(|login_state| flow.peek_destination(login_state, presented_correlation));
+    let matched_console = matches!(destination, Some(LoginDestination::Console(_)));
     let refuse = |error: Error| match &destination {
         Some(LoginDestination::Cli(handoff)) => cli_error_redirect(
             handoff,
@@ -238,47 +275,65 @@ pub async fn callback(
         // A console login lands back in the console, which can say so in
         // its own words. The classification rides the query string; the
         // error itself never does, on `caller_facing`'s usual rule.
-        Some(LoginDestination::Console) => console_error_redirect(&error),
+        Some(LoginDestination::Console(_)) => console_error_redirect(&error),
         _ => ApiError(error).into_response(),
     };
 
-    if let Some(error) = params.error {
-        // The IdP refused (user denied, policy, ...). The description is
-        // trace detail; the caller gets the classification.
+    if let Some(error) = params.error.as_deref() {
+        // Both fields are an untrusted browser/IdP-controlled content
+        // channel. Record only their presence; callers receive a closed
+        // classification.
         tracing::debug!(
-            error,
-            description = params.error_description.as_deref().unwrap_or_default(),
+            has_error = !error.is_empty(),
+            has_description = params.error_description.is_some(),
             "authorization error returned by the IdP"
         );
         // Nothing will complete this login; do not leave it parked for the
         // rest of its TTL.
-        if let Some(login_state) = &params.state {
-            flow.abandon(login_state);
-        }
-        return refuse(Error::Unauthenticated {
-            message: format!("the identity provider reported: {error}"),
-        });
+        let consumed = params
+            .state
+            .as_deref()
+            .is_some_and(|login_state| flow.abandon(login_state, presented_correlation));
+        return finish_callback(
+            refuse(Error::Unauthenticated {
+                message: "the identity provider rejected the authorization request".to_owned(),
+            }),
+            matched_console && consumed,
+        );
     }
-    let (Some(code), Some(login_state)) = (params.code, params.state) else {
-        return refuse(Error::Invalid {
-            message: "callback requires code and state".to_owned(),
-        });
+    let (Some(code), Some(login_state)) = (params.code.as_deref(), params.state.as_deref()) else {
+        let consumed = params
+            .state
+            .as_deref()
+            .is_some_and(|login_state| flow.abandon(login_state, presented_correlation));
+        return finish_callback(
+            refuse(Error::Invalid {
+                message: "callback requires code and state".to_owned(),
+            }),
+            matched_console && consumed,
+        );
     };
-    let session = match flow.complete(&login_state, &code).await {
+    let session = match flow
+        .complete(login_state, code, presented_correlation)
+        .await
+    {
         Ok(session) => session,
-        Err(error) => return refuse(error),
+        Err(error) => return finish_callback(refuse(error), matched_console),
     };
     let context = match tenant::active_tenant(&state, &session.claims).await {
         Ok(context) => context,
-        Err(error) => return refuse(error),
+        Err(error) => return finish_callback(refuse(error), matched_console),
     };
     // A completed login always carries IdP claims (the ID token was just
     // verified); JIT provisioning places first-time subjects (AUTH-2,
     // ADR-0013) and is a read for everyone else.
     let Some(provisioning) = &session.claims.provisioning else {
-        return refuse(Error::Internal {
-            message: "login completed without provisioning claims".to_owned(),
-        });
+        return finish_callback(
+            refuse(Error::Internal {
+                message: "login completed without provisioning claims".to_owned(),
+            }),
+            matched_console,
+        );
     };
     let provisioned = match provision::provision(
         &state,
@@ -289,7 +344,7 @@ pub async fn callback(
     .await
     {
         Ok(provisioned) => provisioned,
-        Err(error) => return refuse(error),
+        Err(error) => return finish_callback(refuse(error), matched_console),
     };
     let completed = SessionResponse {
         subject: session.claims.subject,
@@ -303,9 +358,9 @@ pub async fn callback(
         token_type: session.token_type,
         expires_in: session.expires_in,
     };
-    match session.destination {
+    let response = match session.destination {
         // A browser login reads its session here, as AUTH-1 always has.
-        LoginDestination::Json => Json(completed).into_response(),
+        LoginDestination::Json => private_response(Json(completed).into_response()),
         // A CLI login gets a code, and only a code: the session material
         // waits on the gateway until the CLI redeems it (ADR-0027
         // decision 5).
@@ -318,10 +373,11 @@ pub async fn callback(
         ),
         // A console login gets a cookie, and only a cookie: the tokens
         // stay here (ADR-0056 decisions 2 and 3).
-        LoginDestination::Console => {
+        LoginDestination::Console(_) => {
             open_console_session(&state, completed, session.issuer, session.refresh_token).await
         }
-    }
+    };
+    finish_callback(response, matched_console)
 }
 
 /// Opens a console session: mint a secret, store what it names, set the
@@ -403,7 +459,7 @@ async fn open_console_session(
     match set_cookie_header(&secret.secret, CONSOLE_SESSION_MAX_SECS) {
         Ok(value) => {
             response.headers_mut().insert(header::SET_COOKIE, value);
-            response
+            private_response(response)
         }
         Err(error) => {
             tracing::warn!(%error, "could not render the console session cookie");
@@ -444,10 +500,39 @@ pub async fn console_logout(State(state): State<AppState>, headers: HeaderMap) -
 
 /// Reads the console cookie off a request.
 pub(crate) fn console_cookie(headers: &HeaderMap) -> Option<&str> {
-    headers
-        .get(header::COOKIE)
-        .and_then(|value| value.to_str().ok())
-        .and_then(synveda_identity::console::from_cookie_header)
+    named_cookie(headers, synveda_identity::console::CONSOLE_COOKIE)
+}
+
+/// Reads the short-lived console-login correlation cookie. Missing,
+/// malformed and duplicated values all deliberately collapse to absence.
+fn login_correlation_cookie(headers: &HeaderMap) -> Option<&str> {
+    named_cookie(headers, synveda_identity::console::LOGIN_COOKIE)
+        .filter(|secret| synveda_identity::console::presented_hash(secret).is_some())
+}
+
+/// Reads exactly one named cookie across every Cookie header field.
+///
+/// Selecting a first or last duplicate lets intermediaries and application
+/// code disagree about which credential was presented. Refuse the ambiguous
+/// request instead.
+fn named_cookie<'a>(headers: &'a HeaderMap, expected_name: &str) -> Option<&'a str> {
+    let mut found = None;
+    for raw in headers.get_all(header::COOKIE) {
+        let raw = raw.to_str().ok()?;
+        for pair in raw.split(';') {
+            let Some((name, value)) = pair.split_once('=') else {
+                continue;
+            };
+            if name.trim() != expected_name {
+                continue;
+            }
+            let value = value.trim();
+            if value.is_empty() || found.replace(value).is_some() {
+                return None;
+            }
+        }
+    }
+    found
 }
 
 /// Renders the `Set-Cookie` value. `max_age` of 0 with an empty secret is
@@ -465,6 +550,39 @@ fn set_cookie_header(secret: &str, max_age: i64) -> Result<header::HeaderValue, 
     );
     header::HeaderValue::from_str(&value).map_err(|err| Error::Internal {
         message: format!("cookie value is not a valid header: {err}"),
+    })
+}
+
+/// Renders the short-lived browser binding for a console OIDC round trip.
+fn login_cookie_header(secret: &str, max_age: i64) -> Result<header::HeaderValue, Error> {
+    let value = format!(
+        "{}={secret}; Max-Age={max_age}; Path=/; Secure; HttpOnly; SameSite=Lax",
+        synveda_identity::console::LOGIN_COOKIE,
+    );
+    header::HeaderValue::from_str(&value).map_err(|err| Error::Internal {
+        message: format!("login cookie value is not a valid header: {err}"),
+    })
+}
+
+/// Applies the cache and browser-secret cleanup contract to every callback
+/// response. A matching console callback is terminal even when token
+/// exchange, tenant admission or provisioning later fails.
+fn finish_callback(mut response: Response, clear_login_cookie: bool) -> Response {
+    if clear_login_cookie && let Ok(value) = clear_login_cookie_header() {
+        // `append`, not `insert`: a successful console callback already has
+        // the final session cookie and must carry both fields.
+        response.headers_mut().append(header::SET_COOKIE, value);
+    }
+    private_response(response)
+}
+
+fn clear_login_cookie_header() -> Result<header::HeaderValue, Error> {
+    let value = format!(
+        "{}=; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Path=/; Secure; HttpOnly; SameSite=Lax",
+        synveda_identity::console::LOGIN_COOKIE,
+    );
+    header::HeaderValue::from_str(&value).map_err(|err| Error::Internal {
+        message: format!("login cookie deletion is not a valid header: {err}"),
     })
 }
 
@@ -514,7 +632,7 @@ fn hand_off(
                 urlencode(&code),
                 urlencode(&handoff.state)
             ));
-            Redirect::temporary(&url).into_response()
+            private_response(Redirect::temporary(&url).into_response())
         }
         Err(error) => {
             tracing::warn!(%error, "could not park a CLI login handoff");
@@ -557,7 +675,7 @@ pub async fn cli_exchange(
     match flow.redeem_handoff(&request.code, &request.state) {
         Ok(payload) => {
             metrics::counter!(CLI_LOGINS_TOTAL, "outcome" => "exchanged").increment(1);
-            Json(payload).into_response()
+            private_response(Json(payload).into_response())
         }
         Err(error) => {
             metrics::counter!(CLI_LOGINS_TOTAL, "outcome" => "rejected").increment(1);
@@ -581,13 +699,15 @@ pub async fn refresh(
         .refresh(request.issuer.as_deref(), &request.refresh_token)
         .await
     {
-        Ok(refreshed) => Json(RefreshResponse {
-            access_token: refreshed.access_token,
-            token_type: refreshed.token_type,
-            expires_in: refreshed.expires_in,
-            refresh_token: refreshed.refresh_token,
-        })
-        .into_response(),
+        Ok(refreshed) => private_response(
+            Json(RefreshResponse {
+                access_token: refreshed.access_token,
+                token_type: refreshed.token_type,
+                expires_in: refreshed.expires_in,
+                refresh_token: refreshed.refresh_token,
+            })
+            .into_response(),
+        ),
         Err(error) => ApiError(error).into_response(),
     }
 }
@@ -606,6 +726,19 @@ fn urlencode(value: &str) -> String {
         }
     }
     encoded
+}
+
+/// Token-bearing JSON, one-time handoff redirects and session cookies must
+/// never enter browser, proxy or intermediary caches (OIDC Core §3.1.3.3).
+fn private_response(mut response: Response) -> Response {
+    response.headers_mut().insert(
+        header::CACHE_CONTROL,
+        header::HeaderValue::from_static("no-store"),
+    );
+    response
+        .headers_mut()
+        .insert(header::PRAGMA, header::HeaderValue::from_static("no-cache"));
+    response
 }
 
 fn not_configured() -> Response {

@@ -556,7 +556,7 @@ async fn bind(
         }
     };
     access::create_grant(
-        &mut *tx,
+        &mut tx,
         &access::NewGrant {
             id: GrantId::new(),
             tenant_id: tenant,

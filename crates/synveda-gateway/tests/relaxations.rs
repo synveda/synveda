@@ -147,7 +147,7 @@ async fn administrator(
 ) -> IdentityId {
     let id = provision(tx, tenant, subject).await;
     access::create_grant(
-        &mut *tx,
+        tx,
         &access::NewGrant {
             id: GrantId::new(),
             tenant_id: tenant,

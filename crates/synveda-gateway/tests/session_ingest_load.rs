@@ -41,6 +41,7 @@ use tower::ServiceExt;
 const KEY_PEM: &str = include_str!("fixtures/idp_key_a.pem");
 const KEY_JWK: &str = include_str!("fixtures/idp_key_a.jwk.json");
 const CLIENT_ID: &str = "synveda-test";
+const API_AUDIENCE: &str = "synveda-test-api";
 const SERVICE_AUDIENCE: &str = "synveda-agents";
 const AGENT_CLIENT: &str = "obs-agent";
 const AGENT_SECRET: &str = "obs-agent-secret";
@@ -109,7 +110,7 @@ impl MockIdp {
         self.sign(&json!({
             "iss": self.issuer,
             "sub": subject,
-            "aud": CLIENT_ID,
+            "aud": API_AUDIENCE,
             "iat": now_secs(),
             "exp": now_secs() + 600,
         }))
@@ -122,6 +123,10 @@ async fn discovery(State(idp): State<MockIdp>) -> Json<Value> {
         "authorization_endpoint": format!("{}/authorize", idp.issuer),
         "token_endpoint": format!("{}/token", idp.issuer),
         "jwks_uri": format!("{}/jwks", idp.issuer),
+        "code_challenge_methods_supported": ["S256"],
+        "id_token_signing_alg_values_supported": ["RS256"],
+        "response_types_supported": ["code"],
+        "grant_types_supported": ["authorization_code"],
     }))
 }
 
@@ -166,6 +171,7 @@ async fn token_endpoint(
 fn state(url: &str, issuer: &str, tenant: TenantId) -> AppState {
     let config = format!(
         r#"[{{"issuer":"{issuer}","client_id":"{CLIENT_ID}",
+             "audience":"{API_AUDIENCE}",
              "tenant":{{"static":{{"tenant_id":"{tenant}"}}}},
              "service_audiences":["{SERVICE_AUDIENCE}"]}}]"#
     );

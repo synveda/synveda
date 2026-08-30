@@ -1,0 +1,198 @@
+#!/bin/bash -p
+# Deterministic adversarial checks for the content-free Keycloak projection
+# boundary. This runs while the optimized image is built and ships no fixture.
+unset BASH_ENV ENV CDPATH GLOBIGNORE PS4
+set +x
+set -eu
+umask 077
+
+test_dir=$(mktemp -d /tmp/synveda-keycloak-projection-test.XXXXXX)
+test_name=setup
+cleanup() {
+    status=$?
+    if [ "$status" -ne 0 ]; then
+        echo "Keycloak projection self-test failed at $test_name" >&2
+    fi
+    rm -f -- "$test_dir"/*
+    rmdir -- "$test_dir"
+    exit "$status"
+}
+trap cleanup EXIT HUP INT TERM
+
+run_projection() {
+    /usr/bin/timeout --foreground --signal=TERM --kill-after=1s 5s \
+        /usr/bin/java -cp '/opt/keycloak/bin:/opt/keycloak/lib/lib/main/*' \
+        SynvedaKeycloakProjection "$@"
+}
+
+accept() {
+    expected=$1
+    shift
+    run_projection "$@" > "$test_dir/output" 2> "$test_dir/error"
+    [ ! -s "$test_dir/error" ]
+    actual=
+    if [ -s "$test_dir/output" ]; then
+        actual=$(cat "$test_dir/output")
+    fi
+    [ "$actual" = "$expected" ]
+}
+
+refuse() {
+    if run_projection "$@" > "$test_dir/output" 2> "$test_dir/error"; then
+        return 1
+    fi
+    [ ! -s "$test_dir/output" ]
+    [ "$(cat "$test_dir/error")" = "keycloak-projection: input was refused" ]
+}
+
+printf '%s\n' '{"realm":"synveda","enabled":false}' > "$test_dir/realm.json"
+test_name=realm-state
+accept '' realm-state "$test_dir/realm.json" false
+test_name=target-realm
+accept '' target-realm "$test_dir/realm.json"
+test_name=boolean-refusal
+refuse realm-state "$test_dir/realm.json" flase
+printf '%s\n' '{"realm":"master","enabled":false}' > "$test_dir/master-realm.json"
+test_name=target-realm-refusal
+refuse target-realm "$test_dir/master-realm.json"
+
+test_name=strict-json
+printf '%s\n' '{"realm":"synveda","realm":"other","enabled":false}' \
+    > "$test_dir/duplicate.json"
+refuse realm-state "$test_dir/duplicate.json" false
+printf '%s\n' '{"realm":"synveda","enabled":false} {}' > "$test_dir/trailing.json"
+refuse realm-state "$test_dir/trailing.json" false
+
+fixture_signature=AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQ
+valid_admin_payload=eyJhenAiOiJhZG1pbi1jbGkiLCJleHAiOjIwMDAwMDAwMDAsImlhdCI6MTAwMDAwMDAwMCwiaXNzIjoiaHR0cDovL2tleWNsb2FrOjgwODAvcmVhbG1zL21hc3RlciIsImp0aSI6ImZpeHR1cmUiLCJzY29wZSI6ImVtYWlsIHByb2ZpbGUiLCJzaWQiOiJmaXh0dXJlIiwidHlwIjoiQmVhcmVyIn0
+printf '{"token":"e30.%s.%s"}\n' "$valid_admin_payload" "$fixture_signature" \
+    > "$test_dir/admin-token.json"
+test_name=admin-token-shape
+accept '' admin-token "$test_dir/admin-token.json"
+scoped_admin_payload=eyJhenAiOiJhZG1pbi1jbGkiLCJleHAiOjIwMDAwMDAwMDAsImlhdCI6MTAwMDAwMDAwMCwiaXNzIjoiaHR0cDovL2tleWNsb2FrOjgwODAvcmVhbG1zL21hc3RlciIsImp0aSI6ImZpeHR1cmUiLCJzY29wZSI6InJvbGVzIiwic2lkIjoiZml4dHVyZSIsInR5cCI6IkJlYXJlciJ9
+printf '{"token":"e30.%s.%s"}\n' "$scoped_admin_payload" "$fixture_signature" \
+    > "$test_dir/scoped-admin-token.json"
+test_name=admin-token-scope-refusal
+refuse admin-token "$test_dir/scoped-admin-token.json"
+
+printf '%s\n' \
+    '[{"id":"00000000-0000-0000-0000-000000000002"},{"id":"00000000-0000-0000-0000-000000000001"}]' \
+    > "$test_dir/groups.json"
+test_name=canonical-output
+accept 'group=00000000-0000-0000-0000-000000000001
+group=00000000-0000-0000-0000-000000000002' group-ids "$test_dir/groups.json"
+printf '%s\n' \
+    '[{"id":"00000000-0000-0000-0000-000000000001"},{"id":"not-a-uuid"}]' \
+    > "$test_dir/partial.json"
+test_name=atomic-output
+refuse group-ids "$test_dir/partial.json"
+
+printf '%s\n' \
+    '{"realm":"synveda","attributes":{"otherAttribute":"kept"}}' \
+    > "$test_dir/witness.json"
+test_name=witness-patch
+accept '{"attributes":{"otherAttribute":"kept","synvedaBootstrapRetirementState":"pending","synvedaBootstrapUserId":"00000000-0000-0000-0000-000000000001","synvedaConvergenceUserId":"00000000-0000-0000-0000-000000000002","synvedaManagedContract":"cpr45-keycloak-realm-v3"}}' \
+    realm-witness-patch "$test_dir/witness.json" pending \
+    00000000-0000-0000-0000-000000000001 \
+    00000000-0000-0000-0000-000000000002
+printf '%s\n' \
+    '{"realm":"synveda","attributes":{"SynvedaUnexpected":"refuse"}}' \
+    > "$test_dir/unknown-witness.json"
+test_name=witness-namespace
+refuse realm-witness "$test_dir/unknown-witness.json" absent
+printf '%s\n' \
+    '{"realm":"synveda","attributes":{"synvedaManagedContract":"cpr45-keycloak-realm-v3","synvedaBootstrapRetirementState":"complete","synvedaBootstrapUserId":"00000000-0000-0000-0000-000000000001","synvedaConvergenceUserId":"00000000-0000-0000-0000-000000000001"}}' \
+    > "$test_dir/equal-witness.json"
+test_name=witness-distinct-identities
+refuse realm-witness "$test_dir/equal-witness.json" complete
+
+printf '%s\n' \
+    '{"realmMappings":[],"clientMappings":{"synveda-realm":{"id":"00000000-0000-0000-0000-000000000010","client":"synveda-realm","mappings":[{"id":"00000000-0000-0000-0000-000000000011","name":"manage-clients","clientRole":true,"composite":false,"containerId":"00000000-0000-0000-0000-000000000010"},{"id":"00000000-0000-0000-0000-000000000013","name":"manage-realm","clientRole":true,"composite":false,"containerId":"00000000-0000-0000-0000-000000000010"},{"id":"00000000-0000-0000-0000-000000000014","name":"manage-users","clientRole":true,"composite":false,"containerId":"00000000-0000-0000-0000-000000000010"}]},"master-realm":{"id":"00000000-0000-0000-0000-000000000020","client":"master-realm","mappings":[{"id":"00000000-0000-0000-0000-000000000021","name":"view-users","clientRole":true,"composite":true,"containerId":"00000000-0000-0000-0000-000000000020"}]}}}' \
+    > "$test_dir/mapping.json"
+test_name=direct-role-mapping
+mapping_expected='target-client=00000000-0000-0000-0000-000000000010
+audit-client=00000000-0000-0000-0000-000000000020
+audit-role=00000000-0000-0000-0000-000000000021'
+accept "$mapping_expected" direct-role-mapping "$test_dir/mapping.json"
+sed 's/"composite":false/"composite":true/' "$test_dir/mapping.json" \
+    > "$test_dir/composite.json"
+test_name=target-composite-refusal
+refuse direct-role-mapping "$test_dir/composite.json"
+sed 's/"master-realm"/"realm-management"/g' "$test_dir/mapping.json" \
+    > "$test_dir/audit-client.json"
+test_name=audit-client-refusal
+refuse direct-role-mapping "$test_dir/audit-client.json"
+sed 's/"name":"view-users","clientRole":true,"composite":true/"name":"view-users","clientRole":true,"composite":false/' \
+    "$test_dir/mapping.json" > "$test_dir/audit-composite.json"
+test_name=audit-composite-refusal
+refuse direct-role-mapping "$test_dir/audit-composite.json"
+sed 's/"view-users"/"manage-users"/' "$test_dir/mapping.json" \
+    > "$test_dir/audit-role.json"
+test_name=audit-role-refusal
+refuse direct-role-mapping "$test_dir/audit-role.json"
+sed 's/00000000-0000-0000-0000-000000000021/00000000-0000-0000-0000-000000000011/' \
+    "$test_dir/mapping.json" > "$test_dir/direct-role-id-collision.json"
+test_name=direct-role-id-collision
+refuse direct-role-mapping "$test_dir/direct-role-id-collision.json"
+printf '%s\n' \
+    '[{"id":"00000000-0000-0000-0000-000000000021","name":"view-users","clientRole":true,"composite":true,"containerId":"00000000-0000-0000-0000-000000000020"},{"id":"00000000-0000-0000-0000-000000000022","name":"query-users","clientRole":true,"composite":false,"containerId":"00000000-0000-0000-0000-000000000020"},{"id":"00000000-0000-0000-0000-000000000023","name":"query-groups","clientRole":true,"composite":false,"containerId":"00000000-0000-0000-0000-000000000020"}]' \
+    > "$test_dir/audit-effective.json"
+test_name=effective-audit-role
+accept '' effective-audit-role "$test_dir/audit-effective.json" \
+    00000000-0000-0000-0000-000000000020 \
+    00000000-0000-0000-0000-000000000021
+sed 's/,{"id":"00000000-0000-0000-0000-000000000023","name":"query-groups","clientRole":true,"composite":false,"containerId":"00000000-0000-0000-0000-000000000020"}//' \
+    "$test_dir/audit-effective.json" > "$test_dir/audit-missing-child.json"
+test_name=effective-audit-missing-child
+refuse effective-audit-role "$test_dir/audit-missing-child.json" \
+    00000000-0000-0000-0000-000000000020 \
+    00000000-0000-0000-0000-000000000021
+sed 's/]$/,{"id":"00000000-0000-0000-0000-000000000024","name":"manage-users","clientRole":true,"composite":false,"containerId":"00000000-0000-0000-0000-000000000020"}]/' \
+    "$test_dir/audit-effective.json" > "$test_dir/audit-extra-role.json"
+test_name=effective-audit-extra-role
+refuse effective-audit-role "$test_dir/audit-extra-role.json" \
+    00000000-0000-0000-0000-000000000020 \
+    00000000-0000-0000-0000-000000000021
+sed 's/"name":"view-users","clientRole":true,"composite":true/"name":"view-users","clientRole":true,"composite":false/' \
+    "$test_dir/audit-effective.json" > "$test_dir/audit-parent-composite.json"
+test_name=effective-audit-parent-composite
+refuse effective-audit-role "$test_dir/audit-parent-composite.json" \
+    00000000-0000-0000-0000-000000000020 \
+    00000000-0000-0000-0000-000000000021
+sed 's/"name":"query-users","clientRole":true,"composite":false/"name":"query-users","clientRole":true,"composite":true/' \
+    "$test_dir/audit-effective.json" > "$test_dir/audit-child-composite.json"
+test_name=effective-audit-child-composite
+refuse effective-audit-role "$test_dir/audit-child-composite.json" \
+    00000000-0000-0000-0000-000000000020 \
+    00000000-0000-0000-0000-000000000021
+sed 's/00000000-0000-0000-0000-000000000022/00000000-0000-0000-0000-000000000021/' \
+    "$test_dir/audit-effective.json" > "$test_dir/audit-duplicate-id.json"
+test_name=effective-audit-duplicate-id
+refuse effective-audit-role "$test_dir/audit-duplicate-id.json" \
+    00000000-0000-0000-0000-000000000020 \
+    00000000-0000-0000-0000-000000000021
+sed 's/00000000-0000-0000-0000-000000000022/00000000-0000-0000-0000-000000000020/' \
+    "$test_dir/audit-effective.json" > "$test_dir/audit-client-role-collision.json"
+test_name=effective-audit-client-role-collision
+refuse effective-audit-role "$test_dir/audit-client-role-collision.json" \
+    00000000-0000-0000-0000-000000000020 \
+    00000000-0000-0000-0000-000000000021
+sed 's/"containerId":"00000000-0000-0000-0000-000000000020"/"containerId":"00000000-0000-0000-0000-000000000099"/' \
+    "$test_dir/audit-effective.json" > "$test_dir/audit-wrong-container.json"
+test_name=effective-audit-wrong-container
+refuse effective-audit-role "$test_dir/audit-wrong-container.json" \
+    00000000-0000-0000-0000-000000000020 \
+    00000000-0000-0000-0000-000000000021
+printf '%s\n' \
+    '[{"id":"00000000-0000-0000-0000-000000000022","name":"query-users","clientRole":true,"composite":false,"containerId":"00000000-0000-0000-0000-000000000020"}]' \
+    > "$test_dir/audit-query-only.json"
+test_name=effective-audit-query-only
+refuse effective-audit-role "$test_dir/audit-query-only.json" \
+    00000000-0000-0000-0000-000000000020 \
+    00000000-0000-0000-0000-000000000021
+test_name=effective-audit-parent-id-mismatch
+refuse effective-audit-role "$test_dir/audit-effective.json" \
+    00000000-0000-0000-0000-000000000020 \
+    00000000-0000-0000-0000-000000000099
+
+echo "Keycloak projection self-test passed"

@@ -183,7 +183,7 @@ async fn grant(
         .await
         .expect("begin tenant tx");
     access::create_grant(
-        &mut *tx,
+        &mut tx,
         &access::NewGrant {
             id: GrantId::new(),
             tenant_id,
@@ -225,6 +225,7 @@ fn tenant_context(tenant: &Tenant, subject: &str) -> TenantContext {
             tenant_id: tenant.id,
             provisioning: None,
             lifetime: None,
+            credential_class: synveda_identity::CredentialClass::PrimaryBearer,
         },
     }
 }

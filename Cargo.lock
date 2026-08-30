@@ -3714,6 +3714,7 @@ dependencies = [
  "jsonwebtoken",
  "metrics",
  "reqwest",
+ "rsa",
  "serde",
  "serde_json",
  "sha2",

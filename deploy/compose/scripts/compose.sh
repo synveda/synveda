@@ -29,6 +29,7 @@ esac
 
 script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd)
 compose_dir=$(dirname "$script_dir")
+repo_root=$(CDPATH= cd "$compose_dir/../.." && pwd -P)
 docker_bin=${SYNVEDA_DOCKER_BIN:-docker}
 
 runtime=${SYNVEDA_COMPOSE_RUNTIME:-development}
@@ -39,6 +40,17 @@ profiles=${SYNVEDA_COMPOSE_PROFILES:-}
 # The wrapper owns provider/profile/file selection. Prevent Docker-native
 # selector variables and an ambient .env from adding an unvalidated fragment.
 unset COMPOSE_FILE COMPOSE_PROJECT_NAME COMPOSE_PROFILES COMPOSE_ENV_FILES
+unset SYNVEDA_RENDER_PUBLIC_EDGE_SUBNET SYNVEDA_RENDER_PUBLIC_EDGE_GATEWAY \
+    SYNVEDA_RENDER_APP_BACKEND_SUBNET SYNVEDA_RENDER_APP_BACKEND_GATEWAY \
+    SYNVEDA_RENDER_DATA_SUBNET SYNVEDA_RENDER_DATA_GATEWAY \
+    SYNVEDA_RENDER_KEYCLOAK_DATA_SUBNET SYNVEDA_RENDER_KEYCLOAK_DATA_GATEWAY \
+    SYNVEDA_RENDER_KEYCLOAK_MANAGEMENT_SUBNET SYNVEDA_RENDER_KEYCLOAK_MANAGEMENT_GATEWAY \
+    SYNVEDA_RENDER_IDENTITY_SUBNET SYNVEDA_RENDER_IDENTITY_GATEWAY \
+    SYNVEDA_RENDER_IDENTITY_DYNAMIC_RANGE SYNVEDA_RENDER_PROXY_IDENTITY_ADDRESS \
+    SYNVEDA_RENDER_TELEMETRY_SUBNET SYNVEDA_RENDER_TELEMETRY_GATEWAY \
+    SYNVEDA_RENDER_APPLICATION_EGRESS_SUBNET SYNVEDA_RENDER_APPLICATION_EGRESS_GATEWAY \
+    SYNVEDA_RENDER_IDENTITY_EGRESS_SUBNET SYNVEDA_RENDER_IDENTITY_EGRESS_GATEWAY \
+    SYNVEDA_RENDER_TELEMETRY_EGRESS_SUBNET SYNVEDA_RENDER_TELEMETRY_EGRESS_GATEWAY
 export COMPOSE_DISABLE_ENV_FILE=1
 
 case "$runtime" in
@@ -108,7 +120,9 @@ if [ -n "$suffix" ]; then
 fi
 
 app_host=${SYNVEDA_APP_HOST:-app.synveda.test}
-auth_host=${SYNVEDA_AUTH_HOST:-auth.synveda.test}
+if [ "$oidc_mode" = bundled ]; then
+    auth_host=${SYNVEDA_AUTH_HOST:-auth.synveda.test}
+fi
 public_scheme=${SYNVEDA_PUBLIC_SCHEME:-http}
 valid_host() {
     candidate=$1
@@ -135,14 +149,20 @@ valid_host() {
         esac
     done
 }
-valid_host "$app_host" && valid_host "$auth_host" || {
+valid_host "$app_host" || {
     echo "compose: application and identity hostnames must be lower-case DNS names" >&2
     exit 64
 }
-[ "$app_host" != "$auth_host" ] || {
-    echo "compose: application and identity hostnames must differ" >&2
-    exit 64
-}
+if [ "$oidc_mode" = bundled ]; then
+    valid_host "$auth_host" || {
+        echo "compose: application and identity hostnames must be lower-case DNS names" >&2
+        exit 64
+    }
+    [ "$app_host" != "$auth_host" ] || {
+        echo "compose: application and identity hostnames must differ" >&2
+        exit 64
+    }
+fi
 
 case "$runtime" in
     development)
@@ -150,20 +170,32 @@ case "$runtime" in
             echo "compose: development uses explicit HTTP" >&2
             exit 64
         }
-        case "$app_host:$auth_host" in
-            *.test:*.test) ;;
+        case "$app_host" in
+            *.test) ;;
             *) echo "compose: development hostnames must end in .test" >&2; exit 64 ;;
         esac
+        if [ "$oidc_mode" = bundled ]; then
+            case "$auth_host" in
+                *.test) ;;
+                *) echo "compose: development hostnames must end in .test" >&2; exit 64 ;;
+            esac
+        fi
         restart_policy=no
         public_port=${SYNVEDA_DEV_HTTP_PORT:-8080}
-        valid_runtime_id "$public_port" && [ "$public_port" -le 65535 ] || {
-            echo "compose: SYNVEDA_DEV_HTTP_PORT must be a canonical integer from 1 through 65535" >&2
+        valid_runtime_id "$public_port" && [ "$public_port" -ge 1024 ] && \
+            [ "$public_port" -le 65535 ] && [ "$public_port" -ne 8443 ] || {
+            echo "compose: SYNVEDA_DEV_HTTP_PORT must be a canonical integer from 1024 through 65535 except reserved port 8443" >&2
             exit 64
         }
         public_app_url=http://$app_host:$public_port
-        public_auth_url=http://$auth_host:$public_port
-        proxy_http_port=8080
+        # Browser and containers resolve the same issuer authority. Caddy must
+        # therefore listen on the selected public port inside the network too;
+        # host-only port translation would make the issuer unreachable from
+        # the diagnostic, gateway and CLI containers.
+        proxy_http_port=$public_port
         proxy_https_port=8443
+        keycloak_ssl_required=NONE
+        insecure_development_http=true
         runtime_overlay=dev
         caddy_app_config=$compose_dir/configs/caddy/app.dev.caddy
         caddy_identity_config=$compose_dir/configs/caddy/identity.dev.caddy
@@ -173,12 +205,20 @@ case "$runtime" in
             echo "compose: reference mode requires HTTPS" >&2
             exit 64
         }
-        case "$app_host:$auth_host" in
-            *.test:*|*.localhost:*|*:*.test|*:*.localhost)
+        case "$app_host" in
+            *.test|*.localhost)
                 echo "compose: reference hostnames must be operator DNS names" >&2
                 exit 64
                 ;;
         esac
+        if [ "$oidc_mode" = bundled ]; then
+            case "$auth_host" in
+                *.test|*.localhost)
+                    echo "compose: reference hostnames must be operator DNS names" >&2
+                    exit 64
+                    ;;
+            esac
+        fi
         [ "${SYNVEDA_TLS_MODE:-files}" = files ] || {
             echo "compose: this checkpoint accepts reference certificate-file mode only" >&2
             exit 64
@@ -186,21 +226,35 @@ case "$runtime" in
         restart_policy=unless-stopped
         public_port=443
         public_app_url=https://$app_host
-        public_auth_url=https://$auth_host
         proxy_http_port=80
         proxy_https_port=443
+        keycloak_ssl_required=EXTERNAL
+        insecure_development_http=false
         runtime_overlay=reference
         caddy_app_config=$compose_dir/configs/caddy/app.reference.caddy
         caddy_identity_config=$compose_dir/configs/caddy/identity.reference.caddy
         ;;
 esac
 
-identity_subnet=${SYNVEDA_IDENTITY_SUBNET:-172.30.45.0/24}
-proxy_identity_address=${SYNVEDA_PROXY_IDENTITY_ADDRESS:-172.30.45.2}
-case "$identity_subnet" in
-    */24) identity_network=${identity_subnet%/24} ;;
-    *) echo "compose: SYNVEDA_IDENTITY_SUBNET must be a private /24 CIDR" >&2; exit 64 ;;
-esac
+if [ "$oidc_mode" = bundled ]; then
+    case "$runtime" in
+        development) public_auth_url=http://$auth_host:$public_port ;;
+        reference) public_auth_url=https://$auth_host ;;
+    esac
+fi
+
+if [ "$oidc_mode" = external ]; then
+    caddy_identity_config=$compose_dir/configs/caddy/identity.external.caddy
+fi
+
+compose_ipv4_pool_set=${SYNVEDA_COMPOSE_IPV4_POOL+x}
+compose_ipv4_pool=${SYNVEDA_COMPOSE_IPV4_POOL:-172.30.240.0/24}
+if [ "$runtime" = reference ] || [ -n "$suffix" ]; then
+    [ -n "$compose_ipv4_pool_set" ] && [ -n "${SYNVEDA_COMPOSE_IPV4_POOL:-}" ] || {
+        echo "compose: reference and acceptance projects require an explicit SYNVEDA_COMPOSE_IPV4_POOL" >&2
+        exit 64
+    }
+fi
 
 valid_ipv4_octet() {
     case "$1" in
@@ -223,52 +277,68 @@ split_ipv4() {
     ipv4_c=$3
     ipv4_d=$4
 }
-split_ipv4 "$identity_network" || {
-    echo "compose: SYNVEDA_IDENTITY_SUBNET must be a canonical private IPv4 /24 CIDR" >&2
-    exit 64
+validate_private_24() {
+    pool_candidate=$1
+    case "$pool_candidate" in
+        */24) pool_network=${pool_candidate%/24} ;;
+        *) echo "compose: SYNVEDA_COMPOSE_IPV4_POOL must be a private /24 CIDR" >&2; exit 64 ;;
+    esac
+    split_ipv4 "$pool_network" && [ "$ipv4_d" -eq 0 ] || {
+        echo "compose: SYNVEDA_COMPOSE_IPV4_POOL must be a canonical private IPv4 /24 CIDR" >&2
+        exit 64
+    }
+    case "$ipv4_a" in
+        10) ;;
+        172)
+            [ "$ipv4_b" -ge 16 ] && [ "$ipv4_b" -le 31 ] || {
+                echo "compose: SYNVEDA_COMPOSE_IPV4_POOL must be private" >&2
+                exit 64
+            }
+            ;;
+        192)
+            [ "$ipv4_b" -eq 168 ] || {
+                echo "compose: SYNVEDA_COMPOSE_IPV4_POOL must be private" >&2
+                exit 64
+            }
+            ;;
+        *) echo "compose: SYNVEDA_COMPOSE_IPV4_POOL must be private" >&2; exit 64 ;;
+    esac
 }
-network_a=$ipv4_a
-network_b=$ipv4_b
-network_c=$ipv4_c
-network_d=$ipv4_d
-case "$network_a" in
-    10) ;;
-    172)
-        [ "$network_b" -ge 16 ] && [ "$network_b" -le 31 ] || {
-            echo "compose: SYNVEDA_IDENTITY_SUBNET must be private" >&2
-            exit 64
-        }
-        ;;
-    192)
-        [ "$network_b" -eq 168 ] || {
-            echo "compose: SYNVEDA_IDENTITY_SUBNET must be private" >&2
-            exit 64
-        }
-        ;;
-    *) echo "compose: SYNVEDA_IDENTITY_SUBNET must be private" >&2; exit 64 ;;
-esac
-split_ipv4 "$proxy_identity_address" || {
-    echo "compose: SYNVEDA_PROXY_IDENTITY_ADDRESS must be a canonical IPv4 address" >&2
-    exit 64
-}
-proxy_a=$ipv4_a
-proxy_b=$ipv4_b
-proxy_c=$ipv4_c
-proxy_d=$ipv4_d
-[ "$network_d" -eq 0 ] && [ "$network_a" -eq "$proxy_a" ] && \
-    [ "$network_b" -eq "$proxy_b" ] && [ "$network_c" -eq "$proxy_c" ] || {
-    echo "compose: proxy identity address must belong to the configured /24" >&2
-    exit 64
-}
-[ "$proxy_d" -ge 2 ] && [ "$proxy_d" -le 254 ] || {
-    echo "compose: proxy identity address is not a usable /24 member" >&2
-    exit 64
-}
+
+validate_private_24 "$compose_ipv4_pool"
+pool_prefix=$ipv4_a.$ipv4_b.$ipv4_c
+
+# Ten current networks consume fixed /28 slots from one operator-selected /24.
+# The proxy is fixed at identity slot +2 while dynamic identity endpoints are
+# confined to the upper /29, so Docker cannot allocate the trusted address to
+# Keycloak or a one-shot convergence container first.
+identity_subnet=$pool_prefix.0/28
+identity_gateway=$pool_prefix.1
+proxy_identity_address=$pool_prefix.2
+identity_dynamic_range=$pool_prefix.8/29
+public_edge_subnet=$pool_prefix.16/28
+public_edge_gateway=$pool_prefix.17
+app_backend_subnet=$pool_prefix.32/28
+app_backend_gateway=$pool_prefix.33
+synveda_data_subnet=$pool_prefix.48/28
+synveda_data_gateway=$pool_prefix.49
+keycloak_data_subnet=$pool_prefix.64/28
+keycloak_data_gateway=$pool_prefix.65
+keycloak_management_subnet=$pool_prefix.80/28
+keycloak_management_gateway=$pool_prefix.81
+telemetry_subnet=$pool_prefix.96/28
+telemetry_gateway=$pool_prefix.97
+application_egress_subnet=$pool_prefix.112/28
+application_egress_gateway=$pool_prefix.113
+identity_egress_subnet=$pool_prefix.128/28
+identity_egress_gateway=$pool_prefix.129
+telemetry_egress_subnet=$pool_prefix.144/28
+telemetry_egress_gateway=$pool_prefix.145
 
 for setting in DATABASE_URL SYNVEDA_MIGRATOR_DATABASE_URL SYNVEDA_GATEWAY_DATABASE_URL \
     SYNVEDA_WORKER_DATABASE_URL \
     SYNVEDA_KMS_KEY SYNVEDA_KMS_KEY_REF POSTGRES_PASSWORD KC_DB_PASSWORD KC_BOOTSTRAP_ADMIN_USERNAME \
-    KC_BOOTSTRAP_ADMIN_PASSWORD; do
+    KC_BOOTSTRAP_ADMIN_PASSWORD SYNVEDA_KEYCLOAK_CONVERGENCE_PASSWORD; do
     case "$setting" in
         DATABASE_URL) present=${DATABASE_URL+x} ;;
         SYNVEDA_MIGRATOR_DATABASE_URL) present=${SYNVEDA_MIGRATOR_DATABASE_URL+x} ;;
@@ -280,6 +350,7 @@ for setting in DATABASE_URL SYNVEDA_MIGRATOR_DATABASE_URL SYNVEDA_GATEWAY_DATABA
         KC_DB_PASSWORD) present=${KC_DB_PASSWORD+x} ;;
         KC_BOOTSTRAP_ADMIN_USERNAME) present=${KC_BOOTSTRAP_ADMIN_USERNAME+x} ;;
         KC_BOOTSTRAP_ADMIN_PASSWORD) present=${KC_BOOTSTRAP_ADMIN_PASSWORD+x} ;;
+        SYNVEDA_KEYCLOAK_CONVERGENCE_PASSWORD) present=${SYNVEDA_KEYCLOAK_CONVERGENCE_PASSWORD+x} ;;
     esac
     [ -z "${present:-}" ] || {
         echo "compose: direct secret setting $setting is forbidden; use the role-specific file" >&2
@@ -297,7 +368,8 @@ absolute_from_compose() {
 
 secret_dir=$(absolute_from_compose "${SYNVEDA_SECRETS_DIR:-./secrets}")
 issuer_file=$(absolute_from_compose "${SYNVEDA_OIDC_ISSUERS_FILE:-./runtime/issuers.json}")
-database_authority_dir=$(absolute_from_compose "${SYNVEDA_DATABASE_AUTHORITY_DIR:-./runtime/database-authority}")
+database_authority_dir=$(absolute_from_compose "${SYNVEDA_DATABASE_AUTHORITY_DIR:-./runtime/$project/database-authority}")
+keycloak_public_gate_dir=$(absolute_from_compose "${SYNVEDA_KEYCLOAK_PUBLIC_GATE_DIR:-./runtime/$project/keycloak-public-gate}")
 if [ "${SYNVEDA_DATABASE_ROLES_FILE+x}" = x ]; then
     [ -n "$SYNVEDA_DATABASE_ROLES_FILE" ] || {
         echo "compose: SYNVEDA_DATABASE_ROLES_FILE must not be empty" >&2
@@ -313,6 +385,28 @@ else
     database_roles_input=./configs/database/roles.external-oidc.json
 fi
 database_roles_file=$(absolute_from_compose "$database_roles_input")
+reject_sensitive_build_context_path() {
+    candidate=$1
+    allowed_root=$2
+    label=$3
+    case "$candidate" in
+        "$repo_root"|"$repo_root"/*)
+            case "$candidate" in
+                "$allowed_root"|"$allowed_root"/*) ;;
+                *)
+                    echo "compose: $label must be outside the Docker build context or under its ignored Compose root" >&2
+                    exit 78
+                    ;;
+            esac
+            ;;
+    esac
+}
+reject_sensitive_build_context_path "$secret_dir" "$compose_dir/secrets" secret-directory
+reject_sensitive_build_context_path "$issuer_file" "$compose_dir/runtime" issuer-configuration
+if [ "$oidc_mode" = bundled ]; then
+    reject_sensitive_build_context_path "$database_authority_dir" "$compose_dir/runtime" database-authority
+    reject_sensitive_build_context_path "$keycloak_public_gate_dir" "$compose_dir/runtime" keycloak-public-gate
+fi
 mode_of() {
     stat -f '%Lp' "$1" 2>/dev/null || stat -c '%a' "$1" 2>/dev/null
 }
@@ -344,14 +438,38 @@ require_private_directory() {
 }
 require_private_directory "$secret_dir" secret
 secret_dir=$(CDPATH= cd "$secret_dir" && pwd -P)
+reject_sensitive_build_context_path "$secret_dir" "$compose_dir/secrets" secret-directory
+oidc_directory_secret_dir=$secret_dir/oidc-directory
+require_private_directory "$oidc_directory_secret_dir" oidc-directory-secret
+oidc_directory_secret_dir=$(CDPATH= cd "$oidc_directory_secret_dir" && pwd -P)
+reject_sensitive_build_context_path "$oidc_directory_secret_dir" "$compose_dir/secrets" oidc-directory-secret
 if [ "$oidc_mode" = bundled ]; then
     require_private_directory "$database_authority_dir" database-authority
     database_authority_dir=$(CDPATH= cd "$database_authority_dir" && pwd -P)
+    reject_sensitive_build_context_path "$database_authority_dir" "$compose_dir/runtime" database-authority
+    require_private_directory "$keycloak_public_gate_dir" keycloak-public-gate
+    keycloak_public_gate_dir=$(CDPATH= cd "$keycloak_public_gate_dir" && pwd -P)
+    reject_sensitive_build_context_path "$keycloak_public_gate_dir" "$compose_dir/runtime" keycloak-public-gate
+    case "$database_authority_dir" in
+        */"$project"/database-authority) ;;
+        *)
+            echo "compose: database-authority directory must be scoped to project $project" >&2
+            exit 78
+            ;;
+    esac
+    case "$keycloak_public_gate_dir" in
+        */"$project"/keycloak-public-gate) ;;
+        *)
+            echo "compose: keycloak-public-gate directory must be scoped to project $project" >&2
+            exit 78
+            ;;
+    esac
 fi
 issuer_parent=$(dirname "$issuer_file")
 require_private_directory "$issuer_parent" issuer-configuration
 issuer_parent=$(CDPATH= cd "$issuer_parent" && pwd -P)
 issuer_file=$issuer_parent/$(basename "$issuer_file")
+reject_sensitive_build_context_path "$issuer_file" "$compose_dir/runtime" issuer-configuration
 require_private_file() {
     file=$1
     label=$2
@@ -390,6 +508,8 @@ if [ "$oidc_mode" = bundled ]; then
     require_private_file "$secret_dir/keycloak_database_password" keycloak_database_password
     require_private_file "$secret_dir/keycloak_admin_username" keycloak_admin_username
     require_private_file "$secret_dir/keycloak_admin_password" keycloak_admin_password
+    require_private_file "$secret_dir/keycloak_convergence_admin_password" \
+        keycloak_convergence_admin_password
 fi
 if [ "$runtime" = reference ]; then
     require_private_file "$secret_dir/tls_cert" tls_cert
@@ -418,6 +538,47 @@ esac
 database_roles_parent=$(CDPATH= cd "$(dirname "$database_roles_file")" && pwd -P)
 database_roles_file=$database_roles_parent/$(basename "$database_roles_file")
 
+path_is_within() {
+    candidate=$1
+    directory=$2
+    [ "$candidate" = "$directory" ] || case "$candidate" in
+        "$directory"/*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+reject_directory_overlap() {
+    first=$1
+    second=$2
+    label=$3
+    if path_is_within "$first" "$second" || path_is_within "$second" "$first"; then
+        echo "compose: $label directories must not overlap" >&2
+        exit 78
+    fi
+}
+reject_file_in_directory() {
+    file=$1
+    directory=$2
+    label=$3
+    if path_is_within "$file" "$directory"; then
+        echo "compose: $label file must not be inside runtime authority state" >&2
+        exit 78
+    fi
+}
+if [ "$oidc_mode" = bundled ]; then
+    reject_directory_overlap "$secret_dir" "$database_authority_dir" \
+        secret-and-database-authority
+    reject_directory_overlap "$secret_dir" "$keycloak_public_gate_dir" \
+        secret-and-keycloak-public-gate
+    reject_directory_overlap "$database_authority_dir" "$keycloak_public_gate_dir" \
+        database-authority-and-keycloak-public-gate
+    for state_directory in "$database_authority_dir" "$keycloak_public_gate_dir"; do
+        reject_file_in_directory "$issuer_file" "$state_directory" issuer-configuration
+        reject_file_in_directory "$database_roles_file" "$state_directory" database-role-contract
+    done
+fi
+reject_file_in_directory "$issuer_file" "$secret_dir" issuer-configuration
+reject_file_in_directory "$database_roles_file" "$secret_dir" database-role-contract
+
 if [ "$oidc_mode" = bundled ]; then
     oidc_issuer=$public_auth_url/realms/synveda
 else
@@ -430,8 +591,8 @@ else
             ;;
     esac
     case "$oidc_issuer" in
-        *'@'*|*'#'*|*[[:space:]]*)
-            echo "compose: SYNVEDA_OIDC_ISSUER must not contain credentials, whitespace or a fragment" >&2
+        *'@'*|*'?'*|*'#'*|*[[:space:]]*)
+            echo "compose: SYNVEDA_OIDC_ISSUER must not contain credentials, whitespace, a query or a fragment" >&2
             exit 64
             ;;
     esac
@@ -651,14 +812,16 @@ compose_version=$("$docker_bin" compose version --short 2>/dev/null) || {
     echo "compose: Docker Compose is required" >&2
     exit 69
 }
-version_numbers=$(printf '%s\n' "$compose_version" | sed -E 's/^[^0-9]*([0-9]+)\.([0-9]+).*/\1 \2/')
+version_numbers=$(printf '%s\n' "$compose_version" | sed -E 's/^[^0-9]*([0-9]+)\.([0-9]+)\.([0-9]+).*/\1 \2 \3/')
 set -- $version_numbers
-[ "$#" -eq 2 ] || {
+[ "$#" -eq 3 ] || {
     echo "compose: could not parse Docker Compose version" >&2
     exit 69
 }
-if [ "$1" -lt 2 ] || { [ "$1" -eq 2 ] && [ "$2" -lt 24 ]; }; then
-    echo "compose: Docker Compose 2.24 or newer is required" >&2
+if [ "$1" -lt 2 ] || \
+    { [ "$1" -eq 2 ] && [ "$2" -lt 33 ]; } || \
+    { [ "$1" -eq 2 ] && [ "$2" -eq 33 ] && [ "$3" -lt 1 ]; }; then
+    echo "compose: Docker Compose 2.33.1 or newer is required" >&2
     exit 69
 fi
 
@@ -669,11 +832,16 @@ export SYNVEDA_RUNTIME_UID=$runtime_uid
 export SYNVEDA_RUNTIME_GID=$runtime_gid
 export SYNVEDA_COMPOSE_RESTART_POLICY=$restart_policy
 export SYNVEDA_APP_HOST=$app_host
-export SYNVEDA_AUTH_HOST=$auth_host
 export SYNVEDA_PUBLIC_SCHEME=$public_scheme
 export SYNVEDA_PUBLIC_PORT=$public_port
 export SYNVEDA_PUBLIC_APP_URL=$public_app_url
-export SYNVEDA_PUBLIC_AUTH_URL=$public_auth_url
+if [ "$oidc_mode" = bundled ]; then
+    export SYNVEDA_AUTH_HOST=$auth_host
+    export SYNVEDA_PUBLIC_AUTH_URL=$public_auth_url
+else
+    unset SYNVEDA_AUTH_HOST SYNVEDA_PUBLIC_AUTH_URL
+fi
+export SYNVEDA_INSECURE_DEVELOPMENT_HTTP=$insecure_development_http
 export SYNVEDA_OIDC_ISSUER=$oidc_issuer
 export SYNVEDA_POSTGRES_BOOTSTRAP_URL=$postgres_bootstrap_url
 export SYNVEDA_POSTGRES_BUNDLED_CLUSTER=$postgres_bundled_cluster
@@ -683,18 +851,41 @@ export SYNVEDA_DATABASE_EXPECTED_NAME=$database_expected_name
 export SYNVEDA_DEV_HTTP_PORT=$public_port
 export SYNVEDA_PROXY_HTTP_PORT=$proxy_http_port
 export SYNVEDA_PROXY_HTTPS_PORT=$proxy_https_port
-export SYNVEDA_IDENTITY_SUBNET=$identity_subnet
-export SYNVEDA_PROXY_IDENTITY_ADDRESS=$proxy_identity_address
+export SYNVEDA_RENDER_PUBLIC_EDGE_SUBNET=$public_edge_subnet
+export SYNVEDA_RENDER_PUBLIC_EDGE_GATEWAY=$public_edge_gateway
+export SYNVEDA_RENDER_APP_BACKEND_SUBNET=$app_backend_subnet
+export SYNVEDA_RENDER_APP_BACKEND_GATEWAY=$app_backend_gateway
+export SYNVEDA_RENDER_DATA_SUBNET=$synveda_data_subnet
+export SYNVEDA_RENDER_DATA_GATEWAY=$synveda_data_gateway
+export SYNVEDA_RENDER_KEYCLOAK_DATA_SUBNET=$keycloak_data_subnet
+export SYNVEDA_RENDER_KEYCLOAK_DATA_GATEWAY=$keycloak_data_gateway
+export SYNVEDA_RENDER_KEYCLOAK_MANAGEMENT_SUBNET=$keycloak_management_subnet
+export SYNVEDA_RENDER_KEYCLOAK_MANAGEMENT_GATEWAY=$keycloak_management_gateway
+export SYNVEDA_RENDER_IDENTITY_SUBNET=$identity_subnet
+export SYNVEDA_RENDER_IDENTITY_GATEWAY=$identity_gateway
+export SYNVEDA_RENDER_IDENTITY_DYNAMIC_RANGE=$identity_dynamic_range
+export SYNVEDA_RENDER_PROXY_IDENTITY_ADDRESS=$proxy_identity_address
+export SYNVEDA_RENDER_TELEMETRY_SUBNET=$telemetry_subnet
+export SYNVEDA_RENDER_TELEMETRY_GATEWAY=$telemetry_gateway
+export SYNVEDA_RENDER_APPLICATION_EGRESS_SUBNET=$application_egress_subnet
+export SYNVEDA_RENDER_APPLICATION_EGRESS_GATEWAY=$application_egress_gateway
+export SYNVEDA_RENDER_IDENTITY_EGRESS_SUBNET=$identity_egress_subnet
+export SYNVEDA_RENDER_IDENTITY_EGRESS_GATEWAY=$identity_egress_gateway
+export SYNVEDA_RENDER_TELEMETRY_EGRESS_SUBNET=$telemetry_egress_subnet
+export SYNVEDA_RENDER_TELEMETRY_EGRESS_GATEWAY=$telemetry_egress_gateway
 export SYNVEDA_CADDY_APP_CONFIG=$caddy_app_config
 export SYNVEDA_CADDY_IDENTITY_CONFIG=$caddy_identity_config
 export SYNVEDA_SECRETS_DIR=$secret_dir
+export SYNVEDA_OIDC_DIRECTORY_SECRETS_DIR=$oidc_directory_secret_dir
 export SYNVEDA_OIDC_ISSUERS_FILE=$issuer_file
 export SYNVEDA_DATABASE_ROLES_FILE=$database_roles_file
 export SYNVEDA_DATABASE_AUTHORITY_DIR=$database_authority_dir
+export SYNVEDA_KEYCLOAK_PUBLIC_GATE_DIR=$keycloak_public_gate_dir
 export SYNVEDA_PRODUCT_IMAGE=$product_image
 export SYNVEDA_POSTGRES_IMAGE=$postgres_image
 export SYNVEDA_KEYCLOAK_IMAGE=$keycloak_image
 export SYNVEDA_KEYCLOAK_DATABASE_URL=$keycloak_database_url
+export SYNVEDA_KEYCLOAK_SSL_REQUIRED=$keycloak_ssl_required
 export SYNVEDA_CADDY_IMAGE=$caddy_image
 export SYNVEDA_OTEL_COLLECTOR_IMAGE=$otel_image
 

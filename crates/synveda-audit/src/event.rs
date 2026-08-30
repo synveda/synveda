@@ -91,10 +91,11 @@ pub enum AuditAction {
     /// every allowed admin-plane read.
     AuthzDecision,
     /// A verified token named a tenant that refused resolution (suspended).
-    /// Unauthenticated failures are not chain events (ADR-0019 decision 6).
+    /// Unauthenticated failures without both a verified subject and a
+    /// resolvable tenant are not chain events (ADR-0019 decision 6).
     TenantResolutionDenied,
-    /// A service identity's token was refused at the enforcement seam
-    /// (lifetime unknown or over the cap, ADR-0018 decision 5).
+    /// A service token was refused at the identity-admission or lifetime
+    /// enforcement seam (ADR-0018 decision 5).
     TokenRejected,
     /// The RLS backstop denied a statement (TEN-2, ADR-0009) — an internal
     /// isolation invariant broke; always accompanied by an error response.

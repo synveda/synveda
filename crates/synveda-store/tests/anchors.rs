@@ -245,7 +245,7 @@ async fn grant_to(
 ) -> GrantId {
     let mut tx = tenant_fixture::begin(pool, tenant).await;
     let grant = access::create_grant(
-        &mut *tx,
+        &mut tx,
         &access::NewGrant {
             id: GrantId::new(),
             tenant_id: tenant,

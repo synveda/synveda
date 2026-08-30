@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        select id, tenant_id, directory_source, external_id, user_name, active, display_name,\n               given_name, family_name, work_email, identity_id, version,\n               created_at, updated_at\n        from scim_users\n        where tenant_id = $1 and external_id = $2 and active\n        order by directory_source\n        limit 2\n        ",
+  "query": "\n        select id, tenant_id, directory_source, external_id, user_name, active, display_name,\n               given_name, family_name, work_email, identity_id, version,\n               created_at, updated_at\n        from scim_users\n        where tenant_id = $1 and external_id = $2\n        order by active desc, directory_source, id\n        limit 2\n        ",
   "describe": {
     "columns": [
       {
@@ -97,5 +97,5 @@
       false
     ]
   },
-  "hash": "58c292b4b3810dcf5c73c4ee2ce17f92d6f28ec823bfaeef4f9337cdee498d7c"
+  "hash": "9523a711d16a8fa26b3f300c9a7481647aa7954393202665fccc582f8299b2a5"
 }

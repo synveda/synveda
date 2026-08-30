@@ -21,7 +21,7 @@
 //! ADR-0093).
 
 use chrono::{DateTime, Utc};
-use sqlx::PgExecutor;
+use sqlx::{PgConnection, PgExecutor};
 use synveda_types::{
     DirectoryUser, DirectoryUserId, Error, IdentityId, Result, ScimCredential, ScimCredentialId,
     TenantId,
@@ -146,6 +146,65 @@ pub struct UserAttributes {
     pub work_email: Option<String>,
 }
 
+/// Result of resolving a provider-neutral login claim across directory
+/// sources. Keeping ambiguity distinct from absence is security-critical:
+/// only true absence may fall through to JIT provisioning.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UniqueUserMatch {
+    /// No active mirror row carries the claim.
+    NoMatch,
+    /// Exactly one active mirror row carries the claim.
+    Unique(Box<DirectoryUser>),
+    /// More than one provider owns the claim in this tenant.
+    Ambiguous,
+    /// No active row owns the claim, but a retained inactive mirror does.
+    /// This is a departed correspondence, not permission to JIT.
+    Inactive,
+}
+
+fn classify_unique_user(rows: Vec<UserRow>) -> UniqueUserMatch {
+    let any_match = !rows.is_empty();
+    let mut active = rows.into_iter().filter(|row| row.active);
+    match (active.next(), active.next()) {
+        (None, _) if any_match => UniqueUserMatch::Inactive,
+        (None, _) => UniqueUserMatch::NoMatch,
+        (Some(row), None) => UniqueUserMatch::Unique(Box::new(row.into())),
+        (Some(_), Some(_)) => UniqueUserMatch::Ambiguous,
+    }
+}
+
+/// Serialises first-login correspondence against every mirror mutation in a
+/// tenant.
+///
+/// The login predicates intentionally span directory sources, so row locks
+/// alone cannot exclude a newly inserted matching row. This transaction lock
+/// is the narrow provider-neutral boundary: mutations and adoption take it,
+/// then read or write `scim_users`. A 64-bit hash collision only serialises
+/// unrelated tenants. Callers MUST already be inside a tenant transaction.
+#[tracing::instrument(
+    name = "store.directory.lock_correspondence",
+    skip_all,
+    fields(tenant.id = %tenant_id),
+    err(Display)
+)]
+pub async fn lock_correspondence(conn: &mut PgConnection, tenant_id: TenantId) -> Result<()> {
+    sqlx::query!(
+        r#"
+        select pg_catalog.pg_advisory_xact_lock(
+            pg_catalog.hashtextextended(
+                'synveda.directory.correspondence.v1:' || $1::uuid::text,
+                0
+            )
+        )
+        "#,
+        tenant_id.as_uuid(),
+    )
+    .execute(&mut *conn)
+    .await
+    .map_err(storage_error)?;
+    Ok(())
+}
+
 /// Inserts a mirror row for a person the directory has just created.
 #[tracing::instrument(
     name = "store.directory.create_user",
@@ -154,11 +213,12 @@ pub struct UserAttributes {
     err(Display)
 )]
 pub async fn create_user(
-    executor: impl PgExecutor<'_>,
+    conn: &mut PgConnection,
     id: DirectoryUserId,
     tenant_id: TenantId,
     attributes: &UserAttributes,
 ) -> Result<DirectoryUser> {
+    lock_correspondence(&mut *conn, tenant_id).await?;
     let row = sqlx::query_as!(
         UserRow,
         r#"
@@ -181,7 +241,7 @@ pub async fn create_user(
         attributes.family_name,
         attributes.work_email,
     )
-    .fetch_one(executor)
+    .fetch_one(&mut *conn)
     .await
     .map_err(storage_error)?;
     Ok(row.into())
@@ -196,11 +256,12 @@ pub async fn create_user(
     err(Display)
 )]
 pub async fn replace_user(
-    executor: impl PgExecutor<'_>,
+    conn: &mut PgConnection,
     tenant_id: TenantId,
     id: DirectoryUserId,
     attributes: &UserAttributes,
 ) -> Result<Option<DirectoryUser>> {
+    lock_correspondence(&mut *conn, tenant_id).await?;
     let row = sqlx::query_as!(
         UserRow,
         r#"
@@ -224,7 +285,7 @@ pub async fn replace_user(
         attributes.family_name,
         attributes.work_email,
     )
-    .fetch_optional(executor)
+    .fetch_optional(&mut *conn)
     .await
     .map_err(storage_error)?;
     Ok(row.map(Into::into))
@@ -239,12 +300,13 @@ pub async fn replace_user(
     err(Display)
 )]
 pub async fn link_identity(
-    executor: impl PgExecutor<'_>,
+    conn: &mut PgConnection,
     tenant_id: TenantId,
     directory_source: &str,
     id: DirectoryUserId,
     identity_id: IdentityId,
 ) -> Result<()> {
+    lock_correspondence(&mut *conn, tenant_id).await?;
     sqlx::query!(
         r#"
         update scim_users set identity_id = $3, updated_at = now()
@@ -255,7 +317,7 @@ pub async fn link_identity(
         identity_id.as_uuid(),
         directory_source,
     )
-    .execute(executor)
+    .execute(&mut *conn)
     .await
     .map_err(storage_error)?;
     Ok(())
@@ -356,37 +418,33 @@ pub async fn user_by_external_id(
     Ok(row.map(Into::into))
 }
 
-/// Finds an active external id only when it identifies exactly one provider
-/// row in the tenant. Login claims do not name the provisioning adapter; an
-/// ambiguous anchor must therefore fail closed instead of adopting whichever
-/// provider happens to sort first.
+/// Resolves an external id across every retained provider row in the tenant.
+/// Exactly one active row may be adopted; ambiguity and an inactive-only
+/// match stay distinct from absence so neither can fall through to JIT.
 pub async fn unique_user_by_external_id(
-    executor: impl PgExecutor<'_>,
+    conn: &mut PgConnection,
     tenant_id: TenantId,
     external_id: &str,
-) -> Result<Option<DirectoryUser>> {
-    let mut rows = sqlx::query_as!(
+) -> Result<UniqueUserMatch> {
+    lock_correspondence(&mut *conn, tenant_id).await?;
+    let rows = sqlx::query_as!(
         UserRow,
         r#"
         select id, tenant_id, directory_source, external_id, user_name, active, display_name,
                given_name, family_name, work_email, identity_id, version,
                created_at, updated_at
         from scim_users
-        where tenant_id = $1 and external_id = $2 and active
-        order by directory_source
+        where tenant_id = $1 and external_id = $2
+        order by active desc, directory_source, id
         limit 2
         "#,
         tenant_id.as_uuid(),
         external_id,
     )
-    .fetch_all(executor)
+    .fetch_all(&mut *conn)
     .await
     .map_err(storage_error)?;
-    if rows.len() == 1 {
-        Ok(rows.pop().map(Into::into))
-    } else {
-        Ok(None)
-    }
+    Ok(classify_unique_user(rows))
 }
 
 /// The live mirror row with this `userName`, case-insensitively — the
@@ -423,35 +481,34 @@ pub async fn user_by_user_name(
     Ok(row.map(Into::into))
 }
 
-/// Finds an active case-insensitive user name only when exactly one provider
-/// owns it in the tenant. This is the login correspondence fallback.
+/// Resolves a case-insensitive user name across every retained provider row.
+/// Exactly one active row may be adopted; ambiguity and an inactive-only
+/// match stay distinct from absence. This is the login correspondence
+/// fallback.
 pub async fn unique_user_by_user_name(
-    executor: impl PgExecutor<'_>,
+    conn: &mut PgConnection,
     tenant_id: TenantId,
     user_name: &str,
-) -> Result<Option<DirectoryUser>> {
-    let mut rows = sqlx::query_as!(
+) -> Result<UniqueUserMatch> {
+    lock_correspondence(&mut *conn, tenant_id).await?;
+    let rows = sqlx::query_as!(
         UserRow,
         r#"
         select id, tenant_id, directory_source, external_id, user_name, active, display_name,
                given_name, family_name, work_email, identity_id, version,
                created_at, updated_at
         from scim_users
-        where tenant_id = $1 and lower(user_name) = lower($2) and active
-        order by directory_source
+        where tenant_id = $1 and lower(user_name) = lower($2)
+        order by active desc, directory_source, id
         limit 2
         "#,
         tenant_id.as_uuid(),
         user_name,
     )
-    .fetch_all(executor)
+    .fetch_all(&mut *conn)
     .await
     .map_err(storage_error)?;
-    if rows.len() == 1 {
-        Ok(rows.pop().map(Into::into))
-    } else {
-        Ok(None)
-    }
+    Ok(classify_unique_user(rows))
 }
 
 /// A page of mirror rows in stable id order — the unfiltered list, whose

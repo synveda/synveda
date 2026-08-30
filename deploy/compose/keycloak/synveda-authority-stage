@@ -1,0 +1,113 @@
+#!/bin/bash -p
+# Content-free exit-stage classification for the one-shot Keycloak authority
+# proof. This file is sourced by synveda-realm-converge and has no entrypoint.
+
+synveda_scoped_authority_error_is_exact() {
+    local stage_state_dir=$1
+    local stage_error_file=$stage_state_dir/scoped-authority.error
+    local stage_error_line=
+    [ ! -L "$stage_error_file" ] && [ -f "$stage_error_file" ] && \
+        [ "$(stat -c %s "$stage_error_file" 2>/dev/null)" -eq 39 ] || return
+    IFS= read -r stage_error_line < "$stage_error_file" || return
+    [ "$stage_error_line" = "keycloak-projection: input was refused" ]
+}
+
+synveda_classify_scoped_authority_status() {
+    local stage_state_dir=$1
+    local stage_status=$2
+    local stage_stdout_empty=false
+    local stage_stderr_empty=false
+    local stage_stderr_exact=false
+    if [ -L "$stage_state_dir/scoped-authority.out" ] || \
+        [ ! -f "$stage_state_dir/scoped-authority.out" ] || \
+        [ -L "$stage_state_dir/scoped-authority.error" ] || \
+        [ ! -f "$stage_state_dir/scoped-authority.error" ]; then
+        scoped_authority_stage=runtime-output
+        return 1
+    fi
+    [ ! -s "$stage_state_dir/scoped-authority.out" ] && \
+        stage_stdout_empty=true
+    [ ! -s "$stage_state_dir/scoped-authority.error" ] && \
+        stage_stderr_empty=true
+    if synveda_scoped_authority_error_is_exact "$stage_state_dir"; then
+        stage_stderr_exact=true
+    fi
+    if [ "$stage_status" -eq 0 ]; then
+        if [ "$stage_stdout_empty" = true ] && \
+            [ "$stage_stderr_empty" = true ]; then
+            scoped_authority_stage=complete
+            return 0
+        fi
+        scoped_authority_stage=runtime-output
+        return 1
+    fi
+    if [ "$stage_stdout_empty" != true ]; then
+        scoped_authority_stage=runtime-output
+        return 1
+    fi
+    case "$stage_status" in
+        20) scoped_authority_stage=token-http ;;
+        21) scoped_authority_stage=token-envelope ;;
+        22) scoped_authority_stage=jwks-http ;;
+        23) scoped_authority_stage=jwks-signature ;;
+        24) scoped_authority_stage=token-claims ;;
+        25) scoped_authority_stage=accessible-realms ;;
+        26) scoped_authority_stage=target-realm ;;
+        27) scoped_authority_stage=master-inventory ;;
+        28) scoped_authority_stage=master-self-query ;;
+        29) scoped_authority_stage=master-self ;;
+        30) scoped_authority_stage=master-federated-identities ;;
+        31) scoped_authority_stage=master-credentials ;;
+        32) scoped_authority_stage=master-clients ;;
+        33) scoped_authority_stage=master-session-stats ;;
+        34) scoped_authority_stage=deny-create-realm ;;
+        35) scoped_authority_stage=deny-create-master-user ;;
+        36) scoped_authority_stage=deny-update-master-self ;;
+        37) scoped_authority_stage=deny-add-master-realm-role ;;
+        38) scoped_authority_stage=proof-deadline ;;
+        39) scoped_authority_stage=cleanup ;;
+        40) scoped_authority_stage=token-contract ;;
+        41) scoped_authority_stage=refresh-contract ;;
+        124) scoped_authority_stage=deadline ;;
+        137|143) scoped_authority_stage=signal ;;
+        1) scoped_authority_stage=generic-runtime ;;
+        *) scoped_authority_stage=runtime-output ;;
+    esac
+    case "$stage_status" in
+        20|21|22|23|24|25|26|27|28|29|30|31|32|33|34|35|36|37|38|39|40|41|1)
+            if [ "$stage_stderr_exact" != true ]; then
+                scoped_authority_stage=runtime-output
+            fi
+            ;;
+        124|137|143)
+            if [ "$stage_stderr_empty" != true ]; then
+                scoped_authority_stage=runtime-output
+            fi
+            ;;
+        *) scoped_authority_stage=runtime-output ;;
+    esac
+    return 1
+}
+
+synveda_finish_scoped_authority_probe() {
+    local stage_state_dir=$1
+    local stage_status=$2
+    local stage_result=1
+    if synveda_classify_scoped_authority_status \
+        "$stage_state_dir" "$stage_status"; then
+        stage_result=0
+    fi
+    if ! rm -f -- "$stage_state_dir/scoped-authority.out" \
+        "$stage_state_dir/scoped-authority.error" 2>/dev/null; then
+        scoped_authority_stage=runtime-output
+        return 1
+    fi
+    if [ -e "$stage_state_dir/scoped-authority.out" ] || \
+        [ -L "$stage_state_dir/scoped-authority.out" ] || \
+        [ -e "$stage_state_dir/scoped-authority.error" ] || \
+        [ -L "$stage_state_dir/scoped-authority.error" ]; then
+        scoped_authority_stage=runtime-output
+        return 1
+    fi
+    return "$stage_result"
+}

@@ -28,6 +28,12 @@ const SECRET_BYTES: usize = 32;
 /// browser refuse its own mistake.
 pub const CONSOLE_COOKIE: &str = "__Host-synveda_console";
 
+/// Browser-correlation cookie for a console OIDC login.
+///
+/// This is deliberately distinct from [`CONSOLE_COOKIE`]: it lives only for
+/// the authorization redirect round trip and never names a console session.
+pub const LOGIN_COOKIE: &str = "__Host-synveda_login";
+
 /// A freshly minted session secret and the hash to store for it.
 pub struct ConsoleSecret {
     /// The value the browser gets. Never stored, never logged.
@@ -56,6 +62,22 @@ pub fn hash(secret: &str) -> [u8; 32] {
     Sha256::digest(secret.as_bytes()).into()
 }
 
+/// Validates a presented browser secret and returns its SHA-256 binding.
+///
+/// A minted secret has one canonical shape: 32 bytes encoded as 43 unpadded
+/// base64url characters. Rejecting every other shape keeps malformed cookie
+/// input out of the pending-login comparison and makes aliases impossible.
+pub fn presented_hash(secret: &str) -> Option<[u8; 32]> {
+    if secret.len() != URL_SAFE_NO_PAD.encode([0u8; SECRET_BYTES]).len() {
+        return None;
+    }
+    let decoded = URL_SAFE_NO_PAD.decode(secret).ok()?;
+    if decoded.len() != SECRET_BYTES || URL_SAFE_NO_PAD.encode(&decoded) != secret {
+        return None;
+    }
+    Some(hash(secret))
+}
+
 /// Reads the console cookie out of a `Cookie` header value.
 ///
 /// Hand-parsed rather than pulled from a cookie crate: RFC 6265 §4.2.1 is a
@@ -63,15 +85,21 @@ pub fn hash(secret: &str) -> [u8; 32] {
 /// dependency whose whole job is that split is a dependency whose licence,
 /// supply chain and CVE feed we would be adopting for four lines.
 ///
-/// Returns the **first** match. A duplicate cookie name is the shape of a
-/// fixation attempt — a sibling host setting a second cookie the gateway
-/// might prefer — and `__Host-` already forbids the setter; taking the
-/// first and ignoring the rest keeps the behaviour defined either way.
+/// Duplicate names are rejected. `__Host-` prevents a conforming browser
+/// from accepting a sibling-domain setter, but an ambiguous request must not
+/// leave the server choosing a different value from an intermediary.
 pub fn from_cookie_header(header: &str) -> Option<&str> {
-    header.split(';').find_map(|pair| {
+    let mut found = None;
+    for pair in header.split(';') {
         let (name, value) = pair.split_once('=')?;
-        (name.trim() == CONSOLE_COOKIE).then(|| value.trim())
-    })
+        if name.trim() == CONSOLE_COOKIE {
+            let value = value.trim();
+            if value.is_empty() || found.replace(value).is_some() {
+                return None;
+            }
+        }
+    }
+    found
 }
 
 #[cfg(test)]
@@ -102,6 +130,22 @@ mod tests {
     }
 
     #[test]
+    fn only_the_canonical_minted_shape_can_be_presented() {
+        let minted = mint().expect("mint");
+        assert_eq!(presented_hash(&minted.secret), Some(minted.hash));
+
+        for malformed in [
+            "",
+            "short",
+            "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+            "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA!",
+            "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        ] {
+            assert_eq!(presented_hash(malformed), None, "accepted {malformed:?}");
+        }
+    }
+
+    #[test]
     fn the_cookie_is_found_among_others_and_only_by_its_full_name() {
         let header = format!("theme=dark; {CONSOLE_COOKIE}=abc123; other=1");
         assert_eq!(from_cookie_header(&header), Some("abc123"));
@@ -122,11 +166,10 @@ mod tests {
     }
 
     #[test]
-    fn a_duplicated_cookie_resolves_to_the_first_deterministically() {
-        // The fixation shape: two cookies of the same name. Whatever we do
-        // must be defined, because "whichever the map iterated to" is how
-        // one process reads a different session than the next.
+    fn a_duplicated_cookie_is_rejected() {
+        // The fixation shape: two cookies of the same name. Refusing the
+        // request is the only choice that does not depend on ordering.
         let header = format!("{CONSOLE_COOKIE}=first; {CONSOLE_COOKIE}=second");
-        assert_eq!(from_cookie_header(&header), Some("first"));
+        assert_eq!(from_cookie_header(&header), None);
     }
 }

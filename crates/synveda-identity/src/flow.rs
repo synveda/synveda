@@ -24,6 +24,7 @@
 //! contains — tenant, placement — is the gateway tier's vocabulary.
 
 use std::collections::HashMap;
+use std::fmt;
 use std::net::{Ipv4Addr, Ipv6Addr};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -46,12 +47,15 @@ pub const OIDC_LOGINS_TOTAL: &str = "synveda_oidc_logins_total";
 /// client, so this is where "log in once" is actually kept true.
 pub const OIDC_REFRESHES_TOTAL: &str = "synveda_oidc_refreshes_total";
 
-/// The scope that asks an issuer for a refresh token. Requested for the
-/// two destinations that can keep one — the CLI (ADR-0027 decision 6) and
-/// the console (ADR-0056 decision 3) — and only where discovery advertises
-/// it: an issuer that rejects unknown scopes must not have its JSON browser
-/// logins broken by a scope those two need and it cannot hold.
+/// A scope requested only when an issuer entry explicitly configures it and
+/// the destination can retain a refresh token — the CLI (ADR-0027 decision 6,
+/// as amended by ADR-0102) and the console (ADR-0056 decision 3). Provider-wide
+/// discovery advertising is necessary but cannot grant this client the scope.
 const OFFLINE_ACCESS: &str = "offline_access";
+
+/// Token responses contain a handful of compact credentials and claims. A
+/// larger body is a provider failure, not useful login data.
+const MAX_TOKEN_RESPONSE_BYTES: usize = 65_536;
 
 /// How long a pending login may wait between redirect and callback.
 const PENDING_TTL: Duration = Duration::from_secs(600);
@@ -68,6 +72,11 @@ const PENDING_CAP: usize = 10_000;
 /// The fixed path a CLI loopback listener must serve (ADR-0027 decision 5).
 const CLI_REDIRECT_PATH: &str = "/callback";
 
+/// `synveda login` mints 32 random bytes and encodes them without padding.
+/// The gateway accepts exactly that closed state shape rather than parking an
+/// attacker-controlled, unbounded callback value.
+const CLI_STATE_LENGTH: usize = 43;
+
 struct PendingLogin {
     issuer: String,
     code_verifier: String,
@@ -75,6 +84,15 @@ struct PendingLogin {
     expires_at: Instant,
     /// Where to hand the completed session back.
     destination: LoginDestination,
+}
+
+impl PendingLogin {
+    fn matches_correlation(&self, presented_secret: Option<&str>) -> bool {
+        match &self.destination {
+            LoginDestination::Console(binding) => binding.matches(presented_secret),
+            LoginDestination::Json | LoginDestination::Cli(_) => true,
+        }
+    }
 }
 
 /// Where a completed login is delivered. The OIDC exchange is identical for
@@ -85,7 +103,7 @@ struct PendingLogin {
 /// own reasoning: a struct with `cli: Option<..>` beside `console: bool`
 /// can represent "a CLI login that is also a console login", and the way
 /// that gets fixed is somebody noticing. Here it cannot be written.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub enum LoginDestination {
     /// AUTH-1's browser login (ADR-0010 §1): the session comes back as
     /// JSON on the callback response.
@@ -100,14 +118,49 @@ pub enum LoginDestination {
     /// gateway's own origin, so there is nowhere else for it to land, and
     /// an operator-supplied redirect target here would be an open
     /// redirector attached to a login.
-    Console,
+    Console(ConsoleLoginBinding),
+}
+
+/// Digest-only binding between a console login and the browser that started
+/// it.
+///
+/// The gateway gives the browser the independent random secret in a
+/// host-only cookie and parks only its SHA-256 here. It is therefore not
+/// enough to learn or forward an OIDC callback URL: the callback must also
+/// arrive from the initiating browser.
+#[derive(Clone)]
+pub struct ConsoleLoginBinding {
+    correlation_hash: [u8; 32],
+}
+
+impl ConsoleLoginBinding {
+    /// Binds a pending console login to the hash of its browser secret.
+    pub const fn new(correlation_hash: [u8; 32]) -> Self {
+        Self { correlation_hash }
+    }
+
+    fn matches(&self, presented_secret: Option<&str>) -> bool {
+        let Some(presented_hash) = presented_secret.and_then(crate::console::presented_hash) else {
+            return false;
+        };
+        // Fixed-work comparison. The input is already a SHA-256 digest, but
+        // avoiding an early-exit equality keeps the binding independent of
+        // optimiser/library comparison details.
+        self.correlation_hash
+            .iter()
+            .zip(presented_hash)
+            .fold(0u8, |difference, (expected, actual)| {
+                difference | (*expected ^ actual)
+            })
+            == 0
+    }
 }
 
 /// A CLI-initiated login's return address (ADR-0027 decision 5): the
 /// loopback URI `synveda login` is listening on, and the CSRF state it
 /// minted. Both round-trip through the IdP untouched — the gateway parks
 /// them, and only ever sends a one-time code back to that address.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct CliHandoff {
     /// Loopback return URI, already checked against the allowlist by
     /// [`validate_cli_redirect_uri`].
@@ -116,6 +169,26 @@ pub struct CliHandoff {
     /// so the CLI can tell its own callback from any other local process
     /// hitting its listener, and it is required again at redemption.
     pub state: String,
+}
+
+impl fmt::Debug for LoginDestination {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Json => formatter.write_str("Json"),
+            Self::Cli(handoff) => formatter.debug_tuple("Cli").field(handoff).finish(),
+            Self::Console(_) => formatter.write_str("Console(<redacted>)"),
+        }
+    }
+}
+
+impl fmt::Debug for CliHandoff {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("CliHandoff")
+            .field("redirect_uri", &self.redirect_uri)
+            .field("state", &"<redacted>")
+            .finish()
+    }
 }
 
 /// The `cli_redirect_uri` allowlist (ADR-0027 decision 5), and it is
@@ -155,7 +228,6 @@ pub fn validate_cli_redirect_uri(raw: &str) -> Result<()> {
 
 /// The completed login: verified claims plus the session material the
 /// caller uses as its bearer token (ADR-0010 §1).
-#[derive(Debug)]
 pub struct LoginSession {
     /// Verified subject and tenant from the ID token.
     pub claims: Claims,
@@ -177,10 +249,27 @@ pub struct LoginSession {
     pub destination: LoginDestination,
 }
 
+impl fmt::Debug for LoginSession {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("LoginSession")
+            .field("claims", &"<verified>")
+            .field("issuer", &self.issuer)
+            .field("access_token", &"<redacted>")
+            .field("token_type", &self.token_type)
+            .field("expires_in", &self.expires_in)
+            .field(
+                "refresh_token",
+                &self.refresh_token.as_ref().map(|_| "<redacted>"),
+            )
+            .field("destination", &self.destination)
+            .finish()
+    }
+}
+
 /// A refreshed credential (ADR-0027 decision 6). No claims: a refresh
 /// response need not carry an ID token, and the access token is verified
 /// where every bearer is — at the `/v1` seam, on the next request.
-#[derive(Debug)]
 pub struct RefreshedSession {
     /// The new bearer.
     pub access_token: String,
@@ -191,6 +280,21 @@ pub struct RefreshedSession {
     /// The rotated refresh token, for issuers that rotate them. Absent
     /// means the caller keeps the one it has.
     pub refresh_token: Option<String>,
+}
+
+impl fmt::Debug for RefreshedSession {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("RefreshedSession")
+            .field("access_token", &"<redacted>")
+            .field("token_type", &self.token_type)
+            .field("expires_in", &self.expires_in)
+            .field(
+                "refresh_token",
+                &self.refresh_token.as_ref().map(|_| "<redacted>"),
+            )
+            .finish()
+    }
 }
 
 /// Session material parked under a one-time handoff code.
@@ -211,6 +315,24 @@ struct TokenResponse {
     id_token: Option<String>,
     #[serde(default)]
     refresh_token: Option<String>,
+}
+
+fn decode_token_response(body: &[u8]) -> Result<TokenResponse> {
+    let mut tokens: TokenResponse =
+        serde_json::from_slice(body).map_err(|_| Error::Dependency {
+            service: "oidc-token-endpoint".to_owned(),
+            message: "token response is not valid JSON".to_owned(),
+        })?;
+    if !tokens.token_type.eq_ignore_ascii_case("Bearer") {
+        return Err(Error::Dependency {
+            service: "oidc-token-endpoint".to_owned(),
+            message: "token response did not return a Bearer credential".to_owned(),
+        });
+    }
+    // Every downstream Synveda client uses the RFC 6750 Bearer scheme. Keep
+    // one canonical spelling rather than persisting provider casing.
+    tokens.token_type = "Bearer".to_owned();
+    Ok(tokens)
 }
 
 /// Drives the code+PKCE flow against the verifier's configured issuers.
@@ -257,9 +379,9 @@ impl LoginFlow {
     ) -> Result<String> {
         if let LoginDestination::Cli(handoff) = &destination {
             validate_cli_redirect_uri(&handoff.redirect_uri)?;
-            if handoff.state.is_empty() {
+            if !valid_cli_state(&handoff.state) {
                 return Err(Error::Invalid {
-                    message: "cli_state must not be empty".to_owned(),
+                    message: "cli_state must be a 43-character base64url value".to_owned(),
                 });
             }
         }
@@ -275,21 +397,26 @@ impl LoginFlow {
         // Per-issuer (ADR-0013 decision 1): IdPs that gate the groups claim
         // behind a scope add it in config; the default stays universal.
         let mut scope_list = config.login_scopes.clone();
-        // "Log in once" needs a refresh token, and two of the three
-        // destinations keep a credential long enough to need one: the CLI
-        // on disk (ADR-0027 decision 6) and the console in
-        // `console_sessions` (ADR-0056 decision 3). A JSON browser login
-        // does not — ADR-0027 decision 6 made it structurally incapable of
-        // carrying one back — so asking for the scope there would request
-        // a credential with nowhere to go. Ask only where the issuer says
-        // it understands the scope: an IdP that rejects unknown scopes
-        // would otherwise fail the whole login.
-        if !matches!(destination, LoginDestination::Json)
-            && issuer_state.advertises_scope(OFFLINE_ACCESS)
-            && !scope_list.iter().any(|scope| scope == OFFLINE_ACCESS)
+        // Discovery describes provider-wide scopes, not what this client is
+        // authorised to request. The configured list is therefore
+        // authoritative: a bundled Keycloak realm can advertise
+        // `offline_access` while Synveda's public client deliberately has it
+        // disabled. A JSON browser login cannot retain a refresh token and
+        // strips an explicitly configured offline scope. CLI/console may ask
+        // for it only when both configuration and discovery agree.
+        if matches!(destination, LoginDestination::Json) {
+            scope_list.retain(|scope| scope != OFFLINE_ACCESS);
+        } else if scope_list.iter().any(|scope| scope == OFFLINE_ACCESS)
+            && !issuer_state.advertises_scope(OFFLINE_ACCESS)
         {
-            scope_list.push(OFFLINE_ACCESS.to_owned());
+            return Err(Error::Dependency {
+                service: "oidc-discovery".to_owned(),
+                message: format!(
+                    "issuer {issuer}: configured offline_access is not advertised by discovery"
+                ),
+            });
         }
+        let requests_offline_access = scope_list.iter().any(|scope| scope == OFFLINE_ACCESS);
         let scopes = scope_list.join(" ");
         let mut url =
             url::Url::parse(&issuer_state.discovery.authorization_endpoint).map_err(|err| {
@@ -298,15 +425,24 @@ impl LoginFlow {
                     message: format!("issuer {issuer}: bad authorization_endpoint: {err}"),
                 }
             })?;
-        url.query_pairs_mut()
-            .append_pair("response_type", "code")
-            .append_pair("client_id", &client_id)
-            .append_pair("redirect_uri", &self.redirect_uri)
-            .append_pair("scope", &scopes)
-            .append_pair("state", &state)
-            .append_pair("nonce", &nonce)
-            .append_pair("code_challenge", &challenge)
-            .append_pair("code_challenge_method", "S256");
+        {
+            let mut query = url.query_pairs_mut();
+            query
+                .append_pair("response_type", "code")
+                .append_pair("client_id", &client_id)
+                .append_pair("redirect_uri", &self.redirect_uri)
+                .append_pair("scope", &scopes)
+                .append_pair("state", &state)
+                .append_pair("nonce", &nonce)
+                .append_pair("code_challenge", &challenge)
+                .append_pair("code_challenge_method", "S256");
+            if requests_offline_access {
+                // OIDC Core requires explicit consent when requesting the
+                // offline scope; without it some providers silently omit the
+                // refresh contract while others refuse the request.
+                query.append_pair("prompt", "consent");
+            }
+        }
 
         {
             let mut pending = self.pending.lock().expect("pending login lock");
@@ -338,31 +474,53 @@ impl LoginFlow {
     /// login can fail still lands where the caller is waiting — the
     /// terminal `synveda login` is sitting in (ADR-0027 decision 5), or the
     /// console's own error page rather than a JSON body rendered into a
-    /// browser tab (ADR-0056).
-    pub fn peek_destination(&self, state: &str) -> Option<LoginDestination> {
+    /// browser tab (ADR-0056). A correctly bound expired entry is still
+    /// visible here so its terminal callback can clear the browser cookie;
+    /// [`Self::complete`] remains the authority that refuses its expiry.
+    pub fn peek_destination(
+        &self,
+        state: &str,
+        presented_correlation: Option<&str>,
+    ) -> Option<LoginDestination> {
         let pending = self.pending.lock().expect("pending login lock");
         pending
             .get(state)
-            .filter(|login| login.expires_at > Instant::now())
+            .filter(|login| login.matches_correlation(presented_correlation))
             .map(|login| login.destination.clone())
     }
 
     /// Discards a pending login without completing it — the IdP-reported
     /// failure path, where there is no code to exchange and nothing to
     /// keep parked for ten minutes.
-    pub fn abandon(&self, state: &str) {
-        self.pending
-            .lock()
-            .expect("pending login lock")
-            .remove(state);
+    pub fn abandon(&self, state: &str, presented_correlation: Option<&str>) -> bool {
+        let mut pending = self.pending.lock().expect("pending login lock");
+        if !pending
+            .get(state)
+            .is_some_and(|login| login.matches_correlation(presented_correlation))
+        {
+            return false;
+        }
+        pending.remove(state).is_some()
     }
 
     /// Completes a login from the IdP callback. `state` is single-use;
     /// replaying it — or presenting one the gateway never issued — is a 401.
-    pub async fn complete(&self, state: &str, code: &str) -> Result<LoginSession> {
+    pub async fn complete(
+        &self,
+        state: &str,
+        code: &str,
+        presented_correlation: Option<&str>,
+    ) -> Result<LoginSession> {
         let login = {
             let mut pending = self.pending.lock().expect("pending login lock");
-            pending.remove(state)
+            if !pending
+                .get(state)
+                .is_some_and(|login| login.matches_correlation(presented_correlation))
+            {
+                None
+            } else {
+                pending.remove(state)
+            }
         }
         .ok_or_else(|| Error::Unauthenticated {
             message: "unknown or already-used login state".to_owned(),
@@ -520,16 +678,21 @@ impl LoginFlow {
             .form(form)
             .send()
             .await
-            .map_err(|err| Error::Dependency {
+            .map_err(|_| Error::Dependency {
                 service: "oidc-token-endpoint".to_owned(),
-                message: format!("token exchange: {err}"),
+                message: "token endpoint request failed".to_owned(),
             })?;
         let status = response.status();
+        if matches!(status.as_u16(), 408 | 425 | 429) {
+            return Err(Error::Dependency {
+                service: "oidc-token-endpoint".to_owned(),
+                message: "token endpoint is temporarily unavailable".to_owned(),
+            });
+        }
         if status.is_client_error() {
-            // The IdP refused the grant — a caller problem, and the detail
-            // stays in the trace, not the response.
-            let body = response.text().await.unwrap_or_default();
-            tracing::debug!(%status, body, "token exchange refused");
+            // The IdP refused the grant — a caller problem. Its body is an
+            // untrusted content channel and is neither read nor traced.
+            tracing::debug!(%status, "token exchange refused");
             return Err(Error::Unauthenticated {
                 message: "the identity provider rejected the login".to_owned(),
             });
@@ -540,10 +703,31 @@ impl LoginFlow {
                 message: format!("token exchange: HTTP {status}"),
             });
         }
-        response.json().await.map_err(|err| Error::Dependency {
+        let mut response = response;
+        if response
+            .content_length()
+            .is_some_and(|length| length > MAX_TOKEN_RESPONSE_BYTES as u64)
+        {
+            return Err(Error::Dependency {
+                service: "oidc-token-endpoint".to_owned(),
+                message: "token response exceeds the byte bound".to_owned(),
+            });
+        }
+        let mut body = Vec::new();
+        while let Some(chunk) = response.chunk().await.map_err(|_| Error::Dependency {
             service: "oidc-token-endpoint".to_owned(),
-            message: format!("token exchange: invalid body: {err}"),
-        })
+            message: "token response body failed".to_owned(),
+        })? {
+            let remaining = MAX_TOKEN_RESPONSE_BYTES.saturating_sub(body.len());
+            if chunk.len() > remaining {
+                return Err(Error::Dependency {
+                    service: "oidc-token-endpoint".to_owned(),
+                    message: "token response exceeds the byte bound".to_owned(),
+                });
+            }
+            body.extend_from_slice(&chunk);
+        }
+        decode_token_response(&body)
     }
 }
 
@@ -557,6 +741,13 @@ fn random_urlsafe() -> Result<String> {
     Ok(URL_SAFE_NO_PAD.encode(bytes))
 }
 
+fn valid_cli_state(state: &str) -> bool {
+    state.len() == CLI_STATE_LENGTH
+        && state
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -565,7 +756,9 @@ mod tests {
     fn flow() -> LoginFlow {
         let verifier = Arc::new(
             OidcVerifier::new(
-                parse_issuers(r#"[{"issuer":"http://127.0.0.1:1/idp","client_id":"synveda"}]"#)
+                parse_issuers(
+                    r#"[{"issuer":"http://127.0.0.1:1/idp","client_id":"synveda","audience":"synveda-api"}]"#,
+                )
                     .unwrap(),
             )
             .unwrap(),
@@ -588,7 +781,7 @@ mod tests {
     #[tokio::test]
     async fn unknown_login_state_is_rejected_without_io() {
         let err = flow()
-            .complete("never-issued", "code")
+            .complete("never-issued", "code", None)
             .await
             .expect_err("unknown state must be rejected");
         assert!(matches!(err, Error::Unauthenticated { .. }), "got {err:?}");
@@ -656,6 +849,162 @@ mod tests {
             .await
             .expect_err("a non-loopback redirect must be refused");
         assert!(matches!(err, Error::Invalid { .. }), "got {err:?}");
+    }
+
+    #[tokio::test]
+    async fn cli_state_is_one_exact_bounded_base64url_shape() {
+        for state in [
+            "",
+            "short",
+            "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+            "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA!",
+        ] {
+            let err = flow()
+                .begin(
+                    None,
+                    LoginDestination::Cli(CliHandoff {
+                        redirect_uri: "http://127.0.0.1:49152/callback".to_owned(),
+                        state: state.to_owned(),
+                    }),
+                )
+                .await
+                .expect_err("malformed CLI state must be refused before discovery");
+            assert!(matches!(err, Error::Invalid { .. }), "{state:?}: {err:?}");
+        }
+    }
+
+    #[test]
+    fn completed_session_debug_output_redacts_credentials() {
+        let login = LoginSession {
+            claims: Claims {
+                subject: "alice".to_owned(),
+                tenant_id: synveda_types::TenantId::new(),
+                provisioning: None,
+                lifetime: Some(Duration::from_secs(60)),
+                credential_class: crate::token::CredentialClass::Interactive,
+            },
+            issuer: "https://idp.example.test".to_owned(),
+            access_token: "never-log-access-token".to_owned(),
+            token_type: "Bearer".to_owned(),
+            expires_in: Some(60),
+            refresh_token: Some("never-log-refresh-token".to_owned()),
+            destination: LoginDestination::Cli(CliHandoff {
+                redirect_uri: "http://127.0.0.1:49152/callback".to_owned(),
+                state: "never-log-cli-state".to_owned(),
+            }),
+        };
+        let refreshed = RefreshedSession {
+            access_token: "never-log-new-access-token".to_owned(),
+            token_type: "Bearer".to_owned(),
+            expires_in: Some(60),
+            refresh_token: Some("never-log-new-refresh-token".to_owned()),
+        };
+        let rendered = format!("{login:?} {refreshed:?}");
+        assert!(!rendered.contains("never-log"), "{rendered}");
+        assert!(rendered.contains("<redacted>"), "{rendered}");
+    }
+
+    #[test]
+    fn token_responses_accept_only_canonicalizable_bearer_credentials() {
+        for token_type in ["Bearer", "bearer", "BEARER"] {
+            let body = serde_json::json!({
+                "access_token": "never-log-token",
+                "token_type": token_type,
+            });
+            let decoded = decode_token_response(body.to_string().as_bytes()).expect("Bearer");
+            assert_eq!(decoded.token_type, "Bearer");
+        }
+        for body in [
+            serde_json::json!({"access_token": "never-log-token", "token_type": "DPoP"}),
+            serde_json::json!({"access_token": "never-log-token", "token_type": "MAC"}),
+            serde_json::json!({"access_token": "never-log-token", "token_type": ""}),
+            serde_json::json!({"access_token": "never-log-token"}),
+        ] {
+            let error = match decode_token_response(body.to_string().as_bytes()) {
+                Ok(_) => panic!("non-Bearer token response must be refused"),
+                Err(error) => error,
+            };
+            assert!(matches!(error, Error::Dependency { .. }), "{error:?}");
+            assert!(!format!("{error:?}").contains("never-log-token"));
+        }
+    }
+
+    #[tokio::test]
+    async fn console_state_is_invisible_and_unconsumed_without_its_browser_secret() {
+        let flow = flow();
+        let correlation = crate::console::mint().expect("correlation");
+        let state = "console-state";
+        flow.pending.lock().expect("pending login lock").insert(
+            state.to_owned(),
+            PendingLogin {
+                issuer: "http://127.0.0.1:1/idp".to_owned(),
+                code_verifier: "verifier".to_owned(),
+                nonce: "nonce".to_owned(),
+                expires_at: Instant::now() + PENDING_TTL,
+                destination: LoginDestination::Console(ConsoleLoginBinding::new(correlation.hash)),
+            },
+        );
+
+        for wrong in [
+            None,
+            Some("malformed"),
+            Some("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"),
+        ] {
+            assert!(flow.peek_destination(state, wrong).is_none());
+            assert!(!flow.abandon(state, wrong));
+            let error = flow
+                .complete(state, "code", wrong)
+                .await
+                .expect_err("wrong correlation must fail before exchange");
+            assert!(matches!(error, Error::Unauthenticated { .. }));
+        }
+
+        assert!(matches!(
+            flow.peek_destination(state, Some(&correlation.secret)),
+            Some(LoginDestination::Console(_))
+        ));
+        assert!(flow.abandon(state, Some(&correlation.secret)));
+        assert!(
+            flow.peek_destination(state, Some(&correlation.secret))
+                .is_none()
+        );
+
+        let expired = crate::console::mint().expect("expired correlation");
+        flow.pending.lock().expect("pending login lock").insert(
+            "expired-console-state".to_owned(),
+            PendingLogin {
+                issuer: "http://127.0.0.1:1/idp".to_owned(),
+                code_verifier: "verifier".to_owned(),
+                nonce: "nonce".to_owned(),
+                expires_at: Instant::now() - Duration::from_secs(1),
+                destination: LoginDestination::Console(ConsoleLoginBinding::new(expired.hash)),
+            },
+        );
+        assert!(matches!(
+            flow.peek_destination("expired-console-state", Some(&expired.secret)),
+            Some(LoginDestination::Console(_))
+        ));
+        let error = flow
+            .complete("expired-console-state", "code", Some(&expired.secret))
+            .await
+            .expect_err("expiry must be refused before token exchange");
+        assert!(matches!(error, Error::Unauthenticated { .. }));
+        assert!(
+            flow.peek_destination("expired-console-state", Some(&expired.secret))
+                .is_none(),
+            "the terminal expired callback consumes its state"
+        );
+    }
+
+    #[test]
+    fn console_binding_debug_never_exposes_its_digest() {
+        let correlation = crate::console::mint().expect("correlation");
+        let rendered = format!(
+            "{:?}",
+            LoginDestination::Console(ConsoleLoginBinding::new(correlation.hash))
+        );
+        assert_eq!(rendered, "Console(<redacted>)");
+        assert!(!rendered.contains(&correlation.secret));
     }
 
     // ── The handoff code (ADR-0027 decision 5) ──────────────────────────

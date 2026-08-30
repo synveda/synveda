@@ -93,12 +93,13 @@ pub const POLICY_PACK_RELOADS_TOTAL: &str = "synveda_policy_pack_reloads_total";
 /// measured separately by the Configuration plane.
 pub const POLICY_OPERATIONS_TOTAL: &str = "synveda_policy_operations_total";
 
-/// JIT provisioning outcomes at login (AUTH-2, ADR-0013): `mapped`,
-/// `admin` (admin-group subject with no team mapping, placed under the
-/// org root — AUTHZ-3, ADR-0015 decision 6), `quarantined`, `existing`
-/// (repeat login), or `error`. An AUD-1 emission point
-/// (`identity.provisioned`) once the audit log lands.
+/// JIT provisioning outcomes at login: `own-scope`, `bound`, or `error`.
+/// Identity creation/binding is audited through `identity.provisioned`.
 pub const JIT_PROVISIONS_TOTAL: &str = "synveda_jit_provisions_total";
+
+/// Initial-administrator bootstrap attempts driven by the verified IdP group,
+/// labelled only `claimed` or `closed`. CPR-45, ADR-0102.
+pub const JIT_ADMIN_BOOTSTRAPS_TOTAL: &str = "synveda_jit_admin_bootstraps_total";
 
 /// Role admin operations (AUTHZ-3, ADR-0015 decision 7), labelled by `op`
 /// (list/bind/unbind/list_node/bind_node/unbind_node) and `outcome`
@@ -123,10 +124,9 @@ pub const CAPABILITY_PROBES_TOTAL: &str = "synveda_capability_probes_total";
 /// once the audit log lands.
 pub const SERVICE_IDENTITY_OPERATIONS_TOTAL: &str = "synveda_service_identity_operations_total";
 
-/// Service tokens refused at the enforcement seam (AUTH-3, ADR-0018
-/// decision 5), labelled by `reason` (`lifetime_exceeded`,
-/// `lifetime_unknown` — no `iat`). An AUD-1 emission point once the audit
-/// log lands.
+/// Service tokens refused at the admission or enforcement seam (AUTH-3,
+/// ADR-0018 decision 5), labelled by the closed `reason` vocabulary
+/// (`identity_unresolved`, `lifetime_exceeded`, `lifetime_unknown`).
 pub const SERVICE_TOKEN_REJECTIONS_TOTAL: &str = "synveda_service_token_rejections_total";
 
 /// Redaction findings on the session-event intake seam,
@@ -409,7 +409,11 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
     // module at login completion.
     metrics::describe_counter!(
         JIT_PROVISIONS_TOTAL,
-        "JIT identity provisioning by outcome (mapped/admin/quarantined/existing/error)"
+        "JIT identity provisioning by outcome (own-scope/bound/error)"
+    );
+    metrics::describe_counter!(
+        JIT_ADMIN_BOOTSTRAPS_TOTAL,
+        "IdP-signalled initial-administrator bootstrap attempts by outcome (claimed/closed)"
     );
     // AUTHZ-3 counter (ADR-0015): operations in the gateway's roles routes.
     metrics::describe_counter!(
@@ -430,8 +434,8 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
     );
     metrics::describe_counter!(
         SERVICE_TOKEN_REJECTIONS_TOTAL,
-        "Service tokens refused at the enforcement seam by reason \
-         (lifetime_exceeded/lifetime_unknown)"
+        "Service tokens refused at admission or enforcement by reason \
+         (identity_unresolved/lifetime_exceeded/lifetime_unknown)"
     );
     // CPR-18 metrics (ADR-0083): extraction freezes session evidence and
     // produces reviewable candidates. Nothing here calls a candidate a
@@ -555,8 +559,16 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
         "JWKS refreshes by issuer and outcome (ok/error)"
     );
     metrics::describe_counter!(
+        synveda_identity::OIDC_DIAGNOSTICS_TOTAL,
+        "Explicit OIDC startup diagnostics by issuer and outcome (ok/unavailable/refused)"
+    );
+    metrics::describe_counter!(
         synveda_identity::OIDC_LOGINS_TOTAL,
         "OIDC logins by issuer and outcome (started/completed/rejected/error)"
+    );
+    metrics::describe_counter!(
+        synveda_identity::OIDC_REFRESHES_TOTAL,
+        "OIDC refresh-token redemptions by issuer and outcome (completed/rejected/error)"
     );
     // FLOW-1's counters (ADR-0030 decision 14 deferred describing them to
     // whichever feature made the binary call that crate — FLOW-2 did),

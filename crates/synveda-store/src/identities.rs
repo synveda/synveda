@@ -34,6 +34,27 @@ struct IdentityRow {
     created_at: DateTime<Utc>,
 }
 
+/// Lifecycle rows included in a case-folded email correspondence lookup.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EmailIdentityLifecycle {
+    /// Only identities that may still be adopted by a live directory row.
+    ActiveOnly,
+    /// Active and departed identities, for exact lifecycle inspection.
+    Any,
+}
+
+/// A bounded email correspondence result that never chooses one of several
+/// identities by storage order.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum UniqueIdentityMatch {
+    /// No identity has this address in the requested lifecycle set.
+    NoMatch,
+    /// Exactly one identity has this address.
+    Unique(Identity),
+    /// More than one identity has this address; callers must not adopt one.
+    Ambiguous,
+}
+
 impl TryFrom<IdentityRow> for Identity {
     type Error = Error;
 
@@ -397,8 +418,8 @@ pub async fn by_scope(
     row.map(TryInto::try_into).transpose()
 }
 
-/// The identity whose recorded email matches `email`, case-folded — the
-/// last of the correspondence rule's three matches (AUTH-4, ADR-0059
+/// The unique identity whose recorded email matches `email`, case-folded —
+/// the last of the correspondence rule's three matches (AUTH-4, ADR-0059
 /// decision 4), and the weakest.
 ///
 /// It exists because `externalId` is the customer's attribute mapping
@@ -408,35 +429,51 @@ pub async fn by_scope(
 /// address they were provisioned with is how the two are joined instead of
 /// duplicated.
 ///
-/// Ordered by `created_at` and taking the first, so a tenant that somehow
-/// holds two rows with one address resolves the same way on every call
-/// rather than by whichever the planner reached first.
+/// Email is not unique in the schema: shared or recycled addresses are valid
+/// facts but not valid correspondence authority. The query therefore fetches
+/// at most two rows and reports ambiguity instead of choosing the oldest.
 #[tracing::instrument(
-    name = "store.identities.by_email",
+    name = "store.identities.unique_by_email",
     skip_all,
     fields(tenant.id = %tenant_id),
     err(Display)
 )]
-pub async fn by_email(
+pub async fn unique_user_by_email(
     executor: impl PgExecutor<'_>,
     tenant_id: TenantId,
     email: &str,
-) -> Result<Option<Identity>> {
-    let row = sqlx::query_as!(
+    lifecycle: EmailIdentityLifecycle,
+) -> Result<UniqueIdentityMatch> {
+    let active_only = lifecycle == EmailIdentityLifecycle::ActiveOnly;
+    let rows = sqlx::query_as!(
         IdentityRow,
         r#"
         select i.id, i.tenant_id, i.subject, i.kind, i.email, i.display_name,
                i.scope_id, i.status, i.departed_at, i.created_at
         from identities i
         where i.tenant_id = $1 and lower(i.email) = lower($2)
-        order by i.created_at
-        limit 1
+          and i.kind = 'user'
+          and (not $3::boolean or i.status = 'active')
+        order by i.created_at, i.id
+        limit 2
         "#,
         tenant_id.as_uuid(),
         email,
+        active_only,
     )
-    .fetch_optional(executor)
+    .fetch_all(executor)
     .await
     .map_err(storage_error)?;
-    row.map(TryInto::try_into).transpose()
+    let mut matches = rows
+        .into_iter()
+        .map(TryInto::try_into)
+        .collect::<Result<Vec<Identity>>>()?
+        .into_iter();
+    let Some(identity) = matches.next() else {
+        return Ok(UniqueIdentityMatch::NoMatch);
+    };
+    if matches.next().is_some() {
+        return Ok(UniqueIdentityMatch::Ambiguous);
+    }
+    Ok(UniqueIdentityMatch::Unique(identity))
 }

@@ -4,12 +4,15 @@ import { once } from "node:events";
 import {
   chmodSync,
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   renameSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -18,10 +21,22 @@ import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import {
+  appRouteFindings,
+  authorityCleanupOrderFindings,
+  caddyTrustBoundaryFindings,
   canonicalComposeFindings,
   collectorConfigFindings,
   composeEnvironment,
+  composeNetworkPlan,
+  developmentPortBindingFindings,
+  identityGateFindings,
+  keycloakConvergenceFindings,
+  keycloakGenerationGateFindings,
+  keycloakHealthFindings,
+  keycloakRealmSupervisorFindings,
   makeComposeFixture,
+  masterClientAuthorityFindings,
+  reviewedKeycloakSourceFindings,
 } from "./check-compose-contract.mjs";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -29,9 +44,27 @@ const COMPOSE = join(ROOT, "deploy/compose");
 const WRAPPER = join(COMPOSE, "scripts/compose.sh");
 const GENERATOR = join(COMPOSE, "scripts/generate-secrets.sh");
 const KEYCLOAK_ENTRYPOINT = join(COMPOSE, "keycloak/keycloak-entrypoint");
+const KEYCLOAK_CONVERGENCE = join(COMPOSE, "keycloak/synveda-realm-converge");
+const KEYCLOAK_GENERATION_GATE = join(
+  COMPOSE,
+  "keycloak/synveda-generation-gate",
+);
+const KEYCLOAK_GENERATION_GATE_SELF_TEST = join(
+  COMPOSE,
+  "keycloak/synveda-generation-gate-self-test",
+);
+const KEYCLOAK_HEALTH = join(COMPOSE, "keycloak/synveda-keycloak-health");
+const KEYCLOAK_REALM_SUPERVISOR = join(
+  COMPOSE,
+  "keycloak/synveda-realm-supervise",
+);
+const KEYCLOAK_PROJECTION = join(COMPOSE, "keycloak/SynvedaKeycloakProjection.java");
+const COMPOSE_DEV = join(COMPOSE, "compose.dev.yaml");
 const DATABASE_BOOTSTRAP = join(COMPOSE, "postgres/synveda-database-bootstrap");
 const DB_TEST = join(ROOT, "scripts/db-test.sh");
 const INPUT_SNAPSHOT = join(COMPOSE, "postgres/synveda-input-snapshot.c");
+const CADDYFILE = join(COMPOSE, "configs/caddy/Caddyfile");
+const APP_DEV = join(COMPOSE, "configs/caddy/app.dev.caddy");
 const CARGO_DATABASE_URL_WRAPPER = join(ROOT, "scripts/cargo-with-database-url-file");
 const CLUSTER_AUTHORITY_CONTRACT = join(
   COMPOSE,
@@ -50,6 +83,7 @@ const EXTENSION_FINGERPRINT = join(
   ROOT,
   "crates/synveda-store/sql/extension_fingerprint.sql",
 );
+const IDENTITY_DEV = join(COMPOSE, "configs/caddy/identity.dev.caddy");
 const STORE_RUNTIME_ROLE = join(ROOT, "crates/synveda-store/src/runtime_role.rs");
 const STORE_LIB = join(ROOT, "crates/synveda-store/src/lib.rs");
 const CREDENTIAL_LOG_SETTINGS = [
@@ -174,7 +208,7 @@ function terminalKeycloakFenceFindings(source) {
 function keycloakAdmissionRecoveryFindings(source) {
   const findings = [];
   const helperStart = source.indexOf("assert_keycloak_admission_empty() {");
-  const helperEnd = source.indexOf("\nreport_preserved_state()", helperStart);
+  const helperEnd = source.indexOf("\n}\n\n# Test isolation is intentional", helperStart);
   const helper =
     helperStart >= 0 && helperEnd > helperStart
       ? source.slice(helperStart, helperEnd)
@@ -542,6 +576,1285 @@ test("the Collector health contract is loopback-only and self-probing", () => {
   );
 });
 
+test("the proxy trust boundary is one closed Caddy grammar", () => {
+  const source = readFileSync(CADDYFILE, "utf8");
+  assert.deepEqual(caddyTrustBoundaryFindings(source), []);
+  const forwardedIdentity = source.replace(
+    "\theader_up X-Forwarded-For {remote_host}\n",
+    "\theader_up X-Forwarded-For {remote_host}\n" +
+      "\theader_up X-Forwarded-For {http.request.header.X-Forwarded-For}\n",
+  );
+  assert.notEqual(forwardedIdentity, source);
+  assert.ok(caddyTrustBoundaryFindings(forwardedIdentity).length > 0);
+});
+
+test("the application edge is one closed Caddy route grammar", () => {
+  const source = readFileSync(APP_DEV, "utf8");
+  assert.deepEqual(appRouteFindings(source), []);
+  const identityBypass = source.replace(
+    "\thandle /metrics {",
+    "\timport /etc/caddy/identity.caddy\n\thandle /metrics {",
+  );
+  assert.notEqual(identityBypass, source);
+  assert.ok(appRouteFindings(identityBypass).length > 0);
+});
+
+test("the complete Keycloak proof executable chain is review-locked", () => {
+  const entrypoint = readFileSync(KEYCLOAK_ENTRYPOINT, "utf8");
+  assert.deepEqual(
+    reviewedKeycloakSourceFindings("keycloak/keycloak-entrypoint", entrypoint),
+    [],
+  );
+  for (const [name, mutated] of [
+    [
+      "generation rotation bypass",
+      entrypoint.replace(
+        '"$generation_gate" rotate >/dev/null || {\n',
+        "true || {\n",
+      ),
+    ],
+    [
+      "ambient generation accepted",
+      entrypoint.replace(
+        '[ -z "${SYNVEDA_KEYCLOAK_GENERATION+x}" ] || {\n',
+        "if false; then\n",
+      ),
+    ],
+  ]) {
+    assert.notEqual(mutated, entrypoint, `${name} mutant did not alter entrypoint`);
+    assert.ok(
+      reviewedKeycloakSourceFindings("keycloak/keycloak-entrypoint", mutated).length > 0,
+      `review lock accepted ${name}`,
+    );
+  }
+
+  const projection = readFileSync(KEYCLOAK_PROJECTION, "utf8");
+  assert.deepEqual(
+    reviewedKeycloakSourceFindings("keycloak/SynvedaKeycloakProjection.java", projection),
+    [],
+  );
+  assert.deepEqual(masterClientAuthorityFindings(projection), []);
+  for (const [name, mutated] of [
+    [
+      "legacy empty-array oracle",
+      projection.replace(
+        "                int statusCode = sendDiscarding(",
+        "                BoundedResponse response = sendBounded(",
+      ).replace(
+        "                    proofDeadlineNanos\n"
+          + "                );\n"
+          + "                verifyForbiddenAuthorityResponse(statusCode);",
+        "                    4096,\n"
+          + "                    proofDeadlineNanos\n"
+          + "                );\n"
+          + "                verifyEmptyArrayResponse(\n"
+          + "                    response.statusCode(), response.body()\n"
+          + "                );",
+      ),
+    ],
+    [
+      "body-retaining transport",
+      projection.replace("int statusCode = sendDiscarding(", "int statusCode = sendBounded("),
+    ],
+    [
+      "broadened status",
+      projection.replace(
+        "verifyForbiddenAuthorityResponse(statusCode);",
+        "if (statusCode != 403 && statusCode != 200) throw new IllegalArgumentException();",
+      ),
+    ],
+    [
+      "early 200 bypass",
+      projection.replace(
+        "                verifyForbiddenAuthorityResponse(statusCode);",
+        "                if (statusCode == 200) return;\n"
+          + "                verifyForbiddenAuthorityResponse(statusCode);",
+      ),
+    ],
+    [
+      "removed client discriminator",
+      projection.replace('+ "?clientId=admin-cli",', '+ "",'),
+    ],
+    [
+      "stage attribution drift",
+      projection.replace(
+        "atAuthorityStage(AuthorityStage.MASTER_CLIENTS, () -> {",
+        "atAuthorityStage(AuthorityStage.MASTER_SESSION_STATS, () -> {",
+      ),
+    ],
+  ]) {
+    assert.notEqual(mutated, projection, `${name} mutant did not alter projection`);
+    assert.ok(
+      masterClientAuthorityFindings(mutated).length > 0,
+      `master-client authority contract accepted ${name}`,
+    );
+  }
+  assert.deepEqual(authorityCleanupOrderFindings(projection), []);
+  const unguardedTokenContract = projection.replace(
+    "        String refreshToken = tokenGrant.refreshToken();\n"
+      + "        runAuthorityProofWithCleanup(() -> {\n"
+      + "            AuthorityTokens tokens = atAuthorityStage(\n"
+      + "                AuthorityStage.TOKEN_CONTRACT,\n"
+      + "                () -> parseAuthorityTokenResponse(tokenGrant.response())\n"
+      + "            );",
+    "        String refreshToken = tokenGrant.refreshToken();\n"
+      + "        AuthorityTokens tokens = atAuthorityStage(\n"
+      + "            AuthorityStage.TOKEN_CONTRACT,\n"
+      + "            () -> parseAuthorityTokenResponse(tokenGrant.response())\n"
+      + "        );\n"
+      + "        runAuthorityProofWithCleanup(() -> {",
+  );
+  assert.notEqual(unguardedTokenContract, projection);
+  assert.deepEqual(authorityCleanupOrderFindings(unguardedTokenContract), [
+    "Keycloak authority grant, guarded token contracts or cleanup order drifted",
+  ]);
+  const guardedRefreshContract =
+    "            atAuthorityStage(\n"
+    + "                AuthorityStage.REFRESH_CONTRACT,\n"
+    + "                () -> verifyAuthorityRefreshContract(";
+  const unguardedRefreshContract = projection
+    .replace(guardedRefreshContract, "")
+    .replace(
+      "        String refreshToken = tokenGrant.refreshToken();\n"
+        + "        runAuthorityProofWithCleanup(() -> {",
+      "        String refreshToken = tokenGrant.refreshToken();\n"
+        + guardedRefreshContract
+        + "\n        runAuthorityProofWithCleanup(() -> {",
+    );
+  assert.notEqual(unguardedRefreshContract, projection);
+  assert.deepEqual(authorityCleanupOrderFindings(unguardedRefreshContract), [
+    "Keycloak authority grant, guarded token contracts or cleanup order drifted",
+  ]);
+  const collapsedTokenContract = projection.replace(
+    "                AuthorityStage.TOKEN_CONTRACT,\n"
+      + "                () -> parseAuthorityTokenResponse(tokenGrant.response())",
+    "                AuthorityStage.TOKEN_ENVELOPE,\n"
+      + "                () -> parseAuthorityTokenResponse(tokenGrant.response())",
+  );
+  assert.notEqual(collapsedTokenContract, projection);
+  assert.ok(authorityCleanupOrderFindings(collapsedTokenContract).length > 0);
+  const collapsedRefreshContract = projection.replace(
+    "                AuthorityStage.REFRESH_CONTRACT,\n"
+      + "                () -> verifyAuthorityRefreshContract(",
+    "                AuthorityStage.TOKEN_CLAIMS,\n"
+      + "                () -> verifyAuthorityRefreshContract(",
+  );
+  assert.notEqual(collapsedRefreshContract, projection);
+  assert.ok(authorityCleanupOrderFindings(collapsedRefreshContract).length > 0);
+  for (const [name, mutated] of [
+    [
+      "realm-state proof",
+      projection.replace(
+        "verifyRealmState(input, exactBoolean(args[2]));",
+        "verifyTargetRealm(input);",
+      ),
+    ],
+    [
+      "audit role",
+      projection.replace(
+        'text(role, "name", "view-users");',
+        'text(role, "name", "manage-users");',
+      ),
+    ],
+    [
+      "master audit client",
+      projection.replace(
+        'clientName.equals("master-realm")',
+        'clientName.equals("realm-management")',
+      ),
+    ],
+    [
+      "direct audit composite",
+      projection.replace(
+        '        bool(role, "composite", true);',
+        '        bool(role, "composite", false);',
+      ),
+    ],
+    [
+      "missing effective audit child",
+      projection.replace(
+        '        "query-groups", "query-users", "view-users"',
+        '        "query-users", "view-users"',
+      ),
+    ],
+    [
+      "extra effective audit role",
+      projection.replace(
+        '        "query-groups", "query-users", "view-users"',
+        '        "manage-users", "query-groups", "query-users", "view-users"',
+      ),
+    ],
+    [
+      "master client-list authority",
+      projection.replace(
+        '        "query-groups", "query-users", "view-users"',
+        '        "query-clients", "query-groups", "query-users", "view-users"',
+      ),
+    ],
+    [
+      "effective audit composite flags",
+      projection.replace(
+        'bool(role, "composite", name.equals("view-users"));',
+        'bool(role, "composite", false);',
+      ),
+    ],
+    [
+      "direct UUID collision",
+      projection.replace(
+        "                    if (!directIds.add(roleId)) {",
+        "                    if (false) {",
+      ),
+    ],
+    [
+      "effective client-role UUID collision",
+      projection.replace(
+        "if (roleId.equals(clientId) || !ids.add(roleId)) {",
+        "if (!ids.add(roleId)) {",
+      ),
+    ],
+    [
+      "direct-effective audit UUID binding",
+      projection.replace(
+        'if (name.equals("view-users") && !roleId.equals(directAuditRoleId)) {',
+        "if (false) {",
+      ),
+    ],
+    [
+      "service-account-inclusive master inventory",
+      projection.replace(
+        "?first=0&max=3&briefRepresentation=true&exact=false",
+        "?first=0&max=3&briefRepresentation=true&exact=true",
+      ),
+    ],
+    [
+      "self federated-identity probe",
+      projection.replace(
+        'masterSelfUrl + "/federated-identity"',
+        "masterSelfUrl",
+      ),
+    ],
+    [
+      "exact password credential count",
+      projection.replace("credentials.size() != 1", "credentials.size() < 1"),
+    ],
+    [
+      "forbidden mutation response",
+      projection.replace(
+        "if (statusCode != 403) {",
+        "if (statusCode != 403 && statusCode != 404) {",
+      ),
+    ],
+    [
+      "unordered exact scope membership",
+      projection.replace(
+        'Set.of("email", "openid", "profile")',
+        'Set.of("email", "profile")',
+      ),
+    ],
+    [
+      "token response request window",
+      projection.replace(
+        "Math.subtractExact(responseReceivedAt, requestStartedAt) > 2",
+        "Math.subtractExact(responseReceivedAt, requestStartedAt) > 20",
+      ),
+    ],
+    [
+      "signed access-token lifetime",
+      projection.replace("lifetime > 61", "lifetime > 610"),
+    ],
+    [
+      "access and ID token issuance skew",
+      projection.replace("issuedAtDelta > 2", "issuedAtDelta > 20"),
+    ],
+    [
+      "master realm visibility discriminator",
+      projection.replace(
+        '+ "/client-session-stats",',
+        '+ "",',
+      ),
+    ],
+    [
+      "status-only master session probe",
+      projection.replace(
+        "HttpResponse.BodyHandlers.discarding()",
+        "HttpResponse.BodyHandlers.replacing(null)",
+      ),
+    ],
+    [
+      "cleanup stage attribution",
+      projection.replace(
+        "new AuthorityProofRefusal(AuthorityStage.CLEANUP)",
+        "new AuthorityProofRefusal(AuthorityStage.PROOF_DEADLINE)",
+      ),
+    ],
+    [
+      "bounded response subscriber",
+      projection.replace(
+        "ignored -> new BoundedBodySubscriber(maxBodyBytes)",
+        "HttpResponse.BodyHandlers.ofByteArray()",
+      ),
+    ],
+    [
+      "absolute proof deadline",
+      projection.replace(
+        "AUTHORITY_PROOF_BUDGET = Duration.ofSeconds(34)",
+        "AUTHORITY_PROOF_BUDGET = Duration.ofSeconds(340)",
+      ),
+    ],
+    [
+      "absolute cleanup deadline",
+      projection.replace(
+        "AUTHORITY_CLEANUP_BUDGET = Duration.ofSeconds(6)",
+        "AUTHORITY_CLEANUP_BUDGET = Duration.ofSeconds(60)",
+      ),
+    ],
+    [
+      "replacement refresh revocation",
+      projection.replace(
+        "                replacementRefreshToken,\n                cleanupDeadlineNanos",
+        "                refreshToken,\n                cleanupDeadlineNanos",
+      ),
+    ],
+    [
+      "strict kcadm session shape",
+      projection.replace("session.size() != 6", "session.size() < 6"),
+    ],
+    [
+      "revocation response body",
+      projection.replace(
+        "if (body.length == 0) {",
+        "if (statusCode == 200) {",
+      ),
+    ],
+    [
+      "distinct one-shot tokens",
+      projection.replace(
+        "        if (accessToken.equals(idToken)\n"
+          + "            || accessToken.equals(refreshToken)\n"
+          + "            || idToken.equals(refreshToken)) {",
+        "        if (false) {",
+      ),
+    ],
+  ]) {
+    assert.notEqual(mutated, projection, `${name} mutant did not alter projection`);
+    assert.ok(
+      reviewedKeycloakSourceFindings("keycloak/SynvedaKeycloakProjection.java", mutated).length
+        > 0,
+      `review lock accepted ${name}`,
+    );
+  }
+});
+
+test("the identity edge stays closed until the exact Keycloak witness is present", () => {
+  const source = readFileSync(IDENTITY_DEV, "utf8");
+  assert.deepEqual(identityGateFindings(source), []);
+  for (const [name, mutated] of [
+    [
+      "witness filename drift",
+      source.replace("cpr45-keycloak-realm-v3.ready", "stale.ready"),
+    ],
+    [
+      "writable-state path drift",
+      source.replace(
+        "/run/synveda/keycloak-public-gate",
+        "/tmp/keycloak-public-gate",
+      ),
+    ],
+    [
+      "generation selector removed",
+      source.replace("/keycloak-public-gate/current", "/keycloak-public-gate"),
+    ],
+    ["fail-open fallback", source.replace("respond 503", "reverse_proxy keycloak:8080")],
+    ["cacheable refusal", source.replace('header Cache-Control "no-store"\n', "")],
+    [
+      "operator path exposure",
+      source.replace("/resources/*", "/resources/* /admin/*"),
+    ],
+    [
+      "logout confirmation path removed",
+      source.replace(
+        " /realms/synveda/protocol/openid-connect/logout/logout-confirm",
+        "",
+      ),
+    ],
+    [
+      "additive ungated handler",
+      source.replace(
+        "\t@identity_ready {",
+        "\thandle /realms/synveda/* {\n\t\treverse_proxy keycloak:8080\n\t}\n\t@identity_ready {",
+      ),
+    ],
+    [
+      "alternate-form additive ungated handler",
+      source.replace(
+        "\t@identity_ready {",
+        "\thandle /realms/synveda/* {\n\t\treverse_proxy http://keycloak:8080\n\t}\n\t@identity_ready {",
+      ),
+    ],
+    [
+      "additive imported route",
+      source.replace(
+        "\t@identity_ready {",
+        "\timport operator_identity_bypass\n\t@identity_ready {",
+      ),
+    ],
+    [
+      "redirect before closed handler",
+      source.replace(
+        "\t@identity_ready {",
+        "\tredir /realms/synveda/* https://example.invalid{uri}\n\t@identity_ready {",
+      ),
+    ],
+  ]) {
+    assert.notEqual(mutated, source, `${name} mutant did not alter the fixture`);
+    assert.ok(identityGateFindings(mutated).length > 0, `gate accepted ${name}`);
+  }
+});
+
+test("the Keycloak generation gate fences rotation, publication and retirement", () => {
+  const source = readFileSync(KEYCLOAK_GENERATION_GATE, "utf8");
+  assert.deepEqual(keycloakGenerationGateFindings(source), []);
+  for (const [name, mutated] of [
+    [
+      "widened root mode",
+      source.replace(
+        '[ "$(file_mode "$public_gate_dir")" = 700 ] && \\\n',
+        '[ "$(file_mode "$public_gate_dir")" = 755 ] && \\\n',
+      ),
+    ],
+    [
+      "non-atomic current swap",
+      source.replace(
+        'mv -Tf -- "$staged_link" "$current_link" || {',
+        'cp -P -- "$staged_link" "$current_link" || {',
+      ),
+    ],
+    [
+      "selector closure delayed",
+      source.replace(
+        '        close_current_selector "$previous_generation" || fail\n' +
+          '        withdraw_generation "$previous_generation" || fail\n',
+        '        withdraw_generation "$previous_generation" || fail\n' +
+          '        close_current_selector "$previous_generation" || fail\n',
+      ),
+    ],
+    [
+      "post-publication fence removed",
+      source.replace(
+        '    if ! is_current_generation "$generation"; then\n',
+        "    if false; then\n",
+      ),
+    ],
+    [
+      "current generation retirement allowed",
+      source.replace(
+        '    ! is_current_generation "$generation" || return 1\n',
+        "    true\n",
+      ),
+    ],
+    [
+      "selector closure short-circuited",
+      source.replace(
+        'close_current_selector() {\n    is_current_generation "$1" || return 1',
+        "close_current_selector() {\n    return 0",
+      ),
+    ],
+    [
+      "generation grammar widened",
+      source.replace("*[!A-Za-z0-9]*) return 1", "*[!A-Za-z0-9_-]*) return 1"),
+    ],
+    [
+      "generation directory mode widened",
+      source.replace(
+        '[ "$(file_mode "$generation_path")" = 700 ]',
+        '[ "$(file_mode "$generation_path")" = 755 ]',
+      ),
+    ],
+    [
+      "publication witness made group-readable",
+      source.replace('! chmod 0400 "$gate_candidate"', '! chmod 0440 "$gate_candidate"'),
+    ],
+    [
+      "publication rename weakened",
+      source.replace(
+        'mv -Tf -- "$gate_candidate" "$generation_ready"',
+        'mv -f -- "$gate_candidate" "$generation_ready"',
+      ),
+    ],
+  ]) {
+    assert.notEqual(mutated, source, `${name} mutant did not alter the fixture`);
+    assert.ok(
+      keycloakGenerationGateFindings(mutated).length > 0,
+      `generation gate accepted ${name}`,
+    );
+  }
+});
+
+test("the Keycloak generation race self-test executes against the reviewed gate", () => {
+  const scratch = mkdtempSync(join(tmpdir(), "synveda-generation-race-"));
+  const gate = join(scratch, "synveda-generation-gate");
+  const selfTest = join(scratch, "synveda-generation-gate-self-test");
+  const gateRoot = join(scratch, "gate-root");
+  const bin = join(scratch, "bin");
+  try {
+    mkdirSync(bin, { mode: 0o700 });
+    writeFileSync(
+      join(bin, "mv"),
+      `#!/bin/sh
+set -eu
+[ "$#" -eq 4 ] && [ "$1" = -Tf ] && [ "$2" = -- ] || exit 64
+exec python3 -c 'import os,sys; os.replace(sys.argv[1],sys.argv[2])' "$3" "$4"
+`,
+      { mode: 0o700 },
+    );
+    const gateSource = readFileSync(KEYCLOAK_GENERATION_GATE, "utf8").replace(
+      "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+      `PATH=${bin}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin`,
+    );
+    writeFileSync(gate, gateSource, {
+      mode: 0o700,
+    });
+    const harness = readFileSync(KEYCLOAK_GENERATION_GATE_SELF_TEST, "utf8")
+      .replaceAll("/opt/keycloak/bin/synveda-generation-gate", gate)
+      .replaceAll("/tmp/synveda-generation-gate-self-test", gateRoot);
+    writeFileSync(selfTest, harness, { mode: 0o700 });
+    const result = spawnSync("bash", [selfTest], {
+      encoding: "utf8",
+      env: { PATH: process.env.PATH ?? "/usr/bin:/bin" },
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout, "");
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+});
+
+test("the Keycloak realm supervisor is fail-closed and generation-fenced", () => {
+  const source = readFileSync(KEYCLOAK_REALM_SUPERVISOR, "utf8");
+  assert.deepEqual(keycloakRealmSupervisorFindings(source), []);
+  for (const [name, mutated] of [
+    [
+      "startup withdrawal removed",
+      source.replace("withdraw_current_generation || {\n", "true || {\n"),
+    ],
+    [
+      "management proof removed",
+      source.replace(
+        "/opt/keycloak/bin/synveda-keycloak-health network",
+        "/bin/true",
+      ),
+    ],
+    [
+      "generation argument removed",
+      source.replace(
+        'synveda-realm-converge "$current_generation" &',
+        "synveda-realm-converge &",
+      ),
+    ],
+    [
+      "readiness ignored",
+      source.replace(
+        'if [ "$child_status" -eq 0 ] && $gate ready',
+        'if [ "$child_status" -eq 0 ] && true',
+      ),
+    ],
+    [
+      "failure latch removed",
+      source.replace("failed_generation=$current_generation\n", "failed_generation=\n"),
+    ],
+    [
+      "cleanup withdrawal bypassed",
+      source.replace("    if ! withdraw_current_generation; then", "    if false; then"),
+    ],
+    [
+      "withdrawal helper bypassed",
+      source.replace(
+        '    $gate withdraw "$observed" >/dev/null 2>&1 || return 1',
+        "    return 0",
+      ),
+    ],
+    [
+      "new-generation withdrawal bypassed",
+      source.replace(
+        '        $gate withdraw "$current_generation" >/dev/null 2>&1 || {\n' +
+          '            echo "keycloak-supervisor: new generation could not be closed" >&2',
+        '        true || {\n' +
+          '            echo "keycloak-supervisor: new generation could not be closed" >&2',
+      ),
+    ],
+    [
+      "degraded-generation withdrawal bypassed",
+      source.replace(
+        '    if ! management_ready; then\n' +
+          '        $gate withdraw "$current_generation" >/dev/null 2>&1 || {',
+        "    if ! management_ready; then\n        true || {",
+      ),
+    ],
+    [
+      "child bypasses entrypoint",
+      source.replace(
+        "    /opt/keycloak/bin/keycloak-entrypoint \\\n",
+        "    /bin/true \\\n",
+      ),
+    ],
+    [
+      "degraded-child withdrawal bypassed",
+      source.replace(
+        '            $gate withdraw "$current_generation" >/dev/null 2>&1 || true\n' +
+          '            kill -TERM "$child_pid"',
+        '            true\n' + '            kill -TERM "$child_pid"',
+      ),
+    ],
+    [
+      "post-child degraded withdrawal bypassed",
+      source.replace(
+        '    if [ "$dependency_degraded" = true ]; then\n' +
+          "        # Convergence suppresses signals while its bounded cleanup settles\n" +
+          "        # sessions and may have reached publication after the pre-kill\n" +
+          "        # withdrawal. Close the still-current generation again after wait.\n" +
+          '        $gate withdraw "$current_generation" >/dev/null 2>&1 || {',
+        '    if [ "$dependency_degraded" = true ]; then\n        true || {',
+      ),
+    ],
+    [
+      "failed-generation withdrawal bypassed",
+      source.replace(
+        '    $gate withdraw "$current_generation" >/dev/null 2>&1 || {\n' +
+          '        echo "keycloak-supervisor: failed generation could not be closed" >&2',
+        '    true || {\n' +
+          '        echo "keycloak-supervisor: failed generation could not be closed" >&2',
+      ),
+    ],
+  ]) {
+    assert.notEqual(mutated, source, `${name} mutant did not alter the fixture`);
+    assert.ok(
+      keycloakRealmSupervisorFindings(mutated).length > 0,
+      `realm supervisor accepted ${name}`,
+    );
+  }
+});
+
+test("the Keycloak management health proof uses the bounded HTTP status contract", () => {
+  const source = readFileSync(KEYCLOAK_HEALTH, "utf8");
+  assert.deepEqual(keycloakHealthFindings(source), []);
+  for (const [name, mutated] of [
+    [
+      "status widened",
+      source.replace(
+        '[[ "$status_line" =~ ^HTTP/1\\.[01]\\ 200\\  ]]',
+        '[[ "$status_line" =~ ^HTTP/1\\.[01]\\ 2[0-9][0-9]\\  ]]',
+      ),
+    ],
+    [
+      "incomplete headers accepted",
+      source.replace('[ "$headers_complete" = true ] || return 1', "true"),
+    ],
+    [
+      "response bound widened",
+      source.replace('"$response_size" -le 65536', '"$response_size" -le 65537'),
+    ],
+    [
+      "body oracle added",
+      source.replace(
+        "validate_response() (\n",
+        "validate_response() (\n    grep -q status \"$1\" || return 1\n",
+      ),
+    ],
+    ["local host widened", source.replace("health_host=127.0.0.1", "health_host=0.0.0.0")],
+    ["network host redirected", source.replace("health_host=keycloak", "health_host=localhost")],
+    ["management port drifted", source.replace("/dev/tcp/$host/9000", "/dev/tcp/$host/8080")],
+    ["management endpoint drifted", source.replace("GET /health/ready", "GET /health/live")],
+    [
+      "management timeout widened",
+      source.replace("--kill-after=1s 4s \\", "--kill-after=1s 5s \\"),
+    ],
+  ]) {
+    assert.notEqual(mutated, source, `${name} mutant did not alter the fixture`);
+    assert.ok(
+      keycloakHealthFindings(mutated).length > 0,
+      `Keycloak health accepted ${name}`,
+    );
+  }
+});
+
+test("development uses one exact browser and container issuer port", () => {
+  const source = readFileSync(COMPOSE_DEV, "utf8");
+  assert.deepEqual(developmentPortBindingFindings(source), []);
+  const hostOnlyTranslation = source.replace(
+    "      - target: ${SYNVEDA_DEV_HTTP_PORT:-8080}",
+    "      - target: 8080",
+  );
+  assert.notEqual(hostOnlyTranslation, source);
+  assert.deepEqual(developmentPortBindingFindings(hostOnlyTranslation), [
+    "development proxy does not bind one identical container and host port",
+  ]);
+
+  const fixture = makeComposeFixture();
+  try {
+    const output = join(fixture.scratch, "custom-development-port.json");
+    writeFileSync(
+      fixture.issuers,
+      JSON.stringify([
+        {
+          issuer: "http://auth.synveda.test:18083/realms/synveda",
+          client_id: "synveda",
+          audience: "synveda-api",
+          tenant: { static: { tenant_id: "00000000-0000-0000-0000-000000000001" } },
+          login_scopes: ["openid", "profile", "email"],
+        },
+      ]),
+      { mode: 0o600 },
+    );
+    const result = spawnSync(WRAPPER, ["config", "--output", output], {
+      cwd: ROOT,
+      env: composeEnvironment(fixture, { SYNVEDA_DEV_HTTP_PORT: "18083" }),
+      encoding: "utf8",
+    });
+    assert.equal(result.status, 0, result.stderr);
+    const model = JSON.parse(readFileSync(output, "utf8"));
+    assert.deepEqual(model.services.proxy.ports, [
+      {
+        mode: "ingress",
+        target: 18083,
+        published: "18083",
+        protocol: "tcp",
+        host_ip: "127.0.0.1",
+      },
+    ]);
+    assert.equal(model.services.proxy.environment.SYNVEDA_PUBLIC_PORT, "18083");
+    assert.equal(model.services.proxy.environment.SYNVEDA_PROXY_HTTP_PORT, "18083");
+    assert.equal(
+      model.services.keycloak.environment.KC_HOSTNAME,
+      "http://auth.synveda.test:18083",
+    );
+    assert.equal(
+      model.services["issuer-diagnostic"].environment.SYNVEDA_OIDC_EXPECTED_ISSUER,
+      "http://auth.synveda.test:18083/realms/synveda",
+    );
+  } finally {
+    rmSync(fixture.scratch, { recursive: true, force: true });
+  }
+});
+
+test("Keycloak convergence publishes only after bounded proof and cleanup", () => {
+  const source = readFileSync(KEYCLOAK_CONVERGENCE, "utf8");
+  assert.deepEqual(keycloakConvergenceFindings(source), []);
+
+  const wrongAuditClient = source.replace(
+    "--cclientid master-realm",
+    "--cclientid realm-management",
+  );
+  assert.notEqual(wrongAuditClient, source);
+  assert.ok(
+    keycloakConvergenceFindings(wrongAuditClient).includes(
+      "permanent authority audit client drifted",
+    ),
+  );
+
+  const publication = "if publish_public_gate; then";
+  const withoutPublication = source.replace(publication, "# publication moved");
+  const publicationBeforeCleanup = withoutPublication.replace(
+    '    if ! rm -f -- "$state_dir"/*; then',
+    `    ${publication}\n        :\n    fi\n    if ! rm -f -- "$state_dir"/*; then`,
+  );
+  const withoutFinalAuthorization = replaceOccurrence(
+    source,
+    "publish_gate_on_exit=true",
+    1,
+    "# final publication authorization moved",
+  );
+  const authorizationBeforeProof = withoutFinalAuthorization.replace(
+    'try_complete_projection "$authority_config" || {',
+    'publish_gate_on_exit=true\ntry_complete_projection "$authority_config" || {',
+  );
+
+  const mutants = [
+    [
+      "late proof-function override",
+      source.replace(
+        "trap cleanup EXIT",
+        "try_prove_scoped_authority() { return 0; }\ntrap cleanup EXIT",
+      ),
+    ],
+    [
+      "additive direct gate write",
+      source.replace(
+        "    unset bootstrap_password convergence_password\n",
+        "    printf '%s\\n' \"$contract\" > \"$public_gate\"\n" +
+          "    unset bootstrap_password convergence_password\n",
+      ),
+    ],
+    [
+      "alternate publication authorization",
+      source.replace(
+        "trap 'signal_exit 143' TERM\n",
+        "trap 'signal_exit 143' TERM\n" +
+          "publish_gate_on_exit=$(printf true)\nexit 0\n",
+      ),
+    ],
+    [
+      "gate withdrawal early return",
+      source.replace(
+        "withdraw_public_gate() {\n",
+        "withdraw_public_gate() {\n    return 0\n",
+      ),
+    ],
+    [
+      "non-atomic gate publication",
+      source.replace(
+        '"$generation_gate" publish "$generation" >/dev/null 2>&1',
+        'cp -- "$state_dir/realm.json" "$public_gate"',
+      ),
+    ],
+    [
+      "initial gate withdrawal",
+      source.replace("withdraw_public_gate || {", "true || {"),
+    ],
+    ["EXIT trap", source.replace("trap cleanup EXIT", "# EXIT trap removed")],
+    [
+      "HUP trap",
+      source.replace("trap 'signal_exit 129' HUP", "# HUP trap removed"),
+    ],
+    [
+      "INT trap",
+      source.replace("trap 'signal_exit 130' INT", "# INT trap removed"),
+    ],
+    [
+      "TERM trap",
+      source.replace("trap 'signal_exit 143' TERM", "# TERM trap removed"),
+    ],
+    [
+      "cleanup signal suppression",
+      source.replace("trap '' HUP INT TERM", "trap - HUP INT TERM"),
+    ],
+    [
+      "EXIT trap released before signal suppression",
+      source.replace(
+        "trap '' HUP INT TERM\n    trap - EXIT",
+        "trap - EXIT\n    trap '' HUP INT TERM",
+      ),
+    ],
+    [
+      "authenticated quarantine update",
+      source.replace(
+        'if run_admin_quarantine "$quarantine_config" "$state_dir"; then',
+        "if true; then",
+      ),
+    ],
+    [
+      "authenticated quarantine early success",
+      source.replace("\nquarantine() {\n", "\nquarantine() {\n    return 0\n"),
+    ],
+    [
+      "fresh-authority quarantine early success",
+      source.replace(
+        "quarantine_with_fresh_authority() {\n",
+        "quarantine_with_fresh_authority() {\n    return 0\n",
+      ),
+    ],
+    [
+      "fresh-authority quarantine proof",
+      source.replace(
+        'if run_admin_quarantine "$recovery_config" "$recovery_dir"; then',
+        'if run_admin_quarantine "$permanent_config" "$recovery_dir"; then',
+      ),
+    ],
+    ["private cleanup after publication", publicationBeforeCleanup],
+    ["final authorization before open proof", authorizationBeforeProof],
+    [
+      "complete projection proof short-circuited",
+      source.replace(
+        'try_complete_projection "$authority_config" || {',
+        'true || try_complete_projection "$authority_config" || {',
+      ),
+    ],
+    [
+      "scoped token proof short-circuited",
+      source.replace(
+        'try_project_quiet scoped-token admin-token "$scoped_config" || return',
+        'true || try_project_quiet scoped-token admin-token "$scoped_config" || return',
+      ),
+    ],
+    [
+      "complete group proof short-circuited",
+      source.replace(
+        'try_project_quiet complete-group group "$state_dir/complete-groups.json" || return',
+        'true || try_project_quiet complete-group group "$state_dir/complete-groups.json" || return',
+      ),
+    ],
+    [
+      "publication outside cleanup",
+      `${source}\npublish_public_gate\n`,
+    ],
+    [
+      "bootstrap negative response probe",
+      source.replace(
+        "SynvedaKeycloakProjection bootstrap-refused",
+        "SynvedaKeycloakProjection admin-token",
+      ),
+    ],
+    [
+      "one-shot authority response probe",
+      source.replace(
+        'SynvedaKeycloakProjection admin-authority-login "$scoped_user_id" \\',
+        'SynvedaKeycloakProjection admin-token "$scoped_user_id" \\',
+      ),
+    ],
+    [
+      "one-shot authority proof short-circuited",
+      source.replace(
+        "if KC_CLI_PASSWORD=$convergence_password \\",
+        "if true || KC_CLI_PASSWORD=$convergence_password \\",
+      ),
+    ],
+    [
+      "one-shot authority subject",
+      source.replace(
+        'admin-authority-login "$scoped_user_id" \\',
+        'admin-authority-login "$bootstrap_user_id" \\',
+      ),
+    ],
+    [
+      "one-shot authority issuer",
+      source.replace(
+        "SYNVEDA_PROBE_ISSUER=$public_auth_url/realms/master",
+        "SYNVEDA_PROBE_ISSUER=$admin_url/realms/master",
+      ),
+    ],
+    [
+      "one-shot authority credential",
+      source.replace(
+        "KC_CLI_PASSWORD=$convergence_password",
+        "KC_CLI_PASSWORD=$bootstrap_password",
+      ),
+    ],
+    [
+      "one-shot authority bootstrap identity environment",
+      source.replace(
+        "        SYNVEDA_PROBE_BOOTSTRAP_USERNAME=$bootstrap_username \\\n",
+        "",
+      ),
+    ],
+    [
+      "one-shot authority raw status",
+      source.replace("scoped_status=$?", "scoped_status=1"),
+    ],
+    [
+      "one-shot authority stage classifier",
+      source.replace(
+        ". /opt/keycloak/bin/synveda-authority-stage",
+        ". /tmp/unreviewed-authority-stage",
+      ),
+    ],
+    [
+      "one-shot authority capture cleanup",
+      source.replace(
+        'synveda_finish_scoped_authority_probe "$state_dir" "$scoped_status"',
+        'return "$scoped_status"',
+      ),
+    ],
+    [
+      "one-shot authority command-scoped secret",
+      source.replace(
+        "    if KC_CLI_PASSWORD=$convergence_password \\\n",
+        "    KC_CLI_PASSWORD=$convergence_password\n" +
+          "    export KC_CLI_PASSWORD\n" +
+          "    if /usr/bin/timeout --foreground --signal=TERM --kill-after=1s 55s \\\n",
+      ),
+    ],
+    [
+      "permanent authentication client",
+      source.replace(
+        "authentication_client=admin-cli",
+        "authentication_client=other-client",
+      ),
+    ],
+    [
+      "custom proof-client residue",
+      source.replace(
+        "authentication_client=admin-cli",
+        "authentication_client=admin-cli\nauthority_proof_client=synveda-convergence-proof",
+      ),
+    ],
+    [
+      "legacy custom authentication client",
+      source.replace(
+        "authentication_client=admin-cli",
+        "authentication_client=admin-cli\nlegacy=synveda-convergence-cli",
+      ),
+    ],
+    [
+      "cleanup authentication bypass",
+      source.replace(
+        'if run_cleanup_kcadm "$cleanup_auth_config" config credentials \\',
+        'if true || run_cleanup_kcadm "$cleanup_auth_config" config credentials \\',
+      ),
+    ],
+    [
+      "direct quarantine Java mode",
+      source.replace(
+        'SynvedaKeycloakProjection admin-quarantine "$quarantine_config" \\',
+        'SynvedaKeycloakProjection bootstrap-refused "$quarantine_config" \\',
+      ),
+    ],
+    [
+      "retired bootstrap password guard",
+      source.replace('[ "${bootstrap_password+x}" = x ] || {', ': || {'),
+    ],
+    [
+      "permanent role projection short-circuited",
+      source.replace(
+        "try_project_quiet effective-target-roles effective-roles \\",
+        "true || try_project_quiet effective-target-roles effective-roles \\",
+      ),
+    ],
+    [
+      "permanent audit role projection short-circuited",
+      source.replace(
+        "try_project_quiet effective-audit-role effective-audit-role \\",
+        "true || try_project_quiet effective-audit-role effective-audit-role \\",
+      ),
+    ],
+    [
+      "target role assignment widened",
+      source.replace(
+        "--rolename manage-realm --rolename manage-clients --rolename manage-users",
+        "--rolename manage-realm --rolename manage-clients --rolename manage-users --rolename manage-events",
+      ),
+    ],
+    [
+      "audit role assignment widened",
+      source.replace("--rolename view-users", "--rolename manage-users"),
+    ],
+    [
+      "audit client assignment drifted",
+      source.replace("--cclientid master-realm", "--cclientid realm-management"),
+    ],
+    [
+      "existing admin session close bypassed",
+      source.replace(
+        'close_admin_session "$auth_config" "$state_dir" || return 70',
+        ": || return 70",
+      ),
+    ],
+    [
+      "failed authentication session settlement bypassed",
+      source.replace(
+        'settle_failed_admin_session "$auth_config" "$state_dir" || return 70',
+        ": || return 70",
+      ),
+    ],
+    [
+      "cleanup session close bypassed",
+      source.replace(
+        'if close_admin_session "$session_config" "$state_dir"; then',
+        "if true; then",
+      ),
+    ],
+    [
+      "bootstrap deletion implementation",
+      source.replace(
+        "project_quiet bootstrap-user-delete admin-bootstrap-delete \\",
+        'admin_quiet "$bootstrap_config" bootstrap-user-delete delete \\',
+      ),
+    ],
+    [
+      "bootstrap deletion identity",
+      source.replace(
+        '"$bootstrap_config" "$bootstrap_user_id"\n    close_admin_session',
+        '"$bootstrap_config" "$permanent_user_id"\n    close_admin_session',
+      ),
+    ],
+    [
+      "post-rename candidate verification",
+      source.replace(
+        "    fi\n    require_current_generation\n}\n\nrequire_current_generation || exit 75",
+        "    fi\n    return 0\n}\n\nrequire_current_generation || exit 75",
+      ),
+    ],
+  ];
+  const digestFinding =
+    "Keycloak convergence source differs from the reviewed executable";
+  const expectedFindings = new Map([
+    ["late proof-function override", "scoped convergence authority proof body drifted"],
+    [
+      "additive direct gate write",
+      "realm convergence writes public gate outside atomic publication",
+    ],
+    [
+      "alternate publication authorization",
+      "realm convergence publication authorization grammar drifted",
+    ],
+    ["gate withdrawal early return", "public gate withdrawal body drifted"],
+    ["non-atomic gate publication", "atomic public gate publication body drifted"],
+    [
+      "initial gate withdrawal",
+      "realm convergence withdrawal can be short-circuited",
+    ],
+    ["EXIT trap", "realm convergence signal contract lacks trap cleanup EXIT"],
+    [
+      "HUP trap",
+      "realm convergence signal contract lacks trap 'signal_exit 129' HUP",
+    ],
+    [
+      "INT trap",
+      "realm convergence signal contract lacks trap 'signal_exit 130' INT",
+    ],
+    [
+      "TERM trap",
+      "realm convergence signal contract lacks trap 'signal_exit 143' TERM",
+    ],
+    ["cleanup signal suppression", "cleanup signal suppression can be bypassed"],
+    [
+      "EXIT trap released before signal suppression",
+      "realm convergence cleanup/quarantine/publication order drifted",
+    ],
+    [
+      "authenticated quarantine update",
+      "authenticated quarantine update can be short-circuited",
+    ],
+    ["authenticated quarantine early success", "authenticated quarantine body drifted"],
+    [
+      "fresh-authority quarantine early success",
+      "fresh-authority quarantine body drifted",
+    ],
+    ["fresh-authority quarantine proof", "fresh-authority quarantine body drifted"],
+    [
+      "private cleanup after publication",
+      "realm convergence cleanup/quarantine/publication order drifted",
+    ],
+    [
+      "final authorization before open proof",
+      "realm enablement is not fully proved before publication is authorized",
+    ],
+    [
+      "complete projection proof short-circuited",
+      "complete projection proof can be short-circuited",
+    ],
+    [
+      "scoped token proof short-circuited",
+      "scoped convergence authority proof body drifted",
+    ],
+    [
+      "complete group proof short-circuited",
+      "complete managed projection proof body drifted",
+    ],
+    [
+      "publication outside cleanup",
+      "realm convergence permits publication outside bounded cleanup",
+    ],
+    [
+      "bootstrap negative response probe",
+      "bootstrap retirement does not use the exact response probe",
+    ],
+    [
+      "one-shot authority response probe",
+      "scoped convergence authority proof body drifted",
+    ],
+    [
+      "one-shot authority proof short-circuited",
+      "scoped convergence authority proof body drifted",
+    ],
+    [
+      "one-shot authority subject",
+      "scoped convergence authority proof body drifted",
+    ],
+    [
+      "one-shot authority issuer",
+      "scoped convergence authority proof body drifted",
+    ],
+    [
+      "one-shot authority credential",
+      "scoped convergence authority proof body drifted",
+    ],
+    [
+      "one-shot authority bootstrap identity environment",
+      "scoped convergence authority proof body drifted",
+    ],
+    [
+      "permanent authentication client",
+      "permanent authority authentication client drifted",
+    ],
+    [
+      "custom proof-client residue",
+      "custom proof-only authority client residue remains reachable",
+    ],
+    [
+      "legacy custom authentication client",
+      "legacy convergence authentication client remains reachable",
+    ],
+    [
+      "cleanup authentication bypass",
+      "cleanup quarantine authentication body drifted",
+    ],
+    [
+      "direct quarantine Java mode",
+      "direct administrative quarantine body drifted",
+    ],
+    ["retired bootstrap password guard", "authenticated quarantine body drifted"],
+    [
+      "one-shot authority raw status",
+      "scoped convergence authority proof body drifted",
+    ],
+    [
+      "one-shot authority stage classifier",
+      "scoped authority does not use the reviewed content-free stage classifier",
+    ],
+    [
+      "one-shot authority capture cleanup",
+      "scoped convergence authority proof body drifted",
+    ],
+    [
+      "one-shot authority command-scoped secret",
+      "scoped convergence authority proof body drifted",
+    ],
+    [
+      "permanent role projection short-circuited",
+      "permanent convergence authority projection body drifted",
+    ],
+    [
+      "permanent audit role projection short-circuited",
+      "permanent convergence authority projection body drifted",
+    ],
+    ["target role assignment widened", "permanent authority target role assignment drifted"],
+    ["audit role assignment widened", "permanent authority audit role assignment drifted"],
+    ["audit client assignment drifted", "permanent authority audit client drifted"],
+    [
+      "existing admin session close bypassed",
+      "administrative authentication session lifecycle drifted",
+    ],
+    [
+      "failed authentication session settlement bypassed",
+      "administrative authentication session lifecycle drifted",
+    ],
+    [
+      "cleanup session close bypassed",
+      "realm convergence cleanup/quarantine/publication order drifted",
+    ],
+    [
+      "bootstrap deletion implementation",
+      "bootstrap retirement does not use the exact-ID administrative delete",
+    ],
+    [
+      "bootstrap deletion identity",
+      "bootstrap retirement is not exactly deleted and refused before its complete witness",
+    ],
+    ["post-rename candidate verification", "atomic public gate publication body drifted"],
+  ]);
+  for (const [name, mutated] of mutants) {
+    assert.notEqual(mutated, source, `${name} mutant did not alter the fixture`);
+    const expectedFinding = expectedFindings.get(name);
+    assert.ok(expectedFinding, `${name} mutant lacks a named semantic finding`);
+    const semanticFindings = keycloakConvergenceFindings(mutated).filter(
+      (finding) => finding !== digestFinding,
+    );
+    assert.ok(
+      semanticFindings.includes(expectedFinding),
+      `convergence lifecycle accepted ${name}; findings: ${semanticFindings.join("; ")}`,
+    );
+  }
+});
+
 function fakeDocker(fixture) {
   const path = join(fixture.scratch, "docker");
   const argumentsFile = join(fixture.scratch, "docker-arguments");
@@ -551,8 +1864,14 @@ function fakeDocker(fixture) {
 [ -z "\${COMPOSE_PROFILES+x}" ] || exit 97
 [ "\${COMPOSE_DISABLE_ENV_FILE:-}" = 1 ] || exit 98
 if [ "$1" = compose ] && [ "$2" = version ]; then
-  echo 2.24.0
+  echo "\${SYNVEDA_FAKE_COMPOSE_VERSION:-2.33.1}"
   exit 0
+fi
+if [ -n "\${SYNVEDA_FAKE_DOCKER_ENVIRONMENT_FILE:-}" ]; then
+  printf '%s\n%s\n' \
+    "$SYNVEDA_DATABASE_AUTHORITY_DIR" \
+    "$SYNVEDA_KEYCLOAK_PUBLIC_GATE_DIR" \
+    > "$SYNVEDA_FAKE_DOCKER_ENVIRONMENT_FILE"
 fi
 printf '%s\\n' "$@" > "$SYNVEDA_FAKE_DOCKER_ARGUMENTS"
 `,
@@ -561,6 +1880,28 @@ printf '%s\\n' "$@" > "$SYNVEDA_FAKE_DOCKER_ARGUMENTS"
   chmodSync(path, 0o700);
   return { path, argumentsFile };
 }
+
+test("the selector requires Compose 2.33.1 for gateway priority", () => {
+  for (const version of ["2.32.9", "2.33.0", "not-a-version"]) {
+    const fixture = makeComposeFixture();
+    try {
+      const fake = fakeDocker(fixture);
+      const result = spawnSync(WRAPPER, ["config"], {
+        cwd: ROOT,
+        env: composeEnvironment(fixture, {
+          SYNVEDA_DOCKER_BIN: fake.path,
+          SYNVEDA_FAKE_DOCKER_ARGUMENTS: fake.argumentsFile,
+          SYNVEDA_FAKE_COMPOSE_VERSION: version,
+        }),
+        encoding: "utf8",
+      });
+      assert.equal(result.status, 69, `${version}: ${result.stderr}`);
+      assert.match(result.stderr, /Docker Compose/);
+    } finally {
+      rmSync(fixture.scratch, { recursive: true, force: true });
+    }
+  }
+});
 
 test("the selector builds one exact external-Postgres/bundled-Keycloak file set", () => {
   const fixture = makeComposeFixture();
@@ -593,6 +1934,72 @@ test("the selector builds one exact external-Postgres/bundled-Keycloak file set"
     ]);
     assert.equal(args[args.indexOf("-p") + 1], "synveda-development");
     assert.deepEqual(args.slice(-2), ["config", "--quiet"]);
+  } finally {
+    rmSync(fixture.scratch, { recursive: true, force: true });
+  }
+});
+
+test("acceptance projects receive distinct authority and public-gate state", () => {
+  const fixture = makeComposeFixture();
+  try {
+    const fake = fakeDocker(fixture);
+    const resolved = [];
+    for (const suffix of ["acceptance-alpha", "acceptance-beta"]) {
+      const environmentFile = join(fixture.scratch, `${suffix}.environment`);
+      const result = spawnSync(WRAPPER, ["config"], {
+        cwd: ROOT,
+        env: composeEnvironment(fixture, {
+          SYNVEDA_COMPOSE_PROJECT_SUFFIX: suffix,
+          SYNVEDA_DOCKER_BIN: fake.path,
+          SYNVEDA_FAKE_DOCKER_ARGUMENTS: fake.argumentsFile,
+          SYNVEDA_FAKE_DOCKER_ENVIRONMENT_FILE: environmentFile,
+        }),
+        encoding: "utf8",
+      });
+      assert.equal(result.status, 0, result.stderr);
+      const [authority, gate] = readFileSync(environmentFile, "utf8").trim().split("\n");
+      assert.match(authority, new RegExp(`/synveda-development-${suffix}/database-authority$`));
+      assert.match(gate, new RegExp(`/synveda-development-${suffix}/keycloak-public-gate$`));
+      resolved.push({ authority, gate });
+    }
+    assert.notEqual(resolved[0].authority, resolved[1].authority);
+    assert.notEqual(resolved[0].gate, resolved[1].gate);
+  } finally {
+    rmSync(fixture.scratch, { recursive: true, force: true });
+  }
+});
+
+test("reference and acceptance projects require an explicit IPv4 pool", () => {
+  const fixture = makeComposeFixture();
+  try {
+    const fake = fakeDocker(fixture);
+    for (const overrides of [
+      {
+        SYNVEDA_COMPOSE_RUNTIME: "development",
+        SYNVEDA_COMPOSE_PROJECT_SUFFIX: "acceptance-pool-proof",
+      },
+      {
+        SYNVEDA_COMPOSE_RUNTIME: "reference",
+        SYNVEDA_PUBLIC_SCHEME: "https",
+        SYNVEDA_APP_HOST: "app.compose.example",
+        SYNVEDA_AUTH_HOST: "auth.compose.example",
+      },
+    ]) {
+      const environment = composeEnvironment(fixture, {
+        SYNVEDA_DOCKER_BIN: fake.path,
+        SYNVEDA_FAKE_DOCKER_ARGUMENTS: fake.argumentsFile,
+        ...overrides,
+      });
+      delete environment.SYNVEDA_COMPOSE_IPV4_POOL;
+      const result = spawnSync(WRAPPER, ["config"], {
+        cwd: ROOT,
+        env: environment,
+        encoding: "utf8",
+      });
+      assert.equal(result.status, 64, result.stderr);
+      assert.match(result.stderr, /require an explicit SYNVEDA_COMPOSE_IPV4_POOL/);
+    }
+    assert.equal(existsSync(fake.argumentsFile), false);
   } finally {
     rmSync(fixture.scratch, { recursive: true, force: true });
   }
@@ -658,14 +2065,17 @@ test("the selector rejects unsafe shape before invoking Docker", () => {
       ["SYNVEDA_APP_HOST", "äpp.synveda.test", "lower-case DNS names"],
       ["SYNVEDA_AUTH_HOST", "auth-.synveda.test", "lower-case DNS names"],
       ["SYNVEDA_DEV_HTTP_PORT", "00", "canonical integer"],
+      ["SYNVEDA_DEV_HTTP_PORT", "1023", "1024 through 65535"],
+      ["SYNVEDA_DEV_HTTP_PORT", "8443", "reserved port 8443"],
       ["SYNVEDA_DEV_HTTP_PORT", "65536", "canonical integer"],
-      ["SYNVEDA_IDENTITY_SUBNET", "10.foo.bar.0/24", "canonical private IPv4"],
-      ["SYNVEDA_IDENTITY_SUBNET", "172.30.45.0./24", "canonical private IPv4"],
-      ["SYNVEDA_IDENTITY_SUBNET", "172.32.0.0/24", "must be private"],
-      ["SYNVEDA_IDENTITY_SUBNET", "192.168.001.0/24", "canonical private IPv4"],
-      ["SYNVEDA_PROXY_IDENTITY_ADDRESS", "172.30.45.999", "canonical IPv4"],
-      ["SYNVEDA_PROXY_IDENTITY_ADDRESS", "172.30.45.2.", "canonical IPv4"],
-      ["SYNVEDA_PROXY_IDENTITY_ADDRESS", "172.30.46.2", "configured /24"],
+      ["SYNVEDA_COMPOSE_IPV4_POOL", "10.foo.bar.0/24", "canonical private IPv4"],
+      ["SYNVEDA_COMPOSE_IPV4_POOL", "172.30.240.0./24", "canonical private IPv4"],
+      ["SYNVEDA_COMPOSE_IPV4_POOL", "172.32.0.0/24", "must be private"],
+      ["SYNVEDA_COMPOSE_IPV4_POOL", "192.168.001.0/24", "canonical private IPv4"],
+      ["SYNVEDA_COMPOSE_IPV4_POOL", "172.30.240.1/24", "canonical private IPv4"],
+      ["SYNVEDA_COMPOSE_IPV4_POOL", "172.30.240.0/23", "private /24"],
+      ["SYNVEDA_COMPOSE_IPV4_POOL", "172.30.240.0/25", "private /24"],
+      ["SYNVEDA_COMPOSE_IPV4_POOL", "2001:db8::/24", "canonical private IPv4"],
       [
         "SYNVEDA_OTEL_COLLECTOR_IMAGE",
         `collector.example/otel@sha256:${"1".repeat(64)}\nunpinned:latest`,
@@ -690,6 +2100,36 @@ test("the selector rejects unsafe shape before invoking Docker", () => {
   }
 });
 
+test("the selector rejects unsafe external issuer URLs without echoing input", () => {
+  const fixture = makeComposeFixture();
+  try {
+    const fake = fakeDocker(fixture);
+    for (const issuer of [
+      "https://external-idp.example/tenant?token=cpr45-issuer-sentinel",
+      "https://user:cpr45-issuer-sentinel@external-idp.example/tenant",
+      "https://external-idp.example/tenant#cpr45-issuer-sentinel",
+      "https://external-idp.example/tenant cpr45-issuer-sentinel",
+    ]) {
+      const result = spawnSync(WRAPPER, ["config"], {
+        cwd: ROOT,
+        env: composeEnvironment(fixture, {
+          SYNVEDA_DOCKER_BIN: fake.path,
+          SYNVEDA_FAKE_DOCKER_ARGUMENTS: fake.argumentsFile,
+          SYNVEDA_OIDC_MODE: "external",
+          SYNVEDA_OIDC_ISSUER: issuer,
+        }),
+        encoding: "utf8",
+      });
+      assert.equal(result.status, 64, result.stderr);
+      assert.match(result.stderr, /credentials, whitespace, a query or a fragment/);
+      assert.doesNotMatch(`${result.stdout}${result.stderr}`, /cpr45-issuer-sentinel/);
+      assert.equal(existsSync(fake.argumentsFile), false);
+    }
+  } finally {
+    rmSync(fixture.scratch, { recursive: true, force: true });
+  }
+});
+
 test("the selector rejects direct secrets and permissive secret files", () => {
   const fixture = makeComposeFixture();
   try {
@@ -700,6 +2140,13 @@ test("the selector rejects direct secrets and permissive secret files", () => {
       "SYNVEDA_MIGRATOR_DATABASE_URL",
       "SYNVEDA_GATEWAY_DATABASE_URL",
       "SYNVEDA_WORKER_DATABASE_URL",
+      "SYNVEDA_KMS_KEY",
+      "SYNVEDA_KMS_KEY_REF",
+      "POSTGRES_PASSWORD",
+      "KC_DB_PASSWORD",
+      "KC_BOOTSTRAP_ADMIN_USERNAME",
+      "KC_BOOTSTRAP_ADMIN_PASSWORD",
+      "SYNVEDA_KEYCLOAK_CONVERGENCE_PASSWORD",
     ]) {
       result = spawnSync(WRAPPER, ["config"], {
         cwd: ROOT,
@@ -726,6 +2173,116 @@ test("the selector rejects direct secrets and permissive secret files", () => {
     });
     assert.equal(result.status, 78);
     assert.match(result.stderr, /synveda_gateway_database_url file must have mode 0600/);
+
+    chmodSync(join(fixture.secrets, "synveda_gateway_database_url"), 0o600);
+    chmodSync(join(fixture.secrets, "keycloak_convergence_admin_password"), 0o640);
+    result = spawnSync(WRAPPER, ["config"], {
+      cwd: ROOT,
+      env: composeEnvironment(fixture, {
+        SYNVEDA_DOCKER_BIN: fake.path,
+        SYNVEDA_FAKE_DOCKER_ARGUMENTS: fake.argumentsFile,
+      }),
+      encoding: "utf8",
+    });
+    assert.equal(result.status, 78);
+    assert.match(
+      result.stderr,
+      /keycloak_convergence_admin_password file must have mode 0600/,
+    );
+  } finally {
+    rmSync(fixture.scratch, { recursive: true, force: true });
+  }
+});
+
+test("the selector rejects aliases between secrets, authority state and issuer input", () => {
+  const fixture = makeComposeFixture();
+  try {
+    const fake = fakeDocker(fixture);
+    const baseEnvironment = composeEnvironment(fixture, {
+      SYNVEDA_DOCKER_BIN: fake.path,
+      SYNVEDA_FAKE_DOCKER_ARGUMENTS: fake.argumentsFile,
+    });
+    const gate = baseEnvironment.SYNVEDA_KEYCLOAK_PUBLIC_GATE_DIR;
+    for (const name of readdirSync(fixture.secrets)) {
+      const source = join(fixture.secrets, name);
+      const target = join(gate, name);
+      if (statSync(source).isDirectory()) {
+        mkdirSync(target, { mode: 0o700 });
+        for (const child of readdirSync(source)) {
+          const childSource = join(source, child);
+          assert.ok(statSync(childSource).isFile());
+          const childTarget = join(target, child);
+          writeFileSync(childTarget, readFileSync(childSource), { mode: 0o600 });
+          chmodSync(childTarget, 0o600);
+        }
+      } else {
+        writeFileSync(target, readFileSync(source), { mode: 0o600 });
+        chmodSync(target, 0o600);
+      }
+    }
+    let result = spawnSync(WRAPPER, ["config"], {
+      cwd: ROOT,
+      env: { ...baseEnvironment, SYNVEDA_SECRETS_DIR: gate },
+      encoding: "utf8",
+    });
+    assert.equal(result.status, 78);
+    assert.match(result.stderr, /secret-and-keycloak-public-gate directories/);
+    assert.equal(existsSync(fake.argumentsFile), false);
+
+    const aliasedIssuer = join(gate, "issuers.json");
+    writeFileSync(aliasedIssuer, readFileSync(fixture.issuers), { mode: 0o600 });
+    chmodSync(aliasedIssuer, 0o600);
+    result = spawnSync(WRAPPER, ["config"], {
+      cwd: ROOT,
+      env: { ...baseEnvironment, SYNVEDA_OIDC_ISSUERS_FILE: aliasedIssuer },
+      encoding: "utf8",
+    });
+    assert.equal(result.status, 78);
+    assert.match(result.stderr, /issuer-configuration file must not be inside/);
+    assert.equal(existsSync(fake.argumentsFile), false);
+  } finally {
+    rmSync(fixture.scratch, { recursive: true, force: true });
+  }
+});
+
+test("the selector keeps private inputs out of the development build context", () => {
+  const fixture = makeComposeFixture();
+  try {
+    const fake = fakeDocker(fixture);
+    const forbiddenRoot = join(ROOT, "cpr45-build-context-sentinel");
+    for (const override of [
+      { SYNVEDA_SECRETS_DIR: join(forbiddenRoot, "secrets") },
+      { SYNVEDA_OIDC_ISSUERS_FILE: join(forbiddenRoot, "issuers.json") },
+      {
+        SYNVEDA_DATABASE_AUTHORITY_DIR: join(
+          forbiddenRoot,
+          "synveda-development",
+          "database-authority",
+        ),
+      },
+      {
+        SYNVEDA_KEYCLOAK_PUBLIC_GATE_DIR: join(
+          forbiddenRoot,
+          "synveda-development",
+          "keycloak-public-gate",
+        ),
+      },
+    ]) {
+      const result = spawnSync(WRAPPER, ["config"], {
+        cwd: ROOT,
+        env: composeEnvironment(fixture, {
+          SYNVEDA_DOCKER_BIN: fake.path,
+          SYNVEDA_FAKE_DOCKER_ARGUMENTS: fake.argumentsFile,
+          ...override,
+        }),
+        encoding: "utf8",
+      });
+      assert.equal(result.status, 78, result.stderr);
+      assert.match(result.stderr, /outside the Docker build context/);
+      assert.doesNotMatch(`${result.stdout}${result.stderr}`, /cpr45-build-context-sentinel/);
+      assert.equal(existsSync(fake.argumentsFile), false);
+      assert.equal(existsSync(forbiddenRoot), false);
+    }
   } finally {
     rmSync(fixture.scratch, { recursive: true, force: true });
   }
@@ -807,25 +2364,64 @@ test("the static selector bounds but does not interpret issuer configuration", (
 });
 
 test("the secret generator is private, content-free and overwrite-safe", () => {
-  const scratch = mkdtempSync(join(tmpdir(), "synveda-secret-generator-"));
+  const scratch = realpathSync(mkdtempSync(join(tmpdir(), "synveda-secret-generator-")));
   const secrets = join(scratch, "secrets");
-  const tracedSecrets = join(scratch, "traced-secrets");
-  const authority = join(scratch, "authority");
-  const tracedAuthority = join(scratch, "traced-authority");
+  const tracedRoot = join(scratch, "traced");
+  const tracedSecrets = join(tracedRoot, "secrets");
+  const authority = join(scratch, "synveda-development", "database-authority");
+  const tracedAuthority = join(
+    tracedRoot,
+    "synveda-development",
+    "database-authority",
+  );
+  const gate = join(scratch, "synveda-development", "keycloak-public-gate");
+  const tracedGate = join(
+    tracedRoot,
+    "synveda-development",
+    "keycloak-public-gate",
+  );
+  const aliasRoot = join(scratch, "alias");
+  const aliasAuthority = join(
+    aliasRoot,
+    "synveda-development",
+    "database-authority",
+  );
+  const aliasGate = join(
+    aliasRoot,
+    "synveda-development",
+    "keycloak-public-gate",
+  );
   try {
+    const aliasRefusal = spawnSync(GENERATOR, [], {
+      cwd: ROOT,
+      env: {
+        ...process.env,
+        SYNVEDA_SECRETS_DIR: aliasGate,
+        SYNVEDA_DATABASE_AUTHORITY_DIR: aliasAuthority,
+        SYNVEDA_KEYCLOAK_PUBLIC_GATE_DIR: aliasGate,
+      },
+      encoding: "utf8",
+    });
+    assert.equal(aliasRefusal.status, 73);
+    assert.match(aliasRefusal.stderr, /dedicated secrets leaf/);
+    assert.equal(existsSync(aliasGate), false);
+
     const firstResult = spawnSync(GENERATOR, [], {
       cwd: ROOT,
       env: {
         ...process.env,
-        SYNVEDA_SECRETS_DIR: relative(COMPOSE, secrets),
+        SYNVEDA_SECRETS_DIR: secrets,
         SYNVEDA_DATABASE_AUTHORITY_DIR: authority,
+        SYNVEDA_KEYCLOAK_PUBLIC_GATE_DIR: gate,
       },
       encoding: "utf8",
     });
     assert.equal(firstResult.status, 0, firstResult.stderr);
     const first = `${firstResult.stdout}${firstResult.stderr}`;
-    const files = readdirSync(secrets).sort();
-    assert.equal(files.length, 12);
+    const files = readdirSync(secrets)
+      .filter((name) => !name.startsWith(".") && statSync(join(secrets, name)).isFile())
+      .sort();
+    assert.equal(files.length, 13);
     for (const name of files) {
       const value = readFileSync(join(secrets, name), "utf8").trim();
       assert.ok(value.length > 0, `${name} is empty`);
@@ -835,20 +2431,27 @@ test("the secret generator is private, content-free and overwrite-safe", () => {
     }
     assert.equal(statSync(secrets).mode & 0o777, 0o700);
     assert.equal(statSync(authority).mode & 0o777, 0o700);
+    assert.equal(statSync(gate).mode & 0o777, 0o700);
+    assert.equal(statSync(join(secrets, "oidc-directory")).mode & 0o777, 0o700);
+    assert.equal(statSync(join(secrets, ".synveda-private-directory")).mode & 0o777, 0o600);
 
+    mkdirSync(tracedRoot, { mode: 0o700 });
     const traced = spawnSync("/bin/sh", ["-x", GENERATOR], {
       cwd: ROOT,
       env: {
         ...process.env,
-        SYNVEDA_SECRETS_DIR: relative(COMPOSE, tracedSecrets),
+        SYNVEDA_SECRETS_DIR: tracedSecrets,
         SYNVEDA_DATABASE_AUTHORITY_DIR: tracedAuthority,
+        SYNVEDA_KEYCLOAK_PUBLIC_GATE_DIR: tracedGate,
       },
       encoding: "utf8",
     });
     assert.equal(traced.status, 0, traced.stderr);
     assert.match(traced.stderr, /(?:^|\n)\+ set \+x(?:\n|$)/);
     const traceOutput = `${traced.stdout}${traced.stderr}`;
-    for (const name of readdirSync(tracedSecrets)) {
+    for (const name of readdirSync(tracedSecrets).filter(
+      (entry) => !entry.startsWith(".") && statSync(join(tracedSecrets, entry)).isFile(),
+    )) {
       const value = readFileSync(join(tracedSecrets, name), "utf8").trim();
       assert.ok(value.length > 0, `${name} is empty after traced execution`);
       assert.ok(!traceOutput.includes(value), `${name} value reached shell trace`);
@@ -859,21 +2462,38 @@ test("the secret generator is private, content-free and overwrite-safe", () => {
       cwd: ROOT,
       env: {
         ...process.env,
-        SYNVEDA_SECRETS_DIR: relative(COMPOSE, secrets),
+        SYNVEDA_SECRETS_DIR: secrets,
         SYNVEDA_DATABASE_AUTHORITY_DIR: authority,
+        SYNVEDA_KEYCLOAK_PUBLIC_GATE_DIR: gate,
       },
       encoding: "utf8",
     });
     assert.equal(refusal.status, 73);
-    assert.match(refusal.stderr, /refusing to overwrite/);
+    assert.match(refusal.stderr, /refusing to replace an existing secret set/);
+    assert.equal(readFileSync(join(secrets, "synveda_kms_key"), "utf8"), before);
+
+    const unconfirmed = spawnSync(GENERATOR, ["--force"], {
+      cwd: ROOT,
+      env: {
+        ...process.env,
+        SYNVEDA_SECRETS_DIR: secrets,
+        SYNVEDA_DATABASE_AUTHORITY_DIR: authority,
+        SYNVEDA_KEYCLOAK_PUBLIC_GATE_DIR: gate,
+      },
+      encoding: "utf8",
+    });
+    assert.equal(unconfirmed.status, 73);
+    assert.match(unconfirmed.stderr, /SYNVEDA_CONFIRM_SECRET_REPLACEMENT=synveda-development/);
     assert.equal(readFileSync(join(secrets, "synveda_kms_key"), "utf8"), before);
 
     const forced = spawnSync(GENERATOR, ["--force"], {
       cwd: ROOT,
       env: {
         ...process.env,
-        SYNVEDA_SECRETS_DIR: relative(COMPOSE, secrets),
+        SYNVEDA_SECRETS_DIR: secrets,
         SYNVEDA_DATABASE_AUTHORITY_DIR: authority,
+        SYNVEDA_KEYCLOAK_PUBLIC_GATE_DIR: gate,
+        SYNVEDA_CONFIRM_SECRET_REPLACEMENT: "synveda-development",
       },
       encoding: "utf8",
     });
@@ -881,6 +2501,96 @@ test("the secret generator is private, content-free and overwrite-safe", () => {
     const after = readFileSync(join(secrets, "synveda_kms_key"), "utf8");
     assert.notEqual(after, before);
     assert.ok(!`${forced.stdout}${forced.stderr}`.includes(after.trim()));
+    assert.match(forced.stdout, /preserved previous secret set/);
+    assert.equal(
+      readFileSync(
+        join(scratch, "synveda-development", "previous-secrets", "synveda_kms_key"),
+        "utf8",
+      ),
+      before,
+    );
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+});
+
+test("the secret generator refuses broad, shared and symlinked targets before mutation", () => {
+  const scratch = realpathSync(mkdtempSync(join(tmpdir(), "synveda-secret-path-")));
+  const authority = join(scratch, "state", "synveda-development", "database-authority");
+  const gate = join(scratch, "state", "synveda-development", "keycloak-public-gate");
+  const invoke = (secrets, authorityPath = authority, gatePath = gate) =>
+    spawnSync(GENERATOR, [], {
+      cwd: ROOT,
+      env: {
+        ...process.env,
+        SYNVEDA_SECRETS_DIR: secrets,
+        SYNVEDA_DATABASE_AUTHORITY_DIR: authorityPath,
+        SYNVEDA_KEYCLOAK_PUBLIC_GATE_DIR: gatePath,
+      },
+      encoding: "utf8",
+    });
+  try {
+    for (const target of ["/", ROOT, COMPOSE]) {
+      const before = statSync(target);
+      const result = invoke(target);
+      assert.equal(result.status, 73, result.stderr);
+      const after = statSync(target);
+      assert.equal(after.mode, before.mode);
+      assert.equal(after.ino, before.ino);
+      assert.equal(existsSync(authority), false);
+      assert.equal(existsSync(gate), false);
+    }
+
+    const sharedRoot = join(scratch, "shared");
+    const sharedSecrets = join(sharedRoot, "secrets");
+    mkdirSync(sharedSecrets, { recursive: true, mode: 0o750 });
+    chmodSync(sharedSecrets, 0o750);
+    const sharedBefore = statSync(sharedSecrets);
+    const sharedResult = invoke(sharedSecrets);
+    assert.equal(sharedResult.status, 73, sharedResult.stderr);
+    assert.match(sharedResult.stderr, /metadata was refused/);
+    const sharedAfter = statSync(sharedSecrets);
+    assert.equal(sharedAfter.mode, sharedBefore.mode);
+    assert.equal(sharedAfter.ino, sharedBefore.ino);
+    assert.deepEqual(readdirSync(sharedSecrets), []);
+    assert.equal(existsSync(authority), false);
+    assert.equal(existsSync(gate), false);
+
+    const overlapRoot = join(scratch, "overlap");
+    const overlapSecrets = join(overlapRoot, "secrets");
+    const overlapAuthority = join(
+      overlapSecrets,
+      "synveda-development",
+      "database-authority",
+    );
+    const overlapGate = join(
+      overlapRoot,
+      "synveda-development",
+      "keycloak-public-gate",
+    );
+    const overlapResult = invoke(overlapSecrets, overlapAuthority, overlapGate);
+    assert.equal(overlapResult.status, 73, overlapResult.stderr);
+    assert.match(overlapResult.stderr, /secret-and-database-authority directories/);
+    assert.equal(existsSync(overlapSecrets), false);
+    assert.equal(existsSync(overlapGate), false);
+
+    const realAncestor = join(scratch, "real-ancestor");
+    const linkedAncestor = join(scratch, "linked-ancestor");
+    mkdirSync(realAncestor, { mode: 0o700 });
+    symlinkSync(realAncestor, linkedAncestor, "dir");
+    const symlinkResult = invoke(join(linkedAncestor, "secrets"));
+    assert.equal(symlinkResult.status, 73, symlinkResult.stderr);
+    assert.match(symlinkResult.stderr, /ancestors must not be symlinks/);
+    assert.deepEqual(readdirSync(realAncestor), []);
+    assert.equal(existsSync(authority), false);
+    assert.equal(existsSync(gate), false);
+
+    const inContextResult = invoke(join(ROOT, "private", "secrets"));
+    assert.equal(inContextResult.status, 73, inContextResult.stderr);
+    assert.match(inContextResult.stderr, /ignored Compose roots/);
+    assert.equal(existsSync(join(ROOT, "private")), false);
+    assert.equal(existsSync(authority), false);
+    assert.equal(existsSync(gate), false);
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }
@@ -940,7 +2650,7 @@ set +x
 [ "$KC_DB_PASSWORD" = "$EXPECTED_DB_PASSWORD" ] || exit 91
 [ "$KC_BOOTSTRAP_ADMIN_USERNAME" = "$EXPECTED_ADMIN_USERNAME" ] || exit 92
 [ "$KC_BOOTSTRAP_ADMIN_PASSWORD" = "$EXPECTED_ADMIN_PASSWORD" ] || exit 93
-if [ "\${1:-}" = prove-errexit ]; then
+if [ "\${PROVE_ERREXIT:-}" = 1 ]; then
   false
   printf 'continued after failure\\n' > "$ERREXIT_MARKER"
 fi
@@ -949,10 +2659,29 @@ printf 'keycloak child invoked: %s\\n' "$*"
       { mode: 0o700 },
     );
     chmodSync(child, 0o700);
+    const publicGateDir = join(scratch, "keycloak-public-gate");
+    mkdirSync(publicGateDir, { mode: 0o700 });
+    chmodSync(publicGateDir, 0o700);
+    const publicGate = join(publicGateDir, "cpr45-keycloak-realm-v3.ready");
+    const generationGate = join(scratch, "synveda-generation-gate");
+    writeFileSync(
+      generationGate,
+      `#!/bin/sh
+[ "$#" -eq 1 ] && [ "$1" = rotate ] || exit 96
+rm -f -- "$SYNVEDA_TEST_PUBLIC_GATE"
+printf '.generation-testfixture\\n'
+`,
+      { mode: 0o700 },
+    );
+    chmodSync(generationGate, 0o700);
+    const fixtureSource = source.replace(
+      "generation_gate=/opt/keycloak/bin/synveda-generation-gate",
+      `generation_gate=${JSON.stringify(generationGate)}`,
+    );
     const entrypoint = join(scratch, "keycloak-entrypoint");
 	    writeFileSync(
 	      entrypoint,
-	      source
+	      fixtureSource
 	        .replace("/opt/keycloak/bin/kc.sh", child)
 	        .replaceAll("/opt/keycloak/bin/synveda-input-snapshot", snapshotHelper)
 	        .replaceAll("/usr/bin/timeout", fakeTimeout),
@@ -982,6 +2711,7 @@ printf 'keycloak child invoked: %s\\n' "$*"
       EXPECTED_DB_PASSWORD: values.db,
       EXPECTED_ADMIN_USERNAME: values.username,
       EXPECTED_ADMIN_PASSWORD: values.password,
+      SYNVEDA_TEST_PUBLIC_GATE: publicGate,
     };
     for (const startupSetting of [
       "BASH_ENV",
@@ -1001,20 +2731,51 @@ printf 'keycloak child invoked: %s\\n' "$*"
       delete environment[direct];
     }
 
-    let result = spawnSync(entrypoint, ["show-config"], {
+    let result = spawnSync(entrypoint, ["start", "--optimized"], {
       env: environment,
       encoding: "utf8",
     });
-	    assert.equal(result.status, 0, result.stderr);
-	    assert.equal(result.stdout, "keycloak child invoked: show-config\n");
-	    assertSnapshotsClean();
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout, "keycloak child invoked: start --optimized\n");
+    assertSnapshotsClean();
     for (const value of Object.values(values)) {
       assert.ok(!`${result.stdout}${result.stderr}`.includes(value));
     }
 
+    writeFileSync(publicGate, "cpr45-keycloak-realm-v3\n", { mode: 0o400 });
+    result = spawnSync(entrypoint, ["start", "--optimized"], {
+      env: environment,
+      encoding: "utf8",
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout, "keycloak child invoked: start --optimized\n");
+    assert.equal(existsSync(publicGate), false, "Keycloak start retained a stale gate");
+    assertSnapshotsClean();
+
+    writeFileSync(publicGate, "cpr45-keycloak-realm-v3\n", { mode: 0o400 });
+    for (const unsupported of [
+      ["show-config"],
+      ["start-dev"],
+      ["start"],
+      ["start", "--optimized", "--features=preview"],
+    ]) {
+      result = spawnSync(entrypoint, unsupported, {
+        env: environment,
+        encoding: "utf8",
+      });
+      assert.equal(result.status, 64, `${unsupported.join(" ")}: ${result.stderr}`);
+      assert.match(result.stderr, /supported|unsupported command/);
+      assert.equal(result.stdout, "");
+      assert.equal(
+        existsSync(publicGate),
+        true,
+        `${unsupported.join(" ")} reached generation rotation`,
+      );
+    }
+
     const errexitMarker = join(scratch, "errexit-marker");
-    result = spawnSync(entrypoint, ["prove-errexit"], {
-      env: { ...environment, ERREXIT_MARKER: errexitMarker },
+    result = spawnSync(entrypoint, ["start", "--optimized"], {
+      env: { ...environment, ERREXIT_MARKER: errexitMarker, PROVE_ERREXIT: "1" },
       encoding: "utf8",
     });
     assert.equal(result.status, 1, result.stderr);
@@ -1033,7 +2794,7 @@ printf '\n'
       { mode: 0o700 },
     );
     chmodSync(bashEnv, 0o700);
-    result = spawnSync(entrypoint, ["show-config"], {
+    result = spawnSync(entrypoint, ["start", "--optimized"], {
       env: {
         ...environment,
         BASH_ENV: bashEnv,
@@ -1046,11 +2807,11 @@ printf '\n'
       },
       encoding: "utf8",
     });
-	    assert.equal(result.status, 0, result.stderr);
-	    assert.equal(result.stdout, "keycloak child invoked: show-config\n");
-	    assert.equal(result.stderr, "");
-	    assert.equal(existsSync(startupMarker), false, "Bash startup input executed");
-	    assertSnapshotsClean();
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stdout, "keycloak child invoked: start --optimized\n");
+    assert.equal(result.stderr, "");
+    assert.equal(existsSync(startupMarker), false, "Bash startup input executed");
+    assertSnapshotsClean();
     for (const value of Object.values(values)) {
       assert.ok(!`${result.stdout}${result.stderr}`.includes(value));
     }
@@ -1058,7 +2819,7 @@ printf '\n'
     const cleanupFailureEntrypoint = join(scratch, "keycloak-entrypoint-cleanup-failure");
     writeFileSync(
       cleanupFailureEntrypoint,
-      source
+      fixtureSource
         .replace('[ "$cleanup_status" -eq 0 ]', "false")
         .replace("/opt/keycloak/bin/kc.sh", child)
         .replaceAll("/opt/keycloak/bin/synveda-input-snapshot", snapshotHelper)
@@ -1066,7 +2827,7 @@ printf '\n'
       { mode: 0o700 },
     );
     chmodSync(cleanupFailureEntrypoint, 0o700);
-    result = spawnSync(cleanupFailureEntrypoint, ["show-config"], {
+    result = spawnSync(cleanupFailureEntrypoint, ["start", "--optimized"], {
       env: environment,
       encoding: "utf8",
     });
@@ -1078,7 +2839,7 @@ printf '\n'
     }
     assertSnapshotsClean();
 
-    result = spawnSync(entrypoint, ["show-config"], {
+    result = spawnSync(entrypoint, ["start", "--optimized"], {
       env: { ...environment, KC_DB_PASSWORD: "cpr45-direct-secret-sentinel" },
       encoding: "utf8",
     });
@@ -1087,14 +2848,38 @@ printf '\n'
 	    assert.doesNotMatch(`${result.stdout}${result.stderr}`, /cpr45-direct-secret-sentinel/);
 	    assertSnapshotsClean();
 
+    result = spawnSync(entrypoint, ["start", "--optimized"], {
+      env: {
+        ...environment,
+        SYNVEDA_KEYCLOAK_CONVERGENCE_PASSWORD: "cpr45-direct-convergence-sentinel",
+      },
+      encoding: "utf8",
+    });
+	    assert.equal(result.status, 78);
+	    assert.match(
+      result.stderr,
+      /direct SYNVEDA_KEYCLOAK_CONVERGENCE_PASSWORD is forbidden/,
+    );
+	    assert.doesNotMatch(
+      `${result.stdout}${result.stderr}`,
+      /cpr45-direct-convergence-sentinel/,
+    );
+	    assertSnapshotsClean();
+
     writeFileSync(files.db, "first-line\nsecond-line\n", { mode: 0o600 });
-    result = spawnSync(entrypoint, ["show-config"], { env: environment, encoding: "utf8" });
+    result = spawnSync(entrypoint, ["start", "--optimized"], {
+      env: environment,
+      encoding: "utf8",
+    });
 	    assert.equal(result.status, 78);
 	    assert.match(result.stderr, /must contain one line/);
 	    assertSnapshotsClean();
 
 	    writeFileSync(files.db, "é".repeat(3000), { mode: 0o600 });
-	    result = spawnSync(entrypoint, ["show-config"], { env: environment, encoding: "utf8" });
+	    result = spawnSync(entrypoint, ["start", "--optimized"], {
+          env: environment,
+          encoding: "utf8",
+        });
 	    assert.equal(result.status, 78);
 	    assert.match(result.stderr, /could not be snapshotted safely/);
 	    assertSnapshotsClean();
@@ -1102,7 +2887,10 @@ printf '\n'
     writeFileSync(files.db, Buffer.from([0x61, 0x62, 0x63, 0x00, 0x64, 0x65, 0x66]), {
       mode: 0o600,
     });
-	    result = spawnSync(entrypoint, ["show-config"], { env: environment, encoding: "utf8" });
+	    result = spawnSync(entrypoint, ["start", "--optimized"], {
+          env: environment,
+          encoding: "utf8",
+        });
 	    assert.equal(result.status, 78);
 	    assert.match(result.stderr, /contains a NUL byte/);
 	    assertSnapshotsClean();
@@ -1111,7 +2899,10 @@ printf '\n'
 	    writeFileSync(symlinkTarget, "cpr45-keycloak-symlink-sentinel\n", { mode: 0o600 });
 	    rmSync(files.db);
 	    execFileSync("ln", ["-s", symlinkTarget, files.db]);
-	    result = spawnSync(entrypoint, ["show-config"], { env: environment, encoding: "utf8" });
+	    result = spawnSync(entrypoint, ["start", "--optimized"], {
+          env: environment,
+          encoding: "utf8",
+        });
 	    assert.equal(result.status, 78);
 	    assert.match(result.stderr, /could not be snapshotted safely/);
 	    assert.doesNotMatch(`${result.stdout}${result.stderr}`, /symlink-sentinel/);
@@ -1121,7 +2912,7 @@ printf '\n'
 	    rmSync(files.db);
 	    execFileSync("mkfifo", [files.db]);
 	    const started = Date.now();
-	    result = spawnSync(entrypoint, ["show-config"], {
+	    result = spawnSync(entrypoint, ["start", "--optimized"], {
 	      env: environment,
 	      encoding: "utf8",
 	      timeout: 2000,
@@ -3762,7 +5553,31 @@ test("database convergence proves an existing database shape before mutation", (
 });
 
 test("model findings reject privilege, port, command and secret regressions", () => {
+  const projectName = "fixture";
+  const networkPlan = composeNetworkPlan("172.30.240.0/24");
+  const network = (name, internal = false) => ({
+    name: `${projectName}_${name}`,
+    ipam: { config: [networkPlan[name]] },
+    labels: {
+      "com.synveda.contract": "cpr-45",
+      "com.synveda.network": name,
+    },
+    ...(internal ? { internal: true } : {}),
+  });
   const base = {
+    secrets: {
+      synveda_gateway_database_url: {
+        file: "/fixture/secrets/synveda_gateway_database_url",
+      },
+      synveda_kms_key: { file: "/fixture/secrets/synveda_kms_key" },
+      synveda_kms_key_ref: { file: "/fixture/secrets/synveda_kms_key_ref" },
+      synveda_migrator_database_url: {
+        file: "/fixture/secrets/synveda_migrator_database_url",
+      },
+      synveda_worker_database_url: {
+        file: "/fixture/secrets/synveda_worker_database_url",
+      },
+    },
     services: {
       "database-preflight": {
         command: ["database-preflight"],
@@ -3782,6 +5597,7 @@ test("model findings reject privilege, port, command and secret regressions", ()
           SYNVEDA_WORKER_DATABASE_URL_FILE:
             "/run/secrets/synveda_worker_database_url",
           SYNVEDA_DATABASE_ROLES_FILE: "/etc/synveda/database/roles.json",
+          RUST_LOG: "info",
         },
         secrets: [
           {
@@ -3805,7 +5621,10 @@ test("model findings reject privilege, port, command and secret regressions", ()
             read_only: true,
           },
         ],
-        networks: { "application-egress": {}, "synveda-data": {} },
+        networks: {
+          "application-egress": { gw_priority: 1 },
+          "synveda-data": {},
+        },
         build: { dockerfile: "deploy/compose/gateway/Dockerfile" },
       },
       gateway: {
@@ -3823,10 +5642,29 @@ test("model findings reject privilege, port, command and secret regressions", ()
           SYNVEDA_KMS_KEY_FILE: "/run/secrets/kms_key",
           SYNVEDA_KMS_KEY_REF_FILE: "/run/secrets/kms_key_ref",
           SYNVEDA_PUBLIC_URL: "http://app.synveda.test:8080",
+          SYNVEDA_INSECURE_DEVELOPMENT_HTTP: "true",
+          SYNVEDA_OIDC_ISSUERS_FILE: "/etc/synveda/oidc/issuers.json",
           SYNVEDA_DATABASE_ROLES_FILE: "/etc/synveda/database/roles.json",
+          SYNVEDA_LISTEN_ADDR: "0.0.0.0:8120",
+          OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4317",
+          RUST_LOG: "info",
         },
-        healthcheck: { test: ["ready"] },
-        depends_on: { migrate: { condition: "service_completed_successfully" } },
+        healthcheck: {
+          test: [
+            "CMD",
+            "/usr/local/bin/synveda-container",
+            "probe",
+            "gateway",
+            "ready",
+          ],
+          interval: "5s",
+          timeout: "3s",
+          retries: 24,
+        },
+        depends_on: {
+          migrate: { condition: "service_completed_successfully" },
+          "issuer-diagnostic": { condition: "service_completed_successfully" },
+        },
         secrets: [
           { source: "synveda_gateway_database_url", target: "database_url" },
           { source: "synveda_kms_key", target: "kms_key" },
@@ -3839,10 +5677,16 @@ test("model findings reject privilege, port, command and secret regressions", ()
             target: "/etc/synveda/database/roles.json",
             read_only: true,
           },
+          {
+            type: "bind",
+            source: "/fixture/issuers.json",
+            target: "/etc/synveda/oidc/issuers.json",
+            read_only: true,
+          },
         ],
         networks: {
           "app-backend": {},
-          "application-egress": {},
+          "application-egress": { gw_priority: 1 },
           "synveda-data": {},
           telemetry: {},
         },
@@ -3863,8 +5707,23 @@ test("model findings reject privilege, port, command and secret regressions", ()
           SYNVEDA_KMS_KEY_FILE: "/run/secrets/kms_key",
           SYNVEDA_KMS_KEY_REF_FILE: "/run/secrets/kms_key_ref",
           SYNVEDA_DATABASE_ROLES_FILE: "/etc/synveda/database/roles.json",
+          SYNVEDA_OIDC_ISSUERS_FILE: "/etc/synveda/oidc/issuers.json",
+          SYNVEDA_WORKER_LISTEN_ADDR: "127.0.0.1:8121",
+          OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4317",
+          RUST_LOG: "info",
         },
-        healthcheck: { test: ["ready"] },
+        healthcheck: {
+          test: [
+            "CMD",
+            "/usr/local/bin/synveda-container",
+            "probe",
+            "worker",
+            "ready",
+          ],
+          interval: "5s",
+          timeout: "3s",
+          retries: 24,
+        },
         depends_on: { migrate: { condition: "service_completed_successfully" } },
         secrets: [
           { source: "synveda_worker_database_url", target: "database_url" },
@@ -3878,8 +5737,57 @@ test("model findings reject privilege, port, command and secret regressions", ()
             target: "/etc/synveda/database/roles.json",
             read_only: true,
           },
+          {
+            type: "bind",
+            source: "/fixture/issuers.json",
+            target: "/etc/synveda/oidc/issuers.json",
+            read_only: true,
+          },
+          {
+            type: "bind",
+            source: "/fixture/oidc-directory",
+            target: "/run/secrets/oidc_directory",
+            read_only: true,
+          },
         ],
-        networks: { "application-egress": {}, "synveda-data": {}, telemetry: {} },
+        networks: {
+          "application-egress": { gw_priority: 1 },
+          "synveda-data": {},
+          telemetry: {},
+        },
+      },
+      "issuer-diagnostic": {
+        command: ["issuer-diagnostic"],
+        image: "product",
+        user: "1:1",
+        cap_drop: ["ALL"],
+        security_opt: ["no-new-privileges:true"],
+        read_only: true,
+        init: true,
+        pids_limit: 1,
+        restart: "no",
+        environment: {
+          SYNVEDA_OIDC_ISSUERS_FILE: "/etc/synveda/oidc/issuers.json",
+          SYNVEDA_OIDC_EXPECTED_ISSUER:
+            "https://external-idp.example/tenant",
+          SYNVEDA_PUBLIC_URL: "http://app.synveda.test:8080",
+          SYNVEDA_INSECURE_DEVELOPMENT_HTTP: "true",
+          RUST_LOG: "info",
+        },
+        depends_on: { proxy: { condition: "service_healthy" } },
+        volumes: [
+          {
+            type: "bind",
+            source: "/fixture/issuers.json",
+            target: "/etc/synveda/oidc/issuers.json",
+            read_only: true,
+          },
+        ],
+        networks: {
+          "app-backend": {},
+          "application-egress": { gw_priority: 1 },
+        },
+        build: { dockerfile: "deploy/compose/gateway/Dockerfile" },
       },
       migrate: {
         command: ["migrate"],
@@ -3894,6 +5802,7 @@ test("model findings reject privilege, port, command and secret regressions", ()
         environment: {
           DATABASE_URL_FILE: "/run/secrets/database_url",
           SYNVEDA_DATABASE_ROLES_FILE: "/etc/synveda/database/roles.json",
+          RUST_LOG: "info",
         },
         depends_on: {
           "database-preflight": { condition: "service_completed_successfully" },
@@ -3907,11 +5816,15 @@ test("model findings reject privilege, port, command and secret regressions", ()
             read_only: true,
           },
         ],
-        networks: { "application-egress": {}, "synveda-data": {} },
+        networks: {
+          "application-egress": { gw_priority: 1 },
+          "synveda-data": {},
+        },
         build: { dockerfile: "deploy/compose/gateway/Dockerfile" },
       },
       proxy: {
         command: ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"],
+        image: "proxy-provider",
         user: "1:1",
         cap_drop: ["ALL"],
         security_opt: ["no-new-privileges:true"],
@@ -3920,16 +5833,54 @@ test("model findings reject privilege, port, command and secret regressions", ()
         pids_limit: 1,
         restart: "no",
         environment: {
+          SYNVEDA_APP_HOST: "app.synveda.test",
           SYNVEDA_PUBLIC_PORT: "8080",
           SYNVEDA_PROXY_HTTP_PORT: "8080",
           SYNVEDA_PROXY_HTTPS_PORT: "8443",
+          XDG_CONFIG_HOME: "/tmp/caddy-config",
+          XDG_DATA_HOME: "/tmp/caddy-data",
         },
+        healthcheck: {
+          test: [
+            "CMD",
+            "caddy",
+            "validate",
+            "--config",
+            "/etc/caddy/Caddyfile",
+            "--adapter",
+            "caddyfile",
+          ],
+          interval: "10s",
+          timeout: "6s",
+          retries: 6,
+        },
+        volumes: [
+          {
+            type: "bind",
+            source: "/fixture/Caddyfile",
+            target: "/etc/caddy/Caddyfile",
+            read_only: true,
+          },
+          {
+            type: "bind",
+            source: "/fixture/app.caddy",
+            target: "/etc/caddy/app.caddy",
+            read_only: true,
+          },
+          {
+            type: "bind",
+            source: "/fixture/identity.external.caddy",
+            target: "/etc/caddy/identity.caddy",
+            read_only: true,
+          },
+        ],
         build: { dockerfile: "deploy/compose/proxy/Dockerfile" },
         ports: [{ host_ip: "127.0.0.1", published: "8080", target: 8080 }],
-        networks: { "app-backend": {}, "public-edge": {} },
+        networks: { "app-backend": {}, "public-edge": { gw_priority: 1 } },
       },
       "otel-collector": {
         command: ["--config=/etc/otelcol/config.yaml"],
+        image: "collector-provider",
         user: "1:1",
         cap_drop: ["ALL"],
         security_opt: ["no-new-privileges:true"],
@@ -3944,18 +5895,33 @@ test("model findings reject privilege, port, command and secret regressions", ()
             "validate",
             "--config=/etc/otelcol/config.yaml",
           ],
+          interval: "30s",
+          timeout: "5s",
+          retries: 3,
         },
-        networks: { "keycloak-management": {}, telemetry: {}, "telemetry-egress": {} },
+        volumes: [
+          {
+            type: "bind",
+            source: "/fixture/collector.yaml",
+            target: "/etc/otelcol/config.yaml",
+            read_only: true,
+          },
+        ],
+        networks: {
+          "keycloak-management": {},
+          telemetry: {},
+          "telemetry-egress": { gw_priority: 1 },
+        },
       },
     },
     networks: {
-      "app-backend": { internal: true },
-      "application-egress": {},
-      "keycloak-management": { internal: true },
-      "public-edge": {},
-      "synveda-data": { internal: true },
-      telemetry: { internal: true },
-      "telemetry-egress": {},
+      "app-backend": network("app-backend", true),
+      "application-egress": network("application-egress"),
+      "keycloak-management": network("keycloak-management", true),
+      "public-edge": network("public-edge"),
+      "synveda-data": network("synveda-data", true),
+      telemetry: network("telemetry", true),
+      "telemetry-egress": network("telemetry-egress"),
     },
   };
   base.services.gateway.build = { dockerfile: "deploy/compose/gateway/Dockerfile" };
@@ -3964,15 +5930,540 @@ test("model findings reject privilege, port, command and secret regressions", ()
     runtime: "development",
     postgres: "external",
     oidc: "external",
+    appHost: "app.synveda.test",
+    authHost: undefined,
     appUrl: "http://app.synveda.test:8080",
-    authUrl: "http://auth.synveda.test:8080",
+    authUrl: undefined,
+    projectName,
+    networkPool: "172.30.240.0/24",
+    networkPlan,
+    proxyIdentityAddress: "172.30.240.2",
+    productImage: "product",
+    postgresImage: "postgres-provider",
+    keycloakImage: "keycloak-provider",
+    caddyImage: "proxy-provider",
+    otelCollectorImage: "collector-provider",
+    issuer: "https://external-idp.example/tenant",
     publicPort: 8080,
     runtimeUser: "1:1",
+    caddyFile: "/fixture/Caddyfile",
+    caddyAppConfig: "/fixture/app.caddy",
+    caddyIdentityConfig: "/fixture/identity.external.caddy",
+    collectorConfig: "/fixture/collector.yaml",
+    issuerFile: "/fixture/issuers.json",
+    oidcDirectorySecrets: "/fixture/oidc-directory",
+    databaseRolesFile: "/fixture/database-roles.json",
+    databaseAuthorityDir: "/fixture/database-authority",
+    keycloakPublicGateDir: "/fixture/keycloak-public-gate",
   };
   assert.deepEqual(canonicalComposeFindings(base, expected), []);
 
+  const bundled = structuredClone(base);
+  for (const name of [
+    "postgres_owner_password",
+    "keycloak_database_password",
+    "keycloak_admin_username",
+    "keycloak_admin_password",
+    "keycloak_convergence_admin_password",
+  ]) {
+    bundled.secrets[name] = { file: `/fixture/secrets/${name}` };
+  }
+  bundled.networks["identity-backend"] = network("identity-backend", true);
+  bundled.networks["identity-egress"] = network("identity-egress");
+  bundled.networks["keycloak-data"] = network("keycloak-data", true);
+  bundled.services["database-preflight"].environment.SYNVEDA_DATABASE_REQUIRED_PEER =
+    "keycloak";
+  bundled.services["database-preflight"].environment.SYNVEDA_DATABASE_PEER_WITNESS_FILE =
+    "/run/synveda/database-authority/keycloak-cluster.json";
+  bundled.services["database-preflight"].environment.SYNVEDA_DATABASE_EXPECTED_HOST =
+    "database.compose.example";
+  bundled.services["database-preflight"].environment.SYNVEDA_DATABASE_EXPECTED_PORT =
+    "5432";
+  bundled.services["database-preflight"].environment.SYNVEDA_DATABASE_EXPECTED_NAME =
+    "synveda";
+  bundled.services["database-preflight"].depends_on = {
+    "keycloak-database-bootstrap": {
+      condition: "service_completed_successfully",
+    },
+  };
+  bundled.services["database-preflight"].volumes.push({
+    type: "bind",
+    source: "/fixture/database-authority",
+    target: "/run/synveda/database-authority",
+    read_only: true,
+  });
+  bundled.services.gateway.environment.SYNVEDA_DATABASE_REQUIRED_PEER = "keycloak";
+  bundled.services.worker.environment.SYNVEDA_DATABASE_REQUIRED_PEER = "keycloak";
+  bundled.services["issuer-diagnostic"].environment.SYNVEDA_OIDC_EXPECTED_ISSUER =
+    "http://auth.synveda.test:8080/realms/synveda";
+  bundled.services["issuer-diagnostic"].depends_on["keycloak-realm-convergence"] = {
+    condition: "service_healthy",
+  };
+  bundled.services.proxy.depends_on = {
+    "keycloak-realm-convergence": {
+      condition: "service_healthy",
+    },
+  };
+  bundled.services.proxy.environment.SYNVEDA_AUTH_HOST = "auth.synveda.test";
+  bundled.services.proxy.networks["app-backend"] = {
+    aliases: ["auth.synveda.test"],
+  };
+  bundled.services.proxy.networks["identity-backend"] = {
+    ipv4_address: "172.30.240.2",
+  };
+  bundled.services.proxy.volumes.find(
+    ({ target }) => target === "/etc/caddy/identity.caddy",
+  ).source = "/fixture/identity.caddy";
+  bundled.services.proxy.volumes.push({
+      type: "bind",
+      source: "/fixture/keycloak-public-gate",
+      target: "/run/synveda/keycloak-public-gate",
+      read_only: true,
+  });
+  const hardenedOneShot = (overrides) => ({
+    user: "1:1",
+    cap_drop: ["ALL"],
+    security_opt: ["no-new-privileges:true"],
+    read_only: true,
+    init: true,
+    pids_limit: 1,
+    restart: "no",
+    ...overrides,
+  });
+  bundled.services["keycloak-database-bootstrap"] = hardenedOneShot({
+    entrypoint: ["/usr/local/bin/synveda-database-bootstrap"],
+    command: ["keycloak"],
+    image: "postgres-provider",
+    environment: {
+      SYNVEDA_DATABASE_AUTHORITY_DIR: "/run/synveda/database-authority",
+      SYNVEDA_DATABASE_ROLES_FILE: "/run/secrets/database_roles.json",
+      SYNVEDA_POSTGRES_BOOTSTRAP_URL:
+        "postgresql://bootstrap@database.compose.example:5432/postgres",
+      SYNVEDA_POSTGRES_BUNDLED_CLUSTER: "false",
+    },
+    secrets: [
+      {
+        source: "postgres_owner_password",
+        target: "postgres_bootstrap_password",
+      },
+      {
+        source: "keycloak_database_password",
+        target: "keycloak_database_password",
+      },
+    ],
+    volumes: [
+      {
+        type: "bind",
+        source: "/fixture/database-roles.json",
+        target: "/run/secrets/database_roles.json",
+        read_only: true,
+      },
+      {
+        type: "bind",
+        source: "/fixture/database-authority",
+        target: "/run/synveda/database-authority",
+      },
+    ],
+    networks: {
+      "identity-egress": { gw_priority: 1 },
+      "keycloak-data": {},
+    },
+  });
+  bundled.services.keycloak = hardenedOneShot({
+    command: ["start", "--optimized"],
+    image: "keycloak-provider",
+    pids_limit: 512,
+    stop_grace_period: "45s",
+    mem_limit: "2g",
+    cpus: 2,
+    tmpfs: [
+      "/tmp:rw,noexec,nosuid,nodev,mode=1777,size=128m",
+      "/opt/keycloak/data/tmp:rw,noexec,nosuid,nodev,mode=0700,size=128m,uid=1,gid=1",
+    ],
+    environment: {
+      KC_DB: "postgres",
+      KC_DB_URL: "jdbc:postgresql://database.compose.example:5432/keycloak",
+      KC_DB_USERNAME: "keycloak",
+      KC_DB_PASSWORD_FILE: "/run/secrets/keycloak_database_password",
+      KC_BOOTSTRAP_ADMIN_USERNAME_FILE: "/run/secrets/keycloak_admin_username",
+      KC_BOOTSTRAP_ADMIN_PASSWORD_FILE: "/run/secrets/keycloak_admin_password",
+      KC_HOSTNAME: "http://auth.synveda.test:8080",
+      KC_HOSTNAME_STRICT: "true",
+      KC_HEALTH_ENABLED: "true",
+      KC_METRICS_ENABLED: "true",
+      KC_HTTP_ENABLED: "true",
+      KC_HTTP_PORT: "8080",
+      KC_HTTP_MANAGEMENT_PORT: "9000",
+      KC_PROXY_HEADERS: "xforwarded",
+      KC_PROXY_TRUSTED_ADDRESSES: "172.30.240.2/32",
+      KC_CACHE: "local",
+      KC_LOG_LEVEL_ORG_KEYCLOAK_SERVICES: "warn",
+      SYNVEDA_KEYCLOAK_PUBLIC_GATE_PATH:
+        "/run/synveda/keycloak-public-gate",
+    },
+    healthcheck: {
+      test: ["CMD", "/opt/keycloak/bin/synveda-keycloak-health", "local"],
+      interval: "10s",
+      timeout: "6s",
+      retries: 30,
+      start_period: "30s",
+    },
+    depends_on: {
+      "keycloak-database-bootstrap": {
+        condition: "service_completed_successfully",
+      },
+    },
+    secrets: [
+      {
+        source: "keycloak_database_password",
+        target: "keycloak_database_password",
+      },
+      { source: "keycloak_admin_username", target: "keycloak_admin_username" },
+      { source: "keycloak_admin_password", target: "keycloak_admin_password" },
+    ],
+    volumes: [
+      {
+        type: "bind",
+        source: "/fixture/keycloak-public-gate",
+        target: "/run/synveda/keycloak-public-gate",
+      },
+    ],
+    networks: {
+      "identity-backend": {},
+      "identity-egress": { gw_priority: 1 },
+      "keycloak-data": {},
+      "keycloak-management": {},
+    },
+  });
+  bundled.services["keycloak-realm-convergence"] = hardenedOneShot({
+    command: ["synveda-realm-supervise"],
+    image: "keycloak-provider",
+    pids_limit: 256,
+    stop_grace_period: "3m30s",
+    mem_limit: "512m",
+    cpus: 1,
+    tmpfs: [
+      "/tmp:rw,noexec,nosuid,nodev,mode=0700,size=64m,uid=1,gid=1",
+    ],
+    environment: {
+      KC_BOOTSTRAP_ADMIN_USERNAME_FILE: "/run/secrets/keycloak_admin_username",
+      KC_BOOTSTRAP_ADMIN_PASSWORD_FILE: "/run/secrets/keycloak_admin_password",
+      SYNVEDA_KEYCLOAK_CONVERGENCE_PASSWORD_FILE:
+        "/run/secrets/keycloak_convergence_admin_password",
+      SYNVEDA_PUBLIC_APP_URL: "http://app.synveda.test:8080",
+      SYNVEDA_PUBLIC_AUTH_URL: "http://auth.synveda.test:8080",
+      SYNVEDA_KEYCLOAK_SSL_REQUIRED: "NONE",
+      SYNVEDA_KEYCLOAK_PUBLIC_GATE_PATH:
+        "/run/synveda/keycloak-public-gate",
+    },
+    depends_on: {
+      keycloak: { condition: "service_healthy" },
+    },
+    healthcheck: {
+      test: ["CMD", "/opt/keycloak/bin/synveda-generation-gate", "ready"],
+      interval: "5s",
+      timeout: "3s",
+      retries: 36,
+      start_period: "15s",
+    },
+    secrets: [
+      { source: "keycloak_admin_username", target: "keycloak_admin_username" },
+      { source: "keycloak_admin_password", target: "keycloak_admin_password" },
+      {
+        source: "keycloak_convergence_admin_password",
+        target: "keycloak_convergence_admin_password",
+      },
+    ],
+    volumes: [
+      {
+        type: "bind",
+        source: "/fixture/keycloak-public-gate",
+        target: "/run/synveda/keycloak-public-gate",
+      },
+    ],
+    networks: { "identity-backend": {}, "keycloak-management": {} },
+  });
+  const bundledExpected = {
+    ...expected,
+    oidc: "bundled",
+    authHost: "auth.synveda.test",
+    authUrl: "http://auth.synveda.test:8080",
+    issuer: "http://auth.synveda.test:8080/realms/synveda",
+    caddyIdentityConfig: "/fixture/identity.caddy",
+  };
+  assert.deepEqual(canonicalComposeFindings(bundled, bundledExpected), []);
+
+  const bundledMutants = [];
+  const substitutedConvergenceImage = structuredClone(bundled);
+  substitutedConvergenceImage.services["keycloak-realm-convergence"].image =
+    "attacker-provider";
+  bundledMutants.push(["convergence image substituted", substitutedConvergenceImage]);
+
+  const gateWritingEntrypoint = structuredClone(bundled);
+  gateWritingEntrypoint.services["keycloak-realm-convergence"].entrypoint = [
+    "/bin/bash",
+    "-c",
+    "touch /run/synveda/keycloak-public-gate/cpr45-keycloak-realm-v3.ready",
+  ];
+  bundledMutants.push(["convergence entrypoint writes gate", gateWritingEntrypoint]);
+
+  const gateWritingHealthcheck = structuredClone(bundled);
+  gateWritingHealthcheck.services.keycloak.healthcheck.test = [
+    "CMD-SHELL",
+    "touch /run/synveda/keycloak-public-gate/cpr45-keycloak-realm-v3.ready",
+  ];
+  bundledMutants.push(["Keycloak healthcheck writes gate", gateWritingHealthcheck]);
+
+  const gateWritingHook = structuredClone(bundled);
+  gateWritingHook.services.keycloak.post_start = [
+    {
+      command:
+        "touch /run/synveda/keycloak-public-gate/cpr45-keycloak-realm-v3.ready",
+    },
+  ];
+  bundledMutants.push(["Keycloak lifecycle hook writes gate", gateWritingHook]);
+
+  const overriddenIssuerHost = structuredClone(bundled);
+  overriddenIssuerHost.services.gateway.extra_hosts = [
+    "auth.synveda.test=203.0.113.5",
+  ];
+  bundledMutants.push(["gateway issuer host overridden", overriddenIssuerHost]);
+
+  const proxiedIssuerTraffic = structuredClone(bundled);
+  proxiedIssuerTraffic.services.gateway.environment.HTTP_PROXY =
+    "http://attacker.invalid:8080";
+  bundledMutants.push(["gateway receives ambient HTTP proxy", proxiedIssuerTraffic]);
+
+  const postgresTrustControl = structuredClone(bundled);
+  postgresTrustControl.services["keycloak-database-bootstrap"].environment.POSTGRES_HOST_AUTH_METHOD =
+    "trust";
+  bundledMutants.push(["PostgreSQL trust control injected", postgresTrustControl]);
+
+  const engineSocket = structuredClone(bundled);
+  engineSocket.services.keycloak.use_api_socket = true;
+  bundledMutants.push(["Keycloak receives engine API socket", engineSocket]);
+
+  const unconfinedSeccomp = structuredClone(bundled);
+  unconfinedSeccomp.services.keycloak.security_opt.push("seccomp=unconfined");
+  bundledMutants.push(["Keycloak disables seccomp", unconfinedSeccomp]);
+
+  const missingIssuerAlias = structuredClone(bundled);
+  delete missingIssuerAlias.services.proxy.networks["app-backend"].aliases;
+  bundledMutants.push(["browser issuer alias removed", missingIssuerAlias]);
+
+  const driftedProxyAddress = structuredClone(bundled);
+  driftedProxyAddress.services.proxy.networks["identity-backend"].ipv4_address =
+    "172.30.240.3";
+  bundledMutants.push(["trusted proxy address drifted", driftedProxyAddress]);
+
+  const driftedIdentitySubnet = structuredClone(bundled);
+  driftedIdentitySubnet.networks["identity-backend"].ipam.config[0].subnet =
+    "172.30.240.16/28";
+  bundledMutants.push(["identity subnet drifted", driftedIdentitySubnet]);
+
+  const missingIdentityGateway = structuredClone(bundled);
+  delete missingIdentityGateway.networks["identity-backend"].ipam.config[0].gateway;
+  bundledMutants.push(["identity gateway removed", missingIdentityGateway]);
+
+  const missingIdentityRange = structuredClone(bundled);
+  delete missingIdentityRange.networks["identity-backend"].ipam.config[0].ip_range;
+  bundledMutants.push(["identity dynamic range removed", missingIdentityRange]);
+
+  const widenedIdentityRange = structuredClone(bundled);
+  widenedIdentityRange.networks["identity-backend"].ipam.config[0].ip_range =
+    "172.30.240.0/28";
+  bundledMutants.push(["identity dynamic range includes proxy", widenedIdentityRange]);
+
+  const auxiliaryProxyReservation = structuredClone(bundled);
+  auxiliaryProxyReservation.networks["identity-backend"].ipam.config[0].aux_addresses = {
+    "synveda-proxy": "172.30.240.2",
+  };
+  bundledMutants.push(["conflicting auxiliary proxy reservation", auxiliaryProxyReservation]);
+
+  const missingEgressIpam = structuredClone(bundled);
+  delete missingEgressIpam.networks["telemetry-egress"].ipam;
+  bundledMutants.push(["egress IPAM removed", missingEgressIpam]);
+
+  const extraIdentityRange = structuredClone(bundled);
+  extraIdentityRange.networks["identity-backend"].ipam.config.push({
+    subnet: "fd00::/64",
+  });
+  bundledMutants.push(["second identity IPAM range", extraIdentityRange]);
+
+  const customNetworkName = structuredClone(bundled);
+  customNetworkName.networks["identity-backend"].name = "shared-identity";
+  bundledMutants.push(["identity network name escaped project", customNetworkName]);
+
+  const secondStaticAddress = structuredClone(bundled);
+  secondStaticAddress.services.keycloak.networks["identity-backend"].ipv4_address =
+    "172.30.240.3";
+  bundledMutants.push(["second static identity endpoint", secondStaticAddress]);
+
+  const missingDefaultGateway = structuredClone(bundled);
+  delete missingDefaultGateway.services.keycloak.networks["identity-egress"].gw_priority;
+  bundledMutants.push(["identity egress gateway priority removed", missingDefaultGateway]);
+
+  const ordinaryPrioritySubstitution = structuredClone(bundled);
+  delete ordinaryPrioritySubstitution.services.proxy.networks["public-edge"].gw_priority;
+  ordinaryPrioritySubstitution.services.proxy.networks["public-edge"].priority = 1;
+  bundledMutants.push(["ordinary priority substituted for gateway priority", ordinaryPrioritySubstitution]);
+
+  const widenedTrustedProxy = structuredClone(bundled);
+  widenedTrustedProxy.services.keycloak.environment.KC_PROXY_TRUSTED_ADDRESSES =
+    "172.30.240.0/28";
+  bundledMutants.push(["trusted proxy widened to subnet", widenedTrustedProxy]);
+
+  for (const [setting, value] of [
+    ["SYNVEDA_APP_HOST", "wrong-app.synveda.test"],
+    ["SYNVEDA_AUTH_HOST", "wrong-auth.synveda.test"],
+  ]) {
+    const driftedProxyHost = structuredClone(bundled);
+    driftedProxyHost.services.proxy.environment[setting] = value;
+    bundledMutants.push([`${setting} drifted`, driftedProxyHost]);
+  }
+  const gateInSecrets = structuredClone(bundled);
+  for (const service of ["proxy", "keycloak", "keycloak-realm-convergence"]) {
+    const mount = gateInSecrets.services[service].volumes.find(
+      ({ target }) => target === "/run/synveda/keycloak-public-gate",
+    );
+    mount.source = "/fixture/secrets";
+  }
+  bundledMutants.push(["gate source aliases secrets", gateInSecrets]);
+
+  const gateAliasesAuthority = structuredClone(bundled);
+  for (const service of ["proxy", "keycloak", "keycloak-realm-convergence"]) {
+    const mount = gateAliasesAuthority.services[service].volumes.find(
+      ({ target }) => target === "/run/synveda/keycloak-public-gate",
+    );
+    mount.source = "/fixture/database-authority";
+  }
+  bundledMutants.push(["gate source aliases authority state", gateAliasesAuthority]);
+
+  const extraProxyBind = structuredClone(bundled);
+  extraProxyBind.services.proxy.volumes.push({
+    type: "bind",
+    source: "/fixture/operator-bypass.caddy",
+    target: "/etc/caddy/operator-bypass.caddy",
+    read_only: true,
+  });
+  bundledMutants.push(["extra proxy bind", extraProxyBind]);
+
+  for (const service of ["issuer-diagnostic", "otel-collector"]) {
+    const leakedSecret = structuredClone(bundled);
+    leakedSecret.services[service].secrets = [
+      { source: "keycloak_admin_password", target: "operator_password" },
+    ];
+    bundledMutants.push([`${service} receives an admin secret`, leakedSecret]);
+  }
+
+  const writableProxyGate = structuredClone(bundled);
+  writableProxyGate.services.proxy.volumes.find(
+    ({ target }) => target === "/run/synveda/keycloak-public-gate",
+  ).read_only = false;
+  bundledMutants.push(["proxy gate becomes writable", writableProxyGate]);
+
+  const injectedDependencyRestart = structuredClone(bundled);
+  injectedDependencyRestart.services[
+    "keycloak-realm-convergence"
+  ].depends_on.keycloak.restart = true;
+  bundledMutants.push([
+    "dependency restart metadata injected",
+    injectedDependencyRestart,
+  ]);
+
+  const optionalDependency = structuredClone(bundled);
+  optionalDependency.services["keycloak-realm-convergence"].depends_on.keycloak.required =
+    false;
+  bundledMutants.push(["realm convergence dependency made optional", optionalDependency]);
+
+  const substitutedIdentitySource = structuredClone(bundled);
+  substitutedIdentitySource.services.proxy.volumes.find(
+    ({ target }) => target === "/etc/caddy/identity.caddy",
+  ).source = "/fixture/app.caddy";
+  bundledMutants.push(["identity config source substituted", substitutedIdentitySource]);
+
+  const injectedConfig = structuredClone(bundled);
+  injectedConfig.configs = {
+    identity_bypass: { file: "/fixture/operator-bypass.caddy" },
+  };
+  injectedConfig.services.proxy.configs = [
+    { source: "identity_bypass", target: "/etc/caddy/operator-bypass.caddy" },
+  ];
+  bundledMutants.push(["Compose config injected into proxy", injectedConfig]);
+
+  const sharedNamespace = structuredClone(bundled);
+  sharedNamespace.services.gateway.pid = "service:keycloak";
+  bundledMutants.push(["gateway shares Keycloak PID namespace", sharedNamespace]);
+
+  const legacyLink = structuredClone(bundled);
+  legacyLink.services.gateway.links = ["keycloak"];
+  bundledMutants.push(["gateway adds a legacy Keycloak link", legacyLink]);
+
+  const missingDependency = structuredClone(bundled);
+  delete missingDependency.services["issuer-diagnostic"].depends_on[
+    "keycloak-realm-convergence"
+  ];
+  bundledMutants.push(["issuer convergence dependency removed", missingDependency]);
+
+  const reverseCycle = structuredClone(bundled);
+  reverseCycle.services.keycloak.depends_on["issuer-diagnostic"] = {
+    condition: "service_completed_successfully",
+  };
+  bundledMutants.push(["reverse dependency cycle added", reverseCycle]);
+
+  const keycloakResourceDrift = structuredClone(bundled);
+  keycloakResourceDrift.services.keycloak.pids_limit = 511;
+  bundledMutants.push(["Keycloak PID budget drifted", keycloakResourceDrift]);
+
+  const keycloakMemoryDrift = structuredClone(bundled);
+  keycloakMemoryDrift.services.keycloak.mem_limit = "3g";
+  bundledMutants.push(["Keycloak memory budget drifted", keycloakMemoryDrift]);
+
+  const keycloakTmpfsDrift = structuredClone(bundled);
+  keycloakTmpfsDrift.services.keycloak.tmpfs[0] = "/tmp:rw,size=128m";
+  bundledMutants.push(["Keycloak private tmpfs drifted", keycloakTmpfsDrift]);
+
+  const supervisorResourceDrift = structuredClone(bundled);
+  supervisorResourceDrift.services["keycloak-realm-convergence"].cpus = 2;
+  bundledMutants.push(["realm supervisor CPU budget drifted", supervisorResourceDrift]);
+
+  const supervisorKillSignal = structuredClone(bundled);
+  supervisorKillSignal.services["keycloak-realm-convergence"].stop_signal = "SIGKILL";
+  bundledMutants.push(["realm supervisor graceful stop bypassed", supervisorKillSignal]);
+
+  const duplicatedKeycloak = structuredClone(bundled);
+  duplicatedKeycloak.services.keycloak.scale = 2;
+  bundledMutants.push(["Keycloak scale duplicated", duplicatedKeycloak]);
+
+  const duplicatedSupervisor = structuredClone(bundled);
+  duplicatedSupervisor.services["keycloak-realm-convergence"].deploy = {
+    replicas: 2,
+  };
+  bundledMutants.push(["realm supervisor replicas duplicated", duplicatedSupervisor]);
+
+  for (const [name, mutated] of bundledMutants) {
+    assert.ok(
+      canonicalComposeFindings(mutated, bundledExpected).length > 0,
+      `bundled model accepted ${name}`,
+    );
+  }
+
+  const externalIdentityAttachment = structuredClone(base);
+  externalIdentityAttachment.services.proxy.networks["app-backend"] = {
+    aliases: ["auth.synveda.test"],
+  };
+  assert.ok(
+    canonicalComposeFindings(externalIdentityAttachment, expected).includes(
+      "proxy network boundary drifted",
+    ),
+  );
+
   const wiringRegression = structuredClone(base);
   wiringRegression.services.gateway.user = "2345:2346";
+  wiringRegression.services["issuer-diagnostic"].environment.SYNVEDA_PUBLIC_URL =
+    "http://wrong-app.synveda.test:8080";
+  wiringRegression.secrets.synveda_kms_key.file =
+    "/fixture/secrets/synveda_kms_key_ref";
   delete wiringRegression.services.migrate.environment.DATABASE_URL_FILE;
   wiringRegression.services.migrate.secrets[0].target = "renamed_database_url";
   wiringRegression.services["otel-collector"].healthcheck.test = [
@@ -3984,6 +6475,12 @@ test("model findings reject privilege, port, command and secret regressions", ()
   assert.ok(
     wiringFindings.includes("gateway runtime UID:GID differs from the validated secret owner"),
   );
+  assert.ok(
+    wiringFindings.includes(
+      "issuer diagnostic public URL differs from the selected browser URL",
+    ),
+  );
+  assert.ok(wiringFindings.includes("synveda_kms_key secret file source drifted"));
   assert.ok(
     wiringFindings.includes("migrate secret mounts are not role-scoped or have drifted targets"),
   );

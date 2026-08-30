@@ -7,8 +7,11 @@
 //! tenant that refuses resolution (suspended) chains
 //! `tenant.resolution.denied` on that tenant's log. Successful resolutions
 //! are not events — every subsequent chained event proves resolution — and
-//! unauthenticated failures carry no verified subject and no resolvable
-//! tenant, so they stay in traces and the counter.
+//! unauthenticated failures without both a verified subject and a resolvable
+//! tenant stay in traces and the counter. A verified service-audience token
+//! that resolves to an active tenant but not an active service identity is
+//! attributable, so that refusal is also chained without revealing why the
+//! identity did not resolve.
 //!
 //! Since CNSL-1 (ADR-0056 decision 2) a request may arrive with a console
 //! session cookie instead of an `Authorization` header. That changes how
@@ -30,8 +33,8 @@ use axum::response::{IntoResponse, Response};
 use chrono::{Duration, Utc};
 use serde_json::json;
 use synveda_audit::{Actor, AuditAction, Outcome};
-use synveda_identity::{Claims, TenantContext, with_tenant};
-use synveda_types::{Error, Result, TenantStatus};
+use synveda_identity::{Claims, CredentialClass, TenantContext, with_tenant};
+use synveda_types::{Error, IdentityKind, Result, TenantStatus};
 
 /// How close to expiry a stored access token gets renewed rather than
 /// presented. Wide enough that a token does not expire between this check
@@ -46,7 +49,10 @@ const TOUCH_STALENESS_SECS: i64 = 300;
 use crate::app::AppState;
 use crate::audit;
 use crate::error::ApiError;
-use crate::telemetry::TENANT_RESOLUTIONS_TOTAL;
+use crate::telemetry::{SERVICE_TOKEN_REJECTIONS_TOTAL, TENANT_RESOLUTIONS_TOTAL};
+
+/// One non-oracular reason for every service-identity admission failure.
+const SERVICE_IDENTITY_REJECTION_REASON: &str = "identity_unresolved";
 
 /// Resolves the request's tenant from its bearer token, records the tenant id
 /// on the request span (the traces half of the TEN-1 AC), and runs the rest
@@ -289,6 +295,41 @@ pub(crate) async fn active_tenant(state: &AppState, claims: &Claims) -> Result<T
         )
         .await;
         return Err(unresolved());
+    }
+    if claims.credential_class == CredentialClass::ServiceBearer {
+        let mut tx = synveda_store::rls::begin_tenant_tx(&state.pool, tenant.id).await?;
+        let service = synveda_store::identities::by_subject(&mut *tx, tenant.id, &claims.subject)
+            .await?
+            .is_some_and(|identity| identity.kind == IdentityKind::Service && !identity.sealed());
+        // Detached audit opens its own tenant transaction. Release this
+        // read-only lookup first so a one-connection pool cannot hold and
+        // wait on itself while recording the refusal.
+        drop(tx);
+        if !service {
+            metrics::counter!(
+                SERVICE_TOKEN_REJECTIONS_TOTAL,
+                "reason" => SERVICE_IDENTITY_REJECTION_REASON,
+            )
+            .increment(1);
+            tracing::debug!(
+                tenant.id = %tenant.id,
+                "service-audience token did not resolve to an active service identity"
+            );
+            audit::record_detached(
+                state,
+                tenant.id,
+                Actor::subject(claims.subject.clone()),
+                AuditAction::TokenRejected,
+                format!("tenant {}", tenant.id),
+                Outcome::Deny,
+                json!({
+                    "op": "tenant.resolve",
+                    "reason": SERVICE_IDENTITY_REJECTION_REASON,
+                }),
+            )
+            .await;
+            return Err(unresolved());
+        }
     }
     Ok(TenantContext {
         tenant,

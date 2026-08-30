@@ -255,7 +255,7 @@ echo "    tenant $TENANT_ID"
 
 echo "==> the trust entry, now that there is a tenant to bind it to"
 kubectl create secret generic synveda-oidc -n "$NS" \
-  --from-literal=SYNVEDA_OIDC_ISSUERS="[{\"issuer\":\"$ISSUER\",\"client_id\":\"synveda\",\"tenant\":{\"static\":{\"tenant_id\":\"$TENANT_ID\"}}}]" \
+  --from-literal=SYNVEDA_OIDC_ISSUERS="[{\"issuer\":\"$ISSUER\",\"client_id\":\"synveda\",\"audience\":\"synveda-api\",\"tenant\":{\"static\":{\"tenant_id\":\"$TENANT_ID\"}}}]" \
   --dry-run=client -o yaml | kubectl apply -f - >/dev/null
 
 echo "==> the gateway and core worker"

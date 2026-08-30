@@ -2195,19 +2195,19 @@ async fn verify_extension_fingerprint(connection: &mut PgConnection) -> Result<(
 }
 
 // BLAKE3 of the sorted, provider-neutral application ACL inventory produced
-// by the epoch-3/revision-1 baseline. Names and privileges are included;
+// by the current epoch-3 baseline. Names and privileges are included;
 // grantors are checked relationally above so provider-assigned migrator names
 // do not change the contract.
 const APPLICATION_ACL_FINGERPRINT: &str =
-    "d0dc07f1c9b67e2b3448b4cf803cfea8d11115ef5016b7fed22cef0bce2ea82f";
-const APPLICATION_ACL_ROW_COUNT: usize = 332;
+    "c35da4e5e77eb8969a23f612ca75b9953ea2f8937018ec4cf099905235eddbf6";
+const APPLICATION_ACL_ROW_COUNT: usize = 334;
 
 async fn verify_application_acl_fingerprint(connection: &mut PgConnection) -> Result<()> {
     let actual = application_acl_fingerprint(connection).await?;
     if actual != APPLICATION_ACL_FINGERPRINT {
         return Err(Error::Invalid {
             message:
-                "the synveda_app ACL inventory does not match schema epoch 3 baseline revision 1"
+                "the synveda_app ACL inventory does not match the current schema epoch 3 baseline"
                     .to_owned(),
         });
     }
@@ -2292,7 +2292,7 @@ async fn application_acl_fingerprint(connection: &mut PgConnection) -> Result<St
     if rows.len() != APPLICATION_ACL_ROW_COUNT {
         return Err(Error::Invalid {
             message:
-                "the synveda_app ACL inventory row count does not match schema epoch 3 baseline revision 1"
+                "the synveda_app ACL inventory row count does not match the current schema epoch 3 baseline"
                     .to_owned(),
         });
     }
@@ -2314,14 +2314,14 @@ async fn application_acl_fingerprint(connection: &mut PgConnection) -> Result<St
     Ok(hasher.finalize().to_hex().to_string())
 }
 
-// BLAKE3 of every non-extension routine owned by the epoch-3/revision-1
+// BLAKE3 of every non-extension routine owned by the current epoch-3
 // baseline. `pg_get_functiondef` captures the executable body and routine
 // attributes; the owner is represented as a provider-neutral equality bit.
 // An exact row count and per-definition byte ceiling make the catalogue read
 // bounded even after hostile owner-level drift.
 const ROUTINE_CATALOG_FINGERPRINT: &str =
-    "e77554beb63122b7d71b89a8e4bef8f8aa1377548f5d2fe67593b314a4519dae";
-const ROUTINE_CATALOG_ROW_COUNT: usize = 66;
+    "8591bcfffbda3ec7b3908009816280b32d7127a429b6615d23276d3ee921b114";
+const ROUTINE_CATALOG_ROW_COUNT: usize = 67;
 const ROUTINE_DEFINITION_MAX_BYTES: i32 = 131_072;
 const ROUTINE_CONFIGURATION_MAX_ITEMS: i32 = 32;
 const ROUTINE_CONFIGURATION_ITEM_MAX_BYTES: i32 = 4096;
@@ -2333,7 +2333,7 @@ async fn verify_routine_catalog_fingerprint(
     let actual = routine_catalog_fingerprint(connection, migrator).await?;
     if actual != ROUTINE_CATALOG_FINGERPRINT {
         return Err(Error::Invalid {
-            message: "the application routine definition inventory does not match schema epoch 3 baseline revision 1"
+            message: "the application routine definition inventory does not match the current schema epoch 3 baseline"
                 .to_owned(),
         });
     }
@@ -2413,7 +2413,7 @@ async fn routine_catalog_fingerprint(
 
     if rows.len() != ROUTINE_CATALOG_ROW_COUNT {
         return Err(Error::Invalid {
-            message: "the application routine inventory row count does not match schema epoch 3 baseline revision 1"
+            message: "the application routine inventory row count does not match the current schema epoch 3 baseline"
                 .to_owned(),
         });
     }
@@ -2450,8 +2450,8 @@ async fn routine_catalog_fingerprint(
 // `pg_get_triggerdef`, so that state and provider-neutral ownership bits are
 // hashed separately from the deparsed definition.
 const TRIGGER_CATALOG_FINGERPRINT: &str =
-    "6c496ccdec1d2700874d88cd73d64d517357d2da9804135f0d89ae8cb9f5b362";
-const TRIGGER_CATALOG_ROW_COUNT: usize = 107;
+    "7602373bfa190dd5183cea75a69055f3f9354168b8ab5bd2bb2e4e8b8d14a32e";
+const TRIGGER_CATALOG_ROW_COUNT: usize = 108;
 const TRIGGER_DEFINITION_MAX_BYTES: i32 = 16_384;
 const TRIGGER_ARGUMENT_MAX_COUNT: i16 = 128;
 
@@ -2462,7 +2462,7 @@ async fn verify_trigger_catalog_fingerprint(
     let actual = trigger_catalog_fingerprint(connection, migrator).await?;
     if actual != TRIGGER_CATALOG_FINGERPRINT {
         return Err(Error::Invalid {
-            message: "the application trigger definition inventory does not match schema epoch 3 baseline revision 1"
+            message: "the application trigger definition inventory does not match the current schema epoch 3 baseline"
                 .to_owned(),
         });
     }
@@ -2533,7 +2533,7 @@ async fn trigger_catalog_fingerprint(
 
     if rows.len() != TRIGGER_CATALOG_ROW_COUNT {
         return Err(Error::Invalid {
-            message: "the application trigger inventory row count does not match schema epoch 3 baseline revision 1"
+            message: "the application trigger inventory row count does not match the current schema epoch 3 baseline"
                 .to_owned(),
         });
     }
@@ -2573,8 +2573,8 @@ async fn trigger_catalog_fingerprint(
 }
 
 const RLS_CATALOG_FINGERPRINT: &str =
-    "b33c1e47e529c3c3d5da6004705cbf2717d918b8dacd23f34b2ca8e3652f6bbc";
-const RLS_CATALOG_ROW_COUNT: usize = 89;
+    "eab620d633e874a6fa8c3c468b3d0ab51b8380e70a4df1a0103b97c1166e98be";
+const RLS_CATALOG_ROW_COUNT: usize = 90;
 const TENANT_HELPER_SOURCE: &str =
     "\n    select nullif(current_setting('synveda.tenant_id', true), '')::uuid\n";
 
@@ -2615,7 +2615,7 @@ async fn verify_tenant_helper_definition(
     if !accepted {
         return Err(Error::Invalid {
             message:
-                "the tenant-isolation helper does not match schema epoch 3 baseline revision 1"
+                "the tenant-isolation helper does not match the current schema epoch 3 baseline"
                     .to_owned(),
         });
     }
@@ -2627,7 +2627,7 @@ async fn verify_rls_catalog_fingerprint(connection: &mut PgConnection) -> Result
     if actual != RLS_CATALOG_FINGERPRINT {
         return Err(Error::Invalid {
             message:
-                "the forced-RLS policy inventory does not match schema epoch 3 baseline revision 1"
+                "the forced-RLS policy inventory does not match the current schema epoch 3 baseline"
                     .to_owned(),
         });
     }
@@ -2696,7 +2696,7 @@ async fn rls_catalog_fingerprint(connection: &mut PgConnection) -> Result<String
 
     if rows.len() != RLS_CATALOG_ROW_COUNT {
         return Err(Error::Invalid {
-            message: "the forced-RLS policy inventory row count does not match schema epoch 3 baseline revision 1"
+            message: "the forced-RLS policy inventory row count does not match the current schema epoch 3 baseline"
                 .to_owned(),
         });
     }
@@ -3502,6 +3502,50 @@ mod tests {
             (routine.as_str(), trigger.as_str(),),
             (ROUTINE_CATALOG_FINGERPRINT, TRIGGER_CATALOG_FINGERPRINT),
             "actual routine={routine}, trigger={trigger}"
+        );
+    }
+
+    #[tokio::test]
+    #[ignore = "run only through the isolated authority-fingerprint fixture"]
+    async fn report_live_catalog_fingerprints() {
+        assert_eq!(
+            std::env::var("SYNVEDA_REPORT_AUTHORITY_FINGERPRINTS").as_deref(),
+            Ok("1"),
+            "the authority fingerprint reporter requires its exact harness gate"
+        );
+        let mut connection = live_test_connection("SYNVEDA_TEST_DATABASE_URL_FILE")
+            .await
+            .expect("the exact gateway database URL is required");
+        let roles = live_test_roles().expect("the exact database role contract is required");
+        initialize_product_session_connection(&mut connection)
+            .await
+            .expect("normalise the exact gateway database session");
+        let mut authority = sqlx::Connection::begin(&mut connection)
+            .await
+            .expect("begin authority fingerprint snapshot");
+        configure_authority_snapshot_connection(&mut authority)
+            .await
+            .expect("configure authority fingerprint snapshot");
+        let application_acl = application_acl_fingerprint(&mut authority)
+            .await
+            .expect("fingerprint ACL inventory");
+        let routine_catalog = routine_catalog_fingerprint(&mut authority, roles.migrator())
+            .await
+            .expect("fingerprint application routines");
+        let trigger_catalog = trigger_catalog_fingerprint(&mut authority, roles.migrator())
+            .await
+            .expect("fingerprint application triggers");
+        let forced_rls = rls_catalog_fingerprint(&mut authority)
+            .await
+            .expect("fingerprint forced-RLS inventory");
+        authority
+            .commit()
+            .await
+            .expect("finish authority fingerprint snapshot");
+
+        println!(
+            "authority-fingerprints baseline_revision={} application_acl={application_acl} routine_catalog={routine_catalog} trigger_catalog={trigger_catalog} forced_rls={forced_rls}",
+            crate::epoch::CURRENT_BASELINE_REVISION
         );
     }
 

@@ -27,7 +27,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 use synveda_audit::{AuditAction, Outcome};
 use synveda_policy::{Action, Resource};
-use synveda_store::{access, identities, rls, scopes};
+use synveda_store::{access, directory, identities, rls, scopes};
 use synveda_types::access::{GrantSource, GrantSubject, RoleKey};
 use synveda_types::scope::ScopeKind;
 use synveda_types::{Error, GrantId, Identity, IdentityId, IdentityKind, Result, ScopeId};
@@ -55,8 +55,8 @@ async fn respond<T: IntoResponse>(
 #[derive(Deserialize, utoipa::ToSchema)]
 #[schema(as = RegisterServiceIdentityBody)]
 pub(crate) struct RegisterBody {
-    /// The `sub` the IdP will put in the agent's client-credentials
-    /// tokens (for Rauthy, the client id).
+    /// The stable subject identifier expected from the agent's
+    /// client-credentials access tokens.
     subject: String,
     /// The anchor node whose subtree confines the agent's tokens.
     #[schema(value_type = String, format = "uuid")]
@@ -148,6 +148,13 @@ pub(crate) async fn register(
             Some(&anchor),
         )
         .await?;
+        // Directory correspondence is the outer identity lock domain. A
+        // first login may bind this subject before transferring its
+        // principal-scope owner grant, while registration creates the scope
+        // before inserting the identity row. Serialising here establishes
+        // directory -> principal -> scope/identity order for both paths and
+        // prevents those operations from waiting on each other in reverse.
+        directory::lock_correspondence(&mut tx, tenant_id).await?;
         let identity_id = IdentityId::new();
         let display_name = body.display_name.as_deref().unwrap_or(&body.subject);
         // The agent's own scope: a `principal`-shaped scope under the
@@ -186,7 +193,7 @@ pub(crate) async fn register(
         // read its private material through the base privacy clause but could
         // never govern that material under any shipped policy pack.
         let owner_grant = access::create_grant(
-            &mut *tx,
+            &mut tx,
             &access::NewGrant {
                 id: GrantId::new(),
                 tenant_id,

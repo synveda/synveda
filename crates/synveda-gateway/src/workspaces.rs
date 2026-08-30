@@ -40,7 +40,7 @@ use serde_json::json;
 use synveda_audit::{AuditAction, Outcome};
 use synveda_policy::{Action, Resource, ResourceEntity};
 use synveda_store::anchors::AnchorSelection;
-use synveda_store::{projects, repositories, rls, workspaces};
+use synveda_store::{access, projects, repositories, rls, workspaces};
 use synveda_types::repository::{ProjectRepository, RepositoryProvider};
 use synveda_types::workspace::{LifecycleStatus, Project, Workspace};
 use synveda_types::{
@@ -974,6 +974,10 @@ async fn create_workspace(
         Subject::Tenant,
     )
     .await?;
+    // Owner grants and scope creation share a strict principal-fence then
+    // parent-row order. Lock before `workspaces::create` can lock the tenant
+    // root; the owner insert below safely reacquires the same advisory lock.
+    access::lock_principal_grants(&mut tx, tenant_id, &claim.subject).await?;
     let created_by = actor_identity(&mut tx, tenant_id).await?;
     let workspace = workspaces::create(
         &mut tx,
@@ -1348,6 +1352,9 @@ async fn make_project(
         Subject::Workspace(&workspace),
     )
     .await?;
+    // Match workspace creation's principal-fence then parent-row order before
+    // `projects::create` locks the workspace scope.
+    access::lock_principal_grants(&mut tx, tenant_id, &claim.subject).await?;
     let created_by = actor_identity(&mut tx, tenant_id).await?;
     let project = projects::create(
         &mut tx,
@@ -1873,7 +1880,7 @@ async fn mint_owner_grant(
     subject: &str,
 ) -> Result<synveda_types::access::ScopeGrant> {
     synveda_store::access::create_grant(
-        &mut *tx,
+        tx,
         &synveda_store::access::NewGrant {
             id: synveda_types::GrantId::new(),
             tenant_id,

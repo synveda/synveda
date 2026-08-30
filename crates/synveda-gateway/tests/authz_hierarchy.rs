@@ -194,7 +194,7 @@ async fn bind_admin(pool: &PgPool, tenant: TenantId, subject: &str) {
         .await
         .expect("mint root");
     access::create_grant(
-        &mut *tx,
+        &mut tx,
         &access::NewGrant {
             id: GrantId::new(),
             tenant_id: tenant,

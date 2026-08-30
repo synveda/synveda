@@ -220,6 +220,17 @@ advisory lock before the stamp. A missing, failed, additional or drifted row
 is still a hard-cut refusal; this recovery seam does not make SQLx bookkeeping
 the schema epoch.
 
+### 2026-08-30 amendment — durable initial-administrator bootstrap (CPR-45)
+
+**19. The epoch-3 baseline revision is 2.** CPR-45 adds an insert-only,
+forced-RLS tenant marker plus its root-administrator grant trigger so an OIDC
+group can signal initial administration exactly once. This is a durable
+authority fact rather than a new domain vocabulary, so the schema epoch stays
+3; it does change the sole migration checksum and all pinned authority
+catalogues. A revision-1 database is refused before SQLx checksum comparison
+with the existing explicit reset guidance. There is no revision-1-to-2 row
+translator or compatibility path.
+
 ## Options considered
 
 **1. Derive the epoch from `_sqlx_migrations`.** No new table, and the data is

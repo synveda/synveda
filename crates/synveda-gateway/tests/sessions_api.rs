@@ -137,7 +137,7 @@ async fn grant(
     role_key: RoleKey,
 ) {
     synveda_store::access::create_grant(
-        &mut *tx,
+        tx,
         &synveda_store::access::NewGrant {
             id: GrantId::new(),
             tenant_id,

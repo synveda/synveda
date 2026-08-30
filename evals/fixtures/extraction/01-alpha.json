@@ -55,14 +55,14 @@
       "expected": [{ "class": "preference", "content_contains": "explicit SQL" }]
     },
     {
-      "name": "alpha-entity-rauthy",
+      "name": "alpha-entity-keycloak",
       "input": {
         "event_type": "message.user",
         "session_id": "alpha-6",
         "occurred_at": "2026-07-20T10:05:00Z",
-        "payload": { "text": "Rauthy is our development OIDC provider on port 8100." }
+        "payload": { "text": "Keycloak is the bundled reference OIDC provider behind the reverse proxy." }
       },
-      "expected": [{ "class": "entity", "content_contains": "Rauthy" }]
+      "expected": [{ "class": "entity", "content_contains": "Keycloak" }]
     },
     {
       "name": "alpha-fact-chain-head",

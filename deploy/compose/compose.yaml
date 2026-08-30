@@ -2,8 +2,10 @@
 #
 # This file intentionally defines neither PostgreSQL nor an OIDC provider.
 # Select exactly one runtime overlay and the required provider fragments through
-# deploy/compose/scripts/compose.sh. Until the convergence jobs land, only the
-# `config` action is supported; deploy/compose/README.md records that boundary.
+# deploy/compose/scripts/compose.sh. The convergence and issuer-diagnostic jobs
+# are present, but only the `config` action is supported until the canonical
+# lifecycle and clean-start acceptance land; deploy/compose/README.md records
+# that boundary.
 
 x-synveda-product: &synveda-product
   image: ${SYNVEDA_PRODUCT_IMAGE:?set SYNVEDA_PRODUCT_IMAGE}
@@ -33,7 +35,6 @@ services:
     stop_grace_period: 15s
     environment:
       SYNVEDA_APP_HOST: ${SYNVEDA_APP_HOST:?set SYNVEDA_APP_HOST}
-      SYNVEDA_AUTH_HOST: ${SYNVEDA_AUTH_HOST:?set SYNVEDA_AUTH_HOST}
       SYNVEDA_PUBLIC_PORT: ${SYNVEDA_PUBLIC_PORT:?set SYNVEDA_PUBLIC_PORT}
       SYNVEDA_PROXY_HTTP_PORT: ${SYNVEDA_PROXY_HTTP_PORT:?set SYNVEDA_PROXY_HTTP_PORT}
       SYNVEDA_PROXY_HTTPS_PORT: ${SYNVEDA_PROXY_HTTPS_PORT:?set SYNVEDA_PROXY_HTTPS_PORT}
@@ -50,13 +51,18 @@ services:
         source: ${SYNVEDA_CADDY_APP_CONFIG:?set SYNVEDA_CADDY_APP_CONFIG}
         target: /etc/caddy/app.caddy
         read_only: true
+      - type: bind
+        source: ${SYNVEDA_CADDY_IDENTITY_CONFIG:?set SYNVEDA_CADDY_IDENTITY_CONFIG}
+        target: /etc/caddy/identity.caddy
+        read_only: true
     healthcheck:
       test: ["CMD", "caddy", "validate", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]
       interval: 10s
-      timeout: 3s
+      timeout: 6s
       retries: 6
     networks:
-      public-edge: {}
+      public-edge:
+        gw_priority: 1
       app-backend: {}
 
   database-preflight:
@@ -108,6 +114,31 @@ services:
     networks:
       synveda-data: {}
 
+  issuer-diagnostic:
+    <<: *synveda-product
+    command: ["issuer-diagnostic"]
+    restart: "no"
+    mem_limit: 256m
+    cpus: 0.5
+    depends_on:
+      proxy:
+        condition: service_healthy
+    environment:
+      SYNVEDA_OIDC_ISSUERS_FILE: /etc/synveda/oidc/issuers.json
+      SYNVEDA_OIDC_EXPECTED_ISSUER: ${SYNVEDA_OIDC_ISSUER:?set SYNVEDA_OIDC_ISSUER}
+      SYNVEDA_PUBLIC_URL: ${SYNVEDA_PUBLIC_APP_URL:?set SYNVEDA_PUBLIC_APP_URL}
+      SYNVEDA_INSECURE_DEVELOPMENT_HTTP: ${SYNVEDA_INSECURE_DEVELOPMENT_HTTP:?set SYNVEDA_INSECURE_DEVELOPMENT_HTTP}
+      RUST_LOG: ${RUST_LOG:-info}
+    volumes:
+      - type: bind
+        source: ${SYNVEDA_OIDC_ISSUERS_FILE:?set SYNVEDA_OIDC_ISSUERS_FILE}
+        target: /etc/synveda/oidc/issuers.json
+        read_only: true
+    networks:
+      app-backend: {}
+      application-egress:
+        gw_priority: 1
+
   gateway:
     <<: [*synveda-product, *synveda-long-running]
     command: ["gateway"]
@@ -115,12 +146,15 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
+      issuer-diagnostic:
+        condition: service_completed_successfully
     environment:
       DATABASE_URL_FILE: /run/secrets/database_url
       SYNVEDA_DATABASE_ROLES_FILE: /etc/synveda/database/roles.json
       SYNVEDA_LISTEN_ADDR: 0.0.0.0:8120
       SYNVEDA_PUBLIC_URL: ${SYNVEDA_PUBLIC_APP_URL:?set SYNVEDA_PUBLIC_APP_URL}
       SYNVEDA_OIDC_ISSUERS_FILE: /etc/synveda/oidc/issuers.json
+      SYNVEDA_INSECURE_DEVELOPMENT_HTTP: ${SYNVEDA_INSECURE_DEVELOPMENT_HTTP:?set SYNVEDA_INSECURE_DEVELOPMENT_HTTP}
       SYNVEDA_KMS_KEY_FILE: /run/secrets/kms_key
       SYNVEDA_KMS_KEY_REF_FILE: /run/secrets/kms_key_ref
       OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
@@ -150,7 +184,8 @@ services:
       app-backend: {}
       synveda-data: {}
       telemetry: {}
-      application-egress: {}
+      application-egress:
+        gw_priority: 1
 
   worker:
     <<: [*synveda-product, *synveda-long-running]
@@ -184,6 +219,10 @@ services:
         source: ${SYNVEDA_OIDC_ISSUERS_FILE}
         target: /etc/synveda/oidc/issuers.json
         read_only: true
+      - type: bind
+        source: ${SYNVEDA_OIDC_DIRECTORY_SECRETS_DIR:?set SYNVEDA_OIDC_DIRECTORY_SECRETS_DIR}
+        target: /run/secrets/oidc_directory
+        read_only: true
     healthcheck:
       test: ["CMD", "/usr/local/bin/synveda-container", "probe", "worker", "ready"]
       interval: 5s
@@ -192,7 +231,8 @@ services:
     networks:
       synveda-data: {}
       telemetry: {}
-      application-egress: {}
+      application-egress:
+        gw_priority: 1
 
   otel-collector:
     image: ${SYNVEDA_OTEL_COLLECTOR_IMAGE:?set SYNVEDA_OTEL_COLLECTOR_IMAGE}
@@ -220,25 +260,42 @@ services:
     networks:
       telemetry: {}
       keycloak-management: {}
-      telemetry-egress: {}
+      telemetry-egress:
+        gw_priority: 1
 
 networks:
   public-edge:
+    ipam:
+      config:
+        - subnet: ${SYNVEDA_RENDER_PUBLIC_EDGE_SUBNET:?set SYNVEDA_RENDER_PUBLIC_EDGE_SUBNET}
+          gateway: ${SYNVEDA_RENDER_PUBLIC_EDGE_GATEWAY:?set SYNVEDA_RENDER_PUBLIC_EDGE_GATEWAY}
     labels:
       com.synveda.contract: cpr-45
       com.synveda.network: public-edge
   app-backend:
     internal: true
+    ipam:
+      config:
+        - subnet: ${SYNVEDA_RENDER_APP_BACKEND_SUBNET:?set SYNVEDA_RENDER_APP_BACKEND_SUBNET}
+          gateway: ${SYNVEDA_RENDER_APP_BACKEND_GATEWAY:?set SYNVEDA_RENDER_APP_BACKEND_GATEWAY}
     labels:
       com.synveda.contract: cpr-45
       com.synveda.network: app-backend
   synveda-data:
     internal: true
+    ipam:
+      config:
+        - subnet: ${SYNVEDA_RENDER_DATA_SUBNET:?set SYNVEDA_RENDER_DATA_SUBNET}
+          gateway: ${SYNVEDA_RENDER_DATA_GATEWAY:?set SYNVEDA_RENDER_DATA_GATEWAY}
     labels:
       com.synveda.contract: cpr-45
       com.synveda.network: synveda-data
   keycloak-data:
     internal: true
+    ipam:
+      config:
+        - subnet: ${SYNVEDA_RENDER_KEYCLOAK_DATA_SUBNET:?set SYNVEDA_RENDER_KEYCLOAK_DATA_SUBNET}
+          gateway: ${SYNVEDA_RENDER_KEYCLOAK_DATA_GATEWAY:?set SYNVEDA_RENDER_KEYCLOAK_DATA_GATEWAY}
     labels:
       com.synveda.contract: cpr-45
       com.synveda.network: keycloak-data
@@ -246,29 +303,51 @@ networks:
     internal: true
     ipam:
       config:
-        - subnet: ${SYNVEDA_IDENTITY_SUBNET:?set SYNVEDA_IDENTITY_SUBNET}
+        - subnet: ${SYNVEDA_RENDER_IDENTITY_SUBNET:?set SYNVEDA_RENDER_IDENTITY_SUBNET}
+          gateway: ${SYNVEDA_RENDER_IDENTITY_GATEWAY:?set SYNVEDA_RENDER_IDENTITY_GATEWAY}
+          ip_range: ${SYNVEDA_RENDER_IDENTITY_DYNAMIC_RANGE:?set SYNVEDA_RENDER_IDENTITY_DYNAMIC_RANGE}
     labels:
       com.synveda.contract: cpr-45
       com.synveda.network: identity-backend
   keycloak-management:
     internal: true
+    ipam:
+      config:
+        - subnet: ${SYNVEDA_RENDER_KEYCLOAK_MANAGEMENT_SUBNET:?set SYNVEDA_RENDER_KEYCLOAK_MANAGEMENT_SUBNET}
+          gateway: ${SYNVEDA_RENDER_KEYCLOAK_MANAGEMENT_GATEWAY:?set SYNVEDA_RENDER_KEYCLOAK_MANAGEMENT_GATEWAY}
     labels:
       com.synveda.contract: cpr-45
       com.synveda.network: keycloak-management
   telemetry:
     internal: true
+    ipam:
+      config:
+        - subnet: ${SYNVEDA_RENDER_TELEMETRY_SUBNET:?set SYNVEDA_RENDER_TELEMETRY_SUBNET}
+          gateway: ${SYNVEDA_RENDER_TELEMETRY_GATEWAY:?set SYNVEDA_RENDER_TELEMETRY_GATEWAY}
     labels:
       com.synveda.contract: cpr-45
       com.synveda.network: telemetry
   application-egress:
+    ipam:
+      config:
+        - subnet: ${SYNVEDA_RENDER_APPLICATION_EGRESS_SUBNET:?set SYNVEDA_RENDER_APPLICATION_EGRESS_SUBNET}
+          gateway: ${SYNVEDA_RENDER_APPLICATION_EGRESS_GATEWAY:?set SYNVEDA_RENDER_APPLICATION_EGRESS_GATEWAY}
     labels:
       com.synveda.contract: cpr-45
       com.synveda.network: application-egress
   identity-egress:
+    ipam:
+      config:
+        - subnet: ${SYNVEDA_RENDER_IDENTITY_EGRESS_SUBNET:?set SYNVEDA_RENDER_IDENTITY_EGRESS_SUBNET}
+          gateway: ${SYNVEDA_RENDER_IDENTITY_EGRESS_GATEWAY:?set SYNVEDA_RENDER_IDENTITY_EGRESS_GATEWAY}
     labels:
       com.synveda.contract: cpr-45
       com.synveda.network: identity-egress
   telemetry-egress:
+    ipam:
+      config:
+        - subnet: ${SYNVEDA_RENDER_TELEMETRY_EGRESS_SUBNET:?set SYNVEDA_RENDER_TELEMETRY_EGRESS_SUBNET}
+          gateway: ${SYNVEDA_RENDER_TELEMETRY_EGRESS_GATEWAY:?set SYNVEDA_RENDER_TELEMETRY_EGRESS_GATEWAY}
     labels:
       com.synveda.contract: cpr-45
       com.synveda.network: telemetry-egress

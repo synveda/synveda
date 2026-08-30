@@ -22,6 +22,10 @@ path = "src/main.rs"
 name = "synveda-worker"
 path = "src/bin/synveda-worker.rs"
 
+[[bin]]
+name = "synveda-oidc-diagnostic"
+path = "src/bin/synveda-oidc-diagnostic.rs"
+
 [dependencies]
 synveda-audit = { workspace = true }
 synveda-identity = { workspace = true }

@@ -20,18 +20,28 @@ services:
     environment:
       SYNVEDA_DATABASE_REQUIRED_PEER: keycloak
 
+  issuer-diagnostic:
+    depends_on:
+      keycloak-realm-convergence:
+        condition: service_healthy
+
   proxy:
+    environment:
+      SYNVEDA_AUTH_HOST: ${SYNVEDA_AUTH_HOST:?set SYNVEDA_AUTH_HOST}
+    depends_on:
+      keycloak-realm-convergence:
+        condition: service_healthy
     volumes:
       - type: bind
-        source: ${SYNVEDA_CADDY_IDENTITY_CONFIG:?set SYNVEDA_CADDY_IDENTITY_CONFIG}
-        target: /etc/caddy/identity-keycloak.caddy
+        source: ${SYNVEDA_KEYCLOAK_PUBLIC_GATE_DIR:?set SYNVEDA_KEYCLOAK_PUBLIC_GATE_DIR}
+        target: /run/synveda/keycloak-public-gate
         read_only: true
     networks:
       app-backend:
         aliases:
           - ${SYNVEDA_AUTH_HOST:?set SYNVEDA_AUTH_HOST}
       identity-backend:
-        ipv4_address: ${SYNVEDA_PROXY_IDENTITY_ADDRESS:?set SYNVEDA_PROXY_IDENTITY_ADDRESS}
+        ipv4_address: ${SYNVEDA_RENDER_PROXY_IDENTITY_ADDRESS:?set SYNVEDA_RENDER_PROXY_IDENTITY_ADDRESS}
 
   keycloak-database-bootstrap:
     image: ${SYNVEDA_POSTGRES_IMAGE:?set SYNVEDA_POSTGRES_IMAGE}
@@ -88,10 +98,11 @@ services:
       KC_HOSTNAME: ${SYNVEDA_PUBLIC_AUTH_URL:?set SYNVEDA_PUBLIC_AUTH_URL}
       KC_HOSTNAME_STRICT: "true"
       KC_PROXY_HEADERS: xforwarded
-      KC_PROXY_TRUSTED_ADDRESSES: ${SYNVEDA_PROXY_IDENTITY_ADDRESS}/32
+      KC_PROXY_TRUSTED_ADDRESSES: ${SYNVEDA_RENDER_PROXY_IDENTITY_ADDRESS}/32
       KC_CACHE: local
       # KC-SERVICES0077 otherwise logs the mounted bootstrap identifier.
       KC_LOG_LEVEL_ORG_KEYCLOAK_SERVICES: warn
+      SYNVEDA_KEYCLOAK_PUBLIC_GATE_PATH: /run/synveda/keycloak-public-gate
     read_only: true
     init: true
     cap_drop: [ALL]
@@ -107,6 +118,10 @@ services:
     depends_on:
       keycloak-database-bootstrap:
         condition: service_completed_successfully
+    volumes:
+      - type: bind
+        source: ${SYNVEDA_KEYCLOAK_PUBLIC_GATE_DIR:?set SYNVEDA_KEYCLOAK_PUBLIC_GATE_DIR}
+        target: /run/synveda/keycloak-public-gate
     secrets:
       - source: keycloak_database_password
         target: keycloak_database_password
@@ -115,19 +130,64 @@ services:
       - source: keycloak_admin_password
         target: keycloak_admin_password
     healthcheck:
-      test:
-        - CMD-SHELL
-        - >-
-          exec 3<>/dev/tcp/127.0.0.1/9000 &&
-          printf 'GET /health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 &&
-          grep -q '"status"[[:space:]]*:[[:space:]]*"UP"' <&3
+      test: ["CMD", "/opt/keycloak/bin/synveda-keycloak-health", "local"]
       interval: 10s
-      timeout: 3s
+      timeout: 6s
       retries: 30
       start_period: 30s
     networks:
       identity-backend: {}
       keycloak-data: {}
+      keycloak-management: {}
+
+  keycloak-realm-convergence:
+    image: ${SYNVEDA_KEYCLOAK_IMAGE:?set SYNVEDA_KEYCLOAK_IMAGE}
+    user: "${SYNVEDA_RUNTIME_UID:?set SYNVEDA_RUNTIME_UID}:${SYNVEDA_RUNTIME_GID:?set SYNVEDA_RUNTIME_GID}"
+    command: ["synveda-realm-supervise"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME_FILE: /run/secrets/keycloak_admin_username
+      KC_BOOTSTRAP_ADMIN_PASSWORD_FILE: /run/secrets/keycloak_admin_password
+      SYNVEDA_KEYCLOAK_CONVERGENCE_PASSWORD_FILE: /run/secrets/keycloak_convergence_admin_password
+      SYNVEDA_PUBLIC_APP_URL: ${SYNVEDA_PUBLIC_APP_URL:?set SYNVEDA_PUBLIC_APP_URL}
+      SYNVEDA_PUBLIC_AUTH_URL: ${SYNVEDA_PUBLIC_AUTH_URL:?set SYNVEDA_PUBLIC_AUTH_URL}
+      SYNVEDA_KEYCLOAK_SSL_REQUIRED: ${SYNVEDA_KEYCLOAK_SSL_REQUIRED:?set SYNVEDA_KEYCLOAK_SSL_REQUIRED}
+      SYNVEDA_KEYCLOAK_PUBLIC_GATE_PATH: /run/synveda/keycloak-public-gate
+    read_only: true
+    init: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    pids_limit: 256
+    restart: ${SYNVEDA_COMPOSE_RESTART_POLICY:?set SYNVEDA_COMPOSE_RESTART_POLICY}
+    # Bash can defer a trapped TERM for the 56-second proof child; the
+    # fail-closed cleanup path is bounded at 110 seconds. Keep explicit margin
+    # so Tini/Compose cannot SIGKILL before quarantine and session settlement.
+    stop_grace_period: 210s
+    mem_limit: 512m
+    cpus: 1.0
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,mode=0700,size=64m,uid=${SYNVEDA_RUNTIME_UID},gid=${SYNVEDA_RUNTIME_GID}
+    depends_on:
+      keycloak:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "/opt/keycloak/bin/synveda-generation-gate", "ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 36
+      start_period: 15s
+    secrets:
+      - source: keycloak_admin_username
+        target: keycloak_admin_username
+      - source: keycloak_admin_password
+        target: keycloak_admin_password
+      - source: keycloak_convergence_admin_password
+        target: keycloak_convergence_admin_password
+    volumes:
+      - type: bind
+        source: ${SYNVEDA_KEYCLOAK_PUBLIC_GATE_DIR:?set SYNVEDA_KEYCLOAK_PUBLIC_GATE_DIR}
+        target: /run/synveda/keycloak-public-gate
+    networks:
+      identity-backend: {}
       keycloak-management: {}
 
 secrets:
@@ -139,3 +199,5 @@ secrets:
     file: ${SYNVEDA_SECRETS_DIR}/keycloak_admin_username
   keycloak_admin_password:
     file: ${SYNVEDA_SECRETS_DIR}/keycloak_admin_password
+  keycloak_convergence_admin_password:
+    file: ${SYNVEDA_SECRETS_DIR}/keycloak_convergence_admin_password

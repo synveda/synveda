@@ -5,6 +5,7 @@
 // the release profile twice so an upgrade-shaped stale file cannot survive.
 
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   existsSync,
   mkdtempSync,
@@ -38,6 +39,18 @@ export function serviceBlock(source, service) {
   const rest = source.slice(bodyStart);
   const next = rest.search(/^  [a-zA-Z0-9_-]+:\s*$/m);
   return next < 0 ? rest : rest.slice(0, next);
+}
+
+function occurrenceCount(source, token) {
+  return source.split(token).length - 1;
+}
+
+function shellBlockDigest(source) {
+  const active = source
+    .split("\n")
+    .filter((line) => !/^\s*#/.test(line))
+    .join("\n");
+  return createHash("sha256").update(active).digest("hex");
 }
 
 export function retiredFindings(source) {
@@ -168,6 +181,482 @@ export function shellFunctionOrderFindings(source, names) {
   return findings;
 }
 
+export function dbTestNetworkReservationFindings(dbTest, compose) {
+  const findings = [];
+  if (
+    createHash("sha256").update(dbTest).digest("hex") !==
+    "ef435cf58c44ffa1b2c5ea84d04529454077c1bfa1225a1b7371f484178a937a"
+  ) {
+    findings.push("database fixture differs from the reviewed executable");
+  }
+  const firstReservation = dbTest.indexOf(
+    '\nreserve_test_network 0 "${network_logicals[0]}"',
+  );
+  const candidateDefinition = dbTest.indexOf("\nnetwork_candidate_subnet() {");
+  const contentionDefinition = dbTest.indexOf(
+    "\nnetwork_create_is_pool_contention() {",
+    candidateDefinition,
+  );
+  const reservationDefinition = dbTest.indexOf("\nreserve_test_network() {");
+  const candidateOnly =
+    candidateDefinition >= 0 && contentionDefinition > candidateDefinition
+      ? dbTest.slice(candidateDefinition, contentionDefinition)
+      : "";
+  const candidate =
+    candidateDefinition >= 0 && reservationDefinition > candidateDefinition
+      ? dbTest.slice(candidateDefinition, reservationDefinition)
+      : "";
+  const reservation =
+    reservationDefinition >= 0 && firstReservation > reservationDefinition
+      ? dbTest.slice(reservationDefinition, firstReservation)
+      : "";
+  const cleanupStart = dbTest.indexOf("\ncleanup_successful_fixture() {");
+  const validatorStart = dbTest.indexOf("\nvalidate_owned_network_ledger() {");
+  const expectedLedgerStart = dbTest.indexOf("\nexpected_owned_network_ledger() {");
+  const validator =
+    validatorStart >= 0 && expectedLedgerStart > validatorStart
+      ? dbTest.slice(validatorStart, expectedLedgerStart)
+      : "";
+  const expectedLedger =
+    expectedLedgerStart >= 0 && cleanupStart > expectedLedgerStart
+      ? dbTest.slice(expectedLedgerStart, cleanupStart)
+      : "";
+  const cleanupEnd = dbTest.indexOf("\nprivate_evidence_file() {", cleanupStart);
+  const cleanup =
+    cleanupStart >= 0 && cleanupEnd > cleanupStart
+      ? dbTest.slice(cleanupStart, cleanupEnd)
+      : "";
+  const reportStart = dbTest.indexOf("\nreport_preserved_state() {");
+  const reportEnd = dbTest.indexOf("\ntrap report_preserved_state EXIT", reportStart);
+  const report =
+    reportStart >= 0 && reportEnd > reportStart ? dbTest.slice(reportStart, reportEnd) : "";
+  const networksStart = compose.indexOf("\nnetworks:\n");
+  const networksEnd = compose.indexOf("\nsecrets:\n", networksStart);
+  const networks =
+    networksStart >= 0 && networksEnd > networksStart
+      ? compose.slice(networksStart, networksEnd)
+      : "";
+
+  if (
+    /["']?\$docker_bin["']?\s+network\s+(?:ls|inspect)\b/.test(dbTest) ||
+    /docker-subnets|used_subnets_file/.test(dbTest)
+  ) {
+    findings.push("database fixture observes pre-existing Docker networks");
+  }
+  const activeDbTest = dbTest
+    .split("\n")
+    .filter((line) => !/^\s*#/.test(line))
+    .join("\n");
+  const activeReservation = reservation
+    .split("\n")
+    .filter((line) => !/^\s*#/.test(line))
+    .join("\n");
+  const activeCandidate = candidateOnly
+    .split("\n")
+    .filter((line) => !/^\s*#/.test(line))
+    .join("\n");
+  const activeCleanup = cleanup
+    .split("\n")
+    .filter((line) => !/^\s*#/.test(line))
+    .join("\n");
+  const activeLogicalDbTest = activeDbTest.replace(/\\\n\s*/g, " ");
+  const composeSubcommands = [
+    ...activeLogicalDbTest.matchAll(/\bcompose[ \t]+([^\s;()]+)/g),
+  ].map((match) => match[1]);
+  const allowedComposeSubcommands = new Set([
+    "--project-name",
+    "build",
+    "config",
+    "down",
+    "exec",
+    "logs",
+    "port",
+    "restart",
+    "run",
+    "up",
+  ]);
+  const dockerNetworkLines = activeDbTest
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => /(?:["']?\$docker_bin["']?|\bdocker)\s+network\b/.test(line));
+  const expectedDockerNetworkLines = [
+    'if "$docker_bin" network create \\',
+    'if "$docker_bin" network create \\',
+    '"$docker_bin" network rm "${owned_network_ids[$network_index]}" >/dev/null',
+  ];
+  const directDockerLines = activeDbTest
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.includes('"$docker_bin"'));
+  const expectedDirectDockerLines = [
+    'command -v "$docker_bin" >/dev/null 2>&1 || {',
+    'if "$docker_bin" network create \\',
+    'if "$docker_bin" network create \\',
+    '"$docker_bin" compose --project-name "$project" --file "$manifest" "$@"',
+    '"$docker_bin" network rm "${owned_network_ids[$network_index]}" >/dev/null',
+    '"$docker_bin" image rm "$SYNVEDA_DB_TEST_POSTGRES_IMAGE" >/dev/null',
+    'if "$docker_bin" run --rm --network none --read-only \\',
+    'if "$docker_bin" run --rm --network none --read-only \\',
+  ];
+  const aliasesDockerBinary =
+    /(?:^|[;\n])[ \t]*(?:(?:export|declare)[ \t]+)?[A-Za-z_][A-Za-z0-9_]*=(?:"?\$docker_bin"?|"?\$\{docker_bin\}"?|"?(?:\/[^\s"']+)*\/docker"?|docker)(?=[; \t\n]|$)/.test(
+      activeDbTest,
+    );
+  if (
+    JSON.stringify(dockerNetworkLines.sort()) !==
+    JSON.stringify(expectedDockerNetworkLines.sort()) ||
+    JSON.stringify(directDockerLines.sort()) !==
+      JSON.stringify(expectedDirectDockerLines.sort()) ||
+    occurrenceCount(activeDbTest, "SYNVEDA_DOCKER_BIN") !== 1 ||
+    (activeDbTest.match(/\bdocker_bin\b/g) ?? []).length !== 9 ||
+    (activeDbTest.match(/\bdocker\b/g) ?? []).length !== 1 ||
+    !activeDbTest.includes("docker_bin=${SYNVEDA_DOCKER_BIN:-docker}") ||
+    /\bdocker["']?\s+(?:rm|rmi|image|network|system|container|volume|builder|compose)\b/.test(
+      activeDbTest,
+    ) ||
+    aliasesDockerBinary ||
+    (activeDbTest.match(/\bcompose\b/g) ?? []).length !== 168 ||
+    composeSubcommands.length !== 159 ||
+    composeSubcommands.some((subcommand) => !allowedComposeSubcommands.has(subcommand)) ||
+    (activeLogicalDbTest.match(/\bnetwork\s+create\b/g) ?? []).length !== 2 ||
+    (activeLogicalDbTest.match(/\bnetwork\s+rm\b/g) ?? []).length !== 1 ||
+    /\bnetwork\s+(?:ls|inspect|prune|connect|disconnect)\b/.test(activeLogicalDbTest) ||
+    /\bnetwork\s+(?:["']?\$|\$\{|`)/.test(activeLogicalDbTest) ||
+    occurrenceCount(activeLogicalDbTest, '"$docker_bin" compose ') !== 1 ||
+    (activeLogicalDbTest.match(/\bdown\b/g) ?? []).length !== 1 ||
+    (activeCleanup.match(/\bdown\b/g) ?? []).length !== 1 ||
+    (activeLogicalDbTest.match(/\bimage\s+rm\b/g) ?? []).length !== 1 ||
+    (activeCleanup.match(/\bimage\s+rm\b/g) ?? []).length !== 1 ||
+    /\b(?:system|builder|volume|container)\s+(?:prune|rm|remove)\b/.test(
+      activeLogicalDbTest,
+    ) ||
+    /\b(?:network|image)\s+remove\b/.test(activeLogicalDbTest) ||
+    /\bcompose\b[^\n]{0,256}[ \t](?:rm|kill|stop|pause|unpause)(?=[ \t]|$)/.test(
+      activeLogicalDbTest,
+    ) ||
+    occurrenceCount(activeDbTest, "compose down --volumes --remove-orphans") !== 1 ||
+    occurrenceCount(activeDbTest, 'rm -R -- "$state_dir"') !== 1
+  ) {
+    findings.push("database fixture Docker teardown grammar is not closed");
+  }
+  const expectedCandidate = [
+    "",
+    "network_candidate_subnet() {",
+    "  local logical_index=$1",
+    "  local attempt=$2",
+    "  local network_quartet_slot",
+    "  local network_slot",
+    "  local network_second",
+    "  local network_within",
+    "  local network_third",
+    "  local network_fourth",
+    "",
+    "  network_quartet_slot=$(((network_start_slot + attempt * 1265) % 2048))",
+    "  network_slot=$((network_quartet_slot * 4 + logical_index))",
+    "  network_second=$((18 + network_slot / 4096))",
+    "  network_within=$((network_slot % 4096))",
+    "  network_third=$((network_within / 16))",
+    "  network_fourth=$(((network_within % 16) * 16))",
+    "  printf '198.%s.%s.%s/28\\n' \\",
+    '    "$network_second" "$network_third" "$network_fourth"',
+    "}",
+    "",
+  ].join("\n");
+  const candidateAssignments = [
+    "network_seed",
+    "network_start_slot",
+    "network_reservation_limit",
+    "network_quartet_slot",
+    "network_slot",
+    "network_second",
+    "network_within",
+    "network_third",
+    "network_fourth",
+  ];
+  const hasSingleCandidateAssignments = candidateAssignments.every(
+    (name) => (activeDbTest.match(new RegExp(`^[ \\t]*${name}=`, "gm")) ?? []).length === 1,
+  );
+  const expectedCandidateWordCounts = new Map([
+    ["network_seed", 3],
+    ["network_start_slot", 2],
+    ["network_reservation_limit", 3],
+    ["network_quartet_slot", 3],
+    ["network_slot", 4],
+    ["network_second", 3],
+    ["network_within", 4],
+    ["network_third", 3],
+    ["network_fourth", 3],
+  ]);
+  const hasExactCandidateWordCounts = [...expectedCandidateWordCounts].every(
+    ([name, count]) =>
+      (activeDbTest.match(new RegExp(`\\b${name}\\b`, "g")) ?? []).length === count,
+  );
+  if (
+    !candidate ||
+    activeCandidate !== expectedCandidate ||
+    (activeDbTest.match(/^(?:function[ \t]+)?network_candidate_subnet[ \t]*(?:\(\))?[ \t]*\{/gm) ?? [])
+      .length !== 1 ||
+    !hasSingleCandidateAssignments ||
+    !hasExactCandidateWordCounts ||
+    !dbTest.includes(
+      "network_seed=$(printf '%s\\n' \"$project\" | cksum | awk '{print $1}')",
+    ) ||
+    !dbTest.includes("network_start_slot=$((network_seed % 2048))") ||
+    !candidate.includes(
+      "network_quartet_slot=$(((network_start_slot + attempt * 1265) % 2048))",
+    ) ||
+    !candidate.includes("network_slot=$((network_quartet_slot * 4 + logical_index))") ||
+    !candidate.includes("network_second=$((18 + network_slot / 4096))") ||
+    !candidate.includes("network_within=$((network_slot % 4096))") ||
+    !candidate.includes("network_third=$((network_within / 16))") ||
+    !candidate.includes("network_fourth=$(((network_within % 16) * 16))") ||
+    !candidate.includes("printf '198.%s.%s.%s/28\\n'") ||
+    !dbTest.includes("network_reservation_limit=64")
+  ) {
+    findings.push("database fixture does not walk bounded full-cycle project-derived /28 candidates");
+  }
+  const reservationCalls = dbTest.match(/^reserve_test_network /gm) ?? [];
+  if (
+    reservationCalls.length !== 4 ||
+    !dbTest.includes(
+      'reserve_test_network 0 "${network_logicals[0]}" "${network_names[0]}" true',
+    ) ||
+    !dbTest.includes(
+      'reserve_test_network 1 "${network_logicals[1]}" "${network_names[1]}" true',
+    ) ||
+    !dbTest.includes(
+      'reserve_test_network 2 "${network_logicals[2]}" "${network_names[2]}" false',
+    ) ||
+    !dbTest.includes(
+      'reserve_test_network 3 "${network_logicals[3]}" "${network_names[3]}" false',
+    ) ||
+    /^reserve_test_network [^\n]*(?:\|\||&&)/m.test(dbTest)
+  ) {
+    findings.push("database fixture does not reserve the exact four-network topology once");
+  }
+  if (
+    !activeReservation ||
+    activeReservation.split('"$docker_bin" network create').length - 1 !== 2 ||
+    !activeReservation.includes("--driver bridge --internal --subnet \"$subnet\"") ||
+    !activeReservation.includes("--driver bridge --subnet \"$subnet\"") ||
+    !candidate.includes(
+      "'Error response from daemon: invalid pool request: Pool overlaps with other one on this address space'",
+    ) ||
+    !candidate.includes(
+      '[ "$create_status" -eq 1 ] && [ ! -s "$receipt_file" ] && cmp -s --',
+    ) ||
+    !candidate.includes('>> "$network_ownership_file" || {') ||
+    !activeReservation.includes('>"$network_receipt_file" 2>"$network_error_file"') ||
+    !activeReservation.includes(
+      'network_create_is_pool_contention \\\n        "$network_receipt_file" "$network_error_file" "$network_create_status"',
+    ) ||
+    !activeReservation.includes("network_create_status=$?") ||
+    !activeReservation.includes(
+      "printf '%s\\n' \"$network_create_status\" > \"$network_status_file\"",
+    ) ||
+    !activeReservation.includes('if [ "$network_create_status" -eq 0 ]') ||
+    !activeReservation.includes('attempt=$((attempt + 1))') ||
+    !activeReservation.includes('while [ "$attempt" -lt "$network_reservation_limit" ]') ||
+    !activeReservation.includes('if [ "$attempt" -eq "$network_reservation_limit" ]') ||
+    !activeReservation.includes("--label com.synveda.contract=cpr-45-db-test") ||
+    !activeReservation.includes('--label "com.synveda.project=$project"') ||
+    !activeReservation.includes('--label "com.synveda.network=$logical_name"')
+  ) {
+    findings.push("database fixture network creation is not closed and labelled");
+  }
+  const intent = activeReservation.indexOf(
+    "record_network_ownership \\\n      intent",
+  );
+  const create = activeReservation.indexOf('"$docker_bin" network create');
+  const lengthProof = activeReservation.indexOf('[ "${#created_network_id}" -ne 64 ]');
+  const grammarProof = activeReservation.indexOf("*[!0-9a-f]*)");
+  const duplicateProof = activeReservation.indexOf(
+    'for existing_network_id in "${owned_network_ids[@]}"',
+  );
+  const owned = activeReservation.indexOf(
+    "record_network_ownership \\\n    owned",
+  );
+  const contended = activeReservation.indexOf(
+    "record_network_ownership \\\n        contended",
+  );
+  const receipt = activeReservation.indexOf(': > "$network_receipt_file"');
+  const receiptLength = activeReservation.indexOf(
+    'network_receipt_bytes=$(LC_ALL=C wc -c < "$network_receipt_file")',
+  );
+  const receiptRead = activeReservation.indexOf(
+    'IFS= read -r created_network_id < "$network_receipt_file"',
+  );
+  const volatileSubnet = activeReservation.indexOf(
+    "network_subnets[$logical_index]=$subnet",
+  );
+  const volatileIds = activeReservation.indexOf(
+    'owned_network_ids+=("$created_network_id")',
+  );
+  if (
+    !(
+      intent >= 0 &&
+      create > intent &&
+      receipt >= intent &&
+      create > receipt &&
+      receiptLength > create &&
+      receiptRead > receiptLength &&
+      lengthProof > create &&
+      lengthProof > receiptRead &&
+      grammarProof > lengthProof &&
+      duplicateProof > grammarProof &&
+      owned > duplicateProof &&
+      volatileSubnet > owned &&
+      volatileIds > volatileSubnet
+    ) ||
+    contended < create ||
+    !dbTest.includes('chmod 600 "$network_ownership_file"') ||
+    !dbTest.includes('chmod 700 "$network_receipt_dir"') ||
+    !activeReservation.includes(
+      '"$network_receipt_file" "$network_error_file" "$network_status_file"',
+    ) ||
+    !activeReservation.includes(
+      'owned "$logical_name" "$network_name" "$subnet" "$created_network_id" || return 70',
+    ) ||
+    !dbTest.includes('owned_network_receipt_files+=("$network_receipt_file")') ||
+    !dbTest.includes('[ "$receipt_id" = "${owned_network_ids[$network_index]}" ]') ||
+    !dbTest.includes("cmp -s -- <(printf '0\\n') \"$receipt_status\"")
+  ) {
+    findings.push("database fixture does not journal and validate immutable network ownership");
+  }
+  const trapAt = dbTest.indexOf("\ntrap report_preserved_state EXIT");
+  if (
+    reportStart < 0 ||
+    trapAt < reportStart ||
+    firstReservation < trapAt ||
+    !report.includes("network reservation evidence is in $network_ownership_file") ||
+    /cleanup_successful_fixture|compose down|network rm/.test(report) ||
+    /^trap[^\n]*(?:cleanup_successful_fixture|compose down|network rm)/m.test(dbTest)
+  ) {
+    findings.push("database fixture failure trap can clean or omit partial reservations");
+  }
+  for (const [name, variable, index] of [
+    ["main-data", "SYNVEDA_DB_TEST_MAIN_DATA_NETWORK", 0],
+    ["lifecycle-data", "SYNVEDA_DB_TEST_LIFECYCLE_DATA_NETWORK", 1],
+    ["main-host", "SYNVEDA_DB_TEST_MAIN_HOST_NETWORK", 2],
+    ["lifecycle-host", "SYNVEDA_DB_TEST_LIFECYCLE_HOST_NETWORK", 3],
+  ]) {
+    const assignments =
+      activeDbTest.match(new RegExp(`^[ \\t]*(?:export[ \\t]+)?${variable}=`, "gm")) ?? [];
+    if (
+      assignments.length !== 1 ||
+      (activeDbTest.match(new RegExp(`\\b${variable}\\b`, "g")) ?? []).length !== 1 ||
+      !activeDbTest.split("\n").includes(`export ${variable}=\${network_names[${index}]}`) ||
+      new RegExp(`^[ \\t]*unset[^\\n]*\\b${variable}\\b`, "m").test(activeDbTest)
+    ) {
+      findings.push(`database fixture does not export ${variable}`);
+    }
+    const network = serviceBlock(networks, name);
+    const expected =
+      `    external: true\n` +
+      `    name: \${${variable}:?set ${variable}}\n`;
+    if (network !== expected) {
+      findings.push(`database Compose network ${name} is not an exact external reservation`);
+    }
+  }
+  const cleanupValidation = activeCleanup.indexOf("validate_owned_network_ledger");
+  const cleanupStarted = activeCleanup.indexOf("cleanup_started=true");
+  const cleanupCompose = activeCleanup.indexOf("compose down --volumes --remove-orphans");
+  const cleanupReverseIndex = activeCleanup.indexOf(
+    "network_index=$((owned_network_count - 1))",
+  );
+  const cleanupNetworkRemoval = activeCleanup.indexOf(
+    '"$docker_bin" network rm "${owned_network_ids[$network_index]}"',
+  );
+  const cleanupImageRemoval = activeCleanup.indexOf(
+    '"$docker_bin" image rm "$SYNVEDA_DB_TEST_POSTGRES_IMAGE"',
+  );
+  const cleanupStateRemoval = activeCleanup.indexOf('rm -R -- "$state_dir"');
+  const cleanupTrapRemoval = activeCleanup.indexOf("trap - EXIT");
+  const expectedCleanup = [
+    "",
+    "cleanup_successful_fixture() {",
+    "  local network_index",
+    "",
+    "  validate_owned_network_ledger",
+    "  cleanup_started=true",
+    "  compose down --volumes --remove-orphans",
+    "  network_index=$((owned_network_count - 1))",
+    '  while [ "$network_index" -ge 0 ]; do',
+    '    "$docker_bin" network rm "${owned_network_ids[$network_index]}" >/dev/null',
+    "    network_index=$((network_index - 1))",
+    "  done",
+    '  if [ "$test_image_owned" = true ]; then',
+    '    "$docker_bin" image rm "$SYNVEDA_DB_TEST_POSTGRES_IMAGE" >/dev/null',
+    "  fi",
+    '  rm -R -- "$state_dir"',
+    "  trap - EXIT",
+    "}",
+    "",
+  ].join("\n");
+  if (
+    !activeCleanup ||
+    shellBlockDigest(validator) !==
+      "2bedf86e2e48b626564826435a8afa82ab93558e6fb273108831e0f0a9040782" ||
+    shellBlockDigest(expectedLedger) !==
+      "419019db58268f2f399d604369357a5be4757c39262b9e04560fbc35e75fbfbd" ||
+    (activeDbTest.match(/^(?:function[ \t]+)?validate_owned_network_ledger[ \t]*(?:\(\))?[ \t]*\{/gm) ?? [])
+      .length !== 1 ||
+    (activeDbTest.match(/^(?:function[ \t]+)?expected_owned_network_ledger[ \t]*(?:\(\))?[ \t]*\{/gm) ?? [])
+      .length !== 1 ||
+    activeCleanup !== expectedCleanup ||
+    (activeDbTest.match(/^(?:function[ \t]+)?cleanup_successful_fixture[ \t]*(?:\(\))?[ \t]*\{/gm) ?? [])
+      .length !== 1 ||
+    cleanupValidation < 0 ||
+    cleanupStarted <= cleanupValidation ||
+    cleanupCompose <= cleanupStarted ||
+    cleanupReverseIndex <= cleanupCompose ||
+    cleanupNetworkRemoval <= cleanupReverseIndex ||
+    cleanupImageRemoval <= cleanupNetworkRemoval ||
+    cleanupStateRemoval <= cleanupImageRemoval ||
+    cleanupTrapRemoval <= cleanupStateRemoval ||
+    /network rm[^\n]*(?:network_names|project)/.test(activeCleanup) ||
+    !dbTest.includes(
+      'cmp -s -- <(expected_owned_network_ledger) "$network_ownership_file"',
+    ) ||
+    /network-ownership\.expected/.test(dbTest)
+  ) {
+    findings.push("database fixture cleanup is not fenced by the immutable ownership ledger");
+  }
+  if (
+    occurrenceCount(dbTest, "cleanup_successful_fixture") !== 3 ||
+    (dbTest.match(/^\s*cleanup_successful_fixture\s*$/gm) ?? []).length !== 2
+  ) {
+    findings.push("database fixture does not have exactly two success-only cleanup calls");
+  }
+  if (
+    !dbTest.includes(
+      '[ "$status" -eq 0 ] || exit "$status"\n\n' +
+        '  if [ "${KEEP_TEST_DB:-}" = 1 ]; then\n' +
+        "    trap - EXIT\n" +
+        '    echo "db-test: passed; retained isolated Compose project $project"\n' +
+        '    echo "db-test: private state is in $state_dir (mode 0700; contains credentials)"\n' +
+        "    exit 0\n" +
+        "  fi\n" +
+        "  cleanup_successful_fixture",
+    ) ||
+    !dbTest.includes(
+      'if [ "$status" -ne 0 ]; then\n' +
+        '  exit "$status"\n' +
+        "fi\n\n" +
+        'if [ "${KEEP_TEST_DB:-}" = 1 ]; then\n' +
+        "  trap - EXIT\n" +
+        '  echo "db-test: passed; retained isolated Compose project $project"\n' +
+        '  echo "db-test: private state is in $state_dir (mode 0700; contains credentials)"\n' +
+        "  exit 0\n" +
+        "fi\n\n" +
+        "cleanup_successful_fixture",
+    )
+  ) {
+    findings.push("database fixture cleanup is reachable before success or KEEP handling");
+  }
+  return findings;
+}
+
 export function evalFixtureFindings(dbTest, evalLib, ciWorkflow, evalWorkflow) {
   const findings = [];
   const fastStart = dbTest.indexOf("# Demos and evaluations need the exact");
@@ -265,6 +754,10 @@ export function evalFixtureFindings(dbTest, evalLib, ciWorkflow, evalWorkflow) {
     findings.push("evaluation process and log cleanup is not bounded and best-effort");
   }
   for (const name of [
+    "SYNVEDA_DB_TEST_MAIN_DATA_NETWORK",
+    "SYNVEDA_DB_TEST_LIFECYCLE_DATA_NETWORK",
+    "SYNVEDA_DB_TEST_MAIN_HOST_NETWORK",
+    "SYNVEDA_DB_TEST_LIFECYCLE_HOST_NETWORK",
     "SYNVEDA_DB_TEST_MAIN_DATA_SUBNET",
     "SYNVEDA_DB_TEST_LIFECYCLE_DATA_SUBNET",
     "SYNVEDA_DB_TEST_MAIN_HOST_SUBNET",
@@ -291,12 +784,12 @@ export function sqlxPrepareFixtureFindings(dbTest) {
   const findings = [];
   if (
     !dbTest.includes(
-      "workspace|demo|product-evaluation|evaluation|longmemeval-evaluation|sqlx-prepare)",
+      "workspace|demo|product-evaluation|evaluation|longmemeval-evaluation|authority-fingerprints|sqlx-prepare)",
     )
   ) {
     findings.push("SQLx prepare task is not explicitly allow-listed");
   }
-  if (!dbTest.includes("  sqlx-prepare) fast_fixture=true ;;")) {
+  if (!dbTest.includes("  authority-fingerprints|sqlx-prepare) fast_fixture=true ;;")) {
     findings.push("SQLx prepare task does not select the fresh exact-role fixture");
   }
   if (!dbTest.includes('if [ "$db_test_task" = sqlx-prepare ] && [ "$#" -ne 0 ]; then')) {
@@ -382,11 +875,187 @@ export function sqlxPrepareFixtureFindings(dbTest) {
   return findings;
 }
 
+export function authorityFingerprintFixtureFindings(dbTest, runtimeRole) {
+  const findings = [];
+  const taskVocabulary =
+    "workspace|demo|product-evaluation|evaluation|longmemeval-evaluation|" +
+    "authority-fingerprints|sqlx-prepare)";
+  if (!dbTest.includes(taskVocabulary)) {
+    findings.push("authority fingerprint task is not explicitly allow-listed");
+  }
+  if (!dbTest.includes("  authority-fingerprints|sqlx-prepare) fast_fixture=true ;;")) {
+    findings.push("authority fingerprint task does not select the fresh exact-role fixture");
+  }
+  if (
+    !dbTest.includes(
+      'if [ "$db_test_task" = authority-fingerprints ] && [ "$#" -ne 0 ]; then',
+    )
+  ) {
+    findings.push("authority fingerprint task accepts unreviewed positional arguments");
+  }
+
+  const fastStart = dbTest.indexOf("# Demos and evaluations need the exact");
+  const hostileStart = dbTest.indexOf("enable_hostile_database_logging() {");
+  const fast =
+    fastStart >= 0 && hostileStart > fastStart
+      ? dbTest.slice(fastStart, hostileStart)
+      : "";
+  const witness = fast.indexOf('  assert_database_secrets_absent "$main_witness_file"');
+  const branchStart = fast.indexOf(
+    '  if [ "$db_test_task" = authority-fingerprints ]; then\n',
+  );
+  const sqlxStart = fast.indexOf('  if [ "$db_test_task" = sqlx-prepare ]; then\n');
+  const branch =
+    branchStart > witness && sqlxStart > branchStart
+      ? fast.slice(branchStart, sqlxStart)
+      : "";
+  const versionProbe = branch.indexOf("sqlx_cli_banner=$(cargo sqlx --version)");
+  const versionCompare = branch.indexOf(
+    '[ "$sqlx_cli_banner" = "sqlx-cli-sqlx $sqlx_library_version" ]',
+  );
+  const versionGuard = [
+    '    [ -n "$sqlx_library_version" ] \\',
+    '      && [ "$sqlx_cli_banner" = "sqlx-cli-sqlx $sqlx_library_version" ] || {',
+    '        echo "db-test: cargo-sqlx must exactly match the locked sqlx library" >&2',
+    "        exit 69",
+    "      }",
+  ].join("\n");
+  const versionGuardAt = branch.indexOf(versionGuard);
+  const migrate = branch.indexOf("cargo sqlx migrate run --no-dotenv");
+  const migrationSource = branch.indexOf(
+    "--source crates/synveda-store/migrations",
+    migrate,
+  );
+  const reporter = branch.indexOf(
+    "runtime_role::tests::report_live_catalog_fingerprints",
+  );
+  if (
+    versionProbe < 0 ||
+    versionCompare <= versionProbe ||
+    versionGuardAt < versionProbe ||
+    versionGuardAt >= migrate ||
+    migrate < 0 ||
+    migrationSource <= migrate ||
+    reporter <= migrationSource ||
+    (branch.match(/\bcargo\s+/g) ?? []).length !== 3
+  ) {
+    findings.push(
+      "authority fingerprint report is not version proof, direct migration and one reporter in order",
+    );
+  }
+  if (
+    branch.split("env -u SYNVEDA_DB_TEST_SECRETS_DIR -u SQLX_OFFLINE").length - 1 !==
+      2 ||
+    branch.split("SYNVEDA_CARGO_DATABASE_URL_FILE=$main_migrator_file").length - 1 !==
+      2 ||
+    branch.split("scripts/cargo-with-database-url-file").length - 1 !== 2 ||
+    branch.split("SYNVEDA_REPORT_AUTHORITY_FINGERPRINTS=1").length - 1 !== 1 ||
+    branch.split("SYNVEDA_DATABASE_ROLES_FILE=$roles_file").length - 1 !== 1 ||
+    branch.split("SYNVEDA_TEST_DATABASE_URL_FILE=$main_gateway_file").length - 1 !== 1
+  ) {
+    findings.push("authority fingerprint report does not preserve its exact file boundaries");
+  }
+  const logicalBranch = branch.replace(/\\\n\s*/g, " ").replace(/[ \t]+/g, " ");
+  if (
+    !logicalBranch.includes(
+      "cargo test -q -p synveda-store --lib " +
+        "runtime_role::tests::report_live_catalog_fingerprints " +
+        "-- --ignored --exact --nocapture",
+    ) ||
+    /main_(?:owner|worker)_file|postgres-lifecycle|cargo sqlx prepare|--all-targets/.test(
+      branch,
+    ) ||
+    /\bexit[ \t]+0\b|cleanup_successful_fixture|compose down/.test(branch)
+  ) {
+    findings.push("authority fingerprint report is not the exact bounded store-lib reporter");
+  }
+
+  const productStart = fast.indexOf(
+    '  if [ "$db_test_task" != authority-fingerprints ]; then\n',
+    sqlxStart,
+  );
+  const statusStart = fast.indexOf("\n  status=0\n", productStart);
+  const product =
+    productStart > sqlxStart && statusStart > productStart
+      ? fast.slice(productStart, statusStart)
+      : "";
+  if (
+    !product.includes('    run_main_database_preflight "$main_witness_file"') ||
+    !product.includes("    for _ in 1 2; do") ||
+    !product.includes("cargo run -q -p synveda-cli --bin synveda -- db migrate") ||
+    !product.endsWith("  fi\n") ||
+    !fast.includes("    authority-fingerprints|sqlx-prepare) ;;")
+  ) {
+    findings.push(
+      "authority fingerprint report does not bypass only product acceptance before shared cleanup",
+    );
+  }
+
+  const ignored = runtimeRole.indexOf(
+    '#[ignore = "run only through the isolated authority-fingerprint fixture"]',
+  );
+  const reportTest = runtimeRole.indexOf("async fn report_live_catalog_fingerprints()", ignored);
+  const reportGate = runtimeRole.indexOf(
+    'std::env::var("SYNVEDA_REPORT_AUTHORITY_FINGERPRINTS")',
+    reportTest,
+  );
+  const exactGate = runtimeRole.indexOf('Ok("1")', reportGate);
+  const connection = runtimeRole.indexOf(
+    'live_test_connection("SYNVEDA_TEST_DATABASE_URL_FILE")',
+    exactGate,
+  );
+  const roles = runtimeRole.indexOf("live_test_roles()", connection);
+  const initialise = runtimeRole.indexOf(
+    "initialize_product_session_connection(&mut connection)",
+    roles,
+  );
+  const begin = runtimeRole.indexOf("sqlx::Connection::begin(&mut connection)", initialise);
+  const snapshot = runtimeRole.indexOf(
+    "configure_authority_snapshot_connection(&mut authority)",
+    begin,
+  );
+  const acl = runtimeRole.indexOf("application_acl_fingerprint(&mut authority)", snapshot);
+  const routine = runtimeRole.indexOf("routine_catalog_fingerprint(&mut authority", acl);
+  const trigger = runtimeRole.indexOf("trigger_catalog_fingerprint(&mut authority", routine);
+  const rls = runtimeRole.indexOf("rls_catalog_fingerprint(&mut authority)", trigger);
+  const commit = runtimeRole.indexOf(".commit()", rls);
+  const output = runtimeRole.indexOf(
+    '"authority-fingerprints baseline_revision={}',
+    commit,
+  );
+  if (
+    !(
+      ignored >= 0 &&
+      reportTest > ignored &&
+      reportGate > reportTest &&
+      exactGate > reportGate &&
+      connection > exactGate &&
+      roles > connection &&
+      initialise > roles &&
+      begin > initialise &&
+      snapshot > begin &&
+      acl > snapshot &&
+      routine > acl &&
+      trigger > routine &&
+      rls > trigger &&
+      commit > rls &&
+      output > commit
+    ) ||
+    !runtimeRole.includes("application_acl={application_acl}") ||
+    !runtimeRole.includes("routine_catalog={routine_catalog}") ||
+    !runtimeRole.includes("trigger_catalog={trigger_catalog}") ||
+    !runtimeRole.includes("forced_rls={forced_rls}")
+  ) {
+    findings.push("authority fingerprint reporter is not one gated repeatable-read snapshot");
+  }
+  return findings;
+}
+
 export function demoFixtureFindings(dbTest, demoHarness, ciWorkflow) {
   const findings = [];
   if (
     !dbTest.includes(
-      "workspace|demo|product-evaluation|evaluation|longmemeval-evaluation|sqlx-prepare)",
+      "workspace|demo|product-evaluation|evaluation|longmemeval-evaluation|authority-fingerprints|sqlx-prepare)",
     ) ||
     !dbTest.includes("  demo|product-evaluation|evaluation|longmemeval-evaluation) fast_fixture=true ;;")
   ) {
@@ -545,9 +1214,38 @@ export function lifecyclePeerWitnessFindings(dbTest, dbTestCompose) {
     findings.push("external-provider credential is not confined to its two lifecycle consumers");
   }
 
-  const secretGenerator = dbTest.indexOf(
-    "SYNVEDA_SECRETS_DIR=$secret_dir deploy/compose/scripts/generate-secrets.sh",
+  const generatorProject = dbTest.indexOf(
+    "generator_project=synveda-development-acceptance-$state_token",
   );
+  const generatorSuffix = dbTest.indexOf(
+    "SYNVEDA_COMPOSE_PROJECT_SUFFIX=acceptance-$state_token",
+    generatorProject,
+  );
+  const generatorSecrets = dbTest.indexOf("SYNVEDA_SECRETS_DIR=$secret_dir", generatorSuffix);
+  const generatorAuthority = dbTest.indexOf(
+    "SYNVEDA_DATABASE_AUTHORITY_DIR=$state_dir/generator/$generator_project/database-authority",
+    generatorSecrets,
+  );
+  const generatorGate = dbTest.indexOf(
+    "SYNVEDA_KEYCLOAK_PUBLIC_GATE_DIR=$state_dir/generator/$generator_project/keycloak-public-gate",
+    generatorAuthority,
+  );
+  const secretGenerator = dbTest.indexOf(
+    "deploy/compose/scripts/generate-secrets.sh >/dev/null",
+    generatorGate,
+  );
+  if (
+    !(
+      generatorProject >= 0 &&
+      generatorSuffix > generatorProject &&
+      generatorSecrets > generatorSuffix &&
+      generatorAuthority > generatorSecrets &&
+      generatorGate > generatorAuthority &&
+      secretGenerator > generatorGate
+    )
+  ) {
+    findings.push("database secret-generator state is not fixture-local");
+  }
   const externalGenerate = dbTest.indexOf(
     "external_provider_password=$(openssl rand -hex 32)",
     secretGenerator,
@@ -751,6 +1449,10 @@ export function productImageFindings(source) {
       "synveda-worker",
       "COPY --from=build /src/target/release/synveda-worker /usr/local/bin/synveda-worker",
     ],
+    [
+      "synveda-oidc-diagnostic",
+      "COPY --from=build /src/target/release/synveda-oidc-diagnostic /usr/local/bin/synveda-oidc-diagnostic",
+    ],
     ["synveda", "COPY --from=build /src/target/release/synveda /usr/local/bin/synveda"],
     [
       "synveda-container",
@@ -865,6 +1567,7 @@ export function productLauncherFindings(source) {
   const expectedCaseLabels = [
     "gateway",
     "worker",
+    "issuer-diagnostic",
     "database-preflight",
     "migrate",
     "probe",
@@ -881,7 +1584,7 @@ export function productLauncherFindings(source) {
   }
   const roleMatches = [
     ...active.matchAll(
-      /^ {4}(gateway|worker|database-preflight|migrate|probe|\*)\)[ \t]*$/gm,
+      /^ {4}(gateway|worker|issuer-diagnostic|database-preflight|migrate|probe|\*)\)[ \t]*$/gm,
     ),
   ];
   const labels = roleMatches.map(
@@ -889,7 +1592,15 @@ export function productLauncherFindings(source) {
   );
   if (
     JSON.stringify(labels) !==
-    JSON.stringify(["gateway", "worker", "database-preflight", "migrate", "probe", "*"])
+    JSON.stringify([
+      "gateway",
+      "worker",
+      "issuer-diagnostic",
+      "database-preflight",
+      "migrate",
+      "probe",
+      "*",
+    ])
   ) {
     findings.push("launcher role vocabulary is not closed and ordered");
   }
@@ -904,6 +1615,7 @@ export function productLauncherFindings(source) {
   };
   const gateway = roleBlock("gateway");
   const worker = roleBlock("worker");
+  const issuerDiagnostic = roleBlock("issuer-diagnostic").replace(/\\\r?\n\s*/g, " ");
   const databasePreflight = roleBlock("database-preflight");
   const migrate = roleBlock("migrate");
   const probe = roleBlock("probe").replace(/\\\r?\n\s*/g, " ");
@@ -920,6 +1632,16 @@ export function productLauncherFindings(source) {
   }
   if (!worker.includes("exec /usr/local/bin/synveda-worker")) {
     findings.push("worker role does not exec the worker binary");
+  }
+  if (!issuerDiagnostic.includes('[ "$#" -eq 1 ] || usage')) {
+    findings.push("issuer-diagnostic role does not enforce exact arity");
+  }
+  if (
+    !/exec \/usr\/bin\/timeout\s+--foreground\s+--signal=TERM\s+--kill-after=2s\s+50s\s+\/usr\/local\/bin\/synveda-oidc-diagnostic/.test(
+      issuerDiagnostic,
+    )
+  ) {
+    findings.push("issuer-diagnostic role does not enforce the closed 50s execution bound");
   }
   if (!databasePreflight.includes('[ "$#" -eq 1 ] || usage')) {
     findings.push("database-preflight role does not enforce exact arity");
@@ -1438,6 +2160,15 @@ function checkProductImageInputs() {
   if (functionOrderFindings.length > 0) {
     fail(`scripts/db-test.sh violates shell function ordering: ${functionOrderFindings.join(", ")}`);
   }
+  const networkReservationFindings = dbTestNetworkReservationFindings(
+    read("scripts/db-test.sh"),
+    read("deploy/compose/compose.db-test.yaml"),
+  );
+  if (networkReservationFindings.length > 0) {
+    fail(
+      `database fixture violates network ownership: ${networkReservationFindings.join(", ")}`,
+    );
+  }
   const evalFindings = evalFixtureFindings(
     read("scripts/db-test.sh"),
     read("evals/lib.sh"),
@@ -1450,6 +2181,15 @@ function checkProductImageInputs() {
   const sqlxFindings = sqlxPrepareFixtureFindings(read("scripts/db-test.sh"));
   if (sqlxFindings.length > 0) {
     fail(`SQLx prepare fixture violates the exact-role contract: ${sqlxFindings.join(", ")}`);
+  }
+  const authorityFingerprintFindings = authorityFingerprintFixtureFindings(
+    read("scripts/db-test.sh"),
+    read("crates/synveda-store/src/runtime_role.rs"),
+  );
+  if (authorityFingerprintFindings.length > 0) {
+    fail(
+      `authority fingerprint fixture violates the exact-role contract: ${authorityFingerprintFindings.join(", ")}`,
+    );
   }
   const demoFindings = demoFixtureFindings(
     read("scripts/db-test.sh"),

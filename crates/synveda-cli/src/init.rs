@@ -1371,6 +1371,7 @@ fn issuers_json(tenant_id: TenantId, issuer: &str) -> String {
     json!([{
         "issuer": issuer,
         "client_id": "synveda",
+        "audience": "synveda-api",
         "tenant": {"static": {"tenant_id": tenant_id}},
         "login_scopes": ["openid", "profile", "email", "groups"],
     }])
@@ -2894,6 +2895,7 @@ mod tests {
         // It has to parse as what the gateway's own config reader expects.
         let parsed: Value = serde_json::from_str(value).expect("valid JSON on one line");
         assert_eq!(parsed[0]["client_id"], json!("synveda"));
+        assert_eq!(parsed[0]["audience"], json!("synveda-api"));
         assert_eq!(parsed[0]["tenant"]["static"]["tenant_id"], json!(tenant));
         assert!(!value.contains('\n'), "one line only");
         // The default path must not point the gateway at an embedder it

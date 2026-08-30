@@ -32,8 +32,12 @@
 
 use serde_json::json;
 use synveda_audit::{Actor, AuditAction, Outcome};
+use synveda_store::directory::UserAttributes;
+use synveda_store::identities::{EmailIdentityLifecycle, UniqueIdentityMatch};
 use synveda_store::{directory, identities, rls, scopes};
-use synveda_types::{DirectoryUser, Identity, IdentityId, IdentityKind, Result, Tenant};
+use synveda_types::{
+    DirectoryUser, DirectoryUserId, Error, Identity, IdentityId, IdentityKind, Result, Tenant,
+};
 
 use crate::app::{AppState, DirectoryRuntime};
 use crate::audit;
@@ -130,10 +134,87 @@ pub(crate) async fn reconcile_runtime(
     user: &DirectoryUser,
 ) -> Result<Reconciled> {
     let mut tx = rls::begin_tenant_tx(&state.pool, tenant.id).await?;
-    let existing = find_identity(&mut tx, tenant, user).await?;
+    // Correspondence is one tenant-wide predicate across provider rows. Take
+    // its fence before identity placement can mint principal grants; login
+    // adoption uses the same directory -> principal lock order.
+    directory::lock_correspondence(&mut tx, tenant.id).await?;
+    // The caller's snapshot was committed before this projection transaction.
+    // Re-read under the fence so a newer replace/deactivation cannot be
+    // overwritten by stale placement or sealing work that waited behind it.
+    let user = directory::user(&mut *tx, tenant.id, user.directory_source.as_str(), user.id)
+        .await?
+        .ok_or_else(|| Error::Internal {
+            message: "directory projection target disappeared from the retained mirror".to_owned(),
+        })?;
+    let (outcome, structural) = reconcile_locked(&mut tx, tenant, source, &user).await?;
 
-    let (outcome, structural) = if !user.active {
-        (seal(&mut tx, tenant, source, existing).await?, true)
+    tx.commit()
+        .await
+        .map_err(|err| synveda_types::Error::Storage {
+            message: format!("commit reconciliation: {err}"),
+        })?;
+    finish_reconciliation(state, tenant, outcome, structural);
+    Ok(outcome)
+}
+
+/// Creates a SCIM mirror and projects it atomically under the tenant-wide
+/// correspondence fence.
+///
+/// A separate preflight transaction cannot reserve an absent identity link:
+/// two creates can both pass it, commit mirror rows, and only then collide in
+/// projection. Keeping the mirror write, correspondence decision and identity
+/// link in this one transaction makes a refusal leave no resource behind.
+pub async fn create_and_reconcile(
+    state: &AppState,
+    tenant: &Tenant,
+    source: DirectorySource,
+    id: DirectoryUserId,
+    attributes: &UserAttributes,
+) -> Result<DirectoryUser> {
+    let runtime = state.directory_runtime();
+    let mut tx = rls::begin_tenant_tx(&runtime.pool, tenant.id).await?;
+    directory::lock_correspondence(&mut tx, tenant.id).await?;
+    let created = directory::create_user(&mut tx, id, tenant.id, attributes).await?;
+    let (outcome, structural) = reconcile_locked(&mut tx, tenant, source, &created).await?;
+    let projected = directory::user(
+        &mut *tx,
+        tenant.id,
+        created.directory_source.as_str(),
+        created.id,
+    )
+    .await?
+    .ok_or_else(|| Error::Internal {
+        message: "directory user disappeared during atomic projection".to_owned(),
+    })?;
+    tx.commit().await.map_err(|err| Error::Storage {
+        message: format!("commit atomic directory create: {err}"),
+    })?;
+    finish_reconciliation(&runtime, tenant, outcome, structural);
+    Ok(projected)
+}
+
+async fn reconcile_locked(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    tenant: &Tenant,
+    source: DirectorySource,
+    user: &DirectoryUser,
+) -> Result<(Reconciled, bool)> {
+    let existing = find_identity(tx, tenant, user).await?;
+    if let Some(identity) = existing.as_ref()
+        && user.identity_id != Some(identity.id)
+        && let Some(held) = directory::user_for_identity(&mut **tx, tenant.id, identity.id).await?
+        && held.id != user.id
+    {
+        return Err(Error::Conflict {
+            message: format!(
+                "identity correspondence is already held by directory user {}",
+                held.id
+            ),
+        });
+    }
+
+    let result = if !user.active {
+        (seal(tx, tenant, source, existing).await?, true)
     } else {
         // A departed identity is never resurrected (ADR-0059 decision 12).
         // `active: true` on somebody the directory previously deactivated is
@@ -147,7 +228,7 @@ pub(crate) async fn reconcile_runtime(
         // reactivation could undo is not a retention hold.
         let existing = existing.filter(|identity| !identity.sealed());
         match existing {
-            None => (place(&mut tx, tenant, source, user).await?, true),
+            None => (place(tx, tenant, source, user).await?, true),
             Some(identity) => {
                 // The link is written even when nothing else changes: an
                 // adopted JIT identity has to stop being findable only by
@@ -175,18 +256,20 @@ pub(crate) async fn reconcile_runtime(
             }
         }
     };
+    Ok(result)
+}
 
-    tx.commit()
-        .await
-        .map_err(|err| synveda_types::Error::Storage {
-            message: format!("commit reconciliation: {err}"),
-        })?;
+fn finish_reconciliation(
+    state: &DirectoryRuntime,
+    tenant: &Tenant,
+    outcome: Reconciled,
+    structural: bool,
+) {
     if structural {
         state.invalidate_scopes(tenant.id);
     }
     tracing::Span::current().record("scim.outcome", outcome.label());
     metrics::counter!(SCIM_RECONCILES_TOTAL, "outcome" => outcome.label()).increment(1);
-    Ok(outcome)
 }
 
 /// The correspondence rule (ADR-0059 decision 4), in its one place.
@@ -219,78 +302,47 @@ async fn find_identity(
     if let Some(identity_id) = user.identity_id
         && let Some(identity) = identities::by_id(&mut *tx, tenant.id, identity_id).await?
     {
+        if identity.kind != IdentityKind::User {
+            return Err(Error::Internal {
+                message: "directory mirror is linked to a non-user identity".to_owned(),
+            });
+        }
         return Ok(Some(identity));
     }
     if let Some(external_id) = &user.external_id
         && let Some(identity) = identities::by_subject(&mut *tx, tenant.id, external_id).await?
-        && !identity.sealed()
     {
-        return Ok(Some(identity));
+        if identity.kind != IdentityKind::User {
+            return Err(Error::Conflict {
+                message: "directory external ID corresponds to a non-user identity".to_owned(),
+            });
+        }
+        if !identity.sealed() {
+            return Ok(Some(identity));
+        }
     }
     for address in [user.work_email.as_deref(), Some(user.user_name.as_str())]
         .into_iter()
         .flatten()
     {
-        if let Some(identity) = identities::by_email(&mut *tx, tenant.id, address).await?
-            && !identity.sealed()
+        match identities::unique_user_by_email(
+            &mut *tx,
+            tenant.id,
+            address,
+            EmailIdentityLifecycle::ActiveOnly,
+        )
+        .await?
         {
-            return Ok(Some(identity));
+            UniqueIdentityMatch::NoMatch => {}
+            UniqueIdentityMatch::Unique(identity) => return Ok(Some(identity)),
+            UniqueIdentityMatch::Ambiguous => {
+                return Err(Error::Conflict {
+                    message: "directory email corresponds to multiple active identities".to_owned(),
+                });
+            }
         }
     }
     Ok(None)
-}
-
-/// Whether creating this record would make a **second live directory record
-/// for somebody the product already knows** — and if so, which record they
-/// already have.
-///
-/// Asked before the mirror row is written, deliberately. The projection is
-/// 1:1 in both directions (`scim_users_identity_unique`), so a second record
-/// for one person would otherwise be caught by the constraint *after* the
-/// create had committed: the client would get a `409` for a `POST` whose
-/// resource now exists, which is both a wart and a lie.
-///
-/// Refusing rather than merging is the safe answer. Two live records for one
-/// person is the directory being inconsistent with itself, and a product
-/// that quietly merged them would make somebody's identity depend on which
-/// record was touched last. `409 uniqueness` is the conformant way to say
-/// so, and an administrator can then fix the directory.
-pub async fn conflicting_record(
-    state: &AppState,
-    tenant: &Tenant,
-    attributes: &synveda_store::directory::UserAttributes,
-) -> Result<Option<synveda_types::DirectoryUserId>> {
-    let mut tx = rls::begin_tenant_tx(&state.pool, tenant.id).await?;
-    let candidate = DirectoryUser {
-        id: synveda_types::DirectoryUserId::new(),
-        tenant_id: tenant.id,
-        directory_source: attributes.directory_source.clone(),
-        external_id: attributes.external_id.clone(),
-        user_name: attributes.user_name.clone(),
-        active: attributes.active,
-        display_name: None,
-        given_name: None,
-        family_name: None,
-        work_email: attributes.work_email.clone(),
-        identity_id: None,
-        version: 1,
-        created_at: chrono::Utc::now(),
-        updated_at: chrono::Utc::now(),
-    };
-    let Some(identity) = find_identity(&mut tx, tenant, &candidate).await? else {
-        return Ok(None);
-    };
-    // **Live rows only.** A departed person's identity still matches on
-    // address — that is what makes the correspondence rule work — but it
-    // must not stand in front of a rehire. A sealed row holding an email
-    // forever would 409 every returning employee, which is the one shape
-    // this uniqueness exists to permit rather than refuse (ADR-0059
-    // decision 8: the seal is permanent, the *address* is not).
-    if identity.sealed() {
-        return Ok(None);
-    }
-    let held = directory::user_for_identity(&mut *tx, tenant.id, identity.id).await?;
-    Ok(held.map(|row| row.id))
 }
 
 /// `active: false` — the leaver (ADR-0059 decision 8).
@@ -401,7 +453,7 @@ async fn place(
     )
     .await?;
     directory::link_identity(
-        &mut **tx,
+        tx,
         tenant.id,
         user.directory_source.as_str(),
         user.id,

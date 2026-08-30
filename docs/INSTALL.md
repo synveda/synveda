@@ -59,12 +59,13 @@ synveda login --gateway http://127.0.0.1:8120
 
 Use credentials provisioned by the deployment's identity operator; no current
 `init` path prints demo credentials. The browser opens, you sign in, and
-**that login is where the tenant starts to exist**: the tenant
+**that login is where the tenant starts to exist**: on a fresh tenant whose
+administrator bootstrap remains unclaimed, the tenant
 root scope is minted from the tenant's own slug and name, your identity gets
 its own `principal`-shaped scope under it, and you are granted
-`administrator` **at the tenant root** because you are in the
-`synveda-admins` group (CPR-7, ADR-0074 decision 4). All three are chained
-under *your* subject, not an installer's:
+`administrator` **at the tenant root** because yours is the first qualifying
+`synveda-admins` login (CPR-45, ADR-0102). All three are chained under *your*
+subject, not an installer's:
 
 ```
 2  access.granted         <your subject>
@@ -91,9 +92,10 @@ bulk import and no seeding shortcut; scopes are governed objects — and
 there is no delete: retiring one is `synveda scope move`-shaped
 administration plus a status transition through the PATCH route.
 
-Personal scopes are not created here — each person gets their own when
-they first log in, and a member of the IdP's `synveda-admins` group gets
-an `administrator` grant at the tenant root on that same first login.
+Personal scopes are not created here — each person gets their own when they
+first log in. While bootstrap remains unclaimed, the tenant's first qualifying
+`synveda-admins` login gets the initial `administrator` grant at the tenant
+root; later administrators must receive a governed Synveda grant.
 
 ## Workspaces, projects and the grants that decide
 
@@ -136,9 +138,12 @@ that are worth knowing before you hand somebody a role key:
 
 ### The first grant
 
-A member of the IdP's `synveda-admins` group gets an `administrator` grant
-at the tenant root on their first login — that is the operator door, and
-for a login-driven deployment it is the whole story. A fresh tenant
+While the marker remains unclaimed, a tenant's first qualifying member of the
+IdP's `synveda-admins` group gets an `administrator` grant at the tenant root —
+that is the one-time operator door. Any earlier governed root-administrator
+grant consumes the same marker. The marker survives revocation, so neither
+that revocation nor a later group login reopens IdP authority; later
+administrators must receive governed Synveda grants. A fresh tenant
 admitted with `synveda tenant create` for dev-token use has no IdP group
 to read, so seed the same row by hand, once, at the store level (CPR-7
 deleted `role bind` with the bindings; this is its replacement, as SQL,
@@ -576,10 +581,12 @@ authorization-code client with PKCE S256, its exact deployment callback/origin,
 and the `openid profile email groups` scopes. The issuer in discovery, tokens
 and gateway configuration must be byte-for-byte identical.
 
-One group claim is read: `synveda-admins` upserts an `administrator` grant at
-the tenant root on every login. There is no placement convention — everybody
-arrives at their own scope and reaches anything else through a grant
-(ADR-0074 decision 3). Issuer configuration does not sync a directory.
+One group claim is read: `synveda-admins` may seed the first tenant-root
+`administrator` grant only while the tenant's insert-only bootstrap remains
+unclaimed. It never governs later administrator assignment. There is no
+placement convention — everybody arrives at their own scope and reaches
+anything else through a grant (ADR-0074 decision 3). Issuer configuration does
+not sync a directory.
 
 Directory *synchronisation* — joiners, movers, leavers — is a separate,
 deliberate step (AUTH-4, ADR-0059). Once the instance is up:

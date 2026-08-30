@@ -120,7 +120,7 @@ async fn grant(pool: &PgPool, tenant: TenantId, scope: ScopeId, subject: &str, r
         .await
         .expect("begin tenant transaction");
     access::create_grant(
-        &mut *tx,
+        &mut tx,
         &access::NewGrant {
             id: GrantId::new(),
             tenant_id: tenant,

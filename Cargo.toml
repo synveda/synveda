@@ -94,6 +94,9 @@ jsonwebtoken = { version = "10", default-features = false, features = [
     "use_pem",
     "rust_crypto",
 ] }
+# Validate RSA JWKS material at metadata ingest rather than deferring public
+# key construction until the first token verification (AUTH-1, ADR-0010).
+rsa = { version = "0.9.10", default-features = false, features = ["std"] }
 libc = "0.2"
 # Safe openat/ownership primitives for no-follow deployment authority files.
 # Already present transitively; direct use keeps unsafe code out of binaries.

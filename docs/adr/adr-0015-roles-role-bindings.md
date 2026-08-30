@@ -11,9 +11,12 @@
 > scope's subtree (ADR-0072) and resolved into `context.roles` by the anchor
 > model (ADR-0073). Two of this ADR's decisions survive on the new noun:
 > decision 3 (roles are decision *context*, never a second decision point)
-> and decision 6 (the `synveda-admins` convention, now upserting an
-> `administrator` grant at the tenant root). Decision 5's escalation guard
-> went with the action it guarded.
+> and the initial-administrator intent of decision 6. ADR-0102 narrows that
+> convention to one insert-only tenant bootstrap: only the first qualifying
+> `synveda-admins` login may create the root `administrator` grant; later
+> administrators use governed Synveda grants, and revocation never reopens the
+> provider-controlled door. Decision 5's escalation guard went with the action
+> it guarded.
 
 ## Context
 

@@ -4,8 +4,10 @@
 services:
   database-preflight:
     networks:
-      application-egress: {}
+      application-egress:
+        gw_priority: 1
 
   migrate:
     networks:
-      application-egress: {}
+      application-egress:
+        gw_priority: 1

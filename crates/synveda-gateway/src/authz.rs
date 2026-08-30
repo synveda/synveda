@@ -136,10 +136,11 @@ pub(crate) fn context_at_tier<'a>(
 /// resource refers to — `None` for tenant-level resources.
 ///
 /// Quarantine resolves here (AUTH-2, ADR-0013 decision 6), and since the
-/// cutover it has exactly one meaning: *not provisioned*. An IdP subject
+/// cutover it has exactly one meaning: *not provisioned*. An IdP user subject
 /// with no identity is quarantined — fail closed, because skipping
-/// `/auth/login` must not out-privilege completing it, and an unregistered
-/// service client is exactly this case. A provisioned identity never is:
+/// `/auth/login` must not out-privilege completing it. Unregistered
+/// service-audience subjects are refused earlier during tenant admission. A
+/// provisioned identity never is:
 /// its scope is its own principal scope (CPR-7, ADR-0074 decision 3), and
 /// an ungranted one reaches nothing because the anchor model says so
 /// rather than because a placement-derived flag does. Service identities

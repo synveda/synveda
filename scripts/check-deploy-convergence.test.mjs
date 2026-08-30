@@ -1,11 +1,15 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  realpathSync,
   readFileSync,
+  readdirSync,
   rmSync,
+  statSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -13,8 +17,24 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
+const SUBPROCESS_TIMEOUT_MS = 20_000;
+
+function installPoisonDocker(directory) {
+  writeFileSync(
+    join(directory, "docker"),
+    '#!/bin/sh\nset -eu\n: > "$0.invoked"\nexit 99\n',
+    { mode: 0o700 },
+  );
+}
+
+function assertPoisonDockerUntouched(directory) {
+  assert.equal(existsSync(join(directory, "docker.invoked")), false);
+}
+
 import {
+  authorityFingerprintFixtureFindings,
   contributorPostgresBuildFindings,
+  dbTestNetworkReservationFindings,
   developmentInitdbFindings,
   demoFixtureFindings,
   dockerignoreFindings,
@@ -333,6 +353,14 @@ test("the product image is role-neutral and non-root", () => {
   assert.ok(
     productImageFindings(
       current.replace(
+        "COPY --from=build /src/target/release/synveda-oidc-diagnostic /usr/local/bin/synveda-oidc-diagnostic\n",
+        "",
+      ),
+    ).includes("final runtime stage omits synveda-oidc-diagnostic"),
+  );
+  assert.ok(
+    productImageFindings(
+      current.replace(
         "COPY --from=build /src/target/release/synveda /usr/local/bin/synveda",
         "# COPY --from=build /src/target/release/synveda /usr/local/bin/synveda",
       ),
@@ -436,6 +464,19 @@ test("the product launcher execs closed roles without deployment branching", () 
   assert.ok(
     productLauncherFindings(
       current.replace(
+        'issuer-diagnostic)\n        [ "$#" -eq 1 ] || usage',
+        'issuer-diagnostic)\n        [ "$#" -ge 1 ] || usage',
+      ),
+    ).includes("issuer-diagnostic role does not enforce exact arity"),
+  );
+  assert.ok(
+    productLauncherFindings(current.replace("            50s \\\n", "            500s \\\n")).includes(
+      "issuer-diagnostic role does not enforce the closed 50s execution bound",
+    ),
+  );
+  assert.ok(
+    productLauncherFindings(
+      current.replace(
         "\n    *)\n        usage",
         "\n        shell) exec /bin/sh ;;\n    *)\n        usage",
       ),
@@ -457,7 +498,7 @@ test("the product launcher rejects an unknown role without interpretation", () =
   assert.equal(result.stdout, "");
   assert.equal(
     result.stderr,
-    "usage: synveda-container {gateway|worker|database-preflight|migrate|probe {gateway|worker} {live|ready}}\n",
+    "usage: synveda-container {gateway|worker|issuer-diagnostic|database-preflight|migrate|probe {gateway|worker} {live|ready}}\n",
   );
 });
 
@@ -468,6 +509,10 @@ test("the product launcher dispatches every implemented role exactly", () => {
     const instrumented = readFileSync(PRODUCT_LAUNCHER, "utf8")
       .replace("exec /usr/local/bin/synveda-gateway", "exec /bin/echo gateway")
       .replace("exec /usr/local/bin/synveda-worker", "exec /bin/echo worker")
+      .replace(
+        /exec \/usr\/bin\/timeout \\\n\s+--foreground \\\n\s+--signal=TERM \\\n\s+--kill-after=2s \\\n\s+50s \\\n\s+\/usr\/local\/bin\/synveda-oidc-diagnostic/,
+        "exec /bin/echo issuer-diagnostic",
+      )
       .replace("exec /usr/local/bin/synveda db preflight", "exec /bin/echo database-preflight")
       .replace("exec /usr/local/bin/synveda db migrate", "exec /bin/echo migrate")
       .replace("exec /usr/bin/curl \\\n", "exec /bin/echo curl \\\n");
@@ -476,6 +521,7 @@ test("the product launcher dispatches every implemented role exactly", () => {
     const cases = [
       [["gateway"], "gateway\n"],
       [["worker"], "worker\n"],
+      [["issuer-diagnostic"], "issuer-diagnostic\n"],
       [["database-preflight"], "database-preflight\n"],
       [["migrate"], "migrate\n"],
       [
@@ -672,6 +718,1454 @@ test("database evidence helpers are defined before their first call", () => {
   );
 });
 
+test("database test owns one collision-resistant external-network quartet", () => {
+  const dbTest = readFileSync(DB_TEST, "utf8");
+  const compose = readFileSync(DB_TEST_COMPOSE, "utf8");
+  assert.deepEqual(dbTestNetworkReservationFindings(dbTest, compose), []);
+
+  for (const [mutatedDbTest, mutatedCompose, expected] of [
+    [
+      dbTest.replace(
+        "  compose run --rm --no-deps database-bootstrap-main",
+        '  runner=com""pose\n' +
+          "  operation=rm\n" +
+          "  : compose run\n" +
+          '  "$runner" "$operation" --force --stop postgres-main',
+      ),
+      compose,
+      "differs from the reviewed executable",
+    ],
+    [
+      dbTest.replace(
+        "network_ownership_file=$state_dir/network-ownership.tsv",
+        '"$docker_bin" network ls --quiet\nnetwork_ownership_file=$state_dir/network-ownership.tsv',
+      ),
+      compose,
+      "observes pre-existing Docker networks",
+    ],
+    [
+      dbTest.replace(
+        "network_seed=$(printf '%s\\n' \"$project\" | cksum | awk '{print $1}')",
+        "network_seed=0",
+      ),
+      compose,
+      "bounded full-cycle project-derived /28 candidates",
+    ],
+    [
+      dbTest.replace(
+        "network_start_slot=$((network_seed % 2048))",
+        "network_start_slot=$((network_seed % 512))",
+      ),
+      compose,
+      "bounded full-cycle project-derived /28 candidates",
+    ],
+    [
+      dbTest.replace(
+        "network_start_slot=$((network_seed % 2048))",
+        "network_start_slot=$((network_seed % 2048))\nnetwork_start_slot=0",
+      ),
+      compose,
+      "bounded full-cycle project-derived /28 candidates",
+    ],
+    [
+      dbTest.replace(
+        "network_start_slot=$((network_seed % 2048))",
+        "network_start_slot=$((network_seed % 2048))\nreadonly network_start_slot=0",
+      ),
+      compose,
+      "bounded full-cycle project-derived /28 candidates",
+    ],
+    [
+      dbTest.replace(
+        "network_start_slot=$((network_seed % 2048))",
+        "network_start_slot=$((network_seed % 2048))\ndeclare network_start_slot=0",
+      ),
+      compose,
+      "bounded full-cycle project-derived /28 candidates",
+    ],
+    [
+      dbTest.replace(
+        "network_start_slot=$((network_seed % 2048))",
+        "network_start_slot=$((network_seed % 2048))\nnetwork_start_slot+=1",
+      ),
+      compose,
+      "bounded full-cycle project-derived /28 candidates",
+    ],
+    [
+      dbTest.replace(
+        "network_within=$((network_slot % 4096))",
+        "network_within=0",
+      ),
+      compose,
+      "bounded full-cycle project-derived /28 candidates",
+    ],
+    [
+      dbTest.replace(
+        "network_fourth=$(((network_within % 16) * 16))",
+        "network_fourth=$(((network_within % 16) * 16))\n  network_fourth=0",
+      ),
+      compose,
+      "bounded full-cycle project-derived /28 candidates",
+    ],
+    [
+      dbTest.replace("attempt * 1265", "attempt * 1264"),
+      compose,
+      "bounded full-cycle project-derived /28 candidates",
+    ],
+    [
+      dbTest.replace(
+        "network_reservation_limit=64",
+        "network_reservation_limit=64\nnetwork_reservation_limit=8192",
+      ),
+      compose,
+      "bounded full-cycle project-derived /28 candidates",
+    ],
+    [
+      dbTest.replace(
+        "\nnetwork_create_is_pool_contention() {",
+        "\nnetwork_candidate_subnet() { :; }\n\nnetwork_create_is_pool_contention() {",
+      ),
+      compose,
+      "bounded full-cycle project-derived /28 candidates",
+    ],
+    [
+      dbTest.replace("network_reservation_limit=64", "network_reservation_limit=8192"),
+      compose,
+      "bounded full-cycle project-derived /28 candidates",
+    ],
+    [
+      dbTest.replace(
+        'reserve_test_network 3 "${network_logicals[3]}" "${network_names[3]}" false',
+        "# fourth reservation removed",
+      ),
+      compose,
+      "exact four-network topology",
+    ],
+    [
+      dbTest
+        .replace(
+          "export SYNVEDA_DB_TEST_MAIN_DATA_NETWORK=${network_names[0]}",
+          "export SYNVEDA_DB_TEST_MAIN_DATA_NETWORK=${network_names[2]}",
+        )
+        .replace(
+          "export SYNVEDA_DB_TEST_MAIN_HOST_NETWORK=${network_names[2]}",
+          "export SYNVEDA_DB_TEST_MAIN_HOST_NETWORK=${network_names[0]}",
+        ),
+      compose,
+      "does not export SYNVEDA_DB_TEST_MAIN_DATA_NETWORK",
+    ],
+    [
+      dbTest.replace(
+        "export SYNVEDA_DB_TEST_MAIN_DATA_NETWORK=${network_names[0]}",
+        "export SYNVEDA_DB_TEST_MAIN_DATA_NETWORK=${network_names[0]}\n" +
+          "declare -x SYNVEDA_DB_TEST_MAIN_DATA_NETWORK=${network_names[2]}",
+      ),
+      compose,
+      "does not export SYNVEDA_DB_TEST_MAIN_DATA_NETWORK",
+    ],
+    [
+      dbTest.replace(
+        "export SYNVEDA_DB_TEST_MAIN_DATA_NETWORK=${network_names[0]}",
+        "export SYNVEDA_DB_TEST_MAIN_DATA_NETWORK=${network_names[0]}\n" +
+          "export SYNVEDA_DB_TEST_MAIN_DATA_NETWORK=${network_names[2]}",
+      ),
+      compose,
+      "does not export SYNVEDA_DB_TEST_MAIN_DATA_NETWORK",
+    ],
+    [
+      dbTest.replace(
+        'reserve_test_network 0 "${network_logicals[0]}" "${network_names[0]}" true',
+        'reserve_test_network 0 "${network_logicals[0]}" "${network_names[0]}" false',
+      ),
+      compose,
+      "exact four-network topology",
+    ],
+    [
+      dbTest.replace(
+        'reserve_test_network 0 "${network_logicals[0]}" "${network_names[0]}" true',
+        'reserve_test_network 0 "${network_logicals[0]}" "${network_names[0]}" true || exit 69',
+      ),
+      compose,
+      "exact four-network topology",
+    ],
+    [
+      dbTest.replace(
+        "'Error response from daemon: invalid pool request: Pool overlaps with other one on this address space'",
+        "'Pool overlaps with other one on this address space'",
+      ),
+      compose,
+      "network creation is not closed",
+    ],
+    [
+      dbTest.replace(
+        '[ "$create_status" -eq 1 ] && [ ! -s "$receipt_file" ] && cmp -s --',
+        "cmp -s --",
+      ),
+      compose,
+      "network creation is not closed",
+    ],
+    [
+      dbTest.replaceAll(
+        '>"$network_receipt_file" 2>"$network_error_file"',
+        '2>"$network_error_file"',
+      ),
+      compose,
+      "network creation is not closed",
+    ],
+    [
+      dbTest.replace('[ "${#created_network_id}" -ne 64 ]', '[ "${#created_network_id}" -lt 12 ]'),
+      compose,
+      "journal and validate immutable network ownership",
+    ],
+    [
+      dbTest.replace(
+        "record_network_ownership \\\n      intent",
+        "record_network_ownership \\\n      unowned",
+      ),
+      compose,
+      "journal and validate immutable network ownership",
+    ],
+    [
+      dbTest.replace(
+        "record_network_ownership \\\n        contended",
+        "record_network_ownership \\\n        retried",
+      ),
+      compose,
+      "journal and validate immutable network ownership",
+    ],
+    [
+      dbTest.replace(
+        '  record_network_ownership \\\n' +
+          '    owned "$logical_name" "$network_name" "$subnet" "$created_network_id" || return 70\n' +
+          "  network_subnets[$logical_index]=$subnet",
+        "  network_subnets[$logical_index]=$subnet\n" +
+          '  record_network_ownership \\\n' +
+          '    owned "$logical_name" "$network_name" "$subnet" "$created_network_id" || return 70',
+      ),
+      compose,
+      "journal and validate immutable network ownership",
+    ],
+    [
+      dbTest.replace(
+        '[ "$receipt_id" = "${owned_network_ids[$network_index]}" ]',
+        '[ "$receipt_id" = uncorrelated ]',
+      ),
+      compose,
+      "journal and validate immutable network ownership",
+    ],
+    [
+      dbTest.replace("cmp -s -- <(printf '0\\n') \"$receipt_status\"", "cmp -s -- /dev/null \"$receipt_status\""),
+      compose,
+      "journal and validate immutable network ownership",
+    ],
+    [
+      dbTest.replace(
+        "trap report_preserved_state EXIT",
+        "trap cleanup_successful_fixture EXIT",
+      ),
+      compose,
+      "failure trap can clean",
+    ],
+    [
+      dbTest.replace(
+        "network_ownership_file=$state_dir/network-ownership.tsv",
+        'cleanup_successful_fixture # early\nnetwork_ownership_file=$state_dir/network-ownership.tsv',
+      ),
+      compose,
+      "exactly two success-only cleanup calls",
+    ],
+    [
+      dbTest.replace(
+        '"$docker_bin" network rm "${owned_network_ids[$network_index]}" >/dev/null',
+        '"$docker_bin" network rm "${owned_network_ids[$network_index]}" >/dev/null\n' +
+          '  "$docker_bin" network rm "${owned_network_ids[0]}" >/dev/null',
+      ),
+      compose,
+      "Docker teardown grammar is not closed",
+    ],
+    [
+      dbTest
+        .replace(
+          "  compose down --volumes --remove-orphans",
+          "  # compose down --volumes --remove-orphans",
+        )
+        .replace(
+          "network_ownership_file=$state_dir/network-ownership.tsv",
+          "compose down --volumes --remove-orphans\nnetwork_ownership_file=$state_dir/network-ownership.tsv",
+        ),
+      compose,
+      "cleanup is not fenced",
+    ],
+    [
+      dbTest.replace(
+        "validate_owned_network_ledger() {\n  local network_index",
+        "validate_owned_network_ledger() {\n  return 0\n  local network_index",
+      ),
+      compose,
+      "cleanup is not fenced",
+    ],
+    [
+      dbTest.replace(
+        "expected_owned_network_ledger() {\n  local network_attempt",
+        "expected_owned_network_ledger() {\n  return 0\n  local network_attempt",
+      ),
+      compose,
+      "cleanup is not fenced",
+    ],
+    [
+      dbTest.replace(
+        "  validate_owned_network_ledger\n  cleanup_started=true",
+        "  validate_owned_network_ledger || :\n  cleanup_started=true",
+      ),
+      compose,
+      "cleanup is not fenced",
+    ],
+    [
+      dbTest.replace(
+        "  validate_owned_network_ledger\n  cleanup_started=true",
+        "  : validate_owned_network_ledger\n  cleanup_started=true",
+      ),
+      compose,
+      "cleanup is not fenced",
+    ],
+    [
+      dbTest.replace(
+        "  validate_owned_network_ledger\n  cleanup_started=true",
+        "  validate_owned_network_ledger\n" +
+          `  owned_network_ids[0]=${"f".repeat(64)}\n` +
+          "  cleanup_started=true",
+      ),
+      compose,
+      "cleanup is not fenced",
+    ],
+    [
+      dbTest
+        .replace(
+          '    "$docker_bin" network rm "${owned_network_ids[$network_index]}" >/dev/null',
+          '    # "$docker_bin" network rm "${owned_network_ids[$network_index]}" >/dev/null',
+        )
+        .replace(
+          'reserve_test_network 3 "${network_logicals[3]}" "${network_names[3]}" false',
+          'reserve_test_network 3 "${network_logicals[3]}" "${network_names[3]}" false\n' +
+            'network_index=0\n' +
+            '"$docker_bin" network rm "${owned_network_ids[$network_index]}" >/dev/null',
+        ),
+      compose,
+      "cleanup is not fenced",
+    ],
+    [
+      dbTest.replace(
+        "  validate_owned_network_ledger\n  cleanup_started=true\n  compose down --volumes --remove-orphans",
+        "  cleanup_started=true\n  compose down --volumes --remove-orphans\n  validate_owned_network_ledger",
+      ),
+      compose,
+      "cleanup is not fenced",
+    ],
+    [
+      dbTest
+        .replace('  rm -R -- "$state_dir"', "  # state removed early")
+        .replace(
+          "  cleanup_started=true",
+          '  cleanup_started=true\n  rm -R -- "$state_dir"',
+        ),
+      compose,
+      "cleanup is not fenced",
+    ],
+    [
+      dbTest.replace(
+        "network_ownership_file=$state_dir/network-ownership.tsv",
+        '"$docker_bin" network prune --force\nnetwork_ownership_file=$state_dir/network-ownership.tsv',
+      ),
+      compose,
+      "Docker teardown grammar is not closed",
+    ],
+    [
+      dbTest.replace(
+        "compose config --quiet",
+        'compose config --quiet\noperation=rm\ncompose "$operation" --force --stop postgres-main',
+      ),
+      compose,
+      "Docker teardown grammar is not closed",
+    ],
+    [
+      dbTest.replace(
+        "network_ownership_file=$state_dir/network-ownership.tsv",
+        'export engine=$docker_bin\n"$engine" image prune --all --force\n' +
+          "network_ownership_file=$state_dir/network-ownership.tsv",
+      ),
+      compose,
+      "Docker teardown grammar is not closed",
+    ],
+    [
+      dbTest.replace(
+        "network_ownership_file=$state_dir/network-ownership.tsv",
+        'declare engine=$docker_bin\n"$engine" rmi unrelated\n' +
+          "network_ownership_file=$state_dir/network-ownership.tsv",
+      ),
+      compose,
+      "Docker teardown grammar is not closed",
+    ],
+    [
+      dbTest.replace(
+        "network_ownership_file=$state_dir/network-ownership.tsv",
+        'engine_name=docker_bin\nengine=${!engine_name}\n"$engine" rm unrelated\n' +
+          "network_ownership_file=$state_dir/network-ownership.tsv",
+      ),
+      compose,
+      "Docker teardown grammar is not closed",
+    ],
+    [
+      dbTest.replace(
+        "network_ownership_file=$state_dir/network-ownership.tsv",
+        "docker rm --force unrelated\nnetwork_ownership_file=$state_dir/network-ownership.tsv",
+      ),
+      compose,
+      "Docker teardown grammar is not closed",
+    ],
+    [
+      dbTest.replace(
+        "network_ownership_file=$state_dir/network-ownership.tsv",
+        "docker image prune --all --force\nnetwork_ownership_file=$state_dir/network-ownership.tsv",
+      ),
+      compose,
+      "Docker teardown grammar is not closed",
+    ],
+    [
+      dbTest.replace(
+        "network_ownership_file=$state_dir/network-ownership.tsv",
+        'unreviewed_engine network prune --force\nnetwork_ownership_file=$state_dir/network-ownership.tsv',
+      ),
+      compose,
+      "Docker teardown grammar is not closed",
+    ],
+    [
+      dbTest.replace(
+        "network_ownership_file=$state_dir/network-ownership.tsv",
+        'engine=$docker_bin\nkind=network\noperation=rm\n' +
+          '"$engine" "$kind" "$operation" unrelated\n' +
+          "network_ownership_file=$state_dir/network-ownership.tsv",
+      ),
+      compose,
+      "Docker teardown grammar is not closed",
+    ],
+    [
+      dbTest.replace(
+        "network_ownership_file=$state_dir/network-ownership.tsv",
+        'unreviewed_engine system prune --all --force --volumes\n' +
+          "network_ownership_file=$state_dir/network-ownership.tsv",
+      ),
+      compose,
+      "Docker teardown grammar is not closed",
+    ],
+    [
+      dbTest.replace(
+        "network_ownership_file=$state_dir/network-ownership.tsv",
+        'engine=$docker_bin; "$engine" volume rm unrelated\n' +
+          "network_ownership_file=$state_dir/network-ownership.tsv",
+      ),
+      compose,
+      "Docker teardown grammar is not closed",
+    ],
+    [
+      dbTest.replace(
+        "network_ownership_file=$state_dir/network-ownership.tsv",
+        "compose rm --force --stop --volumes postgres-main\n" +
+          "network_ownership_file=$state_dir/network-ownership.tsv",
+      ),
+      compose,
+      "Docker teardown grammar is not closed",
+    ],
+    [
+      dbTest
+        .replace(
+          '    "$docker_bin" image rm "$SYNVEDA_DB_TEST_POSTGRES_IMAGE" >/dev/null',
+          '    # "$docker_bin" image rm "$SYNVEDA_DB_TEST_POSTGRES_IMAGE" >/dev/null',
+        )
+        .replace(
+          "network_ownership_file=$state_dir/network-ownership.tsv",
+          'if [ "$test_image_owned" = true ]; then\n' +
+            '  "$docker_bin" image rm "$SYNVEDA_DB_TEST_POSTGRES_IMAGE" >/dev/null\n' +
+            "fi\nnetwork_ownership_file=$state_dir/network-ownership.tsv",
+        ),
+      compose,
+      "Docker teardown grammar is not closed",
+    ],
+    [
+      dbTest.replace(
+        "network_ownership_file=$state_dir/network-ownership.tsv",
+        '"$docker_bin" compose --project-name "$project" --file "$manifest" down --volumes --remove-orphans\n' +
+          "network_ownership_file=$state_dir/network-ownership.tsv",
+      ),
+      compose,
+      "Docker teardown grammar is not closed",
+    ],
+    [
+      dbTest
+        .replace(
+          "  compose down --volumes --remove-orphans",
+          "  # compose down --volumes --remove-orphans",
+        )
+        .replace(
+          "network_ownership_file=$state_dir/network-ownership.tsv",
+          "compose \\\n  down --volumes --remove-orphans\n" +
+            "network_ownership_file=$state_dir/network-ownership.tsv",
+        ),
+      compose,
+      "Docker teardown grammar is not closed",
+    ],
+    [
+      dbTest.replace(
+        "network_ownership_file=$state_dir/network-ownership.tsv",
+        "compose down --volumes --remove-orphans\nnetwork_ownership_file=$state_dir/network-ownership.tsv",
+      ),
+      compose,
+      "Docker teardown grammar is not closed",
+    ],
+    [
+      dbTest + '\n"$docker_bin" network create unsafe-extra\n',
+      compose,
+      "Docker teardown grammar is not closed",
+    ],
+    [
+      dbTest.replace(
+        '"$docker_bin" network rm "${owned_network_ids[$network_index]}"',
+        '"$docker_bin" network rm "${network_names[$network_index]}"',
+      ),
+      compose,
+      "cleanup is not fenced",
+    ],
+    [
+      dbTest.replace(
+        '[ "$status" -eq 0 ] || exit "$status"',
+        '# removed fast-path success guard',
+      ),
+      compose,
+      "cleanup is reachable before success",
+    ],
+    [
+      dbTest,
+      compose.replace("  main-data:\n    external: true", "  main-data:\n    external: false"),
+      "network main-data is not an exact external reservation",
+    ],
+  ]) {
+    assert.ok(
+      mutatedDbTest !== dbTest || mutatedCompose !== compose,
+      `network-reservation mutant was a no-op: ${expected}`,
+    );
+    assert.ok(
+      dbTestNetworkReservationFindings(mutatedDbTest, mutatedCompose).some((finding) =>
+        finding.includes(expected),
+      ),
+      `network-reservation mutant escaped: ${expected}`,
+    );
+  }
+});
+
+test("database network reservation failures retain their partial ownership ledger", () => {
+  for (const [scenario, expectedCreates, expectedLedgerLines] of [
+    ["fail-second", 2, 3],
+    ["duplicate-second", 2, 3],
+    ["malformed-fourth", 4, 7],
+  ]) {
+    const scratch = mkdtempSync(join(tmpdir(), `synveda-db-network-${scenario}-`));
+    const stateRoot = join(scratch, "state");
+    const fakeDocker = join(scratch, "configured-engine");
+    const log = join(scratch, "docker.log");
+    const count = join(scratch, "docker.count");
+    mkdirSync(stateRoot, { mode: 0o700 });
+    installPoisonDocker(scratch);
+    writeFileSync(
+      fakeDocker,
+      `#!/bin/sh
+set -eu
+printf '%s\\n' "$*" >> "$FAKE_DOCKER_LOG"
+case "$1 $2" in
+  "network create") ;;
+  *) exit 97 ;;
+esac
+network_count=0
+if [ -f "$FAKE_DOCKER_COUNT" ]; then network_count=$(cat "$FAKE_DOCKER_COUNT"); fi
+network_count=$((network_count + 1))
+printf '%s\\n' "$network_count" > "$FAKE_DOCKER_COUNT"
+if [ "$FAKE_DOCKER_SCENARIO" = fail-second ] && [ "$network_count" -eq 2 ]; then
+  exit 55
+fi
+if [ "$FAKE_DOCKER_SCENARIO" = duplicate-second ] && [ "$network_count" -eq 2 ]; then
+  printf '%064d\\n' 1
+  exit 0
+fi
+if [ "$FAKE_DOCKER_SCENARIO" = malformed-fourth ] && [ "$network_count" -eq 4 ]; then
+  printf 'not-an-immutable-id\\n'
+  exit 0
+fi
+printf '%064d\\n' "$network_count"
+`,
+      { mode: 0o700 },
+    );
+    try {
+      const result = spawnSync("bash", [DB_TEST], {
+        encoding: "utf8",
+        timeout: SUBPROCESS_TIMEOUT_MS,
+        env: {
+          ...process.env,
+          FAKE_DOCKER_COUNT: count,
+          FAKE_DOCKER_LOG: log,
+          FAKE_DOCKER_SCENARIO: scenario,
+          PATH: `${scratch}:${process.env.PATH ?? ""}`,
+          SYNVEDA_DOCKER_BIN: fakeDocker,
+          TMPDIR: stateRoot,
+        },
+      });
+      assert.equal(result.status, 69, result.stderr);
+      const commands = readFileSync(log, "utf8").trim().split("\n");
+      assert.equal(commands.length, expectedCreates);
+      assert.ok(commands.every((command) => command.startsWith("network create ")));
+      assert.ok(commands.every((command) => !/\b(?:ls|inspect|rm)\b/.test(command)));
+      const retained = readdirSync(stateRoot);
+      assert.equal(retained.length, 1);
+      const retainedState = join(stateRoot, retained[0]);
+      const ledgerPath = join(retainedState, "network-ownership.tsv");
+      assert.equal(statSync(retainedState).mode & 0o777, 0o700);
+      assert.equal(statSync(ledgerPath).mode & 0o777, 0o600);
+      const ledger = readFileSync(ledgerPath, "utf8")
+        .trim()
+        .split("\n");
+      assert.equal(ledger.length, expectedLedgerLines);
+      assert.match(ledger.at(-1), /^intent\t/);
+      assert.match(result.stderr, /retained private fixture state and any created resources/);
+      assertPoisonDockerUntouched(scratch);
+    } finally {
+      rmSync(scratch, { recursive: true, force: true });
+    }
+  }
+});
+
+test("database network contention advances each logical lane without ambient observation", () => {
+  const scratch = mkdtempSync(join(tmpdir(), "synveda-db-network-contention-"));
+  const stateRoot = join(scratch, "state");
+  const fakeDocker = join(scratch, "configured-engine");
+  const log = join(scratch, "docker.log");
+  const count = join(scratch, "docker.count");
+  const overlap =
+    "Error response from daemon: invalid pool request: " +
+    "Pool overlaps with other one on this address space";
+  mkdirSync(stateRoot, { mode: 0o700 });
+  installPoisonDocker(scratch);
+  writeFileSync(
+    fakeDocker,
+    `#!/bin/sh
+set -eu
+printf '%s\\n' "$*" >> "$FAKE_DOCKER_LOG"
+case "$1 $2" in
+  "network create")
+    network_count=0
+    if [ -f "$FAKE_DOCKER_COUNT" ]; then network_count=$(cat "$FAKE_DOCKER_COUNT"); fi
+    network_count=$((network_count + 1))
+    printf '%s\\n' "$network_count" > "$FAKE_DOCKER_COUNT"
+    if [ $((network_count % 2)) -eq 1 ]; then
+      printf '%s\\n' "$FAKE_DOCKER_OVERLAP" >&2
+      exit 1
+    fi
+    printf '%064d\\n' $((network_count / 2))
+    ;;
+  "compose --project-name") exit 55 ;;
+  *) exit 97 ;;
+esac
+`,
+    { mode: 0o700 },
+  );
+  try {
+    const result = spawnSync("bash", [DB_TEST], {
+      encoding: "utf8",
+      timeout: SUBPROCESS_TIMEOUT_MS,
+      env: {
+        ...process.env,
+        FAKE_DOCKER_COUNT: count,
+        FAKE_DOCKER_LOG: log,
+        FAKE_DOCKER_OVERLAP: overlap,
+        PATH: `${scratch}:${process.env.PATH ?? ""}`,
+        SYNVEDA_DOCKER_BIN: fakeDocker,
+        TMPDIR: stateRoot,
+      },
+    });
+    assert.equal(result.status, 55, result.stderr);
+    const commands = readFileSync(log, "utf8").trim().split("\n");
+    const creates = commands.filter((command) => command.startsWith("network create "));
+    assert.equal(creates.length, 8);
+    assert.ok(creates.every((command) => !/\b(?:ls|inspect|rm)\b/.test(command)));
+    const subnets = creates.map((command) => {
+      const match = command.match(/--subnet (198\.(?:18|19)\.([0-9]{1,3})\.([0-9]{1,3})\/28)\b/);
+      assert.ok(match, command);
+      assert.ok(Number(match[2]) <= 255, command);
+      assert.ok(Number(match[3]) <= 240, command);
+      assert.equal(Number(match[3]) % 16, 0, command);
+      return match[1];
+    });
+    assert.equal(new Set(subnets).size, subnets.length);
+
+    const retained = readdirSync(stateRoot);
+    assert.equal(retained.length, 1);
+    const retainedState = join(stateRoot, retained[0]);
+    const ledger = readFileSync(join(retainedState, "network-ownership.tsv"), "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => line.split("\t"));
+    assert.equal(ledger.length, 16);
+    for (let logical = 0; logical < 4; logical += 1) {
+      const group = ledger.slice(logical * 4, logical * 4 + 4);
+      assert.deepEqual(
+        group.map((row) => row[0]),
+        ["intent", "contended", "intent", "owned"],
+      );
+      assert.equal(group[0][1], group[3][1]);
+      assert.equal(group[0][2], group[3][2]);
+      assert.equal(group[0][3], group[1][3]);
+      assert.notEqual(group[0][3], group[3][3]);
+      assert.equal(group[3][4], `${logical + 1}`.padStart(64, "0"));
+    }
+
+    const receipts = join(retainedState, "network-receipts");
+    assert.equal(statSync(receipts).mode & 0o777, 0o700);
+    assert.equal(readdirSync(receipts).length, 24);
+    for (let logical = 0; logical < 4; logical += 1) {
+      const contendedStdout = join(receipts, `${logical}-0.stdout`);
+      const contendedStderr = join(receipts, `${logical}-0.stderr`);
+      const contendedStatus = join(receipts, `${logical}-0.status`);
+      const ownedStdout = join(receipts, `${logical}-1.stdout`);
+      const ownedStderr = join(receipts, `${logical}-1.stderr`);
+      const ownedStatus = join(receipts, `${logical}-1.status`);
+      for (const path of [
+        contendedStdout,
+        contendedStderr,
+        contendedStatus,
+        ownedStdout,
+        ownedStderr,
+        ownedStatus,
+      ]) {
+        assert.equal(statSync(path).mode & 0o777, 0o600);
+      }
+      assert.equal(readFileSync(contendedStdout, "utf8"), "");
+      assert.equal(readFileSync(contendedStderr, "utf8"), `${overlap}\n`);
+      assert.equal(readFileSync(contendedStatus, "utf8"), "1\n");
+      assert.equal(
+        readFileSync(ownedStdout, "utf8"),
+        `${`${logical + 1}`.padStart(64, "0")}\n`,
+      );
+      assert.equal(readFileSync(ownedStderr, "utf8"), "");
+      assert.equal(readFileSync(ownedStatus, "utf8"), "0\n");
+    }
+    assertPoisonDockerUntouched(scratch);
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+});
+
+test("database network contention classifier rejects ambiguous Docker failures", () => {
+  for (const scenario of [
+    "nonempty-stdout",
+    "extra-stderr",
+    "different-error",
+    "wrong-status",
+  ]) {
+    const scratch = mkdtempSync(join(tmpdir(), `synveda-db-network-${scenario}-`));
+    const stateRoot = join(scratch, "state");
+    const fakeDocker = join(scratch, "configured-engine");
+    const log = join(scratch, "docker.log");
+    const overlap =
+      "Error response from daemon: invalid pool request: " +
+      "Pool overlaps with other one on this address space";
+    mkdirSync(stateRoot, { mode: 0o700 });
+    installPoisonDocker(scratch);
+    writeFileSync(
+      fakeDocker,
+      `#!/bin/sh
+set -eu
+printf '%s\\n' "$*" >> "$FAKE_DOCKER_LOG"
+case "$1 $2" in
+  "network create")
+    case "$FAKE_DOCKER_SCENARIO" in
+      nonempty-stdout)
+        printf '%064d\\n' 1
+        printf '%s\\n' "$FAKE_DOCKER_OVERLAP" >&2
+        ;;
+      extra-stderr)
+        printf '%s\\n%s\\n' "$FAKE_DOCKER_OVERLAP" extra >&2
+        ;;
+      different-error) printf '%s\\n' 'Error response from daemon: unavailable' >&2 ;;
+      wrong-status)
+        printf '%s\\n' "$FAKE_DOCKER_OVERLAP" >&2
+        exit 55
+        ;;
+    esac
+    exit 1
+    ;;
+  *) exit 97 ;;
+esac
+`,
+      { mode: 0o700 },
+    );
+    try {
+      const result = spawnSync("bash", [DB_TEST], {
+        encoding: "utf8",
+        timeout: SUBPROCESS_TIMEOUT_MS,
+        env: {
+          ...process.env,
+          FAKE_DOCKER_LOG: log,
+          FAKE_DOCKER_OVERLAP: overlap,
+          FAKE_DOCKER_SCENARIO: scenario,
+          PATH: `${scratch}:${process.env.PATH ?? ""}`,
+          SYNVEDA_DOCKER_BIN: fakeDocker,
+          TMPDIR: stateRoot,
+        },
+      });
+      assert.equal(result.status, 69, result.stderr);
+      const commands = readFileSync(log, "utf8").trim().split("\n");
+      assert.equal(commands.length, 1);
+      assert.ok(commands[0].startsWith("network create "));
+      assert.ok(!/\b(?:ls|inspect|rm)\b/.test(commands[0]));
+      const retainedState = join(stateRoot, readdirSync(stateRoot)[0]);
+      const ledger = readFileSync(join(retainedState, "network-ownership.tsv"), "utf8")
+        .trim()
+        .split("\n");
+      assert.equal(ledger.length, 1);
+      assert.match(ledger[0], /^intent\t/);
+      const receipt = readFileSync(
+        join(retainedState, "network-receipts", "0-0.stdout"),
+        "utf8",
+      );
+      assert.equal(receipt.length > 0, scenario === "nonempty-stdout");
+      assertPoisonDockerUntouched(scratch);
+    } finally {
+      rmSync(scratch, { recursive: true, force: true });
+    }
+  }
+});
+
+test("database network contention exhausts its bounded lane without teardown", () => {
+  const scratch = mkdtempSync(join(tmpdir(), "synveda-db-network-exhausted-"));
+  const stateRoot = join(scratch, "state");
+  const fakeDocker = join(scratch, "configured-engine");
+  const log = join(scratch, "docker.log");
+  const overlap =
+    "Error response from daemon: invalid pool request: " +
+    "Pool overlaps with other one on this address space";
+  mkdirSync(stateRoot, { mode: 0o700 });
+  installPoisonDocker(scratch);
+  writeFileSync(
+    fakeDocker,
+    `#!/bin/sh
+set -eu
+printf '%s\\n' "$*" >> "$FAKE_DOCKER_LOG"
+case "$1 $2" in
+  "network create") printf '%s\\n' "$FAKE_DOCKER_OVERLAP" >&2; exit 1 ;;
+  *) exit 97 ;;
+esac
+`,
+    { mode: 0o700 },
+  );
+  try {
+    const result = spawnSync("bash", [DB_TEST], {
+      encoding: "utf8",
+      timeout: SUBPROCESS_TIMEOUT_MS,
+      env: {
+        ...process.env,
+        FAKE_DOCKER_LOG: log,
+        FAKE_DOCKER_OVERLAP: overlap,
+        PATH: `${scratch}:${process.env.PATH ?? ""}`,
+        SYNVEDA_DOCKER_BIN: fakeDocker,
+        TMPDIR: stateRoot,
+      },
+    });
+    assert.equal(result.status, 69, result.stderr);
+    assert.match(result.stderr, /no uncontended \/28 is available/);
+    const commands = readFileSync(log, "utf8").trim().split("\n");
+    assert.equal(commands.length, 64);
+    assert.ok(commands.every((command) => command.startsWith("network create ")));
+    assert.ok(commands.every((command) => !/\b(?:ls|inspect|rm)\b/.test(command)));
+    const subnets = commands.map((command) => command.match(/--subnet ([^ ]+)/)?.[1]);
+    assert.ok(subnets.every(Boolean));
+    assert.equal(new Set(subnets).size, 64);
+    const retainedState = join(stateRoot, readdirSync(stateRoot)[0]);
+    const ledger = readFileSync(join(retainedState, "network-ownership.tsv"), "utf8")
+      .trim()
+      .split("\n");
+    assert.equal(ledger.length, 128);
+    assert.ok(ledger.every((line, index) => line.startsWith(index % 2 ? "contended\t" : "intent\t")));
+    assert.equal(readdirSync(join(retainedState, "network-receipts")).length, 192);
+    assertPoisonDockerUntouched(scratch);
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+});
+
+test("concurrent database fixtures reserve and clean only their own disjoint networks", async () => {
+  const scratch = mkdtempSync(join(tmpdir(), "synveda-db-network-concurrent-"));
+  const binDir = join(scratch, "bin");
+  const barrierDir = join(scratch, "barrier");
+  const evidenceDir = join(scratch, "evidence");
+  const stateA = join(scratch, "state-a");
+  const stateB = join(scratch, "state-b");
+  const barrier = join(binDir, "cleanup-barrier");
+  const fakeDocker = join(binDir, "configured-engine");
+  const fakeCksum = join(binDir, "cksum");
+  const harness = join(scratch, "db-network-concurrent.sh");
+  const daemonState = join(scratch, "daemon.tsv");
+  const daemonCount = join(scratch, "daemon.count");
+  const daemonEvents = join(scratch, "daemon-events.tsv");
+  const daemonLock = join(scratch, "daemon.lock");
+  const sentinelId = "f".repeat(64);
+  const sentinelState =
+    `203.0.113.0/28\t${sentinelId}\tsentinel-project\tsentinel\t` +
+    "sentinel-network\tsentinel\n";
+  mkdirSync(binDir, { mode: 0o700 });
+  installPoisonDocker(binDir);
+  mkdirSync(barrierDir, { mode: 0o700 });
+  mkdirSync(evidenceDir, { mode: 0o700 });
+  mkdirSync(stateA, { mode: 0o700 });
+  mkdirSync(stateB, { mode: 0o700 });
+  writeFileSync(daemonState, sentinelState, { mode: 0o600 });
+  const source = readFileSync(DB_TEST, "utf8");
+  const end = source.indexOf("\nprivate_evidence_file() {");
+  assert.ok(end > 0);
+  const prefix = source.slice(0, end);
+  const repositoryCd = 'cd "$(dirname "$0")/.."';
+  assert.ok(prefix.includes(repositoryCd));
+  writeFileSync(
+    harness,
+    `${prefix.replace(repositoryCd, 'cd "$DB_TEST_REPO_ROOT"')}\n` +
+      '"$FAKE_CLEANUP_BARRIER"\n' +
+      'cp "$network_ownership_file" "$FAKE_EVIDENCE_DIR/$FAKE_CALLER.tsv"\n' +
+      'chmod 600 "$FAKE_EVIDENCE_DIR/$FAKE_CALLER.tsv"\n' +
+      "cleanup_successful_fixture\n",
+    { mode: 0o700 },
+  );
+  writeFileSync(
+    barrier,
+    `#!/bin/sh
+set -eu
+: > "$FAKE_BARRIER_DIR/ready-$FAKE_CALLER"
+barrier_attempt=0
+while [ ! -f "$FAKE_BARRIER_DIR/ready-A" ] || [ ! -f "$FAKE_BARRIER_DIR/ready-B" ]; do
+  barrier_attempt=$((barrier_attempt + 1))
+  if [ "$barrier_attempt" -ge 1000 ]; then exit 98; fi
+  sleep 0.01
+done
+`,
+    { mode: 0o700 },
+  );
+  writeFileSync(
+    fakeCksum,
+    "#!/bin/sh\nset -eu\ncat >/dev/null\nprintf '0 0\\n'\n",
+    { mode: 0o700 },
+  );
+  writeFileSync(
+    fakeDocker,
+    `#!/bin/sh
+set -eu
+lock_held=false
+release_lock() {
+  if [ "$lock_held" = true ]; then
+    rmdir "$FAKE_DAEMON_LOCK" 2>/dev/null || :
+    lock_held=false
+  fi
+}
+trap release_lock EXIT
+trap 'release_lock; exit 130' HUP INT TERM
+lock_attempt=0
+while ! mkdir "$FAKE_DAEMON_LOCK" 2>/dev/null; do
+  lock_attempt=$((lock_attempt + 1))
+  if [ "$lock_attempt" -ge 1000 ]; then exit 98; fi
+  sleep 0.01
+done
+lock_held=true
+case "$1 $2" in
+  "network create")
+    subnet=
+    project=
+    logical=
+    network_name=
+    expect_subnet=false
+    for argument do
+      if [ "$expect_subnet" = true ]; then
+        subnet=$argument
+        expect_subnet=false
+      else
+        case "$argument" in
+          --subnet) expect_subnet=true ;;
+          com.synveda.project=*) project=\${argument#com.synveda.project=} ;;
+          com.synveda.network=*) logical=\${argument#com.synveda.network=} ;;
+        esac
+      fi
+      network_name=$argument
+    done
+    if [ -f "$FAKE_DAEMON_STATE" ] && awk -F '\\t' -v subnet="$subnet" '
+      $1 == subnet { found = 1 }
+      END { exit found ? 0 : 1 }
+    ' "$FAKE_DAEMON_STATE"; then
+      printf 'contended\\t%s\\t%s\\t%s\\t%s\\t%s\\t-\\n' \
+        "$FAKE_CALLER" "$project" "$logical" "$network_name" "$subnet" \
+        >> "$FAKE_DAEMON_EVENTS"
+      release_lock
+      printf '%s\\n' "$FAKE_DOCKER_OVERLAP" >&2
+      exit 1
+    fi
+    network_count=0
+    if [ -f "$FAKE_DAEMON_COUNT" ]; then network_count=$(cat "$FAKE_DAEMON_COUNT"); fi
+    network_count=$((network_count + 1))
+    printf '%s\\n' "$network_count" > "$FAKE_DAEMON_COUNT"
+    network_id=$(printf '%064d' "$network_count")
+    printf '%s\\t%s\\t%s\\t%s\\t%s\\t%s\\n' \
+      "$subnet" "$network_id" "$project" "$logical" "$network_name" "$FAKE_CALLER" \
+      >> "$FAKE_DAEMON_STATE"
+    printf 'created\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\n' \
+      "$FAKE_CALLER" "$project" "$logical" "$network_name" "$subnet" "$network_id" \
+      >> "$FAKE_DAEMON_EVENTS"
+    release_lock
+    printf '%s\\n' "$network_id"
+    ;;
+  "compose --project-name")
+    printf 'compose\\t%s\\t%s\\n' "$FAKE_CALLER" "$*" >> "$FAKE_DAEMON_EVENTS"
+    release_lock
+    exit 0
+    ;;
+  "network rm")
+    network_id=$3
+    network_owner=$(awk -F '\\t' -v network_id="$network_id" '
+      $2 == network_id { print $6; exit }
+    ' "$FAKE_DAEMON_STATE")
+    if [ -z "$network_owner" ]; then
+      printf 'unexpected\\t%s\\tmissing-network\\t%s\\n' \
+        "$FAKE_CALLER" "$network_id" >> "$FAKE_DAEMON_EVENTS"
+      exit 96
+    fi
+    if [ "$network_owner" != "$FAKE_CALLER" ]; then
+      printf 'foreign\\t%s\\t%s\\t%s\\n' \
+        "$FAKE_CALLER" "$network_owner" "$network_id" >> "$FAKE_DAEMON_EVENTS"
+      exit 96
+    fi
+    state_temp=$FAKE_DAEMON_STATE.$FAKE_CALLER.$$
+    awk -F '\\t' -v network_id="$network_id" '$2 != network_id' \
+      "$FAKE_DAEMON_STATE" > "$state_temp"
+    mv "$state_temp" "$FAKE_DAEMON_STATE"
+    printf 'removed\\t%s\\t%s\\t%s\\n' \
+      "$FAKE_CALLER" "$network_owner" "$network_id" >> "$FAKE_DAEMON_EVENTS"
+    release_lock
+    exit 0
+    ;;
+  *)
+    printf 'unexpected\\t%s\\t%s\\n' "$FAKE_CALLER" "$*" >> "$FAKE_DAEMON_EVENTS"
+    release_lock
+    exit 97
+    ;;
+esac
+`,
+    { mode: 0o700 },
+  );
+
+  const overlap =
+    "Error response from daemon: invalid pool request: " +
+    "Pool overlaps with other one on this address space";
+  const run = (caller, stateRoot) =>
+    new Promise((resolve) => {
+      const child = spawn("bash", [harness], {
+        detached: true,
+        env: {
+          ...process.env,
+          DB_TEST_REPO_ROOT: fileURLToPath(new URL("..", import.meta.url)),
+          FAKE_BARRIER_DIR: barrierDir,
+          FAKE_CALLER: caller,
+          FAKE_CLEANUP_BARRIER: barrier,
+          FAKE_DAEMON_COUNT: daemonCount,
+          FAKE_DAEMON_EVENTS: daemonEvents,
+          FAKE_DAEMON_LOCK: daemonLock,
+          FAKE_DAEMON_STATE: daemonState,
+          FAKE_DOCKER_OVERLAP: overlap,
+          FAKE_EVIDENCE_DIR: evidenceDir,
+          PATH: `${binDir}:${process.env.PATH ?? ""}`,
+          SYNVEDA_DB_TEST_POSTGRES_IMAGE: "fake-postgres:owned-elsewhere",
+          SYNVEDA_DOCKER_BIN: fakeDocker,
+          TMPDIR: stateRoot,
+        },
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      let stdout = "";
+      let stderr = "";
+      let finished = false;
+      let timeoutError = null;
+      const finish = (result) => {
+        if (finished) return;
+        finished = true;
+        clearTimeout(timer);
+        resolve(result);
+      };
+      const timer = setTimeout(() => {
+        timeoutError = new Error(`concurrent allocator ${caller} timed out`);
+        if (child.pid !== undefined) {
+          try {
+            process.kill(-child.pid, "SIGKILL");
+          } catch (error) {
+            if (error.code !== "ESRCH") timeoutError = error;
+          }
+        }
+      }, SUBPROCESS_TIMEOUT_MS);
+      child.stdout.setEncoding("utf8");
+      child.stderr.setEncoding("utf8");
+      child.stdout.on("data", (chunk) => {
+        stdout += chunk;
+      });
+      child.stderr.on("data", (chunk) => {
+        stderr += chunk;
+      });
+      child.on("error", (error) =>
+        finish({ error, signal: null, status: null, stderr, stdout }),
+      );
+      child.on("close", (status, signal) =>
+        finish({ error: timeoutError, signal, status, stderr, stdout }),
+      );
+    });
+
+  try {
+    const results = await Promise.all([run("A", stateA), run("B", stateB)]);
+    for (const result of results) {
+      assert.equal(result.error, null, result.error?.message);
+      assert.equal(result.signal, null);
+      assert.equal(result.status, 0, result.stderr);
+    }
+    const events = readFileSync(daemonEvents, "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => line.split("\t"));
+    const created = events.filter((event) => event[0] === "created");
+    const contended = events.filter((event) => event[0] === "contended");
+    const compose = events.filter((event) => event[0] === "compose");
+    const removed = events.filter((event) => event[0] === "removed");
+    assert.equal(created.length, 8);
+    assert.equal(contended.length, 4);
+    assert.equal(compose.length, 2);
+    assert.equal(removed.length, 8);
+    assert.equal(new Set(created.map((event) => event[5])).size, 8);
+    assert.equal(new Set(created.map((event) => event[6])).size, 8);
+    assert.equal(new Set(created.map((event) => event[1])).size, 2);
+    assert.deepEqual(
+      [...new Set(compose.map((event) => event[1]))].sort(),
+      ["A", "B"],
+    );
+    assert.ok(events.every((event) => !["unexpected", "foreign"].includes(event[0])));
+    assert.deepEqual(readdirSync(stateA), []);
+    assert.deepEqual(readdirSync(stateB), []);
+    assert.deepEqual(readdirSync(evidenceDir).sort(), ["A.tsv", "B.tsv"]);
+    assert.ok(existsSync(join(barrierDir, "ready-A")));
+    assert.ok(existsSync(join(barrierDir, "ready-B")));
+
+    const allOwnedIds = new Set();
+    for (const caller of ["A", "B"]) {
+      const evidence = join(evidenceDir, `${caller}.tsv`);
+      assert.equal(statSync(evidence).mode & 0o777, 0o600);
+      const ledger = readFileSync(evidence, "utf8")
+        .trim()
+        .split("\n")
+        .map((line) => line.split("\t"));
+      const owned = ledger.filter((row) => row[0] === "owned");
+      assert.equal(owned.length, 4);
+      const callerCreates = created.filter((event) => event[1] === caller);
+      assert.equal(callerCreates.length, 4);
+      const projects = new Set(callerCreates.map((event) => event[2]));
+      assert.equal(projects.size, 1);
+      const [project] = projects;
+      assert.ok(owned.every((row) => row[2].startsWith(`${project}-`)));
+      for (const row of owned) {
+        assert.ok(
+          created.some(
+            (event) =>
+              event[1] === caller &&
+              event[2] === project &&
+              event[3] === row[1] &&
+              event[4] === row[2] &&
+              event[5] === row[3] &&
+              event[6] === row[4],
+          ),
+        );
+        assert.ok(!allOwnedIds.has(row[4]));
+        allOwnedIds.add(row[4]);
+      }
+    }
+    assert.equal(allOwnedIds.size, 8);
+    const createdById = new Map(created.map((event) => [event[6], event]));
+    for (const event of removed) {
+      assert.equal(event[1], event[2]);
+      assert.equal(createdById.get(event[3])?.[1], event[1]);
+      assert.notEqual(event[3], sentinelId);
+    }
+    assert.deepEqual(
+      removed.map((event) => event[3]).sort(),
+      [...allOwnedIds].sort(),
+    );
+    assert.equal(readFileSync(daemonState, "utf8"), sentinelState);
+    assertPoisonDockerUntouched(binDir);
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+});
+
+test("database cleanup removes only receipt-correlated IDs in reverse creation order", () => {
+  const scratch = mkdtempSync(join(tmpdir(), "synveda-db-network-cleanup-"));
+  const stateRoot = join(scratch, "state");
+  const fakeDocker = join(scratch, "configured-engine");
+  const harness = join(scratch, "db-network-cleanup.sh");
+  const log = join(scratch, "docker.log");
+  const count = join(scratch, "docker.count");
+  mkdirSync(stateRoot, { mode: 0o700 });
+  installPoisonDocker(scratch);
+  const source = readFileSync(DB_TEST, "utf8");
+  const end = source.indexOf("\nprivate_evidence_file() {");
+  assert.ok(end > 0);
+  const prefix = source.slice(0, end);
+  const repositoryCd = 'cd "$(dirname "$0")/.."';
+  assert.ok(prefix.includes(repositoryCd));
+  writeFileSync(
+    harness,
+    `${prefix.replace(repositoryCd, 'cd "$DB_TEST_REPO_ROOT"')}\ncleanup_successful_fixture\n`,
+    { mode: 0o700 },
+  );
+  writeFileSync(
+    fakeDocker,
+    `#!/bin/sh
+set -eu
+printf '%s\\n' "$*" >> "$FAKE_DOCKER_LOG"
+case "$1 $2" in
+  "network create")
+    network_count=0
+    if [ -f "$FAKE_DOCKER_COUNT" ]; then network_count=$(cat "$FAKE_DOCKER_COUNT"); fi
+    network_count=$((network_count + 1))
+    printf '%s\\n' "$network_count" > "$FAKE_DOCKER_COUNT"
+    printf '%064d\\n' "$network_count"
+    ;;
+  "compose --project-name") exit 0 ;;
+  "network rm") exit 0 ;;
+  *) exit 97 ;;
+esac
+`,
+    { mode: 0o700 },
+  );
+  try {
+    const result = spawnSync("bash", [harness], {
+      encoding: "utf8",
+      timeout: SUBPROCESS_TIMEOUT_MS,
+      env: {
+        ...process.env,
+        DB_TEST_REPO_ROOT: fileURLToPath(new URL("..", import.meta.url)),
+        FAKE_DOCKER_COUNT: count,
+        FAKE_DOCKER_LOG: log,
+        PATH: `${scratch}:${process.env.PATH ?? ""}`,
+        SYNVEDA_DB_TEST_POSTGRES_IMAGE: "fake-postgres:owned-elsewhere",
+        SYNVEDA_DOCKER_BIN: fakeDocker,
+        TMPDIR: stateRoot,
+      },
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual(readdirSync(stateRoot), []);
+    const commands = readFileSync(log, "utf8").trim().split("\n");
+    const creates = commands.filter((command) => command.startsWith("network create "));
+    const removals = commands.filter((command) => command.startsWith("network rm "));
+    const compose = commands.filter((command) => command.startsWith("compose --project-name "));
+    assert.equal(creates.length, 4);
+    assert.deepEqual(removals, [
+      `network rm ${"4".padStart(64, "0")}`,
+      `network rm ${"3".padStart(64, "0")}`,
+      `network rm ${"2".padStart(64, "0")}`,
+      `network rm ${"1".padStart(64, "0")}`,
+    ]);
+    assert.equal(compose.length, 1);
+    assert.match(compose[0], / down --volumes --remove-orphans$/);
+    assert.ok(commands.every((command) => !/network (?:ls|inspect|prune)\b/.test(command)));
+    assertPoisonDockerUntouched(scratch);
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+});
+
+test("database cleanup refuses receipt drift before any teardown", () => {
+  const scratch = mkdtempSync(join(tmpdir(), "synveda-db-network-receipt-drift-"));
+  const stateRoot = join(scratch, "state");
+  const fakeDocker = join(scratch, "configured-engine");
+  const harness = join(scratch, "db-network-receipt-drift.sh");
+  const log = join(scratch, "docker.log");
+  const count = join(scratch, "docker.count");
+  mkdirSync(stateRoot, { mode: 0o700 });
+  installPoisonDocker(scratch);
+  const source = readFileSync(DB_TEST, "utf8");
+  const end = source.indexOf("\nprivate_evidence_file() {");
+  assert.ok(end > 0);
+  const prefix = source.slice(0, end);
+  const repositoryCd = 'cd "$(dirname "$0")/.."';
+  assert.ok(prefix.includes(repositoryCd));
+  writeFileSync(
+    harness,
+    `${prefix.replace(repositoryCd, 'cd "$DB_TEST_REPO_ROOT"')}\n` +
+      `printf '%064d\\n' 9 > "\${owned_network_receipt_files[0]}"\n` +
+      "cleanup_successful_fixture\n",
+    { mode: 0o700 },
+  );
+  writeFileSync(
+    fakeDocker,
+    `#!/bin/sh
+set -eu
+printf '%s\\n' "$*" >> "$FAKE_DOCKER_LOG"
+case "$1 $2" in
+  "network create")
+    network_count=0
+    if [ -f "$FAKE_DOCKER_COUNT" ]; then network_count=$(cat "$FAKE_DOCKER_COUNT"); fi
+    network_count=$((network_count + 1))
+    printf '%s\\n' "$network_count" > "$FAKE_DOCKER_COUNT"
+    printf '%064d\\n' "$network_count"
+    ;;
+  *) exit 97 ;;
+esac
+`,
+    { mode: 0o700 },
+  );
+  try {
+    const result = spawnSync("bash", [harness], {
+      encoding: "utf8",
+      timeout: SUBPROCESS_TIMEOUT_MS,
+      env: {
+        ...process.env,
+        DB_TEST_REPO_ROOT: fileURLToPath(new URL("..", import.meta.url)),
+        FAKE_DOCKER_COUNT: count,
+        FAKE_DOCKER_LOG: log,
+        PATH: `${scratch}:${process.env.PATH ?? ""}`,
+        SYNVEDA_DB_TEST_POSTGRES_IMAGE: "fake-postgres:owned-elsewhere",
+        SYNVEDA_DOCKER_BIN: fakeDocker,
+        TMPDIR: stateRoot,
+      },
+    });
+    assert.equal(result.status, 1, result.stderr);
+    assert.match(result.stderr, /refusing cleanup after network receipt drift/);
+    assert.match(result.stderr, /retained private fixture state and any created resources/);
+    const commands = readFileSync(log, "utf8").trim().split("\n");
+    assert.equal(commands.length, 4);
+    assert.ok(commands.every((command) => command.startsWith("network create ")));
+    assert.ok(commands.every((command) => !/\b(?:rm|ls|inspect|prune)\b/.test(command)));
+    assert.equal(readdirSync(stateRoot).length, 1);
+    assertPoisonDockerUntouched(scratch);
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+});
+
+test("database fixtures canonicalize a symlinked platform temp root before private state", () => {
+  const scratch = realpathSync(mkdtempSync(join(tmpdir(), "synveda-db-physical-tmp-")));
+  const physicalRoot = join(scratch, "physical-temp");
+  const linkedRoot = join(scratch, "platform-temp-link");
+  const fakeDocker = join(scratch, "configured-engine");
+  mkdirSync(physicalRoot, { mode: 0o700 });
+  installPoisonDocker(scratch);
+  symlinkSync(physicalRoot, linkedRoot, "dir");
+  writeFileSync(
+    fakeDocker,
+    `#!/bin/sh
+set -eu
+case "$1 $2" in
+  "network create")
+    for argument do network_name=$argument; done
+    case "$network_name" in
+      *-main-data) printf '%064d\n' 1 ;;
+      *-lifecycle-data) printf '%064d\n' 2 ;;
+      *-main-host) printf '%064d\n' 3 ;;
+      *-lifecycle-host) printf '%064d\n' 4 ;;
+      *) exit 96 ;;
+    esac
+    ;;
+  "compose --project-name") exit 55 ;;
+  *) exit 97 ;;
+esac
+`,
+    { mode: 0o700 },
+  );
+  try {
+    const result = spawnSync("bash", [DB_TEST], {
+      encoding: "utf8",
+      timeout: SUBPROCESS_TIMEOUT_MS,
+      env: {
+        ...process.env,
+        PATH: `${scratch}:${process.env.PATH ?? ""}`,
+        SYNVEDA_DOCKER_BIN: fakeDocker,
+        TMPDIR: linkedRoot,
+      },
+    });
+    assert.equal(result.status, 55, result.stderr);
+    assert.ok(result.stderr.includes(`${physicalRoot}/synveda-db-test.`), result.stderr);
+    assert.ok(!result.stderr.includes(`${linkedRoot}/synveda-db-test.`), result.stderr);
+    const retained = readdirSync(physicalRoot);
+    assert.equal(retained.length, 1);
+    const retainedState = join(physicalRoot, retained[0]);
+    assert.equal(statSync(retainedState).mode & 0o777, 0o700);
+    assert.ok(existsSync(join(retainedState, "secrets", ".synveda-private-directory")));
+    const stateToken = retained[0].split(".").at(-1).toLowerCase();
+    const generatorProject = `synveda-development-acceptance-${stateToken}`;
+    assert.ok(
+      existsSync(
+        join(
+          retainedState,
+          "generator",
+          generatorProject,
+          "database-authority",
+          ".synveda-private-directory",
+        ),
+      ),
+    );
+    assertPoisonDockerUntouched(scratch);
+    assert.ok(
+      existsSync(
+        join(
+          retainedState,
+          "generator",
+          generatorProject,
+          "keycloak-public-gate",
+          ".synveda-private-directory",
+        ),
+      ),
+    );
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+});
+
+test("database fixtures reject an unsafe physical temp root before mutation", () => {
+  const scratch = realpathSync(mkdtempSync(join(tmpdir(), "synveda-db-unsafe-tmp-")));
+  const fakeDocker = join(scratch, "configured-engine");
+  installPoisonDocker(scratch);
+  writeFileSync(fakeDocker, "#!/bin/sh\nexit 97\n", { mode: 0o700 });
+  const spacedRoot = join(scratch, "physical temp");
+  mkdirSync(spacedRoot, { mode: 0o700 });
+
+  try {
+    for (const [name, target] of [
+      ["root-link", "/"],
+      ["space-link", spacedRoot],
+    ]) {
+      const linkedRoot = join(scratch, name);
+      symlinkSync(target, linkedRoot, "dir");
+      const result = spawnSync("bash", [DB_TEST], {
+        encoding: "utf8",
+        timeout: SUBPROCESS_TIMEOUT_MS,
+        env: {
+          ...process.env,
+          PATH: `${scratch}:${process.env.PATH ?? ""}`,
+          SYNVEDA_DOCKER_BIN: fakeDocker,
+          TMPDIR: linkedRoot,
+        },
+      });
+      assert.equal(result.status, 70, result.stderr);
+      assert.match(result.stderr, /physical temporary root has an unsafe shape/);
+      assert.equal(readdirSync(spacedRoot).length, 0);
+    }
+    assertPoisonDockerUntouched(scratch);
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+});
+
 test("evaluation uses the bounded exact-role fixture and proxy-free loopback", () => {
   const dbTest = readFileSync(DB_TEST, "utf8");
   const evalLib = readFileSync(EVAL_LIB, "utf8");
@@ -785,6 +2279,15 @@ test("shared demos execute through the fresh exact-role fixture", () => {
 
 test("SQLx metadata uses a fresh private exact-migrator fixture", () => {
   const dbTest = readFileSync(DB_TEST, "utf8");
+  const mutateSqlxBranch = (mutator) => {
+    const start = dbTest.indexOf('  if [ "$db_test_task" = sqlx-prepare ]; then\n');
+    const end = dbTest.indexOf(
+      '  if [ "$db_test_task" != authority-fingerprints ]; then\n',
+      start,
+    );
+    assert.ok(start >= 0 && end > start, "SQLx prepare branch is missing");
+    return `${dbTest.slice(0, start)}${mutator(dbTest.slice(start, end))}${dbTest.slice(end)}`;
+  };
   assert.deepEqual(sqlxPrepareFixtureFindings(dbTest), []);
   assert.ok(
     sqlxPrepareFixtureFindings(
@@ -796,9 +2299,11 @@ test("SQLx metadata uses a fresh private exact-migrator fixture", () => {
   );
   assert.ok(
     sqlxPrepareFixtureFindings(
-      dbTest.replace(
-        "cargo sqlx migrate run --no-dotenv",
-        "cargo run -q -p synveda-cli --bin synveda -- db migrate",
+      mutateSqlxBranch((branch) =>
+        branch.replace(
+          "cargo sqlx migrate run --no-dotenv",
+          "cargo run -q -p synveda-cli --bin synveda -- db migrate",
+        ),
       ),
     ).some((finding) => finding.includes("direct migration, prepare, check")),
   );
@@ -817,7 +2322,12 @@ test("SQLx metadata uses a fresh private exact-migrator fixture", () => {
   );
   assert.ok(
     sqlxPrepareFixtureFindings(
-      dbTest.replace("sqlx_cli_banner=$(cargo sqlx --version)", "sqlx_cli_banner=unchecked"),
+      mutateSqlxBranch((branch) =>
+        branch.replace(
+          "sqlx_cli_banner=$(cargo sqlx --version)",
+          "sqlx_cli_banner=unchecked",
+        ),
+      ),
     ).includes("cargo-sqlx is not proved equal to the locked sqlx library"),
   );
   assert.ok(
@@ -829,13 +2339,15 @@ test("SQLx metadata uses a fresh private exact-migrator fixture", () => {
       ),
     ).some((finding) => finding.includes("extra Cargo invocation")),
   );
-  const delayedVersionProbe = dbTest
-    .replace("    sqlx_cli_banner=$(cargo sqlx --version)\n", "")
-    .replace(
-      "    unset sqlx_library_version sqlx_cli_banner\n",
-      "    sqlx_cli_banner=$(cargo sqlx --version)\n" +
+  const delayedVersionProbe = mutateSqlxBranch((branch) =>
+    branch
+      .replace("    sqlx_cli_banner=$(cargo sqlx --version)\n", "")
+      .replace(
         "    unset sqlx_library_version sqlx_cli_banner\n",
-    );
+        "    sqlx_cli_banner=$(cargo sqlx --version)\n" +
+          "    unset sqlx_library_version sqlx_cli_banner\n",
+      ),
+  );
   assert.ok(
     sqlxPrepareFixtureFindings(delayedVersionProbe).some((finding) =>
       finding.includes("mutates before its version proof"),
@@ -843,22 +2355,103 @@ test("SQLx metadata uses a fresh private exact-migrator fixture", () => {
   );
   assert.ok(
     sqlxPrepareFixtureFindings(
-      dbTest.replace(
-        '        echo "db-test: cargo-sqlx must exactly match the locked sqlx library" >&2\n' +
-          "        exit 69",
-        '        echo "db-test: cargo-sqlx must exactly match the locked sqlx library" >&2\n' +
-          "        :",
+      mutateSqlxBranch((branch) =>
+        branch.replace(
+          '        echo "db-test: cargo-sqlx must exactly match the locked sqlx library" >&2\n' +
+            "        exit 69",
+          '        echo "db-test: cargo-sqlx must exactly match the locked sqlx library" >&2\n' +
+            "        :",
+        ),
       ),
     ).some((finding) => finding.includes("mutates before its version proof")),
   );
   assert.ok(
     sqlxPrepareFixtureFindings(
-      dbTest.replace(
-        '      && [ "$sqlx_cli_banner" = "sqlx-cli-sqlx $sqlx_library_version" ] || {',
-        '      && [ "$sqlx_cli_banner" = "sqlx-cli-sqlx $sqlx_library_version" ] && {',
+      mutateSqlxBranch((branch) =>
+        branch.replace(
+          '      && [ "$sqlx_cli_banner" = "sqlx-cli-sqlx $sqlx_library_version" ] || {',
+          '      && [ "$sqlx_cli_banner" = "sqlx-cli-sqlx $sqlx_library_version" ] && {',
+        ),
       ),
     ).some((finding) => finding.includes("mutates before its version proof")),
   );
+});
+
+test("authority fingerprints use one isolated report-only catalogue snapshot", () => {
+  const dbTest = readFileSync(DB_TEST, "utf8");
+  const runtimeRole = readFileSync(
+    fileURLToPath(
+      new URL("../crates/synveda-store/src/runtime_role.rs", import.meta.url),
+    ),
+    "utf8",
+  );
+  assert.deepEqual(authorityFingerprintFixtureFindings(dbTest, runtimeRole), []);
+
+  for (const mutated of [
+    dbTest.replace(
+      "  authority-fingerprints|sqlx-prepare) fast_fixture=true ;;",
+      "  sqlx-prepare) fast_fixture=true ;;",
+    ),
+    dbTest.replace(
+      'if [ "$db_test_task" = authority-fingerprints ] && [ "$#" -ne 0 ]; then',
+      'if [ "$db_test_task" = sqlx-prepare ] && [ "$#" -ne 0 ]; then',
+    ),
+    dbTest.replace(
+      "      SYNVEDA_REPORT_AUTHORITY_FINGERPRINTS=1 \\\n",
+      "      SYNVEDA_REPORT_AUTHORITY_FINGERPRINTS=2 \\\n",
+    ),
+    dbTest.replace(
+      "      SYNVEDA_TEST_DATABASE_URL_FILE=$main_gateway_file \\\n",
+      "      SYNVEDA_TEST_DATABASE_URL_FILE=$main_worker_file \\\n",
+    ),
+    dbTest.replace(
+      "runtime_role::tests::report_live_catalog_fingerprints",
+      "runtime_role::tests::live_catalog_fingerprints_match_the_revision_constants",
+    ),
+    dbTest.replace(
+      '  if [ "$db_test_task" != authority-fingerprints ]; then',
+      '  if [ "$db_test_task" = authority-fingerprints ]; then',
+    ),
+    dbTest.replace(
+      '  if [ "$db_test_task" = authority-fingerprints ]; then\n',
+      '  if [ "$db_test_task" = authority-fingerprints ]; then\n' +
+        "    cargo check -p synveda-store\n",
+    ),
+    dbTest.replace(
+      '  if [ "$db_test_task" = authority-fingerprints ]; then\n',
+      '  if [ "$db_test_task" = authority-fingerprints ]; then\n' +
+        "    cleanup_successful_fixture\n    exit 0\n",
+    ),
+  ]) {
+    assert.notDeepEqual(authorityFingerprintFixtureFindings(mutated, runtimeRole), []);
+  }
+
+  for (const mutated of [
+    runtimeRole.replace(
+      '#[ignore = "run only through the isolated authority-fingerprint fixture"]',
+      "",
+    ),
+    runtimeRole.replace(
+      "        configure_authority_snapshot_connection(&mut authority)\n",
+      "        verify_session_safety_connection(&mut authority)\n",
+    ),
+    runtimeRole.replace(
+      '            Ok("1"),\n' +
+        '            "the authority fingerprint reporter requires its exact harness gate"',
+      '            Ok("yes"),\n' +
+        '            "the authority fingerprint reporter requires its exact harness gate"',
+    ),
+    runtimeRole.replace(
+      '        let roles = live_test_roles().expect("the exact database role contract is required");',
+      '        let roles = DatabaseRoles::parse_json("{}").expect("unchecked roles");',
+    ),
+    runtimeRole.replace(
+      '            "authority-fingerprints baseline_revision={} application_acl={application_acl} routine_catalog={routine_catalog} trigger_catalog={trigger_catalog} forced_rls={forced_rls}",',
+      '            "authority-fingerprints baseline_revision={}",',
+    ),
+  ]) {
+    assert.notDeepEqual(authorityFingerprintFixtureFindings(dbTest, mutated), []);
+  }
 });
 
 test("the lifecycle wrong-cluster witness is genuine and leaves no peer state", () => {
@@ -989,6 +2582,18 @@ test("the lifecycle wrong-cluster witness is genuine and leaves no peer state", 
       compose,
     ).some((finding) => finding.includes("generated independently")),
   );
+  for (const marker of [
+    "SYNVEDA_COMPOSE_PROJECT_SUFFIX=acceptance-$state_token",
+    "SYNVEDA_DATABASE_AUTHORITY_DIR=$state_dir/generator/$generator_project/database-authority",
+    "SYNVEDA_KEYCLOAK_PUBLIC_GATE_DIR=$state_dir/generator/$generator_project/keycloak-public-gate",
+  ]) {
+    assert.ok(
+      lifecyclePeerWitnessFindings(dbTest.replace(marker, "REMOVED_GENERATOR_MARKER"), compose).some(
+        (finding) => finding.includes("secret-generator state is not fixture-local"),
+      ),
+      `fixture-local generator marker escaped: ${marker}`,
+    );
+  }
 });
 
 test("evaluation signal traps preserve status and clean exactly once", () => {
@@ -1112,6 +2717,8 @@ cleanup_runtime() {
 trap cleanup_runtime EXIT
 
 for fixture_name in \
+  SYNVEDA_DB_TEST_MAIN_DATA_NETWORK SYNVEDA_DB_TEST_LIFECYCLE_DATA_NETWORK \
+  SYNVEDA_DB_TEST_MAIN_HOST_NETWORK SYNVEDA_DB_TEST_LIFECYCLE_HOST_NETWORK \
   SYNVEDA_DB_TEST_MAIN_DATA_SUBNET SYNVEDA_DB_TEST_LIFECYCLE_DATA_SUBNET \
   SYNVEDA_DB_TEST_MAIN_HOST_SUBNET SYNVEDA_DB_TEST_LIFECYCLE_HOST_SUBNET \
   SYNVEDA_DB_TEST_ROLES_FILE SYNVEDA_DB_TEST_LIFECYCLE_ROLES_FILE \

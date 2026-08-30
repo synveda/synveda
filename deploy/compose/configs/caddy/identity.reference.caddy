@@ -5,15 +5,23 @@ https://{$SYNVEDA_AUTH_HOST} {
 	request_body {
 		max_size 2MB
 	}
-	handle /realms/synveda/* {
+	@identity_ready {
+		path /realms/synveda/.well-known/openid-configuration /realms/synveda/protocol/openid-connect/auth /realms/synveda/protocol/openid-connect/token /realms/synveda/protocol/openid-connect/certs /realms/synveda/protocol/openid-connect/logout /realms/synveda/protocol/openid-connect/logout/logout-confirm /realms/synveda/login-actions/* /realms/synveda/account /realms/synveda/account/* /resources/*
+		file {
+			root /run/synveda/keycloak-public-gate/current
+			try_files cpr45-keycloak-realm-v3.ready
+		}
+	}
+	@identity_path path /realms/synveda/.well-known/openid-configuration /realms/synveda/protocol/openid-connect/auth /realms/synveda/protocol/openid-connect/token /realms/synveda/protocol/openid-connect/certs /realms/synveda/protocol/openid-connect/logout /realms/synveda/protocol/openid-connect/logout/logout-confirm /realms/synveda/login-actions/* /realms/synveda/account /realms/synveda/account/* /resources/*
+	handle @identity_ready {
 		reverse_proxy keycloak:8080 {
 			import synveda_upstream
 		}
 	}
-	handle /resources/* {
-		reverse_proxy keycloak:8080 {
-			import synveda_upstream
-		}
+	handle @identity_path {
+		header Cache-Control "no-store"
+		header Pragma "no-cache"
+		respond 503
 	}
 	handle {
 		respond 404

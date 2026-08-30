@@ -240,23 +240,17 @@ volumes:
 
 networks:
   main-data:
-    internal: true
-    ipam:
-      config:
-        - subnet: ${SYNVEDA_DB_TEST_MAIN_DATA_SUBNET:?set SYNVEDA_DB_TEST_MAIN_DATA_SUBNET}
+    external: true
+    name: ${SYNVEDA_DB_TEST_MAIN_DATA_NETWORK:?set SYNVEDA_DB_TEST_MAIN_DATA_NETWORK}
   lifecycle-data:
-    internal: true
-    ipam:
-      config:
-        - subnet: ${SYNVEDA_DB_TEST_LIFECYCLE_DATA_SUBNET:?set SYNVEDA_DB_TEST_LIFECYCLE_DATA_SUBNET}
+    external: true
+    name: ${SYNVEDA_DB_TEST_LIFECYCLE_DATA_NETWORK:?set SYNVEDA_DB_TEST_LIFECYCLE_DATA_NETWORK}
   main-host:
-    ipam:
-      config:
-        - subnet: ${SYNVEDA_DB_TEST_MAIN_HOST_SUBNET:?set SYNVEDA_DB_TEST_MAIN_HOST_SUBNET}
+    external: true
+    name: ${SYNVEDA_DB_TEST_MAIN_HOST_NETWORK:?set SYNVEDA_DB_TEST_MAIN_HOST_NETWORK}
   lifecycle-host:
-    ipam:
-      config:
-        - subnet: ${SYNVEDA_DB_TEST_LIFECYCLE_HOST_SUBNET:?set SYNVEDA_DB_TEST_LIFECYCLE_HOST_SUBNET}
+    external: true
+    name: ${SYNVEDA_DB_TEST_LIFECYCLE_HOST_NETWORK:?set SYNVEDA_DB_TEST_LIFECYCLE_HOST_NETWORK}
 
 secrets:
   postgres_owner_password:

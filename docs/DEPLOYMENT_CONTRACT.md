@@ -31,9 +31,14 @@ compose.yaml             provider-neutral proxy, product, migration and Collecto
 compose.reference.yaml   HTTPS, resource bounds and reference restart policy
 compose.dev.yaml         source builds, explicit HTTP and loopback operator UI
 compose.postgres.yaml    bundled PostgreSQL and idempotent role/database bootstrap
-compose.keycloak.yaml    bundled Keycloak and database bootstrap; realm convergence remains open
-compose.external.yaml    external dependency configuration and diagnostics, no provider services
-compose.apalis.yaml      atomic experimental routing plus dispatcher/executor
+compose.keycloak.yaml    bundled Keycloak, isolated database bootstrap and realm convergence
+compose.keycloak-postgres.yaml             bundled shared-cluster ordering/secret bridge
+compose.external-postgres.yaml             external Synveda database egress bridge
+compose.keycloak-external-postgres.yaml    external Keycloak database egress bridge
+compose.external.yaml    external-provider labels, no provider services
+compose.apalis.yaml      planned experimental routing plus dispatcher/executor; not yet present
+compose.db-test.yaml     isolated database acceptance fixture, not an operator topology
+docker-compose.yml       legacy Rauthy/Temporal development stack retained only until cutover acceptance
 .env.example             non-secret selectors and hostnames only
 configs/                 proxy, Collector, identity and monitoring config
 secrets.example/         filenames and generation instructions, never values
@@ -53,9 +58,11 @@ their simultaneous use. Provider fragments are then selected independently:
 | external PostgreSQL, bundled Keycloak (configuration only) | one runtime overlay, `compose.keycloak.yaml`, `compose.keycloak-external-postgres.yaml`, `compose.external-postgres.yaml`, `compose.external.yaml` |
 | fully external (configuration only while PostgreSQL is external) | one runtime overlay, `compose.external-postgres.yaml`, `compose.external.yaml` |
 
-`compose.external.yaml` supplies mounts and diagnostics for whichever
-dependencies are external; it never defines a service named `postgres` or
-`keycloak`. External PostgreSQL rows currently prove configuration shape only.
+Base `compose.yaml` owns product mounts, database preflight and issuer
+diagnostics. `compose.external.yaml` adds provider labels only and never defines
+a service named `postgres` or `keycloak`; the two external-PostgreSQL bridges
+attach only the required egress. External PostgreSQL rows currently prove
+configuration shape only.
 The database bootstrap refuses before mounted-input reads or `psql` whenever
 `SYNVEDA_POSTGRES_BUNDLED_CLUSTER=false`: the compiled SQLx surface and
 bootstrap transport do not yet have an accepted authenticated-TLS contract.
@@ -73,7 +80,8 @@ configuration gate rejects a routed kind without its services or those
 services without matching routing. The proxy, gateway, core worker, migration,
 identity diagnostic and Collector are never profile-gated.
 Bundled PostgreSQL and Keycloak are likewise unprofiled when their fragments
-are selected. The repository pins a minimum Docker Compose version and tests
+are selected. The repository requires Docker Compose 2.33.1 or newer for
+deterministic `gw_priority` handling and tests
 every row of the table with `docker compose config`, the expected service set,
 ports, secret mounts and dependency graph. Reference and development use fixed
 project names (`synveda-reference` and `synveda-development`); acceptance runs
@@ -95,9 +103,9 @@ digest, OCI index digest and accepted platform digests.
 
 | Image role | Required contents | Commands |
 |---|---|---|
-| Synveda product | `synveda`, `synveda-gateway`, `synveda-worker`; console static bundle; embedded policies; Apalis adapter compiled but disabled | `synveda-container gateway`; `worker`; `migrate`; `operation-dispatcher`; `apalis-worker` |
+| Synveda product | Current: `synveda`, `synveda-gateway`, `synveda-worker`, `synveda-oidc-diagnostic`; console static bundle and embedded policies. Planned CPR-45: experimental Apalis adapter, disabled by default | Current launcher roles: `gateway`; `worker`; `issuer-diagnostic`; `database-preflight`; `migrate`; `probe gateway\|worker live\|ready`. Planned, not yet shipped: `operation-dispatcher`; `apalis-worker` |
 | PostgreSQL | PostgreSQL 17, pgvector, `btree_gin`, pinned pgBackRest | server entrypoint; database/role bootstrap; `synveda-backup` archive/check/create/verify/expire/restore commands |
-| Keycloak | Official Keycloak 26.7.2 optimized build with PostgreSQL, health and metrics; no added provider/package | `kc.sh start --optimized` through a secret-file entrypoint; one-shot supported Admin API convergence |
+| Keycloak | Official Keycloak 26.7.2 optimized build with PostgreSQL, health and metrics; no added provider/package; reviewed standalone convergence/readback helpers | `kc.sh start --optimized` through a secret-file entrypoint; long-running `synveda-realm-supervise` controller with a bounded generation-fenced `synveda-realm-converge` child |
 | Reverse proxy | Pinned Apache-2.0 Caddy release and reviewed configuration | `caddy run --config /etc/caddy/Caddyfile --adapter caddyfile` |
 | Telemetry | Pinned OTel Collector Contrib | `otelcol-contrib --config=/etc/otelcol/config.yaml` |
 | Optional visibility | Prometheus, Jaeger and Perses at reviewed digests | upstream commands with bounded storage/retention |
@@ -125,11 +133,13 @@ acceptance below.
 
 Stateless images run with the validated numeric
 `SYNVEDA_RUNTIME_UID:SYNVEDA_RUNTIME_GID` recorded in the environment manifest;
-the generator defaults to the non-root operator's current ids and refuses
-zero. This lets mode-0600 bind-mounted files remain readable without relying
-on Compose's unimplemented local-secret uid/gid/mode remapping. The product
-image remains compatible with an arbitrary non-root UID for later OpenShift
-packaging.
+the Compose selector defaults these values to the operator's current ids,
+refuses zero and verifies that private directories and mode-0600 files have
+that exact owner. The secret generator must therefore run as the same non-root
+operator that renders the deployment. This lets bind-mounted files remain
+readable without relying on Compose's unimplemented local-secret uid/gid/mode
+remapping. The product image remains compatible with an arbitrary non-root UID
+for later OpenShift packaging.
 Runtime roots are read-only with explicit `/tmp` tmpfs/writable data mounts.
 Base image tags may appear only beside verified digests in build arguments or
 inventories. Apalis does not create a second product image or deployment
@@ -141,7 +151,7 @@ Only the reverse proxy publishes host ports in reference mode.
 
 | Service | Container port | Exposure | Health/readiness |
 |---|---:|---|---|
-| reverse proxy | 80, 443 | public reference; loopback-only development | process/config health; upstream probes are separate |
+| reverse proxy | selected development port (default 8080); 80, 443 reference | public reference; loopback-only development | process/config health; upstream probes are separate |
 | gateway | 8120 | private application network | current `/healthz` process and `/readyz` PostgreSQL + schema epoch; reference target adds drain-state withdrawal before shutdown |
 | worker | 8121 | bound to container loopback for self-health only; not host/network published | `/healthz` process; `/readyz` lifecycle, scheduler heartbeat, database/schema and exact runtime-role state; permanent epoch/role drift faults the supervised process; `/metrics` is transitional |
 | PostgreSQL | 5432 | private data networks | `pg_isready` plus schema/role sentinels |
@@ -154,8 +164,13 @@ Only the reverse proxy publishes host ports in reference mode.
 | Perses | 8080 | loopback/operator route only | upstream health |
 | Apalis board | implementation-defined | operator-only, disabled by default | never a customer/public route |
 
-Development binds explicit HTTP only to loopback. Reference/playground binds
-80/443 and requires configured DNS and certificates or ACME. PostgreSQL,
+Development binds explicit HTTP only to loopback. Its validated unprivileged
+port from 1024 through 65535, excluding Caddy's reserved development HTTPS
+convention port 8443, is identical inside and outside the proxy so the browser,
+issuer diagnostic and gateway use one exact issuer authority; a host-only port
+translation is invalid. Reference/playground binds 80/443 and
+requires configured DNS and HTTPS. Certificate-file mode is the
+only current render; ACME remains an unimplemented target mode. PostgreSQL,
 Keycloak management/admin/master realm, worker health, receivers, metrics,
 dashboards, board and backup operations are never public. pgBackRest is
 embedded in the PostgreSQL image for POSIX/S3 repository operation; the
@@ -170,32 +185,44 @@ bundled postgres healthy -> database bootstrap complete -> Synveda migrate compl
 external postgres diagnostic ---------------------------> Synveda migrate complete
 Synveda migrate complete -> core worker healthy
 
-bundled/external Keycloak database sentinel -> Keycloak ready -> realm convergence
-external OIDC diagnostic -----------------------------------------------+
-realm convergence ------------------------------------------------------>+ issuer diagnostic complete
-Synveda migrate complete + issuer diagnostic complete -> gateway ready -> reverse proxy
+bundled Keycloak database sentinel -> Keycloak ready -> realm convergence
+realm convergence -> reverse-proxy config healthy -> bundled issuer diagnostic
+external reverse-proxy config healthy + external issuer over application-egress
+                                         -> external issuer diagnostic
+Synveda migrate complete + issuer diagnostic complete -> gateway ready -> usable app route
 
 Apalis schema migration complete -> operation dispatcher + Apalis executor
 product processes and Keycloak -> Collector -> optional visibility/external OTLP
 ```
 
-The current additive checkpoint implements the bundled database bootstrap but
-not realm convergence or the issuer diagnostic. Its external-PostgreSQL
-bootstrap path deliberately stops before the graph above until authenticated
-TLS and pre-provisioned-provider acceptance are implemented.
+The current additive checkpoint implements the bundled database bootstrap,
+fail-closed realm convergence and the issuer-diagnostic service contract. The
+canonical selector remains configuration-only, so this graph is not yet
+clean-start acceptance evidence. Its external-PostgreSQL bootstrap path
+deliberately stops before runtime startup until authenticated TLS and
+pre-provisioned-provider acceptance are implemented.
 
-Base one-shot services retry their dependency with a bounded deadline rather
-than naming a provider that may be external. Provider fragments add
+The issuer diagnostic retries retryable OIDC availability through one bounded
+deadline without naming a provider. Database preflight and migration have
+bounded operations but do not poll their dependency. Provider fragments add
 `depends_on` health/completion conditions when the dependency is bundled.
-Gateway is not started until migration and issuer diagnostics succeed; the
-proxy waits for gateway health. Collector or visibility failure never gates
-product readiness.
+Gateway is not started until migration and issuer diagnostics succeed. In
+bundled-Keycloak mode the proxy starts only after convergence; in external-OIDC
+mode it may start immediately. Proxy health proves only that Caddy accepted the
+closed route configuration. The product issuer diagnostic, not proxy health,
+proves discovery, exact issuer and usable JWKS. Bundled mode reaches the
+browser-visible issuer through the proxy alias; external mode reaches the
+provider directly over `application-egress` and has no Synveda identity vhost.
+The application route can remain unavailable until gateway readiness. Collector
+or visibility failure never gates product readiness.
 
-Reference long-running services use `restart: unless-stopped`; one-shot
-migration/bootstrap/convergence/backup jobs use `restart: "no"` and idempotent
-locks/sentinels. Development defaults to `restart: "no"` so failures remain
-visible. Every long-running process has init/signal forwarding, bounded stop
-grace, PID/resource limits and a tested drain path. The core worker and Apalis
+Reference long-running services, including the Keycloak convergence
+supervisor, use `restart: unless-stopped`; one-shot migration, database
+bootstrap and issuer-diagnostic jobs use `restart: "no"` and idempotent
+locks/sentinels. Backup jobs will use the same one-shot policy when that slice
+lands. Development defaults to `restart: "no"` so failures remain visible.
+Every long-running process has init/signal forwarding, bounded stop grace,
+PID/resource limits and a tested drain path. The core worker and Apalis
 executor are mutually exclusive for the `skill_validation@1` operation route:
 `SYNVEDA_OPERATION_PROVIDER_SKILL_VALIDATION=postgres` is the default;
 `compose.apalis.yaml` changes that single value to `apalis` and starts the
@@ -238,14 +265,48 @@ path or unbounded project prefix.
 ## Networks
 
 - `public-edge`: reverse proxy only, plus explicit public ingress.
-- `app-backend`: proxy and gateway.
-- `identity-backend`: proxy and Keycloak.
-- `synveda-data`: gateway, worker, migration/backup jobs and PostgreSQL.
-- `keycloak-data`: Keycloak and PostgreSQL only.
-- `telemetry`: product processes and Collector.
-- `keycloak-management`: Keycloak and Collector only; management scrape/probe
-  traffic, with no published port.
+- `app-backend`: proxy, gateway and issuer diagnostic.
+- `identity-backend`: proxy, Keycloak and the realm-convergence supervisor.
+- `synveda-data`: PostgreSQL, Synveda database bootstrap/preflight/migration,
+  gateway and worker; future backup jobs attach only when implemented.
+- `keycloak-data`: PostgreSQL, Keycloak database bootstrap and Keycloak.
+- `telemetry`: gateway, worker and Collector.
+- `keycloak-management`: Keycloak, the realm-convergence supervisor and
+  Collector; management proof/scrape traffic, with no published port.
+- `application-egress`: issuer diagnostic, gateway and worker; external
+  PostgreSQL mode also attaches database preflight and migration.
+- `identity-egress`: only bundled-Keycloak database bootstrap and Keycloak in
+  the explicit external-PostgreSQL row.
+- `telemetry-egress`: Collector only.
 - Optional isolated `semantic`, `operations` and `restore-test` networks.
+
+Compose consumes one operator-facing `SYNVEDA_COMPOSE_IPV4_POOL=A.B.C.0/24`.
+The selector accepts only a canonical RFC1918 `/24` and derives fixed `/28`
+slots: identity `.0`, public `.16`, application `.32`, Synveda data `.48`,
+Keycloak data `.64`, Keycloak management `.80`, telemetry `.96`, application
+egress `.112`, identity egress `.128` and telemetry egress `.144`. The `.160`,
+`.176` and `.192` slots are reserved for semantic, operations and restore-test;
+three slots remain spare. Every rendered network has an explicit subnet and
+gateway. The intended public or provider-facing attachment has
+`gw_priority: 1` on each multi-homed service; ordinary network `priority` is
+not a default-route control.
+
+Identity uses gateway `+1`, the proxy's sole static address `+2`, and the upper
+`+8/29` dynamic range. This keeps Keycloak and convergence allocations away
+from the trusted proxy address without marking that same address as an IPAM
+auxiliary address. No other service has a static container address.
+
+The baked pool is an unsuffixed development convenience, not a collision-free
+allocation. Reference and acceptance-suffixed projects require an explicit
+pool, and concurrent or retained projects require distinct recorded pools.
+Configuration rendering stays daemon-independent. The future lifecycle `up`
+boundary must first compare numeric CIDR intervals against all Engine networks,
+accept only exact label-owned same-project reruns, and refuse stale or foreign
+overlaps without deleting anything; Docker network creation remains the final
+race authority. Operators must also avoid host/VPN and external-dependency
+routes. Docker Desktop keeps bridge routes inside its VM, so host-route
+inspection alone is insufficient and functional dependency smoke tests remain
+required.
 
 PostgreSQL is the only service joining both data networks in the shared-server
 reference. Gateway and Keycloak never share a data network. Docker networks
@@ -254,9 +315,12 @@ any Keycloak listener, so privacy claims mean no host publication and no proxy
 route; configuration/inspection tests assert both. The proxy owns the
 public application and issuer aliases on the networks that need them so
 gateway and browser use identical issuer bytes without routing the gateway
-through host loopback. Caddy's administration endpoint is disabled. ACME mode
-uses a dedicated persistent `caddy-data` volume; certificate-file mode mounts
-only the selected certificate and private-key files read-only.
+through host loopback. Caddy's administration endpoint is disabled. The current
+certificate-file mode mounts only the selected certificate and private-key
+files read-only. Future ACME mode requires a dedicated persistent
+`caddy-data` volume and acceptance before it can be selected.
+`internal: true` removes external container egress; it is not a security
+boundary against an authorised host/Engine operator.
 
 ## Persistent data and ownership
 
@@ -360,13 +424,14 @@ materialise the same per-service paths, but does not change setting meaning.
 | Skill-validation delivery | `SYNVEDA_OPERATION_PROVIDER_SKILL_VALIDATION=postgres|apalis` | queue database files; `apalis` is accepted only with the atomic Apalis Compose fragment |
 | application OTLP | `OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317` | none; the private hop is unauthenticated only inside `telemetry` |
 | external OTLP | `SYNVEDA_EXTERNAL_OTLP_ENDPOINT` | `SYNVEDA_EXTERNAL_OTLP_CA_FILE=/run/secrets/otel_ca`; `SYNVEDA_EXTERNAL_OTLP_HEADERS_FILE=/run/secrets/otel_headers` |
-| custom CA | `SYNVEDA_CA_BUNDLE_FILE=/etc/synveda/ca/ca-bundle.pem` | read-only config mount; never global host mutation |
-| outbound proxy | `NO_PROXY` host list | `SYNVEDA_HTTP_PROXY_FILE=/run/secrets/http_proxy`; `SYNVEDA_HTTPS_PROXY_FILE=/run/secrets/https_proxy` |
+| custom CA | reserved; not accepted by the current application schema | no supported application mount until OIDC/provider clients prove explicit CA loading |
+| outbound proxy | ambient proxy variables are deliberately ignored by OIDC and CLI clients | explicit proxy-file settings remain reserved and rejected until a bounded consumer and no-proxy contract ship |
 | object store | `SYNVEDA_OBJECT_STORE_ENDPOINT`, `SYNVEDA_OBJECT_STORE_REGION`, `SYNVEDA_OBJECT_STORE_BUCKET`, `SYNVEDA_OBJECT_STORE_PATH_STYLE` | `SYNVEDA_OBJECT_STORE_ACCESS_KEY_FILE=/run/secrets/object_store_access_key`; `SYNVEDA_OBJECT_STORE_SECRET_KEY_FILE=/run/secrets/object_store_secret_key`; `SYNVEDA_OBJECT_STORE_SESSION_TOKEN_FILE=/run/secrets/object_store_session_token`; rejected unless an accepted feature enables the interface |
 | SMTP | reserved `SYNVEDA_SMTP_HOST`, `PORT`, `FROM` | reserved `SYNVEDA_SMTP_USERNAME_FILE` and `PASSWORD_FILE`; all are rejected until an accepted consumer exists |
-| reference TLS | `SYNVEDA_TLS_MODE=acme|files`, public hostnames | `SYNVEDA_TLS_CERT_FILE=/run/secrets/tls_cert`; `SYNVEDA_TLS_KEY_FILE=/run/secrets/tls_key` |
+| reference TLS | `SYNVEDA_TLS_MODE=files` currently; `acme` reserved and rejected, public hostnames | `SYNVEDA_TLS_CERT_FILE=/run/secrets/tls_cert`; `SYNVEDA_TLS_KEY_FILE=/run/secrets/tls_key` |
 | Keycloak database | `KC_DB_URL`, `KC_DB_USERNAME` | `KC_DB_PASSWORD_FILE=/run/secrets/keycloak_database_password` |
 | Keycloak bootstrap | none | `KC_BOOTSTRAP_ADMIN_USERNAME_FILE=/run/secrets/keycloak_admin_username`; `KC_BOOTSTRAP_ADMIN_PASSWORD_FILE=/run/secrets/keycloak_admin_password` |
+| Keycloak convergence | direct password values are forbidden | `SYNVEDA_KEYCLOAK_CONVERGENCE_PASSWORD_FILE=/run/secrets/keycloak_convergence_admin_password` |
 | PostgreSQL bootstrap | `POSTGRES_USER`, database/role names | `POSTGRES_PASSWORD_FILE=/run/secrets/postgres_owner_password`; exact role files `/run/secrets/synveda_migrator_password`, `/run/secrets/synveda_gateway_password`, `/run/secrets/synveda_worker_password`, `/run/secrets/keycloak_database_password`, `/run/secrets/apalis_migrator_password`, `/run/secrets/apalis_runtime_password` |
 | backup | `SYNVEDA_BACKUP_REPOSITORY=posix|s3`, `SYNVEDA_BACKUP_POSIX_PATH`, `SYNVEDA_BACKUP_S3_ENDPOINT`, `SYNVEDA_BACKUP_S3_REGION`, `SYNVEDA_BACKUP_S3_BUCKET`, `SYNVEDA_BACKUP_S3_PATH_STYLE` | `SYNVEDA_BACKUP_REPOSITORY_KEY_FILE=/run/secrets/pgbackrest_repository_key`; `SYNVEDA_BACKUP_S3_ACCESS_KEY_FILE=/run/secrets/backup_s3_access_key`; `SYNVEDA_BACKUP_S3_SECRET_KEY_FILE=/run/secrets/backup_s3_secret_key`; `SYNVEDA_BACKUP_S3_SESSION_TOKEN_FILE=/run/secrets/backup_s3_session_token` |
 | demo identities | non-secret usernames only under `demo` | `SYNVEDA_DEMO_ADMIN_PASSWORD_FILE=/run/secrets/demo_admin_password`; `SYNVEDA_DEMO_MEMBER_PASSWORD_FILE=/run/secrets/demo_member_password` |
@@ -398,12 +463,14 @@ Secret visibility is deny-by-default:
 | Service/job | Sensitive files it may mount |
 |---|---|
 | PostgreSQL server | PostgreSQL owner password; pgBackRest repository/S3 credentials needed by `archive_command` |
-| database bootstrap | PostgreSQL owner plus the fixed role-password set it converges; bundled shared-cluster Synveda preflight additionally receives the Keycloak database password only to prove the complete set is pairwise distinct |
+| database bootstrap | PostgreSQL owner plus the fixed role-password set it converges; the bundled shared-cluster Synveda bootstrap additionally receives the Keycloak database password only to prove the complete set is pairwise distinct |
+| database preflight | all three Synveda migrator/gateway/worker database URL files so it can prove their exact independent authorities; never the PostgreSQL owner password |
 | Synveda migrate | Synveda migration-owner database URL |
-| gateway | gateway runtime database URL, issuer config/CA, Synveda KMS reference/key, only gateway-used provider credentials |
+| issuer diagnostic | issuer configuration only; credential values are forbidden in that sensitive mounted file |
+| gateway | gateway runtime database URL, issuer config, Synveda KMS reference/key, only gateway-used provider credentials; application custom-CA loading is not yet supported |
 | core worker | worker runtime database URL, Synveda KMS reference/key, only credentials required by its owned work |
 | Keycloak | Keycloak database password and first-start bootstrap administrator files |
-| Keycloak convergence | bootstrap administrator files; demo user passwords only under `demo` |
+| Keycloak convergence | first-start bootstrap administrator files and the persistent scoped convergence-identity password; demo user passwords only under `demo` |
 | operation dispatcher | Synveda dispatcher database URL and Apalis runtime database URL; no provider/KMS content secret |
 | Apalis executor | Synveda operation-worker database URL and Apalis runtime database URL; only canary-required key material |
 | Apalis migration | Apalis migration-owner database URL only |
@@ -416,8 +483,10 @@ backup credentials are absent from gateway, core worker, dispatcher and Apalis
 executor containers.
 
 `.env.example` contains no password, token, key, confidential DSN or usable
-demo credential. The generator uses OS entropy, `umask 077`, mode `0600`,
-refuses overwrite without `--force`, and prints filenames only.
+demo credential. The generator uses OS entropy, `umask 077`, mode `0600`, and
+prints filenames only. Replacement requires both `--force` and the exact
+project confirmation; the old set is preserved as `previous-secrets` and this
+is explicitly not a credential-rotation workflow.
 
 ## OIDC contract
 
@@ -435,19 +504,25 @@ refuses overwrite without `--force`, and prints filenames only.
 - Discovery must return the exact issuer, S256 support and an allowed signing
   algorithm. Synveda allow-lists RS256/384/512 and validates signature,
   issuer, audience, time claims, subject and configured tenant binding.
-- The public client has exact redirect URI/origin and an explicit `synveda`
-  audience mapper. `sub` is mandatory. Email/name follow the current JIT
+- Discovery cannot prove client-registration-specific token-endpoint
+  behaviour. The diagnostic therefore does not infer public-client support
+  from `token_endpoint_auth_methods_supported`; a real authorization-code
+  exchange is required before a provider is claimed conforming.
+- The public client has exact redirect URI/origin and an explicit
+  `synveda-api` audience mapper. `sub` is mandatory. Email/name follow the current JIT
   validation contract. The configured group claim is optional for generic
   authentication: absence maps to an empty set and can never seed the first
   administrator.
 - `synveda-admins` is a one-time, race-safe initial-administrator signal only.
   Later authority is a governed Synveda grant; provider roles never become
   application roles.
-- The proxy publishes only required realm discovery/protocol/account/resource
-  paths. `/admin`, the master realm, health, metrics and management remain
-  private.
+- The bundled identity route forwards only discovery; authorization, token,
+  JWKS and logout endpoints; logout confirmation; realm login actions; realm
+  account pages; and required `/resources/*` assets. Other realm paths,
+  `/admin`, the master realm, health, metrics and management remain private.
 - External OIDC mounts the same issuer schema and runs the same gateway image.
-  Provider support is earned by the common conformance suite, not its name.
+  It renders no Synveda identity host or bundled-provider route. Provider
+  support is earned by the common conformance suite, not its name.
 
 The bundled provider is realm `synveda` with public client `synveda`.
 Standard flow and PKCE method S256 are enabled; direct-access grants, implicit
@@ -455,19 +530,24 @@ flow, client service accounts and client secrets are disabled. Its only
 redirect is `${SYNVEDA_PUBLIC_URL}/auth/callback` and its only web origin is
 the exact public origin. The CLI continues through the gateway's bounded
 loopback handoff; the IdP never accepts a wildcard loopback redirect. The
-`groups` protocol mapper emits the non-full-path group claim, and an audience
-mapper emits `synveda`. `synveda-admins` is a bootstrap group, not an
-application-role catalogue. Demo users and their memberships are converged
-only when the `demo` profile is explicitly selected.
+`groups` protocol mapper emits the leaf name `synveda-admins`, which the
+provider-neutral group parser recognises, and an access-token-only audience
+mapper emits `synveda-api`. `synveda-admins` is a bootstrap group, not an
+application-role catalogue. The current checkpoint does not create a target-
+realm user: the planned `demo` profile has no user-convergence service yet, and
+there is no accepted manual administration path. A deterministic first-user or
+demo-user provisioning boundary is therefore required before clean-volume
+browser-login acceptance.
 
 Keycloak is built from the official 26.7.2 image with `--db=postgres`, health
 and metrics, and no preview feature/provider. It runs only
 `start --optimized`. Runtime sets a full fixed `KC_HOSTNAME`, private HTTP on
 8080 behind the proxy, management port 9000, `KC_PROXY_HEADERS=xforwarded` and
-an explicit `KC_PROXY_TRUSTED_ADDRESSES` containing only the proxy's fixed
-identity-network address. Non-secret `SYNVEDA_IDENTITY_SUBNET` and
-`SYNVEDA_PROXY_IDENTITY_ADDRESS` are validated as a private CIDR and one member
-address before rendering; no other service may use that address. The
+an explicit `KC_PROXY_TRUSTED_ADDRESSES` containing only the proxy's derived
+fixed identity-network address as one `/32`. The non-secret
+`SYNVEDA_COMPOSE_IPV4_POOL` is validated before all network addresses are
+derived; the identity dynamic range excludes the proxy and no other service may
+declare a static address. The
 reference limit is 2 GiB memory and its documented host minimum includes that
 bound. The exact upstream manifest digest and each built platform digest are
 release inputs; a version tag without captured digest cannot pass acceptance.
@@ -480,16 +560,113 @@ representations. Development may explicitly relax TLS for its HTTP origin;
 reference/playground requires external TLS. Changes to these values are
 versioned convergence input, not mutable console folklore.
 
-The public proxy allowlists only `/realms/synveda/*` and required static
-`/resources/*` paths for login/account flows. It rejects `/admin/*`,
-`/realms/master/*`, health, metrics and management paths. The browser
-administration console has no host mapping or supported route in reference
-mode. An operator uses an authenticated host shell and `docker compose exec
-keycloak kcadm.sh ...`; any later browser route requires its own accepted
-operator-auth boundary. The one-shot convergence job uses supported Admin
-APIs and the bootstrap administrator files, is idempotent, verifies the
-resulting realm/client/mapper/group fingerprint, and never treats realm export
-as backup.
+The public proxy allowlists the exact discovery, authorization, token, JWKS,
+logout, logout-confirmation, login-action, account and static-resource paths
+required by the login/account flow. It rejects every other realm path,
+`/admin/*`, `/realms/master/*`, health, metrics and management paths. The
+browser administration console has no host mapping or supported route in
+reference mode. No interactive Keycloak administration surface or canonical
+operator command is accepted yet; convergence owns the required realm state.
+Any later operator route requires its own authenticated boundary. A long-lived
+supervisor uses supported Admin APIs and mounted administrator files to launch
+one bounded, idempotent convergence child for each Keycloak process generation,
+verify the resulting managed projection and monitor management readiness. It
+never treats realm export as backup.
+
+The shared marker used by Caddy is a fail-closed startup/readiness sequencing
+aid, not an authorization boundary against the Keycloak process: Keycloak and
+the supervisor deliberately share its writer identity. Before every Keycloak
+start, the entrypoint atomically selects a fresh empty generation and withdraws
+the previous marker. A convergence child captures that exact generation and
+may publish only while it remains current; the supervisor withdraws readiness
+on startup, shutdown, failed convergence or lost management readiness and
+retires old generations. Convergence validates the complete candidate file
+before its atomic rename, so Caddy never observes an unvalidated or stale-child
+publication candidate. A compromised identity service could still mint
+accepted identities or alter this shared gate, so the mechanism is process-
+generation sequencing and availability evidence, not authentication isolation.
+Live restart and dependency-loss acceptance remain required.
+
+Convergence retires the temporary bootstrap administrator by exact user ID and
+retains one narrowly scoped master-realm identity for idempotent repair after
+restart. Its direct role set is exactly the three management roles on the
+master realm's `synveda-realm` client plus direct
+`master-realm:view-users`. Keycloak expands that read-only audit concession to
+the effective `view-users`, `query-users` and `query-groups` role closure.
+The latter is a read-only self-audit concession: it can view all master-realm
+user and group metadata, so convergence proves the complete master user
+inventory is exactly the temporary bootstrap identity plus the permanent
+identity before retirement, and exactly the permanent identity afterwards.
+It also proves the permanent user's security-relevant identity projection
+(ID, username, enabled state, email-verification state, empty attributes and
+required actions, and no service-account or user-storage federation link), no
+external-identity links visible through Keycloak's Admin API, one password
+credential, no groups, no realm roles, exactly four direct client roles and
+the exact six-role effective closure on every first, no-op and restart run.
+Keycloak filters links whose identity-provider
+alias no longer exists, so that API cannot disprove an orphaned provider-owned database row;
+operator-side master-realm/database mutation is an explicit residual rather
+than an exact-empty claim. Non-authoritative profile metadata outside the
+enumerated projection is likewise not claimed to be absent.
+
+The permanent identity has no supported public route. A short-lived
+`admin-cli` OpenID direct grant is validated for exact issuer, subject,
+audience, exact scope membership, bounded token timing and public-key
+signature. The response `session_state` and access/ID `sid` values must be one
+identical Keycloak 26.7.2 secure session identifier: exactly 24 unpadded
+URL-safe Base64 characters derived from the provider's 18-byte session-ID
+generator. User, client, role and credential resource identifiers remain
+UUIDs. Target-realm access and the enumerated master user/credential reads must
+succeed. Keycloak 26.7.2's default fine-grained-admin-v2 evaluator must refuse
+the filtered `admin-cli` client query with 403, proving that the identity lacks
+master client-list authority; master client-session statistics, realm/user
+creation, self-update and role-mapping mutation must likewise return 403.
+Keycloak deliberately permits every
+master admin role to read a reduced master-realm representation and general
+provider/feature/theme/crypto server metadata; those version-sensitive bodies
+are neither fetched nor treated as an absence oracle. The management surface
+remains private, the master realm remains dedicated, and this concession must
+be reassessed before adding other master users or custom providers. The helper
+checks the exact nine-field outer token contract, then decodes the returned
+internal refresh JWT as a pinned shape/drift check. That check requires the
+HS512/JWT header, `Refresh` type, default provider, exact issuer/client/session
+bindings, and the seven-scope refresh set: the three visible response scopes
+plus Keycloak's hidden default `web-origins`, `acr`, `roles` and `basic`
+scopes. The fresh dedicated master realm has refresh rotation disabled, so the
+exact ten-claim projection excludes `reuse_id`, `aud_x` and `sub`; any operator
+or version drift fails closed. The check binds the 1800-second refresh lifetime
+to the access token and correlates `exp - refresh_expires_in` to the bounded
+request/response window. Its HS512 payload cannot be verified through the
+public JWKS and decoded internal claims are never an authorisation input. The
+helper then revokes the refresh token, proves refresh refusal, and
+revokes any replacement refresh token returned by a contradictory success
+response. Each failure is reduced to a closed, content-free stage label:
+`token-envelope` ends before cleanup is possible, while `token-contract` and
+`refresh-contract` run only inside the cleanup guard. Probe inputs exist only
+in the Java child's command-scoped environment. Captured stdout content is
+never read; stderr is read only after its exact 39-byte bound is proved and is
+accepted only when it equals the fixed refusal line. Neither captured stream is
+emitted. Normal cleanup verifies deletion, while a deletion failure maps to
+`runtime-output` and the final convergence cleanup retries removal. A
+session cleanup failure overrides the earlier proof stage. No custom proof
+client exists. This is an explicit reference-deployment security surface, not
+a Synveda application client or domain-authorisation mechanism. Cleanup is
+established immediately after a bounded HTTP-200 JSON object yields one
+syntactically usable refresh token and before either exact token contract.
+An oversize, malformed, duplicate-key or unextractable response cannot supply a
+safe token to revoke; server-side session expiry is the bounded residual for
+that pre-extraction failure.
+
+Each exact persisted `kcadm` password-session configuration is likewise
+revoked and refresh-refused before overwrite or deletion. A closure failure
+withdraws the readiness marker, attempts target-realm quarantine, deletes the
+container-local credential material and requires server-side session expiry;
+the convergence container tmpfs is not a durable recovery channel. A killed CLI can also
+receive a server session before it persists the refresh token. Local file
+inspection cannot close or disprove either residual, so acceptance does not
+claim zero administrative sessions. The 210-second Compose stop grace exceeds
+the 56-second maximum deferred foreground proof plus the 110-second worst-case
+cleanup bound with explicit margin.
 
 The common conformance suite proves discovery, byte-exact issuer, PKCE S256,
 JWKS rotation, accepted algorithm, audience, callback and first-admin signal;
@@ -508,9 +685,11 @@ header; overwrites `X-Forwarded-For`, `X-Forwarded-Host`,
 `X-Original-*` headers; and removes
 untrusted `traceparent`, `tracestate`, `baggage`, B3, Jaeger and OpenTracing
 variants. It bounds body size, header size, upstream timeout and idle lifetime.
-Reference TLS uses certificate files or ACME; secure headers and cookie-origin
-checks are tested through the public route. Proxy configuration never turns a
-header into a principal.
+Reference TLS currently uses certificate files; bundled mode requires both
+application and identity hostnames in the certificate SAN set, while external
+OIDC requires only the application hostname. ACME, secure-header public-route
+acceptance and cookie-origin browser acceptance remain open. Proxy
+configuration never turns a header into a principal.
 
 ## Operation and worker contract
 
@@ -746,7 +925,7 @@ supported or present in a rendered service graph.
 | Dependency | Bundled reference | External mode contract | Claim boundary while CPR-45 is open |
 |---|---|---|---|
 | PostgreSQL | PostgreSQL 17 + pgvector + pgBackRest | mounted DSN/CA and schema/migration ownership | external TLS support remains unclaimed until SQLx verify-full tests pass |
-| OIDC | Keycloak 26.7.2 | issuer JSON file and custom CA | only providers passing conformance are named supported |
+| OIDC | Keycloak 26.7.2 | issuer JSON file; custom CA/proxy remain open | only providers passing a live code exchange and conformance are named supported |
 | telemetry | private Collector, optional local backends | Collector exporter to external OTLP | application configuration is unchanged |
 | backup storage | encrypted POSIX volume | S3-compatible endpoint/region/bucket | backup interface only, not application object storage |
 | embeddings | deterministic or optional TEI | configured HTTP provider | exact model/platform evidence is separate |
@@ -776,7 +955,7 @@ complete or enterprise certified.
 |---|---|---|
 | public edge | Caddy service, 80/443 | Ingress/Gateway API/OpenShift Route and customer certificate |
 | gateway/worker | separate services from one image | separate Deployments with probes/drain and replicas only after OPS-7 |
-| migration/convergence | one-shot services | Jobs, never application init shortcuts |
+| migration/convergence | one-shot migration and bounded long-running Keycloak convergence controller | migration remains a Job; convergence needs a controller/operator or a generation-fenced reconciliation design, never an application init shortcut |
 | PostgreSQL | shared server, isolated DBs/roles | external PostgreSQL or CloudNativePG; Keycloak Operator/external DB as selected |
 | secrets | mounted Compose files | External Secrets/Vault/CSI/projected Secrets and customer KMS |
 | networks | explicit bridge networks | default-deny NetworkPolicies and reviewed ingress/egress |

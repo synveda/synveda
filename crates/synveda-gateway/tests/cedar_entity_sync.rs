@@ -121,7 +121,7 @@ async fn grant(
     role: RoleKey,
 ) {
     access::create_grant(
-        &mut *tx,
+        tx,
         &access::NewGrant {
             id: GrantId::new(),
             tenant_id: tenant,

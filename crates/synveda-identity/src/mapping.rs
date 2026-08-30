@@ -1,7 +1,8 @@
 //! The one IdP-group convention this product reads (AUTHZ-3, ADR-0015
 //! decision 6; re-cut onto grants by CPR-7, ADR-0074 decision 4): the
-//! `synveda-admins` group, whose members are granted `administrator` at
-//! the tenant root on every login completion.
+//! `synveda-admins` group, which may claim the tenant's insert-only initial
+//! administrator marker on the first qualifying login. Later members receive
+//! no automatic grant; Synveda grants remain authoritative.
 //!
 //! It is deliberately the *only* one. Until CPR-7 this module also parsed
 //! `synveda-{dept}-{team}` group names into candidate `(department, team)`
@@ -20,10 +21,9 @@
 
 /// The admin convention group (AUTHZ-3, ADR-0015 decision 6; CPR-7,
 /// ADR-0074 decision 4): a subject whose IdP groups contain this name
-/// (case-insensitively) gets an `administrator` grant upserted at the
-/// tenant root at every login completion — the zero-config bootstrap that
-/// makes a fresh tenant governable, and the operator door ADR-0073
-/// recorded as missing.
+/// (case-insensitively) may claim the one-time tenant-root `administrator`
+/// bootstrap when the insert-only marker is still open. Later members must
+/// receive authority through normal governed Synveda grants.
 pub const ADMIN_GROUP: &str = "synveda-admins";
 
 /// Whether `groups` names the admin convention group.
@@ -61,6 +61,8 @@ mod tests {
             "synveda-engineering",
             "synveda-",
             "admins",
+            "/synveda-admins",
+            "/parent/synveda-admins",
             "",
         ] {
             assert!(

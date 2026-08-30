@@ -83,7 +83,7 @@ async fn seed(pool: &PgPool, count: usize) -> (TenantId, Vec<DirectoryUserId>) {
     let mut users = Vec::with_capacity(count);
     for index in 0..count {
         let user = directory::create_user(
-            &mut *tx,
+            &mut tx,
             DirectoryUserId::new(),
             tenant,
             &UserAttributes {
@@ -281,7 +281,7 @@ fn external_ids_never_confuse_tenants_or_directory_sources() {
             .await
             .expect("begin tenant tx");
         let okta = directory::create_user(
-            &mut *tx,
+            &mut tx,
             DirectoryUserId::new(),
             tenant,
             &UserAttributes {
@@ -303,11 +303,13 @@ fn external_ids_never_confuse_tenants_or_directory_sources() {
             .expect("Entra row");
         assert_ne!(entra.id, okta.id);
         assert!(
-            directory::unique_user_by_external_id(&mut *tx, tenant, "ext-0")
-                .await
-                .expect("resolve ambiguous external id")
-                .is_none(),
-            "a source-less login anchor must not choose one provider"
+            matches!(
+                directory::unique_user_by_external_id(&mut tx, tenant, "ext-0")
+                    .await
+                    .expect("resolve ambiguous external id"),
+                directory::UniqueUserMatch::Ambiguous
+            ),
+            "a source-less login anchor must distinguish ambiguity from absence"
         );
         sqlx::raw_sql("set local role synveda_app")
             .execute(&mut *tx)
@@ -321,6 +323,188 @@ fn external_ids_never_confuse_tenants_or_directory_sources() {
             "another tenant's matching external id is absent under RLS"
         );
         tx.rollback().await.expect("rollback");
+    });
+}
+
+/// The tenant correspondence fence excludes a cross-source mirror insert
+/// while a login or reconciliation transaction resolves its unique match.
+#[test]
+fn correspondence_resolution_serializes_a_cross_source_insert() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let (tenant, _) = seed(&db.pool, 1).await;
+        let mut holder = rls::begin_tenant_tx(&db.pool, tenant)
+            .await
+            .expect("begin correspondence holder");
+        directory::lock_correspondence(&mut holder, tenant)
+            .await
+            .expect("lock correspondence predicate");
+        assert!(matches!(
+            directory::unique_user_by_external_id(&mut holder, tenant, "ext-0")
+                .await
+                .expect("resolve initial correspondence"),
+            directory::UniqueUserMatch::Unique(_)
+        ));
+        let holder_pid = tenant_fixture::backend_pid(&mut holder).await;
+
+        let pool = db.pool.clone();
+        let (pid_sender, pid_receiver) = tokio::sync::oneshot::channel();
+        let waiter = tokio::spawn(async move {
+            let mut tx = rls::begin_tenant_tx(&pool, tenant)
+                .await
+                .expect("begin cross-source waiter");
+            let pid = tenant_fixture::backend_pid(&mut tx).await;
+            pid_sender.send(pid).expect("report waiter pid");
+            let user = directory::create_user(
+                &mut tx,
+                DirectoryUserId::new(),
+                tenant,
+                &UserAttributes {
+                    directory_source: "okta".to_owned(),
+                    external_id: Some("ext-0".to_owned()),
+                    user_name: "fenced-okta-person@example.test".to_owned(),
+                    active: true,
+                    display_name: None,
+                    given_name: None,
+                    family_name: None,
+                    work_email: None,
+                },
+            )
+            .await
+            .expect("create cross-source row after correspondence fence");
+            tx.commit().await.expect("commit cross-source row");
+            user
+        });
+        let waiter_pid = pid_receiver.await.expect("receive waiter pid");
+        let mut observer = rls::begin_tenant_tx(&db.pool, tenant)
+            .await
+            .expect("begin blocker observer");
+        tenant_fixture::wait_until_blocked_by(&mut observer, waiter_pid, holder_pid).await;
+        observer
+            .rollback()
+            .await
+            .expect("finish blocker observation");
+
+        holder.commit().await.expect("release correspondence fence");
+        tokio::time::timeout(std::time::Duration::from_secs(3), waiter)
+            .await
+            .expect("cross-source insert completes after fence release")
+            .expect("cross-source insert task");
+
+        let mut tx = rls::begin_tenant_tx(&db.pool, tenant)
+            .await
+            .expect("begin final correspondence read");
+        assert!(matches!(
+            directory::unique_user_by_external_id(&mut tx, tenant, "ext-0")
+                .await
+                .expect("resolve final correspondence"),
+            directory::UniqueUserMatch::Ambiguous
+        ));
+        tx.commit().await.expect("commit final correspondence read");
+    });
+}
+
+/// A read-modify-write takes the correspondence fence before its snapshot.
+/// A display-only update that waits behind deactivation must therefore read
+/// and preserve `active = false`, never resurrect the stale active value.
+#[test]
+fn correspondence_fence_prevents_stale_read_reactivation() {
+    let Some(db) = db() else { return };
+    db.rt.block_on(async {
+        let (tenant, users) = seed(&db.pool, 1).await;
+        let user_id = users[0];
+        let mut holder = rls::begin_tenant_tx(&db.pool, tenant)
+            .await
+            .expect("begin deactivation holder");
+        directory::lock_correspondence(&mut holder, tenant)
+            .await
+            .expect("lock deactivation snapshot");
+        let current = directory::user(&mut *holder, tenant, DIRECTORY_SOURCE, user_id)
+            .await
+            .expect("read active mirror")
+            .expect("fixture mirror");
+        let deactivated = UserAttributes {
+            directory_source: current.directory_source.clone(),
+            external_id: current.external_id.clone(),
+            user_name: current.user_name.clone(),
+            active: false,
+            display_name: current.display_name.clone(),
+            given_name: current.given_name.clone(),
+            family_name: current.family_name.clone(),
+            work_email: current.work_email.clone(),
+        };
+        directory::replace_user(&mut holder, tenant, user_id, &deactivated)
+            .await
+            .expect("stage deactivation")
+            .expect("mirror remains");
+        let holder_pid = tenant_fixture::backend_pid(&mut holder).await;
+
+        let pool = db.pool.clone();
+        let (pid_sender, pid_receiver) = tokio::sync::oneshot::channel();
+        let waiter = tokio::spawn(async move {
+            let mut tx = rls::begin_tenant_tx(&pool, tenant)
+                .await
+                .expect("begin display-update waiter");
+            let pid = tenant_fixture::backend_pid(&mut tx).await;
+            pid_sender.send(pid).expect("report waiter pid");
+            directory::lock_correspondence(&mut tx, tenant)
+                .await
+                .expect("lock before display snapshot");
+            let current = directory::user(&mut *tx, tenant, DIRECTORY_SOURCE, user_id)
+                .await
+                .expect("read post-deactivation mirror")
+                .expect("mirror remains");
+            let attributes = UserAttributes {
+                directory_source: current.directory_source.clone(),
+                external_id: current.external_id.clone(),
+                user_name: current.user_name.clone(),
+                active: current.active,
+                display_name: Some("updated after deactivation".to_owned()),
+                given_name: current.given_name.clone(),
+                family_name: current.family_name.clone(),
+                work_email: current.work_email.clone(),
+            };
+            let updated = directory::replace_user(&mut tx, tenant, user_id, &attributes)
+                .await
+                .expect("write display-only update")
+                .expect("mirror remains");
+            tx.commit().await.expect("commit display-only update");
+            updated
+        });
+        let waiter_pid = pid_receiver.await.expect("receive waiter pid");
+        let mut observer = rls::begin_tenant_tx(&db.pool, tenant)
+            .await
+            .expect("begin stale-read observer");
+        tenant_fixture::wait_until_blocked_by(&mut observer, waiter_pid, holder_pid).await;
+        observer
+            .rollback()
+            .await
+            .expect("finish blocker observation");
+
+        holder.commit().await.expect("commit deactivation");
+        let updated = tokio::time::timeout(std::time::Duration::from_secs(3), waiter)
+            .await
+            .expect("display update completes after deactivation")
+            .expect("display update task");
+        assert!(!updated.active);
+        assert_eq!(
+            updated.display_name.as_deref(),
+            Some("updated after deactivation")
+        );
+
+        let mut tx = rls::begin_tenant_tx(&db.pool, tenant)
+            .await
+            .expect("begin final mirror read");
+        let retained = directory::user(&mut *tx, tenant, DIRECTORY_SOURCE, user_id)
+            .await
+            .expect("read retained mirror")
+            .expect("mirror remains");
+        assert!(!retained.active, "stale active state was never restored");
+        assert_eq!(
+            retained.display_name.as_deref(),
+            Some("updated after deactivation")
+        );
+        tx.commit().await.expect("commit final mirror read");
     });
 }
 

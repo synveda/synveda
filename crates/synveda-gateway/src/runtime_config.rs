@@ -12,11 +12,120 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use sqlx::postgres::PgPoolOptions;
-use synveda_identity::directory::DirectoryConnector;
+use synveda_identity::directory::{
+    DirectoryConnector, DirectorySyncConfig, DirectorySyncReferenceConfig, Secret,
+};
 use synveda_types::TenantId;
 use tokio::sync::watch;
 
 const MAX_SETTING_FILE_BYTES: u64 = 1_048_576;
+const DIRECTORY_CREDENTIAL_ROOT: &str = "/run/secrets/oidc_directory";
+const MAX_DIRECTORY_CREDENTIAL_BYTES: usize = 4_096;
+
+/// Canonical public application origin and its fixed OIDC callback.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PublicApplicationUrl {
+    origin: String,
+    callback: String,
+}
+
+impl PublicApplicationUrl {
+    /// Credential-free `scheme://host[:port]` used for Origin checks.
+    #[must_use]
+    pub fn origin(&self) -> &str {
+        &self.origin
+    }
+
+    /// Fixed OIDC callback derived from the same canonical origin.
+    #[must_use]
+    pub fn callback(&self) -> &str {
+        &self.callback
+    }
+}
+
+/// Reads and validates the one public application URL shared by the gateway
+/// and deployment diagnostic. Paths, userinfo, query strings and fragments
+/// are refused rather than normalized away or retained in logs.
+pub fn public_application_url() -> Result<PublicApplicationUrl, String> {
+    let raw = setting("SYNVEDA_PUBLIC_URL")?.unwrap_or_else(|| "http://127.0.0.1:8120".to_owned());
+    parse_public_application_url(&raw, insecure_development_http_enabled()?)
+}
+
+/// Returns the one explicitly labelled relaxation for non-loopback plaintext
+/// application and OIDC endpoints. The default is fail-closed; misspellings
+/// are refused rather than interpreted as truthy values.
+pub fn insecure_development_http_enabled() -> Result<bool, String> {
+    if std::env::var_os("SYNVEDA_INSECURE_DEVELOPMENT_HTTP_FILE").is_some() {
+        return Err(
+            "SYNVEDA_INSECURE_DEVELOPMENT_HTTP_FILE is not supported for an explicit security relaxation"
+                .to_owned(),
+        );
+    }
+    let value = match std::env::var("SYNVEDA_INSECURE_DEVELOPMENT_HTTP") {
+        Ok(value) => Some(value),
+        Err(std::env::VarError::NotPresent) => None,
+        Err(std::env::VarError::NotUnicode(_)) => {
+            return Err(
+                "SYNVEDA_INSECURE_DEVELOPMENT_HTTP must be exactly true or false".to_owned(),
+            );
+        }
+    };
+    parse_insecure_development_http(value.as_deref())
+}
+
+fn parse_insecure_development_http(value: Option<&str>) -> Result<bool, String> {
+    match value {
+        None | Some("false") => Ok(false),
+        Some("true") => Ok(true),
+        Some(_) => {
+            Err("SYNVEDA_INSECURE_DEVELOPMENT_HTTP must be exactly true or false".to_owned())
+        }
+    }
+}
+
+fn parse_public_application_url(
+    raw: &str,
+    insecure_development_http: bool,
+) -> Result<PublicApplicationUrl, String> {
+    let invalid =
+        || "SYNVEDA_PUBLIC_URL must be a credential-free HTTP(S) application origin".to_owned();
+    if raw != raw.trim() {
+        return Err(invalid());
+    }
+    let mut url = url::Url::parse(raw).map_err(|_| invalid())?;
+    if !matches!(url.scheme(), "http" | "https")
+        || url.host_str().is_none()
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.path() != "/"
+        || url.query().is_some()
+        || url.fragment().is_some()
+        || !url.origin().is_tuple()
+    {
+        return Err(invalid());
+    }
+    if url.scheme() == "http" && !insecure_development_http && !url_is_loopback(&url) {
+        return Err(
+            "plaintext SYNVEDA_PUBLIC_URL requires the explicit insecure-development HTTP relaxation"
+                .to_owned(),
+        );
+    }
+    let origin = url.origin().ascii_serialization();
+    url.set_path("/auth/callback");
+    Ok(PublicApplicationUrl {
+        origin,
+        callback: url.to_string(),
+    })
+}
+
+fn url_is_loopback(url: &url::Url) -> bool {
+    match url.host() {
+        Some(url::Host::Domain(host)) => host.eq_ignore_ascii_case("localhost"),
+        Some(url::Host::Ipv4(address)) => address.is_loopback(),
+        Some(url::Host::Ipv6(address)) => address.is_loopback(),
+        None => false,
+    }
+}
 
 /// Reads `NAME` or `NAME_FILE`, rejecting ambiguity and oversized/non-text
 /// files without ever including the setting value in an error.
@@ -512,6 +621,13 @@ pub fn embedder_from_env() -> Result<synveda_ingest::embedding::AnyEmbedder, Str
 pub(crate) fn build_directory_connectors(
     issuers: &[synveda_identity::IssuerConfig],
 ) -> Result<HashMap<TenantId, Box<dyn DirectoryConnector>>, Box<dyn std::error::Error>> {
+    build_directory_connectors_from_root(issuers, Path::new(DIRECTORY_CREDENTIAL_ROOT))
+}
+
+fn build_directory_connectors_from_root(
+    issuers: &[synveda_identity::IssuerConfig],
+    credential_root: &Path,
+) -> Result<HashMap<TenantId, Box<dyn DirectoryConnector>>, Box<dyn std::error::Error>> {
     let mut connectors = HashMap::new();
     for issuer in issuers {
         let Some(config) = &issuer.directory_sync else {
@@ -526,7 +642,8 @@ pub(crate) fn build_directory_connectors(
             )
             .into());
         };
-        let connector = synveda_identity::directory::connector(config)?;
+        let resolved = resolve_directory_sync_config(config, credential_root)?;
+        let connector = synveda_identity::directory::connector(&resolved)?;
         tracing::info!(
             issuer = issuer.issuer,
             tenant.id = %tenant_id,
@@ -542,6 +659,99 @@ pub(crate) fn build_directory_connectors(
         }
     }
     Ok(connectors)
+}
+
+fn resolve_directory_sync_config(
+    config: &DirectorySyncReferenceConfig,
+    credential_root: &Path,
+) -> Result<DirectorySyncConfig, String> {
+    match config {
+        DirectorySyncReferenceConfig::Entra {
+            tenant_id,
+            client_id,
+            client_secret_file,
+            graph_base,
+            login_base,
+        } => Ok(DirectorySyncConfig::Entra {
+            tenant_id: tenant_id.clone(),
+            client_id: client_id.clone(),
+            client_secret: Secret::new(read_directory_credential(
+                client_secret_file,
+                credential_root,
+            )?),
+            graph_base: graph_base.clone(),
+            login_base: login_base.clone(),
+        }),
+        DirectorySyncReferenceConfig::Okta {
+            org_url,
+            api_token_file,
+        } => Ok(DirectorySyncConfig::Okta {
+            org_url: org_url.clone(),
+            api_token: Secret::new(read_directory_credential(api_token_file, credential_root)?),
+        }),
+    }
+}
+
+/// Validates issuer-file directory credential references without opening
+/// them. The networked issuer diagnostic uses this projection and receives no
+/// credential mount; the core worker performs the same check before reading.
+pub fn validate_oidc_directory_references(
+    issuers: &[synveda_identity::IssuerConfig],
+) -> Result<(), String> {
+    for issuer in issuers {
+        let Some(config) = &issuer.directory_sync else {
+            continue;
+        };
+        let path = match config {
+            DirectorySyncReferenceConfig::Entra {
+                client_secret_file, ..
+            } => client_secret_file,
+            DirectorySyncReferenceConfig::Okta { api_token_file, .. } => api_token_file,
+        };
+        validate_directory_credential_path(path, Path::new(DIRECTORY_CREDENTIAL_ROOT))?;
+    }
+    Ok(())
+}
+
+fn read_directory_credential(path: &str, credential_root: &Path) -> Result<String, String> {
+    let path = Path::new(path);
+    validate_directory_credential_path(path.to_string_lossy().as_ref(), credential_root)?;
+    let resolved_root = std::fs::canonicalize(credential_root)
+        .map_err(|_| "OIDC directory credential root cannot be resolved".to_owned())?;
+    let resolved_path = std::fs::canonicalize(path)
+        .map_err(|_| "OIDC directory credential file cannot be resolved".to_owned())?;
+    if resolved_path == resolved_root || !resolved_path.starts_with(&resolved_root) {
+        return Err(
+            "OIDC directory credential file resolves outside the credential root".to_owned(),
+        );
+    }
+    // Open the proved canonical target, not the original symlink. This closes
+    // the check/open race on the attacker-controlled leaf while preserving
+    // ordinary projected-secret links whose target stays inside the root.
+    let value = read_setting_file("OIDC_DIRECTORY_CREDENTIAL", &resolved_path)?;
+    if value.is_empty()
+        || value.len() > MAX_DIRECTORY_CREDENTIAL_BYTES
+        || value.contains('\r')
+        || value.contains('\n')
+    {
+        return Err("OIDC directory credential file content was refused".to_owned());
+    }
+    Ok(value)
+}
+
+fn validate_directory_credential_path(path: &str, credential_root: &Path) -> Result<(), String> {
+    let path = Path::new(path);
+    if !path.is_absolute()
+        || path.parent() != Some(credential_root)
+        || path.file_name().is_none()
+        || path.file_name().is_some_and(|name| name.is_empty())
+    {
+        return Err(
+            "OIDC directory credential reference must name one file below the credential root"
+                .to_owned(),
+        );
+    }
+    Ok(())
 }
 
 /// Parses directory-sync pacing and breaker tuning.
@@ -674,20 +884,32 @@ fn bounded_u64_value(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use synveda_identity::directory::{DirectorySyncConfig, Secret};
+    use synveda_identity::directory::DirectorySyncReferenceConfig;
 
     fn issuer(tenant: synveda_identity::TenantBinding) -> synveda_identity::IssuerConfig {
-        let json = r#"[{"issuer":"https://idp.example","client_id":"c"}]"#;
+        let json = r#"[{"issuer":"https://idp.example","client_id":"c","audience":"api"}]"#;
         let mut parsed = synveda_identity::parse_issuers(json).expect("parse");
         let mut config = parsed.remove(0);
         config.tenant = tenant;
         config
     }
 
-    fn okta() -> DirectorySyncConfig {
-        DirectorySyncConfig::Okta {
+    fn directory_credential_fixture() -> (std::path::PathBuf, std::path::PathBuf) {
+        let root = std::env::temp_dir().join(format!(
+            "synveda-directory-secret-{}-{}",
+            std::process::id(),
+            synveda_types::CaptureBatchId::new()
+        ));
+        std::fs::create_dir(&root).expect("create directory credential root");
+        let path = root.join("okta_token");
+        std::fs::write(&path, b"token\n").expect("write directory credential");
+        (root, path)
+    }
+
+    fn okta(path: &Path) -> DirectorySyncReferenceConfig {
+        DirectorySyncReferenceConfig::Okta {
             org_url: "https://example.okta.com".to_owned(),
-            api_token: Secret::new("token"),
+            api_token_file: path.to_string_lossy().into_owned(),
         }
     }
 
@@ -764,10 +986,11 @@ mod tests {
 
     #[test]
     fn a_pull_sync_needs_a_statically_bound_issuer() {
+        let (credential_root, credential_path) = directory_credential_fixture();
         let mut claim_bound = issuer(synveda_identity::TenantBinding::Claim {
             name: "tid".to_owned(),
         });
-        claim_bound.directory_sync = Some(okta());
+        claim_bound.directory_sync = Some(okta(&credential_path));
         let message = build_directory_connectors(std::slice::from_ref(&claim_bound))
             .err()
             .expect("a claim-bound pull sync is refused")
@@ -776,10 +999,13 @@ mod tests {
 
         let tenant_id = TenantId::new();
         let mut bound = issuer(synveda_identity::TenantBinding::Static { tenant_id });
-        bound.directory_sync = Some(okta());
-        let built = build_directory_connectors(std::slice::from_ref(&bound)).expect("built");
+        bound.directory_sync = Some(okta(&credential_path));
+        let built =
+            build_directory_connectors_from_root(std::slice::from_ref(&bound), &credential_root)
+                .expect("built");
         assert_eq!(built.len(), 1);
         assert_eq!(built[&tenant_id].name(), "okta");
+        let _ = std::fs::remove_dir_all(credential_root);
     }
 
     #[test]
@@ -796,13 +1022,45 @@ mod tests {
 
     #[test]
     fn two_issuers_cannot_pull_one_tenant() {
+        let (credential_root, credential_path) = directory_credential_fixture();
         let tenant_id = TenantId::new();
         let mut first = issuer(synveda_identity::TenantBinding::Static { tenant_id });
-        first.directory_sync = Some(okta());
+        first.directory_sync = Some(okta(&credential_path));
         let mut second = issuer(synveda_identity::TenantBinding::Static { tenant_id });
         second.issuer = "https://other.example".to_owned();
-        second.directory_sync = Some(okta());
-        assert!(build_directory_connectors(&[first, second]).is_err());
+        second.directory_sync = Some(okta(&credential_path));
+        assert!(build_directory_connectors_from_root(&[first, second], &credential_root).is_err());
+        let _ = std::fs::remove_dir_all(credential_root);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn directory_credential_symlinks_must_resolve_beneath_their_root() {
+        use std::os::unix::fs::symlink;
+
+        let (credential_root, credential_path) = directory_credential_fixture();
+        let projected_target = credential_root.join("..data-okta-token");
+        let projected_link = credential_root.join("projected-okta-token");
+        std::fs::write(&projected_target, b"projected-token\n").expect("write projected target");
+        symlink(&projected_target, &projected_link).expect("link projected target");
+        assert_eq!(
+            read_directory_credential(projected_link.to_string_lossy().as_ref(), &credential_root)
+                .expect("in-root projected secret"),
+            "projected-token"
+        );
+
+        let outside = credential_root.with_extension("outside-secret");
+        std::fs::write(&outside, b"never-read-sibling-secret\n").expect("write outside target");
+        let escape = credential_root.join("database_url");
+        symlink(&outside, &escape).expect("link outside target");
+        let error = read_directory_credential(escape.to_string_lossy().as_ref(), &credential_root)
+            .expect_err("symlink escape must be refused");
+        assert!(error.contains("outside the credential root"), "{error}");
+        assert!(!error.contains("never-read-sibling-secret"));
+
+        let _ = std::fs::remove_file(outside);
+        let _ = std::fs::remove_dir_all(credential_root);
+        let _ = credential_path;
     }
 
     #[test]
@@ -855,6 +1113,65 @@ mod tests {
         .expect_err("ambiguous secret input is refused");
         assert!(refused.contains("mutually exclusive"));
         assert!(!refused.contains("SYNVEDA_SECRET_SENTINEL"));
+    }
+
+    #[test]
+    fn public_application_url_is_one_canonical_origin_and_callback() {
+        let parsed = parse_public_application_url("HTTPS://App.Example.Test:443/", false)
+            .expect("canonical application origin");
+        assert_eq!(parsed.origin(), "https://app.example.test");
+        assert_eq!(parsed.callback(), "https://app.example.test/auth/callback");
+
+        let loopback = parse_public_application_url("http://127.0.0.1:8120", false)
+            .expect("loopback plaintext origin");
+        assert_eq!(loopback.origin(), "http://127.0.0.1:8120");
+    }
+
+    #[test]
+    fn public_application_url_refuses_non_origin_input_without_echoing_it() {
+        for refused in [
+            "https://user:never-log-me@app.example.test",
+            "https://app.example.test/private",
+            "https://app.example.test/?secret=never-log-me",
+            "https://app.example.test/#never-log-me",
+            " mailto:never-log-me@example.test",
+        ] {
+            let error = parse_public_application_url(refused, false).expect_err("must refuse");
+            assert!(
+                !error.contains("never-log-me"),
+                "error leaked input: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn public_application_url_requires_explicit_relaxation_for_remote_plaintext() {
+        for sentinel in [
+            "http://never-log-plaintext-origin.example.test",
+            "http://app.synveda.localhost:8080",
+        ] {
+            let error = parse_public_application_url(sentinel, false)
+                .expect_err("remote plaintext must be refused by default");
+            assert!(!error.contains(sentinel));
+
+            let allowed = parse_public_application_url(sentinel, true)
+                .expect("explicit development relaxation");
+            assert_eq!(allowed.origin(), sentinel);
+        }
+    }
+
+    #[test]
+    fn insecure_development_http_flag_is_closed_and_exact() {
+        assert!(!parse_insecure_development_http(None).expect("default"));
+        assert!(!parse_insecure_development_http(Some("false")).expect("false"));
+        assert!(parse_insecure_development_http(Some("true")).expect("true"));
+        for refused in ["TRUE", "1", " true", "enabled", "never-log-secret"] {
+            let error = parse_insecure_development_http(Some(refused)).expect_err("must refuse");
+            assert_eq!(
+                error,
+                "SYNVEDA_INSECURE_DEVELOPMENT_HTTP must be exactly true or false"
+            );
+        }
     }
 
     #[test]

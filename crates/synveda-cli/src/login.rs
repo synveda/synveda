@@ -37,12 +37,70 @@ const MAX_REQUEST_BYTES: usize = 8192;
 
 /// The gateway a command talks to: `--gateway`, then `SYNVEDA_GATEWAY`,
 /// then the gateway's own default listen address.
-pub fn gateway_url(flag: Option<String>) -> String {
-    let url = flag
-        .or_else(|| std::env::var("SYNVEDA_GATEWAY").ok())
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| "http://127.0.0.1:8120".to_owned());
-    url.trim_end_matches('/').to_owned()
+pub fn gateway_url(flag: Option<String>) -> Result<String, String> {
+    let raw = match flag {
+        Some(value) => value,
+        None => match std::env::var("SYNVEDA_GATEWAY") {
+            Ok(value) => value,
+            Err(std::env::VarError::NotPresent) => "http://127.0.0.1:8120".to_owned(),
+            Err(std::env::VarError::NotUnicode(_)) => {
+                return Err("SYNVEDA_GATEWAY must be valid UTF-8".to_owned());
+            }
+        },
+    };
+    validate_gateway_origin(&raw, insecure_development_http_enabled()?)
+}
+
+fn insecure_development_http_enabled() -> Result<bool, String> {
+    if std::env::var_os("SYNVEDA_INSECURE_DEVELOPMENT_HTTP_FILE").is_some() {
+        return Err(
+            "SYNVEDA_INSECURE_DEVELOPMENT_HTTP_FILE is not supported for an explicit security relaxation"
+                .to_owned(),
+        );
+    }
+    match std::env::var("SYNVEDA_INSECURE_DEVELOPMENT_HTTP") {
+        Err(std::env::VarError::NotPresent) => Ok(false),
+        Ok(value) if value == "false" => Ok(false),
+        Ok(value) if value == "true" => Ok(true),
+        Ok(_) | Err(std::env::VarError::NotUnicode(_)) => {
+            Err("SYNVEDA_INSECURE_DEVELOPMENT_HTTP must be exactly true or false".to_owned())
+        }
+    }
+}
+
+fn validate_gateway_origin(raw: &str, insecure_development_http: bool) -> Result<String, String> {
+    let invalid = || "the Synveda gateway must be a credential-free HTTP(S) origin".to_owned();
+    if raw != raw.trim() {
+        return Err(invalid());
+    }
+    let url = url::Url::parse(raw).map_err(|_| invalid())?;
+    if !matches!(url.scheme(), "http" | "https")
+        || url.host_str().is_none()
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.path() != "/"
+        || url.query().is_some()
+        || url.fragment().is_some()
+        || !url.origin().is_tuple()
+    {
+        return Err(invalid());
+    }
+    if url.scheme() == "http" && !insecure_development_http && !url_is_loopback(&url) {
+        return Err(
+            "plaintext Synveda gateway origins require the explicit insecure-development HTTP relaxation"
+                .to_owned(),
+        );
+    }
+    Ok(url.origin().ascii_serialization())
+}
+
+fn url_is_loopback(url: &url::Url) -> bool {
+    match url.host() {
+        Some(url::Host::Domain(host)) => host.eq_ignore_ascii_case("localhost"),
+        Some(url::Host::Ipv4(address)) => address.is_loopback(),
+        Some(url::Host::Ipv6(address)) => address.is_loopback(),
+        None => false,
+    }
 }
 
 /// What `/auth/cli/exchange` returns: the browser-facing session plus the
@@ -211,6 +269,8 @@ pub async fn login(
 /// reviewer's approval reaches the gateway at all.
 pub async fn resolve(profile_name: &str) -> Result<Profile, String> {
     let mut profile = credentials::profile(profile_name)?;
+    profile.gateway_url =
+        validate_gateway_origin(&profile.gateway_url, insecure_development_http_enabled()?)?;
     let skew = chrono::Duration::seconds(REFRESH_SKEW_SECS);
     if profile.valid_for(skew) {
         return Ok(profile);
@@ -283,11 +343,10 @@ enum Recovery {
 ///
 /// [`REFRESH_SKEW_SECS`] exists so a bearer handed out is still valid when
 /// it is used, which means the refresh fires a minute before expiry — and
-/// an issuer may not honour a refresh token that early. Rauthy, the
-/// bundled SMB IdP, is exactly such an issuer: its refresh tokens are
-/// not-before `issued_at + access_token_lifetime - 60s`, the same instant
-/// this skew fires, so whether the first attempt lands depends on which of
-/// the two clocks is ahead. Failing there would cost a session its memory
+/// an issuer may not honour a refresh token that early. Some providers set
+/// refresh-token not-before to `issued_at + access_token_lifetime - 60s`, the
+/// same instant this skew fires, so whether the first attempt lands depends on
+/// which of the two clocks is ahead. Failing there would cost a session its memory
 /// and tell the user to log in again while a perfectly good token sat in
 /// the file.
 fn recover(profile: &Profile, error: &str) -> Recovery {
@@ -317,9 +376,14 @@ async fn refresh(
 /// One HTTP client, with the same no-redirect posture the gateway's own
 /// OIDC client takes: an auth response must come from the host we asked.
 fn client() -> Result<reqwest::Client, String> {
+    client_with_timeout(Duration::from_secs(15))
+}
+
+pub(crate) fn client_with_timeout(timeout: Duration) -> Result<reqwest::Client, String> {
     reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(5))
-        .timeout(Duration::from_secs(15))
+        .timeout(timeout)
+        .no_proxy()
         .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(|err| format!("build the HTTP client: {err}"))
@@ -506,20 +570,129 @@ mod tests {
         let _guard = crate::testing::ENV.blocking_lock();
         // SAFETY: the lock above makes this the only thread touching the
         // environment for the duration of the test.
-        unsafe { std::env::remove_var("SYNVEDA_GATEWAY") };
-        assert_eq!(gateway_url(None), "http://127.0.0.1:8120");
+        unsafe {
+            std::env::remove_var("SYNVEDA_GATEWAY");
+            std::env::remove_var("SYNVEDA_INSECURE_DEVELOPMENT_HTTP");
+            std::env::remove_var("SYNVEDA_INSECURE_DEVELOPMENT_HTTP_FILE");
+        }
+        assert_eq!(gateway_url(None).expect("default"), "http://127.0.0.1:8120");
         assert_eq!(
-            gateway_url(Some("https://synveda.corp.test/".to_owned())),
+            gateway_url(Some("https://synveda.corp.test/".to_owned())).expect("flag"),
             "https://synveda.corp.test"
         );
-        unsafe { std::env::set_var("SYNVEDA_GATEWAY", "http://gw.test:9000/") };
-        assert_eq!(gateway_url(None), "http://gw.test:9000");
+        unsafe { std::env::set_var("SYNVEDA_GATEWAY", "https://gw.test:9000/") };
+        assert_eq!(
+            gateway_url(None).expect("environment"),
+            "https://gw.test:9000"
+        );
         // The flag still wins over the environment.
         assert_eq!(
-            gateway_url(Some("http://other.test".to_owned())),
-            "http://other.test"
+            gateway_url(Some("https://other.test".to_owned())).expect("flag precedence"),
+            "https://other.test"
         );
+        assert!(
+            gateway_url(Some(String::new())).is_err(),
+            "an explicitly empty flag must not select the loopback default"
+        );
+        unsafe { std::env::set_var("SYNVEDA_GATEWAY", "") };
+        assert!(
+            gateway_url(None).is_err(),
+            "an explicitly empty environment destination must not select loopback"
+        );
+        unsafe {
+            std::env::remove_var("SYNVEDA_GATEWAY");
+            std::env::remove_var("SYNVEDA_INSECURE_DEVELOPMENT_HTTP");
+            std::env::remove_var("SYNVEDA_INSECURE_DEVELOPMENT_HTTP_FILE");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn gateway_url_refuses_a_non_unicode_environment_destination() {
+        use std::os::unix::ffi::OsStringExt as _;
+
+        let _guard = crate::testing::ENV.blocking_lock();
+        unsafe {
+            std::env::set_var(
+                "SYNVEDA_GATEWAY",
+                std::ffi::OsString::from_vec(vec![0xff, 0xfe]),
+            );
+            std::env::remove_var("SYNVEDA_INSECURE_DEVELOPMENT_HTTP");
+            std::env::remove_var("SYNVEDA_INSECURE_DEVELOPMENT_HTTP_FILE");
+        }
+        let error = gateway_url(None).expect_err("non-Unicode gateway must be refused");
+        assert_eq!(error, "SYNVEDA_GATEWAY must be valid UTF-8");
         unsafe { std::env::remove_var("SYNVEDA_GATEWAY") };
+    }
+
+    #[test]
+    fn gateway_url_refuses_credentials_paths_and_opaque_values_without_echoing_them() {
+        let _guard = crate::testing::ENV.blocking_lock();
+        unsafe {
+            std::env::remove_var("SYNVEDA_INSECURE_DEVELOPMENT_HTTP");
+            std::env::remove_var("SYNVEDA_INSECURE_DEVELOPMENT_HTTP_FILE");
+        }
+        for sentinel in [
+            "https://user:never-log-me@gateway.test",
+            "https://gateway.test/private",
+            "https://gateway.test?secret=never-log-me",
+            "mailto:never-log-me@example.test",
+        ] {
+            let error = gateway_url(Some(sentinel.to_owned())).expect_err("must refuse");
+            assert!(
+                !error.contains("never-log-me"),
+                "error leaked input: {error}"
+            );
+        }
+        unsafe {
+            std::env::remove_var("SYNVEDA_INSECURE_DEVELOPMENT_HTTP");
+            std::env::remove_var("SYNVEDA_INSECURE_DEVELOPMENT_HTTP_FILE");
+        }
+    }
+
+    #[test]
+    fn gateway_url_requires_explicit_relaxation_for_remote_plaintext() {
+        let _guard = crate::testing::ENV.blocking_lock();
+        unsafe {
+            std::env::remove_var("SYNVEDA_GATEWAY");
+            std::env::remove_var("SYNVEDA_INSECURE_DEVELOPMENT_HTTP");
+            std::env::remove_var("SYNVEDA_INSECURE_DEVELOPMENT_HTTP_FILE");
+        }
+        for sentinel in [
+            "http://never-log-plaintext-gateway.example.test",
+            "http://app.synveda.localhost:8080",
+        ] {
+            let error = gateway_url(Some(sentinel.to_owned())).expect_err("must refuse");
+            assert!(!error.contains(sentinel));
+
+            unsafe { std::env::set_var("SYNVEDA_INSECURE_DEVELOPMENT_HTTP", "true") };
+            assert_eq!(
+                gateway_url(Some(sentinel.to_owned())).expect("explicit relaxation"),
+                sentinel
+            );
+            unsafe { std::env::remove_var("SYNVEDA_INSECURE_DEVELOPMENT_HTTP") };
+        }
+
+        unsafe {
+            std::env::set_var(
+                "SYNVEDA_INSECURE_DEVELOPMENT_HTTP",
+                "never-log-plaintext-flag",
+            );
+        }
+        let error = gateway_url(Some("https://gateway.example.test".to_owned()))
+            .expect_err("invalid relaxation value");
+        assert!(!error.contains("never-log-plaintext-flag"));
+        unsafe {
+            std::env::remove_var("SYNVEDA_INSECURE_DEVELOPMENT_HTTP");
+            std::env::set_var(
+                "SYNVEDA_INSECURE_DEVELOPMENT_HTTP_FILE",
+                "/never-log-plaintext-file",
+            );
+        }
+        let error = gateway_url(Some("https://gateway.example.test".to_owned()))
+            .expect_err("file-backed relaxation must be refused");
+        assert!(!error.contains("never-log-plaintext-file"));
+        unsafe { std::env::remove_var("SYNVEDA_INSECURE_DEVELOPMENT_HTTP_FILE") };
     }
 
     fn profile_expiring_in(seconds: i64) -> Profile {
@@ -538,8 +711,8 @@ mod tests {
 
     #[test]
     fn a_refused_pre_emptive_refresh_keeps_a_token_that_still_works() {
-        // Inside the refresh skew but not yet expired: this is the window
-        // Rauthy's not-before sits in, and the stored token is still good.
+        // Inside the refresh skew but not yet expired: a provider's not-before
+        // may sit in this window while the stored token is still good.
         assert_eq!(
             recover(&profile_expiring_in(30), "issuer said no"),
             Recovery::UseStored

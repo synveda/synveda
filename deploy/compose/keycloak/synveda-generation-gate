@@ -1,0 +1,226 @@
+#!/bin/bash -p
+# Generation-fenced public readiness for bundled Keycloak. A restart rotates
+# `current` to a new empty private directory before Java starts. Convergence
+# may publish only inside the generation it captured, so a stale child can
+# never reopen the route selected by Caddy (CPR-45, ADR-0102).
+unset BASH_ENV ENV CDPATH GLOBIGNORE PS4
+set +x
+set -eu
+umask 077
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH
+
+contract=cpr45-keycloak-realm-v3
+public_gate_dir=${SYNVEDA_KEYCLOAK_PUBLIC_GATE_PATH:-}
+current_link=$public_gate_dir/current
+
+refuse() {
+    echo "keycloak-generation-gate: configuration was refused" >&2
+    exit 78
+}
+
+fail() {
+    echo "keycloak-generation-gate: operation failed closed" >&2
+    exit 70
+}
+
+file_mode() {
+    stat -c %a "$1" 2>/dev/null || stat -f %Lp "$1" 2>/dev/null
+}
+
+file_owner() {
+    stat -c %u "$1" 2>/dev/null || stat -f %u "$1" 2>/dev/null
+}
+
+case "$public_gate_dir" in
+    /*) ;;
+    *) refuse ;;
+esac
+[ ! -L "$public_gate_dir" ] && [ -d "$public_gate_dir" ] && \
+    [ -w "$public_gate_dir" ] && \
+    [ "$(file_mode "$public_gate_dir")" = 700 ] && \
+    [ "$(file_owner "$public_gate_dir")" = "$(id -u)" ] || refuse
+
+valid_generation() {
+    case "${1:-}" in
+        .generation-*) generation_suffix=${1#.generation-} ;;
+        *) return 1 ;;
+    esac
+    [ "${#generation_suffix}" -eq 12 ] || return 1
+    case "$generation_suffix" in
+        *[!A-Za-z0-9]*) return 1 ;;
+    esac
+}
+
+validate_generation_directory() {
+    valid_generation "$1" || return 1
+    generation_path=$public_gate_dir/$1
+    [ ! -L "$generation_path" ] && [ -d "$generation_path" ] && \
+        [ "$(file_mode "$generation_path")" = 700 ] && \
+        [ "$(file_owner "$generation_path")" = "$(id -u)" ]
+}
+
+capture_generation() {
+    [ -L "$current_link" ] || return 1
+    captured_generation=$(readlink "$current_link") || return 1
+    valid_generation "$captured_generation" || return 1
+    validate_generation_directory "$captured_generation" || return 1
+    printf '%s\n' "$captured_generation"
+}
+
+is_current_generation() {
+    validate_generation_directory "$1" || return 1
+    observed_generation=$(capture_generation) || return 1
+    [ "$observed_generation" = "$1" ]
+}
+
+close_current_selector() {
+    is_current_generation "$1" || return 1
+    rm -f -- "$current_link" || return 1
+    [ ! -e "$current_link" ] && [ ! -L "$current_link" ]
+}
+
+withdraw_generation() {
+    validate_generation_directory "$1" || return 1
+    generation_ready=$public_gate_dir/$1/$contract.ready
+    rm -f -- "$generation_ready" || return 1
+    [ ! -e "$generation_ready" ] && [ ! -L "$generation_ready" ]
+}
+
+publish_generation() {
+    generation=$1
+    is_current_generation "$generation" || return 1
+    generation_path=$public_gate_dir/$generation
+    generation_ready=$generation_path/$contract.ready
+    gate_candidate=$(mktemp "$generation_path/.ready.XXXXXXXXXXXX") || return 1
+    if ! printf '%s\n' "$contract" > "$gate_candidate" || \
+        ! chmod 0400 "$gate_candidate"; then
+        rm -f -- "$gate_candidate"
+        return 1
+    fi
+    [ ! -L "$gate_candidate" ] && [ -f "$gate_candidate" ] && \
+        [ "$(file_mode "$gate_candidate")" = 400 ] && \
+        [ "$(file_owner "$gate_candidate")" = "$(id -u)" ] || {
+        rm -f -- "$gate_candidate"
+        return 1
+    }
+    gate_value=
+    IFS= read -r gate_value < "$gate_candidate" || [ -n "$gate_value" ]
+    [ "$gate_value" = "$contract" ] || {
+        rm -f -- "$gate_candidate"
+        return 1
+    }
+    gate_extra=
+    if IFS= read -r gate_extra < <(tail -n +2 "$gate_candidate"); then
+        rm -f -- "$gate_candidate"
+        return 1
+    fi
+    is_current_generation "$generation" || {
+        rm -f -- "$gate_candidate"
+        return 1
+    }
+    mv -Tf -- "$gate_candidate" "$generation_ready" || {
+        rm -f -- "$gate_candidate"
+        return 1
+    }
+    if ! is_current_generation "$generation"; then
+        rm -f -- "$generation_ready"
+        return 1
+    fi
+}
+
+ready_generation() {
+    generation=$(capture_generation) || return 1
+    is_current_generation "$generation" || return 1
+    generation_ready=$public_gate_dir/$generation/$contract.ready
+    [ ! -L "$generation_ready" ] && [ -f "$generation_ready" ] && \
+        [ "$(file_mode "$generation_ready")" = 400 ] && \
+        [ "$(file_owner "$generation_ready")" = "$(id -u)" ] || return 1
+    gate_value=
+    IFS= read -r gate_value < "$generation_ready" || [ -n "$gate_value" ]
+    [ "$gate_value" = "$contract" ] || return 1
+    gate_extra=
+    ! IFS= read -r gate_extra < <(tail -n +2 "$generation_ready")
+}
+
+rotate_generation() {
+    if [ -e "$current_link" ] || [ -L "$current_link" ]; then
+        [ -L "$current_link" ] || refuse
+        previous_generation=$(capture_generation) || refuse
+        close_current_selector "$previous_generation" || fail
+        withdraw_generation "$previous_generation" || fail
+    fi
+    generation_path=$(mktemp -d "$public_gate_dir/.generation-XXXXXXXXXXXX") || fail
+    staged_link=$generation_path/.current-link
+    discard_staged_generation() {
+        rm -f -- "$staged_link" 2>/dev/null || true
+        rmdir -- "$generation_path" 2>/dev/null || true
+    }
+    chmod 0700 "$generation_path" || {
+        discard_staged_generation
+        fail
+    }
+    generation=${generation_path##*/}
+    validate_generation_directory "$generation" || {
+        discard_staged_generation
+        fail
+    }
+    ln -s -- "$generation" "$staged_link" || {
+        discard_staged_generation
+        fail
+    }
+    mv -Tf -- "$staged_link" "$current_link" || {
+        discard_staged_generation
+        fail
+    }
+    is_current_generation "$generation" || fail
+    printf '%s\n' "$generation"
+}
+
+retire_generation() {
+    generation=$1
+    validate_generation_directory "$generation" || return 1
+    ! is_current_generation "$generation" || return 1
+    withdraw_generation "$generation" || return 1
+    generation_path=$public_gate_dir/$generation
+    for candidate in "$generation_path"/.ready.*; do
+        [ "$candidate" != "$generation_path/.ready.*" ] || break
+        [ ! -L "$candidate" ] && [ -f "$candidate" ] || return 1
+        rm -f -- "$candidate" || return 1
+    done
+    rmdir -- "$generation_path"
+}
+
+case "${1:-}" in
+    rotate)
+        [ "$#" -eq 1 ] || refuse
+        rotate_generation
+        ;;
+    capture)
+        [ "$#" -eq 1 ] || refuse
+        capture_generation
+        ;;
+    is-current)
+        [ "$#" -eq 2 ] || refuse
+        is_current_generation "$2"
+        ;;
+    withdraw)
+        [ "$#" -eq 2 ] || refuse
+        withdraw_generation "$2"
+        ;;
+    publish)
+        [ "$#" -eq 2 ] || refuse
+        publish_generation "$2"
+        ;;
+    ready)
+        [ "$#" -eq 1 ] || refuse
+        ready_generation
+        ;;
+    retire)
+        [ "$#" -eq 2 ] || refuse
+        retire_generation "$2"
+        ;;
+    *)
+        refuse
+        ;;
+esac

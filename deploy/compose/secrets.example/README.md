@@ -6,10 +6,23 @@ Generate the bundled-development set with:
 deploy/compose/scripts/generate-secrets.sh
 ```
 
-The script writes only to the ignored `secrets` sibling directory, uses
-operating-system entropy, sets mode `0600`, refuses any existing target unless
-`--force` is explicit, and prints filenames rather than values. The directory
-and its contents are ignored by Git and the Docker build context.
+The script writes the credential set to the ignored `secrets` sibling and
+creates project-scoped, ignored database-authority and Keycloak public-gate
+state below `runtime/synveda-<runtime>/`. It uses operating-system entropy,
+sets private directory/file modes to `0700`/`0600`, and prints filenames rather
+than values. All three roots are ignored by Git and the Docker build context.
+
+An existing credential set is refused unless `--force` is paired with the
+exact project confirmation, for example:
+
+```sh
+SYNVEDA_CONFIRM_SECRET_REPLACEMENT=synveda-development \
+  deploy/compose/scripts/generate-secrets.sh --force
+```
+
+The old set is moved to the project runtime directory as `previous-secrets`.
+This preserves recovery material; it is not an automatic credential-rotation
+workflow, and a second replacement is refused while that preserved set exists.
 
 Required core filenames:
 
@@ -28,6 +41,7 @@ Bundled PostgreSQL and Keycloak additionally use:
 - `keycloak_database_password`
 - `keycloak_admin_username`
 - `keycloak_admin_password`
+- `keycloak_convergence_admin_password`
 
 Reference certificate-file mode additionally requires operator-supplied
 `tls_cert` and `tls_key`. The generator never invents a certificate.
