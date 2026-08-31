@@ -219,7 +219,8 @@ product processes and Keycloak -> Collector -> optional visibility/external OTLP
 
 The current additive checkpoint implements the bundled database bootstrap,
 tenant convergence, fail-closed realm convergence, issuer diagnostic and the
-bounded `up`, `smoke`, `down` and exact-confirmation `reset` lifecycle. Its
+bounded `up`, `smoke`, gateway-only `restart-gateway`, `down` and
+exact-confirmation `reset` lifecycle. Its
 deterministic tests are implementation evidence, not clean-start/browser
 acceptance. The external-PostgreSQL bootstrap path
 deliberately stops before runtime startup until authenticated TLS and
@@ -670,7 +671,17 @@ before its atomic rename, so Caddy never observes an unvalidated or stale-child
 publication candidate. A compromised identity service could still mint
 accepted identities or alter this shared gate, so the mechanism is process-
 generation sequencing and availability evidence, not authentication isolation.
-Live restart and dependency-loss acceptance remain required.
+The canonical gateway-only restart action refuses an already degraded graph,
+requires the existing gateway's exact container identity, then restarts it
+under the project lock. It allows 120 seconds for the restart-acceptance health
+check without recreating the container, while the one non-replenishing
+lifecycle deadline reserves 40 seconds for all postflight checks plus five
+seconds for orchestration. It requires the full container identity to remain
+unchanged and repeats the complete public/private smoke. A missing pre-restart
+identity aborts without mutation; a missing or changed post-restart identity
+retains the fail-closed uncertainty lock. Live browser-session survival through
+that action remains required; other service restarts and dependency-loss
+acceptance remain open.
 
 Convergence retires the temporary bootstrap administrator by exact user ID and
 retains one narrowly scoped master-realm identity for idempotent repair after

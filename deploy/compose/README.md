@@ -48,6 +48,7 @@ The default is development with bundled PostgreSQL and bundled Keycloak:
 make compose-config
 make compose-up
 make compose-smoke
+make compose-restart-gateway
 make compose-down
 ```
 
@@ -59,7 +60,16 @@ converge the exact tenant, converge the Keycloak realm, and diagnose the public
 issuer before the gateway becomes ready. `compose-smoke` requires every exact
 service and one-shot result, then probes the real host resolver path for public
 health, console, issuer and management/metrics refusal. It is not a browser
-login test.
+login test. `compose-restart-gateway` first requires that same complete smoke,
+restarts only the existing gateway container under the exact-project lock,
+waits up to 120 seconds for its declared health without recreating it, requires
+the full container identity to remain unchanged, and repeats the complete
+smoke. Its non-replenishing lifecycle deadline retains a 40-second postflight
+reserve across all final checks plus a five-second orchestration margin. The
+command provides the bounded lifecycle action for a separate live test that an
+already completed browser session survives a gateway process restart; it does
+not itself prove browser state. An in-flight login is intentionally
+process-local and is not expected to survive.
 
 `compose-down` stops containers while retaining the database volume and all
 project input. The generated files live under

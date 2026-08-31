@@ -27,14 +27,18 @@ make compose-resolver-check
 make compose-config
 make compose-up
 make compose-smoke
+make compose-restart-gateway
 make compose-down
 ```
 
 `compose-up` creates or validates project-scoped secret files, converges the
 bundled authorities and keeps gateway and worker in separate containers.
 `compose-smoke` probes the public host route and private-route refusals, but is
-not a browser authorization-code exchange. Clean browser login, reference
-HTTPS, backup/restore and upgrade acceptance remain open. External PostgreSQL
+not a browser authorization-code exchange. `compose-restart-gateway` performs
+a locked, health-gated restart of only the existing gateway and repeats the
+smoke; the command is not itself browser-session evidence and does not claim
+that an in-flight login survives. Clean browser login, reference HTTPS,
+backup/restore and upgrade acceptance remain open. External PostgreSQL
 bootstrap deliberately refuses before secret reads or SQL until the
 authenticated-TLS contract is implemented.
 
@@ -884,6 +888,7 @@ From a checkout, use the canonical project-scoped lifecycle:
 ```sh
 make compose-down
 make compose-up
+make compose-restart-gateway
 ```
 
 `compose-down` preserves the database volume and every project input. Reset is

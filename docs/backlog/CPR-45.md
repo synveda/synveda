@@ -178,7 +178,8 @@ that exception to escape same-transaction audit. Explicit development HTTP now
 uses names distinct from the HTTPS `__Host-` cookies and retains host-only,
 HttpOnly, SameSite, lifetime, duplicate-rejection and origin protections.
 The canonical wrapper now invokes those seams through bounded `up`, `smoke`,
-`down` and exact-confirmation `reset` actions. One private exact-project lock
+gateway-only `restart-gateway`, `down` and exact-confirmation `reset` actions.
+One private exact-project lock
 spans authority-file generation and Docker mutation; complete network/IPAM and
 retained-asset proofs are repeated around startup; catchable signals propagate
 to a bounded process-group runner; and uncertain stale locks fail closed. The

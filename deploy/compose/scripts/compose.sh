@@ -8,13 +8,13 @@ LC_ALL=C
 export LC_ALL
 
 usage() {
-    echo "usage: deploy/compose/scripts/compose.sh {config [--output PATH]|hosts-plan|resolver-check|up|smoke|down|reset}" >&2
+    echo "usage: deploy/compose/scripts/compose.sh {config [--output PATH]|hosts-plan|resolver-check|up|smoke|restart-gateway|down|reset}" >&2
     exit 64
 }
 
 action=${1:-}
 case "$action" in
-    config|hosts-plan|resolver-check|up|smoke|down|reset) ;;
+    config|hosts-plan|resolver-check|up|smoke|restart-gateway|down|reset) ;;
     *) usage ;;
 esac
 shift
@@ -43,6 +43,21 @@ oidc_mode=${SYNVEDA_OIDC_MODE:-bundled}
 profiles=${SYNVEDA_COMPOSE_PROFILES:-}
 demo_profile=false
 lifecycle_timeout=${SYNVEDA_COMPOSE_LIFECYCLE_TIMEOUT_SECONDS:-900}
+# The gateway declares a 30-second stop grace in compose.yaml. Leave bounded
+# client and postflight margins around that daemon-side contract rather than
+# handing the daemon the unrelated whole-lifecycle budget.
+gateway_restart_stop_seconds=30
+gateway_restart_runner_seconds=45
+gateway_restart_health_seconds=120
+gateway_restart_health_runner_seconds=125
+gateway_restart_postflight_reserve_seconds=40
+gateway_restart_orchestration_margin_seconds=5
+gateway_restart_required_seconds=$((
+    gateway_restart_runner_seconds +
+    gateway_restart_health_runner_seconds +
+    gateway_restart_postflight_reserve_seconds +
+    gateway_restart_orchestration_margin_seconds
+))
 
 case "$lifecycle_timeout" in
     ''|0|0*|*[!0-9]*)
@@ -280,7 +295,7 @@ if [ -n "$suffix" ]; then
 fi
 
 case "$action" in
-    up|down|smoke|reset)
+    up|down|smoke|restart-gateway|reset)
         # Hold one exact-project exclusion across authority-file generation and
         # every Docker mutation. Child generators verify and borrow this lock.
         # shellcheck source=deploy/compose/scripts/project-lock.sh
@@ -530,7 +545,7 @@ if [ "$action" = resolver-check ]; then
     exit 0
 fi
 case "$action" in
-    up|down|smoke|reset) pin_local_docker_endpoint ;;
+    up|down|smoke|restart-gateway|reset) pin_local_docker_endpoint ;;
 esac
 
 compose_ipv4_pool_set=${SYNVEDA_COMPOSE_IPV4_POOL+x}
@@ -1311,6 +1326,10 @@ prepare_asset_contract() {
     chmod 600 "$asset_config_file"
     run_bounded "$lifecycle_timeout" "$docker_bin" "$@" \
         config --format json > "$asset_config_file"
+    prove_assets_existing
+}
+
+prove_assets_existing() {
     run_bounded "$lifecycle_timeout" node "$script_dir/check-compose-assets.mjs" \
         --config-file "$asset_config_file" --project "$project" \
         --docker-bin "$docker_bin" --state existing
@@ -1320,6 +1339,41 @@ prove_assets_stopped() {
     run_bounded "$lifecycle_timeout" node "$script_dir/check-compose-assets.mjs" \
         --config-file "$asset_config_file" --project "$project" \
         --docker-bin "$docker_bin" --state stopped
+}
+
+run_runtime_smoke() {
+    status_file=$(mktemp "${TMPDIR:-/tmp}/synveda-compose-status.XXXXXX") || exit 70
+    run_bounded "$lifecycle_timeout" "$docker_bin" "$@" \
+        ps --all --format json > "$status_file"
+    set -- "$script_dir/check-runtime-smoke.mjs" \
+        --status-file "$status_file" --runtime "$runtime" \
+        --postgres "$postgres_mode" --oidc "$oidc_mode" \
+        --app-url "$public_app_url" --issuer "$oidc_issuer"
+    run_bounded "$lifecycle_timeout" node "$@"
+    rm -f -- "$status_file"
+    status_file=
+}
+
+capture_gateway_container_identity() {
+    gateway_identity_status=0
+    capture_bounded_output 30 "$docker_bin" "$@" \
+        ps --all --quiet --no-trunc gateway || gateway_identity_status=$?
+    if [ "$gateway_identity_status" -ne 0 ]; then
+        propagate_bounded_failure "$gateway_identity_status"
+        echo "compose: exact gateway container identity was unavailable" >&2
+        return 69
+    fi
+    gateway_container_identity=$bounded_output
+    if [ "${#gateway_container_identity}" -ne 64 ]; then
+        echo "compose: exact gateway container identity was refused" >&2
+        return 78
+    fi
+    case "$gateway_container_identity" in
+        *[!0-9a-f]*)
+            echo "compose: exact gateway container identity was refused" >&2
+            return 78
+            ;;
+    esac
 }
 
 case "$action" in
@@ -1364,17 +1418,44 @@ case "$action" in
     smoke)
         prepare_asset_contract "$@"
         run_resolver_preflight
-        status_file=$(mktemp "${TMPDIR:-/tmp}/synveda-compose-status.XXXXXX") || exit 70
-        run_bounded "$lifecycle_timeout" "$docker_bin" "$@" \
-            ps --all --format json > "$status_file"
-        set -- "$script_dir/check-runtime-smoke.mjs" \
-            --status-file "$status_file" --runtime "$runtime" \
-            --postgres "$postgres_mode" --oidc "$oidc_mode" \
-            --app-url "$public_app_url" --issuer "$oidc_issuer"
-        run_bounded "$lifecycle_timeout" node "$@"
-        rm -f -- "$status_file"
-        status_file=
+        run_runtime_smoke "$@"
         echo "canonical Compose smoke passed for $project"
+        ;;
+    restart-gateway)
+        prepare_asset_contract "$@"
+        run_resolver_preflight
+        # Refuse to turn a pre-existing degraded graph into restart evidence.
+        run_runtime_smoke "$@"
+        capture_gateway_container_identity "$@"
+        gateway_container_identity_before=$gateway_container_identity
+        set_remaining_lifecycle_seconds
+        [ "$lifecycle_remaining" -ge "$gateway_restart_required_seconds" ] || {
+            echo "compose: insufficient lifecycle budget remains for a bounded gateway restart" >&2
+            exit 124
+        }
+        docker_mutation_uncertain=true
+        docker_mutation_phase=compose-restart-gateway
+        run_bounded "$gateway_restart_runner_seconds" "$docker_bin" "$@" \
+            restart --no-deps --timeout "$gateway_restart_stop_seconds" gateway
+        # `restart` does not wait for health. Reuse the exact rendered graph
+        # without recreating the container and let Compose enforce its health
+        # contract before the public smoke is repeated.
+        run_bounded "$gateway_restart_health_runner_seconds" "$docker_bin" "$@" \
+            up --detach --wait --wait-timeout "$gateway_restart_health_seconds" \
+            --no-deps --no-recreate gateway
+        # Repeat the same captured asset, resolver and runtime checks after the
+        # mutation. The pre-mutation render remains the comparison authority.
+        prove_assets_existing
+        run_resolver_preflight
+        run_runtime_smoke "$@"
+        capture_gateway_container_identity "$@"
+        [ "$gateway_container_identity" = "$gateway_container_identity_before" ] || {
+            echo "compose: gateway container identity changed during restart" >&2
+            exit 78
+        }
+        docker_mutation_uncertain=false
+        docker_mutation_phase=
+        echo "canonical Compose gateway restart passed for $project"
         ;;
     reset)
         [ "${SYNVEDA_CONFIRM_RESET:-}" = "$project" ] || {

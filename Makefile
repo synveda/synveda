@@ -19,7 +19,7 @@ export SYNVEDA_TEI_IMAGE
 # and skip when it is unset — CI runs without a database.
 DATABASE_URL ?= postgres://synveda:synveda-dev@localhost:5432/synveda
 
-.PHONY: fmt lint test build deny check-deps check-adr-status check-adapters check-api-types check-backlog check-benchmarks check-chart-images check-compose-contract check-context-hard-cut check-context-security check-corpus-licences check-demos check-deploy check-docs check-npm-licences check-product-eval chart-lint compose-config compose-secrets compose-issuer compose-hosts-plan compose-resolver-check compose-up compose-smoke compose-down compose-reset ts-build ts-test ci dev-up dev-down smoke db-test claude-acceptance claude-acceptance-live eval eval-check eval-product eval-judge eval-read eval-longmemeval eval-longmemeval-full eval-longmemeval-judged eval-extraction-live eval-retrieval eval-security
+.PHONY: fmt lint test build deny check-deps check-adr-status check-adapters check-api-types check-backlog check-benchmarks check-chart-images check-compose-contract check-context-hard-cut check-context-security check-corpus-licences check-demos check-deploy check-docs check-npm-licences check-product-eval chart-lint compose-config compose-secrets compose-issuer compose-hosts-plan compose-resolver-check compose-up compose-smoke compose-restart-gateway compose-down compose-reset ts-build ts-test ci dev-up dev-down smoke db-test claude-acceptance claude-acceptance-live eval eval-check eval-product eval-judge eval-read eval-longmemeval eval-longmemeval-full eval-longmemeval-judged eval-extraction-live eval-retrieval eval-security
 
 dev-up:
 	$(COMPOSE) up --build --detach --wait
@@ -51,6 +51,9 @@ compose-up:
 
 compose-smoke:
 	deploy/compose/scripts/compose.sh smoke
+
+compose-restart-gateway:
+	deploy/compose/scripts/compose.sh restart-gateway
 
 compose-down:
 	deploy/compose/scripts/compose.sh down

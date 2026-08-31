@@ -15,7 +15,8 @@ they do not select policy, capture rules, context budgets, trace retention,
 freshness or Skill/Tool advertisement.
 
 - `compose/` contains the additive canonical Docker reference graph and its
-  executable `up`, `smoke`, `down` and exact-confirmation `reset` lifecycle.
+  executable `up`, `smoke`, gateway-only `restart-gateway`, `down` and
+  exact-confirmation `reset` lifecycle.
   Deterministic lifecycle tests are implementation evidence, not a validated
   reference claim: clean-volume browser/Keycloak acceptance is still open.
   The separate `make dev-up` contributor stack retains Rauthy/Temporal residue

@@ -56,6 +56,24 @@ if [ "$1" = compose ] && [ "$2" = version ]; then
   echo 2.33.1
   exit 0
 fi
+case " $* " in
+  *" ps "*" --quiet "*" gateway "*)
+    if [ "\${SYNVEDA_FAKE_GATEWAY_ID_MODE:-stable}" = missing ]; then
+      exit 0
+    fi
+    if [ "\${SYNVEDA_FAKE_GATEWAY_ID_MODE:-stable}" = post-missing ] &&
+      grep -q ' <restart>' "$SYNVEDA_FAKE_CALL_LOG"; then
+      exit 0
+    fi
+    if [ "\${SYNVEDA_FAKE_GATEWAY_ID_MODE:-stable}" = replaced ] &&
+      grep -q ' <restart>' "$SYNVEDA_FAKE_CALL_LOG"; then
+      printf '%064d\n' 1
+    else
+      printf '%064d\n' 0
+    fi
+    exit 0
+    ;;
+esac
 if [ "$1" = volume ] && [ "$2" = ls ]; then
   [ "\${SYNVEDA_FAKE_VOLUME_INVENTORY_ERROR:-0}" = 0 ] || exit 1
   if grep -q 'docker <volume> <rm>' "$SYNVEDA_FAKE_CALL_LOG"; then
@@ -108,6 +126,9 @@ if [ "$1" = volume ] && [ "$2" = inspect ]; then
   exit 0
 fi
 case " $* " in
+  *" restart "*)
+    [ "\${SYNVEDA_FAKE_RESTART_FAIL:-0}" = 0 ] || exit 42
+    ;;
   *" up "*)
     if [ "\${SYNVEDA_FAKE_BLOCK_UP:-0}" = 1 ]; then
       : > "$SYNVEDA_FAKE_UP_ENTERED"
@@ -452,6 +473,130 @@ test("hosts plan is content-free and smoke is routed through bounded checkers", 
     assert.match(calls, /docker .* <ps> <--all> <--format> <json>/);
     assert.match(calls, /node <.*check-runtime-smoke\.mjs>/);
   } finally {
+    rmSync(state.scratch, { recursive: true, force: true });
+  }
+});
+
+test("gateway restart is locked, health-gated, and smoke-checked on both sides", () => {
+  const state = fixture();
+  try {
+    assert.equal(run(state, "up").status, 0);
+    writeFileSync(state.log, "");
+
+    const restarted = run(state, "restart-gateway");
+    assert.equal(restarted.status, 0, restarted.stderr);
+    assert.match(restarted.stdout, /canonical Compose gateway restart passed/);
+
+    const calls = readFileSync(state.log, "utf8");
+    const preflightAssets = calls.indexOf("check-compose-assets.mjs");
+    const preflightResolver = calls.indexOf("check-host-resolution.mjs", preflightAssets + 1);
+    const preflightSmoke = calls.indexOf("check-runtime-smoke.mjs");
+    const restart = calls.indexOf(" <restart> <--no-deps> <--timeout> <30> <gateway>");
+    const healthWait = calls.indexOf(
+      " <up> <--detach> <--wait> <--wait-timeout> <120> <--no-deps> <--no-recreate> <gateway>",
+    );
+    const postflightAssets = calls.indexOf("check-compose-assets.mjs", preflightAssets + 1);
+    const postflightResolver = calls.indexOf("check-host-resolution.mjs", postflightAssets + 1);
+    const postflightSmoke = calls.indexOf("check-runtime-smoke.mjs", preflightSmoke + 1);
+    assert.ok(preflightAssets >= 0, calls);
+    assert.ok(preflightResolver > preflightAssets, calls);
+    assert.ok(preflightSmoke > preflightResolver, calls);
+    assert.ok(restart > preflightSmoke, calls);
+    assert.ok(healthWait > restart, calls);
+    assert.ok(postflightAssets > healthWait, calls);
+    assert.ok(postflightResolver > postflightAssets, calls);
+    assert.ok(postflightSmoke > postflightResolver, calls);
+    assert.equal((calls.match(/<ps> <--all> <--quiet> <--no-trunc> <gateway>/g) ?? []).length, 2);
+    assert.match(calls, /deadline <45>[\s\S]*<restart>/);
+    assert.match(calls, /deadline <125>[\s\S]*<up> <--detach> <--wait>/);
+    assert.doesNotMatch(calls, /<restart>[^\n]*<900>/);
+    assert.doesNotMatch(calls, /<restart>[^\n]*<(postgres|keycloak|worker|proxy|otel-collector)>/);
+  } finally {
+    rmSync(state.scratch, { recursive: true, force: true });
+  }
+});
+
+test("gateway restart refuses an exhausted postflight budget before mutation", () => {
+  const state = fixture();
+  const clock = join(state.scratch, "clock");
+  writeFileSync(clock, "1000\n", { mode: 0o600 });
+  try {
+    assert.equal(run(state, "up").status, 0);
+    writeFileSync(state.log, "");
+    const refused = run(state, "restart-gateway", {
+      SYNVEDA_COMPOSE_LIFECYCLE_TIMEOUT_SECONDS: "240",
+      SYNVEDA_FAKE_CLOCK_FILE: clock,
+      SYNVEDA_FAKE_CLOCK_STEP: "10",
+    });
+    assert.equal(refused.status, 124, refused.stderr);
+    assert.match(refused.stderr, /insufficient lifecycle budget remains/);
+    assert.doesNotMatch(readFileSync(state.log, "utf8"), / <restart>/);
+  } finally {
+    rmSync(state.scratch, { recursive: true, force: true });
+  }
+});
+
+test("gateway restart refuses a missing or replaced exact container identity", () => {
+  for (const mode of ["missing", "post-missing", "replaced"]) {
+    const state = fixture();
+    const lockFile = join(
+      "/tmp",
+      `.synveda-compose-locks-${process.getuid?.() ?? 0}`,
+      `${state.project}.lock`,
+    );
+    let marker;
+    try {
+      assert.equal(run(state, "up").status, 0);
+      writeFileSync(state.log, "");
+      const refused = run(state, "restart-gateway", {
+        SYNVEDA_FAKE_GATEWAY_ID_MODE: mode,
+      });
+      assert.equal(refused.status, 78, `${mode}: ${refused.stderr}`);
+      assert.match(refused.stderr, /gateway container identity/);
+      const calls = readFileSync(state.log, "utf8");
+      if (mode === "missing") {
+        assert.doesNotMatch(calls, / <restart>/);
+        assert.equal(existsSync(lockFile), false);
+      } else {
+        assert.match(calls, / <restart>/);
+        marker = readFileSync(lockFile, "utf8");
+        assert.equal(marker, `${state.project}:${refused.pid}\n`);
+      }
+    } finally {
+      if (marker !== undefined && existsSync(lockFile) && readFileSync(lockFile, "utf8") === marker) {
+        rmSync(lockFile);
+      }
+      rmSync(state.scratch, { recursive: true, force: true });
+    }
+  }
+});
+
+test("an uncertain gateway restart retains the exact project lock", () => {
+  const state = fixture();
+  const lockFile = join(
+    "/tmp",
+    `.synveda-compose-locks-${process.getuid?.() ?? 0}`,
+    `${state.project}.lock`,
+  );
+  let marker;
+  try {
+    assert.equal(run(state, "up").status, 0);
+    writeFileSync(state.log, "");
+
+    const failed = run(state, "restart-gateway", { SYNVEDA_FAKE_RESTART_FAIL: "1" });
+    assert.equal(failed.status, 42, failed.stderr);
+    assert.match(failed.stderr, /Docker mutation state is uncertain \(compose-restart-gateway\)/);
+    marker = readFileSync(lockFile, "utf8");
+    assert.equal(marker, `${state.project}:${failed.pid}\n`);
+    assert.match(readFileSync(state.log, "utf8"), / <restart> <--no-deps>/);
+
+    const blocked = run(state, "restart-gateway");
+    assert.equal(blocked.status, 75, blocked.stderr);
+    assert.doesNotMatch(readFileSync(state.log, "utf8"), /--no-recreate/);
+  } finally {
+    if (marker !== undefined && existsSync(lockFile) && readFileSync(lockFile, "utf8") === marker) {
+      rmSync(lockFile);
+    }
     rmSync(state.scratch, { recursive: true, force: true });
   }
 });
