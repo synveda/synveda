@@ -14,11 +14,12 @@ OIDC wiring, supported model implementations, secret references and telemetry;
 they do not select policy, capture rules, context budgets, trace retention,
 freshness or Skill/Tool advertisement.
 
-- `compose/` contains the additive canonical Docker reference graph and the
-  still-present Rauthy/Temporal contributor residue. `make compose-config`
-  proves the new graph statically; it is not a runnable-reference claim until
-  clean-volume Keycloak acceptance passes. `make dev-up` remains a source
-  dependency loop, not the reference product lifecycle.
+- `compose/` contains the additive canonical Docker reference graph and its
+  executable `up`, `smoke`, `down` and exact-confirmation `reset` lifecycle.
+  Deterministic lifecycle tests are implementation evidence, not a validated
+  reference claim: clean-volume browser/Keycloak acceptance is still open.
+  The separate `make dev-up` contributor stack retains Rauthy/Temporal residue
+  and is not the reference product lifecycle.
 - `release/` is the pull-only transitional artifact manifest installed under
   `~/.synveda/profile`. It is retained for cutover evidence but is no longer
   advertised as a turnkey single-host install.
@@ -67,9 +68,10 @@ preflight and migration stages are bounded and ordered. Remaining Helm gaps
 include file-mount parity for issuer/KMS material and full promotion
 acceptance, not gateway-owner credential reuse.
 
-The closed `synveda init` implementation retains explicit URL validation for
-the future lifecycle, but none of it is currently executable. There is no
-implicit bundled fallback or host/container endpoint claim.
+The closed `synveda init` implementation retains explicit URL validation but
+is not the canonical bootstrap entry point. Compose now invokes the explicit
+database, migration, tenant, identity and issuer-diagnostic commands. There is
+no implicit bundled fallback or host/container endpoint claim.
 
 The worker's default supervised join is 75 seconds. Both transitional Compose
 manifests give it an 85-second outer stop grace; the installed release also
@@ -95,7 +97,8 @@ loopback. That forced its gateway onto the host. The CPR-45 cutover gate now
 refuses the lifecycle before it can start either the bundled or external-issuer
 legacy shape. Canonical Keycloak Compose removes the workaround by running both
 product processes in containers behind one browser/container-reachable proxy
-issuer name; this becomes executable only after exact-issuer acceptance.
+issuer name. That graph is executable; exact browser issuer/PKCE acceptance is
+still required before the legacy stack can be deleted.
 
 ## Embeddings
 
@@ -120,7 +123,7 @@ BGE-M3 download is about 2.3 GB.
   outage. Worker SIGTERM has bounded cancellation/join evidence at idle;
   interruption during claimed Capture work and two-worker execution remain
   open.
-- Compose is a local single-node shape with explicit development database
+- Compose is a single-node shape with generated file-mounted development
   credentials. It is not a production secret-management example.
 - The chart has no Qdrant, Temporal consumer, backup promise, external HSM or
   customer-managed-key implementation. Provider credentials are Secret

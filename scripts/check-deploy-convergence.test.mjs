@@ -2171,9 +2171,19 @@ esac
     assert.equal(retained.length, 1);
     const retainedState = join(physicalRoot, retained[0]);
     assert.equal(statSync(retainedState).mode & 0o777, 0o700);
-    assert.ok(existsSync(join(retainedState, "secrets", ".synveda-private-directory")));
     const stateToken = retained[0].split(".").at(-1).toLowerCase();
     const generatorProject = `synveda-development-acceptance-${stateToken}`;
+    assert.ok(
+      existsSync(
+        join(
+          retainedState,
+          "generator",
+          generatorProject,
+          "secrets",
+          ".synveda-private-directory",
+        ),
+      ),
+    );
     assert.ok(
       existsSync(
         join(
@@ -2690,6 +2700,8 @@ test("the lifecycle wrong-cluster witness is genuine and leaves no peer state", 
     ).some((finding) => finding.includes("generated independently")),
   );
   for (const marker of [
+    "secret_dir=$state_dir/generator/$generator_project/secrets",
+    'mkdir -p "$state_dir/generator/$generator_project"',
     "SYNVEDA_COMPOSE_PROJECT_SUFFIX=acceptance-$state_token",
     "SYNVEDA_DATABASE_AUTHORITY_DIR=$state_dir/generator/$generator_project/database-authority",
     "SYNVEDA_KEYCLOAK_PUBLIC_GATE_DIR=$state_dir/generator/$generator_project/keycloak-public-gate",

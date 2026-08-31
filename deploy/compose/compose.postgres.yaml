@@ -1,6 +1,8 @@
 services:
   postgres:
     image: ${SYNVEDA_POSTGRES_IMAGE:?set SYNVEDA_POSTGRES_IMAGE}
+    labels:
+      com.synveda.contract: cpr-45
     environment:
       POSTGRES_USER: synveda_owner
       POSTGRES_DB: postgres
@@ -35,6 +37,8 @@ services:
 
   database-bootstrap:
     image: ${SYNVEDA_POSTGRES_IMAGE}
+    labels:
+      com.synveda.contract: cpr-45
     user: "${SYNVEDA_RUNTIME_UID}:${SYNVEDA_RUNTIME_GID}"
     entrypoint: ["/usr/local/bin/synveda-database-bootstrap"]
     command: ["synveda"]

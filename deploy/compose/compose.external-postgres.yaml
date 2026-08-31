@@ -11,3 +11,8 @@ services:
     networks:
       application-egress:
         gw_priority: 1
+
+  tenant-convergence:
+    networks:
+      application-egress:
+        gw_priority: 1

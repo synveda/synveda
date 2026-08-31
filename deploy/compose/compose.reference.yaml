@@ -21,6 +21,9 @@ services:
   migrate:
     mem_limit: 512m
     cpus: 1.0
+  tenant-convergence:
+    mem_limit: 512m
+    cpus: 1.0
   issuer-diagnostic:
     mem_limit: 256m
     cpus: 0.5

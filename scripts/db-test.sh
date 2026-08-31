@@ -112,8 +112,9 @@ case "$state_token" in
     ;;
 esac
 project="synveda-db-test-$$-$state_token"
+generator_project=synveda-development-acceptance-$state_token
 manifest=deploy/compose/compose.db-test.yaml
-secret_dir=$state_dir/secrets
+secret_dir=$state_dir/generator/$generator_project/secrets
 roles_file=$state_dir/database-roles.json
 lifecycle_roles_file=$state_dir/lifecycle-database-roles.json
 external_roles_file=$state_dir/external-database-roles.json
@@ -583,7 +584,8 @@ unset PGHOSTADDR PGHOST PGPORT PGUSER PGPASSWORD PGDATABASE
 unset PGSSLROOTCERT PGSSLCERT PGSSLKEY PGSSLMODE PGSSLCERTMODE PGAPPNAME PGOPTIONS PGPASSFILE
 unset PGGSSENCMODE PGGSSDELEGATION
 
-generator_project=synveda-development-acceptance-$state_token
+mkdir -p "$state_dir/generator/$generator_project"
+chmod 700 "$state_dir/generator" "$state_dir/generator/$generator_project"
 SYNVEDA_COMPOSE_PROJECT_SUFFIX=acceptance-$state_token \
 SYNVEDA_SECRETS_DIR=$secret_dir \
 SYNVEDA_DATABASE_AUTHORITY_DIR=$state_dir/generator/$generator_project/database-authority \

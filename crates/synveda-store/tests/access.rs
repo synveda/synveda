@@ -23,7 +23,8 @@
 #[path = "support/tenant_fixture.rs"]
 mod tenant_fixture;
 
-use std::sync::OnceLock;
+use std::future::Future;
+use std::sync::{Mutex, OnceLock};
 
 use chrono::{Duration, Utc};
 use sqlx::postgres::PgPoolOptions;
@@ -44,6 +45,21 @@ use synveda_types::{
 struct Db {
     rt: tokio::runtime::Runtime,
     pool: PgPool,
+    execution: Mutex<()>,
+}
+
+impl Db {
+    fn block_on<F: Future>(&self, future: F) -> F::Output {
+        // This integration binary shares one current-thread runtime and a
+        // six-connection pool. Serial execution prevents ordinary tests from
+        // occupying every connection while a lock-witness test needs its
+        // holder, waiter and observer at the same time.
+        let _execution = self
+            .execution
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.rt.block_on(future)
+    }
 }
 
 fn db() -> Option<&'static Db> {
@@ -74,7 +90,11 @@ fn db() -> Option<&'static Db> {
                 .expect("apply migrations");
             pool
         });
-        Some(Db { rt, pool })
+        Some(Db {
+            rt,
+            pool,
+            execution: Mutex::new(()),
+        })
     })
     .as_ref()
 }
@@ -366,7 +386,7 @@ async fn members_at(pool: &PgPool, tenant: TenantId, scope: ScopeId) -> Vec<acce
 #[test]
 fn a_workspace_grant_reaches_its_projects_without_a_second_row() {
     let Some(db) = db() else { return };
-    db.rt.block_on(async {
+    db.block_on(async {
         let tree = seed_tree(&db.pool).await;
         grant(
             &db.pool,
@@ -415,7 +435,7 @@ fn a_workspace_grant_reaches_its_projects_without_a_second_row() {
 #[test]
 fn a_project_grant_stays_in_its_project() {
     let Some(db) = db() else { return };
-    db.rt.block_on(async {
+    db.block_on(async {
         let tree = seed_tree(&db.pool).await;
         let mut tx = begin(&db.pool, tree.tenant).await;
         let sibling = projects::create(
@@ -469,7 +489,7 @@ fn a_project_grant_stays_in_its_project() {
 #[test]
 fn a_principal_scope_inherits_nothing_from_anywhere() {
     let Some(db) = db() else { return };
-    db.rt.block_on(async {
+    db.block_on(async {
         let tree = seed_tree(&db.pool).await;
         let mine = seed_principal_scope(&db.pool, &tree, "sam").await;
 
@@ -526,7 +546,7 @@ fn a_principal_scope_inherits_nothing_from_anywhere() {
 #[test]
 fn the_resolution_orders_the_nearest_grant_first() {
     let Some(db) = db() else { return };
-    db.rt.block_on(async {
+    db.block_on(async {
         let tree = seed_tree(&db.pool).await;
         grant(
             &db.pool,
@@ -583,7 +603,7 @@ fn the_resolution_orders_the_nearest_grant_first() {
 #[test]
 fn a_group_grant_resolves_to_its_members_and_follows_them() {
     let Some(db) = db() else { return };
-    db.rt.block_on(async {
+    db.block_on(async {
         let tree = seed_tree(&db.pool).await;
         let group = new_group(&db.pool, tree.tenant, "engineering", &["robin", "kim"]).await;
         grant(
@@ -647,7 +667,7 @@ fn a_group_grant_resolves_to_its_members_and_follows_them() {
 #[test]
 fn an_archived_group_confers_nothing() {
     let Some(db) = db() else { return };
-    db.rt.block_on(async {
+    db.block_on(async {
         let tree = seed_tree(&db.pool).await;
         let group = new_group(&db.pool, tree.tenant, "contractors", &["robin"]).await;
         grant(
@@ -706,7 +726,7 @@ fn an_archived_group_confers_nothing() {
 #[test]
 fn an_empty_group_grants_access_to_nobody() {
     let Some(db) = db() else { return };
-    db.rt.block_on(async {
+    db.block_on(async {
         let tree = seed_tree(&db.pool).await;
         let group = new_group(&db.pool, tree.tenant, "empty", &[]).await;
         grant(
@@ -732,7 +752,7 @@ fn an_empty_group_grants_access_to_nobody() {
 #[test]
 fn a_membership_replacement_is_the_whole_list() {
     let Some(db) = db() else { return };
-    db.rt.block_on(async {
+    db.block_on(async {
         let tree = seed_tree(&db.pool).await;
         let group = new_group(&db.pool, tree.tenant, "eng", &["robin", "kim", "sam"]).await;
 
@@ -777,7 +797,7 @@ fn a_membership_replacement_is_the_whole_list() {
 #[test]
 fn a_stale_group_update_writes_nothing() {
     let Some(db) = db() else { return };
-    db.rt.block_on(async {
+    db.block_on(async {
         let tree = seed_tree(&db.pool).await;
         let group = new_group(&db.pool, tree.tenant, "eng", &["robin"]).await;
 
@@ -834,7 +854,7 @@ fn a_stale_group_update_writes_nothing() {
 #[test]
 fn an_empty_group_update_is_refused() {
     let Some(db) = db() else { return };
-    db.rt.block_on(async {
+    db.block_on(async {
         let tree = seed_tree(&db.pool).await;
         let group = new_group(&db.pool, tree.tenant, "eng", &[]).await;
         let mut tx = begin(&db.pool, tree.tenant).await;
@@ -857,7 +877,7 @@ fn an_empty_group_update_is_refused() {
 #[test]
 fn a_directory_group_carries_source_identity_and_a_direct_one_does_not() {
     let Some(db) = db() else { return };
-    db.rt.block_on(async {
+    db.block_on(async {
         let tenant = admit(&db.pool).await;
         for (source, directory_source, resource_id) in [
             (GroupSource::Directory, None, None),
@@ -916,7 +936,7 @@ fn a_directory_group_carries_source_identity_and_a_direct_one_does_not() {
 #[test]
 fn a_directory_group_cannot_be_edited_here() {
     let Some(db) = db() else { return };
-    db.rt.block_on(async {
+    db.block_on(async {
         let tenant = admit(&db.pool).await;
         let mut tx = begin(&db.pool, tenant).await;
         let group = access::create_group(
@@ -966,7 +986,7 @@ fn a_directory_group_cannot_be_edited_here() {
 #[ignore = "serial administrator tamper acceptance"]
 fn a_groups_identity_is_immutable_against_direct_sql() {
     let Some(db) = db() else { return };
-    db.rt.block_on(async {
+    db.block_on(async {
         let tenant = admit(&db.pool).await;
         let group = new_group(&db.pool, tenant, "eng", &[]).await;
         let administrator = tenant_fixture::administrator_pool(&db.pool).await;
@@ -1014,7 +1034,7 @@ fn a_groups_identity_is_immutable_against_direct_sql() {
 #[test]
 fn one_subject_holds_one_role_once_per_scope() {
     let Some(db) = db() else { return };
-    db.rt.block_on(async {
+    db.block_on(async {
         let tree = seed_tree(&db.pool).await;
         grant(
             &db.pool,
@@ -1068,7 +1088,7 @@ fn one_subject_holds_one_role_once_per_scope() {
 #[test]
 fn a_grant_has_exactly_one_subject_against_direct_sql() {
     let Some(db) = db() else { return };
-    db.rt.block_on(async {
+    db.block_on(async {
         let tree = seed_tree(&db.pool).await;
         let group = new_group(&db.pool, tree.tenant, "eng", &[]).await;
 
@@ -1117,7 +1137,7 @@ fn a_grant_has_exactly_one_subject_against_direct_sql() {
 #[test]
 fn only_an_invite_grant_names_an_invitation() {
     let Some(db) = db() else { return };
-    db.rt.block_on(async {
+    db.block_on(async {
         let tree = seed_tree(&db.pool).await;
         let mut tx = begin(&db.pool, tree.tenant).await;
         let claimed = access::create_grant(
@@ -1165,7 +1185,7 @@ fn only_an_invite_grant_names_an_invitation() {
 #[ignore = "serial administrator tamper acceptance"]
 fn a_grant_is_never_edited_against_direct_sql() {
     let Some(db) = db() else { return };
-    db.rt.block_on(async {
+    db.block_on(async {
         let tree = seed_tree(&db.pool).await;
         let existing = grant(
             &db.pool,
@@ -1195,7 +1215,7 @@ fn a_grant_is_never_edited_against_direct_sql() {
 #[test]
 fn a_directory_grant_cannot_be_revoked_here() {
     let Some(db) = db() else { return };
-    db.rt.block_on(async {
+    db.block_on(async {
         let tree = seed_tree(&db.pool).await;
         let robin = new_identity(&db.pool, tree.tenant, "robin").await;
         let mut tx = begin(&db.pool, tree.tenant).await;
@@ -1253,7 +1273,7 @@ fn a_directory_grant_cannot_be_revoked_here() {
 #[test]
 fn revoking_a_grant_removes_what_it_conferred() {
     let Some(db) = db() else { return };
-    db.rt.block_on(async {
+    db.block_on(async {
         let tree = seed_tree(&db.pool).await;
         let held = grant(
             &db.pool,
@@ -1295,7 +1315,7 @@ fn revoking_a_grant_removes_what_it_conferred() {
 #[test]
 fn a_root_administrator_grant_permanently_consumes_idp_bootstrap() {
     let Some(db) = db() else { return };
-    db.rt.block_on(async {
+    db.block_on(async {
         let tree = seed_tree(&db.pool).await;
         let first = grant(
             &db.pool,
@@ -1342,7 +1362,7 @@ fn a_root_administrator_grant_permanently_consumes_idp_bootstrap() {
 #[test]
 fn concurrent_initial_admin_claims_are_single_winner_and_rollback_safe() {
     let Some(db) = db() else { return };
-    db.rt.block_on(async {
+    db.block_on(async {
         let tree = seed_tree(&db.pool).await;
         let mut winner_tx = begin(&db.pool, tree.tenant).await;
         assert!(
@@ -1439,7 +1459,7 @@ fn concurrent_initial_admin_claims_are_single_winner_and_rollback_safe() {
 #[test]
 fn removing_a_member_refuses_what_it_cannot_actually_remove() {
     let Some(db) = db() else { return };
-    db.rt.block_on(async {
+    db.block_on(async {
         let tree = seed_tree(&db.pool).await;
 
         // Nothing at all.
@@ -1530,7 +1550,7 @@ fn removing_a_member_refuses_what_it_cannot_actually_remove() {
 #[test]
 fn principal_grant_retirement_serializes_a_concurrent_insert() {
     let Some(db) = db() else { return };
-    db.rt.block_on(async {
+    db.block_on(async {
         let tree = seed_tree(&db.pool).await;
         let subject = "fenced-principal";
         let old = grant(
@@ -1620,7 +1640,7 @@ fn principal_grant_retirement_serializes_a_concurrent_insert() {
 #[test]
 fn principal_scope_creation_locks_the_principal_before_its_parent() {
     let Some(db) = db() else { return };
-    db.rt.block_on(async {
+    db.block_on(async {
         let tree = seed_tree(&db.pool).await;
         let subject = "ordered-principal";
         let mut holder = begin(&db.pool, tree.tenant).await;
@@ -1703,7 +1723,7 @@ fn principal_scope_creation_locks_the_principal_before_its_parent() {
 #[test]
 fn principal_scope_creation_locks_the_principal_before_a_missing_root() {
     let Some(db) = db() else { return };
-    db.rt.block_on(async {
+    db.block_on(async {
         let tenant = admit(&db.pool).await;
         let subject = "fresh-root-owner";
         let mut holder = begin(&db.pool, tenant).await;
@@ -1832,7 +1852,7 @@ async fn invite(
 #[test]
 fn redeeming_an_invitation_mints_a_grant_that_says_where_it_came_from() {
     let Some(db) = db() else { return };
-    db.rt.block_on(async {
+    db.block_on(async {
         let tree = seed_tree(&db.pool).await;
         let hash = [1u8; 32];
         let id = invite(
@@ -1869,7 +1889,7 @@ fn redeeming_an_invitation_mints_a_grant_that_says_where_it_came_from() {
 #[test]
 fn an_invitation_is_one_time_and_a_retry_is_not_a_second_redemption() {
     let Some(db) = db() else { return };
-    db.rt.block_on(async {
+    db.block_on(async {
         let tree = seed_tree(&db.pool).await;
         let hash = [2u8; 32];
         invite(
@@ -1925,7 +1945,7 @@ fn an_invitation_is_one_time_and_a_retry_is_not_a_second_redemption() {
 #[test]
 fn an_invitation_expires_without_anything_running() {
     let Some(db) = db() else { return };
-    db.rt.block_on(async {
+    db.block_on(async {
         let tree = seed_tree(&db.pool).await;
         let hash = [3u8; 32];
         let id = invite(
@@ -1966,7 +1986,7 @@ fn an_invitation_expires_without_anything_running() {
 #[ignore = "serial administrator tamper acceptance"]
 fn a_terminal_invitation_cannot_be_reopened() {
     let Some(db) = db() else { return };
-    db.rt.block_on(async {
+    db.block_on(async {
         let tree = seed_tree(&db.pool).await;
         let hash = [4u8; 32];
         let id = invite(
@@ -2018,7 +2038,7 @@ fn a_terminal_invitation_cannot_be_reopened() {
 #[ignore = "serial administrator tamper acceptance"]
 fn an_invitations_terms_are_immutable_against_direct_sql() {
     let Some(db) = db() else { return };
-    db.rt.block_on(async {
+    db.block_on(async {
         let tree = seed_tree(&db.pool).await;
         let id = invite(
             &db.pool,
@@ -2057,7 +2077,7 @@ fn an_invitations_terms_are_immutable_against_direct_sql() {
 #[test]
 fn an_invitation_cannot_be_born_expired() {
     let Some(db) = db() else { return };
-    db.rt.block_on(async {
+    db.block_on(async {
         let tree = seed_tree(&db.pool).await;
         let mut tx = begin(&db.pool, tree.tenant).await;
         let result = access::create_invite(
@@ -2084,7 +2104,7 @@ fn an_invitation_cannot_be_born_expired() {
 #[test]
 fn redeeming_for_access_already_held_consumes_the_invitation_and_conflicts_with_nothing() {
     let Some(db) = db() else { return };
-    db.rt.block_on(async {
+    db.block_on(async {
         let tree = seed_tree(&db.pool).await;
         let existing = grant(
             &db.pool,
@@ -2131,7 +2151,7 @@ fn redeeming_for_access_already_held_consumes_the_invitation_and_conflicts_with_
 #[test]
 fn an_unknown_token_is_indistinguishable_from_a_foreign_one() {
     let Some(db) = db() else { return };
-    db.rt.block_on(async {
+    db.block_on(async {
         let mine = seed_tree(&db.pool).await;
         let theirs = seed_tree(&db.pool).await;
         let hash = [8u8; 32];
@@ -2168,7 +2188,7 @@ fn an_unknown_token_is_indistinguishable_from_a_foreign_one() {
 #[test]
 fn another_tenants_rows_are_absent_on_every_surface() {
     let Some(db) = db() else { return };
-    db.rt.block_on(async {
+    db.block_on(async {
         let mine = seed_tree(&db.pool).await;
         let theirs = seed_tree(&db.pool).await;
         let their_group = new_group(&db.pool, theirs.tenant, "eng", &["robin"]).await;
@@ -2262,7 +2282,7 @@ fn another_tenants_rows_are_absent_on_every_surface() {
 #[test]
 fn the_grant_filters_select_rows_rather_than_authority() {
     let Some(db) = db() else { return };
-    db.rt.block_on(async {
+    db.block_on(async {
         let tree = seed_tree(&db.pool).await;
         grant(
             &db.pool,

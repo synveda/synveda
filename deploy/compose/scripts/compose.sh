@@ -1,6 +1,5 @@
 #!/bin/sh
-# Canonical CPR-45 Compose selector. This checkpoint deliberately exposes only
-# deterministic validation; lifecycle actions arrive with convergence jobs.
+# Canonical CPR-45 Compose selector and single-host lifecycle.
 set -eu
 
 # Shell ranges follow the process locale. Pin validation to bytewise ASCII so
@@ -9,22 +8,28 @@ LC_ALL=C
 export LC_ALL
 
 usage() {
-    echo "usage: deploy/compose/scripts/compose.sh config [--output PATH]" >&2
+    echo "usage: deploy/compose/scripts/compose.sh {config [--output PATH]|hosts-plan|resolver-check|up|smoke|down|reset}" >&2
     exit 64
 }
 
-[ "${1:-}" = config ] || usage
-shift
-output=
-case "${1:-}" in
-    "") ;;
-    --output)
-        [ "$#" -eq 2 ] && [ -n "${2:-}" ] || usage
-        output=$2
-        shift 2
-        ;;
+action=${1:-}
+case "$action" in
+    config|hosts-plan|resolver-check|up|smoke|down|reset) ;;
     *) usage ;;
 esac
+shift
+output=
+if [ "$action" = config ]; then
+    case "${1:-}" in
+        "") ;;
+        --output)
+            [ "$#" -eq 2 ] && [ -n "${2:-}" ] || usage
+            output=$2
+            shift 2
+            ;;
+        *) usage ;;
+    esac
+fi
 [ "$#" -eq 0 ] || usage
 
 script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd)
@@ -36,6 +41,149 @@ runtime=${SYNVEDA_COMPOSE_RUNTIME:-development}
 postgres_mode=${SYNVEDA_POSTGRES_MODE:-bundled}
 oidc_mode=${SYNVEDA_OIDC_MODE:-bundled}
 profiles=${SYNVEDA_COMPOSE_PROFILES:-}
+demo_profile=false
+lifecycle_timeout=${SYNVEDA_COMPOSE_LIFECYCLE_TIMEOUT_SECONDS:-900}
+
+case "$lifecycle_timeout" in
+    ''|0|0*|*[!0-9]*)
+        echo "compose: SYNVEDA_COMPOSE_LIFECYCLE_TIMEOUT_SECONDS must be 240 through 3600" >&2
+        exit 64
+        ;;
+esac
+[ "$lifecycle_timeout" -ge 240 ] && [ "$lifecycle_timeout" -le 3600 ] || {
+    echo "compose: SYNVEDA_COMPOSE_LIFECYCLE_TIMEOUT_SECONDS must be 240 through 3600" >&2
+    exit 64
+}
+lifecycle_started_at=$(node "$script_dir/monotonic-seconds.mjs") || {
+    echo "compose: lifecycle clock was unavailable" >&2
+    exit 69
+}
+case "$lifecycle_started_at" in
+    ''|*[!0-9]*)
+        echo "compose: lifecycle clock was invalid" >&2
+        exit 69
+        ;;
+esac
+lifecycle_deadline=$((lifecycle_started_at + lifecycle_timeout))
+lifecycle_last_remaining=$lifecycle_timeout
+lifecycle_child_uncertain=false
+bounded_runner_pending=false
+bounded_runner_waiting=false
+set_remaining_lifecycle_seconds() {
+    lifecycle_now=$(node "$script_dir/monotonic-seconds.mjs") || {
+        echo "compose: lifecycle clock was unavailable" >&2
+        return 69
+    }
+    case "$lifecycle_now" in
+        ''|*[!0-9]*)
+            echo "compose: lifecycle clock was invalid" >&2
+            return 69
+            ;;
+    esac
+    lifecycle_remaining=$((lifecycle_deadline - lifecycle_now))
+    # CLOCK_MONOTONIC must not step backwards, but a non-increasing clamp also
+    # prevents any platform/runtime anomaly from replenishing the budget.
+    if [ "$lifecycle_remaining" -gt "$lifecycle_last_remaining" ]; then
+        lifecycle_remaining=$lifecycle_last_remaining
+    fi
+    if [ "$lifecycle_remaining" -le 0 ]; then
+        echo "compose: whole-operation lifecycle deadline expired" >&2
+        return 124
+    fi
+    lifecycle_last_remaining=$lifecycle_remaining
+}
+run_bounded() {
+    requested_seconds=$1
+    shift
+    set_remaining_lifecycle_seconds || return $?
+    bounded_seconds=$lifecycle_remaining
+    if [ "$requested_seconds" -lt "$bounded_seconds" ]; then
+        bounded_seconds=$requested_seconds
+    fi
+    bounded_status_file=$(mktemp "${TMPDIR:-/tmp}/synveda-compose-runner.XXXXXX") || {
+        echo "compose: bounded runner status staging failed" >&2
+        return 70
+    }
+    if ! chmod 600 "$bounded_status_file"; then
+        rm -f -- "$bounded_status_file" 2>/dev/null || true
+        bounded_status_file=
+        return 70
+    fi
+    bounded_runner_pending=true
+    node "$script_dir/run-with-deadline.mjs" --seconds "$bounded_seconds" \
+        --status-file "$bounded_status_file" -- "$@" &
+    bounded_runner_pid=$!
+    bounded_status=0
+    bounded_runner_waiting=true
+    bounded_runner_pending=false
+    wait "$bounded_runner_pid" || bounded_status=$?
+    bounded_settlement_status=0
+    settle_bounded_runner "$bounded_status" || bounded_settlement_status=$?
+    if [ "$bounded_status" -ge 128 ]; then
+        # An uncatchable signal delivered directly to the command can bypass
+        # its authority-state cleanup even when the runner proves the process
+        # group is gone. Parent-forwarded signals settle in compose_signal.
+        lifecycle_child_uncertain=true
+    fi
+    if [ "$bounded_status" -eq 0 ] && [ "$bounded_settlement_status" -ne 0 ]; then
+        bounded_status=$bounded_settlement_status
+    fi
+    bounded_runner_waiting=false
+    bounded_runner_pid=
+    return "$bounded_status"
+}
+bounded_runner_pid=
+bounded_status_file=
+bounded_capture_file=
+bounded_output=
+settle_bounded_runner() {
+    settled_status=$1
+    bounded_group_clean=false
+    if [ -n "$bounded_status_file" ] && [ ! -L "$bounded_status_file" ] && \
+        [ -f "$bounded_status_file" ]; then
+        recorded_bounded_status=
+        IFS= read -r recorded_bounded_status < "$bounded_status_file" || \
+            recorded_bounded_status=
+        if [ "$recorded_bounded_status" = "clean:$settled_status" ]; then
+            bounded_group_clean=true
+        fi
+    fi
+    if [ "$settled_status" -eq 125 ] || [ "$bounded_group_clean" != true ]; then
+        lifecycle_child_uncertain=true
+    fi
+    if [ -n "$bounded_status_file" ]; then
+        rm -f -- "$bounded_status_file" || return 70
+        bounded_status_file=
+    fi
+}
+capture_bounded_output() {
+    capture_seconds=$1
+    shift
+    bounded_capture_file=$(mktemp "${TMPDIR:-/tmp}/synveda-compose-output.XXXXXX") || {
+        echo "compose: bounded output staging failed" >&2
+        return 70
+    }
+    chmod 600 "$bounded_capture_file" || return 70
+    capture_status=0
+    run_bounded "$capture_seconds" "$@" > "$bounded_capture_file" || capture_status=$?
+    if [ "$capture_status" -ne 0 ]; then
+        rm -f -- "$bounded_capture_file" 2>/dev/null || true
+        bounded_capture_file=
+        return "$capture_status"
+    fi
+    bounded_output=$(cat -- "$bounded_capture_file") || {
+        rm -f -- "$bounded_capture_file" 2>/dev/null || true
+        bounded_capture_file=
+        return 70
+    }
+    rm -f -- "$bounded_capture_file" || return 70
+    bounded_capture_file=
+}
+propagate_bounded_failure() {
+    case "$1" in
+        124|125) exit "$1" ;;
+    esac
+}
 
 # The wrapper owns provider/profile/file selection. Prevent Docker-native
 # selector variables and an ambient .env from adding an unvalidated fragment.
@@ -71,7 +219,8 @@ IFS=,
 for profile in $profiles; do
     case "$profile" in
         "") ;;
-        semantic|observability|apalis-board|demo|backup-test) ;;
+        semantic|observability|apalis-board|backup-test) ;;
+        demo) demo_profile=true ;;
         *)
             echo "compose: unsupported profile; allowed: semantic,observability,apalis-board,demo,backup-test" >&2
             exit 64
@@ -79,6 +228,17 @@ for profile in $profiles; do
     esac
 done
 IFS=$old_ifs
+
+if [ "$demo_profile" = true ] && \
+    { [ "$postgres_mode" != bundled ] || [ "$oidc_mode" != bundled ]; }; then
+    echo "compose: demo profile requires bundled PostgreSQL and bundled OIDC" >&2
+    exit 64
+fi
+if { [ "$action" = up ] || [ "$action" = reset ]; } && \
+    [ "$postgres_mode" = external ]; then
+    echo "compose: canonical start/reset is unavailable for external PostgreSQL in this checkpoint" >&2
+    exit 69
+fi
 
 runtime_uid=${SYNVEDA_RUNTIME_UID:-$(id -u)}
 runtime_gid=${SYNVEDA_RUNTIME_GID:-$(id -g)}
@@ -118,6 +278,77 @@ if [ -n "$suffix" ]; then
     esac
     project=$project-$suffix
 fi
+
+case "$action" in
+    up|down|smoke|reset)
+        # Hold one exact-project exclusion across authority-file generation and
+        # every Docker mutation. Child generators verify and borrow this lock.
+        # shellcheck source=deploy/compose/scripts/project-lock.sh
+        unset SYNVEDA_INTERNAL_PROJECT_LOCK_FILE SYNVEDA_INTERNAL_PROJECT_LOCK_OWNER
+        . "$script_dir/project-lock.sh"
+        asset_config_file=
+        status_file=
+        docker_mutation_uncertain=false
+        docker_mutation_phase=
+        compose_signal() {
+            signal_name=$1
+            signal_status=$2
+            # A POSIX shell may defer a trap while waiting for a foreground
+            # process. The deadline runner is deliberately a background child
+            # so this handler can forward a parent-only signal immediately.
+            trap '' HUP INT TERM
+            if [ -n "$bounded_runner_pid" ]; then
+                kill -"$signal_name" "$bounded_runner_pid" 2>/dev/null || true
+                signal_wait_status=0
+                wait "$bounded_runner_pid" 2>/dev/null || signal_wait_status=$?
+                settle_bounded_runner "$signal_wait_status" 2>/dev/null || true
+                bounded_runner_waiting=false
+                bounded_runner_pid=
+            elif [ "$bounded_runner_pending" = true ]; then
+                # A signal between fork and $! publication cannot identify the
+                # new process group safely. Retain the project lock so the
+                # possibly-live child cannot overlap another lifecycle.
+                lifecycle_child_uncertain=true
+            fi
+            exit "$signal_status"
+        }
+        compose_cleanup() {
+            cleanup_status=$?
+            # Ignore re-entrant signals until temporary state and the global
+            # exact-project lock are released.
+            trap '' HUP INT TERM
+            trap - EXIT
+            if [ -n "$asset_config_file" ] && \
+                ! rm -f -- "$asset_config_file" 2>/dev/null; then
+                [ "$cleanup_status" -ne 0 ] || cleanup_status=70
+            fi
+            if [ -n "$status_file" ] && ! rm -f -- "$status_file" 2>/dev/null; then
+                [ "$cleanup_status" -ne 0 ] || cleanup_status=70
+            fi
+            if [ -n "$bounded_capture_file" ] && \
+                ! rm -f -- "$bounded_capture_file" 2>/dev/null; then
+                [ "$cleanup_status" -ne 0 ] || cleanup_status=70
+            fi
+            if [ -n "$bounded_status_file" ] && \
+                ! rm -f -- "$bounded_status_file" 2>/dev/null; then
+                [ "$cleanup_status" -ne 0 ] || cleanup_status=70
+            fi
+            if [ "$docker_mutation_uncertain" = true ]; then
+                echo "compose: retained exact-project lock because Docker mutation state is uncertain ($docker_mutation_phase)" >&2
+            elif [ "$lifecycle_child_uncertain" = true ]; then
+                echo "compose: retained exact-project lock because a bounded child process group was not cleanly reaped" >&2
+            elif ! release_project_lock; then
+                [ "$cleanup_status" -ne 0 ] || cleanup_status=73
+            fi
+            exit "$cleanup_status"
+        }
+        trap compose_cleanup EXIT
+        trap 'compose_signal HUP 129' HUP
+        trap 'compose_signal INT 130' INT
+        trap 'compose_signal TERM 143' TERM
+        acquire_project_lock
+        ;;
+esac
 
 app_host=${SYNVEDA_APP_HOST:-app.synveda.test}
 if [ "$oidc_mode" = bundled ]; then
@@ -247,6 +478,61 @@ if [ "$oidc_mode" = external ]; then
     caddy_identity_config=$compose_dir/configs/caddy/identity.external.caddy
 fi
 
+if [ "$action" = hosts-plan ]; then
+    if [ "$runtime" = reference ]; then
+        echo "reference mode uses operator DNS and has no managed hosts-file block"
+    else
+        echo "# BEGIN SYNVEDA $project"
+        if [ "$oidc_mode" = bundled ]; then
+            echo "127.0.0.1 $app_host $auth_host"
+        else
+            echo "127.0.0.1 $app_host"
+        fi
+        echo "# END SYNVEDA $project"
+    fi
+    exit 0
+fi
+
+run_resolver_preflight() {
+    set -- "$script_dir/check-host-resolution.mjs" \
+        --runtime "$runtime" --oidc "$oidc_mode" \
+        --app-host "$app_host" --docker-bin "$docker_bin"
+    if [ "$oidc_mode" = bundled ]; then
+        set -- "$@" --auth-host "$auth_host"
+    fi
+    run_bounded "$lifecycle_timeout" node "$@"
+}
+run_docker_preflight() {
+    run_bounded "$lifecycle_timeout" node "$script_dir/check-host-resolution.mjs" \
+        --docker-only true --docker-bin "$docker_bin"
+}
+pin_local_docker_endpoint() {
+    capture_bounded_output "$lifecycle_timeout" node \
+        "$script_dir/check-host-resolution.mjs" \
+        --docker-only true --print-docker-endpoint true --docker-bin "$docker_bin" || return $?
+    pinned_docker_endpoint=$bounded_output
+    case "$pinned_docker_endpoint" in
+        unix:///*) ;;
+        *) echo "compose: validated Docker endpoint was refused" >&2; return 69 ;;
+    esac
+    case "$pinned_docker_endpoint" in
+        *[[:space:]]*)
+            echo "compose: validated Docker endpoint was refused" >&2
+            return 69
+            ;;
+    esac
+    DOCKER_HOST=$pinned_docker_endpoint
+    export DOCKER_HOST
+    unset DOCKER_CONTEXT
+}
+if [ "$action" = resolver-check ]; then
+    run_resolver_preflight
+    exit 0
+fi
+case "$action" in
+    up|down|smoke|reset) pin_local_docker_endpoint ;;
+esac
+
 compose_ipv4_pool_set=${SYNVEDA_COMPOSE_IPV4_POOL+x}
 compose_ipv4_pool=${SYNVEDA_COMPOSE_IPV4_POOL:-172.30.240.0/24}
 if [ "$runtime" = reference ] || [ -n "$suffix" ]; then
@@ -335,10 +621,47 @@ identity_egress_gateway=$pool_prefix.129
 telemetry_egress_subnet=$pool_prefix.144/28
 telemetry_egress_gateway=$pool_prefix.145
 
+bootstrap_tenant_id=${SYNVEDA_BOOTSTRAP_TENANT_ID:-019b53c0-7c00-7000-8000-000000000045}
+bootstrap_tenant_slug=${SYNVEDA_BOOTSTRAP_TENANT_SLUG:-reference}
+bootstrap_tenant_name=${SYNVEDA_BOOTSTRAP_TENANT_NAME:-Synveda Reference}
+case "$bootstrap_tenant_id" in
+    ????????-????-7???-[89ab]???-????????????) ;;
+    *) echo "compose: bootstrap tenant UUIDv7 was refused" >&2; exit 64 ;;
+esac
+case "$bootstrap_tenant_id" in
+    *[!0-9a-f-]*) echo "compose: bootstrap tenant UUIDv7 was refused" >&2; exit 64 ;;
+esac
+case "$bootstrap_tenant_slug" in
+    [a-z0-9]*) ;;
+    *) echo "compose: bootstrap tenant slug was refused" >&2; exit 64 ;;
+esac
+case "$bootstrap_tenant_slug" in
+    *[!a-z0-9-]*|*-|*--*) echo "compose: bootstrap tenant slug was refused" >&2; exit 64 ;;
+esac
+[ "${#bootstrap_tenant_slug}" -le 63 ] || {
+    echo "compose: bootstrap tenant slug was refused" >&2
+    exit 64
+}
+case "$bootstrap_tenant_name" in
+    ''|-*|*[!A-Za-z0-9._' '-]*)
+        echo "compose: bootstrap tenant name was refused" >&2
+        exit 64
+        ;;
+esac
+case "$bootstrap_tenant_name" in
+    *[A-Za-z0-9]*) ;;
+    *) echo "compose: bootstrap tenant name was refused" >&2; exit 64 ;;
+esac
+[ "${#bootstrap_tenant_name}" -le 128 ] || {
+    echo "compose: bootstrap tenant name was refused" >&2
+    exit 64
+}
+
 for setting in DATABASE_URL SYNVEDA_MIGRATOR_DATABASE_URL SYNVEDA_GATEWAY_DATABASE_URL \
     SYNVEDA_WORKER_DATABASE_URL \
     SYNVEDA_KMS_KEY SYNVEDA_KMS_KEY_REF POSTGRES_PASSWORD KC_DB_PASSWORD KC_BOOTSTRAP_ADMIN_USERNAME \
-    KC_BOOTSTRAP_ADMIN_PASSWORD SYNVEDA_KEYCLOAK_CONVERGENCE_PASSWORD; do
+    KC_BOOTSTRAP_ADMIN_PASSWORD SYNVEDA_KEYCLOAK_CONVERGENCE_PASSWORD \
+    SYNVEDA_KEYCLOAK_DEMO_ADMIN_PASSWORD SYNVEDA_KEYCLOAK_DEMO_MEMBER_PASSWORD; do
     case "$setting" in
         DATABASE_URL) present=${DATABASE_URL+x} ;;
         SYNVEDA_MIGRATOR_DATABASE_URL) present=${SYNVEDA_MIGRATOR_DATABASE_URL+x} ;;
@@ -351,12 +674,41 @@ for setting in DATABASE_URL SYNVEDA_MIGRATOR_DATABASE_URL SYNVEDA_GATEWAY_DATABA
         KC_BOOTSTRAP_ADMIN_USERNAME) present=${KC_BOOTSTRAP_ADMIN_USERNAME+x} ;;
         KC_BOOTSTRAP_ADMIN_PASSWORD) present=${KC_BOOTSTRAP_ADMIN_PASSWORD+x} ;;
         SYNVEDA_KEYCLOAK_CONVERGENCE_PASSWORD) present=${SYNVEDA_KEYCLOAK_CONVERGENCE_PASSWORD+x} ;;
+        SYNVEDA_KEYCLOAK_DEMO_ADMIN_PASSWORD) present=${SYNVEDA_KEYCLOAK_DEMO_ADMIN_PASSWORD+x} ;;
+        SYNVEDA_KEYCLOAK_DEMO_MEMBER_PASSWORD) present=${SYNVEDA_KEYCLOAK_DEMO_MEMBER_PASSWORD+x} ;;
     esac
     [ -z "${present:-}" ] || {
         echo "compose: direct secret setting $setting is forbidden; use the role-specific file" >&2
         exit 78
     }
 done
+
+if [ "$action" = up ]; then
+    run_resolver_preflight
+    run_bounded "$lifecycle_timeout" node "$script_dir/check-network-preflight.mjs" \
+        --project "$project" --pool "$compose_ipv4_pool" --docker-bin "$docker_bin"
+    run_bounded "$lifecycle_timeout" env \
+        "SYNVEDA_COMPOSE_RUNTIME=$runtime" \
+        "SYNVEDA_POSTGRES_MODE=$postgres_mode" \
+        "SYNVEDA_OIDC_MODE=$oidc_mode" \
+        "SYNVEDA_COMPOSE_PROJECT_SUFFIX=$suffix" \
+        "SYNVEDA_APP_HOST=$app_host" \
+        "SYNVEDA_PUBLIC_SCHEME=$public_scheme" \
+        "SYNVEDA_DEV_HTTP_PORT=$public_port" \
+        "$script_dir/generate-secrets.sh" --if-missing
+    if [ "$oidc_mode" = bundled ]; then
+        run_bounded "$lifecycle_timeout" env \
+            "SYNVEDA_COMPOSE_RUNTIME=$runtime" \
+            "SYNVEDA_OIDC_MODE=$oidc_mode" \
+            "SYNVEDA_COMPOSE_PROJECT_SUFFIX=$suffix" \
+            "SYNVEDA_APP_HOST=$app_host" \
+            "SYNVEDA_AUTH_HOST=$auth_host" \
+            "SYNVEDA_PUBLIC_SCHEME=$public_scheme" \
+            "SYNVEDA_DEV_HTTP_PORT=$public_port" \
+            "SYNVEDA_BOOTSTRAP_TENANT_ID=$bootstrap_tenant_id" \
+            "$script_dir/generate-issuer.sh" --if-missing
+    fi
+fi
 
 absolute_from_compose() {
     case "$1" in
@@ -366,7 +718,7 @@ absolute_from_compose() {
     esac
 }
 
-secret_dir=$(absolute_from_compose "${SYNVEDA_SECRETS_DIR:-./secrets}")
+secret_dir=$(absolute_from_compose "${SYNVEDA_SECRETS_DIR:-./runtime/$project/secrets}")
 issuer_file=$(absolute_from_compose "${SYNVEDA_OIDC_ISSUERS_FILE:-./runtime/$project/issuers.json}")
 database_authority_dir=$(absolute_from_compose "${SYNVEDA_DATABASE_AUTHORITY_DIR:-./runtime/$project/database-authority}")
 keycloak_public_gate_dir=$(absolute_from_compose "${SYNVEDA_KEYCLOAK_PUBLIC_GATE_DIR:-./runtime/$project/keycloak-public-gate}")
@@ -401,23 +753,23 @@ reject_sensitive_build_context_path() {
             ;;
     esac
 }
-reject_sensitive_build_context_path "$secret_dir" "$compose_dir/secrets" secret-directory
+reject_sensitive_build_context_path "$secret_dir" "$compose_dir/runtime" secret-directory
 reject_sensitive_build_context_path "$issuer_file" "$compose_dir/runtime" issuer-configuration
 if [ "$oidc_mode" = bundled ]; then
     reject_sensitive_build_context_path "$database_authority_dir" "$compose_dir/runtime" database-authority
     reject_sensitive_build_context_path "$keycloak_public_gate_dir" "$compose_dir/runtime" keycloak-public-gate
 fi
 mode_of() {
-    stat -f '%Lp' "$1" 2>/dev/null || stat -c '%a' "$1" 2>/dev/null
+    stat -c '%a' "$1" 2>/dev/null || stat -f '%Lp' "$1" 2>/dev/null
 }
 owner_of() {
-    stat -f '%u' "$1" 2>/dev/null || stat -c '%u' "$1" 2>/dev/null
+    stat -c '%u' "$1" 2>/dev/null || stat -f '%u' "$1" 2>/dev/null
 }
 group_of() {
-    stat -f '%g' "$1" 2>/dev/null || stat -c '%g' "$1" 2>/dev/null
+    stat -c '%g' "$1" 2>/dev/null || stat -f '%g' "$1" 2>/dev/null
 }
 size_of() {
-    stat -f '%z' "$1" 2>/dev/null || stat -c '%s' "$1" 2>/dev/null
+    stat -c '%s' "$1" 2>/dev/null || stat -f '%z' "$1" 2>/dev/null
 }
 require_private_directory() {
     directory=$1
@@ -438,11 +790,18 @@ require_private_directory() {
 }
 require_private_directory "$secret_dir" secret
 secret_dir=$(CDPATH= cd "$secret_dir" && pwd -P)
-reject_sensitive_build_context_path "$secret_dir" "$compose_dir/secrets" secret-directory
+case "$secret_dir" in
+    */"$project"/secrets) ;;
+    *)
+        echo "compose: secret directory must be scoped to project $project" >&2
+        exit 78
+        ;;
+esac
+reject_sensitive_build_context_path "$secret_dir" "$compose_dir/runtime" secret-directory
 oidc_directory_secret_dir=$secret_dir/oidc-directory
 require_private_directory "$oidc_directory_secret_dir" oidc-directory-secret
 oidc_directory_secret_dir=$(CDPATH= cd "$oidc_directory_secret_dir" && pwd -P)
-reject_sensitive_build_context_path "$oidc_directory_secret_dir" "$compose_dir/secrets" oidc-directory-secret
+reject_sensitive_build_context_path "$oidc_directory_secret_dir" "$compose_dir/runtime" oidc-directory-secret
 if [ "$oidc_mode" = bundled ]; then
     require_private_directory "$database_authority_dir" database-authority
     database_authority_dir=$(CDPATH= cd "$database_authority_dir" && pwd -P)
@@ -469,6 +828,15 @@ issuer_parent=$(dirname "$issuer_file")
 require_private_directory "$issuer_parent" issuer-configuration
 issuer_parent=$(CDPATH= cd "$issuer_parent" && pwd -P)
 issuer_file=$issuer_parent/$(basename "$issuer_file")
+if [ "$oidc_mode" = bundled ]; then
+    case "$issuer_file" in
+        */"$project"/issuers.json) ;;
+        *)
+            echo "compose: bundled issuer input must be scoped to project $project" >&2
+            exit 78
+            ;;
+    esac
+fi
 reject_sensitive_build_context_path "$issuer_file" "$compose_dir/runtime" issuer-configuration
 require_private_file() {
     file=$1
@@ -510,6 +878,12 @@ if [ "$oidc_mode" = bundled ]; then
     require_private_file "$secret_dir/keycloak_admin_password" keycloak_admin_password
     require_private_file "$secret_dir/keycloak_convergence_admin_password" \
         keycloak_convergence_admin_password
+    if [ "$demo_profile" = true ]; then
+        require_private_file "$secret_dir/keycloak_demo_admin_password" \
+            keycloak_demo_admin_password
+        require_private_file "$secret_dir/keycloak_demo_member_password" \
+            keycloak_demo_member_password
+    fi
 fi
 if [ "$runtime" = reference ]; then
     require_private_file "$secret_dir/tls_cert" tls_cert
@@ -808,10 +1182,13 @@ else
     }
 fi
 
-compose_version=$("$docker_bin" compose version --short 2>/dev/null) || {
+capture_bounded_output 30 "$docker_bin" compose version --short || {
+    compose_version_status=$?
+    propagate_bounded_failure "$compose_version_status"
     echo "compose: Docker Compose is required" >&2
     exit 69
 }
+compose_version=$bounded_output
 version_numbers=$(printf '%s\n' "$compose_version" | sed -E 's/^[^0-9]*([0-9]+)\.([0-9]+)\.([0-9]+).*/\1 \2 \3/')
 set -- $version_numbers
 [ "$#" -eq 3 ] || {
@@ -843,6 +1220,9 @@ else
 fi
 export SYNVEDA_INSECURE_DEVELOPMENT_HTTP=$insecure_development_http
 export SYNVEDA_OIDC_ISSUER=$oidc_issuer
+export SYNVEDA_BOOTSTRAP_TENANT_ID=$bootstrap_tenant_id
+export SYNVEDA_BOOTSTRAP_TENANT_SLUG=$bootstrap_tenant_slug
+export SYNVEDA_BOOTSTRAP_TENANT_NAME=$bootstrap_tenant_name
 export SYNVEDA_POSTGRES_BOOTSTRAP_URL=$postgres_bootstrap_url
 export SYNVEDA_POSTGRES_BUNDLED_CLUSTER=$postgres_bundled_cluster
 export SYNVEDA_DATABASE_EXPECTED_HOST=$database_expected_host
@@ -916,6 +1296,9 @@ fi
 if [ "$postgres_mode" = external ] || [ "$oidc_mode" = external ]; then
     set -- "$@" -f "$compose_dir/compose.external.yaml"
 fi
+if [ "$demo_profile" = true ]; then
+    set -- "$@" -f "$compose_dir/compose.demo.yaml"
+fi
 old_ifs=$IFS
 IFS=,
 for profile in $profiles; do
@@ -923,10 +1306,226 @@ for profile in $profiles; do
 done
 IFS=$old_ifs
 
-if [ -n "$output" ]; then
-    set -- "$@" config --format json --output "$output"
-else
-    set -- "$@" config --quiet
-fi
-"$docker_bin" "$@"
-echo "canonical Compose configuration valid for $project ($postgres_mode PostgreSQL, $oidc_mode OIDC)"
+prepare_asset_contract() {
+    asset_config_file=$(mktemp "${TMPDIR:-/tmp}/synveda-compose-assets.XXXXXX") || exit 70
+    chmod 600 "$asset_config_file"
+    run_bounded "$lifecycle_timeout" "$docker_bin" "$@" \
+        config --format json > "$asset_config_file"
+    run_bounded "$lifecycle_timeout" node "$script_dir/check-compose-assets.mjs" \
+        --config-file "$asset_config_file" --project "$project" \
+        --docker-bin "$docker_bin" --state existing
+}
+
+prove_assets_stopped() {
+    run_bounded "$lifecycle_timeout" node "$script_dir/check-compose-assets.mjs" \
+        --config-file "$asset_config_file" --project "$project" \
+        --docker-bin "$docker_bin" --state stopped
+}
+
+case "$action" in
+    config)
+        if [ -n "$output" ]; then
+            run_bounded "$lifecycle_timeout" "$docker_bin" "$@" \
+                config --format json --output "$output"
+        else
+            run_bounded "$lifecycle_timeout" "$docker_bin" "$@" config --quiet
+        fi
+        echo "canonical Compose configuration valid for $project ($postgres_mode PostgreSQL, $oidc_mode OIDC)"
+        ;;
+    up)
+        prepare_asset_contract "$@"
+        docker_mutation_uncertain=true
+        docker_mutation_phase=compose-up
+        if [ "$runtime" = development ]; then
+            run_bounded "$lifecycle_timeout" "$docker_bin" "$@" \
+                up --build --detach --wait --wait-timeout "$lifecycle_timeout" \
+                --force-recreate
+        else
+            run_bounded "$lifecycle_timeout" "$docker_bin" "$@" \
+                up --detach --wait --wait-timeout "$lifecycle_timeout" \
+                --force-recreate
+        fi
+        docker_mutation_uncertain=false
+        docker_mutation_phase=
+        echo "canonical Compose services converged for $project"
+        ;;
+    down)
+        run_docker_preflight
+        prepare_asset_contract "$@"
+        docker_mutation_uncertain=true
+        docker_mutation_phase=compose-down
+        run_bounded "$lifecycle_timeout" "$docker_bin" "$@" \
+            down --timeout "$lifecycle_timeout"
+        prove_assets_stopped
+        docker_mutation_uncertain=false
+        docker_mutation_phase=
+        echo "canonical Compose services stopped for $project; persistent data retained"
+        ;;
+    smoke)
+        prepare_asset_contract "$@"
+        run_resolver_preflight
+        status_file=$(mktemp "${TMPDIR:-/tmp}/synveda-compose-status.XXXXXX") || exit 70
+        run_bounded "$lifecycle_timeout" "$docker_bin" "$@" \
+            ps --all --format json > "$status_file"
+        set -- "$script_dir/check-runtime-smoke.mjs" \
+            --status-file "$status_file" --runtime "$runtime" \
+            --postgres "$postgres_mode" --oidc "$oidc_mode" \
+            --app-url "$public_app_url" --issuer "$oidc_issuer"
+        run_bounded "$lifecycle_timeout" node "$@"
+        rm -f -- "$status_file"
+        status_file=
+        echo "canonical Compose smoke passed for $project"
+        ;;
+    reset)
+        [ "${SYNVEDA_CONFIRM_RESET:-}" = "$project" ] || {
+            echo "compose: reset requires SYNVEDA_CONFIRM_RESET=$project" >&2
+            exit 64
+        }
+        run_docker_preflight
+        prepare_asset_contract "$@"
+        if [ "$oidc_mode" = bundled ]; then
+            run_bounded "$lifecycle_timeout" node "$script_dir/reset-runtime-state.mjs" \
+                --mode check --project "$project" \
+                --authority-dir "$database_authority_dir" \
+                --gate-dir "$keycloak_public_gate_dir"
+        fi
+        volume_name=${project}_postgres-data
+        volume_format='{{.Name}}|{{.Driver}}|{{.Scope}}|{{json .Options}}|{{index .Labels "com.docker.compose.project"}}|{{index .Labels "com.docker.compose.volume"}}|{{index .Labels "com.synveda.contract"}}|{{index .Labels "com.synveda.volume"}}'
+        volume_expected_prefix="$volume_name|local|local|"
+        volume_expected_suffix="|$project|postgres-data|cpr-45|postgres-data"
+        list_named_volume() {
+            capture_bounded_output 30 "$docker_bin" volume ls --quiet \
+                --filter "name=^${volume_name}$"
+        }
+        list_labelled_project_volume() {
+            capture_bounded_output 30 "$docker_bin" volume ls --quiet \
+                --filter "label=com.docker.compose.project=$project" \
+                --filter "label=com.docker.compose.volume=postgres-data"
+        }
+        volume_present=false
+        list_named_volume || {
+            inventory_status=$?
+            propagate_bounded_failure "$inventory_status"
+            echo "compose: named project data volume inventory was unavailable" >&2
+            exit 69
+        }
+        named_volume_candidates=$bounded_output
+        list_labelled_project_volume || {
+            inventory_status=$?
+            propagate_bounded_failure "$inventory_status"
+            echo "compose: project data volume inventory was unavailable" >&2
+            exit 69
+        }
+        labelled_volume_candidates=$bounded_output
+        case "$named_volume_candidates:$labelled_volume_candidates" in
+            :) ;;
+            "$volume_name:$volume_name") volume_present=true ;;
+            *)
+                echo "compose: exact project data volume inventory was refused" >&2
+                exit 78
+                ;;
+        esac
+        if [ "$volume_present" = true ]; then
+            capture_bounded_output 30 "$docker_bin" volume inspect \
+                --format "$volume_format" "$volume_name" || {
+                inspection_status=$?
+                propagate_bounded_failure "$inspection_status"
+                echo "compose: exact project data volume inspection failed" >&2
+                exit 69
+            }
+            volume_contract=$bounded_output
+            case "$volume_contract" in
+                "$volume_expected_prefix"null"$volume_expected_suffix"|\
+                "$volume_expected_prefix"'{}'"$volume_expected_suffix") ;;
+                *)
+                    echo "compose: exact project data volume contract was refused" >&2
+                    exit 78
+                    ;;
+            esac
+        fi
+        docker_mutation_uncertain=true
+        docker_mutation_phase=compose-down-for-reset
+        run_bounded "$lifecycle_timeout" "$docker_bin" "$@" \
+            down --timeout "$lifecycle_timeout"
+        prove_assets_stopped
+        docker_mutation_uncertain=false
+        docker_mutation_phase=
+        list_named_volume || {
+            inventory_status=$?
+            propagate_bounded_failure "$inventory_status"
+            echo "compose: named project data volume inventory was unavailable after shutdown" >&2
+            exit 69
+        }
+        named_volume_candidates_after=$bounded_output
+        list_labelled_project_volume || {
+            inventory_status=$?
+            propagate_bounded_failure "$inventory_status"
+            echo "compose: project data volume inventory was unavailable after shutdown" >&2
+            exit 69
+        }
+        labelled_volume_candidates_after=$bounded_output
+        if [ "$volume_present" = true ]; then
+            [ "$named_volume_candidates_after" = "$volume_name" ] && \
+                [ "$labelled_volume_candidates_after" = "$volume_name" ] || {
+                echo "compose: exact project data volume changed during reset" >&2
+                exit 78
+            }
+            capture_bounded_output 30 "$docker_bin" volume inspect \
+                --format "$volume_format" "$volume_name" || {
+                inspection_status=$?
+                propagate_bounded_failure "$inspection_status"
+                echo "compose: exact project data volume disappeared during reset" >&2
+                exit 70
+            }
+            volume_contract=$bounded_output
+            case "$volume_contract" in
+                "$volume_expected_prefix"null"$volume_expected_suffix"|\
+                "$volume_expected_prefix"'{}'"$volume_expected_suffix") ;;
+                *)
+                    echo "compose: exact project data volume changed during reset" >&2
+                    exit 78
+                    ;;
+            esac
+            docker_mutation_uncertain=true
+            docker_mutation_phase=project-volume-removal
+            run_bounded 30 "$docker_bin" volume rm "$volume_name" >/dev/null || {
+                echo "compose: exact project data volume removal failed" >&2
+                exit 70
+            }
+            list_named_volume || {
+                inventory_status=$?
+                propagate_bounded_failure "$inventory_status"
+                echo "compose: named project data volume inventory was unavailable after removal" >&2
+                exit 69
+            }
+            named_volume_candidates_final=$bounded_output
+            list_labelled_project_volume || {
+                inventory_status=$?
+                propagate_bounded_failure "$inventory_status"
+                echo "compose: project data volume inventory was unavailable after removal" >&2
+                exit 69
+            }
+            labelled_volume_candidates_final=$bounded_output
+            [ -z "$named_volume_candidates_final" ] && \
+                [ -z "$labelled_volume_candidates_final" ] || {
+                echo "compose: exact project data volume remains after reset" >&2
+                exit 78
+            }
+            docker_mutation_uncertain=false
+            docker_mutation_phase=
+        else
+            [ -z "$named_volume_candidates_after" ] && \
+                [ -z "$labelled_volume_candidates_after" ] || {
+                echo "compose: project data volume appeared during reset" >&2
+                exit 78
+            }
+        fi
+        if [ "$oidc_mode" = bundled ]; then
+            run_bounded "$lifecycle_timeout" node "$script_dir/reset-runtime-state.mjs" \
+                --mode apply --project "$project" \
+                --authority-dir "$database_authority_dir" \
+                --gate-dir "$keycloak_public_gate_dir"
+        fi
+        echo "canonical Compose data reset for $project; secrets, issuer and KMS key retained"
+        ;;
+esac

@@ -1,5 +1,7 @@
 import java.nio.charset.StandardCharsets;
 import java.nio.ByteBuffer;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
 import java.security.PrivateKey;
@@ -123,6 +125,116 @@ public final class SynvedaKeycloakProjectionSelfTest {
             200,
             new byte[1_048_577]
         ));
+
+        String demoAdmin = "{\"id\":\"00000000-0000-4000-8000-000000000045\","
+            + "\"username\":\"synveda-demo-admin\",\"enabled\":true,"
+            + "\"emailVerified\":true,\"email\":\"admin@demo.synveda.invalid\","
+            + "\"firstName\":\"Synveda\",\"lastName\":\"Demo Admin\","
+            + "\"requiredActions\":[],\"attributes\":{"
+            + "\"synvedaDemoContract\":[\"cpr45-demo-v1\"],"
+            + "\"synvedaDemoKind\":[\"admin\"]}}";
+        accept(() -> SynvedaKeycloakProjection.verifyDemoUser(
+            bytes(demoAdmin), "synveda-demo-admin", "admin", true
+        ));
+        accept(() -> SynvedaKeycloakProjection.verifyDemoUser(
+            bytes(demoAdmin.replace("\"enabled\":true", "\"enabled\":false")),
+            "synveda-demo-admin", "admin", false
+        ));
+        refuse(() -> SynvedaKeycloakProjection.verifyDemoUser(
+            bytes(demoAdmin.replace("cpr45-demo-v1", "foreign")),
+            "synveda-demo-admin", "admin", false
+        ));
+        refuse(() -> SynvedaKeycloakProjection.verifyDemoUser(
+            bytes(demoAdmin.replace("\"enabled\":true", "\"enabled\":false")),
+            "synveda-demo-admin", "admin", true
+        ));
+        refuse(() -> SynvedaKeycloakProjection.verifyDemoUser(
+            bytes(demoAdmin.replace(",\"requiredActions\":[]", "")),
+            "synveda-demo-admin", "admin", true
+        ));
+        accept(() -> SynvedaKeycloakProjection.demoUserState(
+            bytes(demoAdmin), "synveda-demo-admin", "admin"
+        ));
+        accept(() -> SynvedaKeycloakProjection.demoUserState(
+            bytes("{\"id\":\"00000000-0000-4000-8000-000000000045\","
+                + "\"username\":\"synveda-demo-admin\",\"attributes\":{"
+                + "\"operatorOwned\":[\"true\"]}}"),
+            "synveda-demo-admin", "admin"
+        ));
+        refuse(() -> SynvedaKeycloakProjection.demoUserState(
+            bytes(demoAdmin.replace(
+                "\"synvedaDemoKind\":[\"admin\"]",
+                "\"unexpected\":[\"admin\"]"
+            )),
+            "synveda-demo-admin", "admin"
+        ));
+        byte[] demoGroupMembers = bytes(
+            "[{\"id\":\"00000000-0000-4000-8000-000000000045\","
+                + "\"username\":\"synveda-demo-admin\",\"enabled\":true}]"
+        );
+        accept(() -> SynvedaKeycloakProjection.verifyDemoGroupMembers(
+            demoGroupMembers,
+            "00000000-0000-4000-8000-000000000045",
+            "synveda-demo-admin"
+        ));
+        refuse(() -> SynvedaKeycloakProjection.verifyDemoGroupMembers(
+            bytes("[]"),
+            "00000000-0000-4000-8000-000000000045",
+            "synveda-demo-admin"
+        ));
+        refuse(() -> SynvedaKeycloakProjection.verifyDemoGroupMembers(
+            bytes(new String(demoGroupMembers, StandardCharsets.UTF_8)
+                .replace("synveda-demo-admin", "foreign")),
+            "00000000-0000-4000-8000-000000000045",
+            "synveda-demo-admin"
+        ));
+        byte[] demoCredential = bytes(
+            "[{\"id\":\"00000000-0000-4000-8000-000000000047\","
+                + "\"type\":\"password\"}]"
+        );
+        accept(() -> SynvedaKeycloakProjection.verifyDemoPasswordCredential(
+            demoCredential
+        ));
+        refuse(() -> SynvedaKeycloakProjection.verifyDemoPasswordCredential(
+            bytes("[]")
+        ));
+        refuse(() -> SynvedaKeycloakProjection.verifyDemoPasswordCredential(
+            bytes("[{\"id\":\"00000000-0000-4000-8000-000000000047\","
+                + "\"type\":\"otp\"}]")
+        ));
+        accept(() -> SynvedaKeycloakProjection.verifyEmptyRoleMapping(bytes("{}")));
+        accept(() -> SynvedaKeycloakProjection.verifyEmptyRoleMapping(
+            bytes("{\"realmMappings\":[],\"clientMappings\":{}}")
+        ));
+        refuse(() -> SynvedaKeycloakProjection.verifyEmptyRoleMapping(
+            bytes("{\"realmMappings\":[{\"id\":"
+                + "\"00000000-0000-4000-8000-000000000048\"}]}")
+        ));
+
+        byte[] userProfile = Files.readAllBytes(
+            Path.of("/tmp/synveda-user-profile.json")
+        );
+        accept(() -> SynvedaKeycloakProjection.verifyUserProfile(userProfile));
+        String userProfileJson = new String(userProfile, StandardCharsets.UTF_8);
+        refuse(() -> SynvedaKeycloakProjection.verifyUserProfile(bytes(
+            userProfileJson.replaceFirst(
+                "\\{",
+                "{\"unmanagedAttributePolicy\":\"ENABLED\","
+            )
+        )));
+        refuse(() -> SynvedaKeycloakProjection.verifyUserProfile(bytes(
+            userProfileJson.replace(
+                "\"view\": [\"admin\"],\n        \"edit\": [\"admin\"]",
+                "\"view\": [\"admin\", \"user\"],\n"
+                    + "        \"edit\": [\"admin\", \"user\"]"
+            )
+        )));
+        refuse(() -> SynvedaKeycloakProjection.verifyUserProfile(bytes(
+            userProfileJson.replace(
+                "\"options\": {\"options\": [\"cpr45-demo-v1\"]}",
+                "\"options\": {\"options\": [\"foreign\"]}"
+            )
+        )));
 
         byte[] invalidGrant = bytes(
             "{\"error\":\"invalid_grant\","

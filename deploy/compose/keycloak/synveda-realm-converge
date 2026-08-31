@@ -19,15 +19,21 @@ authentication_client=admin-cli
 contract=cpr45-keycloak-realm-v3
 admin_url=http://keycloak:8080
 generation_gate=/opt/keycloak/bin/synveda-generation-gate
+user_profile_contract=/opt/keycloak/conf/synveda-user-profile.json
 generation=${SYNVEDA_KEYCLOAK_GENERATION:-}
 bootstrap_username=${SYNVEDA_KEYCLOAK_ADMIN_USERNAME:-}
 bootstrap_password=${SYNVEDA_KEYCLOAK_BOOTSTRAP_PASSWORD:-}
 convergence_password=${SYNVEDA_KEYCLOAK_CONVERGENCE_PASSWORD:-}
+demo_enabled=${SYNVEDA_KEYCLOAK_DEMO_ENABLED:-false}
+demo_admin_password=${SYNVEDA_KEYCLOAK_DEMO_ADMIN_PASSWORD:-}
+demo_member_password=${SYNVEDA_KEYCLOAK_DEMO_MEMBER_PASSWORD:-}
 public_app_url=${SYNVEDA_PUBLIC_APP_URL:-}
 public_auth_url=${SYNVEDA_PUBLIC_AUTH_URL:-}
 ssl_required=${SYNVEDA_KEYCLOAK_SSL_REQUIRED:-}
 unset SYNVEDA_KEYCLOAK_ADMIN_USERNAME SYNVEDA_KEYCLOAK_BOOTSTRAP_PASSWORD
 unset SYNVEDA_KEYCLOAK_CONVERGENCE_PASSWORD SYNVEDA_KEYCLOAK_GENERATION
+unset SYNVEDA_KEYCLOAK_DEMO_ENABLED SYNVEDA_KEYCLOAK_DEMO_ADMIN_PASSWORD
+unset SYNVEDA_KEYCLOAK_DEMO_MEMBER_PASSWORD
 
 refuse() {
     echo "keycloak-converge: configuration was refused" >&2
@@ -74,6 +80,20 @@ esac
 [ "$bootstrap_username" != "$convergence_username" ] || refuse
 [ -n "$bootstrap_password" ] && [ -n "$convergence_password" ] || refuse
 [ "$bootstrap_password" != "$convergence_password" ] || refuse
+case "$demo_enabled" in
+    true)
+        [ -n "$demo_admin_password" ] && [ -n "$demo_member_password" ] && \
+            [ "$demo_admin_password" != "$demo_member_password" ] && \
+            [ "$demo_admin_password" != "$bootstrap_password" ] && \
+            [ "$demo_admin_password" != "$convergence_password" ] && \
+            [ "$demo_member_password" != "$bootstrap_password" ] && \
+            [ "$demo_member_password" != "$convergence_password" ] || refuse
+        ;;
+    false)
+        [ -z "$demo_admin_password" ] && [ -z "$demo_member_password" ] || refuse
+        ;;
+    *) refuse ;;
+esac
 case "$ssl_required:$public_app_url" in
     NONE:http://*) ssl_value=none ;;
     EXTERNAL:https://*) ssl_value=external ;;
@@ -248,6 +268,23 @@ admin_quiet() {
         echo "keycloak-converge: $quiet_action failed" >&2
         return 1
     fi
+}
+
+demo_mutations=0
+consume_demo_mutation() {
+    demo_mutations=$((demo_mutations + 1))
+    # A clean Keycloak user receives one default realm-role mapping. Two user
+    # creates, exact updates, permanent passwords, those two removals and the
+    # administrator group join require nine mutations; allow one bounded
+    # repair beyond that clean projection and refuse further drift.
+    [ "$demo_mutations" -le 10 ] || {
+        echo "keycloak-converge: demo mutation budget was exhausted" >&2
+        exit 70
+    }
+}
+demo_admin_quiet() {
+    consume_demo_mutation
+    admin_quiet "$@"
 }
 
 try_project_to_file() {
@@ -689,7 +726,7 @@ cleanup() {
             cleanup_status=70
         fi
     fi
-    unset bootstrap_password convergence_password
+    unset bootstrap_password convergence_password demo_admin_password demo_member_password
     exit "$cleanup_status"
 }
 
@@ -794,6 +831,400 @@ query_user_id() {
     projection_value "$query_file" user-id user "$query_name"
 }
 
+query_target_user_id() {
+    query_config=$1
+    query_name=$2
+    query_file=$state_dir/target-user-query.json
+    admin_to_file "$query_config" "$query_file" target-user-query get users -r "$realm" \
+        -q "username=$query_name" -q exact=true -q first=0 -q max=2
+    projection_value "$query_file" user-id user "$query_name"
+}
+
+demo_user_contract_state() {
+    state_config=$1
+    state_username=$2
+    state_kind=$3
+    state_user_id=$(query_target_user_id "$state_config" "$state_username")
+    if [ "$state_user_id" = missing ]; then
+        printf '%s\n' missing
+        return
+    fi
+    is_uuid "$state_user_id" || exit 70
+    state_input=$state_dir/demo-$state_kind-state.json
+    state_output=$state_dir/demo-$state_kind-state.out
+    admin_to_file "$state_config" "$state_input" "demo-$state_kind-state-read" \
+        get "users/$state_user_id" -r "$realm"
+    project_to_file "$state_output" "demo-$state_kind-state" demo-user-state \
+        "$state_input" "$state_username" "$state_kind"
+    state_line=
+    state_extra=
+    exec 3< "$state_output"
+    IFS= read -r state_line <&3 || [ -n "$state_line" ]
+    if IFS= read -r state_extra <&3; then
+        exec 3<&-
+        exit 70
+    fi
+    exec 3<&-
+    case "$state_line" in
+        demo=owned) printf 'owned=%s\n' "$state_user_id" ;;
+        demo=foreign) printf 'foreign=%s\n' "$state_user_id" ;;
+        *) exit 70 ;;
+    esac
+}
+
+parse_demo_inventory() {
+    inventory_file=$1
+    inventory_admin_id=
+    inventory_member_id=
+    while IFS= read -r inventory_entry; do
+        [ -n "$inventory_entry" ] || continue
+        case "$inventory_entry" in
+            admin=*)
+                [ -z "$inventory_admin_id" ] || exit 70
+                inventory_admin_id=${inventory_entry#admin=}
+                is_uuid "$inventory_admin_id" || exit 70
+                ;;
+            member=*)
+                [ -z "$inventory_member_id" ] || exit 70
+                inventory_member_id=${inventory_entry#member=}
+                is_uuid "$inventory_member_id" || exit 70
+                ;;
+            *) exit 70 ;;
+        esac
+    done < "$inventory_file"
+}
+
+query_demo_inventory() {
+    inventory_config=$1
+    inventory_label=$2
+    inventory_query=$3
+    inventory_mode=$4
+    inventory_kind=${5:-}
+    inventory_json=$state_dir/demo-inventory-$inventory_label.json
+    inventory_output=$state_dir/demo-inventory-$inventory_label.out
+    admin_to_file "$inventory_config" "$inventory_json" \
+        "demo-inventory-$inventory_label-read" get users -r "$realm" \
+        -q "q=$inventory_query" -q first=0 -q max=3 \
+        -q briefRepresentation=false
+    if [ -n "$inventory_kind" ]; then
+        project_to_file "$inventory_output" "demo-inventory-$inventory_label" \
+            "$inventory_mode" "$inventory_json" "$inventory_kind"
+    else
+        project_to_file "$inventory_output" "demo-inventory-$inventory_label" \
+            "$inventory_mode" "$inventory_json"
+    fi
+}
+
+refresh_demo_inventory() {
+    inventory_config=$1
+    query_demo_inventory "$inventory_config" contract \
+        synvedaDemoContract:cpr45-demo-v1 demo-owned-users
+    parse_demo_inventory "$state_dir/demo-inventory-contract.out"
+    contract_admin_id=$inventory_admin_id
+    contract_member_id=$inventory_member_id
+
+    query_demo_inventory "$inventory_config" admin synvedaDemoKind:admin \
+        demo-owned-user-kind admin
+    parse_demo_inventory "$state_dir/demo-inventory-admin.out"
+    [ -z "$inventory_member_id" ] || exit 70
+    kind_admin_id=$inventory_admin_id
+
+    query_demo_inventory "$inventory_config" member synvedaDemoKind:member \
+        demo-owned-user-kind member
+    parse_demo_inventory "$state_dir/demo-inventory-member.out"
+    [ -z "$inventory_admin_id" ] || exit 70
+    kind_member_id=$inventory_member_id
+
+    [ "$contract_admin_id" = "$kind_admin_id" ] && \
+        [ "$contract_member_id" = "$kind_member_id" ] || exit 70
+    demo_inventory_admin_id=$contract_admin_id
+    demo_inventory_member_id=$contract_member_id
+}
+
+try_prove_user_profile() {
+    profile_config=$1
+    profile_label=$2
+    try_admin_to_file "$profile_config" "$state_dir/$profile_label-user-profile.json" \
+        get "users/profile" -r "$realm" || return
+    try_project_quiet "$profile_label-user-profile" user-profile \
+        "$state_dir/$profile_label-user-profile.json"
+}
+
+prove_user_profile() {
+    if ! try_prove_user_profile "$1" "$2"; then
+        echo "keycloak-converge: managed user profile was refused" >&2
+        return 1
+    fi
+}
+
+retire_demo_user() {
+    retire_config=$1
+    retire_kind=$2
+    retire_user_id=$3
+    [ -n "$retire_user_id" ] || return 0
+    is_uuid "$retire_user_id" || exit 70
+    retire_input=$state_dir/demo-$retire_kind-retire.json
+    admin_to_file "$retire_config" "$retire_input" \
+        "demo-$retire_kind-retire-read" get "users/$retire_user_id" -r "$realm"
+    project_quiet "demo-$retire_kind-retire-owned" demo-user-owned-id \
+        "$retire_input" "$retire_kind" "$retire_user_id"
+    demo_admin_quiet "$retire_config" "demo-$retire_kind-user-retire" \
+        delete "users/$retire_user_id" -r "$realm"
+}
+
+clear_target_user_roles() {
+    clear_config=$1
+    clear_user_id=$2
+    clear_kind=$3
+    admin_to_file "$clear_config" "$state_dir/demo-$clear_kind-role-mappings.json" \
+        "demo-$clear_kind-role-mappings-read" \
+        get "users/$clear_user_id/role-mappings" -r "$realm"
+    project_to_file "$state_dir/demo-$clear_kind-role-mapping-ids.out" \
+        "demo-$clear_kind-role-mapping-ids" demo-role-mapping-ids \
+        "$state_dir/demo-$clear_kind-role-mappings.json"
+    while IFS= read -r role_mapping; do
+        [ -n "$role_mapping" ] || continue
+        case "$role_mapping" in
+            realm=*)
+                role_id=${role_mapping#realm=}
+                is_uuid "$role_id" || exit 70
+                demo_admin_quiet "$clear_config" "demo-$clear_kind-realm-role-remove" \
+                    remove-roles -r "$realm" --uid "$clear_user_id" --roleid "$role_id"
+                ;;
+            client=*:*)
+                role_pair=${role_mapping#client=}
+                role_client_id=${role_pair%%:*}
+                role_id=${role_pair#*:}
+                is_uuid "$role_client_id" && is_uuid "$role_id" || exit 70
+                demo_admin_quiet "$clear_config" "demo-$clear_kind-client-role-remove" \
+                    remove-roles -r "$realm" --uid "$clear_user_id" \
+                    --cid "$role_client_id" --roleid "$role_id"
+                ;;
+            *) exit 70 ;;
+        esac
+    done < "$state_dir/demo-$clear_kind-role-mapping-ids.out"
+}
+
+reconcile_target_user_groups() {
+    group_config=$1
+    group_user_id=$2
+    group_kind=$3
+    desired_group_id=$4
+    group_batch=1
+    while [ "$group_batch" -le 2 ]; do
+        admin_to_file "$group_config" "$state_dir/demo-$group_kind-groups.json" \
+            "demo-$group_kind-groups-read" get "users/$group_user_id/groups" \
+            -r "$realm" -q first=0 -q max=5 -q briefRepresentation=true
+        project_to_file "$state_dir/demo-$group_kind-group-ids.out" \
+            "demo-$group_kind-group-ids" demo-group-ids \
+            "$state_dir/demo-$group_kind-groups.json"
+        group_seen=false
+        while IFS= read -r group_entry; do
+            [ -n "$group_entry" ] || continue
+            case "$group_entry" in
+                group=*) existing_group_id=${group_entry#group=} ;;
+                *) exit 70 ;;
+            esac
+            is_uuid "$existing_group_id" || exit 70
+            group_seen=true
+            demo_admin_quiet "$group_config" "demo-$group_kind-group-remove" \
+                delete "users/$group_user_id/groups/$existing_group_id" -r "$realm"
+        done < "$state_dir/demo-$group_kind-group-ids.out"
+        [ "$group_seen" = true ] || break
+        group_batch=$((group_batch + 1))
+    done
+    [ "$group_batch" -le 2 ] || exit 70
+    if [ -n "$desired_group_id" ]; then
+        demo_admin_quiet "$group_config" "demo-$group_kind-group-add" \
+            update "users/$group_user_id/groups/$desired_group_id" -r "$realm" -n
+    fi
+}
+
+verify_demo_user_projection() {
+    verify_config=$1
+    verify_user_id=$2
+    verify_username=$3
+    verify_kind=$4
+    verify_group_id=$5
+    admin_to_file "$verify_config" "$state_dir/demo-$verify_kind-user-verify.json" \
+        "demo-$verify_kind-user-verify-read" get "users/$verify_user_id" -r "$realm"
+    project_quiet "demo-$verify_kind-user-verify" demo-user \
+        "$state_dir/demo-$verify_kind-user-verify.json" "$verify_username" "$verify_kind"
+    admin_to_file "$verify_config" "$state_dir/demo-$verify_kind-credentials-verify.json" \
+        "demo-$verify_kind-credentials-verify-read" \
+        get "users/$verify_user_id/credentials" -r "$realm"
+    project_quiet "demo-$verify_kind-password-verify" demo-password-credential \
+        "$state_dir/demo-$verify_kind-credentials-verify.json"
+    admin_to_file "$verify_config" "$state_dir/demo-$verify_kind-roles-verify.json" \
+        "demo-$verify_kind-roles-verify-read" \
+        get "users/$verify_user_id/role-mappings" -r "$realm"
+    project_quiet "demo-$verify_kind-roles-empty" empty-role-mapping \
+        "$state_dir/demo-$verify_kind-roles-verify.json"
+    admin_to_file "$verify_config" "$state_dir/demo-$verify_kind-groups-verify.json" \
+        "demo-$verify_kind-groups-verify-read" get "users/$verify_user_id/groups" \
+        -r "$realm" -q first=0 -q max=2 -q briefRepresentation=true
+    project_to_file "$state_dir/demo-$verify_kind-groups-verify.out" \
+        "demo-$verify_kind-groups-verify" demo-group-ids \
+        "$state_dir/demo-$verify_kind-groups-verify.json"
+    expected_group_line=
+    [ -z "$verify_group_id" ] || expected_group_line=group=$verify_group_id
+    observed_group_line=
+    observed_group_extra=
+    exec 3< "$state_dir/demo-$verify_kind-groups-verify.out"
+    if ! IFS= read -r observed_group_line <&3; then
+        observed_group_line=
+    fi
+    if IFS= read -r observed_group_extra <&3; then
+        exec 3<&-
+        exit 70
+    fi
+    exec 3<&-
+    [ "$observed_group_line" = "$expected_group_line" ] || exit 70
+}
+
+verify_demo_admin_group_members() {
+    verify_group_config=$1
+    verify_group_id=$2
+    verify_admin_user_id=$3
+    admin_to_file "$verify_group_config" "$state_dir/demo-admin-group-members.json" \
+        demo-admin-group-members-read get "groups/$verify_group_id/members" \
+        -r "$realm" -q first=0 -q max=2 -q briefRepresentation=true
+    project_quiet demo-admin-group-members demo-group-members \
+        "$state_dir/demo-admin-group-members.json" "$verify_admin_user_id" \
+        synveda-demo-admin
+}
+
+reconcile_demo_user() {
+    demo_config=$1
+    demo_kind=$2
+    demo_username=$3
+    demo_password=$4
+    demo_group_id=$5
+    known_owned_id=$6
+    canonical_user_id=$(query_target_user_id "$demo_config" "$demo_username")
+    if [ -n "$known_owned_id" ]; then
+        is_uuid "$known_owned_id" || exit 70
+        case "$canonical_user_id" in
+            missing) demo_user_id=$known_owned_id ;;
+            "$known_owned_id") demo_user_id=$known_owned_id ;;
+            *)
+                echo "keycloak-converge: canonical demo identity conflicts with the managed inventory" >&2
+                exit 70
+                ;;
+        esac
+    else
+        demo_user_id=$canonical_user_id
+    fi
+    if [ "$demo_user_id" = missing ]; then
+        demo_email=$demo_kind@demo.synveda.invalid
+        demo_last_name='Demo Member'
+        [ "$demo_kind" = admin ] && demo_last_name='Demo Admin'
+        demo_admin_quiet "$demo_config" "demo-$demo_kind-user-create" create users -r "$realm" \
+            -s "username=$demo_username" -s "email=$demo_email" \
+            -s firstName=Synveda -s "lastName=$demo_last_name" \
+            -s enabled=true -s emailVerified=true -s 'requiredActions=[]' \
+            -s "attributes={\"synvedaDemoContract\":[\"cpr45-demo-v1\"],\"synvedaDemoKind\":[\"$demo_kind\"]}"
+        demo_user_id=$(query_target_user_id "$demo_config" "$demo_username")
+    fi
+    is_uuid "$demo_user_id" || exit 70
+    admin_to_file "$demo_config" "$state_dir/demo-$demo_kind-owned.json" \
+        "demo-$demo_kind-owned-read" get "users/$demo_user_id" -r "$realm"
+    if [ -n "$known_owned_id" ]; then
+        project_quiet "demo-$demo_kind-owned" demo-user-owned-id \
+            "$state_dir/demo-$demo_kind-owned.json" "$demo_kind" "$demo_user_id"
+    else
+        project_quiet "demo-$demo_kind-owned" demo-user-owned \
+            "$state_dir/demo-$demo_kind-owned.json" "$demo_username" "$demo_kind"
+    fi
+    demo_email=$demo_kind@demo.synveda.invalid
+    demo_last_name='Demo Member'
+    [ "$demo_kind" = admin ] && demo_last_name='Demo Admin'
+    demo_admin_quiet "$demo_config" "demo-$demo_kind-user-update" \
+        update "users/$demo_user_id" -r "$realm" \
+        -s "username=$demo_username" -s "email=$demo_email" \
+        -s firstName=Synveda -s "lastName=$demo_last_name" \
+        -s enabled=true -s emailVerified=true -s 'requiredActions=[]' \
+        -s "attributes={\"synvedaDemoContract\":[\"cpr45-demo-v1\"],\"synvedaDemoKind\":[\"$demo_kind\"]}"
+
+    admin_to_file "$demo_config" "$state_dir/demo-$demo_kind-credentials.json" \
+        "demo-$demo_kind-credentials-read" get "users/$demo_user_id/credentials" -r "$realm"
+    project_to_file "$state_dir/demo-$demo_kind-credential-ids.out" \
+        "demo-$demo_kind-credential-ids" demo-object-ids \
+        "$state_dir/demo-$demo_kind-credentials.json"
+    while IFS= read -r credential_entry; do
+        [ -n "$credential_entry" ] || continue
+        case "$credential_entry" in
+            id=*) credential_id=${credential_entry#id=} ;;
+            *) exit 70 ;;
+        esac
+        is_uuid "$credential_id" || exit 70
+        demo_admin_quiet "$demo_config" "demo-$demo_kind-credential-remove" \
+            delete "users/$demo_user_id/credentials/$credential_id" -r "$realm"
+    done < "$state_dir/demo-$demo_kind-credential-ids.out"
+    KC_CLI_PASSWORD=$demo_password
+    export KC_CLI_PASSWORD
+    consume_demo_mutation
+    if ! admin_quiet "$demo_config" "demo-$demo_kind-password" \
+        set-password -r "$realm" --userid "$demo_user_id" --temporary=false; then
+        unset KC_CLI_PASSWORD
+        exit 70
+    fi
+    unset KC_CLI_PASSWORD
+    clear_target_user_roles "$demo_config" "$demo_user_id" "$demo_kind"
+    reconcile_target_user_groups "$demo_config" "$demo_user_id" "$demo_kind" \
+        "$demo_group_id"
+    verify_demo_user_projection "$demo_config" "$demo_user_id" "$demo_username" \
+        "$demo_kind" "$demo_group_id"
+    case "$demo_kind" in
+        admin) demo_admin_user_id=$demo_user_id ;;
+        member) demo_member_user_id=$demo_user_id ;;
+        *) exit 70 ;;
+    esac
+}
+
+reconcile_admin_group_security() {
+    security_config=$1
+    security_group_id=$2
+    admin_to_file "$security_config" "$state_dir/admin-group-role-mappings.json" \
+        admin-group-role-mappings-read \
+        get "groups/$security_group_id/role-mappings" -r "$realm"
+    project_to_file "$state_dir/admin-group-role-mapping-ids.out" \
+        admin-group-role-mapping-ids demo-role-mapping-ids \
+        "$state_dir/admin-group-role-mappings.json"
+    while IFS= read -r role_mapping; do
+        [ -n "$role_mapping" ] || continue
+        case "$role_mapping" in
+            realm=*)
+                role_id=${role_mapping#realm=}
+                is_uuid "$role_id" || exit 70
+                admin_quiet "$security_config" admin-group-realm-role-remove \
+                    remove-roles -r "$realm" --gid "$security_group_id" \
+                    --roleid "$role_id"
+                ;;
+            client=*:*)
+                role_pair=${role_mapping#client=}
+                role_client_id=${role_pair%%:*}
+                role_id=${role_pair#*:}
+                is_uuid "$role_client_id" && is_uuid "$role_id" || exit 70
+                admin_quiet "$security_config" admin-group-client-role-remove \
+                    remove-roles -r "$realm" --gid "$security_group_id" \
+                    --cid "$role_client_id" --roleid "$role_id"
+                ;;
+            *) exit 70 ;;
+        esac
+    done < "$state_dir/admin-group-role-mapping-ids.out"
+    admin_to_file "$security_config" "$state_dir/admin-group-role-mappings-verify.json" \
+        admin-group-role-mappings-verify-read \
+        get "groups/$security_group_id/role-mappings" -r "$realm"
+    project_quiet admin-group-role-mappings-empty empty-role-mapping \
+        "$state_dir/admin-group-role-mappings-verify.json"
+    admin_to_file "$security_config" "$state_dir/admin-group-children.json" \
+        admin-group-children-read get "groups/$security_group_id/children" \
+        -r "$realm" -q first=0 -q max=1
+    project_quiet admin-group-children-empty empty-array \
+        "$state_dir/admin-group-children.json"
+}
+
 reconcile_permanent_groups() {
     group_batch=1
     while [ "$group_batch" -le 16 ]; do
@@ -847,6 +1278,8 @@ try_complete_projection() {
         [ "$witness_bootstrap_user_id" = "$complete_bootstrap_user_id" ] && \
         [ "$witness_permanent_user_id" = "$complete_permanent_user_id" ] || return
 
+    try_prove_user_profile "$complete_config" complete || return
+
     try_admin_to_file "$complete_config" "$state_dir/complete-client-query.json" \
         get clients -r "$realm" -q "clientId=$client" || return
     try_project_to_file "$state_dir/complete-client-id.out" client-id \
@@ -875,12 +1308,39 @@ try_complete_projection() {
         get groups -r "$realm" -q search=synveda-admins -q exact=false \
         -q briefRepresentation=false || return
     try_project_quiet complete-group group "$state_dir/complete-groups.json" || return
+    complete_group_id=$(projection_value "$state_dir/complete-groups.json" \
+        group group) || return
+    is_uuid "$complete_group_id" || return
+    try_admin_to_file "$complete_config" \
+        "$state_dir/complete-admin-group-role-mappings.json" \
+        get "groups/$complete_group_id/role-mappings" -r "$realm" || return
+    try_project_quiet complete-admin-group-role-mappings empty-role-mapping \
+        "$state_dir/complete-admin-group-role-mappings.json" || return
+    try_admin_to_file "$complete_config" "$state_dir/complete-admin-group-children.json" \
+        get "groups/$complete_group_id/children" -r "$realm" \
+        -q first=0 -q max=1 || return
+    try_project_quiet complete-admin-group-children empty-array \
+        "$state_dir/complete-admin-group-children.json" || return
     try_prove_scoped_authority "$complete_config" \
         "$complete_permanent_user_id" retired || return
 }
 
 require_current_generation_or_exit
+user_profile_valid=false
+demo_inventory_admin_id=
+demo_inventory_member_id=
+if try_prove_user_profile "$authority_config" initial; then
+    user_profile_valid=true
+    refresh_demo_inventory "$authority_config"
+fi
+managed_demo_residue=false
+if [ -n "$demo_inventory_admin_id" ] || [ -n "$demo_inventory_member_id" ]; then
+    managed_demo_residue=true
+fi
 if [ "$realm_was_open" = true ] && \
+    [ "$demo_enabled" = false ] && \
+    [ "$managed_demo_residue" = false ] && \
+    [ "$user_profile_valid" = true ] && \
     [ "$permanent_authority_valid" = true ] && \
     [ "$bootstrap_authenticated" = false ] && \
     try_complete_projection "$permanent_config"; then
@@ -931,7 +1391,7 @@ if [ "$bootstrap_authenticated" = true ]; then
     KC_CLI_PASSWORD=$convergence_password
     export KC_CLI_PASSWORD
     if ! admin_quiet "$bootstrap_config" permanent-password set-password -r master \
-        --userid "$permanent_user_id"; then
+        --userid "$permanent_user_id" --temporary=false; then
         unset KC_CLI_PASSWORD
         exit 70
     fi
@@ -1060,6 +1520,20 @@ admin_quiet "$authority_config" realm-update update "realms/$realm" \
     -s eventsExpiration=604800 \
     -s adminEventsEnabled=true \
     -s adminEventsDetailsEnabled=false
+
+# Marker attributes are managed, admin-only metadata. Keeping unmanaged
+# attributes disabled prevents an end-user context from forging ownership
+# evidence used by the bounded demo cleanup path.
+admin_quiet "$authority_config" user-profile-update update "users/profile" \
+    -r "$realm" -n -f "$user_profile_contract"
+prove_user_profile "$authority_config" repaired
+refresh_demo_inventory "$authority_config"
+if [ "$user_profile_valid" = false ] && \
+    { [ -n "$demo_inventory_admin_id" ] || \
+      [ -n "$demo_inventory_member_id" ]; }; then
+    echo "keycloak-converge: demo marker provenance was refused; reset or operator recovery is required" >&2
+    exit 70
+fi
 
 client_id=$(query_client_id "$authority_config" "$realm" "$client")
 if [ "$client_id" = missing ]; then
@@ -1223,6 +1697,28 @@ admin_quiet "$authority_config" group-update update "groups/$group_id" -r "$real
     -s name=synveda-admins -s 'attributes={}'
 verified_group_id=$(query_group_projection "$authority_config" group)
 [ "$verified_group_id" = "$group_id" ] || exit 70
+reconcile_admin_group_security "$authority_config" "$group_id"
+
+demo_admin_user_id=
+demo_member_user_id=
+if [ "$demo_enabled" = true ]; then
+    reconcile_demo_user "$authority_config" admin synveda-demo-admin \
+        "$demo_admin_password" "$group_id" "$demo_inventory_admin_id"
+    reconcile_demo_user "$authority_config" member synveda-demo-member \
+        "$demo_member_password" "" "$demo_inventory_member_id"
+    refresh_demo_inventory "$authority_config"
+    [ "$demo_inventory_admin_id" = "$demo_admin_user_id" ] && \
+        [ "$demo_inventory_member_id" = "$demo_member_user_id" ] || exit 70
+    verify_demo_admin_group_members "$authority_config" "$group_id" \
+        "$demo_admin_user_id"
+    unset demo_admin_password demo_member_password
+else
+    retire_demo_user "$authority_config" admin "$demo_inventory_admin_id"
+    retire_demo_user "$authority_config" member "$demo_inventory_member_id"
+    refresh_demo_inventory "$authority_config"
+    [ -z "$demo_inventory_admin_id" ] && \
+        [ -z "$demo_inventory_member_id" ] || exit 70
+fi
 
 admin_to_file "$authority_config" "$realm_json" closed-realm-read get "realms/$realm"
 project_quiet closed-realm realm "$realm_json" false "$ssl_value"
@@ -1240,6 +1736,14 @@ try_complete_projection "$authority_config" || {
     echo "keycloak-converge: open projection was refused" >&2
     exit 70
 }
+if [ "$demo_enabled" = true ]; then
+    verify_demo_user_projection "$authority_config" "$demo_admin_user_id" \
+        synveda-demo-admin admin "$group_id"
+    verify_demo_user_projection "$authority_config" "$demo_member_user_id" \
+        synveda-demo-member member ""
+    verify_demo_admin_group_members "$authority_config" "$group_id" \
+        "$demo_admin_user_id"
+fi
 require_current_generation_or_exit
 
 publish_gate_on_exit=true

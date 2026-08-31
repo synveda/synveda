@@ -88,6 +88,147 @@ test_name=atomic-output
 refuse group-ids "$test_dir/partial.json"
 
 printf '%s\n' \
+    '{"id":"00000000-0000-4000-8000-000000000045","username":"synveda-demo-admin","enabled":true,"emailVerified":true,"email":"admin@demo.synveda.invalid","firstName":"Synveda","lastName":"Demo Admin","requiredActions":[],"attributes":{"synvedaDemoContract":["cpr45-demo-v1"],"synvedaDemoKind":["admin"]}}' \
+    > "$test_dir/demo-admin.json"
+test_name=demo-user
+accept '' demo-user "$test_dir/demo-admin.json" synveda-demo-admin admin
+sed 's/,"requiredActions":\[\]//' "$test_dir/demo-admin.json" \
+    > "$test_dir/demo-actions-missing.json"
+test_name=demo-required-actions
+refuse demo-user "$test_dir/demo-actions-missing.json" synveda-demo-admin admin
+test_name=demo-user-owned
+accept '' demo-user-owned "$test_dir/demo-admin.json" synveda-demo-admin admin
+test_name=demo-user-owned-id-renamed
+sed 's/synveda-demo-admin/renamed-managed-admin/' "$test_dir/demo-admin.json" \
+    > "$test_dir/demo-admin-renamed.json"
+printf '[%s]\n' "$(cat "$test_dir/demo-admin-renamed.json")" \
+    > "$test_dir/demo-admin-renamed-array.json"
+accept '' demo-user-owned-id "$test_dir/demo-admin-renamed.json" admin \
+    00000000-0000-4000-8000-000000000045
+test_name=demo-user-owned-id-kind-refusal
+refuse demo-user-owned-id "$test_dir/demo-admin-renamed.json" member \
+    00000000-0000-4000-8000-000000000045
+test_name=demo-user-owned-id-identity-refusal
+refuse demo-user-owned-id "$test_dir/demo-admin-renamed.json" admin \
+    00000000-0000-4000-8000-000000000099
+test_name=demo-user-state-owned
+accept 'demo=owned' demo-user-state "$test_dir/demo-admin.json" synveda-demo-admin admin
+sed 's/cpr45-demo-v1/foreign/' "$test_dir/demo-admin.json" \
+    > "$test_dir/demo-foreign.json"
+test_name=demo-user-ownership-refusal
+refuse demo-user-owned "$test_dir/demo-foreign.json" synveda-demo-admin admin
+printf '%s\n' \
+    '{"id":"00000000-0000-4000-8000-000000000045","username":"synveda-demo-admin","attributes":{"operatorOwned":["true"]}}' \
+    > "$test_dir/demo-unmanaged.json"
+test_name=demo-user-state-foreign
+accept 'demo=foreign' demo-user-state "$test_dir/demo-unmanaged.json" \
+    synveda-demo-admin admin
+printf '%s\n' \
+    '[{"id":"00000000-0000-4000-8000-000000000046","username":"renamed-managed-member","attributes":{"synvedaDemoContract":["cpr45-demo-v1"],"synvedaDemoKind":["member"]}},{"id":"00000000-0000-4000-8000-000000000045","username":"renamed-managed-admin","attributes":{"synvedaDemoContract":["cpr45-demo-v1"],"synvedaDemoKind":["admin"]}}]' \
+    > "$test_dir/demo-owned-users.json"
+test_name=demo-owned-users
+accept 'admin=00000000-0000-4000-8000-000000000045
+member=00000000-0000-4000-8000-000000000046' \
+    demo-owned-users "$test_dir/demo-owned-users.json"
+test_name=demo-owned-admin-kind
+accept 'admin=00000000-0000-4000-8000-000000000045' \
+    demo-owned-user-kind "$test_dir/demo-admin-renamed-array.json" admin
+test_name=demo-owned-kind-refusal
+refuse demo-owned-user-kind "$test_dir/demo-admin-renamed-array.json" member
+sed 's/"synvedaDemoKind":\["member"\]/"synvedaDemoKind":["admin"]/' \
+    "$test_dir/demo-owned-users.json" > "$test_dir/demo-owned-duplicate-kind.json"
+test_name=demo-owned-duplicate-kind-refusal
+refuse demo-owned-users "$test_dir/demo-owned-duplicate-kind.json"
+sed 's/]$/,{"id":"00000000-0000-4000-8000-000000000047","username":"extra","attributes":{"synvedaDemoContract":["cpr45-demo-v1"],"synvedaDemoKind":["member"]}}]/' \
+    "$test_dir/demo-owned-users.json" > "$test_dir/demo-owned-three.json"
+test_name=demo-owned-inventory-cap
+refuse demo-owned-users "$test_dir/demo-owned-three.json"
+printf '%s\n' \
+    '[{"id":"00000000-0000-4000-8000-000000000047","type":"password"}]' \
+    > "$test_dir/demo-credential.json"
+test_name=demo-password-credential
+accept '' demo-password-credential "$test_dir/demo-credential.json"
+printf '%s\n' '{}' > "$test_dir/empty-role-mapping.json"
+test_name=demo-empty-role-mapping
+accept '' empty-role-mapping "$test_dir/empty-role-mapping.json"
+printf '%s\n' \
+    '[{"id":"00000000-0000-4000-8000-000000000045","username":"synveda-demo-admin","enabled":true}]' \
+    > "$test_dir/demo-group-members.json"
+test_name=demo-group-members
+accept '' demo-group-members "$test_dir/demo-group-members.json" \
+    00000000-0000-4000-8000-000000000045 synveda-demo-admin
+test_name=user-profile
+accept '' user-profile /tmp/synveda-user-profile.json
+sed '1s/{/{"unmanagedAttributePolicy":"ENABLED",/' \
+    /tmp/synveda-user-profile.json > "$test_dir/user-profile-unmanaged.json"
+test_name=user-profile-unmanaged-refusal
+refuse user-profile "$test_dir/user-profile-unmanaged.json"
+sed '0,/"view": \["admin"\]/{s/"view": \["admin"\]/"view": ["admin", "user"]/;}' \
+    /tmp/synveda-user-profile.json > "$test_dir/user-profile-user-view.json"
+test_name=user-profile-user-view-refusal
+refuse user-profile "$test_dir/user-profile-user-view.json"
+
+printf '%s\n' \
+    '[{"id":"00000000-0000-4000-8000-000000000001"},{"id":"00000000-0000-4000-8000-000000000002"},{"id":"00000000-0000-4000-8000-000000000003"},{"id":"00000000-0000-4000-8000-000000000004"}]' \
+    > "$test_dir/demo-cleanup-four.json"
+printf '%s\n' \
+    '[{"id":"00000000-0000-4000-8000-000000000001"},{"id":"00000000-0000-4000-8000-000000000002"},{"id":"00000000-0000-4000-8000-000000000003"},{"id":"00000000-0000-4000-8000-000000000004"},{"id":"00000000-0000-4000-8000-000000000005"}]' \
+    > "$test_dir/demo-cleanup-five.json"
+test_name=demo-object-cap
+accept 'id=00000000-0000-4000-8000-000000000001
+id=00000000-0000-4000-8000-000000000002
+id=00000000-0000-4000-8000-000000000003
+id=00000000-0000-4000-8000-000000000004' \
+    demo-object-ids "$test_dir/demo-cleanup-four.json"
+test_name=demo-object-over-cap
+refuse demo-object-ids "$test_dir/demo-cleanup-five.json"
+test_name=demo-group-cap
+accept 'group=00000000-0000-4000-8000-000000000001
+group=00000000-0000-4000-8000-000000000002
+group=00000000-0000-4000-8000-000000000003
+group=00000000-0000-4000-8000-000000000004' \
+    demo-group-ids "$test_dir/demo-cleanup-four.json"
+test_name=demo-group-over-cap
+refuse demo-group-ids "$test_dir/demo-cleanup-five.json"
+printf '%s\n' \
+    '{"realmMappings":[{"id":"00000000-0000-4000-8000-000000000001"},{"id":"00000000-0000-4000-8000-000000000002"},{"id":"00000000-0000-4000-8000-000000000003"},{"id":"00000000-0000-4000-8000-000000000004"}],"clientMappings":{}}' \
+    > "$test_dir/demo-roles-four.json"
+printf '%s\n' \
+    '{"realmMappings":[{"id":"00000000-0000-4000-8000-000000000001"},{"id":"00000000-0000-4000-8000-000000000002"},{"id":"00000000-0000-4000-8000-000000000003"},{"id":"00000000-0000-4000-8000-000000000004"},{"id":"00000000-0000-4000-8000-000000000005"}],"clientMappings":{}}' \
+    > "$test_dir/demo-roles-five.json"
+test_name=demo-role-cap
+accept 'realm=00000000-0000-4000-8000-000000000001
+realm=00000000-0000-4000-8000-000000000002
+realm=00000000-0000-4000-8000-000000000003
+realm=00000000-0000-4000-8000-000000000004' \
+    demo-role-mapping-ids "$test_dir/demo-roles-four.json"
+test_name=demo-role-over-cap
+refuse demo-role-mapping-ids "$test_dir/demo-roles-five.json"
+
+printf '%s\n' \
+    '[{"id":"00000000-0000-4000-8000-000000000010","name":"synveda-admins","path":"/synveda-admins","attributes":{},"subGroups":[],"subGroupCount":0}]' \
+    > "$test_dir/demo-admin-group.json"
+test_name=demo-admin-group
+accept 'group=00000000-0000-4000-8000-000000000010' \
+    group "$test_dir/demo-admin-group.json"
+sed 's/"subGroups":\[\]/"subGroups":[{"id":"00000000-0000-4000-8000-000000000011","name":"child","path":"\/synveda-admins\/child"}]/' \
+    "$test_dir/demo-admin-group.json" > "$test_dir/demo-admin-subgroup.json"
+test_name=demo-admin-subgroup-refusal
+refuse group "$test_dir/demo-admin-subgroup.json"
+sed 's/"subGroupCount":0/"subGroupCount":1/' \
+    "$test_dir/demo-admin-group.json" > "$test_dir/demo-admin-subgroup-count.json"
+test_name=demo-admin-subgroup-count-refusal
+refuse group "$test_dir/demo-admin-subgroup-count.json"
+sed 's/"subGroupCount":0/"subGroupCount":0,"realmRoles":["manage-users"]/' \
+    "$test_dir/demo-admin-group.json" > "$test_dir/demo-admin-realm-role.json"
+test_name=demo-admin-realm-role-refusal
+refuse group "$test_dir/demo-admin-realm-role.json"
+sed 's/"subGroupCount":0/"subGroupCount":0,"clientRoles":{"realm-management":["manage-users"]}/' \
+    "$test_dir/demo-admin-group.json" > "$test_dir/demo-admin-client-role.json"
+test_name=demo-admin-client-role-refusal
+refuse group "$test_dir/demo-admin-client-role.json"
+
+printf '%s\n' \
     '{"realm":"synveda","attributes":{"otherAttribute":"kept"}}' \
     > "$test_dir/witness.json"
 test_name=witness-patch

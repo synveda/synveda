@@ -45,6 +45,7 @@ public final class SynvedaKeycloakProjection {
     private static final int MAX_INPUT_BYTES = 1_048_576;
     private static final int MAX_TOKEN_RESPONSE_BYTES = 65_536;
     private static final int MAX_TOKEN_BYTES = 131_072;
+    private static final int MAX_DEMO_CLEANUP_ITEMS = 4;
     private static final Duration AUTHORITY_REQUEST_TIMEOUT = Duration.ofSeconds(2);
     private static final Duration AUTHORITY_PROOF_BUDGET = Duration.ofSeconds(34);
     private static final Duration AUTHORITY_CLEANUP_BUDGET = Duration.ofSeconds(6);
@@ -179,6 +180,10 @@ public final class SynvedaKeycloakProjection {
                     requireArgs(args, 3);
                     verifyClient(input, args[2]);
                 }
+                case "user-profile" -> {
+                    requireArgs(args, 2);
+                    verifyUserProfile(input);
+                }
                 case "client-id" -> {
                     requireArgs(args, 3);
                     namedId(input, "clientId", args[2], "client", true);
@@ -186,6 +191,38 @@ public final class SynvedaKeycloakProjection {
                 case "user-id" -> {
                     requireArgs(args, 3);
                     namedId(input, "username", args[2], "user", true);
+                }
+                case "demo-user-owned" -> {
+                    requireArgs(args, 4);
+                    verifyDemoUser(input, args[2], args[3], false);
+                }
+                case "demo-user" -> {
+                    requireArgs(args, 4);
+                    verifyDemoUser(input, args[2], args[3], true);
+                }
+                case "demo-user-state" -> {
+                    requireArgs(args, 4);
+                    demoUserState(input, args[2], args[3]);
+                }
+                case "demo-user-owned-id" -> {
+                    requireArgs(args, 4);
+                    verifyDemoUserOwnedId(input, args[2], args[3]);
+                }
+                case "demo-owned-users" -> {
+                    requireArgs(args, 2);
+                    verifyDemoOwnedUsers(input, null);
+                }
+                case "demo-owned-user-kind" -> {
+                    requireArgs(args, 3);
+                    verifyDemoOwnedUsers(input, args[2]);
+                }
+                case "demo-password-credential" -> {
+                    requireArgs(args, 2);
+                    verifyDemoPasswordCredential(input);
+                }
+                case "demo-group-members" -> {
+                    requireArgs(args, 4);
+                    verifyDemoGroupMembers(input, args[2], args[3]);
                 }
                 case "scope-id" -> {
                     requireArgs(args, 3);
@@ -223,13 +260,25 @@ public final class SynvedaKeycloakProjection {
                     requireArgs(args, 2);
                     objectIds(input);
                 }
+                case "demo-object-ids" -> {
+                    requireArgs(args, 2);
+                    objectIds(input, MAX_DEMO_CLEANUP_ITEMS);
+                }
                 case "role-mapping-ids" -> {
                     requireArgs(args, 2);
                     roleMappingIds(input);
                 }
+                case "demo-role-mapping-ids" -> {
+                    requireArgs(args, 2);
+                    roleMappingIds(input, MAX_DEMO_CLEANUP_ITEMS);
+                }
                 case "group-ids" -> {
                     requireArgs(args, 2);
                     groupIds(input);
+                }
+                case "demo-group-ids" -> {
+                    requireArgs(args, 2);
+                    groupIds(input, MAX_DEMO_CLEANUP_ITEMS);
                 }
                 case "empty-array" -> {
                     requireArgs(args, 2);
@@ -238,6 +287,10 @@ public final class SynvedaKeycloakProjection {
                 case "direct-role-mapping" -> {
                     requireArgs(args, 2);
                     verifyDirectRoleMapping(input);
+                }
+                case "empty-role-mapping" -> {
+                    requireArgs(args, 2);
+                    verifyEmptyRoleMapping(input);
                 }
                 case "effective-roles" -> {
                     requireArgs(args, 3);
@@ -479,6 +532,191 @@ public final class SynvedaKeycloakProjection {
         }
     }
 
+    static void verifyUserProfile(JsonNode node) {
+        requireObject(node);
+        Set<String> rootFields = new HashSet<>();
+        node.fieldNames().forEachRemaining(rootFields::add);
+        if (!rootFields.equals(Set.of("attributes", "groups"))
+            && !rootFields.equals(Set.of(
+                "attributes", "groups", "unmanagedAttributePolicy"
+            ))) {
+            throw new IllegalArgumentException();
+        }
+        JsonNode unmanagedPolicy = node.path("unmanagedAttributePolicy");
+        if (!unmanagedPolicy.isMissingNode() && !unmanagedPolicy.isNull()) {
+            throw new IllegalArgumentException();
+        }
+        JsonNode attributes = node.path("attributes");
+        requireArray(attributes);
+        if (attributes.size() != 6) {
+            throw new IllegalArgumentException();
+        }
+        Map<String, JsonNode> byName = new HashMap<>();
+        for (JsonNode attribute : attributes) {
+            requireObject(attribute);
+            String name = requiredText(attribute.path("name"));
+            if (byName.put(name, attribute) != null) {
+                throw new IllegalArgumentException();
+            }
+        }
+        if (!byName.keySet().equals(Set.of(
+            "username",
+            "email",
+            "firstName",
+            "lastName",
+            "synvedaDemoContract",
+            "synvedaDemoKind"
+        ))) {
+            throw new IllegalArgumentException();
+        }
+        verifyBuiltInProfileAttribute(byName.get("username"), "username");
+        verifyBuiltInProfileAttribute(byName.get("email"), "email");
+        verifyBuiltInProfileAttribute(byName.get("firstName"), "firstName");
+        verifyBuiltInProfileAttribute(byName.get("lastName"), "lastName");
+        verifyMarkerProfileAttribute(
+            byName.get("synvedaDemoContract"),
+            "synvedaDemoContract",
+            "Synveda demo contract",
+            13,
+            13,
+            Set.of("cpr45-demo-v1")
+        );
+        verifyMarkerProfileAttribute(
+            byName.get("synvedaDemoKind"),
+            "synvedaDemoKind",
+            "Synveda demo kind",
+            5,
+            6,
+            Set.of("admin", "member")
+        );
+
+        JsonNode groups = node.path("groups");
+        requireArray(groups);
+        if (groups.size() != 1) {
+            throw new IllegalArgumentException();
+        }
+        JsonNode group = groups.get(0);
+        requireObject(group);
+        exactFields(group, Set.of("name", "displayHeader", "displayDescription"));
+        text(group, "name", "user-metadata");
+        text(group, "displayHeader", "User metadata");
+        text(group, "displayDescription", "Attributes, which refer to user metadata");
+    }
+
+    private static void verifyBuiltInProfileAttribute(JsonNode node, String name) {
+        Set<String> requiredFields = name.equals("username")
+            ? Set.of("name", "displayName", "permissions", "validations")
+            : Set.of(
+                "name",
+                "displayName",
+                "required",
+                "permissions",
+                "validations"
+            );
+        Set<String> actualFields = new HashSet<>();
+        node.fieldNames().forEachRemaining(actualFields::add);
+        if (!actualFields.equals(requiredFields)) {
+            Set<String> withMultivalued = new HashSet<>(requiredFields);
+            withMultivalued.add("multivalued");
+            if (!actualFields.equals(withMultivalued)) {
+                throw new IllegalArgumentException();
+            }
+        }
+        text(node, "name", name);
+        text(node, "displayName", "${" + name + "}");
+        boolOrMissingFalse(node, "multivalued");
+        verifyProfilePermissions(node.path("permissions"), Set.of("admin", "user"));
+        if (!name.equals("username")) {
+            JsonNode required = node.path("required");
+            requireObject(required);
+            exactFields(required, Set.of("roles"));
+            stringSet(required, "roles", Set.of("user"));
+        }
+        JsonNode validations = node.path("validations");
+        requireObject(validations);
+        switch (name) {
+            case "username" -> {
+                exactFields(validations, Set.of(
+                    "length",
+                    "username-prohibited-characters",
+                    "up-username-not-idn-homograph"
+                ));
+                verifyLengthValidation(validations.path("length"), 3, 255);
+                requireEmptyObject(validations.path("username-prohibited-characters"));
+                requireEmptyObject(validations.path("up-username-not-idn-homograph"));
+            }
+            case "email" -> {
+                exactFields(validations, Set.of("email", "length"));
+                requireEmptyObject(validations.path("email"));
+                verifyLengthValidation(validations.path("length"), null, 255);
+            }
+            case "firstName", "lastName" -> {
+                exactFields(validations, Set.of("length", "person-name-prohibited-characters"));
+                verifyLengthValidation(validations.path("length"), null, 255);
+                requireEmptyObject(validations.path("person-name-prohibited-characters"));
+            }
+            default -> throw new IllegalArgumentException();
+        }
+    }
+
+    private static void verifyMarkerProfileAttribute(
+        JsonNode node,
+        String name,
+        String displayName,
+        int minLength,
+        int maxLength,
+        Set<String> options
+    ) {
+        exactFields(node, Set.of(
+            "name", "displayName", "multivalued", "permissions", "validations"
+        ));
+        text(node, "name", name);
+        text(node, "displayName", displayName);
+        bool(node, "multivalued", false);
+        verifyProfilePermissions(node.path("permissions"), Set.of("admin"));
+        JsonNode validations = node.path("validations");
+        requireObject(validations);
+        exactFields(validations, Set.of("length", "options"));
+        verifyLengthValidation(validations.path("length"), minLength, maxLength);
+        JsonNode optionValidation = validations.path("options");
+        requireObject(optionValidation);
+        exactFields(optionValidation, Set.of("options"));
+        stringSet(optionValidation, "options", options);
+    }
+
+    private static void verifyProfilePermissions(JsonNode node, Set<String> roles) {
+        requireObject(node);
+        exactFields(node, Set.of("view", "edit"));
+        stringSet(node, "view", roles);
+        stringSet(node, "edit", roles);
+    }
+
+    private static void verifyLengthValidation(JsonNode node, Integer min, int max) {
+        requireObject(node);
+        exactFields(node, min == null ? Set.of("max") : Set.of("min", "max"));
+        if (min != null) {
+            number(node, "min", min);
+        }
+        number(node, "max", max);
+    }
+
+    private static void requireEmptyObject(JsonNode node) {
+        requireObject(node);
+        if (!node.isEmpty()) {
+            throw new IllegalArgumentException();
+        }
+    }
+
+    static void verifyUserProfile(byte[] input) {
+        try {
+            verifyUserProfile(JSON.readTree(input));
+        } catch (IllegalArgumentException refused) {
+            throw refused;
+        } catch (Exception ignored) {
+            throw new IllegalArgumentException();
+        }
+    }
+
     private static void namedId(
         JsonNode node,
         String field,
@@ -503,6 +741,188 @@ public final class SynvedaKeycloakProjection {
             throw new IllegalArgumentException();
         }
         emit(label + "=" + uuid(matches.get(0).path("id")));
+    }
+
+    static void verifyDemoUser(
+        JsonNode node,
+        String expectedUsername,
+        String expectedKind,
+        boolean complete
+    ) {
+        requireObject(node);
+        uuid(node.path("id"));
+        text(node, "username", expectedUsername);
+        verifyDemoOwnership(node, expectedKind);
+        if (!complete) {
+            return;
+        }
+        bool(node, "enabled", true);
+        bool(node, "emailVerified", true);
+        text(node, "email", expectedKind + "@demo.synveda.invalid");
+        text(node, "firstName", "Synveda");
+        text(node, "lastName", expectedKind.equals("admin") ? "Demo Admin" : "Demo Member");
+        emptyArray(node.path("requiredActions"));
+    }
+
+    private static void verifyDemoOwnership(JsonNode node, String expectedKind) {
+        if (!Set.of("admin", "member").contains(expectedKind)) {
+            throw new IllegalArgumentException();
+        }
+        JsonNode attributes = node.path("attributes");
+        requireObject(attributes);
+        if (attributes.size() != 2) {
+            throw new IllegalArgumentException();
+        }
+        stringSet(attributes, "synvedaDemoContract", Set.of("cpr45-demo-v1"));
+        stringSet(attributes, "synvedaDemoKind", Set.of(expectedKind));
+    }
+
+    private static void verifyDemoUserOwnedId(
+        JsonNode node,
+        String expectedKind,
+        String expectedId
+    ) {
+        requireObject(node);
+        if (!uuid(node.path("id")).equals(exactUuid(expectedId))) {
+            throw new IllegalArgumentException();
+        }
+        requiredText(node.path("username"));
+        verifyDemoOwnership(node, expectedKind);
+    }
+
+    private static void verifyDemoOwnedUsers(JsonNode node, String expectedKind) {
+        requireArray(node);
+        if (node.size() > 2 || (expectedKind != null && node.size() > 1)) {
+            throw new IllegalArgumentException();
+        }
+        Map<String, String> ids = new TreeMap<>();
+        for (JsonNode user : node) {
+            requireObject(user);
+            requiredText(user.path("username"));
+            JsonNode kindNode = user.path("attributes").path("synvedaDemoKind");
+            requireArray(kindNode);
+            if (kindNode.size() != 1) {
+                throw new IllegalArgumentException();
+            }
+            String kind = requiredText(kindNode.get(0));
+            if (expectedKind != null && !kind.equals(expectedKind)) {
+                throw new IllegalArgumentException();
+            }
+            verifyDemoOwnership(user, kind);
+            if (ids.put(kind, uuid(user.path("id"))) != null) {
+                throw new IllegalArgumentException();
+            }
+        }
+        for (String kind : List.of("admin", "member")) {
+            if (ids.containsKey(kind)) {
+                emit(kind + "=" + ids.get(kind));
+            }
+        }
+    }
+
+    static void verifyDemoUser(
+        byte[] input,
+        String expectedUsername,
+        String expectedKind,
+        boolean complete
+    ) {
+        try {
+            verifyDemoUser(JSON.readTree(input), expectedUsername, expectedKind, complete);
+        } catch (IllegalArgumentException refused) {
+            throw refused;
+        } catch (Exception ignored) {
+            throw new IllegalArgumentException();
+        }
+    }
+
+    static void demoUserState(JsonNode node, String expectedUsername, String expectedKind) {
+        requireObject(node);
+        uuid(node.path("id"));
+        text(node, "username", expectedUsername);
+        JsonNode attributes = node.path("attributes");
+        if (attributes.isMissingNode() || attributes.isNull()) {
+            emit("demo=foreign");
+            return;
+        }
+        requireObject(attributes);
+        int managedAttributes = 0;
+        var names = attributes.fieldNames();
+        while (names.hasNext()) {
+            if (names.next().toLowerCase(java.util.Locale.ROOT).startsWith("synvedademo")) {
+                managedAttributes += 1;
+            }
+        }
+        if (managedAttributes == 0) {
+            emit("demo=foreign");
+            return;
+        }
+        verifyDemoUser(node, expectedUsername, expectedKind, false);
+        emit("demo=owned");
+    }
+
+    static void demoUserState(byte[] input, String expectedUsername, String expectedKind) {
+        try {
+            demoUserState(JSON.readTree(input), expectedUsername, expectedKind);
+        } catch (IllegalArgumentException refused) {
+            throw refused;
+        } catch (Exception ignored) {
+            throw new IllegalArgumentException();
+        }
+    }
+
+    static void verifyDemoGroupMembers(
+        JsonNode node,
+        String expectedUserId,
+        String expectedUsername
+    ) {
+        requireArray(node);
+        if (node.size() != 1) {
+            throw new IllegalArgumentException();
+        }
+        JsonNode member = node.get(0);
+        requireObject(member);
+        if (!uuid(member.path("id")).equals(exactUuid(expectedUserId))) {
+            throw new IllegalArgumentException();
+        }
+        text(member, "username", expectedUsername);
+        if (member.has("enabled")) {
+            bool(member, "enabled", true);
+        }
+    }
+
+    static void verifyDemoGroupMembers(
+        byte[] input,
+        String expectedUserId,
+        String expectedUsername
+    ) {
+        try {
+            verifyDemoGroupMembers(JSON.readTree(input), expectedUserId, expectedUsername);
+        } catch (IllegalArgumentException refused) {
+            throw refused;
+        } catch (Exception ignored) {
+            throw new IllegalArgumentException();
+        }
+    }
+
+    static void verifyDemoPasswordCredential(JsonNode node) {
+        requireArray(node);
+        if (node.size() != 1) {
+            throw new IllegalArgumentException();
+        }
+        JsonNode credential = node.get(0);
+        requireObject(credential);
+        uuid(credential.path("id"));
+        text(credential, "type", "password");
+    }
+
+    static void verifyDemoPasswordCredential(byte[] input) {
+        try {
+            verifyDemoPasswordCredential(JSON.readTree(input));
+        } catch (IllegalArgumentException refused) {
+            throw refused;
+        } catch (Exception ignored) {
+            throw new IllegalArgumentException();
+        }
     }
 
     private static void mapperIds(JsonNode node) {
@@ -635,6 +1055,25 @@ public final class SynvedaKeycloakProjection {
             if (!attributes.isEmpty()) {
                 throw new IllegalArgumentException();
             }
+            JsonNode subGroups = group.path("subGroups");
+            if (!subGroups.isMissingNode() && !subGroups.isNull()) {
+                emptyArray(subGroups);
+            }
+            JsonNode subGroupCount = group.path("subGroupCount");
+            if (!subGroupCount.isMissingNode() && !subGroupCount.isNull()) {
+                number(group, "subGroupCount", 0);
+            }
+            JsonNode realmRoles = group.path("realmRoles");
+            if (!realmRoles.isMissingNode() && !realmRoles.isNull()) {
+                emptyArray(realmRoles);
+            }
+            JsonNode clientRoles = group.path("clientRoles");
+            if (!clientRoles.isMissingNode() && !clientRoles.isNull()) {
+                requireObject(clientRoles);
+                if (!clientRoles.isEmpty()) {
+                    throw new IllegalArgumentException();
+                }
+            }
         }
         emit("group=" + id);
     }
@@ -682,7 +1121,14 @@ public final class SynvedaKeycloakProjection {
     }
 
     private static void objectIds(JsonNode node) {
+        objectIds(node, Integer.MAX_VALUE);
+    }
+
+    private static void objectIds(JsonNode node, int maximumItems) {
         requireArray(node);
+        if (node.size() > maximumItems) {
+            throw new IllegalArgumentException();
+        }
         Set<String> ids = new HashSet<>();
         for (JsonNode object : node) {
             requireObject(object);
@@ -694,6 +1140,10 @@ public final class SynvedaKeycloakProjection {
     }
 
     private static void roleMappingIds(JsonNode node) {
+        roleMappingIds(node, Integer.MAX_VALUE);
+    }
+
+    private static void roleMappingIds(JsonNode node, int maximumItems) {
         requireObject(node);
         Set<String> roleIds = new HashSet<>();
         List<String> projection = new ArrayList<>();
@@ -732,12 +1182,22 @@ public final class SynvedaKeycloakProjection {
                 }
             }
         }
+        if (projection.size() > maximumItems) {
+            throw new IllegalArgumentException();
+        }
         projection.sort(String::compareTo);
         projection.forEach(SynvedaKeycloakProjection::emit);
     }
 
     private static void groupIds(JsonNode node) {
+        groupIds(node, Integer.MAX_VALUE);
+    }
+
+    private static void groupIds(JsonNode node, int maximumItems) {
         requireArray(node);
+        if (node.size() > maximumItems) {
+            throw new IllegalArgumentException();
+        }
         Set<String> ids = new HashSet<>();
         for (JsonNode group : node) {
             requireObject(group);
@@ -815,6 +1275,31 @@ public final class SynvedaKeycloakProjection {
         emit("target-client=" + targetClientId);
         emit("audit-client=" + auditClientId);
         emit("audit-role=" + auditRoleId);
+    }
+
+    static void verifyEmptyRoleMapping(JsonNode node) {
+        requireObject(node);
+        JsonNode realmMappings = node.path("realmMappings");
+        if (!realmMappings.isMissingNode() && !realmMappings.isNull()) {
+            emptyArray(realmMappings);
+        }
+        JsonNode clientMappings = node.path("clientMappings");
+        if (!clientMappings.isMissingNode() && !clientMappings.isNull()) {
+            requireObject(clientMappings);
+            if (!clientMappings.isEmpty()) {
+                throw new IllegalArgumentException();
+            }
+        }
+    }
+
+    static void verifyEmptyRoleMapping(byte[] input) {
+        try {
+            verifyEmptyRoleMapping(JSON.readTree(input));
+        } catch (IllegalArgumentException refused) {
+            throw refused;
+        } catch (Exception ignored) {
+            throw new IllegalArgumentException();
+        }
     }
 
     private static void verifyEffectiveRoles(JsonNode node, String rawClientId) {
@@ -2562,6 +3047,15 @@ public final class SynvedaKeycloakProjection {
         }
         for (Map.Entry<String, String> entry : expected.entrySet()) {
             text(node, entry.getKey(), entry.getValue());
+        }
+    }
+
+    private static void exactFields(JsonNode node, Set<String> expected) {
+        requireObject(node);
+        Set<String> actual = new HashSet<>();
+        node.fieldNames().forEachRemaining(actual::add);
+        if (!actual.equals(expected)) {
+            throw new IllegalArgumentException();
         }
     }
 

@@ -45,6 +45,8 @@ services:
 
   keycloak-database-bootstrap:
     image: ${SYNVEDA_POSTGRES_IMAGE:?set SYNVEDA_POSTGRES_IMAGE}
+    labels:
+      com.synveda.contract: cpr-45
     user: "${SYNVEDA_RUNTIME_UID:?set SYNVEDA_RUNTIME_UID}:${SYNVEDA_RUNTIME_GID:?set SYNVEDA_RUNTIME_GID}"
     entrypoint: ["/usr/local/bin/synveda-database-bootstrap"]
     command: ["keycloak"]
@@ -81,6 +83,8 @@ services:
 
   keycloak:
     image: ${SYNVEDA_KEYCLOAK_IMAGE:?set SYNVEDA_KEYCLOAK_IMAGE}
+    labels:
+      com.synveda.contract: cpr-45
     user: "${SYNVEDA_RUNTIME_UID:?set SYNVEDA_RUNTIME_UID}:${SYNVEDA_RUNTIME_GID:?set SYNVEDA_RUNTIME_GID}"
     command: ["start", "--optimized"]
     environment:
@@ -142,6 +146,8 @@ services:
 
   keycloak-realm-convergence:
     image: ${SYNVEDA_KEYCLOAK_IMAGE:?set SYNVEDA_KEYCLOAK_IMAGE}
+    labels:
+      com.synveda.contract: cpr-45
     user: "${SYNVEDA_RUNTIME_UID:?set SYNVEDA_RUNTIME_UID}:${SYNVEDA_RUNTIME_GID:?set SYNVEDA_RUNTIME_GID}"
     command: ["synveda-realm-supervise"]
     environment:

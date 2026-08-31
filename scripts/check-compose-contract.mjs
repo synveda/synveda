@@ -4,6 +4,7 @@ import { createHash } from "node:crypto";
 import {
   chownSync,
   chmodSync,
+  existsSync,
   mkdirSync,
   mkdtempSync,
   realpathSync,
@@ -23,23 +24,23 @@ const SECRET_SENTINEL = "cpr45-secret-sentinel";
 const KEYCLOAK_SECURITY_CHAIN_SHA256 = new Map([
   [
     "keycloak/Dockerfile",
-    "7a7118d9fae4ebbe29ad8259013337c5a4af958f8e4233a736c0f4246aa0be39",
+    "b480f34ec0e1ae4c39202cab9947bd7af8cda43b5f7ffbb0f8986d52c4150ed6",
   ],
   [
     "keycloak/keycloak-entrypoint",
-    "4fa833f2eba379274e3d510e8407c872422d65c692650ce102d82a1ef0ffb54d",
+    "80e78357463d4a861e559e2b4e62488ff9c77eac6ee9504203e6aa03137c8023",
   ],
   [
     "keycloak/SynvedaKeycloakProjection.java",
-    "d16c433c70b30129060888f7620e9ddc76f52ffc6026feb4fe06043476095a76",
+    "9887d8596a845c54feaf6c2d2ab9aa1df4705963b6cb26bed057795538f16eac",
   ],
   [
     "keycloak/SynvedaKeycloakProjectionSelfTest.java",
-    "3556c5a9261311fad5d273423a59ed09d30555975fd822dc40d0c74a5e3a5021",
+    "e8f791897c92636610cd4d18e8a8a7bdc934cc32b0e4dc84c80411fa9d9d9608",
   ],
   [
     "keycloak/synveda-projection-self-test",
-    "e176145c2ffea9573494351e6a58e173c3031c5b558ee6a10a38ee62249c7566",
+    "1c8558d91323b44862bc9cc2b2ef989c6a1c477ff8e19714a6e0d7d132f421e7",
   ],
   [
     "keycloak/synveda-authority-stage",
@@ -58,8 +59,12 @@ const KEYCLOAK_SECURITY_CHAIN_SHA256 = new Map([
     "c8c940bc4b7096ed62da1613b6c94b2f34f568b3ac42da21cc75ca606ea2ee8a",
   ],
   [
+    "keycloak/synveda-user-profile.json",
+    "7f38f5f3e142ac0a8ca5d0a3c03cc5b97f0849079f5a3f3f99065fb40455933f",
+  ],
+  [
     "keycloak/synveda-realm-converge",
-    "3892db388974ce32bc0181eeb80bc02c3b81ee815e48afa9d8522612159e9ca2",
+    "d2d676b35a5142694b333e5b9af2801f93442c9fa29fe05f694e15e818a3f8ef",
   ],
   [
     "keycloak/synveda-generation-gate",
@@ -104,6 +109,8 @@ const PROVIDER_SECRETS = [
   "keycloak_admin_username",
   "keycloak_admin_password",
   "keycloak_convergence_admin_password",
+  "keycloak_demo_admin_password",
+  "keycloak_demo_member_password",
 ];
 
 function writePrivate(path, value, owner) {
@@ -122,7 +129,11 @@ export function makeComposeFixture() {
   };
   chmodSync(scratch, 0o700);
   if (processUid === 0) chownSync(scratch, owner.uid, owner.gid);
-  const secrets = join(scratch, "secrets");
+  const defaultRuntimeState = join(scratch, "synveda-development");
+  mkdirSync(defaultRuntimeState, { mode: 0o700 });
+  chmodSync(defaultRuntimeState, 0o700);
+  if (processUid === 0) chownSync(defaultRuntimeState, owner.uid, owner.gid);
+  const secrets = join(defaultRuntimeState, "secrets");
   mkdirSync(secrets, { mode: 0o700 });
   chmodSync(secrets, 0o700);
   if (processUid === 0) chownSync(secrets, owner.uid, owner.gid);
@@ -133,7 +144,7 @@ export function makeComposeFixture() {
   for (const name of [...CORE_SECRETS, ...PROVIDER_SECRETS, "tls_cert", "tls_key"]) {
     writePrivate(join(secrets, name), `${SECRET_SENTINEL}-${name}`, owner);
   }
-  const issuers = join(scratch, "issuers.json");
+  const issuers = join(defaultRuntimeState, "issuers.json");
   writePrivate(
     issuers,
     JSON.stringify([
@@ -177,12 +188,39 @@ export function composeEnvironment(fixture, overrides = {}) {
     : "";
   const project = `synveda-${runtime}${safeSuffix}`;
   const runtimeState = join(fixture.scratch, project);
+  const projectSecrets = join(runtimeState, "secrets");
+  const projectIssuers = join(runtimeState, "issuers.json");
   const databaseAuthority = join(runtimeState, "database-authority");
   const keycloakPublicGate = join(runtimeState, "keycloak-public-gate");
   for (const directory of [runtimeState, databaseAuthority, keycloakPublicGate]) {
     mkdirSync(directory, { recursive: true, mode: 0o700 });
     chmodSync(directory, 0o700);
     if (process.getuid?.() === 0) chownSync(directory, fixture.uid, fixture.gid);
+  }
+  if (!existsSync(projectSecrets)) {
+    mkdirSync(projectSecrets, { mode: 0o700 });
+    chmodSync(projectSecrets, 0o700);
+    if (process.getuid?.() === 0) chownSync(projectSecrets, fixture.uid, fixture.gid);
+    const projectOidcDirectory = join(projectSecrets, "oidc-directory");
+    mkdirSync(projectOidcDirectory, { mode: 0o700 });
+    chmodSync(projectOidcDirectory, 0o700);
+    if (process.getuid?.() === 0) {
+      chownSync(projectOidcDirectory, fixture.uid, fixture.gid);
+    }
+    for (const name of [...CORE_SECRETS, ...PROVIDER_SECRETS, "tls_cert", "tls_key"]) {
+      writePrivate(
+        join(projectSecrets, name),
+        readFileSync(join(fixture.secrets, name), "utf8").trimEnd(),
+        fixture,
+      );
+    }
+  }
+  if (!existsSync(projectIssuers)) {
+    writePrivate(
+      projectIssuers,
+      readFileSync(fixture.issuers, "utf8").trimEnd(),
+      fixture,
+    );
   }
   const externalRoleContract =
     postgresMode === "external"
@@ -200,8 +238,8 @@ export function composeEnvironment(fixture, overrides = {}) {
     SYNVEDA_COMPOSE_IPV4_POOL: "172.30.240.0/24",
     SYNVEDA_RUNTIME_UID: String(fixture.uid),
     SYNVEDA_RUNTIME_GID: String(fixture.gid),
-    SYNVEDA_SECRETS_DIR: fixture.secrets,
-    SYNVEDA_OIDC_ISSUERS_FILE: fixture.issuers,
+    SYNVEDA_SECRETS_DIR: projectSecrets,
+    SYNVEDA_OIDC_ISSUERS_FILE: projectIssuers,
     SYNVEDA_DATABASE_AUTHORITY_DIR: databaseAuthority,
     SYNVEDA_KEYCLOAK_PUBLIC_GATE_DIR: keycloakPublicGate,
     ...(externalRoleContract === undefined
@@ -883,10 +921,8 @@ export function caddyTrustBoundaryFindings(config) {
 
 (synveda_upstream) {
 \theader_up -Forwarded
-\theader_up -X-Forwarded-For
-\theader_up -X-Forwarded-Host
-\theader_up -X-Forwarded-Proto
-\theader_up -X-Forwarded-Port
+\theader_up -X-Forwarded-*
+\theader_up -X-Real-IP
 \theader_up -X-Original-*
 \theader_up -X-Remote-User
 \theader_up -X-Authenticated-User
@@ -1160,6 +1196,31 @@ export function keycloakConvergenceFindings(source) {
       1,
       "permanent authority audit client drifted",
     ],
+    [
+      'try_prove_user_profile "$complete_config" complete || return',
+      1,
+      "complete projection omits the exact managed user profile",
+    ],
+    [
+      'admin_quiet "$authority_config" user-profile-update update "users/profile" \\',
+      1,
+      "managed user profile replacement can be bypassed",
+    ],
+    [
+      'prove_user_profile "$authority_config" repaired',
+      1,
+      "managed user profile readback can be bypassed",
+    ],
+    [
+      '-r "$realm" -n -f "$user_profile_contract"',
+      1,
+      "managed user profile replacement can merge untrusted policy",
+    ],
+    [
+      'if [ "$user_profile_valid" = false ] && \\',
+      1,
+      "untrusted demo marker provenance is not refused",
+    ],
   ]) {
     requireLineCount(line, count, finding);
   }
@@ -1242,6 +1303,29 @@ export function keycloakConvergenceFindings(source) {
   if (occurrenceCount(source, "publish_public_gate") !== 2) {
     findings.push("realm convergence permits publication outside bounded cleanup");
   }
+  requireOrder(
+    [
+      'if try_prove_user_profile "$authority_config" initial; then',
+      "user_profile_valid=true",
+      'refresh_demo_inventory "$authority_config"',
+      '[ "$user_profile_valid" = true ] && \\',
+      'try_complete_projection "$permanent_config"; then',
+    ],
+    "trusted profile, marker inventory and fast-path order drifted",
+  );
+  requireOrder(
+    [
+      'admin_quiet "$authority_config" realm-disable update "realms/$realm" -s enabled=false',
+      'project_quiet realm-disabled realm-state "$realm_json" false',
+      'admin_quiet "$authority_config" realm-update update "realms/$realm" \\',
+      'admin_quiet "$authority_config" user-profile-update update "users/profile" \\',
+      'prove_user_profile "$authority_config" repaired',
+      'refresh_demo_inventory "$authority_config"',
+      'if [ "$user_profile_valid" = false ] && \\',
+      'client_id=$(query_client_id "$authority_config" "$realm" "$client")',
+    ],
+    "closed-realm profile repair, provenance and application mutation order drifted",
+  );
 
   const exactFunction = (startToken, endToken, expectedLines, finding) => {
     const anchoredStart = `\n${startToken}`;
@@ -1680,7 +1764,7 @@ export function keycloakConvergenceFindings(source) {
   );
   exactFunction(
     "try_complete_projection() {",
-    '\nrequire_current_generation_or_exit\nif [ "$realm_was_open" = true ] && \\',
+    "\nrequire_current_generation_or_exit\nuser_profile_valid=false",
     [
       "try_complete_projection() {",
       "complete_config=$1",
@@ -1694,6 +1778,7 @@ export function keycloakConvergenceFindings(source) {
       '[ "$witness_state" = complete ] && \\',
       '[ "$witness_bootstrap_user_id" = "$complete_bootstrap_user_id" ] && \\',
       '[ "$witness_permanent_user_id" = "$complete_permanent_user_id" ] || return',
+      'try_prove_user_profile "$complete_config" complete || return',
       'try_admin_to_file "$complete_config" "$state_dir/complete-client-query.json" \\',
       'get clients -r "$realm" -q "clientId=$client" || return',
       'try_project_to_file "$state_dir/complete-client-id.out" client-id \\',
@@ -1722,6 +1807,19 @@ export function keycloakConvergenceFindings(source) {
       'get groups -r "$realm" -q search=synveda-admins -q exact=false \\',
       "-q briefRepresentation=false || return",
       'try_project_quiet complete-group group "$state_dir/complete-groups.json" || return',
+      'complete_group_id=$(projection_value "$state_dir/complete-groups.json" \\',
+      "group group) || return",
+      'is_uuid "$complete_group_id" || return',
+      'try_admin_to_file "$complete_config" \\',
+      '"$state_dir/complete-admin-group-role-mappings.json" \\',
+      'get "groups/$complete_group_id/role-mappings" -r "$realm" || return',
+      'try_project_quiet complete-admin-group-role-mappings empty-role-mapping \\',
+      '"$state_dir/complete-admin-group-role-mappings.json" || return',
+      'try_admin_to_file "$complete_config" "$state_dir/complete-admin-group-children.json" \\',
+      'get "groups/$complete_group_id/children" -r "$realm" \\',
+      "-q first=0 -q max=1 || return",
+      'try_project_quiet complete-admin-group-children empty-array \\',
+      '"$state_dir/complete-admin-group-children.json" || return',
       'try_prove_scoped_authority "$complete_config" \\',
       '"$complete_permanent_user_id" retired || return',
       "}",
@@ -1769,6 +1867,12 @@ export function canonicalComposeFindings(model, expected) {
       keycloak_convergence_admin_password: "keycloak_convergence_admin_password",
     });
   }
+  if (expected.demo === true) {
+    Object.assign(expectedTopLevelSecrets, {
+      keycloak_demo_admin_password: "keycloak_demo_admin_password",
+      keycloak_demo_member_password: "keycloak_demo_member_password",
+    });
+  }
   if (expected.runtime === "reference") {
     Object.assign(expectedTopLevelSecrets, {
       synveda_tls_cert: "tls_cert",
@@ -1800,6 +1904,7 @@ export function canonicalComposeFindings(model, expected) {
     "migrate",
     "otel-collector",
     "proxy",
+    "tenant-convergence",
     "worker",
   ];
   if (expected.postgres === "bundled") expectedServices.push("database-bootstrap", "postgres");
@@ -1858,18 +1963,20 @@ export function canonicalComposeFindings(model, expected) {
     services["database-preflight"],
     services.gateway,
     services["issuer-diagnostic"],
+    services["tenant-convergence"],
     services.worker,
     services.migrate,
   ].filter(Boolean);
   if (new Set(product.map(({ image }) => image)).size !== 1) {
     findings.push(
-      "database preflight, issuer diagnostic, gateway, worker and migration do not use one product image",
+      "database preflight, migration, tenant convergence, issuer diagnostic, gateway and worker do not use one product image",
     );
   }
   const expectedImages = {
     "database-preflight": expected.productImage,
     gateway: expected.productImage,
     "issuer-diagnostic": expected.productImage,
+    "tenant-convergence": expected.productImage,
     worker: expected.productImage,
     migrate: expected.productImage,
     proxy: expected.caddyImage,
@@ -1890,6 +1997,7 @@ export function canonicalComposeFindings(model, expected) {
   const commands = {
     "database-preflight": ["database-preflight"],
     "issuer-diagnostic": ["issuer-diagnostic"],
+    "tenant-convergence": ["tenant-converge"],
     gateway: ["gateway"],
     worker: ["worker"],
     migrate: ["migrate"],
@@ -2014,7 +2122,13 @@ export function canonicalComposeFindings(model, expected) {
   }
   const roleContractTarget = "/etc/synveda/database/roles.json";
   const roleContractSources = new Set();
-  for (const name of ["database-preflight", "gateway", "migrate", "worker"]) {
+  for (const name of [
+    "database-preflight",
+    "gateway",
+    "migrate",
+    "tenant-convergence",
+    "worker",
+  ]) {
     if (services[name]?.environment?.SYNVEDA_DATABASE_ROLES_FILE !== roleContractTarget) {
       findings.push(`${name} database role contract setting drifted`);
     }
@@ -2048,6 +2162,26 @@ export function canonicalComposeFindings(model, expected) {
     expected.appUrl
   ) {
     findings.push("issuer diagnostic public URL differs from the selected browser URL");
+  }
+  const tenantEnvironment = services["tenant-convergence"]?.environment ?? {};
+  if (tenantEnvironment.SYNVEDA_BOOTSTRAP_TENANT_ID !== expected.bootstrapTenantId) {
+    findings.push("tenant convergence bootstrap tenant ID drifted");
+  }
+  if (
+    tenantEnvironment.SYNVEDA_BOOTSTRAP_TENANT_SLUG !== expected.bootstrapTenantSlug
+  ) {
+    findings.push("tenant convergence bootstrap tenant slug drifted");
+  }
+  if (
+    tenantEnvironment.SYNVEDA_BOOTSTRAP_TENANT_NAME !== expected.bootstrapTenantName
+  ) {
+    findings.push("tenant convergence bootstrap tenant name drifted");
+  }
+  if (
+    services["issuer-diagnostic"]?.environment?.SYNVEDA_BOOTSTRAP_TENANT_ID !==
+    expected.bootstrapTenantId
+  ) {
+    findings.push("issuer diagnostic bootstrap tenant ID drifted");
   }
   const expectedInsecureDevelopmentHttp =
     expected.runtime === "development" ? "true" : "false";
@@ -2289,6 +2423,9 @@ export function canonicalComposeFindings(model, expected) {
     "/etc/synveda/database/roles.json:ro",
   ];
   expectedBindTargets.migrate = ["/etc/synveda/database/roles.json:ro"];
+  expectedBindTargets["tenant-convergence"] = [
+    "/etc/synveda/database/roles.json:ro",
+  ];
   expectedBindTargets["issuer-diagnostic"] = [
     "/etc/synveda/oidc/issuers.json:ro",
   ];
@@ -2353,6 +2490,9 @@ export function canonicalComposeFindings(model, expected) {
       "/etc/synveda/database/roles.json": expected.databaseRolesFile,
     },
     migrate: {
+      "/etc/synveda/database/roles.json": expected.databaseRolesFile,
+    },
+    "tenant-convergence": {
       "/etc/synveda/database/roles.json": expected.databaseRolesFile,
     },
     "issuer-diagnostic": {
@@ -2440,8 +2580,11 @@ export function canonicalComposeFindings(model, expected) {
   ) {
     findings.push("proxy listener ports differ from the runtime contract");
   }
-  if (services.gateway?.depends_on?.migrate?.condition !== "service_completed_successfully") {
-    findings.push("gateway does not wait for migration completion");
+  if (
+    services.gateway?.depends_on?.["tenant-convergence"]?.condition !==
+    "service_completed_successfully"
+  ) {
+    findings.push("gateway does not wait for tenant convergence");
   }
   if (
     services.gateway?.depends_on?.["issuer-diagnostic"]?.condition !==
@@ -2458,8 +2601,23 @@ export function canonicalComposeFindings(model, expected) {
   ) {
     findings.push("issuer diagnostic is not bound to the selected exact issuer");
   }
-  if (services.worker?.depends_on?.migrate?.condition !== "service_completed_successfully") {
-    findings.push("worker does not wait for migration completion");
+  if (
+    services.worker?.depends_on?.["tenant-convergence"]?.condition !==
+    "service_completed_successfully"
+  ) {
+    findings.push("worker does not wait for tenant convergence");
+  }
+  if (
+    services.worker?.depends_on?.["issuer-diagnostic"]?.condition !==
+    "service_completed_successfully"
+  ) {
+    findings.push("worker does not wait for issuer diagnostic completion");
+  }
+  if (
+    services["tenant-convergence"]?.depends_on?.migrate?.condition !==
+    "service_completed_successfully"
+  ) {
+    findings.push("tenant convergence does not wait for migration completion");
   }
   if (
     services.migrate?.depends_on?.["database-preflight"]?.condition !==
@@ -2524,13 +2682,17 @@ export function canonicalComposeFindings(model, expected) {
   );
   expectedDependencies.gateway = [
     "issuer-diagnostic:service_completed_successfully:no-restart:required",
-    "migrate:service_completed_successfully:no-restart:required",
+    "tenant-convergence:service_completed_successfully:no-restart:required",
   ];
   expectedDependencies.worker = [
-    "migrate:service_completed_successfully:no-restart:required",
+    "issuer-diagnostic:service_completed_successfully:no-restart:required",
+    "tenant-convergence:service_completed_successfully:no-restart:required",
   ];
   expectedDependencies.migrate = [
     "database-preflight:service_completed_successfully:no-restart:required",
+  ];
+  expectedDependencies["tenant-convergence"] = [
+    "migrate:service_completed_successfully:no-restart:required",
   ];
   expectedDependencies["issuer-diagnostic"] = [
     "proxy:service_healthy:no-restart:required",
@@ -2593,6 +2755,11 @@ export function canonicalComposeFindings(model, expected) {
       "synveda_worker_database_url:database_url",
     ],
     migrate: ["synveda_migrator_database_url:database_url"],
+    "tenant-convergence": [
+      "synveda_kms_key:kms_key",
+      "synveda_kms_key_ref:kms_key_ref",
+      "synveda_migrator_database_url:database_url",
+    ],
   });
   if (expected.postgres === "bundled") {
     expectedSecrets.postgres = ["postgres_owner_password:postgres_owner_password"];
@@ -2623,6 +2790,12 @@ export function canonicalComposeFindings(model, expected) {
       "keycloak_admin_username:keycloak_admin_username",
       "keycloak_convergence_admin_password:keycloak_convergence_admin_password",
     ];
+    if (expected.demo === true) {
+      expectedSecrets["keycloak-realm-convergence"].push(
+        "keycloak_demo_admin_password:keycloak_demo_admin_password",
+        "keycloak_demo_member_password:keycloak_demo_member_password",
+      );
+    }
   }
   if (expected.runtime === "reference") {
     expectedSecrets.proxy = [
@@ -2681,6 +2854,12 @@ export function canonicalComposeFindings(model, expected) {
           "keycloak_admin_password:keycloak_admin_password",
           "keycloak_admin_username:keycloak_admin_username",
           "keycloak_convergence_admin_password:keycloak_convergence_admin_password",
+          ...(expected.demo === true
+            ? [
+                "keycloak_demo_admin_password:keycloak_demo_admin_password",
+                "keycloak_demo_member_password:keycloak_demo_member_password",
+              ]
+            : []),
         ]),
       )
     ) {
@@ -2704,6 +2883,11 @@ export function canonicalComposeFindings(model, expected) {
       SYNVEDA_KMS_KEY_REF_FILE: "/run/secrets/kms_key_ref",
     },
     migrate: { DATABASE_URL_FILE: "/run/secrets/database_url" },
+    "tenant-convergence": {
+      DATABASE_URL_FILE: "/run/secrets/database_url",
+      SYNVEDA_KMS_KEY_FILE: "/run/secrets/kms_key",
+      SYNVEDA_KMS_KEY_REF_FILE: "/run/secrets/kms_key_ref",
+    },
   };
   for (const [name, settings] of Object.entries(expectedSecretFiles)) {
     for (const [setting, path] of Object.entries(settings)) {
@@ -2753,7 +2937,15 @@ export function canonicalComposeFindings(model, expected) {
         ?.KC_BOOTSTRAP_ADMIN_PASSWORD_FILE !== "/run/secrets/keycloak_admin_password" ||
       services["keycloak-realm-convergence"]?.environment
         ?.SYNVEDA_KEYCLOAK_CONVERGENCE_PASSWORD_FILE !==
-        "/run/secrets/keycloak_convergence_admin_password")
+        "/run/secrets/keycloak_convergence_admin_password" ||
+      services["keycloak-realm-convergence"]?.environment
+        ?.SYNVEDA_KEYCLOAK_DEMO_ENABLED !== (expected.demo === true ? "true" : undefined) ||
+      services["keycloak-realm-convergence"]?.environment
+        ?.SYNVEDA_KEYCLOAK_DEMO_ADMIN_PASSWORD_FILE !==
+        (expected.demo === true ? "/run/secrets/keycloak_demo_admin_password" : undefined) ||
+      services["keycloak-realm-convergence"]?.environment
+        ?.SYNVEDA_KEYCLOAK_DEMO_MEMBER_PASSWORD_FILE !==
+        (expected.demo === true ? "/run/secrets/keycloak_demo_member_password" : undefined))
   ) {
     findings.push("Keycloak realm convergence file-secret settings drifted");
   }
@@ -2776,6 +2968,8 @@ export function canonicalComposeFindings(model, expected) {
     "KC_BOOTSTRAP_ADMIN_USERNAME",
     "KC_BOOTSTRAP_ADMIN_PASSWORD",
     "SYNVEDA_KEYCLOAK_CONVERGENCE_PASSWORD",
+    "SYNVEDA_KEYCLOAK_DEMO_ADMIN_PASSWORD",
+    "SYNVEDA_KEYCLOAK_DEMO_MEMBER_PASSWORD",
   ]);
   for (const [name, service] of Object.entries(services)) {
     for (const key of Object.keys(service.environment ?? {})) {
@@ -2799,8 +2993,19 @@ export function canonicalComposeFindings(model, expected) {
       "SYNVEDA_WORKER_DATABASE_URL_FILE",
     ],
     migrate: ["DATABASE_URL_FILE", "RUST_LOG", "SYNVEDA_DATABASE_ROLES_FILE"],
+    "tenant-convergence": [
+      "DATABASE_URL_FILE",
+      "RUST_LOG",
+      "SYNVEDA_BOOTSTRAP_TENANT_ID",
+      "SYNVEDA_BOOTSTRAP_TENANT_NAME",
+      "SYNVEDA_BOOTSTRAP_TENANT_SLUG",
+      "SYNVEDA_DATABASE_ROLES_FILE",
+      "SYNVEDA_KMS_KEY_FILE",
+      "SYNVEDA_KMS_KEY_REF_FILE",
+    ],
     "issuer-diagnostic": [
       "RUST_LOG",
+      "SYNVEDA_BOOTSTRAP_TENANT_ID",
       "SYNVEDA_INSECURE_DEVELOPMENT_HTTP",
       "SYNVEDA_OIDC_EXPECTED_ISSUER",
       "SYNVEDA_OIDC_ISSUERS_FILE",
@@ -2897,6 +3102,13 @@ export function canonicalComposeFindings(model, expected) {
       "SYNVEDA_PUBLIC_APP_URL",
       "SYNVEDA_PUBLIC_AUTH_URL",
     ];
+    if (expected.demo === true) {
+      expectedEnvironmentKeys["keycloak-realm-convergence"].push(
+        "SYNVEDA_KEYCLOAK_DEMO_ADMIN_PASSWORD_FILE",
+        "SYNVEDA_KEYCLOAK_DEMO_ENABLED",
+        "SYNVEDA_KEYCLOAK_DEMO_MEMBER_PASSWORD_FILE",
+      );
+    }
   }
   for (const name of expectedServices) {
     if (
@@ -2925,6 +3137,7 @@ export function canonicalComposeFindings(model, expected) {
       telemetry: {},
     },
     migrate: { "synveda-data": {} },
+    "tenant-convergence": { "synveda-data": {} },
     "otel-collector": {
       "keycloak-management": {},
       telemetry: {},
@@ -2942,6 +3155,7 @@ export function canonicalComposeFindings(model, expected) {
   if (expected.postgres === "external") {
     expectedNetworks["database-preflight"]["application-egress"] = { gw_priority: 1 };
     expectedNetworks.migrate["application-egress"] = { gw_priority: 1 };
+    expectedNetworks["tenant-convergence"]["application-egress"] = { gw_priority: 1 };
   }
   if (expected.postgres === "bundled") {
     expectedNetworks.postgres = { "keycloak-data": {}, "synveda-data": {} };
@@ -2984,6 +3198,7 @@ export function canonicalComposeFindings(model, expected) {
       "issuer-diagnostic",
       "keycloak-database-bootstrap",
       "migrate",
+      "tenant-convergence",
     ]);
     for (const [name, service] of Object.entries(services)) {
       if (!oneShot.has(name) && service.restart !== "unless-stopped") {
@@ -3019,6 +3234,7 @@ export function canonicalComposeFindings(model, expected) {
       "gateway",
       "worker",
       "migrate",
+      "tenant-convergence",
     ]) {
       if (services[name]?.build?.dockerfile !== "deploy/compose/gateway/Dockerfile") {
         findings.push(`${name} does not use the development product build`);
@@ -3132,7 +3348,7 @@ export function canonicalComposeFindings(model, expected) {
 function render(fixture, expected) {
   const output = join(
     fixture.scratch,
-    `${expected.runtime}-${expected.postgres}-${expected.oidc}.json`,
+    `${expected.runtime}-${expected.postgres}-${expected.oidc}${expected.demo === true ? "-demo" : ""}.json`,
   );
   const reference = expected.runtime === "reference";
   expected.publicPort = reference ? 443 : (expected.devPort ?? 8080);
@@ -3153,6 +3369,9 @@ function render(fixture, expected) {
         : `http://auth.synveda.test:${expected.publicPort}`
       : undefined;
   expected.projectName = `synveda-${expected.runtime}`;
+  expected.bootstrapTenantId = "019b53c0-7c00-7000-8000-000000000045";
+  expected.bootstrapTenantSlug = "reference";
+  expected.bootstrapTenantName = "Synveda Reference";
   expected.networkPool = "172.30.240.0/24";
   expected.networkPlan = composeNetworkPlan(expected.networkPool);
   expected.proxyIdentityAddress = "172.30.240.2";
@@ -3187,10 +3406,6 @@ function render(fixture, expected) {
       : "configs/caddy/identity.external.caddy",
   );
   expected.collectorConfig = join(COMPOSE, "configs/otel/collector.yaml");
-  expected.issuerFile = realpathSync(fixture.issuers);
-  expected.oidcDirectorySecrets = realpathSync(
-    join(fixture.secrets, "oidc-directory"),
-  );
   expected.databaseRolesFile = join(
     COMPOSE,
     "configs/database",
@@ -3214,7 +3429,7 @@ function render(fixture, expected) {
         issuer: expected.issuer,
         client_id: "synveda",
         audience: "synveda-api",
-        tenant: { static: { tenant_id: "00000000-0000-0000-0000-000000000001" } },
+        tenant: { static: { tenant_id: expected.bootstrapTenantId } },
         login_scopes: ["openid", "profile", "email"],
       },
     ]),
@@ -3233,7 +3448,12 @@ function render(fixture, expected) {
     SYNVEDA_KEYCLOAK_IMAGE: expected.keycloakImage,
     SYNVEDA_CADDY_IMAGE: expected.caddyImage,
     SYNVEDA_OTEL_COLLECTOR_IMAGE: expected.otelCollectorImage,
+    ...(expected.demo === true ? { SYNVEDA_COMPOSE_PROFILES: "demo" } : {}),
   });
+  expected.issuerFile = realpathSync(environment.SYNVEDA_OIDC_ISSUERS_FILE);
+  expected.oidcDirectorySecrets = realpathSync(
+    join(environment.SYNVEDA_SECRETS_DIR, "oidc-directory"),
+  );
   if (expected.oidc === "external") {
     environment.SYNVEDA_OIDC_ISSUER = expected.issuer;
   }
@@ -3266,6 +3486,7 @@ function checkStaticInputs() {
     "compose.keycloak.yaml",
     "compose.keycloak-postgres.yaml",
     "compose.keycloak-external-postgres.yaml",
+    "compose.demo.yaml",
     "compose.external.yaml",
     "compose.external-postgres.yaml",
   ].map((name) => readFileSync(join(COMPOSE, name), "utf8"));
@@ -3530,11 +3751,24 @@ export function main() {
       [],
       `development/custom-port: ${customPortFindings.join("; ")}`,
     );
+    const demoExpected = {
+      runtime: "development",
+      postgres: "bundled",
+      oidc: "bundled",
+      demo: true,
+    };
+    const demo = render(fixture, demoExpected);
+    const demoFindings = canonicalComposeFindings(demo, demoExpected);
+    assert.deepEqual(
+      demoFindings,
+      [],
+      `development/demo: ${demoFindings.join("; ")}`,
+    );
     console.log(
       `canonical Compose static shape validates: ${rows}/8 deterministic provider/runtime rows, ` +
-        "one exact custom development issuer port, role-scoped file secrets, " +
+        "one bundled demo profile, one exact custom development issuer port, role-scoped file secrets, " +
         "isolated networks and reverse-proxy-only host ports; " +
-        "startup convergence remains gated",
+        "live clean-start and browser acceptance remain pending",
     );
   } finally {
     rmSync(fixture.scratch, { recursive: true, force: true });

@@ -20,11 +20,11 @@ path=${SYNVEDA_CARGO_DATABASE_URL_FILE:-}
     echo "cargo-database-url: the private URL file is unavailable" >&2
     exit 78
 }
-mode=$(stat -f '%Lp' "$path" 2>/dev/null || stat -c '%a' "$path" 2>/dev/null) || {
+mode=$(stat -c '%a' "$path" 2>/dev/null || stat -f '%Lp' "$path" 2>/dev/null) || {
     echo "cargo-database-url: the private URL file metadata is unavailable" >&2
     exit 78
 }
-owner=$(stat -f '%u' "$path" 2>/dev/null || stat -c '%u' "$path" 2>/dev/null) || {
+owner=$(stat -c '%u' "$path" 2>/dev/null || stat -f '%u' "$path" 2>/dev/null) || {
     echo "cargo-database-url: the private URL file metadata is unavailable" >&2
     exit 78
 }

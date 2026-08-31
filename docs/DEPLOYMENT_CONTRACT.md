@@ -35,6 +35,7 @@ compose.keycloak.dev.yaml local optimized Keycloak and database-bootstrap helper
 compose.postgres.yaml    bundled PostgreSQL and idempotent role/database bootstrap
 compose.keycloak.yaml    bundled Keycloak, isolated database bootstrap and realm convergence
 compose.keycloak-postgres.yaml             bundled shared-cluster ordering/secret bridge
+compose.demo.yaml       optional secret-file-backed target-realm demo identities
 compose.external-postgres.yaml             external Synveda database egress bridge
 compose.keycloak-external-postgres.yaml    external Keycloak database egress bridge
 compose.external.yaml    external-provider labels, no provider services
@@ -137,9 +138,9 @@ current-key unwrap custody, reads the authoritative generation-one KEK
 reference, and serializes one exact content-free provision witness on the
 tenant audit-chain head. The audit crate exposes this as a key-provision-only
 repair operation rather than a generic idempotent append, so ordinary governed
-mutations retain the same-transaction audit rule. The command is an image
-contract; the canonical topology does not yet select a bootstrap job, so it is
-preparation rather than install evidence.
+mutations retain the same-transaction audit rule. The canonical topology runs
+this command as the unprofiled `tenant-convergence` one-shot after migration;
+gateway and worker wait for its exact successful exit.
 
 Capture remains its existing durable aggregate rather than becoming an Apalis
 task. Its current claim is fenced by tenant, batch, process-unique owner and
@@ -203,30 +204,61 @@ The provider-neutral target graph is deterministic:
 ```text
 bundled postgres healthy -> database bootstrap complete -> Synveda migrate complete
 external postgres diagnostic ---------------------------> Synveda migrate complete
-Synveda migrate complete -> core worker healthy
+Synveda migrate complete -> tenant convergence complete
 
 bundled Keycloak database sentinel -> Keycloak ready -> realm convergence
 realm convergence -> reverse-proxy config healthy -> bundled issuer diagnostic
 external reverse-proxy config healthy + external issuer over application-egress
                                          -> external issuer diagnostic
-Synveda migrate complete + issuer diagnostic complete -> gateway ready -> usable app route
+tenant convergence complete + issuer diagnostic complete -> gateway + core worker ready
+gateway ready -> usable app route
 
 Apalis schema migration complete -> operation dispatcher + Apalis executor
 product processes and Keycloak -> Collector -> optional visibility/external OTLP
 ```
 
 The current additive checkpoint implements the bundled database bootstrap,
-fail-closed realm convergence and the issuer-diagnostic service contract. The
-canonical selector remains configuration-only, so this graph is not yet
-clean-start acceptance evidence. Its external-PostgreSQL bootstrap path
+tenant convergence, fail-closed realm convergence, issuer diagnostic and the
+bounded `up`, `smoke`, `down` and exact-confirmation `reset` lifecycle. Its
+deterministic tests are implementation evidence, not clean-start/browser
+acceptance. The external-PostgreSQL bootstrap path
 deliberately stops before runtime startup until authenticated TLS and
 pre-provisioned-provider acceptance are implemented.
+
+Every mutating lifecycle action and authority-file writer holds one private,
+operator-owned lock for the exact Compose project. The lock spans input
+generation, rendered-asset validation and every Docker mutation; children may
+borrow only the exact live ancestor witness. Catchable signals reach the active
+deadline runner and complete process group before re-entrant cleanup. A signal
+during read-only preparation releases the lock only after that group is proved
+gone through a private completion witness. Any failed, timed-out or interrupted
+Docker mutation, unclean child group, missing witness or uncatchable death
+retains a fail-closed lock. An operator may remove it only
+after validating its exact `PROJECT:PID` witness, proving the PID absent,
+revalidating the local Engine and proving no mutation for that project is
+active. Broad or uncertain stale-lock deletion is not an accepted operation.
+
+The whole action consumes one monotonic 240–3600 second elapsed-time budget,
+defaulting to 900 seconds; subprocesses receive only the remaining budget and
+it can never be replenished. A child that ignores termination is killed after a
+five-second grace, followed by a bounded disappearance check; an unproved group
+returns a distinct uncertainty status. Before `up`, the lifecycle compares the
+rendered Compose network driver, options, flags and complete IPAM configuration
+with both the current Engine inventory and the post-validation inventory. It
+refuses overlap, retained-project drift, asset substitution and unexpected
+volumes rather than deleting or silently recreating them.
+
+Every lifecycle that can inspect or mutate Engine state first resolves an exact
+local `unix://` endpoint, pins it in `DOCKER_HOST`, and removes
+`DOCKER_CONTEXT` from its child environment. Context changes after preflight
+therefore cannot redirect later inventory, startup, shutdown or volume removal.
 
 The issuer diagnostic retries retryable OIDC availability through one bounded
 deadline without naming a provider. Database preflight and migration have
 bounded operations but do not poll their dependency. Provider fragments add
 `depends_on` health/completion conditions when the dependency is bundled.
-Gateway is not started until migration and issuer diagnostics succeed. In
+Gateway and worker are not started until tenant convergence and issuer
+diagnostics succeed. In
 bundled-Keycloak mode the proxy starts only after convergence; in external-OIDC
 mode it may start immediately. Proxy health proves only that Caddy accepted the
 closed route configuration. The product issuer diagnostic, not proxy health,
@@ -319,14 +351,15 @@ auxiliary address. No other service has a static container address.
 The baked pool is an unsuffixed development convenience, not a collision-free
 allocation. Reference and acceptance-suffixed projects require an explicit
 pool, and concurrent or retained projects require distinct recorded pools.
-Configuration rendering stays daemon-independent. The future lifecycle `up`
-boundary must first compare numeric CIDR intervals against all Engine networks,
-accept only exact label-owned same-project reruns, and refuse stale or foreign
-overlaps without deleting anything; Docker network creation remains the final
-race authority. Operators must also avoid host/VPN and external-dependency
-routes. Docker Desktop keeps bridge routes inside its VM, so host-route
-inspection alone is insufficient and functional dependency smoke tests remain
-required.
+Configuration rendering stays daemon-independent. The lifecycle `up` boundary
+compares numeric CIDR intervals against all Engine networks, accepts only exact
+label-owned same-project reruns, and refuses stale or foreign overlaps without
+deleting anything; Docker network creation remains the final race authority.
+It also requires a local Unix Docker endpoint and Engine 28 or newer before
+relying on loopback publication. Operators must still avoid host/VPN and
+external-dependency routes. Docker Desktop keeps bridge routes inside its VM,
+so host-route inspection alone is insufficient and functional dependency smoke
+tests remain required.
 
 PostgreSQL is the only service joining both data networks in the shared-server
 reference. Gateway and Keycloak never share a data network. Docker networks
@@ -422,8 +455,11 @@ for example, gateway's `synveda_gateway_database_url` and worker's
 `synveda_worker_database_url` are each mounted as `/run/secrets/database_url`
 only in their respective service.
 
-Local Compose secret sources are generated mode `0600`, owned by the validated
-non-root operator UID/GID. Stateless services run with those same numeric ids;
+Local Compose secret sources are generated beneath
+`runtime/<exact-project>/secrets`, mode `0600`, owned by the validated non-root
+operator UID/GID and guarded by an exact project marker. Re-running `up`
+validates this complete set without rotation. Stateless services run with those
+same numeric ids;
 PostgreSQL's native entrypoint reads its own password before dropping to the
 upstream database UID. The Compose files do not claim `uid`, `gid` or `mode`
 remapping for file-backed secrets. Linux and Docker Desktop acceptance compares
@@ -454,7 +490,7 @@ materialise the same per-service paths, but does not change setting meaning.
 | Keycloak convergence | direct password values are forbidden | `SYNVEDA_KEYCLOAK_CONVERGENCE_PASSWORD_FILE=/run/secrets/keycloak_convergence_admin_password` |
 | PostgreSQL bootstrap | `POSTGRES_USER`, database/role names | `POSTGRES_PASSWORD_FILE=/run/secrets/postgres_owner_password`; exact role files `/run/secrets/synveda_migrator_password`, `/run/secrets/synveda_gateway_password`, `/run/secrets/synveda_worker_password`, `/run/secrets/keycloak_database_password`, `/run/secrets/apalis_migrator_password`, `/run/secrets/apalis_runtime_password` |
 | backup | `SYNVEDA_BACKUP_REPOSITORY=posix|s3`, `SYNVEDA_BACKUP_POSIX_PATH`, `SYNVEDA_BACKUP_S3_ENDPOINT`, `SYNVEDA_BACKUP_S3_REGION`, `SYNVEDA_BACKUP_S3_BUCKET`, `SYNVEDA_BACKUP_S3_PATH_STYLE` | `SYNVEDA_BACKUP_REPOSITORY_KEY_FILE=/run/secrets/pgbackrest_repository_key`; `SYNVEDA_BACKUP_S3_ACCESS_KEY_FILE=/run/secrets/backup_s3_access_key`; `SYNVEDA_BACKUP_S3_SECRET_KEY_FILE=/run/secrets/backup_s3_secret_key`; `SYNVEDA_BACKUP_S3_SESSION_TOKEN_FILE=/run/secrets/backup_s3_session_token` |
-| demo identities | non-secret usernames only under `demo` | `SYNVEDA_DEMO_ADMIN_PASSWORD_FILE=/run/secrets/demo_admin_password`; `SYNVEDA_DEMO_MEMBER_PASSWORD_FILE=/run/secrets/demo_member_password` |
+| Keycloak demo identities | non-secret usernames only under `demo` | `SYNVEDA_KEYCLOAK_DEMO_ADMIN_PASSWORD_FILE=/run/secrets/keycloak_demo_admin_password`; `SYNVEDA_KEYCLOAK_DEMO_MEMBER_PASSWORD_FILE=/run/secrets/keycloak_demo_member_password` |
 
 Every Synveda PostgreSQL URL uses the `postgres` or `postgresql` scheme and
 explicitly names its database in the path or effective `dbname` parameter; it
@@ -504,9 +540,12 @@ executor containers.
 
 `.env.example` contains no password, token, key, confidential DSN or usable
 demo credential. The generator uses OS entropy, `umask 077`, mode `0600`, and
-prints filenames only. Replacement requires both `--force` and the exact
+prints filenames only. `--if-missing` proves an existing complete project set
+without changing values. Replacement requires both `--force` and the exact
 project confirmation; the old set is preserved as `previous-secrets` and this
-is explicitly not a credential-rotation workflow.
+is explicitly not a credential-rotation workflow. Lifecycle reset preserves
+this set, the issuer input and the KMS key; it removes only exact generated
+authority/gate state and the label-proved project PostgreSQL volume.
 
 ## OIDC contract
 
@@ -517,8 +556,10 @@ is explicitly not a credential-rotation workflow.
   namespaces: RFC 6761 section 6.3 reserves it for loopback in each resolver,
   so a gateway container may resolve its own loopback rather than the proxy.
   A Docker alias cannot be accepted as a portable override of that rule. The
-  host/container resolver diagnostic proves the `.test` mapping on Linux and
-  Docker Desktop. Reference/playground uses operator DNS and HTTPS.
+  host resolver diagnostic requires exactly `127.0.0.1`, with no additional or
+  IPv6 answer, before lifecycle mutation. Cross-platform container resolution
+  remains part of clean Linux and Docker Desktop acceptance.
+  Reference/playground uses operator DNS and HTTPS.
 - Authorization code flow, state, nonce and PKCE S256 are mandatory. Implicit
   and resource-owner password grants are disabled.
 - Discovery must return the exact issuer, S256 support and an allowed signing
@@ -543,6 +584,11 @@ is explicitly not a credential-rotation workflow.
 - External OIDC mounts the same issuer schema and runs the same gateway image.
   It renders no Synveda identity host or bundled-provider route. Provider
   support is earned by the common conformance suite, not its name.
+- The deployment diagnostic accepts exactly one configured issuer and requires
+  its tenant binding to be the static
+  `SYNVEDA_BOOTSTRAP_TENANT_ID`. A different tenant, routing/domain mapping or
+  additional issuer is refused before the gateway starts. This is a reference
+  bootstrap constraint, not provider-specific tenant authority.
 
 The bundled provider is realm `synveda` with public client `synveda`.
 Standard flow and PKCE method S256 are enabled; direct-access grants, implicit
@@ -553,11 +599,30 @@ loopback handoff; the IdP never accepts a wildcard loopback redirect. The
 `groups` protocol mapper emits the leaf name `synveda-admins`, which the
 provider-neutral group parser recognises, and an access-token-only audience
 mapper emits `synveda-api`. `synveda-admins` is a bootstrap group, not an
-application-role catalogue. The current checkpoint does not create a target-
-realm user: the planned `demo` profile has no user-convergence service yet, and
-there is no accepted manual administration path. A deterministic first-user or
-demo-user provisioning boundary is therefore required before clean-volume
-browser-login acceptance.
+application-role catalogue. The optional `demo` overlay extends the same
+generation-fenced convergence job and owns `synveda-demo-admin` plus
+`synveda-demo-member`. Passwords arrive only through their two mounted files;
+direct values are refused. Convergence resets the owned users' credentials,
+removes direct Keycloak roles and unexpected groups, proves the bootstrap group
+contains only the administrator, and refuses to adopt a same-named user without
+the exact ownership attributes. A subsequent convergence without `demo`
+deletes only those exactly owned users while the realm is closed. This
+deterministic boundary makes a real browser exchange possible but is not itself
+browser-login acceptance or proof that the password avoids an update prompt.
+
+The optimized image carries one exact Keycloak 26.7.2 user-profile document:
+the four upstream built-in attributes and only the two optional Synveda demo
+ownership attributes. The marker attributes are single-valued, admin-view and
+admin-edit only, with exact length and option validators. The document omits
+`unmanagedAttributePolicy`; missing/null is the disabled state in the pinned
+26.7.2 implementation, whose enum has no literal `DISABLED`. Convergence first
+proves the complete profile before trusting marker inventory. Repair closes
+and proves the realm closed, performs a full no-merge profile PUT, and proves
+the exact readback before any marker-based create, update or delete. When the
+initial profile was non-exact and markers exist after repair, convergence
+refuses operator/reset recovery instead of adopting or deleting identities
+whose provenance cannot be trusted. Fast-path publication repeats the exact
+profile proof.
 
 Keycloak is built from the official 26.7.2 image with `--db=postgres`, health
 and metrics, and no preview feature/provider. It runs only
@@ -700,9 +765,9 @@ case.
 ## Reverse proxy and trust boundary
 
 The proxy accepts only configured hosts; removes the standard `Forwarded`
-header; overwrites `X-Forwarded-For`, `X-Forwarded-Host`,
-`X-Forwarded-Proto` and `X-Forwarded-Port`; strips untrusted identity and
-`X-Original-*` headers; and removes
+header, every incoming `X-Forwarded-*` variant and `X-Real-IP` before installing
+its exact `X-Forwarded-For`, `X-Forwarded-Host`, `X-Forwarded-Proto` and
+`X-Forwarded-Port`; strips untrusted identity and `X-Original-*` headers; and removes
 untrusted `traceparent`, `tracestate`, `baggage`, B3, Jaeger and OpenTracing
 variants. It bounds body size, header size, upstream timeout and idle lifetime.
 Reference TLS currently uses certificate files; bundled mode requires both

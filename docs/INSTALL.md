@@ -5,30 +5,38 @@ processes, PostgreSQL, generic OIDC, one public API and the same governed
 configuration semantics in direct binaries, Compose and later Helm. Personal,
 team and enterprise are Configuration documents, not deployment editions.
 
-The CPR-45 Docker reference deployment has not yet passed clean-volume
-acceptance. There is therefore no currently supported Docker-only turnkey
-install command. The release installer downloads development/evaluation
-artifacts, but does not claim to create a runnable single-host deployment.
-`synveda init` is closed by a cutover gate and refuses before profile
+The CPR-45 canonical Compose graph now has an executable, bounded lifecycle for
+development with bundled PostgreSQL and either bundled Keycloak or external
+OIDC. Deterministic gates cover file selection, private inputs, exact-project
+locking, network preflight, tenant/realm convergence and smoke predicates. It
+has not yet passed clean-volume browser acceptance on the supported desktop
+and Linux platforms, so it is not a supported controlled-use deployment.
+`synveda init` remains closed by a cutover gate and refuses before profile
 discovery, Compose, secret-file or database mutation. The old Rauthy profile
 cannot establish the new exact database-authority, endpoint and file-secret
-contract safely, and the explicit legacy path still round-tripped credentials
-through `.env` and lacked a whole-operation deadline. Neither path is
-advertised during the cutover.
+contract safely and is not an alternative installation path.
 
 The target contract and current limits are in
-[DEPLOYMENT_CONTRACT.md](DEPLOYMENT_CONTRACT.md). Static canonical Compose
-configuration can be validated with:
+[DEPLOYMENT_CONTRACT.md](DEPLOYMENT_CONTRACT.md). From a checkout, print and
+install the exact marked development host mapping using the host's normal
+administrator procedure, then run:
 
 ```sh
-deploy/compose/scripts/generate-secrets.sh
+make compose-hosts-plan
+make compose-resolver-check
 make compose-config
+make compose-up
+make compose-smoke
+make compose-down
 ```
 
-This proves configuration shape only. It does not prove Keycloak realm
-convergence, exact issuer login, backup/restore or a clean reference lifecycle.
-External PostgreSQL bootstrap deliberately refuses before secret reads or SQL
-until the authenticated-TLS contract is implemented.
+`compose-up` creates or validates project-scoped secret files, converges the
+bundled authorities and keeps gateway and worker in separate containers.
+`compose-smoke` probes the public host route and private-route refusals, but is
+not a browser authorization-code exchange. Clean browser login, reference
+HTTPS, backup/restore and upgrade acceptance remain open. External PostgreSQL
+bootstrap deliberately refuses before secret reads or SQL until the
+authenticated-TLS contract is implemented.
 
 The remaining sections describe product use only after a gateway has been
 started through separately validated development/test infrastructure. They are
@@ -757,7 +765,8 @@ under the deployment's encryption key (TEN-4). Gateway and worker accept the
 same mutually exclusive direct/file KMS settings; canonical Compose mounts a
 mode-0600 key file. The deployment must generate, retain and back up that key
 separately from PostgreSQL, since every tenant key in the database is wrapped
-by it. No accepted turnkey lifecycle currently creates or restores it. The
+by it. Canonical Compose generates and retains the project-scoped file but has
+not yet passed the required joint database/key restore acceptance. The
 console ships with release artifacts; from a checkout it needs
 `pnpm --filter @synveda/console build` first, and without a bundle the route
 404s rather than failing boot, because a static asset must not be a dependency
@@ -870,22 +879,29 @@ ended on; start a new Claude Code session to pick it up.
 
 ## Stopping and starting
 
-The following commands apply only to a transitional profile an operator has
-explicitly validated. They are not the pending canonical reference lifecycle:
+From a checkout, use the canonical project-scoped lifecycle:
 
 ```sh
-docker compose -f ~/.synveda/profile/docker-compose.yml down     # state persists in volumes
-docker compose -f ~/.synveda/profile/docker-compose.yml down -v  # wipe persistent volumes; kms.key remains
+make compose-down
+make compose-up
 ```
 
-To remove the product rather than stop it, see **Uninstalling** below.
+`compose-down` preserves the database volume and every project input. Reset is
+separate, destructive, and requires the exact project confirmation:
 
-From a checkout, the compose file is `deploy/compose/docker-compose.yml`
-instead.
+```sh
+SYNVEDA_CONFIRM_RESET=synveda-development make compose-reset
+```
 
-The legacy host gateway's pid and log are under `~/.synveda/data/` (`data/` in
-a checkout). No current reference claim is based on that host-process
-workaround; canonical Compose keeps the gateway in its container.
+Reset preserves the secret set, issuer input and KMS key; it is not tenant
+erasure, backup or credential rotation. See
+[`deploy/compose/README.md`](../deploy/compose/README.md) for exact lock-recovery
+and provider-mode procedures.
+
+The installed transitional profile and legacy host-gateway process remain
+cutover residue only. No current reference claim is based on them; canonical
+Compose keeps the gateway in its container. To remove installed artifacts
+rather than stop a canonical checkout, see **Uninstalling** below.
 
 ## Uninstalling
 

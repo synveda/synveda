@@ -185,7 +185,7 @@ export function dbTestNetworkReservationFindings(dbTest, compose) {
   const findings = [];
   if (
     createHash("sha256").update(dbTest).digest("hex") !==
-    "077d1f7afb261f85ac2ae8daa123b7009318135c338a6df4dbbca2e8513dae1c"
+    "6320b76e60c9709c25f8148c51833a36ee2e2b60a44a1f8a13e059f8140e4dd8"
   ) {
     findings.push("database fixture differs from the reviewed executable");
   }
@@ -1217,9 +1217,17 @@ export function lifecyclePeerWitnessFindings(dbTest, dbTestCompose) {
   const generatorProject = dbTest.indexOf(
     "generator_project=synveda-development-acceptance-$state_token",
   );
+  const generatorSecretPath = dbTest.indexOf(
+    "secret_dir=$state_dir/generator/$generator_project/secrets",
+    generatorProject,
+  );
+  const generatorRootPreparation = dbTest.indexOf(
+    'mkdir -p "$state_dir/generator/$generator_project"',
+    generatorSecretPath,
+  );
   const generatorSuffix = dbTest.indexOf(
     "SYNVEDA_COMPOSE_PROJECT_SUFFIX=acceptance-$state_token",
-    generatorProject,
+    generatorRootPreparation,
   );
   const generatorSecrets = dbTest.indexOf("SYNVEDA_SECRETS_DIR=$secret_dir", generatorSuffix);
   const generatorAuthority = dbTest.indexOf(
@@ -1237,7 +1245,9 @@ export function lifecyclePeerWitnessFindings(dbTest, dbTestCompose) {
   if (
     !(
       generatorProject >= 0 &&
-      generatorSuffix > generatorProject &&
+      generatorSecretPath > generatorProject &&
+      generatorRootPreparation > generatorSecretPath &&
+      generatorSuffix > generatorRootPreparation &&
       generatorSecrets > generatorSuffix &&
       generatorAuthority > generatorSecrets &&
       generatorGate > generatorAuthority &&

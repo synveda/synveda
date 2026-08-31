@@ -61,17 +61,23 @@ fn discovery_document(issuer: &str) -> Value {
     })
 }
 
-async fn run_diagnostic(issuer_file: &std::path::Path, issuer: &str) -> std::process::Output {
+async fn run_diagnostic(
+    issuer_file: &std::path::Path,
+    issuer: &str,
+    tenant_id: synveda_types::TenantId,
+) -> std::process::Output {
     let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_synveda-oidc-diagnostic"));
     command
         .env_remove("SYNVEDA_OIDC_ISSUERS")
         .env_remove("SYNVEDA_PUBLIC_URL_FILE")
         .env_remove("SYNVEDA_INSECURE_DEVELOPMENT_HTTP_FILE")
         .env_remove("SYNVEDA_OIDC_EXPECTED_ISSUER_FILE")
+        .env_remove("SYNVEDA_BOOTSTRAP_TENANT_ID_FILE")
         .env("SYNVEDA_PUBLIC_URL", "http://app.example.test")
         .env("SYNVEDA_INSECURE_DEVELOPMENT_HTTP", "true")
         .env("SYNVEDA_OIDC_ISSUERS_FILE", issuer_file)
         .env("SYNVEDA_OIDC_EXPECTED_ISSUER", issuer)
+        .env("SYNVEDA_BOOTSTRAP_TENANT_ID", tenant_id.to_string())
         .kill_on_drop(true)
         .output()
         .await
@@ -106,11 +112,12 @@ async fn shipped_diagnostic_accepts_exact_contract_and_refuses_hostile_metadata_
         std::process::id(),
         synveda_types::TenantId::new()
     ));
+    let tenant_id = synveda_types::TenantId::new();
     let config = json!([{
         "issuer": issuer,
         "client_id": CLIENT_SENTINEL,
         "audience": "synveda-test-api",
-        "tenant": {"static": {"tenant_id": synveda_types::TenantId::new()}},
+        "tenant": {"static": {"tenant_id": tenant_id}},
     }]);
     std::fs::write(
         &issuer_file,
@@ -118,7 +125,7 @@ async fn shipped_diagnostic_accepts_exact_contract_and_refuses_hostile_metadata_
     )
     .expect("write issuer fixture");
 
-    let passed = run_diagnostic(&issuer_file, &provider.issuer).await;
+    let passed = run_diagnostic(&issuer_file, &provider.issuer, tenant_id).await;
     assert!(passed.status.success(), "{:?}", passed.status);
     assert!(passed.stdout.is_empty());
     assert_eq!(
@@ -126,9 +133,40 @@ async fn shipped_diagnostic_accepts_exact_contract_and_refuses_hostile_metadata_
         "OIDC diagnostic passed for 1 configured issuer(s)\n"
     );
 
+    let wrong_tenant = run_diagnostic(
+        &issuer_file,
+        &provider.issuer,
+        synveda_types::TenantId::new(),
+    )
+    .await;
+    assert_eq!(wrong_tenant.status.code(), Some(78));
+    assert_eq!(
+        String::from_utf8(wrong_tenant.stderr).expect("UTF-8 stderr"),
+        "OIDC diagnostic configuration or provider contract was refused\n"
+    );
+
+    let claim_config = json!([{
+        "issuer": provider.issuer,
+        "client_id": CLIENT_SENTINEL,
+        "audience": "synveda-test-api",
+        "tenant": {"claim": {"name": "tid"}},
+    }]);
+    std::fs::write(
+        &issuer_file,
+        serde_json::to_vec(&claim_config).expect("serialize claim issuer fixture"),
+    )
+    .expect("write claim issuer fixture");
+    let claim_refused = run_diagnostic(&issuer_file, &provider.issuer, tenant_id).await;
+    assert_eq!(claim_refused.status.code(), Some(78));
+    std::fs::write(
+        &issuer_file,
+        serde_json::to_vec(&config).expect("serialize issuer fixture"),
+    )
+    .expect("restore static issuer fixture");
+
     for mode in 1..=4 {
         provider.mode.store(mode, Ordering::SeqCst);
-        let refused = run_diagnostic(&issuer_file, &provider.issuer).await;
+        let refused = run_diagnostic(&issuer_file, &provider.issuer, tenant_id).await;
         assert_eq!(refused.status.code(), Some(78), "mode {mode}");
         assert!(refused.stdout.is_empty(), "mode {mode}");
         let stderr = String::from_utf8(refused.stderr).expect("UTF-8 stderr");

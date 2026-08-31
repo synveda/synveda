@@ -19,7 +19,7 @@ export SYNVEDA_TEI_IMAGE
 # and skip when it is unset — CI runs without a database.
 DATABASE_URL ?= postgres://synveda:synveda-dev@localhost:5432/synveda
 
-.PHONY: fmt lint test build deny check-deps check-adr-status check-adapters check-api-types check-backlog check-benchmarks check-chart-images check-compose-contract check-context-hard-cut check-context-security check-corpus-licences check-demos check-deploy check-docs check-npm-licences check-product-eval chart-lint compose-config compose-secrets compose-issuer ts-build ts-test ci dev-up dev-down smoke db-test claude-acceptance claude-acceptance-live eval eval-check eval-product eval-judge eval-read eval-longmemeval eval-longmemeval-full eval-longmemeval-judged eval-extraction-live eval-retrieval eval-security
+.PHONY: fmt lint test build deny check-deps check-adr-status check-adapters check-api-types check-backlog check-benchmarks check-chart-images check-compose-contract check-context-hard-cut check-context-security check-corpus-licences check-demos check-deploy check-docs check-npm-licences check-product-eval chart-lint compose-config compose-secrets compose-issuer compose-hosts-plan compose-resolver-check compose-up compose-smoke compose-down compose-reset ts-build ts-test ci dev-up dev-down smoke db-test claude-acceptance claude-acceptance-live eval eval-check eval-product eval-judge eval-read eval-longmemeval eval-longmemeval-full eval-longmemeval-judged eval-extraction-live eval-retrieval eval-security
 
 dev-up:
 	$(COMPOSE) up --build --detach --wait
@@ -30,9 +30,8 @@ dev-down:
 smoke:
 	bash scripts/smoke.sh
 
-# CPR-45's additive canonical topology is static-only until database, realm and
-# issuer convergence land. This renders all eight runtime/provider rows and
-# starts or pulls nothing; it is not an alias for the legacy dev lifecycle.
+# CPR-45's canonical topology renders all eight runtime/provider rows and the
+# bundled demo overlay without starting or pulling images.
 compose-config: check-compose-contract
 
 compose-secrets:
@@ -40,6 +39,24 @@ compose-secrets:
 
 compose-issuer:
 	deploy/compose/scripts/generate-issuer.sh
+
+compose-hosts-plan:
+	deploy/compose/scripts/compose.sh hosts-plan
+
+compose-resolver-check:
+	deploy/compose/scripts/compose.sh resolver-check
+
+compose-up:
+	deploy/compose/scripts/compose.sh up
+
+compose-smoke:
+	deploy/compose/scripts/compose.sh smoke
+
+compose-down:
+	deploy/compose/scripts/compose.sh down
+
+compose-reset:
+	deploy/compose/scripts/compose.sh reset
 
 # The eval harness (EVAL-1, ADR-0028; EVAL-2, ADR-0046; EVAL-4, ADR-0047):
 # the scenario suite, the labelled extraction corpus and the Q&A corpus
@@ -340,12 +357,14 @@ check-deploy:
 	node --test scripts/uninstall.test.mjs
 	node --test scripts/generate-compose-issuer.test.mjs
 	node --test scripts/check-compose-contract.test.mjs
+	node --test scripts/check-host-resolution.test.mjs scripts/check-network-preflight.test.mjs scripts/check-compose-assets.test.mjs scripts/run-with-deadline.test.mjs scripts/check-runtime-smoke.test.mjs scripts/reset-runtime-state.test.mjs scripts/compose-lifecycle.test.mjs
 	node scripts/check-deploy-convergence.mjs
 	node scripts/check-compose-contract.mjs
 
 check-compose-contract:
 	node --test scripts/generate-compose-issuer.test.mjs
 	node --test scripts/check-compose-contract.test.mjs
+	node --test scripts/check-host-resolution.test.mjs scripts/check-network-preflight.test.mjs scripts/check-compose-assets.test.mjs scripts/run-with-deadline.test.mjs scripts/check-runtime-smoke.test.mjs scripts/reset-runtime-state.test.mjs scripts/compose-lifecycle.test.mjs
 	node scripts/check-compose-contract.mjs
 
 ts-build:

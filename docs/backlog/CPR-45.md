@@ -176,10 +176,16 @@ generation-one audit witness uses a key-provision-specific API, the stored KEK
 reference and the serialized tenant chain head; arbitrary mutations cannot use
 that exception to escape same-transaction audit. Explicit development HTTP now
 uses names distinct from the HTTPS `__Host-` cookies and retains host-only,
-HttpOnly, SameSite, lifetime, duplicate-rejection and origin protections. No
-canonical service invokes tenant convergence yet and the wrapper remains
-configuration-only; these are bounded preparation seams, not lifecycle or
-browser evidence.
+HttpOnly, SameSite, lifetime, duplicate-rejection and origin protections.
+The canonical wrapper now invokes those seams through bounded `up`, `smoke`,
+`down` and exact-confirmation `reset` actions. One private exact-project lock
+spans authority-file generation and Docker mutation; complete network/IPAM and
+retained-asset proofs are repeated around startup; catchable signals propagate
+to a bounded process-group runner; and uncertain stale locks fail closed. The
+gateway stays in its container. Deterministic lifecycle tests prove
+concurrency refusal, re-entrant signal cleanup, forced termination, asset
+substitution refusal and atomic issuer replacement, but this remains source
+evidence rather than a clean browser lifecycle.
 External-PostgreSQL rows remain configuration-only and the bootstrap now
 refuses before mounted-input reads or SQL until an authenticated-TLS transport
 exists; an ordinary pre-provisioned CREATEROLE/CREATEDB principal is covered by
@@ -188,7 +194,13 @@ the same bounded, non-following descriptor helper before parsing, including
 writerless-FIFO and symlink refusal tests.
 Pinned Keycloak, Caddy, PostgreSQL and Collector configuration, exact
 database-role/authority convergence, idempotent realm convergence and a
-product-owned exact issuer diagnostic now exist. A source-locked arm64 image
+product-owned exact issuer diagnostic now exist. The current pinned Keycloak
+image includes a review-locked complete 26.7.2 user-profile contract: upstream
+built-ins remain intact, unmanaged attributes remain disabled, and the two
+demo ownership attributes are admin-only with closed validators. Realm repair
+performs a full no-merge profile replacement while closed, proves the exact
+readback before marker use and refuses marker provenance after prior profile
+drift. A source-locked arm64 image
 set was built from the complete 1,169-file input closure at source HEAD
 `48704d8878d62036e53645f39d9c70549fe18b09`; the complete-input manifest hash
 was `ce3b5ff12b4d77437bf23f95a4af1cb65cae4409d2777fa1f98c15475016be81`
@@ -262,20 +274,25 @@ The collision-resistant database-network allocator has independently reviewed
 source and fake-engine concurrency evidence. The latest fresh exact-role
 database gate passed the complete live matrix and self-cleaned after exercising
 restart readiness, OIDC 16/16, Capture 7/7 plus its deliberate serial case and
-both directory-sync binaries 10/10. Compose contract is 36/36, issuer
-generation is 4/4 and deployment convergence is 41/41. A separate fresh
+both directory-sync binaries 10/10. The prior Compose, issuer and deployment
+convergence suites passed at their recorded checkpoint; the current slice adds
+deterministic contract/lifecycle/profile mutants without converting them into
+live deployment evidence. A separate fresh
 deterministic authentic-frame Claude lifecycle passed 1/1 and self-cleaned,
 and the complete post-repair `make ci` gate passes with the generated API and
 657-record SQLx cache current.
 
 ### Immediate next slice
 
-The next content-addressed Compose candidate must add the bounded canonical
-lifecycle, a supported target-realm first-user boundary (or secret-file-backed
-`demo` profile), install and prove the explicit `.test` host mapping on Docker
-Desktop, repeat the same resolver contract on Linux, and complete a real
-browser authorization-code exchange. Only after that replacement acceptance
-may the Rauthy/Temporal callers and assets be deleted atomically.
+The next content-addressed Compose candidate must start from empty volumes in a
+separate clean Docker context, install and prove the explicit `.test` host
+mapping on Docker Desktop, and complete a real browser authorization-code
+exchange through the committed demo/profile boundary. Repeat the same resolver
+and lifecycle contract on Linux, then exercise reference HTTPS. Only after
+that replacement acceptance may the Rauthy/Temporal callers and assets be
+deleted atomically. Backup/isolated joint database-and-key restore, upgrade and
+the Apalis canary remain subsequent CPR-45 slices rather than implied results
+of the identity lifecycle.
 
 ## Acceptance criteria
 

@@ -2,10 +2,8 @@
 #
 # This file intentionally defines neither PostgreSQL nor an OIDC provider.
 # Select exactly one runtime overlay and the required provider fragments through
-# deploy/compose/scripts/compose.sh. The convergence and issuer-diagnostic jobs
-# are present, but only the `config` action is supported until the canonical
-# lifecycle and clean-start acceptance land; deploy/compose/README.md records
-# that boundary.
+# deploy/compose/scripts/compose.sh. Database, tenant, realm and issuer
+# convergence are explicit graph phases before the long-running processes.
 
 x-synveda-product: &synveda-product
   image: ${SYNVEDA_PRODUCT_IMAGE:?set SYNVEDA_PRODUCT_IMAGE}
@@ -24,6 +22,8 @@ x-synveda-long-running: &synveda-long-running
 services:
   proxy:
     image: ${SYNVEDA_CADDY_IMAGE:?set SYNVEDA_CADDY_IMAGE}
+    labels:
+      com.synveda.contract: cpr-45
     user: "${SYNVEDA_RUNTIME_UID}:${SYNVEDA_RUNTIME_GID}"
     command: ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]
     read_only: true
@@ -67,6 +67,8 @@ services:
 
   database-preflight:
     <<: *synveda-product
+    labels:
+      com.synveda.contract: cpr-45
     command: ["database-preflight"]
     restart: "no"
     mem_limit: 256m
@@ -94,6 +96,8 @@ services:
 
   migrate:
     <<: *synveda-product
+    labels:
+      com.synveda.contract: cpr-45
     command: ["migrate"]
     restart: "no"
     depends_on:
@@ -114,8 +118,43 @@ services:
     networks:
       synveda-data: {}
 
+  tenant-convergence:
+    <<: *synveda-product
+    labels:
+      com.synveda.contract: cpr-45
+    command: ["tenant-converge"]
+    restart: "no"
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL_FILE: /run/secrets/database_url
+      SYNVEDA_DATABASE_ROLES_FILE: /etc/synveda/database/roles.json
+      SYNVEDA_BOOTSTRAP_TENANT_ID: ${SYNVEDA_BOOTSTRAP_TENANT_ID:?set SYNVEDA_BOOTSTRAP_TENANT_ID}
+      SYNVEDA_BOOTSTRAP_TENANT_SLUG: ${SYNVEDA_BOOTSTRAP_TENANT_SLUG:?set SYNVEDA_BOOTSTRAP_TENANT_SLUG}
+      SYNVEDA_BOOTSTRAP_TENANT_NAME: ${SYNVEDA_BOOTSTRAP_TENANT_NAME:?set SYNVEDA_BOOTSTRAP_TENANT_NAME}
+      SYNVEDA_KMS_KEY_FILE: /run/secrets/kms_key
+      SYNVEDA_KMS_KEY_REF_FILE: /run/secrets/kms_key_ref
+      RUST_LOG: ${RUST_LOG:-info}
+    secrets:
+      - source: synveda_migrator_database_url
+        target: database_url
+      - source: synveda_kms_key
+        target: kms_key
+      - source: synveda_kms_key_ref
+        target: kms_key_ref
+    volumes:
+      - type: bind
+        source: ${SYNVEDA_DATABASE_ROLES_FILE}
+        target: /etc/synveda/database/roles.json
+        read_only: true
+    networks:
+      synveda-data: {}
+
   issuer-diagnostic:
     <<: *synveda-product
+    labels:
+      com.synveda.contract: cpr-45
     command: ["issuer-diagnostic"]
     restart: "no"
     mem_limit: 256m
@@ -128,6 +167,7 @@ services:
       SYNVEDA_OIDC_EXPECTED_ISSUER: ${SYNVEDA_OIDC_ISSUER:?set SYNVEDA_OIDC_ISSUER}
       SYNVEDA_PUBLIC_URL: ${SYNVEDA_PUBLIC_APP_URL:?set SYNVEDA_PUBLIC_APP_URL}
       SYNVEDA_INSECURE_DEVELOPMENT_HTTP: ${SYNVEDA_INSECURE_DEVELOPMENT_HTTP:?set SYNVEDA_INSECURE_DEVELOPMENT_HTTP}
+      SYNVEDA_BOOTSTRAP_TENANT_ID: ${SYNVEDA_BOOTSTRAP_TENANT_ID:?set SYNVEDA_BOOTSTRAP_TENANT_ID}
       RUST_LOG: ${RUST_LOG:-info}
     volumes:
       - type: bind
@@ -141,10 +181,12 @@ services:
 
   gateway:
     <<: [*synveda-product, *synveda-long-running]
+    labels:
+      com.synveda.contract: cpr-45
     command: ["gateway"]
     stop_grace_period: 30s
     depends_on:
-      migrate:
+      tenant-convergence:
         condition: service_completed_successfully
       issuer-diagnostic:
         condition: service_completed_successfully
@@ -189,10 +231,14 @@ services:
 
   worker:
     <<: [*synveda-product, *synveda-long-running]
+    labels:
+      com.synveda.contract: cpr-45
     command: ["worker"]
     stop_grace_period: 85s
     depends_on:
-      migrate:
+      tenant-convergence:
+        condition: service_completed_successfully
+      issuer-diagnostic:
         condition: service_completed_successfully
     environment:
       DATABASE_URL_FILE: /run/secrets/database_url
@@ -236,6 +282,8 @@ services:
 
   otel-collector:
     image: ${SYNVEDA_OTEL_COLLECTOR_IMAGE:?set SYNVEDA_OTEL_COLLECTOR_IMAGE}
+    labels:
+      com.synveda.contract: cpr-45
     user: "${SYNVEDA_RUNTIME_UID}:${SYNVEDA_RUNTIME_GID}"
     command: ["--config=/etc/otelcol/config.yaml"]
     read_only: true

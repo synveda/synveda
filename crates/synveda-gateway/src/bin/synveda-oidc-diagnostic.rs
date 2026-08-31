@@ -79,6 +79,20 @@ fn load_contract() -> Result<synveda_identity::OidcVerifier, ()> {
     let issuers = synveda_identity::parse_issuers(&json).map_err(|_| ())?;
     synveda_gateway::runtime_config::validate_oidc_directory_references(&issuers)
         .map_err(|_| ())?;
+    let expected_tenant =
+        synveda_gateway::runtime_config::required_setting("SYNVEDA_BOOTSTRAP_TENANT_ID")
+            .map_err(|_| ())?
+            .parse::<synveda_types::TenantId>()
+            .map_err(|_| ())?;
+    if issuers.len() != 1
+        || !matches!(
+            &issuers[0].tenant,
+            synveda_identity::TenantBinding::Static { tenant_id }
+                if *tenant_id == expected_tenant
+        )
+    {
+        return Err(());
+    }
     let expected =
         synveda_gateway::runtime_config::required_setting("SYNVEDA_OIDC_EXPECTED_ISSUER")
             .map_err(|_| ())?;

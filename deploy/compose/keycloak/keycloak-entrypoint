@@ -63,12 +63,16 @@ file_owner() {
     stat -c %u "$1" 2>/dev/null || stat -f %u "$1" 2>/dev/null
 }
 
-for direct_setting in KC_DB_PASSWORD KC_BOOTSTRAP_ADMIN_USERNAME KC_BOOTSTRAP_ADMIN_PASSWORD SYNVEDA_KEYCLOAK_CONVERGENCE_PASSWORD; do
+for direct_setting in KC_DB_PASSWORD KC_BOOTSTRAP_ADMIN_USERNAME KC_BOOTSTRAP_ADMIN_PASSWORD \
+    SYNVEDA_KEYCLOAK_CONVERGENCE_PASSWORD SYNVEDA_KEYCLOAK_DEMO_ADMIN_PASSWORD \
+    SYNVEDA_KEYCLOAK_DEMO_MEMBER_PASSWORD; do
     case "$direct_setting" in
         KC_DB_PASSWORD) configured=${KC_DB_PASSWORD+x} ;;
         KC_BOOTSTRAP_ADMIN_USERNAME) configured=${KC_BOOTSTRAP_ADMIN_USERNAME+x} ;;
         KC_BOOTSTRAP_ADMIN_PASSWORD) configured=${KC_BOOTSTRAP_ADMIN_PASSWORD+x} ;;
         SYNVEDA_KEYCLOAK_CONVERGENCE_PASSWORD) configured=${SYNVEDA_KEYCLOAK_CONVERGENCE_PASSWORD+x} ;;
+        SYNVEDA_KEYCLOAK_DEMO_ADMIN_PASSWORD) configured=${SYNVEDA_KEYCLOAK_DEMO_ADMIN_PASSWORD+x} ;;
+        SYNVEDA_KEYCLOAK_DEMO_MEMBER_PASSWORD) configured=${SYNVEDA_KEYCLOAK_DEMO_MEMBER_PASSWORD+x} ;;
     esac
     [ -z "${configured:-}" ] || {
         echo "keycloak-entrypoint: direct $direct_setting is forbidden; configure its file setting only" >&2
@@ -184,15 +188,55 @@ if [ "${1:-}" = synveda-realm-converge ]; then
         read_secret SYNVEDA_KEYCLOAK_CONVERGENCE_PASSWORD \
             "${SYNVEDA_KEYCLOAK_CONVERGENCE_PASSWORD_FILE:-}"
     )
+    demo_enabled=${SYNVEDA_KEYCLOAK_DEMO_ENABLED:-false}
+    case "$demo_enabled" in
+        true)
+            SYNVEDA_KEYCLOAK_DEMO_ADMIN_PASSWORD=$(
+                read_secret SYNVEDA_KEYCLOAK_DEMO_ADMIN_PASSWORD \
+                    "${SYNVEDA_KEYCLOAK_DEMO_ADMIN_PASSWORD_FILE:-}"
+            )
+            SYNVEDA_KEYCLOAK_DEMO_MEMBER_PASSWORD=$(
+                read_secret SYNVEDA_KEYCLOAK_DEMO_MEMBER_PASSWORD \
+                    "${SYNVEDA_KEYCLOAK_DEMO_MEMBER_PASSWORD_FILE:-}"
+            )
+            ;;
+        false)
+            [ -z "${SYNVEDA_KEYCLOAK_DEMO_ADMIN_PASSWORD_FILE+x}" ] && \
+                [ -z "${SYNVEDA_KEYCLOAK_DEMO_MEMBER_PASSWORD_FILE+x}" ] || {
+                echo "keycloak-entrypoint: demo password files require the demo profile" >&2
+                exit 78
+            }
+            ;;
+        *)
+            echo "keycloak-entrypoint: demo selection was refused" >&2
+            exit 78
+            ;;
+    esac
     [ "$SYNVEDA_KEYCLOAK_ADMIN_USERNAME" != synveda-convergence ] && \
         [ "$SYNVEDA_KEYCLOAK_BOOTSTRAP_PASSWORD" != "$SYNVEDA_KEYCLOAK_CONVERGENCE_PASSWORD" ] || {
         echo "keycloak-entrypoint: convergence authority credentials were refused" >&2
         exit 78
     }
+    if [ "$demo_enabled" = true ]; then
+        [ "$SYNVEDA_KEYCLOAK_DEMO_ADMIN_PASSWORD" != "$SYNVEDA_KEYCLOAK_DEMO_MEMBER_PASSWORD" ] && \
+            [ "$SYNVEDA_KEYCLOAK_DEMO_ADMIN_PASSWORD" != "$SYNVEDA_KEYCLOAK_BOOTSTRAP_PASSWORD" ] && \
+            [ "$SYNVEDA_KEYCLOAK_DEMO_ADMIN_PASSWORD" != "$SYNVEDA_KEYCLOAK_CONVERGENCE_PASSWORD" ] && \
+            [ "$SYNVEDA_KEYCLOAK_DEMO_MEMBER_PASSWORD" != "$SYNVEDA_KEYCLOAK_BOOTSTRAP_PASSWORD" ] && \
+            [ "$SYNVEDA_KEYCLOAK_DEMO_MEMBER_PASSWORD" != "$SYNVEDA_KEYCLOAK_CONVERGENCE_PASSWORD" ] || {
+            echo "keycloak-entrypoint: demo credentials were refused" >&2
+            exit 78
+        }
+        export SYNVEDA_KEYCLOAK_DEMO_ADMIN_PASSWORD \
+            SYNVEDA_KEYCLOAK_DEMO_MEMBER_PASSWORD
+    fi
+    SYNVEDA_KEYCLOAK_DEMO_ENABLED=$demo_enabled
     export SYNVEDA_KEYCLOAK_ADMIN_USERNAME SYNVEDA_KEYCLOAK_BOOTSTRAP_PASSWORD \
-        SYNVEDA_KEYCLOAK_CONVERGENCE_PASSWORD SYNVEDA_KEYCLOAK_GENERATION
+        SYNVEDA_KEYCLOAK_CONVERGENCE_PASSWORD SYNVEDA_KEYCLOAK_GENERATION \
+        SYNVEDA_KEYCLOAK_DEMO_ENABLED
     unset KC_DB_PASSWORD_FILE KC_BOOTSTRAP_ADMIN_USERNAME_FILE KC_BOOTSTRAP_ADMIN_PASSWORD_FILE \
-        SYNVEDA_KEYCLOAK_CONVERGENCE_PASSWORD_FILE
+        SYNVEDA_KEYCLOAK_CONVERGENCE_PASSWORD_FILE \
+        SYNVEDA_KEYCLOAK_DEMO_ADMIN_PASSWORD_FILE \
+        SYNVEDA_KEYCLOAK_DEMO_MEMBER_PASSWORD_FILE
     exec /opt/keycloak/bin/synveda-realm-converge
 fi
 

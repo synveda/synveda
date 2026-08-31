@@ -25,10 +25,8 @@
 
 (synveda_upstream) {
 	header_up -Forwarded
-	header_up -X-Forwarded-For
-	header_up -X-Forwarded-Host
-	header_up -X-Forwarded-Proto
-	header_up -X-Forwarded-Port
+	header_up -X-Forwarded-*
+	header_up -X-Real-IP
 	header_up -X-Original-*
 	header_up -X-Remote-User
 	header_up -X-Authenticated-User

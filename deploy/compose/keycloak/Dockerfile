@@ -19,6 +19,7 @@ ENV KC_DB=postgres \
     KC_METRICS_ENABLED=true
 COPY deploy/compose/keycloak/SynvedaKeycloakProjection.java /tmp/SynvedaKeycloakProjection.java
 COPY deploy/compose/keycloak/SynvedaKeycloakProjectionSelfTest.java /tmp/SynvedaKeycloakProjectionSelfTest.java
+COPY --chmod=0444 deploy/compose/keycloak/synveda-user-profile.json /tmp/synveda-user-profile.json
 COPY --chmod=0555 deploy/compose/keycloak/synveda-projection-self-test /tmp/synveda-projection-self-test
 COPY --chmod=0444 deploy/compose/keycloak/synveda-authority-stage /tmp/synveda-authority-stage
 COPY --chmod=0555 deploy/compose/keycloak/synveda-authority-stage-self-test /tmp/synveda-authority-stage-self-test
@@ -54,6 +55,7 @@ COPY --chmod=0555 deploy/compose/keycloak/synveda-realm-converge /opt/keycloak/b
 COPY --chmod=0555 deploy/compose/keycloak/synveda-realm-supervise /opt/keycloak/bin/synveda-realm-supervise
 COPY --chmod=0444 deploy/compose/keycloak/synveda-groups-mapper.json /opt/keycloak/conf/synveda-groups-mapper.json
 COPY --chmod=0444 deploy/compose/keycloak/synveda-audience-mapper.json /opt/keycloak/conf/synveda-audience-mapper.json
+COPY --chmod=0444 deploy/compose/keycloak/synveda-user-profile.json /opt/keycloak/conf/synveda-user-profile.json
 RUN test -x /usr/bin/timeout
 RUN /opt/keycloak/bin/synveda-generation-gate-self-test
 RUN /opt/keycloak/bin/synveda-keycloak-health self-test

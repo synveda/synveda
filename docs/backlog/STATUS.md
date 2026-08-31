@@ -169,17 +169,20 @@ retains their implementation evidence. Open entries link to current briefs.
 CPR-45's current identity/database checkpoint has fresh revision-2 authority
 fingerprints, 657 validated SQLx records and a passing complete exact-role
 database gate. Its independently reviewed collision-resistant fixture
-allocator, fresh deterministic authentic-frame lifecycle and complete
-repository CI also pass. The latest fresh exact-role database gate self-cleaned,
-and deterministic deployment evidence is now 41/41 convergence, 36/36 Compose
-contract and 4/4 issuer generation. The development application, PostgreSQL
-and optimized Keycloak image builds are now selected together; project-scoped
-issuer input generation and exact audited tenant convergence are prepared, and
-explicit development HTTP uses distinct host-only console cookies without
-weakening the HTTPS `__Host-` contract. The next blocker is a bounded canonical
-lifecycle that invokes those seams, with a login-capable Keycloak demo boundary
-and real browser PKCE exchange before the legacy Rauthy/Temporal callers can be
-cut over and deleted.
+allocator and fresh deterministic authentic-frame lifecycle also pass. The
+canonical development graph now has bounded `up`, `smoke`, `down` and
+exact-confirmation `reset` actions that invoke project-scoped secret/issuer
+generation, audited tenant convergence, optimized Keycloak realm/profile/demo
+convergence, exact issuer diagnostics and containerized gateway/worker startup.
+One exact-project lock spans preparation and Docker mutation; deterministic
+tests cover signal/process-group cleanup, stale-lock refusal, network/IPAM and
+asset drift, reset ownership, and atomic issuer publication. The Keycloak
+profile keeps unmanaged attributes disabled and its ownership markers
+admin-only; drifted marker provenance fails closed. The next blocker is a
+clean-volume Docker Desktop run with installed `.test` resolution and a real
+browser PKCE exchange, followed by the Linux/reference-HTTPS run, before the
+legacy Rauthy/Temporal callers can be cut over and deleted. Backup/restore,
+upgrade and Apalis remain open CPR-45 slices.
 
 ## Unscheduled — not listed in the Sequencing section
 

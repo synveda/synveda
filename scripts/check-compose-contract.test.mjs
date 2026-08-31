@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
+import { randomBytes } from "node:crypto";
 import { once } from "node:events";
 import {
   chmodSync,
@@ -16,7 +17,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, relative, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
 
@@ -43,6 +44,7 @@ const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const COMPOSE = join(ROOT, "deploy/compose");
 const WRAPPER = join(COMPOSE, "scripts/compose.sh");
 const GENERATOR = join(COMPOSE, "scripts/generate-secrets.sh");
+const ISSUER_GENERATOR = join(COMPOSE, "scripts/generate-issuer.sh");
 const KEYCLOAK_ENTRYPOINT = join(COMPOSE, "keycloak/keycloak-entrypoint");
 const KEYCLOAK_CONVERGENCE = join(COMPOSE, "keycloak/synveda-realm-converge");
 const KEYCLOAK_GENERATION_GATE = join(
@@ -59,6 +61,7 @@ const KEYCLOAK_REALM_SUPERVISOR = join(
   "keycloak/synveda-realm-supervise",
 );
 const KEYCLOAK_PROJECTION = join(COMPOSE, "keycloak/SynvedaKeycloakProjection.java");
+const KEYCLOAK_USER_PROFILE = join(COMPOSE, "keycloak/synveda-user-profile.json");
 const COMPOSE_DEV = join(COMPOSE, "compose.dev.yaml");
 const DATABASE_BOOTSTRAP = join(COMPOSE, "postgres/synveda-database-bootstrap");
 const DB_TEST = join(ROOT, "scripts/db-test.sh");
@@ -104,6 +107,11 @@ const CREDENTIAL_LOG_SETTINGS = [
 
 function occurrenceCount(source, token) {
   return source.split(token).length - 1;
+}
+
+function randomAcceptanceProject(label) {
+  const suffix = `acceptance-${label}${randomBytes(4).toString("hex")}`;
+  return { suffix, project: `synveda-development-${suffix}` };
 }
 
 function replaceOccurrence(source, token, occurrence, replacement) {
@@ -579,6 +587,13 @@ test("the Collector health contract is loopback-only and self-probing", () => {
 test("the proxy trust boundary is one closed Caddy grammar", () => {
   const source = readFileSync(CADDYFILE, "utf8");
   assert.deepEqual(caddyTrustBoundaryFindings(source), []);
+  for (const [name, mutation] of [
+    ["forwarded-prefix passthrough", source.replace("\theader_up -X-Forwarded-*\n", "")],
+    ["real-ip passthrough", source.replace("\theader_up -X-Real-IP\n", "")],
+  ]) {
+    assert.notEqual(mutation, source, `${name} mutation was ineffective`);
+    assert.ok(caddyTrustBoundaryFindings(mutation).length > 0, name);
+  }
   const forwardedIdentity = source.replace(
     "\theader_up X-Forwarded-For {remote_host}\n",
     "\theader_up X-Forwarded-For {remote_host}\n" +
@@ -624,6 +639,32 @@ test("the complete Keycloak proof executable chain is review-locked", () => {
     assert.notEqual(mutated, entrypoint, `${name} mutant did not alter entrypoint`);
     assert.ok(
       reviewedKeycloakSourceFindings("keycloak/keycloak-entrypoint", mutated).length > 0,
+      `review lock accepted ${name}`,
+    );
+  }
+
+  const userProfile = readFileSync(KEYCLOAK_USER_PROFILE, "utf8");
+  assert.deepEqual(
+    reviewedKeycloakSourceFindings("keycloak/synveda-user-profile.json", userProfile),
+    [],
+  );
+  for (const [name, mutated] of [
+    [
+      "enabled unmanaged attributes",
+      userProfile.replace("{\n", "{\n  \"unmanagedAttributePolicy\": \"ENABLED\",\n"),
+    ],
+    [
+      "user-visible ownership marker",
+      userProfile.replace('"view": ["admin"]', '"view": ["admin", "user"]'),
+    ],
+    [
+      "unbounded ownership marker",
+      userProfile.replace('"length": {"min": 13, "max": 13}', '"length": {"max": 2048}'),
+    ],
+  ]) {
+    assert.notEqual(mutated, userProfile, `${name} mutant did not alter the profile`);
+    assert.ok(
+      reviewedKeycloakSourceFindings("keycloak/synveda-user-profile.json", mutated).length > 0,
       `review lock accepted ${name}`,
     );
   }
@@ -1379,9 +1420,9 @@ test("Keycloak convergence publishes only after bounded proof and cleanup", () =
     [
       "additive direct gate write",
       source.replace(
-        "    unset bootstrap_password convergence_password\n",
+        "    unset bootstrap_password convergence_password demo_admin_password demo_member_password\n",
         "    printf '%s\\n' \"$contract\" > \"$public_gate\"\n" +
-          "    unset bootstrap_password convergence_password\n",
+          "    unset bootstrap_password convergence_password demo_admin_password demo_member_password\n",
       ),
     ],
     [
@@ -2234,9 +2275,15 @@ test("the selector rejects aliases between secrets, authority state and issuer i
       SYNVEDA_FAKE_DOCKER_ARGUMENTS: fake.argumentsFile,
     });
     const gate = baseEnvironment.SYNVEDA_KEYCLOAK_PUBLIC_GATE_DIR;
+    const project = basename(dirname(baseEnvironment.SYNVEDA_SECRETS_DIR));
+    const aliasedSecrets = join(gate, "nested", project, "secrets");
+    mkdirSync(aliasedSecrets, { recursive: true, mode: 0o700 });
+    chmodSync(join(gate, "nested"), 0o700);
+    chmodSync(join(gate, "nested", project), 0o700);
+    chmodSync(aliasedSecrets, 0o700);
     for (const name of readdirSync(fixture.secrets)) {
       const source = join(fixture.secrets, name);
-      const target = join(gate, name);
+      const target = join(aliasedSecrets, name);
       if (statSync(source).isDirectory()) {
         mkdirSync(target, { mode: 0o700 });
         for (const child of readdirSync(source)) {
@@ -2253,14 +2300,18 @@ test("the selector rejects aliases between secrets, authority state and issuer i
     }
     let result = spawnSync(WRAPPER, ["config"], {
       cwd: ROOT,
-      env: { ...baseEnvironment, SYNVEDA_SECRETS_DIR: gate },
+      env: { ...baseEnvironment, SYNVEDA_SECRETS_DIR: aliasedSecrets },
       encoding: "utf8",
     });
     assert.equal(result.status, 78);
     assert.match(result.stderr, /secret-and-keycloak-public-gate directories/);
     assert.equal(existsSync(fake.argumentsFile), false);
 
-    const aliasedIssuer = join(gate, "issuers.json");
+    const aliasedIssuerParent = join(gate, "issuer", project);
+    mkdirSync(aliasedIssuerParent, { recursive: true, mode: 0o700 });
+    chmodSync(join(gate, "issuer"), 0o700);
+    chmodSync(aliasedIssuerParent, 0o700);
+    const aliasedIssuer = join(aliasedIssuerParent, "issuers.json");
     writeFileSync(aliasedIssuer, readFileSync(fixture.issuers), { mode: 0o600 });
     chmodSync(aliasedIssuer, 0o600);
     result = spawnSync(WRAPPER, ["config"], {
@@ -2396,30 +2447,32 @@ test("the static selector bounds but does not interpret issuer configuration", (
 
 test("the secret generator is private, content-free and overwrite-safe", () => {
   const scratch = realpathSync(mkdtempSync(join(tmpdir(), "synveda-secret-generator-")));
-  const secrets = join(scratch, "secrets");
+  const { suffix, project } = randomAcceptanceProject("secretbase");
+  const projectRoot = join(scratch, project);
+  mkdirSync(projectRoot, { mode: 0o700 });
+  const secrets = join(projectRoot, "secrets");
   const tracedRoot = join(scratch, "traced");
-  const tracedSecrets = join(tracedRoot, "secrets");
-  const authority = join(scratch, "synveda-development", "database-authority");
+  const tracedProjectRoot = join(tracedRoot, project);
+  const tracedSecrets = join(tracedProjectRoot, "secrets");
+  const authority = join(projectRoot, "database-authority");
   const tracedAuthority = join(
-    tracedRoot,
-    "synveda-development",
+    tracedProjectRoot,
     "database-authority",
   );
-  const gate = join(scratch, "synveda-development", "keycloak-public-gate");
+  const gate = join(projectRoot, "keycloak-public-gate");
   const tracedGate = join(
-    tracedRoot,
-    "synveda-development",
+    tracedProjectRoot,
     "keycloak-public-gate",
   );
   const aliasRoot = join(scratch, "alias");
   const aliasAuthority = join(
     aliasRoot,
-    "synveda-development",
+    project,
     "database-authority",
   );
   const aliasGate = join(
     aliasRoot,
-    "synveda-development",
+    project,
     "keycloak-public-gate",
   );
   try {
@@ -2427,6 +2480,7 @@ test("the secret generator is private, content-free and overwrite-safe", () => {
       cwd: ROOT,
       env: {
         ...process.env,
+        SYNVEDA_COMPOSE_PROJECT_SUFFIX: suffix,
         SYNVEDA_SECRETS_DIR: aliasGate,
         SYNVEDA_DATABASE_AUTHORITY_DIR: aliasAuthority,
         SYNVEDA_KEYCLOAK_PUBLIC_GATE_DIR: aliasGate,
@@ -2434,13 +2488,14 @@ test("the secret generator is private, content-free and overwrite-safe", () => {
       encoding: "utf8",
     });
     assert.equal(aliasRefusal.status, 73);
-    assert.match(aliasRefusal.stderr, /dedicated secrets leaf/);
+    assert.match(aliasRefusal.stderr, /secret directory must be scoped/);
     assert.equal(existsSync(aliasGate), false);
 
     const firstResult = spawnSync(GENERATOR, [], {
       cwd: ROOT,
       env: {
         ...process.env,
+        SYNVEDA_COMPOSE_PROJECT_SUFFIX: suffix,
         SYNVEDA_SECRETS_DIR: secrets,
         SYNVEDA_DATABASE_AUTHORITY_DIR: authority,
         SYNVEDA_KEYCLOAK_PUBLIC_GATE_DIR: gate,
@@ -2452,7 +2507,7 @@ test("the secret generator is private, content-free and overwrite-safe", () => {
     const files = readdirSync(secrets)
       .filter((name) => !name.startsWith(".") && statSync(join(secrets, name)).isFile())
       .sort();
-    assert.equal(files.length, 13);
+    assert.equal(files.length, 15);
     for (const name of files) {
       const value = readFileSync(join(secrets, name), "utf8").trim();
       assert.ok(value.length > 0, `${name} is empty`);
@@ -2466,11 +2521,12 @@ test("the secret generator is private, content-free and overwrite-safe", () => {
     assert.equal(statSync(join(secrets, "oidc-directory")).mode & 0o777, 0o700);
     assert.equal(statSync(join(secrets, ".synveda-private-directory")).mode & 0o777, 0o600);
 
-    mkdirSync(tracedRoot, { mode: 0o700 });
+    mkdirSync(tracedProjectRoot, { recursive: true, mode: 0o700 });
     const traced = spawnSync("/bin/sh", ["-x", GENERATOR], {
       cwd: ROOT,
       env: {
         ...process.env,
+        SYNVEDA_COMPOSE_PROJECT_SUFFIX: suffix,
         SYNVEDA_SECRETS_DIR: tracedSecrets,
         SYNVEDA_DATABASE_AUTHORITY_DIR: tracedAuthority,
         SYNVEDA_KEYCLOAK_PUBLIC_GATE_DIR: tracedGate,
@@ -2493,6 +2549,7 @@ test("the secret generator is private, content-free and overwrite-safe", () => {
       cwd: ROOT,
       env: {
         ...process.env,
+        SYNVEDA_COMPOSE_PROJECT_SUFFIX: suffix,
         SYNVEDA_SECRETS_DIR: secrets,
         SYNVEDA_DATABASE_AUTHORITY_DIR: authority,
         SYNVEDA_KEYCLOAK_PUBLIC_GATE_DIR: gate,
@@ -2507,6 +2564,7 @@ test("the secret generator is private, content-free and overwrite-safe", () => {
       cwd: ROOT,
       env: {
         ...process.env,
+        SYNVEDA_COMPOSE_PROJECT_SUFFIX: suffix,
         SYNVEDA_SECRETS_DIR: secrets,
         SYNVEDA_DATABASE_AUTHORITY_DIR: authority,
         SYNVEDA_KEYCLOAK_PUBLIC_GATE_DIR: gate,
@@ -2514,17 +2572,21 @@ test("the secret generator is private, content-free and overwrite-safe", () => {
       encoding: "utf8",
     });
     assert.equal(unconfirmed.status, 73);
-    assert.match(unconfirmed.stderr, /SYNVEDA_CONFIRM_SECRET_REPLACEMENT=synveda-development/);
+    assert.match(
+      unconfirmed.stderr,
+      new RegExp(`SYNVEDA_CONFIRM_SECRET_REPLACEMENT=${project}`),
+    );
     assert.equal(readFileSync(join(secrets, "synveda_kms_key"), "utf8"), before);
 
     const forced = spawnSync(GENERATOR, ["--force"], {
       cwd: ROOT,
       env: {
         ...process.env,
+        SYNVEDA_COMPOSE_PROJECT_SUFFIX: suffix,
         SYNVEDA_SECRETS_DIR: secrets,
         SYNVEDA_DATABASE_AUTHORITY_DIR: authority,
         SYNVEDA_KEYCLOAK_PUBLIC_GATE_DIR: gate,
-        SYNVEDA_CONFIRM_SECRET_REPLACEMENT: "synveda-development",
+        SYNVEDA_CONFIRM_SECRET_REPLACEMENT: project,
       },
       encoding: "utf8",
     });
@@ -2535,7 +2597,7 @@ test("the secret generator is private, content-free and overwrite-safe", () => {
     assert.match(forced.stdout, /preserved previous secret set/);
     assert.equal(
       readFileSync(
-        join(scratch, "synveda-development", "previous-secrets", "synveda_kms_key"),
+        join(projectRoot, "previous-secrets", "synveda_kms_key"),
         "utf8",
       ),
       before,
@@ -2545,15 +2607,570 @@ test("the secret generator is private, content-free and overwrite-safe", () => {
   }
 });
 
+test("the exact-project lock serialises fresh and extension secret publication", async () => {
+  const scratch = realpathSync(mkdtempSync(join(tmpdir(), "synveda-secret-lock-")));
+  chmodSync(scratch, 0o700);
+  const suffix = `acceptance-secret${randomBytes(5).toString("hex")}`;
+  const project = `synveda-development-${suffix}`;
+  const projectRoot = join(scratch, project);
+  mkdirSync(projectRoot, { mode: 0o700 });
+  const secrets = join(projectRoot, "secrets");
+  const bin = join(scratch, "bin");
+  mkdirSync(bin, { mode: 0o700 });
+  const fakeOpenSsl = join(bin, "openssl");
+  const realOpenSsl = spawnSync("/bin/sh", ["-c", "command -v openssl"], {
+    encoding: "utf8",
+  }).stdout.trim();
+  writeFileSync(
+    fakeOpenSsl,
+    `#!/bin/sh
+set -eu
+: > "$SYNVEDA_TEST_OPENSSL_ENTERED"
+while [ ! -f "$SYNVEDA_TEST_OPENSSL_RELEASE" ]; do /bin/sleep 0.02; done
+exec "$SYNVEDA_TEST_REAL_OPENSSL" "$@"
+`,
+    { mode: 0o700 },
+  );
+  chmodSync(fakeOpenSsl, 0o700);
+  const entered = join(scratch, "entered");
+  const release = join(scratch, "release");
+  const env = {
+    ...process.env,
+    PATH: `${bin}:${process.env.PATH}`,
+    SYNVEDA_COMPOSE_PROJECT_SUFFIX: suffix,
+    SYNVEDA_SECRETS_DIR: secrets,
+    SYNVEDA_DATABASE_AUTHORITY_DIR: join(projectRoot, "database-authority"),
+    SYNVEDA_KEYCLOAK_PUBLIC_GATE_DIR: join(projectRoot, "keycloak-public-gate"),
+    SYNVEDA_TEST_OPENSSL_ENTERED: entered,
+    SYNVEDA_TEST_OPENSSL_RELEASE: release,
+    SYNVEDA_TEST_REAL_OPENSSL: realOpenSsl,
+  };
+  async function waitFor(path) {
+    const deadline = Date.now() + 5_000;
+    while (!existsSync(path)) {
+      assert.ok(Date.now() < deadline, `timed out waiting for ${path}`);
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
+    }
+  }
+  async function serialisedRun() {
+    rmSync(entered, { force: true });
+    rmSync(release, { force: true });
+    const first = spawn(GENERATOR, ["--if-missing"], {
+      cwd: ROOT,
+      env,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let firstOut = "";
+    let firstErr = "";
+    first.stdout.setEncoding("utf8");
+    first.stderr.setEncoding("utf8");
+    first.stdout.on("data", (chunk) => { firstOut += chunk; });
+    first.stderr.on("data", (chunk) => { firstErr += chunk; });
+    await waitFor(entered);
+    const refused = spawnSync(GENERATOR, ["--if-missing"], {
+      cwd: ROOT,
+      env,
+      encoding: "utf8",
+    });
+    assert.equal(refused.status, 75, refused.stderr);
+    assert.match(refused.stderr, /another lifecycle or authority action owns/);
+    writeFileSync(release, "continue\n", { mode: 0o600 });
+    const [code] = await once(first, "close");
+    assert.equal(code, 0, firstErr);
+    return `${firstOut}${firstErr}${refused.stdout}${refused.stderr}`;
+  }
+  try {
+    const freshOutput = await serialisedRun();
+    const kms = readFileSync(join(secrets, "synveda_kms_key"), "utf8");
+    assert.ok(!freshOutput.includes(kms.trim()));
+    assert.equal(
+      readdirSync(secrets).some((name) => name.startsWith(".synveda-secret-stage.")),
+      false,
+    );
+
+    rmSync(join(secrets, "keycloak_demo_admin_password"));
+    rmSync(join(secrets, "keycloak_demo_member_password"));
+    await serialisedRun();
+    assert.equal(existsSync(join(secrets, "keycloak_demo_admin_password")), true);
+    assert.equal(existsSync(join(secrets, "keycloak_demo_member_password")), true);
+    assert.equal(
+      readdirSync(projectRoot).some((name) => name.startsWith(".synveda-demo-secret-stage.")),
+      false,
+    );
+  } finally {
+    const lockRemains = existsSync(join(
+      "/tmp",
+      `.synveda-compose-locks-${process.getuid?.() ?? 0}`,
+      `${project}.lock`,
+    ));
+    rmSync(scratch, { recursive: true, force: true });
+    assert.equal(lockRemains, false);
+  }
+});
+
+test("a preserved secret set without an active set requires explicit recovery", () => {
+  const scratch = realpathSync(mkdtempSync(join(tmpdir(), "synveda-secret-recovery-")));
+  chmodSync(scratch, 0o700);
+  const { suffix, project } = randomAcceptanceProject("secretrecovery");
+  const projectRoot = join(scratch, project);
+  mkdirSync(projectRoot, { mode: 0o700 });
+  const secrets = join(projectRoot, "secrets");
+  const previous = join(projectRoot, "previous-secrets");
+  const env = {
+    ...process.env,
+    SYNVEDA_COMPOSE_PROJECT_SUFFIX: suffix,
+    SYNVEDA_SECRETS_DIR: secrets,
+    SYNVEDA_DATABASE_AUTHORITY_DIR: join(projectRoot, "database-authority"),
+    SYNVEDA_KEYCLOAK_PUBLIC_GATE_DIR: join(projectRoot, "keycloak-public-gate"),
+  };
+  try {
+    const generated = spawnSync(GENERATOR, [], { cwd: ROOT, env, encoding: "utf8" });
+    assert.equal(generated.status, 0, generated.stderr);
+    const kms = readFileSync(join(secrets, "synveda_kms_key"), "utf8");
+    renameSync(secrets, previous);
+
+    const refused = spawnSync(GENERATOR, ["--if-missing"], {
+      cwd: ROOT,
+      env,
+      encoding: "utf8",
+    });
+    assert.equal(refused.status, 73, refused.stderr);
+    assert.match(refused.stderr, /explicit recovery is required/);
+    assert.equal(existsSync(secrets), false);
+    assert.equal(readFileSync(join(previous, "synveda_kms_key"), "utf8"), kms);
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+});
+
+test("GNU-first stat semantics preserve lock and authority identities", () => {
+  const scratch = realpathSync(mkdtempSync(join(tmpdir(), "synveda-gnu-stat-")));
+  chmodSync(scratch, 0o700);
+  const { suffix, project } = randomAcceptanceProject("gnustat");
+  const projectRoot = join(scratch, project);
+  mkdirSync(projectRoot, { mode: 0o700 });
+  const bin = join(scratch, "bin");
+  mkdirSync(bin, { mode: 0o700 });
+  const statLog = join(scratch, "stat.log");
+  const statHelper = join(scratch, "stat-helper.mjs");
+  writeFileSync(
+    statHelper,
+    `import { statSync } from "node:fs";
+const value = statSync(process.argv[3], { bigint: true });
+const mode = Number(value.mode & 0o777n).toString(8);
+const formats = {
+  "%a": mode,
+  "%u": String(value.uid),
+  "%g": String(value.gid),
+  "%s": String(value.size),
+  "%d:%i": String(value.dev) + ":" + String(value.ino),
+};
+if (!(process.argv[2] in formats)) process.exit(64);
+process.stdout.write(formats[process.argv[2]] + "\\n");
+`,
+    { mode: 0o600 },
+  );
+  const fakeStat = join(bin, "stat");
+  writeFileSync(
+    fakeStat,
+    `#!/bin/sh
+set -eu
+printf '%s:%s\n' "\${1:-}" "\${2:-}" >> "$SYNVEDA_TEST_STAT_LOG"
+if [ "\${1:-}" = -c ]; then
+  exec "$SYNVEDA_TEST_NODE" "$SYNVEDA_TEST_STAT_HELPER" "\${2:-}" "\${3:-}"
+fi
+# GNU stat -f accepts filesystem formats such as %d:%i, so a BSD-first probe
+# can succeed with a path-independent answer instead of reaching stat -c.
+printf '1:1\n'
+`,
+    { mode: 0o700 },
+  );
+  chmodSync(fakeStat, 0o700);
+  const secrets = join(projectRoot, "secrets");
+  const common = {
+    ...process.env,
+    PATH: `${bin}:${process.env.PATH}`,
+    SYNVEDA_COMPOSE_PROJECT_SUFFIX: suffix,
+    SYNVEDA_TEST_NODE: process.execPath,
+    SYNVEDA_TEST_STAT_HELPER: statHelper,
+    SYNVEDA_TEST_STAT_LOG: statLog,
+  };
+  try {
+    const secretEnv = {
+      ...common,
+      SYNVEDA_SECRETS_DIR: secrets,
+      SYNVEDA_DATABASE_AUTHORITY_DIR: join(projectRoot, "database-authority"),
+      SYNVEDA_KEYCLOAK_PUBLIC_GATE_DIR: join(projectRoot, "keycloak-public-gate"),
+    };
+    let result = spawnSync(GENERATOR, [], { cwd: ROOT, env: secretEnv, encoding: "utf8" });
+    assert.equal(result.status, 0, result.stderr);
+    result = spawnSync(GENERATOR, ["--force"], {
+      cwd: ROOT,
+      env: { ...secretEnv, SYNVEDA_CONFIRM_SECRET_REPLACEMENT: project },
+      encoding: "utf8",
+    });
+    assert.equal(result.status, 0, result.stderr);
+
+    const issuer = join(projectRoot, "issuers.json");
+    const issuerEnv = {
+      ...common,
+      SYNVEDA_COMPOSE_RUNTIME: "development",
+      SYNVEDA_OIDC_MODE: "bundled",
+      SYNVEDA_APP_HOST: "app.synveda.test",
+      SYNVEDA_AUTH_HOST: "auth.synveda.test",
+      SYNVEDA_PUBLIC_SCHEME: "http",
+      SYNVEDA_DEV_HTTP_PORT: "8080",
+      SYNVEDA_BOOTSTRAP_TENANT_ID: "019b53c0-7c00-7000-8000-000000000045",
+      SYNVEDA_OIDC_ISSUERS_FILE: issuer,
+    };
+    result = spawnSync(ISSUER_GENERATOR, [], { cwd: ROOT, env: issuerEnv, encoding: "utf8" });
+    assert.equal(result.status, 0, result.stderr);
+    result = spawnSync(ISSUER_GENERATOR, ["--force"], {
+      cwd: ROOT,
+      env: {
+        ...issuerEnv,
+        SYNVEDA_BOOTSTRAP_TENANT_ID: "019b53c0-7c00-7000-8000-000000000046",
+        SYNVEDA_CONFIRM_ISSUER_REPLACEMENT: project,
+      },
+      encoding: "utf8",
+    });
+    assert.equal(result.status, 0, result.stderr);
+
+    const statCalls = readFileSync(statLog, "utf8").trim().split("\n");
+    assert.ok(statCalls.some((call) => call === "-c:%d:%i"));
+    assert.ok(statCalls.every((call) => call.startsWith("-c:")), statCalls.join("\n"));
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+});
+
+test("late secret and demo targets are never overwritten during publication", () => {
+  for (const kind of ["fresh", "demo"]) {
+    const scratch = realpathSync(mkdtempSync(join(tmpdir(), `synveda-secret-${kind}-race-`)));
+    chmodSync(scratch, 0o700);
+    const { suffix, project } = randomAcceptanceProject(`race${kind}`);
+    const projectRoot = join(scratch, project);
+    mkdirSync(projectRoot, { mode: 0o700 });
+    const secrets = join(projectRoot, "secrets");
+    const authority = join(projectRoot, "database-authority");
+    const gate = join(projectRoot, "keycloak-public-gate");
+    const bin = join(scratch, "bin");
+    mkdirSync(bin, { mode: 0o700 });
+    const realChmod = spawnSync("/bin/sh", ["-c", "command -v chmod"], {
+      encoding: "utf8",
+    }).stdout.trim();
+    const fakeChmod = join(bin, "chmod");
+    writeFileSync(
+      fakeChmod,
+      `#!/bin/sh
+set -eu
+case " $* " in
+  *"${kind === "fresh" ? ".synveda-secret-stage." : ".synveda-demo-secret-stage."}"*)
+    if [ ! -e "$SYNVEDA_TEST_RACE_TARGET" ]; then
+      if [ "${kind}" = fresh ]; then
+        /bin/mkdir -m 700 "$SYNVEDA_TEST_RACE_TARGET"
+        printf 'foreign-set\n' > "$SYNVEDA_TEST_RACE_TARGET/foreign"
+        "$SYNVEDA_TEST_REAL_CHMOD" 600 "$SYNVEDA_TEST_RACE_TARGET/foreign"
+      else
+        printf 'foreign-demo\n' > "$SYNVEDA_TEST_RACE_TARGET"
+        "$SYNVEDA_TEST_REAL_CHMOD" 600 "$SYNVEDA_TEST_RACE_TARGET"
+      fi
+    fi
+    ;;
+esac
+exec "$SYNVEDA_TEST_REAL_CHMOD" "$@"
+`,
+      { mode: 0o700 },
+    );
+    chmodSync(fakeChmod, 0o700);
+    const baseEnv = {
+      ...process.env,
+      SYNVEDA_COMPOSE_PROJECT_SUFFIX: suffix,
+      SYNVEDA_SECRETS_DIR: secrets,
+      SYNVEDA_DATABASE_AUTHORITY_DIR: authority,
+      SYNVEDA_KEYCLOAK_PUBLIC_GATE_DIR: gate,
+    };
+    try {
+      if (kind === "demo") {
+        const prepared = spawnSync(GENERATOR, [], {
+          cwd: ROOT,
+          env: baseEnv,
+          encoding: "utf8",
+        });
+        assert.equal(prepared.status, 0, prepared.stderr);
+        rmSync(join(secrets, "keycloak_demo_admin_password"));
+        rmSync(join(secrets, "keycloak_demo_member_password"));
+      }
+      const target =
+        kind === "fresh" ? secrets : join(secrets, "keycloak_demo_admin_password");
+      const refused = spawnSync(GENERATOR, ["--if-missing"], {
+        cwd: ROOT,
+        env: {
+          ...baseEnv,
+          PATH: `${bin}:${process.env.PATH}`,
+          SYNVEDA_TEST_RACE_TARGET: target,
+          SYNVEDA_TEST_REAL_CHMOD: realChmod,
+        },
+        encoding: "utf8",
+      });
+      assert.equal(refused.status, 73, refused.stderr);
+      if (kind === "fresh") {
+        assert.match(refused.stderr, /staged secret set could not be installed/);
+        assert.equal(readFileSync(join(secrets, "foreign"), "utf8"), "foreign-set\n");
+        assert.deepEqual(readdirSync(secrets), ["foreign"]);
+      } else {
+        assert.match(refused.stderr, /demo secret extension could not be installed/);
+        assert.equal(readFileSync(target, "utf8"), "foreign-demo\n");
+        assert.equal(existsSync(join(secrets, "keycloak_demo_member_password")), false);
+      }
+      assert.equal(
+        readdirSync(projectRoot).some((name) => name.startsWith(".synveda-")),
+        false,
+      );
+    } finally {
+      rmSync(scratch, { recursive: true, force: true });
+    }
+  }
+});
+
+test("forced secret publication preserves exact old state across destination races", () => {
+  for (const kind of ["backup", "active"]) {
+    const scratch = realpathSync(mkdtempSync(join(tmpdir(), `synveda-secret-force-${kind}-`)));
+    chmodSync(scratch, 0o700);
+    const { suffix, project } = randomAcceptanceProject(`force${kind}`);
+    const projectRoot = join(scratch, project);
+    mkdirSync(projectRoot, { mode: 0o700 });
+    const secrets = join(projectRoot, "secrets");
+    const backup = join(projectRoot, "previous-secrets");
+    const bin = join(scratch, "bin");
+    mkdirSync(bin, { mode: 0o700 });
+    const realMv = spawnSync("/bin/sh", ["-c", "command -v mv"], {
+      encoding: "utf8",
+    }).stdout.trim();
+    const fakeMv = join(bin, "mv");
+    writeFileSync(
+      fakeMv,
+      `#!/bin/sh
+set -eu
+source_path= destination_path=
+if [ "\${1:-}" = -n ] && [ "\${2:-}" = -- ]; then
+  source_path=\${3:-}
+  destination_path=\${4:-}
+fi
+if [ "${kind}" = backup ] && [ "$source_path" = "$SYNVEDA_TEST_ACTIVE" ]; then
+  /bin/mkdir -m 700 "$SYNVEDA_TEST_BACKUP"
+  printf 'foreign-backup\n' > "$SYNVEDA_TEST_BACKUP/foreign"
+  "$SYNVEDA_TEST_REAL_CHMOD" 600 "$SYNVEDA_TEST_BACKUP/foreign"
+elif [ "${kind}" = active ] && [ "$destination_path" = "$SYNVEDA_TEST_ACTIVE" ] &&
+  [ "$source_path" != "$SYNVEDA_TEST_ACTIVE" ]; then
+  /bin/mkdir -m 700 "$SYNVEDA_TEST_ACTIVE"
+  printf 'foreign-active\n' > "$SYNVEDA_TEST_ACTIVE/foreign"
+  "$SYNVEDA_TEST_REAL_CHMOD" 600 "$SYNVEDA_TEST_ACTIVE/foreign"
+fi
+exec "$SYNVEDA_TEST_REAL_MV" "$@"
+`,
+      { mode: 0o700 },
+    );
+    chmodSync(fakeMv, 0o700);
+    const realChmod = spawnSync("/bin/sh", ["-c", "command -v chmod"], {
+      encoding: "utf8",
+    }).stdout.trim();
+    const baseEnv = {
+      ...process.env,
+      SYNVEDA_COMPOSE_PROJECT_SUFFIX: suffix,
+      SYNVEDA_SECRETS_DIR: secrets,
+      SYNVEDA_DATABASE_AUTHORITY_DIR: join(projectRoot, "database-authority"),
+      SYNVEDA_KEYCLOAK_PUBLIC_GATE_DIR: join(projectRoot, "keycloak-public-gate"),
+    };
+    try {
+      const generated = spawnSync(GENERATOR, [], {
+        cwd: ROOT,
+        env: baseEnv,
+        encoding: "utf8",
+      });
+      assert.equal(generated.status, 0, generated.stderr);
+      const kms = readFileSync(join(secrets, "synveda_kms_key"), "utf8");
+      const refused = spawnSync(GENERATOR, ["--force"], {
+        cwd: ROOT,
+        env: {
+          ...baseEnv,
+          PATH: `${bin}:${process.env.PATH}`,
+          SYNVEDA_CONFIRM_SECRET_REPLACEMENT: project,
+          SYNVEDA_TEST_ACTIVE: secrets,
+          SYNVEDA_TEST_BACKUP: backup,
+          SYNVEDA_TEST_REAL_MV: realMv,
+          SYNVEDA_TEST_REAL_CHMOD: realChmod,
+        },
+        encoding: "utf8",
+      });
+      assert.equal(refused.status, 73, refused.stderr);
+      if (kind === "backup") {
+        assert.match(refused.stderr, /foreign backup state was refused/);
+        assert.equal(readFileSync(join(backup, "foreign"), "utf8"), "foreign-backup\n");
+        assert.equal(readFileSync(join(backup, "secrets", "synveda_kms_key"), "utf8"), kms);
+        assert.equal(existsSync(secrets), false);
+      } else {
+        assert.match(refused.stderr, /previous set remains at/);
+        assert.equal(readFileSync(join(backup, "synveda_kms_key"), "utf8"), kms);
+        assert.equal(readFileSync(join(secrets, "foreign"), "utf8"), "foreign-active\n");
+        assert.deepEqual(readdirSync(secrets), ["foreign"]);
+      }
+      assert.equal(
+        readdirSync(projectRoot).some((name) => name.startsWith(".synveda-secret-stage.")),
+        false,
+      );
+    } finally {
+      rmSync(scratch, { recursive: true, force: true });
+    }
+  }
+});
+
+test("the secret generator rejects unknown active-set leaves", () => {
+  const scratch = realpathSync(mkdtempSync(join(tmpdir(), "synveda-secret-inventory-")));
+  chmodSync(scratch, 0o700);
+  const { suffix, project } = randomAcceptanceProject("secretinv");
+  const projectRoot = join(scratch, project);
+  mkdirSync(projectRoot, { mode: 0o700 });
+  const secrets = join(projectRoot, "secrets");
+  const env = {
+    ...process.env,
+    SYNVEDA_COMPOSE_PROJECT_SUFFIX: suffix,
+    SYNVEDA_SECRETS_DIR: secrets,
+    SYNVEDA_DATABASE_AUTHORITY_DIR: join(projectRoot, "database-authority"),
+    SYNVEDA_KEYCLOAK_PUBLIC_GATE_DIR: join(projectRoot, "keycloak-public-gate"),
+  };
+  try {
+    assert.equal(spawnSync(GENERATOR, [], { cwd: ROOT, env }).status, 0);
+    writeFileSync(join(secrets, ".synveda-secret-stage.foreign"), "refuse\n", {
+      mode: 0o600,
+    });
+    const result = spawnSync(GENERATOR, ["--if-missing"], {
+      cwd: ROOT,
+      env,
+      encoding: "utf8",
+    });
+    assert.equal(result.status, 73);
+    assert.match(result.stderr, /unknown entry/);
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+});
+
+test("the secret generator extends a safe pre-demo set without rotation", () => {
+  const scratch = realpathSync(mkdtempSync(join(tmpdir(), "synveda-secret-extension-")));
+  chmodSync(scratch, 0o700);
+  const { suffix, project } = randomAcceptanceProject("secretext");
+  const projectRoot = join(scratch, project);
+  mkdirSync(projectRoot, { mode: 0o700 });
+  const secrets = join(projectRoot, "secrets");
+  const authority = join(projectRoot, "database-authority");
+  const gate = join(projectRoot, "keycloak-public-gate");
+  const env = {
+    ...process.env,
+    SYNVEDA_COMPOSE_PROJECT_SUFFIX: suffix,
+    SYNVEDA_SECRETS_DIR: secrets,
+    SYNVEDA_DATABASE_AUTHORITY_DIR: authority,
+    SYNVEDA_KEYCLOAK_PUBLIC_GATE_DIR: gate,
+  };
+  try {
+    const prepared = spawnSync(GENERATOR, [], { cwd: ROOT, env, encoding: "utf8" });
+    assert.equal(prepared.status, 0, prepared.stderr);
+    const kmsBefore = readFileSync(join(secrets, "synveda_kms_key"), "utf8");
+    rmSync(join(secrets, "keycloak_demo_admin_password"));
+    rmSync(join(secrets, "keycloak_demo_member_password"));
+
+    const extended = spawnSync(GENERATOR, ["--if-missing"], {
+      cwd: ROOT,
+      env,
+      encoding: "utf8",
+    });
+    assert.equal(extended.status, 0, extended.stderr);
+    assert.equal(readFileSync(join(secrets, "synveda_kms_key"), "utf8"), kmsBefore);
+    const admin = readFileSync(join(secrets, "keycloak_demo_admin_password"), "utf8");
+    const member = readFileSync(join(secrets, "keycloak_demo_member_password"), "utf8");
+    assert.notEqual(admin, member);
+    assert.ok(!`${extended.stdout}${extended.stderr}`.includes(admin.trim()));
+    assert.ok(!`${extended.stdout}${extended.stderr}`.includes(member.trim()));
+
+    const rerun = spawnSync(GENERATOR, ["--if-missing"], {
+      cwd: ROOT,
+      env,
+      encoding: "utf8",
+    });
+    assert.equal(rerun.status, 0, rerun.stderr);
+    assert.equal(readFileSync(join(secrets, "keycloak_demo_admin_password"), "utf8"), admin);
+    assert.equal(readFileSync(join(secrets, "keycloak_demo_member_password"), "utf8"), member);
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+});
+
+test("the secret generator refuses a colliding partial demo extension", () => {
+  const scratch = realpathSync(mkdtempSync(join(tmpdir(), "synveda-secret-partial-")));
+  chmodSync(scratch, 0o700);
+  const { suffix, project } = randomAcceptanceProject("secretpart");
+  const projectRoot = join(scratch, project);
+  mkdirSync(projectRoot, { mode: 0o700 });
+  const secrets = join(projectRoot, "secrets");
+  const env = {
+    ...process.env,
+    SYNVEDA_COMPOSE_PROJECT_SUFFIX: suffix,
+    SYNVEDA_SECRETS_DIR: secrets,
+    SYNVEDA_DATABASE_AUTHORITY_DIR: join(projectRoot, "database-authority"),
+    SYNVEDA_KEYCLOAK_PUBLIC_GATE_DIR: join(projectRoot, "keycloak-public-gate"),
+  };
+  try {
+    const prepared = spawnSync(GENERATOR, [], { cwd: ROOT, env, encoding: "utf8" });
+    assert.equal(prepared.status, 0, prepared.stderr);
+    const protectedAdmin = readFileSync(join(secrets, "keycloak_admin_password"));
+    const protectedConvergence = readFileSync(
+      join(secrets, "keycloak_convergence_admin_password"),
+    );
+    const kmsBefore = readFileSync(join(secrets, "synveda_kms_key"), "utf8");
+
+    rmSync(join(secrets, "keycloak_demo_admin_password"));
+    rmSync(join(secrets, "keycloak_demo_member_password"));
+    writeFileSync(join(secrets, "keycloak_demo_admin_password"), protectedAdmin, {
+      mode: 0o600,
+    });
+    const adminCollision = spawnSync(GENERATOR, ["--if-missing"], {
+      cwd: ROOT,
+      env,
+      encoding: "utf8",
+    });
+    assert.equal(adminCollision.status, 73);
+    assert.match(adminCollision.stderr, /existing demo secret extension is unsafe/);
+    assert.equal(existsSync(join(secrets, "keycloak_demo_member_password")), false);
+
+    rmSync(join(secrets, "keycloak_demo_admin_password"));
+    writeFileSync(join(secrets, "keycloak_demo_member_password"), protectedConvergence, {
+      mode: 0o600,
+    });
+    const memberCollision = spawnSync(GENERATOR, ["--if-missing"], {
+      cwd: ROOT,
+      env,
+      encoding: "utf8",
+    });
+    assert.equal(memberCollision.status, 73);
+    assert.match(memberCollision.stderr, /existing demo secret extension is unsafe/);
+    assert.equal(existsSync(join(secrets, "keycloak_demo_admin_password")), false);
+    assert.equal(readFileSync(join(secrets, "synveda_kms_key"), "utf8"), kmsBefore);
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+});
+
 test("the secret generator refuses broad, shared and symlinked targets before mutation", () => {
   const scratch = realpathSync(mkdtempSync(join(tmpdir(), "synveda-secret-path-")));
-  const authority = join(scratch, "state", "synveda-development", "database-authority");
-  const gate = join(scratch, "state", "synveda-development", "keycloak-public-gate");
+  const { suffix, project } = randomAcceptanceProject("secretpath");
+  const authority = join(scratch, "state", project, "database-authority");
+  const gate = join(scratch, "state", project, "keycloak-public-gate");
   const invoke = (secrets, authorityPath = authority, gatePath = gate) =>
     spawnSync(GENERATOR, [], {
       cwd: ROOT,
       env: {
         ...process.env,
+        SYNVEDA_COMPOSE_PROJECT_SUFFIX: suffix,
         SYNVEDA_SECRETS_DIR: secrets,
         SYNVEDA_DATABASE_AUTHORITY_DIR: authorityPath,
         SYNVEDA_KEYCLOAK_PUBLIC_GATE_DIR: gatePath,
@@ -2573,7 +3190,7 @@ test("the secret generator refuses broad, shared and symlinked targets before mu
     }
 
     const sharedRoot = join(scratch, "shared");
-    const sharedSecrets = join(sharedRoot, "secrets");
+    const sharedSecrets = join(sharedRoot, project, "secrets");
     mkdirSync(sharedSecrets, { recursive: true, mode: 0o750 });
     chmodSync(sharedSecrets, 0o750);
     const sharedBefore = statSync(sharedSecrets);
@@ -2588,15 +3205,15 @@ test("the secret generator refuses broad, shared and symlinked targets before mu
     assert.equal(existsSync(gate), false);
 
     const overlapRoot = join(scratch, "overlap");
-    const overlapSecrets = join(overlapRoot, "secrets");
+    const overlapSecrets = join(overlapRoot, project, "secrets");
     const overlapAuthority = join(
       overlapSecrets,
-      "synveda-development",
+      project,
       "database-authority",
     );
     const overlapGate = join(
       overlapRoot,
-      "synveda-development",
+      project,
       "keycloak-public-gate",
     );
     const overlapResult = invoke(overlapSecrets, overlapAuthority, overlapGate);
@@ -2609,19 +3226,25 @@ test("the secret generator refuses broad, shared and symlinked targets before mu
     const linkedAncestor = join(scratch, "linked-ancestor");
     mkdirSync(realAncestor, { mode: 0o700 });
     symlinkSync(realAncestor, linkedAncestor, "dir");
-    const symlinkResult = invoke(join(linkedAncestor, "secrets"));
+    const symlinkResult = invoke(join(linkedAncestor, project, "secrets"));
     assert.equal(symlinkResult.status, 73, symlinkResult.stderr);
     assert.match(symlinkResult.stderr, /ancestors must not be symlinks/);
     assert.deepEqual(readdirSync(realAncestor), []);
     assert.equal(existsSync(authority), false);
     assert.equal(existsSync(gate), false);
 
-    const inContextResult = invoke(join(ROOT, "private", "secrets"));
+    const inContextResult = invoke(join(ROOT, "private", project, "secrets"));
     assert.equal(inContextResult.status, 73, inContextResult.stderr);
     assert.match(inContextResult.stderr, /ignored Compose roots/);
     assert.equal(existsSync(join(ROOT, "private")), false);
     assert.equal(existsSync(authority), false);
     assert.equal(existsSync(gate), false);
+
+    const crossProjectResult = invoke(
+      join(scratch, "synveda-development-acceptance-foreign", "secrets"),
+    );
+    assert.equal(crossProjectResult.status, 73, crossProjectResult.stderr);
+    assert.match(crossProjectResult.stderr, /secret directory must be scoped/);
   } finally {
     rmSync(scratch, { recursive: true, force: true });
   }
@@ -3107,11 +3730,13 @@ exec "$@"
 	    ]);
 	    chmodSync(fakeSnapshot, 0o700);
 
+	    const snapshotDirectory = join(scratch, "database-bootstrap-snapshots");
 	    const bootstrap = join(scratch, "synveda-database-bootstrap");
 	    writeFileSync(
 	      bootstrap,
 	      readFileSync(DATABASE_BOOTSTRAP, "utf8")
 	        .replaceAll("/run/secrets", secrets)
+	        .replaceAll("/tmp/synveda-database-bootstrap", snapshotDirectory)
 	        .replaceAll("/usr/local/bin/synveda-input-snapshot", fakeSnapshot),
       { mode: 0o700 },
     );
@@ -3313,14 +3938,14 @@ exec "$@"
         for (const role of ["migrator", "gateway", "worker"]) {
           assert.ok(
             sqlInput.includes(
-              `\\copy pg_temp.synveda_${role}_credential(secret) from '/tmp/synveda-database-bootstrap/synveda_${role}_password'`,
+              `\\copy pg_temp.synveda_${role}_credential(secret) from '${snapshotDirectory}/synveda_${role}_password'`,
             ),
           );
         }
       } else {
         assert.ok(
           sqlInput.includes(
-            "\\copy pg_temp.keycloak_credential(secret) from '/tmp/synveda-database-bootstrap/keycloak_database_password'",
+            `\\copy pg_temp.keycloak_credential(secret) from '${snapshotDirectory}/keycloak_database_password'`,
           ),
         );
         const witnessPath = join(authority, "keycloak-cluster.json");
@@ -5693,7 +6318,7 @@ test("model findings reject privilege, port, command and secret regressions", ()
           retries: 24,
         },
         depends_on: {
-          migrate: { condition: "service_completed_successfully" },
+          "tenant-convergence": { condition: "service_completed_successfully" },
           "issuer-diagnostic": { condition: "service_completed_successfully" },
         },
         secrets: [
@@ -5755,7 +6380,10 @@ test("model findings reject privilege, port, command and secret regressions", ()
           timeout: "3s",
           retries: 24,
         },
-        depends_on: { migrate: { condition: "service_completed_successfully" } },
+        depends_on: {
+          "tenant-convergence": { condition: "service_completed_successfully" },
+          "issuer-diagnostic": { condition: "service_completed_successfully" },
+        },
         secrets: [
           { source: "synveda_worker_database_url", target: "database_url" },
           { source: "synveda_kms_key", target: "kms_key" },
@@ -5801,6 +6429,7 @@ test("model findings reject privilege, port, command and secret regressions", ()
           SYNVEDA_OIDC_ISSUERS_FILE: "/etc/synveda/oidc/issuers.json",
           SYNVEDA_OIDC_EXPECTED_ISSUER:
             "https://external-idp.example/tenant",
+          SYNVEDA_BOOTSTRAP_TENANT_ID: "019b53c0-7c00-7000-8000-000000000045",
           SYNVEDA_PUBLIC_URL: "http://app.synveda.test:8080",
           SYNVEDA_INSECURE_DEVELOPMENT_HTTP: "true",
           RUST_LOG: "info",
@@ -5839,6 +6468,48 @@ test("model findings reject privilege, port, command and secret regressions", ()
           "database-preflight": { condition: "service_completed_successfully" },
         },
         secrets: [{ source: "synveda_migrator_database_url", target: "database_url" }],
+        volumes: [
+          {
+            type: "bind",
+            source: "/fixture/database-roles.json",
+            target: "/etc/synveda/database/roles.json",
+            read_only: true,
+          },
+        ],
+        networks: {
+          "application-egress": { gw_priority: 1 },
+          "synveda-data": {},
+        },
+        build: { dockerfile: "deploy/compose/gateway/Dockerfile" },
+      },
+      "tenant-convergence": {
+        command: ["tenant-converge"],
+        image: "product",
+        user: "1:1",
+        cap_drop: ["ALL"],
+        security_opt: ["no-new-privileges:true"],
+        read_only: true,
+        init: true,
+        pids_limit: 1,
+        restart: "no",
+        environment: {
+          DATABASE_URL_FILE: "/run/secrets/database_url",
+          SYNVEDA_BOOTSTRAP_TENANT_ID: "019b53c0-7c00-7000-8000-000000000045",
+          SYNVEDA_BOOTSTRAP_TENANT_NAME: "Synveda Reference",
+          SYNVEDA_BOOTSTRAP_TENANT_SLUG: "reference",
+          SYNVEDA_DATABASE_ROLES_FILE: "/etc/synveda/database/roles.json",
+          SYNVEDA_KMS_KEY_FILE: "/run/secrets/kms_key",
+          SYNVEDA_KMS_KEY_REF_FILE: "/run/secrets/kms_key_ref",
+          RUST_LOG: "info",
+        },
+        depends_on: {
+          migrate: { condition: "service_completed_successfully" },
+        },
+        secrets: [
+          { source: "synveda_migrator_database_url", target: "database_url" },
+          { source: "synveda_kms_key", target: "kms_key" },
+          { source: "synveda_kms_key_ref", target: "kms_key_ref" },
+        ],
         volumes: [
           {
             type: "bind",
@@ -5966,6 +6637,9 @@ test("model findings reject privilege, port, command and secret regressions", ()
     appUrl: "http://app.synveda.test:8080",
     authUrl: undefined,
     projectName,
+    bootstrapTenantId: "019b53c0-7c00-7000-8000-000000000045",
+    bootstrapTenantSlug: "reference",
+    bootstrapTenantName: "Synveda Reference",
     networkPool: "172.30.240.0/24",
     networkPlan,
     proxyIdentityAddress: "172.30.240.2",
@@ -6495,6 +7169,14 @@ test("model findings reject privilege, port, command and secret regressions", ()
   wiringRegression.services.gateway.user = "2345:2346";
   wiringRegression.services["issuer-diagnostic"].environment.SYNVEDA_PUBLIC_URL =
     "http://wrong-app.synveda.test:8080";
+  wiringRegression.services["issuer-diagnostic"].environment.SYNVEDA_BOOTSTRAP_TENANT_ID =
+    "019b53c0-7c00-7000-8000-000000000046";
+  wiringRegression.services["tenant-convergence"].environment.SYNVEDA_BOOTSTRAP_TENANT_ID =
+    "019b53c0-7c00-7000-8000-000000000046";
+  wiringRegression.services["tenant-convergence"].environment.SYNVEDA_BOOTSTRAP_TENANT_SLUG =
+    "wrong-reference";
+  wiringRegression.services["tenant-convergence"].environment.SYNVEDA_BOOTSTRAP_TENANT_NAME =
+    "Wrong Reference";
   wiringRegression.secrets.synveda_kms_key.file =
     "/fixture/secrets/synveda_kms_key_ref";
   delete wiringRegression.services.migrate.environment.DATABASE_URL_FILE;
@@ -6513,6 +7195,10 @@ test("model findings reject privilege, port, command and secret regressions", ()
       "issuer diagnostic public URL differs from the selected browser URL",
     ),
   );
+  assert.ok(wiringFindings.includes("issuer diagnostic bootstrap tenant ID drifted"));
+  assert.ok(wiringFindings.includes("tenant convergence bootstrap tenant ID drifted"));
+  assert.ok(wiringFindings.includes("tenant convergence bootstrap tenant slug drifted"));
+  assert.ok(wiringFindings.includes("tenant convergence bootstrap tenant name drifted"));
   assert.ok(wiringFindings.includes("synveda_kms_key secret file source drifted"));
   assert.ok(
     wiringFindings.includes("migrate secret mounts are not role-scoped or have drifted targets"),
