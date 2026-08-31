@@ -19,6 +19,18 @@ x-synveda-product: &synveda-product
 x-synveda-long-running: &synveda-long-running
   restart: ${SYNVEDA_COMPOSE_RESTART_POLICY:?set SYNVEDA_COMPOSE_RESTART_POLICY}
 
+x-synveda-ambient-proxy-closure: &synveda-ambient-proxy-closure
+  HTTP_PROXY: ""
+  http_proxy: ""
+  HTTPS_PROXY: ""
+  https_proxy: ""
+  NO_PROXY: ""
+  no_proxy: ""
+  FTP_PROXY: ""
+  ftp_proxy: ""
+  ALL_PROXY: ""
+  all_proxy: ""
+
 services:
   proxy:
     image: ${SYNVEDA_CADDY_IMAGE:?set SYNVEDA_CADDY_IMAGE}
@@ -34,6 +46,7 @@ services:
     restart: ${SYNVEDA_COMPOSE_RESTART_POLICY}
     stop_grace_period: 15s
     environment:
+      <<: *synveda-ambient-proxy-closure
       SYNVEDA_APP_HOST: ${SYNVEDA_APP_HOST:?set SYNVEDA_APP_HOST}
       SYNVEDA_PUBLIC_PORT: ${SYNVEDA_PUBLIC_PORT:?set SYNVEDA_PUBLIC_PORT}
       SYNVEDA_PROXY_HTTP_PORT: ${SYNVEDA_PROXY_HTTP_PORT:?set SYNVEDA_PROXY_HTTP_PORT}
@@ -74,6 +87,7 @@ services:
     mem_limit: 256m
     cpus: 0.5
     environment:
+      <<: *synveda-ambient-proxy-closure
       SYNVEDA_MIGRATOR_DATABASE_URL_FILE: /run/secrets/synveda_migrator_database_url
       SYNVEDA_GATEWAY_DATABASE_URL_FILE: /run/secrets/synveda_gateway_database_url
       SYNVEDA_WORKER_DATABASE_URL_FILE: /run/secrets/synveda_worker_database_url
@@ -104,6 +118,7 @@ services:
       database-preflight:
         condition: service_completed_successfully
     environment:
+      <<: *synveda-ambient-proxy-closure
       DATABASE_URL_FILE: /run/secrets/database_url
       SYNVEDA_DATABASE_ROLES_FILE: /etc/synveda/database/roles.json
       RUST_LOG: ${RUST_LOG:-info}
@@ -128,6 +143,7 @@ services:
       migrate:
         condition: service_completed_successfully
     environment:
+      <<: *synveda-ambient-proxy-closure
       DATABASE_URL_FILE: /run/secrets/database_url
       SYNVEDA_DATABASE_ROLES_FILE: /etc/synveda/database/roles.json
       SYNVEDA_BOOTSTRAP_TENANT_ID: ${SYNVEDA_BOOTSTRAP_TENANT_ID:?set SYNVEDA_BOOTSTRAP_TENANT_ID}
@@ -163,6 +179,7 @@ services:
       proxy:
         condition: service_healthy
     environment:
+      <<: *synveda-ambient-proxy-closure
       SYNVEDA_OIDC_ISSUERS_FILE: /etc/synveda/oidc/issuers.json
       SYNVEDA_OIDC_EXPECTED_ISSUER: ${SYNVEDA_OIDC_ISSUER:?set SYNVEDA_OIDC_ISSUER}
       SYNVEDA_PUBLIC_URL: ${SYNVEDA_PUBLIC_APP_URL:?set SYNVEDA_PUBLIC_APP_URL}
@@ -191,6 +208,7 @@ services:
       issuer-diagnostic:
         condition: service_completed_successfully
     environment:
+      <<: *synveda-ambient-proxy-closure
       DATABASE_URL_FILE: /run/secrets/database_url
       SYNVEDA_DATABASE_ROLES_FILE: /etc/synveda/database/roles.json
       SYNVEDA_LISTEN_ADDR: 0.0.0.0:8120
@@ -241,6 +259,7 @@ services:
       issuer-diagnostic:
         condition: service_completed_successfully
     environment:
+      <<: *synveda-ambient-proxy-closure
       DATABASE_URL_FILE: /run/secrets/database_url
       SYNVEDA_DATABASE_ROLES_FILE: /etc/synveda/database/roles.json
       SYNVEDA_WORKER_LISTEN_ADDR: 127.0.0.1:8121
@@ -293,6 +312,8 @@ services:
     pids_limit: 256
     restart: ${SYNVEDA_COMPOSE_RESTART_POLICY}
     stop_grace_period: 15s
+    environment:
+      <<: *synveda-ambient-proxy-closure
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev,mode=1777,size=64m
     volumes:

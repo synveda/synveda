@@ -11,6 +11,25 @@ const CHECKER = join(ROOT, "deploy/compose/scripts/check-compose-assets.mjs");
 const PROJECT = "synveda-development-acceptance-assets";
 const CONTAINER_ID = "1".repeat(64);
 const NETWORK_ID = "2".repeat(64);
+const CLOSED_PROXY_ENVIRONMENT = Object.freeze(
+  Object.fromEntries(
+    [
+      "HTTP_PROXY",
+      "http_proxy",
+      "HTTPS_PROXY",
+      "https_proxy",
+      "NO_PROXY",
+      "no_proxy",
+      "FTP_PROXY",
+      "ftp_proxy",
+      "ALL_PROXY",
+      "all_proxy",
+    ].map((name) => [name, ""]),
+  ),
+);
+const CLOSED_PROXY_ENVIRONMENT_LIST = Object.entries(
+  CLOSED_PROXY_ENVIRONMENT,
+).map(([name, value]) => `${name}=${value}`);
 
 function fixture() {
   const scratch = mkdtempSync(join(tmpdir(), "synveda-compose-assets-"));
@@ -24,7 +43,11 @@ function fixture() {
     JSON.stringify({
       name: PROJECT,
       services: {
-        gateway: { labels: { "com.synveda.contract": "cpr-45" } },
+        gateway: {
+          build: { args: CLOSED_PROXY_ENVIRONMENT },
+          environment: CLOSED_PROXY_ENVIRONMENT,
+          labels: { "com.synveda.contract": "cpr-45" },
+        },
       },
       networks: {
         "app-backend": {
@@ -58,6 +81,7 @@ function fixture() {
         Id: CONTAINER_ID,
         Name: `/${PROJECT}-gateway-1`,
         Config: {
+          Env: CLOSED_PROXY_ENVIRONMENT_LIST,
           Labels: {
             "com.docker.compose.project": PROJECT,
             "com.docker.compose.service": "gateway",
@@ -121,9 +145,9 @@ function fixture() {
     `#!/bin/sh
 set -eu
 case "$1:$2" in
-  container:ls) if [ "\${FAKE_ASSET_STATE:-exact}" = exact ]; then printf '${CONTAINER_ID.slice(0, 12)}\\n'; fi ;;
-  container:inspect) /bin/cat "$FAKE_CONTAINER_INSPECT" ;;
-  network:ls) if [ "\${FAKE_ASSET_STATE:-exact}" = exact ]; then printf '${NETWORK_ID.slice(0, 12)}\\n'; fi ;;
+  container:ls) if [ "\${FAKE_CONTAINER_STATE:-\${FAKE_ASSET_STATE:-exact}}" = exact ]; then printf '${CONTAINER_ID.slice(0, 12)}\\n'; fi ;;
+  container:inspect) [ "\${FAKE_REFUSE_CONTAINER_INSPECT:-0}" = 0 ] || exit 98; /bin/cat "$FAKE_CONTAINER_INSPECT" ;;
+  network:ls) if [ "\${FAKE_NETWORK_STATE:-\${FAKE_ASSET_STATE:-exact}}" = exact ]; then printf '${NETWORK_ID.slice(0, 12)}\\n'; fi ;;
   network:inspect) /bin/cat "$FAKE_NETWORK_INSPECT" ;;
   volume:ls) if [ "\${FAKE_VOLUME_STATE:-exact}" = exact ]; then printf '${PROJECT}_postgres-data\\n'; fi ;;
   volume:inspect) /bin/cat "$FAKE_VOLUME_INSPECT" ;;
@@ -164,15 +188,187 @@ test("exact Compose assets pass and stopped state requires containers and networ
   try {
     const existing = run(state);
     assert.equal(existing.status, 0, existing.stderr);
+    const converged = run(state, {}, "converged");
+    assert.equal(converged.status, 0, converged.stderr);
+    for (const extra of [
+      { FAKE_CONTAINER_STATE: "none" },
+      { FAKE_NETWORK_STATE: "none" },
+      { FAKE_VOLUME_STATE: "none" },
+    ]) {
+      const incomplete = run(state, extra, "converged");
+      assert.equal(incomplete.status, 78, incomplete.stderr);
+      assert.match(incomplete.stderr, /inventory was incomplete/);
+    }
     const stopped = run(
       state,
-      { FAKE_ASSET_STATE: "none", FAKE_VOLUME_STATE: "exact" },
+      {
+        FAKE_ASSET_STATE: "none",
+        FAKE_VOLUME_STATE: "exact",
+        FAKE_REFUSE_CONTAINER_INSPECT: "1",
+      },
       "stopped",
     );
     assert.equal(stopped.status, 0, stopped.stderr);
     const active = run(state, {}, "stopped");
     assert.equal(active.status, 78);
     assert.match(active.stderr, /containers remain after shutdown/);
+  } finally {
+    rmSync(state.scratch, { recursive: true, force: true });
+  }
+});
+
+test("rendered and created proxy environments fail closed without disclosure", () => {
+  const state = fixture();
+  const rendered = JSON.parse(readFileSync(state.config, "utf8"));
+  const inspected = JSON.parse(readFileSync(state.containers, "utf8"));
+  try {
+    for (const [index, name] of Object.keys(
+      CLOSED_PROXY_ENVIRONMENT,
+    ).entries()) {
+      const missing = structuredClone(rendered);
+      delete missing.services.gateway.environment[name];
+      writeFileSync(state.config, JSON.stringify(missing));
+      let result = run(state);
+      assert.equal(result.status, 78, `${name}: ${result.stderr}`);
+      assert.match(result.stderr, /ambient proxy environment was refused/);
+
+      const sentinel = `private-proxy-credential-${index}`;
+      const nonempty = structuredClone(rendered);
+      nonempty.services.gateway.environment[name] = sentinel;
+      writeFileSync(state.config, JSON.stringify(nonempty));
+      result = run(state);
+      assert.equal(result.status, 78, `${name}: ${result.stderr}`);
+      assert.match(result.stderr, /ambient proxy environment was refused/);
+      assert.ok(!`${result.stdout}${result.stderr}`.includes(sentinel));
+
+      const missingBuildArgument = structuredClone(rendered);
+      delete missingBuildArgument.services.gateway.build.args[name];
+      writeFileSync(state.config, JSON.stringify(missingBuildArgument));
+      result = run(state);
+      assert.equal(result.status, 78, `${name}: ${result.stderr}`);
+      assert.match(result.stderr, /ambient proxy build arguments were refused/);
+
+      const nonemptyBuildArgument = structuredClone(rendered);
+      nonemptyBuildArgument.services.gateway.build.args[name] = sentinel;
+      writeFileSync(state.config, JSON.stringify(nonemptyBuildArgument));
+      result = run(state);
+      assert.equal(result.status, 78, `${name}: ${result.stderr}`);
+      assert.match(result.stderr, /ambient proxy build arguments were refused/);
+      assert.ok(!`${result.stdout}${result.stderr}`.includes(sentinel));
+    }
+    writeFileSync(state.config, JSON.stringify(rendered));
+
+    for (const [index, name] of Object.keys(
+      CLOSED_PROXY_ENVIRONMENT,
+    ).entries()) {
+      const without = structuredClone(inspected);
+      without[0].Config.Env = without[0].Config.Env.filter(
+        (entry) => !entry.startsWith(`${name}=`),
+      );
+      writeFileSync(state.containers, JSON.stringify(without));
+      let result = run(state, {}, "converged");
+      assert.equal(result.status, 78, `${name}: ${result.stderr}`);
+      assert.match(result.stderr, /ambient proxy environment was refused/);
+
+      const sentinel = `private-runtime-proxy-credential-${index}`;
+      const nonempty = structuredClone(inspected);
+      nonempty[0].Config.Env = nonempty[0].Config.Env.map((entry) =>
+        entry === `${name}=` ? `${name}=${sentinel}` : entry,
+      );
+      writeFileSync(state.containers, JSON.stringify(nonempty));
+      result = run(state, {}, "converged");
+      assert.equal(result.status, 78, `${name}: ${result.stderr}`);
+      assert.match(result.stderr, /ambient proxy environment was refused/);
+      assert.ok(!`${result.stdout}${result.stderr}`.includes(sentinel));
+
+      const duplicate = structuredClone(inspected);
+      duplicate[0].Config.Env.push(`${name}=`);
+      writeFileSync(state.containers, JSON.stringify(duplicate));
+      result = run(state, {}, "converged");
+      assert.equal(result.status, 78, `${name}: ${result.stderr}`);
+      assert.match(result.stderr, /ambient proxy environment was refused/);
+
+      const conflicting = structuredClone(inspected);
+      conflicting[0].Config.Env.push(`${name}=${sentinel}`);
+      writeFileSync(state.containers, JSON.stringify(conflicting));
+      result = run(state, {}, "converged");
+      assert.equal(result.status, 78, `${name}: ${result.stderr}`);
+      assert.match(result.stderr, /ambient proxy environment was refused/);
+      assert.ok(!`${result.stdout}${result.stderr}`.includes(sentinel));
+    }
+
+    for (const environment of [
+      undefined,
+      null,
+      {},
+      [...CLOSED_PROXY_ENVIRONMENT_LIST, { malformed: true }],
+      CLOSED_PROXY_ENVIRONMENT_LIST.map((entry, index) =>
+        index === 0 ? "HTTP_PROXY" : entry,
+      ),
+      CLOSED_PROXY_ENVIRONMENT_LIST.map((entry, index) =>
+        index === 0 ? "HTTP_PROXY_EXTRA=" : entry,
+      ),
+      CLOSED_PROXY_ENVIRONMENT_LIST.map((entry, index) =>
+        index === 0 ? "Http_Proxy=" : entry,
+      ),
+    ]) {
+      const malformed = structuredClone(inspected);
+      if (environment === undefined) {
+        delete malformed[0].Config.Env;
+      } else {
+        malformed[0].Config.Env = environment;
+      }
+      writeFileSync(state.containers, JSON.stringify(malformed));
+      const result = run(state, {}, "converged");
+      assert.equal(result.status, 78, result.stderr);
+      assert.match(result.stderr, /ambient proxy environment was refused/);
+    }
+
+    const repairable = structuredClone(inspected);
+    repairable[0].Config.Env[0] = "HTTP_PROXY=private-recovery-sentinel";
+    writeFileSync(state.containers, JSON.stringify(repairable));
+    const existing = run(state);
+    assert.equal(existing.status, 0, existing.stderr);
+    assert.ok(!`${existing.stdout}${existing.stderr}`.includes("private-recovery-sentinel"));
+
+    const oversizedSentinel = "private-oversized-inspect-sentinel";
+    writeFileSync(
+      state.containers,
+      oversizedSentinel.repeat(
+        Math.ceil((2 * 1024 * 1024 + 1) / oversizedSentinel.length),
+      ),
+    );
+    const oversized = run(state, {}, "converged");
+    assert.equal(oversized.status, 69, oversized.stderr);
+    assert.match(
+      oversized.stderr,
+      /Docker inventory (?:could not start|exceeded its bound)/,
+    );
+    assert.ok(
+      !`${oversized.stdout}${oversized.stderr}`.includes(oversizedSentinel),
+    );
+
+    const malformedSentinel = "private-malformed-inspect-sentinel";
+    writeFileSync(state.containers, `{${malformedSentinel}`);
+    const malformedInspection = run(state, {}, "converged");
+    assert.equal(malformedInspection.status, 69, malformedInspection.stderr);
+    assert.match(
+      malformedInspection.stderr,
+      /project container inspection was malformed/,
+    );
+    assert.ok(
+      !`${malformedInspection.stdout}${malformedInspection.stderr}`.includes(
+        malformedSentinel,
+      ),
+    );
+
+    writeFileSync(state.containers, "[]");
+    const incompleteInspection = run(state, {}, "converged");
+    assert.equal(incompleteInspection.status, 69, incompleteInspection.stderr);
+    assert.match(
+      incompleteInspection.stderr,
+      /project container inspection was incomplete/,
+    );
   } finally {
     rmSync(state.scratch, { recursive: true, force: true });
   }

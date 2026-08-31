@@ -114,6 +114,18 @@ const PROVIDER_SECRETS = [
   "keycloak_demo_admin_password",
   "keycloak_demo_member_password",
 ];
+const CONTAINER_PROXY_ENVIRONMENT = Object.freeze([
+  "HTTP_PROXY",
+  "http_proxy",
+  "HTTPS_PROXY",
+  "https_proxy",
+  "NO_PROXY",
+  "no_proxy",
+  "FTP_PROXY",
+  "ftp_proxy",
+  "ALL_PROXY",
+  "all_proxy",
+]);
 const HOST_TRUST_CONTROLS = [
   "NODE_OPTIONS",
   "NODE_EXTRA_CA_CERTS",
@@ -1946,6 +1958,13 @@ export function canonicalComposeFindings(model, expected) {
 
   for (const [name, service] of Object.entries(services)) {
     findings.push(...hardeningFindings(name, service));
+    if (
+      CONTAINER_PROXY_ENVIRONMENT.some(
+        (key) => service?.environment?.[key] !== "",
+      )
+    ) {
+      findings.push(`${name} ambient proxy environment is not closed`);
+    }
     if ((service.configs ?? []).length > 0) {
       findings.push(`${name} mounts an unreviewed Compose config`);
     }
@@ -3132,6 +3151,9 @@ export function canonicalComposeFindings(model, expected) {
       );
     }
   }
+  for (const expectedKeys of Object.values(expectedEnvironmentKeys)) {
+    expectedKeys.push(...CONTAINER_PROXY_ENVIRONMENT);
+  }
   for (const name of expectedServices) {
     if (
       JSON.stringify(keys(services[name]?.environment)) !==
@@ -3250,14 +3272,15 @@ export function canonicalComposeFindings(model, expected) {
       findings.push("a non-proxy service changes kernel namespace settings");
     }
   } else {
-    for (const name of [
+    const developmentProductBuilds = [
       "database-preflight",
       "issuer-diagnostic",
       "gateway",
       "worker",
       "migrate",
       "tenant-convergence",
-    ]) {
+    ];
+    for (const name of developmentProductBuilds) {
       if (services[name]?.build?.dockerfile !== "deploy/compose/gateway/Dockerfile") {
         findings.push(`${name} does not use the development product build`);
       }
@@ -3284,6 +3307,21 @@ export function canonicalComposeFindings(model, expected) {
         "deploy/compose/postgres/Dockerfile"
     ) {
       findings.push("Keycloak database bootstrap does not use the development provider build");
+    }
+    const developmentBuilds = [...developmentProductBuilds, "proxy"];
+    if (expected.postgres === "bundled") developmentBuilds.push("database-bootstrap");
+    if (expected.oidc === "bundled") {
+      developmentBuilds.push("keycloak", "keycloak-database-bootstrap");
+    }
+    for (const name of developmentBuilds) {
+      const buildArguments = services[name]?.build?.args;
+      if (
+        JSON.stringify(keys(buildArguments)) !==
+          JSON.stringify(sorted(CONTAINER_PROXY_ENVIRONMENT)) ||
+        CONTAINER_PROXY_ENVIRONMENT.some((key) => buildArguments?.[key] !== "")
+      ) {
+        findings.push(`${name} ambient proxy build arguments are not closed`);
+      }
     }
     if (Object.values(services).some((service) => service.sysctls !== undefined)) {
       findings.push("development mode changes kernel namespace settings");
@@ -3789,7 +3827,7 @@ export function main() {
     console.log(
       `canonical Compose static shape validates: ${rows}/8 deterministic provider/runtime rows, ` +
         "one bundled demo profile, one exact custom development issuer port, role-scoped file secrets, " +
-        "isolated networks and reverse-proxy-only host ports; " +
+        "isolated networks, reverse-proxy-only host ports and closed runtime/build proxy injection; " +
         "live clean-start and browser acceptance remain pending",
     );
   } finally {

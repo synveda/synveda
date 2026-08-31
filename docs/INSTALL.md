@@ -52,6 +52,12 @@ runtime probes. External-OIDC smoke closes the issuer scheme but does not fetch
 that issuer from the host. These checks do not establish browser trust,
 explicit custom-CA/proxy support or automatic renewal.
 
+The canonical Compose graph also refuses Docker client proxy auto-injection:
+every runtime service and every development build explicitly empties the ten
+upper/lower HTTP, HTTPS, NO, FTP and ALL proxy names. Startup proves the
+created containers retain exactly those empty runtime entries. This is a
+closed ambient-input boundary, not supported outbound-proxy configuration.
+
 The remaining sections describe product use only after a gateway has been
 started through separately validated development/test infrastructure. They are
 not deployment instructions or evidence that the reference is complete.

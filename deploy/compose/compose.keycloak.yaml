@@ -1,3 +1,15 @@
+x-synveda-keycloak-ambient-proxy-closure: &synveda-keycloak-ambient-proxy-closure
+  HTTP_PROXY: ""
+  http_proxy: ""
+  HTTPS_PROXY: ""
+  https_proxy: ""
+  NO_PROXY: ""
+  no_proxy: ""
+  FTP_PROXY: ""
+  ftp_proxy: ""
+  ALL_PROXY: ""
+  all_proxy: ""
+
 services:
   database-preflight:
     environment:
@@ -51,6 +63,7 @@ services:
     entrypoint: ["/usr/local/bin/synveda-database-bootstrap"]
     command: ["keycloak"]
     environment:
+      <<: *synveda-keycloak-ambient-proxy-closure
       SYNVEDA_POSTGRES_BOOTSTRAP_URL: ${SYNVEDA_POSTGRES_BOOTSTRAP_URL:?set SYNVEDA_POSTGRES_BOOTSTRAP_URL}
       SYNVEDA_POSTGRES_BUNDLED_CLUSTER: ${SYNVEDA_POSTGRES_BUNDLED_CLUSTER:?set SYNVEDA_POSTGRES_BUNDLED_CLUSTER}
       SYNVEDA_DATABASE_ROLES_FILE: /run/secrets/database_roles.json
@@ -88,6 +101,7 @@ services:
     user: "${SYNVEDA_RUNTIME_UID:?set SYNVEDA_RUNTIME_UID}:${SYNVEDA_RUNTIME_GID:?set SYNVEDA_RUNTIME_GID}"
     command: ["start", "--optimized"]
     environment:
+      <<: *synveda-keycloak-ambient-proxy-closure
       KC_DB: postgres
       KC_DB_URL: ${SYNVEDA_KEYCLOAK_DATABASE_URL:?set SYNVEDA_KEYCLOAK_DATABASE_URL}
       KC_DB_USERNAME: keycloak
@@ -151,6 +165,7 @@ services:
     user: "${SYNVEDA_RUNTIME_UID:?set SYNVEDA_RUNTIME_UID}:${SYNVEDA_RUNTIME_GID:?set SYNVEDA_RUNTIME_GID}"
     command: ["synveda-realm-supervise"]
     environment:
+      <<: *synveda-keycloak-ambient-proxy-closure
       KC_BOOTSTRAP_ADMIN_USERNAME_FILE: /run/secrets/keycloak_admin_username
       KC_BOOTSTRAP_ADMIN_PASSWORD_FILE: /run/secrets/keycloak_admin_password
       SYNVEDA_KEYCLOAK_CONVERGENCE_PASSWORD_FILE: /run/secrets/keycloak_convergence_admin_password

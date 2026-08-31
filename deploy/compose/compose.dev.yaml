@@ -1,10 +1,24 @@
 name: synveda-development
 
+x-synveda-development-proxy-build-closure: &synveda-development-proxy-build-closure
+  HTTP_PROXY: ""
+  http_proxy: ""
+  HTTPS_PROXY: ""
+  https_proxy: ""
+  NO_PROXY: ""
+  no_proxy: ""
+  FTP_PROXY: ""
+  ftp_proxy: ""
+  ALL_PROXY: ""
+  all_proxy: ""
+
 services:
   proxy:
     build:
       context: ../..
       dockerfile: deploy/compose/proxy/Dockerfile
+      args:
+        <<: *synveda-development-proxy-build-closure
     ports:
       - target: ${SYNVEDA_DEV_HTTP_PORT:-8080}
         published: ${SYNVEDA_DEV_HTTP_PORT:-8080}
@@ -14,23 +28,35 @@ services:
     build:
       context: ../..
       dockerfile: deploy/compose/gateway/Dockerfile
+      args:
+        <<: *synveda-development-proxy-build-closure
   migrate:
     build:
       context: ../..
       dockerfile: deploy/compose/gateway/Dockerfile
+      args:
+        <<: *synveda-development-proxy-build-closure
   tenant-convergence:
     build:
       context: ../..
       dockerfile: deploy/compose/gateway/Dockerfile
+      args:
+        <<: *synveda-development-proxy-build-closure
   issuer-diagnostic:
     build:
       context: ../..
       dockerfile: deploy/compose/gateway/Dockerfile
+      args:
+        <<: *synveda-development-proxy-build-closure
   gateway:
     build:
       context: ../..
       dockerfile: deploy/compose/gateway/Dockerfile
+      args:
+        <<: *synveda-development-proxy-build-closure
   worker:
     build:
       context: ../..
       dockerfile: deploy/compose/gateway/Dockerfile
+      args:
+        <<: *synveda-development-proxy-build-closure

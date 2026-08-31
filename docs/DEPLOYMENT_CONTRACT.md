@@ -255,6 +255,21 @@ local `unix://` endpoint, pins it in `DOCKER_HOST`, and removes
 `DOCKER_CONTEXT` from its child environment. Context changes after preflight
 therefore cannot redirect later inventory, startup, shutdown or volume removal.
 
+Docker client proxy configuration is not an input to the deployment contract.
+Every canonical service must explicitly define `HTTP_PROXY`, `http_proxy`,
+`HTTPS_PROXY`, `https_proxy`, `NO_PROXY`, `no_proxy`, `FTP_PROXY`, `ftp_proxy`,
+`ALL_PROXY` and `all_proxy` as empty strings. A null or bare value is invalid
+because Compose may remove it before the Docker client supplies defaults.
+Every development-mode build must define the same exact empty build arguments;
+reference mode accepts prebuilt images and contains no build declaration. The
+rendered graph is checked before mutation. A distinct post-create `converged`
+asset state then requires every rendered container, network and volume and
+requires exactly one empty `NAME=` entry for each name in every container's
+`Config.Env`. Missing, non-empty, malformed and duplicate entries fail with a
+content-free diagnostic. `existing` remains recovery-compatible with an absent
+or partial exact project, while `stopped` requires containers and networks to
+be absent.
+
 The issuer diagnostic retries retryable OIDC availability through one bounded
 deadline without naming a provider. Database preflight and migration have
 bounded operations but do not poll their dependency. Provider fragments add
@@ -486,7 +501,7 @@ materialise the same per-service paths, but does not change setting meaning.
 | application OTLP | `OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317` | none; the private hop is unauthenticated only inside `telemetry` |
 | external OTLP | `SYNVEDA_EXTERNAL_OTLP_ENDPOINT` | `SYNVEDA_EXTERNAL_OTLP_CA_FILE=/run/secrets/otel_ca`; `SYNVEDA_EXTERNAL_OTLP_HEADERS_FILE=/run/secrets/otel_headers` |
 | custom CA | reserved; not accepted by the current application schema | no supported application mount until OIDC/provider clients prove explicit CA loading |
-| outbound proxy | ambient proxy variables are deliberately ignored by OIDC and CLI clients | explicit proxy-file settings remain reserved and rejected until a bounded consumer and no-proxy contract ship |
+| outbound proxy | host Node proxy activation is closed, and all canonical container environments and development build arguments explicitly empty the ten Docker proxy names | explicit proxy-file settings remain reserved and rejected until a bounded consumer and no-proxy contract ship |
 | object store | `SYNVEDA_OBJECT_STORE_ENDPOINT`, `SYNVEDA_OBJECT_STORE_REGION`, `SYNVEDA_OBJECT_STORE_BUCKET`, `SYNVEDA_OBJECT_STORE_PATH_STYLE` | `SYNVEDA_OBJECT_STORE_ACCESS_KEY_FILE=/run/secrets/object_store_access_key`; `SYNVEDA_OBJECT_STORE_SECRET_KEY_FILE=/run/secrets/object_store_secret_key`; `SYNVEDA_OBJECT_STORE_SESSION_TOKEN_FILE=/run/secrets/object_store_session_token`; rejected unless an accepted feature enables the interface |
 | SMTP | reserved `SYNVEDA_SMTP_HOST`, `PORT`, `FROM` | reserved `SYNVEDA_SMTP_USERNAME_FILE` and `PASSWORD_FILE`; all are rejected until an accepted consumer exists |
 | reference TLS | `SYNVEDA_TLS_MODE=files` currently; `acme` reserved and rejected, public hostnames | fixed selected-project files `tls_cert` and `tls_key`, mounted only in the proxy at `/run/secrets/tls_cert` and `/run/secrets/tls_key` |
@@ -815,6 +830,15 @@ issuer URLs; it fetches the issuer only in bundled-OIDC mode. This
 closes ambient host trust for deterministic evidence; it does not implement an
 explicit custom CA, proxy transport, PKIX ownership/revocation check or browser
 trust contract.
+
+The separate Docker-create boundary closes proxy auto-injection in every
+canonical service with the ten explicit empty runtime variables described
+above. Development builds close the corresponding implicit build arguments.
+Static tests cover every selected provider/runtime row; exact-container
+inspection proves the created runtime metadata after startup. A clean live run
+with a private synthetic Docker client proxy configuration remains required as
+acceptance evidence, and image history is not treated as proof of build-time
+absence.
 
 ## Operation and worker contract
 

@@ -1,13 +1,29 @@
 # Development builds the pinned optimized Keycloak image and the PostgreSQL
 # database-bootstrap helper locally. Reference mode accepts only prebuilt
 # digests and never selects this fragment.
+x-synveda-keycloak-proxy-build-closure: &synveda-keycloak-proxy-build-closure
+  HTTP_PROXY: ""
+  http_proxy: ""
+  HTTPS_PROXY: ""
+  https_proxy: ""
+  NO_PROXY: ""
+  no_proxy: ""
+  FTP_PROXY: ""
+  ftp_proxy: ""
+  ALL_PROXY: ""
+  all_proxy: ""
+
 services:
   keycloak-database-bootstrap:
     build:
       context: ../..
       dockerfile: deploy/compose/postgres/Dockerfile
+      args:
+        <<: *synveda-keycloak-proxy-build-closure
 
   keycloak:
     build:
       context: ../..
       dockerfile: deploy/compose/keycloak/Dockerfile
+      args:
+        <<: *synveda-keycloak-proxy-build-closure

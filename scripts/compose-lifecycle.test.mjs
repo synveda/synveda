@@ -200,7 +200,19 @@ case "$1" in
     if [ "\${SYNVEDA_FAKE_RUNNER_125:-0}" = 1 ]; then exit 125; fi
     exec ${JSON.stringify(process.execPath)} "$@"
     ;;
-  */check-host-resolution.mjs|*/check-network-preflight.mjs|*/check-compose-assets.mjs|*/check-runtime-smoke.mjs)
+  */check-compose-assets.mjs)
+    printf 'node' >> "$SYNVEDA_FAKE_CALL_LOG"
+    for argument in "$@"; do printf ' <%s>' "$argument" >> "$SYNVEDA_FAKE_CALL_LOG"; done
+    printf '\n' >> "$SYNVEDA_FAKE_CALL_LOG"
+    case " $* " in
+      *" --state converged "*)
+        [ "\${SYNVEDA_FAKE_CONVERGED_ASSET_STATUS:-0}" = 0 ] ||
+          exit "$SYNVEDA_FAKE_CONVERGED_ASSET_STATUS"
+        ;;
+    esac
+    exit 0
+    ;;
+  */check-host-resolution.mjs|*/check-network-preflight.mjs|*/check-runtime-smoke.mjs)
     printf 'node <%s>\n' "$1" >> "$SYNVEDA_FAKE_CALL_LOG"
     if [ "\${SYNVEDA_FAKE_REAL_HOST_CHECK:-0}" = 1 ]; then
       case "$1" in
@@ -536,7 +548,13 @@ test("canonical up prepares once, reruns convergence, and keeps credentials stab
     const resolver = calls.indexOf("check-host-resolution.mjs");
     const network = calls.indexOf("check-network-preflight.mjs");
     const up = calls.indexOf(" <up>");
-    assert.ok(resolver >= 0 && network > resolver && up > network, calls);
+    const existingAssets = calls.indexOf("<--state> <existing>");
+    const convergedAssets = calls.indexOf("<--state> <converged>");
+    assert.ok(
+      resolver >= 0 && network > resolver && existingAssets > network &&
+        up > existingAssets && convergedAssets > up,
+      calls,
+    );
     assert.match(
       calls,
       / <up> <--build> <--detach> <--wait> <--wait-timeout> <900> <--force-recreate>/,
@@ -544,6 +562,65 @@ test("canonical up prepares once, reruns convergence, and keeps credentials stab
     assert.doesNotMatch(calls, /--remove-orphans/);
     assert.match(calls, /compose\.demo\.yaml/);
   } finally {
+    rmSync(state.scratch, { recursive: true, force: true });
+  }
+});
+
+test("up proves created proxy closure and keeps deterministic refusal recoverable", () => {
+  const state = fixture();
+  const lockFile = join(
+    "/tmp",
+    `.synveda-compose-locks-${process.getuid?.() ?? 0}`,
+    `${state.project}.lock`,
+  );
+  try {
+    const refused = run(state, "up", {
+      SYNVEDA_FAKE_CONVERGED_ASSET_STATUS: "78",
+    });
+    assert.equal(refused.status, 78, refused.stderr);
+    assert.doesNotMatch(refused.stdout, /canonical Compose services converged/);
+    const calls = readFileSync(state.log, "utf8");
+    const existing = calls.indexOf("<--state> <existing>");
+    const up = calls.indexOf(" <up>", existing);
+    const converged = calls.indexOf("<--state> <converged>", up);
+    assert.ok(existing >= 0 && up > existing && converged > up, calls);
+    assert.equal(existsSync(lockFile), false);
+
+    writeFileSync(state.log, "");
+    const down = run(state, "down");
+    assert.equal(down.status, 0, down.stderr);
+    const recoveryCalls = readFileSync(state.log, "utf8");
+    assert.match(recoveryCalls, /<--state> <existing>/);
+    assert.match(recoveryCalls, /<--state> <stopped>/);
+    assert.doesNotMatch(recoveryCalls, /<--state> <converged>/);
+  } finally {
+    rmSync(state.scratch, { recursive: true, force: true });
+  }
+});
+
+test("unavailable post-create asset evidence retains the exact project lock", () => {
+  const state = fixture();
+  const lockFile = join(
+    "/tmp",
+    `.synveda-compose-locks-${process.getuid?.() ?? 0}`,
+    `${state.project}.lock`,
+  );
+  let marker;
+  try {
+    const refused = run(state, "up", {
+      SYNVEDA_FAKE_CONVERGED_ASSET_STATUS: "69",
+    });
+    assert.equal(refused.status, 69, refused.stderr);
+    assert.match(refused.stderr, /Docker mutation state is uncertain \(compose-up\)/);
+    marker = readFileSync(lockFile, "utf8");
+    assert.match(marker, new RegExp(`^${state.project}:[1-9][0-9]*\\n$`));
+  } finally {
+    if (
+      marker !== undefined && existsSync(lockFile) &&
+      readFileSync(lockFile, "utf8") === marker
+    ) {
+      rmSync(lockFile);
+    }
     rmSync(state.scratch, { recursive: true, force: true });
   }
 });
@@ -687,9 +764,18 @@ test("hosts plan is content-free and smoke is routed through bounded checkers", 
       `# BEGIN SYNVEDA ${state.project}\n127.0.0.1 app.synveda.test auth.synveda.test\n# END SYNVEDA ${state.project}\n`,
     );
     assert.equal(run(state, "up").status, 0);
+    writeFileSync(state.log, "");
     const smoke = run(state, "smoke");
     assert.equal(smoke.status, 0, smoke.stderr);
     const calls = readFileSync(state.log, "utf8");
+    const existingAssets = calls.indexOf("<--state> <existing>");
+    const convergedAssets = calls.indexOf("<--state> <converged>");
+    const runtimeSmoke = calls.indexOf("check-runtime-smoke.mjs");
+    assert.ok(
+      existingAssets >= 0 && convergedAssets > existingAssets &&
+        runtimeSmoke > convergedAssets,
+      calls,
+    );
     assert.match(calls, /docker .* <ps> <--all> <--format> <json>/);
     assert.match(calls, /node <.*check-runtime-smoke\.mjs>/);
   } finally {
@@ -708,17 +794,18 @@ test("gateway restart is locked, health-gated, and smoke-checked on both sides",
     assert.match(restarted.stdout, /canonical Compose gateway restart passed/);
 
     const calls = readFileSync(state.log, "utf8");
-    const preflightAssets = calls.indexOf("check-compose-assets.mjs");
+    const initialAssets = calls.indexOf("<--state> <existing>");
+    const preflightAssets = calls.indexOf("<--state> <converged>", initialAssets);
     const preflightResolver = calls.indexOf("check-host-resolution.mjs", preflightAssets + 1);
     const preflightSmoke = calls.indexOf("check-runtime-smoke.mjs");
     const restart = calls.indexOf(" <restart> <--no-deps> <--timeout> <30> <gateway>");
     const healthWait = calls.indexOf(
       " <up> <--detach> <--wait> <--wait-timeout> <120> <--no-deps> <--no-recreate> <gateway>",
     );
-    const postflightAssets = calls.indexOf("check-compose-assets.mjs", preflightAssets + 1);
+    const postflightAssets = calls.indexOf("<--state> <converged>", preflightAssets + 1);
     const postflightResolver = calls.indexOf("check-host-resolution.mjs", postflightAssets + 1);
     const postflightSmoke = calls.indexOf("check-runtime-smoke.mjs", preflightSmoke + 1);
-    assert.ok(preflightAssets >= 0, calls);
+    assert.ok(initialAssets >= 0 && preflightAssets > initialAssets, calls);
     assert.ok(preflightResolver > preflightAssets, calls);
     assert.ok(preflightSmoke > preflightResolver, calls);
     assert.ok(restart > preflightSmoke, calls);

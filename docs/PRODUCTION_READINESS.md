@@ -54,8 +54,13 @@ Keycloak image with closed realm/demo/user-profile convergence. Deterministic
 source tests also prove that reference host validators refuse ambient
 Node/OpenSSL trust activation before their first process or lock and run with
 Node's explicit bundled CA set. These tests and image self-tests establish
-those contracts, not public PKIX/browser trust, explicit custom-CA/proxy
-support, a clean-volume login or recovery claim. One
+those contracts. Deterministic rendered-model and lifecycle tests also prove
+that every canonical runtime service and development build explicitly closes
+Docker client proxy injection and that converged container inspection rejects
+runtime drift without disclosing values. No clean live run has yet exercised a
+private synthetic Docker client proxy configuration, so this is not public
+PKIX/browser trust, explicit custom-CA/proxy support, a clean-volume login or
+recovery evidence. One
 frozen Docker Desktop candidate also proved bounded PostgreSQL/Keycloak
 bootstrap, optimized
 Keycloak, realm convergence, issuer metadata, Collector, worker and gateway

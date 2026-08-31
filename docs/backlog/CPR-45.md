@@ -207,8 +207,16 @@ helper now starts through an explicit bundled-CA wrapper. Reference evidence
 actions refuse ambient Node/OpenSSL trust or proxy activation before their
 first process and project lock, while development and recovery scrub those
 controls. The runtime smoke independently refuses non-HTTPS reference URLs.
-This is deterministic host-probe closure, not public/browser trust or an
-explicit custom-CA/proxy contract. The current pinned Keycloak
+Every canonical service now also defines all ten upper/lower Docker proxy
+variables as exactly empty, every development build defines the matching empty
+build arguments, and rendered plus post-create asset checks refuse missing,
+non-empty, malformed or duplicate runtime entries without disclosure. The
+post-create check requires the complete container/network/volume graph before
+smoke and on both sides of gateway restart; deterministic contract failure
+remains recoverable while uncertain inspection retains the project lock. This
+is deterministic host/client-proxy closure, not public/browser trust, live
+synthetic Docker-config evidence or an explicit custom-CA/proxy contract. The
+current pinned Keycloak
 image includes a review-locked complete 26.7.2 user-profile contract: upstream
 built-ins remain intact, unmanaged attributes remain disabled, and the two
 demo ownership attributes are admin-only with closed validators. Realm repair
@@ -298,12 +306,14 @@ and the complete post-repair `make ci` gate passes with the generated API and
 
 ### Immediate next slice
 
-Before the next live candidate, close Docker client proxy auto-injection so an
-operator's client configuration cannot add undeclared proxy variables to
-reference containers. Then start the content-addressed candidate from empty
-volumes in the separate clean Docker context, install and prove the explicit
-`.test` host mapping on Docker Desktop, and complete a real browser
-authorization-code exchange through the committed demo/profile boundary.
+Start the content-addressed candidate from empty volumes in the separate clean
+Docker context with a private temporary Docker client configuration containing
+non-secret proxy markers. Prove every real created container retains the ten
+exact empty entries without reading or printing the operator's configuration;
+use a synthetic build-stage assertion because image history cannot prove the
+development-build boundary. Install and prove the explicit `.test` host mapping
+on Docker Desktop, then complete a real browser authorization-code exchange
+through the committed demo/profile boundary.
 Repeat the same resolver and lifecycle contract on Linux, then exercise
 reference HTTPS. Only after that replacement acceptance may the
 Rauthy/Temporal callers and assets be deleted atomically. Backup/isolated joint

@@ -69,6 +69,22 @@ const DB_TEST = join(ROOT, "scripts/db-test.sh");
 const INPUT_SNAPSHOT = join(COMPOSE, "postgres/synveda-input-snapshot.c");
 const CADDYFILE = join(COMPOSE, "configs/caddy/Caddyfile");
 const APP_DEV = join(COMPOSE, "configs/caddy/app.dev.caddy");
+const CLOSED_CONTAINER_PROXY_ENVIRONMENT = Object.freeze(
+  Object.fromEntries(
+    [
+      "HTTP_PROXY",
+      "http_proxy",
+      "HTTPS_PROXY",
+      "https_proxy",
+      "NO_PROXY",
+      "no_proxy",
+      "FTP_PROXY",
+      "ftp_proxy",
+      "ALL_PROXY",
+      "all_proxy",
+    ].map((name) => [name, ""]),
+  ),
+);
 const CARGO_DATABASE_URL_WRAPPER = join(ROOT, "scripts/cargo-with-database-url-file");
 const CLUSTER_AUTHORITY_CONTRACT = join(
   COMPOSE,
@@ -105,6 +121,23 @@ const CREDENTIAL_LOG_SETTINGS = [
   ["debug_print_rewritten", "off"],
   ["debug_print_plan", "off"],
 ];
+
+function closeContainerProxyEnvironment(model) {
+  for (const service of Object.values(model.services ?? {})) {
+    service.environment = {
+      ...CLOSED_CONTAINER_PROXY_ENVIRONMENT,
+      ...(service.environment ?? {}),
+    };
+  }
+}
+
+function closeDevelopmentBuildProxyArguments(model) {
+  for (const service of Object.values(model.services ?? {})) {
+    if (service.build !== undefined) {
+      service.build.args = { ...CLOSED_CONTAINER_PROXY_ENVIRONMENT };
+    }
+  }
+}
 
 function occurrenceCount(source, token) {
   return source.split(token).length - 1;
@@ -6748,6 +6781,8 @@ test("model findings reject privilege, port, command and secret regressions", ()
   };
   base.services.gateway.build = { dockerfile: "deploy/compose/gateway/Dockerfile" };
   base.services.worker.build = { dockerfile: "deploy/compose/gateway/Dockerfile" };
+  closeContainerProxyEnvironment(base);
+  closeDevelopmentBuildProxyArguments(base);
   const expected = {
     runtime: "development",
     postgres: "external",
@@ -6782,6 +6817,36 @@ test("model findings reject privilege, port, command and secret regressions", ()
     keycloakPublicGateDir: "/fixture/keycloak-public-gate",
   };
   assert.deepEqual(canonicalComposeFindings(base, expected), []);
+  for (const key of Object.keys(CLOSED_CONTAINER_PROXY_ENVIRONMENT)) {
+    const proxyMutant = structuredClone(base);
+    const sentinel = `private-proxy-credential-${key}`;
+    proxyMutant.services.gateway.environment[key] = sentinel;
+    const proxyFindings = canonicalComposeFindings(proxyMutant, expected);
+    assert.ok(proxyFindings.includes("gateway ambient proxy environment is not closed"));
+    assert.ok(!JSON.stringify(proxyFindings).includes(sentinel));
+  }
+  const missingProxyClosure = structuredClone(base);
+  delete missingProxyClosure.services.worker.environment.HTTPS_PROXY;
+  assert.ok(
+    canonicalComposeFindings(missingProxyClosure, expected).includes(
+      "worker ambient proxy environment is not closed",
+    ),
+  );
+  for (const key of Object.keys(CLOSED_CONTAINER_PROXY_ENVIRONMENT)) {
+    const buildMutant = structuredClone(base);
+    buildMutant.services.gateway.build.args[key] = `private-build-proxy-${key}`;
+    const buildFindings = canonicalComposeFindings(buildMutant, expected);
+    assert.ok(
+      buildFindings.includes("gateway ambient proxy build arguments are not closed"),
+    );
+  }
+  const missingBuildClosure = structuredClone(base);
+  delete missingBuildClosure.services.proxy.build.args.all_proxy;
+  assert.ok(
+    canonicalComposeFindings(missingBuildClosure, expected).includes(
+      "proxy ambient proxy build arguments are not closed",
+    ),
+  );
 
   const bundled = structuredClone(base);
   for (const name of [
@@ -7010,6 +7075,8 @@ test("model findings reject privilege, port, command and secret regressions", ()
     ],
     networks: { "identity-backend": {}, "keycloak-management": {} },
   });
+  closeContainerProxyEnvironment(bundled);
+  closeDevelopmentBuildProxyArguments(bundled);
   const bundledExpected = {
     ...expected,
     oidc: "bundled",

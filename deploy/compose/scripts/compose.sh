@@ -1375,6 +1375,12 @@ prove_assets_existing() {
         --docker-bin "$docker_bin" --state existing
 }
 
+prove_assets_converged() {
+    run_bounded "$lifecycle_timeout" "$node_runner" "$script_dir/check-compose-assets.mjs" \
+        --config-file "$asset_config_file" --project "$project" \
+        --docker-bin "$docker_bin" --state converged
+}
+
 prove_assets_stopped() {
     run_bounded "$lifecycle_timeout" "$node_runner" "$script_dir/check-compose-assets.mjs" \
         --config-file "$asset_config_file" --project "$project" \
@@ -1439,6 +1445,20 @@ case "$action" in
                 up --detach --wait --wait-timeout "$lifecycle_timeout" \
                 --force-recreate
         fi
+        asset_convergence_status=0
+        prove_assets_converged || asset_convergence_status=$?
+        case "$asset_convergence_status" in
+            0) ;;
+            78)
+                # The Docker mutation completed and exact immutable container
+                # inspection proved a deterministic contract violation. Leave
+                # the project recoverable through down or force-recreate.
+                docker_mutation_uncertain=false
+                docker_mutation_phase=
+                exit 78
+                ;;
+            *) exit "$asset_convergence_status" ;;
+        esac
         docker_mutation_uncertain=false
         docker_mutation_phase=
         echo "canonical Compose services converged for $project"
@@ -1457,12 +1477,14 @@ case "$action" in
         ;;
     smoke)
         prepare_asset_contract "$@"
+        prove_assets_converged
         run_resolver_preflight
         run_runtime_smoke "$@"
         echo "canonical Compose smoke passed for $project"
         ;;
     restart-gateway)
         prepare_asset_contract "$@"
+        prove_assets_converged
         run_resolver_preflight
         # Refuse to turn a pre-existing degraded graph into restart evidence.
         run_runtime_smoke "$@"
@@ -1485,7 +1507,7 @@ case "$action" in
             --no-deps --no-recreate gateway
         # Repeat the same captured asset, resolver and runtime checks after the
         # mutation. The pre-mutation render remains the comparison authority.
-        prove_assets_existing
+        prove_assets_converged
         run_resolver_preflight
         run_runtime_smoke "$@"
         capture_gateway_container_identity "$@"

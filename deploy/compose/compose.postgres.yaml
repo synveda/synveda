@@ -1,9 +1,22 @@
+x-synveda-postgres-ambient-proxy-closure: &synveda-postgres-ambient-proxy-closure
+  HTTP_PROXY: ""
+  http_proxy: ""
+  HTTPS_PROXY: ""
+  https_proxy: ""
+  NO_PROXY: ""
+  no_proxy: ""
+  FTP_PROXY: ""
+  ftp_proxy: ""
+  ALL_PROXY: ""
+  all_proxy: ""
+
 services:
   postgres:
     image: ${SYNVEDA_POSTGRES_IMAGE:?set SYNVEDA_POSTGRES_IMAGE}
     labels:
       com.synveda.contract: cpr-45
     environment:
+      <<: *synveda-postgres-ambient-proxy-closure
       POSTGRES_USER: synveda_owner
       POSTGRES_DB: postgres
       POSTGRES_PASSWORD_FILE: /run/secrets/postgres_owner_password
@@ -43,6 +56,7 @@ services:
     entrypoint: ["/usr/local/bin/synveda-database-bootstrap"]
     command: ["synveda"]
     environment:
+      <<: *synveda-postgres-ambient-proxy-closure
       SYNVEDA_POSTGRES_BOOTSTRAP_URL: ${SYNVEDA_POSTGRES_BOOTSTRAP_URL:?set SYNVEDA_POSTGRES_BOOTSTRAP_URL}
       SYNVEDA_POSTGRES_BUNDLED_CLUSTER: "true"
       SYNVEDA_DATABASE_ROLES_FILE: /run/secrets/database_roles.json

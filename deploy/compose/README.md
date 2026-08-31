@@ -88,6 +88,18 @@ The wrapper selects Node's fixed bundled CA snapshot and disables ambient Node
 proxy activation; ordinary proxy URL variables therefore do not reroute the
 host smoke. This is not a custom-CA or outbound-proxy interface.
 
+Docker client proxy configuration is not a canonical deployment input either.
+Every selected service explicitly sets the upper- and lower-case HTTP, HTTPS,
+NO, FTP and ALL proxy environment variables to the empty string. Every
+development build sets the same ten build arguments to the empty string;
+reference mode has no source builds. The rendered-contract gate rejects a
+missing or non-empty value. After `compose-up`, and before smoke or either side
+of a gateway restart, the asset gate requires the complete service, network and
+volume inventory and inspects every exact container's immutable `Config.Env`
+for one empty entry per name. This closes Docker CLI proxy auto-injection; it
+does not add supported outbound-proxy routing. The legacy contributor Compose
+file and the isolated database-test harness are outside this canonical wrapper.
+
 Every mutating lifecycle action and authority-file generator holds one
 operator-owned, exact-project lock across preparation and Docker mutation.
 The whole operation shares one monotonic 240–3600 second elapsed-time budget
@@ -99,6 +111,14 @@ inventories the complete rendered network/IPAM contract and every retained
 project network before startup. It refuses a concurrent owner, a stale or
 drifted network, an overlapping foreign network, or an asset that changes
 between validation and use; it never repairs those states by deletion.
+
+Asset state is explicit: `existing` permits an absent or partial exact project
+so recovery can proceed, `converged` requires every rendered container, network
+and volume plus the closed runtime proxy environment, and `stopped` requires
+containers and networks to be absent. A deterministic post-create contract
+refusal releases the lifecycle lock so the exact project can be taken down or
+force-recreated; an unavailable, timed-out or otherwise uncertain inspection
+retains the fail-closed lock.
 
 An uncatchable operator/process death, an unclean bounded child, a missing
 private completion witness, or any failed, timed-out or interrupted Docker

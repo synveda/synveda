@@ -139,6 +139,16 @@ proves schema epoch, its exact runtime role, a writable primary target, initial 
 convergence, process lifecycle and the supervisor heartbeat; that heartbeat is
 not evidence that every work loop made progress.
 
+Docker CLI proxy defaults can otherwise add credential-bearing proxy URLs to
+new container metadata and implicit build arguments. The canonical Compose
+graph explicitly empties the upper- and lower-case HTTP, HTTPS, NO, FTP and ALL
+proxy names for every runtime service and every development build. Rendered
+model checks reject absence or non-empty values, and converged-asset inspection
+requires one exact empty entry per name in every created container without
+printing a rejected value. This prevents ambient client configuration from
+becoming application routing or stored container metadata; explicit custom-CA
+and outbound-proxy support remain unimplemented.
+
 ## Residual and external limits
 
 - A PostgreSQL superuser, compromised gateway or worker process, or compromised

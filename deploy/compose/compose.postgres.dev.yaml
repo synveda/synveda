@@ -2,8 +2,22 @@
 # it on the database bootstrap service makes the same image tag available to
 # the server and Keycloak bootstrap without adding provider stubs to external
 # PostgreSQL rows.
+x-synveda-postgres-proxy-build-closure: &synveda-postgres-proxy-build-closure
+  HTTP_PROXY: ""
+  http_proxy: ""
+  HTTPS_PROXY: ""
+  https_proxy: ""
+  NO_PROXY: ""
+  no_proxy: ""
+  FTP_PROXY: ""
+  ftp_proxy: ""
+  ALL_PROXY: ""
+  all_proxy: ""
+
 services:
   database-bootstrap:
     build:
       context: ../..
       dockerfile: deploy/compose/postgres/Dockerfile
+      args:
+        <<: *synveda-postgres-proxy-build-closure

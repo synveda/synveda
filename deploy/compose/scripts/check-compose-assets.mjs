@@ -2,6 +2,19 @@
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 
+const CLOSED_PROXY_ENVIRONMENT = Object.freeze([
+  "HTTP_PROXY",
+  "http_proxy",
+  "HTTPS_PROXY",
+  "https_proxy",
+  "NO_PROXY",
+  "no_proxy",
+  "FTP_PROXY",
+  "ftp_proxy",
+  "ALL_PROXY",
+  "all_proxy",
+]);
+
 function fail(message, status = 78) {
   process.stderr.write(`compose-assets: ${message}\n`);
   process.exit(status);
@@ -26,7 +39,9 @@ function parseArgs(argv) {
     fail("expected --config-file, --project and --docker-bin", 64);
   }
   result.state ??= "existing";
-  if (!new Set(["existing", "stopped"]).has(result.state)) fail("state was refused", 64);
+  if (!new Set(["existing", "converged", "stopped"]).has(result.state)) {
+    fail("state was refused", 64);
+  }
   return result;
 }
 
@@ -51,13 +66,15 @@ function lines(output, grammar, label) {
   if (output === "") return [];
   const values = output.trimEnd().split("\n");
   if (values.some((value) => !grammar.test(value)) || new Set(values).size !== values.length) {
-    fail(`${label} inventory was malformed`);
+    fail(`${label} inventory was malformed`, 69);
   }
   return values;
 }
 
-function object(value, label) {
-  if (value === null || Array.isArray(value) || typeof value !== "object") fail(`${label} was malformed`);
+function object(value, label, malformedStatus = 78) {
+  if (value === null || Array.isArray(value) || typeof value !== "object") {
+    fail(`${label} was malformed`, malformedStatus);
+  }
   return value;
 }
 
@@ -66,8 +83,25 @@ function inventoryContainsIdentity(inventory, identity) {
   return matches.length === 1;
 }
 
-function exactLabel(labels, name, value, label) {
-  if (object(labels, `${label} labels`)[name] !== value) fail(`${label} label ${name} was refused`);
+function proxyEnvironmentIsClosed(environment) {
+  if (!Array.isArray(environment)) return false;
+  const expected = new Set(CLOSED_PROXY_ENVIRONMENT);
+  const seen = new Set();
+  for (const entry of environment) {
+    if (typeof entry !== "string") return false;
+    const separator = entry.indexOf("=");
+    const name = separator < 0 ? entry : entry.slice(0, separator);
+    if (!expected.has(name)) continue;
+    if (seen.has(name) || entry !== `${name}=`) return false;
+    seen.add(name);
+  }
+  return seen.size === expected.size;
+}
+
+function exactLabel(labels, name, value, label, malformedStatus = 78) {
+  if (object(labels, `${label} labels`, malformedStatus)[name] !== value) {
+    fail(`${label} label ${name} was refused`);
+  }
 }
 
 function emptyObjectOrNull(value) {
@@ -100,7 +134,22 @@ const volumes = object(config.volumes ?? {}, "rendered volumes");
 const expectedContainers = new Map();
 for (const [service, definition] of Object.entries(services)) {
   if (!/^[a-z0-9][a-z0-9-]{0,62}$/.test(service)) fail("rendered service name was refused");
-  exactLabel(object(definition, `service ${service}`).labels, "com.synveda.contract", "cpr-45", `service ${service}`);
+  const renderedService = object(definition, `service ${service}`);
+  exactLabel(renderedService.labels, "com.synveda.contract", "cpr-45", `service ${service}`);
+  const renderedEnvironment = object(
+    renderedService.environment,
+    `service ${service} environment`,
+  );
+  if (CLOSED_PROXY_ENVIRONMENT.some((name) => renderedEnvironment[name] !== "")) {
+    fail(`service ${service} ambient proxy environment was refused`);
+  }
+  if (renderedService.build !== undefined) {
+    const build = object(renderedService.build, `service ${service} build`);
+    const buildArguments = object(build.args, `service ${service} build arguments`);
+    if (CLOSED_PROXY_ENVIRONMENT.some((name) => buildArguments[name] !== "")) {
+      fail(`service ${service} ambient proxy build arguments were refused`);
+    }
+  }
   expectedContainers.set(`${args.project}-${service}-1`, service);
 }
 const expectedNetworks = new Map();
@@ -178,26 +227,35 @@ if (containerIds.size > 0) {
   try {
     inspected = JSON.parse(docker(args["docker-bin"], ["container", "inspect", ...containerIds]));
   } catch {
-    fail("project container inspection was malformed");
+    fail("project container inspection was malformed", 69);
   }
-  if (!Array.isArray(inspected) || inspected.length !== containerIds.size) fail("project container inspection was incomplete");
+  if (!Array.isArray(inspected) || inspected.length !== containerIds.size) {
+    fail("project container inspection was incomplete", 69);
+  }
   for (const container of inspected) {
-    object(container, "project container");
+    object(container, "project container", 69);
     if (!/^[0-9a-f]{64}$/.test(container.Id) || !inventoryContainsIdentity(containerIds, container.Id)) {
-      fail("project container identity was refused");
+      fail("project container identity was refused", 69);
     }
-    const labels = object(container.Config, "project container configuration").Labels;
-    exactLabel(labels, "com.docker.compose.project", args.project, "project container");
-    exactLabel(labels, "com.synveda.contract", "cpr-45", "project container");
-    exactLabel(labels, "com.docker.compose.oneoff", "False", "project container");
-    exactLabel(labels, "com.docker.compose.container-number", "1", "project container");
-    const service = object(labels, "project container labels")["com.docker.compose.service"];
+    const configuration = object(container.Config, "project container configuration", 69);
+    const labels = configuration.Labels;
+    exactLabel(labels, "com.docker.compose.project", args.project, "project container", 69);
+    exactLabel(labels, "com.synveda.contract", "cpr-45", "project container", 69);
+    exactLabel(labels, "com.docker.compose.oneoff", "False", "project container", 69);
+    exactLabel(labels, "com.docker.compose.container-number", "1", "project container", 69);
+    const service = object(labels, "project container labels", 69)["com.docker.compose.service"];
     if (typeof service !== "string" || expectedContainers.get(container.Name?.slice(1)) !== service) {
       fail("project container name or service was refused");
     }
     if (seenServices.has(service)) fail("duplicate project service container was refused");
+    if (args.state === "converged" && !proxyEnvironmentIsClosed(configuration.Env)) {
+      fail("project container ambient proxy environment was refused");
+    }
     seenServices.add(service);
   }
+}
+if (args.state === "converged" && seenServices.size !== expectedContainers.size) {
+  fail("project container inventory was incomplete");
 }
 
 const networkIds = new Set(
@@ -225,13 +283,15 @@ if (networkIds.size > 0) {
   try {
     inspected = JSON.parse(docker(args["docker-bin"], ["network", "inspect", ...networkIds]));
   } catch {
-    fail("project network inspection was malformed");
+    fail("project network inspection was malformed", 69);
   }
-  if (!Array.isArray(inspected) || inspected.length !== networkIds.size) fail("project network inspection was incomplete");
+  if (!Array.isArray(inspected) || inspected.length !== networkIds.size) {
+    fail("project network inspection was incomplete", 69);
+  }
   for (const network of inspected) {
-    object(network, "project network");
+    object(network, "project network", 69);
     if (!/^[0-9a-f]{64}$/.test(network.Id) || !inventoryContainsIdentity(networkIds, network.Id)) {
-      fail("project network identity was refused");
+      fail("project network identity was refused", 69);
     }
     const expected = expectedNetworks.get(network.Name);
     if (expected === undefined || seenNetworks.has(network.Name)) fail("project network name was refused");
@@ -244,10 +304,10 @@ if (networkIds.size > 0) {
       network.ConfigOnly !== false || !emptyObjectOrNull(network.Options) ||
       !(network.ConfigFrom === undefined || network.ConfigFrom?.Network === "")
     ) fail("project network runtime contract was refused");
-    const runtimeIpam = object(network.IPAM, "project network IPAM");
+    const runtimeIpam = object(network.IPAM, "project network IPAM", 69);
     const runtimeIpamConfig = Array.isArray(runtimeIpam.Config) &&
         runtimeIpam.Config.length === 1
-      ? object(runtimeIpam.Config[0], "project network IPAM configuration")
+      ? object(runtimeIpam.Config[0], "project network IPAM configuration", 69)
       : undefined;
     if (
       runtimeIpam.Driver !== "default" || !emptyObjectOrNull(runtimeIpam.Options) ||
@@ -258,11 +318,14 @@ if (networkIds.size > 0) {
         ? !(runtimeIpamConfig.IPRange === undefined || runtimeIpamConfig.IPRange === "")
         : runtimeIpamConfig.IPRange !== expected.ipRange)
     ) fail("project network runtime IPAM contract was refused");
-    exactLabel(network.Labels, "com.docker.compose.project", args.project, "project network");
-    exactLabel(network.Labels, "com.docker.compose.network", expected.logical, "project network");
-    exactLabel(network.Labels, "com.synveda.contract", "cpr-45", "project network");
-    exactLabel(network.Labels, "com.synveda.network", expected.logical, "project network");
+    exactLabel(network.Labels, "com.docker.compose.project", args.project, "project network", 69);
+    exactLabel(network.Labels, "com.docker.compose.network", expected.logical, "project network", 69);
+    exactLabel(network.Labels, "com.synveda.contract", "cpr-45", "project network", 69);
+    exactLabel(network.Labels, "com.synveda.network", expected.logical, "project network", 69);
   }
+}
+if (args.state === "converged" && seenNetworks.size !== expectedNetworks.size) {
+  fail("project network inventory was incomplete");
 }
 
 const volumeNames = new Set(
@@ -289,11 +352,13 @@ if (volumeNames.size > 0) {
   try {
     inspected = JSON.parse(docker(args["docker-bin"], ["volume", "inspect", ...volumeNames]));
   } catch {
-    fail("project volume inspection was malformed");
+    fail("project volume inspection was malformed", 69);
   }
-  if (!Array.isArray(inspected) || inspected.length !== volumeNames.size) fail("project volume inspection was incomplete");
+  if (!Array.isArray(inspected) || inspected.length !== volumeNames.size) {
+    fail("project volume inspection was incomplete", 69);
+  }
   for (const volume of inspected) {
-    object(volume, "project volume");
+    object(volume, "project volume", 69);
     const logical = expectedVolumes.get(volume.Name);
     if (logical === undefined || seenVolumes.has(volume.Name)) fail("project volume name was refused");
     seenVolumes.add(volume.Name);
@@ -304,9 +369,12 @@ if (volumeNames.size > 0) {
         (typeof volume.Options === "object" && !Array.isArray(volume.Options) && Object.keys(volume.Options).length === 0)
       )
     ) fail("project volume runtime contract was refused");
-    exactLabel(volume.Labels, "com.docker.compose.project", args.project, "project volume");
-    exactLabel(volume.Labels, "com.docker.compose.volume", logical, "project volume");
-    exactLabel(volume.Labels, "com.synveda.contract", "cpr-45", "project volume");
-    exactLabel(volume.Labels, "com.synveda.volume", logical, "project volume");
+    exactLabel(volume.Labels, "com.docker.compose.project", args.project, "project volume", 69);
+    exactLabel(volume.Labels, "com.docker.compose.volume", logical, "project volume", 69);
+    exactLabel(volume.Labels, "com.synveda.contract", "cpr-45", "project volume", 69);
+    exactLabel(volume.Labels, "com.synveda.volume", logical, "project volume", 69);
   }
+}
+if (args.state === "converged" && seenVolumes.size !== expectedVolumes.size) {
+  fail("project volume inventory was incomplete");
 }
