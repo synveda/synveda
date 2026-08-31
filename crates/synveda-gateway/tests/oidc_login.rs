@@ -22,7 +22,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use axum::Router;
 use axum::body::Body;
 use axum::extract::{Form, Query, State};
-use axum::http::{Request, StatusCode, header};
+use axum::http::{Method, Request, StatusCode, header};
 use axum::response::{IntoResponse, Json, Redirect, Response};
 use axum::routing::{get, post};
 use base64::Engine;
@@ -34,9 +34,11 @@ use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
-use synveda_gateway::app::{AppState, behavior_test_router as router};
+use synveda_gateway::app::{AppState, ConfiguredLogin, behavior_test_router as router};
 use synveda_gateway::telemetry;
-use synveda_identity::console::{CONSOLE_COOKIE, LOGIN_COOKIE};
+use synveda_identity::console::{
+    CONSOLE_COOKIE, DEVELOPMENT_CONSOLE_COOKIE, DEVELOPMENT_LOGIN_COOKIE, LOGIN_COOKIE,
+};
 use synveda_identity::{LoginFlow, OidcVerifier, TokenVerifier, parse_issuers};
 use synveda_types::{TenantId, TenantStatus};
 use tower::ServiceExt;
@@ -375,6 +377,16 @@ fn pool(url: &str) -> PgPool {
 /// Builds the gateway with one configured OIDC issuer. `refresh_interval`
 /// tunes the JWKS rate limit (zero = always refetch, huge = never twice).
 fn oidc_state(url: &str, issuer: &str, binding: &Binding, refresh_interval: Duration) -> AppState {
+    oidc_state_with_cookie_mode(url, issuer, binding, refresh_interval, false)
+}
+
+fn oidc_state_with_cookie_mode(
+    url: &str,
+    issuer: &str,
+    binding: &Binding,
+    refresh_interval: Duration,
+    explicit_development_http: bool,
+) -> AppState {
     let config = match binding {
         Binding::Claim => {
             format!(
@@ -396,7 +408,10 @@ fn oidc_state(url: &str, issuer: &str, binding: &Binding, refresh_interval: Dura
         pool: pool(url),
         metrics: metrics_handle(),
         verifier: verifier.clone(),
-        login: Some(Arc::new(LoginFlow::new(verifier, REDIRECT_URI.to_owned()))),
+        login: Some(Arc::new(ConfiguredLogin::for_behavior_test(
+            LoginFlow::new(verifier, REDIRECT_URI.to_owned()),
+            explicit_development_http,
+        ))),
         public_origin: "http://127.0.0.1:8120".to_owned(),
         pdp: Arc::new(synveda_policy::Pdp::new().expect("build the embedded PDP")),
         service_token_max_ttl: std::time::Duration::from_secs(3600),
@@ -444,6 +459,19 @@ fn cookie_request(uri: &str, cookie: Option<&str>) -> Request<Body> {
     builder.body(Body::empty()).unwrap()
 }
 
+fn cookie_mutation_request(uri: &str, cookie: &str, origin: Option<&str>) -> Request<Body> {
+    let builder = Request::builder()
+        .method(Method::POST)
+        .uri(uri)
+        .header(header::COOKIE, cookie)
+        .header(header::CONTENT_TYPE, "application/json");
+    let builder = match origin {
+        Some(origin) => builder.header(header::ORIGIN, origin),
+        None => builder,
+    };
+    builder.body(Body::from("{}")).expect("mutation request")
+}
+
 fn assert_private_response(response: &Response) {
     assert_eq!(response.headers()[header::CACHE_CONTROL], "no-store");
     assert_eq!(response.headers()[header::PRAGMA], "no-cache");
@@ -458,8 +486,8 @@ fn set_cookie_values(response: &Response) -> Vec<String> {
         .collect()
 }
 
-fn assert_login_cookie_cleared(response: &Response) {
-    let expected = format!("{LOGIN_COOKIE}=;");
+fn assert_login_cookie_cleared_with_mode(response: &Response, cookie_name: &str, secure: bool) {
+    let expected = format!("{cookie_name}=;");
     let matching: Vec<_> = set_cookie_values(response)
         .into_iter()
         .filter(|value| value.starts_with(&expected))
@@ -470,12 +498,16 @@ fn assert_login_cookie_cleared(response: &Response) {
         "Max-Age=0",
         "Expires=Thu, 01 Jan 1970 00:00:00 GMT",
         "Path=/",
-        "Secure",
         "HttpOnly",
         "SameSite=Lax",
     ] {
         assert!(cookie.contains(attribute), "{attribute} missing: {cookie}");
     }
+    assert_eq!(cookie.contains("; Secure"), secure, "cookie: {cookie}");
+}
+
+fn assert_login_cookie_cleared(response: &Response) {
+    assert_login_cookie_cleared_with_mode(response, LOGIN_COOKIE, true);
 }
 
 struct ConsoleCallback {
@@ -521,6 +553,14 @@ async fn drive_to_callback(app: &Router, expect_challenge: bool) -> String {
 }
 
 async fn drive_console_to_callback(app: &Router) -> ConsoleCallback {
+    drive_console_to_callback_with_mode(app, LOGIN_COOKIE, true).await
+}
+
+async fn drive_console_to_callback_with_mode(
+    app: &Router,
+    cookie_name: &str,
+    secure: bool,
+) -> ConsoleCallback {
     let response = app
         .clone()
         .oneshot(get_request("/auth/login?console=true", None))
@@ -541,25 +581,20 @@ async fn drive_console_to_callback(app: &Router) -> ConsoleCallback {
         .expect("cookie pair")
         .to_owned();
     let secret = cookie
-        .strip_prefix(&format!("{LOGIN_COOKIE}="))
+        .strip_prefix(&format!("{cookie_name}="))
         .expect("login-correlation cookie name");
     assert_eq!(secret.len(), 43, "32-byte base64url correlation");
     assert!(
         !location.contains(secret),
         "correlation leaked into redirect"
     );
-    for attribute in [
-        "Max-Age=600",
-        "Path=/",
-        "Secure",
-        "HttpOnly",
-        "SameSite=Lax",
-    ] {
+    for attribute in ["Max-Age=600", "Path=/", "HttpOnly", "SameSite=Lax"] {
         assert!(
             set_cookie.contains(attribute),
             "{attribute} missing: {set_cookie}"
         );
     }
+    assert_eq!(set_cookie.contains("; Secure"), secure, "{set_cookie}");
     assert!(!set_cookie.contains("Domain="), "host-only cookie required");
 
     ConsoleCallback {
@@ -715,12 +750,38 @@ async fn static_tenant_binding_login_yields_a_session_too() {
 
 #[tokio::test]
 async fn successful_console_callback_sets_the_session_and_clears_its_login_binding() {
+    assert_successful_console_callback(false, LOGIN_COOKIE, CONSOLE_COOKIE, true).await;
+}
+
+#[tokio::test]
+async fn explicit_development_http_uses_distinct_host_only_console_cookies() {
+    assert_successful_console_callback(
+        true,
+        DEVELOPMENT_LOGIN_COOKIE,
+        DEVELOPMENT_CONSOLE_COOKIE,
+        false,
+    )
+    .await;
+}
+
+async fn assert_successful_console_callback(
+    explicit_development_http: bool,
+    login_cookie_name: &str,
+    console_cookie_name: &str,
+    secure: bool,
+) {
     let _serial = serial().await;
     let Some((db_url, tenant_id)) = admitted_tenant().await else {
         return;
     };
     let idp = MockIdp::spawn(Some(tenant_id.to_string())).await;
-    let state = oidc_state(&db_url, &idp.issuer, &Binding::Claim, Duration::ZERO);
+    let state = oidc_state_with_cookie_mode(
+        &db_url,
+        &idp.issuer,
+        &Binding::Claim,
+        Duration::ZERO,
+        explicit_development_http,
+    );
     state
         .keys
         .provision(&state.pool, synveda_crypto::KeyScope::Deployment)
@@ -728,10 +789,10 @@ async fn successful_console_callback_sets_the_session_and_clears_its_login_bindi
         .expect("provision deployment key for sealed console tokens");
     let app = router(state);
 
-    let callback = drive_console_to_callback(&app).await;
+    let callback = drive_console_to_callback_with_mode(&app, login_cookie_name, secure).await;
     let correlation_secret = callback
         .cookie
-        .strip_prefix(&format!("{LOGIN_COOKIE}="))
+        .strip_prefix(&format!("{login_cookie_name}="))
         .expect("correlation pair")
         .to_owned();
     let response = app
@@ -742,26 +803,25 @@ async fn successful_console_callback_sets_the_session_and_clears_its_login_bindi
     assert_eq!(response.status(), StatusCode::TEMPORARY_REDIRECT);
     assert_eq!(response.headers()[header::LOCATION], "/console/");
     assert_private_response(&response);
-    assert_login_cookie_cleared(&response);
+    assert_login_cookie_cleared_with_mode(&response, login_cookie_name, secure);
 
     let cookies = set_cookie_values(&response);
     assert_eq!(cookies.len(), 2, "callback must set and clear two cookies");
     let session_cookie = cookies
         .iter()
-        .find(|value| value.starts_with(&format!("{CONSOLE_COOKIE}=")))
+        .find(|value| value.starts_with(&format!("{console_cookie_name}=")))
         .expect("final console-session cookie");
-    for attribute in [
-        "Max-Age=43200",
-        "Path=/",
-        "Secure",
-        "HttpOnly",
-        "SameSite=Strict",
-    ] {
+    for attribute in ["Max-Age=43200", "Path=/", "HttpOnly", "SameSite=Strict"] {
         assert!(
             session_cookie.contains(attribute),
             "{attribute} missing: {session_cookie}"
         );
     }
+    assert_eq!(
+        session_cookie.contains("; Secure"),
+        secure,
+        "{session_cookie}"
+    );
     assert!(!session_cookie.contains("Domain="));
     assert!(
         cookies
@@ -769,6 +829,54 @@ async fn successful_console_callback_sets_the_session_and_clears_its_login_bindi
             .all(|value| !value.contains(&correlation_secret)),
         "the initiating-browser secret must not be reflected"
     );
+
+    let session_pair = session_cookie
+        .split(';')
+        .next()
+        .expect("session cookie pair")
+        .to_owned();
+    let whoami = app
+        .clone()
+        .oneshot(cookie_request("/v1/whoami", Some(&session_pair)))
+        .await
+        .expect("cookie-authenticated whoami");
+    assert_eq!(whoami.status(), StatusCode::OK);
+    assert_eq!(body_json(whoami).await["subject"], SUBJECT);
+
+    let missing_origin = app
+        .clone()
+        .oneshot(cookie_mutation_request("/v1/sessions", &session_pair, None))
+        .await
+        .expect("cookie mutation without origin");
+    assert_eq!(missing_origin.headers()[header::WWW_AUTHENTICATE], "Bearer");
+    let (status, kind) = status_and_kind(missing_origin).await;
+    assert_eq!(
+        (status, kind.as_str()),
+        (StatusCode::UNAUTHORIZED, "unauthenticated")
+    );
+
+    let logout = app
+        .clone()
+        .oneshot(cookie_mutation_request(
+            "/auth/console/logout",
+            &session_pair,
+            None,
+        ))
+        .await
+        .expect("console logout");
+    assert_eq!(logout.status(), StatusCode::NO_CONTENT);
+    assert!(
+        set_cookie_values(&logout)
+            .iter()
+            .any(|value| value.starts_with(&format!("{console_cookie_name}=; Max-Age=0"))),
+        "logout must clear the selected cookie name"
+    );
+    let signed_out = app
+        .clone()
+        .oneshot(cookie_request("/v1/whoami", Some(&session_pair)))
+        .await
+        .expect("signed-out whoami");
+    assert_eq!(signed_out.status(), StatusCode::UNAUTHORIZED);
 
     let replay = app
         .oneshot(cookie_request(&callback.uri, Some(&callback.cookie)))

@@ -30,6 +30,8 @@ dependency-provider fragments are orthogonal:
 compose.yaml             provider-neutral proxy, product, migration and Collector graph
 compose.reference.yaml   HTTPS, resource bounds and reference restart policy
 compose.dev.yaml         source builds, explicit HTTP and loopback operator UI
+compose.postgres.dev.yaml local PostgreSQL image build, development only
+compose.keycloak.dev.yaml local optimized Keycloak and database-bootstrap helper builds, development only
 compose.postgres.yaml    bundled PostgreSQL and idempotent role/database bootstrap
 compose.keycloak.yaml    bundled Keycloak, isolated database bootstrap and realm convergence
 compose.keycloak-postgres.yaml             bundled shared-cluster ordering/secret bridge
@@ -53,10 +55,15 @@ their simultaneous use. Provider fragments are then selected independently:
 | Mode | Required file set after `compose.yaml` |
 |---|---|
 | bundled reference | `compose.reference.yaml`, `compose.postgres.yaml`, `compose.keycloak.yaml`, `compose.keycloak-postgres.yaml` |
-| bundled development | `compose.dev.yaml`, `compose.postgres.yaml`, `compose.keycloak.yaml`, `compose.keycloak-postgres.yaml` |
+| bundled development | `compose.dev.yaml`, `compose.postgres.dev.yaml`, `compose.keycloak.dev.yaml`, `compose.postgres.yaml`, `compose.keycloak.yaml`, `compose.keycloak-postgres.yaml` |
 | bundled PostgreSQL, external OIDC | one runtime overlay, `compose.postgres.yaml`, `compose.external.yaml` |
 | external PostgreSQL, bundled Keycloak (configuration only) | one runtime overlay, `compose.keycloak.yaml`, `compose.keycloak-external-postgres.yaml`, `compose.external-postgres.yaml`, `compose.external.yaml` |
 | fully external (configuration only while PostgreSQL is external) | one runtime overlay, `compose.external-postgres.yaml`, `compose.external.yaml` |
+
+For every development row, selection inserts `compose.postgres.dev.yaml`
+before the provider fragments when PostgreSQL is bundled and
+`compose.keycloak.dev.yaml` when OIDC is bundled. Reference rows select no
+source-build fragment and require digest-addressed images.
 
 Base `compose.yaml` owns product mounts, database preflight and issuer
 diagnostics. `compose.external.yaml` adds provider labels only and never defines
@@ -103,7 +110,7 @@ digest, OCI index digest and accepted platform digests.
 
 | Image role | Required contents | Commands |
 |---|---|---|
-| Synveda product | Current: `synveda`, `synveda-gateway`, `synveda-worker`, `synveda-oidc-diagnostic`; console static bundle and embedded policies. Planned CPR-45: experimental Apalis adapter, disabled by default | Current launcher roles: `gateway`; `worker`; `issuer-diagnostic`; `database-preflight`; `migrate`; `probe gateway\|worker live\|ready`. Planned, not yet shipped: `operation-dispatcher`; `apalis-worker` |
+| Synveda product | Current: `synveda`, `synveda-gateway`, `synveda-worker`, `synveda-oidc-diagnostic`; console static bundle and embedded policies. Planned CPR-45: experimental Apalis adapter, disabled by default | Current launcher roles: `gateway`; `worker`; `issuer-diagnostic`; `database-preflight`; `migrate`; `tenant-converge`; `probe gateway\|worker live\|ready`. Planned, not yet shipped: `operation-dispatcher`; `apalis-worker` |
 | PostgreSQL | PostgreSQL 17, pgvector, `btree_gin`, pinned pgBackRest | server entrypoint; database/role bootstrap; `synveda-backup` archive/check/create/verify/expire/restore commands |
 | Keycloak | Official Keycloak 26.7.2 optimized build with PostgreSQL, health and metrics; no added provider/package; reviewed standalone convergence/readback helpers | `kc.sh start --optimized` through a secret-file entrypoint; long-running `synveda-realm-supervise` controller with a bounded generation-fenced `synveda-realm-converge` child |
 | Reverse proxy | Pinned Apache-2.0 Caddy release and reviewed configuration | `caddy run --config /etc/caddy/Caddyfile --adapter caddyfile` |
@@ -120,6 +127,19 @@ the selected binary; it does not interpret deployment type or print secrets.
 `apalis-worker` executes only the declared experimental operation kind. Image
 health is not hard-coded to the gateway: Compose and later Kubernetes attach a
 role-specific probe to each service.
+
+`tenant-converge` delegates to the provider-neutral `synveda tenant converge`
+command. It admits one exact UUIDv7/slug/name tuple through the existing
+migrator-authority, forced-RLS and `tenant.created` audit path, is idempotent
+only for that exact active tenant, and requires encryption-key provisioning to
+succeed. An existing wrapped key is not sufficient: every convergence proves
+current-key unwrap custody, reads the authoritative generation-one KEK
+reference, and serializes one exact content-free provision witness on the
+tenant audit-chain head. The audit crate exposes this as a key-provision-only
+repair operation rather than a generic idempotent append, so ordinary governed
+mutations retain the same-transaction audit rule. The command is an image
+contract; the canonical topology does not yet select a bootstrap job, so it is
+preparation rather than install evidence.
 
 Capture remains its existing durable aggregate rather than becoming an Apalis
 task. Its current claim is fenced by tenant, batch, process-unique owner and

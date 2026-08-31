@@ -476,6 +476,10 @@ pub fn init_metrics() -> Result<PrometheusHandle> {
         "Audit appends that failed on a best-effort path (the event is lost, never the response)"
     );
     metrics::describe_counter!(
+        synveda_audit::TENANT_KEY_PROVISION_WITNESSES_TOTAL,
+        "Generation-one key-provision audit witnesses converged by result"
+    );
+    metrics::describe_counter!(
         synveda_audit::AUDIT_VERIFICATIONS_TOTAL,
         "Audit chain verifications by outcome (valid/broken)"
     );

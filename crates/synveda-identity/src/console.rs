@@ -28,11 +28,19 @@ const SECRET_BYTES: usize = 32;
 /// browser refuse its own mistake.
 pub const CONSOLE_COOKIE: &str = "__Host-synveda_console";
 
+/// Host-only session-cookie name used only when the gateway accepted the
+/// explicit plaintext development relaxation. It is distinct so a stale
+/// development cookie can never be interpreted after HTTPS promotion.
+pub const DEVELOPMENT_CONSOLE_COOKIE: &str = "synveda_console_dev";
+
 /// Browser-correlation cookie for a console OIDC login.
 ///
 /// This is deliberately distinct from [`CONSOLE_COOKIE`]: it lives only for
 /// the authorization redirect round trip and never names a console session.
 pub const LOGIN_COOKIE: &str = "__Host-synveda_login";
+
+/// Host-only OIDC-correlation cookie for explicit plaintext development.
+pub const DEVELOPMENT_LOGIN_COOKIE: &str = "synveda_login_dev";
 
 /// A freshly minted session secret and the hash to store for it.
 pub struct ConsoleSecret {

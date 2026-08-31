@@ -166,6 +166,20 @@ gateway/worker/migration, reverse-proxy-only host ports and no Rauthy/Temporal
 entry in the new graph. `synveda db migrate`, reset and other executable direct
 store commands resolve `DATABASE_URL` or bounded `DATABASE_URL_FILE` with
 ambiguity and content-free failure tests; `init` is closed before resolution.
+Development selection now closes the local build graph for the product,
+proxy, PostgreSQL and optimized Keycloak images. A content-free issuer helper
+atomically generates the exact project-scoped static-tenant contract, while
+`synveda tenant converge` reuses migrator authority, tenant forced-RLS and the
+normal `tenant.created` audit event to admit only one exact active UUIDv7,
+requiring current-key unwrap custody before success. Its repairable
+generation-one audit witness uses a key-provision-specific API, the stored KEK
+reference and the serialized tenant chain head; arbitrary mutations cannot use
+that exception to escape same-transaction audit. Explicit development HTTP now
+uses names distinct from the HTTPS `__Host-` cookies and retains host-only,
+HttpOnly, SameSite, lifetime, duplicate-rejection and origin protections. No
+canonical service invokes tenant convergence yet and the wrapper remains
+configuration-only; these are bounded preparation seams, not lifecycle or
+browser evidence.
 External-PostgreSQL rows remain configuration-only and the bootstrap now
 refuses before mounted-input reads or SQL until an authenticated-TLS transport
 exists; an ordinary pre-provisioned CREATEROLE/CREATEDB principal is covered by
@@ -245,11 +259,14 @@ fixture failures were likewise retained without reuse. The final fresh
 database gate passed all ordinary workspace tests, every serial
 administrator/drift suite, epoch/reset acceptance and exact success cleanup.
 The collision-resistant database-network allocator has independently reviewed
-source and fake-engine concurrency evidence. Compose contract is 35/35 and
-deployment convergence is 38/38. A separate fresh deterministic
-authentic-frame Claude lifecycle passed 1/1 and self-cleaned, and the complete
-post-repair `make ci` gate passes with the generated API and 657-record SQLx
-cache current.
+source and fake-engine concurrency evidence. The latest fresh exact-role
+database gate passed the complete live matrix and self-cleaned after exercising
+restart readiness, OIDC 16/16, Capture 7/7 plus its deliberate serial case and
+both directory-sync binaries 10/10. Compose contract is 36/36, issuer
+generation is 4/4 and deployment convergence is 41/41. A separate fresh
+deterministic authentic-frame Claude lifecycle passed 1/1 and self-cleaned,
+and the complete post-repair `make ci` gate passes with the generated API and
+657-record SQLx cache current.
 
 ### Immediate next slice
 

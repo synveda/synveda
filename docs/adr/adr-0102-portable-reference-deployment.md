@@ -36,6 +36,20 @@ provider-wide scope is necessary but never sufficient. The bundled public
 Keycloak client omits it and uses ordinary authorization-code refresh tokens;
 live identity acceptance must prove that behavior.
 
+This ADR also amends ADR-0056 decision 2 for one explicitly selected
+development-only case. HTTPS retains the exact
+`__Host-synveda_console`/`__Host-synveda_login`, `Secure`, host-only,
+`HttpOnly`, `SameSite`, path and lifetime contract. When startup validation
+accepts a non-loopback plaintext public URL only because
+`SYNVEDA_INSECURE_DEVELOPMENT_HTTP=true`, the gateway instead uses the
+distinct `synveda_console_dev` and `synveda_login_dev` names, sets no `Domain`
+attribute, and omits only `Secure`. Any HTTP origin selects these names when
+the flag is explicitly true; non-loopback HTTP additionally requires the flag
+to pass startup validation. Origin enforcement, token re-verification,
+duplicate-cookie refusal, `HttpOnly`, `SameSite`, path and lifetimes are
+unchanged. HTTPS never selects this relaxation merely because the setting is
+present, and development cookies cannot become HTTPS session credentials.
+
 The reference bundles an optimized production-mode Keycloak and replaces
 Rauthy completely after conformance. Synveda remains a generic OIDC/OAuth 2.0
 authorization-code + PKCE client: Keycloak groups may signal the one-time first
@@ -98,6 +112,17 @@ installation. Gateway and worker are distinct non-owner `synveda_app` members
 with direct CONNECT only to Synveda; the same authority split applies to
 Compose and Helm and is validated before either runtime becomes ready.
 
+Deployment tenant convergence uses the key-plane repair contract in ADR-0064
+amendment 3. It first proves current-key unwrap custody, then reads the
+authoritative generation-1 row and converges its exact content-free
+`tenant.key.provisioned` witness while holding the tenant audit-chain head.
+This is the narrow repairable exception to same-transaction mutation/audit:
+an external KMS call is never held inside the tenant-admission transaction,
+and a crash after the key commit is repaired by the exact rerun. Historic
+exact duplicate witnesses are retained without extension; malformed
+generation-1 candidates fail closed, while a later-generation legacy event is
+a different fact and cannot prevent generation-1 repair.
+
 ## Options considered
 
 1. **Keep contributor and installed Compose separate** — preserves current
@@ -125,6 +150,10 @@ Compose and Helm and is validated before either runtime becomes ready.
   reserves it for each resolver's own loopback; accepting a Docker DNS alias
   as an override would make the exact-issuer contract platform-dependent.
   Reference/playground uses real DNS and HTTPS.
+- Explicit plaintext development is not a secure transport. Its distinct
+  host-only cookie names make the limitation usable for local validation
+  without weakening or reusing the HTTPS cookie contract; it is never
+  reference/playground evidence.
 - One physical PostgreSQL cluster means one WAL/PITR recovery unit even with
   correctly isolated databases and roles. Independent RPOs later require
   separate clusters.

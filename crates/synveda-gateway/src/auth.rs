@@ -33,7 +33,7 @@ use synveda_identity::{
 };
 use synveda_types::{Error, IdentityId, ScopeId, Tenant};
 
-use crate::app::AppState;
+use crate::app::{AppState, ConsoleCookieMode};
 use crate::error::ApiError;
 use crate::provision;
 use crate::tenant;
@@ -184,7 +184,11 @@ pub async fn login(State(state): State<AppState>, Query(params): Query<LoginPara
                 Ok(correlation) => correlation,
                 Err(error) => return private_response(ApiError(error).into_response()),
             };
-            let cookie = match login_cookie_header(&correlation.secret, PENDING_LOGIN_MAX_SECS) {
+            let cookie = match login_cookie_header(
+                &correlation.secret,
+                PENDING_LOGIN_MAX_SECS,
+                flow.cookie_mode(),
+            ) {
                 Ok(cookie) => cookie,
                 Err(error) => return private_response(ApiError(error).into_response()),
             };
@@ -260,7 +264,8 @@ pub async fn callback(
     // Read the CLI's return address before anything consumes the pending
     // login: a login can fail in half a dozen ways below, and all of them
     // have to land back in the terminal, not on a page nobody sees.
-    let presented_correlation = login_correlation_cookie(&headers);
+    let cookie_mode = flow.cookie_mode();
+    let presented_correlation = login_correlation_cookie(&headers, cookie_mode);
     let destination = params
         .state
         .as_deref()
@@ -299,6 +304,7 @@ pub async fn callback(
                 message: "the identity provider rejected the authorization request".to_owned(),
             }),
             matched_console && consumed,
+            cookie_mode,
         );
     }
     let (Some(code), Some(login_state)) = (params.code.as_deref(), params.state.as_deref()) else {
@@ -311,6 +317,7 @@ pub async fn callback(
                 message: "callback requires code and state".to_owned(),
             }),
             matched_console && consumed,
+            cookie_mode,
         );
     };
     let session = match flow
@@ -318,11 +325,11 @@ pub async fn callback(
         .await
     {
         Ok(session) => session,
-        Err(error) => return finish_callback(refuse(error), matched_console),
+        Err(error) => return finish_callback(refuse(error), matched_console, cookie_mode),
     };
     let context = match tenant::active_tenant(&state, &session.claims).await {
         Ok(context) => context,
-        Err(error) => return finish_callback(refuse(error), matched_console),
+        Err(error) => return finish_callback(refuse(error), matched_console, cookie_mode),
     };
     // A completed login always carries IdP claims (the ID token was just
     // verified); JIT provisioning places first-time subjects (AUTH-2,
@@ -333,6 +340,7 @@ pub async fn callback(
                 message: "login completed without provisioning claims".to_owned(),
             }),
             matched_console,
+            cookie_mode,
         );
     };
     let provisioned = match provision::provision(
@@ -344,7 +352,7 @@ pub async fn callback(
     .await
     {
         Ok(provisioned) => provisioned,
-        Err(error) => return finish_callback(refuse(error), matched_console),
+        Err(error) => return finish_callback(refuse(error), matched_console, cookie_mode),
     };
     let completed = SessionResponse {
         subject: session.claims.subject,
@@ -374,10 +382,17 @@ pub async fn callback(
         // A console login gets a cookie, and only a cookie: the tokens
         // stay here (ADR-0056 decisions 2 and 3).
         LoginDestination::Console(_) => {
-            open_console_session(&state, completed, session.issuer, session.refresh_token).await
+            open_console_session(
+                &state,
+                completed,
+                session.issuer,
+                session.refresh_token,
+                cookie_mode,
+            )
+            .await
         }
     };
-    finish_callback(response, matched_console)
+    finish_callback(response, matched_console, cookie_mode)
 }
 
 /// Opens a console session: mint a secret, store what it names, set the
@@ -392,6 +407,7 @@ async fn open_console_session(
     session: SessionResponse,
     issuer: String,
     refresh_token: Option<String>,
+    cookie_mode: ConsoleCookieMode,
 ) -> Response {
     let secret = match synveda_identity::console::mint() {
         Ok(secret) => secret,
@@ -456,7 +472,7 @@ async fn open_console_session(
 
     metrics::counter!(CONSOLE_SESSIONS_TOTAL, "outcome" => "opened").increment(1);
     let mut response = Redirect::temporary(CONSOLE_HOME).into_response();
-    match set_cookie_header(&secret.secret, CONSOLE_SESSION_MAX_SECS) {
+    match set_cookie_header(&secret.secret, CONSOLE_SESSION_MAX_SECS, cookie_mode) {
         Ok(value) => {
             response.headers_mut().insert(header::SET_COOKIE, value);
             private_response(response)
@@ -475,7 +491,11 @@ async fn open_console_session(
 /// gateway already reaped all end in the same place — signed out.
 #[tracing::instrument(name = "auth.console.logout", skip_all)]
 pub async fn console_logout(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    if let Some(secret) = console_cookie(&headers) {
+    let cookie_mode = state
+        .login
+        .as_ref()
+        .map_or(ConsoleCookieMode::Https, |login| login.cookie_mode());
+    if let Some(secret) = console_cookie(&headers, cookie_mode) {
         let hash = synveda_identity::console::hash(secret);
         match synveda_store::console_sessions::delete(&state.pool, &hash).await {
             Ok(existed) => {
@@ -492,22 +512,40 @@ pub async fn console_logout(State(state): State<AppState>, headers: HeaderMap) -
         }
     }
     let mut response = StatusCode::NO_CONTENT.into_response();
-    if let Ok(value) = set_cookie_header("", 0) {
+    if let Ok(value) = set_cookie_header("", 0, cookie_mode) {
         response.headers_mut().insert(header::SET_COOKIE, value);
     }
     response
 }
 
 /// Reads the console cookie off a request.
-pub(crate) fn console_cookie(headers: &HeaderMap) -> Option<&str> {
-    named_cookie(headers, synveda_identity::console::CONSOLE_COOKIE)
+pub(crate) fn console_cookie(headers: &HeaderMap, cookie_mode: ConsoleCookieMode) -> Option<&str> {
+    named_cookie(headers, console_cookie_name(cookie_mode))
 }
 
 /// Reads the short-lived console-login correlation cookie. Missing,
 /// malformed and duplicated values all deliberately collapse to absence.
-fn login_correlation_cookie(headers: &HeaderMap) -> Option<&str> {
-    named_cookie(headers, synveda_identity::console::LOGIN_COOKIE)
+fn login_correlation_cookie(headers: &HeaderMap, cookie_mode: ConsoleCookieMode) -> Option<&str> {
+    named_cookie(headers, login_cookie_name(cookie_mode))
         .filter(|secret| synveda_identity::console::presented_hash(secret).is_some())
+}
+
+fn console_cookie_name(cookie_mode: ConsoleCookieMode) -> &'static str {
+    match cookie_mode {
+        ConsoleCookieMode::Https => synveda_identity::console::CONSOLE_COOKIE,
+        ConsoleCookieMode::ExplicitDevelopmentHttp => {
+            synveda_identity::console::DEVELOPMENT_CONSOLE_COOKIE
+        }
+    }
+}
+
+fn login_cookie_name(cookie_mode: ConsoleCookieMode) -> &'static str {
+    match cookie_mode {
+        ConsoleCookieMode::Https => synveda_identity::console::LOGIN_COOKIE,
+        ConsoleCookieMode::ExplicitDevelopmentHttp => {
+            synveda_identity::console::DEVELOPMENT_LOGIN_COOKIE
+        }
+    }
 }
 
 /// Reads exactly one named cookie across every Cookie header field.
@@ -538,15 +576,21 @@ fn named_cookie<'a>(headers: &'a HeaderMap, expected_name: &str) -> Option<&'a s
 /// Renders the `Set-Cookie` value. `max_age` of 0 with an empty secret is
 /// the clear.
 ///
-/// `__Host-` forces `Secure`, which means the console does not work over
-/// plain HTTP — including `http://localhost`, where browsers make an
-/// exception for `Secure` but not for the prefix's other rules. That is a
-/// deliberate cost: a session cookie that a captive portal can read is not
-/// a session cookie, and OPS-1's install path already terminates TLS.
-fn set_cookie_header(secret: &str, max_age: i64) -> Result<header::HeaderValue, Error> {
+/// HTTPS uses the browser-enforced `__Host-`/`Secure` pair. Only the startup-
+/// validated explicit development HTTP mode uses a distinct host-only name,
+/// retaining every other session and CSRF attribute.
+fn set_cookie_header(
+    secret: &str,
+    max_age: i64,
+    cookie_mode: ConsoleCookieMode,
+) -> Result<header::HeaderValue, Error> {
+    let secure = match cookie_mode {
+        ConsoleCookieMode::Https => "; Secure",
+        ConsoleCookieMode::ExplicitDevelopmentHttp => "",
+    };
     let value = format!(
-        "{}={secret}; Max-Age={max_age}; Path=/; Secure; HttpOnly; SameSite=Strict",
-        synveda_identity::console::CONSOLE_COOKIE,
+        "{}={secret}; Max-Age={max_age}; Path=/{secure}; HttpOnly; SameSite=Strict",
+        console_cookie_name(cookie_mode),
     );
     header::HeaderValue::from_str(&value).map_err(|err| Error::Internal {
         message: format!("cookie value is not a valid header: {err}"),
@@ -554,10 +598,18 @@ fn set_cookie_header(secret: &str, max_age: i64) -> Result<header::HeaderValue, 
 }
 
 /// Renders the short-lived browser binding for a console OIDC round trip.
-fn login_cookie_header(secret: &str, max_age: i64) -> Result<header::HeaderValue, Error> {
+fn login_cookie_header(
+    secret: &str,
+    max_age: i64,
+    cookie_mode: ConsoleCookieMode,
+) -> Result<header::HeaderValue, Error> {
+    let secure = match cookie_mode {
+        ConsoleCookieMode::Https => "; Secure",
+        ConsoleCookieMode::ExplicitDevelopmentHttp => "",
+    };
     let value = format!(
-        "{}={secret}; Max-Age={max_age}; Path=/; Secure; HttpOnly; SameSite=Lax",
-        synveda_identity::console::LOGIN_COOKIE,
+        "{}={secret}; Max-Age={max_age}; Path=/{secure}; HttpOnly; SameSite=Lax",
+        login_cookie_name(cookie_mode),
     );
     header::HeaderValue::from_str(&value).map_err(|err| Error::Internal {
         message: format!("login cookie value is not a valid header: {err}"),
@@ -567,8 +619,12 @@ fn login_cookie_header(secret: &str, max_age: i64) -> Result<header::HeaderValue
 /// Applies the cache and browser-secret cleanup contract to every callback
 /// response. A matching console callback is terminal even when token
 /// exchange, tenant admission or provisioning later fails.
-fn finish_callback(mut response: Response, clear_login_cookie: bool) -> Response {
-    if clear_login_cookie && let Ok(value) = clear_login_cookie_header() {
+fn finish_callback(
+    mut response: Response,
+    clear_login_cookie: bool,
+    cookie_mode: ConsoleCookieMode,
+) -> Response {
+    if clear_login_cookie && let Ok(value) = clear_login_cookie_header(cookie_mode) {
         // `append`, not `insert`: a successful console callback already has
         // the final session cookie and must carry both fields.
         response.headers_mut().append(header::SET_COOKIE, value);
@@ -576,10 +632,14 @@ fn finish_callback(mut response: Response, clear_login_cookie: bool) -> Response
     private_response(response)
 }
 
-fn clear_login_cookie_header() -> Result<header::HeaderValue, Error> {
+fn clear_login_cookie_header(cookie_mode: ConsoleCookieMode) -> Result<header::HeaderValue, Error> {
+    let secure = match cookie_mode {
+        ConsoleCookieMode::Https => "; Secure",
+        ConsoleCookieMode::ExplicitDevelopmentHttp => "",
+    };
     let value = format!(
-        "{}=; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Path=/; Secure; HttpOnly; SameSite=Lax",
-        synveda_identity::console::LOGIN_COOKIE,
+        "{}=; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Path=/{secure}; HttpOnly; SameSite=Lax",
+        login_cookie_name(cookie_mode),
     );
     header::HeaderValue::from_str(&value).map_err(|err| Error::Internal {
         message: format!("login cookie deletion is not a valid header: {err}"),
@@ -750,7 +810,13 @@ fn not_configured() -> Response {
 
 #[cfg(test)]
 mod tests {
-    use super::{IdentitySummary, urlencode};
+    use axum::http::{HeaderMap, header};
+
+    use super::{
+        IdentitySummary, clear_login_cookie_header, console_cookie, login_cookie_header,
+        set_cookie_header, urlencode,
+    };
+    use crate::app::ConsoleCookieMode;
 
     /// **The other half of the CLI's `the_session_shape_is_the_one_the_gateway
     /// _serves`** (CPR-9).
@@ -795,5 +861,83 @@ mod tests {
         assert_eq!(urlencode("a b&c=d#e"), "a%20b%26c%3Dd%23e");
         // A code that tried to smuggle a second parameter cannot.
         assert_eq!(urlencode("x&state=forged"), "x%26state%3Dforged");
+    }
+
+    #[test]
+    fn explicit_development_http_uses_distinct_host_only_cookie_contracts() {
+        let session = set_cookie_header(
+            "session",
+            43_200,
+            ConsoleCookieMode::ExplicitDevelopmentHttp,
+        )
+        .expect("development session cookie")
+        .to_str()
+        .expect("ASCII cookie")
+        .to_owned();
+        assert_eq!(
+            session,
+            "synveda_console_dev=session; Max-Age=43200; Path=/; HttpOnly; SameSite=Strict"
+        );
+
+        let login = login_cookie_header(
+            "correlation",
+            600,
+            ConsoleCookieMode::ExplicitDevelopmentHttp,
+        )
+        .expect("development login cookie")
+        .to_str()
+        .expect("ASCII cookie")
+        .to_owned();
+        assert_eq!(
+            login,
+            "synveda_login_dev=correlation; Max-Age=600; Path=/; HttpOnly; SameSite=Lax"
+        );
+        assert_eq!(
+            clear_login_cookie_header(ConsoleCookieMode::ExplicitDevelopmentHttp)
+                .expect("development login clear")
+                .to_str()
+                .expect("ASCII cookie"),
+            "synveda_login_dev=; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT; Path=/; HttpOnly; SameSite=Lax"
+        );
+    }
+
+    #[test]
+    fn https_cookie_contract_remains_host_prefixed_and_secure() {
+        assert_eq!(
+            set_cookie_header("session", 43_200, ConsoleCookieMode::Https)
+                .expect("HTTPS session cookie")
+                .to_str()
+                .expect("ASCII cookie"),
+            "__Host-synveda_console=session; Max-Age=43200; Path=/; Secure; HttpOnly; SameSite=Strict"
+        );
+        assert_eq!(
+            login_cookie_header("correlation", 600, ConsoleCookieMode::Https)
+                .expect("HTTPS login cookie")
+                .to_str()
+                .expect("ASCII cookie"),
+            "__Host-synveda_login=correlation; Max-Age=600; Path=/; Secure; HttpOnly; SameSite=Lax"
+        );
+    }
+
+    #[test]
+    fn duplicated_console_cookie_is_rejected_in_both_modes() {
+        for (mode, name) in [
+            (ConsoleCookieMode::Https, "__Host-synveda_console"),
+            (
+                ConsoleCookieMode::ExplicitDevelopmentHttp,
+                "synveda_console_dev",
+            ),
+        ] {
+            let mut headers = HeaderMap::new();
+            headers.append(
+                header::COOKIE,
+                format!("{name}=first").parse().expect("cookie header"),
+            );
+            headers.append(
+                header::COOKIE,
+                format!("{name}=second").parse().expect("cookie header"),
+            );
+            assert!(console_cookie(&headers, mode).is_none(), "mode: {mode:?}");
+        }
     }
 }

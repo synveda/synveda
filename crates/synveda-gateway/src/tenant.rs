@@ -46,7 +46,7 @@ const EXPIRY_SKEW_SECS: i64 = 30;
 /// write path for a column nothing reads in real time.
 const TOUCH_STALENESS_SECS: i64 = 300;
 
-use crate::app::AppState;
+use crate::app::{AppState, ConsoleCookieMode};
 use crate::audit;
 use crate::error::ApiError;
 use crate::telemetry::{SERVICE_TOKEN_REJECTIONS_TOTAL, TENANT_RESOLUTIONS_TOTAL};
@@ -105,7 +105,11 @@ async fn resolve_with_transport(
             active_tenant(state, &claims).await
         }
         Err(missing) => {
-            let Some(secret) = crate::auth::console_cookie(headers) else {
+            let cookie_mode = state
+                .login
+                .as_ref()
+                .map_or(ConsoleCookieMode::Https, |login| login.cookie_mode());
+            let Some(secret) = crate::auth::console_cookie(headers, cookie_mode) else {
                 return Err(missing);
             };
             // Ambient authority: prove intent before the credential is

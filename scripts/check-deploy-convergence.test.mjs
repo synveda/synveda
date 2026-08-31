@@ -31,6 +31,13 @@ function assertPoisonDockerUntouched(directory) {
   assert.equal(existsSync(join(directory, "docker.invoked")), false);
 }
 
+function shellFunctionSource(source, name) {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = source.match(new RegExp(`^${escaped}\\(\\) \\{\\n[\\s\\S]*?^\\}\\n`, "m"));
+  assert.ok(match, `${name} function is missing`);
+  return match[0];
+}
+
 import {
   authorityFingerprintFixtureFindings,
   contributorPostgresBuildFindings,
@@ -470,6 +477,11 @@ test("the product launcher execs closed roles without deployment branching", () 
     ).includes("issuer-diagnostic role does not enforce exact arity"),
   );
   assert.ok(
+    productLauncherFindings(
+      current.replace("exec /usr/local/bin/synveda tenant converge", "exec /bin/true"),
+    ).includes("tenant-converge role does not exec the exact tenant admission command"),
+  );
+  assert.ok(
     productLauncherFindings(current.replace("            50s \\\n", "            500s \\\n")).includes(
       "issuer-diagnostic role does not enforce the closed 50s execution bound",
     ),
@@ -498,7 +510,7 @@ test("the product launcher rejects an unknown role without interpretation", () =
   assert.equal(result.stdout, "");
   assert.equal(
     result.stderr,
-    "usage: synveda-container {gateway|worker|issuer-diagnostic|database-preflight|migrate|probe {gateway|worker} {live|ready}}\n",
+    "usage: synveda-container {gateway|worker|issuer-diagnostic|database-preflight|migrate|tenant-converge|probe {gateway|worker} {live|ready}}\n",
   );
 });
 
@@ -515,6 +527,7 @@ test("the product launcher dispatches every implemented role exactly", () => {
       )
       .replace("exec /usr/local/bin/synveda db preflight", "exec /bin/echo database-preflight")
       .replace("exec /usr/local/bin/synveda db migrate", "exec /bin/echo migrate")
+      .replace("exec /usr/local/bin/synveda tenant converge", "exec /bin/echo tenant-converge")
       .replace("exec /usr/bin/curl \\\n", "exec /bin/echo curl \\\n");
     writeFileSync(launcher, instrumented);
 
@@ -524,6 +537,15 @@ test("the product launcher dispatches every implemented role exactly", () => {
       [["issuer-diagnostic"], "issuer-diagnostic\n"],
       [["database-preflight"], "database-preflight\n"],
       [["migrate"], "migrate\n"],
+      [
+        ["tenant-converge"],
+        "tenant-converge --id 019b53c0-7c00-7000-8000-000000000045 --slug reference --name Reference Tenant\n",
+        {
+          SYNVEDA_BOOTSTRAP_TENANT_ID: "019b53c0-7c00-7000-8000-000000000045",
+          SYNVEDA_BOOTSTRAP_TENANT_SLUG: "reference",
+          SYNVEDA_BOOTSTRAP_TENANT_NAME: "Reference Tenant",
+        },
+      ],
       [
         ["probe", "gateway", "live"],
         "curl --disable --noproxy * --fail --silent --show-error --connect-timeout 1 --max-time 2 http://127.0.0.1:8120/healthz\n",
@@ -541,14 +563,63 @@ test("the product launcher dispatches every implemented role exactly", () => {
         "curl --disable --noproxy * --fail --silent --show-error --connect-timeout 1 --max-time 2 http://127.0.0.1:8121/readyz\n",
       ],
     ];
-    for (const [args, expected] of cases) {
-      const result = spawnSync("sh", [launcher, ...args], { encoding: "utf8" });
+    for (const [args, expected, extraEnvironment = {}] of cases) {
+      const result = spawnSync("sh", [launcher, ...args], {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          SYNVEDA_BOOTSTRAP_TENANT_ID: "",
+          SYNVEDA_BOOTSTRAP_TENANT_SLUG: "",
+          SYNVEDA_BOOTSTRAP_TENANT_NAME: "",
+          ...extraEnvironment,
+        },
+      });
       assert.equal(result.status, 0, result.stderr);
       assert.equal(result.stdout, expected);
       assert.equal(result.stderr, "");
     }
   } finally {
     rmSync(scratch, { recursive: true, force: true });
+  }
+});
+
+test("tenant convergence refuses malformed deployment identity before exec", () => {
+  for (const extraEnvironment of [
+    {},
+    {
+      SYNVEDA_BOOTSTRAP_TENANT_ID: "019b53c0-7c00-7g00-8000-000000000045",
+      SYNVEDA_BOOTSTRAP_TENANT_SLUG: "reference",
+      SYNVEDA_BOOTSTRAP_TENANT_NAME: "Reference Tenant",
+    },
+    {
+      SYNVEDA_BOOTSTRAP_TENANT_ID: "019b53c0-7c00-7000-8000-000000000045",
+      SYNVEDA_BOOTSTRAP_TENANT_SLUG: "../reference",
+      SYNVEDA_BOOTSTRAP_TENANT_NAME: "Reference Tenant",
+    },
+    {
+      SYNVEDA_BOOTSTRAP_TENANT_ID: "019b53c0-7c00-7000-8000-000000000045",
+      SYNVEDA_BOOTSTRAP_TENANT_SLUG: "reference",
+      SYNVEDA_BOOTSTRAP_TENANT_NAME: "-Reference Tenant",
+    },
+    {
+      SYNVEDA_BOOTSTRAP_TENANT_ID: "019b53c0-7c00-7000-8000-000000000045",
+      SYNVEDA_BOOTSTRAP_TENANT_SLUG: "reference",
+      SYNVEDA_BOOTSTRAP_TENANT_NAME: "   ",
+    },
+  ]) {
+    const result = spawnSync("sh", [PRODUCT_LAUNCHER, "tenant-converge"], {
+      encoding: "utf8",
+      env: {
+        ...process.env,
+        SYNVEDA_BOOTSTRAP_TENANT_ID: "",
+        SYNVEDA_BOOTSTRAP_TENANT_SLUG: "",
+        SYNVEDA_BOOTSTRAP_TENANT_NAME: "",
+        ...extraEnvironment,
+      },
+    });
+    assert.equal(result.status, 78, result.stderr);
+    assert.equal(result.stdout, "");
+    assert.doesNotMatch(result.stderr, /019b53c0|Reference Tenant/);
   }
 });
 
@@ -2555,6 +2626,42 @@ test("the lifecycle wrong-cluster witness is genuine and leaves no peer state", 
       compose,
     ).some((finding) => finding.includes("refresh every dynamic-port database URL")),
   );
+  for (const [before, after] of [
+    [
+      "\nwait_for_main_database_authority\n",
+      "\nfalse && wait_for_main_database_authority\n",
+    ],
+    [
+      '\nexpect_main_preflight_refusal stale-after-restart "$main_witness_file" "$peer_mismatch_error"\n',
+      '\nfalse && expect_main_preflight_refusal stale-after-restart "$main_witness_file" "$peer_mismatch_error"\n',
+    ],
+  ]) {
+    assert.ok(
+      lifecyclePeerWitnessFindings(dbTest.replace(before, after), compose).some((finding) =>
+        finding.includes("refresh every dynamic-port database URL"),
+      ),
+    );
+  }
+  for (const [before, after] of [
+    ["wait_for_main_database_authority\n", "# removed authority readiness\n"],
+    ['while [ "$attempt" -le 3 ]', 'while [ "$attempt" -le 4 ]'],
+    ["-u SYNVEDA_DATABASE_PEER_WITNESS_FILE", "# inherited peer witness"],
+    ["database target preflight complete", "unchecked readiness"],
+    [
+      "sleep 2\n    attempt=$((attempt + 1))",
+      "sleep 20\n    attempt=$((attempt + 1))",
+    ],
+    [
+      "sleep 2\n    attempt=$((attempt + 1))",
+      "sleep 2\n    attempt=$((attempt - 1))",
+    ],
+  ]) {
+    assert.ok(
+      lifecyclePeerWitnessFindings(dbTest.replace(before, after), compose).some((finding) =>
+        finding.includes("post-restart") || finding.includes("refresh every dynamic-port"),
+      ),
+    );
+  }
   assert.ok(
     lifecyclePeerWitnessFindings(
       dbTest,
@@ -2593,6 +2700,161 @@ test("the lifecycle wrong-cluster witness is genuine and leaves no peer state", 
       ),
       `fixture-local generator marker escaped: ${marker}`,
     );
+  }
+});
+
+test("post-restart database readiness classifier is closed and byte-exact", () => {
+  const dbTest = readFileSync(DB_TEST, "utf8");
+  const classifier = shellFunctionSource(
+    dbTest,
+    "classify_main_database_authority_preflight",
+  );
+  const scratch = mkdtempSync(join(tmpdir(), "synveda-preflight-classifier-"));
+  const harness = join(scratch, "classify.sh");
+  const stdoutFile = join(scratch, "stdout");
+  const stderrFile = join(scratch, "stderr");
+  writeFileSync(
+    harness,
+    `#!/usr/bin/env bash\nset -u\n${classifier}\nclassify_main_database_authority_preflight "$@" || exit $?\n`,
+    { mode: 0o700 },
+  );
+
+  const classify = (status, stdout, stderr) => {
+    writeFileSync(stdoutFile, stdout);
+    writeFileSync(stderrFile, stderr);
+    return spawnSync("bash", [harness, String(status), stdoutFile, stderrFile], {
+      encoding: "utf8",
+      timeout: SUBPROCESS_TIMEOUT_MS,
+    }).status;
+  };
+
+  try {
+    assert.equal(classify(0, "", "database target preflight complete\n"), 0);
+    for (const error of [
+      "synveda: SYNVEDA_MIGRATOR_DATABASE_URL_FILE connection failed",
+      "synveda: SYNVEDA_MIGRATOR_DATABASE_URL_FILE preflight timed out",
+      "synveda: SYNVEDA_MIGRATOR_DATABASE_URL_FILE authority or writable-target verification failed",
+    ]) {
+      assert.equal(classify(1, "", `${error}\n`), 75, error);
+    }
+    assert.equal(classify(0, "unexpected\n", "database target preflight complete\n"), 1);
+    assert.equal(classify(1, "", "database target preflight complete\n"), 1);
+    assert.equal(
+      classify(
+        1,
+        "",
+        "synveda: SYNVEDA_MIGRATOR_DATABASE_URL_FILE connection failed\nextra\n",
+      ),
+      1,
+    );
+    assert.equal(classify(1, "", "synveda: unknown failure\n"), 1);
+    assert.equal(
+      classify(101, "", "synveda: SYNVEDA_MIGRATOR_DATABASE_URL_FILE connection failed\n"),
+      1,
+    );
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+});
+
+test("post-restart database readiness wait is bounded and fail-closed", () => {
+  const dbTest = readFileSync(DB_TEST, "utf8");
+  const classifier = shellFunctionSource(
+    dbTest,
+    "classify_main_database_authority_preflight",
+  );
+  const wait = shellFunctionSource(dbTest, "wait_for_main_database_authority");
+  const scratch = mkdtempSync(join(tmpdir(), "synveda-preflight-wait-"));
+  const harness = join(scratch, "wait.sh");
+  const attemptsFile = join(scratch, "attempts");
+  writeFileSync(
+    harness,
+    `#!/usr/bin/env bash
+set -u
+state_dir=$1
+scenario=$2
+attempt_file=$state_dir/attempts
+private_evidence_file() { : > "$1"; }
+assert_database_secrets_absent() { :; }
+sleep() { :; }
+run_main_database_authority_preflight() {
+  local count=0
+  if [ -s "$attempt_file" ]; then count=$(<"$attempt_file"); fi
+  count=$((count + 1))
+  printf '%s\n' "$count" > "$attempt_file"
+  case "$scenario" in
+    ready)
+      printf '%s\n' 'database target preflight complete' >&2
+      return 0
+      ;;
+    retry-ready)
+      if [ "$count" -eq 3 ]; then
+        printf '%s\n' 'database target preflight complete' >&2
+        return 0
+      fi
+      ;;
+    retry-exhausted)
+      ;;
+    invalid)
+      printf '%s\n' 'synveda: unknown failure' >&2
+      return 1
+      ;;
+    *)
+      return 97
+      ;;
+  esac
+  printf '%s\n' 'synveda: SYNVEDA_MIGRATOR_DATABASE_URL_FILE connection failed' >&2
+  return 1
+}
+${classifier}${wait}wait_for_main_database_authority
+`,
+    { mode: 0o700 },
+  );
+
+  const run = (scenario) => {
+    rmSync(attemptsFile, { force: true });
+    const result = spawnSync("bash", [harness, scratch, scenario], {
+      encoding: "utf8",
+      timeout: SUBPROCESS_TIMEOUT_MS,
+    });
+    return {
+      ...result,
+      attempts: Number(readFileSync(attemptsFile, "utf8").trim()),
+    };
+  };
+
+  try {
+    const ready = run("ready");
+    assert.equal(ready.status, 0, ready.stderr);
+    assert.equal(ready.stdout, "");
+    assert.equal(ready.stderr, "");
+    assert.equal(ready.attempts, 1);
+
+    const recovered = run("retry-ready");
+    assert.equal(recovered.status, 0, recovered.stderr);
+    assert.equal(recovered.stdout, "");
+    assert.equal(recovered.stderr, "");
+    assert.equal(recovered.attempts, 3);
+
+    const exhausted = run("retry-exhausted");
+    assert.equal(exhausted.status, 1);
+    assert.equal(exhausted.stdout, "");
+    assert.equal(
+      exhausted.stderr,
+      "db-test: post-restart database authority readiness did not converge\n",
+    );
+    assert.equal(exhausted.attempts, 3);
+
+    const invalid = run("invalid");
+    assert.equal(invalid.status, 1);
+    assert.equal(invalid.stdout, "");
+    assert.equal(
+      invalid.stderr,
+      "db-test: post-restart database authority readiness returned an invalid response\n",
+    );
+    assert.equal(invalid.attempts, 1);
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
   }
 });
 

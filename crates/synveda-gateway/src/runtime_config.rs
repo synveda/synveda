@@ -12,6 +12,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use sqlx::postgres::PgPoolOptions;
+use synveda_identity::LoginFlow;
 use synveda_identity::directory::{
     DirectoryConnector, DirectorySyncConfig, DirectorySyncReferenceConfig, Secret,
 };
@@ -27,6 +28,7 @@ const MAX_DIRECTORY_CREDENTIAL_BYTES: usize = 4_096;
 pub struct PublicApplicationUrl {
     origin: String,
     callback: String,
+    explicit_development_http: bool,
 }
 
 impl PublicApplicationUrl {
@@ -40,6 +42,22 @@ impl PublicApplicationUrl {
     #[must_use]
     pub fn callback(&self) -> &str {
         &self.callback
+    }
+
+    /// Whether this exact plaintext origin was admitted by the explicit
+    /// development-only relaxation. HTTPS never selects this mode merely
+    /// because the relaxation setting is present.
+    #[must_use]
+    pub fn explicit_development_http(&self) -> bool {
+        self.explicit_development_http
+    }
+
+    /// Binds an OIDC login flow to this already-validated public URL's cookie
+    /// policy. Callers cannot select the plaintext cookie mode independently
+    /// of the origin validation that admitted it.
+    #[must_use]
+    pub fn configure_login(&self, flow: LoginFlow) -> crate::app::ConfiguredLogin {
+        crate::app::ConfiguredLogin::from_validated_public_url(flow, self.explicit_development_http)
     }
 }
 
@@ -115,6 +133,7 @@ fn parse_public_application_url(
     Ok(PublicApplicationUrl {
         origin,
         callback: url.to_string(),
+        explicit_development_http: url.scheme() == "http" && insecure_development_http,
     })
 }
 
@@ -1121,10 +1140,12 @@ mod tests {
             .expect("canonical application origin");
         assert_eq!(parsed.origin(), "https://app.example.test");
         assert_eq!(parsed.callback(), "https://app.example.test/auth/callback");
+        assert!(!parsed.explicit_development_http());
 
         let loopback = parse_public_application_url("http://127.0.0.1:8120", false)
             .expect("loopback plaintext origin");
         assert_eq!(loopback.origin(), "http://127.0.0.1:8120");
+        assert!(!loopback.explicit_development_http());
     }
 
     #[test]
@@ -1157,7 +1178,16 @@ mod tests {
             let allowed = parse_public_application_url(sentinel, true)
                 .expect("explicit development relaxation");
             assert_eq!(allowed.origin(), sentinel);
+            assert!(allowed.explicit_development_http());
         }
+
+        let explicit_loopback = parse_public_application_url("http://127.0.0.1:8120", true)
+            .expect("explicit loopback development mode");
+        assert!(explicit_loopback.explicit_development_http());
+
+        let https = parse_public_application_url("https://app.example.test", true)
+            .expect("HTTPS remains the secure cookie mode");
+        assert!(!https.explicit_development_http());
     }
 
     #[test]

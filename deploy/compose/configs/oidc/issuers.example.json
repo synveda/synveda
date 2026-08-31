@@ -5,7 +5,7 @@
     "audience": "synveda-api",
     "tenant": {
       "static": {
-        "tenant_id": "00000000-0000-0000-0000-000000000000"
+        "tenant_id": "019b53c0-7c00-7000-8000-000000000045"
       }
     },
     "login_scopes": ["openid", "profile", "email"]

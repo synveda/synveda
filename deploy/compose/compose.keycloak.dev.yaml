@@ -1,0 +1,13 @@
+# Development builds the pinned optimized Keycloak image and the PostgreSQL
+# database-bootstrap helper locally. Reference mode accepts only prebuilt
+# digests and never selects this fragment.
+services:
+  keycloak-database-bootstrap:
+    build:
+      context: ../..
+      dockerfile: deploy/compose/postgres/Dockerfile
+
+  keycloak:
+    build:
+      context: ../..
+      dockerfile: deploy/compose/keycloak/Dockerfile

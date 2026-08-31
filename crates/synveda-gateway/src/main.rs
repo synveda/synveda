@@ -36,7 +36,7 @@ compile_error!("the gateway release binary cannot include the test-support featu
 use std::sync::Arc;
 use std::time::Duration;
 
-use synveda_gateway::app::{self, AppState};
+use synveda_gateway::app::{self, AppState, ConfiguredLogin};
 use synveda_gateway::authority::{self, AuthorityGate, AuthorityMonitor, CheckOutcome};
 use synveda_gateway::{authz, runtime_config, shutdown, telemetry};
 use synveda_identity::{DisabledVerifier, Hs256Verifier, LoginFlow, OidcVerifier, TokenVerifier};
@@ -99,7 +99,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         runtime_config::setting("SYNVEDA_OIDC_ISSUERS")?.filter(|value| !value.is_empty());
     let dev_secret =
         runtime_config::setting("SYNVEDA_DEV_JWT_SECRET")?.filter(|value| !value.is_empty());
-    let (verifier, login): (Arc<dyn TokenVerifier>, Option<Arc<LoginFlow>>) =
+    let (verifier, login): (Arc<dyn TokenVerifier>, Option<Arc<ConfiguredLogin>>) =
         match (oidc_issuers, dev_secret) {
             (Some(_), Some(_)) => {
                 return Err(
@@ -131,7 +131,9 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
                     issuers = %oidc.issuers().collect::<Vec<_>>().join(", "),
                     "OIDC auth mode (ADR-0010): /v1 accepts IdP-issued bearer tokens"
                 );
-                let flow = Arc::new(LoginFlow::new(Arc::clone(&oidc), redirect_uri));
+                let flow = Arc::new(
+                    public_url.configure_login(LoginFlow::new(Arc::clone(&oidc), redirect_uri)),
+                );
                 (oidc, Some(flow))
             }
             (None, Some(secret)) => {

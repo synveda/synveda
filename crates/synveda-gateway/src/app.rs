@@ -57,6 +57,59 @@ impl DirectoryRuntime {
     }
 }
 
+/// Browser-cookie policy selected only from the validated public application
+/// URL at process startup.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ConsoleCookieMode {
+    /// HTTPS uses browser-enforced `__Host-` names and `Secure`.
+    Https,
+    /// Explicit development HTTP uses distinct host-only names and omits only
+    /// the attributes that a plaintext origin cannot satisfy.
+    ExplicitDevelopmentHttp,
+}
+
+/// A configured OIDC login flow plus its immutable browser-cookie policy.
+pub struct ConfiguredLogin {
+    flow: LoginFlow,
+    cookie_mode: ConsoleCookieMode,
+}
+
+impl ConfiguredLogin {
+    pub(crate) fn from_validated_public_url(
+        flow: LoginFlow,
+        explicit_development_http: bool,
+    ) -> Self {
+        let cookie_mode = if explicit_development_http {
+            ConsoleCookieMode::ExplicitDevelopmentHttp
+        } else {
+            ConsoleCookieMode::Https
+        };
+        Self { flow, cookie_mode }
+    }
+
+    /// Builds login state for a behaviour test without process-global
+    /// environment configuration.
+    #[cfg(feature = "test-support")]
+    #[must_use]
+    pub fn for_behavior_test(flow: LoginFlow, explicit_development_http: bool) -> Self {
+        Self::from_validated_public_url(flow, explicit_development_http)
+    }
+
+    /// Returns the immutable cookie policy for this login runtime.
+    #[must_use]
+    pub(crate) const fn cookie_mode(&self) -> ConsoleCookieMode {
+        self.cookie_mode
+    }
+}
+
+impl std::ops::Deref for ConfiguredLogin {
+    type Target = LoginFlow;
+
+    fn deref(&self) -> &Self::Target {
+        &self.flow
+    }
+}
+
 /// Shared state for all routes.
 #[derive(Clone)]
 pub struct AppState {
@@ -71,7 +124,7 @@ pub struct AppState {
     pub verifier: Arc<dyn TokenVerifier>,
     /// The code+PKCE login flow when OIDC is configured (AUTH-1); `None`
     /// otherwise, in which case `/auth/*` answers 404.
-    pub login: Option<Arc<LoginFlow>>,
+    pub login: Option<Arc<ConfiguredLogin>>,
     /// This gateway's own origin (`scheme://host[:port]`), derived from
     /// `SYNVEDA_PUBLIC_URL`. The value a cookie-authenticated mutation's
     /// `Origin` header must equal (CNSL-1, ADR-0056 decision 4). Bearer

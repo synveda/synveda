@@ -170,9 +170,16 @@ CPR-45's current identity/database checkpoint has fresh revision-2 authority
 fingerprints, 657 validated SQLx records and a passing complete exact-role
 database gate. Its independently reviewed collision-resistant fixture
 allocator, fresh deterministic authentic-frame lifecycle and complete
-repository CI also pass. The next blocker is a bounded canonical lifecycle
-with a login-capable Keycloak demo boundary and real browser PKCE exchange
-before the legacy Rauthy/Temporal callers can be cut over and deleted.
+repository CI also pass. The latest fresh exact-role database gate self-cleaned,
+and deterministic deployment evidence is now 41/41 convergence, 36/36 Compose
+contract and 4/4 issuer generation. The development application, PostgreSQL
+and optimized Keycloak image builds are now selected together; project-scoped
+issuer input generation and exact audited tenant convergence are prepared, and
+explicit development HTTP uses distinct host-only console cookies without
+weakening the HTTPS `__Host-` contract. The next blocker is a bounded canonical
+lifecycle that invokes those seams, with a login-capable Keycloak demo boundary
+and real browser PKCE exchange before the legacy Rauthy/Temporal callers can be
+cut over and deleted.
 
 ## Unscheduled — not listed in the Sequencing section
 

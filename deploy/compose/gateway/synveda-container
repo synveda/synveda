@@ -2,9 +2,11 @@
 # CPR-45 / ADR-0102: one product image exposes a closed command vocabulary.
 # Deployment shape belongs in Compose or Helm, never in this launcher.
 set -eu
+LC_ALL=C
+export LC_ALL
 
 usage() {
-    echo "usage: synveda-container {gateway|worker|issuer-diagnostic|database-preflight|migrate|probe {gateway|worker} {live|ready}}" >&2
+    echo "usage: synveda-container {gateway|worker|issuer-diagnostic|database-preflight|migrate|tenant-converge|probe {gateway|worker} {live|ready}}" >&2
     exit 64
 }
 
@@ -33,6 +35,49 @@ case "${1:-}" in
     migrate)
         [ "$#" -eq 1 ] || usage
         exec /usr/local/bin/synveda db migrate
+        ;;
+    tenant-converge)
+        [ "$#" -eq 1 ] || usage
+        tenant_id=${SYNVEDA_BOOTSTRAP_TENANT_ID:-}
+        tenant_slug=${SYNVEDA_BOOTSTRAP_TENANT_SLUG:-}
+        tenant_name=${SYNVEDA_BOOTSTRAP_TENANT_NAME:-}
+        case "$tenant_id" in
+            ????????-????-7???-[89ab]???-????????????) ;;
+            *) echo "tenant convergence: tenant UUIDv7 was refused" >&2; exit 78 ;;
+        esac
+        case "$tenant_id" in
+            *[!0-9a-f-]*) echo "tenant convergence: tenant UUIDv7 was refused" >&2; exit 78 ;;
+        esac
+        case "$tenant_slug" in
+            [a-z0-9]*) ;;
+            *) echo "tenant convergence: tenant slug was refused" >&2; exit 78 ;;
+        esac
+        case "$tenant_slug" in
+            *[!a-z0-9-]*|*-|*--*)
+                echo "tenant convergence: tenant slug was refused" >&2
+                exit 78
+                ;;
+        esac
+        [ "${#tenant_slug}" -le 63 ] || {
+            echo "tenant convergence: tenant slug was refused" >&2
+            exit 78
+        }
+        case "$tenant_name" in
+            ''|-*|*[!A-Za-z0-9._' '-]*)
+                echo "tenant convergence: tenant name was refused" >&2
+                exit 78
+                ;;
+        esac
+        case "$tenant_name" in
+            *[A-Za-z0-9]*) ;;
+            *) echo "tenant convergence: tenant name was refused" >&2; exit 78 ;;
+        esac
+        [ "${#tenant_name}" -le 128 ] || {
+            echo "tenant convergence: tenant name was refused" >&2
+            exit 78
+        }
+        exec /usr/local/bin/synveda tenant converge \
+            --id "$tenant_id" --slug "$tenant_slug" --name "$tenant_name"
         ;;
     probe)
         [ "$#" -eq 3 ] || usage

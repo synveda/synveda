@@ -31,7 +31,7 @@ use metrics_exporter_prometheus::PrometheusHandle;
 use serde_json::{Value, json};
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
-use synveda_gateway::app::{AppState, behavior_test_router as router};
+use synveda_gateway::app::{AppState, ConfiguredLogin, behavior_test_router as router};
 use synveda_gateway::telemetry;
 use synveda_identity::{LoginFlow, OidcVerifier, parse_issuers};
 use synveda_store::{access, anchors, directory, identities, scopes};
@@ -275,7 +275,10 @@ fn state(url: &str, issuer: &str) -> AppState {
             .expect("parse database url"),
         metrics: metrics_handle(),
         verifier: verifier.clone(),
-        login: Some(Arc::new(LoginFlow::new(verifier, REDIRECT_URI.to_owned()))),
+        login: Some(Arc::new(ConfiguredLogin::for_behavior_test(
+            LoginFlow::new(verifier, REDIRECT_URI.to_owned()),
+            false,
+        ))),
         public_origin: "http://127.0.0.1:8120".to_owned(),
         pdp: Arc::new(synveda_policy::Pdp::new().expect("build the embedded PDP")),
         service_token_max_ttl: std::time::Duration::from_secs(3600),

@@ -2336,6 +2336,53 @@ mod tests {
         [row.tenants, row.scopes, row.grants, row.audits]
     }
 
+    async fn tenant_key_provision_events(
+        pool: &sqlx::PgPool,
+        tenant_id: TenantId,
+    ) -> Vec<synveda_audit::StoredEvent> {
+        let mut tx = synveda_store::rls::begin_tenant_tx(pool, tenant_id)
+            .await
+            .expect("open tenant-scoped audit transaction");
+        let events = synveda_audit::search(
+            &mut tx,
+            tenant_id,
+            &synveda_audit::EventFilter {
+                actions: vec![synveda_audit::AuditAction::TenantKeyProvisioned],
+                resource: Some(format!("tenant {tenant_id} key")),
+                ..synveda_audit::EventFilter::default()
+            },
+            0,
+            10,
+        )
+        .await
+        .expect("read tenant key-provision evidence")
+        .items;
+        tx.rollback()
+            .await
+            .expect("roll back audit inspection transaction");
+        events
+    }
+
+    async fn append_fixture_key_provision_event(
+        pool: &sqlx::PgPool,
+        tenant_id: TenantId,
+        payload: serde_json::Value,
+    ) {
+        let mut tx = synveda_store::rls::begin_tenant_tx(pool, tenant_id)
+            .await
+            .expect("open tenant-scoped fixture audit transaction");
+        crate::record_break_glass(
+            &mut tx,
+            tenant_id,
+            synveda_audit::AuditAction::TenantKeyProvisioned,
+            format!("tenant {tenant_id} key"),
+            payload,
+        )
+        .await
+        .expect("append fixture key-provision event");
+        tx.commit().await.expect("commit fixture audit event");
+    }
+
     struct TestSchemaEpoch {
         epoch: i32,
         updated_at: chrono::DateTime<chrono::Utc>,
@@ -3427,6 +3474,319 @@ mod tests {
             tenant_admission_footprint(&runtime, wrong_epoch_id).await,
             [0; 4],
             "wrong-epoch admission wrote tenant, scope, grant or audit state"
+        );
+
+        let converged_id = TenantId::new();
+        let converged_suffix = converged_id.to_string();
+        let converged_slug = format!(
+            "cpr45-converged-{}",
+            &converged_suffix[converged_suffix.len() - 12..]
+        );
+        let first = crate::converge_tenant(
+            &migrator,
+            &database_roles,
+            converged_id,
+            &converged_slug,
+            "CPR-45 converged tenant",
+            TenantStatus::Active,
+        )
+        .await
+        .expect("admit the exact deployment-owned tenant");
+        let second = crate::converge_tenant(
+            &migrator,
+            &database_roles,
+            converged_id,
+            &converged_slug,
+            "CPR-45 converged tenant",
+            TenantStatus::Active,
+        )
+        .await
+        .expect("repeat exact tenant convergence");
+        assert_eq!(first, second, "a rerun must resolve the same tenant row");
+        assert_eq!(
+            tenant_admission_footprint(&runtime, converged_id).await,
+            [1, 0, 0, 1],
+            "a rerun must not duplicate tenant or audit state"
+        );
+        assert!(
+            crate::converge_tenant(
+                &migrator,
+                &database_roles,
+                converged_id,
+                &converged_slug,
+                "CPR-45 conflicting tenant",
+                TenantStatus::Active,
+            )
+            .await
+            .is_err(),
+            "the same UUID with changed immutable admission fields must fail"
+        );
+        assert_eq!(
+            tenant_admission_footprint(&runtime, converged_id).await,
+            [1, 0, 0, 1],
+            "a conflicting rerun must not change admitted state"
+        );
+
+        let local_kms = synveda_crypto::LocalKms::from_hex(
+            &"45".repeat(32),
+            "local:cpr45-convergence-test".to_owned(),
+        )
+        .expect("construct fixture KMS");
+        let ring = synveda_store::keys::KeyRing::new(synveda_crypto::Kms::Local(local_kms));
+        let key_scope = synveda_crypto::KeyScope::Tenant(converged_id);
+
+        // The key commit can win immediately before the process disappears.
+        // A rerun must repair the missing evidence rather than suppressing it
+        // merely because the key row now exists.
+        ring.provision(&migrator, key_scope)
+            .await
+            .expect("simulate committed key before audit");
+        assert!(
+            tenant_key_provision_events(&runtime, converged_id)
+                .await
+                .is_empty(),
+            "the crash fixture must begin with the key/evidence gap"
+        );
+        let wrong_local_kms = synveda_crypto::LocalKms::from_hex(
+            &"46".repeat(32),
+            "local:cpr45-convergence-test".to_owned(),
+        )
+        .expect("construct wrong fixture KMS");
+        for refusing_ring in [
+            synveda_store::keys::KeyRing::new(synveda_crypto::Kms::Disabled),
+            synveda_store::keys::KeyRing::new(synveda_crypto::Kms::Local(wrong_local_kms)),
+        ] {
+            assert!(
+                crate::keys::provision_quietly_with_ring(&migrator, converged_id, &refusing_ring,)
+                    .await
+                    .is_err(),
+                "an existing wrapped row must not substitute for KMS custody"
+            );
+            assert!(
+                tenant_key_provision_events(&runtime, converged_id)
+                    .await
+                    .is_empty(),
+                "failed custody proof must not append success evidence"
+            );
+        }
+        assert_eq!(
+            crate::keys::provision_quietly_with_ring(&migrator, converged_id, &ring)
+                .await
+                .expect("repair key-provision evidence"),
+            1
+        );
+        assert_eq!(
+            crate::keys::provision_quietly_with_ring(&migrator, converged_id, &ring)
+                .await
+                .expect("repeat exact key convergence"),
+            1
+        );
+        let provisioned = tenant_key_provision_events(&runtime, converged_id).await;
+        assert_eq!(provisioned.len(), 1, "a rerun must retain one witness");
+        assert_eq!(
+            provisioned[0].payload,
+            serde_json::json!({
+                "version": 1,
+                "kek_ref": "local:cpr45-convergence-test",
+            })
+        );
+
+        ring.rotate(&migrator, key_scope)
+            .await
+            .expect("rotate fixture key");
+        assert_eq!(
+            crate::keys::provision_quietly_with_ring(&migrator, converged_id, &ring)
+                .await
+                .expect("converge after rotation"),
+            2,
+            "the current key may advance without inventing another provision witness"
+        );
+        assert_eq!(
+            tenant_key_provision_events(&runtime, converged_id)
+                .await
+                .len(),
+            1,
+            "post-rotation convergence must keep the generation-1 witness"
+        );
+
+        let concurrent_id = TenantId::new();
+        let concurrent_suffix = concurrent_id.to_string();
+        crate::converge_tenant(
+            &migrator,
+            &database_roles,
+            concurrent_id,
+            &format!(
+                "cpr45-concurrent-{}",
+                &concurrent_suffix[concurrent_suffix.len() - 12..]
+            ),
+            "CPR-45 concurrent tenant",
+            TenantStatus::Active,
+        )
+        .await
+        .expect("admit concurrent key fixture tenant");
+        let (left, right) = tokio::join!(
+            crate::keys::provision_quietly_with_ring(&migrator, concurrent_id, &ring),
+            crate::keys::provision_quietly_with_ring(&migrator, concurrent_id, &ring),
+        );
+        assert_eq!(left.expect("left key convergence"), 1);
+        assert_eq!(right.expect("right key convergence"), 1);
+        assert_eq!(
+            tenant_key_provision_events(&runtime, concurrent_id)
+                .await
+                .len(),
+            1,
+            "concurrent convergence must serialize to one audit witness"
+        );
+
+        let duplicate_id = TenantId::new();
+        let duplicate_suffix = duplicate_id.to_string();
+        crate::converge_tenant(
+            &migrator,
+            &database_roles,
+            duplicate_id,
+            &format!(
+                "cpr45-duplicate-{}",
+                &duplicate_suffix[duplicate_suffix.len() - 12..]
+            ),
+            "CPR-45 historic duplicate tenant",
+            TenantStatus::Active,
+        )
+        .await
+        .expect("admit historic duplicate fixture tenant");
+        ring.provision(&migrator, synveda_crypto::KeyScope::Tenant(duplicate_id))
+            .await
+            .expect("provision historic duplicate fixture key");
+        let exact_payload = serde_json::json!({
+            "version": 1,
+            "kek_ref": "local:cpr45-convergence-test",
+        });
+        append_fixture_key_provision_event(&migrator, duplicate_id, exact_payload.clone()).await;
+        append_fixture_key_provision_event(&migrator, duplicate_id, exact_payload).await;
+        assert_eq!(
+            crate::keys::provision_quietly_with_ring(&migrator, duplicate_id, &ring)
+                .await
+                .expect("accept historic exact duplicate evidence"),
+            1
+        );
+        assert_eq!(
+            tenant_key_provision_events(&runtime, duplicate_id)
+                .await
+                .len(),
+            2,
+            "historic exact duplicates are retained but never extended"
+        );
+
+        let inconsistent_id = TenantId::new();
+        let inconsistent_suffix = inconsistent_id.to_string();
+        crate::converge_tenant(
+            &migrator,
+            &database_roles,
+            inconsistent_id,
+            &format!(
+                "cpr45-inconsistent-{}",
+                &inconsistent_suffix[inconsistent_suffix.len() - 12..]
+            ),
+            "CPR-45 inconsistent witness tenant",
+            TenantStatus::Active,
+        )
+        .await
+        .expect("admit inconsistent witness fixture tenant");
+        ring.provision(&migrator, synveda_crypto::KeyScope::Tenant(inconsistent_id))
+            .await
+            .expect("provision inconsistent witness fixture key");
+        let expected_inconsistent_payload = serde_json::json!({
+            "version": 1,
+            "kek_ref": "local:cpr45-convergence-test",
+        });
+        append_fixture_key_provision_event(
+            &migrator,
+            inconsistent_id,
+            expected_inconsistent_payload.clone(),
+        )
+        .await;
+        append_fixture_key_provision_event(
+            &migrator,
+            inconsistent_id,
+            expected_inconsistent_payload,
+        )
+        .await;
+        append_fixture_key_provision_event(
+            &migrator,
+            inconsistent_id,
+            serde_json::json!({
+                "version": 1,
+                "kek_ref": "local:conflicting-authority",
+            }),
+        )
+        .await;
+        append_fixture_key_provision_event(
+            &migrator,
+            inconsistent_id,
+            serde_json::json!({
+                "version": 1,
+                "kek_ref": "local:cpr45-convergence-test",
+                "unexpected": true,
+            }),
+        )
+        .await;
+        assert!(
+            crate::keys::provision_quietly_with_ring(&migrator, inconsistent_id, &ring)
+                .await
+                .is_err(),
+            "a malformed candidate witness must fail closed"
+        );
+        assert_eq!(
+            tenant_key_provision_events(&runtime, inconsistent_id)
+                .await
+                .len(),
+            4,
+            "later conflicting references or supersets must not hide behind an exact duplicate prefix"
+        );
+
+        let legacy_rotation_id = TenantId::new();
+        let legacy_rotation_suffix = legacy_rotation_id.to_string();
+        crate::converge_tenant(
+            &migrator,
+            &database_roles,
+            legacy_rotation_id,
+            &format!(
+                "cpr45-legacy-rotation-{}",
+                &legacy_rotation_suffix[legacy_rotation_suffix.len() - 12..]
+            ),
+            "CPR-45 legacy rotation tenant",
+            TenantStatus::Active,
+        )
+        .await
+        .expect("admit legacy rotation fixture tenant");
+        let legacy_scope = synveda_crypto::KeyScope::Tenant(legacy_rotation_id);
+        ring.provision(&migrator, legacy_scope)
+            .await
+            .expect("provision legacy rotation fixture key");
+        ring.rotate(&migrator, legacy_scope)
+            .await
+            .expect("rotate legacy fixture key");
+        append_fixture_key_provision_event(
+            &migrator,
+            legacy_rotation_id,
+            serde_json::json!({
+                "version": 2,
+                "kek_ref": "local:cpr45-convergence-test",
+            }),
+        )
+        .await;
+        assert_eq!(
+            crate::keys::provision_quietly_with_ring(&migrator, legacy_rotation_id, &ring)
+                .await
+                .expect("repair generation-1 evidence beside legacy generation-2 evidence"),
+            2
+        );
+        let legacy_events = tenant_key_provision_events(&runtime, legacy_rotation_id).await;
+        assert_eq!(legacy_events.len(), 2);
+        assert!(
+            legacy_events
+                .iter()
+                .any(|event| event.payload["version"] == 1),
+            "generation-1 evidence must be repaired without deleting history"
         );
 
         let suffix_source = TenantId::new().to_string();

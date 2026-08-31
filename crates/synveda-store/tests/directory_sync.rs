@@ -18,7 +18,8 @@
 #[path = "support/tenant_fixture.rs"]
 mod tenant_fixture;
 
-use std::sync::OnceLock;
+use std::future::Future;
+use std::sync::{Mutex, OnceLock};
 
 use sqlx::PgPool;
 use sqlx::postgres::PgPoolOptions;
@@ -33,6 +34,21 @@ const DIRECTORY_SOURCE: &str = "entra";
 struct Db {
     rt: tokio::runtime::Runtime,
     pool: PgPool,
+    execution: Mutex<()>,
+}
+
+impl Db {
+    fn block_on<F: Future>(&self, future: F) -> F::Output {
+        // This integration binary deliberately shares one current-thread
+        // runtime and a four-connection pool. Serial execution keeps the
+        // lock-witness tests' three simultaneous connections isolated from
+        // each other without inflating the test fixture's connection budget.
+        let _execution = self
+            .execution
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        self.rt.block_on(future)
+    }
 }
 
 /// Connects (once) to `DATABASE_URL` and applies migrations. `None` = no
@@ -65,7 +81,11 @@ fn db() -> Option<&'static Db> {
                 .expect("apply migrations");
             pool
         });
-        Some(Db { rt, pool })
+        Some(Db {
+            rt,
+            pool,
+            execution: Mutex::new(()),
+        })
     })
     .as_ref()
 }
@@ -117,7 +137,7 @@ async fn seed(pool: &PgPool, count: usize) -> (TenantId, Vec<DirectoryUserId>) {
 #[test]
 fn absence_accumulates_only_for_the_unseen_and_resets_on_return() {
     let Some(db) = db() else { return };
-    db.rt.block_on(async {
+    db.block_on(async {
         let (tenant, users) = seed(&db.pool, 4).await;
         let mut tx = rls::begin_tenant_tx(&db.pool, tenant)
             .await
@@ -183,7 +203,7 @@ fn absence_accumulates_only_for_the_unseen_and_resets_on_return() {
 #[test]
 fn an_absence_pass_never_touches_the_mirrors_own_clock() {
     let Some(db) = db() else { return };
-    db.rt.block_on(async {
+    db.block_on(async {
         let (tenant, users) = seed(&db.pool, 2).await;
         let mut tx = rls::begin_tenant_tx(&db.pool, tenant)
             .await
@@ -236,7 +256,7 @@ fn an_absence_pass_never_touches_the_mirrors_own_clock() {
 #[test]
 fn a_connector_change_forgets_what_the_previous_one_never_saw() {
     let Some(db) = db() else { return };
-    db.rt.block_on(async {
+    db.block_on(async {
         let (tenant, users) = seed(&db.pool, 3).await;
         let mut tx = rls::begin_tenant_tx(&db.pool, tenant)
             .await
@@ -274,7 +294,7 @@ fn a_connector_change_forgets_what_the_previous_one_never_saw() {
 #[test]
 fn external_ids_never_confuse_tenants_or_directory_sources() {
     let Some(db) = db() else { return };
-    db.rt.block_on(async {
+    db.block_on(async {
         let (tenant, _) = seed(&db.pool, 1).await;
         let (other_tenant, _) = seed(&db.pool, 1).await;
         let mut tx = rls::begin_tenant_tx(&db.pool, tenant)
@@ -331,7 +351,7 @@ fn external_ids_never_confuse_tenants_or_directory_sources() {
 #[test]
 fn correspondence_resolution_serializes_a_cross_source_insert() {
     let Some(db) = db() else { return };
-    db.rt.block_on(async {
+    db.block_on(async {
         let (tenant, _) = seed(&db.pool, 1).await;
         let mut holder = rls::begin_tenant_tx(&db.pool, tenant)
             .await
@@ -410,7 +430,7 @@ fn correspondence_resolution_serializes_a_cross_source_insert() {
 #[test]
 fn correspondence_fence_prevents_stale_read_reactivation() {
     let Some(db) = db() else { return };
-    db.rt.block_on(async {
+    db.block_on(async {
         let (tenant, users) = seed(&db.pool, 1).await;
         let user_id = users[0];
         let mut holder = rls::begin_tenant_tx(&db.pool, tenant)
@@ -521,7 +541,7 @@ fn correspondence_fence_prevents_stale_read_reactivation() {
 #[test]
 fn a_completed_pass_records_the_breakers_verdict_or_clears_it() {
     let Some(db) = db() else { return };
-    db.rt.block_on(async {
+    db.block_on(async {
         let (tenant, _) = seed(&db.pool, 1).await;
         let mut tx = rls::begin_tenant_tx(&db.pool, tenant)
             .await
@@ -583,7 +603,7 @@ fn a_completed_pass_records_the_breakers_verdict_or_clears_it() {
 #[test]
 fn an_unsynced_tenant_has_nothing_to_authorise() {
     let Some(db) = db() else { return };
-    db.rt.block_on(async {
+    db.block_on(async {
         let (tenant, _) = seed(&db.pool, 1).await;
         let mut tx = rls::begin_tenant_tx(&db.pool, tenant)
             .await
@@ -626,7 +646,7 @@ fn an_unsynced_tenant_has_nothing_to_authorise() {
 #[test]
 fn an_authorisation_covers_what_it_sized_and_is_spent_once() {
     let Some(db) = db() else { return };
-    db.rt.block_on(async {
+    db.block_on(async {
         let (tenant, _) = seed(&db.pool, 1).await;
         let mut tx = rls::begin_tenant_tx(&db.pool, tenant)
             .await
@@ -724,7 +744,7 @@ fn an_authorisation_covers_what_it_sized_and_is_spent_once() {
 #[test]
 fn an_expired_authorisation_covers_nothing() {
     let Some(db) = db() else { return };
-    db.rt.block_on(async {
+    db.block_on(async {
         let (tenant, _) = seed(&db.pool, 1).await;
         let mut tx = rls::begin_tenant_tx(&db.pool, tenant)
             .await

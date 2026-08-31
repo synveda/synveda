@@ -1,6 +1,6 @@
 # ADR-0019: Hash-chained audit log — per-tenant BLAKE3 chains, in-transaction append, one event per audited operation
 
-- **Status**: Accepted
+- **Status**: Accepted; key-provision exception amended by ADR-0064
 - **Date**: 2026-07-19
 - **Feature(s)**: AUD-1
 - **Deciders**: sujitn
@@ -138,6 +138,10 @@ chain from a canonical serialisation that never round-trips through jsonb.
    `break_glass` (unauthenticated store-level access; attribution is
    honest about being weaker there). Events carry the OTel trace id when
    one is live, linking every chain row to its trace.
+   ADR-0064 amendment 3 narrows this rule only for external-KMS key
+   provisioning: the key commit is followed by a chain-head-serialized exact
+   witness transaction whose rerun repairs the crash gap after proving unwrap
+   custody. Every other CLI mutation retains same-transaction append.
 8. **The audit crate is functions, not a sink.** `synveda_audit::append`
    takes the caller's connection (`&mut PgConnection`) plus tenant and
    event; `verify` walks a tenant's chain in one snapshot and reports the

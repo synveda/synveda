@@ -104,7 +104,7 @@ if [ -n "$suffix" ]; then
         exit 64
     fi
     case "$suffix_value" in
-        *[!a-z0-9-]*)
+        *[!a-z0-9-]*|*-)
             echo "compose: project suffix must match acceptance-[a-z0-9][a-z0-9-]{0,23}" >&2
             exit 64
             ;;
@@ -367,7 +367,7 @@ absolute_from_compose() {
 }
 
 secret_dir=$(absolute_from_compose "${SYNVEDA_SECRETS_DIR:-./secrets}")
-issuer_file=$(absolute_from_compose "${SYNVEDA_OIDC_ISSUERS_FILE:-./runtime/issuers.json}")
+issuer_file=$(absolute_from_compose "${SYNVEDA_OIDC_ISSUERS_FILE:-./runtime/$project/issuers.json}")
 database_authority_dir=$(absolute_from_compose "${SYNVEDA_DATABASE_AUTHORITY_DIR:-./runtime/$project/database-authority}")
 keycloak_public_gate_dir=$(absolute_from_compose "${SYNVEDA_KEYCLOAK_PUBLIC_GATE_DIR:-./runtime/$project/keycloak-public-gate}")
 if [ "${SYNVEDA_DATABASE_ROLES_FILE+x}" = x ]; then
@@ -892,6 +892,12 @@ export SYNVEDA_OTEL_COLLECTOR_IMAGE=$otel_image
 set -- compose --project-directory "$compose_dir" \
     --env-file "$compose_dir/.env.example" -p "$project" \
     -f "$compose_dir/compose.yaml" -f "$compose_dir/compose.$runtime_overlay.yaml"
+if [ "$runtime" = development ] && [ "$postgres_mode" = bundled ]; then
+    set -- "$@" -f "$compose_dir/compose.postgres.dev.yaml"
+fi
+if [ "$runtime" = development ] && [ "$oidc_mode" = bundled ]; then
+    set -- "$@" -f "$compose_dir/compose.keycloak.dev.yaml"
+fi
 if [ "$postgres_mode" = bundled ]; then
     set -- "$@" -f "$compose_dir/compose.postgres.yaml"
 fi

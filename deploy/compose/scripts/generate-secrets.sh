@@ -4,6 +4,8 @@
 # first value-bearing expansion so generated credentials cannot reach logs.
 set +x
 set -eu
+LC_ALL=C
+export LC_ALL
 
 force=0
 case "${1:-}" in
@@ -42,7 +44,7 @@ if [ -n "$suffix" ]; then
         exit 64
     fi
     case "$suffix_value" in
-        *[!a-z0-9-]*)
+        *[!a-z0-9-]*|*-)
             echo "generate-secrets: project suffix must match acceptance-[a-z0-9][a-z0-9-]{0,23}" >&2
             exit 64
             ;;

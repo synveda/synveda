@@ -15,7 +15,8 @@ use sqlx::PgConnection;
 use synveda_types::{Error, Result, TenantId};
 
 use crate::canonical::{canonical_event, truncate_to_micros};
-use crate::event::{AuditAction, AuditEvent};
+use crate::event::{Actor, AuditAction, AuditEvent};
+use crate::query::{EventFilter, search};
 
 /// Counts appended events, labelled by action and outcome. Emitted here;
 /// described by the gateway's recorder (ADR-0007).
@@ -25,6 +26,11 @@ pub const AUDIT_EVENTS_TOTAL: &str = "synveda_audit_events_total";
 /// must never mask the original error — ADR-0019 decision 5). Emitted by
 /// the seam that swallows the failure.
 pub const AUDIT_APPEND_FAILURES_TOTAL: &str = "synveda_audit_append_failures_total";
+
+/// Counts generation-one key-provision witness convergence, labelled by
+/// `result` (`appended`, `existing`, or `inconsistent`).
+pub const TENANT_KEY_PROVISION_WITNESSES_TOTAL: &str =
+    "synveda_audit_tenant_key_provision_witnesses_total";
 
 /// Counts chain verifications, labelled by outcome (`valid`/`broken`).
 pub const AUDIT_VERIFICATIONS_TOTAL: &str = "synveda_audit_verifications_total";
@@ -68,6 +74,38 @@ pub struct AppendedEvent {
     pub hash: [u8; 32],
 }
 
+/// The attempt metadata needed to converge the one exceptional
+/// generation-one key-provision witness (ADR-0064 amendment 3).
+///
+/// Action, resource, outcome, generation and payload shape are deliberately
+/// not caller-controlled. Ordinary governed mutations must continue to call
+/// [`append`] in the same transaction as their effect (ADR-0019).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TenantKeyProvisionedWitness {
+    /// When this repair or initial append was attempted.
+    pub occurred_at: DateTime<Utc>,
+    /// The OS-attributed subject running break-glass key provisioning.
+    pub break_glass_subject: String,
+    /// The authoritative KEK reference stored with generation one.
+    pub kek_ref: String,
+    /// Optional trace correlation for this attempt.
+    pub trace_id: Option<String>,
+}
+
+/// Result of converging the generation-one key-provision witness.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TenantKeyProvisionedAppend {
+    /// The existing or newly appended chain position.
+    pub seq: i64,
+    /// Whether this transaction appended the witness.
+    pub appended: bool,
+}
+
+struct LockedHead {
+    seq: i64,
+    hash: Vec<u8>,
+}
+
 /// Appends one event to `tenant`'s chain, inside the caller's transaction.
 ///
 /// The caller's transaction must have been opened by
@@ -85,7 +123,154 @@ pub async fn append(
     tenant: TenantId,
     event: &AuditEvent,
 ) -> Result<AppendedEvent> {
-    let occurred_at = truncate_to_micros(event.occurred_at);
+    let head = lock_head(conn, tenant).await?;
+    append_locked(conn, tenant, event, head).await
+}
+
+/// Appends the exact generation-one tenant-key witness only when absent.
+///
+/// The tenant's chain head is locked before the lookup, so concurrent callers
+/// cannot both observe absence. Actor subject, occurrence time and trace id
+/// describe an attempt rather than the idempotent business fact. Historic
+/// duplicate exact witnesses are accepted but never extended; a candidate
+/// whose payload only contains the requested shape fails closed.
+///
+/// This intentionally narrow API is the only exception to ADR-0019's normal
+/// same-transaction mutation/audit rule. The external KMS effect cannot join
+/// a PostgreSQL transaction, so an exact witness can be repaired after custody
+/// is proved. No generic idempotent append surface is exported.
+#[tracing::instrument(
+    name = "audit.tenant_key_provision_witness",
+    skip_all,
+    fields(tenant.id = %tenant, audit.action = AuditAction::TenantKeyProvisioned.as_str(), audit.seq = tracing::field::Empty),
+    err(Display)
+)]
+pub async fn append_tenant_key_provisioned_once(
+    conn: &mut PgConnection,
+    tenant: TenantId,
+    witness: &TenantKeyProvisionedWitness,
+) -> Result<TenantKeyProvisionedAppend> {
+    let event = AuditEvent {
+        occurred_at: witness.occurred_at,
+        actor: Actor::break_glass(witness.break_glass_subject.clone()),
+        action: AuditAction::TenantKeyProvisioned,
+        resource: format!("tenant {tenant} key"),
+        outcome: crate::event::Outcome::Success,
+        payload: serde_json::json!({
+            "version": 1,
+            "kek_ref": witness.kek_ref,
+        }),
+        trace_id: witness.trace_id.clone(),
+    };
+    append_once(conn, tenant, &event).await
+}
+
+async fn append_once(
+    conn: &mut PgConnection,
+    tenant: TenantId,
+    event: &AuditEvent,
+) -> Result<TenantKeyProvisionedAppend> {
+    let head = lock_head(conn, tenant).await?;
+    match existing_exact_witness(conn, tenant, event).await? {
+        None => {
+            let appended = append_locked(conn, tenant, event, head).await?;
+            metrics::counter!(
+                TENANT_KEY_PROVISION_WITNESSES_TOTAL,
+                "result" => "appended",
+            )
+            .increment(1);
+            Ok(TenantKeyProvisionedAppend {
+                seq: appended.seq,
+                appended: true,
+            })
+        }
+        Some(seq) => {
+            tracing::Span::current().record("audit.seq", seq);
+            metrics::counter!(
+                TENANT_KEY_PROVISION_WITNESSES_TOTAL,
+                "result" => "existing",
+            )
+            .increment(1);
+            Ok(TenantKeyProvisionedAppend {
+                seq,
+                appended: false,
+            })
+        }
+    }
+}
+
+async fn existing_exact_witness(
+    conn: &mut PgConnection,
+    tenant: TenantId,
+    event: &AuditEvent,
+) -> Result<Option<i64>> {
+    const PAGE_SIZE: i64 = 64;
+    const MAX_CANDIDATES: usize = 4_096;
+
+    let filter = EventFilter {
+        actions: vec![event.action],
+        outcome: Some(event.outcome),
+        resource: Some(event.resource.clone()),
+        // Inspect every generation-one candidate, including a conflicting
+        // KEK reference or malformed superset. Later generations are a
+        // different historic fact and must not block repair of generation 1.
+        payload_contains: Some(serde_json::json!({ "version": 1 })),
+        ..EventFilter::default()
+    };
+    let mut after = 0;
+    let mut first_seq = None;
+    let mut inspected = 0usize;
+
+    loop {
+        let page = search(conn, tenant, &filter, after, PAGE_SIZE).await?;
+        if page
+            .items
+            .iter()
+            .any(|candidate| !exact_witness(candidate, event))
+        {
+            metrics::counter!(
+                TENANT_KEY_PROVISION_WITNESSES_TOTAL,
+                "result" => "inconsistent",
+            )
+            .increment(1);
+            return Err(Error::Conflict {
+                message: "audit idempotency witness is inconsistent".to_owned(),
+            });
+        }
+        if first_seq.is_none() {
+            first_seq = page.items.first().map(|candidate| candidate.seq);
+        }
+        inspected = inspected
+            .checked_add(page.items.len())
+            .ok_or_else(|| Error::Internal {
+                message: "audit idempotency witness count overflowed".to_owned(),
+            })?;
+        if inspected > MAX_CANDIDATES {
+            metrics::counter!(
+                TENANT_KEY_PROVISION_WITNESSES_TOTAL,
+                "result" => "inconsistent",
+            )
+            .increment(1);
+            return Err(Error::Conflict {
+                message: "audit idempotency witness exceeds the bounded history".to_owned(),
+            });
+        }
+        let Some(cursor) = page.next_cursor else {
+            return Ok(first_seq);
+        };
+        after = cursor;
+    }
+}
+
+fn exact_witness(existing: &StoredEvent, event: &AuditEvent) -> bool {
+    existing.actor_kind == event.actor.kind.as_str()
+        && existing.action == event.action.as_str()
+        && existing.resource == event.resource
+        && existing.outcome == event.outcome.as_str()
+        && existing.payload == event.payload
+}
+
+async fn lock_head(conn: &mut PgConnection, tenant: TenantId) -> Result<LockedHead> {
     let genesis = genesis_hash(tenant);
 
     // First append wins the race to create the head; every later append
@@ -111,6 +296,20 @@ pub async fn append(
     .await
     .map_err(|err| storage_error("lock chain head", &err))?;
 
+    Ok(LockedHead {
+        seq: head.seq,
+        hash: head.head_hash,
+    })
+}
+
+async fn append_locked(
+    conn: &mut PgConnection,
+    tenant: TenantId,
+    event: &AuditEvent,
+    head: LockedHead,
+) -> Result<AppendedEvent> {
+    let occurred_at = truncate_to_micros(event.occurred_at);
+
     let seq = head.seq + 1;
     let canonical = canonical_event(
         tenant.as_uuid(),
@@ -124,7 +323,7 @@ pub async fn append(
         &event.payload,
         event.trace_id.as_deref(),
     )?;
-    let hash = compute_hash(&head.head_hash, &canonical);
+    let hash = compute_hash(&head.hash, &canonical);
 
     sqlx::query!(
         "insert into audit_log
@@ -141,7 +340,7 @@ pub async fn append(
         event.outcome.as_str(),
         &event.payload,
         event.trace_id.as_deref(),
-        &head.head_hash[..],
+        &head.hash[..],
         &hash[..],
     )
     .execute(&mut *conn)

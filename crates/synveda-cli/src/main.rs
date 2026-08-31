@@ -1697,6 +1697,23 @@ enum TenantCommand {
         #[arg(long, hide = true)]
         dev_administrator_subject: Option<String>,
     },
+    /// Converge one deployment-owned tenant admission by exact UUID.
+    ///
+    /// This is the idempotent form used by deployment bootstrap jobs. It
+    /// creates through the same audited break-glass transaction as `create`,
+    /// and a rerun succeeds only when UUID, slug, name and active status are
+    /// byte-for-byte the expected admission.
+    Converge {
+        /// Stable deployment-owned UUIDv7.
+        #[arg(long)]
+        id: TenantId,
+        /// Human-stable handle: lowercase, hyphenated, unique.
+        #[arg(long)]
+        slug: String,
+        /// Display name.
+        #[arg(long)]
+        name: String,
+    },
     /// A tenant's encryption keys (TEN-4, ADR-0064).
     #[command(subcommand)]
     Key(TenantKeyCommand),
@@ -2275,33 +2292,22 @@ async fn run(cli: Cli) -> Result<(), String> {
             };
             #[cfg(not(feature = "eval-fixture"))]
             let tenant = create_tenant(&pool, &database_roles, &slug, &name, status).await?;
-            // The tenant's key, in the same command that admits it (TEN-4,
-            // ADR-0064). Not in `create_tenant`'s transaction: wrapping a key
-            // is a KMS call, and a network call inside the transaction that
-            // admits a tenant is a transaction held open by somebody else's
-            // outage. A failure here leaves an admitted tenant with no key,
-            // which `tenant key provision` fixes and which the message says.
-            let key = match keys::provision_quietly(&pool, tenant.id).await {
-                Ok(version) => serde_json::json!({ "version": version }),
-                Err(error) => {
-                    eprintln!(
-                        "tenant admitted, but its encryption key was not \
-                         provisioned: {error}\nrun `synveda tenant key \
-                         provision --tenant {}` once a KEK is configured",
-                        tenant.id
-                    );
-                    serde_json::Value::Null
-                }
-            };
-            let mut rendered = serde_json::to_value(&tenant).map_err(|err| err.to_string())?;
-            if let Some(object) = rendered.as_object_mut() {
-                object.insert("encryption_key".to_string(), key);
-            }
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&rendered).map_err(|err| err.to_string())?
-            );
-            Ok(())
+            render_admitted_tenant(&pool, tenant, false).await
+        }
+        Command::Tenant(TenantCommand::Converge { id, slug, name }) => {
+            validate_deployment_tenant_admission(id, &slug, &name)?;
+            let database_roles = init::database_roles()?;
+            let pool = connect_tenant_admission().await?;
+            let tenant = converge_tenant(
+                &pool,
+                &database_roles,
+                id,
+                &slug,
+                &name,
+                TenantStatus::Active,
+            )
+            .await?;
+            render_admitted_tenant(&pool, tenant, true).await
         }
         Command::Kms(KmsCommand::Keygen) => keys::keygen(),
         Command::Tenant(TenantCommand::Key(TenantKeyCommand::Provision { tenant })) => {
@@ -3140,11 +3146,21 @@ async fn create_tenant_with_admission_id(
     let tenant = synveda_store::tenants::create(&mut *tx, tenant_id, slug, name, status)
         .await
         .map_err(|err| err.to_string())?;
+    record_tenant_admission(&mut tx, &tenant, admission).await?;
+    tx.commit().await.map_err(|err| err.to_string())?;
+    Ok(tenant)
+}
+
+async fn record_tenant_admission(
+    tx: &mut sqlx::PgConnection,
+    tenant: &synveda_types::Tenant,
+    admission: TenantAdmission,
+) -> Result<(), String> {
     record_break_glass(
-        &mut tx,
-        tenant_id,
+        tx,
+        tenant.id,
         AuditAction::TenantCreated,
-        format!("tenant {tenant_id}"),
+        format!("tenant {}", tenant.id),
         json!({"slug": tenant.slug, "name": tenant.name, "status": tenant.status}),
     )
     .await?;
@@ -3152,14 +3168,14 @@ async fn create_tenant_with_admission_id(
         TenantAdmission::Standard => {}
         #[cfg(feature = "eval-fixture")]
         TenantAdmission::EvalAdministrator(subject) => {
-            let root = synveda_store::scopes::ensure_tenant_root(&mut *tx, tenant_id)
+            let root = synveda_store::scopes::ensure_tenant_root(&mut *tx, tenant.id)
                 .await
                 .map_err(|err| err.to_string())?;
             let grant = synveda_store::access::create_grant(
-                &mut tx,
+                tx,
                 &synveda_store::access::NewGrant {
                     id: GrantId::new(),
-                    tenant_id,
+                    tenant_id: tenant.id,
                     scope_id: root.id,
                     subject: GrantSubject::Principal {
                         principal_id: subject.clone(),
@@ -3173,8 +3189,8 @@ async fn create_tenant_with_admission_id(
             .await
             .map_err(|err| err.to_string())?;
             record_break_glass(
-                &mut tx,
-                tenant_id,
+                tx,
+                tenant.id,
                 AuditAction::AccessGranted,
                 format!("scope {}", root.id),
                 json!({
@@ -3190,8 +3206,139 @@ async fn create_tenant_with_admission_id(
             .await?;
         }
     }
-    tx.commit().await.map_err(|err| err.to_string())?;
-    Ok(tenant)
+    Ok(())
+}
+
+/// Idempotently admits one deployment-owned tenant without creating a second
+/// bootstrap path. The read and possible insert use the exact migrator
+/// authority proof and tenant-scoped transaction used by ordinary admission.
+/// A single retry closes the concurrent-create race; it never widens a
+/// conflict with another UUID or different immutable admission fields.
+async fn converge_tenant(
+    pool: &sqlx::PgPool,
+    database_roles: &synveda_store::runtime_role::DatabaseRoles,
+    tenant_id: TenantId,
+    slug: &str,
+    name: &str,
+    status: TenantStatus,
+) -> Result<synveda_types::Tenant, String> {
+    validate_deployment_tenant_admission(tenant_id, slug, name)?;
+    for attempt in 0..2 {
+        let mut tx = synveda_store::rls::begin_migrator_tenant_tx(
+            pool,
+            tenant_id,
+            database_roles,
+        )
+        .await
+        .map_err(|error| {
+            format!(
+                "tenant admission requires the exact configured migrator principal, database target and schema epoch: {error}"
+            )
+        })?;
+
+        if let Some(existing) = synveda_store::tenants::by_id(&mut *tx, tenant_id)
+            .await
+            .map_err(|error| error.to_string())?
+        {
+            if existing.slug != slug || existing.name != name || existing.status != status {
+                return Err(format!(
+                    "tenant {tenant_id} already exists with a different slug, name or status"
+                ));
+            }
+            tx.commit().await.map_err(|error| error.to_string())?;
+            return Ok(existing);
+        }
+
+        let tenant =
+            match synveda_store::tenants::create(&mut *tx, tenant_id, slug, name, status).await {
+                Ok(tenant) => tenant,
+                Err(synveda_types::Error::Conflict { .. }) if attempt == 0 => {
+                    tx.rollback().await.map_err(|error| error.to_string())?;
+                    continue;
+                }
+                Err(error) => return Err(error.to_string()),
+            };
+        record_tenant_admission(&mut tx, &tenant, TenantAdmission::Standard).await?;
+        tx.commit().await.map_err(|error| error.to_string())?;
+        return Ok(tenant);
+    }
+    Err("tenant admission did not converge after a concurrent create".to_owned())
+}
+
+fn is_deployment_tenant_id(tenant_id: TenantId) -> bool {
+    let uuid = tenant_id.as_uuid();
+    uuid.get_version_num() == 7 && uuid.as_bytes()[8] & 0b1100_0000 == 0b1000_0000
+}
+
+fn validate_deployment_tenant_admission(
+    tenant_id: TenantId,
+    slug: &str,
+    name: &str,
+) -> Result<(), String> {
+    if !is_deployment_tenant_id(tenant_id) {
+        return Err("tenant converge requires an RFC 4122 UUIDv7 --id".to_owned());
+    }
+    let slug_starts_safely = slug
+        .as_bytes()
+        .first()
+        .is_some_and(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit());
+    if !slug_starts_safely
+        || slug.len() > 63
+        || !slug
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+        || slug.ends_with('-')
+        || slug.contains("--")
+    {
+        return Err("tenant converge requires a bounded lowercase --slug".to_owned());
+    }
+    if name.is_empty()
+        || name.len() > 128
+        || name.starts_with('-')
+        || !name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b' ' | b'-'))
+        || !name.bytes().any(|byte| byte.is_ascii_alphanumeric())
+    {
+        return Err("tenant converge requires a bounded display --name".to_owned());
+    }
+    Ok(())
+}
+
+async fn render_admitted_tenant(
+    pool: &sqlx::PgPool,
+    tenant: synveda_types::Tenant,
+    require_key: bool,
+) -> Result<(), String> {
+    // Key wrapping remains outside the admission transaction: a network KMS
+    // outage must not hold the transaction that creates the tenant. A rerun
+    // converges the already-admitted row and retries this idempotent step.
+    let key = match keys::provision_quietly(pool, tenant.id).await {
+        Ok(version) => serde_json::json!({ "version": version }),
+        Err(error) if require_key => {
+            return Err(format!(
+                "tenant {0} was admitted, but its required encryption key was not provisioned: {error}; rerun the same converge command after restoring KMS availability",
+                tenant.id
+            ));
+        }
+        Err(error) => {
+            eprintln!(
+                "tenant admitted, but its encryption key was not provisioned: {error}\n\
+                 run `synveda tenant key provision --tenant {}` once a KEK is configured",
+                tenant.id
+            );
+            serde_json::Value::Null
+        }
+    };
+    let mut rendered = serde_json::to_value(&tenant).map_err(|error| error.to_string())?;
+    if let Some(object) = rendered.as_object_mut() {
+        object.insert("encryption_key".to_owned(), key);
+    }
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&rendered).map_err(|error| error.to_string())?
+    );
+    Ok(())
 }
 
 /// Chains a break-glass event in the same transaction as the mutation it
@@ -3315,6 +3462,68 @@ mod hard_cut_tests {
         assert!(
             error.to_string().contains("unexpected argument '--demo'"),
             "unexpected clap refusal: {error}"
+        );
+    }
+
+    #[test]
+    fn deployment_tenant_convergence_has_one_exact_non_secret_shape() {
+        Cli::try_parse_from([
+            "synveda",
+            "tenant",
+            "converge",
+            "--id",
+            "019b53c0-7c00-7000-8000-000000000045",
+            "--slug",
+            "synveda-demo",
+            "--name",
+            "Synveda Demo",
+        ])
+        .expect("deployment tenant convergence must parse");
+
+        let error = Cli::try_parse_from([
+            "synveda",
+            "tenant",
+            "converge",
+            "--id",
+            "019b53c0-7c00-7000-8000-000000000045",
+            "--slug",
+            "synveda-demo",
+        ])
+        .err()
+        .expect("all immutable admission fields are required");
+        assert!(error.to_string().contains("--name"), "{error}");
+
+        let non_rfc_variant: TenantId = "019b53c0-7c00-7000-c000-000000000045"
+            .parse()
+            .expect("syntactically valid non-RFC UUID");
+        assert_eq!(non_rfc_variant.as_uuid().get_version_num(), 7);
+        assert!(
+            !is_deployment_tenant_id(non_rfc_variant),
+            "deployment convergence must reject non-RFC UUID variants before database access"
+        );
+        let deployment_id: TenantId = "019b53c0-7c00-7000-8000-000000000045"
+            .parse()
+            .expect("deployment UUIDv7");
+        for (slug, name) in [
+            ("synveda--demo", "Synveda Demo"),
+            ("synveda-demo-", "Synveda Demo"),
+            ("Synveda-demo", "Synveda Demo"),
+            ("synveda-demo", "-Synveda Demo"),
+            ("synveda-demo", "Synveda/Demo"),
+            ("synveda-demo", "Synveda Démo"),
+        ] {
+            assert!(
+                validate_deployment_tenant_admission(deployment_id, slug, name).is_err(),
+                "invalid deployment admission was accepted: {slug:?} {name:?}"
+            );
+        }
+        assert!(
+            validate_deployment_tenant_admission(deployment_id, &"a".repeat(64), "Synveda Demo")
+                .is_err()
+        );
+        assert!(
+            validate_deployment_tenant_admission(deployment_id, "synveda-demo", &"A".repeat(129))
+                .is_err()
         );
     }
 

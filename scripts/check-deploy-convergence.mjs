@@ -185,7 +185,7 @@ export function dbTestNetworkReservationFindings(dbTest, compose) {
   const findings = [];
   if (
     createHash("sha256").update(dbTest).digest("hex") !==
-    "ef435cf58c44ffa1b2c5ea84d04529454077c1bfa1225a1b7371f484178a937a"
+    "077d1f7afb261f85ac2ae8daa123b7009318135c338a6df4dbbca2e8513dae1c"
   ) {
     findings.push("database fixture differs from the reviewed executable");
   }
@@ -1345,8 +1345,9 @@ export function lifecyclePeerWitnessFindings(dbTest, dbTestCompose) {
       : "";
   const restart = restartBranch.indexOf("compose restart postgres-main");
   const refreshedPort = restartBranch.indexOf("main_port=$(published_port postgres-main)");
+  const readiness = restartBranch.indexOf("\nwait_for_main_database_authority\n");
   const refusal = restartBranch.indexOf(
-    "expect_main_preflight_refusal stale-after-restart",
+    '\nexpect_main_preflight_refusal stale-after-restart "$main_witness_file" "$peer_mismatch_error"\n',
   );
   const refreshedUrls = [
     "main_owner_file",
@@ -1355,11 +1356,75 @@ export function lifecyclePeerWitnessFindings(dbTest, dbTestCompose) {
     "main_worker_file",
   ].every((file) =>
     restartBranch
-      .slice(refreshedPort, refusal)
+      .slice(refreshedPort, readiness)
       .includes(`\"$main_port\" synveda \"$${file}\"`),
   );
-  if (!(restart >= 0 && refreshedPort > restart && refusal > refreshedPort && refreshedUrls)) {
+  if (
+    !(
+      restart >= 0 &&
+      refreshedPort > restart &&
+      readiness > refreshedPort &&
+      refusal > readiness &&
+      refreshedUrls
+    )
+  ) {
     findings.push("restart witness test does not refresh every dynamic-port database URL");
+  }
+
+  const authorityStart = dbTest.indexOf("run_main_database_authority_preflight() {");
+  const classifierStart = dbTest.indexOf(
+    "classify_main_database_authority_preflight() {",
+    authorityStart,
+  );
+  const waitStart = dbTest.indexOf("wait_for_main_database_authority() {", classifierStart);
+  const helpersEnd = dbTest.indexOf("\ncompose config --quiet", waitStart);
+  const authorityHelper =
+    authorityStart >= 0 && classifierStart > authorityStart
+      ? dbTest.slice(authorityStart, classifierStart)
+      : "";
+  const classifierHelper =
+    classifierStart >= 0 && waitStart > classifierStart
+      ? dbTest.slice(classifierStart, waitStart)
+      : "";
+  const waitHelper =
+    waitStart >= 0 && helpersEnd > waitStart ? dbTest.slice(waitStart, helpersEnd) : "";
+  for (const marker of [
+    "-u SYNVEDA_DATABASE_REQUIRED_PEER",
+    "-u SYNVEDA_DATABASE_PEER_WITNESS_FILE",
+    "SYNVEDA_MIGRATOR_DATABASE_URL_FILE=$main_migrator_file",
+    "SYNVEDA_GATEWAY_DATABASE_URL_FILE=$main_gateway_file",
+    "SYNVEDA_WORKER_DATABASE_URL_FILE=$main_worker_file",
+  ]) {
+    if (!authorityHelper.includes(marker)) {
+      findings.push(`post-restart authority readiness is missing ${marker}`);
+    }
+  }
+  for (const marker of [
+    '[ "$preflight_status" -eq 0 ]',
+    "database target preflight complete",
+    '[ "$preflight_status" -eq 1 ]',
+    "SYNVEDA_MIGRATOR_DATABASE_URL_FILE connection failed",
+    "SYNVEDA_MIGRATOR_DATABASE_URL_FILE preflight timed out",
+    "SYNVEDA_MIGRATOR_DATABASE_URL_FILE authority or writable-target verification failed",
+    "return 75",
+  ]) {
+    if (!classifierHelper.includes(marker)) {
+      findings.push(`post-restart authority classifier is missing ${marker}`);
+    }
+  }
+  for (const marker of [
+    'while [ "$attempt" -le 3 ]',
+    'run_main_database_authority_preflight > "$stdout_file" 2> "$stderr_file"',
+    'assert_database_secrets_absent "$stdout_file"',
+    'assert_database_secrets_absent "$stderr_file"',
+    "classify_main_database_authority_preflight",
+    '[ "$classification" -eq 75 ]',
+    '\n    sleep 2\n',
+    'attempt=$((attempt + 1))',
+  ]) {
+    if (!waitHelper.includes(marker)) {
+      findings.push(`post-restart authority wait is missing ${marker}`);
+    }
   }
   if (
     dbTest.includes(
@@ -1570,6 +1635,16 @@ export function productLauncherFindings(source) {
     "issuer-diagnostic",
     "database-preflight",
     "migrate",
+    "tenant-converge",
+    "????????-????-7???-[89ab]???-????????????",
+    "*",
+    "*[!0-9a-f-]*",
+    "[a-z0-9]*",
+    "*",
+    "*[!a-z0-9-]*|*-|*--*",
+    "''|-*|*[!A-Za-z0-9._' '-]*",
+    "*[A-Za-z0-9]*",
+    "*",
     "probe",
     "gateway",
     "worker",
@@ -1584,7 +1659,7 @@ export function productLauncherFindings(source) {
   }
   const roleMatches = [
     ...active.matchAll(
-      /^ {4}(gateway|worker|issuer-diagnostic|database-preflight|migrate|probe|\*)\)[ \t]*$/gm,
+      /^ {4}(gateway|worker|issuer-diagnostic|database-preflight|migrate|tenant-converge|probe|\*)\)[ \t]*$/gm,
     ),
   ];
   const labels = roleMatches.map(
@@ -1598,6 +1673,7 @@ export function productLauncherFindings(source) {
       "issuer-diagnostic",
       "database-preflight",
       "migrate",
+      "tenant-converge",
       "probe",
       "*",
     ])
@@ -1618,6 +1694,7 @@ export function productLauncherFindings(source) {
   const issuerDiagnostic = roleBlock("issuer-diagnostic").replace(/\\\r?\n\s*/g, " ");
   const databasePreflight = roleBlock("database-preflight");
   const migrate = roleBlock("migrate");
+  const tenantConverge = roleBlock("tenant-converge").replace(/\\\r?\n\s*/g, " ");
   const probe = roleBlock("probe").replace(/\\\r?\n\s*/g, " ");
   const unknown = roleBlock("*").replace(/\s+/g, " ").trim();
 
@@ -1654,6 +1731,16 @@ export function productLauncherFindings(source) {
   }
   if (!migrate.includes("exec /usr/local/bin/synveda db migrate")) {
     findings.push("migrate role does not exec the migration command");
+  }
+  if (!tenantConverge.includes('[ "$#" -eq 1 ] || usage')) {
+    findings.push("tenant-converge role does not enforce exact arity");
+  }
+  if (
+    !/exec \/usr\/local\/bin\/synveda tenant converge\s+--id "\$tenant_id" --slug "\$tenant_slug" --name "\$tenant_name"/.test(
+      tenantConverge,
+    )
+  ) {
+    findings.push("tenant-converge role does not exec the exact tenant admission command");
   }
   if (!probe.includes('[ "$#" -eq 3 ] || usage')) {
     findings.push("probe role does not enforce exact arity");

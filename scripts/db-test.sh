@@ -660,6 +660,84 @@ run_main_database_preflight() {
       cargo run -q -p synveda-cli --bin synveda -- db preflight
 }
 
+run_main_database_authority_preflight() {
+  env -u SYNVEDA_DB_TEST_SECRETS_DIR \
+    -u SYNVEDA_DATABASE_REQUIRED_PEER \
+    -u SYNVEDA_DATABASE_PEER_WITNESS_FILE \
+    SQLX_OFFLINE=true \
+    SYNVEDA_DATABASE_ROLES_FILE=$roles_file \
+    SYNVEDA_DATABASE_EXPECTED_HOST=127.0.0.1 \
+    SYNVEDA_DATABASE_EXPECTED_PORT=$main_port \
+    SYNVEDA_DATABASE_EXPECTED_NAME=synveda \
+    SYNVEDA_MIGRATOR_DATABASE_URL_FILE=$main_migrator_file \
+    SYNVEDA_GATEWAY_DATABASE_URL_FILE=$main_gateway_file \
+    SYNVEDA_WORKER_DATABASE_URL_FILE=$main_worker_file \
+      cargo run -q -p synveda-cli --bin synveda -- db preflight
+}
+
+# Returns 0 only for exact readiness, 75 only for a closed transient shape,
+# and 1 for every other status/output combination.
+classify_main_database_authority_preflight() {
+  local preflight_status=$1
+  local stdout_file=$2
+  local stderr_file=$3
+  local retryable_error
+
+  [ ! -s "$stdout_file" ] || return 1
+  if [ "$preflight_status" -eq 0 ] && cmp -s -- \
+      <(printf '%s\n' 'database target preflight complete') "$stderr_file"; then
+    return 0
+  fi
+  [ "$preflight_status" -eq 1 ] || return 1
+  for retryable_error in \
+    'synveda: SYNVEDA_MIGRATOR_DATABASE_URL_FILE connection failed' \
+    'synveda: SYNVEDA_MIGRATOR_DATABASE_URL_FILE preflight timed out' \
+    'synveda: SYNVEDA_MIGRATOR_DATABASE_URL_FILE authority or writable-target verification failed'; do
+    if cmp -s -- <(printf '%s\n' "$retryable_error") "$stderr_file"; then
+      return 75
+    fi
+  done
+  return 1
+}
+
+wait_for_main_database_authority() {
+  local attempt=1
+  local classification
+  local preflight_status
+  local stdout_file=$state_dir/preflight-restart-readiness.stdout
+  local stderr_file=$state_dir/preflight-restart-readiness.stderr
+
+  while [ "$attempt" -le 3 ]; do
+    private_evidence_file "$stdout_file"
+    private_evidence_file "$stderr_file"
+    if run_main_database_authority_preflight > "$stdout_file" 2> "$stderr_file"; then
+      preflight_status=0
+    else
+      preflight_status=$?
+    fi
+    assert_database_secrets_absent "$stdout_file"
+    assert_database_secrets_absent "$stderr_file"
+    if classify_main_database_authority_preflight \
+        "$preflight_status" "$stdout_file" "$stderr_file"; then
+      rm -f "$stdout_file" "$stderr_file"
+      return 0
+    else
+      classification=$?
+    fi
+    [ "$classification" -eq 75 ] || {
+      echo "db-test: post-restart database authority readiness returned an invalid response" >&2
+      return 1
+    }
+    [ "$attempt" -lt 3 ] || {
+      echo "db-test: post-restart database authority readiness did not converge" >&2
+      return 1
+    }
+    sleep 2
+    attempt=$((attempt + 1))
+  done
+  return 1
+}
+
 compose config --quiet
 compose build postgres-main
 if [ "$fast_fixture" = true ]; then
@@ -3245,6 +3323,7 @@ write_database_url synveda_gateway "$secret_dir/synveda_gateway_password" \
   "$main_port" synveda "$main_gateway_file"
 write_database_url synveda_worker "$secret_dir/synveda_worker_password" \
   "$main_port" synveda "$main_worker_file"
+wait_for_main_database_authority
 expect_main_preflight_refusal stale-after-restart "$main_witness_file" "$peer_mismatch_error"
 compose run --rm --no-deps keycloak-database-bootstrap-main
 run_main_database_preflight "$main_witness_file"

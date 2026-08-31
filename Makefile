@@ -19,7 +19,7 @@ export SYNVEDA_TEI_IMAGE
 # and skip when it is unset — CI runs without a database.
 DATABASE_URL ?= postgres://synveda:synveda-dev@localhost:5432/synveda
 
-.PHONY: fmt lint test build deny check-deps check-adr-status check-adapters check-api-types check-backlog check-benchmarks check-chart-images check-compose-contract check-context-hard-cut check-context-security check-corpus-licences check-demos check-deploy check-docs check-npm-licences check-product-eval chart-lint compose-config compose-secrets ts-build ts-test ci dev-up dev-down smoke db-test claude-acceptance claude-acceptance-live eval eval-check eval-product eval-judge eval-read eval-longmemeval eval-longmemeval-full eval-longmemeval-judged eval-extraction-live eval-retrieval eval-security
+.PHONY: fmt lint test build deny check-deps check-adr-status check-adapters check-api-types check-backlog check-benchmarks check-chart-images check-compose-contract check-context-hard-cut check-context-security check-corpus-licences check-demos check-deploy check-docs check-npm-licences check-product-eval chart-lint compose-config compose-secrets compose-issuer ts-build ts-test ci dev-up dev-down smoke db-test claude-acceptance claude-acceptance-live eval eval-check eval-product eval-judge eval-read eval-longmemeval eval-longmemeval-full eval-longmemeval-judged eval-extraction-live eval-retrieval eval-security
 
 dev-up:
 	$(COMPOSE) up --build --detach --wait
@@ -37,6 +37,9 @@ compose-config: check-compose-contract
 
 compose-secrets:
 	deploy/compose/scripts/generate-secrets.sh
+
+compose-issuer:
+	deploy/compose/scripts/generate-issuer.sh
 
 # The eval harness (EVAL-1, ADR-0028; EVAL-2, ADR-0046; EVAL-4, ADR-0047):
 # the scenario suite, the labelled extraction corpus and the Q&A corpus
@@ -335,11 +338,13 @@ chart-lint:
 check-deploy:
 	node --test scripts/check-deploy-convergence.test.mjs
 	node --test scripts/uninstall.test.mjs
+	node --test scripts/generate-compose-issuer.test.mjs
 	node --test scripts/check-compose-contract.test.mjs
 	node scripts/check-deploy-convergence.mjs
 	node scripts/check-compose-contract.mjs
 
 check-compose-contract:
+	node --test scripts/generate-compose-issuer.test.mjs
 	node --test scripts/check-compose-contract.test.mjs
 	node scripts/check-compose-contract.mjs
 

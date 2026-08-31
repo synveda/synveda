@@ -587,6 +587,7 @@ async fn wait_for_database_lock(state: &AppState, tenant_id: TenantId, applicati
 
 #[derive(Clone)]
 struct BlockingVllmState {
+    block_on: String,
     entered: Arc<Notify>,
     release: Arc<Notify>,
     calls: Arc<AtomicUsize>,
@@ -606,21 +607,69 @@ impl Drop for BlockingVllm {
     }
 }
 
-async fn blocked_vllm_response(State(state): State<BlockingVllmState>) -> Json<Value> {
-    state.calls.fetch_add(1, Ordering::SeqCst);
-    state.entered.notify_one();
-    state.release.notified().await;
+fn request_has_exact_payload_text(request: &Value, expected: &str) -> bool {
+    request["messages"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|message| message["role"] == "user")
+        .filter_map(|message| message["content"].as_str())
+        .filter_map(|content| serde_json::from_str::<Value>(content).ok())
+        .any(|input| input["payload"]["text"] == expected)
+}
+
+async fn blocked_vllm_response(
+    State(state): State<BlockingVllmState>,
+    Json(request): Json<Value>,
+) -> Json<Value> {
+    let target = request_has_exact_payload_text(&request, &state.block_on);
+    let content = if target {
+        state.calls.fetch_add(1, Ordering::SeqCst);
+        state.entered.notify_one();
+        state.release.notified().await;
+        "{\"candidates\":[{\"knowledge_type\":\"fact\",\"title\":\"Renewed capture\",\"body_markdown\":\"The worker retained its exact lease while extraction was blocked.\",\"summary\":\"The capture lease was renewed.\",\"tags\":[\"lease\"],\"confidence\":0.9}] }"
+    } else {
+        "{\"candidates\":[]}"
+    };
     Json(json!({
         "model": "cpr45-blocking@1",
         "choices": [{
             "message": {
-                "content": "{\"candidates\":[{\"knowledge_type\":\"fact\",\"title\":\"Renewed capture\",\"body_markdown\":\"The worker retained its exact lease while extraction was blocked.\",\"summary\":\"The capture lease was renewed.\",\"tags\":[\"lease\"],\"confidence\":0.9}] }"
+                "content": content
             }
         }]
     }))
 }
 
-async fn spawn_blocking_vllm() -> BlockingVllm {
+#[test]
+fn blocking_vllm_fixture_matches_only_the_exact_target_event() {
+    let request = |role: &str, text: &str| {
+        json!({
+            "messages": [{
+                "role": role,
+                "content": json!({"payload": {"text": text}}).to_string(),
+            }],
+        })
+    };
+    assert!(request_has_exact_payload_text(
+        &request("user", "target event"),
+        "target event"
+    ));
+    assert!(!request_has_exact_payload_text(
+        &request("user", "target event plus another"),
+        "target event"
+    ));
+    assert!(!request_has_exact_payload_text(
+        &request("system", "target event"),
+        "target event"
+    ));
+    assert!(!request_has_exact_payload_text(
+        &json!({"messages": [{"role": "user", "content": "not-json"}]}),
+        "target event"
+    ));
+}
+
+async fn spawn_blocking_vllm(block_on: &str) -> BlockingVllm {
     let entered = Arc::new(Notify::new());
     let release = Arc::new(Notify::new());
     let calls = Arc::new(AtomicUsize::new(0));
@@ -631,6 +680,7 @@ async fn spawn_blocking_vllm() -> BlockingVllm {
     let app = Router::new()
         .route("/v1/chat/completions", post(blocked_vllm_response))
         .with_state(BlockingVllmState {
+            block_on: block_on.to_owned(),
             entered: Arc::clone(&entered),
             release: Arc::clone(&release),
             calls: Arc::clone(&calls),
@@ -1024,7 +1074,8 @@ async fn capture_worker_renews_blocked_extraction_and_discards_a_reclaimed_resul
         .parse::<CaptureBatchId>()
         .expect("parse renewed batch id");
 
-    let blocked = spawn_blocking_vllm().await;
+    let blocked =
+        spawn_blocking_vllm("A blocked model call must not outlive its database authority.").await;
     let deps = capture_worker::Deps {
         pool: state.pool.clone(),
         pdp: Arc::clone(&state.pdp),
@@ -1040,7 +1091,7 @@ async fn capture_worker_renews_blocked_extraction_and_discards_a_reclaimed_resul
         lease_owner: format!("cpr45-renew-{}", CaptureBatchId::new()),
     };
     let sweep = tokio::spawn(async move { capture_worker::sweep_once(&deps, &config).await });
-    tokio::time::timeout(Duration::from_secs(3), blocked.entered.notified())
+    tokio::time::timeout(Duration::from_secs(10), blocked.entered.notified())
         .await
         .expect("extractor receives the frozen event");
     let initial_expiry = lease_expiry(&state, tenant_id, renewed_batch_id).await;
@@ -1082,7 +1133,7 @@ async fn capture_worker_renews_blocked_extraction_and_discards_a_reclaimed_resul
         .parse::<CaptureBatchId>()
         .expect("parse reclaimed batch id");
 
-    let lost = spawn_blocking_vllm().await;
+    let lost = spawn_blocking_vllm("A reclaimed attempt must discard dependency output.").await;
     let loser_owner = format!("cpr45-loser-{}", CaptureBatchId::new());
     let deps = capture_worker::Deps {
         pool: state.pool.clone(),
@@ -1099,7 +1150,7 @@ async fn capture_worker_renews_blocked_extraction_and_discards_a_reclaimed_resul
         lease_owner: loser_owner,
     };
     let sweep = tokio::spawn(async move { capture_worker::sweep_once(&deps, &config).await });
-    tokio::time::timeout(Duration::from_secs(3), lost.entered.notified())
+    tokio::time::timeout(Duration::from_secs(10), lost.entered.notified())
         .await
         .expect("losing extractor receives the frozen event");
     let winner_owner = format!("cpr45-winner-{}", CaptureBatchId::new());
@@ -1184,7 +1235,8 @@ async fn capture_worker_reproves_a_preflight_lease_before_calling_the_extractor(
         .await
         .expect("lock frozen configuration reads");
 
-    let fixture = spawn_blocking_vllm().await;
+    let fixture =
+        spawn_blocking_vllm("Expired preflight authority must prevent provider disclosure.").await;
     fixture.release.notify_one();
     let application_name = format!("cpr45-preflight-{}", CaptureBatchId::new());
     let worker_pool = named_worker_pool(&application_name).await;

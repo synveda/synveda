@@ -1927,6 +1927,7 @@ test("the selector builds one exact external-Postgres/bundled-Keycloak file set"
     assert.deepEqual(selected, [
       join(COMPOSE, "compose.yaml"),
       join(COMPOSE, "compose.dev.yaml"),
+      join(COMPOSE, "compose.keycloak.dev.yaml"),
       join(COMPOSE, "compose.keycloak.yaml"),
       join(COMPOSE, "compose.keycloak-external-postgres.yaml"),
       join(COMPOSE, "compose.external-postgres.yaml"),
@@ -1934,6 +1935,35 @@ test("the selector builds one exact external-Postgres/bundled-Keycloak file set"
     ]);
     assert.equal(args[args.indexOf("-p") + 1], "synveda-development");
     assert.deepEqual(args.slice(-2), ["config", "--quiet"]);
+  } finally {
+    rmSync(fixture.scratch, { recursive: true, force: true });
+  }
+});
+
+test("development closes the bundled provider image build graph", () => {
+  const fixture = makeComposeFixture();
+  try {
+    const fake = fakeDocker(fixture);
+    execFileSync(WRAPPER, ["config"], {
+      cwd: ROOT,
+      env: composeEnvironment(fixture, {
+        SYNVEDA_DOCKER_BIN: fake.path,
+        SYNVEDA_FAKE_DOCKER_ARGUMENTS: fake.argumentsFile,
+        SYNVEDA_POSTGRES_MODE: "bundled",
+        SYNVEDA_OIDC_MODE: "bundled",
+      }),
+    });
+    const args = readFileSync(fake.argumentsFile, "utf8").trim().split("\n");
+    const selected = args.filter((value, index) => args[index - 1] === "-f");
+    assert.deepEqual(selected, [
+      join(COMPOSE, "compose.yaml"),
+      join(COMPOSE, "compose.dev.yaml"),
+      join(COMPOSE, "compose.postgres.dev.yaml"),
+      join(COMPOSE, "compose.keycloak.dev.yaml"),
+      join(COMPOSE, "compose.postgres.yaml"),
+      join(COMPOSE, "compose.keycloak.yaml"),
+      join(COMPOSE, "compose.keycloak-postgres.yaml"),
+    ]);
   } finally {
     rmSync(fixture.scratch, { recursive: true, force: true });
   }
@@ -2057,6 +2087,7 @@ test("the selector rejects unsafe shape before invoking Docker", () => {
       ["SYNVEDA_RUNTIME_GID", "020", "non-zero decimal integers"],
       ["SYNVEDA_COMPOSE_PROJECT_SUFFIX", "yes", "project suffix"],
       ["SYNVEDA_COMPOSE_PROJECT_SUFFIX", "acceptance-aa/../../x", "project suffix"],
+      ["SYNVEDA_COMPOSE_PROJECT_SUFFIX", "acceptance-invalid-", "project suffix"],
       ["SYNVEDA_COMPOSE_PROJECT_SUFFIX", "acceptance-ok\ninvalid", "project suffix"],
       ["SYNVEDA_COMPOSE_PROJECT_SUFFIX", "acceptance-ä", "project suffix"],
       ["SYNVEDA_APP_HOST", "localhost", "lower-case DNS names"],
@@ -6034,6 +6065,7 @@ test("model findings reject privilege, port, command and secret regressions", ()
     entrypoint: ["/usr/local/bin/synveda-database-bootstrap"],
     command: ["keycloak"],
     image: "postgres-provider",
+    build: { dockerfile: "deploy/compose/postgres/Dockerfile" },
     environment: {
       SYNVEDA_DATABASE_AUTHORITY_DIR: "/run/synveda/database-authority",
       SYNVEDA_DATABASE_ROLES_FILE: "/run/secrets/database_roles.json",
@@ -6072,6 +6104,7 @@ test("model findings reject privilege, port, command and secret regressions", ()
   bundled.services.keycloak = hardenedOneShot({
     command: ["start", "--optimized"],
     image: "keycloak-provider",
+    build: { dockerfile: "deploy/compose/keycloak/Dockerfile" },
     pids_limit: 512,
     stop_grace_period: "45s",
     mem_limit: "2g",

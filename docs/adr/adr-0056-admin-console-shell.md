@@ -110,6 +110,12 @@ Four forces.
    would make "which credential did this act under" a question whose answer
    depends on header order.
 
+   ADR-0102 amends only the cookie attributes for startup-validated explicit
+   plaintext development: distinct `synveda_console_dev` and
+   `synveda_login_dev` host-only names omit `Secure` while retaining the
+   Origin, `HttpOnly`, `SameSite`, path, lifetime, duplicate-refusal and token
+   re-verification rules. HTTPS retains the exact `__Host-` contract above.
+
    This is the load-bearing sentence of the ADR, so it is worth stating as an
    invariant rather than as an implementation note: **the session's authority
    is the token's authority, re-checked on every request.** A token the IdP

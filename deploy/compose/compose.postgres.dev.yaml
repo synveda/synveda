@@ -1,0 +1,9 @@
+# Development builds the reviewed PostgreSQL/pgvector image locally. Building
+# it on the database bootstrap service makes the same image tag available to
+# the server and Keycloak bootstrap without adding provider stubs to external
+# PostgreSQL rows.
+services:
+  database-bootstrap:
+    build:
+      context: ../..
+      dockerfile: deploy/compose/postgres/Dockerfile

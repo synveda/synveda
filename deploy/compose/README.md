@@ -20,12 +20,14 @@ The reviewed wrapper selects files in this order:
 
 1. `compose.yaml`;
 2. exactly one of `compose.dev.yaml` or `compose.reference.yaml`;
-3. `compose.postgres.yaml` when PostgreSQL is bundled;
-4. `compose.keycloak.yaml` when OIDC is bundled;
-5. `compose.keycloak-postgres.yaml` or
+3. in development, `compose.postgres.dev.yaml` and/or
+   `compose.keycloak.dev.yaml` for the bundled identity and database-bootstrap images;
+4. `compose.postgres.yaml` when PostgreSQL is bundled;
+5. `compose.keycloak.yaml` when OIDC is bundled;
+6. `compose.keycloak-postgres.yaml` or
    `compose.keycloak-external-postgres.yaml` for the selected Keycloak database;
-6. `compose.external-postgres.yaml` when PostgreSQL is external;
-7. `compose.external.yaml` when either dependency is external.
+7. `compose.external-postgres.yaml` when PostgreSQL is external;
+8. `compose.external.yaml` when either dependency is external.
 
 The defaults are bundled development. Validate the complete eight-row matrix
 without starting or pulling images:
@@ -34,16 +36,28 @@ without starting or pulling images:
 make compose-config
 ```
 
-To validate one operator selection, create role-specific secrets and the
-private database-authority directory, prepare a real issuer file from
-`configs/oidc/issuers.example.json`, and run:
+To validate one bundled-OIDC operator selection, create role-specific secrets,
+the private project state directories and the credential-free static-tenant
+issuer contract, then render:
 
 ```sh
 deploy/compose/scripts/generate-secrets.sh
+deploy/compose/scripts/generate-issuer.sh
 SYNVEDA_COMPOSE_IPV4_POOL=10.231.44.0/24 \
-  SYNVEDA_OIDC_ISSUERS_FILE=/absolute/path/to/issuers.json \
   deploy/compose/scripts/compose.sh config
 ```
+
+The issuer generator writes `runtime/<project>/issuers.json` atomically with
+mode 0600 and never prints its content. Its default bootstrap tenant UUIDv7 can
+be replaced with `SYNVEDA_BOOTSTRAP_TENANT_ID`; replacing an existing file
+requires both `--force` and the exact project confirmation. External OIDC
+continues to require an operator-supplied issuer file.
+
+Development selection now includes source builds for the product, proxy,
+PostgreSQL and optimized Keycloak images. This closes the local image build
+graph but does not make the still-config-only wrapper an executable lifecycle.
+The image also exposes an exact, audited `tenant-converge` command for the
+future bootstrap job; no canonical service invokes it in this checkpoint.
 
 Replace the example pool with a canonical private `/24` chosen for this exact
 project. The selector deterministically divides it into ten `/28` networks;

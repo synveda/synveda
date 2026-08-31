@@ -87,19 +87,46 @@ pub fn keygen() -> Result<(), String> {
 /// If no KEK is configured, or the tenant does not exist.
 pub async fn provision_quietly(pool: &sqlx::PgPool, tenant: TenantId) -> Result<u32, String> {
     let ring = ring()?;
+    provision_quietly_with_ring(pool, tenant, &ring).await
+}
+
+pub(crate) async fn provision_quietly_with_ring(
+    pool: &sqlx::PgPool,
+    tenant: TenantId,
+    ring: &KeyRing,
+) -> Result<u32, String> {
     let version = ring
         .provision(pool, KeyScope::Tenant(tenant))
         .await
         .map_err(|err| err.to_string())?;
-    chain(
-        pool,
-        tenant,
-        synveda_audit::AuditAction::TenantKeyProvisioned,
-        format!("tenant {tenant} key"),
-        serde_json::json!({ "version": version.get(), "kek_ref": ring.kms().key_ref() }),
-    )
-    .await?;
+    // An existing wrapped row is not custody. Prove that this process can
+    // unwrap the current generation before converging success evidence; this
+    // catches disabled, wrong and externally denied KMS authority on reruns.
+    ring.sealing_key(pool, KeyScope::Tenant(tenant))
+        .await
+        .map_err(|err| err.to_string())?;
+    converge_provision_audit(pool, tenant).await?;
     Ok(version.get())
+}
+
+async fn converge_provision_audit(pool: &sqlx::PgPool, tenant: TenantId) -> Result<(), String> {
+    let mut tx = synveda_store::rls::begin_tenant_tx(pool, tenant)
+        .await
+        .map_err(|err| err.to_string())?;
+    let first = synveda_store::keys::tenant_at(&mut *tx, tenant, KeyVersion::FIRST)
+        .await
+        .map_err(|err| err.to_string())?
+        .ok_or_else(|| "tenant key provisioning committed without generation 1".to_owned())?;
+    let witness = synveda_audit::TenantKeyProvisionedWitness {
+        occurred_at: chrono::Utc::now(),
+        break_glass_subject: crate::break_glass().subject,
+        kek_ref: first.kek_ref,
+        trace_id: None,
+    };
+    synveda_audit::append_tenant_key_provisioned_once(&mut tx, tenant, &witness)
+        .await
+        .map_err(|err| err.to_string())?;
+    tx.commit().await.map_err(|err| err.to_string())
 }
 
 /// Mints a tenant's first data key, or reports the one already there.

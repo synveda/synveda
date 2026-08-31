@@ -3027,6 +3027,26 @@ export function canonicalComposeFindings(model, expected) {
     if (services.proxy?.build?.dockerfile !== "deploy/compose/proxy/Dockerfile") {
       findings.push("proxy does not use the capability-free development build");
     }
+    if (
+      expected.postgres === "bundled" &&
+      services["database-bootstrap"]?.build?.dockerfile !==
+        "deploy/compose/postgres/Dockerfile"
+    ) {
+      findings.push("bundled PostgreSQL does not use the development provider build");
+    }
+    if (
+      expected.oidc === "bundled" &&
+      services.keycloak?.build?.dockerfile !== "deploy/compose/keycloak/Dockerfile"
+    ) {
+      findings.push("bundled Keycloak does not use the development optimized build");
+    }
+    if (
+      expected.oidc === "bundled" &&
+      services["keycloak-database-bootstrap"]?.build?.dockerfile !==
+        "deploy/compose/postgres/Dockerfile"
+    ) {
+      findings.push("Keycloak database bootstrap does not use the development provider build");
+    }
     if (Object.values(services).some((service) => service.sysctls !== undefined)) {
       findings.push("development mode changes kernel namespace settings");
     }
@@ -3239,10 +3259,13 @@ function checkStaticInputs() {
   const canonicalFiles = [
     "compose.yaml",
     "compose.dev.yaml",
+    "compose.postgres.dev.yaml",
+    "compose.keycloak.dev.yaml",
     "compose.reference.yaml",
     "compose.postgres.yaml",
     "compose.keycloak.yaml",
     "compose.keycloak-postgres.yaml",
+    "compose.keycloak-external-postgres.yaml",
     "compose.external.yaml",
     "compose.external-postgres.yaml",
   ].map((name) => readFileSync(join(COMPOSE, name), "utf8"));
