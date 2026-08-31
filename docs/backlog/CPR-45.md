@@ -202,7 +202,13 @@ remain valid through the bounded lifecycle before Compose rendering or startup
 mutation. The Node 22 preflight accepts leaf-first leaf-and-intermediate
 fullchains, refuses an included self-signed trust root and commits no test keys;
 expiry never blocks `down` or `reset`. Trust anchors, revocation,
-served-endpoint proof, renewal and ACME remain open. The current pinned Keycloak
+served-endpoint proof, renewal and ACME remain open. Every lifecycle Node
+helper now starts through an explicit bundled-CA wrapper. Reference evidence
+actions refuse ambient Node/OpenSSL trust or proxy activation before their
+first process and project lock, while development and recovery scrub those
+controls. The runtime smoke independently refuses non-HTTPS reference URLs.
+This is deterministic host-probe closure, not public/browser trust or an
+explicit custom-CA/proxy contract. The current pinned Keycloak
 image includes a review-locked complete 26.7.2 user-profile contract: upstream
 built-ins remain intact, unmanaged attributes remain disabled, and the two
 demo ownership attributes are admin-only with closed validators. Realm repair
@@ -292,15 +298,17 @@ and the complete post-repair `make ci` gate passes with the generated API and
 
 ### Immediate next slice
 
-The next content-addressed Compose candidate must start from empty volumes in a
-separate clean Docker context, install and prove the explicit `.test` host
-mapping on Docker Desktop, and complete a real browser authorization-code
-exchange through the committed demo/profile boundary. Repeat the same resolver
-and lifecycle contract on Linux, then exercise reference HTTPS. Only after
-that replacement acceptance may the Rauthy/Temporal callers and assets be
-deleted atomically. Backup/isolated joint database-and-key restore, upgrade and
-the Apalis canary remain subsequent CPR-45 slices rather than implied results
-of the identity lifecycle.
+Before the next live candidate, close Docker client proxy auto-injection so an
+operator's client configuration cannot add undeclared proxy variables to
+reference containers. Then start the content-addressed candidate from empty
+volumes in the separate clean Docker context, install and prove the explicit
+`.test` host mapping on Docker Desktop, and complete a real browser
+authorization-code exchange through the committed demo/profile boundary.
+Repeat the same resolver and lifecycle contract on Linux, then exercise
+reference HTTPS. Only after that replacement acceptance may the
+Rauthy/Temporal callers and assets be deleted atomically. Backup/isolated joint
+database-and-key restore, upgrade and the Apalis canary remain subsequent
+CPR-45 slices rather than implied results of the identity lifecycle.
 
 ## Acceptance criteria
 

@@ -46,7 +46,11 @@ Reference certificate-file preparation and its executable ordering are defined
 in [`deploy/compose/README.md`](../deploy/compose/README.md). The lifecycle
 preflights a leaf-first leaf-and-intermediate fullchain with the trust root
 omitted, matching unencrypted key, SAN coverage and validity before startup
-mutation; it does not establish public browser trust or automatic renewal.
+mutation. Reference host validators also refuse ambient Node/OpenSSL trust
+overrides and use Node's bundled CA set for application and bundled-issuer
+runtime probes. External-OIDC smoke closes the issuer scheme but does not fetch
+that issuer from the host. These checks do not establish browser trust,
+explicit custom-CA/proxy support or automatic renewal.
 
 The remaining sections describe product use only after a gateway has been
 started through separately validated development/test infrastructure. They are

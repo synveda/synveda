@@ -19,7 +19,8 @@ only after the replacement acceptance is complete.
   captures that validated socket, clears `DOCKER_CONTEXT`, and pins every later
   inventory and mutation to the same `DOCKER_HOST` value.
 - Docker Compose 2.33.1 or newer.
-- Node.js 22, OpenSSL and a non-root Unix operator.
+- Node.js 22, OpenSSL and a non-root Unix operator. The lifecycle selects
+  Node's bundled CA set explicitly for every host-side validator.
 - Development host mappings that resolve each selected `.test` name to exactly
   `127.0.0.1`, with no IPv6 or additional address.
 
@@ -76,6 +77,16 @@ project input. The generated files live under
 `runtime/synveda-development/` by default; secret files are mode 0600 beneath a
 mode-0700 project directory and their values are never printed by the
 lifecycle.
+
+Host-side validators start only through
+`deploy/compose/scripts/run-node-closed`. Reference
+`config`, `up`, `smoke` and `restart-gateway` refuse an ambient Node/OpenSSL
+trust override, even when it is set to an empty value, before the first Node
+process or project lock. Development and the recovery-oriented `down` and
+confirmed `reset` actions scrub those controls from lifecycle children instead.
+The wrapper selects Node's fixed bundled CA snapshot and disables ambient Node
+proxy activation; ordinary proxy URL variables therefore do not reroute the
+host smoke. This is not a custom-CA or outbound-proxy interface.
 
 Every mutating lifecycle action and authority-file generator holds one
 operator-owned, exact-project lock across preparation and Docker mutation.
@@ -222,9 +233,14 @@ only. A conventional one-label wildcard SAN is accepted, but CN fallback,
 partial wildcards and multi-label wildcards are not.
 The preflight proves parsing, adjacent chain signatures and key/hostname
 coherence. It does not prove public trust, revocation, DNS ownership or what a
-live endpoint serves. There is no automatic renewal, and ACME is not
-implemented in this checkpoint. Certificate validity never blocks canonical
-`down` or `reset`.
+live endpoint serves. The reference runtime smoke separately requires HTTPS
+for both configured URLs. It validates the application routes and, in bundled
+OIDC mode, the issuer routes with Node's bundled CA set; external-OIDC host
+smoke enforces only the issuer scheme. Passing the probes therefore requires
+their served chains to be trusted by that set, but it still does not prove
+browser trust or public-PKI ownership independently. There is no automatic
+renewal, and ACME is not implemented in this checkpoint. Certificate validity
+never blocks canonical `down` or `reset`.
 
 ## Network and edge contract
 

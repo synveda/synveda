@@ -43,6 +43,7 @@ import {
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const COMPOSE = join(ROOT, "deploy/compose");
 const WRAPPER = join(COMPOSE, "scripts/compose.sh");
+const CLOSED_NODE = join(COMPOSE, "scripts/run-node-closed");
 const GENERATOR = join(COMPOSE, "scripts/generate-secrets.sh");
 const ISSUER_GENERATOR = join(COMPOSE, "scripts/generate-issuer.sh");
 const KEYCLOAK_ENTRYPOINT = join(COMPOSE, "keycloak/keycloak-entrypoint");
@@ -1921,6 +1922,49 @@ printf '%s\\n' "$@" > "$SYNVEDA_FAKE_DOCKER_ARGUMENTS"
   chmodSync(path, 0o700);
   return { path, argumentsFile };
 }
+
+test("host validators start through one closed Node trust boundary", () => {
+  const selector = readFileSync(WRAPPER, "utf8");
+  const runner = readFileSync(CLOSED_NODE, "utf8");
+  const controls = [
+    "NODE_OPTIONS",
+    "NODE_EXTRA_CA_CERTS",
+    "NODE_TLS_REJECT_UNAUTHORIZED",
+    "NODE_USE_SYSTEM_CA",
+    "NODE_USE_ENV_PROXY",
+    "SSL_CERT_FILE",
+    "SSL_CERT_DIR",
+    "OPENSSL_CONF",
+    "OPENSSL_CONF_INCLUDE",
+    "OPENSSL_MODULES",
+    "OPENSSL_ENGINES",
+  ];
+  assert.notEqual(statSync(CLOSED_NODE).mode & 0o111, 0);
+  for (const name of controls) {
+    assert.ok(selector.includes(`\${${name}+x}`), `${name} is not detected`);
+    assert.ok(runner.includes(name), `${name} is not scrubbed`);
+  }
+  assert.match(runner, /exec node --use-bundled-ca "\$@"/);
+  assert.match(
+    selector,
+    /reference:config:true\|reference:up:true\|reference:smoke:true\|\\\n\s+reference:restart-gateway:true\)/,
+  );
+  const detection = selector.indexOf("ambient_node_trust=false");
+  const refusal = selector.indexOf("ambient host trust configuration is not accepted");
+  const firstNode = selector.indexOf('lifecycle_started_at=$("$node_runner"');
+  const lock = selector.indexOf('. "$script_dir/project-lock.sh"');
+  assert.ok(detection >= 0 && refusal > detection && firstNode > refusal && lock > firstNode);
+  assert.match(
+    selector,
+    /lifecycle_now=\$\("\$node_runner" "\$script_dir\/monotonic-seconds\.mjs"\)/,
+  );
+  assert.doesNotMatch(selector, /\$\(\$node_runner/);
+  assert.match(
+    selector,
+    /"\$node_runner" "\$script_dir\/run-with-deadline\.mjs"/,
+  );
+  assert.doesNotMatch(selector, /(?:^|[ (])node "\$script_dir\//m);
+});
 
 test("reference TLS is validated before Compose rendering while development ignores it", () => {
   const digest = `sha256:${"1".repeat(64)}`;

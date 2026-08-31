@@ -36,6 +36,7 @@ script_dir=$(CDPATH= cd "$(dirname "$0")" && pwd)
 compose_dir=$(dirname "$script_dir")
 repo_root=$(CDPATH= cd "$compose_dir/../.." && pwd -P)
 docker_bin=${SYNVEDA_DOCKER_BIN:-docker}
+node_runner=$script_dir/run-node-closed
 
 runtime=${SYNVEDA_COMPOSE_RUNTIME:-development}
 postgres_mode=${SYNVEDA_POSTGRES_MODE:-bundled}
@@ -69,7 +70,32 @@ esac
     echo "compose: SYNVEDA_COMPOSE_LIFECYCLE_TIMEOUT_SECONDS must be 240 through 3600" >&2
     exit 64
 }
-lifecycle_started_at=$(node "$script_dir/monotonic-seconds.mjs") || {
+
+# These inputs are consumed by Node or OpenSSL before JavaScript can inspect
+# them. Reference evidence refuses their ambient presence before the first
+# helper process; recovery and explicit-HTTP development scrub them instead.
+ambient_node_trust=false
+if [ "${NODE_OPTIONS+x}" = x ] || [ "${NODE_EXTRA_CA_CERTS+x}" = x ] || \
+    [ "${NODE_TLS_REJECT_UNAUTHORIZED+x}" = x ] || \
+    [ "${NODE_USE_SYSTEM_CA+x}" = x ] || \
+    [ "${NODE_USE_ENV_PROXY+x}" = x ] || [ "${SSL_CERT_FILE+x}" = x ] || \
+    [ "${SSL_CERT_DIR+x}" = x ] || [ "${OPENSSL_CONF+x}" = x ] || \
+    [ "${OPENSSL_CONF_INCLUDE+x}" = x ] || [ "${OPENSSL_MODULES+x}" = x ] || \
+    [ "${OPENSSL_ENGINES+x}" = x ]; then
+    ambient_node_trust=true
+fi
+case "$runtime:$action:$ambient_node_trust" in
+    reference:config:true|reference:up:true|reference:smoke:true|\
+    reference:restart-gateway:true)
+        echo "compose: ambient host trust configuration is not accepted for reference evidence" >&2
+        exit 78
+        ;;
+esac
+unset NODE_OPTIONS NODE_EXTRA_CA_CERTS NODE_TLS_REJECT_UNAUTHORIZED \
+    NODE_USE_SYSTEM_CA NODE_USE_ENV_PROXY SSL_CERT_FILE SSL_CERT_DIR \
+    OPENSSL_CONF OPENSSL_CONF_INCLUDE OPENSSL_MODULES OPENSSL_ENGINES
+
+lifecycle_started_at=$("$node_runner" "$script_dir/monotonic-seconds.mjs") || {
     echo "compose: lifecycle clock was unavailable" >&2
     exit 69
 }
@@ -85,7 +111,7 @@ lifecycle_child_uncertain=false
 bounded_runner_pending=false
 bounded_runner_waiting=false
 set_remaining_lifecycle_seconds() {
-    lifecycle_now=$(node "$script_dir/monotonic-seconds.mjs") || {
+    lifecycle_now=$("$node_runner" "$script_dir/monotonic-seconds.mjs") || {
         echo "compose: lifecycle clock was unavailable" >&2
         return 69
     }
@@ -125,7 +151,7 @@ run_bounded() {
         return 70
     fi
     bounded_runner_pending=true
-    node "$script_dir/run-with-deadline.mjs" --seconds "$bounded_seconds" \
+    "$node_runner" "$script_dir/run-with-deadline.mjs" --seconds "$bounded_seconds" \
         --status-file "$bounded_status_file" -- "$@" &
     bounded_runner_pid=$!
     bounded_status=0
@@ -515,14 +541,14 @@ run_resolver_preflight() {
     if [ "$oidc_mode" = bundled ]; then
         set -- "$@" --auth-host "$auth_host"
     fi
-    run_bounded "$lifecycle_timeout" node "$@"
+    run_bounded "$lifecycle_timeout" "$node_runner" "$@"
 }
 run_docker_preflight() {
-    run_bounded "$lifecycle_timeout" node "$script_dir/check-host-resolution.mjs" \
+    run_bounded "$lifecycle_timeout" "$node_runner" "$script_dir/check-host-resolution.mjs" \
         --docker-only true --docker-bin "$docker_bin"
 }
 pin_local_docker_endpoint() {
-    capture_bounded_output "$lifecycle_timeout" node \
+    capture_bounded_output "$lifecycle_timeout" "$node_runner" \
         "$script_dir/check-host-resolution.mjs" \
         --docker-only true --print-docker-endpoint true --docker-bin "$docker_bin" || return $?
     pinned_docker_endpoint=$bounded_output
@@ -700,7 +726,7 @@ done
 
 if [ "$action" = up ]; then
     run_resolver_preflight
-    run_bounded "$lifecycle_timeout" node "$script_dir/check-network-preflight.mjs" \
+    run_bounded "$lifecycle_timeout" "$node_runner" "$script_dir/check-network-preflight.mjs" \
         --project "$project" --pool "$compose_ipv4_pool" --docker-bin "$docker_bin"
     run_bounded "$lifecycle_timeout" env \
         "SYNVEDA_COMPOSE_RUNTIME=$runtime" \
@@ -914,7 +940,7 @@ if [ "$runtime" = reference ]; then
             if [ "$oidc_mode" = bundled ]; then
                 set -- "$@" --auth-host "$auth_host"
             fi
-            run_bounded "$lifecycle_timeout" node "$@"
+            run_bounded "$lifecycle_timeout" "$node_runner" "$@"
             ;;
     esac
 fi
@@ -1344,13 +1370,13 @@ prepare_asset_contract() {
 }
 
 prove_assets_existing() {
-    run_bounded "$lifecycle_timeout" node "$script_dir/check-compose-assets.mjs" \
+    run_bounded "$lifecycle_timeout" "$node_runner" "$script_dir/check-compose-assets.mjs" \
         --config-file "$asset_config_file" --project "$project" \
         --docker-bin "$docker_bin" --state existing
 }
 
 prove_assets_stopped() {
-    run_bounded "$lifecycle_timeout" node "$script_dir/check-compose-assets.mjs" \
+    run_bounded "$lifecycle_timeout" "$node_runner" "$script_dir/check-compose-assets.mjs" \
         --config-file "$asset_config_file" --project "$project" \
         --docker-bin "$docker_bin" --state stopped
 }
@@ -1363,7 +1389,7 @@ run_runtime_smoke() {
         --status-file "$status_file" --runtime "$runtime" \
         --postgres "$postgres_mode" --oidc "$oidc_mode" \
         --app-url "$public_app_url" --issuer "$oidc_issuer"
-    run_bounded "$lifecycle_timeout" node "$@"
+    run_bounded "$lifecycle_timeout" "$node_runner" "$@"
     rm -f -- "$status_file"
     status_file=
 }
@@ -1479,7 +1505,7 @@ case "$action" in
         run_docker_preflight
         prepare_asset_contract "$@"
         if [ "$oidc_mode" = bundled ]; then
-            run_bounded "$lifecycle_timeout" node "$script_dir/reset-runtime-state.mjs" \
+            run_bounded "$lifecycle_timeout" "$node_runner" "$script_dir/reset-runtime-state.mjs" \
                 --mode check --project "$project" \
                 --authority-dir "$database_authority_dir" \
                 --gate-dir "$keycloak_public_gate_dir"
@@ -1616,7 +1642,7 @@ case "$action" in
             }
         fi
         if [ "$oidc_mode" = bundled ]; then
-            run_bounded "$lifecycle_timeout" node "$script_dir/reset-runtime-state.mjs" \
+            run_bounded "$lifecycle_timeout" "$node_runner" "$script_dir/reset-runtime-state.mjs" \
                 --mode apply --project "$project" \
                 --authority-dir "$database_authority_dir" \
                 --gate-dir "$keycloak_public_gate_dir"

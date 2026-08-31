@@ -114,6 +114,19 @@ const PROVIDER_SECRETS = [
   "keycloak_demo_admin_password",
   "keycloak_demo_member_password",
 ];
+const HOST_TRUST_CONTROLS = [
+  "NODE_OPTIONS",
+  "NODE_EXTRA_CA_CERTS",
+  "NODE_TLS_REJECT_UNAUTHORIZED",
+  "NODE_USE_SYSTEM_CA",
+  "NODE_USE_ENV_PROXY",
+  "SSL_CERT_FILE",
+  "SSL_CERT_DIR",
+  "OPENSSL_CONF",
+  "OPENSSL_CONF_INCLUDE",
+  "OPENSSL_MODULES",
+  "OPENSSL_ENGINES",
+];
 
 function writePrivate(path, value, owner) {
   writeFileSync(path, `${value}\n`, { mode: 0o600 });
@@ -174,6 +187,7 @@ export function composeEnvironment(fixture, overrides = {}) {
   for (const name of Object.keys(environment)) {
     if (name.startsWith("SYNVEDA_")) delete environment[name];
   }
+  for (const name of HOST_TRUST_CONTROLS) delete environment[name];
   for (const name of [
     "DATABASE_URL",
     "POSTGRES_PASSWORD",

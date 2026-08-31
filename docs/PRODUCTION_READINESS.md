@@ -51,8 +51,11 @@ canonical lifecycle; complete network/IPAM and asset preflight; containerized
 gateway/worker; a private Collector; exact static-tenant issuer diagnostics;
 pre-mutation reference PEM/key/chain/SAN/validity checks; and an optimized
 Keycloak image with closed realm/demo/user-profile convergence. Deterministic
-source tests and image self-tests establish those contracts, not public PKIX
-trust, a clean-volume login or recovery claim. One
+source tests also prove that reference host validators refuse ambient
+Node/OpenSSL trust activation before their first process or lock and run with
+Node's explicit bundled CA set. These tests and image self-tests establish
+those contracts, not public PKIX/browser trust, explicit custom-CA/proxy
+support, a clean-volume login or recovery claim. One
 frozen Docker Desktop candidate also proved bounded PostgreSQL/Keycloak
 bootstrap, optimized
 Keycloak, realm convergence, issuer metadata, Collector, worker and gateway

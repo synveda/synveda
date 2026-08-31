@@ -797,6 +797,25 @@ ownership or served-endpoint evidence. ACME, renewal/expiry monitoring,
 secure-header public-route acceptance and cookie-origin browser acceptance
 remain open. Proxy configuration never turns a header into a principal.
 
+Every host-side Node validator starts through
+`deploy/compose/scripts/run-node-closed`, which removes ambient Node/OpenSSL
+trust activation and executes Node with `--use-bundled-ca`. Reference
+`config`, `up`, `smoke` and `restart-gateway` refuse before the first Node
+process and project lock when any of these variables is present, including an
+empty value: `NODE_OPTIONS`, `NODE_EXTRA_CA_CERTS`,
+`NODE_TLS_REJECT_UNAUTHORIZED`, `NODE_USE_SYSTEM_CA`,
+`NODE_USE_ENV_PROXY`, `SSL_CERT_FILE`, `SSL_CERT_DIR`, `OPENSSL_CONF`,
+`OPENSSL_CONF_INCLUDE`, `OPENSSL_MODULES` or `OPENSSL_ENGINES`. Development and
+recovery actions remove those variables from their children instead of making
+teardown depend on trust configuration.
+Generic proxy URL variables remain outside this trust-input set, but cannot
+affect the host probe because Node proxy activation is removed. Reference
+runtime smoke independently requires HTTPS schemes for its application and
+issuer URLs; it fetches the issuer only in bundled-OIDC mode. This
+closes ambient host trust for deterministic evidence; it does not implement an
+explicit custom CA, proxy transport, PKIX ownership/revocation check or browser
+trust contract.
+
 ## Operation and worker contract
 
 Gateway serves synchronous APIs and in one tenant transaction records the

@@ -4,6 +4,19 @@ import process from "node:process";
 
 const MAX_STATUS_BYTES = 1024 * 1024;
 const REQUEST_TIMEOUT_MS = 5_000;
+const HOST_TRUST_ENVIRONMENT = Object.freeze([
+  "NODE_OPTIONS",
+  "NODE_EXTRA_CA_CERTS",
+  "NODE_TLS_REJECT_UNAUTHORIZED",
+  "NODE_USE_SYSTEM_CA",
+  "NODE_USE_ENV_PROXY",
+  "SSL_CERT_FILE",
+  "SSL_CERT_DIR",
+  "OPENSSL_CONF",
+  "OPENSSL_CONF_INCLUDE",
+  "OPENSSL_MODULES",
+  "OPENSSL_ENGINES",
+]);
 
 export function parseComposePs(source) {
   const trimmed = source.trim();
@@ -64,7 +77,35 @@ export function runtimeStateFindings(rows, { postgres, oidc }) {
   return [...new Set(findings)];
 }
 
-function parseArguments(argv) {
+export function referenceHostTrustFindings({ runtime, environment, execArgv }) {
+  if (runtime !== "reference") return [];
+  if (
+    environment === null ||
+    typeof environment !== "object" ||
+    !Array.isArray(execArgv)
+  ) {
+    return ["reference host trust process was malformed"];
+  }
+  if (HOST_TRUST_ENVIRONMENT.some((name) => Object.hasOwn(environment, name))) {
+    return ["reference host trust environment was refused"];
+  }
+  const normalized = execArgv.map((argument) =>
+    typeof argument === "string" ? argument.replaceAll("_", "-") : "",
+  );
+  if (
+    !normalized.includes("--use-bundled-ca") ||
+    normalized.some((argument) =>
+      new Set(["--use-openssl-ca", "--use-system-ca", "--use-env-proxy"]).has(
+        argument,
+      ),
+    )
+  ) {
+    return ["reference host trust mode was refused"];
+  }
+  return [];
+}
+
+export function parseArguments(argv) {
   const values = new Map();
   for (let index = 0; index < argv.length; index += 2) {
     const key = argv[index];
@@ -90,6 +131,13 @@ function parseArguments(argv) {
     const app = new URL(selection["app-url"]);
     const issuer = new URL(selection.issuer);
     if (!new Set(["http:", "https:"]).has(app.protocol) || !new Set(["http:", "https:"]).has(issuer.protocol)) {
+      return undefined;
+    }
+    if (selection.runtime === "reference" &&
+        (app.protocol !== "https:" || issuer.protocol !== "https:")) {
+      return undefined;
+    }
+    if (selection.runtime === "development" && app.protocol !== "http:") {
       return undefined;
     }
   } catch {
@@ -145,6 +193,16 @@ export async function main(argv = process.argv.slice(2)) {
   if (selection === undefined) {
     console.error("compose-smoke: configuration was refused");
     process.exitCode = 64;
+    return;
+  }
+  const hostTrustFindings = referenceHostTrustFindings({
+    runtime: selection.runtime,
+    environment: process.env,
+    execArgv: process.execArgv,
+  });
+  if (hostTrustFindings.length > 0) {
+    console.error(`compose-smoke: ${hostTrustFindings[0]}`);
+    process.exitCode = 78;
     return;
   }
   let metadata;

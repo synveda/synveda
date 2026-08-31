@@ -25,6 +25,19 @@ const PROJECT_LOCK = join(ROOT, "deploy/compose/scripts/project-lock.sh");
 const SECRET_GENERATOR = join(ROOT, "deploy/compose/scripts/generate-secrets.sh");
 const ISSUER_GENERATOR = join(ROOT, "deploy/compose/scripts/generate-issuer.sh");
 const DIGEST = `sha256:${"1".repeat(64)}`;
+const HOST_TRUST_CONTROLS = [
+  "NODE_OPTIONS",
+  "NODE_EXTRA_CA_CERTS",
+  "NODE_TLS_REJECT_UNAUTHORIZED",
+  "NODE_USE_SYSTEM_CA",
+  "NODE_USE_ENV_PROXY",
+  "SSL_CERT_FILE",
+  "SSL_CERT_DIR",
+  "OPENSSL_CONF",
+  "OPENSSL_CONF_INCLUDE",
+  "OPENSSL_MODULES",
+  "OPENSSL_ENGINES",
+];
 const REAL_ENV = spawnSync("/bin/sh", ["-c", "command -v env"], {
   encoding: "utf8",
 }).stdout.trim();
@@ -51,6 +64,14 @@ function fixture(runtimeKind = "development") {
     fakeDocker,
     `#!/bin/sh
 set -eu
+if [ "\${NODE_OPTIONS+x}" = x ] || [ "\${NODE_EXTRA_CA_CERTS+x}" = x ] ||
+  [ "\${NODE_TLS_REJECT_UNAUTHORIZED+x}" = x ] ||
+  [ "\${NODE_USE_SYSTEM_CA+x}" = x ] || [ "\${NODE_USE_ENV_PROXY+x}" = x ] ||
+  [ "\${SSL_CERT_FILE+x}" = x ] || [ "\${SSL_CERT_DIR+x}" = x ] ||
+  [ "\${OPENSSL_CONF+x}" = x ] || [ "\${OPENSSL_CONF_INCLUDE+x}" = x ] ||
+  [ "\${OPENSSL_MODULES+x}" = x ] || [ "\${OPENSSL_ENGINES+x}" = x ]; then
+  exit 94
+fi
 if [ "\${SYNVEDA_FAKE_REQUIRE_PINNED_DOCKER:-0}" = 1 ]; then
   [ "\${DOCKER_HOST:-}" = "$SYNVEDA_FAKE_LOCAL_DOCKER_ENDPOINT" ] &&
     [ -z "\${DOCKER_CONTEXT:-}" ] || exit 97
@@ -150,6 +171,17 @@ exit 0
     fakeNode,
     `#!/bin/sh
 set -eu
+[ "\${1:-}" = --use-bundled-ca ] || exit 96
+shift
+if [ "\${NODE_OPTIONS+x}" = x ] || [ "\${NODE_EXTRA_CA_CERTS+x}" = x ] ||
+  [ "\${NODE_TLS_REJECT_UNAUTHORIZED+x}" = x ] ||
+  [ "\${NODE_USE_SYSTEM_CA+x}" = x ] || [ "\${NODE_USE_ENV_PROXY+x}" = x ] ||
+  [ "\${SSL_CERT_FILE+x}" = x ] ||
+  [ "\${SSL_CERT_DIR+x}" = x ] || [ "\${OPENSSL_CONF+x}" = x ] ||
+  [ "\${OPENSSL_CONF_INCLUDE+x}" = x ] || [ "\${OPENSSL_MODULES+x}" = x ] ||
+  [ "\${OPENSSL_ENGINES+x}" = x ]; then
+  exit 95
+fi
 case "$1" in
   */monotonic-seconds.mjs)
     if [ -n "\${SYNVEDA_FAKE_CLOCK_FILE:-}" ]; then
@@ -273,6 +305,7 @@ function environment(state, extra = {}) {
   for (const name of Object.keys(clean)) {
     if (name.startsWith("SYNVEDA_") || name.startsWith("COMPOSE_")) delete clean[name];
   }
+  for (const name of HOST_TRUST_CONTROLS) delete clean[name];
   for (const name of [
     "DATABASE_URL",
     "POSTGRES_PASSWORD",
@@ -341,6 +374,46 @@ function prepareReferenceFixture(state) {
   chmodSync(join(state.secrets, "tls_cert"), 0o600);
   chmodSync(join(state.secrets, "tls_key"), 0o600);
 }
+
+function ambientHostTrust(sentinel = "cpr45-private-host-trust-sentinel") {
+  return Object.fromEntries(HOST_TRUST_CONTROLS.map((name) => [name, sentinel]));
+}
+
+test("reference evidence refuses ambient host trust before Node or project locking", () => {
+  const actions = ["config", "up", "smoke", "restart-gateway"];
+  for (const [index, name] of HOST_TRUST_CONTROLS.entries()) {
+    const state = fixture("reference");
+    const lockFile = join(
+      "/tmp",
+      `.synveda-compose-locks-${process.getuid?.() ?? 0}`,
+      `${state.project}.lock`,
+    );
+    const sentinel = `cpr45-private-host-trust-sentinel-${index}`;
+    try {
+      const refused = run(state, actions[index % actions.length], {
+        [name]: sentinel,
+      });
+      assert.equal(refused.status, 78, `${name}: ${refused.stderr}`);
+      assert.match(refused.stderr, /ambient host trust configuration is not accepted/);
+      assert.ok(!`${refused.stdout}${refused.stderr}`.includes(sentinel));
+      assert.equal(existsSync(state.log), false, `${name} reached a child process`);
+      assert.equal(existsSync(lockFile), false, `${name} acquired the project lock`);
+    } finally {
+      rmSync(state.scratch, { recursive: true, force: true });
+    }
+  }
+});
+
+test("development scrubs ambient host trust before every lifecycle child", () => {
+  const state = fixture();
+  try {
+    const result = run(state, "up", ambientHostTrust());
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(readFileSync(state.log, "utf8"), / <up>/);
+  } finally {
+    rmSync(state.scratch, { recursive: true, force: true });
+  }
+});
 
 test("invalid reference TLS blocks startup actions and releases the exact-project lock", () => {
   const state = fixture("reference");
@@ -419,7 +492,10 @@ test("reference teardown and confirmed reset exclude semantic TLS validation", (
     });
 
     writeFileSync(state.log, "");
-    const down = run(state, "down", { SYNVEDA_FAKE_FAIL_TLS_CHECK: "1" });
+    const down = run(state, "down", {
+      ...ambientHostTrust(),
+      SYNVEDA_FAKE_FAIL_TLS_CHECK: "1",
+    });
     assert.equal(down.status, 0, down.stderr);
     let calls = readFileSync(state.log, "utf8");
     assert.match(calls, / <down>/);
@@ -427,6 +503,7 @@ test("reference teardown and confirmed reset exclude semantic TLS validation", (
 
     writeFileSync(state.log, "");
     const reset = run(state, "reset", {
+      ...ambientHostTrust(),
       SYNVEDA_CONFIRM_RESET: state.project,
       SYNVEDA_FAKE_FAIL_TLS_CHECK: "1",
     });
@@ -1071,7 +1148,10 @@ test("a catchable parent signal retains the lock when authority cleanup needs SI
 test("runner launch publishes pending uncertainty before its PID", () => {
   const source = readFileSync(WRAPPER, "utf8");
   const pending = source.indexOf("bounded_runner_pending=true");
-  const launch = source.indexOf('node "$script_dir/run-with-deadline.mjs"', pending);
+  const launch = source.indexOf(
+    '"$node_runner" "$script_dir/run-with-deadline.mjs"',
+    pending,
+  );
   const pid = source.indexOf("bounded_runner_pid=$!", launch);
   const clear = source.indexOf("bounded_runner_pending=false", pid);
   const handler = source.indexOf('elif [ "$bounded_runner_pending" = true ]');
