@@ -42,6 +42,12 @@ backup/restore and upgrade acceptance remain open. External PostgreSQL
 bootstrap deliberately refuses before secret reads or SQL until the
 authenticated-TLS contract is implemented.
 
+Reference certificate-file preparation and its executable ordering are defined
+in [`deploy/compose/README.md`](../deploy/compose/README.md). The lifecycle
+preflights a leaf-first leaf-and-intermediate fullchain with the trust root
+omitted, matching unencrypted key, SAN coverage and validity before startup
+mutation; it does not establish public browser trust or automatic renewal.
+
 The remaining sections describe product use only after a gateway has been
 started through separately validated development/test infrastructure. They are
 not deployment instructions or evidence that the reference is complete.

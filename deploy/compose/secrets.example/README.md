@@ -43,8 +43,10 @@ Bundled PostgreSQL and Keycloak additionally use:
 - `keycloak_admin_password`
 - `keycloak_convergence_admin_password`
 
-Reference certificate-file mode additionally requires operator-supplied
-`tls_cert` and `tls_key`. The generator never invents a certificate.
+Reference certificate-file mode additionally requires an operator-supplied
+leaf-first PEM fullchain (leaf plus any intermediates, with the trust root
+omitted) in `tls_cert` and its matching unencrypted PEM private key in
+`tls_key`. The generator creates neither file and never invents a certificate.
 
 External PostgreSQL operators replace the three role-specific database URL
 files with separately provisioned least-privilege connections. Owner,

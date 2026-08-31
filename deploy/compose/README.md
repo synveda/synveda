@@ -189,22 +189,42 @@ PostgreSQL rows render and validate only: canonical `up` and `reset` refuse
 them until the authenticated-TLS bootstrap and compiled SQLx transport
 contract is implemented.
 
-Reference mode requires operator DNS, HTTPS certificate/key files, an explicit
-private `/24`, and digest-addressed product/provider/proxy images. Only ports 80
-and 443 are published. It does not manage `/etc/hosts`:
+Reference mode requires operator DNS, a leaf-first PEM fullchain containing the
+leaf and any intermediates but not the trust root, a matching unencrypted PEM
+private key, an explicit private `/24`, and digest-addressed
+product/provider/proxy images. Only ports 80 and 443 are published. It does not
+manage `/etc/hosts`.
+
+First replace the documentation-only names and export the reference settings:
 
 ```sh
-SYNVEDA_COMPOSE_RUNTIME=reference \
-SYNVEDA_APP_HOST=app.example.invalid \
-SYNVEDA_AUTH_HOST=auth.example.invalid \
-SYNVEDA_PUBLIC_SCHEME=https \
-SYNVEDA_COMPOSE_IPV4_POOL=10.231.44.0/24 \
-deploy/compose/scripts/compose.sh config
+export SYNVEDA_COMPOSE_RUNTIME=reference
+export SYNVEDA_APP_HOST=app.example.invalid
+export SYNVEDA_AUTH_HOST=auth.example.invalid
+export SYNVEDA_PUBLIC_SCHEME=https
+export SYNVEDA_COMPOSE_IPV4_POOL=10.231.44.0/24
+make compose-secrets
 ```
 
-Replace the example names and pool; `.invalid` is documentation-only. Put the
-certificate and key in the selected project secret directory as `tls_cert` and
-`tls_key` before starting. ACME is not implemented in this checkpoint.
+The secret generator creates the mode-0700 project directory but never invents
+a certificate. Copy the operator fullchain and key into the selected
+`synveda-reference` project's ignored runtime secret directory, naming them
+`tls_cert` and `tls_key`. Set both files to mode 0600 and the configured runtime
+UID:GID, then supply the digest-addressed images from the matching environment
+manifest and run `make compose-config` before `make compose-up`.
+
+The preflight accepts one through eight leaf-first `CERTIFICATE` blocks and one
+matching unencrypted `PRIVATE KEY`, `RSA PRIVATE KEY` or `EC PRIVATE KEY`
+block. It refuses an included self-signed trust root. Every supplied certificate
+must be valid through the remaining bounded lifecycle. Bundled mode requires
+DNS SAN coverage for both hosts; external OIDC requires the application host
+only. A conventional one-label wildcard SAN is accepted, but CN fallback,
+partial wildcards and multi-label wildcards are not.
+The preflight proves parsing, adjacent chain signatures and key/hostname
+coherence. It does not prove public trust, revocation, DNS ownership or what a
+live endpoint serves. There is no automatic renewal, and ACME is not
+implemented in this checkpoint. Certificate validity never blocks canonical
+`down` or `reset`.
 
 ## Network and edge contract
 

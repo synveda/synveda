@@ -17,9 +17,14 @@ import { dirname, join, resolve } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { generateTestTlsChain } from "./test-certificate.mjs";
+
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const WRAPPER = join(ROOT, "deploy/compose/scripts/compose.sh");
 const PROJECT_LOCK = join(ROOT, "deploy/compose/scripts/project-lock.sh");
+const SECRET_GENERATOR = join(ROOT, "deploy/compose/scripts/generate-secrets.sh");
+const ISSUER_GENERATOR = join(ROOT, "deploy/compose/scripts/generate-issuer.sh");
+const DIGEST = `sha256:${"1".repeat(64)}`;
 const REAL_ENV = spawnSync("/bin/sh", ["-c", "command -v env"], {
   encoding: "utf8",
 }).stdout.trim();
@@ -32,9 +37,10 @@ function executable(path, content) {
   chmodSync(path, 0o700);
 }
 
-function fixture() {
+function fixture(runtimeKind = "development") {
+  assert.match(runtimeKind, /^(development|reference)$/);
   const suffix = `acceptance-life${randomBytes(6).toString("hex")}`;
-  const project = `synveda-development-${suffix}`;
+  const project = `synveda-${runtimeKind}-${suffix}`;
   const scratch = realpathSync(mkdtempSync(join(tmpdir(), "synveda-compose-lifecycle-")));
   chmodSync(scratch, 0o700);
   const bin = join(scratch, "bin");
@@ -176,6 +182,13 @@ case "$1" in
     esac
     exit 0
     ;;
+  */check-tls-inputs.mjs)
+    printf 'node' >> "$SYNVEDA_FAKE_CALL_LOG"
+    for argument in "$@"; do printf ' <%s>' "$argument" >> "$SYNVEDA_FAKE_CALL_LOG"; done
+    printf '\n' >> "$SYNVEDA_FAKE_CALL_LOG"
+    if [ "\${SYNVEDA_FAKE_FAIL_TLS_CHECK:-0}" = 1 ]; then exit 91; fi
+    exec ${JSON.stringify(process.execPath)} "$@"
+    ;;
 esac
 exec ${JSON.stringify(process.execPath)} "$@"
 `,
@@ -251,6 +264,7 @@ exec /bin/rm "$@"
     issuer,
     project,
     suffix,
+    runtimeKind,
   };
 }
 
@@ -274,7 +288,7 @@ function environment(state, extra = {}) {
     SYNVEDA_DOCKER_BIN: state.fakeDocker,
     SYNVEDA_FAKE_CALL_LOG: state.log,
     SYNVEDA_FAKE_PROJECT: state.project,
-    SYNVEDA_COMPOSE_RUNTIME: "development",
+    SYNVEDA_COMPOSE_RUNTIME: state.runtimeKind,
     SYNVEDA_POSTGRES_MODE: "bundled",
     SYNVEDA_OIDC_MODE: "bundled",
     SYNVEDA_COMPOSE_PROFILES: "demo",
@@ -284,6 +298,17 @@ function environment(state, extra = {}) {
     SYNVEDA_DATABASE_AUTHORITY_DIR: state.authority,
     SYNVEDA_KEYCLOAK_PUBLIC_GATE_DIR: state.gate,
     SYNVEDA_OIDC_ISSUERS_FILE: state.issuer,
+    ...(state.runtimeKind === "reference"
+      ? {
+          SYNVEDA_PUBLIC_SCHEME: "https",
+          SYNVEDA_APP_HOST: "app.lifecycle.example",
+          SYNVEDA_AUTH_HOST: "auth.lifecycle.example",
+          SYNVEDA_PRODUCT_IMAGE: `registry.lifecycle.example/synveda/product@${DIGEST}`,
+          SYNVEDA_POSTGRES_IMAGE: `registry.lifecycle.example/synveda/postgres@${DIGEST}`,
+          SYNVEDA_KEYCLOAK_IMAGE: `registry.lifecycle.example/synveda/keycloak@${DIGEST}`,
+          SYNVEDA_CADDY_IMAGE: `registry.lifecycle.example/synveda/proxy@${DIGEST}`,
+        }
+      : {}),
     ...extra,
   };
 }
@@ -295,6 +320,124 @@ function run(state, action, extra = {}) {
     encoding: "utf8",
   });
 }
+
+function prepareReferenceFixture(state) {
+  assert.equal(state.runtimeKind, "reference");
+  const preparedEnvironment = environment(state);
+  for (const script of [SECRET_GENERATOR, ISSUER_GENERATOR]) {
+    const result = spawnSync(script, ["--if-missing"], {
+      cwd: ROOT,
+      env: preparedEnvironment,
+      encoding: "utf8",
+    });
+    assert.equal(result.status, 0, result.stderr);
+  }
+  const tls = generateTestTlsChain({
+    commonName: "app.lifecycle.example",
+    sanHosts: ["app.lifecycle.example", "auth.lifecycle.example"],
+  });
+  writeFileSync(join(state.secrets, "tls_cert"), tls.certificateChain, { mode: 0o600 });
+  writeFileSync(join(state.secrets, "tls_key"), tls.privateKey, { mode: 0o600 });
+  chmodSync(join(state.secrets, "tls_cert"), 0o600);
+  chmodSync(join(state.secrets, "tls_key"), 0o600);
+}
+
+test("invalid reference TLS blocks startup actions and releases the exact-project lock", () => {
+  const state = fixture("reference");
+  const lockFile = join(
+    "/tmp",
+    `.synveda-compose-locks-${process.getuid?.() ?? 0}`,
+    `${state.project}.lock`,
+  );
+  try {
+    prepareReferenceFixture(state);
+    writeFileSync(join(state.secrets, "tls_key"), "invalid-reference-key\n", {
+      mode: 0o600,
+    });
+    for (const action of ["up", "smoke", "restart-gateway"]) {
+      writeFileSync(state.log, "");
+      const refused = run(state, action);
+      assert.equal(refused.status, 78, `${action}: ${refused.stderr}`);
+      assert.match(refused.stderr, /compose-tls: PEM structure was refused/);
+      assert.equal(existsSync(lockFile), false, `${action} retained its lock`);
+      const calls = readFileSync(state.log, "utf8");
+      assert.match(calls, /check-tls-inputs\.mjs/);
+      assert.doesNotMatch(
+        calls,
+        /docker| <up>| <restart>| <down>| <volume>/,
+        `${action} reached Docker after TLS refusal`,
+      );
+    }
+  } finally {
+    rmSync(state.scratch, { recursive: true, force: true });
+  }
+});
+
+test("reference config preserves output and passes a non-replenishing TLS runway", () => {
+  for (const { step, expected } of [
+    { step: "10", expected: "230" },
+    { step: "-10", expected: "240" },
+  ]) {
+    const state = fixture("reference");
+    const clock = join(state.scratch, "clock");
+    const output = join(state.scratch, `render-${expected}.json`);
+    try {
+      prepareReferenceFixture(state);
+      writeFileSync(clock, "1000\n", { mode: 0o600 });
+      writeFileSync(state.log, "");
+      const result = spawnSync(WRAPPER, ["config", "--output", output], {
+        cwd: ROOT,
+        env: environment(state, {
+          SYNVEDA_COMPOSE_LIFECYCLE_TIMEOUT_SECONDS: "240",
+          SYNVEDA_FAKE_CLOCK_FILE: clock,
+          SYNVEDA_FAKE_CLOCK_STEP: step,
+        }),
+        encoding: "utf8",
+      });
+      assert.equal(result.status, 0, result.stderr);
+      const calls = readFileSync(state.log, "utf8");
+      assert.match(
+        calls,
+        new RegExp(`check-tls-inputs\\.mjs[^\\n]*<--valid-for-seconds> <${expected}>`),
+      );
+      assert.ok(calls.includes(`<--output> <${output}>`), calls);
+    } finally {
+      rmSync(state.scratch, { recursive: true, force: true });
+    }
+  }
+});
+
+test("reference teardown and confirmed reset exclude semantic TLS validation", () => {
+  const state = fixture("reference");
+  try {
+    prepareReferenceFixture(state);
+    writeFileSync(join(state.secrets, "tls_cert"), "semantically-invalid-certificate\n", {
+      mode: 0o600,
+    });
+    writeFileSync(join(state.secrets, "tls_key"), "semantically-invalid-key\n", {
+      mode: 0o600,
+    });
+
+    writeFileSync(state.log, "");
+    const down = run(state, "down", { SYNVEDA_FAKE_FAIL_TLS_CHECK: "1" });
+    assert.equal(down.status, 0, down.stderr);
+    let calls = readFileSync(state.log, "utf8");
+    assert.match(calls, / <down>/);
+    assert.doesNotMatch(calls, /check-tls-inputs\.mjs/);
+
+    writeFileSync(state.log, "");
+    const reset = run(state, "reset", {
+      SYNVEDA_CONFIRM_RESET: state.project,
+      SYNVEDA_FAKE_FAIL_TLS_CHECK: "1",
+    });
+    assert.equal(reset.status, 0, reset.stderr);
+    calls = readFileSync(state.log, "utf8");
+    assert.match(calls, / <down>/);
+    assert.doesNotMatch(calls, /check-tls-inputs\.mjs|docker <volume> <rm>/);
+  } finally {
+    rmSync(state.scratch, { recursive: true, force: true });
+  }
+});
 
 test("canonical up prepares once, reruns convergence, and keeps credentials stable", () => {
   const state = fixture();

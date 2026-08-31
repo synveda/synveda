@@ -16,6 +16,8 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { generateTestTlsChain } from "./test-certificate.mjs";
+
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const COMPOSE = join(ROOT, "deploy/compose");
 const WRAPPER = join(COMPOSE, "scripts/compose.sh");
@@ -141,9 +143,15 @@ export function makeComposeFixture() {
   mkdirSync(oidcDirectorySecrets, { mode: 0o700 });
   chmodSync(oidcDirectorySecrets, 0o700);
   if (processUid === 0) chownSync(oidcDirectorySecrets, owner.uid, owner.gid);
-  for (const name of [...CORE_SECRETS, ...PROVIDER_SECRETS, "tls_cert", "tls_key"]) {
+  for (const name of [...CORE_SECRETS, ...PROVIDER_SECRETS]) {
     writePrivate(join(secrets, name), `${SECRET_SENTINEL}-${name}`, owner);
   }
+  const tls = generateTestTlsChain({
+    commonName: "app.compose.example",
+    sanHosts: ["app.compose.example", "auth.compose.example"],
+  });
+  writePrivate(join(secrets, "tls_cert"), tls.certificateChain.trimEnd(), owner);
+  writePrivate(join(secrets, "tls_key"), tls.privateKey.trimEnd(), owner);
   const issuers = join(defaultRuntimeState, "issuers.json");
   writePrivate(
     issuers,

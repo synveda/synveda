@@ -190,8 +190,9 @@ port from 1024 through 65535, excluding Caddy's reserved development HTTPS
 convention port 8443, is identical inside and outside the proxy so the browser,
 issuer diagnostic and gateway use one exact issuer authority; a host-only port
 translation is invalid. Reference/playground binds 80/443 and
-requires configured DNS and HTTPS. Certificate-file mode is the
-only current render; ACME remains an unimplemented target mode. PostgreSQL,
+requires configured DNS and HTTPS. Certificate-file mode with pre-mutation
+PEM, key, chain, SAN and bounded-validity checks is the only current render;
+ACME remains an unimplemented target mode. PostgreSQL,
 Keycloak management/admin/master realm, worker health, receivers, metrics,
 dashboards, board and backup operations are never public. pgBackRest is
 embedded in the PostgreSQL image for POSIX/S3 repository operation; the
@@ -370,8 +371,11 @@ route; configuration/inspection tests assert both. The proxy owns the
 public application and issuer aliases on the networks that need them so
 gateway and browser use identical issuer bytes without routing the gateway
 through host loopback. Caddy's administration endpoint is disabled. The current
-certificate-file mode mounts only the selected certificate and private-key
-files read-only. Future ACME mode requires a dedicated persistent
+certificate-file mode mounts only the selected leaf-first fullchain (leaf and
+intermediates, with its trust root omitted) and matching unencrypted private-key
+files read-only. Full semantic validation runs before `config`, `up`, `smoke`
+and gateway restart, but certificate validity never blocks `down` or `reset`.
+Future ACME mode requires a dedicated persistent
 `caddy-data` volume and acceptance before it can be selected.
 `internal: true` removes external container egress; it is not a security
 boundary against an authorised host/Engine operator.
@@ -485,7 +489,7 @@ materialise the same per-service paths, but does not change setting meaning.
 | outbound proxy | ambient proxy variables are deliberately ignored by OIDC and CLI clients | explicit proxy-file settings remain reserved and rejected until a bounded consumer and no-proxy contract ship |
 | object store | `SYNVEDA_OBJECT_STORE_ENDPOINT`, `SYNVEDA_OBJECT_STORE_REGION`, `SYNVEDA_OBJECT_STORE_BUCKET`, `SYNVEDA_OBJECT_STORE_PATH_STYLE` | `SYNVEDA_OBJECT_STORE_ACCESS_KEY_FILE=/run/secrets/object_store_access_key`; `SYNVEDA_OBJECT_STORE_SECRET_KEY_FILE=/run/secrets/object_store_secret_key`; `SYNVEDA_OBJECT_STORE_SESSION_TOKEN_FILE=/run/secrets/object_store_session_token`; rejected unless an accepted feature enables the interface |
 | SMTP | reserved `SYNVEDA_SMTP_HOST`, `PORT`, `FROM` | reserved `SYNVEDA_SMTP_USERNAME_FILE` and `PASSWORD_FILE`; all are rejected until an accepted consumer exists |
-| reference TLS | `SYNVEDA_TLS_MODE=files` currently; `acme` reserved and rejected, public hostnames | `SYNVEDA_TLS_CERT_FILE=/run/secrets/tls_cert`; `SYNVEDA_TLS_KEY_FILE=/run/secrets/tls_key` |
+| reference TLS | `SYNVEDA_TLS_MODE=files` currently; `acme` reserved and rejected, public hostnames | fixed selected-project files `tls_cert` and `tls_key`, mounted only in the proxy at `/run/secrets/tls_cert` and `/run/secrets/tls_key` |
 | Keycloak database | `KC_DB_URL`, `KC_DB_USERNAME` | `KC_DB_PASSWORD_FILE=/run/secrets/keycloak_database_password` |
 | Keycloak bootstrap | none | `KC_BOOTSTRAP_ADMIN_USERNAME_FILE=/run/secrets/keycloak_admin_username`; `KC_BOOTSTRAP_ADMIN_PASSWORD_FILE=/run/secrets/keycloak_admin_password` |
 | Keycloak convergence | direct password values are forbidden | `SYNVEDA_KEYCLOAK_CONVERGENCE_PASSWORD_FILE=/run/secrets/keycloak_convergence_admin_password` |
@@ -781,11 +785,17 @@ its exact `X-Forwarded-For`, `X-Forwarded-Host`, `X-Forwarded-Proto` and
 `X-Forwarded-Port`; strips untrusted identity and `X-Original-*` headers; and removes
 untrusted `traceparent`, `tracestate`, `baggage`, B3, Jaeger and OpenTracing
 variants. It bounds body size, header size, upstream timeout and idle lifetime.
-Reference TLS currently uses certificate files; bundled mode requires both
-application and identity hostnames in the certificate SAN set, while external
-OIDC requires only the application hostname. ACME, secure-header public-route
-acceptance and cookie-origin browser acceptance remain open. Proxy
-configuration never turns a header into a principal.
+Reference TLS currently uses a bounded leaf-first PEM chain and matching
+unencrypted key. The chain contains the leaf and intermediates but omits its
+self-signed trust root. Every supplied certificate must parse, form one unique
+ordered adjacent-signature chain and remain valid through the current lifecycle
+deadline. Bundled mode requires DNS SAN coverage for both application and
+identity hostnames, while external OIDC requires only the application hostname.
+Conventional one-label wildcards are accepted; CN fallback, partial wildcards
+and multi-label wildcards are refused. This is not PKIX trust, revocation, DNS
+ownership or served-endpoint evidence. ACME, renewal/expiry monitoring,
+secure-header public-route acceptance and cookie-origin browser acceptance
+remain open. Proxy configuration never turns a header into a principal.
 
 ## Operation and worker contract
 

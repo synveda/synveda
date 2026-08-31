@@ -903,6 +903,20 @@ fi
 if [ "$runtime" = reference ]; then
     require_private_file "$secret_dir/tls_cert" tls_cert
     require_private_file "$secret_dir/tls_key" tls_key
+    case "$action" in
+        config|up|smoke|restart-gateway)
+            set_remaining_lifecycle_seconds
+            set -- "$script_dir/check-tls-inputs.mjs" \
+                --cert-file "$secret_dir/tls_cert" \
+                --key-file "$secret_dir/tls_key" \
+                --oidc "$oidc_mode" --app-host "$app_host" \
+                --valid-for-seconds "$lifecycle_remaining"
+            if [ "$oidc_mode" = bundled ]; then
+                set -- "$@" --auth-host "$auth_host"
+            fi
+            run_bounded "$lifecycle_timeout" node "$@"
+            ;;
+    esac
 fi
 require_private_file "$issuer_file" issuer_configuration
 

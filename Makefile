@@ -359,6 +359,7 @@ check-deploy:
 	node --test scripts/check-deploy-convergence.test.mjs
 	node --test scripts/uninstall.test.mjs
 	node --test scripts/generate-compose-issuer.test.mjs
+	node --test scripts/check-tls-inputs.test.mjs
 	node --test scripts/check-compose-contract.test.mjs
 	node --test scripts/check-host-resolution.test.mjs scripts/check-network-preflight.test.mjs scripts/check-compose-assets.test.mjs scripts/run-with-deadline.test.mjs scripts/check-runtime-smoke.test.mjs scripts/reset-runtime-state.test.mjs scripts/compose-lifecycle.test.mjs
 	node scripts/check-deploy-convergence.mjs
@@ -366,6 +367,7 @@ check-deploy:
 
 check-compose-contract:
 	node --test scripts/generate-compose-issuer.test.mjs
+	node --test scripts/check-tls-inputs.test.mjs
 	node --test scripts/check-compose-contract.test.mjs
 	node --test scripts/check-host-resolution.test.mjs scripts/check-network-preflight.test.mjs scripts/check-compose-assets.test.mjs scripts/run-with-deadline.test.mjs scripts/check-runtime-smoke.test.mjs scripts/reset-runtime-state.test.mjs scripts/compose-lifecycle.test.mjs
 	node scripts/check-compose-contract.mjs

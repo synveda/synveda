@@ -195,7 +195,14 @@ the same bounded, non-following descriptor helper before parsing, including
 writerless-FIFO and symlink refusal tests.
 Pinned Keycloak, Caddy, PostgreSQL and Collector configuration, exact
 database-role/authority convergence, idempotent realm convergence and a
-product-owned exact issuer diagnostic now exist. The current pinned Keycloak
+product-owned exact issuer diagnostic now exist. Reference certificate-file
+mode now refuses unsafe, oversized or malformed PEM, key mismatch, unordered
+or duplicate chains, missing DNS SAN coverage and certificates that cannot
+remain valid through the bounded lifecycle before Compose rendering or startup
+mutation. The Node 22 preflight accepts leaf-first leaf-and-intermediate
+fullchains, refuses an included self-signed trust root and commits no test keys;
+expiry never blocks `down` or `reset`. Trust anchors, revocation,
+served-endpoint proof, renewal and ACME remain open. The current pinned Keycloak
 image includes a review-locked complete 26.7.2 user-profile contract: upstream
 built-ins remain intact, unmanaged attributes remain disabled, and the two
 demo ownership attributes are admin-only with closed validators. Realm repair

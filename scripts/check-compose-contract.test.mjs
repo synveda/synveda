@@ -1922,6 +1922,82 @@ printf '%s\\n' "$@" > "$SYNVEDA_FAKE_DOCKER_ARGUMENTS"
   return { path, argumentsFile };
 }
 
+test("reference TLS is validated before Compose rendering while development ignores it", () => {
+  const digest = `sha256:${"1".repeat(64)}`;
+  for (const runtime of ["reference", "development"]) {
+    const fixture = makeComposeFixture();
+    try {
+      const fake = fakeDocker(fixture);
+      const environment = composeEnvironment(fixture, {
+        SYNVEDA_DOCKER_BIN: fake.path,
+        SYNVEDA_FAKE_DOCKER_ARGUMENTS: fake.argumentsFile,
+        ...(runtime === "reference"
+          ? {
+              SYNVEDA_COMPOSE_RUNTIME: "reference",
+              SYNVEDA_PUBLIC_SCHEME: "https",
+              SYNVEDA_APP_HOST: "app.compose.example",
+              SYNVEDA_AUTH_HOST: "auth.compose.example",
+              SYNVEDA_PRODUCT_IMAGE: `registry.compose.example/synveda/product@${digest}`,
+              SYNVEDA_POSTGRES_IMAGE: `registry.compose.example/synveda/postgres@${digest}`,
+              SYNVEDA_KEYCLOAK_IMAGE: `registry.compose.example/synveda/keycloak@${digest}`,
+              SYNVEDA_CADDY_IMAGE: `registry.compose.example/synveda/proxy@${digest}`,
+            }
+          : {}),
+      });
+      const invalidKey = "cpr45-invalid-reference-key-sentinel";
+      const keyPath = join(environment.SYNVEDA_SECRETS_DIR, "tls_key");
+      if (runtime === "reference") {
+        for (const name of ["tls_cert", "tls_key"]) {
+          const path = join(environment.SYNVEDA_SECRETS_DIR, name);
+          chmodSync(path, 0o640);
+          const permissive = spawnSync(WRAPPER, ["config"], {
+            cwd: ROOT,
+            env: environment,
+            encoding: "utf8",
+          });
+          assert.equal(permissive.status, 78, permissive.stderr);
+          assert.match(permissive.stderr, new RegExp(`${name} file must have mode 0600`));
+          assert.equal(existsSync(fake.argumentsFile), false);
+          chmodSync(path, 0o600);
+        }
+        const realKey = `${keyPath}.real`;
+        renameSync(keyPath, realKey);
+        symlinkSync(realKey, keyPath);
+        const linked = spawnSync(WRAPPER, ["config"], {
+          cwd: ROOT,
+          env: environment,
+          encoding: "utf8",
+        });
+        assert.equal(linked.status, 78, linked.stderr);
+        assert.match(linked.stderr, /required tls_key file is missing or is a symlink/);
+        assert.equal(existsSync(fake.argumentsFile), false);
+        rmSync(keyPath);
+        renameSync(realKey, keyPath);
+      }
+      writeFileSync(keyPath, `${invalidKey}\n`, { mode: 0o600 });
+      chmodSync(keyPath, 0o600);
+      const result = spawnSync(WRAPPER, ["config"], {
+        cwd: ROOT,
+        env: environment,
+        encoding: "utf8",
+      });
+      const output = `${result.stdout}${result.stderr}`;
+      if (runtime === "reference") {
+        assert.equal(result.status, 78, result.stderr);
+        assert.match(result.stderr, /compose-tls: PEM structure was refused/);
+        assert.equal(existsSync(fake.argumentsFile), false);
+        assert.ok(!output.includes(invalidKey));
+        assert.ok(!output.includes(keyPath));
+      } else {
+        assert.equal(result.status, 0, result.stderr);
+        assert.equal(existsSync(fake.argumentsFile), true);
+      }
+    } finally {
+      rmSync(fixture.scratch, { recursive: true, force: true });
+    }
+  }
+});
+
 test("the selector requires Compose 2.33.1 for gateway priority", () => {
   for (const version of ["2.32.9", "2.33.0", "not-a-version"]) {
     const fixture = makeComposeFixture();

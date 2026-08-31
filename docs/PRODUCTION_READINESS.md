@@ -49,9 +49,10 @@ installed proprietary-client test or canonical browser/Compose acceptance.
 The current additive implementation now has a bounded, exact-project-locked
 canonical lifecycle; complete network/IPAM and asset preflight; containerized
 gateway/worker; a private Collector; exact static-tenant issuer diagnostics;
-and an optimized Keycloak image with closed realm/demo/user-profile
-convergence. Deterministic source tests and image self-tests establish those
-contracts, not a clean-volume login or recovery claim. One
+pre-mutation reference PEM/key/chain/SAN/validity checks; and an optimized
+Keycloak image with closed realm/demo/user-profile convergence. Deterministic
+source tests and image self-tests establish those contracts, not public PKIX
+trust, a clean-volume login or recovery claim. One
 frozen Docker Desktop candidate also proved bounded PostgreSQL/Keycloak
 bootstrap, optimized
 Keycloak, realm convergence, issuer metadata, Collector, worker and gateway
