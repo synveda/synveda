@@ -630,6 +630,16 @@ test("the Docker build context excludes local state and credentials", () => {
     "build context includes .codex",
   ]);
   assert.ok(
+    dockerignoreFindings(current.replace(".claude/**\n", "")).includes(
+      "build context includes .claude/**",
+    ),
+  );
+  assert.ok(
+    dockerignoreFindings(
+      current.replace("evals/fixtures/longmemeval/longmemeval_*.json\n", ""),
+    ).includes("build context includes evals/fixtures/longmemeval/longmemeval_*.json"),
+  );
+  assert.ok(
     dockerignoreFindings(current.replace(/^\.env\.\*\n/m, "")).includes(
       "build context includes .env.*",
     ),

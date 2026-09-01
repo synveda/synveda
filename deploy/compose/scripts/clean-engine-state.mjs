@@ -76,6 +76,8 @@ const DOCKERIGNORE_CONTRACT = Object.freeze([
   ".agents/**",
   ".codex",
   ".codex/**",
+  ".claude",
+  ".claude/**",
   "target",
   "target/**",
   "**/target",
@@ -92,6 +94,9 @@ const DOCKERIGNORE_CONTRACT = Object.freeze([
   "**/dist-test/**",
   "data",
   "data/**",
+  "evals/fixtures/longmemeval/longmemeval_*.json",
+  "evals/fixtures/longmemeval/LICENSE",
+  "evals/fixtures/longmemeval/LICENSE.*",
   ".env",
   ".env.*",
   "**/.env",
@@ -226,7 +231,18 @@ function pathIsOutsideBuildContext(path) {
   if (segments.some((segment) => new Set(["target", "node_modules", "dist", "dist-test"]).has(segment))) {
     return true;
   }
-  if (new Set([".agents", ".codex", "data"]).has(segments[0])) return true;
+  if (new Set([".agents", ".claude", ".codex", "data"]).has(segments[0])) return true;
+  if (
+    segments.length === 4 &&
+    segments[0] === "evals" &&
+    segments[1] === "fixtures" &&
+    segments[2] === "longmemeval" &&
+    (segments[3] === "LICENSE" ||
+      segments[3].startsWith("LICENSE.") ||
+      /^longmemeval_.*\.json$/.test(segments[3]))
+  ) {
+    return true;
+  }
   return (
     segments[0] === "deploy" &&
     segments[1] === "compose" &&

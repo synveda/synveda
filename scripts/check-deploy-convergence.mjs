@@ -1604,6 +1604,8 @@ export function dockerignoreFindings(source) {
     ".agents/**",
     ".codex",
     ".codex/**",
+    ".claude",
+    ".claude/**",
     "target",
     "target/**",
     "node_modules",
@@ -1618,6 +1620,9 @@ export function dockerignoreFindings(source) {
     "deploy/compose/runtime/**",
     "deploy/compose/backups",
     "deploy/compose/backups/**",
+    "evals/fixtures/longmemeval/longmemeval_*.json",
+    "evals/fixtures/longmemeval/LICENSE",
+    "evals/fixtures/longmemeval/LICENSE.*",
   ]) {
     if (!rules.has(required)) findings.push(`build context includes ${required}`);
   }

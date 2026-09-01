@@ -52,6 +52,8 @@ function fixture() {
 .agents/**
 .codex
 .codex/**
+.claude
+.claude/**
 target
 target/**
 **/target
@@ -68,6 +70,9 @@ node_modules/**
 **/dist-test/**
 data
 data/**
+evals/fixtures/longmemeval/longmemeval_*.json
+evals/fixtures/longmemeval/LICENSE
+evals/fixtures/longmemeval/LICENSE.*
 .env
 .env.*
 **/.env
@@ -88,13 +93,22 @@ Thumbs.db
 *.tmp
 **/*.tmp
 `.trimStart(),
-    ".gitignore": ".codex/\ntarget/\nnode_modules/\n",
+    ".gitignore":
+      ".claude/\n.codex/\ntarget/\nnode_modules/\n" +
+      "evals/fixtures/longmemeval/longmemeval_*.json\n" +
+      "evals/fixtures/longmemeval/LICENSE\n" +
+      "evals/fixtures/longmemeval/LICENSE.*\n",
+    ".claude/RESUME.md": "local harness recovery state\n",
     ".env.example": "NON_SECRET_EXAMPLE=true\n",
     ".env.secret.example": "excluded example-shaped residue\n",
     Makefile: "compose-config:\n\t@true\n",
     "deploy/compose/compose.yaml": "name: fixture\nservices: {}\n",
     "docs/DEPLOYMENT_CONTRACT.md": "# Fixture deployment contract\n",
     "docs/SECURITY.md": "# Fixture security contract\n",
+    "evals/fixtures/longmemeval/LICENSE": "upstream fixture licence\n",
+    "evals/fixtures/longmemeval/LICENSE.txt": "upstream fixture licence variant\n",
+    "evals/fixtures/longmemeval/NOTICE.md": "# Tracked corpus notice\n",
+    "evals/fixtures/longmemeval/longmemeval_s_cleaned.json": "[]\n",
     "source.txt": "fixture source\n",
   };
   for (const [path, content] of Object.entries(files)) {
@@ -549,6 +563,11 @@ test("actual Docker-context modes and empty directories are part of source closu
       mode: 0o700,
       recursive: true,
     });
+    writeFileSync(join(ignoredState.repo, ".claude", "RESUME.md"), "changed local state\n");
+    writeFileSync(
+      join(ignoredState.repo, "evals", "fixtures", "longmemeval", "longmemeval_oracle.json"),
+      "[]\n",
+    );
     assert.equal(run(ignoredState, "verify").status, 0);
   } finally {
     rmSync(ignoredState.root, { recursive: true, force: true });

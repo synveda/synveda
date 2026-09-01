@@ -6,6 +6,8 @@
 .agents/**
 .codex
 .codex/**
+.claude
+.claude/**
 target
 target/**
 **/target
@@ -22,6 +24,11 @@ node_modules/**
 **/dist-test/**
 data
 data/**
+# Downloaded evaluation corpora and their fetched licence copies are not
+# product-image inputs. Their tracked notice remains in the context.
+evals/fixtures/longmemeval/longmemeval_*.json
+evals/fixtures/longmemeval/LICENSE
+evals/fixtures/longmemeval/LICENSE.*
 
 # Local deployment configuration can contain database passwords, issuer
 # client secrets and key paths. Examples are documentation, not credentials.
