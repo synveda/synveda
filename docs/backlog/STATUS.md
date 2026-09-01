@@ -180,7 +180,8 @@ asset drift, reset ownership, and atomic issuer publication. The Keycloak
 profile keeps unmanaged attributes disabled and its ownership markers
 admin-only; drifted marker provenance fails closed. Development source builds
 now refuse ambient BuildKit/Buildx/Bake routing before helpers or locking, pin
-the local default builder behind fresh private state, preserve registry auth
+the local default builder behind fresh private state, require one running
+embedded `docker` driver/node at endpoint `default`, preserve registry auth
 opaquely, exclude its config and lifecycle temporaries from the source context,
 and separate build from every no-build startup/recovery path. The next blocker
 now has a reversible, exact-confirmation `.test` host ownership ceremony whose
@@ -192,10 +193,16 @@ image stage, and a pinned sandboxed no-capture Playwright fixture. Its exact
 development overlay waits for one Keycloak authorization-code/PKCE S256
 administrator login and logout before ordinary smoke; deterministic contract,
 lifecycle and injected-flow tests pass, but the container has not run. The next
-slice completes the isolated clean-Engine harness with synthetic Docker-client
-proxy, private-registry/remote-builder, candidate-manifest and exact-cleanup
-evidence; only then is the privileged mapping installed for the Docker Desktop
-run. Linux/reference HTTPS follows before the legacy Rauthy/Temporal callers
+slice now has an immutable canonical candidate/plan receipt binding the clean
+tracked index, actual effective Docker context, deployment inputs and exact
+fixture selection plus a private non-secret synthetic proxy template. Its
+complete run publishes through a no-replace hard-linked lease; inert
+pre-publication crash residue grants no provider authority and remains pending
+final cleanup. Planning reaches no Docker/provider/host authority.
+It must next add receipt-owned disposable-Engine, TLS private-registry,
+remote-builder canary, live proxy and exact-cleanup evidence; only then is the
+privileged mapping installed for the first live run. Linux/reference HTTPS
+follows before the legacy Rauthy/Temporal callers
 can be cut over and deleted. Backup/restore, upgrade and Apalis remain open
 CPR-45 slices.
 

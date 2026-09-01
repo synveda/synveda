@@ -75,7 +75,12 @@ exact PKCE request and callback checks, administrator admission/logout, and a
 fresh-project initial-asset absence gate. Deterministic model, lifecycle and
 injected-browser tests pass; the browser container has not executed and its
 effective mounted-secret ownership has not been proved on a supported Docker
-platform. No clean live run has yet exercised either the
+platform. The source now requires one running embedded `docker` builder at the
+default endpoint and can publish/revalidate a canonical content-free candidate
+binding the clean source, deployment inputs and exact fixture selection. It
+binds both the tracked index and actual effective Docker context and prepares a
+private non-secret synthetic proxy template, but creates no provider, registry,
+canary or live evidence. No clean live run has yet exercised either the
 ACL/default-ACL and SELinux/xattr/file-flag contract on Linux or a private
 synthetic Docker client proxy configuration, canary remote builder and private
 registry. Current ACL exploit and metadata-retention evidence is macOS plus

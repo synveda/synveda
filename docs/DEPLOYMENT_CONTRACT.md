@@ -114,6 +114,43 @@ relies on list append order.
 Every release environment manifest records the source SHA, deployment-file
 digest, OCI index digest and accepted platform digests.
 
+The clean-Engine development fixture has a narrower pre-mutation candidate
+manifest. Schema version 1 is canonical JSON under a mode-0700 state root
+outside the repository. The candidate binds the exact commit/tree and both the
+stage-zero tracked-index manifest and actual effective Docker-context manifest.
+The latter hashes portable paths, entry types, permission bits, file sizes and
+bytes, symlink targets and derived directory modes after applying the exact
+ordered `.dockerignore`; included untracked files or empty directories are
+refused. It also binds the actual deployment-input manifest,
+deployment-contract digest, project/suffix, private `/24`, hosts, profiles and
+exact fixture image. Its paired receipt additionally binds the closed provider
+and resource identity. Requested assertions and excluded claims are closed
+vocabularies. It contains no path, machine identity, Docker configuration,
+credential-derived value, secret-file digest, browser state or raw command
+output. The complete run is fsynced under a private random staging directory,
+renamed to its final run name and only then published by a no-replace `active`
+hard link to the immutable mode-0600 `00-plan.json`. The link and run-directory
+device/inode identities use exact 64-bit filesystem values. The receipt hash
+chain is correlation evidence, not a signature or release provenance.
+
+`make compose-clean-engine-plan` publishes only that candidate, receipt and a
+non-secret synthetic proxy template; `status` verifies the stored schema and
+`verify` additionally re-proves the clean source closure. These preparation
+targets do not create or adopt an Engine, start the reserved registry, arm a
+builder canary, mutate the resolver or run Compose. Later receipts must bind
+the exact disposable provider/Engine before those actions, and a final
+environment manifest is forbidden until registry, proxy, builder, browser and
+receipt-owned cleanup assertions all pass.
+
+An uncatchable pre-publication interruption can retain one or more strictly
+validated `.pending-*` or `.run-*` staging directories. They contain no
+provider, registry, runtime or evidence mutation, have no `active` authority
+and do not block a later plan. `status` and `verify` validate every retained
+staging inventory. A successful final receipt-owned cleanup must remove them
+before an environment manifest may be published; this preparation slice does
+not yet implement that cleanup. Preparation refuses more than eight retained
+inert staging directories, keeping later validation and cleanup work bounded.
+
 | Image role | Required contents | Commands |
 |---|---|---|
 | Synveda product | Current: `synveda`, `synveda-gateway`, `synveda-worker`, `synveda-oidc-diagnostic`; console static bundle and embedded policies. Planned CPR-45: experimental Apalis adapter, disabled by default | Current launcher roles: `gateway`; `worker`; `issuer-diagnostic`; `database-preflight`; `migrate`; `tenant-converge`; `probe gateway\|worker live\|ready`. Planned, not yet shipped: `operation-dispatcher`; `apalis-worker` |
@@ -287,10 +324,16 @@ Development source builds have a separate host-control boundary. A present
 ambient BuildKit, Buildx or Bake selector is refused before any helper or lock,
 including an empty value. Once the local Unix Engine endpoint has been pinned,
 `docker context show` must return exactly `default`. The lifecycle creates a
-fresh mode-0700 `BUILDX_CONFIG` directory outside the repository, selects
-`--builder default`, marks project-mutation state uncertain immediately before
-the build, and removes the private state on success, failure, timeout or
-catchable interruption. A successful, cleanly settled build clears that phase
+fresh mode-0700 `BUILDX_CONFIG` directory outside the repository. Before source
+mutation, a bounded, content-free parser requires `buildx inspect default` to
+report exactly the embedded `docker` driver, one running node named `default`
+and endpoint `default`; remote, container and Kubernetes drivers, second nodes,
+driver options and daemon file/flag extensions are refused. The lifecycle then
+selects `--builder default`, marks project-mutation state uncertain immediately
+before the build. Inspection stdout and stderr are captured only in byte-capped
+memory and discarded without reproduction; the private Buildx state is removed
+on success, failure, timeout or catchable interruption. A successful, cleanly
+settled build clears that phase
 before the separate startup mutation begins. An uncertain build outcome retains
 the exact project lock because daemon-side cache or tag mutation cannot be
 disproved. All subsequent startup and gateway recovery commands use

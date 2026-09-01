@@ -264,6 +264,20 @@ export function composeBuildBoundaryFindings(source) {
   if (!source.includes("BUILDX_CONFIG=$buildx_config_dir")) {
     findings.push("Buildx does not use the private state directory");
   }
+  const buildxConfig = source.indexOf("BUILDX_CONFIG=$buildx_config_dir");
+  const builderCheck = source.indexOf(
+    '"$script_dir/check-local-builder.mjs"',
+  );
+  const builderCheckCall =
+    'run_bounded 25 "$node_runner" "$script_dir/check-local-builder.mjs" \\\n' +
+    '        --docker-bin "$docker_bin"';
+  if (
+    buildxConfig < 0 ||
+    builderCheck < buildxConfig ||
+    !source.includes(builderCheckCall)
+  ) {
+    findings.push("the embedded default Docker builder is not proved by the bounded checker");
+  }
   if (!source.includes('rm -rf -- "$buildx_config_dir"')) {
     findings.push("private Buildx state is not removed by lifecycle cleanup");
   }
@@ -293,6 +307,9 @@ export function composeBuildBoundaryFindings(source) {
   const settled = source.indexOf("docker_mutation_uncertain=false", build);
   const startupMutation = source.indexOf("docker_mutation_uncertain=true", settled);
   if (build < 0) findings.push("development does not select the local default builder");
+  if (!(builderCheck >= 0 && builderCheck < build)) {
+    findings.push("the embedded default Docker builder is not proved before building");
+  }
   if (!(buildBoundary >= 0 && buildPhase > buildBoundary && mutation > buildPhase && mutation < build)) {
     findings.push("project mutation uncertainty does not cover the explicit build");
   }

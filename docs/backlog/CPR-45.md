@@ -362,12 +362,33 @@ pool and profiles through down, confirmed reset and mapping removal. No Docker
 command has run in this slice, so neither a live exchange nor
 the mounted secret's effective uid/mode is deployment evidence.
 
+The deterministic clean-Engine preparation publishes one immutable
+canonical candidate and plan receipt under a user-owned external state root.
+The candidate binds the clean commit/tree, stage-zero tracked index, actual
+effective Docker context, deployment inputs, deployment-contract digest, exact
+development/bundled selection, private `/24`, hosts, profiles and pinned
+Distribution 3.1.1 fixture image. Context hashing covers types, modes, file
+bytes/sizes, symlink targets and derived directories; included untracked/empty
+entries and ignored inputs outside the closed exclusions fail closed. It
+contains no host path, machine identity, Docker configuration, credential
+derivative or raw command output. A private synthetic proxy template contains
+only `.invalid` markers. The complete run is fsynced, renamed and published as
+a no-replace hard-linked active receipt using exact device/inode identities.
+Uncatchable pre-publication residue remains inert and must be removed by final
+cleanup. Independently, every development build now requires byte-bounded,
+content-free `buildx inspect` evidence for exactly one running embedded
+`docker` builder at endpoint `default` before source mutation. Planning
+contacts neither Docker nor Colima and does not install the resolver mapping,
+so it closes no live acceptance criterion.
+
 ### Immediate next slice
 
-After this preparation is committed, complete the isolated clean-Engine
-harness with an ephemeral authenticated private registry, synthetic Docker
-client proxy configuration, canary remote-builder state, a content-free
-candidate manifest and exact fixture cleanup. Then request explicit
+Extend the immutable plan through a receipt-owned Colima provider create,
+globally clean Engine proof, TLS/bcrypt private registry, authenticated
+push/pull, synthetic Docker-client proxy activation, a zero-read canary remote
+builder, exact project/provider cleanup and content-free environment manifest.
+Do not use plaintext Basic auth, host-wide daemon trust changes or any prune.
+Then request explicit
 administrator approval for the exact `.test` block, install it from the clean
 reviewed checkout with the fixed-runtime helper, flush the active resolver cache
 and run the committed browser fixture against that separate clean Docker

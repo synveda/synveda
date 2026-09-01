@@ -169,6 +169,23 @@ if [ "$1" = context ] && [ "$2" = show ]; then
   printf '%s\n' "\${SYNVEDA_FAKE_CONTEXT_NAME:-default}"
   exit 0
 fi
+if [ "$1" = buildx ] && [ "$2" = inspect ]; then
+  [ "\${SYNVEDA_FAKE_BUILDER_COMMAND_FAIL:-0}" = 0 ] || exit 41
+  case "\${SYNVEDA_FAKE_BUILDER_MODE:-valid}" in
+    valid) builder_driver=docker; builder_endpoint=default; builder_status=running ;;
+    remote) builder_driver=remote; builder_endpoint=tcp://127.0.0.1:47001; builder_status=running ;;
+    stopped) builder_driver=docker; builder_endpoint=default; builder_status=stopped ;;
+    extra-node) builder_driver=docker; builder_endpoint=default; builder_status=running ;;
+    *) exit 98 ;;
+  esac
+  printf 'Name:          default\nDriver:        %s\n\nNodes:\n' "$builder_driver"
+  printf 'Name:          default\nEndpoint:      %s\nStatus:        %s\n' \
+    "$builder_endpoint" "$builder_status"
+  if [ "\${SYNVEDA_FAKE_BUILDER_MODE:-valid}" = extra-node ]; then
+    printf 'Name:          foreign\nEndpoint:      default\nStatus:        running\n'
+  fi
+  exit 0
+fi
 case " $* " in
   *" ps "*" --quiet "*" browser-acceptance "*)
     case "\${SYNVEDA_FAKE_BROWSER_ID_MODE:-exact}" in
@@ -1270,6 +1287,29 @@ test("development build refuses a non-default context after endpoint pinning", (
     assert.equal(existsSync(lockFile), false);
   } finally {
     rmSync(state.scratch, { recursive: true, force: true });
+  }
+});
+
+test("development build requires one running embedded default builder before mutation", () => {
+  for (const mode of ["remote", "stopped", "extra-node"]) {
+    const state = fixture();
+    const lockFile = join(
+      "/tmp",
+      `.synveda-compose-locks-${process.getuid?.() ?? 0}`,
+      `${state.project}.lock`,
+    );
+    try {
+      const refused = run(state, "up", { SYNVEDA_FAKE_BUILDER_MODE: mode });
+      assert.equal(refused.status, 78, `${mode}: ${refused.stderr}`);
+      assert.match(refused.stderr, /^compose-builder: /m);
+      assert.doesNotMatch(refused.stderr, /remote|stopped|foreign|tcp/);
+      const calls = readFileSync(state.log, "utf8");
+      assert.match(calls, /docker <buildx> <inspect> <--timeout> <20s> <default>/);
+      assert.doesNotMatch(calls, / <build>| <up>/);
+      assert.equal(existsSync(lockFile), false);
+    } finally {
+      rmSync(state.scratch, { recursive: true, force: true });
+    }
   }
 });
 

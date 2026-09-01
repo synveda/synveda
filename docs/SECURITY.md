@@ -152,8 +152,12 @@ and outbound-proxy support remain unimplemented.
 Development builds additionally refuse recognised ambient BuildKit, Buildx and
 Bake controls before helpers or project locking. They pin the already-proved
 local Unix Engine endpoint, require its effective context to be `default`, use
-a fresh mode-0700 Buildx state directory and the explicit default builder, then
-start only with `--no-build`. Reference startup and gateway recovery cannot
+a fresh mode-0700 Buildx state directory, and require bounded inspection to
+show exactly one running `default` node using the embedded `docker` driver at
+endpoint `default`. Remote/container/Kubernetes drivers, additional nodes,
+driver options and daemon file/flag extensions fail content-free. The build
+then uses the explicit default builder and startup uses only `--no-build`.
+Reference startup and gateway recovery cannot
 build. Registry authentication inputs are retained opaquely and are never
 parsed or logged by the lifecycle. Only their effective directory location is
 resolved; development builds refuse it, or the lifecycle temporary root, when
@@ -166,8 +170,18 @@ authentication path;
 support it as a credential store. Docker/Compose/Buildx binaries and plugin
 discovery, credential helpers, registry authentication, daemon mirrors, daemon
 proxy/CA and embedded BuildKit policy remain within the trusted host boundary.
-Clean isolated-Engine evidence with a canary remote builder and private
-registry is still pending. Hardlinks, bind mounts and hostile same-user path
+Clean-Engine preparation now writes an immutable content-free candidate and
+receipt outside the checkout. It binds both the tracked index and actual
+effective Docker context—portable paths, types, modes, file bytes and symlink
+targets—and rejects included untracked/empty entries plus ignored files not
+covered by the closed exclusions. Its private proxy template contains only
+`.invalid` non-secret markers. Exact BigInt device/inode checks and a
+no-replace hard-linked active receipt prevent rounded or partial lease
+publication. Pre-publication crash residue is inert and grants no provider
+authority, but the later final cleanup must remove it. Preparation creates no
+Engine and carries no Docker auth. Disposable-provider identity, TLS registry
+auth, a zero-read remote-builder canary and exact destruction evidence are
+still pending. ACLs, xattrs, file flags, bind mounts and hostile same-user path
 replacement remain trusted-host limits.
 
 ## Residual and external limits

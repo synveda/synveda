@@ -52,6 +52,7 @@ runtime dependency and is pinned here exactly.
 | `otel/opentelemetry-collector-contrib:0.159.0@sha256:1f2c54a30e713fac6b3ae77a1ec84010c2007e29ced8ec666214fc2f6739c1cc` | private core Collector | Apache-2.0 | Exact official Collector Contrib runtime; the application emits only OTLP to this private seam. |
 | `synveda/browser-acceptance:1.62.1-dev` | browser-acceptance fixture | Fixture code and Playwright are Apache-2.0; bundled browsers and system components retain their upstream licences | Locally built no-capture one-shot; never a product or reference service. Playwright's licence, upstream NOTICE and the seccomp provenance notice are retained in the image. |
 | `synveda-db-test-postgres:local` | isolated database acceptance fixture | ours over PostgreSQL-licensed PostgreSQL | Local-only database-test build; never an operator topology. |
+| `registry:3.1.1@sha256:1be55279f18a2fe1a74edf2664cac61c1bea305b7b4642dab412e7affdcb3e33` | clean-Engine private-registry acceptance fixture | Apache-2.0 CNCF Distribution over Alpine/system components, which retain upstream licences | Exact multi-platform official Distribution image reserved by the candidate receipt. It is fixture-only and must later run loopback-only with TLS and one-run bcrypt authentication; it is not part of the product topology. |
 
 ## Images the legacy contributor topology still runs
 

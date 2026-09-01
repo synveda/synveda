@@ -1828,6 +1828,12 @@ prepare_local_build_boundary() {
     }
     BUILDX_CONFIG=$buildx_config_dir
     export BUILDX_CONFIG
+    run_bounded 25 "$node_runner" "$script_dir/check-local-builder.mjs" \
+        --docker-bin "$docker_bin" || {
+        builder_status=$?
+        propagate_bounded_failure "$builder_status"
+        return "$builder_status"
+    }
 }
 
 run_runtime_smoke() {

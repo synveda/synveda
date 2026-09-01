@@ -136,6 +136,37 @@ project input. The generated files live under
 mode-0700 project directory and their values are never printed by the
 lifecycle.
 
+Before a clean-Engine run, prepare the immutable candidate in a private state
+root outside the checkout. Supply a collision-reviewed private `/24`; the tool
+generates a 128-bit run identity and derives the exact 24-hex acceptance suffix.
+The default state root is
+`$HOME/.local/state/synveda/compose-acceptance`; an explicit
+`SYNVEDA_CLEAN_ENGINE_STATE_BASE` must also be absolute, mode 0700, owned by the
+current user and physically outside the repository.
+
+```sh
+SYNVEDA_COMPOSE_IPV4_POOL=10.231.45.0/24 \
+  make compose-clean-engine-plan
+make compose-clean-engine-status
+make compose-clean-engine-verify
+```
+
+Planning performs no Docker, Colima or privileged hosts-file action. It writes
+one canonical content-free candidate, immutable plan receipt and private
+synthetic-proxy template, all mode 0600. The candidate records both the tracked
+index and the actual effective Docker context, including modes, file bytes and
+symlink targets; included untracked or empty directories fail closed. The
+complete fsynced run publishes one no-replace hard-linked `active` lease, and a
+second plan refuses it. Do not edit or remove the lease or receipt-owned run.
+An uncatchable interruption before lease publication can retain a validated
+inert staging directory; it has no provider authority, does not block a later
+plan and must be removed by the future final cleanup before success evidence.
+More than eight retained inert directories fail closed.
+The provider/registry/canary phases are not implemented yet, so this candidate
+is preparation rather than live acceptance authority. The manual browser
+ceremony below remains usable for fixture development but cannot be labelled a
+clean-Engine result.
+
 The dedicated development browser fixture is deliberately a fresh-project
 one-shot, not an ordinary smoke extension. The hosts manager owns at most one
 global block, and ownership includes the exact Compose project. The ordinary
@@ -496,8 +527,12 @@ is not proof that a browser login has completed against live containers. It is
 also not proof of desktop/Linux parity, reference HTTPS, backup/PITR, isolated
 restore, upgrade/rollback, HA, host-loss tolerance, hosted SaaS readiness or
 enterprise certification. The synthetic Docker-client proxy, canary remote
-builder, authenticated private registry, candidate manifest and exact clean
-Engine teardown harness remain open. The core Collector remains private but
+builder, authenticated private registry and exact clean-Engine teardown remain
+open. Candidate planning now binds the source and selection closure, prepares
+the private synthetic proxy template and contacts no Docker endpoint.
+Separately, every development source build proves the embedded local builder
+grammar before mutation; none of that is live provider evidence. The core
+Collector remains private but
 currently exports to `nop`; the bounded observability profile and Operations UI
 are open. Do not delete the legacy Rauthy/Temporal assets or change the
 production-readiness verdict until replacement acceptance passes.

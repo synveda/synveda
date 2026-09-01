@@ -40,7 +40,9 @@ deploy/compose/backups/**
 # Editor, operating-system and diagnostic residue never belongs in an OCI
 # build context.
 .DS_Store
+**/.DS_Store
 Thumbs.db
+**/Thumbs.db
 *.log
 **/*.log
 *.tmp

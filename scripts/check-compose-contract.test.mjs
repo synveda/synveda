@@ -2085,6 +2085,13 @@ test("canonical build routing is explicit, local, private-state and no-build aft
     source.replace("BUILDX_BAKE_GIT_AUTH_TOKEN+x", "UNREVIEWED_TOKEN+x"),
     source.replace("COMPOSE_BAKE=false", "COMPOSE_BAKE=true"),
     source.replace('[ "$bounded_output" = default ]', '[ "$bounded_output" = remote ]'),
+    source.replace(
+      'run_bounded 25 "$node_runner" "$script_dir/check-local-builder.mjs" \\\n' +
+        '        --docker-bin "$docker_bin"',
+      'run_bounded 25 "$node_runner" "$script_dir/check-local-builder.mjs" \\\n' +
+        '        --docker-bin "remote-docker"',
+    ),
+    source.replace("check-local-builder.mjs", "unreviewed-builder.mjs"),
     source.replace('rm -rf -- "$buildx_config_dir"', 'rm -f -- "$buildx_config_dir"'),
     source.replace("docker_mutation_phase=compose-build", "docker_mutation_phase="),
     source.replace(
