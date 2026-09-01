@@ -27,6 +27,7 @@ import {
   caddyTrustBoundaryFindings,
   canonicalComposeFindings,
   collectorConfigFindings,
+  composeBuildBoundaryFindings,
   composeEnvironment,
   composeNetworkPlan,
   developmentPortBindingFindings,
@@ -131,9 +132,10 @@ function closeContainerProxyEnvironment(model) {
   }
 }
 
-function closeDevelopmentBuildProxyArguments(model) {
+function closeDevelopmentBuildBoundary(model) {
   for (const service of Object.values(model.services ?? {})) {
     if (service.build !== undefined) {
+      service.build.context = ROOT;
       service.build.args = { ...CLOSED_CONTAINER_PROXY_ENVIRONMENT };
     }
   }
@@ -1997,6 +1999,39 @@ test("host validators start through one closed Node trust boundary", () => {
     /"\$node_runner" "\$script_dir\/run-with-deadline\.mjs"/,
   );
   assert.doesNotMatch(selector, /(?:^|[ (])node "\$script_dir\//m);
+});
+
+test("canonical build routing is explicit, local, private-state and no-build after build", () => {
+  const source = readFileSync(WRAPPER, "utf8");
+  assert.deepEqual(composeBuildBoundaryFindings(source), []);
+
+  const mutants = [
+    source.replace("build --builder default", "build"),
+    source.replace("up --no-build", "up --build"),
+    source.replace(
+      'mktemp -d "$lifecycle_temp_root/synveda-compose-buildx.XXXXXX"',
+      'mktemp -d "$lifecycle_temp_root/unreviewed-buildx.XXXXXX"',
+    ),
+    source.replace('"$repo_root"|"$repo_root"/*', '"$repo_root"'),
+    source.replaceAll(
+      "Docker registry configuration is not accepted inside the build context",
+      "Docker registry configuration was not checked",
+    ),
+    source.replace('[ -n "${HOME:-}" ] && [ -d "$HOME" ]', '[ -d "$HOME" ]'),
+    source.replace('[ -L "$build_docker_config_file" ]', "false"),
+    source.replace("BUILDX_BAKE_GIT_AUTH_TOKEN+x", "UNREVIEWED_TOKEN+x"),
+    source.replace("COMPOSE_BAKE=false", "COMPOSE_BAKE=true"),
+    source.replace('[ "$bounded_output" = default ]', '[ "$bounded_output" = remote ]'),
+    source.replace('rm -rf -- "$buildx_config_dir"', 'rm -f -- "$buildx_config_dir"'),
+    source.replace("docker_mutation_phase=compose-build", "docker_mutation_phase="),
+    source.replace(
+      "docker_mutation_phase=compose-build\n            docker_mutation_uncertain=true",
+      "docker_mutation_phase=compose-build\n            docker_mutation_uncertain=false",
+    ),
+  ];
+  for (const mutant of mutants) {
+    assert.notDeepEqual(composeBuildBoundaryFindings(mutant), []);
+  }
 });
 
 test("reference TLS is validated before Compose rendering while development ignores it", () => {
@@ -6779,10 +6814,16 @@ test("model findings reject privilege, port, command and secret regressions", ()
       "telemetry-egress": network("telemetry-egress"),
     },
   };
-  base.services.gateway.build = { dockerfile: "deploy/compose/gateway/Dockerfile" };
-  base.services.worker.build = { dockerfile: "deploy/compose/gateway/Dockerfile" };
+  base.services.gateway.build = {
+    context: ROOT,
+    dockerfile: "deploy/compose/gateway/Dockerfile",
+  };
+  base.services.worker.build = {
+    context: ROOT,
+    dockerfile: "deploy/compose/gateway/Dockerfile",
+  };
   closeContainerProxyEnvironment(base);
-  closeDevelopmentBuildProxyArguments(base);
+  closeDevelopmentBuildBoundary(base);
   const expected = {
     runtime: "development",
     postgres: "external",
@@ -6817,6 +6858,38 @@ test("model findings reject privilege, port, command and secret regressions", ()
     keycloakPublicGateDir: "/fixture/keycloak-public-gate",
   };
   assert.deepEqual(canonicalComposeFindings(base, expected), []);
+  const sshBuild = structuredClone(base);
+  sshBuild.services.gateway.build.ssh = ["default"];
+  assert.ok(
+    canonicalComposeFindings(sshBuild, expected).includes(
+      "gateway build enables unsupported ssh",
+    ),
+  );
+  const remoteBuild = structuredClone(base);
+  remoteBuild.services.gateway.build.context = "https://source.invalid/repository.git";
+  assert.ok(
+    canonicalComposeFindings(remoteBuild, expected).includes(
+      "gateway build context or option set is not closed",
+    ),
+  );
+  const missingContext = structuredClone(base);
+  delete missingContext.services.gateway.build.context;
+  assert.ok(
+    canonicalComposeFindings(missingContext, expected).includes(
+      "gateway build context or option set is not closed",
+    ),
+  );
+  const extraBuild = structuredClone(base);
+  extraBuild.services["otel-collector"].build = {
+    context: ROOT,
+    dockerfile: "deploy/compose/gateway/Dockerfile",
+    args: { ...CLOSED_CONTAINER_PROXY_ENVIRONMENT },
+  };
+  assert.ok(
+    canonicalComposeFindings(extraBuild, expected).includes(
+      "development source-build service set drifted",
+    ),
+  );
   for (const key of Object.keys(CLOSED_CONTAINER_PROXY_ENVIRONMENT)) {
     const proxyMutant = structuredClone(base);
     const sentinel = `private-proxy-credential-${key}`;
@@ -7076,7 +7149,7 @@ test("model findings reject privilege, port, command and secret regressions", ()
     networks: { "identity-backend": {}, "keycloak-management": {} },
   });
   closeContainerProxyEnvironment(bundled);
-  closeDevelopmentBuildProxyArguments(bundled);
+  closeDevelopmentBuildBoundary(bundled);
   const bundledExpected = {
     ...expected,
     oidc: "bundled",

@@ -270,6 +270,40 @@ content-free diagnostic. `existing` remains recovery-compatible with an absent
 or partial exact project, while `stopped` requires containers and networks to
 be absent.
 
+Development source builds have a separate host-control boundary. A present
+ambient BuildKit, Buildx or Bake selector is refused before any helper or lock,
+including an empty value. Once the local Unix Engine endpoint has been pinned,
+`docker context show` must return exactly `default`. The lifecycle creates a
+fresh mode-0700 `BUILDX_CONFIG` directory outside the repository, selects
+`--builder default`, marks project-mutation state uncertain immediately before
+the build, and removes the private state on success, failure, timeout or
+catchable interruption. A successful, cleanly settled build clears that phase
+before the separate startup mutation begins. An uncertain build outcome retains
+the exact project lock because daemon-side cache or tag mutation cannot be
+disproved. All subsequent startup and gateway recovery commands use
+`up --no-build`; reference mode is prebuilt and never enters the source-build
+path. Non-build and recovery actions scrub the same ambient selectors. Before
+any helper or lock, the lifecycle also resolves one physical temporary root and
+the effective Docker config directory; a development build refuses either
+location when it is equal to or below the repository. Without explicit
+`DOCKER_CONFIG`, an accessible non-empty `HOME` is required and its prospective
+`.docker` path is checked even when absent. An existing `config.json` must be a
+non-symlinked regular file. These are path-metadata checks; Docker config
+contents are not opened. Hardlinks, bind mounts and hostile same-user path
+replacement remain host-trust limits.
+
+The canonical build child disables optional Compose Bake selection, Docker CLI
+hooks, remote BuildKit selection, Bake environment-variable lookup, implicit
+provenance and Git metadata, while retaining `DOCKER_CONFIG` and
+`DOCKER_AUTH_CONFIG` without parsing, copying or printing them.
+`DOCKER_CONFIG` remains the portable private-registry authentication path;
+raw `DOCKER_AUTH_CONFIG` use depends on the installed Docker client version.
+Compose versions may internally delegate the supplied model to Buildx/Bake;
+the exact local model, default builder and closed environment remain the
+contract. Docker/Compose/Buildx binaries and plugin discovery, credential
+helpers, registry authentication, daemon mirrors, daemon proxy/CA and embedded
+BuildKit policy remain operator-trusted inputs, not isolation claims.
+
 The issuer diagnostic retries retryable OIDC availability through one bounded
 deadline without naming a provider. Database preflight and migration have
 bounded operations but do not poll their dependency. Provider fragments add
@@ -836,9 +870,10 @@ canonical service with the ten explicit empty runtime variables described
 above. Development builds close the corresponding implicit build arguments.
 Static tests cover every selected provider/runtime row; exact-container
 inspection proves the created runtime metadata after startup. A clean live run
-with a private synthetic Docker client proxy configuration remains required as
-acceptance evidence, and image history is not treated as proof of build-time
-absence.
+with a private synthetic Docker client proxy configuration, canary remote
+builder state and private-registry authentication remains required as
+acceptance evidence. It must prove the source reaches only the pinned local
+default builder; image history is not treated as proof of build-time absence.
 
 ## Operation and worker contract
 

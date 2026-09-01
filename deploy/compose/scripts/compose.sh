@@ -95,6 +95,161 @@ unset NODE_OPTIONS NODE_EXTRA_CA_CERTS NODE_TLS_REJECT_UNAUTHORIZED \
     NODE_USE_SYSTEM_CA NODE_USE_ENV_PROXY SSL_CERT_FILE SSL_CERT_DIR \
     OPENSSL_CONF OPENSSL_CONF_INCLUDE OPENSSL_MODULES OPENSSL_ENGINES
 
+# A development build is allowed to disclose the repository context only to
+# the Docker daemon whose local Unix socket is proved below. Refuse every
+# ambient BuildKit/Buildx/Bake selector before the first helper process. Other
+# actions do not build and scrub the same controls so recovery never depends on
+# a caller's build environment. DOCKER_CONFIG is deliberately retained for
+# registry authentication; its builder state is isolated later with a private
+# BUILDX_CONFIG directory.
+ambient_build_control=false
+if [ "${COMPOSE_BAKE+x}" = x ] || \
+    [ "${COMPOSE_DOCKER_CLI_BUILD+x}" = x ] || \
+    [ "${DOCKER_CLI_HINTS+x}" = x ] || [ "${DOCKER_CLI_HOOKS+x}" = x ] || \
+    [ "${DOCKER_BUILDKIT+x}" = x ] || \
+    [ "${DOCKER_DEFAULT_PLATFORM+x}" = x ] || \
+    [ "${SOURCE_DATE_EPOCH+x}" = x ] || \
+    [ "${BUILDKIT_COLORS+x}" = x ] || [ "${BUILDKIT_HOST+x}" = x ] || \
+    [ "${BUILDKIT_PROGRESS+x}" = x ] || \
+    [ "${BUILDKIT_NO_CLIENT_TOKEN+x}" = x ] || \
+    [ "${BUILDKIT_TTY_LOG_LINES+x}" = x ] || \
+    [ "${EXPERIMENTAL_BUILDKIT_SOURCE_POLICY+x}" = x ] || \
+    [ "${BUILDX_BAKE_FILE+x}" = x ] || \
+    [ "${BUILDX_BAKE_FILE_SEPARATOR+x}" = x ] || \
+    [ "${BUILDX_BAKE_PATH_SEPARATOR+x}" = x ] || \
+    [ "${BUILDX_BAKE_FILE_RELATIVE_PATHS+x}" = x ] || \
+    [ "${BUILDX_BAKE_DISABLE_VARS_ENV_LOOKUP+x}" = x ] || \
+    [ "${BUILDX_BAKE_GIT_AUTH_HEADER+x}" = x ] || \
+    [ "${BUILDX_BAKE_GIT_AUTH_TOKEN+x}" = x ] || \
+    [ "${BUILDX_BAKE_GIT_SSH+x}" = x ] || \
+    [ "${BUILDX_BAKE_ENTITLEMENTS_FS+x}" = x ] || \
+    [ "${BAKE_ALLOW_REMOTE_FS_ACCESS+x}" = x ] || \
+    [ "${BAKE_CMD_CONTEXT+x}" = x ] || \
+    [ "${BAKE_LOCAL_PLATFORM+x}" = x ] || \
+    [ "${BUILDX_BUILDER+x}" = x ] || [ "${BUILDX_CONFIG+x}" = x ] || \
+    [ "${BUILDX_CPU_PROFILE+x}" = x ] || \
+    [ "${BUILDX_EXPERIMENTAL+x}" = x ] || \
+    [ "${BUILDX_GIT_CHECK_DIRTY+x}" = x ] || \
+    [ "${BUILDX_GIT_INFO+x}" = x ] || [ "${BUILDX_GIT_LABELS+x}" = x ] || \
+    [ "${BUILDX_MEM_PROFILE+x}" = x ] || \
+    [ "${BUILDX_METADATA_PROVENANCE+x}" = x ] || \
+    [ "${BUILDX_METADATA_WARNINGS+x}" = x ] || \
+    [ "${BUILDX_NO_DEFAULT_ATTESTATIONS+x}" = x ] || \
+    [ "${BUILDX_NO_DEFAULT_OCI_ARTIFACT+x}" = x ] || \
+    [ "${BUILDX_NO_DEFAULT_LOAD+x}" = x ] || \
+    [ "${BUILDX_DEFAULT_POLICY+x}" = x ]; then
+    ambient_build_control=true
+fi
+if [ "$runtime" = development ] && [ "$action" = up ] && \
+    [ "$ambient_build_control" = true ]; then
+    echo "compose: ambient host build configuration is not accepted for development builds" >&2
+    exit 78
+fi
+unset COMPOSE_BAKE COMPOSE_DOCKER_CLI_BUILD DOCKER_CLI_HINTS DOCKER_CLI_HOOKS \
+    DOCKER_BUILDKIT \
+    DOCKER_DEFAULT_PLATFORM SOURCE_DATE_EPOCH BUILDKIT_COLORS BUILDKIT_HOST \
+    BUILDKIT_PROGRESS BUILDKIT_NO_CLIENT_TOKEN BUILDKIT_TTY_LOG_LINES \
+    EXPERIMENTAL_BUILDKIT_SOURCE_POLICY BUILDX_BAKE_FILE \
+    BUILDX_BAKE_FILE_SEPARATOR BUILDX_BAKE_PATH_SEPARATOR \
+    BUILDX_BAKE_FILE_RELATIVE_PATHS BUILDX_BAKE_DISABLE_VARS_ENV_LOOKUP \
+    BUILDX_BAKE_GIT_AUTH_HEADER BUILDX_BAKE_GIT_AUTH_TOKEN \
+    BUILDX_BAKE_GIT_SSH BUILDX_BAKE_ENTITLEMENTS_FS \
+    BAKE_ALLOW_REMOTE_FS_ACCESS BAKE_CMD_CONTEXT BAKE_LOCAL_PLATFORM \
+    BUILDX_BUILDER BUILDX_CONFIG BUILDX_CPU_PROFILE \
+    BUILDX_EXPERIMENTAL BUILDX_GIT_CHECK_DIRTY BUILDX_GIT_INFO \
+    BUILDX_GIT_LABELS BUILDX_MEM_PROFILE BUILDX_METADATA_PROVENANCE \
+    BUILDX_METADATA_WARNINGS BUILDX_NO_DEFAULT_ATTESTATIONS \
+    BUILDX_NO_DEFAULT_OCI_ARTIFACT BUILDX_NO_DEFAULT_LOAD \
+    BUILDX_DEFAULT_POLICY
+COMPOSE_BAKE=false
+DOCKER_CLI_HOOKS=false
+DOCKER_BUILDKIT=1
+BUILDX_BUILDER=default
+BUILDKIT_PROGRESS=plain
+BUILDKIT_NO_CLIENT_TOKEN=false
+BUILDX_BAKE_DISABLE_VARS_ENV_LOOKUP=1
+BUILDX_GIT_CHECK_DIRTY=false
+BUILDX_GIT_INFO=false
+BUILDX_GIT_LABELS=false
+BUILDX_NO_DEFAULT_ATTESTATIONS=true
+export COMPOSE_BAKE DOCKER_CLI_HOOKS DOCKER_BUILDKIT BUILDX_BUILDER \
+    BUILDKIT_PROGRESS BUILDKIT_NO_CLIENT_TOKEN BUILDX_GIT_CHECK_DIRTY \
+    BUILDX_BAKE_DISABLE_VARS_ENV_LOOKUP BUILDX_GIT_INFO BUILDX_GIT_LABELS \
+    BUILDX_NO_DEFAULT_ATTESTATIONS
+
+# Every lifecycle temporary is rooted in one physical directory. A development
+# build refuses a root inside the repository before any helper or lock because
+# asset captures and Buildx state would otherwise enter the source context.
+lifecycle_temp_root=${TMPDIR:-/tmp}
+lifecycle_temp_root=$(CDPATH= cd "$lifecycle_temp_root" 2>/dev/null && pwd -P) || {
+    echo "compose: lifecycle temporary root was unavailable" >&2
+    exit 70
+}
+if [ "$runtime" = development ] && [ "$action" = up ]; then
+    case "$lifecycle_temp_root" in
+        "$repo_root"|"$repo_root"/*)
+            echo "compose: lifecycle temporary root is not accepted inside the build context" >&2
+            exit 78
+            ;;
+    esac
+
+    # Preserve registry authentication byte-for-byte, but validate only the
+    # effective config directory's location. Its contents are never opened or
+    # copied. An explicit path must already be an accessible directory.
+    build_docker_config_root=
+    if [ "${DOCKER_CONFIG+x}" = x ]; then
+        [ -n "$DOCKER_CONFIG" ] && [ -d "$DOCKER_CONFIG" ] || {
+            echo "compose: Docker registry configuration path was refused" >&2
+            exit 78
+        }
+        build_docker_config_root=$(CDPATH= cd "$DOCKER_CONFIG" 2>/dev/null && pwd -P) || {
+            echo "compose: Docker registry configuration path was refused" >&2
+            exit 78
+        }
+    else
+        [ -n "${HOME:-}" ] && [ -d "$HOME" ] || {
+            echo "compose: Docker registry configuration path was refused" >&2
+            exit 78
+        }
+        build_docker_home=$(CDPATH= cd "$HOME" 2>/dev/null && pwd -P) || {
+            echo "compose: Docker registry configuration path was refused" >&2
+            exit 78
+        }
+        case "$build_docker_home" in
+            "$repo_root"|"$repo_root"/*)
+                echo "compose: Docker registry configuration is not accepted inside the build context" >&2
+                exit 78
+                ;;
+        esac
+        build_docker_config_path=$build_docker_home/.docker
+        if [ -e "$build_docker_config_path" ] || [ -L "$build_docker_config_path" ]; then
+            [ -d "$build_docker_config_path" ] || {
+                echo "compose: Docker registry configuration path was refused" >&2
+                exit 78
+            }
+            build_docker_config_root=$(CDPATH= cd "$build_docker_config_path" 2>/dev/null && pwd -P) || {
+                echo "compose: Docker registry configuration path was refused" >&2
+                exit 78
+            }
+        else
+            build_docker_config_root=$build_docker_config_path
+        fi
+    fi
+    case "$build_docker_config_root" in
+        "$repo_root"|"$repo_root"/*)
+            echo "compose: Docker registry configuration is not accepted inside the build context" >&2
+            exit 78
+            ;;
+    esac
+    build_docker_config_file=$build_docker_config_root/config.json
+    if [ -L "$build_docker_config_file" ] || {
+        [ -e "$build_docker_config_file" ] && [ ! -f "$build_docker_config_file" ]
+    }; then
+        echo "compose: Docker registry configuration file was refused" >&2
+        exit 78
+    fi
+fi
+
 lifecycle_started_at=$("$node_runner" "$script_dir/monotonic-seconds.mjs") || {
     echo "compose: lifecycle clock was unavailable" >&2
     exit 69
@@ -141,7 +296,7 @@ run_bounded() {
     if [ "$requested_seconds" -lt "$bounded_seconds" ]; then
         bounded_seconds=$requested_seconds
     fi
-    bounded_status_file=$(mktemp "${TMPDIR:-/tmp}/synveda-compose-runner.XXXXXX") || {
+    bounded_status_file=$(mktemp "$lifecycle_temp_root/synveda-compose-runner.XXXXXX") || {
         echo "compose: bounded runner status staging failed" >&2
         return 70
     }
@@ -200,7 +355,7 @@ settle_bounded_runner() {
 capture_bounded_output() {
     capture_seconds=$1
     shift
-    bounded_capture_file=$(mktemp "${TMPDIR:-/tmp}/synveda-compose-output.XXXXXX") || {
+    bounded_capture_file=$(mktemp "$lifecycle_temp_root/synveda-compose-output.XXXXXX") || {
         echo "compose: bounded output staging failed" >&2
         return 70
     }
@@ -329,6 +484,7 @@ case "$action" in
         . "$script_dir/project-lock.sh"
         asset_config_file=
         status_file=
+        buildx_config_dir=
         docker_mutation_uncertain=false
         docker_mutation_phase=
         compose_signal() {
@@ -364,6 +520,10 @@ case "$action" in
                 [ "$cleanup_status" -ne 0 ] || cleanup_status=70
             fi
             if [ -n "$status_file" ] && ! rm -f -- "$status_file" 2>/dev/null; then
+                [ "$cleanup_status" -ne 0 ] || cleanup_status=70
+            fi
+            if [ -n "$buildx_config_dir" ] && \
+                ! rm -rf -- "$buildx_config_dir" 2>/dev/null; then
                 [ "$cleanup_status" -ne 0 ] || cleanup_status=70
             fi
             if [ -n "$bounded_capture_file" ] && \
@@ -1362,7 +1522,7 @@ done
 IFS=$old_ifs
 
 prepare_asset_contract() {
-    asset_config_file=$(mktemp "${TMPDIR:-/tmp}/synveda-compose-assets.XXXXXX") || exit 70
+    asset_config_file=$(mktemp "$lifecycle_temp_root/synveda-compose-assets.XXXXXX") || exit 70
     chmod 600 "$asset_config_file"
     run_bounded "$lifecycle_timeout" "$docker_bin" "$@" \
         config --format json > "$asset_config_file"
@@ -1387,8 +1547,36 @@ prove_assets_stopped() {
         --docker-bin "$docker_bin" --state stopped
 }
 
+prepare_local_build_boundary() {
+    build_context_status=0
+    capture_bounded_output 30 "$docker_bin" context show || build_context_status=$?
+    if [ "$build_context_status" -ne 0 ]; then
+        propagate_bounded_failure "$build_context_status"
+        echo "compose: pinned Docker build context was unavailable" >&2
+        return 69
+    fi
+    [ "$bounded_output" = default ] || {
+        echo "compose: pinned Docker build context was refused" >&2
+        return 69
+    }
+    buildx_config_dir=$(mktemp -d "$lifecycle_temp_root/synveda-compose-buildx.XXXXXX") || {
+        echo "compose: private Buildx state creation failed" >&2
+        return 70
+    }
+    chmod 700 "$buildx_config_dir" || {
+        echo "compose: private Buildx state permissions failed" >&2
+        return 70
+    }
+    [ ! -L "$buildx_config_dir" ] && [ -d "$buildx_config_dir" ] || {
+        echo "compose: private Buildx state was refused" >&2
+        return 70
+    }
+    BUILDX_CONFIG=$buildx_config_dir
+    export BUILDX_CONFIG
+}
+
 run_runtime_smoke() {
-    status_file=$(mktemp "${TMPDIR:-/tmp}/synveda-compose-status.XXXXXX") || exit 70
+    status_file=$(mktemp "$lifecycle_temp_root/synveda-compose-status.XXXXXX") || exit 70
     run_bounded "$lifecycle_timeout" "$docker_bin" "$@" \
         ps --all --format json > "$status_file"
     set -- "$script_dir/check-runtime-smoke.mjs" \
@@ -1434,17 +1622,20 @@ case "$action" in
         ;;
     up)
         prepare_asset_contract "$@"
+        if [ "$runtime" = development ]; then
+            prepare_local_build_boundary
+            docker_mutation_phase=compose-build
+            docker_mutation_uncertain=true
+            run_bounded "$lifecycle_timeout" "$docker_bin" "$@" \
+                build --builder default
+            docker_mutation_uncertain=false
+            docker_mutation_phase=
+        fi
         docker_mutation_uncertain=true
         docker_mutation_phase=compose-up
-        if [ "$runtime" = development ]; then
-            run_bounded "$lifecycle_timeout" "$docker_bin" "$@" \
-                up --build --detach --wait --wait-timeout "$lifecycle_timeout" \
-                --force-recreate
-        else
-            run_bounded "$lifecycle_timeout" "$docker_bin" "$@" \
-                up --detach --wait --wait-timeout "$lifecycle_timeout" \
-                --force-recreate
-        fi
+        run_bounded "$lifecycle_timeout" "$docker_bin" "$@" \
+            up --no-build --detach --wait --wait-timeout "$lifecycle_timeout" \
+            --force-recreate
         asset_convergence_status=0
         prove_assets_converged || asset_convergence_status=$?
         case "$asset_convergence_status" in
@@ -1503,7 +1694,7 @@ case "$action" in
         # without recreating the container and let Compose enforce its health
         # contract before the public smoke is repeated.
         run_bounded "$gateway_restart_health_runner_seconds" "$docker_bin" "$@" \
-            up --detach --wait --wait-timeout "$gateway_restart_health_seconds" \
+            up --no-build --detach --wait --wait-timeout "$gateway_restart_health_seconds" \
             --no-deps --no-recreate gateway
         # Repeat the same captured asset, resolver and runtime checks after the
         # mutation. The pre-mutation render remains the comparison authority.

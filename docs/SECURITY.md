@@ -149,6 +149,27 @@ printing a rejected value. This prevents ambient client configuration from
 becoming application routing or stored container metadata; explicit custom-CA
 and outbound-proxy support remain unimplemented.
 
+Development builds additionally refuse recognised ambient BuildKit, Buildx and
+Bake controls before helpers or project locking. They pin the already-proved
+local Unix Engine endpoint, require its effective context to be `default`, use
+a fresh mode-0700 Buildx state directory and the explicit default builder, then
+start only with `--no-build`. Reference startup and gateway recovery cannot
+build. Registry authentication inputs are retained opaquely and are never
+parsed or logged by the lifecycle. Only their effective directory location is
+resolved; development builds refuse it, or the lifecycle temporary root, when
+physically inside the repository so those files cannot join the source
+context. When `DOCKER_CONFIG` is unset, the prospective path is derived from a
+required accessible `HOME`; a present `config.json` must be regular and not a
+symlink. No config content is opened. `DOCKER_CONFIG` is the portable
+authentication path;
+`DOCKER_AUTH_CONFIG` is merely byte-preserved when a client version does not
+support it as a credential store. Docker/Compose/Buildx binaries and plugin
+discovery, credential helpers, registry authentication, daemon mirrors, daemon
+proxy/CA and embedded BuildKit policy remain within the trusted host boundary.
+Clean isolated-Engine evidence with a canary remote builder and private
+registry is still pending. Hardlinks, bind mounts and hostile same-user path
+replacement remain trusted-host limits.
+
 ## Residual and external limits
 
 - A PostgreSQL superuser, compromised gateway or worker process, or compromised

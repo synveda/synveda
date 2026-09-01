@@ -100,6 +100,40 @@ for one empty entry per name. This closes Docker CLI proxy auto-injection; it
 does not add supported outbound-proxy routing. The legacy contributor Compose
 file and the isolated database-test harness are outside this canonical wrapper.
 
+Development `up` also refuses every recognised ambient BuildKit, Buildx and
+Bake control before starting a helper or taking the project lock. After the
+local Unix Engine endpoint is pinned, the wrapper requires the resulting
+Docker context to be exactly `default`, creates a fresh mode-0700 Buildx state
+directory outside the repository, and runs an explicit
+`compose build --builder default`. Startup then uses `up --no-build`; reference
+startup and gateway recovery are always no-build paths. Other lifecycle
+actions scrub the same controls. Entering the build marks Docker mutation state
+uncertain. A failed, timed-out or catchably interrupted build therefore retains
+the exact project lock for operator recovery even though cleanup removes the
+private Buildx scratch directory; only a cleanly settled build advances to the
+separate startup mutation phase. The canonical child environment disables
+optional Compose Bake selection and Bake environment-variable lookup, while
+preserving `DOCKER_CONFIG` opaquely for private-registry authentication and
+passing `DOCKER_AUTH_CONFIG` through unchanged where the installed client
+supports it. The lifecycle never opens or parses credential content and never
+rewrites or prints either environment value. It resolves only the effective
+Docker config directory's physical path metadata and refuses development builds
+when that directory or the lifecycle temporary root is inside the repository,
+so neither credentials nor temporary evidence can enter the source context.
+When `DOCKER_CONFIG` is unset, a non-empty accessible `HOME` is required and the
+prospective `.docker` path is checked even when it does not exist. An existing
+`config.json` must be a non-symlinked regular file; the lifecycle checks metadata
+but never opens it. Private Buildx state is removed on ordinary and catchable
+cleanup; an uncatchable process death cannot make that cleanup guarantee.
+
+The installed Docker CLI, Compose and Buildx plugin binaries, plugin discovery
+configuration, credential helpers, registry authentication and local daemon
+policy remain operator-trusted inputs. The daemon's mirrors, proxy, CA and
+embedded BuildKit policy are not isolated by this wrapper. A clean live build
+with canary remote-builder state and private-registry authentication remains
+required before this deterministic boundary is deployment evidence. Hardlinks,
+bind mounts and hostile same-user path replacement remain trusted-host limits.
+
 Every mutating lifecycle action and authority-file generator holds one
 operator-owned, exact-project lock across preparation and Docker mutation.
 The whole operation shares one monotonic 240–3600 second elapsed-time budget

@@ -216,14 +216,23 @@ smoke and on both sides of gateway restart; deterministic contract failure
 remains recoverable while uncertain inspection retains the project lock. This
 is deterministic host/client-proxy closure, not public/browser trust, live
 synthetic Docker-config evidence or an explicit custom-CA/proxy contract. The
-current pinned Keycloak
-image includes a review-locked complete 26.7.2 user-profile contract: upstream
-built-ins remain intact, unmanaged attributes remain disabled, and the two
-demo ownership attributes are admin-only with closed validators. Realm repair
-performs a full no-merge profile replacement while closed, proves the exact
-readback before marker use and refuses marker provenance after prior profile
-drift. A source-locked arm64 image
-set was built from the complete 1,169-file input closure at source HEAD
+development source-build path now also refuses recognised ambient
+BuildKit/Buildx/Bake selectors before helpers or locking, requires the pinned
+local Engine's exact `default` context, uses fresh private Buildx state and an
+explicit default builder, and separates the build from all no-build startup and
+gateway-recovery commands. It preserves registry authentication, never opens or
+parses credential content, and never rewrites or prints either authentication
+environment value, while resolving path metadata to refuse an effective config
+directory or temporary root physically inside the source context. Installed
+Docker plugins, credential helpers and daemon policy remain operator-trusted,
+and the canary remote-builder/private registry case is not yet live evidence.
+The current pinned Keycloak image includes a review-locked complete 26.7.2
+user-profile contract: upstream built-ins remain intact, unmanaged attributes
+remain disabled, and the two demo ownership attributes are admin-only with
+closed validators. Realm repair performs a full no-merge profile replacement
+while closed, proves the exact readback before marker use and refuses marker
+provenance after prior profile drift. A source-locked arm64 image set was built
+from the complete 1,169-file input closure at source HEAD
 `48704d8878d62036e53645f39d9c70549fe18b09`; the complete-input manifest hash
 was `ce3b5ff12b4d77437bf23f95a4af1cb65cae4409d2777fa1f98c15475016be81`
 and the five-image ledger hash was
@@ -306,14 +315,17 @@ and the complete post-repair `make ci` gate passes with the generated API and
 
 ### Immediate next slice
 
-Start the content-addressed candidate from empty volumes in the separate clean
-Docker context with a private temporary Docker client configuration containing
-non-secret proxy markers. Prove every real created container retains the ten
-exact empty entries without reading or printing the operator's configuration;
-use a synthetic build-stage assertion because image history cannot prove the
-development-build boundary. Install and prove the explicit `.test` host mapping
-on Docker Desktop, then complete a real browser authorization-code exchange
-through the committed demo/profile boundary.
+Install and prove the explicit `.test` host mapping on Docker Desktop before
+any Docker mutation. Then start the content-addressed candidate from empty
+volumes in the separate clean Docker endpoint with a private temporary Docker
+client configuration containing non-secret proxy markers, canary remote-builder
+state and private-registry authentication. Prove the repository reaches only
+the pinned local default builder, registry authentication still works, private
+Buildx state is removed, and every created container retains the ten exact
+empty proxy entries without opening or parsing credential content or printing
+operator configuration. Use a synthetic build-stage assertion because image
+history cannot prove the development-build boundary. Complete a real browser
+authorization-code exchange through the committed demo/profile boundary.
 Repeat the same resolver and lifecycle contract on Linux, then exercise
 reference HTTPS. Only after that replacement acceptance may the
 Rauthy/Temporal callers and assets be deleted atomically. Backup/isolated joint

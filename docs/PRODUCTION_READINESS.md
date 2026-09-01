@@ -57,10 +57,15 @@ Node's explicit bundled CA set. These tests and image self-tests establish
 those contracts. Deterministic rendered-model and lifecycle tests also prove
 that every canonical runtime service and development build explicitly closes
 Docker client proxy injection and that converged container inspection rejects
-runtime drift without disclosing values. No clean live run has yet exercised a
-private synthetic Docker client proxy configuration, so this is not public
-PKIX/browser trust, explicit custom-CA/proxy support, a clean-volume login or
-recovery evidence. One
+runtime drift without disclosing values. Development builds now also refuse
+ambient BuildKit/Buildx/Bake routing before helpers or locking, pin an explicit
+local default builder behind fresh private state and separate the build from
+all no-build startup/recovery commands while preserving registry authentication
+opaquely. Their path boundary also refuses a Docker config directory or
+lifecycle temporary root inside the source context. No clean live run has yet
+exercised a private synthetic Docker client proxy configuration, canary remote
+builder and private registry, so this is not public PKIX/browser trust,
+explicit custom-CA/proxy support, a clean-volume login or recovery evidence. One
 frozen Docker Desktop candidate also proved bounded PostgreSQL/Keycloak
 bootstrap, optimized
 Keycloak, realm convergence, issuer metadata, Collector, worker and gateway

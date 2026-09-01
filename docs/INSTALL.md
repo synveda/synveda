@@ -58,6 +58,20 @@ upper/lower HTTP, HTTPS, NO, FTP and ALL proxy names. Startup proves the
 created containers retain exactly those empty runtime entries. This is a
 closed ambient-input boundary, not supported outbound-proxy configuration.
 
+For development source builds, `compose-up` refuses ambient BuildKit, Buildx
+and Bake selectors, proves the pinned local Engine still resolves as the
+`default` context, uses fresh private Buildx state and an explicit default
+builder, and starts the graph only with `--no-build` after that build succeeds.
+Reference startup and gateway restart never build. Docker registry
+authentication is retained opaquely; the lifecycle does not print, parse or
+rewrite it. Its effective directory and the lifecycle temporary root must be
+physically outside the repository for a development build. `DOCKER_CONFIG` is
+the portable path; raw `DOCKER_AUTH_CONFIG` support depends on the installed
+Docker client. Without explicit `DOCKER_CONFIG`, development builds require an
+accessible `HOME`; an existing `config.json` must be regular and not a symlink.
+Installed Docker plugins, credential helpers and daemon policy are operator
+prerequisites rather than evidence supplied by this repository.
+
 The remaining sections describe product use only after a gateway has been
 started through separately validated development/test infrastructure. They are
 not deployment instructions or evidence that the reference is complete.

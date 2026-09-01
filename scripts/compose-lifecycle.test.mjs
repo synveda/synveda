@@ -10,6 +10,7 @@ import {
   readFileSync,
   realpathSync,
   rmSync,
+  symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -38,6 +39,73 @@ const HOST_TRUST_CONTROLS = [
   "OPENSSL_MODULES",
   "OPENSSL_ENGINES",
 ];
+const HOST_BUILD_CONTROLS = [
+  "COMPOSE_BAKE",
+  "COMPOSE_DOCKER_CLI_BUILD",
+  "DOCKER_CLI_HINTS",
+  "DOCKER_CLI_HOOKS",
+  "DOCKER_BUILDKIT",
+  "DOCKER_DEFAULT_PLATFORM",
+  "SOURCE_DATE_EPOCH",
+  "BUILDKIT_COLORS",
+  "BUILDKIT_HOST",
+  "BUILDKIT_PROGRESS",
+  "BUILDKIT_NO_CLIENT_TOKEN",
+  "BUILDKIT_TTY_LOG_LINES",
+  "EXPERIMENTAL_BUILDKIT_SOURCE_POLICY",
+  "BUILDX_BAKE_FILE",
+  "BUILDX_BAKE_FILE_SEPARATOR",
+  "BUILDX_BAKE_PATH_SEPARATOR",
+  "BUILDX_BAKE_FILE_RELATIVE_PATHS",
+  "BUILDX_BAKE_DISABLE_VARS_ENV_LOOKUP",
+  "BUILDX_BAKE_GIT_AUTH_HEADER",
+  "BUILDX_BAKE_GIT_AUTH_TOKEN",
+  "BUILDX_BAKE_GIT_SSH",
+  "BUILDX_BAKE_ENTITLEMENTS_FS",
+  "BAKE_ALLOW_REMOTE_FS_ACCESS",
+  "BAKE_CMD_CONTEXT",
+  "BAKE_LOCAL_PLATFORM",
+  "BUILDX_BUILDER",
+  "BUILDX_CONFIG",
+  "BUILDX_CPU_PROFILE",
+  "BUILDX_EXPERIMENTAL",
+  "BUILDX_GIT_CHECK_DIRTY",
+  "BUILDX_GIT_INFO",
+  "BUILDX_GIT_LABELS",
+  "BUILDX_MEM_PROFILE",
+  "BUILDX_METADATA_PROVENANCE",
+  "BUILDX_METADATA_WARNINGS",
+  "BUILDX_NO_DEFAULT_ATTESTATIONS",
+  "BUILDX_NO_DEFAULT_OCI_ARTIFACT",
+  "BUILDX_NO_DEFAULT_LOAD",
+  "BUILDX_DEFAULT_POLICY",
+];
+const CANONICAL_BUILD_ENVIRONMENT = Object.freeze({
+  COMPOSE_BAKE: "false",
+  DOCKER_CLI_HOOKS: "false",
+  DOCKER_BUILDKIT: "1",
+  BUILDX_BUILDER: "default",
+  BUILDKIT_PROGRESS: "plain",
+  BUILDKIT_NO_CLIENT_TOKEN: "false",
+  BUILDX_BAKE_DISABLE_VARS_ENV_LOOKUP: "1",
+  BUILDX_GIT_CHECK_DIRTY: "false",
+  BUILDX_GIT_INFO: "false",
+  BUILDX_GIT_LABELS: "false",
+  BUILDX_NO_DEFAULT_ATTESTATIONS: "true",
+});
+const SCRUBBED_BUILD_CONTROLS = HOST_BUILD_CONTROLS.filter(
+  (name) => !(name in CANONICAL_BUILD_ENVIRONMENT) && name !== "BUILDX_CONFIG",
+);
+
+function shellEnvironmentAssertions() {
+  const canonical = Object.entries(CANONICAL_BUILD_ENVIRONMENT).map(
+    ([name, value]) => `[ "\${${name}:-}" = ${value} ] || exit 92`,
+  );
+  const absent = SCRUBBED_BUILD_CONTROLS.map(
+    (name) => `[ "\${${name}+x}" != x ] || exit 93`,
+  );
+  return [...canonical, ...absent].join("\n");
+}
 const REAL_ENV = spawnSync("/bin/sh", ["-c", "command -v env"], {
   encoding: "utf8",
 }).stdout.trim();
@@ -64,6 +132,20 @@ function fixture(runtimeKind = "development") {
     fakeDocker,
     `#!/bin/sh
 set -eu
+${shellEnvironmentAssertions()}
+if [ "\${BUILDX_CONFIG+x}" = x ]; then
+  [ -d "$BUILDX_CONFIG" ] && [ ! -L "$BUILDX_CONFIG" ] || exit 93
+  case "$BUILDX_CONFIG" in
+    "\${TMPDIR:-/tmp}"/synveda-compose-buildx.*) ;;
+    *) exit 93 ;;
+  esac
+fi
+if [ -n "\${SYNVEDA_FAKE_EXPECT_DOCKER_CONFIG:-}" ]; then
+  [ "\${DOCKER_CONFIG:-}" = "$SYNVEDA_FAKE_EXPECT_DOCKER_CONFIG" ] || exit 93
+fi
+if [ -n "\${SYNVEDA_FAKE_EXPECT_DOCKER_AUTH_CONFIG:-}" ]; then
+  [ "\${DOCKER_AUTH_CONFIG:-}" = "$SYNVEDA_FAKE_EXPECT_DOCKER_AUTH_CONFIG" ] || exit 93
+fi
 if [ "\${NODE_OPTIONS+x}" = x ] || [ "\${NODE_EXTRA_CA_CERTS+x}" = x ] ||
   [ "\${NODE_TLS_REJECT_UNAUTHORIZED+x}" = x ] ||
   [ "\${NODE_USE_SYSTEM_CA+x}" = x ] || [ "\${NODE_USE_ENV_PROXY+x}" = x ] ||
@@ -81,6 +163,10 @@ for argument in "$@"; do printf ' <%s>' "$argument" >> "$SYNVEDA_FAKE_CALL_LOG";
 printf '\n' >> "$SYNVEDA_FAKE_CALL_LOG"
 if [ "$1" = compose ] && [ "$2" = version ]; then
   echo 2.33.1
+  exit 0
+fi
+if [ "$1" = context ] && [ "$2" = show ]; then
+  printf '%s\n' "\${SYNVEDA_FAKE_CONTEXT_NAME:-default}"
   exit 0
 fi
 case " $* " in
@@ -153,6 +239,15 @@ if [ "$1" = volume ] && [ "$2" = inspect ]; then
   exit 0
 fi
 case " $* " in
+  *" build --builder default "*)
+    printf 'buildx <%s>\n' "$BUILDX_CONFIG" >> "$SYNVEDA_FAKE_CALL_LOG"
+    : > "$BUILDX_CONFIG/fake-state"
+    if [ "\${SYNVEDA_FAKE_BLOCK_BUILD:-0}" = 1 ]; then
+      : > "$SYNVEDA_FAKE_BUILD_ENTERED"
+      while [ ! -f "$SYNVEDA_FAKE_BUILD_RELEASE" ]; do /bin/sleep 0.02; done
+    fi
+    [ "\${SYNVEDA_FAKE_BUILD_FAIL:-0}" = 0 ] || exit 42
+    ;;
   *" restart "*)
     [ "\${SYNVEDA_FAKE_RESTART_FAIL:-0}" = 0 ] || exit 42
     ;;
@@ -198,6 +293,15 @@ case "$1" in
       printf '%s\n' "$$" > "$SYNVEDA_FAKE_RUNNER_PID_FILE"
     fi
     if [ "\${SYNVEDA_FAKE_RUNNER_125:-0}" = 1 ]; then exit 125; fi
+    if [ "\${SYNVEDA_FAKE_BUILD_TIMEOUT:-0}" = 1 ]; then
+      case " $* " in
+        *" build --builder default "*)
+          runner_path=$1
+          shift 3
+          exec ${JSON.stringify(process.execPath)} "$runner_path" --seconds 1 "$@"
+          ;;
+      esac
+    fi
     exec ${JSON.stringify(process.execPath)} "$@"
     ;;
   */check-compose-assets.mjs)
@@ -318,18 +422,22 @@ function environment(state, extra = {}) {
     if (name.startsWith("SYNVEDA_") || name.startsWith("COMPOSE_")) delete clean[name];
   }
   for (const name of HOST_TRUST_CONTROLS) delete clean[name];
+  for (const name of HOST_BUILD_CONTROLS) delete clean[name];
   for (const name of [
     "DATABASE_URL",
     "POSTGRES_PASSWORD",
     "KC_DB_PASSWORD",
     "KC_BOOTSTRAP_ADMIN_USERNAME",
     "KC_BOOTSTRAP_ADMIN_PASSWORD",
+    "DOCKER_CONFIG",
+    "DOCKER_AUTH_CONFIG",
   ]) {
     delete clean[name];
   }
   return {
     ...clean,
     PATH: `${state.bin}:${clean.PATH}`,
+    TMPDIR: state.scratch,
     SYNVEDA_DOCKER_BIN: state.fakeDocker,
     SYNVEDA_FAKE_CALL_LOG: state.log,
     SYNVEDA_FAKE_PROJECT: state.project,
@@ -366,6 +474,12 @@ function run(state, action, extra = {}) {
   });
 }
 
+function runWithoutEnvironment(state, action, names, extra = {}) {
+  const env = environment(state, extra);
+  for (const name of names) delete env[name];
+  return spawnSync(WRAPPER, [action], { cwd: ROOT, env, encoding: "utf8" });
+}
+
 function prepareReferenceFixture(state) {
   assert.equal(state.runtimeKind, "reference");
   const preparedEnvironment = environment(state);
@@ -389,6 +503,10 @@ function prepareReferenceFixture(state) {
 
 function ambientHostTrust(sentinel = "cpr45-private-host-trust-sentinel") {
   return Object.fromEntries(HOST_TRUST_CONTROLS.map((name) => [name, sentinel]));
+}
+
+function ambientHostBuild(sentinel = "cpr45-private-host-build-sentinel") {
+  return Object.fromEntries(HOST_BUILD_CONTROLS.map((name) => [name, sentinel]));
 }
 
 test("reference evidence refuses ambient host trust before Node or project locking", () => {
@@ -422,6 +540,160 @@ test("development scrubs ambient host trust before every lifecycle child", () =>
     const result = run(state, "up", ambientHostTrust());
     assert.equal(result.status, 0, result.stderr);
     assert.match(readFileSync(state.log, "utf8"), / <up>/);
+  } finally {
+    rmSync(state.scratch, { recursive: true, force: true });
+  }
+});
+
+test("development build refuses ambient host build controls before children or locking", () => {
+  for (const [index, name] of HOST_BUILD_CONTROLS.entries()) {
+    for (const value of ["", `cpr45-private-host-build-sentinel-${index}`]) {
+      const state = fixture();
+      const lockFile = join(
+        "/tmp",
+        `.synveda-compose-locks-${process.getuid?.() ?? 0}`,
+        `${state.project}.lock`,
+      );
+      try {
+        const refused = run(state, "up", { [name]: value });
+        assert.equal(refused.status, 78, `${name}: ${refused.stderr}`);
+        assert.match(
+          refused.stderr,
+          /ambient host build configuration is not accepted for development builds/,
+        );
+        assert.ok(!`${refused.stdout}${refused.stderr}`.includes(value) || value === "");
+        assert.equal(existsSync(state.log), false, `${name} reached a child process`);
+        assert.equal(existsSync(lockFile), false, `${name} acquired the project lock`);
+      } finally {
+        rmSync(state.scratch, { recursive: true, force: true });
+      }
+    }
+  }
+});
+
+test("development build keeps temporary and Docker config roots outside the source context", () => {
+  const cases = [
+    {
+      extra: { TMPDIR: ROOT },
+      diagnostic: /temporary root is not accepted inside the build context/,
+    },
+    {
+      extra: { DOCKER_CONFIG: ROOT },
+      diagnostic: /Docker registry configuration is not accepted inside the build context/,
+    },
+    {
+      extra: { DOCKER_CONFIG: "" },
+      diagnostic: /Docker registry configuration path was refused/,
+    },
+    {
+      extra: { HOME: ROOT },
+      diagnostic: /Docker registry configuration is not accepted inside the build context/,
+    },
+    {
+      extra(state) {
+        const fakeHome = join(state.scratch, "home");
+        mkdirSync(fakeHome, { mode: 0o700 });
+        symlinkSync(ROOT, join(fakeHome, ".docker"), "dir");
+        return { HOME: fakeHome };
+      },
+      diagnostic: /Docker registry configuration is not accepted inside the build context/,
+    },
+  ];
+
+  for (const testCase of cases) {
+    const state = fixture();
+    const lockFile = join(
+      "/tmp",
+      `.synveda-compose-locks-${process.getuid?.() ?? 0}`,
+      `${state.project}.lock`,
+    );
+    try {
+      const extra =
+        typeof testCase.extra === "function" ? testCase.extra(state) : testCase.extra;
+      const refused = run(state, "up", extra);
+      assert.equal(refused.status, 78, refused.stderr);
+      assert.match(refused.stderr, testCase.diagnostic);
+      assert.equal(existsSync(state.log), false, "a refused path reached Docker");
+      assert.equal(existsSync(lockFile), false, "a refused path acquired the project lock");
+    } finally {
+      rmSync(state.scratch, { recursive: true, force: true });
+    }
+  }
+
+  const unsetHome = fixture();
+  try {
+    const refused = runWithoutEnvironment(unsetHome, "up", ["HOME"]);
+    assert.equal(refused.status, 78, refused.stderr);
+    assert.match(refused.stderr, /Docker registry configuration path was refused/);
+    assert.equal(existsSync(unsetHome.log), false);
+  } finally {
+    rmSync(unsetHome.scratch, { recursive: true, force: true });
+  }
+
+  const linkedConfig = fixture();
+  try {
+    const dockerConfig = join(linkedConfig.scratch, "linked-docker-config");
+    mkdirSync(dockerConfig, { mode: 0o700 });
+    symlinkSync(join(ROOT, "README.md"), join(dockerConfig, "config.json"));
+    const refused = run(linkedConfig, "up", { DOCKER_CONFIG: dockerConfig });
+    assert.equal(refused.status, 78, refused.stderr);
+    assert.match(refused.stderr, /Docker registry configuration file was refused/);
+    assert.equal(existsSync(linkedConfig.log), false);
+  } finally {
+    rmSync(linkedConfig.scratch, { recursive: true, force: true });
+  }
+});
+
+test("non-build actions scrub host build controls and preserve opaque registry auth", () => {
+  const state = fixture();
+  const dockerConfig = join(state.scratch, "opaque-docker-config");
+  const dockerAuth = '{"auths":{"registry.invalid":{"auth":"cpr45-auth-sentinel"}}}';
+  try {
+    assert.equal(run(state, "up").status, 0);
+    writeFileSync(state.log, "");
+    const result = run(state, "down", {
+      ...ambientHostBuild(),
+      DOCKER_CONFIG: dockerConfig,
+      DOCKER_AUTH_CONFIG: dockerAuth,
+      SYNVEDA_FAKE_EXPECT_DOCKER_CONFIG: dockerConfig,
+      SYNVEDA_FAKE_EXPECT_DOCKER_AUTH_CONFIG: dockerAuth,
+    });
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(readFileSync(state.log, "utf8"), / <down>/);
+    assert.doesNotMatch(`${result.stdout}${result.stderr}`, /cpr45-auth-sentinel/);
+  } finally {
+    rmSync(state.scratch, { recursive: true, force: true });
+  }
+
+  const reference = fixture("reference");
+  try {
+    prepareReferenceFixture(reference);
+    const result = run(reference, "config", ambientHostBuild());
+    assert.equal(result.status, 0, result.stderr);
+    assert.match(readFileSync(reference.log, "utf8"), / <config> <--quiet>/);
+  } finally {
+    rmSync(reference.scratch, { recursive: true, force: true });
+  }
+});
+
+test("development build preserves opaque registry authentication outside the source", () => {
+  const state = fixture();
+  const dockerConfig = join(state.scratch, "opaque-docker-config");
+  const dockerAuth = '{"auths":{"registry.invalid":{"auth":"cpr45-build-auth-sentinel"}}}';
+  mkdirSync(dockerConfig, { mode: 0o700 });
+  writeFileSync(join(dockerConfig, "config.json"), '{"auths":{}}\n', { mode: 0o600 });
+  try {
+    const result = run(state, "up", {
+      DOCKER_CONFIG: dockerConfig,
+      DOCKER_AUTH_CONFIG: dockerAuth,
+      SYNVEDA_FAKE_EXPECT_DOCKER_CONFIG: dockerConfig,
+      SYNVEDA_FAKE_EXPECT_DOCKER_AUTH_CONFIG: dockerAuth,
+    });
+    assert.equal(result.status, 0, result.stderr);
+    const calls = readFileSync(state.log, "utf8");
+    assert.match(calls, / <build> <--builder> <default>/);
+    assert.match(calls, / <up> <--no-build>/);
+    assert.doesNotMatch(`${result.stdout}${result.stderr}`, /cpr45-build-auth-sentinel/);
   } finally {
     rmSync(state.scratch, { recursive: true, force: true });
   }
@@ -547,20 +819,201 @@ test("canonical up prepares once, reruns convergence, and keeps credentials stab
     const calls = readFileSync(state.log, "utf8");
     const resolver = calls.indexOf("check-host-resolution.mjs");
     const network = calls.indexOf("check-network-preflight.mjs");
-    const up = calls.indexOf(" <up>");
     const existingAssets = calls.indexOf("<--state> <existing>");
+    const build = calls.indexOf(" <build> <--builder> <default>", existingAssets);
+    const up = calls.indexOf(" <up>", build);
     const convergedAssets = calls.indexOf("<--state> <converged>");
     assert.ok(
       resolver >= 0 && network > resolver && existingAssets > network &&
-        up > existingAssets && convergedAssets > up,
+        build > existingAssets && up > build && convergedAssets > up,
       calls,
     );
     assert.match(
       calls,
-      / <up> <--build> <--detach> <--wait> <--wait-timeout> <900> <--force-recreate>/,
+      / <up> <--no-build> <--detach> <--wait> <--wait-timeout> <900> <--force-recreate>/,
     );
+    assert.doesNotMatch(calls, / <up> <--build>/);
+    const buildxDirectories = [...calls.matchAll(/^buildx <(.+)>$/gm)].map(
+      (match) => match[1],
+    );
+    assert.equal(buildxDirectories.length, 2, calls);
+    for (const directory of buildxDirectories) {
+      assert.ok(!directory.startsWith(`${ROOT}/`), directory);
+      assert.equal(existsSync(directory), false, `${directory} was not cleaned`);
+    }
     assert.doesNotMatch(calls, /--remove-orphans/);
     assert.match(calls, /compose\.demo\.yaml/);
+  } finally {
+    rmSync(state.scratch, { recursive: true, force: true });
+  }
+});
+
+test("failed build retains its exact lock and removes only private Buildx state", () => {
+  const state = fixture();
+  const lockFile = join(
+    "/tmp",
+    `.synveda-compose-locks-${process.getuid?.() ?? 0}`,
+    `${state.project}.lock`,
+  );
+  let marker;
+  try {
+    const failed = run(state, "up", { SYNVEDA_FAKE_BUILD_FAIL: "1" });
+    assert.equal(failed.status, 42, failed.stderr);
+    assert.match(failed.stderr, /Docker mutation state is uncertain \(compose-build\)/);
+    const calls = readFileSync(state.log, "utf8");
+    assert.match(calls, / <build> <--builder> <default>/);
+    assert.doesNotMatch(calls, / <up>|<--state> <converged>/);
+    const directory = calls.match(/^buildx <(.+)>$/m)?.[1];
+    assert.ok(directory, calls);
+    assert.equal(existsSync(directory), false, `${directory} was not cleaned`);
+    marker = readFileSync(lockFile, "utf8");
+    assert.equal(marker, `${state.project}:${failed.pid}\n`);
+
+    writeFileSync(state.log, "");
+    const blocked = run(state, "up");
+    assert.equal(blocked.status, 75, blocked.stderr);
+    assert.match(blocked.stderr, /another lifecycle or authority action owns/);
+    assert.equal(readFileSync(state.log, "utf8"), "");
+  } finally {
+    if (marker !== undefined && existsSync(lockFile) && readFileSync(lockFile, "utf8") === marker) {
+      rmSync(lockFile);
+    }
+    rmSync(state.scratch, { recursive: true, force: true });
+  }
+});
+
+test("timed-out build retains its exact lock and removes private Buildx state", () => {
+  const state = fixture();
+  const entered = join(state.scratch, "build-entered");
+  const release = join(state.scratch, "build-release");
+  const lockFile = join(
+    "/tmp",
+    `.synveda-compose-locks-${process.getuid?.() ?? 0}`,
+    `${state.project}.lock`,
+  );
+  let marker;
+  try {
+    const timedOut = run(state, "up", {
+      SYNVEDA_FAKE_BLOCK_BUILD: "1",
+      SYNVEDA_FAKE_BUILD_ENTERED: entered,
+      SYNVEDA_FAKE_BUILD_RELEASE: release,
+      SYNVEDA_FAKE_BUILD_TIMEOUT: "1",
+    });
+    assert.equal(timedOut.status, 124, timedOut.stderr);
+    assert.match(timedOut.stderr, /command exceeded 1 seconds/);
+    assert.match(timedOut.stderr, /Docker mutation state is uncertain \(compose-build\)/);
+    assert.equal(existsSync(entered), true);
+    const calls = readFileSync(state.log, "utf8");
+    assert.match(calls, / <build> <--builder> <default>/);
+    assert.doesNotMatch(calls, / <up>|<--state> <converged>/);
+    const directory = calls.match(/^buildx <(.+)>$/m)?.[1];
+    assert.ok(directory, calls);
+    assert.equal(existsSync(directory), false, `${directory} was not cleaned`);
+    marker = readFileSync(lockFile, "utf8");
+    assert.equal(marker, `${state.project}:${timedOut.pid}\n`);
+
+    const blocked = run(state, "up");
+    assert.equal(blocked.status, 75, blocked.stderr);
+    assert.match(blocked.stderr, /another lifecycle or authority action owns/);
+  } finally {
+    writeFileSync(release, "continue\n", { mode: 0o600 });
+    if (marker !== undefined && existsSync(lockFile) && readFileSync(lockFile, "utf8") === marker) {
+      rmSync(lockFile);
+    }
+    rmSync(state.scratch, { recursive: true, force: true });
+  }
+});
+
+test("interrupted build retains its exact lock and removes private Buildx state", async () => {
+  const state = fixture();
+  const entered = join(state.scratch, "build-entered");
+  const release = join(state.scratch, "build-release");
+  const lockFile = join(
+    "/tmp",
+    `.synveda-compose-locks-${process.getuid?.() ?? 0}`,
+    `${state.project}.lock`,
+  );
+  let marker;
+  try {
+    const wrapper = spawn(WRAPPER, ["up"], {
+      cwd: ROOT,
+      env: environment(state, {
+        SYNVEDA_FAKE_BLOCK_BUILD: "1",
+        SYNVEDA_FAKE_BUILD_ENTERED: entered,
+        SYNVEDA_FAKE_BUILD_RELEASE: release,
+      }),
+      detached: true,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let errorOutput = "";
+    wrapper.stderr.setEncoding("utf8");
+    wrapper.stderr.on("data", (chunk) => { errorOutput += chunk; });
+    wrapper.stdout.resume();
+    const deadline = Date.now() + 8_000;
+    while (!existsSync(entered)) {
+      assert.ok(Date.now() < deadline, `timed out waiting for ${entered}`);
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
+    }
+    process.kill(wrapper.pid, "SIGTERM");
+    const [status, signal] = await once(wrapper, "close");
+    assert.equal(signal, null);
+    assert.equal(status, 143, errorOutput);
+    assert.match(errorOutput, /Docker mutation state is uncertain \(compose-build\)/);
+    const calls = readFileSync(state.log, "utf8");
+    assert.match(calls, / <build> <--builder> <default>/);
+    assert.doesNotMatch(calls, / <up>|<--state> <converged>/);
+    const directory = calls.match(/^buildx <(.+)>$/m)?.[1];
+    assert.ok(directory, calls);
+    assert.equal(existsSync(directory), false, `${directory} was not cleaned`);
+    marker = readFileSync(lockFile, "utf8");
+    assert.equal(marker, `${state.project}:${wrapper.pid}\n`);
+
+    const blocked = run(state, "up");
+    assert.equal(blocked.status, 75, blocked.stderr);
+    assert.match(blocked.stderr, /another lifecycle or authority action owns/);
+  } finally {
+    writeFileSync(release, "continue\n", { mode: 0o600 });
+    if (marker !== undefined && existsSync(lockFile) && readFileSync(lockFile, "utf8") === marker) {
+      rmSync(lockFile);
+    }
+    rmSync(state.scratch, { recursive: true, force: true });
+  }
+});
+
+test("development build refuses a non-default context after endpoint pinning", () => {
+  const state = fixture();
+  const lockFile = join(
+    "/tmp",
+    `.synveda-compose-locks-${process.getuid?.() ?? 0}`,
+    `${state.project}.lock`,
+  );
+  try {
+    const refused = run(state, "up", {
+      SYNVEDA_FAKE_CONTEXT_NAME: "remote-builder-context",
+    });
+    assert.equal(refused.status, 69, refused.stderr);
+    assert.match(refused.stderr, /pinned Docker build context was refused/);
+    const calls = readFileSync(state.log, "utf8");
+    assert.match(calls, /docker <context> <show>/);
+    assert.doesNotMatch(calls, / <build>| <up>/);
+    assert.equal(existsSync(lockFile), false);
+  } finally {
+    rmSync(state.scratch, { recursive: true, force: true });
+  }
+});
+
+test("reference startup is pull-only and never enters the source-build boundary", () => {
+  const state = fixture("reference");
+  try {
+    prepareReferenceFixture(state);
+    const result = run(state, "up");
+    assert.equal(result.status, 0, result.stderr);
+    const calls = readFileSync(state.log, "utf8");
+    assert.match(
+      calls,
+      / <up> <--no-build> <--detach> <--wait> <--wait-timeout> <900> <--force-recreate>/,
+    );
+    assert.doesNotMatch(calls, / <build>| <--build>|docker <context> <show>/);
   } finally {
     rmSync(state.scratch, { recursive: true, force: true });
   }
@@ -800,7 +1253,7 @@ test("gateway restart is locked, health-gated, and smoke-checked on both sides",
     const preflightSmoke = calls.indexOf("check-runtime-smoke.mjs");
     const restart = calls.indexOf(" <restart> <--no-deps> <--timeout> <30> <gateway>");
     const healthWait = calls.indexOf(
-      " <up> <--detach> <--wait> <--wait-timeout> <120> <--no-deps> <--no-recreate> <gateway>",
+      " <up> <--no-build> <--detach> <--wait> <--wait-timeout> <120> <--no-deps> <--no-recreate> <gateway>",
     );
     const postflightAssets = calls.indexOf("<--state> <converged>", preflightAssets + 1);
     const postflightResolver = calls.indexOf("check-host-resolution.mjs", postflightAssets + 1);
@@ -815,7 +1268,7 @@ test("gateway restart is locked, health-gated, and smoke-checked on both sides",
     assert.ok(postflightSmoke > postflightResolver, calls);
     assert.equal((calls.match(/<ps> <--all> <--quiet> <--no-trunc> <gateway>/g) ?? []).length, 2);
     assert.match(calls, /deadline <45>[\s\S]*<restart>/);
-    assert.match(calls, /deadline <125>[\s\S]*<up> <--detach> <--wait>/);
+    assert.match(calls, /deadline <125>[\s\S]*<up> <--no-build> <--detach> <--wait>/);
     assert.doesNotMatch(calls, /<restart>[^\n]*<900>/);
     assert.doesNotMatch(calls, /<restart>[^\n]*<(postgres|keycloak|worker|proxy|otel-collector)>/);
   } finally {

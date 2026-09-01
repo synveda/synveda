@@ -178,11 +178,16 @@ One exact-project lock spans preparation and Docker mutation; deterministic
 tests cover signal/process-group cleanup, stale-lock refusal, network/IPAM and
 asset drift, reset ownership, and atomic issuer publication. The Keycloak
 profile keeps unmanaged attributes disabled and its ownership markers
-admin-only; drifted marker provenance fails closed. The next blocker is a
-clean-volume Docker Desktop run with installed `.test` resolution and a real
-browser PKCE exchange, followed by the Linux/reference-HTTPS run, before the
-legacy Rauthy/Temporal callers can be cut over and deleted. Backup/restore,
-upgrade and Apalis remain open CPR-45 slices.
+admin-only; drifted marker provenance fails closed. Development source builds
+now refuse ambient BuildKit/Buildx/Bake routing before helpers or locking, pin
+the local default builder behind fresh private state, preserve registry auth
+opaquely, exclude its config and lifecycle temporaries from the source context,
+and separate build from every no-build startup/recovery path. The next blocker
+is a clean-volume Docker Desktop run with installed `.test` resolution,
+canary remote-builder/private-registry evidence and a real browser PKCE
+exchange, followed by the Linux/reference-HTTPS run, before the legacy
+Rauthy/Temporal callers can be cut over and deleted. Backup/restore, upgrade
+and Apalis remain open CPR-45 slices.
 
 ## Unscheduled — not listed in the Sequencing section
 

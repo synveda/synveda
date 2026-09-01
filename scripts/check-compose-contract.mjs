@@ -139,6 +139,175 @@ const HOST_TRUST_CONTROLS = [
   "OPENSSL_MODULES",
   "OPENSSL_ENGINES",
 ];
+const HOST_BUILD_CONTROLS = [
+  "COMPOSE_BAKE",
+  "COMPOSE_DOCKER_CLI_BUILD",
+  "DOCKER_CLI_HINTS",
+  "DOCKER_CLI_HOOKS",
+  "DOCKER_BUILDKIT",
+  "DOCKER_DEFAULT_PLATFORM",
+  "SOURCE_DATE_EPOCH",
+  "BUILDKIT_COLORS",
+  "BUILDKIT_HOST",
+  "BUILDKIT_PROGRESS",
+  "BUILDKIT_NO_CLIENT_TOKEN",
+  "BUILDKIT_TTY_LOG_LINES",
+  "EXPERIMENTAL_BUILDKIT_SOURCE_POLICY",
+  "BUILDX_BAKE_FILE",
+  "BUILDX_BAKE_FILE_SEPARATOR",
+  "BUILDX_BAKE_PATH_SEPARATOR",
+  "BUILDX_BAKE_FILE_RELATIVE_PATHS",
+  "BUILDX_BAKE_DISABLE_VARS_ENV_LOOKUP",
+  "BUILDX_BAKE_GIT_AUTH_HEADER",
+  "BUILDX_BAKE_GIT_AUTH_TOKEN",
+  "BUILDX_BAKE_GIT_SSH",
+  "BUILDX_BAKE_ENTITLEMENTS_FS",
+  "BAKE_ALLOW_REMOTE_FS_ACCESS",
+  "BAKE_CMD_CONTEXT",
+  "BAKE_LOCAL_PLATFORM",
+  "BUILDX_BUILDER",
+  "BUILDX_CONFIG",
+  "BUILDX_CPU_PROFILE",
+  "BUILDX_EXPERIMENTAL",
+  "BUILDX_GIT_CHECK_DIRTY",
+  "BUILDX_GIT_INFO",
+  "BUILDX_GIT_LABELS",
+  "BUILDX_MEM_PROFILE",
+  "BUILDX_METADATA_PROVENANCE",
+  "BUILDX_METADATA_WARNINGS",
+  "BUILDX_NO_DEFAULT_ATTESTATIONS",
+  "BUILDX_NO_DEFAULT_OCI_ARTIFACT",
+  "BUILDX_NO_DEFAULT_LOAD",
+  "BUILDX_DEFAULT_POLICY",
+];
+const CANONICAL_BUILD_ENVIRONMENT = Object.freeze({
+  COMPOSE_BAKE: "false",
+  DOCKER_CLI_HOOKS: "false",
+  DOCKER_BUILDKIT: "1",
+  BUILDX_BUILDER: "default",
+  BUILDKIT_PROGRESS: "plain",
+  BUILDKIT_NO_CLIENT_TOKEN: "false",
+  BUILDX_BAKE_DISABLE_VARS_ENV_LOOKUP: "1",
+  BUILDX_GIT_CHECK_DIRTY: "false",
+  BUILDX_GIT_INFO: "false",
+  BUILDX_GIT_LABELS: "false",
+  BUILDX_NO_DEFAULT_ATTESTATIONS: "true",
+});
+
+export function composeBuildBoundaryFindings(source) {
+  const findings = [];
+  for (const name of HOST_BUILD_CONTROLS) {
+    if (!source.includes(`[ "\${${name}+x}" = x ]`)) {
+      findings.push(`${name} ambient build control is not detected`);
+    }
+  }
+
+  const detection = source.indexOf("ambient_build_control=false");
+  const refusal = source.indexOf(
+    "ambient host build configuration is not accepted for development builds",
+  );
+  const clock = source.indexOf('lifecycle_started_at=$("$node_runner"');
+  const lock = source.indexOf('. "$script_dir/project-lock.sh"');
+  if (!(detection >= 0 && refusal > detection && clock > refusal && lock > clock)) {
+    findings.push("ambient build refusal does not precede helpers and project locking");
+  }
+
+  const scrubStart = source.indexOf("unset COMPOSE_BAKE");
+  const scrubEnd = source.indexOf("COMPOSE_BAKE=false", scrubStart);
+  const scrub =
+    scrubStart >= 0 && scrubEnd > scrubStart ? source.slice(scrubStart, scrubEnd) : "";
+  for (const name of HOST_BUILD_CONTROLS) {
+    if (name in CANONICAL_BUILD_ENVIRONMENT || name === "BUILDX_CONFIG") continue;
+    if (!new RegExp(`\\b${name}\\b`).test(scrub)) {
+      findings.push(`${name} ambient build control is not scrubbed`);
+    }
+  }
+  for (const [name, value] of Object.entries(CANONICAL_BUILD_ENVIRONMENT)) {
+    if (!source.includes(`${name}=${value}`)) {
+      findings.push(`${name} canonical build value drifted`);
+    }
+  }
+  if (/\bDOCKER_AUTH_CONFIG\b|(?<!BUILDX_)\bDOCKER_CONFIG\b/.test(scrub)) {
+    findings.push("registry authentication configuration is scrubbed or projected");
+  }
+
+  if (!source.includes('capture_bounded_output 30 "$docker_bin" context show')) {
+    findings.push("the pinned default Docker context is not proved before building");
+  }
+  if (!source.includes('[ "$bounded_output" = default ]')) {
+    findings.push("the local default Docker context is not required");
+  }
+  const temporaryRoot = source.indexOf("lifecycle_temp_root=${TMPDIR:-/tmp}");
+  const temporaryRootRefusal = source.indexOf(
+    "lifecycle temporary root is not accepted inside the build context",
+  );
+  const preHelperBoundary =
+    temporaryRoot >= 0 && clock > temporaryRoot ? source.slice(temporaryRoot, clock) : "";
+  if (
+    temporaryRoot < 0 ||
+    temporaryRootRefusal < temporaryRoot ||
+    temporaryRootRefusal > clock ||
+    !source.includes('lifecycle_temp_root=$(CDPATH= cd "$lifecycle_temp_root"') ||
+    preHelperBoundary.match(/"\$repo_root"\|"\$repo_root"\/\*/g)?.length !== 3
+  ) {
+    findings.push("lifecycle temporary state is not physically outside the build context");
+  }
+  if (source.match(/mktemp[^\n]*\$lifecycle_temp_root/g)?.length !== 5) {
+    findings.push("lifecycle temporary files do not share the validated root");
+  }
+  if (!source.includes('mktemp -d "$lifecycle_temp_root/synveda-compose-buildx.XXXXXX"')) {
+    findings.push("Buildx state is not created in a fresh private directory");
+  }
+  if (!source.includes('chmod 700 "$buildx_config_dir"')) {
+    findings.push("private Buildx state permissions are not fixed at mode 0700");
+  }
+  if (!source.includes("BUILDX_CONFIG=$buildx_config_dir")) {
+    findings.push("Buildx does not use the private state directory");
+  }
+  if (!source.includes('rm -rf -- "$buildx_config_dir"')) {
+    findings.push("private Buildx state is not removed by lifecycle cleanup");
+  }
+  const dockerConfigValidation = source.indexOf('if [ "${DOCKER_CONFIG+x}" = x ]');
+  const dockerConfigRefusal = source.indexOf(
+    "Docker registry configuration is not accepted inside the build context",
+  );
+  if (
+    dockerConfigValidation < 0 ||
+    dockerConfigRefusal < dockerConfigValidation ||
+    dockerConfigRefusal > clock ||
+    !source.includes('build_docker_config_root=$(CDPATH= cd "$DOCKER_CONFIG"') ||
+    !source.includes('[ -n "${HOME:-}" ] && [ -d "$HOME" ]') ||
+    !source.includes('build_docker_home=$(CDPATH= cd "$HOME"') ||
+    !source.includes("build_docker_config_path=$build_docker_home/.docker") ||
+    !source.includes("build_docker_config_file=$build_docker_config_root/config.json") ||
+    !source.includes('[ -L "$build_docker_config_file" ]') ||
+    !source.includes('[ ! -f "$build_docker_config_file" ]')
+  ) {
+    findings.push("effective Docker registry configuration can enter the build context");
+  }
+
+  const build = source.indexOf("build --builder default");
+  const buildBoundary = source.lastIndexOf("prepare_local_build_boundary", build);
+  const buildPhase = source.lastIndexOf("docker_mutation_phase=compose-build", build);
+  const mutation = source.lastIndexOf("docker_mutation_uncertain=true", build);
+  const settled = source.indexOf("docker_mutation_uncertain=false", build);
+  const startupMutation = source.indexOf("docker_mutation_uncertain=true", settled);
+  if (build < 0) findings.push("development does not select the local default builder");
+  if (!(buildBoundary >= 0 && buildPhase > buildBoundary && mutation > buildPhase && mutation < build)) {
+    findings.push("project mutation uncertainty does not cover the explicit build");
+  }
+  if (!(settled > build && startupMutation > settled)) {
+    findings.push("build and startup mutation phases are not settled independently");
+  }
+  if (/\bup --build\b/.test(source)) {
+    findings.push("an implicit compose-up build path remains");
+  }
+  const noBuildUps = source.match(/\bup --no-build\b/g) ?? [];
+  if (noBuildUps.length !== 2) {
+    findings.push("startup and gateway recovery are not both explicitly no-build");
+  }
+  return findings;
+}
 
 function writePrivate(path, value, owner) {
   writeFileSync(path, `${value}\n`, { mode: 0o600 });
@@ -200,6 +369,7 @@ export function composeEnvironment(fixture, overrides = {}) {
     if (name.startsWith("SYNVEDA_")) delete environment[name];
   }
   for (const name of HOST_TRUST_CONTROLS) delete environment[name];
+  for (const name of HOST_BUILD_CONTROLS) delete environment[name];
   for (const name of [
     "DATABASE_URL",
     "POSTGRES_PASSWORD",
@@ -3313,14 +3483,46 @@ export function canonicalComposeFindings(model, expected) {
     if (expected.oidc === "bundled") {
       developmentBuilds.push("keycloak", "keycloak-database-bootstrap");
     }
+    const selectedBuilds = Object.entries(services)
+      .filter(([, service]) => service.build !== undefined)
+      .map(([name]) => name)
+      .sort();
+    if (JSON.stringify(selectedBuilds) !== JSON.stringify(sorted(developmentBuilds))) {
+      findings.push("development source-build service set drifted");
+    }
     for (const name of developmentBuilds) {
-      const buildArguments = services[name]?.build?.args;
+      const build = services[name]?.build;
+      const buildArguments = build?.args;
       if (
         JSON.stringify(keys(buildArguments)) !==
           JSON.stringify(sorted(CONTAINER_PROXY_ENVIRONMENT)) ||
         CONTAINER_PROXY_ENVIRONMENT.some((key) => buildArguments?.[key] !== "")
       ) {
         findings.push(`${name} ambient proxy build arguments are not closed`);
+      }
+      for (const field of [
+        "additional_contexts",
+        "cache_from",
+        "cache_to",
+        "entitlements",
+        "network",
+        "platforms",
+        "privileged",
+        "provenance",
+        "sbom",
+        "secrets",
+        "ssh",
+        "x-bake",
+      ]) {
+        if (build?.[field] !== undefined) {
+          findings.push(`${name} build enables unsupported ${field}`);
+        }
+      }
+      if (
+        build?.context !== ROOT ||
+        JSON.stringify(keys(build)) !== JSON.stringify(["args", "context", "dockerfile"])
+      ) {
+        findings.push(`${name} build context or option set is not closed`);
       }
     }
     if (Object.values(services).some((service) => service.sysctls !== undefined)) {
@@ -3536,6 +3738,11 @@ function render(fixture, expected) {
 }
 
 function checkStaticInputs() {
+  assert.deepEqual(
+    composeBuildBoundaryFindings(readFileSync(WRAPPER, "utf8")),
+    [],
+    "canonical host build boundary drifted",
+  );
   const canonicalFiles = [
     "compose.yaml",
     "compose.dev.yaml",
