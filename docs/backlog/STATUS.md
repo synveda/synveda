@@ -183,11 +183,16 @@ now refuse ambient BuildKit/Buildx/Bake routing before helpers or locking, pin
 the local default builder behind fresh private state, preserve registry auth
 opaquely, exclude its config and lifecycle temporaries from the source context,
 and separate build from every no-build startup/recovery path. The next blocker
-is a clean-volume Docker Desktop run with installed `.test` resolution,
-canary remote-builder/private-registry evidence and a real browser PKCE
-exchange, followed by the Linux/reference-HTTPS run, before the legacy
-Rauthy/Temporal callers can be cut over and deleted. Backup/restore, upgrade
-and Apalis remain open CPR-45 slices.
+now has a reversible, exact-confirmation `.test` host ownership ceremony whose
+scratch acceptance proves collision/drift refusal, same-inode metadata
+retention, and strict-prefix and sidecar-stage interruption recovery. No host
+change has been made. The next slice is the
+committed clean-Engine/browser fixture with initial-absence, synthetic build,
+private-registry/remote-builder, manifest, no-capture PKCE and exact-cleanup
+evidence; only then is the privileged mapping installed for the Docker Desktop
+run. Linux/reference HTTPS follows before the legacy Rauthy/Temporal callers
+can be cut over and deleted. Backup/restore, upgrade and Apalis remain open
+CPR-45 slices.
 
 ## Unscheduled — not listed in the Sequencing section
 

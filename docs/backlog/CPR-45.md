@@ -199,7 +199,7 @@ product-owned exact issuer diagnostic now exist. Reference certificate-file
 mode now refuses unsafe, oversized or malformed PEM, key mismatch, unordered
 or duplicate chains, missing DNS SAN coverage and certificates that cannot
 remain valid through the bounded lifecycle before Compose rendering or startup
-mutation. The Node 22 preflight accepts leaf-first leaf-and-intermediate
+mutation. The Node 22-or-newer preflight accepts leaf-first leaf-and-intermediate
 fullchains, refuses an included self-signed trust root and commits no test keys;
 expiry never blocks `down` or `reset`. Trust anchors, revocation,
 served-endpoint proof, renewal and ACME remain open. Every lifecycle Node
@@ -226,6 +226,27 @@ environment value, while resolving path metadata to refuse an effective config
 directory or temporary root physically inside the source context. Installed
 Docker plugins, credential helpers and daemon policy remain operator-trusted,
 and the canary remote-builder/private registry case is not yet live evidence.
+The explicit development resolver prerequisite now has a reversible ownership
+ceremony rather than an instruction to edit `/etc/hosts` manually. One
+repository root command hardcodes the target, binds confirmation to the exact
+project and selected aliases, refuses unmanaged/foreign/drifted state, and
+preserves the original bytes in a root-only adjacent recovery record. It uses
+same-inode append/truncate mutation so xattrs, security labels and flags
+survive; the supported host file/physical parent are ACL-free and the target is
+root-owned, single-link mode `0644`. A killed append is recoverable only when it
+is an exact expected-prefix state. Ordinary preflight proves the
+raw-content-free ownership record and its world-readable-target integrity
+digest before its first Docker endpoint query, then repeats the check with real
+resolver validation. The elevation uses a fixed root-owned, non-writable,
+ACL-free Node runtime/path and empty environment but still trusts the clean,
+reviewed operator-writable checkout. Reference mode owns no host-file state,
+external OIDC owns only the application alias, and `down`/confirmed `reset`
+stay usable after resolver removal. Scratch-file acceptance covers idempotency,
+interruption on sidecar publication and strict-prefix mutation, stale/active
+cooperative locks, collision and drift, inode/xattr/POSIX metadata, ACL/mode
+refusal, file-type/size constraints and a concurrent edit before mutation. The
+host mapping remains uninstalled, so this is deterministic ceremony evidence,
+not browser or cross-platform resolver acceptance.
 The current pinned Keycloak image includes a review-locked complete 26.7.2
 user-profile contract: upstream built-ins remain intact, unmanaged attributes
 remain disabled, and the two demo ownership attributes are admin-only with
@@ -315,22 +336,23 @@ and the complete post-repair `make ci` gate passes with the generated API and
 
 ### Immediate next slice
 
-Install and prove the explicit `.test` host mapping on Docker Desktop before
-any Docker mutation. Then start the content-addressed candidate from empty
-volumes in the separate clean Docker endpoint with a private temporary Docker
-client configuration containing non-secret proxy markers, canary remote-builder
-state and private-registry authentication. Prove the repository reaches only
+Commit the deterministic clean-Engine/browser acceptance fixture before any
+host or Docker mutation. It must add exact initial-asset absence, synthetic
+assertions in every real development build, an ephemeral authenticated private
+registry and canary remote-builder state, a content-free candidate manifest, a
+fresh no-capture Keycloak browser PKCE driver and exact fixture cleanup. Then
+request explicit administrator approval for the exact `.test` block, install
+it from the clean reviewed checkout with the fixed-runtime helper, flush the
+active resolver cache and run that fixture
+against the separate clean Docker endpoint. Prove the repository reaches only
 the pinned local default builder, registry authentication still works, private
-Buildx state is removed, and every created container retains the ten exact
-empty proxy entries without opening or parsing credential content or printing
-operator configuration. Use a synthetic build-stage assertion because image
-history cannot prove the development-build boundary. Complete a real browser
-authorization-code exchange through the committed demo/profile boundary.
-Repeat the same resolver and lifecycle contract on Linux, then exercise
-reference HTTPS. Only after that replacement acceptance may the
-Rauthy/Temporal callers and assets be deleted atomically. Backup/isolated joint
-database-and-key restore, upgrade and the Apalis canary remain subsequent
-CPR-45 slices rather than implied results of the identity lifecycle.
+Buildx state is removed, every created container retains the ten exact empty
+proxy entries, and the real browser completes authorization-code + PKCE without
+recording credentials, codes, tokens, cookies, HAR, trace, video or screenshots.
+Repeat the resolver/lifecycle contract on Linux, then exercise reference HTTPS.
+Only after replacement acceptance may the Rauthy/Temporal callers and assets
+be deleted atomically. Backup/isolated joint database-and-key restore, upgrade
+and the Apalis canary remain subsequent slices.
 
 ## Acceptance criteria
 

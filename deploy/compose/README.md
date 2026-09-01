@@ -19,27 +19,84 @@ only after the replacement acceptance is complete.
   captures that validated socket, clears `DOCKER_CONTEXT`, and pins every later
   inventory and mutation to the same `DOCKER_HOST` value.
 - Docker Compose 2.33.1 or newer.
-- Node.js 22, OpenSSL and a non-root Unix operator. The lifecycle selects
+- Node.js 22 or newer, OpenSSL and a non-root Unix operator. Hosts mutation additionally
+  requires a root-owned, non-writable, ACL-free Node binary and path at
+  `/usr/bin/node` or `/usr/local/bin/node`; Linux requires the fixed
+  root-controlled `getfacl` from the `acl` package. The lifecycle selects
   Node's bundled CA set explicitly for every host-side validator.
+  Fixed `/usr/bin` and `/bin` `sudo`, `env`, `find`, `uname`, `awk`, `ls` and
+  `getfacl` binaries and their root-owned system paths are part of the host OS
+  trust base; the repository does not attest that base.
 - Development host mappings that resolve each selected `.test` name to exactly
   `127.0.0.1`, with no IPv6 or additional address.
+- A regular, single-link, root-owned `/etc/hosts` with exact mode `0644`, and an
+  ACL-free file and physical parent directory. Noncanonical modes, access/default
+  ACLs, bind mounts and externally managed host files are refused.
 
 Print the exact development hosts-file block without changing the host:
 
 ```sh
 make compose-hosts-plan
+make compose-hosts-status
 ```
 
-Install that marked block using the host's normal administrator procedure, then
-prove the resolver and Docker prerequisites:
+Install it with the repository-owned helper. The confirmation binds the
+action, fixed loopback address, exact project and both selected names:
 
 ```sh
+SYNVEDA_CONFIRM_HOSTS_INSTALL=install:127.0.0.1:synveda-development:app.synveda.test:auth.synveda.test \
+  make compose-hosts-install
+```
+
+Run `make` and the Compose lifecycle as the ordinary operator. The mutation
+target invokes only `manage-hosts-file.mjs` under an empty environment with a
+root-owned, non-writable and ACL-free Node 22-or-newer binary and path at
+`/usr/bin/node` or `/usr/local/bin/node`; it refuses caller-selected runtimes. This remains a full
+administrator trust decision because the reviewed checkout script itself is
+operator-writable. Use only a clean checkout whose diff and source you trust;
+the empty environment and closed argv reduce accidental ambient input but are
+not a sandbox against that operator. Never use `sudo make`, `sudo compose.sh`,
+or run Docker, generators or browser acceptance as root. After installation,
+flush only the host's active resolver cache. On macOS:
+
+```sh
+sudo dscacheutil -flushcache
+sudo killall -HUP mDNSResponder
+```
+
+On Linux, use the command for the cache implementation that is actually
+active, such as `sudo resolvectl flush-caches` or `sudo nscd -i hosts`. Then
+prove textual ownership, the real resolver result and the local Docker
+prerequisites in order:
+
+```sh
+make compose-hosts-status
 make compose-resolver-check
 ```
 
 The default names are `app.synveda.test` and `auth.synveda.test`. `.localhost`
 is deliberately not used across container namespaces. The browser, gateway,
 CLI, discovery document and tokens use the same issuer authority.
+
+The manager hardcodes `/etc/hosts`, owns at most one development block, refuses
+unmarked equivalent rows and every foreign, partial, duplicate or drifted
+marker, and never prints the existing file. It keeps a mode-0600 root-owned
+recovery record and a raw-content-free ownership record adjacent to the
+physical host file. The ACL-free-parent preflight runs before any recovery bytes
+are staged. The ownership record contains a full-file integrity digest; both it
+and the required target are mode `0644`, while the full recovery copy is
+root-owned mode `0600` with no access ACL. Installation appends only the terminal managed block and
+removal truncates only that recorded suffix through the same open descriptor.
+The inode, unrelated bytes, POSIX metadata, extended attributes, security
+labels and file flags are therefore retained; ACL-bearing targets are refused.
+A killed append may leave an
+exact strict prefix of the block rather than an old-or-new atomic result; the
+next exactly confirmed install or removal completes or truncates that proved
+prefix. This does not promise preservation of modification/change timestamps,
+power-loss atomicity beyond filesystem `fsync`, exclusion of a separate root
+editor, or support for bind-mounted, network, immutable or externally managed
+host files. Do not copy the recovery record, integrity digest or host-file
+contents into deployment evidence.
 
 ## Canonical lifecycle
 
@@ -77,6 +134,23 @@ project input. The generated files live under
 `runtime/synveda-development/` by default; secret files are mode 0600 beneath a
 mode-0700 project directory and their values are never printed by the
 lifecycle.
+
+Neither `compose-down` nor confirmed `compose-reset` removes the host-wide
+mapping. After the exact project is stopped, remove only the helper-owned block
+with the same runtime, OIDC, suffix and hostname selectors used to install it:
+
+```sh
+SYNVEDA_CONFIRM_HOSTS_REMOVE=remove:127.0.0.1:synveda-development:app.synveda.test:auth.synveda.test \
+  make compose-hosts-remove
+```
+
+Flush the active resolver cache again, then `make compose-hosts-status` must
+report `absent`. Removal is idempotent only when both the selected mapping and
+its ownership records are absent; drift or an unowned exact-looking block is a
+refusal, not a global hostname deletion. A valid stale cooperative lock is
+removed automatically only after its recorded PID is absent. A malformed lock
+requires administrator inspection; never delete it while a helper process may
+still be active.
 
 Host-side validators start only through
 `deploy/compose/scripts/run-node-closed`. Reference
@@ -253,6 +327,13 @@ scopes under the common issuer schema. Fully external
 PostgreSQL rows render and validate only: canonical `up` and `reset` refuse
 them until the authenticated-TLS bootstrap and compiled SQLx transport
 contract is implemented.
+
+In development external-OIDC mode the hosts manager owns only the selected
+application name; the provider issuer keeps its own DNS. Use the same exported
+selectors for plan, status, install, resolver check and removal. The exact
+confirmation ends in `:<app-host>:-` because no identity hostname belongs to
+the block. A different project suffix or hostname produces a different
+confirmation and never shares ownership with the default block.
 
 Reference mode requires operator DNS, a leaf-first PEM fullchain containing the
 leaf and any intermediates but not the trust root, a matching unencrypted PEM

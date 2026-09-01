@@ -149,6 +149,17 @@ a different fact and cannot prevent generation-1 repair.
   Although `.localhost` was an illustrative programme hostname, RFC 6761
   reserves it for each resolver's own loopback; accepting a Docker DNS alias
   as an override would make the exact-issuer contract platform-dependent.
+  One reversible host-file helper owns the exact development block. It accepts
+  only the root-owned, single-link mode-0644, ACL-free host file and ACL-free
+  physical parent, then retains the existing inode and non-ACL security
+  metadata by appending or truncating only the terminal suffix. An exact
+  interrupted prefix is recoverable by the next confirmed action rather than
+  claimed old-or-new atomic. Its fixed root-owned, non-writable, ACL-free Node
+  runtime/path and empty environment reduce accidental inputs, but elevation
+  still trusts the clean, reviewed operator-writable checkout. Ordinary
+  preflight proves ownership before Docker contact, while reference mode,
+  `down` and confirmed `reset` never acquire host-file authority. Unmarked or
+  overlapping aliases are refused, not adopted.
   Reference/playground uses real DNS and HTTPS.
 - Explicit plaintext development is not a secure transport. Its distinct
   host-only cookie names make the limitation usable for local validation

@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
+import { realpathSync } from "node:fs";
 import process from "node:process";
+import { fileURLToPath } from "node:url";
 
 const COMMAND_TIMEOUT_MS = 10_000;
 
@@ -223,4 +225,4 @@ export function main(argv = process.argv.slice(2)) {
   console.log("Docker network interval preflight validated");
 }
 
-if (process.argv[1] && new URL(import.meta.url).pathname === process.argv[1]) main();
+if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) main();

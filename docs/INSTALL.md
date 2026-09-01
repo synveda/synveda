@@ -17,12 +17,26 @@ cannot establish the new exact database-authority, endpoint and file-secret
 contract safely and is not an alternative installation path.
 
 The target contract and current limits are in
-[DEPLOYMENT_CONTRACT.md](DEPLOYMENT_CONTRACT.md). From a checkout, print and
-install the exact marked development host mapping using the host's normal
-administrator procedure, then run:
+[DEPLOYMENT_CONTRACT.md](DEPLOYMENT_CONTRACT.md). From a clean, reviewed
+checkout, inspect the exact development plan and current ownership state, then
+run the hardcoded `/etc/hosts` helper. This executes the checkout helper as root
+with a fixed root-owned Node runtime and is an administrator trust decision,
+not a sandbox against the checkout owner:
 
 ```sh
 make compose-hosts-plan
+make compose-hosts-status
+SYNVEDA_CONFIRM_HOSTS_INSTALL=install:127.0.0.1:synveda-development:app.synveda.test:auth.synveda.test \
+  make compose-hosts-install
+```
+
+Never run Make, Compose, Docker, secret generation or browser acceptance as
+root. Flush the active host resolver cache as documented in
+[`deploy/compose/README.md`](../deploy/compose/README.md), then run the ordinary
+operator lifecycle:
+
+```sh
+make compose-hosts-status
 make compose-resolver-check
 make compose-config
 make compose-up
@@ -30,6 +44,35 @@ make compose-smoke
 make compose-restart-gateway
 make compose-down
 ```
+
+`compose-down` and confirmed `compose-reset` deliberately retain this
+host-wide prerequisite. After stopping the exact project, remove it with the
+same selectors and the removal-bound confirmation, flush the cache, and prove
+the state is absent:
+
+```sh
+SYNVEDA_CONFIRM_HOSTS_REMOVE=remove:127.0.0.1:synveda-development:app.synveda.test:auth.synveda.test \
+  make compose-hosts-remove
+make compose-hosts-status
+```
+
+The helper refuses unmarked, duplicate, foreign or drifted ownership instead
+of editing hostname lines globally. It keeps its full recovery copy root-only
+beside the physical host file and never emits existing host-file content. It
+updates the existing inode by appending or truncating only the terminal managed
+suffix, retaining xattrs, security labels and file flags. The supported host
+file is root-owned, single-link, exact mode `0644`, with no access ACL and an
+ACL-free physical parent; ACL-bearing or noncanonical targets are refused
+before sidecars. Linux requires fixed root-controlled `getfacl` from the `acl`
+package. Interrupted
+append recovery accepts only an exact strict prefix of that suffix under a new
+exactly confirmed action; this is recoverable rather than an old-or-new
+power-loss atomicity claim. The raw-content-free mode-0644 ownership record
+carries a full-file digest of the already world-readable target; the complete
+source recovery record is root-owned mode `0600` and ACL-free.
+External-OIDC development owns only the application hostname and uses `-` as
+the confirmation's final identity-host field. Reference mode uses operator DNS
+and never reads or manages `/etc/hosts`.
 
 `compose-up` creates or validates project-scoped secret files, converges the
 bundled authorities and keeps gateway and worker in separate containers.

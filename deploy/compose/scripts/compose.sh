@@ -8,13 +8,13 @@ LC_ALL=C
 export LC_ALL
 
 usage() {
-    echo "usage: deploy/compose/scripts/compose.sh {config [--output PATH]|hosts-plan|resolver-check|up|smoke|restart-gateway|down|reset}" >&2
+    echo "usage: deploy/compose/scripts/compose.sh {config [--output PATH]|hosts-plan|hosts-status|hosts-install|hosts-remove|resolver-check|up|smoke|restart-gateway|down|reset}" >&2
     exit 64
 }
 
 action=${1:-}
 case "$action" in
-    config|hosts-plan|resolver-check|up|smoke|restart-gateway|down|reset) ;;
+    config|hosts-plan|hosts-status|hosts-install|hosts-remove|resolver-check|up|smoke|restart-gateway|down|reset) ;;
     *) usage ;;
 esac
 shift
@@ -37,6 +37,7 @@ compose_dir=$(dirname "$script_dir")
 repo_root=$(CDPATH= cd "$compose_dir/../.." && pwd -P)
 docker_bin=${SYNVEDA_DOCKER_BIN:-docker}
 node_runner=$script_dir/run-node-closed
+hosts_manager=$script_dir/manage-hosts-file.mjs
 
 runtime=${SYNVEDA_COMPOSE_RUNTIME:-development}
 postgres_mode=${SYNVEDA_POSTGRES_MODE:-bundled}
@@ -552,6 +553,7 @@ case "$action" in
 esac
 
 app_host=${SYNVEDA_APP_HOST:-app.synveda.test}
+auth_host=
 if [ "$oidc_mode" = bundled ]; then
     auth_host=${SYNVEDA_AUTH_HOST:-auth.synveda.test}
 fi
@@ -679,22 +681,170 @@ if [ "$oidc_mode" = external ]; then
     caddy_identity_config=$compose_dir/configs/caddy/identity.external.caddy
 fi
 
+run_hosts_manager() {
+    hosts_manager_action=$1
+    shift
+    set -- "$hosts_manager" "$hosts_manager_action" \
+        --runtime development --project "$project" --oidc "$oidc_mode" \
+        --app-host "$app_host" "$@"
+    if [ "$oidc_mode" = bundled ]; then
+        set -- "$@" --auth-host "$auth_host"
+    fi
+    run_bounded "$lifecycle_timeout" "$node_runner" "$@"
+}
+hosts_confirmation() {
+    hosts_confirmation_action=$1
+    if [ "$oidc_mode" = bundled ]; then
+        hosts_confirmation_identity=$auth_host
+    else
+        hosts_confirmation_identity=-
+    fi
+    printf '%s\n' "$hosts_confirmation_action:127.0.0.1:$project:$app_host:$hosts_confirmation_identity"
+}
+
 if [ "$action" = hosts-plan ]; then
     if [ "$runtime" = reference ]; then
         echo "reference mode uses operator DNS and has no managed hosts-file block"
     else
-        echo "# BEGIN SYNVEDA $project"
-        if [ "$oidc_mode" = bundled ]; then
-            echo "127.0.0.1 $app_host $auth_host"
-        else
-            echo "127.0.0.1 $app_host"
-        fi
-        echo "# END SYNVEDA $project"
+        run_hosts_manager plan
     fi
     exit 0
 fi
 
+if [ "$action" = hosts-status ]; then
+    if [ "$runtime" = reference ]; then
+        echo "reference mode uses operator DNS and has no managed hosts-file state"
+    else
+        run_hosts_manager status
+    fi
+    exit 0
+fi
+
+if [ "$action" = hosts-install ] || [ "$action" = hosts-remove ]; then
+    [ "$runtime" = development ] || {
+        echo "compose: reference mode never manages /etc/hosts" >&2
+        exit 64
+    }
+    case "$action" in
+        hosts-install)
+            hosts_mutation=install
+            hosts_confirmation_name=SYNVEDA_CONFIRM_HOSTS_INSTALL
+            hosts_confirmation_value=${SYNVEDA_CONFIRM_HOSTS_INSTALL:-}
+            ;;
+        hosts-remove)
+            hosts_mutation=remove
+            hosts_confirmation_name=SYNVEDA_CONFIRM_HOSTS_REMOVE
+            hosts_confirmation_value=${SYNVEDA_CONFIRM_HOSTS_REMOVE:-}
+            ;;
+    esac
+    expected_hosts_confirmation=$(hosts_confirmation "$hosts_mutation")
+    [ "$hosts_confirmation_value" = "$expected_hosts_confirmation" ] || {
+        echo "compose: $hosts_mutation requires $hosts_confirmation_name=$expected_hosts_confirmation" >&2
+        exit 64
+    }
+    [ -x /usr/bin/sudo ] && [ -x /usr/bin/env ] && [ -x /usr/bin/find ] && \
+        [ -x /usr/bin/uname ] && [ -x /usr/bin/awk ] && [ -x /bin/ls ] || {
+        echo "compose: the narrow hosts-file privilege runner is unavailable" >&2
+        exit 69
+    }
+    node_platform=$(/usr/bin/uname -s 2>/dev/null) || node_platform=
+    node_acl_tool=
+    if [ "$node_platform" = Linux ]; then
+        for acl_candidate in /usr/bin/getfacl /bin/getfacl; do
+            [ -f "$acl_candidate" ] && [ -x "$acl_candidate" ] && [ ! -L "$acl_candidate" ] || continue
+            trusted_acl_candidate=$(/usr/bin/find "$acl_candidate" -prune -type f -user root \
+                ! -perm -0020 ! -perm -0002 -print 2>/dev/null) || continue
+            [ "$trusted_acl_candidate" = "$acl_candidate" ] || continue
+            node_acl_tool=$acl_candidate
+            break
+        done
+    fi
+    node_component_acl_free() {
+        node_acl_component=$1
+        case "$node_platform" in
+            Darwin)
+                node_acl_output=$(
+                    /usr/bin/env -i LC_ALL=C PATH=/usr/bin:/bin \
+                        /bin/ls -lde "$node_acl_component" 2>/dev/null
+                ) || return 1
+                case "$node_acl_output" in
+                    *'
+'*) return 1 ;;
+                esac
+                node_acl_mode=${node_acl_output%% *}
+                case "$node_acl_mode" in *+) return 1 ;; esac
+                ;;
+            Linux)
+                [ -n "$node_acl_tool" ] || return 1
+                node_acl_output=$(
+                    /usr/bin/env -i LC_ALL=C PATH=/usr/bin:/bin \
+                        "$node_acl_tool" -c -p -n -- "$node_acl_component" 2>/dev/null
+                ) || return 1
+                printf '%s\n' "$node_acl_output" | \
+                    /usr/bin/awk '
+                        /^$/ { next }
+                        /^#/ { bad = 1; next }
+                        !/^(user|group|other)::[rwx-][rwx-][rwx-]$/ { bad = 1; next }
+                        { split($0, part, ":"); seen[part[1]] += 1; count += 1 }
+                        END {
+                            if (bad || count != 3 || seen["user"] != 1 ||
+                                seen["group"] != 1 || seen["other"] != 1) exit 1
+                        }
+                    ' || return 1
+                ;;
+            *) return 1 ;;
+        esac
+    }
+    node_executable=
+    for node_candidate in /usr/bin/node /usr/local/bin/node; do
+        [ -f "$node_candidate" ] && [ -x "$node_candidate" ] && [ ! -L "$node_candidate" ] || continue
+        case "$node_candidate" in
+            /usr/bin/node) node_components='/ /usr /usr/bin /usr/bin/node' ;;
+            /usr/local/bin/node) node_components='/ /usr /usr/local /usr/local/bin /usr/local/bin/node' ;;
+        esac
+        node_candidate_trusted=true
+        for node_component in $node_components; do
+            case "$node_component" in
+                */node) node_component_type=f ;;
+                *) node_component_type=d ;;
+            esac
+            trusted_component=$(/usr/bin/find "$node_component" -prune -type "$node_component_type" -user root \
+                ! -perm -0020 ! -perm -0002 -print 2>/dev/null) || node_candidate_trusted=false
+            [ "$trusted_component" = "$node_component" ] || node_candidate_trusted=false
+            node_component_acl_free "$node_component" || node_candidate_trusted=false
+        done
+        [ "$node_candidate_trusted" = true ] || continue
+        node_major=$(
+            "$node_candidate" --use-bundled-ca -p 'process.versions.node.split(".")[0]' 2>/dev/null
+        ) || continue
+        case "$node_major" in ''|*[!0-9]*) continue ;; esac
+        [ "$node_major" -ge 22 ] || continue
+        node_executable=$node_candidate
+        break
+    done
+    [ -n "$node_executable" ] || {
+        echo "compose: Node executable identity was refused" >&2
+        exit 69
+    }
+    set -- /usr/bin/sudo -- /usr/bin/env -i "$node_executable" \
+        "$hosts_manager" "$hosts_mutation" \
+        --runtime development --project "$project" --oidc "$oidc_mode" \
+        --app-host "$app_host"
+    if [ "$oidc_mode" = bundled ]; then
+        set -- "$@" --auth-host "$auth_host"
+    fi
+    set -- "$@" --confirm "$expected_hosts_confirmation"
+    exec "$@"
+fi
+
+run_hosts_ownership_preflight() {
+    if [ "$runtime" = development ]; then
+        run_hosts_manager status --expect installed
+    fi
+}
+
 run_resolver_preflight() {
+    run_hosts_ownership_preflight
     set -- "$script_dir/check-host-resolution.mjs" \
         --runtime "$runtime" --oidc "$oidc_mode" \
         --app-host "$app_host" --docker-bin "$docker_bin"
@@ -730,6 +880,9 @@ if [ "$action" = resolver-check ]; then
     run_resolver_preflight
     exit 0
 fi
+case "$action" in
+    up|smoke|restart-gateway) run_hosts_ownership_preflight ;;
+esac
 case "$action" in
     up|down|smoke|restart-gateway|reset) pin_local_docker_endpoint ;;
 esac

@@ -317,7 +317,9 @@ case "$1" in
     exit 0
     ;;
   */check-host-resolution.mjs|*/check-network-preflight.mjs|*/check-runtime-smoke.mjs)
-    printf 'node <%s>\n' "$1" >> "$SYNVEDA_FAKE_CALL_LOG"
+    printf 'node' >> "$SYNVEDA_FAKE_CALL_LOG"
+    for argument in "$@"; do printf ' <%s>' "$argument" >> "$SYNVEDA_FAKE_CALL_LOG"; done
+    printf '\n' >> "$SYNVEDA_FAKE_CALL_LOG"
     if [ "\${SYNVEDA_FAKE_REAL_HOST_CHECK:-0}" = 1 ]; then
       case "$1" in
         */check-host-resolution.mjs) exec ${JSON.stringify(process.execPath)} "$@" ;;
@@ -328,6 +330,31 @@ case "$1" in
         printf '%s\n' "\${SYNVEDA_FAKE_LOCAL_DOCKER_ENDPOINT:-unix:///var/run/docker.sock}"
         ;;
     esac
+    exit 0
+    ;;
+  */manage-hosts-file.mjs)
+    case " $* " in
+      *" plan "*) exec ${JSON.stringify(process.execPath)} "$@" ;;
+    esac
+    printf 'node' >> "$SYNVEDA_FAKE_CALL_LOG"
+    for argument in "$@"; do printf ' <%s>' "$argument" >> "$SYNVEDA_FAKE_CALL_LOG"; done
+    printf '\n' >> "$SYNVEDA_FAKE_CALL_LOG"
+    fake_hosts_status=\${SYNVEDA_FAKE_HOSTS_STATUS:-installed}
+    case " $* " in
+      *" --expect installed "*)
+        [ "$fake_hosts_status" = installed ] || {
+          printf 'hosts-file: development hosts mapping is absent, expected installed\n' >&2
+          exit 78
+        }
+        ;;
+      *" --expect absent "*)
+        [ "$fake_hosts_status" = absent ] || {
+          printf 'hosts-file: development hosts mapping is installed, expected absent\n' >&2
+          exit 78
+        }
+        ;;
+    esac
+    printf 'development hosts mapping is %s\n' "$fake_hosts_status"
     exit 0
     ;;
   */check-tls-inputs.mjs)
@@ -721,7 +748,7 @@ test("invalid reference TLS blocks startup actions and releases the exact-projec
       assert.match(calls, /check-tls-inputs\.mjs/);
       assert.doesNotMatch(
         calls,
-        /docker| <up>| <restart>| <down>| <volume>/,
+        /^docker(?: |$)| <up>| <restart>| <down>| <volume>/m,
         `${action} reached Docker after TLS refusal`,
       );
     }
@@ -1234,6 +1261,207 @@ test("hosts plan is content-free and smoke is routed through bounded checkers", 
   } finally {
     rmSync(state.scratch, { recursive: true, force: true });
   }
+});
+
+test("owned development host state precedes every Docker prerequisite", () => {
+  for (const action of ["resolver-check", "up", "smoke", "restart-gateway"]) {
+    const state = fixture();
+    const lockFile = join(
+      "/tmp",
+      `.synveda-compose-locks-${process.getuid?.() ?? 0}`,
+      `${state.project}.lock`,
+    );
+    try {
+      const refused = run(state, action, { SYNVEDA_FAKE_HOSTS_STATUS: "absent" });
+      assert.equal(refused.status, 78, `${action}: ${refused.stderr}`);
+      assert.match(refused.stderr, /hosts mapping is absent, expected installed/);
+      const calls = readFileSync(state.log, "utf8");
+      assert.match(
+        calls,
+        /manage-hosts-file\.mjs> <status>[^\n]*<--expect> <installed>/,
+      );
+      assert.doesNotMatch(
+        calls,
+        /check-host-resolution\.mjs|check-network-preflight\.mjs|check-compose-assets\.mjs|check-runtime-smoke\.mjs|^docker/m,
+      );
+      assert.equal(existsSync(lockFile), false, `${action} retained a certain preflight lock`);
+    } finally {
+      rmSync(state.scratch, { recursive: true, force: true });
+    }
+  }
+});
+
+test("up distinguishes owned status, endpoint pin, full resolution, and mutation order", () => {
+  const state = fixture();
+  try {
+    const result = run(state, "up");
+    assert.equal(result.status, 0, result.stderr);
+    const calls = readFileSync(state.log, "utf8");
+    assert.equal(
+      [...calls.matchAll(/manage-hosts-file\.mjs> <status>[^\n]*<--expect> <installed>/g)]
+        .length,
+      2,
+      calls,
+    );
+    const firstStatus = calls.indexOf("manage-hosts-file.mjs> <status>");
+    const endpointPin = calls.indexOf(
+      "check-host-resolution.mjs> <--docker-only> <true> <--print-docker-endpoint> <true>",
+    );
+    const repeatedStatus = calls.indexOf("manage-hosts-file.mjs> <status>", firstStatus + 1);
+    const fullResolver = calls.indexOf(
+      "check-host-resolution.mjs> <--runtime> <development>",
+      endpointPin + 1,
+    );
+    const network = calls.indexOf("check-network-preflight.mjs>", fullResolver + 1);
+    const build = calls.indexOf(" <build> <--builder> <default>", network + 1);
+    const up = calls.indexOf(" <up> <--no-build>", build + 1);
+    assert.ok(
+      firstStatus >= 0 &&
+        endpointPin > firstStatus &&
+        repeatedStatus > endpointPin &&
+        fullResolver > repeatedStatus &&
+        network > fullResolver &&
+        build > network &&
+        up > build,
+      calls,
+    );
+  } finally {
+    rmSync(state.scratch, { recursive: true, force: true });
+  }
+});
+
+test("recovery actions never require or remove development host ownership", () => {
+  const state = fixture();
+  try {
+    assert.equal(run(state, "up").status, 0);
+    writeFileSync(state.log, "");
+    const down = run(state, "down", { SYNVEDA_FAKE_HOSTS_STATUS: "absent" });
+    assert.equal(down.status, 0, down.stderr);
+    assert.doesNotMatch(readFileSync(state.log, "utf8"), /manage-hosts-file\.mjs/);
+    writeFileSync(state.log, "");
+    const reset = run(state, "reset", {
+      SYNVEDA_FAKE_HOSTS_STATUS: "absent",
+      SYNVEDA_CONFIRM_RESET: state.project,
+    });
+    assert.equal(reset.status, 0, reset.stderr);
+    assert.doesNotMatch(readFileSync(state.log, "utf8"), /manage-hosts-file\.mjs/);
+  } finally {
+    rmSync(state.scratch, { recursive: true, force: true });
+  }
+});
+
+test("external OIDC owns only the selected development application hostname", () => {
+  const state = fixture();
+  try {
+    const result = run(state, "hosts-status", {
+      SYNVEDA_OIDC_MODE: "external",
+      SYNVEDA_COMPOSE_PROFILES: "",
+      SYNVEDA_APP_HOST: "external-app.synveda.test",
+    });
+    assert.equal(result.status, 0, result.stderr);
+    const calls = readFileSync(state.log, "utf8");
+    assert.match(
+      calls,
+      /manage-hosts-file\.mjs> <status> <--runtime> <development> <--project> <[^>]+> <--oidc> <external> <--app-host> <external-app\.synveda\.test>/,
+    );
+    assert.doesNotMatch(calls, /--auth-host/);
+
+    const refused = run(state, "hosts-install", {
+      SYNVEDA_OIDC_MODE: "external",
+      SYNVEDA_COMPOSE_PROFILES: "",
+      SYNVEDA_APP_HOST: "external-app.synveda.test",
+      auth_host: "ambient.injected.test",
+    });
+    assert.equal(refused.status, 64, refused.stderr);
+    assert.match(
+      refused.stderr,
+      new RegExp(`install:127\\.0\\.0\\.1:${state.project}:external-app\\.synveda\\.test:-`),
+    );
+    assert.doesNotMatch(refused.stderr, /ambient\.injected/);
+  } finally {
+    rmSync(state.scratch, { recursive: true, force: true });
+  }
+});
+
+test("reference mode never reads or mutates managed hosts-file state", () => {
+  const state = fixture("reference");
+  try {
+    const status = run(state, "hosts-status");
+    assert.equal(status.status, 0, status.stderr);
+    assert.match(status.stdout, /operator DNS and has no managed hosts-file state/);
+    assert.equal(existsSync(state.log), false);
+
+    const install = run(state, "hosts-install", {
+      SYNVEDA_CONFIRM_HOSTS_INSTALL: "irrelevant",
+    });
+    assert.equal(install.status, 64, install.stderr);
+    assert.match(install.stderr, /reference mode never manages \/etc\/hosts/);
+    assert.equal(existsSync(state.log), false);
+  } finally {
+    rmSync(state.scratch, { recursive: true, force: true });
+  }
+});
+
+test("host mutation actions require exact configuration-bound confirmation before elevation", () => {
+  for (const action of ["hosts-install", "hosts-remove"]) {
+    const state = fixture();
+    try {
+      const refused = run(state, action);
+      assert.equal(refused.status, 64, refused.stderr);
+      assert.match(
+        refused.stderr,
+        new RegExp(
+          `${action === "hosts-install" ? "install" : "remove"}:127\\.0\\.0\\.1:` +
+            `${state.project}:app\\.synveda\\.test:auth\\.synveda\\.test`,
+        ),
+      );
+      assert.equal(existsSync(state.log), false);
+    } finally {
+      rmSync(state.scratch, { recursive: true, force: true });
+    }
+  }
+});
+
+test("host elevation argv uses only a fixed root-controlled Node candidate and terminal confirmation", () => {
+  const source = readFileSync(WRAPPER, "utf8");
+  const start = source.indexOf('if [ "$action" = hosts-install ] || [ "$action" = hosts-remove ]; then');
+  const end = source.indexOf("run_hosts_ownership_preflight()", start);
+  assert.ok(start >= 0 && end > start);
+  const elevation = source.slice(start, end);
+  const candidateLine = elevation
+    .split("\n")
+    .find((line) => line.includes("for node_candidate in"));
+  assert.equal(candidateLine?.trim(), "for node_candidate in /usr/bin/node /usr/local/bin/node; do");
+  assert.match(
+    elevation,
+    /\/usr\/bin\/node\) node_components='\/ \/usr \/usr\/bin \/usr\/bin\/node'/,
+  );
+  assert.match(
+    elevation,
+    /\/usr\/local\/bin\/node\) node_components='\/ \/usr \/usr\/local \/usr\/local\/bin \/usr\/local\/bin\/node'/,
+  );
+  assert.match(elevation, /\[ ! -L "\$node_candidate" \]/);
+  assert.match(elevation, /\/usr\/bin\/find/);
+  assert.match(elevation, /\/usr\/bin\/uname/);
+  assert.match(elevation, /\/usr\/bin\/awk/);
+  assert.match(elevation, /node_component_acl_free\(\)/);
+  assert.match(elevation, /\/bin\/ls -lde "\$node_acl_component"/);
+  assert.match(elevation, /getfacl/);
+  assert.match(elevation, /\/usr\/bin\/env -i LC_ALL=C PATH=\/usr\/bin:\/bin/);
+  assert.match(elevation, /!\/\^\(user\|group\|other\)::\[rwx-\]\[rwx-\]\[rwx-\]\$\//);
+  assert.match(
+    elevation,
+    /-type "\$node_component_type" -user root[\s\\]+! -perm -0020 ! -perm -0002 -print/,
+  );
+  assert.doesNotMatch(elevation, /process\.execPath|\$node_runner/);
+  assert.match(
+    elevation,
+    /set -- \/usr\/bin\/sudo -- \/usr\/bin\/env -i "\$node_executable"[\s\\]+"\$hosts_manager" "\$hosts_mutation"[\s\\]+--runtime development --project "\$project" --oidc "\$oidc_mode"[\s\\]+--app-host "\$app_host"/,
+  );
+  const authAppend = elevation.indexOf('set -- "$@" --auth-host "$auth_host"');
+  const confirmationAppend = elevation.indexOf('set -- "$@" --confirm "$expected_hosts_confirmation"');
+  const execution = elevation.indexOf('exec "$@"');
+  assert.ok(authAppend >= 0 && confirmationAppend > authAppend && execution > confirmationAppend);
 });
 
 test("gateway restart is locked, health-gated, and smoke-checked on both sides", () => {

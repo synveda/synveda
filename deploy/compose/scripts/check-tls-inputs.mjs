@@ -9,6 +9,7 @@ import {
   fstatSync,
   openSync,
   readSync,
+  realpathSync,
 } from "node:fs";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
@@ -285,7 +286,7 @@ export function main(argv = process.argv.slice(2)) {
     Number(process.versions.node.split(".")[0]) < 22 ||
     !new Set(["darwin", "linux"]).has(process.platform)
   ) {
-    console.error("compose-tls: Node 22 on macOS or Linux is required");
+    console.error("compose-tls: Node 22 or newer on macOS or Linux is required");
     process.exitCode = 69;
     return;
   }
@@ -334,4 +335,4 @@ export function main(argv = process.argv.slice(2)) {
   }
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) main();
+if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) main();

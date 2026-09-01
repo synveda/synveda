@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
 import { lookup } from "node:dns/promises";
+import { realpathSync } from "node:fs";
 import process from "node:process";
+import { fileURLToPath } from "node:url";
 
 const LOOKUP_TIMEOUT_MS = 5_000;
 
@@ -133,7 +135,7 @@ export async function main(argv = process.argv.slice(2)) {
     return;
   }
   if (Number(process.versions.node.split(".")[0]) < 22 || !["darwin", "linux"].includes(process.platform)) {
-    refuse("Node 22 on macOS or Linux is required", 69);
+    refuse("Node 22 or newer on macOS or Linux is required", 69);
     return;
   }
   const endpoint = effectiveDockerEndpoint(selection.dockerBin);
@@ -185,6 +187,6 @@ export async function main(argv = process.argv.slice(2)) {
   console.log("host resolver and local Docker prerequisites validated");
 }
 
-if (process.argv[1] && new URL(import.meta.url).pathname === process.argv[1]) {
+if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) {
   await main();
 }

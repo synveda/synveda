@@ -1,6 +1,6 @@
 # Production readiness
 
-Assessment date: 2026-08-31. Scope: the current context-platform checkout as a
+Assessment date: 2026-09-01. Scope: the current context-platform checkout as a
 service for individuals and small teams. Passing repository gates establishes
 repeatable behaviour; it does not establish availability, recoverability,
 supportability or a releasable supply chain.
@@ -62,9 +62,17 @@ ambient BuildKit/Buildx/Bake routing before helpers or locking, pin an explicit
 local default builder behind fresh private state and separate the build from
 all no-build startup/recovery commands while preserving registry authentication
 opaquely. Their path boundary also refuses a Docker config directory or
-lifecycle temporary root inside the source context. No clean live run has yet
-exercised a private synthetic Docker client proxy configuration, canary remote
-builder and private registry, so this is not public PKIX/browser trust,
+lifecycle temporary root inside the source context. Development resolver
+ownership now has a reversible same-inode host-file helper and deterministic
+collision, drift, strict-prefix interruption and recovery evidence; elevation
+still trusts a clean operator-writable checkout, and ownership is checked
+before Docker contact, while recovery actions remain independent. The selected
+mapping has not been installed or browser/container-validated, so this closes
+no live-readiness criterion. No clean live run has yet exercised either the
+ACL/default-ACL and SELinux/xattr/file-flag contract on Linux or a private
+synthetic Docker client proxy configuration, canary remote builder and private
+registry. Current ACL exploit and metadata-retention evidence is macOS plus
+deterministic Linux grammar coverage. This is not public PKIX/browser trust,
 explicit custom-CA/proxy support, a clean-volume login or recovery evidence. One
 frozen Docker Desktop candidate also proved bounded PostgreSQL/Keycloak
 bootstrap, optimized

@@ -1,6 +1,8 @@
 #!/usr/bin/env node
+import { realpathSync } from "node:fs";
 import { lstat, readFile } from "node:fs/promises";
 import process from "node:process";
+import { fileURLToPath } from "node:url";
 
 const MAX_STATUS_BYTES = 1024 * 1024;
 const REQUEST_TIMEOUT_MS = 5_000;
@@ -272,4 +274,4 @@ export async function main(argv = process.argv.slice(2)) {
   console.log("service state and public endpoint smoke validated");
 }
 
-if (process.argv[1] && new URL(import.meta.url).pathname === process.argv[1]) await main();
+if (process.argv[1] && realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)) await main();

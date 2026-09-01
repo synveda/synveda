@@ -613,6 +613,33 @@ authority/gate state and the label-proved project PostgreSQL volume.
   host resolver diagnostic requires exactly `127.0.0.1`, with no additional or
   IPv6 answer, before lifecycle mutation. Cross-platform container resolution
   remains part of clean Linux and Docker Desktop acceptance.
+  The canonical host-file manager targets literal `/etc/hosts`, owns at most
+  one exact marked development block, and refuses unmarked aliases, foreign or
+  malformed markers and drift. A root-only adjacent recovery record plus a
+  raw-content-free ownership record make exact install/remove completion
+  inspectable. The supported target is root-owned, single-link, exact mode
+  `0644`, and both it and the physical parent are ACL-free. That preflight runs
+  before stage bytes; Linux requires fixed root-controlled `getfacl`. The
+  ownership record contains a digest of the already world-readable target and
+  is mode `0644`; the full recovery record is root-owned mode `0600` and
+  ACL-free. The root command uses a fixed root-owned, non-writable, ACL-free Node
+  runtime/path and the repository helper under an empty
+  environment; this narrows accidental inputs but still requires a clean,
+  reviewed checkout because its owner can modify the executed code.
+  The fixed `/usr/bin` and `/bin` privilege, identity and ACL-inspection tools
+  are host-OS trusted-computing-base inputs, not repository-attested artifacts.
+  Development ownership is checked
+  before the first Docker endpoint query and again with the resolver check.
+  `down` and confirmed `reset` remain independent recovery paths and never
+  remove host-wide state. External OIDC owns only the application mapping;
+  reference mode owns none. Same-inode descriptor mutation appends or truncates
+  only the terminal block, preserving unrelated bytes, inode, POSIX metadata,
+  xattrs, security labels and file flags. ACL-bearing and noncanonical-mode
+  targets are refused. A killed append can leave only
+  an exact strict prefix until a newly confirmed install/remove recovers it;
+  this is not an old-or-new or universal power-loss guarantee. Modification and
+  change timestamps, exclusion of an unrelated root editor, and immutable,
+  bind-mounted, network or externally managed files are outside the contract.
   Reference/playground uses operator DNS and HTTPS.
 - Authorization code flow, state, nonce and PKCE S256 are mandatory. Implicit
   and resource-owner password grants are disabled.
