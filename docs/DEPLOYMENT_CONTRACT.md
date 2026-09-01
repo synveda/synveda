@@ -36,6 +36,7 @@ compose.postgres.yaml    bundled PostgreSQL and idempotent role/database bootstr
 compose.keycloak.yaml    bundled Keycloak, isolated database bootstrap and realm convergence
 compose.keycloak-postgres.yaml             bundled shared-cluster ordering/secret bridge
 compose.demo.yaml       optional secret-file-backed target-realm demo identities
+compose.browser-acceptance.yaml             fresh-project no-capture browser PKCE fixture
 compose.external-postgres.yaml             external Synveda database egress bridge
 compose.keycloak-external-postgres.yaml    external Keycloak database egress bridge
 compose.external.yaml    external-provider labels, no provider services
@@ -81,7 +82,11 @@ future implementation cannot infer or silently omit peer databases. Fully
 external OIDC omits Keycloak and its database bootstrap entirely.
 
 Optional services use only these profiles: `semantic`, `observability`,
-`apalis-board`, `demo` and `backup-test`. Apalis execution is activated by the
+`apalis-board`, `demo`, `backup-test` and the fixture-only
+`browser-acceptance`. The browser profile is valid only for development with
+both bundled providers, exactly the `demo,browser-acceptance` profile set, a
+suffixed acceptance project and proved initial asset absence; it is not a
+reference runtime service. Apalis execution is activated by the
 explicit `compose.apalis.yaml` fragment, not a profile: that fragment atomically
 changes the one per-kind routing key and starts its dispatcher/executor. The
 configuration gate rejects a routed kind without its services or those
@@ -118,6 +123,7 @@ digest, OCI index digest and accepted platform digests.
 | Telemetry | Pinned OTel Collector Contrib | `otelcol-contrib --config=/etc/otelcol/config.yaml` |
 | Optional visibility | Prometheus, Jaeger and Perses at reviewed digests | upstream commands with bounded storage/retention |
 | Experimental executor | Exact same Synveda product image digest; adapter-only `apalis`/`apalis-sql` 0.7.4 dependency | `synveda-container operation-dispatcher`; `synveda-container apalis-worker` |
+| Browser acceptance fixture | Pinned Playwright/Chromium 1.62.1 image, matching `playwright-core`, reviewed upstream seccomp profile and licence; fixture only, never a product image | one non-root `node console-login.mjs` process with no capture output |
 
 The product image has a role-neutral
 `ENTRYPOINT ["/usr/local/bin/synveda-container"]` and defaults to `gateway`.
@@ -221,9 +227,12 @@ product processes and Keycloak -> Collector -> optional visibility/external OTLP
 The current additive checkpoint implements the bundled database bootstrap,
 tenant convergence, fail-closed realm convergence, issuer diagnostic and the
 bounded `up`, `smoke`, gateway-only `restart-gateway`, `down` and
-exact-confirmation `reset` lifecycle. Its
-deterministic tests are implementation evidence, not clean-start/browser
-acceptance. The external-PostgreSQL bootstrap path
+exact-confirmation `reset` lifecycle. It also implements one fresh-project
+browser-acceptance selection that proves every exact project asset absent,
+builds and starts the normal bundled graph, waits for one sandboxed browser
+container to exit zero and then runs the ordinary runtime smoke. Its
+deterministic and injected-flow tests are implementation evidence, not a live
+clean-start/browser acceptance. The external-PostgreSQL bootstrap path
 deliberately stops before runtime startup until authenticated TLS and
 pre-provisioned-provider acceptance are implemented.
 
@@ -262,13 +271,17 @@ Every canonical service must explicitly define `HTTP_PROXY`, `http_proxy`,
 because Compose may remove it before the Docker client supplies defaults.
 Every development-mode build must define the same exact empty build arguments;
 reference mode accepts prebuilt images and contains no build declaration. The
-rendered graph is checked before mutation. A distinct post-create `converged`
+first `RUN` in every one of the fourteen deployment image stages invokes the same
+closed assertion and refuses any non-empty proxy build argument before network
+or package work. The rendered graph is checked before mutation. A distinct post-create `converged`
 asset state then requires every rendered container, network and volume and
 requires exactly one empty `NAME=` entry for each name in every container's
 `Config.Env`. Missing, non-empty, malformed and duplicate entries fail with a
 content-free diagnostic. `existing` remains recovery-compatible with an absent
 or partial exact project, while `stopped` requires containers and networks to
-be absent.
+be absent. The separate `absent` state is valid only for a suffixed development
+acceptance project and requires every exact project container, network and
+volume to be missing before the first build.
 
 Development source builds have a separate host-control boundary. A present
 ambient BuildKit, Buildx or Bake selector is refused before any helper or lock,
@@ -643,6 +656,11 @@ authority/gate state and the label-proved project PostgreSQL volume.
   Reference/playground uses operator DNS and HTTPS.
 - Authorization code flow, state, nonce and PKCE S256 are mandatory. Implicit
   and resource-owner password grants are disabled.
+- The bundled client explicitly retains Keycloak's issuer and session-state
+  authorization-response parameters. Browser acceptance permits exactly one
+  callback carrying `code`, the exact issuer `iss`, Keycloak 26.7.2's exact
+  24-character unpadded `session_state`, and the original exact `state`; a
+  missing, duplicate or additional parameter is refused before continuation.
 - Discovery must return the exact issuer, S256 support and an allowed signing
   algorithm. Synveda allow-lists RS256/384/512 and validates signature,
   issuer, audience, time claims, subject and configured tenant binding.
@@ -690,6 +708,23 @@ the exact ownership attributes. A subsequent convergence without `demo`
 deletes only those exactly owned users while the realm is closed. This
 deterministic boundary makes a real browser exchange possible but is not itself
 browser-login acceptance or proof that the password avoids an update prompt.
+
+The fixture-only browser image is attached only to `app-backend`, receives no
+public port, writable volume or Docker socket, and runs read-only as the
+selected non-root runtime identity with all capabilities dropped,
+`no-new-privileges`, bounded PIDs/CPU/memory/shared-memory and the exact
+vendored Playwright 1.62.1 sandbox profile. Its route gate permits only the
+selected application origin plus the exact Keycloak authorization endpoint,
+realm login actions and static resources; it refuses `userinfo`, account,
+foreign-origin and fragment-bearing requests. The driver records no page
+content, screenshot, HAR, trace, video, browser storage, credential, code,
+token or cookie. It reads only the demo administrator password through a
+bounded mode/uid/link/inode-revalidated no-follow descriptor, zeroes the raw
+and returned buffers, proves administrator admission through aggregate
+`whoami` booleans, signs out and exports only a fixed success/failure line.
+The wrapper accepts the result only after the exact one-shot container exits
+zero. Live platform evidence for the mounted secret's effective uid/mode and
+the complete exchange remains open.
 
 The optimized image carries one exact Keycloak 26.7.2 user-profile document:
 the four upstream built-in attributes and only the two optional Synveda demo

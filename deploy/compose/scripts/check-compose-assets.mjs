@@ -39,7 +39,7 @@ function parseArgs(argv) {
     fail("expected --config-file, --project and --docker-bin", 64);
   }
   result.state ??= "existing";
-  if (!new Set(["existing", "converged", "stopped"]).has(result.state)) {
+  if (!new Set(["absent", "existing", "converged", "stopped"]).has(result.state)) {
     fail("state was refused", 64);
   }
   return result;
@@ -112,6 +112,12 @@ function emptyObjectOrNull(value) {
 const args = parseArgs(process.argv);
 if (!/^synveda-(development|reference)(-acceptance-[a-z0-9][a-z0-9-]{0,23})?$/.test(args.project)) {
   fail("project name was refused", 64);
+}
+if (
+  args.state === "absent" &&
+  !/^synveda-development-acceptance-[a-z0-9][a-z0-9-]{0,23}$/.test(args.project)
+) {
+  fail("initial absence is restricted to a suffixed development acceptance project", 64);
 }
 let rawConfig;
 try {
@@ -220,6 +226,7 @@ for (const name of expectedContainers.keys()) {
   )) containerIds.add(id);
 }
 if (containerIds.size > Object.keys(services).length) fail("project container inventory exceeded the service contract");
+if (args.state === "absent" && containerIds.size !== 0) fail("project containers were not initially absent");
 if (args.state === "stopped" && containerIds.size !== 0) fail("project containers remain after shutdown");
 const seenServices = new Set();
 if (containerIds.size > 0) {
@@ -276,6 +283,7 @@ for (const name of expectedNetworks.keys()) {
   )) networkIds.add(id);
 }
 if (networkIds.size > Object.keys(networks).length) fail("project network inventory exceeded the network contract");
+if (args.state === "absent" && networkIds.size !== 0) fail("project networks were not initially absent");
 if (args.state === "stopped" && networkIds.size !== 0) fail("project networks remain after shutdown");
 const seenNetworks = new Set();
 if (networkIds.size > 0) {
@@ -346,6 +354,7 @@ for (const name of expectedVolumes.keys()) {
   )) volumeNames.add(candidate);
 }
 if (volumeNames.size > Object.keys(volumes).length) fail("project volume inventory exceeded the volume contract");
+if (args.state === "absent" && volumeNames.size !== 0) fail("project volumes were not initially absent");
 const seenVolumes = new Set();
 if (volumeNames.size > 0) {
   let inspected;

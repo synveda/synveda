@@ -1,11 +1,16 @@
-# Container images we ship
+# Container image inventory
 
-Every image the Helm chart can reference, every image the **released
-single-node profile** runs, and every base image the images we build are
-built from. `scripts/check-chart-images.mjs` (in `make ci`) fails the build
-when one of those surfaces names an image that is not on this list, **tag
-included** — so a version bump is a diff somebody reads rather than a
+Every image the canonical Compose graph or its deployment fixtures can
+reference, every image the Helm chart can reference, every image the
+**released single-node profile** runs, and every base image the images we
+build are built from. `scripts/check-chart-images.mjs` (in `make ci`) fails
+the build when one of those surfaces names an image that is not on this list,
+**tag included** — so a version bump is a diff somebody reads rather than a
 silent change of what is installed.
+
+Fixture-only deployment Dockerfiles are inventoried as well and are labelled
+explicitly; their presence here is not a claim that those images ship in the
+reference deployment.
 
 The release profile joined with OPS-8 (ADR-0065 decision 9). It is the
 stronger case, not the weaker one: the chart is what a customer's platform
@@ -30,6 +35,38 @@ corpus reach a published phase demo goal untouched by any check (EVAL-7).
 The entry to read first on any bump is **text-embeddings-inference**: an
 inference server's licence is exactly the kind that changes between
 releases, and that image carries both a binary and a model.
+
+## Images the canonical Compose graph and fixtures run
+
+The development names below are locally built outputs, not pullable release
+claims. Reference deployment replaces each Synveda-built name with a digest
+from a matching environment manifest. The Collector is a direct third-party
+runtime dependency and is pinned here exactly.
+
+| Image | Where | Licence | Why it is here |
+|---|---|---|---|
+| `synveda/product:dev` | canonical gateway, worker and one-shot product commands | ours | Development output of `deploy/compose/gateway/Dockerfile`; reference selects the same image contract by digest. |
+| `synveda/postgres:17.11-dev` | bundled PostgreSQL and database bootstrap | ours over PostgreSQL-licensed PostgreSQL | Development output of `deploy/compose/postgres/Dockerfile`. |
+| `synveda/keycloak:26.7.2-dev` | bundled Keycloak and realm convergence | ours over Apache-2.0 Keycloak | Optimized development output of `deploy/compose/keycloak/Dockerfile`. |
+| `synveda/proxy:2.11.4-dev` | canonical reverse proxy | ours over Apache-2.0 Caddy | Development output of `deploy/compose/proxy/Dockerfile`. |
+| `otel/opentelemetry-collector-contrib:0.159.0@sha256:1f2c54a30e713fac6b3ae77a1ec84010c2007e29ced8ec666214fc2f6739c1cc` | private core Collector | Apache-2.0 | Exact official Collector Contrib runtime; the application emits only OTLP to this private seam. |
+| `synveda/browser-acceptance:1.62.1-dev` | browser-acceptance fixture | Fixture code and Playwright are Apache-2.0; bundled browsers and system components retain their upstream licences | Locally built no-capture one-shot; never a product or reference service. Playwright's licence, upstream NOTICE and the seccomp provenance notice are retained in the image. |
+| `synveda-db-test-postgres:local` | isolated database acceptance fixture | ours over PostgreSQL-licensed PostgreSQL | Local-only database-test build; never an operator topology. |
+
+## Images the legacy contributor topology still runs
+
+`make dev-up` remains executable during the bounded Keycloak cutover. It is
+not the canonical reference graph, and its Rauthy and Temporal services are
+deletion residue rather than supported-provider claims. The inventory keeps
+that current executable surface visible until replacement acceptance permits
+its atomic removal.
+
+| Image | Where | Licence | Why it is here |
+|---|---|---|---|
+| `synveda/dev-postgres:17` | legacy contributor PostgreSQL | ours over PostgreSQL-licensed PostgreSQL | Local build output used only by the pre-cutover contributor topology. |
+| `synveda/gateway:dev` | legacy contributor gateway and worker | ours | Local product build output used only by the pre-cutover contributor topology. |
+| `temporalio/auto-setup:1.29.7` | stale legacy Temporal server | MIT Temporal server/docker-build scripts over Alpine and database-client/system packages, which retain upstream licences | Deprecated upstream image and executable residue with no supported Synveda consumer; retained only until the tested hard deletion. |
+| `temporalio/admin-tools:1.29.7-tctl-1.18.4-cli-1.7.2` | stale legacy Temporal health tooling | MIT Temporal server tools, tctl and Temporal CLI over Alpine/system packages, which retain upstream licences | Executable residue used only to probe the stale Temporal service; its bundled tctl reached end of support on 2025-09-30, and the image is retained only until hard deletion. |
 
 ## Images the released single-node profile runs
 
@@ -74,6 +111,19 @@ selection for deterministic packaging evidence only.
 | `rust:1.96.0-bullseye@sha256:7069898d5edfc11b0ba498ecefbcc5438f6390b3ce0be11a9750cf39cab7e02f` | CloudNativePG mounted-input helper build stage | MIT/Apache-2.0 toolchain; build-only system compiler | Matches the Debian 11 glibc ABI in the pinned CloudNativePG final image; a final-stage execution probe rejects ABI drift. |
 | `node:22-bookworm-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5` | gateway console stage | MIT | Builds the console bundle. Never in the runtime stage. |
 | `debian:bookworm-slim@sha256:88200866dfff7ea7f5cbcb6ec7c8a701889efe6fe859fe64d6990e4b07ea4171` | gateway runtime stage | various, all Debian-main | Runtime: `ca-certificates` for OIDC discovery, `curl` for the healthcheck. |
+| `postgres:17.11-bookworm@sha256:051f7b7b3abdd564d5d1bd1e8c4b9c1b6e77087d1dd22020ede611c096a272e0` | Compose PostgreSQL image | PostgreSQL | Exact multi-architecture upstream PostgreSQL 17.11 base for the bundled reference database. |
+| `quay.io/keycloak/keycloak:26.7.2@sha256:9d1f1b2b7261ff53c66cb1092dfcdc34a5fb77e81f9e6a6e75b8b6a795de8067` | optimized Compose Keycloak image | Apache-2.0 | Exact multi-architecture Keycloak production base, used for both the optimized build and runtime stages. |
+| `caddy:2.11.4-alpine@sha256:5f5c8640aae01df9654968d946d8f1a56c497f1dd5c5cda4cf95ab7c14d58648` | Compose reverse proxy image | Apache-2.0 over Alpine packages | Exact multi-architecture Caddy base with its file capability removed before runtime. |
+
+## Fixture-only build images
+
+This image is not part of the product or reference service graph. It builds a
+one-shot development acceptance fixture and is inventoried because repository
+deployment Dockerfiles are a closed surface.
+
+| Image | Where | Licence | Why it is here |
+|---|---|---|---|
+| `mcr.microsoft.com/playwright:v1.62.1-noble@sha256:dcc5531e97840b9b5e794f2814476b21571c5124a3fca2267d73041f56e7580e` | browser-acceptance fixture | Playwright is Apache-2.0; the bundled Chromium, Firefox, WebKit and Ubuntu/system components retain their upstream licences | Exact official multi-architecture Playwright fixture base. The matching `playwright-core` package and reviewed non-root Chromium sandbox profile are pinned to 1.62.1; fixture-only use is not a product-image licence claim. |
 
 ## Images the install test runs, and the chart never does
 

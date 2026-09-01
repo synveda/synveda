@@ -160,13 +160,13 @@ esac
   return { scratch, config, containers, networks, volumes, docker };
 }
 
-function run(state, extra = {}, mode = "existing") {
+function run(state, extra = {}, mode = "existing", project = PROJECT) {
   return spawnSync(
     process.execPath,
     [
       CHECKER,
       "--config-file", state.config,
-      "--project", PROJECT,
+      "--project", project,
       "--docker-bin", state.docker,
       "--state", mode,
     ],
@@ -212,6 +212,69 @@ test("exact Compose assets pass and stopped state requires containers and networ
     const active = run(state, {}, "stopped");
     assert.equal(active.status, 78);
     assert.match(active.stderr, /containers remain after shutdown/);
+  } finally {
+    rmSync(state.scratch, { recursive: true, force: true });
+  }
+});
+
+test("initial-absence state requires every exact project asset to be absent", () => {
+  const state = fixture();
+  try {
+    const absent = run(
+      state,
+      { FAKE_ASSET_STATE: "none", FAKE_VOLUME_STATE: "none" },
+      "absent",
+    );
+    assert.equal(absent.status, 0, absent.stderr);
+
+    for (const [extra, message] of [
+      [
+        {
+          FAKE_CONTAINER_STATE: "exact",
+          FAKE_NETWORK_STATE: "none",
+          FAKE_VOLUME_STATE: "none",
+        },
+        /containers were not initially absent/,
+      ],
+      [
+        {
+          FAKE_CONTAINER_STATE: "none",
+          FAKE_NETWORK_STATE: "exact",
+          FAKE_VOLUME_STATE: "none",
+        },
+        /networks were not initially absent/,
+      ],
+      [
+        {
+          FAKE_CONTAINER_STATE: "none",
+          FAKE_NETWORK_STATE: "none",
+          FAKE_VOLUME_STATE: "exact",
+        },
+        /volumes were not initially absent/,
+      ],
+    ]) {
+      const present = run(state, extra, "absent");
+      assert.equal(present.status, 78, present.stderr);
+      assert.match(present.stderr, message);
+    }
+  } finally {
+    rmSync(state.scratch, { recursive: true, force: true });
+  }
+});
+
+test("initial-absence state is restricted to suffixed development acceptance projects", () => {
+  const state = fixture();
+  try {
+    for (const project of ["synveda-development", "synveda-reference", "synveda-reference-acceptance-assets"]) {
+      const refused = run(
+        state,
+        { FAKE_ASSET_STATE: "none", FAKE_VOLUME_STATE: "none" },
+        "absent",
+        project,
+      );
+      assert.equal(refused.status, 64, refused.stderr);
+      assert.match(refused.stderr, /initial absence is restricted/);
+    }
   } finally {
     rmSync(state.scratch, { recursive: true, force: true });
   }

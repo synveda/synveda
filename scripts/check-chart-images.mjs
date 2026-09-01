@@ -1,8 +1,9 @@
 #!/usr/bin/env node
-// Asserts that every container image we ship — the Helm chart's, the
-// released single-node profile's, and every base image the images we build
-// are built from — appears in deploy/helm/IMAGES.md, tag included. Writes
-// nothing, ever.
+// Asserts that every container image we ship or use for a deployment fixture
+// — the canonical Compose graph's, the Helm chart's, the released single-node
+// profile's, and every base image in deployment Dockerfiles — appears in
+// deploy/helm/IMAGES.md, tag included.
+// Writes nothing, ever.
 //
 // The release profile joined the chart as a surface with OPS-8 (ADR-0065
 // decision 9): those are images a *customer installs*, which is a stronger
@@ -25,26 +26,46 @@
 //
 // Usage: node scripts/check-chart-images.mjs   (exit 0 clean, 1 with findings)
 
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
+import { join } from "node:path";
+import {
+  canonicalComposeFiles,
+  composeImageReferences,
+  dockerfileBaseImages,
+  parseComposeDefaults,
+} from "./chart-image-discovery.mjs";
 
 const INVENTORY = "deploy/helm/IMAGES.md";
 const CHART = "deploy/helm/synveda/Chart.yaml";
 const VALUES = "deploy/helm/synveda/values.yaml";
 const RELEASE_COMPOSE = "deploy/release/docker-compose.yml";
+const COMPOSE_DIRECTORY = "deploy/compose";
+const COMPOSE_DEFAULTS = `${COMPOSE_DIRECTORY}/.env.example`;
+const LEGACY_COMPOSE = `${COMPOSE_DIRECTORY}/docker-compose.yml`;
 // The per-architecture TEI pins. They are declared here, in the one place
 // that resolves them, and `synveda init` carries the same table for an
 // installed operator who has no Makefile — so this is where the inventory
 // learns about the arm64 build, which no compose file names.
 const MAKEFILE = "Makefile";
-const DOCKERFILES = [
-  "deploy/helm/postgres/Dockerfile",
-  "deploy/compose/gateway/Dockerfile",
-];
-
 const problems = [];
 const fail = (message) => problems.push(message);
 
 const read = (path) => readFileSync(path, "utf8");
+
+function deploymentDockerfiles(directory, found = []) {
+  for (const entry of readdirSync(directory, { withFileTypes: true })) {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) {
+      deploymentDockerfiles(path, found);
+    } else if (entry.name === "Dockerfile") {
+      if (!entry.isFile()) fail(`${path}: deployment Dockerfile is not a regular file`);
+      found.push(path);
+    }
+  }
+  return found;
+}
+
+const DOCKERFILES = deploymentDockerfiles("deploy").sort();
 
 // ── The inventory ────────────────────────────────────────────────────────
 // Every backticked token that looks like `repo:tag`. The gateway's own tag
@@ -100,6 +121,45 @@ for (const [, raw] of release.matchAll(/^\s*image:\s+(\S+)\s*$/gm)) {
   found.set(ref, `${RELEASE_COMPOSE} (image:)`);
 }
 
+// ── What the canonical Compose graph and its fixtures run ────────────────
+// The checked-in non-secret defaults resolve every canonical image selector.
+// Reference deployments replace the locally built Synveda image names with
+// environment-manifest digests, but the third-party Collector remains the
+// same exact runtime dependency and must not escape the image inventory.
+let composeDefaults = new Map();
+try {
+  composeDefaults = parseComposeDefaults(read(COMPOSE_DEFAULTS));
+} catch (error) {
+  fail(`${COMPOSE_DEFAULTS}: ${error?.code ?? "defaults could not be parsed"}`);
+}
+const composeFiles = canonicalComposeFiles(
+  readdirSync(COMPOSE_DIRECTORY, { withFileTypes: true }),
+);
+if (!composeFiles.includes("compose.yaml")) {
+  fail(`${COMPOSE_DIRECTORY}: canonical compose.yaml was not discovered`);
+}
+for (const name of composeFiles) {
+  const path = join(COMPOSE_DIRECTORY, name);
+  try {
+    for (const ref of composeImageReferences(read(path), composeDefaults)) {
+      found.set(ref, `${path} (image:)`);
+    }
+  } catch (error) {
+    fail(`${path}: ${error?.code ?? "image selector could not be resolved"}`);
+  }
+}
+
+// The contributor `make dev-up` stack remains executable until CPR-45 deletes
+// its Rauthy and Temporal residue. It is not canonical, but exclusion from the
+// reference graph cannot make its pulled and locally built images invisible.
+try {
+  for (const ref of composeImageReferences(read(LEGACY_COMPOSE), composeDefaults)) {
+    found.set(ref, `${LEGACY_COMPOSE} (legacy image:)`);
+  }
+} catch (error) {
+  fail(`${LEGACY_COMPOSE}: ${error?.code ?? "legacy image selector could not be resolved"}`);
+}
+
 // ── The per-architecture TEI pins ────────────────────────────────────────
 for (const [, ref] of read(MAKEFILE).matchAll(/^TEI_IMAGE_\w+\s*=\s*(\S+:\S+)\s*$/gm)) {
   found.set(ref, `${MAKEFILE} (TEI_IMAGE_*)`);
@@ -108,16 +168,12 @@ for (const [, ref] of read(MAKEFILE).matchAll(/^TEI_IMAGE_\w+\s*=\s*(\S+:\S+)\s*
 // ── What the images we build are built from ──────────────────────────────
 for (const path of DOCKERFILES) {
   const text = read(path);
-  const args = new Map();
-  for (const [, name, value] of text.matchAll(/^ARG\s+(\w+)=(\S+)\s*$/gm)) args.set(name, value);
-  for (const [, raw] of text.matchAll(/^FROM\s+(\S+)/gm)) {
-    // `FROM ${CNPG_BASE}` resolves against the ARG default above it.
-    const ref = raw.replace(/\$\{(\w+)\}/g, (whole, name) => args.get(name) ?? whole);
-    if (ref.includes("$")) {
-      fail(`${path}: FROM ${raw} references a build arg with no default, so it cannot be inventoried`);
-      continue;
+  try {
+    for (const ref of dockerfileBaseImages(text)) {
+      found.set(ref, `${path} (FROM)`);
     }
-    found.set(ref, `${path} (FROM)`);
+  } catch (error) {
+    fail(`${path}: ${error?.code ?? "base image could not be resolved"}`);
   }
 }
 
@@ -143,7 +199,7 @@ if (orphans.length) {
 }
 if (problems.length) {
   for (const p of problems) console.error(`FAIL ${p}`);
-  console.error(`\n${problems.length} problem(s); we ship images the inventory does not name.`);
+  console.error(`\n${problems.length} problem(s); the deployment image surface is not fully inventoried.`);
   process.exit(1);
 }
-console.log(`ok: ${found.size} image reference(s) across the chart, the release profile and their Dockerfiles, all inventoried in ${INVENTORY}.`);
+console.log(`ok: ${found.size} image reference(s) across canonical Compose, the chart, the release profile and deployment Dockerfiles, all inventoried in ${INVENTORY}.`);

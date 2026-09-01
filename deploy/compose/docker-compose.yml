@@ -8,12 +8,26 @@
 # Lifecycle: `make dev-up` / `make dev-down` (state survives; wipe with `down -v`).
 name: synveda
 
+x-synveda-build-proxy-closure: &synveda-build-proxy-closure
+  HTTP_PROXY: ""
+  http_proxy: ""
+  HTTPS_PROXY: ""
+  https_proxy: ""
+  NO_PROXY: ""
+  no_proxy: ""
+  FTP_PROXY: ""
+  ftp_proxy: ""
+  ALL_PROXY: ""
+  all_proxy: ""
+
 services:
   postgres:
     build:
       context: ../..
       dockerfile: deploy/compose/postgres/Dockerfile
       target: development
+      args:
+        <<: *synveda-build-proxy-closure
     image: synveda/dev-postgres:17
     environment:
       POSTGRES_USER: synveda
@@ -138,6 +152,8 @@ services:
     build:
       context: ../..
       dockerfile: deploy/compose/gateway/Dockerfile
+      args:
+        <<: *synveda-build-proxy-closure
     image: synveda/gateway:dev
     depends_on:
       postgres:
@@ -175,6 +191,8 @@ services:
     build:
       context: ../..
       dockerfile: deploy/compose/gateway/Dockerfile
+      args:
+        <<: *synveda-build-proxy-closure
     image: synveda/gateway:dev
     command: ["worker"]
     init: true

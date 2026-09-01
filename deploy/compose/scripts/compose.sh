@@ -8,7 +8,7 @@ LC_ALL=C
 export LC_ALL
 
 usage() {
-    echo "usage: deploy/compose/scripts/compose.sh {config [--output PATH]|hosts-plan|hosts-status|hosts-install|hosts-remove|resolver-check|up|smoke|restart-gateway|down|reset}" >&2
+    echo "usage: deploy/compose/scripts/compose.sh {config [--output PATH]|hosts-plan|hosts-status|hosts-install|hosts-remove|resolver-check|up [--initial-assets absent]|smoke|restart-gateway|down|reset}" >&2
     exit 64
 }
 
@@ -19,12 +19,24 @@ case "$action" in
 esac
 shift
 output=
+initial_asset_state=existing
 if [ "$action" = config ]; then
     case "${1:-}" in
         "") ;;
         --output)
             [ "$#" -eq 2 ] && [ -n "${2:-}" ] || usage
             output=$2
+            shift 2
+            ;;
+        *) usage ;;
+    esac
+fi
+if [ "$action" = up ]; then
+    case "${1:-}" in
+        "") ;;
+        --initial-assets)
+            [ "$#" -eq 2 ] && [ "${2:-}" = absent ] || usage
+            initial_asset_state=absent
             shift 2
             ;;
         *) usage ;;
@@ -44,6 +56,7 @@ postgres_mode=${SYNVEDA_POSTGRES_MODE:-bundled}
 oidc_mode=${SYNVEDA_OIDC_MODE:-bundled}
 profiles=${SYNVEDA_COMPOSE_PROFILES:-}
 demo_profile=false
+browser_acceptance_profile=false
 lifecycle_timeout=${SYNVEDA_COMPOSE_LIFECYCLE_TIMEOUT_SECONDS:-900}
 # The gateway declares a 30-second stop grace in compose.yaml. Leave bounded
 # client and postflight margins around that daemon-side contract rather than
@@ -413,13 +426,30 @@ esac
 
 old_ifs=$IFS
 IFS=,
+profile_count=0
+profile_seen=,
+case "$profiles" in
+    ,*|*,|*,,*)
+        echo "compose: empty profile selector was refused" >&2
+        exit 64
+        ;;
+esac
 for profile in $profiles; do
+    case "$profile_seen" in
+        *,"$profile",*)
+            echo "compose: duplicate profile was refused" >&2
+            exit 64
+            ;;
+    esac
+    profile_seen=$profile_seen$profile,
+    profile_count=$((profile_count + 1))
     case "$profile" in
         "") ;;
         semantic|observability|apalis-board|backup-test) ;;
         demo) demo_profile=true ;;
+        browser-acceptance) browser_acceptance_profile=true ;;
         *)
-            echo "compose: unsupported profile; allowed: semantic,observability,apalis-board,demo,backup-test" >&2
+            echo "compose: unsupported profile; allowed: semantic,observability,apalis-board,demo,backup-test,browser-acceptance" >&2
             exit 64
             ;;
     esac
@@ -430,6 +460,24 @@ if [ "$demo_profile" = true ] && \
     { [ "$postgres_mode" != bundled ] || [ "$oidc_mode" != bundled ]; }; then
     echo "compose: demo profile requires bundled PostgreSQL and bundled OIDC" >&2
     exit 64
+fi
+if [ "$browser_acceptance_profile" = true ]; then
+    [ "$profile_count" -eq 2 ] && [ "$demo_profile" = true ] || {
+        echo "compose: browser acceptance requires exactly the demo,browser-acceptance profiles" >&2
+        exit 64
+    }
+    [ "$runtime" = development ] && [ "$postgres_mode" = bundled ] && \
+        [ "$oidc_mode" = bundled ] || {
+        echo "compose: browser acceptance requires development with bundled PostgreSQL and bundled OIDC" >&2
+        exit 64
+    }
+    case "$action" in
+        config|up|smoke|down|reset) ;;
+        *)
+            echo "compose: browser acceptance is unavailable for this lifecycle action" >&2
+            exit 64
+            ;;
+    esac
 fi
 if { [ "$action" = up ] || [ "$action" = reset ]; } && \
     [ "$postgres_mode" = external ]; then
@@ -474,6 +522,22 @@ if [ -n "$suffix" ]; then
             ;;
     esac
     project=$project-$suffix
+fi
+if [ "$initial_asset_state" = absent ] && {
+    [ "$runtime" != development ] || [ -z "$suffix" ];
+}; then
+    echo "compose: initial absence is restricted to suffixed development acceptance projects" >&2
+    exit 64
+fi
+if [ "$browser_acceptance_profile" = true ]; then
+    [ -n "$suffix" ] || {
+        echo "compose: browser acceptance requires a suffixed development acceptance project" >&2
+        exit 64
+    }
+    if [ "$action" = up ] && [ "$initial_asset_state" != absent ]; then
+        echo "compose: browser acceptance up requires --initial-assets absent" >&2
+        exit 64
+    fi
 fi
 
 case "$action" in
@@ -1438,6 +1502,7 @@ postgres_image=${SYNVEDA_POSTGRES_IMAGE:-synveda/postgres:17.11-dev}
 keycloak_image=${SYNVEDA_KEYCLOAK_IMAGE:-synveda/keycloak:26.7.2-dev}
 caddy_image=${SYNVEDA_CADDY_IMAGE:-synveda/proxy:2.11.4-dev}
 otel_image=${SYNVEDA_OTEL_COLLECTOR_IMAGE:-otel/opentelemetry-collector-contrib:0.159.0@sha256:1f2c54a30e713fac6b3ae77a1ec84010c2007e29ced8ec666214fc2f6739c1cc}
+browser_image=${SYNVEDA_BROWSER_IMAGE:-synveda/browser-acceptance:1.62.1-dev}
 valid_image_reference() {
     case "$1" in
         ''|*[!A-Za-z0-9_./:@+-]*) return 1 ;;
@@ -1462,6 +1527,24 @@ for image_reference in "$product_image" "$postgres_image" "$keycloak_image" \
         exit 64
     }
 done
+if [ "$browser_acceptance_profile" = true ]; then
+    valid_image_reference "$browser_image" || {
+        echo "compose: browser acceptance image must use the closed OCI reference character set" >&2
+        exit 64
+    }
+    browser_seccomp_profile=$compose_dir/browser/seccomp_profile.json
+    [ ! -L "$browser_seccomp_profile" ] && [ -f "$browser_seccomp_profile" ] || {
+        echo "compose: reviewed browser seccomp profile was unavailable" >&2
+        exit 78
+    }
+    browser_seccomp_parent=$(CDPATH= cd "$(dirname "$browser_seccomp_profile")" && pwd -P) || {
+        echo "compose: reviewed browser seccomp profile was unavailable" >&2
+        exit 78
+    }
+    browser_seccomp_profile=$browser_seccomp_parent/$(basename "$browser_seccomp_profile")
+    run_bounded 30 "$node_runner" "$script_dir/check-browser-seccomp.mjs" \
+        --profile "$browser_seccomp_profile"
+fi
 if [ "$runtime" = reference ]; then
     digest_image "$product_image" || {
         echo "compose: reference product image must use an OCI sha256 digest" >&2
@@ -1636,6 +1719,12 @@ export SYNVEDA_KEYCLOAK_DATABASE_URL=$keycloak_database_url
 export SYNVEDA_KEYCLOAK_SSL_REQUIRED=$keycloak_ssl_required
 export SYNVEDA_CADDY_IMAGE=$caddy_image
 export SYNVEDA_OTEL_COLLECTOR_IMAGE=$otel_image
+if [ "$browser_acceptance_profile" = true ]; then
+    export SYNVEDA_BROWSER_IMAGE=$browser_image
+    export SYNVEDA_BROWSER_SECCOMP_PROFILE=$browser_seccomp_profile
+else
+    unset SYNVEDA_BROWSER_IMAGE SYNVEDA_BROWSER_SECCOMP_PROFILE
+fi
 
 set -- compose --project-directory "$compose_dir" \
     --env-file "$compose_dir/.env.example" -p "$project" \
@@ -1667,6 +1756,9 @@ fi
 if [ "$demo_profile" = true ]; then
     set -- "$@" -f "$compose_dir/compose.demo.yaml"
 fi
+if [ "$browser_acceptance_profile" = true ]; then
+    set -- "$@" -f "$compose_dir/compose.browser-acceptance.yaml"
+fi
 old_ifs=$IFS
 IFS=,
 for profile in $profiles; do
@@ -1679,7 +1771,17 @@ prepare_asset_contract() {
     chmod 600 "$asset_config_file"
     run_bounded "$lifecycle_timeout" "$docker_bin" "$@" \
         config --format json > "$asset_config_file"
-    prove_assets_existing
+    if [ "$initial_asset_state" = absent ]; then
+        prove_assets_absent
+    else
+        prove_assets_existing
+    fi
+}
+
+prove_assets_absent() {
+    run_bounded "$lifecycle_timeout" "$node_runner" "$script_dir/check-compose-assets.mjs" \
+        --config-file "$asset_config_file" --project "$project" \
+        --docker-bin "$docker_bin" --state absent
 }
 
 prove_assets_existing() {
@@ -1735,10 +1837,52 @@ run_runtime_smoke() {
     set -- "$script_dir/check-runtime-smoke.mjs" \
         --status-file "$status_file" --runtime "$runtime" \
         --postgres "$postgres_mode" --oidc "$oidc_mode" \
+        --browser "$browser_acceptance_profile" \
         --app-url "$public_app_url" --issuer "$oidc_issuer"
     run_bounded "$lifecycle_timeout" "$node_runner" "$@"
     rm -f -- "$status_file"
     status_file=
+}
+
+wait_for_browser_acceptance() {
+    browser_identity_status=0
+    capture_bounded_output 30 "$docker_bin" "$@" \
+        ps --all --quiet --no-trunc browser-acceptance || browser_identity_status=$?
+    if [ "$browser_identity_status" -ne 0 ]; then
+        propagate_bounded_failure "$browser_identity_status"
+        echo "compose: browser acceptance container identity was unavailable" >&2
+        return 69
+    fi
+    browser_container_identity=$bounded_output
+    if [ "${#browser_container_identity}" -ne 64 ]; then
+        echo "compose: browser acceptance container identity was refused" >&2
+        return 78
+    fi
+    case "$browser_container_identity" in
+        *[!0-9a-f]*)
+            echo "compose: browser acceptance container identity was refused" >&2
+            return 78
+            ;;
+    esac
+    browser_wait_status=0
+    capture_bounded_output "$lifecycle_timeout" "$docker_bin" container wait \
+        "$browser_container_identity" || browser_wait_status=$?
+    if [ "$browser_wait_status" -ne 0 ]; then
+        propagate_bounded_failure "$browser_wait_status"
+        echo "compose: browser acceptance result was unavailable" >&2
+        return 69
+    fi
+    case "$bounded_output" in
+        0) ;;
+        ''|*[!0-9]*)
+            echo "compose: browser acceptance result was malformed" >&2
+            return 78
+            ;;
+        *)
+            echo "compose: browser acceptance failed" >&2
+            return 78
+            ;;
+    esac
 }
 
 capture_gateway_container_identity() {
@@ -1786,9 +1930,33 @@ case "$action" in
         fi
         docker_mutation_uncertain=true
         docker_mutation_phase=compose-up
-        run_bounded "$lifecycle_timeout" "$docker_bin" "$@" \
-            up --no-build --detach --wait --wait-timeout "$lifecycle_timeout" \
-            --force-recreate
+        if [ "$browser_acceptance_profile" = true ]; then
+            # An unreferenced one-shot is not portable through Compose's
+            # `up --wait` classification. Converge the normal graph with the
+            # fixture scaled to zero, then start exactly that already-built
+            # service without recreating its proved-ready dependencies.
+            run_bounded "$lifecycle_timeout" "$docker_bin" "$@" \
+                up --no-build --detach --wait --wait-timeout "$lifecycle_timeout" \
+                --force-recreate --scale browser-acceptance=0
+            run_bounded "$lifecycle_timeout" "$docker_bin" "$@" \
+                up --no-build --detach --no-deps --force-recreate \
+                browser-acceptance
+            browser_acceptance_status=0
+            wait_for_browser_acceptance "$@" || browser_acceptance_status=$?
+            case "$browser_acceptance_status" in
+                0) ;;
+                78)
+                    docker_mutation_uncertain=false
+                    docker_mutation_phase=
+                    exit 78
+                    ;;
+                *) exit "$browser_acceptance_status" ;;
+            esac
+        else
+            run_bounded "$lifecycle_timeout" "$docker_bin" "$@" \
+                up --no-build --detach --wait --wait-timeout "$lifecycle_timeout" \
+                --force-recreate
+        fi
         asset_convergence_status=0
         prove_assets_converged || asset_convergence_status=$?
         case "$asset_convergence_status" in
@@ -1805,6 +1973,10 @@ case "$action" in
         esac
         docker_mutation_uncertain=false
         docker_mutation_phase=
+        if [ "$browser_acceptance_profile" = true ]; then
+            run_resolver_preflight
+            run_runtime_smoke "$@"
+        fi
         echo "canonical Compose services converged for $project"
         ;;
     down)

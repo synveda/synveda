@@ -45,7 +45,8 @@ serial administrator/drift and epoch/reset suites with exact cleanup. A fresh
 deterministic authentic-frame lifecycle also passes and self-cleans through
 the independently reviewed collision-resistant fixture allocator; the
 complete repository CI and current deployment contracts pass. This is not the
-installed proprietary-client test or canonical browser/Compose acceptance.
+installed proprietary-client test or live canonical browser/Compose
+acceptance.
 The current additive implementation now has a bounded, exact-project-locked
 canonical lifecycle; complete network/IPAM and asset preflight; containerized
 gateway/worker; a private Collector; exact static-tenant issuer diagnostics;
@@ -68,7 +69,13 @@ collision, drift, strict-prefix interruption and recovery evidence; elevation
 still trusts a clean operator-writable checkout, and ownership is checked
 before Docker contact, while recovery actions remain independent. The selected
 mapping has not been installed or browser/container-validated, so this closes
-no live-readiness criterion. No clean live run has yet exercised either the
+no live-readiness criterion. Current source does add a pinned, sandboxed,
+non-root Playwright 1.62.1 one-shot with a no-capture route/secret boundary,
+exact PKCE request and callback checks, administrator admission/logout, and a
+fresh-project initial-asset absence gate. Deterministic model, lifecycle and
+injected-browser tests pass; the browser container has not executed and its
+effective mounted-secret ownership has not been proved on a supported Docker
+platform. No clean live run has yet exercised either the
 ACL/default-ACL and SELinux/xattr/file-flag contract on Linux or a private
 synthetic Docker client proxy configuration, canary remote builder and private
 registry. Current ACL exploit and metadata-retention evidence is macOS plus

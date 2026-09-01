@@ -1,0 +1,11 @@
+Playwright Chromium sandbox seccomp profile
+
+Source: https://github.com/microsoft/playwright/blob/v1.62.1/utils/docker/seccomp_profile.json
+Release: v1.62.1
+Commit: 26a9e470a7b3c7822084b09fb7f13902c5f37b51
+SHA-256: cc3e61cabda6bbc1e53e54d27ba4d55a9d3be829b6dd1a596f4a7b31b1cc7849
+Licence: Apache License 2.0 (see PLAYWRIGHT-LICENSE)
+Modifications: none; the JSON is vendored byte-for-byte.
+
+The profile is fixture-only. It extends Docker's default seccomp policy with
+the user-namespace syscalls required by Playwright's non-root Chromium sandbox.

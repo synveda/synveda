@@ -26,7 +26,7 @@ const SECRET_SENTINEL = "cpr45-secret-sentinel";
 const KEYCLOAK_SECURITY_CHAIN_SHA256 = new Map([
   [
     "keycloak/Dockerfile",
-    "b480f34ec0e1ae4c39202cab9947bd7af8cda43b5f7ffbb0f8986d52c4150ed6",
+    "d144d10506d36d42a5df8f38a15814640183e05f5b12b02098cd5acda3299730",
   ],
   [
     "keycloak/keycloak-entrypoint",
@@ -34,7 +34,7 @@ const KEYCLOAK_SECURITY_CHAIN_SHA256 = new Map([
   ],
   [
     "keycloak/SynvedaKeycloakProjection.java",
-    "9887d8596a845c54feaf6c2d2ab9aa1df4705963b6cb26bed057795538f16eac",
+    "12c9bc06fa3811bbc989769528267aa33a67f0150711bc6b5340366c7278032e",
   ],
   [
     "keycloak/SynvedaKeycloakProjectionSelfTest.java",
@@ -42,7 +42,7 @@ const KEYCLOAK_SECURITY_CHAIN_SHA256 = new Map([
   ],
   [
     "keycloak/synveda-projection-self-test",
-    "1c8558d91323b44862bc9cc2b2ef989c6a1c477ff8e19714a6e0d7d132f421e7",
+    "cf63c2c323824953fbd4382bd821fcd64a787a02e7c22a245a9c5df3d03d22ed",
   ],
   [
     "keycloak/synveda-authority-stage",
@@ -66,7 +66,7 @@ const KEYCLOAK_SECURITY_CHAIN_SHA256 = new Map([
   ],
   [
     "keycloak/synveda-realm-converge",
-    "d2d676b35a5142694b333e5b9af2801f93442c9fa29fe05f694e15e818a3f8ef",
+    "119176825496bf2cd2b3841c6a55f562476d10ccff9f03a7dcb61b687aa046f9",
   ],
   [
     "keycloak/synveda-generation-gate",
@@ -303,8 +303,17 @@ export function composeBuildBoundaryFindings(source) {
     findings.push("an implicit compose-up build path remains");
   }
   const noBuildUps = source.match(/\bup --no-build\b/g) ?? [];
-  if (noBuildUps.length !== 2) {
-    findings.push("startup and gateway recovery are not both explicitly no-build");
+  if (
+    noBuildUps.length !== 4 ||
+    !source.includes("--force-recreate --scale browser-acceptance=0") ||
+    !source.includes(
+      [
+        "up --no-build --detach --no-deps --force-recreate \\",
+        "                browser-acceptance",
+      ].join("\n"),
+    )
+  ) {
+    findings.push("startup, browser fixture and gateway recovery are not explicitly no-build");
   }
   return findings;
 }
@@ -1045,9 +1054,14 @@ function hardeningFindings(name, service) {
   if (JSON.stringify(service.cap_drop ?? []) !== JSON.stringify(["ALL"])) {
     findings.push(`${name} does not drop all capabilities`);
   }
+  const expectedSecurityOptions =
+    name === "browser-acceptance"
+      ? ["no-new-privileges:true", service.security_opt?.[1]]
+      : ["no-new-privileges:true"];
   if (
-    JSON.stringify(service.security_opt ?? []) !==
-    JSON.stringify(["no-new-privileges:true"])
+    JSON.stringify(service.security_opt ?? []) !== JSON.stringify(expectedSecurityOptions) ||
+    (name === "browser-acceptance" &&
+      !/^seccomp=\/.+\/browser\/seccomp_profile\.json$/.test(service.security_opt?.[1] ?? ""))
   ) {
     findings.push(`${name} security options drifted from no-new-privileges`);
   }
@@ -1078,6 +1092,96 @@ function normalizedByteSize(value) {
   const powers = { "": 0, k: 1, m: 2, g: 3, t: 4 };
   const bytes = Number(match[1]) * 1024 ** powers[(match[2] ?? "").toLowerCase()];
   return Number.isSafeInteger(bytes) ? bytes : undefined;
+}
+
+export function browserAcceptanceFindings(browser, expected) {
+  const findings = [];
+  const expectedKeys = sorted([
+    "build",
+    "cap_drop",
+    "command",
+    "cpus",
+    "depends_on",
+    "entrypoint",
+    "environment",
+    "image",
+    "init",
+    "labels",
+    "mem_limit",
+    "networks",
+    "pids_limit",
+    "profiles",
+    "read_only",
+    "restart",
+    "secrets",
+    "security_opt",
+    "shm_size",
+    "stop_grace_period",
+    "tmpfs",
+    "user",
+  ]);
+  if (
+    expected.runtime !== "development" ||
+    expected.postgres !== "bundled" ||
+    expected.oidc !== "bundled" ||
+    expected.demo !== true
+  ) findings.push("browser acceptance selected outside its fixture topology");
+  if (JSON.stringify(keys(browser)) !== JSON.stringify(expectedKeys)) {
+    findings.push(`browser acceptance option set drifted (${keys(browser).join(",")})`);
+  }
+  if (
+    browser.labels?.["com.synveda.contract"] !== "cpr-45" ||
+    browser.image !== expected.browserImage ||
+    browser.user !== expected.runtimeUser ||
+    browser.command !== null ||
+    JSON.stringify(browser.entrypoint) !== JSON.stringify(["node", "console-login.mjs"]) ||
+    JSON.stringify(browser.profiles) !== JSON.stringify(["browser-acceptance"])
+  ) findings.push("browser acceptance process contract drifted");
+  const expectedEnvironment = {
+    ...Object.fromEntries(CONTAINER_PROXY_ENVIRONMENT.map((name) => [name, ""])),
+    SYNVEDA_BROWSER_APP_URL: expected.appUrl,
+    SYNVEDA_BROWSER_ISSUER: expected.issuer,
+  };
+  if (!sameJson(browser.environment, expectedEnvironment)) {
+    findings.push("browser acceptance public or proxy environment drifted");
+  }
+  if (
+    browser.read_only !== true ||
+    browser.init !== true ||
+    JSON.stringify(browser.cap_drop) !== JSON.stringify(["ALL"]) ||
+    JSON.stringify(browser.security_opt) !==
+      JSON.stringify([
+        "no-new-privileges:true",
+        `seccomp=${expected.browserSeccompProfile}`,
+      ]) ||
+    browser.pids_limit !== 256 ||
+    browser.restart !== "no" ||
+    browser.stop_grace_period !== "10s" ||
+    normalizedByteSize(browser.mem_limit) !== 1024 ** 3 ||
+    normalizedByteSize(browser.shm_size) !== 256 * 1024 ** 2 ||
+    Number(browser.cpus) !== 1 ||
+    JSON.stringify(browser.tmpfs) !==
+      JSON.stringify(["/tmp:rw,noexec,nosuid,nodev,mode=1777,size=64m"])
+  ) findings.push("browser acceptance sandbox or resource boundary drifted");
+  if (
+    !sameJson(browser.build, {
+      context: expected.root,
+      dockerfile: "deploy/compose/browser/Dockerfile",
+      args: Object.fromEntries(CONTAINER_PROXY_ENVIRONMENT.map((name) => [name, ""])),
+    })
+  ) findings.push("browser acceptance build boundary drifted");
+  if (
+    JSON.stringify(secretBindings(browser)) !==
+      JSON.stringify(["keycloak_demo_admin_password:keycloak_demo_admin_password"]) ||
+    JSON.stringify(dependencyBindings(browser)) !==
+      JSON.stringify([
+        "gateway:service_healthy:no-restart:required",
+        "keycloak-realm-convergence:service_healthy:no-restart:required",
+        "proxy:service_healthy:no-restart:required",
+      ]) ||
+    !sameJson(browser.networks, { "app-backend": {} })
+  ) findings.push("browser acceptance secret, dependency or network boundary drifted");
+  return findings;
 }
 
 export function collectorConfigFindings(config) {
@@ -2119,6 +2223,7 @@ export function canonicalComposeFindings(model, expected) {
       "keycloak-realm-convergence",
     );
   }
+  if (expected.browser === true) expectedServices.push("browser-acceptance");
   if (JSON.stringify(keys(services)) !== JSON.stringify(sorted(expectedServices))) {
     findings.push("service set does not match the selected provider row");
   }
@@ -2138,7 +2243,13 @@ export function canonicalComposeFindings(model, expected) {
     if ((service.configs ?? []).length > 0) {
       findings.push(`${name} mounts an unreviewed Compose config`);
     }
-    if (service.profiles !== undefined) findings.push(`${name} is unexpectedly profile-gated`);
+    if (name === "browser-acceptance") {
+      if (JSON.stringify(service.profiles) !== JSON.stringify(["browser-acceptance"])) {
+        findings.push("browser-acceptance profile gate drifted");
+      }
+    } else if (service.profiles !== undefined) {
+      findings.push(`${name} is unexpectedly profile-gated`);
+    }
     if (name !== "postgres" && service.user !== expected.runtimeUser) {
       findings.push(`${name} runtime UID:GID differs from the validated secret owner`);
     }
@@ -2202,6 +2313,9 @@ export function canonicalComposeFindings(model, expected) {
     expectedImages.keycloak = expected.keycloakImage;
     expectedImages["keycloak-realm-convergence"] = expected.keycloakImage;
   }
+  if (expected.browser === true) {
+    expectedImages["browser-acceptance"] = expected.browserImage;
+  }
   for (const [name, image] of Object.entries(expectedImages)) {
     if (services[name]?.image !== image) findings.push(`${name} image reference drifted`);
   }
@@ -2236,6 +2350,9 @@ export function canonicalComposeFindings(model, expected) {
     expectedEntrypoints["keycloak-database-bootstrap"] = [
       "/usr/local/bin/synveda-database-bootstrap",
     ];
+  }
+  if (expected.browser === true) {
+    expectedEntrypoints["browser-acceptance"] = ["node", "console-login.mjs"];
   }
   for (const name of expectedServices) {
     const actual = services[name]?.entrypoint;
@@ -2933,6 +3050,13 @@ export function canonicalComposeFindings(model, expected) {
       "keycloak-realm-convergence:service_healthy:no-restart:required",
     ];
   }
+  if (expected.browser === true) {
+    expectedDependencies["browser-acceptance"] = [
+      "gateway:service_healthy:no-restart:required",
+      "keycloak-realm-convergence:service_healthy:no-restart:required",
+      "proxy:service_healthy:no-restart:required",
+    ];
+  }
   if (expected.postgres === "bundled" && expected.oidc === "bundled") {
     expectedDependencies["keycloak-database-bootstrap"] = [
       "database-bootstrap:service_completed_successfully:no-restart:required",
@@ -3007,6 +3131,11 @@ export function canonicalComposeFindings(model, expected) {
         "keycloak_demo_member_password:keycloak_demo_member_password",
       );
     }
+  }
+  if (expected.browser === true) {
+    expectedSecrets["browser-acceptance"] = [
+      "keycloak_demo_admin_password:keycloak_demo_admin_password",
+    ];
   }
   if (expected.runtime === "reference") {
     expectedSecrets.proxy = [
@@ -3246,6 +3375,12 @@ export function canonicalComposeFindings(model, expected) {
     ],
     "otel-collector": [],
   };
+  if (expected.browser === true) {
+    expectedEnvironmentKeys["browser-acceptance"] = [
+      "SYNVEDA_BROWSER_APP_URL",
+      "SYNVEDA_BROWSER_ISSUER",
+    ];
+  }
   if (expected.postgres === "bundled" || expected.oidc === "bundled") {
     expectedEnvironmentKeys["database-preflight"].push(
       "SYNVEDA_DATABASE_EXPECTED_HOST",
@@ -3332,6 +3467,14 @@ export function canonicalComposeFindings(model, expected) {
       findings.push(`${name} environment key set drifted`);
     }
   }
+  if (expected.browser === true) {
+    findings.push(
+      ...browserAcceptanceFindings(services["browser-acceptance"] ?? {}, {
+        ...expected,
+        root: ROOT,
+      }),
+    );
+  }
 
   const expectedNetworks = {
     "database-preflight": { "synveda-data": {} },
@@ -3358,14 +3501,20 @@ export function canonicalComposeFindings(model, expected) {
       "telemetry-egress": { gw_priority: 1 },
     },
     proxy: {
-      "app-backend":
-        expected.oidc === "bundled" ? { aliases: [expected.authHost] } : {},
+      "app-backend": {
+        aliases: expected.oidc === "bundled"
+          ? [expected.appHost, expected.authHost]
+          : [expected.appHost],
+      },
       ...(expected.oidc === "bundled"
         ? { "identity-backend": { ipv4_address: expected.proxyIdentityAddress } }
         : {}),
       "public-edge": { gw_priority: 1 },
     },
   };
+  if (expected.browser === true) {
+    expectedNetworks["browser-acceptance"] = { "app-backend": {} };
+  }
   if (expected.postgres === "external") {
     expectedNetworks["database-preflight"]["application-egress"] = { gw_priority: 1 };
     expectedNetworks.migrate["application-egress"] = { gw_priority: 1 };
@@ -3478,11 +3627,19 @@ export function canonicalComposeFindings(model, expected) {
     ) {
       findings.push("Keycloak database bootstrap does not use the development provider build");
     }
+    if (
+      expected.browser === true &&
+      services["browser-acceptance"]?.build?.dockerfile !==
+        "deploy/compose/browser/Dockerfile"
+    ) {
+      findings.push("browser acceptance does not use the pinned fixture build");
+    }
     const developmentBuilds = [...developmentProductBuilds, "proxy"];
     if (expected.postgres === "bundled") developmentBuilds.push("database-bootstrap");
     if (expected.oidc === "bundled") {
       developmentBuilds.push("keycloak", "keycloak-database-bootstrap");
     }
+    if (expected.browser === true) developmentBuilds.push("browser-acceptance");
     const selectedBuilds = Object.entries(services)
       .filter(([, service]) => service.build !== undefined)
       .map(([name]) => name)
@@ -3610,7 +3767,7 @@ export function canonicalComposeFindings(model, expected) {
 function render(fixture, expected) {
   const output = join(
     fixture.scratch,
-    `${expected.runtime}-${expected.postgres}-${expected.oidc}${expected.demo === true ? "-demo" : ""}.json`,
+    `${expected.runtime}-${expected.postgres}-${expected.oidc}${expected.demo === true ? "-demo" : ""}${expected.browser === true ? "-browser" : ""}.json`,
   );
   const reference = expected.runtime === "reference";
   expected.publicPort = reference ? 443 : (expected.devPort ?? 8080);
@@ -3630,7 +3787,7 @@ function render(fixture, expected) {
         ? "https://auth.compose.example"
         : `http://auth.synveda.test:${expected.publicPort}`
       : undefined;
-  expected.projectName = `synveda-${expected.runtime}`;
+  expected.projectName = `synveda-${expected.runtime}${expected.browser === true ? "-acceptance-browser" : ""}`;
   expected.bootstrapTenantId = "019b53c0-7c00-7000-8000-000000000045";
   expected.bootstrapTenantSlug = "reference";
   expected.bootstrapTenantName = "Synveda Reference";
@@ -3651,6 +3808,10 @@ function render(fixture, expected) {
     : "synveda/proxy:2.11.4-dev";
   expected.otelCollectorImage =
     "otel/opentelemetry-collector-contrib:0.159.0@sha256:1f2c54a30e713fac6b3ae77a1ec84010c2007e29ced8ec666214fc2f6739c1cc";
+  expected.browserImage = "synveda/browser-acceptance:1.62.1-dev";
+  expected.browserSeccompProfile = realpathSync(
+    join(COMPOSE, "browser/seccomp_profile.json"),
+  );
   expected.issuer =
     expected.oidc === "bundled"
       ? `${expected.authUrl}/realms/synveda`
@@ -3676,12 +3837,12 @@ function render(fixture, expected) {
   const canonicalScratch = realpathSync(fixture.scratch);
   expected.databaseAuthorityDir = join(
     canonicalScratch,
-    `synveda-${expected.runtime}`,
+    expected.projectName,
     "database-authority",
   );
   expected.keycloakPublicGateDir = join(
     canonicalScratch,
-    `synveda-${expected.runtime}`,
+    expected.projectName,
     "keycloak-public-gate",
   );
   writePrivate(
@@ -3710,7 +3871,15 @@ function render(fixture, expected) {
     SYNVEDA_KEYCLOAK_IMAGE: expected.keycloakImage,
     SYNVEDA_CADDY_IMAGE: expected.caddyImage,
     SYNVEDA_OTEL_COLLECTOR_IMAGE: expected.otelCollectorImage,
-    ...(expected.demo === true ? { SYNVEDA_COMPOSE_PROFILES: "demo" } : {}),
+    ...(expected.browser === true
+      ? {
+          SYNVEDA_COMPOSE_PROFILES: "demo,browser-acceptance",
+          SYNVEDA_COMPOSE_PROJECT_SUFFIX: "acceptance-browser",
+          SYNVEDA_BROWSER_IMAGE: expected.browserImage,
+        }
+      : expected.demo === true
+        ? { SYNVEDA_COMPOSE_PROFILES: "demo" }
+        : {}),
   });
   expected.issuerFile = realpathSync(environment.SYNVEDA_OIDC_ISSUERS_FILE);
   expected.oidcDirectorySecrets = realpathSync(
@@ -3754,6 +3923,7 @@ function checkStaticInputs() {
     "compose.keycloak-postgres.yaml",
     "compose.keycloak-external-postgres.yaml",
     "compose.demo.yaml",
+    "compose.browser-acceptance.yaml",
     "compose.external.yaml",
     "compose.external-postgres.yaml",
   ].map((name) => readFileSync(join(COMPOSE, name), "utf8"));
@@ -4031,11 +4201,30 @@ export function main() {
       [],
       `development/demo: ${demoFindings.join("; ")}`,
     );
+    const browserExpected = {
+      runtime: "development",
+      postgres: "bundled",
+      oidc: "bundled",
+      demo: true,
+      browser: true,
+    };
+    const browser = render(fixture, browserExpected);
+    const browserFindings = canonicalComposeFindings(browser, browserExpected);
+    assert.deepEqual(
+      browserFindings,
+      [],
+      `development/browser-acceptance: ${browserFindings.join("; ")}`,
+    );
+    assert.deepEqual(
+      render(fixture, browserExpected),
+      browser,
+      "development/browser-acceptance render is not deterministic",
+    );
     console.log(
       `canonical Compose static shape validates: ${rows}/8 deterministic provider/runtime rows, ` +
-        "one bundled demo profile, one exact custom development issuer port, role-scoped file secrets, " +
+        "one bundled demo profile, one sandboxed browser-acceptance row, one exact custom development issuer port, role-scoped file secrets, " +
         "isolated networks, reverse-proxy-only host ports and closed runtime/build proxy injection; " +
-        "live clean-start and browser acceptance remain pending",
+        "live clean-start and browser acceptance execution remain pending",
     );
   } finally {
     rmSync(fixture.scratch, { recursive: true, force: true });

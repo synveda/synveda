@@ -186,9 +186,14 @@ and separate build from every no-build startup/recovery path. The next blocker
 now has a reversible, exact-confirmation `.test` host ownership ceremony whose
 scratch acceptance proves collision/drift refusal, same-inode metadata
 retention, and strict-prefix and sidecar-stage interruption recovery. No host
-change has been made. The next slice is the
-committed clean-Engine/browser fixture with initial-absence, synthetic build,
-private-registry/remote-builder, manifest, no-capture PKCE and exact-cleanup
+change has been made. The current source now adds a fresh-project initial-asset
+absence gate, closed proxy assertions before the first RUN in every deployment
+image stage, and a pinned sandboxed no-capture Playwright fixture. Its exact
+development overlay waits for one Keycloak authorization-code/PKCE S256
+administrator login and logout before ordinary smoke; deterministic contract,
+lifecycle and injected-flow tests pass, but the container has not run. The next
+slice completes the isolated clean-Engine harness with synthetic Docker-client
+proxy, private-registry/remote-builder, candidate-manifest and exact-cleanup
 evidence; only then is the privileged mapping installed for the Docker Desktop
 run. Linux/reference HTTPS follows before the legacy Rauthy/Temporal callers
 can be cut over and deleted. Backup/restore, upgrade and Apalis remain open

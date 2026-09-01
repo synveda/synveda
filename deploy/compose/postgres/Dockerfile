@@ -3,6 +3,18 @@
 # jobs all live in ordinary tenant-bound tables; pgvector is the epoch-3
 # schema's only non-core extension.
 FROM rust:1.96.0-bookworm@sha256:5e2214abe154fe26e39f64488952e5c991eeed1d6d6da7cc8381ae83927f0cfc AS snapshot-builder
+ARG HTTP_PROXY
+ARG http_proxy
+ARG HTTPS_PROXY
+ARG https_proxy
+ARG NO_PROXY
+ARG no_proxy
+ARG FTP_PROXY
+ARG ftp_proxy
+ARG ALL_PROXY
+ARG all_proxy
+COPY --chmod=0555 deploy/compose/scripts/assert-build-proxy-closed /usr/local/bin/assert-build-proxy-closed
+RUN /usr/local/bin/assert-build-proxy-closed
 
 COPY deploy/compose/postgres/synveda-input-snapshot.c /tmp/synveda-input-snapshot.c
 
@@ -13,6 +25,18 @@ RUN set -eux; \
     chmod 0555 /usr/local/bin/synveda-input-snapshot
 
 FROM postgres:17.11-bookworm@sha256:051f7b7b3abdd564d5d1bd1e8c4b9c1b6e77087d1dd22020ede611c096a272e0 AS runtime
+ARG HTTP_PROXY
+ARG http_proxy
+ARG HTTPS_PROXY
+ARG https_proxy
+ARG NO_PROXY
+ARG no_proxy
+ARG FTP_PROXY
+ARG ftp_proxy
+ARG ALL_PROXY
+ARG all_proxy
+COPY --chmod=0555 deploy/compose/scripts/assert-build-proxy-closed /usr/local/bin/assert-build-proxy-closed
+RUN /usr/local/bin/assert-build-proxy-closed
 
 RUN set -eux; \
     apt-get update; \
@@ -50,8 +74,32 @@ RUN set -eux; \
 # two extension prerequisites in an explicit build target so the reference,
 # db-test and release images cannot execute initdb SQL behind the bootstrap.
 FROM runtime AS development
+ARG HTTP_PROXY
+ARG http_proxy
+ARG HTTPS_PROXY
+ARG https_proxy
+ARG NO_PROXY
+ARG no_proxy
+ARG FTP_PROXY
+ARG ftp_proxy
+ARG ALL_PROXY
+ARG all_proxy
+COPY --chmod=0555 deploy/compose/scripts/assert-build-proxy-closed /usr/local/bin/assert-build-proxy-closed
+RUN /usr/local/bin/assert-build-proxy-closed
 COPY --chmod=0444 deploy/compose/postgres/development-initdb.sql /docker-entrypoint-initdb.d/01-synveda-extensions.sql
 
 # Default final stage: all product/reference callers build this stage unless
 # they deliberately select the development target above.
 FROM runtime AS reference
+ARG HTTP_PROXY
+ARG http_proxy
+ARG HTTPS_PROXY
+ARG https_proxy
+ARG NO_PROXY
+ARG no_proxy
+ARG FTP_PROXY
+ARG ftp_proxy
+ARG ALL_PROXY
+ARG all_proxy
+COPY --chmod=0555 deploy/compose/scripts/assert-build-proxy-closed /usr/local/bin/assert-build-proxy-closed
+RUN /usr/local/bin/assert-build-proxy-closed

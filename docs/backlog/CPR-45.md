@@ -334,21 +334,48 @@ deterministic authentic-frame Claude lifecycle passed 1/1 and self-cleaned,
 and the complete post-repair `make ci` gate passes with the generated API and
 657-record SQLx cache current.
 
+The current deterministic browser-preparation slice introduces an explicit
+`absent` asset state that is valid only for a suffixed development acceptance
+project and refuses every exact-name container, network and volume before the
+first build. All fourteen deployment image stages now execute one
+closed assertion before their first RUN and refuse a non-empty upper/lower
+HTTP, HTTPS, NO, FTP or ALL proxy build argument. Recursive image inventory now
+interprets Docker global build arguments and stage aliases in declaration
+order, refuses noncanonical Compose image/build keys and Dockerfile parser
+directives, and covers all deployment Dockerfiles and Compose build callers,
+including the fixture-only pinned
+Playwright/Chromium 1.62.1 base and its Apache-2.0 package, licence and reviewed
+default-deny sandbox profile.
+
+The exact `demo,browser-acceptance` overlay is development/bundled-only,
+requires that fresh project state, and adds one private non-root one-shot on
+`app-backend`. Its driver validates one exact authorization-code/PKCE S256
+request, Keycloak's exact issuer/session-state callback, administrator
+admission and logout while refusing foreign or non-flow identity paths. It
+captures no screenshots, content, HAR, trace, video or storage state and emits
+no credentials, codes, tokens or cookies. The wrapper waits for the exact
+container to exit zero before the ordinary runtime smoke. Deterministic
+Compose-model, lifecycle, seccomp, secret-descriptor and injected-browser tests
+pass. The documented serial resolver handoff binds the single helper-owned
+hosts block to the suffixed acceptance project and carries the exact suffix,
+pool and profiles through down, confirmed reset and mapping removal. No Docker
+command has run in this slice, so neither a live exchange nor
+the mounted secret's effective uid/mode is deployment evidence.
+
 ### Immediate next slice
 
-Commit the deterministic clean-Engine/browser acceptance fixture before any
-host or Docker mutation. It must add exact initial-asset absence, synthetic
-assertions in every real development build, an ephemeral authenticated private
-registry and canary remote-builder state, a content-free candidate manifest, a
-fresh no-capture Keycloak browser PKCE driver and exact fixture cleanup. Then
-request explicit administrator approval for the exact `.test` block, install
-it from the clean reviewed checkout with the fixed-runtime helper, flush the
-active resolver cache and run that fixture
-against the separate clean Docker endpoint. Prove the repository reaches only
-the pinned local default builder, registry authentication still works, private
-Buildx state is removed, every created container retains the ten exact empty
-proxy entries, and the real browser completes authorization-code + PKCE without
-recording credentials, codes, tokens, cookies, HAR, trace, video or screenshots.
+After this preparation is committed, complete the isolated clean-Engine
+harness with an ephemeral authenticated private registry, synthetic Docker
+client proxy configuration, canary remote-builder state, a content-free
+candidate manifest and exact fixture cleanup. Then request explicit
+administrator approval for the exact `.test` block, install it from the clean
+reviewed checkout with the fixed-runtime helper, flush the active resolver cache
+and run the committed browser fixture against that separate clean Docker
+endpoint. Prove the repository reaches only the pinned local default builder,
+registry authentication still works, private Buildx state is removed, every
+created container retains the ten exact empty proxy entries, and the real
+browser completes authorization-code + PKCE without recording credentials,
+codes, tokens, cookies, HAR, trace, video or screenshots.
 Repeat the resolver/lifecycle contract on Linux, then exercise reference HTTPS.
 Only after replacement acceptance may the Rauthy/Temporal callers and assets
 be deleted atomically. Backup/isolated joint database-and-key restore, upgrade

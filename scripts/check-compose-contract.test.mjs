@@ -24,6 +24,7 @@ import test from "node:test";
 import {
   appRouteFindings,
   authorityCleanupOrderFindings,
+  browserAcceptanceFindings,
   caddyTrustBoundaryFindings,
   canonicalComposeFindings,
   collectorConfigFindings,
@@ -1408,6 +1409,68 @@ test("development uses one exact browser and container issuer port", () => {
       model.services["issuer-diagnostic"].environment.SYNVEDA_OIDC_EXPECTED_ISSUER,
       "http://auth.synveda.test:18083/realms/synveda",
     );
+  } finally {
+    rmSync(fixture.scratch, { recursive: true, force: true });
+  }
+});
+
+test("browser acceptance renders one sandboxed secret-minimal fixture", () => {
+  const fixture = makeComposeFixture();
+  try {
+    const output = join(fixture.scratch, "browser-acceptance.json");
+    const browserImage = "synveda/browser-acceptance:1.62.1-dev";
+    const result = spawnSync(WRAPPER, ["config", "--output", output], {
+      cwd: ROOT,
+      env: composeEnvironment(fixture, {
+        SYNVEDA_COMPOSE_PROFILES: "demo,browser-acceptance",
+        SYNVEDA_COMPOSE_PROJECT_SUFFIX: "acceptance-browser-test",
+        SYNVEDA_BROWSER_IMAGE: browserImage,
+      }),
+      encoding: "utf8",
+    });
+    assert.equal(result.status, 0, result.stderr);
+    const model = JSON.parse(readFileSync(output, "utf8"));
+    const browser = model.services["browser-acceptance"];
+    const expected = {
+      runtime: "development",
+      postgres: "bundled",
+      oidc: "bundled",
+      demo: true,
+      root: ROOT,
+      runtimeUser: `${fixture.uid}:${fixture.gid}`,
+      browserImage,
+      browserSeccompProfile: realpathSync(
+        join(COMPOSE, "browser/seccomp_profile.json"),
+      ),
+      appUrl: "http://app.synveda.test:8080",
+      issuer: "http://auth.synveda.test:8080/realms/synveda",
+    };
+    assert.deepEqual(browserAcceptanceFindings(browser, expected), []);
+
+    const mutations = [
+      (service) => { service.profiles = ["demo"]; },
+      (service) => { service.secrets[0].source = "keycloak_admin_password"; },
+      (service) => { service.depends_on.gateway.condition = "service_started"; },
+      (service) => { service.environment.SYNVEDA_BROWSER_APP_URL = "http://other.invalid"; },
+      (service) => { service.user = "0:0"; },
+      (service) => { service.pids_limit = 512; },
+      (service) => { service.tmpfs[0] = "/tmp:rw,size=1g"; },
+      (service) => { service.build.args.HTTP_PROXY = "http://private.invalid"; },
+      (service) => { service.security_opt[1] = "seccomp=unconfined"; },
+      (service) => { service.ports = [{ published: "9222", target: 9222 }]; },
+      (service) => { service.networks["public-edge"] = {}; },
+      (service) => {
+        service.volumes = [{ type: "bind", source: "/var/run/docker.sock", target: "/var/run/docker.sock" }];
+      },
+      (service) => { service.privileged = true; },
+      (service) => { service.ipc = "host"; },
+      (service) => { service.cap_add = ["SYS_ADMIN"]; },
+    ];
+    for (const mutate of mutations) {
+      const changed = structuredClone(browser);
+      mutate(changed);
+      assert.ok(browserAcceptanceFindings(changed, expected).length > 0);
+    }
   } finally {
     rmSync(fixture.scratch, { recursive: true, force: true });
   }
@@ -6766,7 +6829,10 @@ test("model findings reject privilege, port, command and secret regressions", ()
         ],
         build: { dockerfile: "deploy/compose/proxy/Dockerfile" },
         ports: [{ host_ip: "127.0.0.1", published: "8080", target: 8080 }],
-        networks: { "app-backend": {}, "public-edge": { gw_priority: 1 } },
+        networks: {
+          "app-backend": { aliases: ["app.synveda.test"] },
+          "public-edge": { gw_priority: 1 },
+        },
       },
       "otel-collector": {
         command: ["--config=/etc/otelcol/config.yaml"],
@@ -6969,7 +7035,7 @@ test("model findings reject privilege, port, command and secret regressions", ()
   };
   bundled.services.proxy.environment.SYNVEDA_AUTH_HOST = "auth.synveda.test";
   bundled.services.proxy.networks["app-backend"] = {
-    aliases: ["auth.synveda.test"],
+    aliases: ["app.synveda.test", "auth.synveda.test"],
   };
   bundled.services.proxy.networks["identity-backend"] = {
     ipv4_address: "172.30.240.2",
@@ -7417,7 +7483,7 @@ test("model findings reject privilege, port, command and secret regressions", ()
 
   const externalIdentityAttachment = structuredClone(base);
   externalIdentityAttachment.services.proxy.networks["app-backend"] = {
-    aliases: ["auth.synveda.test"],
+    aliases: ["app.synveda.test", "auth.synveda.test"],
   };
   assert.ok(
     canonicalComposeFindings(externalIdentityAttachment, expected).includes(

@@ -15,6 +15,18 @@
 # static directory, not a second runtime. Node appears here and never in
 # the runtime stage.
 FROM node:22-bookworm-slim@sha256:83f487e0a63425e5b4d146fb5e5be574bcbe1b7b843d3ebafdd95eaf7767a7e5 AS console
+ARG HTTP_PROXY
+ARG http_proxy
+ARG HTTPS_PROXY
+ARG https_proxy
+ARG NO_PROXY
+ARG no_proxy
+ARG FTP_PROXY
+ARG ftp_proxy
+ARG ALL_PROXY
+ARG all_proxy
+COPY --chmod=0555 deploy/compose/scripts/assert-build-proxy-closed /usr/local/bin/assert-build-proxy-closed
+RUN /usr/local/bin/assert-build-proxy-closed
 WORKDIR /src
 RUN corepack enable
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
@@ -27,6 +39,18 @@ COPY console console
 RUN pnpm --filter @synveda/console build
 
 FROM rust:1.96.0-bookworm@sha256:5e2214abe154fe26e39f64488952e5c991eeed1d6d6da7cc8381ae83927f0cfc AS build
+ARG HTTP_PROXY
+ARG http_proxy
+ARG HTTPS_PROXY
+ARG https_proxy
+ARG NO_PROXY
+ARG no_proxy
+ARG FTP_PROXY
+ARG ftp_proxy
+ARG ALL_PROXY
+ARG all_proxy
+COPY --chmod=0555 deploy/compose/scripts/assert-build-proxy-closed /usr/local/bin/assert-build-proxy-closed
+RUN /usr/local/bin/assert-build-proxy-closed
 WORKDIR /src
 
 # The toolchain file pins the same version this image starts from; copying
@@ -80,6 +104,18 @@ RUN set -eux; \
     cargo build --locked --release -p synveda-gateway -p synveda-cli
 
 FROM debian:bookworm-slim@sha256:88200866dfff7ea7f5cbcb6ec7c8a701889efe6fe859fe64d6990e4b07ea4171 AS runtime
+ARG HTTP_PROXY
+ARG http_proxy
+ARG HTTPS_PROXY
+ARG https_proxy
+ARG NO_PROXY
+ARG no_proxy
+ARG FTP_PROXY
+ARG ftp_proxy
+ARG ALL_PROXY
+ARG all_proxy
+COPY --chmod=0555 deploy/compose/scripts/assert-build-proxy-closed /usr/local/bin/assert-build-proxy-closed
+RUN /usr/local/bin/assert-build-proxy-closed
 # ca-certificates for OIDC discovery against an external issuer over TLS;
 # curl for the healthcheck compose waits on.
 RUN apt-get update \

@@ -3,6 +3,18 @@
 # so a glibc/loader mismatch fails the image build; glibc is not statically
 # embedded in the distributed helper.
 FROM rust:1.96.0-bookworm@sha256:5e2214abe154fe26e39f64488952e5c991eeed1d6d6da7cc8381ae83927f0cfc AS snapshot-builder
+ARG HTTP_PROXY
+ARG http_proxy
+ARG HTTPS_PROXY
+ARG https_proxy
+ARG NO_PROXY
+ARG no_proxy
+ARG FTP_PROXY
+ARG ftp_proxy
+ARG ALL_PROXY
+ARG all_proxy
+COPY --chmod=0555 deploy/compose/scripts/assert-build-proxy-closed /usr/local/bin/assert-build-proxy-closed
+RUN /usr/local/bin/assert-build-proxy-closed
 COPY deploy/compose/postgres/synveda-input-snapshot.c /tmp/synveda-input-snapshot.c
 RUN cc -std=c11 -O2 -Wall -Wextra -Werror \
        /tmp/synveda-input-snapshot.c -o /opt/synveda-input-snapshot \
@@ -12,6 +24,18 @@ RUN cc -std=c11 -O2 -Wall -Wextra -Werror \
 # CPR-45 / ADR-0102: the bundled provider is an optimized production-mode
 # Keycloak build. The official multi-architecture index is pinned exactly.
 FROM quay.io/keycloak/keycloak:26.7.2@sha256:9d1f1b2b7261ff53c66cb1092dfcdc34a5fb77e81f9e6a6e75b8b6a795de8067 AS builder
+ARG HTTP_PROXY
+ARG http_proxy
+ARG HTTPS_PROXY
+ARG https_proxy
+ARG NO_PROXY
+ARG no_proxy
+ARG FTP_PROXY
+ARG ftp_proxy
+ARG ALL_PROXY
+ARG all_proxy
+COPY --chmod=0555 deploy/compose/scripts/assert-build-proxy-closed /opt/keycloak/bin/assert-build-proxy-closed
+RUN /opt/keycloak/bin/assert-build-proxy-closed
 
 ENV KC_DB=postgres \
     KC_FEATURES_DISABLED=identity-brokering-api,twitter-broker \
@@ -41,6 +65,18 @@ RUN /tmp/synveda-authority-stage-self-test
 RUN /opt/keycloak/bin/kc.sh build
 
 FROM quay.io/keycloak/keycloak:26.7.2@sha256:9d1f1b2b7261ff53c66cb1092dfcdc34a5fb77e81f9e6a6e75b8b6a795de8067
+ARG HTTP_PROXY
+ARG http_proxy
+ARG HTTPS_PROXY
+ARG https_proxy
+ARG NO_PROXY
+ARG no_proxy
+ARG FTP_PROXY
+ARG ftp_proxy
+ARG ALL_PROXY
+ARG all_proxy
+COPY --chmod=0555 deploy/compose/scripts/assert-build-proxy-closed /opt/keycloak/bin/assert-build-proxy-closed
+RUN /opt/keycloak/bin/assert-build-proxy-closed
 # KC-SERVICES0077 includes the mounted bootstrap identifier at INFO. Retain
 # service warnings/errors without allowing that input into default logs.
 ENV KC_LOG_LEVEL_ORG_KEYCLOAK_SERVICES=warn

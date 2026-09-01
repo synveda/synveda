@@ -4,8 +4,9 @@ This directory contains Synveda's canonical single-host Compose graph. The
 current checkpoint has an executable, convergent lifecycle for bundled
 PostgreSQL with either bundled Keycloak or external OIDC. It is still
 development/reference implementation evidence, not controlled-use acceptance:
-a clean browser PKCE exchange, a clean Linux run, reference HTTPS, backup,
-restore and upgrade remain open.
+the committed no-capture browser PKCE fixture has not run against live
+containers, and a clean Linux run, reference HTTPS, backup, restore and upgrade
+remain open.
 
 The contributor-only `make dev-up` stack still contains Rauthy and Temporal
 residue. It is not an alternative reference deployment and will be removed
@@ -135,9 +136,97 @@ project input. The generated files live under
 mode-0700 project directory and their values are never printed by the
 lifecycle.
 
+The dedicated development browser fixture is deliberately a fresh-project
+one-shot, not an ordinary smoke extension. The hosts manager owns at most one
+global block, and ownership includes the exact Compose project. The ordinary
+project and a suffixed acceptance project therefore cannot coexist in that
+block. First stop the ordinary project, then remove its mapping (or prove it
+already absent):
+
+```sh
+make compose-down
+SYNVEDA_CONFIRM_HOSTS_REMOVE=remove:127.0.0.1:synveda-development:app.synveda.test:auth.synveda.test \
+  make compose-hosts-remove
+make compose-hosts-status
+```
+
+Flush the active resolver cache after removal. Install the mapping for the
+exact fresh acceptance project. Hosts actions deliberately take the suffix but
+no Compose profiles or IPv4 pool:
+
+```sh
+SYNVEDA_COMPOSE_PROJECT_SUFFIX=acceptance-browser \
+SYNVEDA_CONFIRM_HOSTS_INSTALL=install:127.0.0.1:synveda-development-acceptance-browser:app.synveda.test:auth.synveda.test \
+  make compose-hosts-install
+```
+
+Flush the active resolver cache after installation, then prove the exact
+acceptance mapping and real resolver result:
+
+```sh
+SYNVEDA_COMPOSE_PROJECT_SUFFIX=acceptance-browser \
+  make compose-hosts-status
+SYNVEDA_COMPOSE_PROJECT_SUFFIX=acceptance-browser \
+  make compose-resolver-check
+```
+
+Supply that same bounded suffix and a distinct non-overlapping `/24` to the
+browser target:
+
+```sh
+SYNVEDA_COMPOSE_PROJECT_SUFFIX=acceptance-browser \
+SYNVEDA_COMPOSE_IPV4_POOL=10.231.45.0/24 \
+  make compose-browser-acceptance
+```
+
+The target fixes the selected profiles to exactly `demo,browser-acceptance`
+and invokes `up --initial-assets absent`. It refuses the unsuffixed project,
+reference/external-provider modes, every pre-existing exact project container,
+network or volume, and every additional profile. After the normal bundled
+graph is healthy, a sandboxed non-root Playwright 1.62.1 container completes
+one authorization-code/PKCE S256 administrator admission and logout. The
+wrapper waits for that exact container to exit zero before the ordinary
+runtime smoke; no browser service is accepted in ordinary smoke. The fixture
+does not record screenshots, HTML, HAR, trace, video, storage state,
+credentials, codes, tokens or cookies. Its sole secret is the mounted demo
+administrator password, which is read through a bounded no-follow descriptor;
+the mutable read and return buffers are zeroed, and the value is never logged
+or captured. A live run must still prove the effective secret uid/mode on each
+supported Docker platform. The target leaves the fresh project running for
+inspection. Teardown and disposal must repeat the exact suffix, pool and
+profiles selected by the target:
+
+```sh
+SYNVEDA_COMPOSE_PROJECT_SUFFIX=acceptance-browser \
+SYNVEDA_COMPOSE_IPV4_POOL=10.231.45.0/24 \
+SYNVEDA_COMPOSE_PROFILES=demo,browser-acceptance \
+  make compose-down
+SYNVEDA_COMPOSE_PROJECT_SUFFIX=acceptance-browser \
+SYNVEDA_COMPOSE_IPV4_POOL=10.231.45.0/24 \
+SYNVEDA_COMPOSE_PROFILES=demo,browser-acceptance \
+SYNVEDA_CONFIRM_RESET=synveda-development-acceptance-browser \
+  make compose-reset
+```
+
+The confirmed reset preserves generated secrets and issuer inputs under the
+current lifecycle contract. Remove the acceptance mapping separately, without
+profiles or the pool, flush the active resolver cache, and prove it is absent:
+
+```sh
+SYNVEDA_COMPOSE_PROJECT_SUFFIX=acceptance-browser \
+SYNVEDA_CONFIRM_HOSTS_REMOVE=remove:127.0.0.1:synveda-development-acceptance-browser:app.synveda.test:auth.synveda.test \
+  make compose-hosts-remove
+SYNVEDA_COMPOSE_PROJECT_SUFFIX=acceptance-browser \
+  make compose-hosts-status
+```
+
+Reinstall the ordinary project's mapping before returning to its default
+lifecycle. A refusal during any handoff requires recovery or inspection; do
+not override it or install a second block manually.
+
 Neither `compose-down` nor confirmed `compose-reset` removes the host-wide
-mapping. After the exact project is stopped, remove only the helper-owned block
-with the same runtime, OIDC, suffix and hostname selectors used to install it:
+mapping. For the ordinary unsuffixed project, remove only the helper-owned
+block after the exact project is stopped:
 
 ```sh
 SYNVEDA_CONFIRM_HOSTS_REMOVE=remove:127.0.0.1:synveda-development:app.synveda.test:auth.synveda.test \
@@ -172,7 +261,9 @@ of a gateway restart, the asset gate requires the complete service, network and
 volume inventory and inspects every exact container's immutable `Config.Env`
 for one empty entry per name. This closes Docker CLI proxy auto-injection; it
 does not add supported outbound-proxy routing. The legacy contributor Compose
-file and the isolated database-test harness are outside this canonical wrapper.
+file and the isolated database-test harness are outside this canonical wrapper,
+but their source-build declarations supply the same exact empty proxy arguments
+so those deployment callers cannot reopen the image-stage boundary.
 
 Development `up` also refuses every recognised ambient BuildKit, Buildx and
 Bake control before starting a helper or taking the project lock. After the
@@ -223,7 +314,10 @@ between validation and use; it never repairs those states by deletion.
 Asset state is explicit: `existing` permits an absent or partial exact project
 so recovery can proceed, `converged` requires every rendered container, network
 and volume plus the closed runtime proxy environment, and `stopped` requires
-containers and networks to be absent. A deterministic post-create contract
+containers and networks to be absent. `absent` is narrower: it is accepted only
+for a suffixed development acceptance project and requires all exact project
+containers, networks and volumes to be missing before the first build. A
+deterministic post-create contract
 refusal releases the lifecycle lock so the exact project can be taken down or
 force-recreated; an unavailable, timed-out or otherwise uncertain inspection
 retains the fail-closed lock.
@@ -309,13 +403,16 @@ The wrapper owns file and profile selection in this order:
 6. the matching Keycloak/PostgreSQL bridge;
 7. external-provider egress fragments when selected;
 8. `compose.demo.yaml` when `demo` is selected;
-9. the remaining optional profile fragments.
+9. `compose.browser-acceptance.yaml` only for the exact fresh browser fixture;
+10. the remaining optional profile fragments.
 
 `make compose-config` runs the complete deterministic matrix without starting
 or pulling images. The accepted profile vocabulary is `semantic`,
-`observability`, `apalis-board`, `demo` and `backup-test`; profiles without an
-implemented service remain configuration-only. The demo profile requires both
-bundled providers.
+`observability`, `apalis-board`, `demo`, `backup-test` and
+`browser-acceptance`; profiles without an implemented service remain
+configuration-only. The demo profile requires both bundled providers, and
+`browser-acceptance` is a fixture-only profile valid only together with `demo`
+under the fresh-project command above.
 
 Bundled PostgreSQL with external OIDC uses the same product image and requires
 an operator-supplied, mode-0600 issuer file plus `SYNVEDA_OIDC_ISSUER`. The
@@ -394,9 +491,13 @@ backups and operator UIs remain private.
 
 ## Current limits
 
-This checkpoint is not proof of browser login, desktop/Linux parity, reference
-HTTPS, backup/PITR, isolated restore, upgrade/rollback, HA, host-loss tolerance,
-hosted SaaS readiness or enterprise certification. The core Collector remains
-private but currently exports to `nop`; the bounded observability profile and
-Operations UI are open. Do not delete the legacy Rauthy/Temporal assets or
-change the production-readiness verdict until replacement acceptance passes.
+This checkpoint contains a deterministically tested browser-login fixture, but
+is not proof that a browser login has completed against live containers. It is
+also not proof of desktop/Linux parity, reference HTTPS, backup/PITR, isolated
+restore, upgrade/rollback, HA, host-loss tolerance, hosted SaaS readiness or
+enterprise certification. The synthetic Docker-client proxy, canary remote
+builder, authenticated private registry, candidate manifest and exact clean
+Engine teardown harness remain open. The core Collector remains private but
+currently exports to `nop`; the bounded observability profile and Operations UI
+are open. Do not delete the legacy Rauthy/Temporal assets or change the
+production-readiness verdict until replacement acceptance passes.

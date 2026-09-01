@@ -1562,7 +1562,7 @@ admin_quiet "$authority_config" client-update update "clients/$client_id" -r "$r
     -s "baseUrl=\"$public_app_url/console/\"" \
     -s "redirectUris=[\"$redirect_uri\"]" \
     -s "webOrigins=[\"$public_app_url\"]" \
-    -s 'attributes={"pkce.code.challenge.method":"S256","use.refresh.tokens":"true","client_credentials.use_refresh_token":"false","dpop.bound.access.tokens":"false"}'
+    -s 'attributes={"pkce.code.challenge.method":"S256","use.refresh.tokens":"true","client_credentials.use_refresh_token":"false","dpop.bound.access.tokens":"false","exclude.session.state.from.auth.response":"false","exclude.issuer.from.auth.response":"false"}'
 
 reconcile_client_scopes() {
     scope_kind=$1

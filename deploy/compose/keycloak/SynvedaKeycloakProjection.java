@@ -516,13 +516,15 @@ public final class SynvedaKeycloakProjection {
         stringSet(node, "optionalClientScopes", Set.of());
         JsonNode attributes = node.path("attributes");
         requireObject(attributes);
-        if (attributes.size() != 8) {
+        if (attributes.size() != 10) {
             throw new IllegalArgumentException();
         }
         text(attributes, "pkce.code.challenge.method", "S256");
         text(attributes, "use.refresh.tokens", "true");
         text(attributes, "client_credentials.use_refresh_token", "false");
         text(attributes, "dpop.bound.access.tokens", "false");
+        text(attributes, "exclude.session.state.from.auth.response", "false");
+        text(attributes, "exclude.issuer.from.auth.response", "false");
         text(attributes, "realm_client", "false");
         text(attributes, "backchannel.logout.session.required", "true");
         text(attributes, "backchannel.logout.revoke.offline.tokens", "false");

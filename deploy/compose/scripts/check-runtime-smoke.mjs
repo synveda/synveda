@@ -31,7 +31,7 @@ export function parseComposePs(source) {
   }
 }
 
-export function runtimeStateFindings(rows, { postgres, oidc }) {
+export function runtimeStateFindings(rows, { postgres, oidc, browser }) {
   const oneShots = new Set([
     "database-preflight",
     "issuer-diagnostic",
@@ -48,6 +48,7 @@ export function runtimeStateFindings(rows, { postgres, oidc }) {
     longRunning.add("keycloak");
     longRunning.add("keycloak-realm-convergence");
   }
+  if (browser === "true") oneShots.add("browser-acceptance");
   const expected = new Set([...oneShots, ...longRunning]);
   const findings = [];
   const observed = new Map();
@@ -120,6 +121,7 @@ export function parseArguments(argv) {
     "--runtime",
     "--postgres",
     "--oidc",
+    "--browser",
     "--app-url",
     "--issuer",
   ]);
@@ -129,6 +131,13 @@ export function parseArguments(argv) {
   if (!["development", "reference"].includes(selection.runtime)) return undefined;
   if (!["bundled", "external"].includes(selection.postgres)) return undefined;
   if (!["bundled", "external"].includes(selection.oidc)) return undefined;
+  if (!["true", "false"].includes(selection.browser)) return undefined;
+  if (
+    selection.browser === "true" &&
+    (selection.runtime !== "development" ||
+      selection.postgres !== "bundled" ||
+      selection.oidc !== "bundled")
+  ) return undefined;
   try {
     const app = new URL(selection["app-url"]);
     const issuer = new URL(selection.issuer);

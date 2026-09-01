@@ -2,6 +2,18 @@
 # it gives `make db-test` two isolated PostgreSQL clusters so normal tests run
 # as the gateway role while destructive epoch/reset tests cannot affect them.
 
+x-synveda-build-proxy-closure: &synveda-build-proxy-closure
+  HTTP_PROXY: ""
+  http_proxy: ""
+  HTTPS_PROXY: ""
+  https_proxy: ""
+  NO_PROXY: ""
+  no_proxy: ""
+  FTP_PROXY: ""
+  ftp_proxy: ""
+  ALL_PROXY: ""
+  all_proxy: ""
+
 x-postgres: &postgres
   image: ${SYNVEDA_DB_TEST_POSTGRES_IMAGE:-synveda-db-test-postgres:local}
   environment:
@@ -61,6 +73,8 @@ services:
       context: ../..
       dockerfile: deploy/compose/postgres/Dockerfile
       target: reference
+      args:
+        <<: *synveda-build-proxy-closure
     ports:
       - "127.0.0.1:49152-65535:5432"
     volumes:

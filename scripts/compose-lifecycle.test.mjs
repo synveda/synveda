@@ -170,6 +170,15 @@ if [ "$1" = context ] && [ "$2" = show ]; then
   exit 0
 fi
 case " $* " in
+  *" ps "*" --quiet "*" browser-acceptance "*)
+    case "\${SYNVEDA_FAKE_BROWSER_ID_MODE:-exact}" in
+      missing) exit 0 ;;
+      malformed) printf 'not-an-id\n' ;;
+      multiple) printf '%064d\n%064d\n' 2 3 ;;
+      exact) printf '%064d\n' 2 ;;
+    esac
+    exit 0
+    ;;
   *" ps "*" --quiet "*" gateway "*)
     if [ "\${SYNVEDA_FAKE_GATEWAY_ID_MODE:-stable}" = missing ]; then
       exit 0
@@ -187,6 +196,11 @@ case " $* " in
     exit 0
     ;;
 esac
+if [ "$1" = container ] && [ "$2" = wait ]; then
+  [ "\${SYNVEDA_FAKE_BROWSER_WAIT_ERROR:-0}" = 0 ] || exit 44
+  printf '%s\n' "\${SYNVEDA_FAKE_BROWSER_EXIT:-0}"
+  exit 0
+fi
 if [ "$1" = volume ] && [ "$2" = ls ]; then
   [ "\${SYNVEDA_FAKE_VOLUME_INVENTORY_ERROR:-0}" = 0 ] || exit 1
   if grep -q 'docker <volume> <rm>' "$SYNVEDA_FAKE_CALL_LOG"; then
@@ -252,6 +266,11 @@ case " $* " in
     [ "\${SYNVEDA_FAKE_RESTART_FAIL:-0}" = 0 ] || exit 42
     ;;
   *" up "*)
+    case " $* " in
+      *" --no-deps --force-recreate browser-acceptance "*)
+        [ "\${SYNVEDA_FAKE_BROWSER_UP_FAIL:-0}" = 0 ] || exit 43
+        ;;
+    esac
     if [ "\${SYNVEDA_FAKE_BLOCK_UP:-0}" = 1 ]; then
       : > "$SYNVEDA_FAKE_UP_ENTERED"
       while [ ! -f "$SYNVEDA_FAKE_UP_RELEASE" ]; do /bin/sleep 0.02; done
@@ -309,12 +328,22 @@ case "$1" in
     for argument in "$@"; do printf ' <%s>' "$argument" >> "$SYNVEDA_FAKE_CALL_LOG"; done
     printf '\n' >> "$SYNVEDA_FAKE_CALL_LOG"
     case " $* " in
+      *" --state absent "*)
+        [ "\${SYNVEDA_FAKE_ABSENT_ASSET_STATUS:-0}" = 0 ] ||
+          exit "$SYNVEDA_FAKE_ABSENT_ASSET_STATUS"
+        ;;
       *" --state converged "*)
         [ "\${SYNVEDA_FAKE_CONVERGED_ASSET_STATUS:-0}" = 0 ] ||
           exit "$SYNVEDA_FAKE_CONVERGED_ASSET_STATUS"
         ;;
     esac
     exit 0
+    ;;
+  */check-browser-seccomp.mjs)
+    printf 'node' >> "$SYNVEDA_FAKE_CALL_LOG"
+    for argument in "$@"; do printf ' <%s>' "$argument" >> "$SYNVEDA_FAKE_CALL_LOG"; done
+    printf '\n' >> "$SYNVEDA_FAKE_CALL_LOG"
+    exec ${JSON.stringify(process.execPath)} "$@"
     ;;
   */check-host-resolution.mjs|*/check-network-preflight.mjs|*/check-runtime-smoke.mjs)
     printf 'node' >> "$SYNVEDA_FAKE_CALL_LOG"
@@ -493,8 +522,8 @@ function environment(state, extra = {}) {
   };
 }
 
-function run(state, action, extra = {}) {
-  return spawnSync(WRAPPER, [action], {
+function run(state, action, extra = {}, args = []) {
+  return spawnSync(WRAPPER, [action, ...args], {
     cwd: ROOT,
     env: environment(state, extra),
     encoding: "utf8",
@@ -871,6 +900,221 @@ test("canonical up prepares once, reruns convergence, and keeps credentials stab
     assert.doesNotMatch(calls, /--remove-orphans/);
     assert.match(calls, /compose\.demo\.yaml/);
   } finally {
+    rmSync(state.scratch, { recursive: true, force: true });
+  }
+});
+
+test("acceptance up proves initial absence atomically and ordinary up stays rerunnable", () => {
+  const state = fixture();
+  try {
+    const accepted = run(state, "up", {}, ["--initial-assets", "absent"]);
+    assert.equal(accepted.status, 0, accepted.stderr);
+    let calls = readFileSync(state.log, "utf8");
+    const absent = calls.indexOf("<--state> <absent>");
+    const build = calls.indexOf(" <build> <--builder> <default>");
+    const up = calls.indexOf(" <up> <--no-build>");
+    assert.ok(absent >= 0 && build > absent && up > build, calls);
+
+    writeFileSync(state.log, "");
+    const rerun = run(state, "up");
+    assert.equal(rerun.status, 0, rerun.stderr);
+    calls = readFileSync(state.log, "utf8");
+    assert.match(calls, /<--state> <existing>/);
+    assert.doesNotMatch(calls, /<--state> <absent>/);
+  } finally {
+    rmSync(state.scratch, { recursive: true, force: true });
+  }
+});
+
+test("acceptance up refuses present assets before build and is development-only", () => {
+  const state = fixture();
+  try {
+    const present = run(
+      state,
+      "up",
+      { SYNVEDA_FAKE_ABSENT_ASSET_STATUS: "78" },
+      ["--initial-assets", "absent"],
+    );
+    assert.equal(present.status, 78, present.stderr);
+    const calls = readFileSync(state.log, "utf8");
+    assert.match(calls, /<--state> <absent>/);
+    assert.doesNotMatch(calls, / <build>| <up>/);
+  } finally {
+    rmSync(state.scratch, { recursive: true, force: true });
+  }
+
+  const reference = fixture("reference");
+  try {
+    prepareReferenceFixture(reference);
+    const refused = run(reference, "up", {}, ["--initial-assets", "absent"]);
+    assert.equal(refused.status, 64, refused.stderr);
+    assert.match(refused.stderr, /restricted to suffixed development acceptance projects/);
+    assert.equal(existsSync(reference.log), false);
+  } finally {
+    rmSync(reference.scratch, { recursive: true, force: true });
+  }
+});
+
+test("browser acceptance is a clean one-shot whose exact result gates startup", () => {
+  const state = fixture();
+  try {
+    const result = run(
+      state,
+      "up",
+      { SYNVEDA_COMPOSE_PROFILES: "demo,browser-acceptance" },
+      ["--initial-assets", "absent"],
+    );
+    assert.equal(result.status, 0, result.stderr);
+    const calls = readFileSync(state.log, "utf8");
+    const seccomp = calls.indexOf("check-browser-seccomp.mjs");
+    const absent = calls.indexOf("<--state> <absent>");
+    const build = calls.indexOf(" <build> <--builder> <default>");
+    const up = calls.indexOf(" <up> <--no-build>");
+    const browserUp = calls.indexOf(" <up> <--no-build>", up + 1);
+    const identity = calls.indexOf("<ps> <--all> <--quiet> <--no-trunc> <browser-acceptance>");
+    const wait = calls.indexOf("docker <container> <wait>");
+    const converged = calls.indexOf("<--state> <converged>", wait);
+    const smoke = calls.indexOf("check-runtime-smoke.mjs", converged);
+    assert.ok(
+      seccomp >= 0 && absent > seccomp && build > absent && up > build &&
+        browserUp > up && identity > browserUp && wait > identity &&
+        converged > wait && smoke > converged,
+      calls,
+    );
+    assert.match(
+      calls,
+      / <up> <--no-build> <--detach> <--wait> <--wait-timeout> <900> <--force-recreate> <--scale> <browser-acceptance=0>/,
+    );
+    assert.match(
+      calls,
+      / <up> <--no-build> <--detach> <--no-deps> <--force-recreate> <browser-acceptance>/,
+    );
+    assert.match(calls, /compose\.browser-acceptance\.yaml/);
+    assert.match(calls, /<--profile> <browser-acceptance>/);
+    assert.match(calls, /<--browser> <true>/);
+  } finally {
+    rmSync(state.scratch, { recursive: true, force: true });
+  }
+});
+
+test("browser acceptance rejects unsafe selectors before Docker mutation", () => {
+  const cases = [
+    {
+      extra: { SYNVEDA_COMPOSE_PROFILES: "browser-acceptance" },
+      diagnostic: /requires exactly the demo,browser-acceptance profiles/,
+    },
+    {
+      extra: { SYNVEDA_COMPOSE_PROFILES: "demo,browser-acceptance,semantic" },
+      diagnostic: /requires exactly the demo,browser-acceptance profiles/,
+    },
+    {
+      extra: { SYNVEDA_COMPOSE_PROFILES: "demo,browser-acceptance,demo" },
+      diagnostic: /duplicate profile was refused/,
+    },
+    {
+      extra: {
+        SYNVEDA_COMPOSE_PROFILES: "demo,browser-acceptance",
+        SYNVEDA_COMPOSE_PROJECT_SUFFIX: "",
+      },
+      diagnostic: /initial absence is restricted to suffixed development acceptance projects/,
+    },
+  ];
+  for (const testCase of cases) {
+    const state = fixture();
+    try {
+      const refused = run(state, "up", testCase.extra, ["--initial-assets", "absent"]);
+      assert.equal(refused.status, 64, refused.stderr);
+      assert.match(refused.stderr, testCase.diagnostic);
+      assert.equal(existsSync(state.log), false);
+    } finally {
+      rmSync(state.scratch, { recursive: true, force: true });
+    }
+  }
+
+  const missingAbsence = fixture();
+  try {
+    const refused = run(missingAbsence, "up", {
+      SYNVEDA_COMPOSE_PROFILES: "demo,browser-acceptance",
+    });
+    assert.equal(refused.status, 64, refused.stderr);
+    assert.match(refused.stderr, /requires --initial-assets absent/);
+    assert.equal(existsSync(missingAbsence.log), false);
+  } finally {
+    rmSync(missingAbsence.scratch, { recursive: true, force: true });
+  }
+
+  const reference = fixture("reference");
+  try {
+    const refused = run(
+      reference,
+      "up",
+      { SYNVEDA_COMPOSE_PROFILES: "demo,browser-acceptance" },
+      ["--initial-assets", "absent"],
+    );
+    assert.equal(refused.status, 64, refused.stderr);
+    assert.match(refused.stderr, /requires development with bundled PostgreSQL and bundled OIDC/);
+    assert.equal(existsSync(reference.log), false);
+  } finally {
+    rmSync(reference.scratch, { recursive: true, force: true });
+  }
+});
+
+test("a known browser acceptance failure releases the project lock and never claims success", () => {
+  const state = fixture();
+  const lockFile = join(
+    "/tmp",
+    `.synveda-compose-locks-${process.getuid?.() ?? 0}`,
+    `${state.project}.lock`,
+  );
+  try {
+    const refused = run(
+      state,
+      "up",
+      {
+        SYNVEDA_COMPOSE_PROFILES: "demo,browser-acceptance",
+        SYNVEDA_FAKE_BROWSER_EXIT: "78",
+      },
+      ["--initial-assets", "absent"],
+    );
+    assert.equal(refused.status, 78, refused.stderr);
+    assert.match(refused.stderr, /browser acceptance failed/);
+    assert.doesNotMatch(refused.stdout, /services converged/);
+    assert.equal(existsSync(lockFile), false);
+    const calls = readFileSync(state.log, "utf8");
+    assert.match(calls, /docker <container> <wait>/);
+    assert.doesNotMatch(calls, /<--state> <converged>|check-runtime-smoke\.mjs/);
+  } finally {
+    rmSync(state.scratch, { recursive: true, force: true });
+  }
+});
+
+test("an uncertain browser container start retains the exact project lock", () => {
+  const state = fixture();
+  const lockFile = join(
+    "/tmp",
+    `.synveda-compose-locks-${process.getuid?.() ?? 0}`,
+    `${state.project}.lock`,
+  );
+  try {
+    const refused = run(
+      state,
+      "up",
+      {
+        SYNVEDA_COMPOSE_PROFILES: "demo,browser-acceptance",
+        SYNVEDA_FAKE_BROWSER_UP_FAIL: "1",
+      },
+      ["--initial-assets", "absent"],
+    );
+    assert.equal(refused.status, 43, refused.stderr);
+    assert.equal(existsSync(lockFile), true);
+    const calls = readFileSync(state.log, "utf8");
+    assert.match(
+      calls,
+      / <up> <--no-build> <--detach> <--no-deps> <--force-recreate> <browser-acceptance>/,
+    );
+    assert.doesNotMatch(calls, /docker <container> <wait>|<--state> <converged>/);
+  } finally {
+    if (existsSync(lockFile)) rmSync(lockFile);
     rmSync(state.scratch, { recursive: true, force: true });
   }
 });

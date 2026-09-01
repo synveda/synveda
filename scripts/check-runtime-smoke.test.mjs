@@ -58,6 +58,8 @@ function smokeArguments(runtime, appUrl, issuer) {
     "bundled",
     "--oidc",
     "bundled",
+    "--browser",
+    "false",
     "--app-url",
     appUrl,
     "--issuer",
@@ -164,7 +166,7 @@ test("Compose ps accepts array and newline-delimited JSON", () => {
 });
 
 test("bundled topology requires every convergence and healthy process", () => {
-  const selection = { postgres: "bundled", oidc: "bundled" };
+  const selection = { postgres: "bundled", oidc: "bundled", browser: "false" };
   assert.deepEqual(runtimeStateFindings(healthyRows(), selection), []);
 
   const failed = healthyRows().map((row) =>
@@ -197,14 +199,48 @@ test("external provider rows reject bundled provider residue", () => {
       ].includes(Service),
   );
   assert.deepEqual(
-    runtimeStateFindings(external, { postgres: "external", oidc: "external" }),
+    runtimeStateFindings(external, { postgres: "external", oidc: "external", browser: "false" }),
     [],
   );
   assert.ok(
-    runtimeStateFindings(healthyRows(), { postgres: "external", oidc: "external" }).includes(
+    runtimeStateFindings(healthyRows(), { postgres: "external", oidc: "external", browser: "false" }).includes(
       "Compose service status set differs from the selected topology",
     ),
   );
+});
+
+test("browser acceptance is an exact successful one-shot in its development topology", () => {
+  const browserRows = [
+    ...healthyRows(),
+    { Service: "browser-acceptance", State: "exited", ExitCode: 0, Health: "" },
+  ];
+  const selection = { postgres: "bundled", oidc: "bundled", browser: "true" };
+  assert.deepEqual(runtimeStateFindings(browserRows, selection), []);
+  assert.match(
+    runtimeStateFindings(healthyRows(), selection)[0],
+    /service status set differs/,
+  );
+  const failed = browserRows.map((row) =>
+    row.Service === "browser-acceptance" ? { ...row, ExitCode: 78 } : row,
+  );
+  assert.ok(
+    runtimeStateFindings(failed, selection).includes(
+      "browser-acceptance convergence did not complete successfully",
+    ),
+  );
+  assert.ok(
+    runtimeStateFindings(browserRows, { ...selection, browser: "false" }).includes(
+      "Compose service status set differs from the selected topology",
+    ),
+  );
+
+  const invalid = smokeArguments(
+    "reference",
+    "https://app.reference.example",
+    "https://auth.reference.example/realms/synveda",
+  );
+  invalid[invalid.indexOf("false")] = "true";
+  assert.equal(parseArguments(invalid), undefined);
 });
 
 test("public response bodies are bounded before parsing", async () => {

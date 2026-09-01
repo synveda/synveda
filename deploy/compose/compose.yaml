@@ -76,7 +76,9 @@ services:
     networks:
       public-edge:
         gw_priority: 1
-      app-backend: {}
+      app-backend:
+        aliases:
+          - ${SYNVEDA_APP_HOST:?set SYNVEDA_APP_HOST}
 
   database-preflight:
     <<: *synveda-product

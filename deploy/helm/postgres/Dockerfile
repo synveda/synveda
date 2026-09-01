@@ -8,6 +8,18 @@ ARG CNPG_BASE=ghcr.io/cloudnative-pg/postgresql:17@sha256:fa6e2b2e14d19a109cc142
 # Compile against Debian 11's glibc because the pinned CloudNativePG image is
 # bullseye-based. The final-stage probe below enforces this ABI boundary.
 FROM rust:1.96.0-bullseye@sha256:7069898d5edfc11b0ba498ecefbcc5438f6390b3ce0be11a9750cf39cab7e02f AS snapshot-builder
+ARG HTTP_PROXY
+ARG http_proxy
+ARG HTTPS_PROXY
+ARG https_proxy
+ARG NO_PROXY
+ARG no_proxy
+ARG FTP_PROXY
+ARG ftp_proxy
+ARG ALL_PROXY
+ARG all_proxy
+COPY --chmod=0555 deploy/compose/scripts/assert-build-proxy-closed /usr/local/bin/assert-build-proxy-closed
+RUN /usr/local/bin/assert-build-proxy-closed
 
 COPY deploy/compose/postgres/synveda-input-snapshot.c /tmp/synveda-input-snapshot.c
 
@@ -18,6 +30,18 @@ RUN set -eux; \
     chmod 0555 /usr/local/bin/synveda-input-snapshot
 
 FROM ${CNPG_BASE}
+ARG HTTP_PROXY
+ARG http_proxy
+ARG HTTPS_PROXY
+ARG https_proxy
+ARG NO_PROXY
+ARG no_proxy
+ARG FTP_PROXY
+ARG ftp_proxy
+ARG ALL_PROXY
+ARG all_proxy
+COPY --chmod=0555 deploy/compose/scripts/assert-build-proxy-closed /usr/local/bin/assert-build-proxy-closed
+RUN /usr/local/bin/assert-build-proxy-closed
 
 # The base runs as uid 26. apt and `make install` need root; the image has
 # to go back, or the operator's own entrypoint fails on a permission it

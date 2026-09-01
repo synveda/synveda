@@ -56,6 +56,21 @@ printf '%s\n' '{"realm":"master","enabled":false}' > "$test_dir/master-realm.jso
 test_name=target-realm-refusal
 refuse target-realm "$test_dir/master-realm.json"
 
+client_app=http://app.synveda.test:8080
+printf '%s\n' \
+    '{"clientId":"synveda","enabled":true,"protocol":"openid-connect","publicClient":true,"bearerOnly":false,"standardFlowEnabled":true,"implicitFlowEnabled":false,"directAccessGrantsEnabled":false,"serviceAccountsEnabled":false,"authorizationServicesEnabled":false,"consentRequired":false,"fullScopeAllowed":false,"frontchannelLogout":true,"rootUrl":"http://app.synveda.test:8080","baseUrl":"http://app.synveda.test:8080/console/","redirectUris":["http://app.synveda.test:8080/auth/callback"],"webOrigins":["http://app.synveda.test:8080"],"defaultClientScopes":["email","profile"],"optionalClientScopes":[],"attributes":{"pkce.code.challenge.method":"S256","use.refresh.tokens":"true","client_credentials.use_refresh_token":"false","dpop.bound.access.tokens":"false","exclude.session.state.from.auth.response":"false","exclude.issuer.from.auth.response":"false","realm_client":"false","backchannel.logout.session.required":"true","backchannel.logout.revoke.offline.tokens":"false","client.secret.creation.time":"1"}}' \
+    > "$test_dir/client.json"
+test_name=client-callback-contract
+accept '' client "$test_dir/client.json" "$client_app"
+sed 's/"exclude.issuer.from.auth.response":"false"/"exclude.issuer.from.auth.response":"true"/' \
+    "$test_dir/client.json" > "$test_dir/client-excludes-issuer.json"
+test_name=client-issuer-response-refusal
+refuse client "$test_dir/client-excludes-issuer.json" "$client_app"
+sed 's/"exclude.session.state.from.auth.response":"false"/"exclude.session.state.from.auth.response":"true"/' \
+    "$test_dir/client.json" > "$test_dir/client-excludes-session.json"
+test_name=client-session-response-refusal
+refuse client "$test_dir/client-excludes-session.json" "$client_app"
+
 test_name=strict-json
 printf '%s\n' '{"realm":"synveda","realm":"other","enabled":false}' \
     > "$test_dir/duplicate.json"

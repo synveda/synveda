@@ -1,0 +1,15 @@
+#!/bin/sh
+# Docker predefines proxy build arguments even when a Dockerfile does not name
+# them. Every network-capable CPR-45 build stage calls this before its first
+# command so a client-side proxy cannot silently receive the source context or
+# dependency requests. The diagnostic is deliberately value-free.
+set -eu
+
+if [ -n "${HTTP_PROXY:-}" ] || [ -n "${http_proxy:-}" ] || \
+    [ -n "${HTTPS_PROXY:-}" ] || [ -n "${https_proxy:-}" ] || \
+    [ -n "${NO_PROXY:-}" ] || [ -n "${no_proxy:-}" ] || \
+    [ -n "${FTP_PROXY:-}" ] || [ -n "${ftp_proxy:-}" ] || \
+    [ -n "${ALL_PROXY:-}" ] || [ -n "${all_proxy:-}" ]; then
+    echo "build proxy contract was refused" >&2
+    exit 78
+fi

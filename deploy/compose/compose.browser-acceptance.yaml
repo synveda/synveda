@@ -1,0 +1,55 @@
+x-synveda-browser-proxy-closure: &synveda-browser-proxy-closure
+  HTTP_PROXY: ""
+  http_proxy: ""
+  HTTPS_PROXY: ""
+  https_proxy: ""
+  NO_PROXY: ""
+  no_proxy: ""
+  FTP_PROXY: ""
+  ftp_proxy: ""
+  ALL_PROXY: ""
+  all_proxy: ""
+
+services:
+  browser-acceptance:
+    profiles: [browser-acceptance]
+    image: ${SYNVEDA_BROWSER_IMAGE:?set SYNVEDA_BROWSER_IMAGE}
+    build:
+      context: ../..
+      dockerfile: deploy/compose/browser/Dockerfile
+      args:
+        <<: *synveda-browser-proxy-closure
+    labels:
+      com.synveda.contract: cpr-45
+    user: "${SYNVEDA_RUNTIME_UID:?set SYNVEDA_RUNTIME_UID}:${SYNVEDA_RUNTIME_GID:?set SYNVEDA_RUNTIME_GID}"
+    entrypoint: ["node", "console-login.mjs"]
+    read_only: true
+    init: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+      - seccomp=${SYNVEDA_BROWSER_SECCOMP_PROFILE:?set SYNVEDA_BROWSER_SECCOMP_PROFILE}
+    pids_limit: 256
+    restart: "no"
+    stop_grace_period: 10s
+    shm_size: 256m
+    mem_limit: 1g
+    cpus: 1.0
+    environment:
+      <<: *synveda-browser-proxy-closure
+      SYNVEDA_BROWSER_APP_URL: ${SYNVEDA_PUBLIC_APP_URL:?set SYNVEDA_PUBLIC_APP_URL}
+      SYNVEDA_BROWSER_ISSUER: ${SYNVEDA_OIDC_ISSUER:?set SYNVEDA_OIDC_ISSUER}
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,mode=1777,size=64m
+    secrets:
+      - source: keycloak_demo_admin_password
+        target: keycloak_demo_admin_password
+    depends_on:
+      gateway:
+        condition: service_healthy
+      keycloak-realm-convergence:
+        condition: service_healthy
+      proxy:
+        condition: service_healthy
+    networks:
+      app-backend: {}
