@@ -286,6 +286,24 @@ test("dirty tracked, untracked and ignored build-context inputs leave no active 
       mkdirSync(join(state.repo, ".idea"), { mode: 0o700 });
       writeFileSync(join(state.repo, ".idea", "leak"), "ignored context leak\n");
     },
+    (state) => {
+      const ignore = join(state.repo, ".gitignore");
+      writeFileSync(ignore, `${readFileSync(ignore, "utf8")}dist/\n`);
+      git(state.repo, ["add", ".gitignore"]);
+      git(state.repo, [
+        "-c",
+        "user.name=Synveda Test",
+        "-c",
+        "user.email=synveda-test@example.invalid",
+        "commit",
+        "-q",
+        "-m",
+        "ignore generated output",
+      ]);
+      const generated = join(state.repo, "sdks", "typescript", "dist");
+      mkdirSync(generated, { mode: 0o700, recursive: true });
+      writeFileSync(join(generated, "index.js"), "generated but stale\n");
+    },
   ];
   for (const mutate of mutations) {
     const state = fixture();
