@@ -199,10 +199,22 @@ fixture selection plus a private non-secret synthetic proxy template. Its
 complete run publishes through a no-replace hard-linked lease; inert
 pre-publication crash residue grants no provider authority and remains pending
 final cleanup. Planning reaches no Docker/provider/host authority.
-It must next add receipt-owned disposable-Engine, TLS private-registry,
-remote-builder canary, live proxy and exact-cleanup evidence; only then is the
-privileged mapping installed for the first live run. Linux/reference HTTPS
-follows before the legacy Rauthy/Temporal callers
+The new version-2 append-only receipt machine closes all intent/result schemas,
+collision-safe cleanup-only failure branches and success-only manifest
+eligibility. Receipt and manifest publication use no-replace artifact staging
+and share an exclusive content-free mutation slot; concurrent fake writers,
+append versus finalize, tamper and operator-cleared
+partial/complete/linked stages are covered. A real abandoned slot is retained
+and blocks because safe recovery is not implemented. There is still no public
+executor and the execution directories remain empty. It must next add
+identity-confirmed abandoned-slot recovery, hold exclusion across
+intent/effect/result, and then wire only the provider-create boundary to
+isolated short Colima/Lima/cache homes and private Docker client state. Fake
+crash/collision cleanup must pass before the first receipt-owned disposable
+Engine. TLS private-registry, remote-builder canary, live proxy, browser and
+exact-cleanup evidence follow; only then is the privileged mapping installed
+for the first live run. Linux/reference HTTPS follows before the legacy
+Rauthy/Temporal callers
 can be cut over and deleted. Backup/restore, upgrade and Apalis remain open
 CPR-45 slices.
 

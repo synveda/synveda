@@ -162,10 +162,19 @@ An uncatchable interruption before lease publication can retain a validated
 inert staging directory; it has no provider authority, does not block a later
 plan and must be removed by the future final cleanup before success evidence.
 More than eight retained inert directories fail closed.
-The provider/registry/canary phases are not implemented yet, so this candidate
-is preparation rather than live acceptance authority. The manual browser
-ceremony below remains usable for fixture development but cannot be labelled a
-clean-Engine result.
+The internal version-2 receipt state machine now closes every intent/result,
+failure-cleanup and success-only environment-manifest transition. Canonical
+receipts and the manifest use no-replace publication, while one atomic
+content-free mutation slot serializes append and finalization. Staged-artifact
+tests prove reconciliation only after that slot is absent. A real crash while
+holding it leaves an abandoned slot that intentionally blocks; no automatic or
+public recovery command exists yet. The tests exercise synthetic results only.
+There is no public phase runner, and `provider/`, `registry/`, `runtime/` and
+`evidence/` remain empty, so the provider/registry/canary phases are not live
+and this candidate is preparation rather than acceptance authority. A
+version-1 plan is pre-provider state and must be discarded and regenerated.
+The manual browser ceremony below remains usable for fixture development but
+cannot be labelled a clean-Engine result.
 
 The dedicated development browser fixture is deliberately a fresh-project
 one-shot, not an ordinary smoke extension. The hosts manager owns at most one
@@ -529,7 +538,11 @@ restore, upgrade/rollback, HA, host-loss tolerance, hosted SaaS readiness or
 enterprise certification. The synthetic Docker-client proxy, canary remote
 builder, authenticated private registry and exact clean-Engine teardown remain
 open. Candidate planning now binds the source and selection closure, prepares
-the private synthetic proxy template and contacts no Docker endpoint.
+the private synthetic proxy template and contacts no Docker endpoint. The
+append-only receipt grammar, cleanup-only failure branch, shared mutation slot
+and success-only manifest finalizer are deterministic filesystem contracts, not
+a live executor or provider claim. Abandoned-slot recovery and exclusion across
+intent, external effect and result remain prerequisites for that executor.
 Separately, every development source build proves the embedded local builder
 grammar before mutation; none of that is live provider evidence. The core
 Collector remains private but

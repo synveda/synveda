@@ -133,6 +133,43 @@ hard link to the immutable mode-0600 `00-plan.json`. The link and run-directory
 device/inode identities use exact 64-bit filesystem values. The receipt hash
 chain is correlation evidence, not a signature or release provenance.
 
+Receipt schema version 2 is an append-only state machine with one exact success
+path: provider create, registry, proxy, zero-read builder, browser, project
+cleanup, provider cleanup and finalization. Each external mutation must first
+publish its closed intent; each result is a closed content-free assertion.
+Failures can transition only to receipt-owned cleanup, and a reported foreign
+collision is removed from cleanup authority even when cleanup itself is
+retried. A preflight provider collision is terminal and grants no cleanup
+authority. Version-1 plan receipts predate this mutation contract and are a
+hard-cut refusal: discard their non-mutating preparation state and create a new
+plan; there is no compatibility mode.
+
+All receipt appends and finalization share one private, content-free mutation
+slot created directly with exclusive no-follow semantics. A live owner
+serializes writers. An abandoned slot is retained and refuses every later
+mutation; this deterministic slice has no automatic reclaim or public recovery
+command. Before external effects exist, the executor must add an explicit,
+identity-confirmed recovery action and hold the same exclusion boundary across
+intent, effect and result. PID liveness alone is never deletion authority.
+
+Receipt and environment bytes are canonical, fsynced in private staging files
+and linked to their final names without replacement. After the mutation slot
+has been safely resolved, a partial/noncanonical staging file is discardable;
+a complete canonical or already-linked file is resumed only when it exactly
+reconstructs the next state and otherwise is retained and refused. The
+environment manifest is bound to the canonical planned candidate, exact
+receipt head and ten requested assertions. It is published before the
+state-owned `finalize-passed` receipt and is mandatory thereafter; neither
+failure nor cleanup can publish one.
+
+Receipt cleanup resources are an upper bound, never sufficient deletion
+authority. The executor must revalidate each immutable receipt-owned
+provider/container/network/volume/resolver/path identity immediately before
+removal and preserve any mismatch. Passed cleanup assertions and every
+recorded foreign collision retire that resource from later authority. A
+partially failed multi-resource cleanup must not infer continued ownership from
+the receipt list alone.
+
 `make compose-clean-engine-plan` publishes only that candidate, receipt and a
 non-secret synthetic proxy template; `status` verifies the stored schema and
 `verify` additionally re-proves the clean source closure. These preparation
@@ -142,14 +179,22 @@ the exact disposable provider/Engine before those actions, and a final
 environment manifest is forbidden until registry, proxy, builder, browser and
 receipt-owned cleanup assertions all pass.
 
+The current executor API and finalizer are internal deterministic seams used by
+the state tests. There is no public phase command and no live provider executor
+yet. `provider/`, `registry/`, `runtime/` and `evidence/` therefore remain
+strictly empty; live mutable state will use a short receipt-owned external root
+and phase-specific inventories in the next slice. This checkpoint must not be
+reported as clean-Engine, Docker, Colima or browser evidence.
+
 An uncatchable pre-publication interruption can retain one or more strictly
 validated `.pending-*` or `.run-*` staging directories. They contain no
 provider, registry, runtime or evidence mutation, have no `active` authority
 and do not block a later plan. `status` and `verify` validate every retained
 staging inventory. A successful final receipt-owned cleanup must remove them
-before an environment manifest may be published; this preparation slice does
-not yet implement that cleanup. Preparation refuses more than eight retained
-inert staging directories, keeping later validation and cleanup work bounded.
+before an environment manifest may be published. The deterministic finalizer
+enforces that absence, but no live executor invokes it yet. Preparation refuses
+more than eight retained inert staging directories, keeping later validation
+and cleanup work bounded.
 
 | Image role | Required contents | Commands |
 |---|---|---|

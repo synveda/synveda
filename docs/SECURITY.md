@@ -179,9 +179,15 @@ covered by the closed exclusions. Its private proxy template contains only
 no-replace hard-linked active receipt prevent rounded or partial lease
 publication. Pre-publication crash residue is inert and grants no provider
 authority, but the later final cleanup must remove it. Preparation creates no
-Engine and carries no Docker auth. Disposable-provider identity, TLS registry
-auth, a zero-read remote-builder canary and exact destruction evidence are
-still pending. ACLs, xattrs, file flags, bind mounts and hostile same-user path
+Engine and carries no Docker auth. The version-2 synthetic receipt grammar
+phase-binds collisions, replays retired cleanup authority and admits a final
+manifest only after the exact success sequence. Its private atomic mutation
+slot refuses concurrent writers and retains an abandoned owner; there is no
+automatic recovery, public phase runner or external effect yet. Receipt and
+manifest staging reconciliation is therefore artifact-level evidence only,
+not process-crash recovery. Disposable-provider identity, TLS registry auth, a
+zero-read remote-builder canary and exact destruction evidence are still
+pending. ACLs, xattrs, file flags, bind mounts and hostile same-user path
 replacement remain trusted-host limits.
 
 ## Residual and external limits

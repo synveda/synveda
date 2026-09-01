@@ -86,7 +86,15 @@ synthetic Docker client proxy configuration, canary remote builder and private
 registry. Current ACL exploit and metadata-retention evidence is macOS plus
 deterministic Linux grammar coverage. This is not public PKIX/browser trust,
 explicit custom-CA/proxy support, a clean-volume login or recovery evidence. One
-frozen Docker Desktop candidate also proved bounded PostgreSQL/Keycloak
+append-only version-2 receipt machine now deterministically enforces closed
+intent/result schemas, collision-preserving cleanup-only failure paths,
+no-replace artifact publication, one exclusive mutation slot and an exact
+success-only environment manifest. Operator-cleared staged artifacts reconcile,
+but a real abandoned slot intentionally blocks because safe recovery is not
+implemented. Those tests use synthetic results; there is no public phase
+runner, live provider mutation or environment manifest. Consequently they
+improve the evidence boundary without changing readiness. One frozen Docker
+Desktop candidate also proved bounded PostgreSQL/Keycloak
 bootstrap, optimized
 Keycloak, realm convergence, issuer metadata, Collector, worker and gateway
 startup for its exact historical source/image closure. That private run is

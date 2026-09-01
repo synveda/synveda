@@ -381,12 +381,40 @@ content-free `buildx inspect` evidence for exactly one running embedded
 contacts neither Docker nor Colima and does not install the resolver mapping,
 so it closes no live acceptance criterion.
 
+The deterministic executor boundary now validates an append-only version-2
+receipt grammar from provider intent through registry, proxy, zero-read
+builder, browser, project cleanup and provider cleanup. Every phase has a
+closed content-free result schema; failures enter only an exact receipt-owned
+cleanup branch, and a colliding foreign resource is excluded from that
+authority across cleanup retries. Receipt and final-manifest publication use
+fsynced staging plus no-replace links, while one atomically created
+content-free mutation slot serializes concurrent append/finalize attempts. The
+artifact reconciler covers partial, complete and linked staging after that slot
+has been safely resolved. It deliberately does not reclaim an abandoned slot:
+a real process crash blocks further mutation pending an explicit
+identity-confirmed recovery design. Only the exact successful sequence can
+produce the closed environment manifest and state-owned final receipt. The
+pre-provider version-1 plan format is deliberately refused rather than
+migrated. This is fake-executor and filesystem evidence only: there is no
+public phase runner, the execution directories remain empty by contract, and
+no provider or Docker command has run.
+
 ### Immediate next slice
 
-Extend the immutable plan through a receipt-owned Colima provider create,
-globally clean Engine proof, TLS/bcrypt private registry, authenticated
-push/pull, synthetic Docker-client proxy activation, a zero-read canary remote
-builder, exact project/provider cleanup and content-free environment manifest.
+Add the first live executor boundary around the existing
+`provider-create-intent`/`provider-create-passed` contract. It must use isolated
+short Colima/Lima/cache homes and a private Docker client configuration, prove
+the named provider was absent before intent, refuse adoption, and retain the
+active receipt until exact provider cleanup. First exercise process crash,
+foreign collision, source drift and cleanup failure with fake commands. Before
+any provider mutation, add an explicit identity-bound abandoned-slot recovery
+action and make the executor hold the slot across intent, external effect and
+result; only then create and destroy the receipt-owned Colima provider.
+Subsequent bounded steps add the globally clean Engine proof, TLS/bcrypt
+private registry,
+authenticated push/pull, synthetic Docker-client proxy activation, a zero-read
+canary remote builder, browser run and exact cleanup that make the existing
+environment finalizer eligible.
 Do not use plaintext Basic auth, host-wide daemon trust changes or any prune.
 Then request explicit
 administrator approval for the exact `.test` block, install it from the clean

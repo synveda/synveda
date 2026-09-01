@@ -20,6 +20,18 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
+import {
+  appendReceiptForExecutor,
+  finalizeEnvironmentForExecutor,
+} from "../deploy/compose/scripts/clean-engine-state.mjs";
+import {
+  canonicalBytes,
+  createFinalization,
+  createNextReceipt,
+  receiptFileName,
+  receiptSuccessPath,
+} from "../deploy/compose/scripts/clean-engine-receipts.mjs";
+import { cleanEngineReceiptResult } from "./fixtures/clean-engine-receipt-fixture.mjs";
 
 const stateTool = resolve("deploy/compose/scripts/clean-engine-state.mjs");
 
@@ -173,6 +185,23 @@ function activeRun(state) {
   return join(state.state, `.run-${receipt.fixture_id}`);
 }
 
+function stageSuccessfulReceipts(state) {
+  const active = activeRun(state);
+  const candidate = parse(join(active, "candidate.json"));
+  const receipts = [parse(join(active, "00-plan.json"))];
+  for (const phase of receiptSuccessPath.slice(1, -1)) {
+    const receipt = createNextReceipt(
+      receipts,
+      candidate.run_id,
+      phase,
+      cleanEngineReceiptResult(phase, candidate.run_id),
+    );
+    writeFileSync(join(active, receiptFileName(receipt)), canonicalBytes(receipt), { mode: 0o600 });
+    receipts.push(receipt);
+  }
+  return { active, candidate, receipts };
+}
+
 test("plan publishes one canonical content-free candidate, receipt and proxy template", () => {
   const state = fixture();
   try {
@@ -253,6 +282,623 @@ test("one active plan is a durable lease and cannot be replaced", () => {
     assert.equal(second.stdout, "");
     assert.equal(second.stderr, "clean-engine: an active clean-engine plan already exists\n");
     assert.deepEqual(readFileSync(join(activeRun(state), "candidate.json")), original);
+  } finally {
+    rmSync(state.root, { recursive: true, force: true });
+  }
+});
+
+test("the state loader appends one exclusive provider intent and rejects receipt drift", () => {
+  const state = fixture();
+  try {
+    assert.equal(run(state, "plan").status, 0);
+    const active = activeRun(state);
+    const candidate = parse(join(active, "candidate.json"));
+    const result = {
+      cleanup_command: "colima-delete-data-force",
+      preexisting_resource: "absent",
+      provider_contract_sha256: "2".repeat(64),
+      provider_resource: `synveda-cpr45-${candidate.run_id}`,
+      provider_root_key: `sv-c45-${candidate.run_id.slice(0, 16)}`,
+    };
+    const receipt = appendReceiptForExecutor({
+      phase: "provider-create-intent",
+      repoRoot: state.repo,
+      result,
+      stateBase: state.state,
+    });
+    const receiptPath = join(active, "01-provider-create-intent.json");
+    assert.equal(receipt.sequence, 1);
+    assertPrivate(receiptPath, 0o600);
+    assert.equal(run(state, "status").status, 0);
+    const retried = appendReceiptForExecutor({
+      phase: "provider-create-intent",
+      repoRoot: state.repo,
+      result,
+      stateBase: state.state,
+    });
+    assert.deepEqual(retried, receipt);
+    assert.throws(() => appendReceiptForExecutor({
+      phase: "provider-create-intent",
+      repoRoot: state.repo,
+      result: { ...result, provider_contract_sha256: "3".repeat(64) },
+      stateBase: state.state,
+    }), /completed receipt result did not match retry/);
+
+    const mutated = parse(receiptPath);
+    mutated.previous_sha256 = "f".repeat(64);
+    const ordered = Object.fromEntries(
+      Object.entries(mutated).sort(([left], [right]) => left.localeCompare(right)),
+    );
+    writeFileSync(receiptPath, `${JSON.stringify(ordered)}\n`, { mode: 0o600 });
+    const refused = run(state, "status");
+    assert.equal(refused.status, 78);
+    assert.equal(refused.stderr, "clean-engine: receipt chain was refused\n");
+  } finally {
+    rmSync(state.root, { recursive: true, force: true });
+  }
+});
+
+test("receipt publication reconciles every operator-cleared staging boundary", () => {
+  for (const crashPoint of ["partial-staging", "complete-staging", "published-link"]) {
+    const state = fixture();
+    try {
+      assert.equal(run(state, "plan").status, 0);
+      const active = activeRun(state);
+      const candidate = parse(join(active, "candidate.json"));
+      const planReceipt = parse(join(active, "00-plan.json"));
+      const result = {
+        cleanup_command: "colima-delete-data-force",
+        preexisting_resource: "absent",
+        provider_contract_sha256: "2".repeat(64),
+        provider_resource: `synveda-cpr45-${candidate.run_id}`,
+        provider_root_key: `sv-c45-${candidate.run_id.slice(0, 16)}`,
+      };
+      const receipt = createNextReceipt(
+        [planReceipt],
+        candidate.run_id,
+        "provider-create-intent",
+        result,
+      );
+      const staging = join(active, ".receipt-publish");
+      const destination = join(active, "01-provider-create-intent.json");
+      if (crashPoint === "partial-staging") {
+        writeFileSync(staging, "{", { mode: 0o600 });
+      } else {
+        writeFileSync(staging, canonicalBytes(receipt), { mode: 0o600 });
+        if (crashPoint === "published-link") linkSync(staging, destination);
+      }
+      assert.equal(run(state, "status").status, 0);
+      if (crashPoint !== "published-link") assert.equal(existsSync(destination), false);
+
+      const recovered = appendReceiptForExecutor({
+        phase: "provider-create-intent",
+        repoRoot: state.repo,
+        result,
+        stateBase: state.state,
+      });
+      assert.deepEqual(recovered, receipt);
+      assert.equal(existsSync(staging), false);
+      assertPrivate(destination, 0o600);
+      assert.equal(run(state, "verify").status, 0);
+    } finally {
+      rmSync(state.root, { recursive: true, force: true });
+    }
+  }
+});
+
+test("canonical mismatched publication stages are retained and refused", () => {
+  const receiptState = fixture();
+  try {
+    assert.equal(run(receiptState, "plan").status, 0);
+    const active = activeRun(receiptState);
+    const candidate = parse(join(active, "candidate.json"));
+    const planReceipt = parse(join(active, "00-plan.json"));
+    const result = cleanEngineReceiptResult("provider-create-intent", candidate.run_id);
+    const staged = createNextReceipt(
+      [planReceipt],
+      candidate.run_id,
+      "provider-create-intent",
+      result,
+    );
+    staged.previous_sha256 = "f".repeat(64);
+    const staging = join(active, ".receipt-publish");
+    writeFileSync(staging, canonicalBytes(staged), { mode: 0o600 });
+    assert.throws(
+      () => appendReceiptForExecutor({
+        phase: "provider-create-intent",
+        repoRoot: receiptState.repo,
+        result,
+        stateBase: receiptState.state,
+      }),
+      /complete pending receipt publication did not match/,
+    );
+    assertPrivate(staging, 0o600);
+    assert.equal(existsSync(join(active, "01-provider-create-intent.json")), false);
+  } finally {
+    rmSync(receiptState.root, { recursive: true, force: true });
+  }
+
+  const environmentState = fixture();
+  try {
+    assert.equal(run(environmentState, "plan").status, 0);
+    const { active, candidate, receipts } = stageSuccessfulReceipts(environmentState);
+    const manifest = createFinalization(
+      candidate,
+      canonicalBytes(candidate),
+      receipts,
+    ).manifest;
+    const staging = join(active, ".environment-publish");
+    writeFileSync(join(active, "environment.json"), canonicalBytes(manifest), { mode: 0o600 });
+    writeFileSync(staging, canonicalBytes({ ...manifest, unreviewed: true }), { mode: 0o600 });
+    assert.throws(
+      () => finalizeEnvironmentForExecutor({
+        repoRoot: environmentState.repo,
+        stateBase: environmentState.state,
+      }),
+      /complete pending environment publication did not match/,
+    );
+    assertPrivate(staging, 0o600);
+    assertPrivate(join(active, "environment.json"), 0o600);
+  } finally {
+    rmSync(environmentState.root, { recursive: true, force: true });
+  }
+});
+
+test("source drift after a positive receipt durably enters cleanup-only failure", () => {
+  const state = fixture();
+  const originalPath = process.env.PATH;
+  try {
+    assert.equal(run(state, "plan").status, 0);
+    const active = activeRun(state);
+    const candidate = parse(join(active, "candidate.json"));
+    const result = cleanEngineReceiptResult("provider-create-intent", candidate.run_id);
+    const resolvedGit = command("sh", ["-c", "command -v git"]).stdout.trim();
+    assert.match(resolvedGit, /^\//);
+    const bin = join(state.root, "fake-bin");
+    const marker = join(state.root, "drift-triggered");
+    const drift = join(state.repo, "post-publication-drift.txt");
+    mkdirSync(bin, { mode: 0o700 });
+    const wrapper = join(bin, "git");
+    writeFileSync(
+      wrapper,
+      "#!/bin/sh\n" +
+        `if [ -f ${JSON.stringify(join(active, "01-provider-create-intent.json"))} ] && ` +
+        `[ ! -f ${JSON.stringify(marker)} ]; then\n` +
+        `  printf '%s\\n' drift > ${JSON.stringify(drift)}\n` +
+        `  : > ${JSON.stringify(marker)}\n` +
+        "fi\n" +
+        `exec ${JSON.stringify(resolvedGit)} \"$@\"\n`,
+      { mode: 0o700 },
+    );
+    process.env.PATH = `${bin}:${originalPath}`;
+    assert.throws(
+      () => appendReceiptForExecutor({
+        phase: "provider-create-intent",
+        repoRoot: state.repo,
+        result,
+        stateBase: state.state,
+      }),
+      /source worktree is not clean/,
+    );
+    process.env.PATH = originalPath;
+    assertPrivate(join(active, "01-provider-create-intent.json"), 0o600);
+    assertPrivate(join(active, "02-execution-failed.json"), 0o600);
+    assert.equal(existsSync(join(active, "environment.json")), false);
+    rmSync(drift);
+    const cleanup = appendReceiptForExecutor({
+      phase: "failure-cleanup-intent",
+      repoRoot: state.repo,
+      result: {
+        authorized_resources: ["provider"],
+        scope: "exact-receipt-owned-only",
+      },
+      stateBase: state.state,
+    });
+    assert.equal(cleanup.phase, "failure-cleanup-intent");
+    assert.equal(run(state, "verify").status, 0);
+  } finally {
+    process.env.PATH = originalPath;
+    rmSync(state.root, { recursive: true, force: true });
+  }
+});
+
+test("one atomic mutation slot serializes concurrent receipt writers", async () => {
+  const concurrent = fixture();
+  try {
+    assert.equal(run(concurrent, "plan").status, 0);
+    const candidate = parse(join(activeRun(concurrent), "candidate.json"));
+    const helper = resolve("scripts/fixtures/append-clean-engine-provider-intent.mjs");
+    const launch = (digit) => {
+      const child = spawn(
+        process.execPath,
+        [helper, concurrent.repo, concurrent.state, candidate.run_id, digit],
+        {
+          env: { PATH: process.env.PATH, LANG: "C", LC_ALL: "C" },
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
+      let stdout = "";
+      let stderr = "";
+      child.stdout.setEncoding("utf8");
+      child.stderr.setEncoding("utf8");
+      child.stdout.on("data", (chunk) => { stdout += chunk; });
+      child.stderr.on("data", (chunk) => { stderr += chunk; });
+      return new Promise((resolvePromise) => {
+        child.on("close", (status, signal) => resolvePromise({ signal, status, stderr, stdout }));
+      });
+    };
+    const results = await Promise.all([launch("2"), launch("3")]);
+    assert.deepEqual(results.map((value) => value.status).sort((a, b) => a - b), [0, 73]);
+    assert.equal(results.every((value) => value.signal === null), true);
+    assert.equal(
+      readdirSync(activeRun(concurrent)).filter((name) => /^01-.*\.json$/.test(name)).length,
+      1,
+    );
+    assert.equal(existsSync(join(activeRun(concurrent), ".mutation-lease")), false);
+    assert.equal(run(concurrent, "verify").status, 0);
+  } finally {
+    rmSync(concurrent.root, { recursive: true, force: true });
+  }
+});
+
+test("an abandoned mutation slot is retained for explicit recovery", () => {
+  const state = fixture();
+  try {
+    assert.equal(run(state, "plan").status, 0);
+    const active = activeRun(state);
+    const candidate = parse(join(active, "candidate.json"));
+    writeFileSync(
+      join(active, ".mutation-lease"),
+      canonicalBytes({
+        action: "append-receipt",
+        fixture_id: candidate.run_id,
+        nonce: "f".repeat(32),
+        pid: 2_147_483_647,
+        schema: "synveda.clean-engine.mutation-lease.v1",
+      }),
+      { mode: 0o600 },
+    );
+    assert.equal(run(state, "status").status, 0);
+    assert.throws(
+      () => appendReceiptForExecutor({
+        phase: "provider-create-intent",
+        repoRoot: state.repo,
+        result: cleanEngineReceiptResult("provider-create-intent", candidate.run_id),
+        stateBase: state.state,
+      }),
+      /abandoned clean-engine mutation requires explicit recovery/,
+    );
+    assertPrivate(join(active, ".mutation-lease"), 0o600);
+    assert.equal(existsSync(join(active, "01-provider-create-intent.json")), false);
+  } finally {
+    rmSync(state.root, { recursive: true, force: true });
+  }
+});
+
+test("a live mutation lease is content-free state and refuses a competing writer", () => {
+  const state = fixture();
+  try {
+    assert.equal(run(state, "plan").status, 0);
+    const active = activeRun(state);
+    const candidate = parse(join(active, "candidate.json"));
+    writeFileSync(
+      join(active, ".mutation-lease"),
+      canonicalBytes({
+        action: "finalize-environment",
+        fixture_id: candidate.run_id,
+        nonce: "e".repeat(32),
+        pid: process.pid,
+        schema: "synveda.clean-engine.mutation-lease.v1",
+      }),
+      { mode: 0o600 },
+    );
+    assert.equal(run(state, "status").status, 0);
+    assert.throws(
+      () => appendReceiptForExecutor({
+        phase: "provider-create-intent",
+        repoRoot: state.repo,
+        result: cleanEngineReceiptResult("provider-create-intent", candidate.run_id),
+        stateBase: state.state,
+      }),
+      /another clean-engine mutation is active/,
+    );
+    assert.equal(existsSync(join(active, "01-provider-create-intent.json")), false);
+  } finally {
+    rmSync(state.root, { recursive: true, force: true });
+  }
+});
+
+test("the state API appends the complete synthetic success path before finalization", () => {
+  const state = fixture();
+  try {
+    assert.equal(run(state, "plan").status, 0);
+    const active = activeRun(state);
+    const candidate = parse(join(active, "candidate.json"));
+    for (const phase of receiptSuccessPath.slice(1, -1)) {
+      const receipt = appendReceiptForExecutor({
+        phase,
+        repoRoot: state.repo,
+        result: cleanEngineReceiptResult(phase, candidate.run_id),
+        stateBase: state.state,
+      });
+      assert.equal(receipt.phase, phase);
+    }
+    const finalized = finalizeEnvironmentForExecutor({
+      repoRoot: state.repo,
+      stateBase: state.state,
+    });
+    assert.equal(finalized.receipt.phase, "finalize-passed");
+    assert.equal(run(state, "verify").status, 0);
+    assert.equal(
+      readdirSync(active).filter((name) => /^[0-9]{2}-.*\.json$/.test(name)).length,
+      receiptSuccessPath.length,
+    );
+  } finally {
+    rmSync(state.root, { recursive: true, force: true });
+  }
+});
+
+test("competing finalization and failure append leave one valid branch", async () => {
+  const state = fixture();
+  try {
+    assert.equal(run(state, "plan").status, 0);
+    const { active } = stageSuccessfulReceipts(state);
+    const helper = resolve("scripts/fixtures/race-clean-engine-finalization.mjs");
+    const launch = (action) => {
+      const child = spawn(process.execPath, [helper, action, state.repo, state.state], {
+        env: { PATH: process.env.PATH, LANG: "C", LC_ALL: "C" },
+        stdio: ["ignore", "pipe", "pipe"],
+      });
+      child.stdout.resume();
+      child.stderr.resume();
+      return new Promise((resolvePromise) => {
+        child.on("close", (status, signal) => resolvePromise({ signal, status }));
+      });
+    };
+    const results = await Promise.all([launch("finalize"), launch("fail")]);
+    assert.deepEqual(results.map((value) => value.status).sort((a, b) => a - b), [0, 73]);
+    assert.equal(results.every((value) => value.signal === null), true);
+    assert.equal(run(state, "status").status, 0);
+    assert.equal(existsSync(join(active, ".mutation-lease")), false);
+    const finalized = existsSync(join(active, "15-finalize-passed.json"));
+    const failed = existsSync(join(active, "15-execution-failed.json"));
+    assert.notEqual(finalized, failed);
+    assert.equal(existsSync(join(active, "environment.json")), finalized);
+  } finally {
+    rmSync(state.root, { recursive: true, force: true });
+  }
+});
+
+test("state-owned finalization publishes and verifies the exact eligible environment", () => {
+  const state = fixture();
+  try {
+    assert.equal(run(state, "plan").status, 0);
+    const { active, candidate } = stageSuccessfulReceipts(state);
+    assert.match(run(state, "status").stdout, /prepared at provider-cleanup-passed\n$/);
+    const finalized = finalizeEnvironmentForExecutor({
+      repoRoot: state.repo,
+      stateBase: state.state,
+    });
+    assert.equal(finalized.receipt.phase, "finalize-passed");
+    assert.equal(finalized.manifest.schema, "synveda.clean-engine.environment.v1");
+    assertPrivate(join(active, "environment.json"), 0o600);
+    assertPrivate(join(active, "15-finalize-passed.json"), 0o600);
+    assert.equal(run(state, "verify").status, 0);
+    assert.deepEqual(
+      finalizeEnvironmentForExecutor({ repoRoot: state.repo, stateBase: state.state }),
+      finalized,
+    );
+    assert.throws(
+      () => appendReceiptForExecutor({
+        phase: "provider-create-intent",
+        repoRoot: state.repo,
+        result: cleanEngineReceiptResult("provider-create-intent", candidate.run_id),
+        stateBase: state.state,
+      }),
+      /environment finalization is already in progress/,
+    );
+
+    const environmentPath = join(active, "environment.json");
+    const environment = parse(environmentPath);
+    environment.unreviewed = true;
+    const ordered = Object.fromEntries(
+      Object.entries(environment).sort(([left], [right]) => left.localeCompare(right)),
+    );
+    writeFileSync(environmentPath, `${JSON.stringify(ordered)}\n`, { mode: 0o600 });
+    const refused = run(state, "status");
+    assert.equal(refused.status, 78);
+    assert.equal(refused.stderr, "clean-engine: environment manifest content was refused\n");
+  } finally {
+    rmSync(state.root, { recursive: true, force: true });
+  }
+});
+
+test("environment publication reconciles every operator-cleared staging boundary", () => {
+  for (const crashPoint of ["partial-staging", "complete-staging", "published-link"]) {
+    const state = fixture();
+    try {
+      assert.equal(run(state, "plan").status, 0);
+      const { active, candidate, receipts } = stageSuccessfulReceipts(state);
+      const manifest = createFinalization(
+        candidate,
+        canonicalBytes(candidate),
+        receipts,
+      ).manifestBytes;
+      const staging = join(active, ".environment-publish");
+      const destination = join(active, "environment.json");
+      if (crashPoint === "partial-staging") {
+        writeFileSync(staging, "{", { mode: 0o600 });
+      } else {
+        writeFileSync(staging, manifest, { mode: 0o600 });
+        if (crashPoint === "published-link") linkSync(staging, destination);
+      }
+      assert.equal(run(state, "status").status, 0);
+      const finalized = finalizeEnvironmentForExecutor({
+        repoRoot: state.repo,
+        stateBase: state.state,
+      });
+      assert.equal(finalized.receipt.phase, "finalize-passed");
+      assert.equal(existsSync(staging), false);
+      assertPrivate(destination, 0o600);
+      assert.equal(run(state, "verify").status, 0);
+    } finally {
+      rmSync(state.root, { recursive: true, force: true });
+    }
+  }
+});
+
+test("final receipt publication reconciles every operator-cleared staging boundary", () => {
+  for (const crashPoint of ["partial-staging", "complete-staging", "published-link"]) {
+    const state = fixture();
+    try {
+      assert.equal(run(state, "plan").status, 0);
+      const { active, candidate, receipts } = stageSuccessfulReceipts(state);
+      const finalization = createFinalization(candidate, canonicalBytes(candidate), receipts);
+      writeFileSync(join(active, "environment.json"), finalization.manifestBytes, { mode: 0o600 });
+      const staging = join(active, ".receipt-publish");
+      const destination = join(active, "15-finalize-passed.json");
+      if (crashPoint === "partial-staging") {
+        writeFileSync(staging, "{", { mode: 0o600 });
+      } else {
+        writeFileSync(staging, canonicalBytes(finalization.receipt), { mode: 0o600 });
+        if (crashPoint === "published-link") linkSync(staging, destination);
+      }
+      assert.equal(run(state, "status").status, 0);
+      const recovered = finalizeEnvironmentForExecutor({
+        repoRoot: state.repo,
+        stateBase: state.state,
+      });
+      assert.equal(recovered.receipt.phase, "finalize-passed");
+      assert.equal(existsSync(staging), false);
+      assertPrivate(destination, 0o600);
+      assert.equal(run(state, "verify").status, 0);
+    } finally {
+      rmSync(state.root, { recursive: true, force: true });
+    }
+  }
+});
+
+test("a complete final receipt stage requires the exact published environment", () => {
+  const state = fixture();
+  try {
+    assert.equal(run(state, "plan").status, 0);
+    const { active, candidate, receipts } = stageSuccessfulReceipts(state);
+    const finalization = createFinalization(candidate, canonicalBytes(candidate), receipts);
+    const staging = join(active, ".receipt-publish");
+    writeFileSync(staging, canonicalBytes(finalization.receipt), { mode: 0o600 });
+    assert.throws(
+      () => finalizeEnvironmentForExecutor({
+        repoRoot: state.repo,
+        stateBase: state.state,
+      }),
+      /complete final receipt publication requires the environment manifest/,
+    );
+    assertPrivate(staging, 0o600);
+    assert.equal(existsSync(join(active, "15-finalize-passed.json")), false);
+    assert.equal(existsSync(join(active, "environment.json")), false);
+
+    writeFileSync(join(active, "environment.json"), finalization.manifestBytes, { mode: 0o600 });
+    const recovered = finalizeEnvironmentForExecutor({
+      repoRoot: state.repo,
+      stateBase: state.state,
+    });
+    assert.equal(recovered.receipt.phase, "finalize-passed");
+    assert.equal(existsSync(staging), false);
+    assert.equal(run(state, "verify").status, 0);
+  } finally {
+    rmSync(state.root, { recursive: true, force: true });
+  }
+});
+
+test("finalization refuses inert staging and removes a stale pre-final manifest on source drift", () => {
+  const inertState = fixture();
+  try {
+    assert.equal(run(inertState, "plan").status, 0);
+    stageSuccessfulReceipts(inertState);
+    mkdirSync(join(inertState.state, `.pending-${"f".repeat(32)}`), { mode: 0o700 });
+    assert.equal(run(inertState, "status").status, 0);
+    assert.throws(
+      () => finalizeEnvironmentForExecutor({
+        repoRoot: inertState.repo,
+        stateBase: inertState.state,
+      }),
+      /environment finalization requires absent inert staging/,
+    );
+    assert.equal(existsSync(join(activeRun(inertState), "environment.json")), false);
+  } finally {
+    rmSync(inertState.root, { recursive: true, force: true });
+  }
+
+  const driftState = fixture();
+  try {
+    assert.equal(run(driftState, "plan").status, 0);
+    const { active, candidate, receipts } = stageSuccessfulReceipts(driftState);
+    const finalization = createFinalization(candidate, canonicalBytes(candidate), receipts);
+    writeFileSync(join(active, "environment.json"), finalization.manifestBytes, { mode: 0o600 });
+    writeFileSync(join(driftState.repo, "source.txt"), "source drift\n");
+    assert.throws(
+      () => finalizeEnvironmentForExecutor({
+        repoRoot: driftState.repo,
+        stateBase: driftState.state,
+      }),
+      /source worktree is not clean/,
+    );
+    assert.equal(existsSync(join(active, "environment.json")), false);
+    assert.equal(existsSync(join(active, "15-finalize-passed.json")), false);
+    assert.equal(run(driftState, "status").status, 0);
+
+    writeFileSync(join(driftState.repo, "source.txt"), "fixture source\n");
+    const recovered = finalizeEnvironmentForExecutor({
+      repoRoot: driftState.repo,
+      stateBase: driftState.state,
+    });
+    assert.equal(recovered.receipt.phase, "finalize-passed");
+  } finally {
+    rmSync(driftState.root, { recursive: true, force: true });
+  }
+});
+
+test("a finalized environment is mandatory, private and not replaceable", () => {
+  for (const mutation of ["missing", "mode", "symlink"]) {
+    const state = fixture();
+    try {
+      assert.equal(run(state, "plan").status, 0);
+      const { active } = stageSuccessfulReceipts(state);
+      finalizeEnvironmentForExecutor({ repoRoot: state.repo, stateBase: state.state });
+      const environmentPath = join(active, "environment.json");
+      if (mutation === "missing") {
+        rmSync(environmentPath);
+      } else if (mutation === "mode") {
+        chmodSync(environmentPath, 0o644);
+      } else {
+        const substitute = join(state.root, "environment-substitute.json");
+        writeFileSync(substitute, "{}\n", { mode: 0o600 });
+        rmSync(environmentPath);
+        symlinkSync(substitute, environmentPath);
+      }
+      const refused = run(state, "status");
+      assert.notEqual(refused.status, 0);
+      assert.match(refused.stderr, /^clean-engine: /);
+    } finally {
+      rmSync(state.root, { recursive: true, force: true });
+    }
+  }
+});
+
+test("receipt schema v1 is an explicit pre-provider hard-cut refusal", () => {
+  const state = fixture();
+  try {
+    assert.equal(run(state, "plan").status, 0);
+    const path = join(activeRun(state), "00-plan.json");
+    const legacy = parse(path);
+    legacy.schema = "synveda.clean-engine.receipt.v1";
+    const ordered = Object.fromEntries(
+      Object.entries(legacy).sort(([left], [right]) => left.localeCompare(right)),
+    );
+    writeFileSync(path, `${JSON.stringify(ordered)}\n`, { mode: 0o600 });
+    const refused = run(state, "status");
+    assert.equal(refused.status, 78);
+    assert.equal(refused.stderr, "clean-engine: plan receipt contract was refused\n");
   } finally {
     rmSync(state.root, { recursive: true, force: true });
   }

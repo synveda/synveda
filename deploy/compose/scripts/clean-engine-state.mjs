@@ -20,9 +20,19 @@ import {
   renameSync,
   rmSync,
   statSync,
+  unlinkSync,
   writeSync,
 } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { pathToFileURL } from "node:url";
+import {
+  ReceiptFailure,
+  buildEnvironmentManifest,
+  createFinalization,
+  createNextReceipt,
+  receiptFileName,
+  validateReceiptChain,
+} from "./clean-engine-receipts.mjs";
 
 const REGISTRY_IMAGE =
   "registry:3.1.1@sha256:1be55279f18a2fe1a74edf2664cac61c1bea305b7b4642dab412e7affdcb3e33";
@@ -33,6 +43,10 @@ const MAX_CONTEXT_FILE_BYTES = 128n * 1024n * 1024n;
 const MAX_CONTEXT_TOTAL_BYTES = 2n * 1024n * 1024n * 1024n;
 const OWNER_UID = BigInt(process.getuid());
 const ZERO_SHA256 = "0".repeat(64);
+const RECEIPT_STAGING_NAME = ".receipt-publish";
+const ENVIRONMENT_NAME = "environment.json";
+const ENVIRONMENT_STAGING_NAME = ".environment-publish";
+const MUTATION_LEASE_NAME = ".mutation-lease";
 const REQUESTED_ASSERTIONS = Object.freeze([
   "browser-pkce-admin-logout-no-capture",
   "builder-canary-zero-connections",
@@ -597,6 +611,7 @@ function sourceClosure(repoRoot) {
 }
 
 function privateIpv4Pool(value) {
+  if (typeof value !== "string") return false;
   const match = value.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.0\/24$/);
   if (match === null) return false;
   const rawOctets = match.slice(1);
@@ -710,7 +725,7 @@ function writeExclusive(path, bytes, mode = 0o600) {
   syncDirectory(dirname(path));
 }
 
-function readPrivate(path, label, expectedLinks = 1) {
+function readPrivate(path, label, expectedLinks = 1, minimumBytes = 2n) {
   let descriptor;
   try {
     descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
@@ -720,7 +735,7 @@ function readPrivate(path, label, expectedLinks = 1) {
       before.uid !== OWNER_UID ||
       before.nlink !== BigInt(expectedLinks) ||
       (before.mode & 0o7777n) !== 0o600n ||
-      before.size < 2n ||
+      before.size < minimumBytes ||
       before.size > BigInt(MAX_FILE_BYTES)
     ) {
       fail(`${label} file was refused`);
@@ -745,8 +760,8 @@ function readPrivate(path, label, expectedLinks = 1) {
   }
 }
 
-function parseCanonical(path, label, expectedLinks = 1) {
-  const bytes = readPrivate(path, label, expectedLinks);
+function parseCanonical(path, label, expectedLinks = 1, minimumBytes = 2n) {
+  const bytes = readPrivate(path, label, expectedLinks, minimumBytes);
   let value;
   try {
     value = JSON.parse(bytes.toString("utf8"));
@@ -881,12 +896,13 @@ function validateCandidate(candidate) {
 function validatePlan(plan, candidateBytes, stateMetadata) {
   exactKeys(
     plan,
-    ["fixture_id", "phase", "previous_sha256", "result", "schema", "sequence"],
+    ["fixture_id", "outcome", "phase", "previous_sha256", "result", "schema", "sequence"],
     "plan receipt",
   );
   if (
-    plan.schema !== "synveda.clean-engine.receipt.v1" ||
+    plan.schema !== "synveda.clean-engine.receipt.v2" ||
     plan.sequence !== 0 ||
+    plan.outcome !== "passed" ||
     plan.phase !== "plan" ||
     plan.previous_sha256 !== ZERO_SHA256 ||
     !onlyLowerHex(plan.fixture_id, 32)
@@ -923,7 +939,7 @@ function validateProxyTemplate(path) {
 }
 
 function validatePlanRunInventory(run, stateMetadata) {
-  const expected = [
+  const required = [
     "00-plan.json",
     "candidate.json",
     "client",
@@ -933,7 +949,25 @@ function validatePlanRunInventory(run, stateMetadata) {
     "runtime",
   ];
   const entries = readdirSync(run).sort();
-  if (JSON.stringify(entries) !== JSON.stringify(expected)) {
+  const receipts = entries.filter((entry) => /^[0-9]{2}-[a-z][a-z0-9-]*\.json$/.test(entry));
+  const hasReceiptStaging = entries.includes(RECEIPT_STAGING_NAME);
+  const hasEnvironment = entries.includes(ENVIRONMENT_NAME);
+  const hasEnvironmentStaging = entries.includes(ENVIRONMENT_STAGING_NAME);
+  const hasMutationLease = entries.includes(MUTATION_LEASE_NAME);
+  if (
+    receipts.length < 1 ||
+    receipts.length > 64 ||
+    required.some((entry) => !entries.includes(entry)) ||
+    entries.some(
+      (entry) =>
+        !required.includes(entry) &&
+        !receipts.includes(entry) &&
+        entry !== RECEIPT_STAGING_NAME &&
+        entry !== ENVIRONMENT_NAME &&
+        entry !== ENVIRONMENT_STAGING_NAME &&
+        entry !== MUTATION_LEASE_NAME,
+    )
+  ) {
     fail("plan run inventory was refused");
   }
   for (const directory of ["client", "evidence", "provider", "registry", "runtime"]) {
@@ -949,6 +983,93 @@ function validatePlanRunInventory(run, stateMetadata) {
       fail("pre-provider plan directory was not empty");
     }
   }
+  let pendingPublication;
+  if (hasReceiptStaging) {
+    const path = join(run, RECEIPT_STAGING_NAME);
+    const metadata = inspectPendingFile(
+      path,
+      "pending receipt publication",
+      stateMetadata.dev,
+      new Set([1n, 2n]),
+    );
+    const linkedReceipts = receipts.filter((name) => {
+      const candidate = exactLstat(join(run, name));
+      return candidate.dev === metadata.dev && candidate.ino === metadata.ino;
+    });
+    if (
+      (metadata.nlink === 1n && linkedReceipts.length !== 0) ||
+      (metadata.nlink === 2n && linkedReceipts.length !== 1) ||
+      linkedReceipts.includes("00-plan.json")
+    ) {
+      fail("pending receipt publication link was refused");
+    }
+    pendingPublication = {
+      linkedReceipt: linkedReceipts[0],
+      links: Number(metadata.nlink),
+      path,
+    };
+  }
+  let environmentPublication;
+  if (hasEnvironmentStaging) {
+    const path = join(run, ENVIRONMENT_STAGING_NAME);
+    const metadata = inspectPendingFile(
+      path,
+      "pending environment publication",
+      stateMetadata.dev,
+      new Set([1n, 2n]),
+    );
+    let linkedEnvironment = false;
+    if (hasEnvironment) {
+      const candidate = exactLstat(join(run, ENVIRONMENT_NAME));
+      linkedEnvironment = candidate.dev === metadata.dev && candidate.ino === metadata.ino;
+    }
+    if (
+      (metadata.nlink === 1n && linkedEnvironment) ||
+      (metadata.nlink === 2n && !linkedEnvironment)
+    ) {
+      fail("pending environment publication link was refused");
+    }
+    environmentPublication = {
+      linkedEnvironment,
+      links: Number(metadata.nlink),
+      path,
+    };
+  }
+  if (hasEnvironment) {
+    const expectedLinks = environmentPublication?.linkedEnvironment ? new Set([2n]) : new Set([1n]);
+    inspectPendingFile(
+      join(run, ENVIRONMENT_NAME),
+      "environment manifest",
+      stateMetadata.dev,
+      expectedLinks,
+    );
+  }
+  let mutationLease;
+  if (hasMutationLease) {
+    mutationLease = parseCanonical(join(run, MUTATION_LEASE_NAME), "mutation lease");
+    exactKeys(
+      mutationLease.value,
+      ["action", "fixture_id", "nonce", "pid", "schema"],
+      "mutation lease",
+    );
+    if (
+      mutationLease.value.schema !== "synveda.clean-engine.mutation-lease.v1" ||
+      !new Set(["append-receipt", "finalize-environment"]).has(mutationLease.value.action) ||
+      !onlyLowerHex(mutationLease.value.fixture_id, 32) ||
+      !onlyLowerHex(mutationLease.value.nonce, 32) ||
+      !Number.isSafeInteger(mutationLease.value.pid) ||
+      mutationLease.value.pid < 1
+    ) {
+      fail("mutation lease was refused");
+    }
+  }
+  return {
+    environment: hasEnvironment ? join(run, ENVIRONMENT_NAME) : undefined,
+    environmentPublication,
+    mutationLease,
+    pendingPublication,
+    receipts,
+  };
 }
 
 function loadState(roots, checkSource, allowCompetingStaging = false) {
@@ -968,7 +1089,7 @@ function loadState(roots, checkSource, allowCompetingStaging = false) {
   if (!entries.includes(runName)) fail("state base inventory was refused");
   const run = join(roots.stateBase, runName);
   const stateMetadata = ownedPrivateDirectory(run, "active run state");
-  validatePlanRunInventory(run, stateMetadata);
+  const inventory = validatePlanRunInventory(run, stateMetadata);
   const candidate = parseCanonical(join(run, "candidate.json"), "candidate");
   validateCandidate(candidate.value);
   const plan = parseCanonical(join(run, "00-plan.json"), "plan receipt", 2);
@@ -985,6 +1106,68 @@ function loadState(roots, checkSource, allowCompetingStaging = false) {
   }
   validatePlan(plan.value, candidate.bytes, stateMetadata);
   if (candidate.value.run_id !== plan.value.fixture_id) fail("state identity was refused");
+  if (
+    inventory.mutationLease !== undefined &&
+    inventory.mutationLease.value.fixture_id !== candidate.value.run_id
+  ) {
+    fail("mutation lease identity was refused");
+  }
+  const receipts = [];
+  for (const [index, name] of inventory.receipts.entries()) {
+    const expectedLinks =
+      index === 0 || name === inventory.pendingPublication?.linkedReceipt ? 2 : 1;
+    const parsed =
+      index === 0
+        ? plan
+        : parseCanonical(join(run, name), "phase receipt", expectedLinks);
+    if (name !== receiptFileName(parsed.value)) fail("phase receipt filename was refused");
+    receipts.push(parsed.value);
+  }
+  let receiptState;
+  try {
+    receiptState = validateReceiptChain(receipts, candidate.value.run_id);
+  } catch (error) {
+    if (error instanceof ReceiptFailure) fail(error.message);
+    throw error;
+  }
+  const finalized = receiptState.head.phase === "finalize-passed";
+  const manifestReceipts = finalized ? receipts.slice(0, -1) : receipts;
+  let manifestState;
+  try {
+    manifestState = validateReceiptChain(manifestReceipts, candidate.value.run_id);
+  } catch (error) {
+    if (error instanceof ReceiptFailure) fail(error.message);
+    throw error;
+  }
+  if (
+    (inventory.environment !== undefined || inventory.environmentPublication !== undefined) &&
+    !manifestState.manifest_eligible
+  ) {
+    fail("environment manifest publication was not eligible");
+  }
+  let environment;
+  if (inventory.environment !== undefined) {
+    const expectedLinks = inventory.environmentPublication?.linkedEnvironment ? 2 : 1;
+    environment = parseCanonical(inventory.environment, "environment manifest", expectedLinks);
+    let expected;
+    try {
+      expected = canonicalBytes(
+        buildEnvironmentManifest(candidate.value, candidate.bytes, manifestReceipts),
+      );
+    } catch (error) {
+      if (error instanceof ReceiptFailure) fail(error.message);
+      throw error;
+    }
+    if (!environment.bytes.equals(expected)) fail("environment manifest content was refused");
+    if (
+      finalized &&
+      receiptState.head.result.environment_manifest_sha256 !== digest(environment.bytes)
+    ) {
+      fail("final environment manifest digest was refused");
+    }
+  } else if (finalized) {
+    fail("final environment manifest was unavailable", 69);
+  }
   validateProxyTemplate(join(run, "client", "proxy-template.json"));
   if (!allowCompetingStaging) {
     for (const entry of entries) {
@@ -997,7 +1180,17 @@ function loadState(roots, checkSource, allowCompetingStaging = false) {
     const current = sourceClosure(roots.repoRoot);
     if (canonical(current) !== canonical(candidate.value.source)) fail("source closure changed");
   }
-  return { candidate: candidate.value, plan: plan.value, run };
+  return {
+    candidate: candidate.value,
+    candidateBytes: candidate.bytes,
+    environment,
+    environmentPublication: inventory.environmentPublication,
+    plan: plan.value,
+    receiptState,
+    receipts,
+    run,
+    pendingPublication: inventory.pendingPublication,
+  };
 }
 
 function plan(roots, values) {
@@ -1069,6 +1262,7 @@ function plan(roots, values) {
     );
     const receipt = {
       fixture_id: runId,
+      outcome: "passed",
       phase: "plan",
       previous_sha256: ZERO_SHA256,
       result: {
@@ -1079,7 +1273,7 @@ function plan(roots, values) {
         state_device: String(stateMetadata.dev),
         state_inode: String(stateMetadata.ino),
       },
-      schema: "synveda.clean-engine.receipt.v1",
+      schema: "synveda.clean-engine.receipt.v2",
       sequence: 0,
     };
     writeExclusive(join(pending, "00-plan.json"), canonicalBytes(receipt));
@@ -1129,16 +1323,425 @@ function plan(roots, values) {
   }
 }
 
-function inspectPendingFile(path, label, expectedDevice) {
+function activeMutationRun(roots) {
+  const active = parseCanonical(roots.active, "active plan receipt", 2);
+  if (!onlyLowerHex(active.value?.fixture_id, 32)) fail("active plan identity was refused");
+  const run = join(roots.stateBase, `.run-${active.value.fixture_id}`);
+  ownedPrivateDirectory(run, "active run state");
+  return { fixtureId: active.value.fixture_id, run };
+}
+
+function processIsAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    if (error?.code === "ESRCH") return false;
+    return true;
+  }
+}
+
+function withMutationLease(roots, action, callback) {
+  const active = activeMutationRun(roots);
+  const leasePath = join(active.run, MUTATION_LEASE_NAME);
+  if (existsSync(leasePath)) {
+    const retained = parseCanonical(leasePath, "mutation lease");
+    exactKeys(
+      retained.value,
+      ["action", "fixture_id", "nonce", "pid", "schema"],
+      "mutation lease",
+    );
+    if (
+      retained.value.schema !== "synveda.clean-engine.mutation-lease.v1" ||
+      retained.value.fixture_id !== active.fixtureId ||
+      !new Set(["append-receipt", "finalize-environment"]).has(retained.value.action) ||
+      !onlyLowerHex(retained.value.nonce, 32) ||
+      !Number.isSafeInteger(retained.value.pid) ||
+      retained.value.pid < 1
+    ) {
+      fail("mutation lease was refused");
+    }
+    if (processIsAlive(retained.value.pid)) fail("another clean-engine mutation is active", 73);
+    fail("an abandoned clean-engine mutation requires explicit recovery", 73);
+  }
+  const lease = {
+    action,
+    fixture_id: active.fixtureId,
+    nonce: randomBytes(16).toString("hex"),
+    pid: process.pid,
+    schema: "synveda.clean-engine.mutation-lease.v1",
+  };
+  try {
+    writeExclusive(leasePath, canonicalBytes(lease));
+  } catch (error) {
+    if (existsSync(leasePath)) fail("another clean-engine mutation is active", 73);
+    throw error;
+  }
+  const leaseIdentity = exactLstat(leasePath);
+  let result;
+  let callbackError;
+  try {
+    result = callback();
+  } catch (error) {
+    callbackError = error;
+  }
+  try {
+    const current = exactLstat(leasePath);
+    if (!sameMetadata(leaseIdentity, current)) fail("mutation lease identity changed");
+    unlinkSync(leasePath);
+    syncDirectory(active.run);
+  } catch (error) {
+    if (error instanceof ClosedFailure) throw error;
+    fail("mutation lease release failed", 70);
+  }
+  if (callbackError !== undefined) throw callbackError;
+  return result;
+}
+
+export function appendReceiptForExecutor(argumentsValue) {
+  const roots = prepareRoots(argumentsValue.repoRoot, argumentsValue.stateBase, false);
+  return withMutationLease(roots, "append-receipt", () =>
+    appendReceiptWithLease(roots, argumentsValue),
+  );
+}
+
+function appendReceiptWithLease(roots, {
+  phase,
+  result,
+}) {
+  reconcileReceiptPublication(roots);
+  const sourceRequired =
+    !phase.endsWith("-failed") &&
+    !phase.startsWith("failure-cleanup-") &&
+    phase !== "preflight-refused" &&
+      phase !== "project-cleanup-intent" &&
+      phase !== "provider-cleanup-intent";
+  const state = loadState(roots, sourceRequired);
+  if (state.receiptState.head.phase === phase) {
+    if (canonical(state.receiptState.head.result) !== canonical(result)) {
+      fail("completed receipt result did not match retry");
+    }
+    return state.receiptState.head;
+  }
+  if (state.environment !== undefined || state.environmentPublication !== undefined) {
+    fail("environment finalization is already in progress", 73);
+  }
+  if (
+    state.receipts.length >= 64 ||
+    ((phase.endsWith("-intent") || sourceRequired) && state.receipts.length >= 63)
+  ) {
+    fail("receipt chain capacity was exhausted", 73);
+  }
+  let receipt;
+  try {
+    receipt = createNextReceipt(state.receipts, state.candidate.run_id, phase, result);
+  } catch (error) {
+    if (error instanceof ReceiptFailure) fail(error.message);
+    throw error;
+  }
+  publishReceipt(state.run, receipt);
+  if (sourceRequired) {
+    let sourceFailure;
+    try {
+      const current = sourceClosure(roots.repoRoot);
+      if (canonical(current) !== canonical(state.candidate.source)) fail("source closure changed");
+    } catch (error) {
+      if (error instanceof ClosedFailure) sourceFailure = error;
+      else throw error;
+    }
+    if (sourceFailure !== undefined) {
+      const drifted = loadState(roots, false);
+      if (drifted.receipts.length >= 64) throw sourceFailure;
+      let failurePhase = "execution-failed";
+      if (phase === "project-cleanup-intent" || phase === "provider-cleanup-intent") {
+        failurePhase = phase.replace(/-intent$/, "-failed");
+      }
+      try {
+        const failureReceipt = createNextReceipt(
+          drifted.receipts,
+          drifted.candidate.run_id,
+          failurePhase,
+          {
+            cleanup_required: true,
+            collision_resource: "none",
+            resource_disposition: "receipt-owned-or-absent",
+            safe_code: "evidence-refused",
+          },
+        );
+        publishReceipt(drifted.run, failureReceipt);
+      } catch (error) {
+        if (!(error instanceof ReceiptFailure) && !(error instanceof ClosedFailure)) throw error;
+      }
+      throw sourceFailure;
+    }
+  }
+  const verified = loadState(roots, sourceRequired);
+  if (verified.receiptState.head_sha256 !== digest(canonicalBytes(receipt))) {
+    fail("phase receipt publication was not durable", 70);
+  }
+  return receipt;
+}
+
+function publishReceipt(run, receipt) {
+  publishPrivateArtifact(
+    run,
+    RECEIPT_STAGING_NAME,
+    receiptFileName(receipt),
+    canonicalBytes(receipt),
+    "phase receipt",
+  );
+}
+
+function publishPrivateArtifact(run, stagingName, destinationName, bytes, label) {
+  const staging = join(run, stagingName);
+  const destination = join(run, destinationName);
+  writeExclusive(staging, bytes);
+  try {
+    linkSync(staging, destination);
+    syncDirectory(run);
+    unlinkSync(staging);
+    syncDirectory(run);
+  } catch {
+    fail(`${label} publication failed`, 70);
+  }
+}
+
+function reconcileReceiptPublication(roots) {
+  const state = loadState(roots, false);
+  const pending = state.pendingPublication;
+  if (pending === undefined) return;
+  if (pending.links === 2) {
+    try {
+      unlinkSync(pending.path);
+      syncDirectory(state.run);
+    } catch {
+      fail("pending receipt publication recovery failed", 70);
+    }
+    loadState(roots, false);
+    return;
+  }
+
+  let staged;
+  try {
+    staged = parseCanonical(pending.path, "pending receipt publication", 1, 0n);
+  } catch (error) {
+    if (
+      !(error instanceof ClosedFailure) ||
+      error.message !== "pending receipt publication was not canonical JSON"
+    ) {
+      throw error;
+    }
+    try {
+      unlinkSync(pending.path);
+      syncDirectory(state.run);
+    } catch {
+      fail("pending receipt publication recovery failed", 70);
+    }
+    loadState(roots, false);
+    return;
+  }
+  let expected;
+  const existing = state.receipts[staged.value?.sequence];
+  try {
+    if (existing !== undefined) {
+      expected = existing;
+    } else if (staged.value?.phase === "finalize-passed") {
+      if (state.environment === undefined) {
+        fail("complete final receipt publication requires the environment manifest");
+      }
+      expected = createFinalization(
+        state.candidate,
+        state.candidateBytes,
+        state.receipts,
+      ).receipt;
+    } else {
+      expected = createNextReceipt(
+        state.receipts,
+        state.candidate.run_id,
+        staged.value?.phase,
+        staged.value?.result,
+      );
+    }
+  } catch (error) {
+    if (error instanceof ReceiptFailure) {
+      fail("complete pending receipt publication was refused");
+    }
+    throw error;
+  }
+  if (!staged.bytes.equals(canonicalBytes(expected))) {
+    fail("complete pending receipt publication did not match");
+  }
+  try {
+    if (existing === undefined) {
+      linkSync(pending.path, join(state.run, receiptFileName(expected)));
+      syncDirectory(state.run);
+    }
+    unlinkSync(pending.path);
+    syncDirectory(state.run);
+  } catch {
+    fail("pending receipt publication recovery failed", 70);
+  }
+  loadState(roots, false);
+}
+
+function reconcileEnvironmentPublication(roots) {
+  const state = loadState(roots, false);
+  const pending = state.environmentPublication;
+  if (pending === undefined) return;
+  if (pending.links === 2) {
+    try {
+      unlinkSync(pending.path);
+      syncDirectory(state.run);
+    } catch {
+      fail("pending environment publication recovery failed", 70);
+    }
+    loadState(roots, false);
+    return;
+  }
+
+  let staged;
+  try {
+    staged = parseCanonical(pending.path, "pending environment publication", 1, 0n);
+  } catch (error) {
+    if (
+      !(error instanceof ClosedFailure) ||
+      error.message !== "pending environment publication was not canonical JSON"
+    ) {
+      throw error;
+    }
+    try {
+      unlinkSync(pending.path);
+      syncDirectory(state.run);
+    } catch {
+      fail("pending environment publication recovery failed", 70);
+    }
+    loadState(roots, false);
+    return;
+  }
+  let finalization;
+  try {
+    const manifestReceipts =
+      state.receiptState.head.phase === "finalize-passed"
+        ? state.receipts.slice(0, -1)
+        : state.receipts;
+    finalization = createFinalization(
+      state.candidate,
+      state.candidateBytes,
+      manifestReceipts,
+    );
+  } catch (error) {
+    if (error instanceof ReceiptFailure) {
+      fail("complete pending environment publication was refused");
+    }
+    throw error;
+  }
+  if (!staged.bytes.equals(finalization.manifestBytes)) {
+    fail("complete pending environment publication did not match");
+  }
+  try {
+    if (state.environment === undefined) {
+      linkSync(pending.path, join(state.run, ENVIRONMENT_NAME));
+      syncDirectory(state.run);
+    }
+    unlinkSync(pending.path);
+    syncDirectory(state.run);
+  } catch {
+    fail("pending environment publication recovery failed", 70);
+  }
+  loadState(roots, false);
+}
+
+export function finalizeEnvironmentForExecutor(argumentsValue) {
+  const roots = prepareRoots(argumentsValue.repoRoot, argumentsValue.stateBase, false);
+  return withMutationLease(roots, "finalize-environment", () =>
+    finalizeEnvironmentWithLease(roots),
+  );
+}
+
+function finalizeEnvironmentWithLease(roots) {
+  reconcileReceiptPublication(roots);
+  reconcileEnvironmentPublication(roots);
+  let state = loadState(roots, false);
+  const exactStateEntries = readdirSync(roots.stateBase).sort();
+  if (
+    JSON.stringify(exactStateEntries) !==
+    JSON.stringify([`.run-${state.candidate.run_id}`, "active"].sort())
+  ) {
+    fail("environment finalization requires absent inert staging");
+  }
+  let sourceFailure;
+  try {
+    const current = sourceClosure(roots.repoRoot);
+    if (canonical(current) !== canonical(state.candidate.source)) fail("source closure changed");
+  } catch (error) {
+    if (error instanceof ClosedFailure) sourceFailure = error;
+    else throw error;
+  }
+  if (sourceFailure !== undefined) {
+    if (
+      state.environment !== undefined &&
+      state.receiptState.head.phase !== "finalize-passed"
+    ) {
+      try {
+        unlinkSync(join(state.run, ENVIRONMENT_NAME));
+        syncDirectory(state.run);
+      } catch {
+        fail("stale environment manifest cleanup failed", 70);
+      }
+      loadState(roots, false);
+    }
+    throw sourceFailure;
+  }
+  state = loadState(roots, true);
+  if (state.receiptState.head.phase === "finalize-passed") {
+    return { manifest: state.environment.value, receipt: state.receiptState.head };
+  }
+  let finalization;
+  try {
+    finalization = createFinalization(
+      state.candidate,
+      state.candidateBytes,
+      state.receipts,
+    );
+  } catch (error) {
+    if (error instanceof ReceiptFailure) fail(error.message);
+    throw error;
+  }
+  if (state.environment === undefined) {
+    publishPrivateArtifact(
+      state.run,
+      ENVIRONMENT_STAGING_NAME,
+      ENVIRONMENT_NAME,
+      finalization.manifestBytes,
+      "environment manifest",
+    );
+  }
+  state = loadState(roots, true);
+  if (!state.environment.bytes.equals(finalization.manifestBytes)) {
+    fail("environment manifest retry did not match");
+  }
+  publishReceipt(state.run, finalization.receipt);
+  const verified = loadState(roots, true);
+  if (
+    verified.receiptState.head.phase !== "finalize-passed" ||
+    verified.receiptState.head_sha256 !== digest(canonicalBytes(finalization.receipt))
+  ) {
+    fail("environment finalization was not durable", 70);
+  }
+  return { manifest: verified.environment.value, receipt: verified.receiptState.head };
+}
+
+function inspectPendingFile(path, label, expectedDevice, expectedLinks = new Set([1n])) {
   let descriptor;
+  let metadata;
   try {
     descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
-    const metadata = exactFstat(descriptor);
+    metadata = exactFstat(descriptor);
     if (
       !metadata.isFile() ||
       metadata.uid !== OWNER_UID ||
       metadata.dev !== expectedDevice ||
-      metadata.nlink !== 1n ||
+      !expectedLinks.has(metadata.nlink) ||
       (metadata.mode & 0o7777n) !== 0o600n ||
       metadata.size > BigInt(MAX_FILE_BYTES)
     ) {
@@ -1150,6 +1753,9 @@ function inspectPendingFile(path, label, expectedDevice) {
   } finally {
     if (descriptor !== undefined) closeSync(descriptor);
   }
+  const current = exactLstat(path);
+  if (!sameMetadata(metadata, current)) fail(`${label} identity changed`);
+  return current;
 }
 
 function validateInertStaging(pending) {
@@ -1195,22 +1801,30 @@ function validateInertStaging(pending) {
   }
 }
 
-try {
-  const { action, values } = parseArgs(process.argv);
-  const roots = prepareRoots(values["repo-root"], values["state-base"], action === "plan");
-  if (action === "plan") {
-    plan(roots, values);
-  } else {
-    const state = loadState(roots, action === "verify");
-    process.stdout.write(
-      `clean-engine: plan ${state.candidate.run_id} is ${action === "verify" ? "source-verified" : "prepared"}\n`,
-    );
+function main() {
+  try {
+    const { action, values } = parseArgs(process.argv);
+    const roots = prepareRoots(values["repo-root"], values["state-base"], action === "plan");
+    if (action === "plan") {
+      plan(roots, values);
+    } else {
+      const state = loadState(roots, action === "verify");
+      const suffix =
+        state.receiptState.head.phase === "plan"
+          ? action === "verify" ? "source-verified" : "prepared"
+          : `${action === "verify" ? "source-verified" : "prepared"} at ${state.receiptState.head.phase}`;
+      process.stdout.write(`clean-engine: plan ${state.candidate.run_id} is ${suffix}\n`);
+    }
+  } catch (error) {
+    if (error instanceof ClosedFailure) {
+      process.stderr.write(`clean-engine: ${error.message}\n`);
+      process.exit(error.exitStatus);
+    }
+    process.stderr.write("clean-engine: unexpected closed-state failure\n");
+    process.exit(70);
   }
-} catch (error) {
-  if (error instanceof ClosedFailure) {
-    process.stderr.write(`clean-engine: ${error.message}\n`);
-    process.exit(error.exitStatus);
-  }
-  process.stderr.write("clean-engine: unexpected closed-state failure\n");
-  process.exit(70);
+}
+
+if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+  main();
 }
