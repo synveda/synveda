@@ -196,22 +196,36 @@ lifecycle and injected-flow tests pass, but the container has not run. The next
 slice now has an immutable canonical candidate/plan receipt binding the clean
 tracked index, actual effective Docker context, deployment inputs and exact
 fixture selection plus a private non-secret synthetic proxy template. Its
-complete run publishes through a no-replace hard-linked lease; inert
+complete run publishes through a no-replace hard-linked active receipt; inert
 pre-publication crash residue grants no provider authority and remains pending
 final cleanup. Planning reaches no Docker/provider/host authority.
 The new version-2 append-only receipt machine closes all intent/result schemas,
 collision-safe cleanup-only failure branches and success-only manifest
-eligibility. Receipt and manifest publication use no-replace artifact staging
-and share an exclusive content-free mutation slot; concurrent fake writers,
-append versus finalize, tamper and operator-cleared
-partial/complete/linked stages are covered. A real abandoned slot is retained
-and blocks because safe recovery is not implemented. There is still no public
-executor and the execution directories remain empty. It must next add
-identity-confirmed abandoned-slot recovery, hold exclusion across
-intent/effect/result, and then wire only the provider-create boundary to
-isolated short Colima/Lima/cache homes and private Docker client state. Fake
-crash/collision cleanup must pass before the first receipt-owned disposable
-Engine. TLS private-registry, remote-builder canary, live proxy, browser and
+eligibility. Receipt and manifest publication use no-replace artifact staging.
+The append-only mutation journal keeps permanent, gap-free slots, closes and
+per-slot recovery claims; each generation binds its source/result endpoints,
+prior close and exact owner/recovery authority. Final journal names are never
+deleted or reused. Concurrent fake writers, append versus finalize, tamper,
+partial/complete/linked stages, stale names, capacity exhaustion and a
+cooperatively removed live close stage are covered. That close retries only
+after exact authority and endpoint revalidation. Generic append cannot own
+provider-create or finalization evidence. One internal deterministic
+fake-provider seam holds an open slot across intent/effect/result, retains
+uncertainty and recovers a killed owner only through exact
+slot-sequence/digest confirmation plus at most eight permanent claims;
+live/unidentifiable owners and competing writers refuse, while claims linked
+after a durable close remain inert history. The
+contract-derived fake adapter is closed data with no function, command, path,
+environment or provider selection. Its provider-absence and cleanup results
+are synthetic; portable process birth, child-group quiescence and external
+ownership remain unproved. There is no public executor/recovery command, and
+execution directories remain empty. It must next add the gated
+child/actor/process-group witness, phase-specific
+provider ownership artifacts and fake collision/signal/orphan cleanup before
+the fixed Colima adapter can use isolated short Colima/Lima/cache homes and
+private Docker client state. No code may set or repurpose `HOME`; the future
+adapter uses explicit provider paths and `--mount none`. TLS private-registry,
+remote-builder canary, live proxy, browser and
 exact-cleanup evidence follow; only then is the privileged mapping installed
 for the first live run. Linux/reference HTTPS follows before the legacy
 Rauthy/Temporal callers

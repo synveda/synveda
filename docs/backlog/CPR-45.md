@@ -387,29 +387,55 @@ builder, browser, project cleanup and provider cleanup. Every phase has a
 closed content-free result schema; failures enter only an exact receipt-owned
 cleanup branch, and a colliding foreign resource is excluded from that
 authority across cleanup retries. Receipt and final-manifest publication use
-fsynced staging plus no-replace links, while one atomically created
-content-free mutation slot serializes concurrent append/finalize attempts. The
-artifact reconciler covers partial, complete and linked staging after that slot
-has been safely resolved. It deliberately does not reclaim an abandoned slot:
-a real process crash blocks further mutation pending an explicit
-identity-confirmed recovery design. Only the exact successful sequence can
-produce the closed environment manifest and state-owned final receipt. The
-pre-provider version-1 plan format is deliberately refused rather than
-migrated. This is fake-executor and filesystem evidence only: there is no
-public phase runner, the execution directories remain empty by contract, and
-no provider or Docker command has run.
+fsynced staging plus no-replace links. The mutation journal now appends
+permanent, gap-free slots, closes and per-slot recovery claims. A slot binds its
+exact source receipt/environment endpoints, the previous close, intended
+provider receipt and cooperative process-instance challenge. Its close binds
+the exact result endpoints and owner or recovery authority. Final journal names
+are never deleted or reused. Only unique staging aliases reconcile; a live
+close publisher whose alias is concurrently removed retries within a fixed
+bound only after re-proving unchanged authority and result endpoints. Generic
+append cannot own provider-create or finalization evidence.
+
+The provider seam holds one open slot across intent, one synchronous
+closed-data `deterministic-fake-provider-v1` step and result, retaining it on
+uncertainty. Exact slot-sequence/digest confirmation and at most eight recovery
+claims recover a killed owner, refuse a live or unidentifiable owner, and allow
+a later owner to supersede an abandoned recovery while cooperative writers
+stay blocked. A late claim after a durable close is inert history. Slot or
+claim capacity exhaustion fails closed for inspection and fresh-plan
+regeneration. The reusable mutation-lease layout and version-1 plan receipts
+are refused rather than migrated.
+
+This remains fake-executor and cooperative filesystem evidence only. The fake
+adapter has a contract-derived hash, bounded hold and closed outcome/result
+objects; it accepts no function, command, environment, path or provider
+selection. Its hard-coded absence/cleanup vocabulary is synthetic and grants no
+deletion authority. Owner challenges do not prove portable process birth or
+child quiescence, and journal hashes do not protect against a hostile same-user
+writer. Only provider-create is recoverable, so an abandoned ordinary
+append/finalization slot remains blocking evidence. There is no public
+phase/recovery runner, controlled child gate, actor/process-group witness or
+owned external provider root; execution directories remain empty and no
+provider or Docker command has run. Exact actor quiescence and immutable root
+ownership remain prerequisites for enabling Colima.
 
 ### Immediate next slice
 
-Add the first live executor boundary around the existing
-`provider-create-intent`/`provider-create-passed` contract. It must use isolated
-short Colima/Lima/cache homes and a private Docker client configuration, prove
-the named provider was absent before intent, refuse adoption, and retain the
-active receipt until exact provider cleanup. First exercise process crash,
-foreign collision, source drift and cleanup failure with fake commands. Before
-any provider mutation, add an explicit identity-bound abandoned-slot recovery
-action and make the executor hold the slot across intent, external effect and
-result; only then create and destroy the receipt-owned Colima provider.
+Add the controlled child boundary around the proven fake-provider state seam.
+The child must publish an exact actor/process-group witness while blocked,
+fsync a one-way start gate before invoking a command, retain exclusion until
+the whole group is proven absent, and leave an independently classifiable
+completion after parent death. Add phase-specific closed `provider/`
+inventories plus a mirrored immutable ownership marker for the short external
+root. Exercise pre/post-intent collision, source drift, signal, timeout,
+orphaned child, result-publication crash and foreign-preserved cleanup with fake
+commands. Only after that matrix passes may the fixed Colima adapter use
+explicit `COLIMA_HOME`, `COLIMA_CACHE_HOME`, `LIMA_HOME` and `DOCKER_CONFIG`,
+`--mount none`, absolute revalidated binaries and a closed environment that
+does not set or repurpose `HOME`. Prove the named provider absent before
+intent, refuse adoption, and retain the active receipt until exact provider
+cleanup; only then create and destroy the receipt-owned Colima provider.
 Subsequent bounded steps add the globally clean Engine proof, TLS/bcrypt
 private registry,
 authenticated push/pull, synthetic Docker-client proxy activation, a zero-read

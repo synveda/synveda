@@ -88,13 +88,25 @@ deterministic Linux grammar coverage. This is not public PKIX/browser trust,
 explicit custom-CA/proxy support, a clean-volume login or recovery evidence. One
 append-only version-2 receipt machine now deterministically enforces closed
 intent/result schemas, collision-preserving cleanup-only failure paths,
-no-replace artifact publication, one exclusive mutation slot and an exact
-success-only environment manifest. Operator-cleared staged artifacts reconcile,
-but a real abandoned slot intentionally blocks because safe recovery is not
-implemented. Those tests use synthetic results; there is no public phase
-runner, live provider mutation or environment manifest. Consequently they
-improve the evidence boundary without changing readiness. One frozen Docker
-Desktop candidate also proved bounded PostgreSQL/Keycloak
+no-replace artifact publication and an exact success-only environment
+manifest. Its permanent, gap-free mutation slots, closes and per-slot recovery
+claims bind each source/result endpoint, prior close and exact owner/recovery
+authority; final journal names are never deleted or reused. Only staged aliases
+reconcile, and a cooperatively displaced close stage retries only after exact
+authority and endpoint revalidation. Generic append cannot fabricate
+provider-create or finalization evidence. An internal deterministic
+fake-provider seam holds one open slot across synchronous
+intent/effect/result; slot-sequence/digest confirmation plus at most eight
+append-only claims recovers a killed fake owner and supersedes an abandoned
+recovery while live or unidentifiable owners refuse. Late claims after a close
+are inert history, and bounded journal exhaustion fails closed. The closed data
+adapter has no function, command, path, environment or provider selector. Its
+absence/cleanup result is synthetic; process birth, child quiescence and
+external ownership remain unproved. There is no public phase/recovery runner,
+gated child, process-group witness, external ownership marker, live provider
+mutation or environment manifest. Consequently these synthetic tests improve
+the evidence boundary without changing readiness. One
+frozen Docker Desktop candidate also proved bounded PostgreSQL/Keycloak
 bootstrap, optimized
 Keycloak, realm convergence, issuer metadata, Collector, worker and gateway
 startup for its exact historical source/image closure. That private run is

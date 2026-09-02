@@ -156,23 +156,56 @@ one canonical content-free candidate, immutable plan receipt and private
 synthetic-proxy template, all mode 0600. The candidate records both the tracked
 index and the actual effective Docker context, including modes, file bytes and
 symlink targets; included untracked or empty directories fail closed. The
-complete fsynced run publishes one no-replace hard-linked `active` lease, and a
-second plan refuses it. Do not edit or remove the lease or receipt-owned run.
-An uncatchable interruption before lease publication can retain a validated
+complete fsynced run publishes one no-replace hard-linked `active` receipt, and
+a second plan refuses it. Do not edit or remove that link or receipt-owned run.
+An uncatchable interruption before active-receipt publication can retain a validated
 inert staging directory; it has no provider authority, does not block a later
 plan and must be removed by the future final cleanup before success evidence.
 More than eight retained inert directories fail closed.
-The internal version-2 receipt state machine now closes every intent/result,
+The internal version-2 receipt state machine closes every intent/result,
 failure-cleanup and success-only environment-manifest transition. Canonical
-receipts and the manifest use no-replace publication, while one atomic
-content-free mutation slot serializes append and finalization. Staged-artifact
-tests prove reconciliation only after that slot is absent. A real crash while
-holding it leaves an abandoned slot that intentionally blocks; no automatic or
-public recovery command exists yet. The tests exercise synthetic results only.
-There is no public phase runner, and `provider/`, `registry/`, `runtime/` and
-`evidence/` remain empty, so the provider/registry/canary phases are not live
-and this candidate is preparation rather than acceptance authority. A
-version-1 plan is pre-provider state and must be discarded and regenerated.
+receipts and the manifest use no-replace publication. Its mutation journal is
+append-only: permanent `.mutation-slot-SS`, `.mutation-close-SS` and
+`.mutation-recovery-SS-RR` records are never deleted or reused. Each slot binds
+the exact source receipt/environment endpoints and previous close digest; each
+close binds the exact result endpoints and owner or recovery authority. Only
+unguessable `.mutation-stage-*` aliases are retired. If a cooperative verifier
+removes a live pre-link alias, close publication retries only after re-proving
+the same authority and result endpoints. An unrelated one-link alias confers no
+authority and cannot block the authorised close; its eventual final link loses
+to the permanent no-replace name. Append and finalization close their
+short slot on a catchable no-effect error. Generic append cannot publish
+provider-create or finalization evidence.
+
+Only the provider-create seam is recoverable: it holds one slot across intent,
+a synchronous deterministic fake step and result, retaining the open slot on
+uncertainty. Explicit recovery requires
+`recover:<fixture>:<two-digit-slot>:<slot-sha256>`, refuses a live or
+unidentifiable owner and appends a gap-free claim chain. The open slot and
+newest live claim block cooperative writers until a terminal receipt and close
+are durable. A claim linked after an already-durable close is retained as inert
+history and cannot reopen or replace that generation. Eight failed recovery
+attempts or 64 slots exhaust the bounded journal and require operator
+inspection and fresh-plan regeneration. The reusable `.mutation-lease` layout
+is refused rather than reclaimed; an abandoned append or finalization slot
+still requires operator inspection.
+
+This is still an internal fake-adapter contract, not a provider runner. The
+adapter is closed data: fixed contract hash, bounded hold and closed
+outcome/result objects. It accepts no function, command, path, environment or
+provider selector. Its reported resource absence and cleanup vocabulary are
+synthetic and confer no deletion authority. Owner challenges prove only
+cooperative self-identity; another live PID is unidentifiable and blocks, while
+`ESRCH` proves absence only in the probing PID namespace. They do not prove
+portable process birth or child-group quiescence. Recovery claims must form a
+complete permanent prefix; journal
+hashes are correlation evidence and do not protect against a hostile same-user
+writer. There is no public execute
+or recover target, controlled child, actor/process-group witness or external
+root. `provider/`, `registry/`, `runtime/` and `evidence/` remain empty. The
+next runner must add a durable pre-effect gate, exact actor quiescence and
+immutable root ownership before the first provider command. A version-1 plan
+is pre-provider state and must be discarded and regenerated.
 The manual browser ceremony below remains usable for fixture development but
 cannot be labelled a clean-Engine result.
 
@@ -539,10 +572,12 @@ enterprise certification. The synthetic Docker-client proxy, canary remote
 builder, authenticated private registry and exact clean-Engine teardown remain
 open. Candidate planning now binds the source and selection closure, prepares
 the private synthetic proxy template and contacts no Docker endpoint. The
-append-only receipt grammar, cleanup-only failure branch, shared mutation slot
-and success-only manifest finalizer are deterministic filesystem contracts, not
-a live executor or provider claim. Abandoned-slot recovery and exclusion across
-intent, external effect and result remain prerequisites for that executor.
+append-only receipt grammar, cleanup-only failure branch, permanent mutation
+journal, fake-provider recovery and success-only manifest finalizer are
+deterministic filesystem contracts, not a live executor or provider claim. A
+controlled child/process-group witness and immutable external-root ownership
+remain prerequisites for extending that exclusion across a real provider
+effect.
 Separately, every development source build proves the embedded local builder
 grammar before mutation; none of that is live provider evidence. The core
 Collector remains private but

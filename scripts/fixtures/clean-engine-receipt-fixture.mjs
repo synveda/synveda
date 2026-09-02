@@ -3,11 +3,19 @@ const REGISTRY_IMAGE =
 
 export function cleanEngineReceiptResult(phase, fixtureId) {
   switch (phase) {
+    case "preflight-refused":
+      return {
+        cleanup_required: false,
+        collision_resource: "provider",
+        resource_disposition: "foreign-preserved",
+        safe_code: "resource-collision",
+      };
     case "provider-create-intent":
       return {
         cleanup_command: "colima-delete-data-force",
         preexisting_resource: "absent",
-        provider_contract_sha256: "2".repeat(64),
+        provider_contract_sha256:
+          "644704a6fccc5867c9987d6a971a980086d7fe77712ca4f892ae4aef839fd799",
         provider_resource: `synveda-cpr45-${fixtureId}`,
         provider_root_key: `sv-c45-${fixtureId.slice(0, 16)}`,
       };

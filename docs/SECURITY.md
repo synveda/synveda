@@ -176,16 +176,39 @@ effective Docker context—portable paths, types, modes, file bytes and symlink
 targets—and rejects included untracked/empty entries plus ignored files not
 covered by the closed exclusions. Its private proxy template contains only
 `.invalid` non-secret markers. Exact BigInt device/inode checks and a
-no-replace hard-linked active receipt prevent rounded or partial lease
-publication. Pre-publication crash residue is inert and grants no provider
+no-replace hard-linked active receipt prevent rounded or partial publication.
+Pre-publication crash residue is inert and grants no provider
 authority, but the later final cleanup must remove it. Preparation creates no
 Engine and carries no Docker auth. The version-2 synthetic receipt grammar
 phase-binds collisions, replays retired cleanup authority and admits a final
-manifest only after the exact success sequence. Its private atomic mutation
-slot refuses concurrent writers and retains an abandoned owner; there is no
-automatic recovery, public phase runner or external effect yet. Receipt and
-manifest staging reconciliation is therefore artifact-level evidence only,
-not process-crash recovery. Disposable-provider identity, TLS registry auth, a
+manifest only after the exact success sequence. The append-only mutation
+journal binds permanent numbered slots to exact source receipt/environment
+endpoints, the prior close and a cooperative owner challenge. Permanent closes
+bind exact result endpoints and owner/recovery authority; per-slot recovery
+claims form a gap-free prefix. Final journal names are never deleted or reused.
+Unique fsynced stages and atomic no-replace links prevent partial final files;
+only stage aliases reconcile. A displaced live close stage retries only after
+authority and result endpoints are re-proved. An unrelated one-link alias
+confers no authority and cannot block that close; its final no-replace link
+loses. One internal fake-provider
+operation holds an open slot across synchronous intent/effect/result and
+retains uncertainty. Generic append cannot own provider or finalization
+evidence.
+
+Recovery requires the exact slot sequence and canonical digest and appends a
+bounded claim chain while the open slot and newest claim block ordinary
+writers; live/unidentifiable owners refuse, and an abandoned recovery can be
+superseded without PID-based adoption. A claim appended after a durable close
+is inert history. Exhausted recovery or slot capacity fails closed. This is a
+trusted-process deterministic seam only. The fixed fake adapter is closed data
+and accepts no function, command, path, environment or provider selector; its
+absence/cleanup fields are not external discovery or deletion authority.
+Cooperative owner challenges do not prove portable process birth or child
+quiescence, and journal hashes do not protect against a hostile same-user
+writer. No public phase/recovery runner exists, and no external effect,
+actor/process-group witness or deletion authority is enabled.
+Receipt and manifest staging reconciliation plus fake-owner recovery are not
+live process/provider recovery evidence. Disposable-provider identity, TLS registry auth, a
 zero-read remote-builder canary and exact destruction evidence are still
 pending. ACLs, xattrs, file flags, bind mounts and hostile same-user path
 replacement remain trusted-host limits.

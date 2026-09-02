@@ -144,13 +144,43 @@ authority. Version-1 plan receipts predate this mutation contract and are a
 hard-cut refusal: discard their non-mutating preparation state and create a new
 plan; there is no compatibility mode.
 
-All receipt appends and finalization share one private, content-free mutation
-slot created directly with exclusive no-follow semantics. A live owner
-serializes writers. An abandoned slot is retained and refuses every later
-mutation; this deterministic slice has no automatic reclaim or public recovery
-command. Before external effects exist, the executor must add an explicit,
-identity-confirmed recovery action and hold the same exclusion boundary across
-intent, effect and result. PID liveness alone is never deletion authority.
+All receipt appends and finalization use an append-only, private, content-free
+mutation journal. A permanent `.mutation-slot-SS` binds the closed action,
+exact source receipt/environment endpoints, intended provider receipt where
+applicable, random nonce, cooperative process-instance challenge and the prior
+close digest. Its permanent `.mutation-close-SS` binds exact result endpoints
+and the slot-owner or recovery authority. Recovery attempts append permanent,
+gap-free `.mutation-recovery-SS-RR` claims. These final names are never deleted
+or reused; the next slot is valid only when it binds the prior close exactly.
+The reusable `.mutation-lease` layout is a hard-cut refusal.
+
+Blockers are completed and fsynced under unique private staging names, then
+linked atomically without replacement. Interruption leaves either an inert
+one-link stage or a complete two-link final record. Only staging aliases are
+retired. A close whose live pre-link alias is concurrently reconciled retries
+within a fixed bound only after re-proving its authority and unchanged result
+endpoints. An unrelated one-link stage confers no authority and cannot block
+that close; its later final link loses to the permanent no-replace name. A live
+or unidentifiable owner serializes writers; PID liveness
+alone is not adoption or deletion authority. Generic receipt append cannot own
+provider-create or finalization evidence.
+
+The internal provider-create fake adapter holds one slot from intent through a
+synchronous closed-data fake step to result and leaves it open after any
+uncertain outcome. Explicit recovery is bound to the exact canonical slot
+digest and two-digit slot sequence, then appends at most eight recovery claims.
+The open slot and newest recovery claim block ordinary writers. A
+live/unidentifiable owner or recovery refuses; an abandoned claim can be
+superseded. A claim that links after an already-durable close is inert history
+and cannot reopen that generation. Claim-attempt or 64-slot exhaustion fails
+closed for inspection and fresh-plan regeneration. Only provider-create has
+this recovery path; abandoned append and finalization slots remain blocking
+evidence. This is cooperative filesystem-state recovery only. Owner challenges
+do not prove portable process birth or child quiescence, and journal hashes do
+not protect against a hostile same-user writer. There is no public recovery
+command, kernel-lock helper, external provider actor or child process yet; the
+real runner must prove a durable start gate and exact process-group quiescence
+before this contract may cover Colima.
 
 Receipt and environment bytes are canonical, fsynced in private staging files
 and linked to their final names without replacement. After the mutation slot
@@ -179,12 +209,17 @@ the exact disposable provider/Engine before those actions, and a final
 environment manifest is forbidden until registry, proxy, builder, browser and
 receipt-owned cleanup assertions all pass.
 
-The current executor API and finalizer are internal deterministic seams used by
-the state tests. There is no public phase command and no live provider executor
-yet. `provider/`, `registry/`, `runtime/` and `evidence/` therefore remain
-strictly empty; live mutable state will use a short receipt-owned external root
-and phase-specific inventories in the next slice. This checkpoint must not be
-reported as clean-Engine, Docker, Colima or browser evidence.
+The current executor API, recovery API and finalizer are internal deterministic
+seams used by the state tests. The provider adapter is a closed data fixture
+with a contract-derived hash, bounded hold and closed outcome/result objects;
+it accepts no function, path, command, environment or provider selector. Its
+absence and cleanup fields are synthetic evidence, not provider discovery or
+deletion authority. There is no public phase/recovery command and no live
+provider executor. `provider/`, `registry/`, `runtime/` and `evidence/`
+therefore remain strictly empty; live mutable state will use a short
+receipt-owned external root and phase-specific inventories in the next slice.
+This checkpoint must not be reported as clean-Engine, Docker, Colima or browser
+evidence.
 
 An uncatchable pre-publication interruption can retain one or more strictly
 validated `.pending-*` or `.run-*` staging directories. They contain no
