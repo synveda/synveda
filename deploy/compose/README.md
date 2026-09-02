@@ -186,8 +186,9 @@ The deterministic fixture finalizer can emit only the explicitly non-live
 evidence is structurally ineligible; a future live provider must introduce its
 own reviewed environment schema before any acceptance claim.
 
-Only the provider-create seam is recoverable. The synchronous deterministic
-fake remains the rollback; the controlled fake path holds the same slot across
+Only the state-integrated provider-create seam has mutation-journal recovery.
+The synchronous deterministic fake remains the rollback; the controlled fake
+path holds the same slot across
 an immutable root plan/reservation, a mirrored external-root owner, durable
 launch/witness/one-way decision, one fixed child effect, outcome and whole
 process-group settlement. The supervisor reasserts the actual slot before its
@@ -212,8 +213,9 @@ regeneration. The reusable `.mutation-lease` layout is refused rather than
 reclaimed; an abandoned append or finalization slot still requires operator
 inspection.
 
-This remains an internal fake-only contract, not a provider runner. The closed
-adapter accepts no function, command, path, environment or provider selector.
+This remains an internal fake-only contract, not a provider runner. The
+state-integrated adapter accepts no function, command, path, environment or
+provider selector.
 The controlled actor executes only the repository-fixed fake command under the
 private receipt-owned root; it has no Docker or Colima command. Provider
 artifacts now record the plan, reservation, owner mirror, launch, witness,
@@ -221,15 +223,41 @@ decision, optional outcome, ESRCH settlement, state-owned effect mirror and an
 explicitly controlled-fake provider identity. The fixed effect contains only
 opaque binding metadata. Owner challenges and PGID probes are cooperative
 same-user/PID-namespace evidence; journal hashes do not protect against a
-hostile same-user writer. No supported lifecycle target exposes the test-only
-execute/recover fixtures; there is no live provider mutation, provider-root
-cleanup settlement or environment manifest.
-Controlled runs are therefore non-finalizable, and their synthetic cleanup
-vocabulary grants no deletion authority. `registry/`, `runtime/` and
-`evidence/` remain empty. The next slice must first lock the truthful
-background-provider model and fixed command/toolchain closure, then add exact
-owned-root/provider deletion settlement and a supported lifecycle target before
-any Docker claim.
+hostile same-user writer.
+
+A separate lifecycle-unexposed fake canary now models the background provider
+truthfully: its explicitly authorised fixture launcher starts only a
+digest-bound controller and separately detached host agent,
+and authenticated host-agent and Engine sockets plus the Docker-context
+endpoint remain healthy after controller-group `ESRCH`. Its proposed live
+contract pins the Colima 0.10.3 and Lima 2.2.0 source revisions and exact
+Darwin/arm64 VZ command, explicit short roots, closed helper path and unchanged
+inherited `HOME`, but refuses start while its OS, Docker, helper and disk-image
+closure is unresolved. Provider identity binds the complete creation-time
+fake-root inventory; retirement requires its exact match before publishing the
+leaf-first actions. It then stops the exact host agent through its
+authenticated socket protocol, fsyncs socket absence and applies individual
+identity-checked unlink/rmdir steps. Append-only progress resumes an exact
+complete stage/link, discards only its reserved same-target/digest partial
+stage, and recovers shutdown and delete-before-progress interruptions. Any
+already-absent deletion target has its exact parent fsynced and is rechecked
+before recovered progress can become durable.
+When the recorded host-agent PID is already absent before planning, every
+non-socket creation identity must remain exact and only the two exact recorded
+sockets may be stale or absent before a recovery plan is published.
+Wrong-digest or foreign-linked stages, settlements, links, symlinks, inodes,
+leaves and recreated roots are preserved and refused. Create and cleanup
+evidence are distinct.
+
+No supported lifecycle target exposes either test-only seam; there is no live
+provider mutation or environment manifest. The background canary explicitly
+records `state_integration: not-authorized`, while the older state-integrated
+provider root remains unretired. Controlled runs are therefore non-finalizable,
+and their synthetic cleanup vocabulary grants no receipt deletion authority.
+`registry/`, `runtime/` and `evidence/` remain empty. The next slice must bind
+the canary's distinct create/cleanup heads into dedicated mutation slots and
+closes, then finish the live Docker/helper/disk closure before exposing a
+supported lifecycle target or making any Docker claim.
 A receipt-v1/v2 plan or mutation-close v1 is discarded and regenerated.
 The manual browser ceremony below remains usable for fixture development but
 cannot be labelled a clean-Engine result.
@@ -599,13 +627,15 @@ open. Candidate planning now binds the source and selection closure, prepares
 the private synthetic proxy template and contacts no Docker endpoint. The
 append-only receipt grammar, cleanup-only failure branch, permanent mutation
 journal, synchronous rollback fake, controlled actor/process-group witness,
-mirrored external-root ownership and success-only manifest finalizer are
-deterministic fixed-fake contracts, not a live provider claim. The supervisor
+mirrored external-root ownership, lifecycle-unexposed background-process retirement
+canary and success-only manifest finalizer are deterministic fixed-fake
+contracts, not a live provider claim. The supervisor
 reasserts the actual slot before the actor validates its digest-bound authority
 and full root inventory. Exact optional effect/outcome digests and group ESRCH
-are bound into settlement and close evidence. No supported lifecycle target
-exposes the test fixtures, and owned-root deletion settlement remains a
-prerequisite for a real provider effect.
+are bound into settlement and close evidence. The separate process canary
+proves exact fake-root retirement but has no mutation-journal authority. No
+supported lifecycle target exposes the test fixtures; state-integrated cleanup
+and exact live-provider retirement remain prerequisites for a real effect.
 Separately, every development source build proves the embedded local builder
 grammar before mutation; none of that is live provider evidence. The core
 Collector remains private but

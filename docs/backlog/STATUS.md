@@ -228,17 +228,28 @@ identity-publication, terminal-receipt and close crashes without replay or
 stored-PGID signalling; launch-without-witness stays blocked. The
 contract-derived adapter
 accepts no caller function, command, path, environment or provider selection,
-and generic append cannot create preflight evidence. Only test fixtures expose
-it; no supported lifecycle target, Docker/Colima action, cleanup settlement or
-finalization is enabled. Next lock the live background-provider model, fixed
-command/toolchain closure and disk image; isolate and pre-create short
-Colima/Lima/cache/private-Docker roots, distinguish host-agent and Engine
-sockets, prove exact pre-intent absence, and add identity-bound recoverable
-deletion evidence. No code may set or repurpose `HOME`; use explicit provider
-paths, a closed helper `PATH` and `--mount none`. TLS private-registry,
-remote-builder canary, live proxy, browser and
-exact-cleanup evidence follow; only then is the privileged mapping installed
-for the first live run. Linux/reference HTTPS follows before the legacy
+and generic append cannot create preflight evidence. A separate
+lifecycle-unexposed fake canary now pins the Colima 0.10.3/Lima 2.2.0
+background-process contract
+for Darwin/arm64, executes digest-bound fixture source under an owned working
+directory, and proves that controller `ESRCH` is distinct from authenticated
+host-agent, Engine and Docker-context identity. Provider identity also binds the
+complete creation-time root inventory before retirement authority. It inherits ambient `HOME`
+unchanged while isolating all provider roots and its helper path. Its immutable
+leaf-first inventory, authenticated stop, durable socket absence and
+append-only progress recover exact publication, shutdown and
+delete-before-progress interruptions while preserving collisions and
+substitutions. Create and cleanup retain separate evidence heads.
+
+Only test fixtures expose either seam; no supported lifecycle target or
+Docker/Colima action is enabled. The new retirement settlement is explicitly
+state-unintegrated, the older mutation-owned root remains unretired, and
+cleanup/finalization still refuse. Next hard-cut and bind the separate
+create/cleanup evidence into dedicated mutation slots and closes, then finish
+the exact live Docker/helper/disk-image and OS-version closure without
+repurposing `HOME`. TLS private-registry, remote-builder canary, live proxy,
+browser and exact-cleanup evidence follow; only then is the privileged mapping
+installed for the first live run. Linux/reference HTTPS follows before the legacy
 Rauthy/Temporal callers
 can be cut over and deleted. Backup/restore, upgrade and Apalis remain open
 CPR-45 slices.

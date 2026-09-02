@@ -151,13 +151,47 @@ blocker because its PGID was not durably recorded.
 
 This is deterministic POSIX process/filesystem evidence for the fixed fake
 command and actor-owned descendant, not Docker, Colima or live-provider
-evidence. The controlled root has no deletion settlement yet, so controlled
-runs cannot publish provider-cleanup or finalization evidence. Receipt schema
-v3 separates deterministic-fixture from controlled-fake evidence and requires
-future live evidence to add a distinct reviewed shape. It binds provider
-success to its intent contract; receipt v1/v2 state is refused and regenerated.
-Mutation-close schema v2 adds the operation-evidence
-digest and remains a fresh-plan hard cut; v1 closes are refused, not translated.
+evidence. The state-integrated controlled root has no deletion settlement yet,
+so controlled runs cannot publish provider-cleanup or finalization evidence.
+Receipt schema v3 separates deterministic-fixture from controlled-fake
+evidence and requires future live evidence to add a distinct reviewed shape.
+It binds provider success to its intent contract; receipt v1/v2 state is
+refused and regenerated. Mutation-close schema v2 adds the
+operation-evidence digest and remains a fresh-plan hard cut; v1 closes are
+refused, not translated.
+
+A separate lifecycle-unexposed process canary locks the discovered background
+provider semantics before state integration. Its explicitly authorised
+launcher runs only the fixed fake fixture. The live-preparation record pins
+Colima 0.10.3 at `00f6c297e92a82c04a4ab507db0a61435650d7e8`
+and Lima 2.2.0 at `de0816ea4bdc5267b428ab21025889b8dd785526`,
+records the proposed fixed command and explicit short roots, inherits ambient
+`HOME` unchanged, and blocks while the exact Docker/helper/disk closure is
+unresolved. Its repository-fixed fake proves that controller-group `ESRCH`
+can coexist with a separately authenticated host agent, Engine and Docker
+context. Provider identity binds the complete creation-time root inventory;
+retirement must match it exactly before publishing its immutable leaf-first
+plan, stop by authenticated provider protocol rather than a stored PID,
+then revalidate each remaining inode/link/type/mode/owner subset before an
+individual unlink or directory removal. Append-only progress repairs an exact
+delete-before-progress interruption and preserves every unknown or replaced
+resource. Create and cleanup use distinct evidence heads. This canary remains
+`state_integration: not-authorized`; it cannot authorize a cleanup result,
+final receipt or live start.
+
+Deletion and recovered absence fsync the exact parent and recheck absence
+before publishing progress, including the terminal provider root.
+
+If the recorded process is already absent before planning, every non-socket
+creation identity remains mandatory and only the two exact creation-bound
+sockets may be stale or absent. A present process must still authenticate.
+
+The unsupported canary intentionally keeps canonical artifact publication,
+process authentication, inventory validation and retirement in one internal
+protocol module. Splitting those responsibilities now would export
+deletion-bearing primitives without an independent authority seam. Revisit the
+module boundary before a supported lifecycle target is introduced; size alone
+does not authorize weakening the closed validator.
 
 ## Options considered
 
@@ -208,14 +242,14 @@ digest and remains a fresh-plan hard cut; v1 closes are refused, not translated.
   evidence, not DR, HA, SaaS or enterprise evidence.
 - Keycloak/database downgrade and schema rollback remain constrained by the
   tested version window; zero downtime is not promised.
-- The controlled clean-Engine actor/root seam remains internal and fake-only.
-  Colima 0.10.3 `--foreground` keeps only its controller in the actor group; it
-  does not make the Lima host agent an owned descendant. A live adapter must
-  therefore lock a truthful background-instance model (or a genuinely owned
-  replacement), close its transitive helper and disk-image identity,
-  distinguish the host-agent and Engine sockets, and publish exact provider
-  deletion settlement. A public runner and source/image environment manifest
-  remain required before it can support a Docker or Colima acceptance claim.
+- The controlled clean-Engine seams remain internal and fake-only. The
+  deterministic background canary now distinguishes controller, host agent,
+  Engine, both sockets and Docker context and proves exact fake-root retirement.
+  Its settlement is not integrated with the receipt state. A live adapter must
+  still close the transitive Docker/helper/disk identities and integrate
+  separate create/cleanup evidence without weakening the immutable journal. A
+  supported runner and source/image environment manifest remain required
+  before it can support a Docker or Colima acceptance claim.
 - Reversal trigger: if measured operation failure semantics cannot be made
   correct behind the provider-neutral outbox, remove Apalis and retain the
   Postgres worker path. If single-host Compose cannot reproduce the contract on

@@ -431,33 +431,73 @@ pass to `execution-failed`. Generic append cannot fabricate preflight evidence.
 Version-1 mutation closes and reusable leases are refused rather than
 translated.
 
-This remains fixed-fake trusted-process POSIX evidence. The controlled adapter
-accepts no caller function, command, environment, path or provider selection;
-only test fixture modules invoke it and no supported lifecycle target exposes
-them. No Docker, Colima, resolver, registry, database or host command ran in
-this slice. The controlled root deliberately has no deletion settlement, so
-provider cleanup and finalization remain blocked. Cooperative owner challenges
-and PGID probes do not protect against a hostile same-user writer or prove
-another PID namespace; ACLs, xattrs, flags and bind mounts remain trusted-host
-limits.
+A separate deterministic process canary now captures the background-provider
+model that controller settlement cannot prove. Its closed live-preparation
+contract pins Colima 0.10.3 source revision
+`00f6c297e92a82c04a4ab507db0a61435650d7e8` and Lima 2.2.0 source revision
+`de0816ea4bdc5267b428ab21025889b8dd785526`; records the exact proposed
+`--foreground`, Docker, VZ, resource, `--mount none`, forwarding and
+digest-bound disk-image arguments; and remains live-start-disabled while the
+Docker/helper/disk closure is unresolved. The fake canary pre-creates short
+private Colima, Lima, cache, Docker and temporary roots, uses a closed helper
+path, and inherits ambient `HOME` unchanged because Lima resolves it even when
+`LIMA_HOME` is explicit. It persists the closed environment-name set, not the
+`HOME` environment value. The toolchain evidence necessarily records absolute
+runtime and fixture-source paths, which may reside beneath that home directory.
+
+The repository-fixed controller launches a separately detached fake host
+agent with distinct authenticated host-agent and Engine sockets plus a bound
+Docker-context endpoint. Provider identity binds the exact creation-time root
+and complete content-free inventory before retirement can obtain deletion
+authority. After the controller group reports `ESRCH`, fresh
+challenges prove the host agent and Engine still belong to the recorded
+process instance. Retirement publishes a complete immutable inventory and
+leaf-first action plan before any deletion, stops the host agent only through
+its authenticated protocol, and uses individual `unlink`/`rmdir` actions after
+revalidating the exact remaining subset. Append-only progress repairs an exact
+delete-before-progress crash. Unknown leaves, aliases, symlinks, inode changes,
+transplanted evidence and a recreated retired root are preserved and refused.
+Provider-create and provider-cleanup evidence remain separate immutable heads.
+Before recovered deletion progress, the exact parent is fsynced and absence is
+rechecked, including the terminal provider root.
+Planning after host-agent death or graceful expiry retains every exact
+creation-bound non-socket and permits only the two recorded sockets to be stale
+or absent.
+
+This remains fixed-fake trusted-process POSIX evidence. The state-integrated
+adapter accepts no caller function, command, environment, path or provider
+selection; the separate process canary accepts only validated private fixture
+and evidence roots plus bounded test controls. Only test fixture modules invoke
+either seam and no supported lifecycle target exposes them. No Docker, Colima,
+resolver, registry, database, live-provider or host-management command ran in
+this slice; only the fixed POSIX fake-fixture processes were spawned and
+signalled. The new retirement settlement is deliberately
+`state_integration: not-authorized` and cannot publish a cleanup result or
+finalize the existing mutation receipt. The older state-integrated actor root
+also remains unretired. Cooperative owner challenges and process probes do not
+protect against a hostile same-user writer or prove another PID namespace;
+ACLs, xattrs, flags and bind mounts remain trusted-host limits.
 
 ### Immediate next slice
 
-Lock and test the live provider process model before invoking Colima. In 0.10.3,
-`--foreground` keeps the controller alive but does not place the background
-Lima host agent under its process group, so actor-group `ESRCH` is not provider
-absence. Add fixed command and toolchain manifests covering pinned
-Colima/Lima/Docker binaries, every transitive helper and the disk image; use a
-closed `PATH`, pre-created explicit `COLIMA_HOME`, `COLIMA_CACHE_HOME`,
-`LIMA_HOME`, `DOCKER_CONFIG` and `TMPDIR`, and never set or repurpose `HOME`.
-Require `--mount none`, exact pre-intent root/profile/context absence, and
-separate identities for the Lima host-agent socket, Engine socket and Docker
-context. Then add identity-bound, crash-recoverable deletion settlement so the
-same receipt remains open until exact root/profile/context cleanup; never adopt
-or remove a foreign collision. Expose execution and recovery only through one
-supported lifecycle target after deterministic conformance passes. Then, with
-explicit authority, create and destroy one fresh isolated provider and publish
-its exact content-free environment evidence.
+Integrate the reviewed background-process and retirement evidence into the
+append-only mutation state under a receipt hard cut. Add a dedicated cleanup
+intent/slot and crash recovery, bind the immutable plan and progress chain,
+retain the provider-create evidence head unchanged, and close cleanup with its
+separate settlement digest. Neither action may finalize until the corresponding
+result and mutation close are durable. Prove interruption before and after
+shutdown, every deletion, settlement, result and close without replaying start
+or broadening deletion authority.
+
+Before invoking Colima, finish the selected live toolchain manifest for the
+pinned Colima/Lima and Docker CLI, every transitive helper and the exact disk
+image. Audit the actual inherited home dependency without repurposing `HOME`;
+retain the closed helper `PATH`, explicit provider roots, `--mount none`, exact
+pre-intent absence and distinct host-agent/Engine/context identities. Expose
+execution and recovery through one supported lifecycle target only after the
+state integration and fixed live closure pass deterministic conformance and
+independent review. Then, with explicit authority, create and destroy one fresh
+isolated provider and publish its exact content-free environment evidence.
 Subsequent bounded steps add the globally clean Engine proof, TLS/bcrypt
 private registry,
 authenticated push/pull, synthetic Docker-client proxy activation, a zero-read

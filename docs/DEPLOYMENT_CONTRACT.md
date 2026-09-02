@@ -194,8 +194,40 @@ without a witness remains blocking. The open slot and newest recovery claim
 block ordinary writers. A live/unidentifiable owner or recovery refuses; an
 abandoned claim can be superseded. A claim appended after a durable close is inert
 history. Claim-attempt or 64-slot exhaustion fails closed for inspection and
-fresh-plan regeneration. Only provider-create has recovery; abandoned append
-and finalization slots remain blocking evidence.
+fresh-plan regeneration. Only state-integrated provider-create has
+mutation-journal recovery; abandoned append and finalization slots remain
+blocking evidence.
+
+A separate lifecycle-unexposed fake process canary fixes the
+background-provider and retirement protocol before state integration. Its
+explicitly authorised fixture launcher binds captured controller
+and host-agent source bytes plus child-side runtime/source witnesses, uses an
+owned working directory and closed environment, and shuts the controller down
+through authenticated bounded IPC rather than a numeric PID or PGID signal.
+Controller-group `ESRCH` is followed by fresh authenticated host-agent and
+Engine probes through their distinct sockets and the exact Docker-context
+endpoint. Its live-preparation record is explicitly Darwin/arm64 VZ, pins
+Colima 0.10.3 and Lima 2.2.0 source revisions, inherits ambient `HOME`
+unchanged, and blocks on unresolved OS, Docker, helper and disk-image closure.
+
+Provider identity binds a complete immutable creation-time fake-root inventory;
+the canary requires its exact match before publishing a leaf-first retirement
+plan. Socket absence is fsynced; an abruptly dead
+host agent permits removal only of the exact planned stale socket identities.
+The same rule permits planning after pre-plan process death or graceful expiry:
+all non-socket creation identities remain mandatory and only the two exact
+creation-bound sockets may be present or absent.
+Every later deletion revalidates the exact remaining inventory and uses one
+unlink or rmdir. A recovered absence fsyncs its exact parent and is rechecked
+before progress publication, including provider-root removal. Bounded
+append-only publication/progress reconciles a complete
+pre-link stage or final link awaiting stage removal and discards only a
+reserved same-target/digest partial stage. It also recovers authenticated
+shutdown and delete-before-progress interruption. Unknown or substituted
+evidence/resources remain blocking. Provider-create and provider-cleanup
+retain different evidence heads. This settlement is
+`state_integration: not-authorized` and cannot close a cleanup result or final
+receipt.
 
 Receipt and environment bytes are canonical, fsynced in private staging files
 and linked to their final names without replacement. The current internal
@@ -228,21 +260,22 @@ the exact disposable provider/Engine before those actions, and a final
 environment manifest is forbidden until registry, proxy, builder, browser and
 receipt-owned cleanup assertions all pass.
 
-The current executor API, recovery API and finalizer remain internal
-deterministic seams exercised only by repository tests. No supported lifecycle
-target exposes the test-only phase/recovery fixtures. The adapter is closed
-data with a contract-derived hash and bounded timings; it accepts no
-caller-supplied function, path, command, environment or provider selector.
-The controlled path invokes only the repository-fixed fake child under a
-short, private, receipt-owned external root. `provider/` now contains
+The current executor API, recovery API, process canary and finalizer remain
+internal deterministic seams exercised only by repository tests. No supported
+lifecycle target exposes the test-only phase/recovery fixtures. The
+state-integrated adapter is closed data with a contract-derived hash and bounded
+timings; it accepts no caller-supplied function, path, command, environment or
+provider selector. The state-integrated controlled path invokes only the
+repository-fixed fake child under a short, private, receipt-owned external root.
+`provider/` now contains
 content-free root and actor lifecycle evidence, a state-owned effect mirror and
 a provider identity explicitly classified as controlled fake, but `registry/`,
 `runtime/` and `evidence/` remain empty. There is no Docker/Colima invocation,
-live provider executor, deletion settlement or environment manifest. Because
-the active validator still requires the owned root and no identity-bound
-deletion settlement retires that authority, controlled runs reject provider
-cleanup and finalization. This checkpoint must not be reported as clean-Engine,
-Docker, Colima or browser evidence.
+live provider executor or environment manifest. The separate process canary's
+fake-root deletion settlement carries no state authority, while the active
+state-integrated validator still requires its unretired owned root. Controlled
+runs therefore reject provider cleanup and finalization. This checkpoint must
+not be reported as clean-Engine, Docker, Colima or browser evidence.
 
 An uncatchable pre-publication interruption can retain one or more strictly
 validated `.pending-*` or `.run-*` staging directories. They contain no

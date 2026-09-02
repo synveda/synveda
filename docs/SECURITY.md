@@ -222,16 +222,35 @@ outcome, completed ESRCH settlement and the exact provider-identity digest in
 both receipt and mutation close. Attempts to relabel controlled-fake identity
 as live evidence fail closed.
 
-This remains trusted-process, fake-command-only POSIX evidence. The closed
-adapter accepts no function, command, path, environment or provider selector;
-its provider absence/cleanup fields are not external discovery or deletion
-authority. Cooperative owner challenges and PGID probes do not protect against
-a hostile same-user writer or prove another PID namespace. No supported
-lifecycle target exposes the test-only execution/recovery fixtures; no
-Docker/Colima effect or deletion authority is enabled.
-The owned root has no deletion settlement, so controlled provider cleanup and
-finalization fail closed. A truthful live-provider identity, TLS registry auth,
-a zero-read remote-builder canary and exact destruction evidence remain pending.
+This remains trusted-process, fake-command-only POSIX evidence. The
+state-integrated closed adapter accepts no function, command, path, environment
+or provider selector; its absence/cleanup fields are not external discovery or
+deletion authority. A separate lifecycle-unexposed canary uses an explicitly
+authorised fixed-fixture launcher and validated private roots to distinguish
+controller, host agent, Engine, sockets and Docker context. Provider identity
+binds the complete creation-time fake-root inventory, which must match exactly
+before a retirement plan can grant deletion authority. Retirement uses
+authenticated bounded shutdown, fsyncs socket absence and applies only exact
+individual unlink/rmdir steps with append-only recovery. Foreign stages,
+settlements, resources and recreated roots remain preserved. Its distinct
+create/cleanup evidence is explicitly state-unintegrated and cannot authorize
+a result receipt.
+
+Deletion and recovered absence both fsync the exact parent and recheck absence
+before progress publication, including terminal provider-root removal.
+
+If the recorded host-agent PID is absent before planning, recovery still
+requires every creation-bound non-socket identity. Only the two exact recorded
+socket identities may be stale or absent; a present process still requires
+authenticated live evidence and an unidentifiable process is refused.
+
+Cooperative owner challenges and process probes do not protect against a
+hostile same-user writer or prove another PID namespace. No supported lifecycle
+target exposes the test-only execution/recovery fixtures; no Docker/Colima
+effect or live deletion authority is enabled. The state-integrated owned root
+has no deletion settlement, so controlled provider cleanup and finalization
+fail closed. A truthful live-provider identity, TLS registry auth, a zero-read
+remote-builder canary and exact destruction evidence remain pending.
 ACLs, xattrs, file flags, bind mounts and hostile same-user path replacement
 remain trusted-host limits.
 

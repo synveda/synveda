@@ -119,12 +119,21 @@ Terminal success and the mutation close bind that identity, and relabelling it
 as live evidence fails closed. The closed adapter accepts no caller function,
 command, path, environment or provider selector.
 
+An additional lifecycle-unexposed fake canary uses only its explicitly
+authorised fixed-fixture launcher to distinguish the background controller,
+host agent, Engine, both sockets and Docker context, then proves exact fake-root
+retirement through authenticated shutdown, durable socket absence, an exact
+creation-bound inventory, immutable leaf-first actions and append-only
+interruption recovery. It preserves foreign evidence and resource substitutions and retains
+separate create/cleanup evidence heads. This settlement explicitly has no
+mutation-state or result-receipt authority.
+
 This is fixed-fake POSIX process/filesystem evidence only. No supported
 lifecycle target exposes the test fixture modules; there is no Docker/Colima
-mutation, owned-root cleanup settlement or environment manifest, so controlled
-cleanup and finalization refuse.
-Linux CI and a current Docker Desktop/provider run remain absent. Consequently
-this evidence improves the boundary without changing readiness. One
+mutation or environment manifest. The state-integrated owned root remains
+unretired, so controlled cleanup and finalization refuse.
+Live Linux/provider CI and a current Docker Desktop/provider run remain absent.
+Consequently this evidence improves the boundary without changing readiness. One
 frozen Docker Desktop candidate also proved bounded PostgreSQL/Keycloak
 bootstrap, optimized
 Keycloak, realm convergence, issuer metadata, Collector, worker and gateway
