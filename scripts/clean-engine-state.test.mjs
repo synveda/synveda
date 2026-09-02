@@ -348,7 +348,10 @@ function recoveryClaimForSlot(state, {
 async function waitForProviderIntent(state, timeoutMilliseconds = 8_000) {
   const path = join(activeRun(state), "01-provider-create-intent.json");
   const deadline = Date.now() + timeoutMilliseconds;
-  while (!existsSync(path)) {
+  while (
+    !existsSync(path) ||
+    lstatSync(path, { bigint: true }).nlink !== 1n
+  ) {
     assert.ok(Date.now() < deadline, "timed out waiting for fake provider intent");
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
   }

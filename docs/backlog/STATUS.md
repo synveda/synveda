@@ -232,7 +232,11 @@ and generic append cannot create preflight evidence. A separate
 lifecycle-unexposed fake canary now pins the Colima 0.10.3/Lima 2.2.0
 background-process contract
 for Darwin/arm64, executes digest-bound fixture source under an owned working
-directory, and proves that controller `ESRCH` is distinct from authenticated
+directory, and places a recoverable fixture-only authority before root
+mutation, a durable decision before controller launch and a controller-reproved
+durable decision before host-agent spawn. It rejects mutation-journal
+relabelling, changed gate inputs and pre-start controller death without a
+host-agent effect. It proves that controller `ESRCH` is distinct from authenticated
 host-agent, Engine and Docker-context identity. Provider identity also binds the
 complete creation-time root inventory before retirement authority. It inherits ambient `HOME`
 unchanged while isolating all provider roots and its helper path. Its immutable

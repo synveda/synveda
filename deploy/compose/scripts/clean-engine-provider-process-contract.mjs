@@ -46,8 +46,11 @@ export const CONTROLLED_BACKGROUND_ROOT_LAYOUT = Object.freeze({
 });
 
 const CONTROLLED_BACKGROUND_CREATION_ARTIFACTS = Object.freeze([
+  "background-create-authority.json",
   "background-toolchain.json",
+  "controller-launch-decision.json",
   "controller-witness.json",
+  "provider-start-decision.json",
   "hostagent-witness.json",
   "engine-witness.json",
   "context-witness.json",
@@ -170,14 +173,15 @@ export const CONTROLLED_BACKGROUND_PROVIDER_CONTRACT = Object.freeze({
   fixture_launch_authorized: true,
   home_policy: COLIMA_LIVE_PREPARATION_CONTRACT.home_policy,
   hostagent_protocol: "authenticated-challenge-v1",
-  kind: "controlled-background-provider-v1",
+  launch_protocol: "durable-evidence-controller-start-gate-v1",
+  kind: "controlled-background-provider-v2",
   lifecycle_exposure_authorized: false,
   live_preparation_contract_sha256: COLIMA_LIVE_PREPARATION_CONTRACT_SHA256,
   max_lifetime_milliseconds: 30_000,
   optional_environment_names: COLIMA_LIVE_PREPARATION_CONTRACT.optional_environment_names,
   provider_kind: "controlled-background-fake",
   root_layout: CONTROLLED_BACKGROUND_ROOT_LAYOUT,
-  schema: "synveda.clean-engine.controlled-background-provider-contract.v1",
+  schema: "synveda.clean-engine.controlled-background-provider-contract.v2",
   toolchain_roles: Object.freeze(["controller-script", "hostagent-script", "node-runtime"]),
 });
 
@@ -323,6 +327,7 @@ function openedFile(
   label,
   maximumBytes = MAX_ARTIFACT_BYTES,
   expectedLinks = new Set([1n]),
+  requirePrivate = false,
 ) {
   let descriptor;
   try {
@@ -334,6 +339,8 @@ function openedFile(
       before.isSymbolicLink() ||
       !sameMetadata(before, named) ||
       !expectedLinks.has(before.nlink) ||
+      (requirePrivate && before.uid !== BigInt(process.getuid())) ||
+      (requirePrivate && (before.mode & 0o7777n) !== 0o600n) ||
       before.size < 1n ||
       before.size > BigInt(maximumBytes)
     ) {
@@ -439,6 +446,7 @@ function reconcileArtifactPublication(directory, name, expectedBytes) {
       name,
       MAX_ARTIFACT_BYTES,
       new Set([1n, 2n]),
+      true,
     );
     if (!final.bytes.equals(expectedBytes)) fail(`${name} changed`);
   }
@@ -466,6 +474,7 @@ function reconcileArtifactPublication(directory, name, expectedBytes) {
         name,
         MAX_ARTIFACT_BYTES,
         new Set([1n, 2n]),
+        true,
       );
       if (!final.bytes.equals(expectedBytes)) fail(`${name} changed`);
       const linkedStage = openedStage(stage.path, "provider process artifact stage");
@@ -478,7 +487,7 @@ function reconcileArtifactPublication(directory, name, expectedBytes) {
         fail("provider process artifact recovery link changed");
       }
       removeExactStage(directory, { ...stage, ...linkedStage });
-      final = openedFile(finalPath, name);
+      final = openedFile(finalPath, name, MAX_ARTIFACT_BYTES, new Set([1n]), true);
       continue;
     }
     if (stage.metadata.nlink === 1n && !stage.bytes.equals(expectedBytes)) {
@@ -503,7 +512,7 @@ function reconcileArtifactPublication(directory, name, expectedBytes) {
       fail("provider process artifact stage identity was refused");
     }
     removeExactStage(directory, { ...stage, ...current });
-    final = openedFile(finalPath, name);
+    final = openedFile(finalPath, name, MAX_ARTIFACT_BYTES, new Set([1n]), true);
   }
   return final;
 }
@@ -514,6 +523,7 @@ function canonicalArtifact(path, label) {
     label,
     MAX_ARTIFACT_BYTES,
     new Set([1n, 2n]),
+    true,
   );
   if (artifactNameAllowed(basename(path))) {
     opened = reconcileArtifactPublication(dirname(path), basename(path), opened.bytes);
@@ -796,30 +806,119 @@ function rootPaths(base, fixtureId) {
   });
 }
 
-function rootOwnerValue(paths, fixtureId, ownershipNonce) {
+function validateCreateBindings(value) {
+  exactKeys(
+    value,
+    [
+      "create_intent_sha256",
+      "create_slot_sequence",
+      "create_slot_sha256",
+      "ownership_nonce",
+      "source_head_sha256",
+      "source_sequence",
+      "state_integration",
+    ],
+    "controlled background create bindings",
+  );
+  if (
+    !lowerHex(value.create_intent_sha256, 64) ||
+    !Number.isSafeInteger(value.create_slot_sequence) ||
+    value.create_slot_sequence < 0 ||
+    value.create_slot_sequence > 63 ||
+    !lowerHex(value.create_slot_sha256, 64) ||
+    !lowerHex(value.ownership_nonce, 64) ||
+    !lowerHex(value.source_head_sha256, 64) ||
+    !Number.isSafeInteger(value.source_sequence) ||
+    value.source_sequence < 0 ||
+    value.source_sequence > 63 ||
+    value.state_integration !== "fixture-only"
+  ) {
+    fail("controlled background create bindings were refused", 64);
+  }
+}
+
+function createAuthorityValue({ bindings, evidenceDirectory, fixtureId, paths }) {
   return {
+    base: directoryIdentity(paths.base, "controlled background provider base"),
+    create_intent_sha256: bindings.create_intent_sha256,
+    create_slot_sequence: bindings.create_slot_sequence,
+    create_slot_sha256: bindings.create_slot_sha256,
+    evidence_directory: directoryIdentity(
+      evidenceDirectory,
+      "controlled background evidence directory",
+    ),
     fixture_id: fixtureId,
-    ownership_nonce: ownershipNonce,
+    ownership_nonce: bindings.ownership_nonce,
     provider_contract_sha256: CONTROLLED_BACKGROUND_PROVIDER_CONTRACT_SHA256,
-    provider_kind: "controlled-background-fake",
     provider_profile: paths.profile,
-    root_path: paths.root,
-    schema: "synveda.clean-engine.background-provider-root-owner.v1",
+    provider_root_path: paths.root,
+    root_preexisting: "absent",
+    schema: "synveda.clean-engine.background-create-authority.v1",
+    source_head_sha256: bindings.source_head_sha256,
+    source_sequence: bindings.source_sequence,
+    state_integration: bindings.state_integration,
   };
 }
 
-function publishPrivateFile(path, value) {
-  const valueBytes = providerProcessBytes(value);
-  writeExclusive(path, valueBytes);
-  syncDirectory(dirname(path));
-  return Object.freeze({
-    bytes: valueBytes,
-    sha256: providerProcessDigest(valueBytes),
+function validateCreateAuthority(value, evidenceDirectory, fixtureId, paths) {
+  exactKeys(
     value,
+    [
+      "base",
+      "create_intent_sha256",
+      "create_slot_sequence",
+      "create_slot_sha256",
+      "evidence_directory",
+      "fixture_id",
+      "ownership_nonce",
+      "provider_contract_sha256",
+      "provider_profile",
+      "provider_root_path",
+      "root_preexisting",
+      "schema",
+      "source_head_sha256",
+      "source_sequence",
+      "state_integration",
+    ],
+    "controlled background create authority",
+  );
+  validateCreateBindings({
+    create_intent_sha256: value.create_intent_sha256,
+    create_slot_sequence: value.create_slot_sequence,
+    create_slot_sha256: value.create_slot_sha256,
+    ownership_nonce: value.ownership_nonce,
+    source_head_sha256: value.source_head_sha256,
+    source_sequence: value.source_sequence,
+    state_integration: value.state_integration,
   });
+  validateDirectoryIdentity(value.base, "controlled background create base");
+  validateDirectoryIdentity(
+    value.evidence_directory,
+    "controlled background create evidence directory",
+  );
+  if (
+    value.schema !== "synveda.clean-engine.background-create-authority.v1" ||
+    value.fixture_id !== fixtureId ||
+    !lowerHex(value.ownership_nonce, 64) ||
+    value.provider_contract_sha256 !== CONTROLLED_BACKGROUND_PROVIDER_CONTRACT_SHA256 ||
+    value.provider_profile !== paths.profile ||
+    value.provider_root_path !== paths.root ||
+    value.root_preexisting !== "absent" ||
+    canonical(value.base) !==
+      canonical(directoryIdentity(paths.base, "controlled background provider base")) ||
+    canonical(value.evidence_directory) !==
+      canonical(
+        directoryIdentity(
+          evidenceDirectory,
+          "controlled background evidence directory",
+        ),
+      )
+  ) {
+    fail("controlled background create authority was refused");
+  }
 }
 
-function prepareControlledBackgroundRoot({ evidenceDirectory, fixtureId, providerBase }) {
+function validateControlledBackgroundRoots({ evidenceDirectory, fixtureId, providerBase }) {
   if (
     !lowerHex(fixtureId, 32) ||
     typeof providerBase !== "string" ||
@@ -861,8 +960,87 @@ function prepareControlledBackgroundRoot({ evidenceDirectory, fixtureId, provide
   if (Buffer.byteLength(paths.haSocket, "utf8") > 103) {
     fail("controlled background socket path bound was exceeded");
   }
-  if (existsSync(paths.root)) fail("controlled background provider root collided", 73);
+  return paths;
+}
+
+export function planControlledBackgroundProviderCreate({
+  bindings,
+  evidenceDirectory,
+  fixtureId,
+  providerBase,
+}) {
+  validateCreateBindings(bindings);
+  const paths = validateControlledBackgroundRoots({
+    evidenceDirectory,
+    fixtureId,
+    providerBase,
+  });
+  validateEvidenceDirectoryInventory(evidenceDirectory);
+  for (const name of readdirSync(evidenceDirectory)) {
+    if (name === "background-create-authority.json") continue;
+    const stage = parseArtifactStageName(name);
+    if (stage?.targetName !== "background-create-authority.json") {
+      fail("controlled background pre-authority evidence inventory was refused", 73);
+    }
+  }
+  if (pathEntryExists(paths.root)) {
+    fail("controlled background provider root collided", 73);
+  }
+  const value = createAuthorityValue({
+    bindings,
+    evidenceDirectory,
+    fixtureId,
+    paths,
+  });
+  const authority = publishArtifact(
+    evidenceDirectory,
+    "background-create-authority.json",
+    value,
+  );
+  validateCreateAuthority(authority.value, evidenceDirectory, fixtureId, paths);
+  return Object.freeze({ authority, paths });
+}
+
+function rootOwnerValue(paths, fixtureId, ownershipNonce, createAuthoritySha256) {
+  return {
+    create_authority_sha256: createAuthoritySha256,
+    fixture_id: fixtureId,
+    ownership_nonce: ownershipNonce,
+    provider_contract_sha256: CONTROLLED_BACKGROUND_PROVIDER_CONTRACT_SHA256,
+    provider_kind: "controlled-background-fake",
+    provider_profile: paths.profile,
+    root_path: paths.root,
+    schema: "synveda.clean-engine.background-provider-root-owner.v2",
+  };
+}
+
+function publishPrivateFile(path, value) {
+  const valueBytes = providerProcessBytes(value);
+  writeExclusive(path, valueBytes);
+  syncDirectory(dirname(path));
+  return Object.freeze({
+    bytes: valueBytes,
+    sha256: providerProcessDigest(valueBytes),
+    value,
+  });
+}
+
+function prepareControlledBackgroundRoot({ authority, evidenceDirectory, fixtureId, providerBase }) {
+  const paths = validateControlledBackgroundRoots({
+    evidenceDirectory,
+    fixtureId,
+    providerBase,
+  });
+  validateCreateAuthority(authority.value, evidenceDirectory, fixtureId, paths);
+  if (pathEntryExists(paths.root)) {
+    fail("controlled background provider root collided", 73);
+  }
   createDirectory(paths.root, providerBase, "controlled background provider root");
+  const ownershipNonce = authority.value.ownership_nonce;
+  const owner = publishPrivateFile(
+    paths.ownerMarker,
+    rootOwnerValue(paths, fixtureId, ownershipNonce, authority.sha256),
+  );
   for (const leaf of Object.values(CONTROLLED_BACKGROUND_ROOT_LAYOUT).sort()) {
     createDirectory(join(paths.root, leaf), paths.root, `controlled background ${leaf} root`);
   }
@@ -882,11 +1060,6 @@ function prepareControlledBackgroundRoot({ evidenceDirectory, fixtureId, provide
   createDirectory(contexts, dockerConfig, "controlled background context root");
   createDirectory(meta, contexts, "controlled background context metadata root");
   createDirectory(paths.contextDirectory, meta, "controlled background context directory");
-  const ownershipNonce = randomBytes(32).toString("hex");
-  const owner = publishPrivateFile(
-    paths.ownerMarker,
-    rootOwnerValue(paths, fixtureId, ownershipNonce),
-  );
   const disk = publishPrivateFile(paths.diskImage, {
     fixture_id: fixtureId,
     payload: "non-bootable-controlled-background-disk",
@@ -916,6 +1089,10 @@ function proofEquals(left, right) {
     lowerHex(right, 64) &&
     timingSafeEqual(Buffer.from(left, "ascii"), Buffer.from(right, "ascii"))
   );
+}
+
+function controllerStartProofIdentity(processIdentity, startDecisionSha256) {
+  return `${processIdentity}\0${startDecisionSha256}`;
 }
 
 function requestSocket(path, request, timeoutMilliseconds = 2_000) {
@@ -1151,7 +1328,109 @@ async function waitForGroupAbsent(pgid, timeoutMilliseconds = 8_000) {
   fail("controller process group remained present", 69);
 }
 
-function requestControllerShutdown(controller, expected, secret, timeoutMilliseconds = 2_000) {
+function requestControllerStart(controller, expected, secret, timeoutMilliseconds = 8_000) {
+  return new Promise((resolvePromise, rejectPromise) => {
+    const challenge = randomBytes(32).toString("hex");
+    let settled = false;
+    const finish = (error, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      controller.off("message", onMessage);
+      controller.off("error", onError);
+      controller.off("close", onClose);
+      if (error === undefined) resolvePromise(value);
+      else rejectPromise(error);
+    };
+    const onError = () =>
+      finish(new ProviderProcessContractFailure("controller start channel failed", 69));
+    const onClose = () =>
+      finish(new ProviderProcessContractFailure("controller closed before start", 69));
+    const onMessage = (value) => {
+      try {
+        exactKeys(
+          value,
+          [
+            "challenge_sha256",
+            "fixture_id",
+            "hostagent_pid",
+            "hostagent_process_instance_sha256",
+            "process_instance_sha256",
+            "proof_sha256",
+            "schema",
+            "start_decision_sha256",
+          ],
+          "controlled background controller start acknowledgement",
+        );
+        if (
+          value.schema !== "synveda.clean-engine.background-controller-start.v1" ||
+          value.fixture_id !== expected.fixtureId ||
+          value.process_instance_sha256 !== expected.processIdentity ||
+          value.start_decision_sha256 !== expected.startDecisionSha256 ||
+          value.challenge_sha256 !== providerProcessDigest(Buffer.from(challenge, "ascii")) ||
+          !Number.isSafeInteger(value.hostagent_pid) ||
+          value.hostagent_pid < 2 ||
+          !lowerHex(value.hostagent_process_instance_sha256, 64) ||
+          !proofEquals(
+            value.proof_sha256,
+            proof(
+              secret,
+              "controller-start-accepted",
+              challenge,
+              controllerStartProofIdentity(
+                expected.processIdentity,
+                expected.startDecisionSha256,
+              ),
+            ),
+          )
+        ) {
+          fail("controlled background controller start acknowledgement was refused");
+        }
+        finish(undefined, value);
+      } catch (error) {
+        finish(
+          error instanceof ProviderProcessContractFailure
+            ? error
+            : new ProviderProcessContractFailure(
+                "controlled background controller start acknowledgement was refused",
+              ),
+        );
+      }
+    };
+    const timeout = setTimeout(
+      () => finish(new ProviderProcessContractFailure("controller start timed out", 69)),
+      timeoutMilliseconds,
+    );
+    controller.once("error", onError);
+    controller.once("close", onClose);
+    controller.on("message", onMessage);
+    if (!controller.connected) {
+      finish(new ProviderProcessContractFailure("controller channel was unavailable", 69));
+      return;
+    }
+    controller.send(
+      {
+        action: "start",
+        challenge,
+        start_decision_sha256: expected.startDecisionSha256,
+        proof_sha256: proof(
+          secret,
+          "controller-start",
+          challenge,
+          controllerStartProofIdentity(
+            expected.processIdentity,
+            expected.startDecisionSha256,
+          ),
+        ),
+      },
+      (error) => {
+        if (error !== null && error !== undefined) onError();
+      },
+    );
+  });
+}
+
+function requestControllerShutdown(controller, expected, secret, timeoutMilliseconds = 15_000) {
   return new Promise((resolvePromise, rejectPromise) => {
     const challenge = randomBytes(32).toString("hex");
     let settled = false;
@@ -1179,14 +1458,16 @@ function requestControllerShutdown(controller, expected, secret, timeoutMillisec
             "process_instance_sha256",
             "proof_sha256",
             "schema",
+            "start_was_pending",
           ],
           "controlled background controller shutdown acknowledgement",
         );
         if (
-          value.schema !== "synveda.clean-engine.background-controller-shutdown.v1" ||
+          value.schema !== "synveda.clean-engine.background-controller-shutdown.v2" ||
           value.fixture_id !== expected.fixtureId ||
           value.process_instance_sha256 !== expected.processIdentity ||
           value.challenge_sha256 !== providerProcessDigest(Buffer.from(challenge, "ascii")) ||
+          typeof value.start_was_pending !== "boolean" ||
           !proofEquals(
             value.proof_sha256,
             proof(
@@ -1233,7 +1514,7 @@ function requestControllerShutdown(controller, expected, secret, timeoutMillisec
         ),
       },
       (error) => {
-        if (error !== null) onError();
+        if (error !== null && error !== undefined) onError();
       },
     );
   });
@@ -1261,8 +1542,6 @@ function validateControllerReady(value, expected, secret) {
       "controller_process_instance_sha256",
       "controller_script_sha256",
       "fixture_id",
-      "hostagent_pid",
-      "hostagent_process_instance_sha256",
       "node_sha256",
       "proof_sha256",
       "schema",
@@ -1272,7 +1551,7 @@ function validateControllerReady(value, expected, secret) {
   );
   validateEnvironmentKeys(value.controller_environment_keys, "controller environment");
   if (
-    value.schema !== "synveda.clean-engine.background-controller-ready.v1" ||
+    value.schema !== "synveda.clean-engine.background-controller-ready.v2" ||
     value.fixture_id !== expected.fixtureId ||
     value.controller_pid !== expected.controllerPid ||
     !lowerHex(value.controller_process_instance_sha256, 64) ||
@@ -1287,10 +1566,7 @@ function validateControllerReady(value, expected, secret) {
         expected.fixtureId,
         value.controller_process_instance_sha256,
       ),
-    ) ||
-    !Number.isSafeInteger(value.hostagent_pid) ||
-    value.hostagent_pid < 2 ||
-    !lowerHex(value.hostagent_process_instance_sha256, 64)
+    )
   ) {
     fail("controlled background controller readiness was refused");
   }
@@ -1393,10 +1669,13 @@ function contextWitnessValue(root, context, engineSocketIdentity, providerIdenti
 }
 
 export async function launchControlledBackgroundProvider({
+  beforeDetachHoldMilliseconds = 0,
+  beforeStartHoldMilliseconds = 0,
   evidenceDirectory,
   fixtureId,
   maximumLifetimeMilliseconds = 30_000,
   providerBase,
+  requireShutdownDuringStart = false,
 }) {
   if (
     CONTROLLED_BACKGROUND_PROVIDER_CONTRACT.fixture_launch_authorized !== true ||
@@ -1411,11 +1690,34 @@ export async function launchControlledBackgroundProvider({
   ) {
     fail("controlled background lifetime was refused", 64);
   }
-  const engineArchitecture = controlledBackgroundEngineArchitecture(process.arch);
-  if (readdirSync(evidenceDirectory).length !== 0) {
-    fail("controlled background evidence directory was not empty", 73);
+  if (
+    !Number.isSafeInteger(beforeDetachHoldMilliseconds) ||
+    beforeDetachHoldMilliseconds < 0 ||
+    beforeDetachHoldMilliseconds > 5_000 ||
+    !Number.isSafeInteger(beforeStartHoldMilliseconds) ||
+    beforeStartHoldMilliseconds < 0 ||
+    beforeStartHoldMilliseconds > 5_000 ||
+    typeof requireShutdownDuringStart !== "boolean"
+  ) {
+    fail("controlled background pre-start hold was refused", 64);
   }
-  const root = prepareControlledBackgroundRoot({ evidenceDirectory, fixtureId, providerBase });
+  const engineArchitecture = controlledBackgroundEngineArchitecture(process.arch);
+  const authority = canonicalArtifact(
+    join(evidenceDirectory, "background-create-authority.json"),
+    "background-create-authority.json",
+  );
+  validateEvidenceDirectoryInventory(evidenceDirectory);
+  exactArray(
+    readdirSync(evidenceDirectory).sort(),
+    ["background-create-authority.json"],
+    "controlled background pre-launch evidence inventory",
+  );
+  const root = prepareControlledBackgroundRoot({
+    authority,
+    evidenceDirectory,
+    fixtureId,
+    providerBase,
+  });
   const toolchainBundle = controlledToolchain(fixtureId);
   const toolchainValue = toolchainBundle.value;
   const toolchain = publishArtifact(evidenceDirectory, "background-toolchain.json", toolchainValue);
@@ -1443,21 +1745,50 @@ export async function launchControlledBackgroundProvider({
     "utf8",
   ).toString("base64");
   const controllerConfig = {
+    before_detach_hold_milliseconds: beforeDetachHoldMilliseconds,
+    controller_launch_decision: join(evidenceDirectory, "controller-launch-decision.json"),
     controller_nonce: controllerNonce,
     controller_ready: root.paths.controllerReady,
     controller_script_sha256: components.get("controller-script").sha256,
+    controller_witness: join(evidenceDirectory, "controller-witness.json"),
+    create_authority: join(evidenceDirectory, "background-create-authority.json"),
+    create_authority_sha256: authority.sha256,
+    create_intent_sha256: authority.value.create_intent_sha256,
+    create_slot_sha256: authority.value.create_slot_sha256,
     fixture_id: fixtureId,
     hostagent_config: root.paths.hostagentConfig,
+    hostagent_config_sha256: hostagentConfigArtifact.sha256,
     hostagent_source_base64: hostagentSourceBase64,
     hostagent_source_sha256: components.get("hostagent-script").sha256,
+    instance_nonce: root.ownershipNonce,
     maximum_lifetime_milliseconds: maximumLifetimeMilliseconds,
     node_sha256: components.get("node-runtime").sha256,
-    schema: "synveda.clean-engine.background-controller-config.v1",
+    provider_contract_sha256: CONTROLLED_BACKGROUND_PROVIDER_CONTRACT_SHA256,
+    provider_start_decision: join(evidenceDirectory, "provider-start-decision.json"),
+    require_shutdown_during_start: requireShutdownDuringStart,
+    root_owner: root.paths.ownerMarker,
+    root_owner_sha256: root.owner.sha256,
+    schema: "synveda.clean-engine.background-controller-config.v2",
     working_directory: root.paths.root,
   };
   const controllerConfigArtifact = publishPrivateFile(
     root.paths.controllerConfig,
     controllerConfig,
+  );
+  const controllerLaunchDecision = publishArtifact(
+    evidenceDirectory,
+    "controller-launch-decision.json",
+    {
+      controller_config_sha256: controllerConfigArtifact.sha256,
+      controller_nonce_sha256: providerProcessDigest(Buffer.from(controllerNonce, "ascii")),
+      create_authority_sha256: authority.sha256,
+      decision: "launch-waiting",
+      fixture_id: fixtureId,
+      hostagent_config_sha256: hostagentConfigArtifact.sha256,
+      root_owner_sha256: root.owner.sha256,
+      schema: "synveda.clean-engine.background-controller-launch-decision.v1",
+      toolchain_sha256: toolchain.sha256,
+    },
   );
   const controller = spawn(
     components.get("node-runtime").path,
@@ -1508,11 +1839,13 @@ export async function launchControlledBackgroundProvider({
       controller_pgid: controller.pid,
       controller_pid: controller.pid,
       controller_process_instance_sha256: controllerProcessIdentity,
-      execution_protocol: "authenticated-ipc-shutdown-v1",
+      controller_launch_decision_sha256: controllerLaunchDecision.sha256,
+      create_authority_sha256: authority.sha256,
+      execution_protocol: "authenticated-ipc-start-shutdown-v2",
       fixture_id: fixtureId,
       hostagent_config_sha256: hostagentConfigArtifact.sha256,
       root_owner_sha256: root.owner.sha256,
-      schema: "synveda.clean-engine.background-controller-witness.v1",
+      schema: "synveda.clean-engine.background-controller-witness.v2",
       toolchain_sha256: toolchain.sha256,
     };
     const controllerWitness = publishArtifact(
@@ -1520,6 +1853,46 @@ export async function launchControlledBackgroundProvider({
       "controller-witness.json",
       controllerWitnessValue,
     );
+    const startDecision = publishArtifact(
+      evidenceDirectory,
+      "provider-start-decision.json",
+      {
+        controller_witness_sha256: controllerWitness.sha256,
+        create_authority_sha256: authority.sha256,
+        create_intent_sha256: authority.value.create_intent_sha256,
+        create_slot_sha256: authority.value.create_slot_sha256,
+        decision: "start",
+        fixture_id: fixtureId,
+        schema: "synveda.clean-engine.background-provider-start-decision.v1",
+      },
+    );
+    if (beforeStartHoldMilliseconds > 0) {
+      await new Promise((resolvePromise) =>
+        setTimeout(resolvePromise, beforeStartHoldMilliseconds),
+      );
+    }
+    const started = await requestControllerStart(
+      controller,
+      {
+        fixtureId,
+        processIdentity: controllerProcessIdentity,
+        startDecisionSha256: startDecision.sha256,
+      },
+      controllerNonce,
+    );
+    if (probeProcessGroup(controller.pid) !== "present") {
+      fail("controlled background controller disappeared before settlement", 69);
+    }
+    const earlyControllerShutdown = requireShutdownDuringStart
+      ? requestControllerShutdown(
+          controller,
+          { fixtureId, processIdentity: controllerProcessIdentity },
+          controllerNonce,
+        ).then(
+          (value) => ({ error: undefined, value }),
+          (error) => ({ error, value: undefined }),
+        )
+      : undefined;
     const pidRecord = await waitForCanonicalArtifact(
       root.paths.pidRecord,
       "controlled background hostagent PID record",
@@ -1532,8 +1905,8 @@ export async function launchControlledBackgroundProvider({
         instanceNonceSha256: providerProcessDigest(
           Buffer.from(root.ownershipNonce, "ascii"),
         ),
-        pid: ready.value.hostagent_pid,
-        processIdentity: ready.value.hostagent_process_instance_sha256,
+        pid: started.hostagent_pid,
+        processIdentity: started.hostagent_process_instance_sha256,
         profile: root.paths.profile,
         workingDirectory: root.paths.root,
       },
@@ -1553,14 +1926,14 @@ export async function launchControlledBackgroundProvider({
       root.paths,
       fixtureId,
       root.ownershipNonce,
-      ready.value.hostagent_pid,
-      ready.value.hostagent_process_instance_sha256,
+      started.hostagent_pid,
+      started.hostagent_process_instance_sha256,
     );
     const engineProbe = await probeEngine(
       root.paths,
       fixtureId,
       root.ownershipNonce,
-      ready.value.hostagent_process_instance_sha256,
+      started.hostagent_process_instance_sha256,
     );
     const hostagentWitnessValue = {
       authenticated_probe_sha256: providerProcessDigest(providerProcessBytes(hostagentProbe)),
@@ -1574,9 +1947,10 @@ export async function launchControlledBackgroundProvider({
         "controlled background hostagent PID record",
         relative(root.paths.root, root.paths.pidRecord),
       ),
-      process_instance_sha256: ready.value.hostagent_process_instance_sha256,
-      schema: "synveda.clean-engine.background-hostagent-identity.v1",
+      process_instance_sha256: started.hostagent_process_instance_sha256,
+      schema: "synveda.clean-engine.background-hostagent-identity.v2",
       socket: haSocket,
+      start_decision_sha256: startDecision.sha256,
     };
     const hostagentWitness = publishArtifact(
       evidenceDirectory,
@@ -1591,7 +1965,7 @@ export async function launchControlledBackgroundProvider({
       hostagent_witness_sha256: hostagentWitness.sha256,
       name: engineProbe.name,
       operating_system: engineProbe.operating_system,
-      process_instance_sha256: ready.value.hostagent_process_instance_sha256,
+      process_instance_sha256: started.hostagent_process_instance_sha256,
       schema: "synveda.clean-engine.background-engine-identity.v1",
       server_id: engineProbe.server_id,
       socket: engineSocket,
@@ -1607,14 +1981,19 @@ export async function launchControlledBackgroundProvider({
       "context-witness.json",
       contextWitnessValue(root, root.context, engineSocket, { fixtureId }),
     );
-    if (probeProcessGroup(controller.pid) !== "present") {
-      fail("controlled background controller disappeared before settlement", 69);
-    }
-    await requestControllerShutdown(
-      controller,
-      { fixtureId, processIdentity: controllerProcessIdentity },
-      controllerNonce,
-    );
+    const shutdownOutcome =
+      earlyControllerShutdown === undefined
+        ? {
+            error: undefined,
+            value: await requestControllerShutdown(
+              controller,
+              { fixtureId, processIdentity: controllerProcessIdentity },
+              controllerNonce,
+            ),
+          }
+        : await earlyControllerShutdown;
+    if (shutdownOutcome.error !== undefined) throw shutdownOutcome.error;
+    const shutdownAcknowledgement = shutdownOutcome.value;
     const closed = await boundedControllerClose(controllerClosed);
     await waitForGroupAbsent(controller.pid);
     if (closed.error !== undefined || closed.signal !== null || closed.status !== 0) {
@@ -1624,14 +2003,14 @@ export async function launchControlledBackgroundProvider({
       root.paths,
       fixtureId,
       root.ownershipNonce,
-      ready.value.hostagent_pid,
-      ready.value.hostagent_process_instance_sha256,
+      started.hostagent_pid,
+      started.hostagent_process_instance_sha256,
     );
     const engineAfterController = await probeEngine(
       root.paths,
       fixtureId,
       root.ownershipNonce,
-      ready.value.hostagent_process_instance_sha256,
+      started.hostagent_process_instance_sha256,
     );
     const controllerSettlementValue = {
       controller_group_absent: true,
@@ -1646,7 +2025,9 @@ export async function launchControlledBackgroundProvider({
         providerProcessBytes(stableHostagentProbe(hostagentAfterController)),
       ),
       hostagent_disposition: "authenticated-running",
-      schema: "synveda.clean-engine.background-controller-settlement.v1",
+      provider_start_decision_sha256: startDecision.sha256,
+      schema: "synveda.clean-engine.background-controller-settlement.v2",
+      shutdown_during_start: shutdownAcknowledgement.start_was_pending,
     };
     const controllerSettlement = publishArtifact(
       evidenceDirectory,
@@ -1655,7 +2036,9 @@ export async function launchControlledBackgroundProvider({
     );
     const creationInventory = inspectRootInventory(root.paths);
     const providerIdentityValue = {
+      create_authority_sha256: authority.sha256,
       context_witness_sha256: contextWitness.sha256,
+      controller_launch_decision_sha256: controllerLaunchDecision.sha256,
       controller_settlement_sha256: controllerSettlement.sha256,
       controller_witness_sha256: controllerWitness.sha256,
       engine_witness_sha256: engineWitness.sha256,
@@ -1675,7 +2058,8 @@ export async function launchControlledBackgroundProvider({
         provider_root: "owned",
       },
       root_owner_sha256: root.owner.sha256,
-      schema: "synveda.clean-engine.background-provider-identity.v1",
+      schema: "synveda.clean-engine.background-provider-identity.v2",
+      start_decision_sha256: startDecision.sha256,
       toolchain_sha256: toolchain.sha256,
     };
     const providerIdentity = publishArtifact(
@@ -1685,17 +2069,20 @@ export async function launchControlledBackgroundProvider({
     );
     return Object.freeze({
       contextWitness,
+      controllerLaunchDecision,
       controllerSettlement,
       controllerWitness,
+      createAuthority: authority,
       engineWitness,
       evidenceDirectory,
       fixtureId,
-      hostagentPid: ready.value.hostagent_pid,
+      hostagentPid: started.hostagent_pid,
       hostagentWitness,
       instanceNonce: root.ownershipNonce,
       paths: root.paths,
       providerIdentity,
       root,
+      startDecision,
       toolchain,
     });
   } catch (error) {
@@ -1799,16 +2186,59 @@ function validateCreationArtifactChain(
   fixtureId,
   { revalidateCurrentToolchain = false } = {},
 ) {
+  const createAuthority = artifacts["background-create-authority.json"];
   const toolchain = artifacts["background-toolchain.json"];
+  const controllerLaunchDecision = artifacts["controller-launch-decision.json"];
   const controllerWitness = artifacts["controller-witness.json"];
+  const providerStartDecision = artifacts["provider-start-decision.json"];
   const hostagentWitness = artifacts["hostagent-witness.json"];
   const engineWitness = artifacts["engine-witness.json"];
   const contextWitness = artifacts["context-witness.json"];
   const controllerSettlement = artifacts["controller-settlement.json"];
   const providerIdentity = artifacts["provider-identity.json"];
+  const recordedProviderRoot = providerIdentity.value?.provider_root?.path;
+  if (typeof recordedProviderRoot !== "string" || !isAbsolute(recordedProviderRoot)) {
+    fail("controlled background provider root was refused");
+  }
+  const recordedPaths = rootPaths(dirname(recordedProviderRoot), fixtureId);
+  validateCreateAuthority(
+    createAuthority.value,
+    dirname(createAuthority.path),
+    fixtureId,
+    recordedPaths,
+  );
   validateToolchain(toolchain.value, fixtureId, {
     revalidateCurrent: revalidateCurrentToolchain,
   });
+  exactKeys(
+    controllerLaunchDecision.value,
+    [
+      "controller_config_sha256",
+      "controller_nonce_sha256",
+      "create_authority_sha256",
+      "decision",
+      "fixture_id",
+      "hostagent_config_sha256",
+      "root_owner_sha256",
+      "schema",
+      "toolchain_sha256",
+    ],
+    "controlled background controller launch decision",
+  );
+  if (
+    controllerLaunchDecision.value.schema !==
+      "synveda.clean-engine.background-controller-launch-decision.v1" ||
+    controllerLaunchDecision.value.fixture_id !== fixtureId ||
+    controllerLaunchDecision.value.decision !== "launch-waiting" ||
+    controllerLaunchDecision.value.create_authority_sha256 !== createAuthority.sha256 ||
+    !lowerHex(controllerLaunchDecision.value.controller_config_sha256, 64) ||
+    !lowerHex(controllerLaunchDecision.value.controller_nonce_sha256, 64) ||
+    !lowerHex(controllerLaunchDecision.value.hostagent_config_sha256, 64) ||
+    !lowerHex(controllerLaunchDecision.value.root_owner_sha256, 64) ||
+    controllerLaunchDecision.value.toolchain_sha256 !== toolchain.sha256
+  ) {
+    fail("controlled background controller launch decision was refused");
+  }
   exactKeys(
     controllerWitness.value,
     [
@@ -1818,6 +2248,8 @@ function validateCreationArtifactChain(
       "controller_pgid",
       "controller_pid",
       "controller_process_instance_sha256",
+      "controller_launch_decision_sha256",
+      "create_authority_sha256",
       "execution_protocol",
       "fixture_id",
       "hostagent_config_sha256",
@@ -1828,10 +2260,10 @@ function validateCreationArtifactChain(
     "controlled background controller witness",
   );
   if (
-    controllerWitness.value.schema !== "synveda.clean-engine.background-controller-witness.v1" ||
+    controllerWitness.value.schema !== "synveda.clean-engine.background-controller-witness.v2" ||
     controllerWitness.value.fixture_id !== fixtureId ||
     controllerWitness.value.argv_contract !== "repository-digest-bound-eval-controller-v1" ||
-    controllerWitness.value.execution_protocol !== "authenticated-ipc-shutdown-v1" ||
+    controllerWitness.value.execution_protocol !== "authenticated-ipc-start-shutdown-v2" ||
     !lowerHex(controllerWitness.value.controller_config_sha256, 64) ||
     !lowerHex(controllerWitness.value.controller_nonce_sha256, 64) ||
     !Number.isSafeInteger(controllerWitness.value.controller_pid) ||
@@ -1840,9 +2272,47 @@ function validateCreationArtifactChain(
     !lowerHex(controllerWitness.value.controller_process_instance_sha256, 64) ||
     !lowerHex(controllerWitness.value.hostagent_config_sha256, 64) ||
     !lowerHex(controllerWitness.value.root_owner_sha256, 64) ||
+    controllerWitness.value.controller_launch_decision_sha256 !==
+      controllerLaunchDecision.sha256 ||
+    controllerWitness.value.create_authority_sha256 !== createAuthority.sha256 ||
+    controllerWitness.value.controller_config_sha256 !==
+      controllerLaunchDecision.value.controller_config_sha256 ||
+    controllerWitness.value.controller_nonce_sha256 !==
+      controllerLaunchDecision.value.controller_nonce_sha256 ||
+    controllerWitness.value.hostagent_config_sha256 !==
+      controllerLaunchDecision.value.hostagent_config_sha256 ||
+    controllerWitness.value.root_owner_sha256 !==
+      controllerLaunchDecision.value.root_owner_sha256 ||
     controllerWitness.value.toolchain_sha256 !== toolchain.sha256
   ) {
     fail("controlled background controller witness was refused");
+  }
+  exactKeys(
+    providerStartDecision.value,
+    [
+      "controller_witness_sha256",
+      "create_authority_sha256",
+      "create_intent_sha256",
+      "create_slot_sha256",
+      "decision",
+      "fixture_id",
+      "schema",
+    ],
+    "controlled background provider start decision",
+  );
+  if (
+    providerStartDecision.value.schema !==
+      "synveda.clean-engine.background-provider-start-decision.v1" ||
+    providerStartDecision.value.fixture_id !== fixtureId ||
+    providerStartDecision.value.decision !== "start" ||
+    providerStartDecision.value.controller_witness_sha256 !== controllerWitness.sha256 ||
+    providerStartDecision.value.create_authority_sha256 !== createAuthority.sha256 ||
+    providerStartDecision.value.create_intent_sha256 !==
+      createAuthority.value.create_intent_sha256 ||
+    providerStartDecision.value.create_slot_sha256 !==
+      createAuthority.value.create_slot_sha256
+  ) {
+    fail("controlled background provider start decision was refused");
   }
   exactKeys(
     hostagentWitness.value,
@@ -1855,6 +2325,7 @@ function validateCreationArtifactChain(
       "process_instance_sha256",
       "schema",
       "socket",
+      "start_decision_sha256",
     ],
     "controlled background hostagent witness",
   );
@@ -1869,9 +2340,10 @@ function validateCreationArtifactChain(
     "controlled background hostagent socket identity",
   );
   if (
-    hostagentWitness.value.schema !== "synveda.clean-engine.background-hostagent-identity.v1" ||
+    hostagentWitness.value.schema !== "synveda.clean-engine.background-hostagent-identity.v2" ||
     hostagentWitness.value.fixture_id !== fixtureId ||
     hostagentWitness.value.controller_witness_sha256 !== controllerWitness.sha256 ||
+    hostagentWitness.value.start_decision_sha256 !== providerStartDecision.sha256 ||
     !lowerHex(hostagentWitness.value.authenticated_probe_sha256, 64) ||
     !lowerHex(hostagentWitness.value.instance_nonce_sha256, 64) ||
     !lowerHex(hostagentWitness.value.process_instance_sha256, 64)
@@ -1940,7 +2412,6 @@ function validateCreationArtifactChain(
     contextWitness.value.endpoint.startsWith("unix://")
       ? contextWitness.value.endpoint.slice("unix://".length)
       : "";
-  const recordedProviderRoot = providerIdentity.value?.provider_root?.path;
   const recordedEngineSocket =
     typeof recordedProviderRoot === "string" && isAbsolute(recordedProviderRoot)
       ? join(recordedProviderRoot, engineWitness.value.socket.relative_path)
@@ -1968,28 +2439,35 @@ function validateCreationArtifactChain(
       "fixture_id",
       "hostagent_after_controller_sha256",
       "hostagent_disposition",
+      "provider_start_decision_sha256",
       "schema",
+      "shutdown_during_start",
     ],
     "controlled background controller settlement",
   );
   if (
     controllerSettlement.value.schema !==
-      "synveda.clean-engine.background-controller-settlement.v1" ||
+      "synveda.clean-engine.background-controller-settlement.v2" ||
     controllerSettlement.value.fixture_id !== fixtureId ||
     controllerSettlement.value.controller_group_absent !== true ||
     controllerSettlement.value.controller_group_probe !== "esrch" ||
     controllerSettlement.value.controller_shutdown !== "authenticated-ipc" ||
     controllerSettlement.value.controller_witness_sha256 !== controllerWitness.sha256 ||
+    controllerSettlement.value.provider_start_decision_sha256 !==
+      providerStartDecision.sha256 ||
     controllerSettlement.value.hostagent_disposition !== "authenticated-running" ||
     !lowerHex(controllerSettlement.value.engine_after_controller_sha256, 64) ||
-    !lowerHex(controllerSettlement.value.hostagent_after_controller_sha256, 64)
+    !lowerHex(controllerSettlement.value.hostagent_after_controller_sha256, 64) ||
+    typeof controllerSettlement.value.shutdown_during_start !== "boolean"
   ) {
     fail("controlled background controller settlement was refused");
   }
   exactKeys(
     providerIdentity.value,
     [
+      "create_authority_sha256",
       "context_witness_sha256",
+      "controller_launch_decision_sha256",
       "controller_settlement_sha256",
       "controller_witness_sha256",
       "engine_witness_sha256",
@@ -2003,6 +2481,7 @@ function validateCreationArtifactChain(
       "resources",
       "root_owner_sha256",
       "schema",
+      "start_decision_sha256",
       "toolchain_sha256",
     ],
     "controlled background provider identity",
@@ -2036,7 +2515,6 @@ function validateCreationArtifactChain(
       "controlled background provider creation inventory",
     );
   }
-  const recordedPaths = rootPaths(dirname(providerIdentity.value.provider_root.path), fixtureId);
   const creationByPath = new Map(
     providerIdentity.value.provider_root_inventory.map((entry) => [entry.relative_path, entry]),
   );
@@ -2045,7 +2523,7 @@ function validateCreationArtifactChain(
     return current !== undefined && canonical(current) === canonical(expected);
   };
   if (
-    providerIdentity.value.schema !== "synveda.clean-engine.background-provider-identity.v1" ||
+    providerIdentity.value.schema !== "synveda.clean-engine.background-provider-identity.v2" ||
     providerIdentity.value.fixture_id !== fixtureId ||
     providerIdentity.value.provider_kind !== "controlled-background-fake" ||
     providerIdentity.value.provider_profile !== rootKey(fixtureId) ||
@@ -2077,6 +2555,10 @@ function validateCreationArtifactChain(
       controllerWitness.value.hostagent_config_sha256 ||
     providerIdentity.value.provider_contract_sha256 !==
       CONTROLLED_BACKGROUND_PROVIDER_CONTRACT_SHA256 ||
+    providerIdentity.value.create_authority_sha256 !== createAuthority.sha256 ||
+    providerIdentity.value.controller_launch_decision_sha256 !==
+      controllerLaunchDecision.sha256 ||
+    providerIdentity.value.start_decision_sha256 !== providerStartDecision.sha256 ||
     providerIdentity.value.toolchain_sha256 !== toolchain.sha256 ||
     providerIdentity.value.controller_witness_sha256 !== controllerWitness.sha256 ||
     providerIdentity.value.hostagent_witness_sha256 !== hostagentWitness.sha256 ||
@@ -2097,12 +2579,15 @@ function validateCreationArtifactChain(
     fail("controlled background provider identity was refused");
   }
   return Object.freeze({
+    createAuthority,
     contextWitness,
+    controllerLaunchDecision,
     controllerSettlement,
     controllerWitness,
     engineWitness,
     hostagentWitness,
     providerIdentity,
+    providerStartDecision,
     toolchain,
   });
 }
@@ -2110,13 +2595,29 @@ function validateCreationArtifactChain(
 export function inspectControlledBackgroundProvider(
   evidenceDirectory,
   fixtureId,
-  { revalidateCurrentToolchain = false } = {},
+  { expectedCreateBindings, revalidateCurrentToolchain = false } = {},
 ) {
   if (!lowerHex(fixtureId, 32)) fail("controlled background fixture was refused", 64);
   const artifacts = readCreationArtifacts(evidenceDirectory);
-  return validateCreationArtifactChain(artifacts, fixtureId, {
+  const evidence = validateCreationArtifactChain(artifacts, fixtureId, {
     revalidateCurrentToolchain,
   });
+  if (expectedCreateBindings !== undefined) {
+    validateCreateBindings(expectedCreateBindings);
+    const recorded = {
+      create_intent_sha256: evidence.createAuthority.value.create_intent_sha256,
+      create_slot_sequence: evidence.createAuthority.value.create_slot_sequence,
+      create_slot_sha256: evidence.createAuthority.value.create_slot_sha256,
+      ownership_nonce: evidence.createAuthority.value.ownership_nonce,
+      source_head_sha256: evidence.createAuthority.value.source_head_sha256,
+      source_sequence: evidence.createAuthority.value.source_sequence,
+      state_integration: evidence.createAuthority.value.state_integration,
+    };
+    if (canonical(recorded) !== canonical(expectedCreateBindings)) {
+      fail("controlled background create authority binding changed");
+    }
+  }
+  return evidence;
 }
 
 function pathDepth(path) {
@@ -2351,6 +2852,7 @@ function validateRootOwner(value, expected) {
   exactKeys(
     value,
     [
+      "create_authority_sha256",
       "fixture_id",
       "ownership_nonce",
       "provider_contract_sha256",
@@ -2362,8 +2864,9 @@ function validateRootOwner(value, expected) {
     "controlled background root owner",
   );
   if (
-    value.schema !== "synveda.clean-engine.background-provider-root-owner.v1" ||
+    value.schema !== "synveda.clean-engine.background-provider-root-owner.v2" ||
     value.fixture_id !== expected.fixtureId ||
+    value.create_authority_sha256 !== expected.createAuthoritySha256 ||
     !lowerHex(value.ownership_nonce, 64) ||
     value.provider_contract_sha256 !== CONTROLLED_BACKGROUND_PROVIDER_CONTRACT_SHA256 ||
     value.provider_kind !== "controlled-background-fake" ||
@@ -2394,8 +2897,15 @@ export async function planControlledBackgroundRetirement({
   const evidence = inspectControlledBackgroundProvider(evidenceDirectory, fixtureId, {
     revalidateCurrentToolchain: true,
   });
+  if (bindings.create_slot_sha256 !== evidence.createAuthority.value.create_slot_sha256) {
+    fail("controlled background create slot binding was refused");
+  }
   const owner = canonicalArtifact(paths.ownerMarker, "controlled background root owner");
-  validateRootOwner(owner.value, { fixtureId, paths });
+  validateRootOwner(owner.value, {
+    createAuthoritySha256: evidence.createAuthority.sha256,
+    fixtureId,
+    paths,
+  });
   if (
     owner.sha256 !== evidence.providerIdentity.value.root_owner_sha256 ||
     owner.sha256 !== evidence.controllerWitness.value.root_owner_sha256
@@ -3122,7 +3632,11 @@ export async function retireControlledBackgroundProvider({
       fail("controlled background retirement progress stage preceded mutation");
     }
     const marker = canonicalArtifact(paths.ownerMarker, "controlled background root owner");
-    validateRootOwner(marker.value, { fixtureId, paths });
+    validateRootOwner(marker.value, {
+      createAuthoritySha256: evidence.createAuthority.sha256,
+      fixtureId,
+      paths,
+    });
     if (marker.sha256 !== planArtifact.value.provider_root_owner_sha256) {
       fail("controlled background root owner changed");
     }

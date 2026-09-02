@@ -120,8 +120,13 @@ as live evidence fails closed. The closed adapter accepts no caller function,
 command, path, environment or provider selector.
 
 An additional lifecycle-unexposed fake canary uses only its explicitly
-authorised fixed-fixture launcher to distinguish the background controller,
-host agent, Engine, both sockets and Docker context, then proves exact fake-root
+authorised fixed-fixture launcher. A recoverable fixture-only authority is
+durable before root mutation; separate immutable decisions precede controller
+and host-agent creation, and controller-side reproof of the full gate chain
+blocks changed evidence or pre-start controller death without a host-agent
+effect. This is not mutation-journal authority. The canary distinguishes the
+background controller, host agent, Engine, both sockets and Docker context,
+then proves exact fake-root
 retirement through authenticated shutdown, durable socket absence, an exact
 creation-bound inventory, immutable leaf-first actions and append-only
 interruption recovery. It preserves foreign evidence and resource substitutions and retains

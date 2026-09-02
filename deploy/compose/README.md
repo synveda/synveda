@@ -226,8 +226,14 @@ same-user/PID-namespace evidence; journal hashes do not protect against a
 hostile same-user writer.
 
 A separate lifecycle-unexposed fake canary now models the background provider
-truthfully: its explicitly authorised fixture launcher starts only a
-digest-bound controller and separately detached host agent,
+truthfully. Before root mutation, a recoverable fixture-only create authority
+binds the exact base/evidence directory identities, intended receipt/slot-shaped
+inputs and ownership nonce. A controller-launch decision is durable before the
+controller process, and a separate start decision is durable before the host
+agent. The controller reopens and revalidates that exact authority, root owner,
+launch/witness chain, start decision and host-agent configuration before it can
+spawn. Its explicitly authorised fixture launcher starts only a digest-bound
+controller and separately detached host agent,
 and authenticated host-agent and Engine sockets plus the Docker-context
 endpoint remain healthy after controller-group `ESRCH`. Its proposed live
 contract pins the Colima 0.10.3 and Lima 2.2.0 source revisions and exact
@@ -254,10 +260,12 @@ provider mutation or environment manifest. The background canary explicitly
 records `state_integration: not-authorized`, while the older state-integrated
 provider root remains unretired. Controlled runs are therefore non-finalizable,
 and their synthetic cleanup vocabulary grants no receipt deletion authority.
-`registry/`, `runtime/` and `evidence/` remain empty. The next slice must bind
-the canary's distinct create/cleanup heads into dedicated mutation slots and
-closes, then finish the live Docker/helper/disk closure before exposing a
-supported lifecycle target or making any Docker claim.
+`registry/`, `runtime/` and `evidence/` remain empty. The next slice must add a
+state-born wrapper that reasserts the real mutation journal around this
+fixture-only inner chain and recovers every partial create prefix before it can
+bind the canary's distinct cleanup head. It must then finish the live
+Docker/helper/disk closure before exposing a supported lifecycle target or
+making any Docker claim.
 A receipt-v1/v2 plan or mutation-close v1 is discarded and regenerated.
 The manual browser ceremony below remains usable for fixture development but
 cannot be labelled a clean-Engine result.

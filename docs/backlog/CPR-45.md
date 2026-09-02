@@ -445,9 +445,17 @@ path, and inherits ambient `HOME` unchanged because Lima resolves it even when
 `HOME` environment value. The toolchain evidence necessarily records absolute
 runtime and fixture-source paths, which may reside beneath that home directory.
 
-The repository-fixed controller launches a separately detached fake host
-agent with distinct authenticated host-agent and Engine sockets plus a bound
-Docker-context endpoint. Provider identity binds the exact creation-time root
+The repository-fixed controller launches a separately detached fake host agent
+only after two pre-effect gates. A recoverable fixture-only create authority
+binds the canonical base/evidence directory identities, intended
+receipt/slot-shaped inputs and ownership nonce before root creation. An
+immutable controller-launch decision precedes the controller, and an immutable
+start decision precedes the host agent. The controller reopens and validates
+the exact authority, root owner, launch/witness chain, start decision and
+host-agent configuration before spawning. Rewritten gate inputs and controller
+death before the request leave no host-agent PID or socket. Distinct
+authenticated host-agent and Engine sockets plus a bound Docker-context
+endpoint then remain. Provider identity binds the exact creation-time root
 and complete content-free inventory before retirement can obtain deletion
 authority. After the controller group reports `ESRCH`, fresh
 challenges prove the host agent and Engine still belong to the recorded
@@ -480,14 +488,14 @@ ACLs, xattrs, flags and bind mounts remain trusted-host limits.
 
 ### Immediate next slice
 
-Integrate the reviewed background-process and retirement evidence into the
-append-only mutation state under a receipt hard cut. Add a dedicated cleanup
-intent/slot and crash recovery, bind the immutable plan and progress chain,
-retain the provider-create evidence head unchanged, and close cleanup with its
-separate settlement digest. Neither action may finalize until the corresponding
-result and mutation close are durable. Prove interruption before and after
-shutdown, every deletion, settlement, result and close without replaying start
-or broadening deletion authority.
+Wrap the fixture-only background-create chain in state-born authority under the
+append-only mutation journal. Reassert the real slot/head before each effect
+gate and recover every partial create prefix to either an exact residual
+identity or proved complete absence without replaying a durable start. Keep
+cleanup and finalization blocked until that create result and close are durable.
+Then add the dedicated cleanup slot and crash recovery, bind its immutable
+plan/progress/settlement chain, retain the create evidence head unchanged and
+close cleanup with the separate settlement digest.
 
 Before invoking Colima, finish the selected live toolchain manifest for the
 pinned Colima/Lima and Docker CLI, every transitive helper and the exact disk

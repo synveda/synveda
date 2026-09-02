@@ -125,6 +125,12 @@ function publish(path, value) {
 function readConfig(path) {
   if (!isAbsolute(path) || resolve(path) !== path) throw new Error("config path was refused");
   const configBytes = readFileSync(path);
+  if (
+    !/^[0-9a-f]{64}$/.test(process.argv[2] ?? "") ||
+    digest(configBytes) !== process.argv[2]
+  ) {
+    throw new Error("config digest was refused");
+  }
   const value = JSON.parse(configBytes.toString("utf8"));
   if (!bytes(value).equals(configBytes)) throw new Error("config was not canonical");
   exactKeys(value, [
@@ -301,6 +307,7 @@ async function main() {
     ),
   );
   let shuttingDown = false;
+  let detached = false;
   let lifetime;
   const shutdown = async () => {
     if (shuttingDown) return;
@@ -311,6 +318,12 @@ async function main() {
   };
   const hostagent = createProtocolServer(config, processIdentity, "hostagent", shutdown);
   const engine = createProtocolServer(config, processIdentity, "engine", () => {});
+  const disconnectBeforeDetach = () => {
+    if (!detached) void shutdown();
+  };
+  process.on("disconnect", disconnectBeforeDetach);
+  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
   await listen(hostagent, config.ha_socket);
   await listen(engine, config.engine_socket);
   chmodSync(config.ha_socket, 0o600);
@@ -338,10 +351,67 @@ async function main() {
     process_instance_sha256: processIdentity,
     schema: "synveda.clean-engine.background-hostagent-ready.v1",
   });
-  process.disconnect();
+  await new Promise((resolvePromise, rejectPromise) => {
+    let settled = false;
+    const finish = (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      if (error === undefined) resolvePromise();
+      else rejectPromise(error);
+    };
+    const timeout = setTimeout(
+      () => finish(new Error("hostagent detach timed out")),
+      8_000,
+    );
+    process.once("message", (message) => {
+      try {
+        exactKeys(message, ["action", "challenge", "proof_sha256"]);
+        if (
+          message.action !== "detach" ||
+          !/^[0-9a-f]{64}$/.test(message.challenge) ||
+          !proofEquals(
+            message.proof_sha256,
+            proof(
+              config.instance_nonce,
+              "hostagent-detach",
+              message.challenge,
+              processIdentity,
+            ),
+          )
+        ) {
+          throw new Error("hostagent detach was refused");
+        }
+        process.send(
+          {
+            challenge_sha256: digest(Buffer.from(message.challenge, "ascii")),
+            fixture_id: config.fixture_id,
+            process_instance_sha256: processIdentity,
+            proof_sha256: proof(
+              config.instance_nonce,
+              "hostagent-detached",
+              message.challenge,
+              processIdentity,
+            ),
+            schema: "synveda.clean-engine.background-hostagent-detached.v1",
+          },
+          (error) => {
+            if (error !== null && error !== undefined) {
+              finish(error);
+              return;
+            }
+            detached = true;
+            process.off("disconnect", disconnectBeforeDetach);
+            finish();
+          },
+        );
+      } catch (error) {
+        finish(error);
+      }
+    });
+  });
+  if (process.connected) process.disconnect();
   lifetime = setTimeout(shutdown, config.maximum_lifetime_milliseconds);
-  process.on("SIGINT", shutdown);
-  process.on("SIGTERM", shutdown);
 }
 
 main().catch((error) => {

@@ -162,7 +162,12 @@ refused, not translated.
 
 A separate lifecycle-unexposed process canary locks the discovered background
 provider semantics before state integration. Its explicitly authorised
-launcher runs only the fixed fake fixture. The live-preparation record pins
+launcher runs only the fixed fake fixture. A recoverable fixture-only authority
+precedes root creation, an immutable launch decision precedes the controller,
+and an immutable start decision precedes the host agent. The controller reopens
+the authority, owner, launch/witness chain, start decision and host-agent
+configuration before spawning; this inner contract cannot claim
+mutation-journal integration. The live-preparation record pins
 Colima 0.10.3 at `00f6c297e92a82c04a4ab507db0a61435650d7e8`
 and Lima 2.2.0 at `de0816ea4bdc5267b428ab21025889b8dd785526`,
 records the proposed fixed command and explicit short roots, inherits ambient

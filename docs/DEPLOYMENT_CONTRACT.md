@@ -200,7 +200,14 @@ blocking evidence.
 
 A separate lifecycle-unexposed fake process canary fixes the
 background-provider and retirement protocol before state integration. Its
-explicitly authorised fixture launcher binds captured controller
+recoverable pre-effect authority binds the exact fixture roots, directory
+identities, intended receipt/slot-shaped inputs and ownership nonce. It remains
+explicitly `fixture-only`: the inner process module rejects a caller-supplied
+mutation-journal label. A durable launch decision precedes the controller and a
+distinct durable start decision precedes the host agent; the controller
+reopens and validates the authority, owner, launch/witness chain, start
+decision and host-agent configuration before spawning. The explicitly
+authorised fixture launcher binds captured controller
 and host-agent source bytes plus child-side runtime/source witnesses, uses an
 owned working directory and closed environment, and shuts the controller down
 through authenticated bounded IPC rather than a numeric PID or PGID signal.
