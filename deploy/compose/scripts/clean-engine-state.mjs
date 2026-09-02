@@ -33,6 +33,28 @@ import {
   receiptFileName,
   validateReceiptChain,
 } from "./clean-engine-receipts.mjs";
+import {
+  CONTROLLED_FAKE_PROVIDER_CONTRACT_SHA256,
+  ControlledProviderFailure,
+  controlledProviderBytes,
+  controlledProviderDigest,
+  controlledProviderIntent,
+  controlledProviderIntendedReceipt,
+  createOwnedProviderRoot,
+  inspectControlledProviderArtifacts,
+  launchControlledFakeActor,
+  planControlledProviderRoot,
+  probeControlledProcessGroup,
+  providerRootPreflight,
+  publishControlledProviderArtifact,
+  publishOwnedProviderRootMirror,
+  publishProviderRootReservation,
+  publishRecoveredAbort,
+  publishRecoveredSettlement,
+  recoverOwnedProviderRootMirror,
+  validateControlledProviderAdapter,
+  validateControlledProviderArtifactChain,
+} from "./clean-engine-provider-actor.mjs";
 
 const REGISTRY_IMAGE =
   "registry:3.1.1@sha256:1be55279f18a2fe1a74edf2664cac61c1bea305b7b4642dab412e7affdcb3e33";
@@ -50,7 +72,7 @@ const LEGACY_MUTATION_LEASE_NAME = ".mutation-lease";
 const MUTATION_SLOT_PREFIX = ".mutation-slot-";
 const MUTATION_CLOSE_PREFIX = ".mutation-close-";
 const MUTATION_SLOT_SCHEMA = "synveda.clean-engine.mutation-slot.v1";
-const MUTATION_CLOSE_SCHEMA = "synveda.clean-engine.mutation-close.v1";
+const MUTATION_CLOSE_SCHEMA = "synveda.clean-engine.mutation-close.v2";
 const MUTATION_RECOVERY_PREFIX = ".mutation-recovery-";
 const MUTATION_RECOVERY_SCHEMA = "synveda.clean-engine.mutation-recovery.v1";
 const MUTATION_STAGE_PREFIX = ".mutation-stage-";
@@ -909,7 +931,12 @@ function validateMutationLeaseValue(value, fixtureId) {
   if (
     value.schema !== MUTATION_SLOT_SCHEMA ||
     value.fixture_id !== fixtureId ||
-    !new Set(["append-receipt", "finalize-environment", "provider-create"]).has(value.action) ||
+    !new Set([
+      "append-receipt",
+      "finalize-environment",
+      "provider-cleanup",
+      "provider-create",
+    ]).has(value.action) ||
     !onlyLowerHex(value.intent_receipt_sha256, 64) ||
     !Number.isSafeInteger(value.journal_sequence) ||
     value.journal_sequence < 0 ||
@@ -1050,6 +1077,7 @@ function validateMutationCloseValue(value, slot, fixtureId) {
       "authority_sha256",
       "disposition",
       "fixture_id",
+      "operation_evidence_sha256",
       "result_head_sha256",
       "result_environment_sha256",
       "result_sequence",
@@ -1066,6 +1094,7 @@ function validateMutationCloseValue(value, slot, fixtureId) {
     value.slot_sha256 !== digest(slot.bytes) ||
     !new Set(["owner", "recovery"]).has(value.authority) ||
     !onlyLowerHex(value.authority_sha256, 64) ||
+    !onlyLowerHex(value.operation_evidence_sha256, 64) ||
     !onlyLowerHex(value.result_environment_sha256, 64) ||
     !new Set(["aborted-before-effect", "completed"]).has(value.disposition) ||
     !Number.isSafeInteger(value.result_sequence) ||
@@ -1291,6 +1320,7 @@ function validatePlanRunInventory(run, stateMetadata) {
   if (hasLegacyMutationLease) {
     fail("legacy mutation lease was refused; prepare a fresh clean-engine plan");
   }
+  let providerArtifacts;
   for (const directory of ["client", "evidence", "provider", "registry", "runtime"]) {
     const path = join(run, directory);
     const metadata = ownedPrivateDirectory(path, "plan run directory");
@@ -1299,6 +1329,13 @@ function validatePlanRunInventory(run, stateMetadata) {
     if (directory === "client") {
       if (children.length !== 1 || children[0] !== "proxy-template.json") {
         fail("plan client inventory was refused");
+      }
+    } else if (directory === "provider") {
+      try {
+        providerArtifacts = inspectControlledProviderArtifacts(path);
+      } catch (error) {
+        if (error instanceof ControlledProviderFailure) fail(error.message, error.exitStatus);
+        throw error;
       }
     } else if (children.length !== 0) {
       fail("pre-provider plan directory was not empty");
@@ -1494,6 +1531,7 @@ function validatePlanRunInventory(run, stateMetadata) {
     mutationSlots,
     mutationStages,
     pendingPublication,
+    providerArtifacts,
     receipts,
   };
 }
@@ -1583,9 +1621,11 @@ function loadState(roots, checkSource, allowCompetingStaging = false) {
         (lease.source_sequence !== 0 ||
           lease.intent_receipt_sha256 === ZERO_SHA256 ||
           (providerIntentReceipt !== undefined &&
-            (providerIntentReceipt.phase !== "provider-create-intent" ||
-              digest(canonicalBytes(providerIntentReceipt)) !==
-                lease.intent_receipt_sha256)))) ||
+            !(
+              providerIntentReceipt.phase === "preflight-refused" ||
+              (providerIntentReceipt.phase === "provider-create-intent" &&
+                digest(canonicalBytes(providerIntentReceipt)) === lease.intent_receipt_sha256)
+            )))) ||
       (lease.action !== "provider-create" && lease.intent_receipt_sha256 !== ZERO_SHA256)
     ) {
       fail("mutation slot receipt binding was refused");
@@ -1635,8 +1675,9 @@ function loadState(roots, checkSource, allowCompetingStaging = false) {
           close.value.result_head_sha256 !== lease.source_head_sha256)) ||
       (close.value.disposition === "completed" &&
         lease.action === "provider-create" &&
-        (!new Set([2, 3]).has(resultDelta) ||
-          providerIntentReceipt === undefined ||
+        (!new Set([1, 2, 3]).has(resultDelta) ||
+          (resultDelta === 1 && resultReceipt.phase !== "preflight-refused") ||
+          (resultDelta > 1 && providerIntentReceipt === undefined) ||
           (resultDelta === 2 &&
             !new Set([
               "execution-failed",
@@ -1653,9 +1694,11 @@ function loadState(roots, checkSource, allowCompetingStaging = false) {
           (resultDelta === 0 && sourceReceipt.phase !== "finalize-passed") ||
           close.value.result_environment_sha256 === ZERO_SHA256)) ||
       (close.value.disposition === "completed" &&
-        lease.action === "append-receipt" &&
+        new Set(["append-receipt", "provider-cleanup"]).has(lease.action) &&
         (resultDelta > 2 ||
-          (resultDelta === 2 && !resultReceipt.phase.endsWith("-failed"))))
+          (resultDelta === 2 && !resultReceipt.phase.endsWith("-failed")))) ||
+      (lease.action !== "provider-create" &&
+        close.value.operation_evidence_sha256 !== ZERO_SHA256)
     ) {
       fail("mutation close receipt binding was refused");
     }
@@ -1695,12 +1738,15 @@ function loadState(roots, checkSource, allowCompetingStaging = false) {
     const delta = receiptState.head.sequence - lease.source_sequence;
     if (
       delta < 0 ||
-      (lease.action === "append-receipt" &&
+      (new Set(["append-receipt", "provider-cleanup"]).has(lease.action) &&
         (delta > 2 ||
           (delta === 2 && !receiptState.head.phase.endsWith("-failed")))) ||
       (lease.action === "provider-create" &&
         (delta > 3 ||
-          (delta === 1 && receiptState.head.phase !== "provider-create-intent") ||
+          (delta === 1 &&
+            !new Set(["preflight-refused", "provider-create-intent"]).has(
+              receiptState.head.phase,
+            )) ||
           (delta === 2 &&
             !new Set([
               "execution-failed",
@@ -1732,16 +1778,105 @@ function loadState(roots, checkSource, allowCompetingStaging = false) {
   for (const receipt of receipts) {
     let requiredAction;
     if (receipt.phase.startsWith("provider-create-")) requiredAction = "provider-create";
+    if (receipt.phase.startsWith("provider-cleanup-")) requiredAction = "provider-cleanup";
     if (receipt.phase === "finalize-passed") requiredAction = "finalize-environment";
-    if (requiredAction === undefined) continue;
+    if (requiredAction === undefined && receipt.phase !== "preflight-refused") continue;
     const owner = inventory.mutationSlots.find((slot) => {
       const close = mutationClosesBySlot.get(slot.value.journal_sequence);
       const resultSequence = close?.value.result_sequence ?? receiptState.head.sequence;
       return receipt.sequence > slot.value.source_sequence && receipt.sequence <= resultSequence;
     });
-    if (owner?.value.action !== requiredAction) {
+    const allowedAction = owner?.value.action === (requiredAction ?? "provider-create");
+    if (!allowedAction) {
       fail(`${receipt.phase} receipt was outside its mutation action`);
     }
+  }
+  const providerArtifactCount = Object.keys(inventory.providerArtifacts ?? {}).length;
+  let providerSlot;
+  if (providerArtifactCount > 0) {
+    const rootPlanArtifact = inventory.providerArtifacts?.["root-plan.json"];
+    if (rootPlanArtifact === undefined) {
+      fail("controlled provider artifacts lacked their root plan");
+    }
+    let matchingProviderSlots;
+    try {
+      matchingProviderSlots = inventory.mutationSlots.filter((slot) => {
+        if (slot.value.action !== "provider-create") return false;
+        const intended = controlledProviderIntendedReceipt(
+          candidate.value.run_id,
+          rootPlanArtifact.value,
+          slot.value.source_head_sha256,
+          slot.value.source_sequence,
+        );
+        return (
+          slot.value.intent_receipt_sha256 ===
+          controlledProviderDigest(controlledProviderBytes(intended))
+        );
+      });
+    } catch (error) {
+      if (error instanceof ControlledProviderFailure) fail(error.message, error.exitStatus);
+      throw error;
+    }
+    if (matchingProviderSlots.length === 0) {
+      fail("controlled provider root plan was outside its intended receipt");
+    }
+    if (matchingProviderSlots.length > 1) {
+      fail("controlled provider root plan mutation slot was ambiguous");
+    }
+    [providerSlot] = matchingProviderSlots;
+  }
+  const providerClose =
+    providerSlot === undefined
+      ? undefined
+      : mutationClosesBySlot.get(providerSlot.value.journal_sequence);
+  const providerIntentReceipt =
+    providerSlot === undefined ? undefined : receipts[providerSlot.value.source_sequence + 1];
+  const providerTerminalReceipt =
+    providerClose !== undefined
+      ? receipts[providerClose.value.result_sequence]
+      : providerSlot !== undefined &&
+          inventory.mutationLease?.value.journal_sequence === providerSlot.value.journal_sequence
+        ? receiptState.head
+        : undefined;
+  let providerState;
+  try {
+    if (providerArtifactCount > 0 && providerSlot === undefined) {
+      fail("controlled provider artifacts were outside a mutation slot");
+    }
+    providerState = validateControlledProviderArtifactChain({
+      artifacts: inventory.providerArtifacts ?? {},
+      close: providerClose,
+      fixtureId: candidate.value.run_id,
+      intentReceipt: providerIntentReceipt,
+      slot: providerSlot,
+      terminalReceipt: providerTerminalReceipt,
+    });
+  } catch (error) {
+    if (error instanceof ControlledProviderFailure) fail(error.message, error.exitStatus);
+    throw error;
+  }
+  for (const slot of inventory.mutationSlots) {
+    if (slot.value.action !== "provider-create") continue;
+    const close = mutationClosesBySlot.get(slot.value.journal_sequence);
+    if (close === undefined) continue;
+    const expectedEvidenceSha256 =
+      providerSlot?.value.journal_sequence === slot.value.journal_sequence
+        ? providerState.operationEvidenceSha256
+        : ZERO_SHA256;
+    if (close.value.operation_evidence_sha256 !== expectedEvidenceSha256) {
+      fail("provider mutation close operation evidence was refused");
+    }
+  }
+  if (
+    providerState.contract === "controlled-fake" &&
+    receipts.some(
+      (receipt) =>
+        receipt.phase.startsWith("provider-cleanup-") ||
+        receipt.phase.startsWith("failure-cleanup-") ||
+        receipt.phase === "finalize-passed",
+    )
+  ) {
+    fail("controlled provider cleanup requires dedicated ownership evidence");
   }
   const finalized = receiptState.head.phase === "finalize-passed";
   const manifestReceipts = finalized ? receipts.slice(0, -1) : receipts;
@@ -1830,6 +1965,7 @@ function loadState(roots, checkSource, allowCompetingStaging = false) {
     mutationSlots: inventory.mutationSlots,
     mutationStages: inventory.mutationStages,
     pendingPublication: inventory.pendingPublication,
+    providerState,
   };
 }
 
@@ -2195,7 +2331,12 @@ function acquireMutationLease(
     }
     fail("an abandoned clean-engine mutation requires explicit recovery", 73);
   }
-  if (!new Set(["append-receipt", "finalize-environment", "provider-create"]).has(action)) {
+  if (!new Set([
+    "append-receipt",
+    "finalize-environment",
+    "provider-cleanup",
+    "provider-create",
+  ]).has(action)) {
     fail("mutation action was refused", 70);
   }
   if (!onlyLowerHex(intentReceiptSha256, 64)) fail("mutation intent binding was refused", 70);
@@ -2291,7 +2432,15 @@ function publishMutationClose(
   disposition,
   reassertAuthority,
   publicationHolds = {},
+  operationEvidenceSha256 = ZERO_SHA256,
 ) {
+  const expectedOperationEvidenceSha256 =
+    slot.value.action === "provider-create"
+      ? state.providerState.operationEvidenceSha256
+      : ZERO_SHA256;
+  if (operationEvidenceSha256 !== expectedOperationEvidenceSha256) {
+    fail("mutation close operation evidence was refused", 70);
+  }
   if (
     state.mutationLease === undefined ||
     !state.mutationLease.bytes.equals(slot.bytes) ||
@@ -2316,6 +2465,7 @@ function publishMutationClose(
     ((slot.value.action === "provider-create" &&
       !new Set([
         "execution-failed",
+        "preflight-refused",
         "provider-create-failed",
         "provider-create-passed",
       ]).has(result.head.phase)) ||
@@ -2333,6 +2483,7 @@ function publishMutationClose(
     authority_sha256: authoritySha256,
     disposition,
     fixture_id: slot.value.fixture_id,
+    operation_evidence_sha256: operationEvidenceSha256,
     result_environment_sha256: resultEnvironmentSha256,
     result_head_sha256: result.head_sha256,
     result_sequence: result.head.sequence,
@@ -2382,7 +2533,13 @@ function publishMutationClose(
   return verified;
 }
 
-function closeMutationLease(roots, held, disposition, publicationHolds = {}) {
+function closeMutationLease(
+  roots,
+  held,
+  disposition,
+  publicationHolds = {},
+  operationEvidenceSha256 = ZERO_SHA256,
+) {
   assertMutationLeaseHeld(roots, held, false);
   reconcileReceiptPublication(roots);
   reconcileEnvironmentPublication(roots);
@@ -2394,6 +2551,7 @@ function closeMutationLease(roots, held, disposition, publicationHolds = {}) {
     disposition,
     () => assertMutationLeaseHeld(roots, held, false),
     publicationHolds,
+    operationEvidenceSha256,
   );
 }
 
@@ -2525,7 +2683,8 @@ export function executeProviderCreateForExecutor(argumentsValue) {
     initial.receiptState.head.phase !== "plan" ||
     initial.pendingPublication !== undefined ||
     initial.environment !== undefined ||
-    initial.environmentPublication !== undefined
+    initial.environmentPublication !== undefined ||
+    initial.providerState.contract !== "synchronous-fake"
   ) {
     fail("provider creation state was refused", 73);
   }
@@ -2575,6 +2734,239 @@ export function executeProviderCreateForExecutor(argumentsValue) {
   const receipt = appendReceiptWithLease(roots, next);
   assertMutationLeaseHeld(roots, held);
   closeMutationLease(roots, held, "completed", closePublicationHolds);
+  return receipt;
+}
+
+function controlledProviderFailureResult(safeCode, collision = false) {
+  return {
+    cleanup_required: true,
+    collision_resource: collision ? "provider" : "none",
+    resource_disposition: collision ? "foreign-preserved" : "receipt-owned-or-absent",
+    safe_code: safeCode,
+  };
+}
+
+function controlledProviderPassedResult(settlementSha256) {
+  return {
+    colima_version: "0.10.3",
+    docker_client_version: "29.4.0",
+    docker_server_version: "29.4.0",
+    engine_identity_sha256: settlementSha256,
+    initial_containers: 0,
+    initial_images: 0,
+    initial_networks: ["bridge", "host", "none"],
+    initial_volumes: 0,
+    platform: "darwin-arm64-colima-vz",
+    socket_contract: "receipt-owned-unix",
+  };
+}
+
+function sourceClosureMatches(roots, candidate) {
+  try {
+    return canonical(sourceClosure(roots.repoRoot)) === canonical(candidate.source);
+  } catch (error) {
+    if (!(error instanceof ClosedFailure)) throw error;
+    return false;
+  }
+}
+
+function controlledFailureSafeCode(settlement, outcome, sourceMatches) {
+  if (!sourceMatches) return "evidence-refused";
+  if (settlement.value.termination_reason === "deadline") return "child-timeout";
+  if (settlement.value.disposition === "completed" && outcome?.value.outcome === "failed") {
+    return "child-failed";
+  }
+  return "evidence-refused";
+}
+
+function controlledProviderDirectory(state) {
+  return join(state.run, "provider");
+}
+
+function controlledPause(milliseconds) {
+  if (milliseconds === 0) return Promise.resolve();
+  return new Promise((resolvePromise) => setTimeout(resolvePromise, milliseconds));
+}
+
+export async function executeControlledProviderCreateForExecutor(argumentsValue) {
+  validateControlledProviderAdapter(argumentsValue.adapter);
+  const roots = prepareRoots(argumentsValue.repoRoot, argumentsValue.stateBase, false);
+  const initial = loadState(roots, true);
+  if (
+    initial.receiptState.head.phase !== "plan" ||
+    initial.pendingPublication !== undefined ||
+    initial.environment !== undefined ||
+    initial.environmentPublication !== undefined ||
+    initial.providerState.contract !== "synchronous-fake"
+  ) {
+    fail("controlled provider creation state was refused", 73);
+  }
+  let rootPlan;
+  try {
+    rootPlan = planControlledProviderRoot({
+      fixtureId: initial.candidate.run_id,
+      providerBase: argumentsValue.providerBase,
+      repoRoot: roots.repoRoot,
+      stateBase: roots.stateBase,
+    });
+  } catch (error) {
+    if (error instanceof ControlledProviderFailure) fail(error.message, error.exitStatus);
+    throw error;
+  }
+  const rootPlanSha256 = controlledProviderDigest(controlledProviderBytes(rootPlan));
+  const ownershipNonce = rootPlan.ownership_nonce;
+  const intentResult = controlledProviderIntent(
+    initial.candidate.run_id,
+    rootPlan,
+    ownershipNonce,
+  );
+  let intendedReceipt;
+  try {
+    intendedReceipt = createNextReceipt(
+      initial.receipts,
+      initial.candidate.run_id,
+      "provider-create-intent",
+      intentResult,
+    );
+  } catch (error) {
+    if (error instanceof ReceiptFailure) fail(error.message);
+    throw error;
+  }
+  const held = acquireMutationLease(
+    roots,
+    "provider-create",
+    digest(canonicalBytes(intendedReceipt)),
+    {
+      sequence: initial.receiptState.head.sequence,
+      sha256: initial.receiptState.head_sha256,
+    },
+  );
+  const providerDirectory = controlledProviderDirectory(initial);
+  publishControlledProviderArtifact(providerDirectory, "root-plan.json", rootPlan);
+  assertMutationLeaseHeld(roots, held);
+  await controlledPause(argumentsValue.adapter.after_root_plan_hold_milliseconds);
+  assertMutationLeaseHeld(roots, held);
+  if (providerRootPreflight(rootPlan) === "collision") {
+    const receipt = appendReceiptWithLease(roots, {
+      phase: "preflight-refused",
+      result: {
+        cleanup_required: false,
+        collision_resource: "provider",
+        resource_disposition: "foreign-preserved",
+        safe_code: "resource-collision",
+      },
+    });
+    closeMutationLease(
+      roots,
+      held,
+      "completed",
+      { beforeLinkMilliseconds: argumentsValue.adapter.close_prelink_hold_milliseconds },
+      rootPlanSha256,
+    );
+    return receipt;
+  }
+  const intentReceipt = appendReceiptWithLease(roots, {
+    phase: "provider-create-intent",
+    result: intentResult,
+  });
+  const intentSha256 = digest(canonicalBytes(intentReceipt));
+  await controlledPause(argumentsValue.adapter.after_intent_hold_milliseconds);
+  assertMutationLeaseHeld(roots, held);
+  const reservation = publishProviderRootReservation(
+    providerDirectory,
+    rootPlan,
+    intentSha256,
+    ownershipNonce,
+  );
+  assertMutationLeaseHeld(roots, held);
+  await controlledPause(argumentsValue.adapter.before_root_creation_hold_milliseconds);
+  assertMutationLeaseHeld(roots, held);
+  const root = createOwnedProviderRoot({
+    intentSha256,
+    ownershipNonce,
+    providerContractSha256: CONTROLLED_FAKE_PROVIDER_CONTRACT_SHA256,
+    rootPlan,
+  });
+  if (root.outcome === "collision") {
+    const receipt = appendReceiptWithLease(roots, {
+      phase: "provider-create-failed",
+      result: controlledProviderFailureResult("resource-collision", true),
+    });
+    closeMutationLease(
+      roots,
+      held,
+      "completed",
+      { beforeLinkMilliseconds: argumentsValue.adapter.close_prelink_hold_milliseconds },
+      reservation.sha256,
+    );
+    return receipt;
+  }
+  await controlledPause(argumentsValue.adapter.before_root_mirror_hold_milliseconds);
+  assertMutationLeaseHeld(roots, held);
+  const rootOwner = publishOwnedProviderRootMirror(providerDirectory, root.marker);
+  let state = assertMutationLeaseHeld(roots, held);
+  const actor = await launchControlledFakeActor(
+    {
+      fixtureId: initial.candidate.run_id,
+      intentSha256,
+      providerDirectory,
+      rootOwnerSha256: rootOwner.sha256,
+      rootPlanSha256,
+      rootPath: rootPlan.root_path,
+      slotSequence: held.lease.journal_sequence,
+      slotSha256: digest(held.leaseBytes),
+    },
+    argumentsValue.adapter,
+  );
+  await controlledPause(argumentsValue.adapter.before_decision_hold_milliseconds);
+  state = assertMutationLeaseHeld(roots, held);
+  if (!sourceClosureMatches(roots, state.candidate)) {
+    actor.abort();
+    const settled = await actor.settle();
+    const receipt = appendReceiptWithLease(roots, {
+      phase: "provider-create-failed",
+      result: controlledProviderFailureResult("evidence-refused"),
+    });
+    closeMutationLease(
+      roots,
+      held,
+      "completed",
+      { beforeLinkMilliseconds: argumentsValue.adapter.close_prelink_hold_milliseconds },
+      settled.settlement.sha256,
+    );
+    return receipt;
+  }
+  actor.start();
+  await controlledPause(argumentsValue.adapter.after_decision_hold_milliseconds);
+  assertMutationLeaseHeld(roots, held);
+  const settled = await actor.settle();
+  assertMutationLeaseHeld(roots, held);
+  await controlledPause(argumentsValue.adapter.after_settlement_hold_milliseconds);
+  state = assertMutationLeaseHeld(roots, held);
+  const sourceMatches = sourceClosureMatches(roots, state.candidate);
+  const passed =
+    settled.settlement.value.disposition === "completed" &&
+    settled.outcome?.value.outcome === "passed" &&
+    sourceMatches;
+  const safeCode = controlledFailureSafeCode(
+    settled.settlement,
+    settled.outcome,
+    sourceMatches,
+  );
+  const receipt = appendReceiptWithLease(roots, {
+    phase: passed ? "provider-create-passed" : "provider-create-failed",
+    result: passed
+      ? controlledProviderPassedResult(settled.settlement.sha256)
+      : controlledProviderFailureResult(safeCode),
+  });
+  assertMutationLeaseHeld(roots, held);
+  closeMutationLease(
+    roots,
+    held,
+    "completed",
+    { beforeLinkMilliseconds: argumentsValue.adapter.close_prelink_hold_milliseconds },
+    settled.settlement.sha256,
+  );
   return receipt;
 }
 
@@ -2693,7 +3085,13 @@ function assertProviderRecoveryHeld(roots, held) {
   return state;
 }
 
-function closeRecoveredProviderMutation(roots, held, disposition, publicationHolds = {}) {
+function closeRecoveredProviderMutation(
+  roots,
+  held,
+  disposition,
+  publicationHolds = {},
+  operationEvidenceSha256 = ZERO_SHA256,
+) {
   assertProviderRecoveryHeld(roots, held);
   reconcileReceiptPublication(roots);
   reconcileEnvironmentPublication(roots);
@@ -2705,12 +3103,17 @@ function closeRecoveredProviderMutation(roots, held, disposition, publicationHol
     disposition,
     () => assertProviderRecoveryHeld(roots, held),
     publicationHolds,
+    operationEvidenceSha256,
   );
 }
 
 export function recoverProviderCreateForExecutor(argumentsValue) {
   validateFakeProviderAdapter(argumentsValue.adapter);
   const roots = prepareRoots(argumentsValue.repoRoot, argumentsValue.stateBase, false);
+  const initial = loadState(roots, false);
+  if (initial.providerState.contract === "controlled-fake") {
+    fail("controlled provider recovery requires its dedicated executor", 73);
+  }
   const closePublicationHolds = {
     beforeLinkMilliseconds: argumentsValue.adapter.close_prelink_hold_milliseconds,
   };
@@ -2796,16 +3199,211 @@ export function recoverProviderCreateForExecutor(argumentsValue) {
   return state.receiptState.head;
 }
 
+function assertControlledActorAbsent(providerState) {
+  if (providerState.witness === undefined) return;
+  const probe = probeControlledProcessGroup(Number(providerState.witness.value.actor_pgid));
+  if (probe !== "absent") {
+    fail("controlled provider actor group remained present or unknown", 73);
+  }
+}
+
+export async function recoverControlledProviderCreateForExecutor(argumentsValue) {
+  const roots = prepareRoots(argumentsValue.repoRoot, argumentsValue.stateBase, false);
+  let state = reconcileMutationStages(roots);
+  let recoverRootMirror = false;
+  let recoverRootIntentSha256;
+  if (state.providerState.contract === "controlled-fake") {
+    if (state.providerState.rootPlan.value.base.path !== argumentsValue.providerBase) {
+      fail("controlled provider recovery base was refused", 64);
+    }
+    if (
+      state.providerState.rootOwner !== undefined &&
+      state.providerState.launch !== undefined &&
+      state.providerState.witness === undefined
+    ) {
+      fail("controlled provider launch state remained uncertain", 73);
+    }
+    recoverRootMirror =
+      state.receiptState.head.phase === "provider-create-intent" &&
+      state.providerState.rootOwner === undefined &&
+      state.providerState.reservation !== undefined &&
+      providerRootPreflight(state.providerState.rootPlan.value) === "collision";
+    if (recoverRootMirror) recoverRootIntentSha256 = state.receiptState.head_sha256;
+    assertControlledActorAbsent(state.providerState);
+  } else if (state.receiptState.head.phase !== "plan") {
+    fail("controlled provider recovery contract was refused", 73);
+  }
+  const held = acquireProviderRecovery(
+    roots,
+    argumentsValue.confirmation,
+    defaultMutationOwnerProbe,
+  );
+  state = assertProviderRecoveryHeld(roots, held);
+  if (recoverRootMirror) {
+    try {
+      recoverOwnedProviderRootMirror({
+        intentSha256: recoverRootIntentSha256,
+        ownershipNonce: state.providerState.rootPlan.value.ownership_nonce,
+        providerDirectory: controlledProviderDirectory(state),
+        reservation: state.providerState.reservation,
+        rootPlan: state.providerState.rootPlan.value,
+      });
+    } catch (error) {
+      if (error instanceof ControlledProviderFailure) fail(error.message, error.exitStatus);
+      throw error;
+    }
+    state = assertProviderRecoveryHeld(roots, held);
+  }
+  if (state.providerState.contract === "controlled-fake") {
+    assertControlledActorAbsent(state.providerState);
+  }
+  const providerDirectory = controlledProviderDirectory(state);
+  if (state.receiptState.head.phase === "plan") {
+    const evidence = state.providerState.operationEvidenceSha256;
+    closeRecoveredProviderMutation(
+      roots,
+      held,
+      "aborted-before-effect",
+      {},
+      evidence,
+    );
+    return state.receiptState.head;
+  }
+  if (state.receiptState.head.phase === "preflight-refused") {
+    const evidence = state.providerState.operationEvidenceSha256;
+    closeRecoveredProviderMutation(roots, held, "completed", {}, evidence);
+    return state.receiptState.head;
+  }
+  if (state.providerState.contract !== "controlled-fake") {
+    fail("controlled provider recovery contract was refused", 73);
+  }
+  const rootPlan = state.providerState.rootPlan.value;
+  if (state.receiptState.head.phase === "provider-create-intent") {
+    if (state.providerState.rootOwner === undefined) {
+      if (providerRootPreflight(rootPlan) !== "absent") {
+        fail("controlled provider root ownership remained uncertain", 73);
+      }
+      appendReceiptWithLease(roots, {
+        phase: "provider-create-failed",
+        result: controlledProviderFailureResult("evidence-refused"),
+      });
+      state = assertProviderRecoveryHeld(roots, held);
+    } else if (
+      state.providerState.witness === undefined &&
+      state.providerState.launch === undefined
+    ) {
+      appendReceiptWithLease(roots, {
+        phase: "provider-create-failed",
+        result: controlledProviderFailureResult("evidence-refused"),
+      });
+      state = assertProviderRecoveryHeld(roots, held);
+    } else if (state.providerState.witness === undefined) {
+      fail("controlled provider launch state remained uncertain", 73);
+    } else {
+      let decision = state.providerState.decision;
+      if (decision === undefined) {
+        decision = publishRecoveredAbort(providerDirectory, state.providerState.witness);
+        state = assertProviderRecoveryHeld(roots, held);
+        assertControlledActorAbsent(state.providerState);
+      }
+      let settlement = state.providerState.settlement;
+      if (settlement === undefined) {
+        settlement = publishRecoveredSettlement(
+          providerDirectory,
+          state.providerState.witness,
+          decision,
+          state.providerState.outcome,
+          state.providerState.rootPlan,
+        );
+        state = assertProviderRecoveryHeld(roots, held);
+        assertControlledActorAbsent(state.providerState);
+      }
+      const sourceMatches = sourceClosureMatches(roots, state.candidate);
+      const passed =
+        decision.value.decision === "start" &&
+        state.providerState.outcome?.value.outcome === "passed" &&
+        settlement.value.disposition === "completed" &&
+        sourceMatches;
+      const safeCode = controlledFailureSafeCode(
+        settlement,
+        state.providerState.outcome,
+        sourceMatches,
+      );
+      appendReceiptWithLease(roots, {
+        phase: passed ? "provider-create-passed" : "provider-create-failed",
+        result: passed
+          ? controlledProviderPassedResult(settlement.sha256)
+          : controlledProviderFailureResult(safeCode),
+      });
+      state = assertProviderRecoveryHeld(roots, held);
+    }
+  }
+  if (
+    state.receiptState.head.phase === "provider-create-passed" &&
+    !sourceClosureMatches(roots, state.candidate)
+  ) {
+    appendReceiptWithLease(roots, {
+      phase: "execution-failed",
+      result: controlledProviderFailureResult("evidence-refused"),
+    });
+    state = assertProviderRecoveryHeld(roots, held);
+  }
+  if (
+    !new Set(["execution-failed", "provider-create-failed", "provider-create-passed"]).has(
+      state.receiptState.head.phase,
+    )
+  ) {
+    fail("controlled provider recovery receipt state was refused", 73);
+  }
+  const operationEvidenceSha256 = state.providerState.operationEvidenceSha256;
+  closeRecoveredProviderMutation(
+    roots,
+    held,
+    "completed",
+    {},
+    operationEvidenceSha256,
+  );
+  return state.receiptState.head;
+}
+
 export function appendReceiptForExecutor(argumentsValue) {
   if (
     typeof argumentsValue.phase === "string" &&
     (argumentsValue.phase.startsWith("provider-create-") ||
+      argumentsValue.phase.startsWith("provider-cleanup-") ||
+      argumentsValue.phase === "preflight-refused" ||
       argumentsValue.phase === "finalize-passed")
   ) {
     fail("receipt phase requires its dedicated mutation executor", 64);
   }
   const roots = prepareRoots(argumentsValue.repoRoot, argumentsValue.stateBase, false);
+  const initial = loadState(roots, false);
+  if (
+    initial.providerState.contract === "controlled-fake" &&
+    typeof argumentsValue.phase === "string" &&
+    (argumentsValue.phase.startsWith("provider-cleanup-") ||
+      argumentsValue.phase.startsWith("failure-cleanup-"))
+  ) {
+    fail("controlled provider cleanup requires dedicated ownership evidence", 73);
+  }
   return withMutationLease(roots, "append-receipt", () =>
+    appendReceiptWithLease(roots, argumentsValue),
+  );
+}
+
+export function appendProviderCleanupReceiptForExecutor(argumentsValue) {
+  if (
+    typeof argumentsValue.phase !== "string" ||
+    !argumentsValue.phase.startsWith("provider-cleanup-")
+  ) {
+    fail("provider cleanup receipt phase was refused", 64);
+  }
+  const roots = prepareRoots(argumentsValue.repoRoot, argumentsValue.stateBase, false);
+  const initial = loadState(roots, false);
+  if (initial.providerState.contract === "controlled-fake") {
+    fail("controlled provider cleanup requires dedicated ownership evidence", 73);
+  }
+  return withMutationLease(roots, "provider-cleanup", () =>
     appendReceiptWithLease(roots, argumentsValue),
   );
 }
@@ -3058,6 +3656,10 @@ function reconcileEnvironmentPublication(roots) {
 
 export function finalizeEnvironmentForExecutor(argumentsValue) {
   const roots = prepareRoots(argumentsValue.repoRoot, argumentsValue.stateBase, false);
+  const initial = loadState(roots, false);
+  if (initial.providerState.contract === "controlled-fake") {
+    fail("controlled provider cleanup must complete before finalization", 73);
+  }
   return withMutationLease(roots, "finalize-environment", () =>
     finalizeEnvironmentWithLease(roots),
   );

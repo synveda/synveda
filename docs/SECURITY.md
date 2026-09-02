@@ -184,34 +184,47 @@ phase-binds collisions, replays retired cleanup authority and admits a final
 manifest only after the exact success sequence. The append-only mutation
 journal binds permanent numbered slots to exact source receipt/environment
 endpoints, the prior close and a cooperative owner challenge. Permanent closes
-bind exact result endpoints and owner/recovery authority; per-slot recovery
-claims form a gap-free prefix. Final journal names are never deleted or reused.
+bind exact result endpoints, owner/recovery authority and the operation-evidence
+digest; per-slot recovery claims form a gap-free prefix. Final journal names
+are never deleted or reused. Mutation-close v1 is refused as a fresh-plan hard
+cut.
 Unique fsynced stages and atomic no-replace links prevent partial final files;
 only stage aliases reconcile. A displaced live close stage retries only after
 authority and result endpoints are re-proved. An unrelated one-link alias
 confers no authority and cannot block that close; its final no-replace link
-loses. One internal fake-provider
-operation holds an open slot across synchronous intent/effect/result and
-retains uncertainty. Generic append cannot own provider or finalization
-evidence.
+loses. Generic append cannot own preflight, provider-create, provider-cleanup
+or finalization evidence.
 
 Recovery requires the exact slot sequence and canonical digest and appends a
 bounded claim chain while the open slot and newest claim block ordinary
 writers; live/unidentifiable owners refuse, and an abandoned recovery can be
 superseded without PID-based adoption. A claim appended after a durable close
-is inert history. Exhausted recovery or slot capacity fails closed. This is a
-trusted-process deterministic seam only. The fixed fake adapter is closed data
-and accepts no function, command, path, environment or provider selector; its
-absence/cleanup fields are not external discovery or deletion authority.
-Cooperative owner challenges do not prove portable process birth or child
-quiescence, and journal hashes do not protect against a hostile same-user
-writer. No public phase/recovery runner exists, and no external effect,
-actor/process-group witness or deletion authority is enabled.
-Receipt and manifest staging reconciliation plus fake-owner recovery are not
-live process/provider recovery evidence. Disposable-provider identity, TLS registry auth, a
-zero-read remote-builder canary and exact destruction evidence are still
-pending. ACLs, xattrs, file flags, bind mounts and hostile same-user path
-replacement remain trusted-host limits.
+is inert history. Exhausted recovery or slot capacity fails closed. The
+synchronous fake remains the rollback. A separate controlled fake path reserves
+a short private external root, mirrors its inode/mode/UID-bound owner marker and
+publishes an immutable launch, actor/process-group witness, one-way start
+decision, fixed-child outcome and ESRCH settlement. Before start the supervisor
+reasserts the actual slot and the actor rechecks the exact plan, owner, launch,
+witness, digest-bound slot fields and full root/leaf inventory. Only the actor
+signals its own group; its directly owned children exit on parent-IPC loss.
+The settlement binds the exact optional effect and outcome digests. Recovery
+probes but never signals a stored PGID and
+cannot replay a durable start. A launch without a witness remains uncertain
+evidence. Terminal success requires a passing outcome, completed ESRCH
+settlement and its exact digest in both receipt and mutation close.
+
+This remains trusted-process, fake-command-only POSIX evidence. The closed
+adapter accepts no function, command, path, environment or provider selector;
+its provider absence/cleanup fields are not external discovery or deletion
+authority. Cooperative owner challenges and PGID probes do not protect against
+a hostile same-user writer or prove another PID namespace. No supported
+lifecycle target exposes the test-only execution/recovery fixtures; no
+Docker/Colima effect or deletion authority is enabled.
+The owned root has no cleanup settlement, so controlled provider cleanup and
+finalization fail closed. Disposable-provider identity, TLS registry auth, a
+zero-read remote-builder canary and exact destruction evidence remain pending.
+ACLs, xattrs, file flags, bind mounts and hostile same-user path replacement
+remain trusted-host limits.
 
 ## Residual and external limits
 

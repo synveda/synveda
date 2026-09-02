@@ -123,6 +123,32 @@ exact duplicate witnesses are retained without extension; malformed
 generation-1 candidates fail closed, while a later-generation legacy event is
 a different fact and cannot prevent generation-1 repair.
 
+The clean-Engine provider seam now has two fake-only execution paths. The
+original synchronous closed-data adapter remains the rollback. The controlled
+path creates a private, receipt-reserved external filesystem root, mirrors its
+inode/mode/UID-bound owner marker, publishes a durable launch record and starts
+one detached actor which remains its process-group leader. The supervisor
+reasserts the actual mutation slot immediately before its one-way decision;
+the actor independently validates the root plan, complete root/leaf inventory,
+owner mirror, launch and witness, including their digest-bound slot fields,
+before its fixed fake child can start. Only the actor signals its own group;
+its directly owned children also exit if their private parent IPC closes. A
+provider result can close only after a negative PGID probe reports `ESRCH`.
+The settlement binds the exact optional effect and outcome digests, the close
+binds that settlement, and a passing receipt additionally binds the settlement
+as its engine identity.
+Recovery never signals a stored PGID or replays a durable start. A
+marker-before-mirror crash converges only an exact reservation-bound marker;
+a launch without a witness remains an explicit blocker because its PGID was
+not durably recorded.
+
+This is deterministic POSIX process/filesystem evidence for the fixed fake
+command and actor-owned descendant, not Docker, Colima or live-provider
+evidence. The controlled root has
+no deletion settlement yet, so controlled runs cannot publish provider-cleanup
+or finalization evidence. Mutation-close schema v2 adds the operation-evidence
+digest and is a fresh-plan hard cut; v1 closes are refused, not translated.
+
 ## Options considered
 
 1. **Keep contributor and installed Compose separate** — preserves current
@@ -172,6 +198,10 @@ a different fact and cannot prevent generation-1 repair.
   evidence, not DR, HA, SaaS or enterprise evidence.
 - Keycloak/database downgrade and schema rollback remain constrained by the
   tested version window; zero downtime is not promised.
+- The controlled clean-Engine actor/root seam remains internal and fake-only.
+  A real provider command, exact provider cleanup, a public runner and a
+  source/image environment manifest remain required before it can support a
+  Docker or Colima acceptance claim.
 - Reversal trigger: if measured operation failure semantics cannot be made
   correct behind the provider-neutral outbox, remove Apalis and retain the
   Postgres worker path. If single-host Compose cannot reproduce the contract on

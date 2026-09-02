@@ -22,6 +22,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import test from "node:test";
 import {
+  appendProviderCleanupReceiptForExecutor,
   appendReceiptForExecutor,
   executeProviderCreateForExecutor,
   finalizeEnvironmentForExecutor,
@@ -425,7 +426,10 @@ function stageSuccessfulReceipts(state) {
     parse(join(active, "02-provider-create-passed.json")),
   ];
   for (const phase of receiptSuccessPath.slice(3, -1)) {
-    const receipt = appendReceiptForExecutor({
+    const append = phase.startsWith("provider-cleanup-")
+      ? appendProviderCleanupReceiptForExecutor
+      : appendReceiptForExecutor;
+    const receipt = append({
       phase,
       repoRoot: state.repo,
       result: cleanEngineReceiptResult(phase, candidate.run_id),
@@ -527,26 +531,31 @@ test("the state loader appends one exclusive generic receipt and rejects receipt
     assert.equal(run(state, "plan").status, 0);
     const active = activeRun(state);
     const candidate = parse(join(active, "candidate.json"));
-    const result = cleanEngineReceiptResult("preflight-refused", candidate.run_id);
+    executeProviderCreateForExecutor({
+      adapter: fakeProviderAdapter(),
+      repoRoot: state.repo,
+      stateBase: state.state,
+    });
+    const result = cleanEngineReceiptResult("registry-intent", candidate.run_id);
     const receipt = appendReceiptForExecutor({
-      phase: "preflight-refused",
+      phase: "registry-intent",
       repoRoot: state.repo,
       result,
       stateBase: state.state,
     });
-    const receiptPath = join(active, "01-preflight-refused.json");
-    assert.equal(receipt.sequence, 1);
+    const receiptPath = join(active, "03-registry-intent.json");
+    assert.equal(receipt.sequence, 3);
     assertPrivate(receiptPath, 0o600);
     assert.equal(run(state, "status").status, 0);
     const retried = appendReceiptForExecutor({
-      phase: "preflight-refused",
+      phase: "registry-intent",
       repoRoot: state.repo,
       result,
       stateBase: state.state,
     });
     assert.deepEqual(retried, receipt);
     assert.throws(() => appendReceiptForExecutor({
-      phase: "preflight-refused",
+      phase: "registry-intent",
       repoRoot: state.repo,
       result: { ...result, safe_code: "different-safe-code" },
       stateBase: state.state,
@@ -620,9 +629,9 @@ test("canonical mismatched publication stages are retained and refused", () => {
     writeFileSync(staging, canonicalBytes(staged), { mode: 0o600 });
     assert.throws(
       () => appendReceiptForExecutor({
-        phase: "preflight-refused",
+        phase: "registry-intent",
         repoRoot: receiptState.repo,
-        result,
+        result: cleanEngineReceiptResult("registry-intent", candidate.run_id),
         stateBase: receiptState.state,
       }),
       /pending receipt publication was outside an open mutation slot/,
@@ -775,9 +784,9 @@ test("an abandoned mutation slot is retained for explicit recovery", () => {
     assert.equal(run(state, "status").status, 0);
     assert.throws(
       () => appendReceiptForExecutor({
-        phase: "preflight-refused",
+        phase: "registry-intent",
         repoRoot: state.repo,
-        result: cleanEngineReceiptResult("preflight-refused", candidate.run_id),
+        result: cleanEngineReceiptResult("registry-intent", candidate.run_id),
         stateBase: state.state,
       }),
       /abandoned clean-engine mutation requires explicit recovery/,
@@ -806,9 +815,9 @@ test("a live mutation slot is content-free state and refuses a competing writer"
     assert.equal(run(state, "status").status, 0);
     assert.throws(
       () => appendReceiptForExecutor({
-        phase: "preflight-refused",
+        phase: "registry-intent",
         repoRoot: state.repo,
-        result: cleanEngineReceiptResult("preflight-refused", candidate.run_id),
+        result: cleanEngineReceiptResult("registry-intent", candidate.run_id),
         stateBase: state.state,
       }),
       /another clean-engine mutation is active or could not be identified/,
@@ -844,6 +853,54 @@ test("mutation lease v1 is a hard-cut refusal", () => {
     );
   } finally {
     rmSync(state.root, { recursive: true, force: true });
+  }
+});
+
+test("mutation close v1 and non-provider operation evidence are hard-cut refusals", () => {
+  const legacy = fixture();
+  try {
+    assert.equal(run(legacy, "plan").status, 0);
+    executeProviderCreateForExecutor({
+      adapter: fakeProviderAdapter(),
+      repoRoot: legacy.repo,
+      stateBase: legacy.state,
+    });
+    const closePath = join(activeRun(legacy), ".mutation-close-00");
+    const close = parse(closePath);
+    close.schema = "synveda.clean-engine.mutation-close.v1";
+    writeFileSync(closePath, canonicalBytes(close), { mode: 0o600 });
+    const refused = run(legacy, "status");
+    assert.equal(refused.status, 78);
+    assert.equal(refused.stderr, "clean-engine: mutation close was refused\n");
+  } finally {
+    rmSync(legacy.root, { recursive: true, force: true });
+  }
+
+  const evidence = fixture();
+  try {
+    assert.equal(run(evidence, "plan").status, 0);
+    executeProviderCreateForExecutor({
+      adapter: fakeProviderAdapter(),
+      repoRoot: evidence.repo,
+      stateBase: evidence.state,
+    });
+    const active = activeRun(evidence);
+    const candidate = parse(join(active, "candidate.json"));
+    appendReceiptForExecutor({
+      phase: "registry-intent",
+      repoRoot: evidence.repo,
+      result: cleanEngineReceiptResult("registry-intent", candidate.run_id),
+      stateBase: evidence.state,
+    });
+    const closePath = join(active, ".mutation-close-01");
+    const close = parse(closePath);
+    close.operation_evidence_sha256 = "f".repeat(64);
+    writeFileSync(closePath, canonicalBytes(close), { mode: 0o600 });
+    const refused = run(evidence, "status");
+    assert.equal(refused.status, 78);
+    assert.equal(refused.stderr, "clean-engine: mutation close receipt binding was refused\n");
+  } finally {
+    rmSync(evidence.root, { recursive: true, force: true });
   }
 });
 
@@ -963,19 +1020,24 @@ test("inert mutation publication stages retire before mutation", () => {
       assert.equal(run(state, "plan").status, 0);
       const active = activeRun(state);
       const candidate = parse(join(active, "candidate.json"));
+      executeProviderCreateForExecutor({
+        adapter: fakeProviderAdapter(),
+        repoRoot: state.repo,
+        stateBase: state.state,
+      });
       const stage = join(active, `.mutation-stage-${suffix}`);
       writeFileSync(stage, bytes, { mode: 0o600 });
       assert.equal(run(state, "status").status, 0);
       const receipt = appendReceiptForExecutor({
-        phase: "preflight-refused",
+        phase: "registry-intent",
         repoRoot: state.repo,
-        result: cleanEngineReceiptResult("preflight-refused", candidate.run_id),
+        result: cleanEngineReceiptResult("registry-intent", candidate.run_id),
         stateBase: state.state,
       });
-      assert.equal(receipt.phase, "preflight-refused");
+      assert.equal(receipt.phase, "registry-intent");
       assert.equal(existsSync(stage), false);
-      assertPrivate(join(active, ".mutation-slot-00"), 0o600);
-      assertPrivate(join(active, ".mutation-close-00"), 0o600);
+      assertPrivate(join(active, ".mutation-slot-01"), 0o600);
+      assertPrivate(join(active, ".mutation-close-01"), 0o600);
     } finally {
       rmSync(state.root, { recursive: true, force: true });
     }
@@ -987,6 +1049,11 @@ test("mutation publication staging is bounded and excess evidence is retained", 
   try {
     assert.equal(run(accepted, "plan").status, 0);
     const active = activeRun(accepted);
+    executeProviderCreateForExecutor({
+      adapter: fakeProviderAdapter(),
+      repoRoot: accepted.repo,
+      stateBase: accepted.state,
+    });
     for (let index = 0; index < 16; index += 1) {
       writeFileSync(
         join(active, `.mutation-stage-${index.toString(16).padStart(32, "0")}`),
@@ -997,11 +1064,11 @@ test("mutation publication staging is bounded and excess evidence is retained", 
     assert.equal(run(accepted, "status").status, 0);
     const candidate = parse(join(active, "candidate.json"));
     assert.equal(appendReceiptForExecutor({
-      phase: "preflight-refused",
+      phase: "registry-intent",
       repoRoot: accepted.repo,
-      result: cleanEngineReceiptResult("preflight-refused", candidate.run_id),
+      result: cleanEngineReceiptResult("registry-intent", candidate.run_id),
       stateBase: accepted.state,
-    }).phase, "preflight-refused");
+    }).phase, "registry-intent");
     assert.equal(readdirSync(active).some((name) => name.startsWith(".mutation-stage-")), false);
   } finally {
     rmSync(accepted.root, { recursive: true, force: true });
@@ -1044,10 +1111,10 @@ test("a linked slot stage retires without removing its published blocker", () =>
     assertPrivate(lease, 0o600, false, 2);
     assert.throws(
       () => appendReceiptForExecutor({
-        phase: "preflight-refused",
+        phase: "registry-intent",
         repoRoot: state.repo,
         result: cleanEngineReceiptResult(
-          "preflight-refused",
+          "registry-intent",
           parse(join(active, "candidate.json")).run_id,
         ),
         stateBase: state.state,
@@ -1111,11 +1178,9 @@ test("a linked close stage retires without reopening its permanent generation", 
     assert.equal(run(state, "plan").status, 0);
     const active = activeRun(state);
     const candidate = parse(join(active, "candidate.json"));
-    const result = cleanEngineReceiptResult("preflight-refused", candidate.run_id);
-    appendReceiptForExecutor({
-      phase: "preflight-refused",
+    executeProviderCreateForExecutor({
+      adapter: fakeProviderAdapter(),
       repoRoot: state.repo,
-      result,
       stateBase: state.state,
     });
     const close = join(active, ".mutation-close-00");
@@ -1124,9 +1189,9 @@ test("a linked close stage retires without reopening its permanent generation", 
     assert.equal(run(state, "status").status, 0);
     assertPrivate(close, 0o600, false, 2);
     appendReceiptForExecutor({
-      phase: "preflight-refused",
+      phase: "registry-intent",
       repoRoot: state.repo,
-      result,
+      result: cleanEngineReceiptResult("registry-intent", candidate.run_id),
       stateBase: state.state,
     });
     assert.equal(existsSync(stage), false);
@@ -1163,10 +1228,10 @@ test("a publisher accepts its exact final blocker after concurrent stage reconci
     assertPrivate(join(active, ".mutation-slot-00"), 0o600, false, 2);
     assert.throws(
       () => appendReceiptForExecutor({
-        phase: "preflight-refused",
+        phase: "registry-intent",
         repoRoot: state.repo,
         result: cleanEngineReceiptResult(
-          "preflight-refused",
+          "registry-intent",
           parse(join(active, "candidate.json")).run_id,
         ),
         stateBase: state.state,
@@ -1211,10 +1276,10 @@ test("a close publisher retries after a competing writer reconciles its live sta
     const active = activeRun(state);
     assert.throws(
       () => appendReceiptForExecutor({
-        phase: "preflight-refused",
+        phase: "registry-intent",
         repoRoot: state.repo,
         result: cleanEngineReceiptResult(
-          "preflight-refused",
+          "registry-intent",
           parse(join(active, "candidate.json")).run_id,
         ),
         stateBase: state.state,
@@ -1316,10 +1381,10 @@ test("a recovery close retries after a competing writer reconciles its live stag
     const active = activeRun(state);
     assert.throws(
       () => appendReceiptForExecutor({
-        phase: "preflight-refused",
+        phase: "registry-intent",
         repoRoot: state.repo,
         result: cleanEngineReceiptResult(
-          "preflight-refused",
+          "registry-intent",
           parse(join(active, "candidate.json")).run_id,
         ),
         stateBase: state.state,
@@ -1386,13 +1451,22 @@ test("generic receipt append cannot own provider or finalization evidence", () =
   try {
     assert.equal(run(state, "plan").status, 0);
     const candidate = parse(join(activeRun(state), "candidate.json"));
-    for (const phase of ["provider-create-intent", "provider-create-passed", "finalize-passed"]) {
+    for (const phase of [
+      "preflight-refused",
+      "provider-create-intent",
+      "provider-create-passed",
+      "provider-cleanup-intent",
+      "provider-cleanup-passed",
+      "finalize-passed",
+    ]) {
       assert.throws(
         () => appendReceiptForExecutor({
           phase,
           repoRoot: state.repo,
           result: cleanEngineReceiptResult(
-            phase === "finalize-passed" ? "provider-create-passed" : phase,
+            new Set(["finalize-passed", "provider-cleanup-passed"]).has(phase)
+              ? "provider-create-passed"
+              : phase,
             candidate.run_id,
           ),
           stateBase: state.state,
@@ -1452,19 +1526,24 @@ test("mutation slot capacity refuses wraparound and retains all closed generatio
     assert.equal(run(state, "plan").status, 0);
     const active = activeRun(state);
     const candidate = parse(join(active, "candidate.json"));
-    const result = cleanEngineReceiptResult("preflight-refused", candidate.run_id);
-    for (let sequence = 0; sequence < 64; sequence += 1) {
+    executeProviderCreateForExecutor({
+      adapter: fakeProviderAdapter(),
+      repoRoot: state.repo,
+      stateBase: state.state,
+    });
+    const result = cleanEngineReceiptResult("registry-intent", candidate.run_id);
+    for (let sequence = 1; sequence < 64; sequence += 1) {
       const receipt = appendReceiptForExecutor({
-        phase: "preflight-refused",
+        phase: "registry-intent",
         repoRoot: state.repo,
         result,
         stateBase: state.state,
       });
-      assert.equal(receipt.phase, "preflight-refused");
+      assert.equal(receipt.phase, "registry-intent");
     }
     assert.throws(
       () => appendReceiptForExecutor({
-        phase: "preflight-refused",
+        phase: "registry-intent",
         repoRoot: state.repo,
         result,
         stateBase: state.state,
@@ -1503,9 +1582,9 @@ test("a competing writer cannot enter while the fake provider effect lease is he
     await waitForProviderIntent(state);
     assert.throws(
       () => appendReceiptForExecutor({
-        phase: "preflight-refused",
+        phase: "registry-intent",
         repoRoot: state.repo,
-        result: cleanEngineReceiptResult("preflight-refused", candidate.run_id),
+        result: cleanEngineReceiptResult("registry-intent", candidate.run_id),
         stateBase: state.state,
       }),
       /another clean-engine mutation is active or could not be identified/,
@@ -1892,9 +1971,12 @@ test("uncertain provider recovery retains a claim and a later recovery supersede
     assertPrivate(join(active, ".mutation-recovery-00-00"), 0o600);
     assert.throws(
       () => appendReceiptForExecutor({
-        phase: "preflight-refused",
+        phase: "registry-intent",
         repoRoot: state.repo,
-        result: cleanEngineReceiptResult("preflight-refused"),
+        result: cleanEngineReceiptResult(
+          "registry-intent",
+          parse(join(active, "candidate.json")).run_id,
+        ),
         stateBase: state.state,
       }),
       /recovery is active or abandoned/,
@@ -2138,9 +2220,12 @@ test("a live recovery claim fences recoverers writers and finalization", async (
     );
     assert.throws(
       () => appendReceiptForExecutor({
-        phase: "preflight-refused",
+        phase: "registry-intent",
         repoRoot: state.repo,
-        result: cleanEngineReceiptResult("preflight-refused"),
+        result: cleanEngineReceiptResult(
+          "registry-intent",
+          parse(join(activeRun(state), "candidate.json")).run_id,
+        ),
         stateBase: state.state,
       }),
       /mutation recovery is active or abandoned/,
@@ -2249,7 +2334,10 @@ test("the state API appends the complete synthetic success path before finalizat
       stateBase: state.state,
     });
     for (const phase of receiptSuccessPath.slice(3, -1)) {
-      const receipt = appendReceiptForExecutor({
+      const append = phase.startsWith("provider-cleanup-")
+        ? appendProviderCleanupReceiptForExecutor
+        : appendReceiptForExecutor;
+      const receipt = append({
         phase,
         repoRoot: state.repo,
         result: cleanEngineReceiptResult(phase, candidate.run_id),

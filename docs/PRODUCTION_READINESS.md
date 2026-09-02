@@ -91,21 +91,32 @@ intent/result schemas, collision-preserving cleanup-only failure paths,
 no-replace artifact publication and an exact success-only environment
 manifest. Its permanent, gap-free mutation slots, closes and per-slot recovery
 claims bind each source/result endpoint, prior close and exact owner/recovery
-authority; final journal names are never deleted or reused. Only staged aliases
+authority plus operation evidence; final journal names are never deleted or
+reused, and mutation-close v1 is a fresh-plan refusal. Only staged aliases
 reconcile, and a cooperatively displaced close stage retries only after exact
 authority and endpoint revalidation. Generic append cannot fabricate
-provider-create or finalization evidence. An internal deterministic
-fake-provider seam holds one open slot across synchronous
-intent/effect/result; slot-sequence/digest confirmation plus at most eight
-append-only claims recovers a killed fake owner and supersedes an abandoned
-recovery while live or unidentifiable owners refuse. Late claims after a close
-are inert history, and bounded journal exhaustion fails closed. The closed data
-adapter has no function, command, path, environment or provider selector. Its
-absence/cleanup result is synthetic; process birth, child quiescence and
-external ownership remain unproved. There is no public phase/recovery runner,
-gated child, process-group witness, external ownership marker, live provider
-mutation or environment manifest. Consequently these synthetic tests improve
-the evidence boundary without changing readiness. One
+preflight, provider-create, provider-cleanup or finalization evidence. The
+synchronous deterministic fake remains a rollback path. A separate controlled
+fake path holds the slot across a private external-root reservation/owner,
+durable launch and actor/process-group witness, one-way start decision, fixed
+fake-child outcome and ESRCH settlement. The supervisor reasserts the actual
+slot at the start gate while the actor validates the digest-bound slot fields
+and full root inventory; only the actor signals its group and its directly
+owned children exit on parent-IPC loss. Settlements bind exact optional effect
+and outcome digests. Recovery never signals a stored PGID or replays a durable
+start. Crash tests cover
+root collision, marker-to-mirror convergence, launch-without-witness refusal,
+supervisor and actor SIGTERM/SIGKILL, timeout, an actor-owned remaining
+descendant, source/root drift and result/close publication. Terminal success is
+cross-bound to its exact completed settlement. The closed adapter accepts no
+caller function, command, path, environment or provider selector.
+
+This is fixed-fake POSIX process/filesystem evidence only. No supported
+lifecycle target exposes the test fixture modules; there is no Docker/Colima
+mutation, owned-root cleanup settlement or environment manifest, so controlled
+cleanup and finalization refuse.
+Linux CI and a current Docker Desktop/provider run remain absent. Consequently
+this evidence improves the boundary without changing readiness. One
 frozen Docker Desktop candidate also proved bounded PostgreSQL/Keycloak
 bootstrap, optimized
 Keycloak, realm convergence, issuer metadata, Collector, worker and gateway

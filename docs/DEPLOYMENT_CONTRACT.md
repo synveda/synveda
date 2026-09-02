@@ -149,10 +149,11 @@ mutation journal. A permanent `.mutation-slot-SS` binds the closed action,
 exact source receipt/environment endpoints, intended provider receipt where
 applicable, random nonce, cooperative process-instance challenge and the prior
 close digest. Its permanent `.mutation-close-SS` binds exact result endpoints
-and the slot-owner or recovery authority. Recovery attempts append permanent,
-gap-free `.mutation-recovery-SS-RR` claims. These final names are never deleted
-or reused; the next slot is valid only when it binds the prior close exactly.
-The reusable `.mutation-lease` layout is a hard-cut refusal.
+and the slot-owner or recovery authority plus an operation-evidence digest.
+Recovery attempts append permanent, gap-free `.mutation-recovery-SS-RR`
+claims. These final names are never deleted or reused; the next slot is valid
+only when it binds the prior close exactly. Mutation-close v1 and the reusable
+`.mutation-lease` layout are fresh-plan hard-cut refusals.
 
 Blockers are completed and fsynced under unique private staging names, then
 linked atomically without replacement. Interruption leaves either an inert
@@ -163,24 +164,28 @@ endpoints. An unrelated one-link stage confers no authority and cannot block
 that close; its later final link loses to the permanent no-replace name. A live
 or unidentifiable owner serializes writers; PID liveness
 alone is not adoption or deletion authority. Generic receipt append cannot own
-provider-create or finalization evidence.
+preflight, provider-create, provider-cleanup or finalization evidence.
 
-The internal provider-create fake adapter holds one slot from intent through a
-synchronous closed-data fake step to result and leaves it open after any
-uncertain outcome. Explicit recovery is bound to the exact canonical slot
-digest and two-digit slot sequence, then appends at most eight recovery claims.
-The open slot and newest recovery claim block ordinary writers. A
-live/unidentifiable owner or recovery refuses; an abandoned claim can be
-superseded. A claim that links after an already-durable close is inert history
-and cannot reopen that generation. Claim-attempt or 64-slot exhaustion fails
-closed for inspection and fresh-plan regeneration. Only provider-create has
-this recovery path; abandoned append and finalization slots remain blocking
-evidence. This is cooperative filesystem-state recovery only. Owner challenges
-do not prove portable process birth or child quiescence, and journal hashes do
-not protect against a hostile same-user writer. There is no public recovery
-command, kernel-lock helper, external provider actor or child process yet; the
-real runner must prove a durable start gate and exact process-group quiescence
-before this contract may cover Colima.
+The internal provider-create seam retains the synchronous closed-data fake as
+rollback and adds a separate controlled fake path. The controlled path holds
+one slot across an immutable root plan/reservation, mirrored external-root
+owner, durable actor-launch record, actor/process-group witness, one-way start
+decision, fixed fake-child outcome and ESRCH settlement. The supervisor
+reasserts the actual slot before deciding; the actor validates the exact plan,
+full root/leaf inode-mode-type inventory, owner mirror, launch and witness,
+including their digest-bound slot fields, before start. Only that actor signals
+its own group, while its directly owned children exit on parent-IPC loss. The
+settlement binds the exact optional effect and outcome digests.
+Explicit recovery is bound to the exact canonical slot digest and two-digit
+slot sequence, then appends at most eight recovery claims. It probes but never
+signals a stored PGID and never replays a durable start. A marker-before-mirror
+crash converges only the exact reservation-bound owner; a launch without a
+witness remains blocking. The open slot and newest recovery claim block
+ordinary writers. A live/unidentifiable owner or recovery refuses; an abandoned
+claim can be superseded. A claim appended after a durable close is inert
+history. Claim-attempt or 64-slot exhaustion fails closed for inspection and
+fresh-plan regeneration. Only provider-create has recovery; abandoned append
+and finalization slots remain blocking evidence.
 
 Receipt and environment bytes are canonical, fsynced in private staging files
 and linked to their final names without replacement. After the mutation slot
@@ -209,16 +214,19 @@ the exact disposable provider/Engine before those actions, and a final
 environment manifest is forbidden until registry, proxy, builder, browser and
 receipt-owned cleanup assertions all pass.
 
-The current executor API, recovery API and finalizer are internal deterministic
-seams used by the state tests. The provider adapter is a closed data fixture
-with a contract-derived hash, bounded hold and closed outcome/result objects;
-it accepts no function, path, command, environment or provider selector. Its
-absence and cleanup fields are synthetic evidence, not provider discovery or
-deletion authority. There is no public phase/recovery command and no live
-provider executor. `provider/`, `registry/`, `runtime/` and `evidence/`
-therefore remain strictly empty; live mutable state will use a short
-receipt-owned external root and phase-specific inventories in the next slice.
-This checkpoint must not be reported as clean-Engine, Docker, Colima or browser
+The current executor API, recovery API and finalizer remain internal
+deterministic seams exercised only by repository tests. No supported lifecycle
+target exposes the test-only phase/recovery fixtures. The adapter is closed
+data with a contract-derived hash and bounded timings; it accepts no
+caller-supplied function, path, command, environment or provider selector.
+The controlled path invokes only the repository-fixed fake child under a
+short, private, receipt-owned external root. `provider/` now contains
+content-free root and actor lifecycle evidence, but `registry/`, `runtime/`
+and `evidence/` remain empty. There is no Docker/Colima invocation, live
+provider executor, cleanup settlement or environment manifest. Because the
+live owned root cannot yet be deleted while retaining verifiable historic
+ownership, controlled runs reject provider cleanup and finalization. This
+checkpoint must not be reported as clean-Engine, Docker, Colima or browser
 evidence.
 
 An uncatchable pre-publication interruption can retain one or more strictly

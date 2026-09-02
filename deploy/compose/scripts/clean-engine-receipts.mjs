@@ -172,17 +172,29 @@ function validatePlanResult(result, fixtureId) {
 }
 
 function validateProviderIntent(result, fixtureId) {
-  exactKeys(
-    result,
-    [
-      "cleanup_command",
-      "preexisting_resource",
-      "provider_contract_sha256",
-      "provider_resource",
-      "provider_root_key",
-    ],
-    "provider intent result",
-  );
+  const basicFields = [
+    "cleanup_command",
+    "preexisting_resource",
+    "provider_contract_sha256",
+    "provider_resource",
+    "provider_root_key",
+  ];
+  const controlledFields = [
+    ...basicFields,
+    "ownership_nonce",
+    "preexisting_docker_context",
+    "preexisting_provider_instance",
+    "preexisting_provider_root",
+    "provider_profile",
+    "provider_root_plan_sha256",
+  ];
+  const fields = Object.keys(result ?? {}).sort();
+  if (
+    JSON.stringify(fields) !== JSON.stringify(basicFields.sort()) &&
+    JSON.stringify(fields) !== JSON.stringify(controlledFields.sort())
+  ) {
+    refuse("provider intent result fields were refused");
+  }
   if (
     result.cleanup_command !== "colima-delete-data-force" ||
     result.preexisting_resource !== "absent" ||
@@ -191,6 +203,17 @@ function validateProviderIntent(result, fixtureId) {
     result.provider_root_key !== `sv-c45-${fixtureId.slice(0, 16)}`
   ) {
     refuse("provider intent result was refused");
+  }
+  if (
+    fields.length === controlledFields.length &&
+    (!lowerHex(result.ownership_nonce, 64) ||
+      result.preexisting_docker_context !== "absent" ||
+      result.preexisting_provider_instance !== "absent" ||
+      result.preexisting_provider_root !== "absent" ||
+      result.provider_profile !== `sv-c45-${fixtureId.slice(0, 16)}` ||
+      !lowerHex(result.provider_root_plan_sha256, 64))
+  ) {
+    refuse("controlled provider intent result was refused");
   }
 }
 

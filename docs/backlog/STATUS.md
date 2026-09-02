@@ -209,22 +209,24 @@ deleted or reused. Concurrent fake writers, append versus finalize, tamper,
 partial/complete/linked stages, stale names, capacity exhaustion and a
 cooperatively removed live close stage are covered. That close retries only
 after exact authority and endpoint revalidation. Generic append cannot own
-provider-create or finalization evidence. One internal deterministic
-fake-provider seam holds an open slot across intent/effect/result, retains
-uncertainty and recovers a killed owner only through exact
-slot-sequence/digest confirmation plus at most eight permanent claims;
-live/unidentifiable owners and competing writers refuse, while claims linked
-after a durable close remain inert history. The
-contract-derived fake adapter is closed data with no function, command, path,
-environment or provider selection. Its provider-absence and cleanup results
-are synthetic; portable process birth, child-group quiescence and external
-ownership remain unproved. There is no public executor/recovery command, and
-execution directories remain empty. It must next add the gated
-child/actor/process-group witness, phase-specific
-provider ownership artifacts and fake collision/signal/orphan cleanup before
-the fixed Colima adapter can use isolated short Colima/Lima/cache homes and
-private Docker client state. No code may set or repurpose `HOME`; the future
-adapter uses explicit provider paths and `--mount none`. TLS private-registry,
+provider-create, provider-cleanup or finalization evidence. The synchronous
+closed-data fake remains rollback. A separate controlled fake path holds the
+slot across a private root plan/reservation, mirrored inode/mode/UID owner,
+durable actor launch/witness, one-way start, fixed-child effect/outcome and
+ESRCH settlement. The supervisor reasserts the actual slot before deciding;
+the actor validates the complete root inventory and digest-bound authority.
+Only the actor signals its group, and directly owned children exit on parent
+IPC loss. Settlement and the mutation close bind exact optional effect/outcome
+evidence. Exact confirmation recovers pre-reservation, marker/mirror,
+post-outcome, terminal-receipt and close crashes without replay or stored-PGID
+signalling; launch-without-witness stays blocked. The contract-derived adapter
+accepts no caller function, command, path, environment or provider selection,
+and generic append cannot create preflight evidence. Only test fixtures expose
+it; no supported lifecycle target, Docker/Colima action, cleanup settlement or
+finalization is enabled. Next add the fixed Colima adapter with isolated short
+Colima/Lima/cache roots, private Docker state, exact pre-intent absence and
+provider-owned deletion evidence. No code may set or repurpose `HOME`; use
+explicit provider paths and `--mount none`. TLS private-registry,
 remote-builder canary, live proxy, browser and
 exact-cleanup evidence follow; only then is the privileged mapping installed
 for the first live run. Linux/reference HTTPS follows before the legacy

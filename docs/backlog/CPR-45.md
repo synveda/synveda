@@ -397,45 +397,54 @@ close publisher whose alias is concurrently removed retries within a fixed
 bound only after re-proving unchanged authority and result endpoints. Generic
 append cannot own provider-create or finalization evidence.
 
-The provider seam holds one open slot across intent, one synchronous
-closed-data `deterministic-fake-provider-v1` step and result, retaining it on
-uncertainty. Exact slot-sequence/digest confirmation and at most eight recovery
-claims recover a killed owner, refuse a live or unidentifiable owner, and allow
-a later owner to supersede an abandoned recovery while cooperative writers
-stay blocked. A late claim after a durable close is inert history. Slot or
-claim capacity exhaustion fails closed for inspection and fresh-plan
-regeneration. The reusable mutation-lease layout and version-1 plan receipts
-are refused rather than migrated.
+The provider seam now has two fixed fake-only paths. The synchronous
+`deterministic-fake-provider-v1` adapter remains the rollback. The controlled
+path keeps one slot open across an immutable root plan and reservation, creates
+a short private external root, and mirrors its inode/mode/UID-bound owner
+marker into the append-only run. It then publishes a durable launch and
+actor/process-group witness. The supervisor reasserts the actual slot before
+its one-way decision; the detached group-leading actor independently checks the
+root plan, full root/leaf inventory, owner mirror, launch, witness and their
+digest-bound slot fields before invoking only the repository-fixed fake child.
+The child receives a closed explicit environment and working directory without
+`HOME`. Only the actor signals its own group, while its directly owned child and
+test descendant exit if their private parent IPC closes.
 
-This remains fake-executor and cooperative filesystem evidence only. The fake
-adapter has a contract-derived hash, bounded hold and closed outcome/result
-objects; it accepts no function, command, environment, path or provider
-selection. Its hard-coded absence/cleanup vocabulary is synthetic and grants no
-deletion authority. Owner challenges do not prove portable process birth or
-child quiescence, and journal hashes do not protect against a hostile same-user
-writer. Only provider-create is recoverable, so an abandoned ordinary
-append/finalization slot remains blocking evidence. There is no public
-phase/recovery runner, controlled child gate, actor/process-group witness or
-owned external provider root; execution directories remain empty and no
-provider or Docker command has run. Exact actor quiescence and immutable root
-ownership remain prerequisites for enabling Colima.
+Completion requires a negative PGID probe reporting `ESRCH`. The settlement
+binds exact optional effect and outcome digests; the permanent mutation close
+binds the settlement, and a passing receipt also uses that digest as its engine
+identity. Exact slot-sequence/digest confirmation and at most eight recovery
+claims cover pre-reservation, marker-before-mirror, post-outcome, settlement,
+terminal-receipt and close-publication crashes without replaying a durable
+start or signalling a stored PGID. A launch without a witness remains an
+explicit blocker. Foreign collision receipts are never adopted, and later
+source drift converts a durable pass to `execution-failed`. Generic append
+cannot fabricate preflight evidence. Version-1 mutation closes and reusable
+leases are refused rather than translated.
+
+This remains fixed-fake trusted-process POSIX evidence. The controlled adapter
+accepts no caller function, command, environment, path or provider selection;
+only test fixture modules invoke it and no supported lifecycle target exposes
+them. No Docker, Colima, resolver, registry, database or host command ran in
+this slice. The controlled root deliberately has no deletion settlement, so
+provider cleanup and finalization remain blocked. Cooperative owner challenges
+and PGID probes do not protect against a hostile same-user writer or prove
+another PID namespace; ACLs, xattrs, flags and bind mounts remain trusted-host
+limits.
 
 ### Immediate next slice
 
-Add the controlled child boundary around the proven fake-provider state seam.
-The child must publish an exact actor/process-group witness while blocked,
-fsync a one-way start gate before invoking a command, retain exclusion until
-the whole group is proven absent, and leave an independently classifiable
-completion after parent death. Add phase-specific closed `provider/`
-inventories plus a mirrored immutable ownership marker for the short external
-root. Exercise pre/post-intent collision, source drift, signal, timeout,
-orphaned child, result-publication crash and foreign-preserved cleanup with fake
-commands. Only after that matrix passes may the fixed Colima adapter use
-explicit `COLIMA_HOME`, `COLIMA_CACHE_HOME`, `LIMA_HOME` and `DOCKER_CONFIG`,
-`--mount none`, absolute revalidated binaries and a closed environment that
-does not set or repurpose `HOME`. Prove the named provider absent before
-intent, refuse adoption, and retain the active receipt until exact provider
-cleanup; only then create and destroy the receipt-owned Colima provider.
+Add the fixed Colima adapter behind the reviewed controlled boundary. Revalidate
+absolute pinned Colima/Lima/Docker binaries and versions, use only explicit
+`COLIMA_HOME`, `COLIMA_CACHE_HOME`, `LIMA_HOME`, `DOCKER_CONFIG` and `--mount
+none`, preserve the closed environment without setting or repurposing `HOME`,
+and prove the named profile, Docker context and short root absent before intent.
+Add provider-owned identity and deletion settlement so the same receipt remains
+open until exact root/profile/context cleanup; never adopt or remove a foreign
+collision. Expose execution and recovery only through one supported lifecycle
+target after deterministic conformance passes. Then, with explicit authority,
+create and destroy one fresh isolated Colima provider and publish its exact
+content-free environment evidence.
 Subsequent bounded steps add the globally clean Engine proof, TLS/bcrypt
 private registry,
 authenticated push/pull, synthetic Docker-client proxy activation, a zero-read
