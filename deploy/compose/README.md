@@ -230,10 +230,22 @@ truthfully. Before root mutation, a recoverable fixture-only create authority
 binds the exact base/evidence directory identities, intended receipt/slot-shaped
 inputs and ownership nonce. A controller-launch decision is durable before the
 controller process, and a separate start decision is durable before the host
-agent. The controller reopens and revalidates that exact authority, root owner,
-launch/witness chain, start decision and host-agent configuration before it can
-spawn. Its explicitly authorised fixture launcher starts only a digest-bound
-controller and separately detached host agent,
+agent. The v3 process contract inserts a synchronous veto-only authority
+checkpoint before root publication, controller spawn, start-decision
+publication, start delivery and terminal provider identity. Each checkpoint
+compares the full ordered evidence and private-root effect frontier with
+launcher-owned identities before the next effect; the terminal checkpoint runs
+only after both provider sockets are freshly reauthenticated and the identity
+candidate is prevalidated. Root, controller-readiness and PID files use private
+fsynced stages plus no-replace hard links, so interruption cannot expose a
+partially written final. A separate non-mutating inspector validates causal
+evidence/root prefixes, distinguishes unattested/observed/proved-absent process
+state and retains partial or linked stages for the future state recovery path.
+The controller and host agent reopen their exact digest-bound configuration
+through no-follow descriptors. The controller also revalidates that exact
+authority, root owner, launch/witness chain, start decision and host-agent
+configuration before it can spawn. Its explicitly authorised fixture launcher
+starts only a digest-bound controller and separately detached host agent,
 and authenticated host-agent and Engine sockets plus the Docker-context
 endpoint remain healthy after controller-group `ESRCH`. Its proposed live
 contract pins the Colima 0.10.3 and Lima 2.2.0 source revisions and exact

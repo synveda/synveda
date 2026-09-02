@@ -6,12 +6,14 @@ import {
   fchmodSync,
   fstatSync,
   fsyncSync,
+  linkSync,
   lstatSync,
   openSync,
   readFileSync,
+  unlinkSync,
   writeSync,
 } from "node:fs";
-import { dirname, isAbsolute, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { spawn } from "node:child_process";
 
 function canonical(value) {
@@ -102,14 +104,18 @@ function syncDirectory(path) {
 }
 
 function publish(path, value) {
+  const valueBytes = bytes(value);
+  const stagePath = join(
+    dirname(path),
+    `.background-private-stage-${digest(Buffer.from(basename(path), "utf8"))}-${digest(valueBytes)}-${randomBytes(16).toString("hex")}`,
+  );
   const descriptor = openSync(
-    path,
+    stagePath,
     constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
     0o600,
   );
   try {
     fchmodSync(descriptor, 0o600);
-    const valueBytes = bytes(value);
     let offset = 0;
     while (offset < valueBytes.length) {
       const written = writeSync(
@@ -126,12 +132,46 @@ function publish(path, value) {
   } finally {
     closeSync(descriptor);
   }
+  linkSync(stagePath, path);
+  syncDirectory(dirname(path));
+  unlinkSync(stagePath);
   syncDirectory(dirname(path));
 }
 
-function readConfig(path) {
-  if (!isAbsolute(path) || resolve(path) !== path) throw new Error("config path was refused");
-  const configBytes = readFileSync(path);
+function readConfig(path, expectedSha256) {
+  if (
+    !isAbsolute(path) ||
+    resolve(path) !== path ||
+    typeof expectedSha256 !== "string" ||
+    !/^[0-9a-f]{64}$/.test(expectedSha256)
+  ) {
+    throw new Error("config path or digest was refused");
+  }
+  const descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  let configBytes;
+  try {
+    const before = fstatSync(descriptor, { bigint: true });
+    const named = lstatSync(path, { bigint: true });
+    if (
+      !before.isFile() ||
+      before.isSymbolicLink() ||
+      !sameMetadata(before, named) ||
+      before.uid !== BigInt(process.getuid()) ||
+      before.nlink !== 1n ||
+      (before.mode & 0o7777n) !== 0o600n ||
+      before.size < 1n ||
+      before.size > 128n * 1024n
+    ) {
+      throw new Error("config identity was refused");
+    }
+    configBytes = readFileSync(descriptor);
+    const after = fstatSync(descriptor, { bigint: true });
+    if (!sameMetadata(before, after) || digest(configBytes) !== expectedSha256) {
+      throw new Error("config identity changed");
+    }
+  } finally {
+    closeSync(descriptor);
+  }
   const value = JSON.parse(configBytes.toString("utf8"));
   if (!bytes(value).equals(configBytes)) throw new Error("config was not canonical");
   exactKeys(value, [
@@ -566,7 +606,10 @@ function acknowledgeControllerStart(config, controllerProcessIdentity, message, 
 }
 
 async function main() {
-  const { configSha256, hostagentSource, value: config } = readConfig(process.argv[1]);
+  const { configSha256, hostagentSource, value: config } = readConfig(
+    process.argv[1],
+    process.argv[2],
+  );
   const controllerProcessIdentity = digest(
     Buffer.from(
       [

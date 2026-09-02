@@ -124,7 +124,12 @@ authorised fixed-fixture launcher. A recoverable fixture-only authority is
 durable before root mutation; separate immutable decisions precede controller
 and host-agent creation, and controller-side reproof of the full gate chain
 blocks changed evidence or pre-start controller death without a host-agent
-effect. This is not mutation-journal authority. The canary distinguishes the
+effect. Its v3 contract now has five synchronous veto-only effect checkpoints,
+atomic fsynced private-file publication and a non-mutating global causal-prefix
+inspector with an exact evidence/private-file frontier and bounded process
+observations;
+this removes partial-final ambiguity but is still only preparation for the
+state-born wrapper. This is not mutation-journal authority. The canary distinguishes the
 background controller, host agent, Engine, both sockets and Docker context,
 then proves exact fake-root
 retirement through authenticated shutdown, durable socket absence, an exact

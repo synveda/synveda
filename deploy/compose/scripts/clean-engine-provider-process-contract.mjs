@@ -173,15 +173,19 @@ export const CONTROLLED_BACKGROUND_PROVIDER_CONTRACT = Object.freeze({
   fixture_launch_authorized: true,
   home_policy: COLIMA_LIVE_PREPARATION_CONTRACT.home_policy,
   hostagent_protocol: "authenticated-challenge-v1",
-  launch_protocol: "durable-evidence-controller-start-gate-v1",
-  kind: "controlled-background-provider-v2",
+  launch_protocol: "durable-evidence-state-veto-gate-v2",
+  kind: "controlled-background-provider-v3",
   lifecycle_exposure_authorized: false,
   live_preparation_contract_sha256: COLIMA_LIVE_PREPARATION_CONTRACT_SHA256,
   max_lifetime_milliseconds: 30_000,
   optional_environment_names: COLIMA_LIVE_PREPARATION_CONTRACT.optional_environment_names,
+  private_file_publication: "fsync-stage-link-no-replace-v1",
   provider_kind: "controlled-background-fake",
+  root_publication: "authority-before-mkdir-owner-atomic-v1",
   root_layout: CONTROLLED_BACKGROUND_ROOT_LAYOUT,
-  schema: "synveda.clean-engine.controlled-background-provider-contract.v2",
+  schema: "synveda.clean-engine.controlled-background-provider-contract.v3",
+  socket_publication: "umask-0177-listen-chmod-fsync-v1",
+  state_authority_gate: "synchronous-veto-only-five-checkpoint-v1",
   toolchain_roles: Object.freeze(["controller-script", "hostagent-script", "node-runtime"]),
 });
 
@@ -223,8 +227,37 @@ export const CONTROLLED_BACKGROUND_PROVIDER_CONTRACT_SHA256 = providerProcessDig
   providerProcessBytes(CONTROLLED_BACKGROUND_PROVIDER_CONTRACT),
 );
 
+export const CONTROLLED_BACKGROUND_AUTHORITY_CHECKPOINTS = Object.freeze([
+  "before-root-publication",
+  "before-controller-spawn",
+  "before-start-decision-publication",
+  "before-hostagent-start-delivery",
+  "before-provider-identity-publication",
+]);
+
 function lowerHex(value, length) {
   return typeof value === "string" && value.length === length && /^[0-9a-f]+$/.test(value);
+}
+
+function invokeAuthorityGate(authorityGate, checkpoint, evidenceHeadSha256, revalidate) {
+  if (
+    typeof authorityGate !== "function" ||
+    !CONTROLLED_BACKGROUND_AUTHORITY_CHECKPOINTS.includes(checkpoint) ||
+    !lowerHex(evidenceHeadSha256, 64) ||
+    typeof revalidate !== "function"
+  ) {
+    fail("controlled background authority gate was refused", 70);
+  }
+  const result = authorityGate(
+    Object.freeze({ checkpoint, evidence_head_sha256: evidenceHeadSha256 }),
+  );
+  if (result !== undefined) {
+    fail("controlled background authority gate returned authority", 70);
+  }
+  const revalidated = revalidate();
+  if (revalidated !== undefined) {
+    fail("controlled background authority revalidation returned authority", 70);
+  }
 }
 
 function decimalString(value) {
@@ -837,6 +870,139 @@ function validateCreateBindings(value) {
   }
 }
 
+function createBindingsFromAuthority(value) {
+  return Object.freeze({
+    create_intent_sha256: value.create_intent_sha256,
+    create_slot_sequence: value.create_slot_sequence,
+    create_slot_sha256: value.create_slot_sha256,
+    ownership_nonce: value.ownership_nonce,
+    source_head_sha256: value.source_head_sha256,
+    source_sequence: value.source_sequence,
+    state_integration: value.state_integration,
+  });
+}
+
+function validateAuthorityCheckpointFrontier(prefix, expectedStage, paths) {
+  const finalPaths = new Set(
+    prefix.residual.root_inventory
+      .filter((entry) => parsePrivateStageName(basename(entry.relative_path)) === undefined)
+      .map((entry) => entry.relative_path),
+  );
+  const has = (path) => finalPaths.has(relative(paths.root, path));
+  const ready = has(paths.controllerReady);
+  const pid = has(paths.pidRecord);
+  const exactRoot =
+    canonical([...finalPaths].sort()) === canonical(expectedRootPaths(paths));
+  const noPrivatePublication = prefix.residual.private_publications.length === 0;
+  if (
+    prefix.effectFrontier.effect !== expectedStage ||
+    prefix.effectFrontier.disposition !== "complete"
+  ) {
+    fail("controlled background authority checkpoint effect frontier was refused", 73);
+  }
+  const accepted =
+    (expectedStage === "create-authority" &&
+      prefix.replaySafe &&
+      prefix.residual.root_disposition === "absent" &&
+      prefix.residual.controller_presence === "not-started" &&
+      prefix.residual.hostagent_presence === "not-started" &&
+      prefix.residual.sockets === "absent" &&
+      noPrivatePublication) ||
+    (expectedStage === "controller-launch-decision" &&
+      prefix.residual.root_disposition === "owned" &&
+      prefix.residual.controller_presence === "unattested" &&
+      prefix.residual.hostagent_presence === "not-started" &&
+      !ready &&
+      !pid &&
+      prefix.residual.sockets === "absent" &&
+      noPrivatePublication) ||
+    (expectedStage === "controller-witness" &&
+      prefix.residual.root_disposition === "owned" &&
+      prefix.residual.controller_presence === "observed-present" &&
+      prefix.residual.hostagent_presence === "not-started" &&
+      ready &&
+      !pid &&
+      prefix.residual.sockets === "absent" &&
+      noPrivatePublication) ||
+    (expectedStage === "provider-start-decision" &&
+      prefix.residual.root_disposition === "owned" &&
+      prefix.residual.controller_presence === "observed-present" &&
+      prefix.residual.hostagent_presence === "unattested" &&
+      ready &&
+      !pid &&
+      prefix.residual.sockets === "absent" &&
+      noPrivatePublication) ||
+    (expectedStage === "controller-settlement" &&
+      prefix.residual.root_disposition === "owned" &&
+      prefix.residual.controller_presence === "proved-absent" &&
+      prefix.residual.hostagent_presence === "observed-present" &&
+      prefix.residual.sockets === "present" &&
+      exactRoot &&
+      noPrivatePublication);
+  if (!accepted) {
+    fail("controlled background authority checkpoint frontier was refused", 73);
+  }
+}
+
+function captureAuthorityCheckpointPrefix({
+  evidenceDirectory,
+  expectedArtifacts,
+  expectedCreateBindings,
+  expectedHeadSha256,
+  expectedRootInventorySha256,
+  expectedStage,
+  fixtureId,
+  providerBase,
+}) {
+  const prefix = inspectControlledBackgroundProviderPrefix(evidenceDirectory, fixtureId, {
+    expectedCreateBindings,
+    providerBase,
+    revalidateCurrentToolchain: true,
+  });
+  if (
+    prefix.evidenceHeadSha256 !== expectedHeadSha256 ||
+    prefix.evidenceStage !== expectedStage ||
+    prefix.pendingPublication !== undefined
+  ) {
+    fail("controlled background authority checkpoint prefix was refused", 73);
+  }
+  const artifactNames = Object.keys(prefix.artifacts).sort();
+  if (
+    expectedArtifacts === null ||
+    Array.isArray(expectedArtifacts) ||
+    typeof expectedArtifacts !== "object" ||
+    canonical(artifactNames) !== canonical(Object.keys(expectedArtifacts).sort())
+  ) {
+    fail("controlled background authority checkpoint artifacts were refused", 73);
+  }
+  for (const name of artifactNames) {
+    const current = prefix.artifacts[name];
+    const expected = expectedArtifacts[name];
+    if (
+      expected === undefined ||
+      !current.bytes.equals(expected.bytes) ||
+      !sameMetadata(current.metadata, expected.metadata)
+    ) {
+      fail("controlled background authority checkpoint artifact changed", 73);
+    }
+  }
+  if (
+    expectedRootInventorySha256 !== undefined &&
+    prefix.residual.inventory_sha256 !== expectedRootInventorySha256
+  ) {
+    fail("controlled background authority checkpoint root changed", 73);
+  }
+  validateAuthorityCheckpointFrontier(prefix, expectedStage, rootPaths(providerBase, fixtureId));
+  return prefix;
+}
+
+function revalidateAuthorityCheckpointPrefix(argumentsValue, expectedPrefix) {
+  const current = captureAuthorityCheckpointPrefix(argumentsValue);
+  if (current.residualSha256 !== expectedPrefix.residualSha256) {
+    fail("controlled background authority checkpoint prefix changed", 73);
+  }
+}
+
 function createAuthorityValue({ bindings, evidenceDirectory, fixtureId, paths }) {
   return {
     base: directoryIdentity(paths.base, "controlled background provider base"),
@@ -1014,10 +1180,181 @@ function rootOwnerValue(paths, fixtureId, ownershipNonce, createAuthoritySha256)
   };
 }
 
+function privateStageTargetSha256(path) {
+  return providerProcessDigest(Buffer.from(basename(path), "utf8"));
+}
+
+function privateStageName(path, valueSha256) {
+  return `.background-private-stage-${privateStageTargetSha256(path)}-${valueSha256}-${randomBytes(16).toString("hex")}`;
+}
+
+function parsePrivateStageName(name) {
+  const match = /^\.background-private-stage-([0-9a-f]{64})-([0-9a-f]{64})-([0-9a-f]{32})$/.exec(
+    name,
+  );
+  if (match === null) return undefined;
+  return Object.freeze({ target_sha256: match[1], value_sha256: match[2] });
+}
+
+function privateFileStages(path) {
+  const directory = dirname(path);
+  const targetSha256 = privateStageTargetSha256(path);
+  const stages = [];
+  for (const name of readdirSync(directory).sort()) {
+    const parsed = parsePrivateStageName(name);
+    if (parsed?.target_sha256 !== targetSha256) continue;
+    const stage = openedStage(join(directory, name), "controlled background private-file stage");
+    stages.push(Object.freeze({ ...parsed, ...stage, name, path: join(directory, name) }));
+  }
+  if (stages.length > 1) fail("controlled background private-file stages were ambiguous");
+  return stages;
+}
+
+function removePrivateFileStage(path, stage) {
+  const current = openedStage(stage.path, "controlled background private-file stage");
+  if (!sameMetadata(current.metadata, stage.metadata) || !current.bytes.equals(stage.bytes)) {
+    fail("controlled background private-file stage changed");
+  }
+  try {
+    unlinkSync(stage.path);
+    syncDirectory(dirname(path));
+  } catch {
+    fail("controlled background private-file stage retirement failed", 70);
+  }
+}
+
+function reconcilePrivateFilePublication(path, expectedBytes) {
+  const expectedSha256 = providerProcessDigest(expectedBytes);
+  let final;
+  if (pathEntryExists(path)) {
+    final = openedFile(
+      path,
+      "controlled background private file",
+      MAX_ARTIFACT_BYTES,
+      new Set([1n, 2n]),
+      true,
+    );
+    if (!final.bytes.equals(expectedBytes)) {
+      fail("controlled background private file changed");
+    }
+  }
+  const stages = privateFileStages(path);
+  for (const stage of stages) {
+    if (stage.value_sha256 !== expectedSha256) {
+      fail("controlled background private-file stage digest was refused");
+    }
+    let linkedToFinal =
+      final !== undefined &&
+      stage.metadata.dev === final.metadata.dev &&
+      stage.metadata.ino === final.metadata.ino;
+    if (stage.metadata.nlink === 2n && !linkedToFinal) {
+      fail("controlled background private-file stage link was foreign");
+    }
+    if (stage.metadata.nlink === 1n && !stage.bytes.equals(expectedBytes)) {
+      removePrivateFileStage(path, stage);
+      continue;
+    }
+    if (stage.metadata.nlink === 1n && final === undefined) {
+      try {
+        linkSync(stage.path, path);
+        syncDirectory(dirname(path));
+      } catch (error) {
+        if (error?.code !== "EEXIST") {
+          fail("controlled background private-file recovery publication failed", 70);
+        }
+      }
+      final = openedFile(
+        path,
+        "controlled background private file",
+        MAX_ARTIFACT_BYTES,
+        new Set([1n, 2n]),
+        true,
+      );
+      if (!final.bytes.equals(expectedBytes)) {
+        fail("controlled background private file changed");
+      }
+      const linkedStage = openedStage(
+        stage.path,
+        "controlled background private-file stage",
+      );
+      linkedToFinal =
+        linkedStage.metadata.dev === final.metadata.dev &&
+        linkedStage.metadata.ino === final.metadata.ino;
+      if (
+        linkedStage.metadata.nlink !== 2n ||
+        !linkedToFinal ||
+        !linkedStage.bytes.equals(expectedBytes)
+      ) {
+        fail("controlled background private-file recovery link changed");
+      }
+      removePrivateFileStage(path, { ...stage, ...linkedStage });
+      final = openedFile(
+        path,
+        "controlled background private file",
+        MAX_ARTIFACT_BYTES,
+        new Set([1n]),
+        true,
+      );
+      continue;
+    }
+    if (stage.metadata.nlink === 1n && final !== undefined) {
+      removePrivateFileStage(path, stage);
+      continue;
+    }
+    const current = openedStage(stage.path, "controlled background private-file stage");
+    const currentFinal = openedFile(
+      path,
+      "controlled background private file",
+      MAX_ARTIFACT_BYTES,
+      new Set([2n]),
+      true,
+    );
+    if (
+      current.metadata.dev !== currentFinal.metadata.dev ||
+      current.metadata.ino !== currentFinal.metadata.ino ||
+      !current.bytes.equals(expectedBytes)
+    ) {
+      fail("controlled background private-file recovery link changed");
+    }
+    removePrivateFileStage(path, { ...stage, ...current });
+    final = openedFile(
+      path,
+      "controlled background private file",
+      MAX_ARTIFACT_BYTES,
+      new Set([1n]),
+      true,
+    );
+  }
+  return final;
+}
+
 function publishPrivateFile(path, value) {
   const valueBytes = providerProcessBytes(value);
-  writeExclusive(path, valueBytes);
-  syncDirectory(dirname(path));
+  const recovered = reconcilePrivateFilePublication(path, valueBytes);
+  if (recovered === undefined) {
+    const stagePath = join(
+      dirname(path),
+      privateStageName(path, providerProcessDigest(valueBytes)),
+    );
+    writeExclusive(stagePath, valueBytes);
+    try {
+      linkSync(stagePath, path);
+      syncDirectory(dirname(path));
+    } catch (error) {
+      if (error?.code !== "EEXIST") {
+        fail("controlled background private-file publication failed", 70);
+      }
+    }
+    reconcilePrivateFilePublication(path, valueBytes);
+  }
+  const final = openedFile(
+    path,
+    "controlled background private file",
+    MAX_ARTIFACT_BYTES,
+    new Set([1n]),
+    true,
+  );
+  if (!final.bytes.equals(valueBytes)) fail("controlled background private file changed");
   return Object.freeze({
     bytes: valueBytes,
     sha256: providerProcessDigest(valueBytes),
@@ -1303,6 +1640,13 @@ function probeProcessGroup(pgid) {
   }
 }
 
+function processObservation(disposition) {
+  if (disposition === "present") return "observed-present";
+  if (disposition === "absent") return "proved-absent";
+  if (disposition === "unknown") return "unattested";
+  fail("controlled background process observation was refused", 70);
+}
+
 async function waitForCanonicalArtifact(path, label, timeoutMilliseconds = 8_000) {
   const deadline = Date.now() + timeoutMilliseconds;
   while (Date.now() < deadline) {
@@ -1310,8 +1654,8 @@ async function waitForCanonicalArtifact(path, label, timeoutMilliseconds = 8_000
       try {
         return canonicalArtifact(path, label);
       } catch {
-        // The fixed child writes its private readiness file before fsync. A
-        // reader may observe that final name while its bounded frame is partial.
+        // The fixed child publishes through a durable hard link. A reader may
+        // observe the linked final before the private stage name is retired.
       }
     }
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 10));
@@ -1668,15 +2012,16 @@ function contextWitnessValue(root, context, engineSocketIdentity, providerIdenti
   };
 }
 
-export async function launchControlledBackgroundProvider({
+async function launchControlledBackgroundProviderImpl({
   beforeDetachHoldMilliseconds = 0,
+  beforeIdentityProbeHoldMilliseconds = 0,
   beforeStartHoldMilliseconds = 0,
   evidenceDirectory,
   fixtureId,
   maximumLifetimeMilliseconds = 30_000,
   providerBase,
   requireShutdownDuringStart = false,
-}) {
+}, authorityGate) {
   if (
     CONTROLLED_BACKGROUND_PROVIDER_CONTRACT.fixture_launch_authorized !== true ||
     CONTROLLED_BACKGROUND_PROVIDER_CONTRACT.lifecycle_exposure_authorized !== false
@@ -1694,6 +2039,9 @@ export async function launchControlledBackgroundProvider({
     !Number.isSafeInteger(beforeDetachHoldMilliseconds) ||
     beforeDetachHoldMilliseconds < 0 ||
     beforeDetachHoldMilliseconds > 5_000 ||
+    !Number.isSafeInteger(beforeIdentityProbeHoldMilliseconds) ||
+    beforeIdentityProbeHoldMilliseconds < 0 ||
+    beforeIdentityProbeHoldMilliseconds > 5_000 ||
     !Number.isSafeInteger(beforeStartHoldMilliseconds) ||
     beforeStartHoldMilliseconds < 0 ||
     beforeStartHoldMilliseconds > 5_000 ||
@@ -1711,6 +2059,23 @@ export async function launchControlledBackgroundProvider({
     readdirSync(evidenceDirectory).sort(),
     ["background-create-authority.json"],
     "controlled background pre-launch evidence inventory",
+  );
+  const expectedCreateBindings = createBindingsFromAuthority(authority.value);
+  const rootCheckpointArguments = {
+    evidenceDirectory,
+    expectedArtifacts: { "background-create-authority.json": authority },
+    expectedCreateBindings,
+    expectedHeadSha256: authority.sha256,
+    expectedStage: "create-authority",
+    fixtureId,
+    providerBase,
+  };
+  const rootCheckpoint = captureAuthorityCheckpointPrefix(rootCheckpointArguments);
+  invokeAuthorityGate(
+    authorityGate,
+    "before-root-publication",
+    authority.sha256,
+    () => revalidateAuthorityCheckpointPrefix(rootCheckpointArguments, rootCheckpoint),
   );
   const root = prepareControlledBackgroundRoot({
     authority,
@@ -1790,6 +2155,32 @@ export async function launchControlledBackgroundProvider({
       toolchain_sha256: toolchain.sha256,
     },
   );
+  const controllerCheckpointArguments = {
+    evidenceDirectory,
+    expectedArtifacts: {
+      "background-create-authority.json": authority,
+      "background-toolchain.json": toolchain,
+      "controller-launch-decision.json": controllerLaunchDecision,
+    },
+    expectedCreateBindings,
+    expectedHeadSha256: controllerLaunchDecision.sha256,
+    expectedStage: "controller-launch-decision",
+    fixtureId,
+    providerBase,
+  };
+  const controllerCheckpoint = captureAuthorityCheckpointPrefix(
+    controllerCheckpointArguments,
+  );
+  invokeAuthorityGate(
+    authorityGate,
+    "before-controller-spawn",
+    controllerLaunchDecision.sha256,
+    () =>
+      revalidateAuthorityCheckpointPrefix(
+        controllerCheckpointArguments,
+        controllerCheckpoint,
+      ),
+  );
   const controller = spawn(
     components.get("node-runtime").path,
     [
@@ -1797,6 +2188,7 @@ export async function launchControlledBackgroundProvider({
       "--eval",
       toolchainBundle.execution.controllerSource,
       root.paths.controllerConfig,
+      controllerConfigArtifact.sha256,
     ],
     {
       cwd: root.paths.root,
@@ -1833,7 +2225,7 @@ export async function launchControlledBackgroundProvider({
     );
     controllerProcessIdentity = ready.value.controller_process_instance_sha256;
     const controllerWitnessValue = {
-      argv_contract: "repository-digest-bound-eval-controller-v1",
+      argv_contract: "repository-digest-bound-eval-controller-v2",
       controller_config_sha256: controllerConfigArtifact.sha256,
       controller_nonce_sha256: providerProcessDigest(Buffer.from(controllerNonce, "ascii")),
       controller_pgid: controller.pid,
@@ -1853,6 +2245,33 @@ export async function launchControlledBackgroundProvider({
       "controller-witness.json",
       controllerWitnessValue,
     );
+    const startDecisionCheckpointArguments = {
+      evidenceDirectory,
+      expectedArtifacts: {
+        "background-create-authority.json": authority,
+        "background-toolchain.json": toolchain,
+        "controller-launch-decision.json": controllerLaunchDecision,
+        "controller-witness.json": controllerWitness,
+      },
+      expectedCreateBindings,
+      expectedHeadSha256: controllerWitness.sha256,
+      expectedStage: "controller-witness",
+      fixtureId,
+      providerBase,
+    };
+    const startDecisionCheckpoint = captureAuthorityCheckpointPrefix(
+      startDecisionCheckpointArguments,
+    );
+    invokeAuthorityGate(
+      authorityGate,
+      "before-start-decision-publication",
+      controllerWitness.sha256,
+      () =>
+        revalidateAuthorityCheckpointPrefix(
+          startDecisionCheckpointArguments,
+          startDecisionCheckpoint,
+        ),
+    );
     const startDecision = publishArtifact(
       evidenceDirectory,
       "provider-start-decision.json",
@@ -1871,6 +2290,35 @@ export async function launchControlledBackgroundProvider({
         setTimeout(resolvePromise, beforeStartHoldMilliseconds),
       );
     }
+    const hostagentStartCheckpointArguments = {
+      evidenceDirectory,
+      expectedArtifacts: {
+        "background-create-authority.json": authority,
+        "background-toolchain.json": toolchain,
+        "controller-launch-decision.json": controllerLaunchDecision,
+        "controller-witness.json": controllerWitness,
+        "provider-start-decision.json": startDecision,
+      },
+      expectedCreateBindings,
+      expectedHeadSha256: startDecision.sha256,
+      expectedRootInventorySha256: startDecisionCheckpoint.residual.inventory_sha256,
+      expectedStage: "provider-start-decision",
+      fixtureId,
+      providerBase,
+    };
+    const hostagentStartCheckpoint = captureAuthorityCheckpointPrefix(
+      hostagentStartCheckpointArguments,
+    );
+    invokeAuthorityGate(
+      authorityGate,
+      "before-hostagent-start-delivery",
+      startDecision.sha256,
+      () =>
+        revalidateAuthorityCheckpointPrefix(
+          hostagentStartCheckpointArguments,
+          hostagentStartCheckpoint,
+        ),
+    );
     const started = await requestControllerStart(
       controller,
       {
@@ -2035,6 +2483,62 @@ export async function launchControlledBackgroundProvider({
       controllerSettlementValue,
     );
     const creationInventory = inspectRootInventory(root.paths);
+    const identityCheckpointArguments = {
+      evidenceDirectory,
+      expectedArtifacts: {
+        "background-create-authority.json": authority,
+        "background-toolchain.json": toolchain,
+        "context-witness.json": contextWitness,
+        "controller-launch-decision.json": controllerLaunchDecision,
+        "controller-settlement.json": controllerSettlement,
+        "controller-witness.json": controllerWitness,
+        "engine-witness.json": engineWitness,
+        "hostagent-witness.json": hostagentWitness,
+        "provider-start-decision.json": startDecision,
+      },
+      expectedCreateBindings,
+      expectedHeadSha256: controllerSettlement.sha256,
+      expectedRootInventorySha256: providerProcessDigest(
+        providerProcessBytes(creationInventory),
+      ),
+      expectedStage: "controller-settlement",
+      fixtureId,
+      providerBase,
+    };
+    const identityCheckpoint = captureAuthorityCheckpointPrefix(
+      identityCheckpointArguments,
+    );
+    if (beforeIdentityProbeHoldMilliseconds > 0) {
+      await new Promise((resolvePromise) =>
+        setTimeout(resolvePromise, beforeIdentityProbeHoldMilliseconds),
+      );
+    }
+    const hostagentAtIdentity = await probeHostagent(
+      root.paths,
+      fixtureId,
+      root.ownershipNonce,
+      started.hostagent_pid,
+      started.hostagent_process_instance_sha256,
+    );
+    const engineAtIdentity = await probeEngine(
+      root.paths,
+      fixtureId,
+      root.ownershipNonce,
+      started.hostagent_process_instance_sha256,
+    );
+    revalidateAuthorityCheckpointPrefix(
+      identityCheckpointArguments,
+      identityCheckpoint,
+    );
+    if (
+      providerProcessDigest(providerProcessBytes(stableHostagentProbe(hostagentAtIdentity))) !==
+        controllerSettlementValue.hostagent_after_controller_sha256 ||
+      providerProcessDigest(providerProcessBytes(stableEngineProbe(engineAtIdentity))) !==
+        controllerSettlementValue.engine_after_controller_sha256 ||
+      canonical(inspectRootInventory(root.paths)) !== canonical(creationInventory)
+    ) {
+      fail("controlled background provider identity authority changed", 73);
+    }
     const providerIdentityValue = {
       create_authority_sha256: authority.sha256,
       context_witness_sha256: contextWitness.sha256,
@@ -2062,6 +2566,38 @@ export async function launchControlledBackgroundProvider({
       start_decision_sha256: startDecision.sha256,
       toolchain_sha256: toolchain.sha256,
     };
+    const providerIdentityBytes = providerProcessBytes(providerIdentityValue);
+    validateCreationArtifactChain(
+      {
+        "background-create-authority.json": authority,
+        "background-toolchain.json": toolchain,
+        "context-witness.json": contextWitness,
+        "controller-launch-decision.json": controllerLaunchDecision,
+        "controller-settlement.json": controllerSettlement,
+        "controller-witness.json": controllerWitness,
+        "engine-witness.json": engineWitness,
+        "hostagent-witness.json": hostagentWitness,
+        "provider-identity.json": Object.freeze({
+          bytes: providerIdentityBytes,
+          path: join(evidenceDirectory, "provider-identity.json"),
+          sha256: providerProcessDigest(providerIdentityBytes),
+          value: providerIdentityValue,
+        }),
+        "provider-start-decision.json": startDecision,
+      },
+      fixtureId,
+      { revalidateCurrentToolchain: true },
+    );
+    invokeAuthorityGate(
+      authorityGate,
+      "before-provider-identity-publication",
+      controllerSettlement.sha256,
+      () =>
+        revalidateAuthorityCheckpointPrefix(
+          identityCheckpointArguments,
+          identityCheckpoint,
+        ),
+    );
     const providerIdentity = publishArtifact(
       evidenceDirectory,
       "provider-identity.json",
@@ -2097,6 +2633,17 @@ export async function launchControlledBackgroundProvider({
   }
 }
 
+export async function launchControlledBackgroundProvider(argumentsValue) {
+  return launchControlledBackgroundProviderImpl(argumentsValue, () => undefined);
+}
+
+export async function launchControlledBackgroundProviderWithAuthorityGate(
+  argumentsValue,
+  authorityGate,
+) {
+  return launchControlledBackgroundProviderImpl(argumentsValue, authorityGate);
+}
+
 function readCreationArtifacts(evidenceDirectory) {
   validateEvidenceDirectoryInventory(evidenceDirectory);
   const artifacts = {};
@@ -2105,6 +2652,142 @@ function readCreationArtifacts(evidenceDirectory) {
   }
   validateEvidenceDirectoryInventory(evidenceDirectory);
   return artifacts;
+}
+
+function readCanonicalArtifactOnly(path, label, expectedLinks = new Set([1n])) {
+  const opened = openedFile(path, label, MAX_ARTIFACT_BYTES, expectedLinks, true);
+  let value;
+  try {
+    value = JSON.parse(opened.bytes.toString("utf8"));
+  } catch {
+    fail(`${label} was not canonical JSON`);
+  }
+  if (!providerProcessBytes(value).equals(opened.bytes)) {
+    fail(`${label} was not canonical JSON`);
+  }
+  return Object.freeze({
+    bytes: opened.bytes,
+    metadata: opened.metadata,
+    path,
+    sha256: providerProcessDigest(opened.bytes),
+    value,
+  });
+}
+
+function inspectCreationEvidencePrefix(evidenceDirectory) {
+  secureDirectory(evidenceDirectory, "controlled background evidence directory");
+  const entries = readdirSync(evidenceDirectory).sort();
+  if (entries.length > MAX_EVIDENCE_ENTRIES) {
+    fail("controlled background evidence capacity was exceeded");
+  }
+  const finals = entries
+    .filter((name) => CONTROLLED_BACKGROUND_CREATION_ARTIFACTS.includes(name))
+    .sort(
+      (left, right) =>
+        CONTROLLED_BACKGROUND_CREATION_ARTIFACTS.indexOf(left) -
+        CONTROLLED_BACKGROUND_CREATION_ARTIFACTS.indexOf(right),
+    );
+  const stages = [];
+  for (const name of entries) {
+    if (CONTROLLED_BACKGROUND_CREATION_ARTIFACTS.includes(name)) continue;
+    const parsed = parseArtifactStageName(name);
+    if (
+      parsed === undefined ||
+      !CONTROLLED_BACKGROUND_CREATION_ARTIFACTS.includes(parsed.targetName)
+    ) {
+      fail("controlled background create-prefix evidence entry was refused");
+    }
+    const stage = openedStage(
+      join(evidenceDirectory, name),
+      "controlled background create-prefix stage",
+    );
+    stages.push(Object.freeze({ ...parsed, ...stage, name, path: join(evidenceDirectory, name) }));
+  }
+  if (stages.length > 1) {
+    fail("controlled background create-prefix stages were ambiguous");
+  }
+  const indexes = finals.map((name) => CONTROLLED_BACKGROUND_CREATION_ARTIFACTS.indexOf(name));
+  if (indexes.some((value, index) => value !== index)) {
+    fail("controlled background creation artifact chain had a gap");
+  }
+  const linkedFinals = new Map();
+  for (const stage of stages) {
+    const targetIndex = CONTROLLED_BACKGROUND_CREATION_ARTIFACTS.indexOf(stage.targetName);
+    const targetPath = join(evidenceDirectory, stage.targetName);
+    const hasTarget = finals.includes(stage.targetName);
+    if (stage.metadata.nlink === 2n) {
+      if (!hasTarget || targetIndex !== finals.length - 1) {
+        fail("controlled background create-prefix stage link was foreign");
+      }
+      const target = openedFile(
+        targetPath,
+        stage.targetName,
+        MAX_ARTIFACT_BYTES,
+        new Set([2n]),
+        true,
+      );
+      if (
+        target.metadata.dev !== stage.metadata.dev ||
+        target.metadata.ino !== stage.metadata.ino ||
+        !target.bytes.equals(stage.bytes) ||
+        providerProcessDigest(stage.bytes) !== stage.sha256
+      ) {
+        fail("controlled background create-prefix stage link was refused");
+      }
+      linkedFinals.set(stage.targetName, stage.name);
+    } else if (targetIndex !== finals.length || hasTarget) {
+      fail("controlled background create-prefix stage order was refused");
+    }
+  }
+  const artifacts = {};
+  for (const name of finals) {
+    artifacts[name] = readCanonicalArtifactOnly(
+      join(evidenceDirectory, name),
+      name,
+      new Set([linkedFinals.has(name) ? 2n : 1n]),
+    );
+  }
+  const pending = stages[0];
+  let pendingPublication;
+  if (pending !== undefined) {
+    const actualSha256 = providerProcessDigest(pending.bytes);
+    let canonicalComplete = false;
+    try {
+      const value = JSON.parse(pending.bytes.toString("utf8"));
+      canonicalComplete = providerProcessBytes(value).equals(pending.bytes);
+    } catch {
+      canonicalComplete = false;
+    }
+    if (canonicalComplete && actualSha256 !== pending.sha256) {
+      fail("controlled background create-prefix stage digest was refused");
+    }
+    if (actualSha256 === pending.sha256 && !canonicalComplete) {
+      fail("controlled background complete create-prefix stage was malformed");
+    }
+    pendingPublication = Object.freeze({
+      actual_sha256: actualSha256,
+      declared_sha256: pending.sha256,
+      device: String(pending.metadata.dev),
+      disposition:
+        pending.metadata.nlink === 2n
+          ? "linked-complete"
+          : canonicalComplete
+            ? "staged-complete"
+            : "staged-partial",
+      links: Number(pending.metadata.nlink),
+      inode: String(pending.metadata.ino),
+      mode: (pending.metadata.mode & 0o7777n).toString(8).padStart(4, "0"),
+      name: pending.name,
+      size: String(pending.metadata.size),
+      target_name: pending.targetName,
+      uid: String(pending.metadata.uid),
+    });
+  }
+  return Object.freeze({
+    artifacts: Object.freeze(artifacts),
+    pendingArtifact: pending,
+    pendingPublication,
+  });
 }
 
 function validateToolchain(value, fixtureId, { revalidateCurrent = false } = {}) {
@@ -2196,7 +2879,7 @@ function validateCreationArtifactChain(
   const contextWitness = artifacts["context-witness.json"];
   const controllerSettlement = artifacts["controller-settlement.json"];
   const providerIdentity = artifacts["provider-identity.json"];
-  const recordedProviderRoot = providerIdentity.value?.provider_root?.path;
+  const recordedProviderRoot = createAuthority.value?.provider_root_path;
   if (typeof recordedProviderRoot !== "string" || !isAbsolute(recordedProviderRoot)) {
     fail("controlled background provider root was refused");
   }
@@ -2262,7 +2945,7 @@ function validateCreationArtifactChain(
   if (
     controllerWitness.value.schema !== "synveda.clean-engine.background-controller-witness.v2" ||
     controllerWitness.value.fixture_id !== fixtureId ||
-    controllerWitness.value.argv_contract !== "repository-digest-bound-eval-controller-v1" ||
+    controllerWitness.value.argv_contract !== "repository-digest-bound-eval-controller-v2" ||
     controllerWitness.value.execution_protocol !== "authenticated-ipc-start-shutdown-v2" ||
     !lowerHex(controllerWitness.value.controller_config_sha256, 64) ||
     !lowerHex(controllerWitness.value.controller_nonce_sha256, 64) ||
@@ -2592,6 +3275,489 @@ function validateCreationArtifactChain(
   });
 }
 
+function partialPrivateArtifact(path, label) {
+  return readCanonicalArtifactOnly(path, label, new Set([1n, 2n]));
+}
+
+function validateCreationArtifactPrefix(
+  artifacts,
+  fixtureId,
+  { expectedCreateBindings, providerBase, revalidateCurrentToolchain = false } = {},
+) {
+  const names = Object.keys(artifacts);
+  if (names.length === 0) {
+    return Object.freeze({ evidence: Object.freeze({}), paths: undefined });
+  }
+  const createAuthority = artifacts["background-create-authority.json"];
+  if (createAuthority === undefined) {
+    fail("controlled background create authority was unavailable", 69);
+  }
+  const recordedRoot = createAuthority.value?.provider_root_path;
+  const recordedBase = createAuthority.value?.base?.path;
+  if (
+    typeof recordedRoot !== "string" ||
+    !isAbsolute(recordedRoot) ||
+    typeof recordedBase !== "string" ||
+    !isAbsolute(recordedBase)
+  ) {
+    fail("controlled background provider root was refused");
+  }
+  if (providerBase !== undefined && providerBase !== recordedBase) {
+    fail("controlled background provider base binding changed");
+  }
+  const paths = rootPaths(recordedBase, fixtureId);
+  if (paths.root !== recordedRoot) {
+    fail("controlled background provider root was refused");
+  }
+  validateCreateAuthority(createAuthority.value, dirname(createAuthority.path), fixtureId, paths);
+  if (expectedCreateBindings !== undefined) {
+    validateCreateBindings(expectedCreateBindings);
+    const recorded = {
+      create_intent_sha256: createAuthority.value.create_intent_sha256,
+      create_slot_sequence: createAuthority.value.create_slot_sequence,
+      create_slot_sha256: createAuthority.value.create_slot_sha256,
+      ownership_nonce: createAuthority.value.ownership_nonce,
+      source_head_sha256: createAuthority.value.source_head_sha256,
+      source_sequence: createAuthority.value.source_sequence,
+      state_integration: createAuthority.value.state_integration,
+    };
+    if (canonical(recorded) !== canonical(expectedCreateBindings)) {
+      fail("controlled background create authority binding changed");
+    }
+  }
+  const toolchain = artifacts["background-toolchain.json"];
+  if (toolchain !== undefined) {
+    validateToolchain(toolchain.value, fixtureId, {
+      revalidateCurrent: revalidateCurrentToolchain,
+    });
+  }
+  const controllerLaunchDecision = artifacts["controller-launch-decision.json"];
+  let rootOwner;
+  let hostagentConfig;
+  let controllerConfig;
+  if (controllerLaunchDecision !== undefined) {
+    if (toolchain === undefined) fail("controlled background launch lacked its toolchain");
+    exactKeys(
+      controllerLaunchDecision.value,
+      [
+        "controller_config_sha256",
+        "controller_nonce_sha256",
+        "create_authority_sha256",
+        "decision",
+        "fixture_id",
+        "hostagent_config_sha256",
+        "root_owner_sha256",
+        "schema",
+        "toolchain_sha256",
+      ],
+      "controlled background controller launch decision",
+    );
+    if (
+      controllerLaunchDecision.value.schema !==
+        "synveda.clean-engine.background-controller-launch-decision.v1" ||
+      controllerLaunchDecision.value.fixture_id !== fixtureId ||
+      controllerLaunchDecision.value.decision !== "launch-waiting" ||
+      controllerLaunchDecision.value.create_authority_sha256 !== createAuthority.sha256 ||
+      controllerLaunchDecision.value.toolchain_sha256 !== toolchain.sha256 ||
+      !lowerHex(controllerLaunchDecision.value.controller_config_sha256, 64) ||
+      !lowerHex(controllerLaunchDecision.value.controller_nonce_sha256, 64) ||
+      !lowerHex(controllerLaunchDecision.value.hostagent_config_sha256, 64) ||
+      !lowerHex(controllerLaunchDecision.value.root_owner_sha256, 64)
+    ) {
+      fail("controlled background controller launch decision was refused");
+    }
+    rootOwner = partialPrivateArtifact(paths.ownerMarker, "controlled background root owner");
+    validateRootOwner(rootOwner.value, {
+      createAuthoritySha256: createAuthority.sha256,
+      fixtureId,
+      paths,
+    });
+    hostagentConfig = partialPrivateArtifact(
+      paths.hostagentConfig,
+      "controlled background hostagent config",
+    );
+    controllerConfig = partialPrivateArtifact(
+      paths.controllerConfig,
+      "controlled background controller config",
+    );
+    if (
+      rootOwner.sha256 !== controllerLaunchDecision.value.root_owner_sha256 ||
+      hostagentConfig.sha256 !== controllerLaunchDecision.value.hostagent_config_sha256 ||
+      controllerConfig.sha256 !== controllerLaunchDecision.value.controller_config_sha256 ||
+      hostagentConfig.value.schema !== "synveda.clean-engine.background-hostagent-config.v1" ||
+      hostagentConfig.value.fixture_id !== fixtureId ||
+      hostagentConfig.value.instance_nonce !== createAuthority.value.ownership_nonce ||
+      hostagentConfig.value.working_directory !== paths.root ||
+      controllerConfig.value.schema !== "synveda.clean-engine.background-controller-config.v2" ||
+      controllerConfig.value.fixture_id !== fixtureId ||
+      controllerConfig.value.create_authority_sha256 !== createAuthority.sha256 ||
+      controllerConfig.value.hostagent_config_sha256 !== hostagentConfig.sha256 ||
+      controllerConfig.value.root_owner_sha256 !== rootOwner.sha256 ||
+      controllerConfig.value.working_directory !== paths.root
+    ) {
+      fail("controlled background controller launch inputs were refused");
+    }
+  }
+  const controllerWitness = artifacts["controller-witness.json"];
+  if (controllerWitness !== undefined) {
+    if (controllerLaunchDecision === undefined || controllerConfig === undefined) {
+      fail("controlled background controller witness lacked launch authority");
+    }
+    exactKeys(
+      controllerWitness.value,
+      [
+        "argv_contract",
+        "controller_config_sha256",
+        "controller_nonce_sha256",
+        "controller_pgid",
+        "controller_pid",
+        "controller_process_instance_sha256",
+        "controller_launch_decision_sha256",
+        "create_authority_sha256",
+        "execution_protocol",
+        "fixture_id",
+        "hostagent_config_sha256",
+        "root_owner_sha256",
+        "schema",
+        "toolchain_sha256",
+      ],
+      "controlled background controller witness",
+    );
+    if (
+      controllerWitness.value.schema !== "synveda.clean-engine.background-controller-witness.v2" ||
+      controllerWitness.value.fixture_id !== fixtureId ||
+      controllerWitness.value.argv_contract !== "repository-digest-bound-eval-controller-v2" ||
+      controllerWitness.value.execution_protocol !== "authenticated-ipc-start-shutdown-v2" ||
+      controllerWitness.value.controller_launch_decision_sha256 !== controllerLaunchDecision.sha256 ||
+      controllerWitness.value.create_authority_sha256 !== createAuthority.sha256 ||
+      controllerWitness.value.controller_config_sha256 !== controllerConfig.sha256 ||
+      controllerWitness.value.controller_nonce_sha256 !==
+        controllerLaunchDecision.value.controller_nonce_sha256 ||
+      controllerWitness.value.hostagent_config_sha256 !== hostagentConfig.sha256 ||
+      controllerWitness.value.root_owner_sha256 !== rootOwner.sha256 ||
+      controllerWitness.value.toolchain_sha256 !== toolchain.sha256 ||
+      !Number.isSafeInteger(controllerWitness.value.controller_pid) ||
+      controllerWitness.value.controller_pid < 2 ||
+      controllerWitness.value.controller_pgid !== controllerWitness.value.controller_pid ||
+      !lowerHex(controllerWitness.value.controller_process_instance_sha256, 64)
+    ) {
+      fail("controlled background controller witness was refused");
+    }
+    const controllerReady = partialPrivateArtifact(
+      paths.controllerReady,
+      "controlled background controller readiness",
+    );
+    validateControllerReady(
+      controllerReady.value,
+      {
+        controllerPid: controllerWitness.value.controller_pid,
+        controllerScriptSha256: controllerConfig.value.controller_script_sha256,
+        fixtureId,
+        nodeSha256: controllerConfig.value.node_sha256,
+        workingDirectory: paths.root,
+      },
+      controllerConfig.value.controller_nonce,
+    );
+    if (
+      controllerReady.value.controller_process_instance_sha256 !==
+      controllerWitness.value.controller_process_instance_sha256
+    ) {
+      fail("controlled background controller readiness changed");
+    }
+  }
+  const providerStartDecision = artifacts["provider-start-decision.json"];
+  if (providerStartDecision !== undefined) {
+    if (controllerWitness === undefined) {
+      fail("controlled background provider start lacked a controller witness");
+    }
+    exactKeys(
+      providerStartDecision.value,
+      [
+        "controller_witness_sha256",
+        "create_authority_sha256",
+        "create_intent_sha256",
+        "create_slot_sha256",
+        "decision",
+        "fixture_id",
+        "schema",
+      ],
+      "controlled background provider start decision",
+    );
+    if (
+      providerStartDecision.value.schema !==
+        "synveda.clean-engine.background-provider-start-decision.v1" ||
+      providerStartDecision.value.fixture_id !== fixtureId ||
+      providerStartDecision.value.decision !== "start" ||
+      providerStartDecision.value.controller_witness_sha256 !== controllerWitness.sha256 ||
+      providerStartDecision.value.create_authority_sha256 !== createAuthority.sha256 ||
+      providerStartDecision.value.create_intent_sha256 !==
+        createAuthority.value.create_intent_sha256 ||
+      providerStartDecision.value.create_slot_sha256 !==
+        createAuthority.value.create_slot_sha256
+    ) {
+      fail("controlled background provider start decision was refused");
+    }
+  }
+  const hostagentWitness = artifacts["hostagent-witness.json"];
+  if (hostagentWitness !== undefined) {
+    if (
+      providerStartDecision === undefined ||
+      controllerWitness === undefined ||
+      controllerConfig === undefined ||
+      toolchain === undefined
+    ) {
+      fail("controlled background hostagent witness lacked start authority");
+    }
+    exactKeys(
+      hostagentWitness.value,
+      [
+        "authenticated_probe_sha256",
+        "controller_witness_sha256",
+        "fixture_id",
+        "instance_nonce_sha256",
+        "pid_record",
+        "process_instance_sha256",
+        "schema",
+        "socket",
+        "start_decision_sha256",
+      ],
+      "controlled background hostagent witness",
+    );
+    validateResourceIdentity(
+      hostagentWitness.value.pid_record,
+      "file",
+      "controlled background hostagent PID identity",
+    );
+    validateResourceIdentity(
+      hostagentWitness.value.socket,
+      "socket",
+      "controlled background hostagent socket identity",
+    );
+    if (
+      hostagentWitness.value.schema !== "synveda.clean-engine.background-hostagent-identity.v2" ||
+      hostagentWitness.value.fixture_id !== fixtureId ||
+      hostagentWitness.value.controller_witness_sha256 !== controllerWitness.sha256 ||
+      hostagentWitness.value.start_decision_sha256 !== providerStartDecision.sha256 ||
+      !lowerHex(hostagentWitness.value.authenticated_probe_sha256, 64) ||
+      !lowerHex(hostagentWitness.value.instance_nonce_sha256, 64) ||
+      !lowerHex(hostagentWitness.value.process_instance_sha256, 64)
+    ) {
+      fail("controlled background hostagent witness was refused");
+    }
+    const pidRecord = partialPrivateArtifact(
+      paths.pidRecord,
+      "controlled background hostagent PID record",
+    );
+    validatePidRecord(
+      pidRecord.value,
+      {
+        controllerPid: controllerWitness.value.controller_pid,
+        fixtureId,
+        instanceNonceSha256: providerProcessDigest(
+          Buffer.from(createAuthority.value.ownership_nonce, "ascii"),
+        ),
+        pid: pidRecord.value.pid,
+        processIdentity: hostagentWitness.value.process_instance_sha256,
+        profile: paths.profile,
+        workingDirectory: paths.root,
+      },
+      toolchain.value,
+    );
+    if (
+      canonical(privateFileIdentity(
+        paths.pidRecord,
+        "controlled background hostagent PID record",
+        relative(paths.root, paths.pidRecord),
+      )) !== canonical(hostagentWitness.value.pid_record)
+    ) {
+      fail("controlled background hostagent PID identity changed");
+    }
+    if (
+      pathEntryExists(paths.haSocket) &&
+      canonical(
+        socketIdentity(
+          paths.haSocket,
+          "controlled background hostagent socket",
+          relative(paths.root, paths.haSocket),
+        ),
+      ) !== canonical(hostagentWitness.value.socket)
+    ) {
+      fail("controlled background hostagent socket identity changed");
+    }
+  }
+  const engineWitness = artifacts["engine-witness.json"];
+  if (engineWitness !== undefined) {
+    if (hostagentWitness === undefined) {
+      fail("controlled background Engine witness lacked a hostagent witness");
+    }
+    exactKeys(
+      engineWitness.value,
+      [
+        "api_version",
+        "architecture",
+        "authenticated_probe_sha256",
+        "fixture_id",
+        "hostagent_witness_sha256",
+        "name",
+        "operating_system",
+        "process_instance_sha256",
+        "schema",
+        "server_id",
+        "socket",
+        "version",
+      ],
+      "controlled background Engine witness",
+    );
+    validateResourceIdentity(
+      engineWitness.value.socket,
+      "socket",
+      "controlled background Engine socket identity",
+    );
+    if (
+      engineWitness.value.schema !== "synveda.clean-engine.background-engine-identity.v1" ||
+      engineWitness.value.fixture_id !== fixtureId ||
+      engineWitness.value.hostagent_witness_sha256 !== hostagentWitness.sha256 ||
+      engineWitness.value.process_instance_sha256 !==
+        hostagentWitness.value.process_instance_sha256 ||
+      engineWitness.value.api_version !== "1.52" ||
+      engineWitness.value.version !== "29.4.0-fake" ||
+      engineWitness.value.operating_system !== "linux" ||
+      !new Set(["aarch64", "x86_64"]).has(engineWitness.value.architecture) ||
+      engineWitness.value.name !== `synveda-cpr45-${fixtureId}` ||
+      !lowerHex(engineWitness.value.authenticated_probe_sha256, 64) ||
+      !lowerHex(engineWitness.value.server_id, 64)
+    ) {
+      fail("controlled background Engine witness was refused");
+    }
+    if (
+      pathEntryExists(paths.engineSocket) &&
+      canonical(
+        socketIdentity(
+          paths.engineSocket,
+          "controlled background Engine socket",
+          relative(paths.root, paths.engineSocket),
+        ),
+      ) !== canonical(engineWitness.value.socket)
+    ) {
+      fail("controlled background Engine socket identity changed");
+    }
+  }
+  const contextWitness = artifacts["context-witness.json"];
+  if (contextWitness !== undefined) {
+    if (engineWitness === undefined) {
+      fail("controlled background context witness lacked an Engine witness");
+    }
+    exactKeys(
+      contextWitness.value,
+      [
+        "context_file",
+        "context_name",
+        "endpoint",
+        "engine_socket_sha256",
+        "fixture_id",
+        "schema",
+        "tls_material",
+      ],
+      "controlled background context witness",
+    );
+    validateResourceIdentity(
+      contextWitness.value.context_file,
+      "file",
+      "controlled background context file identity",
+    );
+    if (
+      contextWitness.value.schema !== "synveda.clean-engine.background-context-witness.v1" ||
+      contextWitness.value.fixture_id !== fixtureId ||
+      contextWitness.value.context_name !== paths.profile ||
+      contextWitness.value.endpoint !== `unix://${paths.engineSocket}` ||
+      contextWitness.value.engine_socket_sha256 !==
+        providerProcessDigest(providerProcessBytes(engineWitness.value.socket)) ||
+      contextWitness.value.tls_material !== "absent"
+    ) {
+      fail("controlled background context witness was refused");
+    }
+    if (
+      canonical(
+        privateFileIdentity(
+          paths.contextFile,
+          "controlled background context file",
+          relative(paths.root, paths.contextFile),
+        ),
+      ) !== canonical(contextWitness.value.context_file)
+    ) {
+      fail("controlled background context file identity changed");
+    }
+  }
+  const controllerSettlement = artifacts["controller-settlement.json"];
+  if (controllerSettlement !== undefined) {
+    if (
+      contextWitness === undefined ||
+      engineWitness === undefined ||
+      hostagentWitness === undefined ||
+      providerStartDecision === undefined ||
+      controllerWitness === undefined
+    ) {
+      fail("controlled background controller settlement lacked process evidence");
+    }
+    exactKeys(
+      controllerSettlement.value,
+      [
+        "controller_group_absent",
+        "controller_group_probe",
+        "controller_shutdown",
+        "controller_witness_sha256",
+        "engine_after_controller_sha256",
+        "fixture_id",
+        "hostagent_after_controller_sha256",
+        "hostagent_disposition",
+        "provider_start_decision_sha256",
+        "schema",
+        "shutdown_during_start",
+      ],
+      "controlled background controller settlement",
+    );
+    if (
+      controllerSettlement.value.schema !==
+        "synveda.clean-engine.background-controller-settlement.v2" ||
+      controllerSettlement.value.fixture_id !== fixtureId ||
+      controllerSettlement.value.controller_group_absent !== true ||
+      controllerSettlement.value.controller_group_probe !== "esrch" ||
+      controllerSettlement.value.controller_shutdown !== "authenticated-ipc" ||
+      controllerSettlement.value.controller_witness_sha256 !== controllerWitness.sha256 ||
+      controllerSettlement.value.provider_start_decision_sha256 !==
+        providerStartDecision.sha256 ||
+      controllerSettlement.value.hostagent_disposition !== "authenticated-running" ||
+      !lowerHex(controllerSettlement.value.engine_after_controller_sha256, 64) ||
+      !lowerHex(controllerSettlement.value.hostagent_after_controller_sha256, 64) ||
+      typeof controllerSettlement.value.shutdown_during_start !== "boolean"
+    ) {
+      fail("controlled background controller settlement was refused");
+    }
+  }
+  if (artifacts["provider-identity.json"] !== undefined) {
+    return Object.freeze({
+      evidence: validateCreationArtifactChain(artifacts, fixtureId, {
+        revalidateCurrentToolchain,
+      }),
+      paths,
+    });
+  }
+  return Object.freeze({
+    evidence: Object.freeze({
+      createAuthority,
+      toolchain,
+      controllerLaunchDecision,
+      controllerWitness,
+      providerStartDecision,
+      hostagentWitness,
+      engineWitness,
+      contextWitness,
+      controllerSettlement,
+    }),
+    paths,
+  });
+}
+
 export function inspectControlledBackgroundProvider(
   evidenceDirectory,
   fixtureId,
@@ -2618,6 +3784,168 @@ export function inspectControlledBackgroundProvider(
     }
   }
   return evidence;
+}
+
+export function inspectControlledBackgroundProviderPrefix(
+  evidenceDirectory,
+  fixtureId,
+  {
+    expectedCreateBindings,
+    providerBase,
+    revalidateCurrentToolchain = false,
+  } = {},
+) {
+  if (
+    !lowerHex(fixtureId, 32) ||
+    typeof providerBase !== "string" ||
+    typeof revalidateCurrentToolchain !== "boolean"
+  ) {
+    fail("controlled background prefix arguments were refused", 64);
+  }
+  if (expectedCreateBindings !== undefined) validateCreateBindings(expectedCreateBindings);
+  const expectedPaths = validateControlledBackgroundRoots({
+    evidenceDirectory,
+    fixtureId,
+    providerBase,
+  });
+  const prefix = inspectCreationEvidencePrefix(evidenceDirectory);
+  if (
+    !pathEntryExists(expectedPaths.root) &&
+    Object.keys(prefix.artifacts).some(
+      (name) => name !== "background-create-authority.json",
+    )
+  ) {
+    fail("controlled background provider root disappeared after preparation");
+  }
+  const validated = validateCreationArtifactPrefix(prefix.artifacts, fixtureId, {
+    expectedCreateBindings,
+    providerBase,
+    revalidateCurrentToolchain,
+  });
+  if (prefix.pendingPublication?.disposition === "staged-complete") {
+    let pendingValue;
+    try {
+      pendingValue = JSON.parse(prefix.pendingArtifact.bytes.toString("utf8"));
+    } catch {
+      fail("controlled background complete create-prefix stage was malformed");
+    }
+    validateCreationArtifactPrefix(
+      {
+        ...prefix.artifacts,
+        [prefix.pendingPublication.target_name]: Object.freeze({
+          bytes: prefix.pendingArtifact.bytes,
+          metadata: prefix.pendingArtifact.metadata,
+          path: join(evidenceDirectory, prefix.pendingPublication.target_name),
+          sha256: prefix.pendingPublication.actual_sha256,
+          value: pendingValue,
+        }),
+      },
+      fixtureId,
+      { expectedCreateBindings, providerBase, revalidateCurrentToolchain },
+    );
+  }
+  if (
+    validated.paths === undefined &&
+    pathEntryExists(expectedPaths.root)
+  ) {
+    fail("controlled background provider root preceded create authority");
+  }
+  const residual =
+    validated.paths === undefined
+      ? Object.freeze({
+          controller_presence: "not-started",
+          hostagent_presence: "not-started",
+          inventory_sha256: ZERO_SHA256,
+          private_publications: Object.freeze([]),
+          root: undefined,
+          root_disposition: "absent",
+          root_inventory: Object.freeze([]),
+          sockets: "absent",
+        })
+      : inspectProgressiveRoot(
+          validated.paths,
+          prefix.artifacts["background-create-authority.json"],
+          prefix.artifacts,
+        );
+  const effectFrontier = validateProgressiveEffectPrefix(expectedPaths, prefix, residual);
+  if (
+    residual.root_disposition === "absent" &&
+    Object.keys(prefix.artifacts).some(
+      (name) => name !== "background-create-authority.json",
+    ) ||
+    (residual.root_disposition === "absent" &&
+      prefix.pendingPublication !== undefined &&
+      prefix.pendingPublication.target_name !== "background-create-authority.json")
+  ) {
+    fail("controlled background provider root disappeared after preparation");
+  }
+  const artifactNames = Object.keys(prefix.artifacts).sort(
+    (left, right) =>
+      CONTROLLED_BACKGROUND_CREATION_ARTIFACTS.indexOf(left) -
+      CONTROLLED_BACKGROUND_CREATION_ARTIFACTS.indexOf(right),
+  );
+  const artifactHead = artifactNames.at(-1);
+  const evidenceHeadSha256 =
+    artifactHead === undefined ? ZERO_SHA256 : prefix.artifacts[artifactHead].sha256;
+  const stage =
+    artifactHead === undefined
+      ? "empty"
+      : artifactHead
+          .replace(/^background-/, "")
+          .replace(/\.json$/, "")
+          .replace(/^provider-identity$/, "provider-identity");
+  const evidencePrefix = artifactNames.map((name) => {
+    const artifact = prefix.artifacts[name];
+    return {
+      device: String(artifact.metadata.dev),
+      inode: String(artifact.metadata.ino),
+      links: String(artifact.metadata.nlink),
+      mode: (artifact.metadata.mode & 0o7777n).toString(8).padStart(4, "0"),
+      name,
+      sha256: artifact.sha256,
+      size: String(artifact.metadata.size),
+      uid: String(artifact.metadata.uid),
+    };
+  });
+  const replaySafe =
+    artifactNames.length === 1 &&
+    artifactNames[0] === "background-create-authority.json" &&
+    prefix.pendingPublication === undefined &&
+    residual.root_disposition === "absent";
+  const residualValue = {
+    contract: "controlled-background-fake",
+    create_bindings: expectedCreateBindings ?? null,
+    effect_frontier: effectFrontier,
+    evidence_directory: directoryIdentity(
+      evidenceDirectory,
+      "controlled background evidence directory",
+    ),
+    evidence_prefix: evidencePrefix,
+    evidence_head_sha256: evidenceHeadSha256,
+    evidence_stage: stage,
+    fixture_id: fixtureId,
+    pending_publication: prefix.pendingPublication ?? null,
+    provider_base: directoryIdentity(providerBase, "controlled background provider base"),
+    provider_contract_sha256: CONTROLLED_BACKGROUND_PROVIDER_CONTRACT_SHA256,
+    replay_safe: replaySafe,
+    residual: {
+      ...residual,
+      root: residual.root ?? null,
+    },
+  };
+  const evidencePrefixSha256 = providerProcessDigest(providerProcessBytes(evidencePrefix));
+  return Object.freeze({
+    artifacts: prefix.artifacts,
+    contract: "controlled-background-fake",
+    effectFrontier,
+    evidenceHeadSha256,
+    evidencePrefixSha256,
+    evidenceStage: stage,
+    pendingPublication: prefix.pendingPublication,
+    replaySafe,
+    residual,
+    residualSha256: providerProcessDigest(providerProcessBytes(residualValue)),
+  });
 }
 
 function pathDepth(path) {
@@ -2689,6 +4017,633 @@ function inventoryIdentity(path, rootPath, rootDevice) {
     size: String(metadata.size),
     uid: String(metadata.uid),
   };
+}
+
+function progressiveRootContract(paths) {
+  const staticEntries = [
+    paths.ownerMarker,
+    ...Object.values(CONTROLLED_BACKGROUND_ROOT_LAYOUT)
+      .sort()
+      .map((leaf) => join(paths.root, leaf)),
+    paths.colimaProfile,
+    paths.limaInstance,
+    join(paths.root, CONTROLLED_BACKGROUND_ROOT_LAYOUT.DOCKER_CONFIG, "contexts"),
+    join(paths.root, CONTROLLED_BACKGROUND_ROOT_LAYOUT.DOCKER_CONFIG, "contexts", "meta"),
+    paths.contextDirectory,
+    paths.diskImage,
+    paths.contextFile,
+    paths.hostagentConfig,
+    paths.controllerConfig,
+  ];
+  const dynamicEntries = [
+    paths.controllerReady,
+    paths.haSocket,
+    paths.engineSocket,
+    paths.pidRecord,
+  ];
+  const kinds = new Map();
+  for (const path of staticEntries) {
+    kinds.set(
+      relative(paths.root, path),
+      new Set([
+        paths.ownerMarker,
+        paths.diskImage,
+        paths.contextFile,
+        paths.hostagentConfig,
+        paths.controllerConfig,
+      ]).has(path)
+        ? "file"
+        : "directory",
+    );
+  }
+  kinds.set(relative(paths.root, paths.controllerReady), "file");
+  kinds.set(relative(paths.root, paths.haSocket), "socket");
+  kinds.set(relative(paths.root, paths.engineSocket), "socket");
+  kinds.set(relative(paths.root, paths.pidRecord), "file");
+  return Object.freeze({ dynamicEntries, kinds, staticEntries });
+}
+
+function progressiveFile(path, rootPath, rootDevice, isStage) {
+  const label = isStage
+    ? "controlled background progressive private-file stage"
+    : "controlled background progressive private file";
+  const opened = isStage
+    ? openedStage(path, label)
+    : openedFile(path, label, MAX_ARTIFACT_BYTES, new Set([1n, 2n]), true);
+  if (opened.metadata.dev !== rootDevice) {
+    fail("controlled background progressive file crossed a filesystem boundary");
+  }
+  const sha256 = providerProcessDigest(opened.bytes);
+  return Object.freeze({
+    artifact: Object.freeze({
+      bytes: opened.bytes,
+      metadata: opened.metadata,
+      path,
+      sha256,
+    }),
+    identity: Object.freeze({
+      device: String(opened.metadata.dev),
+      inode: String(opened.metadata.ino),
+      kind: "file",
+      links: String(opened.metadata.nlink),
+      mode: "0600",
+      relative_path: relative(rootPath, path),
+      sha256,
+      size: String(opened.metadata.size),
+      uid: String(opened.metadata.uid),
+    }),
+  });
+}
+
+function inspectProgressiveRoot(paths, createAuthority, artifacts) {
+  if (!pathEntryExists(paths.root)) {
+    return Object.freeze({
+      controller_presence:
+        artifacts["controller-launch-decision.json"] === undefined
+          ? "not-started"
+          : "unattested",
+      hostagent_presence:
+        artifacts["provider-start-decision.json"] === undefined
+          ? "not-started"
+          : "unattested",
+      inventory_sha256: ZERO_SHA256,
+      private_publications: Object.freeze([]),
+      root: undefined,
+      root_disposition: "absent",
+      root_inventory: Object.freeze([]),
+      sockets: "absent",
+    });
+  }
+  const rootMetadata = secureDirectory(paths.root, "controlled background progressive root");
+  const contract = progressiveRootContract(paths);
+  const entries = [];
+  const stages = [];
+  const walk = (directory) => {
+    for (const name of readdirSync(directory).sort()) {
+      const path = join(directory, name);
+      const relativePath = relative(paths.root, path);
+      const metadata = lstatSync(path, { bigint: true });
+      const parsedStage = parsePrivateStageName(name);
+      if (parsedStage !== undefined) {
+        const possibleTargets = [...contract.kinds.entries()].filter(
+          ([target, kind]) =>
+            kind === "file" &&
+            dirname(target) === dirname(relativePath) &&
+            privateStageTargetSha256(join(paths.root, target)) === parsedStage.target_sha256,
+        );
+        if (possibleTargets.length !== 1) {
+          fail("controlled background progressive stage target was refused");
+        }
+        const [target] = possibleTargets[0];
+        const file = progressiveFile(path, paths.root, rootMetadata.dev, true);
+        stages.push(Object.freeze({ ...file, parsed: parsedStage, target }));
+        entries.push(file.identity);
+      } else {
+        const kind = contract.kinds.get(relativePath);
+        if (kind === undefined) {
+          fail("controlled background progressive root inventory was refused");
+        }
+        if (kind === "directory") {
+          if (
+            metadata.isSymbolicLink() ||
+            !metadata.isDirectory() ||
+            metadata.uid !== BigInt(process.getuid()) ||
+            metadata.dev !== rootMetadata.dev ||
+            (metadata.mode & 0o7777n) !== 0o700n
+          ) {
+            fail("controlled background progressive directory identity was refused");
+          }
+          entries.push({
+            device: String(metadata.dev),
+            inode: String(metadata.ino),
+            kind: "directory",
+            links: String(metadata.nlink),
+            mode: "0700",
+            relative_path: relativePath,
+            sha256: ZERO_SHA256,
+            size: String(metadata.size),
+            uid: String(metadata.uid),
+          });
+          walk(path);
+        } else if (kind === "file") {
+          entries.push(progressiveFile(path, paths.root, rootMetadata.dev, false).identity);
+        } else {
+          if (
+            metadata.isSymbolicLink() ||
+            !metadata.isSocket() ||
+            metadata.uid !== BigInt(process.getuid()) ||
+            metadata.dev !== rootMetadata.dev ||
+            metadata.nlink !== 1n ||
+            (metadata.mode & 0o7777n) !== 0o600n
+          ) {
+            fail("controlled background progressive socket identity was refused");
+          }
+          entries.push({
+            device: String(metadata.dev),
+            inode: String(metadata.ino),
+            kind: "socket",
+            links: "1",
+            mode: "0600",
+            relative_path: relativePath,
+            sha256: ZERO_SHA256,
+            size: String(metadata.size),
+            uid: String(metadata.uid),
+          });
+        }
+      }
+      if (entries.length > MAX_INVENTORY_ENTRIES) {
+        fail("controlled background progressive inventory capacity was exceeded");
+      }
+    }
+  };
+  walk(paths.root);
+  if (stages.length > 1) {
+    fail("controlled background progressive stages were ambiguous");
+  }
+  const entriesByPath = new Map(entries.map((entry) => [entry.relative_path, entry]));
+  const stagesByTarget = new Map();
+  for (const candidate of stages) {
+    const target = entriesByPath.get(candidate.target);
+    const linked = target !== undefined && target.inode === candidate.identity.inode;
+    let value;
+    let canonicalComplete = false;
+    try {
+      value = JSON.parse(candidate.artifact.bytes.toString("utf8"));
+      canonicalComplete = providerProcessBytes(value).equals(candidate.artifact.bytes);
+    } catch {
+      canonicalComplete = false;
+    }
+    if (
+      (candidate.identity.links === "2" && !linked) ||
+      (candidate.identity.links === "1" && linked) ||
+      (target !== undefined && !linked)
+    ) {
+      fail("controlled background progressive stage link was refused");
+    }
+    if (canonicalComplete && candidate.artifact.sha256 !== candidate.parsed.value_sha256) {
+      fail("controlled background progressive stage digest was refused");
+    }
+    if (
+      (candidate.artifact.sha256 === candidate.parsed.value_sha256 && !canonicalComplete) ||
+      (linked && !canonicalComplete)
+    ) {
+      fail("controlled background complete progressive stage was malformed");
+    }
+    const publication = Object.freeze({
+      actual_sha256: candidate.artifact.sha256,
+      declared_sha256: candidate.parsed.value_sha256,
+      disposition:
+        candidate.identity.links === "2"
+          ? "linked-complete"
+          : canonicalComplete
+            ? "staged-complete"
+            : "staged-partial",
+      links: Number(candidate.identity.links),
+      name: basename(candidate.identity.relative_path),
+      size: candidate.identity.size,
+      target_path: candidate.target,
+    });
+    stagesByTarget.set(
+      candidate.target,
+      Object.freeze({ ...candidate, canonicalComplete, publication, value }),
+    );
+  }
+  for (const entry of entries) {
+    if (entry.kind !== "file" || parsePrivateStageName(basename(entry.relative_path)) !== undefined) {
+      continue;
+    }
+    if (entry.links === "2" && !stagesByTarget.has(entry.relative_path)) {
+      fail("controlled background progressive file link was refused");
+    }
+  }
+  const progressiveArtifact = (path, label) => {
+    const relativePath = relative(paths.root, path);
+    if (entriesByPath.has(relativePath)) return partialPrivateArtifact(path, label);
+    const stage = stagesByTarget.get(relativePath);
+    if (stage?.canonicalComplete !== true) return undefined;
+    return Object.freeze({
+      bytes: stage.artifact.bytes,
+      metadata: stage.artifact.metadata,
+      path,
+      sha256: stage.artifact.sha256,
+      value: stage.value,
+    });
+  };
+  let prefixOpen = true;
+  for (const path of contract.staticEntries) {
+    const relativePath = relative(paths.root, path);
+    const present = entriesByPath.has(relativePath);
+    const staged = stagesByTarget.has(relativePath);
+    if (!prefixOpen && (present || staged)) {
+      fail("controlled background progressive root had a causal gap");
+    }
+    if (!present || staged) prefixOpen = false;
+  }
+  const owner = entriesByPath.get(relative(paths.root, paths.ownerMarker));
+  const ownerArtifact = progressiveArtifact(
+    paths.ownerMarker,
+    "controlled background progressive root owner",
+  );
+  let rootDisposition = "ownership-pending";
+  if (ownerArtifact !== undefined) {
+    validateRootOwner(ownerArtifact.value, {
+      createAuthoritySha256: createAuthority.sha256,
+      fixtureId: createAuthority.value.fixture_id,
+      paths,
+    });
+  }
+  if (owner !== undefined) {
+    rootDisposition = "owned";
+  }
+  const disk = progressiveArtifact(
+    paths.diskImage,
+    "controlled background progressive disk fixture",
+  );
+  if (disk !== undefined) {
+    if (
+      canonical(disk.value) !== canonical({
+        fixture_id: createAuthority.value.fixture_id,
+        payload: "non-bootable-controlled-background-disk",
+        schema: "synveda.clean-engine.background-disk-fixture.v1",
+      })
+    ) {
+      fail("controlled background progressive disk fixture was refused");
+    }
+  }
+  const context = progressiveArtifact(
+    paths.contextFile,
+    "controlled background progressive context",
+  );
+  if (context !== undefined) {
+    if (
+      canonical(context.value) !== canonical({
+        context_name: paths.profile,
+        endpoint: `unix://${paths.engineSocket}`,
+        fixture_id: createAuthority.value.fixture_id,
+        schema: "synveda.clean-engine.background-docker-context.v1",
+        tls_material: "absent",
+      })
+    ) {
+      fail("controlled background progressive context was refused");
+    }
+  }
+  const hostagentConfig = progressiveArtifact(
+    paths.hostagentConfig,
+    "controlled background progressive hostagent config",
+  );
+  if (hostagentConfig !== undefined) {
+    exactKeys(
+      hostagentConfig.value,
+      [
+        "engine_architecture",
+        "engine_socket",
+        "fixture_id",
+        "ha_socket",
+        "hostagent_script_sha256",
+        "instance_nonce",
+        "maximum_lifetime_milliseconds",
+        "node_sha256",
+        "pid_record",
+        "profile",
+        "schema",
+        "working_directory",
+      ],
+      "controlled background progressive hostagent config",
+    );
+    if (
+      hostagentConfig.value.schema !== "synveda.clean-engine.background-hostagent-config.v1" ||
+      hostagentConfig.value.fixture_id !== createAuthority.value.fixture_id ||
+      hostagentConfig.value.engine_architecture !==
+        controlledBackgroundEngineArchitecture(process.arch) ||
+      hostagentConfig.value.engine_socket !== paths.engineSocket ||
+      hostagentConfig.value.ha_socket !== paths.haSocket ||
+      hostagentConfig.value.instance_nonce !== createAuthority.value.ownership_nonce ||
+      hostagentConfig.value.pid_record !== paths.pidRecord ||
+      hostagentConfig.value.profile !== paths.profile ||
+      hostagentConfig.value.working_directory !== paths.root ||
+      !lowerHex(hostagentConfig.value.hostagent_script_sha256, 64) ||
+      !lowerHex(hostagentConfig.value.node_sha256, 64) ||
+      !Number.isSafeInteger(hostagentConfig.value.maximum_lifetime_milliseconds) ||
+      hostagentConfig.value.maximum_lifetime_milliseconds < 1_000 ||
+      hostagentConfig.value.maximum_lifetime_milliseconds >
+        CONTROLLED_BACKGROUND_PROVIDER_CONTRACT.max_lifetime_milliseconds
+    ) {
+      fail("controlled background progressive hostagent config was refused");
+    }
+  }
+  const controllerConfig = progressiveArtifact(
+    paths.controllerConfig,
+    "controlled background progressive controller config",
+  );
+  if (controllerConfig !== undefined) {
+    exactKeys(
+      controllerConfig.value,
+      [
+        "before_detach_hold_milliseconds",
+        "controller_launch_decision",
+        "controller_nonce",
+        "controller_ready",
+        "controller_script_sha256",
+        "controller_witness",
+        "create_authority",
+        "create_authority_sha256",
+        "create_intent_sha256",
+        "create_slot_sha256",
+        "fixture_id",
+        "hostagent_config",
+        "hostagent_config_sha256",
+        "hostagent_source_base64",
+        "hostagent_source_sha256",
+        "instance_nonce",
+        "maximum_lifetime_milliseconds",
+        "node_sha256",
+        "provider_contract_sha256",
+        "provider_start_decision",
+        "require_shutdown_during_start",
+        "root_owner",
+        "root_owner_sha256",
+        "schema",
+        "working_directory",
+      ],
+      "controlled background progressive controller config",
+    );
+    if (
+      controllerConfig.value.schema !== "synveda.clean-engine.background-controller-config.v2" ||
+      controllerConfig.value.fixture_id !== createAuthority.value.fixture_id ||
+      controllerConfig.value.create_authority_sha256 !== createAuthority.sha256 ||
+      controllerConfig.value.create_intent_sha256 !==
+        createAuthority.value.create_intent_sha256 ||
+      controllerConfig.value.create_slot_sha256 !== createAuthority.value.create_slot_sha256 ||
+      controllerConfig.value.hostagent_config !== paths.hostagentConfig ||
+      controllerConfig.value.hostagent_config_sha256 !== hostagentConfig?.sha256 ||
+      controllerConfig.value.maximum_lifetime_milliseconds !==
+        hostagentConfig?.value.maximum_lifetime_milliseconds ||
+      controllerConfig.value.controller_launch_decision !==
+        join(dirname(createAuthority.path), "controller-launch-decision.json") ||
+      controllerConfig.value.controller_ready !== paths.controllerReady ||
+      controllerConfig.value.controller_witness !==
+        join(dirname(createAuthority.path), "controller-witness.json") ||
+      controllerConfig.value.create_authority !== createAuthority.path ||
+      controllerConfig.value.instance_nonce !== createAuthority.value.ownership_nonce ||
+      controllerConfig.value.provider_contract_sha256 !==
+        CONTROLLED_BACKGROUND_PROVIDER_CONTRACT_SHA256 ||
+      controllerConfig.value.provider_start_decision !==
+        join(dirname(createAuthority.path), "provider-start-decision.json") ||
+      controllerConfig.value.root_owner !== paths.ownerMarker ||
+      controllerConfig.value.root_owner_sha256 !== ownerArtifact?.sha256 ||
+      controllerConfig.value.working_directory !== paths.root ||
+      !Number.isSafeInteger(controllerConfig.value.before_detach_hold_milliseconds) ||
+      controllerConfig.value.before_detach_hold_milliseconds < 0 ||
+      controllerConfig.value.before_detach_hold_milliseconds > 5_000 ||
+      !lowerHex(controllerConfig.value.controller_nonce, 64) ||
+      !lowerHex(controllerConfig.value.controller_script_sha256, 64) ||
+      !lowerHex(controllerConfig.value.hostagent_source_sha256, 64) ||
+      !lowerHex(controllerConfig.value.node_sha256, 64) ||
+      !Number.isSafeInteger(controllerConfig.value.maximum_lifetime_milliseconds) ||
+      controllerConfig.value.maximum_lifetime_milliseconds < 1_000 ||
+      controllerConfig.value.maximum_lifetime_milliseconds >
+        CONTROLLED_BACKGROUND_PROVIDER_CONTRACT.max_lifetime_milliseconds ||
+      typeof controllerConfig.value.require_shutdown_during_start !== "boolean"
+    ) {
+      fail("controlled background progressive controller config was refused");
+    }
+  }
+  if (hostagentConfig !== undefined || controllerConfig !== undefined) {
+    const toolchain = artifacts["background-toolchain.json"];
+    if (toolchain === undefined) {
+      fail("controlled background progressive config lacked its toolchain");
+    }
+    const components = new Map(
+      toolchain.value.components.map((component) => [component.role, component]),
+    );
+    if (
+      hostagentConfig === undefined ||
+      hostagentConfig.value.hostagent_script_sha256 !==
+        components.get("hostagent-script")?.sha256 ||
+      hostagentConfig.value.node_sha256 !== components.get("node-runtime")?.sha256
+    ) {
+      fail("controlled background progressive hostagent config toolchain changed");
+    }
+    if (controllerConfig !== undefined) {
+      let hostagentSource;
+      try {
+        hostagentSource = Buffer.from(controllerConfig.value.hostagent_source_base64, "base64");
+      } catch {
+        fail("controlled background progressive hostagent source was refused");
+      }
+      if (
+        typeof controllerConfig.value.hostagent_source_base64 !== "string" ||
+        hostagentSource.toString("base64") !== controllerConfig.value.hostagent_source_base64 ||
+        providerProcessDigest(hostagentSource) !==
+          controllerConfig.value.hostagent_source_sha256 ||
+        controllerConfig.value.hostagent_source_sha256 !==
+          components.get("hostagent-script")?.sha256 ||
+        controllerConfig.value.controller_script_sha256 !==
+          components.get("controller-script")?.sha256 ||
+        controllerConfig.value.node_sha256 !== components.get("node-runtime")?.sha256
+      ) {
+        fail("controlled background progressive controller config toolchain changed");
+      }
+    }
+  }
+  const root = {
+    device: String(rootMetadata.dev),
+    inode: String(rootMetadata.ino),
+    mode: "0700",
+    path: paths.root,
+    uid: String(rootMetadata.uid),
+  };
+  const orderedEntries = entries.sort((left, right) =>
+    left.relative_path.localeCompare(right.relative_path));
+  const ready = progressiveArtifact(
+    paths.controllerReady,
+    "controlled background progressive controller readiness",
+  );
+  let controllerPresence =
+    artifacts["controller-launch-decision.json"] === undefined
+      ? "not-started"
+      : "unattested";
+  if (ready !== undefined) {
+    if (controllerConfig === undefined) {
+      fail("controlled background controller readiness lacked its config");
+    }
+    validateControllerReady(
+      ready.value,
+      {
+        controllerPid: ready.value.controller_pid,
+        controllerScriptSha256: controllerConfig.value.controller_script_sha256,
+        fixtureId: createAuthority.value.fixture_id,
+        nodeSha256: controllerConfig.value.node_sha256,
+        workingDirectory: paths.root,
+      },
+      controllerConfig.value.controller_nonce,
+    );
+    if (
+      entriesByPath.has(relative(paths.root, paths.controllerReady)) &&
+      artifacts["controller-witness.json"] !== undefined
+    ) {
+      controllerPresence = processObservation(probeProcessGroup(ready.value.controller_pid));
+    }
+  }
+  const pid = progressiveArtifact(
+    paths.pidRecord,
+    "controlled background progressive hostagent PID record",
+  );
+  let hostagentPresence =
+    artifacts["provider-start-decision.json"] === undefined
+      ? "not-started"
+      : "unattested";
+  if (pid !== undefined) {
+    const controllerWitness = artifacts["controller-witness.json"];
+    const toolchain = artifacts["background-toolchain.json"];
+    if (controllerWitness === undefined || toolchain === undefined) {
+      fail("controlled background hostagent PID record lacked process evidence");
+    }
+    validatePidRecord(
+      pid.value,
+      {
+        controllerPid: controllerWitness.value.controller_pid,
+        fixtureId: createAuthority.value.fixture_id,
+        instanceNonceSha256: providerProcessDigest(
+          Buffer.from(createAuthority.value.ownership_nonce, "ascii"),
+        ),
+        pid: pid.value.pid,
+        processIdentity: pid.value.process_instance_sha256,
+        profile: paths.profile,
+        workingDirectory: paths.root,
+      },
+      toolchain.value,
+    );
+    if (
+      entriesByPath.has(relative(paths.root, paths.pidRecord)) &&
+      artifacts["hostagent-witness.json"] !== undefined
+    ) {
+      hostagentPresence = processObservation(processPresence(pid.value.pid));
+    }
+  }
+  const socketCount = [paths.haSocket, paths.engineSocket].filter((path) =>
+    entriesByPath.has(relative(paths.root, path))).length;
+  const privatePublications = [...stagesByTarget.values()]
+    .map((stage) => stage.publication)
+    .sort((left, right) => left.target_path.localeCompare(right.target_path));
+  return Object.freeze({
+    controller_presence: controllerPresence,
+    hostagent_presence: hostagentPresence,
+    inventory_sha256: providerProcessDigest(providerProcessBytes({ entries: orderedEntries, root })),
+    private_publications: Object.freeze(privatePublications),
+    root: Object.freeze(root),
+    root_disposition: rootDisposition,
+    root_inventory: Object.freeze(orderedEntries),
+    sockets: socketCount === 0 ? "absent" : socketCount === 2 ? "present" : "partial",
+  });
+}
+
+function validateProgressiveEffectPrefix(paths, prefix, residual) {
+  if (
+    Number(prefix.pendingPublication !== undefined) + residual.private_publications.length >
+    1
+  ) {
+    fail("controlled background pending publications were ambiguous");
+  }
+  const finalRootEntries = new Set(
+    residual.root_inventory
+      .filter((entry) => parsePrivateStageName(basename(entry.relative_path)) === undefined)
+      .map((entry) => entry.relative_path),
+  );
+  const pendingRootTargets = new Set(
+    residual.private_publications.map((publication) => publication.target_path),
+  );
+  const evidenceStatus = (name) => {
+    if (prefix.pendingPublication?.target_name === name) return "pending";
+    return prefix.artifacts[name] === undefined ? "absent" : "complete";
+  };
+  const rootStatus = (path) => {
+    const relativePath = relative(paths.root, path);
+    if (pendingRootTargets.has(relativePath)) return "pending";
+    return finalRootEntries.has(relativePath) ? "complete" : "absent";
+  };
+  const effects = [
+    ["create-authority", evidenceStatus("background-create-authority.json")],
+    ["provider-root", residual.root_disposition === "absent" ? "absent" : "complete"],
+    ...progressiveRootContract(paths).staticEntries
+      .slice(0, -2)
+      .map((path) => [relative(paths.root, path), rootStatus(path)]),
+    ["toolchain", evidenceStatus("background-toolchain.json")],
+    ["hostagent-config", rootStatus(paths.hostagentConfig)],
+    ["controller-config", rootStatus(paths.controllerConfig)],
+    ["controller-launch-decision", evidenceStatus("controller-launch-decision.json")],
+    ["controller-ready", rootStatus(paths.controllerReady)],
+    ["controller-witness", evidenceStatus("controller-witness.json")],
+    ["provider-start-decision", evidenceStatus("provider-start-decision.json")],
+    ["hostagent-pid", rootStatus(paths.pidRecord)],
+    ["hostagent-witness", evidenceStatus("hostagent-witness.json")],
+    ["engine-witness", evidenceStatus("engine-witness.json")],
+    ["context-witness", evidenceStatus("context-witness.json")],
+    ["controller-settlement", evidenceStatus("controller-settlement.json")],
+    ["provider-identity", evidenceStatus("provider-identity.json")],
+  ];
+  let prefixClosed = false;
+  let frontier = Object.freeze({ disposition: "complete", effect: "empty" });
+  for (const [name, status] of effects) {
+    if (prefixClosed && status !== "absent") {
+      fail(`controlled background effect ${name} had a causal gap`);
+    }
+    if (!prefixClosed && status === "complete") {
+      frontier = Object.freeze({ disposition: "complete", effect: name });
+    } else if (!prefixClosed) {
+      if (status === "pending") {
+        frontier = Object.freeze({ disposition: "pending", effect: name });
+      }
+      prefixClosed = true;
+    }
+  }
+  const socketPresent = [paths.haSocket, paths.engineSocket].some(
+    (path) => rootStatus(path) !== "absent",
+  );
+  if (socketPresent && evidenceStatus("provider-start-decision.json") !== "complete") {
+    fail("controlled background socket state preceded start authority");
+  }
+  return frontier;
 }
 
 function scanRootInventory(paths) {

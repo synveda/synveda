@@ -236,7 +236,12 @@ directory, and places a recoverable fixture-only authority before root
 mutation, a durable decision before controller launch and a controller-reproved
 durable decision before host-agent spawn. It rejects mutation-journal
 relabelling, changed gate inputs and pre-start controller death without a
-host-agent effect. It proves that controller `ESRCH` is distinct from authenticated
+host-agent effect. The v3 inner contract now publishes every private
+root/config/readiness/PID file through a fsynced stage and no-replace link,
+creates sockets under a restrictive umask, offers five synchronous veto-only
+state checkpoints and validates one ordered evidence/private-file frontier
+without mutating it. Terminal identity is prevalidated and both provider
+sockets are freshly reauthenticated. It proves that controller `ESRCH` is distinct from authenticated
 host-agent, Engine and Docker-context identity. Provider identity also binds the
 complete creation-time root inventory before retirement authority. It inherits ambient `HOME`
 unchanged while isolating all provider roots and its helper path. Its immutable
@@ -248,8 +253,9 @@ substitutions. Create and cleanup retain separate evidence heads.
 Only test fixtures expose either seam; no supported lifecycle target or
 Docker/Colima action is enabled. The new retirement settlement is explicitly
 state-unintegrated, the older mutation-owned root remains unretired, and
-cleanup/finalization still refuse. Next hard-cut and bind the separate
-create/cleanup evidence into dedicated mutation slots and closes, then finish
+cleanup/finalization still refuse. Next hard-cut receipt/slot/recovery/close
+schemas and bind background create through the state-born wrapper; only after
+that create close is durable may a separate cleanup slot be added. Then finish
 the exact live Docker/helper/disk-image and OS-version closure without
 repurposing `HOME`. TLS private-registry, remote-builder canary, live proxy,
 browser and exact-cleanup evidence follow; only then is the privileged mapping

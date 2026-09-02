@@ -207,8 +207,22 @@ mutation-journal label. A durable launch decision precedes the controller and a
 distinct durable start decision precedes the host agent; the controller
 reopens and validates the authority, owner, launch/witness chain, start
 decision and host-agent configuration before spawning. The explicitly
-authorised fixture launcher binds captured controller
-and host-agent source bytes plus child-side runtime/source witnesses, uses an
+authorised v3 fixture launcher additionally exposes only a synchronous veto
+checkpoint before root publication, controller spawn, start-decision
+publication, start delivery and provider-identity publication. Each veto is followed by a
+non-mutating comparison of the complete ordered evidence/private-file frontier
+with launcher-owned identities; it cannot return authority or alter launch
+inputs. The terminal veto runs only after reauthenticating the host agent and
+Engine and prevalidating the complete provider identity, immediately before
+synchronous publication.
+Private root/config/readiness/PID files publish through a fsynced private stage
+and no-replace hard link; sockets are created under a `0177` umask before their
+mode and parent durability are rechecked. A non-mutating prefix inspector
+classifies exact causal evidence and root residuals without repairing them.
+The launcher binds captured controller
+and host-agent source bytes plus child-side runtime/source witnesses. Both
+children open their digest-bound configuration through exact no-follow
+descriptors. The launcher uses an
 owned working directory and closed environment, and shuts the controller down
 through authenticated bounded IPC rather than a numeric PID or PGID signal.
 Controller-group `ESRCH` is followed by fresh authenticated host-agent and

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import {
   chmodSync,
@@ -21,11 +22,12 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, join, relative } from "node:path";
+import { basename, dirname, join, relative } from "node:path";
 import { test } from "node:test";
 import {
   COLIMA_LIVE_PREPARATION_CONTRACT,
   COLIMA_LIVE_PREPARATION_CONTRACT_SHA256,
+  CONTROLLED_BACKGROUND_AUTHORITY_CHECKPOINTS,
   CONTROLLED_BACKGROUND_PROVIDER_CONTRACT,
   ProviderProcessContractFailure,
   authorizeColimaLiveStart,
@@ -33,7 +35,9 @@ import {
   controlledBackgroundEnvironmentNames,
   controlledBackgroundOperationEvidence,
   inspectControlledBackgroundProvider,
+  inspectControlledBackgroundProviderPrefix,
   launchControlledBackgroundProvider,
+  launchControlledBackgroundProviderWithAuthorityGate,
   planControlledBackgroundProviderCreate,
   planControlledBackgroundRetirement,
   providerProcessBytes,
@@ -183,6 +187,10 @@ async function cleanupFixture(state) {
 function artifactStageName(targetName, bytes, nonce = "a".repeat(32)) {
   const sha256 = providerProcessDigest(bytes);
   return `.provider-process-stage-${targetName.slice(0, -5)}-${sha256}-${nonce}`;
+}
+
+function privateStageName(targetPath, expectedBytes, nonce = "b".repeat(32)) {
+  return `.background-private-stage-${providerProcessDigest(Buffer.from(basename(targetPath), "utf8"))}-${providerProcessDigest(expectedBytes)}-${nonce}`;
 }
 
 function writeDurable(path, bytes) {
@@ -371,8 +379,27 @@ test("the tagged Colima contract is closed and cannot authorize a live start", (
   ]);
   assert.equal(
     CONTROLLED_BACKGROUND_PROVIDER_CONTRACT.launch_protocol,
-    "durable-evidence-controller-start-gate-v1",
+    "durable-evidence-state-veto-gate-v2",
   );
+  assert.equal(CONTROLLED_BACKGROUND_PROVIDER_CONTRACT.kind,
+    "controlled-background-provider-v3");
+  assert.equal(CONTROLLED_BACKGROUND_PROVIDER_CONTRACT.schema,
+    "synveda.clean-engine.controlled-background-provider-contract.v3");
+  assert.equal(CONTROLLED_BACKGROUND_PROVIDER_CONTRACT.private_file_publication,
+    "fsync-stage-link-no-replace-v1");
+  assert.equal(CONTROLLED_BACKGROUND_PROVIDER_CONTRACT.root_publication,
+    "authority-before-mkdir-owner-atomic-v1");
+  assert.equal(CONTROLLED_BACKGROUND_PROVIDER_CONTRACT.socket_publication,
+    "umask-0177-listen-chmod-fsync-v1");
+  assert.equal(CONTROLLED_BACKGROUND_PROVIDER_CONTRACT.state_authority_gate,
+    "synchronous-veto-only-five-checkpoint-v1");
+  assert.deepEqual(CONTROLLED_BACKGROUND_AUTHORITY_CHECKPOINTS, [
+    "before-root-publication",
+    "before-controller-spawn",
+    "before-start-decision-publication",
+    "before-hostagent-start-delivery",
+    "before-provider-identity-publication",
+  ]);
   assert.equal(CONTROLLED_BACKGROUND_PROVIDER_CONTRACT.fixture_launch_authorized, true);
   assert.equal(CONTROLLED_BACKGROUND_PROVIDER_CONTRACT.lifecycle_exposure_authorized, false);
   assert.deepEqual(
@@ -407,6 +434,1115 @@ test("the tagged Colima contract is closed and cannot authorize a live start", (
   );
 });
 
+test("the read-only inspector identifies empty, authorised and complete create prefixes", async () => {
+  const state = fixture();
+  try {
+    const empty = inspectControlledBackgroundProviderPrefix(
+      state.evidenceDirectory,
+      state.fixtureId,
+      { providerBase: state.providerBase },
+    );
+    assert.equal(empty.evidenceStage, "empty");
+    assert.equal(empty.residual.root_disposition, "absent");
+    assert.equal(empty.residual.controller_presence, "not-started");
+    assert.equal(empty.residual.hostagent_presence, "not-started");
+    assert.equal(empty.replaySafe, false);
+    const boundEmpty = inspectControlledBackgroundProviderPrefix(
+      state.evidenceDirectory,
+      state.fixtureId,
+      { expectedCreateBindings: createBindings(), providerBase: state.providerBase },
+    );
+    const differentlyBoundEmpty = inspectControlledBackgroundProviderPrefix(
+      state.evidenceDirectory,
+      state.fixtureId,
+      { expectedCreateBindings: createBindings("b"), providerBase: state.providerBase },
+    );
+    const secondEvidenceDirectory = join(state.root, "e2");
+    mkdirSync(secondEvidenceDirectory, { mode: 0o700 });
+    chmodSync(secondEvidenceDirectory, 0o700);
+    const otherDirectoryEmpty = inspectControlledBackgroundProviderPrefix(
+      secondEvidenceDirectory,
+      state.fixtureId,
+      { expectedCreateBindings: createBindings(), providerBase: state.providerBase },
+    );
+    assert.notEqual(boundEmpty.residualSha256, differentlyBoundEmpty.residualSha256);
+    assert.notEqual(boundEmpty.residualSha256, otherDirectoryEmpty.residualSha256);
+    assert.throws(
+      () => inspectControlledBackgroundProviderPrefix(
+        state.evidenceDirectory,
+        state.fixtureId,
+      ),
+      /prefix arguments were refused/,
+    );
+    assert.throws(
+      () => inspectControlledBackgroundProviderPrefix(
+        state.evidenceDirectory,
+        state.fixtureId,
+        { expectedCreateBindings: {}, providerBase: state.providerBase },
+      ),
+      /create bindings fields were refused/,
+    );
+    assert.throws(
+      () => inspectControlledBackgroundProviderPrefix(
+        state.evidenceDirectory,
+        state.fixtureId,
+        { providerBase: state.providerBase, revalidateCurrentToolchain: "yes" },
+      ),
+      /prefix arguments were refused/,
+    );
+
+    planControlledBackgroundProviderCreate({
+      bindings: createBindings(),
+      evidenceDirectory: state.evidenceDirectory,
+      fixtureId: state.fixtureId,
+      providerBase: state.providerBase,
+    });
+    const authorised = inspectControlledBackgroundProviderPrefix(
+      state.evidenceDirectory,
+      state.fixtureId,
+      {
+        expectedCreateBindings: createBindings(),
+        providerBase: state.providerBase,
+      },
+    );
+    assert.equal(authorised.evidenceStage, "create-authority");
+    assert.equal(authorised.residual.root_disposition, "absent");
+    assert.equal(authorised.replaySafe, true);
+
+    const checkpoints = [];
+    await launchControlledBackgroundProviderWithAuthorityGate(
+      {
+        evidenceDirectory: state.evidenceDirectory,
+        fixtureId: state.fixtureId,
+        maximumLifetimeMilliseconds: 5_000,
+        providerBase: state.providerBase,
+      },
+      ({ checkpoint }) => {
+        checkpoints.push(checkpoint);
+      },
+    );
+    assert.deepEqual(checkpoints, CONTROLLED_BACKGROUND_AUTHORITY_CHECKPOINTS);
+    const complete = inspectControlledBackgroundProviderPrefix(
+      state.evidenceDirectory,
+      state.fixtureId,
+      {
+        expectedCreateBindings: createBindings(),
+        providerBase: state.providerBase,
+      },
+    );
+    assert.equal(complete.evidenceStage, "provider-identity");
+    assert.equal(complete.residual.root_disposition, "owned");
+    assert.equal(complete.replaySafe, false);
+    assert.equal(complete.pendingPublication, undefined);
+    assert.equal(complete.evidenceHeadSha256,
+      complete.artifacts["provider-identity.json"].sha256);
+  } finally {
+    await cleanupFixture(state);
+  }
+});
+
+test("every state-authority checkpoint is a veto before its next effect", async (t) => {
+  const expectations = [
+    {
+      checkpoint: "before-root-publication",
+      controller: "not-started",
+      head: "background-create-authority.json",
+      hostagent: "not-started",
+      next: "background-toolchain.json",
+      replaySafe: true,
+      root: "absent",
+      sockets: "absent",
+      stage: "create-authority",
+    },
+    {
+      checkpoint: "before-controller-spawn",
+      controller: "unattested",
+      head: "controller-launch-decision.json",
+      hostagent: "not-started",
+      next: "controller-witness.json",
+      replaySafe: false,
+      root: "owned",
+      sockets: "absent",
+      stage: "controller-launch-decision",
+    },
+    {
+      checkpoint: "before-start-decision-publication",
+      controller: "proved-absent",
+      head: "controller-witness.json",
+      hostagent: "not-started",
+      next: "provider-start-decision.json",
+      replaySafe: false,
+      root: "owned",
+      sockets: "absent",
+      stage: "controller-witness",
+    },
+    {
+      checkpoint: "before-hostagent-start-delivery",
+      controller: "proved-absent",
+      head: "provider-start-decision.json",
+      hostagent: "unattested",
+      next: "hostagent-witness.json",
+      replaySafe: false,
+      root: "owned",
+      sockets: "absent",
+      stage: "provider-start-decision",
+    },
+    {
+      checkpoint: "before-provider-identity-publication",
+      controller: "proved-absent",
+      head: "controller-settlement.json",
+      hostagent: "observed-present",
+      next: "provider-identity.json",
+      replaySafe: false,
+      root: "owned",
+      sockets: "present",
+      stage: "controller-settlement",
+    },
+  ];
+  for (const [index, expectation] of expectations.entries()) {
+    await t.test(expectation.checkpoint, async () => {
+      const state = fixture();
+      try {
+        planControlledBackgroundProviderCreate({
+          bindings: createBindings(),
+          evidenceDirectory: state.evidenceDirectory,
+          fixtureId: state.fixtureId,
+          providerBase: state.providerBase,
+        });
+        const observed = [];
+        await assert.rejects(
+          () =>
+            launchControlledBackgroundProviderWithAuthorityGate(
+              {
+                evidenceDirectory: state.evidenceDirectory,
+                fixtureId: state.fixtureId,
+                maximumLifetimeMilliseconds: 2_000,
+                providerBase: state.providerBase,
+              },
+              ({ checkpoint, evidence_head_sha256: evidenceHeadSha256 }) => {
+                assert.match(evidenceHeadSha256, /^[0-9a-f]{64}$/);
+                observed.push({ checkpoint, evidenceHeadSha256 });
+                if (checkpoint === expectation.checkpoint) {
+                  throw new Error("state authority veto");
+                }
+              },
+            ),
+          /state authority veto/,
+        );
+        assert.deepEqual(
+          observed.map(({ checkpoint }) => checkpoint),
+          CONTROLLED_BACKGROUND_AUTHORITY_CHECKPOINTS.slice(0, index + 1),
+        );
+        const prefix = inspectControlledBackgroundProviderPrefix(
+          state.evidenceDirectory,
+          state.fixtureId,
+          { expectedCreateBindings: createBindings(), providerBase: state.providerBase },
+        );
+        assert.equal(prefix.evidenceStage, expectation.stage);
+        assert.equal(prefix.evidenceHeadSha256, prefix.artifacts[expectation.head].sha256);
+        assert.equal(prefix.evidenceHeadSha256, observed.at(-1).evidenceHeadSha256);
+        assert.equal(prefix.artifacts[expectation.next], undefined);
+        assert.equal(prefix.artifacts["provider-identity.json"], undefined);
+        assert.equal(prefix.replaySafe, expectation.replaySafe);
+        assert.equal(prefix.residual.root_disposition, expectation.root);
+        assert.equal(prefix.residual.controller_presence, expectation.controller);
+        assert.equal(prefix.residual.hostagent_presence, expectation.hostagent);
+        assert.equal(prefix.residual.sockets, expectation.sockets);
+        assert.deepEqual(prefix.effectFrontier, {
+          disposition: "complete",
+          effect: expectation.stage,
+        });
+        if (index < 4) {
+          assert.equal(existsSync(hostagentRecordPath(state)), false);
+        }
+        if (index > 0) {
+          const before = {
+            evidencePrefixSha256: prefix.evidencePrefixSha256,
+            residualSha256: prefix.residualSha256,
+            rootInventory: prefix.residual.root_inventory,
+          };
+          await assert.rejects(
+            () => launchPlanned(state, 2_000),
+            /pre-launch evidence inventory was refused/,
+          );
+          const after = inspectControlledBackgroundProviderPrefix(
+            state.evidenceDirectory,
+            state.fixtureId,
+            { expectedCreateBindings: createBindings(), providerBase: state.providerBase },
+          );
+          assert.equal(after.evidencePrefixSha256, before.evidencePrefixSha256);
+          assert.equal(after.residualSha256, before.residualSha256);
+          assert.deepEqual(after.residual.root_inventory, before.rootInventory);
+        }
+      } finally {
+        await cleanupFixture(state);
+      }
+    });
+  }
+});
+
+test("authority gates reject causal-prefix mutation before the named effect", async (t) => {
+  await t.test("prepared root mutation blocks controller spawn", async () => {
+    const state = fixture();
+    try {
+      planControlledBackgroundProviderCreate({
+        bindings: createBindings(),
+        evidenceDirectory: state.evidenceDirectory,
+        fixtureId: state.fixtureId,
+        providerBase: state.providerBase,
+      });
+      const profile = `svb-${state.fixtureId.slice(0, 12)}`;
+      const diskPath = join(providerRootPath(state), "l", `colima-${profile}`, "basedisk");
+      await assert.rejects(
+        () =>
+          launchControlledBackgroundProviderWithAuthorityGate(
+            {
+              evidenceDirectory: state.evidenceDirectory,
+              fixtureId: state.fixtureId,
+              maximumLifetimeMilliseconds: 2_000,
+              providerBase: state.providerBase,
+            },
+            ({ checkpoint }) => {
+              if (checkpoint === "before-controller-spawn") unlinkDurable(diskPath);
+            },
+          ),
+        /causal gap|checkpoint prefix changed/,
+      );
+      assert.equal(
+        existsSync(join(providerRootPath(state), "t", "controller-ready.json")),
+        false,
+      );
+      assert.equal(
+        existsSync(join(state.evidenceDirectory, "controller-witness.json")),
+        false,
+      );
+    } finally {
+      await cleanupFixture(state);
+    }
+  });
+
+  await t.test("non-head evidence rewrite blocks provider identity", async () => {
+    const state = fixture();
+    try {
+      planControlledBackgroundProviderCreate({
+        bindings: createBindings(),
+        evidenceDirectory: state.evidenceDirectory,
+        fixtureId: state.fixtureId,
+        providerBase: state.providerBase,
+      });
+      await assert.rejects(
+        () =>
+          launchControlledBackgroundProviderWithAuthorityGate(
+            {
+              evidenceDirectory: state.evidenceDirectory,
+              fixtureId: state.fixtureId,
+              maximumLifetimeMilliseconds: 2_000,
+              providerBase: state.providerBase,
+            },
+            ({ checkpoint }) => {
+              if (checkpoint !== "before-provider-identity-publication") return;
+              const path = join(state.evidenceDirectory, "hostagent-witness.json");
+              rewriteCanonicalArtifact(path, JSON.parse(readFileSync(path, "utf8")));
+            },
+          ),
+        /checkpoint artifact changed/,
+      );
+      assert.equal(
+        existsSync(join(state.evidenceDirectory, "provider-identity.json")),
+        false,
+      );
+    } finally {
+      await cleanupFixture(state);
+    }
+  });
+
+  await t.test("same-byte context replacement blocks provider identity", async () => {
+    const state = fixture();
+    try {
+      planControlledBackgroundProviderCreate({
+        bindings: createBindings(),
+        evidenceDirectory: state.evidenceDirectory,
+        fixtureId: state.fixtureId,
+        providerBase: state.providerBase,
+      });
+      await assert.rejects(
+        () =>
+          launchControlledBackgroundProviderWithAuthorityGate(
+            {
+              evidenceDirectory: state.evidenceDirectory,
+              fixtureId: state.fixtureId,
+              maximumLifetimeMilliseconds: 2_000,
+              providerBase: state.providerBase,
+            },
+            ({ checkpoint }) => {
+              if (checkpoint !== "before-provider-identity-publication") return;
+              const contextPath = JSON.parse(
+                readFileSync(
+                  join(state.evidenceDirectory, "background-create-authority.json"),
+                  "utf8",
+                ),
+              ).provider_root_path;
+              const contextKey = providerProcessDigest(
+                Buffer.from(`context\0${state.fixtureId}`, "utf8"),
+              ).slice(0, 32);
+              const path = join(contextPath, "d", "contexts", "meta", contextKey, "meta.json");
+              const bytes = readFileSync(path);
+              unlinkDurable(path);
+              writeDurable(path, bytes);
+            },
+          ),
+        /context file identity changed|checkpoint root changed/,
+      );
+      assert.equal(
+        existsSync(join(state.evidenceDirectory, "provider-identity.json")),
+        false,
+      );
+    } finally {
+      await cleanupFixture(state);
+    }
+  });
+
+  await t.test("authority change during terminal probes blocks provider identity", async () => {
+    const state = fixture();
+    try {
+      planControlledBackgroundProviderCreate({
+        bindings: createBindings(),
+        evidenceDirectory: state.evidenceDirectory,
+        fixtureId: state.fixtureId,
+        providerBase: state.providerBase,
+      });
+      let authorityCurrent = true;
+      const invalidateAuthority = (async () => {
+        await waitForPath(
+          join(state.evidenceDirectory, "controller-settlement.json"),
+        );
+        authorityCurrent = false;
+      })();
+      await assert.rejects(
+        () =>
+          launchControlledBackgroundProviderWithAuthorityGate(
+            {
+              beforeIdentityProbeHoldMilliseconds: 100,
+              evidenceDirectory: state.evidenceDirectory,
+              fixtureId: state.fixtureId,
+              maximumLifetimeMilliseconds: 5_000,
+              providerBase: state.providerBase,
+            },
+            ({ checkpoint }) => {
+              if (
+                checkpoint === "before-provider-identity-publication" &&
+                !authorityCurrent
+              ) {
+                throw new Error("state authority changed during terminal probes");
+              }
+            },
+          ),
+        /state authority changed during terminal probes/,
+      );
+      await invalidateAuthority;
+      assert.equal(
+        existsSync(join(state.evidenceDirectory, "provider-identity.json")),
+        false,
+      );
+    } finally {
+      await cleanupFixture(state);
+    }
+  });
+});
+
+test("prefix inspection preserves private-file stages and rejects foreign targets", async () => {
+  const state = fixture();
+  try {
+    planControlledBackgroundProviderCreate({
+      bindings: createBindings(),
+      evidenceDirectory: state.evidenceDirectory,
+      fixtureId: state.fixtureId,
+      providerBase: state.providerBase,
+    });
+    await assert.rejects(
+      () =>
+        launchControlledBackgroundProviderWithAuthorityGate(
+          {
+            evidenceDirectory: state.evidenceDirectory,
+            fixtureId: state.fixtureId,
+            maximumLifetimeMilliseconds: 2_000,
+            providerBase: state.providerBase,
+          },
+          ({ checkpoint }) => {
+            if (checkpoint === "before-controller-spawn") {
+              throw new Error("stop before controller");
+            }
+          },
+        ),
+      /stop before controller/,
+    );
+    const root = providerRootPath(state);
+    const readyPath = join(root, "t", "controller-ready.json");
+    const completeBytes = providerProcessBytes({ schema: "simulated-ready" });
+    const partialStage = join(
+      dirname(readyPath),
+      privateStageName(readyPath, completeBytes),
+    );
+    writeDurable(partialStage, completeBytes.subarray(0, completeBytes.length - 1));
+    const partial = inspectControlledBackgroundProviderPrefix(
+      state.evidenceDirectory,
+      state.fixtureId,
+      { expectedCreateBindings: createBindings(), providerBase: state.providerBase },
+    );
+    assert.equal(partial.evidenceStage, "controller-launch-decision");
+    assert.equal(existsSync(partialStage), true);
+    unlinkDurable(partialStage);
+
+    unlinkDurable(join(state.evidenceDirectory, "controller-launch-decision.json"));
+
+    const configPath = join(root, "t", "controller-config.json");
+    const configBytes = readFileSync(configPath);
+    const linkedStage = join(
+      dirname(configPath),
+      privateStageName(configPath, configBytes, "c".repeat(32)),
+    );
+    linkSync(configPath, linkedStage);
+    const linked = inspectControlledBackgroundProviderPrefix(
+      state.evidenceDirectory,
+      state.fixtureId,
+      { expectedCreateBindings: createBindings(), providerBase: state.providerBase },
+    );
+    assert.equal(linked.residual.root_disposition, "owned");
+    assert.equal(linked.residual.private_publications.length, 1);
+    assert.deepEqual(
+      {
+        actual_sha256: linked.residual.private_publications[0].actual_sha256,
+        declared_sha256: linked.residual.private_publications[0].declared_sha256,
+        disposition: linked.residual.private_publications[0].disposition,
+        links: linked.residual.private_publications[0].links,
+        target_path: linked.residual.private_publications[0].target_path,
+      },
+      {
+        actual_sha256: providerProcessDigest(configBytes),
+        declared_sha256: providerProcessDigest(configBytes),
+        disposition: "linked-complete",
+        links: 2,
+        target_path: relative(root, configPath),
+      },
+    );
+    assert.equal(existsSync(linkedStage), true);
+    assert.equal(lstatSync(configPath, { bigint: true }).nlink, 2n);
+    unlinkDurable(linkedStage);
+
+    const duplicateFinalStage = join(
+      dirname(configPath),
+      privateStageName(configPath, configBytes, "2".repeat(32)),
+    );
+    writeDurable(duplicateFinalStage, configBytes);
+    assert.throws(
+      () =>
+        inspectControlledBackgroundProviderPrefix(
+          state.evidenceDirectory,
+          state.fixtureId,
+          { expectedCreateBindings: createBindings(), providerBase: state.providerBase },
+        ),
+      /stage link was refused/,
+    );
+    assert.equal(existsSync(duplicateFinalStage), true);
+    unlinkDurable(duplicateFinalStage);
+
+    const foreignAliasSource = join(state.root, "foreign-config-source.json");
+    writeDurable(foreignAliasSource, configBytes);
+    const foreignLinkedStage = join(
+      dirname(configPath),
+      privateStageName(configPath, configBytes, "5".repeat(32)),
+    );
+    linkSync(foreignAliasSource, foreignLinkedStage);
+    assert.throws(
+      () =>
+        inspectControlledBackgroundProviderPrefix(
+          state.evidenceDirectory,
+          state.fixtureId,
+          { expectedCreateBindings: createBindings(), providerBase: state.providerBase },
+        ),
+      /stage link was refused/,
+    );
+    assert.equal(existsSync(foreignLinkedStage), true);
+    assert.equal(existsSync(foreignAliasSource), true);
+    unlinkDurable(foreignLinkedStage);
+    unlinkDurable(foreignAliasSource);
+
+    unlinkDurable(configPath);
+    const configSha256 = providerProcessDigest(configBytes);
+    const completeStage = join(
+      dirname(configPath),
+      privateStageName(configPath, configBytes, "6".repeat(32)),
+    );
+    writeDurable(completeStage, configBytes);
+    const stagedComplete = inspectControlledBackgroundProviderPrefix(
+      state.evidenceDirectory,
+      state.fixtureId,
+      { expectedCreateBindings: createBindings(), providerBase: state.providerBase },
+    );
+    assert.equal(stagedComplete.residual.private_publications.length, 1);
+    assert.equal(
+      stagedComplete.residual.private_publications[0].disposition,
+      "staged-complete",
+    );
+    assert.equal(
+      stagedComplete.effectFrontier.effect,
+      "controller-config",
+    );
+    assert.equal(stagedComplete.effectFrontier.disposition, "pending");
+    assert.equal(existsSync(completeStage), true);
+    unlinkDurable(completeStage);
+
+    const wrongDigestStage = join(
+      dirname(configPath),
+      privateStageName(configPath, configBytes, "d".repeat(32)).replace(
+        configSha256,
+        "1".repeat(64),
+      ),
+    );
+    writeDurable(wrongDigestStage, configBytes);
+    assert.throws(
+      () =>
+        inspectControlledBackgroundProviderPrefix(
+          state.evidenceDirectory,
+          state.fixtureId,
+          { expectedCreateBindings: createBindings(), providerBase: state.providerBase },
+        ),
+      /progressive stage digest was refused/,
+    );
+    assert.equal(existsSync(wrongDigestStage), true);
+    unlinkDurable(wrongDigestStage);
+
+    const invalidConfigBytes = providerProcessBytes({ schema: "invalid-controller-config" });
+    const invalidConfigStage = join(
+      dirname(configPath),
+      privateStageName(configPath, invalidConfigBytes, "e".repeat(32)),
+    );
+    writeDurable(invalidConfigStage, invalidConfigBytes);
+    assert.throws(
+      () =>
+        inspectControlledBackgroundProviderPrefix(
+          state.evidenceDirectory,
+          state.fixtureId,
+          { expectedCreateBindings: createBindings(), providerBase: state.providerBase },
+        ),
+      /controller config fields were refused/,
+    );
+    assert.equal(existsSync(invalidConfigStage), true);
+    unlinkDurable(invalidConfigStage);
+
+    const toolchainPath = join(state.evidenceDirectory, "background-toolchain.json");
+    const toolchainBytes = readFileSync(toolchainPath);
+    const linkedToolchainStage = join(
+      state.evidenceDirectory,
+      artifactStageName("background-toolchain.json", toolchainBytes, "3".repeat(32)),
+    );
+    linkSync(toolchainPath, linkedToolchainStage);
+    const concurrentPrivateStage = join(
+      dirname(configPath),
+      privateStageName(configPath, configBytes, "4".repeat(32)),
+    );
+    writeDurable(
+      concurrentPrivateStage,
+      configBytes.subarray(0, configBytes.length - 1),
+    );
+    assert.throws(
+      () =>
+        inspectControlledBackgroundProviderPrefix(
+          state.evidenceDirectory,
+          state.fixtureId,
+          { expectedCreateBindings: createBindings(), providerBase: state.providerBase },
+        ),
+      /pending publications were ambiguous/,
+    );
+    assert.equal(existsSync(linkedToolchainStage), true);
+    assert.equal(existsSync(concurrentPrivateStage), true);
+    unlinkDurable(linkedToolchainStage);
+    unlinkDurable(concurrentPrivateStage);
+    writeDurable(configPath, configBytes);
+
+    const hostagentConfigPath = join(root, "t", "hostagent-config.json");
+    const staleLinkedStage = join(
+      dirname(hostagentConfigPath),
+      privateStageName(
+        hostagentConfigPath,
+        readFileSync(hostagentConfigPath),
+        "f".repeat(32),
+      ),
+    );
+    linkSync(hostagentConfigPath, staleLinkedStage);
+    assert.throws(
+      () =>
+        inspectControlledBackgroundProviderPrefix(
+          state.evidenceDirectory,
+          state.fixtureId,
+          { expectedCreateBindings: createBindings(), providerBase: state.providerBase },
+        ),
+      /causal gap/,
+    );
+    assert.equal(existsSync(staleLinkedStage), true);
+    unlinkDurable(staleLinkedStage);
+
+    const pidPath = hostagentRecordPath(state);
+    const secondPartialStage = join(
+      dirname(pidPath),
+      privateStageName(pidPath, completeBytes, "1".repeat(32)),
+    );
+    writeDurable(partialStage, completeBytes.subarray(0, completeBytes.length - 1));
+    writeDurable(secondPartialStage, completeBytes.subarray(0, completeBytes.length - 1));
+    assert.throws(
+      () =>
+        inspectControlledBackgroundProviderPrefix(
+          state.evidenceDirectory,
+          state.fixtureId,
+          { expectedCreateBindings: createBindings(), providerBase: state.providerBase },
+        ),
+      /progressive stages were ambiguous/,
+    );
+    assert.equal(existsSync(partialStage), true);
+    assert.equal(existsSync(secondPartialStage), true);
+    unlinkDurable(partialStage);
+    unlinkDurable(secondPartialStage);
+
+    const foreignStage = join(
+      dirname(configPath),
+      `.background-private-stage-${"d".repeat(64)}-${providerProcessDigest(configBytes)}-${"e".repeat(32)}`,
+    );
+    writeDurable(foreignStage, configBytes);
+    assert.throws(
+      () =>
+        inspectControlledBackgroundProviderPrefix(
+          state.evidenceDirectory,
+          state.fixtureId,
+          { expectedCreateBindings: createBindings(), providerBase: state.providerBase },
+        ),
+      /stage target was refused/,
+    );
+    assert.equal(existsSync(foreignStage), true);
+  } finally {
+    await cleanupFixture(state);
+  }
+});
+
+test("dynamic private stages require their durable process decisions", async (t) => {
+  await t.test("controller readiness requires launch authority", async () => {
+    const state = fixture();
+    try {
+      planControlledBackgroundProviderCreate({
+        bindings: createBindings(),
+        evidenceDirectory: state.evidenceDirectory,
+        fixtureId: state.fixtureId,
+        providerBase: state.providerBase,
+      });
+      await assert.rejects(
+        () =>
+          launchControlledBackgroundProviderWithAuthorityGate(
+            {
+              evidenceDirectory: state.evidenceDirectory,
+              fixtureId: state.fixtureId,
+              maximumLifetimeMilliseconds: 2_000,
+              providerBase: state.providerBase,
+            },
+            ({ checkpoint }) => {
+              if (checkpoint === "before-controller-spawn") throw new Error("veto launch");
+            },
+          ),
+        /veto launch/,
+      );
+      unlinkDurable(join(state.evidenceDirectory, "controller-launch-decision.json"));
+      const readyPath = join(providerRootPath(state), "t", "controller-ready.json");
+      const readyBytes = providerProcessBytes({ schema: "partial-ready" });
+      const stage = join(dirname(readyPath), privateStageName(readyPath, readyBytes));
+      writeDurable(stage, readyBytes.subarray(0, readyBytes.length - 1));
+      assert.throws(
+        () =>
+          inspectControlledBackgroundProviderPrefix(
+            state.evidenceDirectory,
+            state.fixtureId,
+            { expectedCreateBindings: createBindings(), providerBase: state.providerBase },
+          ),
+        /controller-ready had a causal gap/,
+      );
+      assert.equal(existsSync(stage), true);
+    } finally {
+      await cleanupFixture(state);
+    }
+  });
+
+  await t.test("hostagent PID requires start authority", async () => {
+    const state = fixture();
+    try {
+      planControlledBackgroundProviderCreate({
+        bindings: createBindings(),
+        evidenceDirectory: state.evidenceDirectory,
+        fixtureId: state.fixtureId,
+        providerBase: state.providerBase,
+      });
+      await assert.rejects(
+        () =>
+          launchControlledBackgroundProviderWithAuthorityGate(
+            {
+              evidenceDirectory: state.evidenceDirectory,
+              fixtureId: state.fixtureId,
+              maximumLifetimeMilliseconds: 2_000,
+              providerBase: state.providerBase,
+            },
+            ({ checkpoint }) => {
+              if (checkpoint === "before-hostagent-start-delivery") {
+                throw new Error("veto start");
+              }
+            },
+          ),
+        /veto start/,
+      );
+      unlinkDurable(join(state.evidenceDirectory, "provider-start-decision.json"));
+      const pidPath = hostagentRecordPath(state);
+      const pidBytes = providerProcessBytes({ schema: "partial-pid" });
+      const stage = join(dirname(pidPath), privateStageName(pidPath, pidBytes));
+      writeDurable(stage, pidBytes.subarray(0, pidBytes.length - 1));
+      assert.throws(
+        () =>
+          inspectControlledBackgroundProviderPrefix(
+            state.evidenceDirectory,
+            state.fixtureId,
+            { expectedCreateBindings: createBindings(), providerBase: state.providerBase },
+          ),
+        /hostagent-pid had a causal gap/,
+      );
+      assert.equal(existsSync(stage), true);
+    } finally {
+      await cleanupFixture(state);
+    }
+  });
+});
+
+test("the global create prefix binds root preparation, toolchain and configs", async (t) => {
+  const prepareThroughLaunchDecision = async (state) => {
+    planControlledBackgroundProviderCreate({
+      bindings: createBindings(),
+      evidenceDirectory: state.evidenceDirectory,
+      fixtureId: state.fixtureId,
+      providerBase: state.providerBase,
+    });
+    await assert.rejects(
+      () =>
+        launchControlledBackgroundProviderWithAuthorityGate(
+          {
+            evidenceDirectory: state.evidenceDirectory,
+            fixtureId: state.fixtureId,
+            maximumLifetimeMilliseconds: 2_000,
+            providerBase: state.providerBase,
+          },
+          ({ checkpoint }) => {
+            if (checkpoint === "before-controller-spawn") throw new Error("veto launch");
+          },
+        ),
+      /veto launch/,
+    );
+  };
+
+  await t.test("toolchain cannot survive an incomplete prepared root", async () => {
+    const state = fixture();
+    try {
+      await prepareThroughLaunchDecision(state);
+      const contextPath = join(
+        providerRootPath(state),
+        "d",
+        "contexts",
+        "meta",
+        providerProcessDigest(Buffer.from(`context\0${state.fixtureId}`, "utf8")).slice(0, 32),
+        "meta.json",
+      );
+      unlinkDurable(contextPath);
+      assert.throws(
+        () =>
+          inspectControlledBackgroundProviderPrefix(
+            state.evidenceDirectory,
+            state.fixtureId,
+            { expectedCreateBindings: createBindings(), providerBase: state.providerBase },
+          ),
+        /causal gap/,
+      );
+    } finally {
+      await cleanupFixture(state);
+    }
+  });
+
+  await t.test("configs cannot survive without their toolchain", async () => {
+    const state = fixture();
+    try {
+      await prepareThroughLaunchDecision(state);
+      unlinkDurable(join(state.evidenceDirectory, "controller-launch-decision.json"));
+      unlinkDurable(join(state.evidenceDirectory, "background-toolchain.json"));
+      assert.throws(
+        () =>
+          inspectControlledBackgroundProviderPrefix(
+            state.evidenceDirectory,
+            state.fixtureId,
+            { expectedCreateBindings: createBindings(), providerBase: state.providerBase },
+          ),
+        /config lacked its toolchain|causal gap/,
+      );
+    } finally {
+      await cleanupFixture(state);
+    }
+  });
+
+  await t.test("an earlier-final linked evidence stage is refused and preserved", async () => {
+    const state = fixture();
+    try {
+      await prepareThroughLaunchDecision(state);
+      unlinkDurable(join(state.evidenceDirectory, "controller-launch-decision.json"));
+      const authorityPath = join(
+        state.evidenceDirectory,
+        "background-create-authority.json",
+      );
+      const authorityBytes = readFileSync(authorityPath);
+      const stagePath = join(
+        state.evidenceDirectory,
+        artifactStageName(
+          "background-create-authority.json",
+          authorityBytes,
+          "7".repeat(32),
+        ),
+      );
+      linkSync(authorityPath, stagePath);
+      assert.throws(
+        () =>
+          inspectControlledBackgroundProviderPrefix(
+            state.evidenceDirectory,
+            state.fixtureId,
+            { expectedCreateBindings: createBindings(), providerBase: state.providerBase },
+          ),
+        /create-prefix stage link was foreign/,
+      );
+      assert.equal(existsSync(stagePath), true);
+      assert.equal(lstatSync(authorityPath, { bigint: true }).nlink, 2n);
+    } finally {
+      await cleanupFixture(state);
+    }
+  });
+
+  await t.test("a prepared root cannot disappear behind a later prefix", async () => {
+    const state = fixture();
+    try {
+      await prepareThroughLaunchDecision(state);
+      const displacedRoot = join(state.root, "displaced-provider-root");
+      renameSync(providerRootPath(state), displacedRoot);
+      assert.throws(
+        () =>
+          inspectControlledBackgroundProviderPrefix(
+            state.evidenceDirectory,
+            state.fixtureId,
+            { expectedCreateBindings: createBindings(), providerBase: state.providerBase },
+          ),
+        /provider root disappeared after preparation|causal gap/,
+      );
+      assert.equal(existsSync(displacedRoot), true);
+    } finally {
+      await cleanupFixture(state);
+    }
+  });
+});
+
+test("the controller refuses a wrong configuration digest before child effects", async () => {
+  const state = fixture();
+  try {
+    planControlledBackgroundProviderCreate({
+      bindings: createBindings(),
+      evidenceDirectory: state.evidenceDirectory,
+      fixtureId: state.fixtureId,
+      providerBase: state.providerBase,
+    });
+    await assert.rejects(
+      () =>
+        launchControlledBackgroundProviderWithAuthorityGate(
+          {
+            evidenceDirectory: state.evidenceDirectory,
+            fixtureId: state.fixtureId,
+            maximumLifetimeMilliseconds: 2_000,
+            providerBase: state.providerBase,
+          },
+          ({ checkpoint }) => {
+            if (checkpoint === "before-controller-spawn") throw new Error("veto launch");
+          },
+        ),
+      /veto launch/,
+    );
+    const controllerSource = readFileSync(
+      new URL("./fixtures/clean-engine-background-controller.mjs", import.meta.url),
+      "utf8",
+    );
+    const result = spawnSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "--eval",
+        controllerSource,
+        join(providerRootPath(state), "t", "controller-config.json"),
+        "0".repeat(64),
+      ],
+      {
+        cwd: providerRootPath(state),
+        encoding: "utf8",
+        timeout: 2_000,
+      },
+    );
+    assert.equal(result.signal, null);
+    assert.equal(result.status, 70);
+    assert.match(result.stderr, /config identity changed/);
+    assert.equal(
+      existsSync(join(providerRootPath(state), "t", "controller-ready.json")),
+      false,
+    );
+    assert.equal(
+      existsSync(join(state.evidenceDirectory, "controller-witness.json")),
+      false,
+    );
+    assert.equal(
+      existsSync(join(state.evidenceDirectory, "provider-start-decision.json")),
+      false,
+    );
+  } finally {
+    await cleanupFixture(state);
+  }
+});
+
+test("evidence-prefix inspection is non-mutating and validates complete next stages", () => {
+  const state = fixture();
+  try {
+    const planned = planControlledBackgroundProviderCreate({
+      bindings: createBindings(),
+      evidenceDirectory: state.evidenceDirectory,
+      fixtureId: state.fixtureId,
+      providerBase: state.providerBase,
+    });
+    const authorityPath = join(
+      state.evidenceDirectory,
+      "background-create-authority.json",
+    );
+    const linkedStage = join(
+      state.evidenceDirectory,
+      artifactStageName(
+        "background-create-authority.json",
+        planned.authority.bytes,
+        "f".repeat(32),
+      ),
+    );
+    linkSync(authorityPath, linkedStage);
+    const linked = inspectControlledBackgroundProviderPrefix(
+      state.evidenceDirectory,
+      state.fixtureId,
+      { expectedCreateBindings: createBindings(), providerBase: state.providerBase },
+    );
+    assert.equal(linked.pendingPublication.disposition, "linked-complete");
+    assert.equal(linked.replaySafe, false);
+    assert.equal(existsSync(linkedStage), true);
+    assert.equal(lstatSync(authorityPath, { bigint: true }).nlink, 2n);
+    unlinkDurable(linkedStage);
+
+    const actualSha256 = providerProcessDigest(planned.authority.bytes);
+    const wrongDigestStage = join(
+      state.evidenceDirectory,
+      artifactStageName(
+        "background-toolchain.json",
+        planned.authority.bytes,
+        "0".repeat(32),
+      ).replace(actualSha256, "2".repeat(64)),
+    );
+    writeDurable(wrongDigestStage, planned.authority.bytes);
+    assert.throws(
+      () =>
+        inspectControlledBackgroundProviderPrefix(
+          state.evidenceDirectory,
+          state.fixtureId,
+          { expectedCreateBindings: createBindings(), providerBase: state.providerBase },
+        ),
+      /stage digest was refused/,
+    );
+    assert.equal(existsSync(wrongDigestStage), true);
+    unlinkDurable(wrongDigestStage);
+
+    const invalidToolchainStage = join(
+      state.evidenceDirectory,
+      artifactStageName(
+        "background-toolchain.json",
+        planned.authority.bytes,
+        "1".repeat(32),
+      ),
+    );
+    writeDurable(invalidToolchainStage, planned.authority.bytes);
+    assert.throws(
+      () =>
+        inspectControlledBackgroundProviderPrefix(
+          state.evidenceDirectory,
+          state.fixtureId,
+          { expectedCreateBindings: createBindings(), providerBase: state.providerBase },
+        ),
+      /toolchain (?:fields )?were refused/,
+    );
+    assert.equal(existsSync(invalidToolchainStage), true);
+  } finally {
+    rmSync(state.root, { force: true, recursive: true });
+  }
+});
+
+test("an interrupted root mkdir is an exact residual and unknown leaves remain blocking", async () => {
+  const state = fixture();
+  try {
+    planControlledBackgroundProviderCreate({
+      bindings: createBindings(),
+      evidenceDirectory: state.evidenceDirectory,
+      fixtureId: state.fixtureId,
+      providerBase: state.providerBase,
+    });
+    const root = providerRootPath(state);
+    mkdirSync(root, { mode: 0o700 });
+    chmodSync(root, 0o700);
+    const interrupted = inspectControlledBackgroundProviderPrefix(
+      state.evidenceDirectory,
+      state.fixtureId,
+      { expectedCreateBindings: createBindings(), providerBase: state.providerBase },
+    );
+    assert.equal(interrupted.residual.root_disposition, "ownership-pending");
+    assert.deepEqual(interrupted.residual.root_inventory, []);
+    assert.match(interrupted.residualSha256, /^[0-9a-f]{64}$/);
+    assert.equal(interrupted.replaySafe, false);
+
+    let gateCalls = 0;
+    await assert.rejects(
+      () =>
+        launchControlledBackgroundProviderWithAuthorityGate(
+          {
+            evidenceDirectory: state.evidenceDirectory,
+            fixtureId: state.fixtureId,
+            maximumLifetimeMilliseconds: 2_000,
+            providerBase: state.providerBase,
+          },
+          () => {
+            gateCalls += 1;
+          },
+        ),
+      /checkpoint (?:effect )?frontier was refused/,
+    );
+    assert.equal(gateCalls, 0);
+
+    const unknown = join(root, "foreign-leaf");
+    writeDurable(unknown, Buffer.from("foreign\n", "utf8"));
+    assert.throws(
+      () =>
+        inspectControlledBackgroundProviderPrefix(
+          state.evidenceDirectory,
+          state.fixtureId,
+          { expectedCreateBindings: createBindings(), providerBase: state.providerBase },
+        ),
+      /root inventory was refused/,
+    );
+    assert.equal(readFileSync(unknown, "utf8"), "foreign\n");
+  } finally {
+    rmSync(state.root, { force: true, recursive: true });
+  }
+});
+
 test("launch requires one exact fixture-only create authority before root mutation", async () => {
   const state = fixture();
   try {
@@ -426,6 +1562,48 @@ test("launch requires one exact fixture-only create authority before root mutati
     );
     assert.equal(existsSync(providerRootPath(state)), false);
     assert.deepEqual(readdirSync(state.evidenceDirectory), []);
+  } finally {
+    await cleanupFixture(state);
+  }
+});
+
+test("the state gate can only veto and cannot return launch authority", async () => {
+  const state = fixture();
+  try {
+    planControlledBackgroundProviderCreate({
+      bindings: createBindings(),
+      evidenceDirectory: state.evidenceDirectory,
+      fixtureId: state.fixtureId,
+      providerBase: state.providerBase,
+    });
+    await assert.rejects(
+      () =>
+        launchControlledBackgroundProviderWithAuthorityGate(
+          {
+            evidenceDirectory: state.evidenceDirectory,
+            fixtureId: state.fixtureId,
+            maximumLifetimeMilliseconds: 2_000,
+            providerBase: state.providerBase,
+          },
+          () => ({ authority: "forged" }),
+        ),
+      /gate returned authority/,
+    );
+    assert.equal(existsSync(providerRootPath(state)), false);
+    await assert.rejects(
+      () =>
+        launchControlledBackgroundProviderWithAuthorityGate(
+          {
+            evidenceDirectory: state.evidenceDirectory,
+            fixtureId: state.fixtureId,
+            maximumLifetimeMilliseconds: 2_000,
+            providerBase: state.providerBase,
+          },
+          async () => undefined,
+        ),
+      /gate returned authority/,
+    );
+    assert.equal(existsSync(providerRootPath(state)), false);
   } finally {
     await cleanupFixture(state);
   }
@@ -578,7 +1756,10 @@ test("controller reproof rejects a rewritten durable start decision with no host
     rewritten.decision = "abort";
     rewriteCanonicalArtifact(startDecisionPath, rewritten);
 
-    await assert.rejects(() => execution, /controller closed before start/);
+    await assert.rejects(
+      () => execution,
+      /provider start decision was refused/,
+    );
     assert.equal(existsSync(hostagentRecordPath(state)), false);
     assert.equal(
       existsSync(
@@ -599,28 +1780,33 @@ test("controller reproof rejects a rewritten durable start decision with no host
 test("controller reproof rejects changed start-gate inputs with no hostagent", async (t) => {
   const cases = [
     {
+      error: /create authority binding changed/,
       label: "create authority",
       path: (state) => join(state.evidenceDirectory, "background-create-authority.json"),
       rewrite: (value) => ({ ...value, source_sequence: value.source_sequence + 1 }),
     },
     {
+      error: /controller launch decision was refused/,
       label: "controller launch decision",
       path: (state) =>
         join(state.evidenceDirectory, "controller-launch-decision.json"),
       rewrite: (value) => ({ ...value, decision: "abort" }),
     },
     {
+      error: /controller witness was refused/,
       label: "controller witness",
       path: (state) => join(state.evidenceDirectory, "controller-witness.json"),
       rewrite: (value) => ({ ...value, execution_protocol: "changed" }),
     },
     {
+      error: /root owner was refused/,
       label: "root owner",
       path: (state) =>
         join(providerRootPath(state), ".synveda-background-provider-owner.json"),
       rewrite: (value) => ({ ...value, provider_profile: `${value.provider_profile}-changed` }),
     },
     {
+      error: /controller launch inputs were refused/,
       label: "hostagent config",
       path: (state) => join(providerRootPath(state), "t", "hostagent-config.json"),
       rewrite: (value) => ({ ...value, profile: `${value.profile}-changed` }),
@@ -648,7 +1834,7 @@ test("controller reproof rejects changed start-gate inputs with no hostagent", a
         const value = JSON.parse(readFileSync(target, "utf8"));
         rewriteCanonicalArtifact(target, entry.rewrite(value));
 
-        await assert.rejects(() => execution, /controller closed before start/);
+        await assert.rejects(() => execution, entry.error);
         assert.equal(existsSync(hostagentRecordPath(state)), false);
         const sockets = providerSocketPaths(state);
         assert.equal(existsSync(sockets.hostagent), false);
@@ -679,7 +1865,7 @@ test("controller death before the durable start request creates no hostagent", a
 
     await assert.rejects(
       () => execution,
-      /controller (?:start channel failed|closed before start|channel was unavailable)/,
+      /authority checkpoint frontier was refused/,
     );
     await waitForProcessAbsent(witness.controller_pid);
     assert.equal(existsSync(hostagentRecordPath(state)), false);
@@ -1276,6 +2462,14 @@ test("retirement planning recovers exact pre-plan graceful expiry", async () => 
     await waitForProcessAbsent(started.hostagentPid);
     assert.equal(existsSync(started.paths.haSocket), false);
     assert.equal(existsSync(started.paths.engineSocket), false);
+    const expired = inspectControlledBackgroundProviderPrefix(
+      state.evidenceDirectory,
+      state.fixtureId,
+      { expectedCreateBindings: createBindings(), providerBase: state.providerBase },
+    );
+    assert.equal(expired.evidenceStage, "provider-identity");
+    assert.equal(expired.residual.hostagent_presence, "proved-absent");
+    assert.equal(expired.residual.sockets, "absent");
 
     await plan(state);
     const retired = await retire(state);

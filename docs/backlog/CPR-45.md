@@ -488,7 +488,19 @@ ACLs, xattrs, flags and bind mounts remain trusted-host limits.
 
 ### Immediate next slice
 
-Wrap the fixture-only background-create chain in state-born authority under the
+The inner background contract is now v3. It places synchronous veto-only
+checkpoints before root publication, controller spawn, start-decision
+publication, start delivery and provider-identity publication; each checkpoint
+reopens the full ordered evidence/private-file frontier, compares it with
+launcher-owned identities and cannot return authority. The terminal veto runs
+after reauthenticating both provider sockets and prevalidating the identity
+candidate, immediately before synchronous publication. Private
+root/config/readiness/PID evidence uses
+fsynced stages and no-replace links, sockets start under a restrictive umask,
+and a non-mutating inspector validates a single global causal frontier and
+reports unattested, observed-present or proved-absent process state.
+
+Now wrap the fixture-only background-create chain in state-born authority under the
 append-only mutation journal. Reassert the real slot/head before each effect
 gate and recover every partial create prefix to either an exact residual
 identity or proved complete absence without replaying a durable start. Keep
