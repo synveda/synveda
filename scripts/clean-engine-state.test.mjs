@@ -247,7 +247,7 @@ function fakeProviderAdapter({
 function stageAbandonedProviderLease(state, {
   ownerPid = 2_147_483_647,
   providerContractSha256 =
-    "644704a6fccc5867c9987d6a971a980086d7fe77712ca4f892ae4aef839fd799",
+    "9b472c7749667e773423d96a56cbc167f454d477cd6b0280b308533bab62bd5f",
   publishIntent = true,
 } = {}) {
   const active = activeRun(state);
@@ -1435,12 +1435,75 @@ test("the fake provider adapter holds one slot across intent effect and result",
     const intent = parse(join(activeRun(state), "01-provider-create-intent.json"));
     assert.equal(
       intent.result.provider_contract_sha256,
-      "644704a6fccc5867c9987d6a971a980086d7fe77712ca4f892ae4aef839fd799",
+      "9b472c7749667e773423d96a56cbc167f454d477cd6b0280b308533bab62bd5f",
     );
     assert.equal(intent.result.provider_resource, `synveda-cpr45-${candidate.run_id}`);
     assertPrivate(join(activeRun(state), ".mutation-slot-00"), 0o600);
     assertPrivate(join(activeRun(state), ".mutation-close-00"), 0o600);
     assert.equal(run(state, "verify").status, 0);
+  } finally {
+    rmSync(state.root, { recursive: true, force: true });
+  }
+});
+
+test("the synchronous fake cannot publish controlled-provider evidence", () => {
+  const state = fixture();
+  try {
+    assert.equal(run(state, "plan").status, 0);
+    assert.throws(
+      () =>
+        executeProviderCreateForExecutor({
+          adapter: fakeProviderAdapter({
+            executeResult: {
+              evidence_class: "controlled-fake",
+              platform: "deterministic-posix",
+              provider_contract_sha256:
+                "9b472c7749667e773423d96a56cbc167f454d477cd6b0280b308533bab62bd5f",
+              provider_evidence_sha256: "d".repeat(64),
+              provider_name: "controlled-fake",
+              runtime_name: "none",
+            },
+          }),
+          repoRoot: state.repo,
+          stateBase: state.state,
+        }),
+      /fake provider result was refused/,
+    );
+    assert.equal(existsSync(join(activeRun(state), "02-provider-create-passed.json")), false);
+  } finally {
+    rmSync(state.root, { recursive: true, force: true });
+  }
+});
+
+test("persisted synchronous state cannot be relabelled as controlled evidence", () => {
+  const state = fixture();
+  try {
+    assert.equal(run(state, "plan").status, 0);
+    executeProviderCreateForExecutor({
+      adapter: fakeProviderAdapter(),
+      repoRoot: state.repo,
+      stateBase: state.state,
+    });
+    const active = activeRun(state);
+    const receiptPath = join(active, "02-provider-create-passed.json");
+    const closePath = join(active, ".mutation-close-00");
+    const receipt = parse(receiptPath);
+    receipt.result = {
+      evidence_class: "controlled-fake",
+      platform: "deterministic-posix",
+      provider_contract_sha256: receipt.result.provider_contract_sha256,
+      provider_evidence_sha256: "d".repeat(64),
+      provider_name: "controlled-fake",
+      runtime_name: "none",
+    };
+    const receiptBytes = canonicalBytes(receipt);
+    writeFileSync(receiptPath, receiptBytes, { mode: 0o600 });
+    const close = parse(closePath);
+    close.result_head_sha256 = sha256(receiptBytes);
+    writeFileSync(closePath, canonicalBytes(close), { mode: 0o600 });
+    const refused = run(state, "status");
+    assert.equal(refused.status, 78);
+    assert.match(refused.stderr, /synchronous provider passing evidence was refused/);
   } finally {
     rmSync(state.root, { recursive: true, force: true });
   }
@@ -1744,28 +1807,25 @@ test("a recovery claim without its permanent slot is refused", () => {
   }
 });
 
-test("provider recovery rebinds the fixed fake contract recorded by the intent", () => {
+test("provider recovery rejects a mismatched fixed fake contract before claiming", () => {
   const state = fixture();
   try {
     assert.equal(run(state, "plan").status, 0);
     const { active } = stageAbandonedProviderMutation(state, {
       providerContractSha256: "3".repeat(64),
     });
-    const confirmation = providerRecoveryConfirmationForExecutor({
-      repoRoot: state.repo,
-      stateBase: state.state,
-    });
     assert.throws(
-      () => recoverProviderCreateForExecutor({
-        adapter: fakeProviderAdapter(),
-        confirmation,
+      () => providerRecoveryConfirmationForExecutor({
         repoRoot: state.repo,
         stateBase: state.state,
       }),
-      /provider recovery intent binding was refused/,
+      /synchronous provider mutation intent was refused/,
     );
     assertPrivate(join(active, ".mutation-slot-00"), 0o600);
-    assertPrivate(join(active, ".mutation-recovery-00-01"), 0o600);
+    assert.deepEqual(
+      readdirSync(active).filter((name) => name.startsWith(".mutation-recovery-")),
+      [".mutation-recovery-00-00"],
+    );
   } finally {
     rmSync(state.root, { recursive: true, force: true });
   }
@@ -1839,7 +1899,7 @@ test("recovery refuses the exact live provider owner without publishing a claim"
         repoRoot: state.repo,
         stateBase: state.state,
       }),
-      /provider result fields were refused/,
+      /fake provider result was refused/,
     );
     const confirmation = providerRecoveryConfirmationForExecutor({
       repoRoot: state.repo,
@@ -2405,7 +2465,7 @@ test("state-owned finalization publishes and verifies the exact eligible environ
       stateBase: state.state,
     });
     assert.equal(finalized.receipt.phase, "finalize-passed");
-    assert.equal(finalized.manifest.schema, "synveda.clean-engine.environment.v1");
+    assert.equal(finalized.manifest.schema, "synveda.clean-engine.synthetic-environment.v1");
     assertPrivate(join(active, "environment.json"), 0o600);
     assertPrivate(join(active, "15-finalize-passed.json"), 0o600);
     assert.equal(run(state, "verify").status, 0);
@@ -2593,22 +2653,27 @@ test("a finalized environment is mandatory, private and not replaceable", () => 
   }
 });
 
-test("receipt schema v1 is an explicit pre-provider hard-cut refusal", () => {
-  const state = fixture();
-  try {
-    assert.equal(run(state, "plan").status, 0);
-    const path = join(activeRun(state), "00-plan.json");
-    const legacy = parse(path);
-    legacy.schema = "synveda.clean-engine.receipt.v1";
-    const ordered = Object.fromEntries(
-      Object.entries(legacy).sort(([left], [right]) => left.localeCompare(right)),
-    );
-    writeFileSync(path, `${JSON.stringify(ordered)}\n`, { mode: 0o600 });
-    const refused = run(state, "status");
-    assert.equal(refused.status, 78);
-    assert.equal(refused.stderr, "clean-engine: plan receipt contract was refused\n");
-  } finally {
-    rmSync(state.root, { recursive: true, force: true });
+test("receipt schemas v1 and v2 are explicit pre-provider hard-cut refusals", () => {
+  for (const schema of [
+    "synveda.clean-engine.receipt.v1",
+    "synveda.clean-engine.receipt.v2",
+  ]) {
+    const state = fixture();
+    try {
+      assert.equal(run(state, "plan").status, 0);
+      const path = join(activeRun(state), "00-plan.json");
+      const legacy = parse(path);
+      legacy.schema = schema;
+      const ordered = Object.fromEntries(
+        Object.entries(legacy).sort(([left], [right]) => left.localeCompare(right)),
+      );
+      writeFileSync(path, `${JSON.stringify(ordered)}\n`, { mode: 0o600 });
+      const refused = run(state, "status");
+      assert.equal(refused.status, 78);
+      assert.equal(refused.stderr, "clean-engine: plan receipt contract was refused\n");
+    } finally {
+      rmSync(state.root, { recursive: true, force: true });
+    }
   }
 });
 

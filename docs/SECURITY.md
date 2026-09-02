@@ -179,9 +179,12 @@ covered by the closed exclusions. Its private proxy template contains only
 no-replace hard-linked active receipt prevent rounded or partial publication.
 Pre-publication crash residue is inert and grants no provider
 authority, but the later final cleanup must remove it. Preparation creates no
-Engine and carries no Docker auth. The version-2 synthetic receipt grammar
+Engine and carries no Docker auth. The version-3 synthetic receipt grammar
 phase-binds collisions, replays retired cleanup authority and admits a final
-manifest only after the exact success sequence. The append-only mutation
+manifest only after the exact success sequence. Provider success is explicitly
+classified and binds its intent contract; v1/v2 receipts fail closed. The
+fixture finalizer emits an explicitly non-live synthetic schema and rejects
+controlled-fake evidence. The append-only mutation
 journal binds permanent numbered slots to exact source receipt/environment
 endpoints, the prior close and a cooperative owner challenge. Permanent closes
 bind exact result endpoints, owner/recovery authority and the operation-evidence
@@ -189,8 +192,9 @@ digest; per-slot recovery claims form a gap-free prefix. Final journal names
 are never deleted or reused. Mutation-close v1 is refused as a fresh-plan hard
 cut.
 Unique fsynced stages and atomic no-replace links prevent partial final files;
-only stage aliases reconcile. A displaced live close stage retries only after
-authority and result endpoints are re-proved. An unrelated one-link alias
+only stage aliases reconcile. Every close link follows authority, result,
+operation-evidence and staged-inode reproof. A displaced live close stage
+retries only after those checks. An unrelated one-link alias
 confers no authority and cannot block that close; its final no-replace link
 loses. Generic append cannot own preflight, provider-create, provider-cleanup
 or finalization evidence.
@@ -207,11 +211,16 @@ decision, fixed-child outcome and ESRCH settlement. Before start the supervisor
 reasserts the actual slot and the actor rechecks the exact plan, owner, launch,
 witness, digest-bound slot fields and full root/leaf inventory. Only the actor
 signals its own group; its directly owned children exit on parent-IPC loss.
-The settlement binds the exact optional effect and outcome digests. Recovery
-probes but never signals a stored PGID and
-cannot replay a durable start. A launch without a witness remains uncertain
-evidence. Terminal success requires a passing outcome, completed ESRCH
-settlement and its exact digest in both receipt and mutation close.
+The settlement binds the exact optional effect and outcome digests. The effect
+is mirrored into append-only state and a controlled-fake identity binds the
+slot, intent, contract, root plan/owner and settlement; passing receipts and
+post-settlement mutation closes bind that identity. Recovery probes but never
+signals a stored PGID and cannot replay a durable start. Effect-mirror and
+identity-publication crashes converge without replay. A launch without a
+witness remains uncertain evidence. Terminal success requires a passing
+outcome, completed ESRCH settlement and the exact provider-identity digest in
+both receipt and mutation close. Attempts to relabel controlled-fake identity
+as live evidence fail closed.
 
 This remains trusted-process, fake-command-only POSIX evidence. The closed
 adapter accepts no function, command, path, environment or provider selector;
@@ -220,9 +229,9 @@ authority. Cooperative owner challenges and PGID probes do not protect against
 a hostile same-user writer or prove another PID namespace. No supported
 lifecycle target exposes the test-only execution/recovery fixtures; no
 Docker/Colima effect or deletion authority is enabled.
-The owned root has no cleanup settlement, so controlled provider cleanup and
-finalization fail closed. Disposable-provider identity, TLS registry auth, a
-zero-read remote-builder canary and exact destruction evidence remain pending.
+The owned root has no deletion settlement, so controlled provider cleanup and
+finalization fail closed. A truthful live-provider identity, TLS registry auth,
+a zero-read remote-builder canary and exact destruction evidence remain pending.
 ACLs, xattrs, file flags, bind mounts and hostile same-user path replacement
 remain trusted-host limits.
 

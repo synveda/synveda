@@ -11,8 +11,10 @@ if (
     "fail",
     "hang",
     "hold-after-decision",
+    "hold-after-effect-mirror",
     "hold-after-intent",
     "hold-after-outcome-publish",
+    "hold-after-provider-identity",
     "hold-after-root-plan",
     "hold-orphan-after-decision",
     "hold-passed-close",
@@ -24,6 +26,8 @@ if (
     "hold-before-witness",
     "orphan",
     "pass",
+    "race-failed-close",
+    "race-passed-close",
     "race-before-decision",
     "race-after-decision",
     "race-root",
@@ -40,9 +44,13 @@ const adapter = {
       "hold-orphan-after-decision",
       "kill-hang-after-decision",
     ]).has(mode) ? 30_000 : mode === "race-after-decision" ? 500 : 0,
+  after_effect_mirror_hold_milliseconds:
+    mode === "hold-after-effect-mirror" ? 30_000 : 0,
   after_intent_hold_milliseconds: mode === "hold-after-intent" ? 30_000 : 0,
   after_outcome_publish_hold_milliseconds:
     mode === "hold-after-outcome-publish" ? 1_000 : 0,
+  after_provider_identity_hold_milliseconds:
+    mode === "hold-after-provider-identity" ? 30_000 : 0,
   after_root_plan_hold_milliseconds: mode === "hold-after-root-plan" ? 30_000 : 0,
   after_settlement_hold_milliseconds: mode === "hold-after-settlement" ? 30_000 : 0,
   before_decision_hold_milliseconds:
@@ -60,9 +68,17 @@ const adapter = {
       ? "hang"
       : mode === "hold-orphan-after-decision"
         ? "orphan"
-      : new Set(["fail", "hang", "orphan"]).has(mode) ? mode : "pass",
+      : mode === "race-failed-close"
+        ? "fail"
+        : new Set(["fail", "hang", "orphan"]).has(mode)
+          ? mode
+          : "pass",
   close_prelink_hold_milliseconds:
-    new Set(["hold-passed-close", "hold-root-collision-close"]).has(mode) ? 30_000 : 0,
+    new Set(["hold-passed-close", "hold-root-collision-close"]).has(mode)
+      ? 30_000
+      : new Set(["race-failed-close", "race-passed-close"]).has(mode)
+        ? 1_000
+        : 0,
   deadline_milliseconds:
     new Set(["hang", "hold-after-outcome-publish"]).has(mode) ? 300 : 5_000,
   gate_delivery: "correct",

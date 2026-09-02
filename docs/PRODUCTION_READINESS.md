@@ -1,6 +1,6 @@
 # Production readiness
 
-Assessment date: 2026-09-01. Scope: the current context-platform checkout as a
+Assessment date: 2026-09-02. Scope: the current context-platform checkout as a
 service for individuals and small teams. Passing repository gates establishes
 repeatable behaviour; it does not establish availability, recoverability,
 supportability or a releasable supply chain.
@@ -86,15 +86,19 @@ synthetic Docker client proxy configuration, canary remote builder and private
 registry. Current ACL exploit and metadata-retention evidence is macOS plus
 deterministic Linux grammar coverage. This is not public PKIX/browser trust,
 explicit custom-CA/proxy support, a clean-volume login or recovery evidence. One
-append-only version-2 receipt machine now deterministically enforces closed
+append-only version-3 receipt machine now deterministically enforces closed
 intent/result schemas, collision-preserving cleanup-only failure paths,
-no-replace artifact publication and an exact success-only environment
-manifest. Its permanent, gap-free mutation slots, closes and per-slot recovery
+no-replace artifact publication and an exact success-only synthetic manifest.
+The fixture-only manifest schema is explicitly non-live and controlled-fake
+evidence is structurally ineligible. Provider success is classified and bound
+to the exact provider-contract digest from its intent; receipt v1/v2 state is
+refused. Its permanent, gap-free mutation slots, closes and per-slot recovery
 claims bind each source/result endpoint, prior close and exact owner/recovery
 authority plus operation evidence; final journal names are never deleted or
 reused, and mutation-close v1 is a fresh-plan refusal. Only staged aliases
-reconcile, and a cooperatively displaced close stage retries only after exact
-authority and endpoint revalidation. Generic append cannot fabricate
+reconcile, and every close link follows exact authority, endpoint,
+operation-evidence and staged-inode revalidation. A cooperatively displaced
+stage retries only after those checks. Generic append cannot fabricate
 preflight, provider-create, provider-cleanup or finalization evidence. The
 synchronous deterministic fake remains a rollback path. A separate controlled
 fake path holds the slot across a private external-root reservation/owner,
@@ -107,9 +111,13 @@ and outcome digests. Recovery never signals a stored PGID or replays a durable
 start. Crash tests cover
 root collision, marker-to-mirror convergence, launch-without-witness refusal,
 supervisor and actor SIGTERM/SIGKILL, timeout, an actor-owned remaining
-descendant, source/root drift and result/close publication. Terminal success is
-cross-bound to its exact completed settlement. The closed adapter accepts no
-caller function, command, path, environment or provider selector.
+descendant, source/root drift, effect/identity publication and result/close
+publication. After settlement, the exact effect is mirrored into append-only
+state and a controlled-fake identity binds the slot, intent, contract, root
+plan/owner and settlement.
+Terminal success and the mutation close bind that identity, and relabelling it
+as live evidence fails closed. The closed adapter accepts no caller function,
+command, path, environment or provider selector.
 
 This is fixed-fake POSIX process/filesystem evidence only. No supported
 lifecycle target exposes the test fixture modules; there is no Docker/Colima

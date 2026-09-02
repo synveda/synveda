@@ -199,16 +199,19 @@ fixture selection plus a private non-secret synthetic proxy template. Its
 complete run publishes through a no-replace hard-linked active receipt; inert
 pre-publication crash residue grants no provider authority and remains pending
 final cleanup. Planning reaches no Docker/provider/host authority.
-The new version-2 append-only receipt machine closes all intent/result schemas,
-collision-safe cleanup-only failure branches and success-only manifest
-eligibility. Receipt and manifest publication use no-replace artifact staging.
+The new version-3 append-only receipt machine closes all intent/result schemas,
+collision-safe cleanup-only failure branches and success-only synthetic-manifest
+eligibility. Provider success is explicitly classified and binds its exact
+intent contract; receipt v1/v2 state is refused. Receipt and manifest
+publication use no-replace artifact staging.
 The append-only mutation journal keeps permanent, gap-free slots, closes and
 per-slot recovery claims; each generation binds its source/result endpoints,
 prior close and exact owner/recovery authority. Final journal names are never
 deleted or reused. Concurrent fake writers, append versus finalize, tamper,
 partial/complete/linked stages, stale names, capacity exhaustion and a
-cooperatively removed live close stage are covered. That close retries only
-after exact authority and endpoint revalidation. Generic append cannot own
+cooperatively removed live close stage are covered. Every close link follows
+exact authority, endpoint, operation-evidence and staged-inode revalidation;
+reconciliation retries only after the same checks. Generic append cannot own
 provider-create, provider-cleanup or finalization evidence. The synchronous
 closed-data fake remains rollback. A separate controlled fake path holds the
 slot across a private root plan/reservation, mirrored inode/mode/UID owner,
@@ -216,17 +219,23 @@ durable actor launch/witness, one-way start, fixed-child effect/outcome and
 ESRCH settlement. The supervisor reasserts the actual slot before deciding;
 the actor validates the complete root inventory and digest-bound authority.
 Only the actor signals its group, and directly owned children exit on parent
-IPC loss. Settlement and the mutation close bind exact optional effect/outcome
-evidence. Exact confirmation recovers pre-reservation, marker/mirror,
-post-outcome, terminal-receipt and close crashes without replay or stored-PGID
-signalling; launch-without-witness stays blocked. The contract-derived adapter
+IPC loss. Settlement binds exact optional effect/outcome evidence; the effect
+is then mirrored into state and a controlled-fake identity binds the slot,
+intent, contract, root plan/owner and settlement. Passing receipts and
+post-settlement closes bind that identity. Exact confirmation recovers
+pre-reservation, marker/mirror, post-outcome, effect-mirror,
+identity-publication, terminal-receipt and close crashes without replay or
+stored-PGID signalling; launch-without-witness stays blocked. The
+contract-derived adapter
 accepts no caller function, command, path, environment or provider selection,
 and generic append cannot create preflight evidence. Only test fixtures expose
 it; no supported lifecycle target, Docker/Colima action, cleanup settlement or
-finalization is enabled. Next add the fixed Colima adapter with isolated short
-Colima/Lima/cache roots, private Docker state, exact pre-intent absence and
-provider-owned deletion evidence. No code may set or repurpose `HOME`; use
-explicit provider paths and `--mount none`. TLS private-registry,
+finalization is enabled. Next lock the live background-provider model, fixed
+command/toolchain closure and disk image; isolate and pre-create short
+Colima/Lima/cache/private-Docker roots, distinguish host-agent and Engine
+sockets, prove exact pre-intent absence, and add identity-bound recoverable
+deletion evidence. No code may set or repurpose `HOME`; use explicit provider
+paths, a closed helper `PATH` and `--mount none`. TLS private-registry,
 remote-builder canary, live proxy, browser and
 exact-cleanup evidence follow; only then is the privileged mapping installed
 for the first live run. Linux/reference HTTPS follows before the legacy

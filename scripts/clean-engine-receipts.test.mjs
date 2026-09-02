@@ -31,7 +31,7 @@ function plan(candidateSha256 = sha256(canonicalBytes(candidate()))) {
       state_device: "42",
       state_inode: "73",
     },
-    schema: "synveda.clean-engine.receipt.v2",
+    schema: "synveda.clean-engine.receipt.v3",
     sequence: 0,
   };
 }
@@ -48,15 +48,19 @@ function result(phase) {
       };
     case "provider-create-passed":
       return {
-        colima_version: "0.10.3",
-        docker_client_version: "29.4.0",
-        docker_server_version: "29.4.0",
+        evidence_class: "deterministic-fixture",
         engine_identity_sha256: "3".repeat(64),
         initial_containers: 0,
         initial_images: 0,
         initial_networks: ["bridge", "host", "none"],
         initial_volumes: 0,
         platform: "darwin-arm64-colima-vz",
+        provider_contract_sha256: "2".repeat(64),
+        provider_name: "colima",
+        provider_version: "0.10.3",
+        runtime_client_version: "29.4.0",
+        runtime_name: "docker",
+        runtime_server_version: "29.4.0",
         socket_contract: "receipt-owned-unix",
       };
     case "registry-intent":
@@ -298,6 +302,73 @@ test("unknown, skipped, reordered and mutated receipts are refused", () => {
   assert.throws(
     () => createNextReceipt([plan()], fixtureId, "registry-intent", result("registry-intent")),
     /next receipt phase was refused/,
+  );
+});
+
+test("provider success binds its explicit evidence class and intent contract", () => {
+  const receipts = [plan()];
+  receipts.push(
+    createNextReceipt(
+      receipts,
+      fixtureId,
+      "provider-create-intent",
+      result("provider-create-intent"),
+    ),
+  );
+
+  const mismatchedContract = result("provider-create-passed");
+  mismatchedContract.provider_contract_sha256 = "f".repeat(64);
+  assert.throws(
+    () =>
+      createNextReceipt(
+        receipts,
+        fixtureId,
+        "provider-create-passed",
+        mismatchedContract,
+      ),
+    /provider result contract binding was refused/,
+  );
+
+  const relabelledFixture = result("provider-create-passed");
+  relabelledFixture.evidence_class = "controlled-fake";
+  assert.throws(
+    () =>
+      createNextReceipt(
+        receipts,
+        fixtureId,
+        "provider-create-passed",
+        relabelledFixture,
+      ),
+    /provider result(?: was| fields were) refused/,
+  );
+
+  const controlledReceipts = [plan()];
+  const controlledContract = "c".repeat(64);
+  controlledReceipts.push(
+    createNextReceipt(controlledReceipts, fixtureId, "provider-create-intent", {
+      ...result("provider-create-intent"),
+      provider_contract_sha256: controlledContract,
+    }),
+  );
+  controlledReceipts.push(
+    createNextReceipt(controlledReceipts, fixtureId, "provider-create-passed", {
+      evidence_class: "controlled-fake",
+      platform: "deterministic-posix",
+      provider_contract_sha256: controlledContract,
+      provider_evidence_sha256: "d".repeat(64),
+      provider_name: "controlled-fake",
+      runtime_name: "none",
+    }),
+  );
+  for (const phase of receiptSuccessPath.slice(3, -1)) {
+    controlledReceipts.push(
+      createNextReceipt(controlledReceipts, fixtureId, phase, result(phase)),
+    );
+  }
+  assert.equal(validateReceiptChain(controlledReceipts, fixtureId).manifest_eligible, false);
+  assert.throws(
+    () => buildEnvironmentManifest(candidate(), canonicalBytes(candidate()), controlledReceipts),
+    /environment manifest is not eligible/,
   );
 });
 

@@ -41,6 +41,8 @@ const PROVIDER_ARTIFACT_NAMES = Object.freeze([
   "actor-decision.json",
   "actor-outcome.json",
   "actor-settlement.json",
+  "provider-effect.json",
+  "provider-identity.json",
 ]);
 const PROVIDER_SCENARIOS = Object.freeze(["fail", "hang", "orphan", "pass"]);
 const ACTOR_SCRIPT = fileURLToPath(import.meta.url);
@@ -50,8 +52,10 @@ const FIXED_FAKE_COMMAND = fileURLToPath(
 
 export const CONTROLLED_FAKE_PROVIDER_ADAPTER_FIELDS = Object.freeze([
   "after_decision_hold_milliseconds",
+  "after_effect_mirror_hold_milliseconds",
   "after_intent_hold_milliseconds",
   "after_outcome_publish_hold_milliseconds",
+  "after_provider_identity_hold_milliseconds",
   "after_root_plan_hold_milliseconds",
   "after_settlement_hold_milliseconds",
   "before_decision_hold_milliseconds",
@@ -479,7 +483,7 @@ export function controlledProviderIntendedReceipt(
     phase: "provider-create-intent",
     previous_sha256: sourceHeadSha256,
     result: controlledProviderIntent(fixtureId, rootPlan, rootPlan.ownership_nonce),
-    schema: "synveda.clean-engine.receipt.v2",
+    schema: "synveda.clean-engine.receipt.v3",
     sequence: sourceSequence + 1,
   });
 }
@@ -513,11 +517,19 @@ export function validateControlledProviderAdapter(adapter) {
       CONTROLLED_FAKE_PROVIDER_CONTRACT.max_hold_milliseconds,
     ) ||
     !bounded(
+      adapter.after_effect_mirror_hold_milliseconds,
+      CONTROLLED_FAKE_PROVIDER_CONTRACT.max_hold_milliseconds,
+    ) ||
+    !bounded(
       adapter.after_intent_hold_milliseconds,
       CONTROLLED_FAKE_PROVIDER_CONTRACT.max_hold_milliseconds,
     ) ||
     !bounded(
       adapter.after_outcome_publish_hold_milliseconds,
+      CONTROLLED_FAKE_PROVIDER_CONTRACT.max_hold_milliseconds,
+    ) ||
+    !bounded(
+      adapter.after_provider_identity_hold_milliseconds,
       CONTROLLED_FAKE_PROVIDER_CONTRACT.max_hold_milliseconds,
     ) ||
     !bounded(
@@ -1196,21 +1208,7 @@ function validateDecision(value, witness) {
   }
 }
 
-function readControlledEffect(rootPlan, witness, decision, required) {
-  const effectPath = join(rootPlan.root_path, ROOT_LAYOUT.TMPDIR, "fake-effect.json");
-  const expectedLinks = inspectFakeEffectInventory(rootPlan);
-  if (expectedLinks === undefined) {
-    if (readdirSync(join(rootPlan.root_path, ROOT_LAYOUT.TMPDIR)).length !== 0) {
-      fail("controlled provider effect publication remained uncertain", 73);
-    }
-    if (required) fail("controlled provider fake effect was unavailable", 69);
-    return undefined;
-  }
-  const effect = readCanonical(
-    effectPath,
-    "controlled provider fake effect",
-    expectedLinks,
-  );
+function validateControlledEffectValue(effect, witness, decision, label) {
   exactKeys(
     effect.value,
     [
@@ -1222,7 +1220,7 @@ function readControlledEffect(rootPlan, witness, decision, required) {
       "schema",
       "witness_sha256",
     ],
-    "controlled provider fake effect",
+    label,
   );
   const environmentKeys = [
     "COLIMA_CACHE_HOME",
@@ -1245,8 +1243,31 @@ function readControlledEffect(rootPlan, witness, decision, required) {
     canonical(effect.value.environment_keys) !== canonical(environmentKeys) ||
     decision.value.decision !== "start"
   ) {
-    fail("controlled provider fake effect was refused");
+    fail(`${label} was refused`);
   }
+}
+
+function readControlledEffect(rootPlan, witness, decision, required) {
+  const effectPath = join(rootPlan.root_path, ROOT_LAYOUT.TMPDIR, "fake-effect.json");
+  const expectedLinks = inspectFakeEffectInventory(rootPlan);
+  if (expectedLinks === undefined) {
+    if (readdirSync(join(rootPlan.root_path, ROOT_LAYOUT.TMPDIR)).length !== 0) {
+      fail("controlled provider effect publication remained uncertain", 73);
+    }
+    if (required) fail("controlled provider fake effect was unavailable", 69);
+    return undefined;
+  }
+  const effect = readCanonical(
+    effectPath,
+    "controlled provider fake effect",
+    expectedLinks,
+  );
+  validateControlledEffectValue(
+    effect,
+    witness,
+    decision,
+    "controlled provider fake effect",
+  );
   return effect;
 }
 
@@ -1256,6 +1277,171 @@ function validateEffect(rootPlan, outcome, witness, decision) {
     fail("controlled provider fake effect was refused");
   }
   return effect;
+}
+
+function validateControlledFakeEvidencePrefix(artifacts) {
+  const rootPlan = requireArtifact(artifacts, "root-plan.json");
+  const rootOwner = requireArtifact(artifacts, "root-owner.json");
+  const launch = requireArtifact(artifacts, "actor-launch.json");
+  const witness = requireArtifact(artifacts, "actor-witness.json");
+  const decision = requireArtifact(artifacts, "actor-decision.json");
+  const settlement = requireArtifact(artifacts, "actor-settlement.json");
+  validateRootPlan(rootPlan.value, rootPlan.value.fixture_id);
+  assertRootOwner(
+    rootOwner.value,
+    rootPlan.value,
+    witness.value.provider_intent_sha256,
+    rootPlan.value.ownership_nonce,
+  );
+  validateActorLaunch(launch.value, {
+    fixtureId: rootPlan.value.fixture_id,
+    intentSha256: witness.value.provider_intent_sha256,
+    rootOwnerSha256: rootOwner.sha256,
+    rootPlanSha256: rootPlan.sha256,
+    slotSequence: witness.value.slot_sequence,
+    slotSha256: witness.value.slot_sha256,
+  });
+  validateWitness(witness.value, {
+    fixtureId: rootPlan.value.fixture_id,
+    intentSha256: witness.value.provider_intent_sha256,
+    launchSha256: launch.sha256,
+    rootOwnerSha256: rootOwner.sha256,
+    rootPlanSha256: rootPlan.sha256,
+    slotSequence: witness.value.slot_sequence,
+    slotSha256: witness.value.slot_sha256,
+  });
+  validateDecision(decision.value, witness);
+  const outcome = artifacts["actor-outcome.json"];
+  let effect;
+  if (outcome !== undefined) {
+    validateOutcome(outcome.value, witness, decision);
+    effect = validateEffect(rootPlan.value, outcome, witness, decision);
+  } else {
+    effect = readControlledEffect(rootPlan.value, witness, decision, false);
+  }
+  validateSettlement(settlement.value, witness, decision, outcome, effect);
+  return Object.freeze({
+    decision,
+    effect,
+    launch,
+    outcome,
+    rootOwner,
+    rootPlan,
+    settlement,
+    witness,
+  });
+}
+
+export function mirrorControlledFakeProviderEffect(providerDirectory) {
+  const artifacts = inspectControlledProviderArtifacts(providerDirectory);
+  const evidence = validateControlledFakeEvidencePrefix(artifacts);
+  const mirrored = artifacts["provider-effect.json"];
+  if (evidence.effect === undefined) {
+    if (mirrored !== undefined) fail("controlled provider effect mirror was unexpected");
+    return undefined;
+  }
+  if (mirrored !== undefined) {
+    validateControlledEffectValue(
+      mirrored,
+      evidence.witness,
+      evidence.decision,
+      "controlled provider effect mirror",
+    );
+    if (!mirrored.bytes.equals(evidence.effect.bytes)) {
+      fail("controlled provider effect mirror changed");
+    }
+    return mirrored;
+  }
+  return publishControlledProviderArtifact(
+    providerDirectory,
+    "provider-effect.json",
+    evidence.effect.value,
+  );
+}
+
+function controlledFakeProviderIdentityValue(evidence, mirroredEffect) {
+  return {
+    actor_settlement_sha256: evidence.settlement.sha256,
+    create_slot_sha256: evidence.witness.value.slot_sha256,
+    effect_disposition: mirroredEffect === undefined ? "absent" : "mirrored",
+    effect_sha256: mirroredEffect?.sha256 ?? ZERO_SHA256,
+    fixture_id: evidence.rootPlan.value.fixture_id,
+    provider_contract_sha256: CONTROLLED_FAKE_PROVIDER_CONTRACT_SHA256,
+    provider_intent_sha256: evidence.witness.value.provider_intent_sha256,
+    provider_kind: "controlled-fake",
+    provider_profile: evidence.rootPlan.value.provider_profile,
+    provider_root_owner_sha256: evidence.rootOwner.sha256,
+    provider_root_plan_sha256: evidence.rootPlan.sha256,
+    resources: {
+      docker_context: "not-created",
+      provider_instance: "not-created",
+      provider_root: "owned",
+      socket: "not-created",
+    },
+    schema: "synveda.clean-engine.controlled-fake-provider-identity.v1",
+  };
+}
+
+function validateControlledFakeProviderIdentity(value, evidence, mirroredEffect) {
+  exactKeys(
+    value,
+    [
+      "actor_settlement_sha256",
+      "create_slot_sha256",
+      "effect_disposition",
+      "effect_sha256",
+      "fixture_id",
+      "provider_contract_sha256",
+      "provider_intent_sha256",
+      "provider_kind",
+      "provider_profile",
+      "provider_root_owner_sha256",
+      "provider_root_plan_sha256",
+      "resources",
+      "schema",
+    ],
+    "controlled provider identity",
+  );
+  exactKeys(
+    value.resources,
+    ["docker_context", "provider_instance", "provider_root", "socket"],
+    "controlled provider identity resources",
+  );
+  if (
+    canonical(value) !== canonical(controlledFakeProviderIdentityValue(evidence, mirroredEffect))
+  ) {
+    fail("controlled provider identity was refused");
+  }
+}
+
+export function publishControlledFakeProviderIdentity(providerDirectory) {
+  const artifacts = inspectControlledProviderArtifacts(providerDirectory);
+  const evidence = validateControlledFakeEvidencePrefix(artifacts);
+  const mirroredEffect = artifacts["provider-effect.json"];
+  if (evidence.effect === undefined) {
+    if (mirroredEffect !== undefined) fail("controlled provider effect mirror was unexpected");
+  } else {
+    if (mirroredEffect === undefined) fail("controlled provider effect mirror was unavailable", 69);
+    validateControlledEffectValue(
+      mirroredEffect,
+      evidence.witness,
+      evidence.decision,
+      "controlled provider effect mirror",
+    );
+    if (!mirroredEffect.bytes.equals(evidence.effect.bytes)) {
+      fail("controlled provider effect mirror changed");
+    }
+  }
+  const value = controlledFakeProviderIdentityValue(evidence, mirroredEffect);
+  const existing = artifacts["provider-identity.json"];
+  if (existing !== undefined) {
+    validateControlledFakeProviderIdentity(existing.value, evidence, mirroredEffect);
+    if (!existing.bytes.equals(controlledProviderBytes(value))) {
+      fail("controlled provider identity changed");
+    }
+    return existing;
+  }
+  return publishControlledProviderArtifact(providerDirectory, "provider-identity.json", value);
 }
 
 function validateOutcome(value, witness, decision) {
@@ -1390,18 +1576,146 @@ function actorFailureCode(settlement, outcome) {
   return "evidence-refused";
 }
 
+function controlledPassingReceiptMatches(receipt, providerIdentity) {
+  return (
+    receipt?.phase === "provider-create-passed" &&
+    receipt.result?.evidence_class === "controlled-fake" &&
+    receipt.result?.provider_contract_sha256 === CONTROLLED_FAKE_PROVIDER_CONTRACT_SHA256 &&
+    receipt.result?.provider_evidence_sha256 === providerIdentity?.sha256
+  );
+}
+
+function synchronousFakeIntendedReceipt(fixtureId, slot, contractSha256) {
+  return {
+    fixture_id: fixtureId,
+    outcome: "intent",
+    phase: "provider-create-intent",
+    previous_sha256: slot.value.source_head_sha256,
+    result: {
+      cleanup_command: "colima-delete-data-force",
+      preexisting_resource: "absent",
+      provider_contract_sha256: contractSha256,
+      provider_resource: `synveda-cpr45-${fixtureId}`,
+      provider_root_key: `sv-c45-${fixtureId.slice(0, 16)}`,
+    },
+    schema: "synveda.clean-engine.receipt.v3",
+    sequence: slot.value.source_sequence + 1,
+  };
+}
+
+function validateSynchronousFakeIntent(receipt, expected) {
+  if (receipt?.phase !== "provider-create-intent") {
+    fail("synchronous provider intent was refused");
+  }
+  exactKeys(
+    receipt.result,
+    [
+      "cleanup_command",
+      "preexisting_resource",
+      "provider_contract_sha256",
+      "provider_resource",
+      "provider_root_key",
+    ],
+    "synchronous provider intent",
+  );
+  if (!controlledProviderBytes(receipt).equals(controlledProviderBytes(expected))) {
+    fail("synchronous provider intent was refused");
+  }
+}
+
+function synchronousPassingReceiptMatches(receipt, contractSha256) {
+  return (
+    receipt?.phase === "provider-create-passed" &&
+    receipt.result?.evidence_class === "deterministic-fixture" &&
+    receipt.result?.provider_contract_sha256 === contractSha256
+  );
+}
+
 export function validateControlledProviderArtifactChain({
   artifacts,
   close,
   fixtureId,
   intentReceipt,
+  passedReceipt,
   slot,
+  synchronousContractSha256,
   terminalReceipt,
 }) {
   const names = Object.keys(artifacts);
   if (names.length === 0) {
+    if (!lowerHex(synchronousContractSha256, 64)) {
+      fail("synchronous provider contract was refused");
+    }
     if (close !== undefined && close.value.operation_evidence_sha256 !== ZERO_SHA256) {
       fail("empty provider state carried operation evidence");
+    }
+    let expectedIntent;
+    if (slot !== undefined) {
+      expectedIntent = synchronousFakeIntendedReceipt(
+        fixtureId,
+        slot,
+        synchronousContractSha256,
+      );
+      const synchronousIntentMatches =
+        slot.value.action === "provider-create" &&
+        slot.value.intent_receipt_sha256 ===
+          controlledProviderDigest(controlledProviderBytes(expectedIntent));
+      if (!synchronousIntentMatches) {
+        if (
+          close === undefined &&
+          intentReceipt === undefined &&
+          passedReceipt === undefined &&
+          new Set([undefined, "plan"]).has(terminalReceipt?.phase)
+        ) {
+          return Object.freeze({
+            contract: "pending-provider",
+            operationEvidenceSha256: ZERO_SHA256,
+          });
+        }
+        fail("synchronous provider mutation intent was refused");
+      }
+    }
+    if (intentReceipt !== undefined) {
+      if (expectedIntent === undefined) fail("synchronous provider intent lacked a mutation slot");
+      validateSynchronousFakeIntent(intentReceipt, expectedIntent);
+    }
+    if (
+      passedReceipt !== undefined &&
+      !synchronousPassingReceiptMatches(passedReceipt, synchronousContractSha256)
+    ) {
+      fail("synchronous provider passing evidence was refused");
+    }
+    if (
+      terminalReceipt?.phase === "provider-create-passed" &&
+      !synchronousPassingReceiptMatches(terminalReceipt, synchronousContractSha256)
+    ) {
+      fail("synchronous provider passing terminal evidence was refused");
+    }
+    if (
+      terminalReceipt?.phase === "execution-failed" &&
+      !synchronousPassingReceiptMatches(passedReceipt, synchronousContractSha256)
+    ) {
+      fail("synchronous provider execution failure evidence was refused");
+    }
+    if (
+      terminalReceipt !== undefined &&
+      !new Set([
+        "execution-failed",
+        "plan",
+        "provider-create-failed",
+        "provider-create-intent",
+        "provider-create-passed",
+      ]).has(terminalReceipt.phase)
+    ) {
+      fail("synchronous provider terminal evidence was refused");
+    }
+    if (
+      new Set(["execution-failed", "provider-create-failed", "provider-create-passed"]).has(
+        terminalReceipt?.phase,
+      ) &&
+      intentReceipt === undefined
+    ) {
+      fail("synchronous provider terminal evidence lacked its intent");
     }
     return Object.freeze({ contract: "synchronous-fake", operationEvidenceSha256: ZERO_SHA256 });
   }
@@ -1529,6 +1843,37 @@ export function validateControlledProviderArtifactChain({
       validateSettlement(settlement.value, witness, decision, outcome, effect);
       operationEvidenceSha256 = settlement.sha256;
     }
+    const providerEffect = artifacts["provider-effect.json"];
+    if (providerEffect !== undefined) {
+      if (settlement === undefined || effect === undefined) {
+        fail("controlled provider effect mirror lacked settled effect evidence");
+      }
+      validateControlledEffectValue(
+        providerEffect,
+        witness,
+        decision,
+        "controlled provider effect mirror",
+      );
+      if (!providerEffect.bytes.equals(effect.bytes)) {
+        fail("controlled provider effect mirror changed");
+      }
+      operationEvidenceSha256 = providerEffect.sha256;
+    }
+    const providerIdentity = artifacts["provider-identity.json"];
+    if (providerIdentity !== undefined) {
+      if (settlement === undefined) {
+        fail("controlled provider identity lacked actor settlement");
+      }
+      if ((effect === undefined) !== (providerEffect === undefined)) {
+        fail("controlled provider identity effect evidence was refused");
+      }
+      validateControlledFakeProviderIdentity(
+        providerIdentity.value,
+        { decision, effect, launch, outcome, rootOwner, rootPlan: rootPlanArtifact, settlement, witness },
+        providerEffect,
+      );
+      operationEvidenceSha256 = providerIdentity.sha256;
+    }
   }
   if (intent === undefined && names.some((name) => name !== "root-plan.json")) {
     fail("controlled provider artifacts were outside their intent");
@@ -1540,6 +1885,8 @@ export function validateControlledProviderArtifactChain({
   const decision = artifacts["actor-decision.json"];
   const outcome = artifacts["actor-outcome.json"];
   const settlement = artifacts["actor-settlement.json"];
+  const providerEffect = artifacts["provider-effect.json"];
+  const providerIdentity = artifacts["provider-identity.json"];
   if (terminalReceipt?.phase === "preflight-refused") {
     exactKeys(
       terminalReceipt.result,
@@ -1567,8 +1914,9 @@ export function validateControlledProviderArtifactChain({
       decision?.value.decision !== "start" ||
       outcome?.value.outcome !== "passed" ||
       settlement?.value.disposition !== "completed" ||
-      terminalReceipt.result?.engine_identity_sha256 !== settlement.sha256 ||
-      operationEvidenceSha256 !== settlement.sha256
+      providerIdentity === undefined ||
+      !controlledPassingReceiptMatches(terminalReceipt, providerIdentity) ||
+      operationEvidenceSha256 !== providerIdentity.sha256
     ) {
       fail("controlled provider passing terminal evidence was refused");
     }
@@ -1605,7 +1953,9 @@ export function validateControlledProviderArtifactChain({
       settlement === undefined &&
       operationEvidenceSha256 === rootOwner.sha256;
     const actorFailure =
-      settlement !== undefined && operationEvidenceSha256 === settlement.sha256;
+      settlement !== undefined &&
+      providerIdentity !== undefined &&
+      operationEvidenceSha256 === providerIdentity.sha256;
     const pathValid =
       (preReservationFailure &&
         failureCode === "evidence-refused") ||
@@ -1636,9 +1986,11 @@ export function validateControlledProviderArtifactChain({
     const postSettlementFailure =
       intentDelta === 2 &&
       settlement !== undefined &&
+      providerIdentity !== undefined &&
       settlement.value.disposition === "completed" &&
       outcome?.value.outcome === "passed" &&
-      operationEvidenceSha256 === settlement.sha256;
+      controlledPassingReceiptMatches(passedReceipt, providerIdentity) &&
+      operationEvidenceSha256 === providerIdentity.sha256;
     if (
       intent === undefined ||
       failureCode !== "evidence-refused" ||
@@ -1661,6 +2013,8 @@ export function validateControlledProviderArtifactChain({
     decision,
     outcome,
     settlement,
+    providerEffect,
+    providerIdentity,
   });
 }
 

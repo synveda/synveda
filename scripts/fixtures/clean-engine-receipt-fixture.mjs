@@ -15,21 +15,26 @@ export function cleanEngineReceiptResult(phase, fixtureId) {
         cleanup_command: "colima-delete-data-force",
         preexisting_resource: "absent",
         provider_contract_sha256:
-          "644704a6fccc5867c9987d6a971a980086d7fe77712ca4f892ae4aef839fd799",
+          "9b472c7749667e773423d96a56cbc167f454d477cd6b0280b308533bab62bd5f",
         provider_resource: `synveda-cpr45-${fixtureId}`,
         provider_root_key: `sv-c45-${fixtureId.slice(0, 16)}`,
       };
     case "provider-create-passed":
       return {
-        colima_version: "0.10.3",
-        docker_client_version: "29.4.0",
-        docker_server_version: "29.4.0",
+        evidence_class: "deterministic-fixture",
         engine_identity_sha256: "3".repeat(64),
         initial_containers: 0,
         initial_images: 0,
         initial_networks: ["bridge", "host", "none"],
         initial_volumes: 0,
         platform: "darwin-arm64-colima-vz",
+        provider_contract_sha256:
+          "9b472c7749667e773423d96a56cbc167f454d477cd6b0280b308533bab62bd5f",
+        provider_name: "colima",
+        provider_version: "0.10.3",
+        runtime_client_version: "29.4.0",
+        runtime_name: "docker",
+        runtime_server_version: "29.4.0",
         socket_contract: "receipt-owned-unix",
       };
     case "registry-intent":

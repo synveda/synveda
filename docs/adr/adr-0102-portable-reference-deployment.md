@@ -134,20 +134,30 @@ owner mirror, launch and witness, including their digest-bound slot fields,
 before its fixed fake child can start. Only the actor signals its own group;
 its directly owned children also exit if their private parent IPC closes. A
 provider result can close only after a negative PGID probe reports `ESRCH`.
-The settlement binds the exact optional effect and outcome digests, the close
-binds that settlement, and a passing receipt additionally binds the settlement
-as its engine identity.
+The settlement binds the exact optional effect and outcome digests. After
+settlement, the supervisor copies the exact fixed effect, when present, into
+append-only state and publishes a provider identity that binds the slot,
+intent, fixed-fake contract, root plan/owner, settlement and closed fake
+resource dispositions. The mutation close and a passing receipt bind that
+identity digest; the receipt also labels the evidence explicitly as
+`controlled-fake`, so it cannot be reclassified as live provider evidence.
+Immediately before linking a close, the publisher re-proves its authority,
+result endpoints, operation evidence and staged inode/bytes.
 Recovery never signals a stored PGID or replays a durable start. A
 marker-before-mirror crash converges only an exact reservation-bound marker;
-a launch without a witness remains an explicit blocker because its PGID was
-not durably recorded.
+crashes after effect mirroring or identity publication converge the same
+identity without replay, and a launch without a witness remains an explicit
+blocker because its PGID was not durably recorded.
 
 This is deterministic POSIX process/filesystem evidence for the fixed fake
 command and actor-owned descendant, not Docker, Colima or live-provider
-evidence. The controlled root has
-no deletion settlement yet, so controlled runs cannot publish provider-cleanup
-or finalization evidence. Mutation-close schema v2 adds the operation-evidence
-digest and is a fresh-plan hard cut; v1 closes are refused, not translated.
+evidence. The controlled root has no deletion settlement yet, so controlled
+runs cannot publish provider-cleanup or finalization evidence. Receipt schema
+v3 separates deterministic-fixture from controlled-fake evidence and requires
+future live evidence to add a distinct reviewed shape. It binds provider
+success to its intent contract; receipt v1/v2 state is refused and regenerated.
+Mutation-close schema v2 adds the operation-evidence
+digest and remains a fresh-plan hard cut; v1 closes are refused, not translated.
 
 ## Options considered
 
@@ -199,9 +209,13 @@ digest and is a fresh-plan hard cut; v1 closes are refused, not translated.
 - Keycloak/database downgrade and schema rollback remain constrained by the
   tested version window; zero downtime is not promised.
 - The controlled clean-Engine actor/root seam remains internal and fake-only.
-  A real provider command, exact provider cleanup, a public runner and a
-  source/image environment manifest remain required before it can support a
-  Docker or Colima acceptance claim.
+  Colima 0.10.3 `--foreground` keeps only its controller in the actor group; it
+  does not make the Lima host agent an owned descendant. A live adapter must
+  therefore lock a truthful background-instance model (or a genuinely owned
+  replacement), close its transitive helper and disk-image identity,
+  distinguish the host-agent and Engine sockets, and publish exact provider
+  deletion settlement. A public runner and source/image environment manifest
+  remain required before it can support a Docker or Colima acceptance claim.
 - Reversal trigger: if measured operation failure semantics cannot be made
   correct behind the provider-neutral outbox, remove Apalis and retain the
   Postgres worker path. If single-host Compose cannot reproduce the contract on

@@ -162,22 +162,29 @@ An uncatchable interruption before active-receipt publication can retain a valid
 inert staging directory; it has no provider authority, does not block a later
 plan and must be removed by the future final cleanup before success evidence.
 More than eight retained inert directories fail closed.
-The internal version-2 receipt state machine closes every intent/result,
+The internal version-3 receipt state machine closes every intent/result,
 failure-cleanup and success-only environment-manifest transition. Canonical
 receipts and the manifest use no-replace publication. Its mutation journal is
 append-only: permanent `.mutation-slot-SS`, `.mutation-close-SS` and
 `.mutation-recovery-SS-RR` records are never deleted or reused. Each slot binds
 the exact source receipt/environment endpoints and previous close digest; each
 close binds the exact result endpoints, owner or recovery authority and a
-schema-v2 operation-evidence digest. Mutation-close v1 is a fresh-plan hard-cut
-refusal. Only unguessable `.mutation-stage-*` aliases are retired. If a
-cooperative verifier removes a live pre-link alias, close publication retries
-only after re-proving the same authority and result endpoints. An unrelated
-one-link alias confers no authority and cannot block the authorised close; its
-eventual final link loses to the permanent no-replace name. Append and
-finalization close their short slot on a catchable no-effect error. Generic
+schema-v2 operation-evidence digest. Provider success is explicitly classified
+and binds its intent contract. Receipt v1/v2 and mutation-close v1 are
+fresh-plan hard-cut refusals. Only unguessable `.mutation-stage-*` aliases are
+retired. Every close link follows revalidation of the same authority, result
+endpoints, operation evidence and staged inode/bytes. If a cooperative verifier
+removes a live pre-link alias, publication retries only after those checks. An
+unrelated one-link alias confers no authority and cannot block the authorised
+close; its eventual final link loses to the permanent no-replace name. Append
+and finalization close their short slot on a catchable no-effect error. Generic
 append cannot publish preflight, provider-create, provider-cleanup or
 finalization evidence.
+
+The deterministic fixture finalizer can emit only the explicitly non-live
+`synveda.clean-engine.synthetic-environment.v1` schema. Controlled-fake
+evidence is structurally ineligible; a future live provider must introduce its
+own reviewed environment schema before any acceptance claim.
 
 Only the provider-create seam is recoverable. The synchronous deterministic
 fake remains the rollback; the controlled fake path holds the same slot across
@@ -187,15 +194,18 @@ process-group settlement. The supervisor reasserts the actual slot before its
 decision, while the actor validates the complete root inventory and
 digest-bound plan/owner/launch/witness. Only the actor signals its group;
 directly owned children exit on parent-IPC loss. The settlement binds exact
-optional effect and outcome digests before the close can bind it. Explicit
-recovery requires
+optional effect and outcome digests. The exact effect is then mirrored into
+append-only state and a controlled-fake provider identity binds the slot,
+intent, contract, root plan/owner and settlement; the passing receipt and
+post-settlement close bind that identity. Explicit recovery requires
 `recover:<fixture>:<two-digit-slot>:<slot-sha256>`, refuses a live or
 unidentifiable owner and appends a gap-free claim chain. The open slot and
 newest live claim block cooperative writers until a terminal receipt and close
 are durable. Recovery never signals a stored process-group identifier and never
 replays a durable start. A reservation-bound external marker can repair an
-interrupted internal mirror; a durable launch without a witness remains a
-blocker. A claim linked after an already-durable close is inert history and
+interrupted internal mirror; effect-mirror and identity-publication crashes
+converge without replay. A durable launch without a witness remains a blocker.
+A claim linked after an already-durable close is inert history and
 cannot reopen that generation. Eight failed recovery attempts or 64 slots
 exhaust the bounded journal and require operator inspection and fresh-plan
 regeneration. The reusable `.mutation-lease` layout is refused rather than
@@ -207,18 +217,20 @@ adapter accepts no function, command, path, environment or provider selector.
 The controlled actor executes only the repository-fixed fake command under the
 private receipt-owned root; it has no Docker or Colima command. Provider
 artifacts now record the plan, reservation, owner mirror, launch, witness,
-decision, optional outcome and ESRCH settlement, while the fixed effect
-contains only opaque binding metadata. Owner challenges and PGID probes are cooperative
+decision, optional outcome, ESRCH settlement, state-owned effect mirror and an
+explicitly controlled-fake provider identity. The fixed effect contains only
+opaque binding metadata. Owner challenges and PGID probes are cooperative
 same-user/PID-namespace evidence; journal hashes do not protect against a
 hostile same-user writer. No supported lifecycle target exposes the test-only
 execute/recover fixtures; there is no live provider mutation, provider-root
 cleanup settlement or environment manifest.
 Controlled runs are therefore non-finalizable, and their synthetic cleanup
 vocabulary grants no deletion authority. `registry/`, `runtime/` and
-`evidence/` remain empty. The next slice must add one fixed, revalidated Colima
-command, a supported lifecycle target and exact owned-root/provider cleanup
-before any Docker claim.
-A version-1 plan or mutation-close v1 is discarded and regenerated.
+`evidence/` remain empty. The next slice must first lock the truthful
+background-provider model and fixed command/toolchain closure, then add exact
+owned-root/provider deletion settlement and a supported lifecycle target before
+any Docker claim.
+A receipt-v1/v2 plan or mutation-close v1 is discarded and regenerated.
 The manual browser ceremony below remains usable for fixture development but
 cannot be labelled a clean-Engine result.
 

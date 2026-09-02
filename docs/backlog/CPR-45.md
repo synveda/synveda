@@ -381,21 +381,26 @@ content-free `buildx inspect` evidence for exactly one running embedded
 contacts neither Docker nor Colima and does not install the resolver mapping,
 so it closes no live acceptance criterion.
 
-The deterministic executor boundary now validates an append-only version-2
+The deterministic executor boundary now validates an append-only version-3
 receipt grammar from provider intent through registry, proxy, zero-read
 builder, browser, project cleanup and provider cleanup. Every phase has a
 closed content-free result schema; failures enter only an exact receipt-owned
 cleanup branch, and a colliding foreign resource is excluded from that
-authority across cleanup retries. Receipt and final-manifest publication use
-fsynced staging plus no-replace links. The mutation journal now appends
+authority across cleanup retries. Receipt and synthetic-manifest publication
+use fsynced staging plus no-replace links. The fixture-only manifest schema is
+explicitly non-live and controlled-fake evidence cannot become eligible.
+Provider success carries an explicit evidence class and must bind the exact
+provider-contract digest from its intent; receipt v1/v2 state is a fresh-plan
+hard cut. The mutation journal now appends
 permanent, gap-free slots, closes and per-slot recovery claims. A slot binds its
 exact source receipt/environment endpoints, the previous close, intended
 provider receipt and cooperative process-instance challenge. Its close binds
 the exact result endpoints and owner or recovery authority. Final journal names
 are never deleted or reused. Only unique staging aliases reconcile; a live
-close publisher whose alias is concurrently removed retries within a fixed
-bound only after re-proving unchanged authority and result endpoints. Generic
-append cannot own provider-create or finalization evidence.
+close publisher re-proves unchanged authority, result endpoints, operation
+evidence and staged inode/bytes immediately before every link; if its alias is
+concurrently removed, it retries within a fixed bound only after the same
+checks. Generic append cannot own provider-create or finalization evidence.
 
 The provider seam now has two fixed fake-only paths. The synchronous
 `deterministic-fake-provider-v1` adapter remains the rollback. The controlled
@@ -411,16 +416,20 @@ The child receives a closed explicit environment and working directory without
 test descendant exit if their private parent IPC closes.
 
 Completion requires a negative PGID probe reporting `ESRCH`. The settlement
-binds exact optional effect and outcome digests; the permanent mutation close
-binds the settlement, and a passing receipt also uses that digest as its engine
-identity. Exact slot-sequence/digest confirmation and at most eight recovery
-claims cover pre-reservation, marker-before-mirror, post-outcome, settlement,
-terminal-receipt and close-publication crashes without replaying a durable
-start or signalling a stored PGID. A launch without a witness remains an
-explicit blocker. Foreign collision receipts are never adopted, and later
-source drift converts a durable pass to `execution-failed`. Generic append
-cannot fabricate preflight evidence. Version-1 mutation closes and reusable
-leases are refused rather than translated.
+binds exact optional effect and outcome digests. The supervisor then mirrors
+the exact fixed effect into append-only state and publishes a controlled-fake
+provider identity binding the slot, intent, contract, root plan/owner,
+settlement and fake resource dispositions. The permanent mutation close and a
+passing receipt bind that identity digest, and the receipt cannot be relabelled
+as deterministic or live evidence. Exact slot-sequence/digest confirmation and
+at most eight recovery claims cover pre-reservation, marker-before-mirror,
+post-outcome, settlement, effect-mirror, identity-publication, terminal-receipt
+and close-publication crashes without replaying a durable start or signalling
+a stored PGID. A launch without a witness remains an explicit blocker. Foreign
+collision receipts are never adopted, and later source drift converts a durable
+pass to `execution-failed`. Generic append cannot fabricate preflight evidence.
+Version-1 mutation closes and reusable leases are refused rather than
+translated.
 
 This remains fixed-fake trusted-process POSIX evidence. The controlled adapter
 accepts no caller function, command, environment, path or provider selection;
@@ -434,17 +443,21 @@ limits.
 
 ### Immediate next slice
 
-Add the fixed Colima adapter behind the reviewed controlled boundary. Revalidate
-absolute pinned Colima/Lima/Docker binaries and versions, use only explicit
-`COLIMA_HOME`, `COLIMA_CACHE_HOME`, `LIMA_HOME`, `DOCKER_CONFIG` and `--mount
-none`, preserve the closed environment without setting or repurposing `HOME`,
-and prove the named profile, Docker context and short root absent before intent.
-Add provider-owned identity and deletion settlement so the same receipt remains
-open until exact root/profile/context cleanup; never adopt or remove a foreign
-collision. Expose execution and recovery only through one supported lifecycle
-target after deterministic conformance passes. Then, with explicit authority,
-create and destroy one fresh isolated Colima provider and publish its exact
-content-free environment evidence.
+Lock and test the live provider process model before invoking Colima. In 0.10.3,
+`--foreground` keeps the controller alive but does not place the background
+Lima host agent under its process group, so actor-group `ESRCH` is not provider
+absence. Add fixed command and toolchain manifests covering pinned
+Colima/Lima/Docker binaries, every transitive helper and the disk image; use a
+closed `PATH`, pre-created explicit `COLIMA_HOME`, `COLIMA_CACHE_HOME`,
+`LIMA_HOME`, `DOCKER_CONFIG` and `TMPDIR`, and never set or repurpose `HOME`.
+Require `--mount none`, exact pre-intent root/profile/context absence, and
+separate identities for the Lima host-agent socket, Engine socket and Docker
+context. Then add identity-bound, crash-recoverable deletion settlement so the
+same receipt remains open until exact root/profile/context cleanup; never adopt
+or remove a foreign collision. Expose execution and recovery only through one
+supported lifecycle target after deterministic conformance passes. Then, with
+explicit authority, create and destroy one fresh isolated provider and publish
+its exact content-free environment evidence.
 Subsequent bounded steps add the globally clean Engine proof, TLS/bcrypt
 private registry,
 authenticated push/pull, synthetic Docker-client proxy activation, a zero-read

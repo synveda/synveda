@@ -183,8 +183,10 @@ function sha256(bytes) {
 function adapter({ scenario = "pass", deadline = 5_000, gateDelivery = "correct" } = {}) {
   return {
     after_decision_hold_milliseconds: 0,
+    after_effect_mirror_hold_milliseconds: 0,
     after_intent_hold_milliseconds: 0,
     after_outcome_publish_hold_milliseconds: 0,
+    after_provider_identity_hold_milliseconds: 0,
     after_root_plan_hold_milliseconds: 0,
     after_settlement_hold_milliseconds: 0,
     before_decision_hold_milliseconds: 0,
@@ -244,6 +246,16 @@ async function waitFor(path, timeout = 8_000) {
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 10));
   }
   assert.fail(`timed out waiting for ${path}`);
+}
+
+async function waitForMutationStage(runDirectory, timeout = 8_000) {
+  const deadline = Date.now() + timeout;
+  while (Date.now() < deadline) {
+    const stage = readdirSync(runDirectory).find((name) => name.startsWith(".mutation-stage-"));
+    if (stage !== undefined) return join(runDirectory, stage);
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 10));
+  }
+  assert.fail(`timed out waiting for mutation stage in ${runDirectory}`);
 }
 
 function pause(milliseconds) {
@@ -328,6 +340,9 @@ test("the controlled fake publishes root actor outcome settlement and close evid
     const outcome = existsSync(outcomePath) ? parse(outcomePath) : undefined;
     const settlementBytes = readFileSync(join(provider, "actor-settlement.json"));
     const settlement = JSON.parse(settlementBytes);
+    const providerEffectBytes = readFileSync(join(provider, "provider-effect.json"));
+    const providerIdentityBytes = readFileSync(join(provider, "provider-identity.json"));
+    const providerIdentity = JSON.parse(providerIdentityBytes);
     assert.equal(
       receipt.phase,
       "provider-create-passed",
@@ -342,13 +357,22 @@ test("the controlled fake publishes root actor outcome settlement and close evid
     assert.equal(settlement.group_probe, "esrch");
     assert.equal(probeControlledProcessGroup(Number(witness.actor_pgid)), "absent");
     assert.equal(close.schema, "synveda.clean-engine.mutation-close.v2");
-    assert.equal(close.operation_evidence_sha256, sha256(settlementBytes));
+    assert.equal(close.operation_evidence_sha256, sha256(providerIdentityBytes));
+    assert.equal(receipt.result.evidence_class, "controlled-fake");
+    assert.equal(receipt.result.provider_name, "controlled-fake");
+    assert.equal(receipt.result.runtime_name, "none");
+    assert.equal(receipt.result.provider_contract_sha256, CONTROLLED_FAKE_PROVIDER_CONTRACT_SHA256);
+    assert.equal(receipt.result.provider_evidence_sha256, sha256(providerIdentityBytes));
+    assert.equal(providerIdentity.actor_settlement_sha256, sha256(settlementBytes));
+    assert.equal(providerIdentity.effect_sha256, sha256(providerEffectBytes));
+    assert.equal(providerIdentity.provider_kind, "controlled-fake");
     const rootPlan = parse(join(provider, "root-plan.json"));
     assert.deepEqual(
       readFileSync(join(provider, "root-owner.json")),
       readFileSync(join(rootPlan.root_path, ".synveda-clean-engine-owner.json")),
     );
     const effect = parse(join(rootPlan.root_path, "t", "fake-effect.json"));
+    assert.deepEqual(providerEffectBytes, readFileSync(join(rootPlan.root_path, "t", "fake-effect.json")));
     const expectedEnvironmentKeys = [
       "COLIMA_CACHE_HOME",
       "COLIMA_HOME",
@@ -385,6 +409,31 @@ test("a pre-intent root collision is terminal and never adopted", async () => {
     assert.equal(existsSync(join(plan.root_path, ".synveda-clean-engine-owner.json")), false);
     assert.equal(existsSync(join(activeRun(state), "01-provider-create-intent.json")), false);
     assert.equal(stateRun(state, "verify").status, 0);
+  } finally {
+    rmSync(state.root, { force: true, recursive: true });
+  }
+});
+
+test("a preflight collision cannot discard its root-plan evidence", async () => {
+  const state = fixture();
+  try {
+    const plan = rootPlanFor(state);
+    mkdirSync(plan.root_path, { mode: 0o700 });
+    await executeControlledProviderCreateForExecutor({
+      adapter: adapter(),
+      providerBase: state.providerBase,
+      repoRoot: state.repo,
+      stateBase: state.state,
+    });
+    const active = activeRun(state);
+    rmSync(join(active, "provider", "root-plan.json"));
+    const closePath = join(active, ".mutation-close-00");
+    const close = parse(closePath);
+    close.operation_evidence_sha256 = "0".repeat(64);
+    writeFileSync(closePath, canonicalBytes(close), { mode: 0o600 });
+    const refused = stateRun(state, "status");
+    assert.equal(refused.status, 78);
+    assert.match(refused.stderr, /synchronous provider mutation intent was refused/);
   } finally {
     rmSync(state.root, { force: true, recursive: true });
   }
@@ -794,6 +843,64 @@ test("a crash after settlement recovers result publication without rerunning the
   }
 });
 
+test("a crash after the effect mirror converges one provider identity without replay", async () => {
+  const state = fixture();
+  try {
+    const execution = launch(state, "hold-after-effect-mirror");
+    const provider = join(activeRun(state), "provider");
+    await waitFor(join(provider, "provider-effect.json"));
+    assert.equal(existsSync(join(provider, "provider-identity.json")), false);
+    process.kill(execution.child.pid, "SIGKILL");
+    assert.equal((await execution.closed).signal, "SIGKILL");
+    const confirmation = providerRecoveryConfirmationForExecutor({
+      repoRoot: state.repo,
+      stateBase: state.state,
+    });
+    const recovered = await recoverControlledProviderCreateForExecutor({
+      confirmation,
+      providerBase: state.providerBase,
+      repoRoot: state.repo,
+      stateBase: state.state,
+    });
+    assert.equal(recovered.phase, "provider-create-passed");
+    assert.equal(existsSync(join(provider, "provider-identity.json")), true);
+    assert.equal(readdirCount(rootPlanFor(state).root_path, "fake-effect.json"), 1);
+    assert.equal(stateRun(state, "verify").status, 0);
+  } finally {
+    rmSync(state.root, { force: true, recursive: true });
+  }
+});
+
+test("a crash after provider identity recovers the same evidence without replay", async () => {
+  const state = fixture();
+  try {
+    const execution = launch(state, "hold-after-provider-identity");
+    const provider = join(activeRun(state), "provider");
+    const identityPath = join(provider, "provider-identity.json");
+    await waitFor(identityPath);
+    const identityBytes = readFileSync(identityPath);
+    assert.equal(existsSync(join(activeRun(state), "02-provider-create-passed.json")), false);
+    process.kill(execution.child.pid, "SIGKILL");
+    assert.equal((await execution.closed).signal, "SIGKILL");
+    const confirmation = providerRecoveryConfirmationForExecutor({
+      repoRoot: state.repo,
+      stateBase: state.state,
+    });
+    const recovered = await recoverControlledProviderCreateForExecutor({
+      confirmation,
+      providerBase: state.providerBase,
+      repoRoot: state.repo,
+      stateBase: state.state,
+    });
+    assert.equal(recovered.phase, "provider-create-passed");
+    assert.deepEqual(readFileSync(identityPath), identityBytes);
+    assert.equal(readdirCount(rootPlanFor(state).root_path, "fake-effect.json"), 1);
+    assert.equal(stateRun(state, "verify").status, 0);
+  } finally {
+    rmSync(state.root, { force: true, recursive: true });
+  }
+});
+
 test("a live started group blocks recovery until its disconnect watchdog settles it", async () => {
   const state = fixture();
   try {
@@ -950,6 +1057,99 @@ test("recovery converts a durable controlled pass plus source drift to execution
   }
 });
 
+test("post-pass failure retains the controlled evidence class binding", async () => {
+  const state = fixture();
+  try {
+    const execution = launch(state, "hold-passed-close");
+    const active = activeRun(state);
+    await waitFor(join(active, "02-provider-create-passed.json"));
+    writeFileSync(join(state.repo, "source.txt"), "drifted\n", { mode: 0o600 });
+    process.kill(execution.child.pid, "SIGKILL");
+    assert.equal((await execution.closed).signal, "SIGKILL");
+    const confirmation = providerRecoveryConfirmationForExecutor({
+      repoRoot: state.repo,
+      stateBase: state.state,
+    });
+    await recoverControlledProviderCreateForExecutor({
+      confirmation,
+      providerBase: state.providerBase,
+      repoRoot: state.repo,
+      stateBase: state.state,
+    });
+    writeFileSync(join(state.repo, "source.txt"), "fixture source\n", { mode: 0o600 });
+
+    const passPath = join(active, "02-provider-create-passed.json");
+    const failurePath = join(active, "03-execution-failed.json");
+    const recoveryPath = join(active, ".mutation-recovery-00-00");
+    const closePath = join(active, ".mutation-close-00");
+    const passReceipt = parse(passPath);
+    passReceipt.result = {
+      evidence_class: "deterministic-fixture",
+      engine_identity_sha256: "d".repeat(64),
+      initial_containers: 0,
+      initial_images: 0,
+      initial_networks: ["bridge", "host", "none"],
+      initial_volumes: 0,
+      platform: "darwin-arm64-colima-vz",
+      provider_contract_sha256: passReceipt.result.provider_contract_sha256,
+      provider_name: "colima",
+      provider_version: "0.10.3",
+      runtime_client_version: "29.4.0",
+      runtime_name: "docker",
+      runtime_server_version: "29.4.0",
+      socket_contract: "receipt-owned-unix",
+    };
+    const passBytes = canonicalBytes(passReceipt);
+    writeFileSync(passPath, passBytes, { mode: 0o600 });
+    const recovery = parse(recoveryPath);
+    recovery.source_head_sha256 = sha256(passBytes);
+    const recoveryBytes = canonicalBytes(recovery);
+    writeFileSync(recoveryPath, recoveryBytes, { mode: 0o600 });
+    const failureReceipt = parse(failurePath);
+    failureReceipt.previous_sha256 = sha256(passBytes);
+    const failureBytes = canonicalBytes(failureReceipt);
+    writeFileSync(failurePath, failureBytes, { mode: 0o600 });
+    const close = parse(closePath);
+    close.authority_sha256 = sha256(recoveryBytes);
+    close.result_head_sha256 = sha256(failureBytes);
+    writeFileSync(closePath, canonicalBytes(close), { mode: 0o600 });
+
+    const refused = stateRun(state, "status");
+    assert.equal(refused.status, 78);
+    assert.match(refused.stderr, /execution failure evidence was refused/);
+  } finally {
+    rmSync(state.root, { force: true, recursive: true });
+  }
+});
+
+test("close publication reasserts controlled operation evidence immediately before link", async () => {
+  const state = fixture();
+  try {
+    const execution = launch(state, "race-failed-close");
+    const active = activeRun(state);
+    await waitFor(join(active, "02-provider-create-failed.json"));
+    const stagePath = await waitForMutationStage(active);
+    const settlementPath = join(active, "provider", "actor-settlement.json");
+    const providerIdentityPath = join(active, "provider", "provider-identity.json");
+    const settlement = parse(settlementPath);
+    assert.equal(settlement.termination_reason, "none");
+    settlement.termination_reason = "recovered";
+    const settlementBytes = canonicalBytes(settlement);
+    writeFileSync(settlementPath, settlementBytes, { mode: 0o600 });
+    const identity = parse(providerIdentityPath);
+    identity.actor_settlement_sha256 = sha256(settlementBytes);
+    writeFileSync(providerIdentityPath, canonicalBytes(identity), { mode: 0o600 });
+    const closed = await execution.closed;
+    assert.equal(closed.status, 73, closed.stderr);
+    assert.equal(closed.signal, null);
+    assert.match(closed.stderr, /mutation close authority changed/);
+    assert.equal(existsSync(join(active, ".mutation-close-00")), false);
+    assert.equal(existsSync(stagePath), true);
+  } finally {
+    rmSync(state.root, { force: true, recursive: true });
+  }
+});
+
 test("root identity drift at the start gate produces no provider effect", async () => {
   const state = fixture();
   try {
@@ -1082,10 +1282,10 @@ test("terminal success is bound to the exact completed settlement", async () => 
         const settlementBytes = canonicalBytes(settlement);
         writeFileSync(settlementPath, settlementBytes, { mode: 0o600 });
         const settlementSha256 = sha256(settlementBytes);
-        receipt.result.engine_identity_sha256 = settlementSha256;
+        receipt.result.provider_evidence_sha256 = settlementSha256;
         close.operation_evidence_sha256 = settlementSha256;
       } else {
-        receipt.result.engine_identity_sha256 = "f".repeat(64);
+        receipt.result.provider_evidence_sha256 = "f".repeat(64);
       }
       const receiptBytes = canonicalBytes(receipt);
       writeFileSync(receiptPath, receiptBytes, { mode: 0o600 });
@@ -1104,6 +1304,102 @@ test("terminal success is bound to the exact completed settlement", async () => 
     } finally {
       rmSync(state.root, { force: true, recursive: true });
     }
+  }
+});
+
+test("controlled provider identity cannot be relabelled as live evidence", async () => {
+  const state = fixture();
+  try {
+    await executeControlledProviderCreateForExecutor({
+      adapter: adapter(),
+      providerBase: state.providerBase,
+      repoRoot: state.repo,
+      stateBase: state.state,
+    });
+    const active = activeRun(state);
+    const providerIdentityPath = join(active, "provider", "provider-identity.json");
+    const receiptPath = join(active, "02-provider-create-passed.json");
+    const closePath = join(active, ".mutation-close-00");
+    const identity = parse(providerIdentityPath);
+    identity.provider_kind = "colima-live";
+    const identityBytes = canonicalBytes(identity);
+    writeFileSync(providerIdentityPath, identityBytes, { mode: 0o600 });
+    const identitySha256 = sha256(identityBytes);
+    const receipt = parse(receiptPath);
+    receipt.result.provider_evidence_sha256 = identitySha256;
+    const receiptBytes = canonicalBytes(receipt);
+    writeFileSync(receiptPath, receiptBytes, { mode: 0o600 });
+    const close = parse(closePath);
+    close.operation_evidence_sha256 = identitySha256;
+    close.result_head_sha256 = sha256(receiptBytes);
+    writeFileSync(closePath, canonicalBytes(close), { mode: 0o600 });
+    const refused = stateRun(state, "status");
+    assert.equal(refused.status, 78);
+    assert.match(refused.stderr, /provider identity was refused/);
+  } finally {
+    rmSync(state.root, { force: true, recursive: true });
+  }
+});
+
+test("controlled provider identity cannot erase a settled effect mirror", async () => {
+  const state = fixture();
+  try {
+    await executeControlledProviderCreateForExecutor({
+      adapter: adapter(),
+      providerBase: state.providerBase,
+      repoRoot: state.repo,
+      stateBase: state.state,
+    });
+    const active = activeRun(state);
+    const providerEffectPath = join(active, "provider", "provider-effect.json");
+    const providerIdentityPath = join(active, "provider", "provider-identity.json");
+    const receiptPath = join(active, "02-provider-create-passed.json");
+    const closePath = join(active, ".mutation-close-00");
+    rmSync(providerEffectPath);
+    const identity = parse(providerIdentityPath);
+    identity.effect_disposition = "absent";
+    identity.effect_sha256 = "0".repeat(64);
+    const identityBytes = canonicalBytes(identity);
+    writeFileSync(providerIdentityPath, identityBytes, { mode: 0o600 });
+    const identitySha256 = sha256(identityBytes);
+    const receipt = parse(receiptPath);
+    receipt.result.provider_evidence_sha256 = identitySha256;
+    const receiptBytes = canonicalBytes(receipt);
+    writeFileSync(receiptPath, receiptBytes, { mode: 0o600 });
+    const close = parse(closePath);
+    close.operation_evidence_sha256 = identitySha256;
+    close.result_head_sha256 = sha256(receiptBytes);
+    writeFileSync(closePath, canonicalBytes(close), { mode: 0o600 });
+    const refused = stateRun(state, "status");
+    assert.equal(refused.status, 78);
+    assert.match(refused.stderr, /provider identity effect evidence was refused/);
+  } finally {
+    rmSync(state.root, { force: true, recursive: true });
+  }
+});
+
+test("controlled provider artifacts cannot be removed to downgrade the evidence class", async () => {
+  const state = fixture();
+  try {
+    await executeControlledProviderCreateForExecutor({
+      adapter: adapter(),
+      providerBase: state.providerBase,
+      repoRoot: state.repo,
+      stateBase: state.state,
+    });
+    const provider = join(activeRun(state), "provider");
+    for (const name of readdirSync(provider)) {
+      rmSync(join(provider, name));
+    }
+    const closePath = join(activeRun(state), ".mutation-close-00");
+    const close = parse(closePath);
+    close.operation_evidence_sha256 = "0".repeat(64);
+    writeFileSync(closePath, canonicalBytes(close), { mode: 0o600 });
+    const refused = stateRun(state, "status");
+    assert.equal(refused.status, 78);
+    assert.match(refused.stderr, /synchronous provider mutation intent was refused/);
+  } finally {
+    rmSync(state.root, { force: true, recursive: true });
   }
 });
 

@@ -133,16 +133,18 @@ hard link to the immutable mode-0600 `00-plan.json`. The link and run-directory
 device/inode identities use exact 64-bit filesystem values. The receipt hash
 chain is correlation evidence, not a signature or release provenance.
 
-Receipt schema version 2 is an append-only state machine with one exact success
+Receipt schema version 3 is an append-only state machine with one exact success
 path: provider create, registry, proxy, zero-read builder, browser, project
 cleanup, provider cleanup and finalization. Each external mutation must first
 publish its closed intent; each result is a closed content-free assertion.
 Failures can transition only to receipt-owned cleanup, and a reported foreign
 collision is removed from cleanup authority even when cleanup itself is
 retried. A preflight provider collision is terminal and grants no cleanup
-authority. Version-1 plan receipts predate this mutation contract and are a
-hard-cut refusal: discard their non-mutating preparation state and create a new
-plan; there is no compatibility mode.
+authority. Provider success has an explicit evidence class and must bind the
+same provider-contract digest as its intent. Version-1 and version-2 plan
+receipts predate this contract and are a hard-cut refusal: discard their
+non-mutating preparation state and create a new plan; there is no compatibility
+mode.
 
 All receipt appends and finalization use an append-only, private, content-free
 mutation journal. A permanent `.mutation-slot-SS` binds the closed action,
@@ -158,13 +160,15 @@ only when it binds the prior close exactly. Mutation-close v1 and the reusable
 Blockers are completed and fsynced under unique private staging names, then
 linked atomically without replacement. Interruption leaves either an inert
 one-link stage or a complete two-link final record. Only staging aliases are
-retired. A close whose live pre-link alias is concurrently reconciled retries
-within a fixed bound only after re-proving its authority and unchanged result
-endpoints. An unrelated one-link stage confers no authority and cannot block
-that close; its later final link loses to the permanent no-replace name. A live
-or unidentifiable owner serializes writers; PID liveness
-alone is not adoption or deletion authority. Generic receipt append cannot own
-preflight, provider-create, provider-cleanup or finalization evidence.
+retired. Immediately before every close link, the publisher re-proves its
+authority, unchanged result endpoints, current operation evidence and exact
+staged inode/bytes. A close whose live pre-link alias is concurrently reconciled
+retries within a fixed bound only after the same checks. An unrelated one-link
+stage confers no authority and cannot block that close; its later final link
+loses to the permanent no-replace name. A live or unidentifiable owner
+serializes writers; PID liveness alone is not adoption or deletion authority.
+Generic receipt append cannot own preflight, provider-create, provider-cleanup
+or finalization evidence.
 
 The internal provider-create seam retains the synchronous closed-data fake as
 rollback and adds a separate controlled fake path. The controlled path holds
@@ -175,22 +179,32 @@ reasserts the actual slot before deciding; the actor validates the exact plan,
 full root/leaf inode-mode-type inventory, owner mirror, launch and witness,
 including their digest-bound slot fields, before start. Only that actor signals
 its own group, while its directly owned children exit on parent-IPC loss. The
-settlement binds the exact optional effect and outcome digests.
+settlement binds the exact optional effect and outcome digests. After
+settlement, the exact fixed effect is mirrored into append-only state and a
+controlled-fake provider identity binds the slot, intent, contract, root
+plan/owner, settlement and closed fake resource dispositions. Passing results
+and post-settlement mutation closes bind this identity rather than treating
+process settlement as Engine identity.
 Explicit recovery is bound to the exact canonical slot digest and two-digit
 slot sequence, then appends at most eight recovery claims. It probes but never
 signals a stored PGID and never replays a durable start. A marker-before-mirror
-crash converges only the exact reservation-bound owner; a launch without a
-witness remains blocking. The open slot and newest recovery claim block
-ordinary writers. A live/unidentifiable owner or recovery refuses; an abandoned
-claim can be superseded. A claim appended after a durable close is inert
+crash converges only the exact reservation-bound owner; effect-mirror and
+identity-publication crashes converge one identical provider identity; a launch
+without a witness remains blocking. The open slot and newest recovery claim
+block ordinary writers. A live/unidentifiable owner or recovery refuses; an
+abandoned claim can be superseded. A claim appended after a durable close is inert
 history. Claim-attempt or 64-slot exhaustion fails closed for inspection and
 fresh-plan regeneration. Only provider-create has recovery; abandoned append
 and finalization slots remain blocking evidence.
 
 Receipt and environment bytes are canonical, fsynced in private staging files
-and linked to their final names without replacement. After the mutation slot
-has been safely resolved, a partial/noncanonical staging file is discardable;
-a complete canonical or already-linked file is resumed only when it exactly
+and linked to their final names without replacement. The current internal
+fixture finalizer emits only `synveda.clean-engine.synthetic-environment.v1`;
+controlled-fake evidence is structurally ineligible for it, and this schema is
+not live environment evidence. A future live provider class requires a distinct
+reviewed environment schema. After the mutation slot has been safely resolved,
+a partial/noncanonical staging file is discardable; a complete canonical or
+already-linked file is resumed only when it exactly
 reconstructs the next state and otherwise is retained and refused. The
 environment manifest is bound to the canonical planned candidate, exact
 receipt head and ten requested assertions. It is published before the
@@ -221,13 +235,14 @@ data with a contract-derived hash and bounded timings; it accepts no
 caller-supplied function, path, command, environment or provider selector.
 The controlled path invokes only the repository-fixed fake child under a
 short, private, receipt-owned external root. `provider/` now contains
-content-free root and actor lifecycle evidence, but `registry/`, `runtime/`
-and `evidence/` remain empty. There is no Docker/Colima invocation, live
-provider executor, cleanup settlement or environment manifest. Because the
-live owned root cannot yet be deleted while retaining verifiable historic
-ownership, controlled runs reject provider cleanup and finalization. This
-checkpoint must not be reported as clean-Engine, Docker, Colima or browser
-evidence.
+content-free root and actor lifecycle evidence, a state-owned effect mirror and
+a provider identity explicitly classified as controlled fake, but `registry/`,
+`runtime/` and `evidence/` remain empty. There is no Docker/Colima invocation,
+live provider executor, deletion settlement or environment manifest. Because
+the active validator still requires the owned root and no identity-bound
+deletion settlement retires that authority, controlled runs reject provider
+cleanup and finalization. This checkpoint must not be reported as clean-Engine,
+Docker, Colima or browser evidence.
 
 An uncatchable pre-publication interruption can retain one or more strictly
 validated `.pending-*` or `.run-*` staging directories. They contain no

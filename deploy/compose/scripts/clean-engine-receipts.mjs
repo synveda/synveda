@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { createHash } from "node:crypto";
 
-export const RECEIPT_SCHEMA = "synveda.clean-engine.receipt.v2";
+export const RECEIPT_SCHEMA = "synveda.clean-engine.receipt.v3";
 export const ZERO_SHA256 = "0".repeat(64);
 
 const REGISTRY_IMAGE =
@@ -111,16 +111,6 @@ function lowerHex(value, length) {
   return typeof value === "string" && value.length === length && /^[0-9a-f]+$/.test(value);
 }
 
-function version(value) {
-  return (
-    typeof value === "string" &&
-    value.length <= 64 &&
-    /^(?:0|[1-9][0-9]{0,5})\.[0-9]{1,6}\.[0-9]{1,6}(?:[-+][0-9A-Za-z.-]{1,32})?$/.test(
-      value,
-    )
-  );
-}
-
 function privateIpv4Pool(value) {
   if (typeof value !== "string") return false;
   const match = value.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.0\/24$/);
@@ -218,36 +208,71 @@ function validateProviderIntent(result, fixtureId) {
 }
 
 function validateProviderPassed(result) {
-  exactKeys(
-    result,
-    [
-      "colima_version",
-      "docker_client_version",
-      "docker_server_version",
-      "engine_identity_sha256",
-      "initial_containers",
-      "initial_images",
-      "initial_networks",
-      "initial_volumes",
-      "platform",
-      "socket_contract",
-    ],
-    "provider result",
-  );
-  if (
-    result.platform !== "darwin-arm64-colima-vz" ||
-    !version(result.colima_version) ||
-    !version(result.docker_client_version) ||
-    !version(result.docker_server_version) ||
-    !lowerHex(result.engine_identity_sha256, 64) ||
-    result.initial_containers !== 0 ||
-    result.initial_images !== 0 ||
-    result.initial_volumes !== 0 ||
-    result.socket_contract !== "receipt-owned-unix"
-  ) {
-    refuse("provider result was refused");
+  if (result?.evidence_class === "deterministic-fixture") {
+    exactKeys(
+      result,
+      [
+        "evidence_class",
+        "engine_identity_sha256",
+        "initial_containers",
+        "initial_images",
+        "initial_networks",
+        "initial_volumes",
+        "platform",
+        "provider_contract_sha256",
+        "provider_name",
+        "provider_version",
+        "runtime_client_version",
+        "runtime_name",
+        "runtime_server_version",
+        "socket_contract",
+      ],
+      "provider result",
+    );
+    if (
+      !lowerHex(result.provider_contract_sha256, 64) ||
+      !lowerHex(result.engine_identity_sha256, 64) ||
+      result.provider_name !== "colima" ||
+      result.provider_version !== "0.10.3" ||
+      result.runtime_name !== "docker" ||
+      result.runtime_client_version !== "29.4.0" ||
+      result.runtime_server_version !== "29.4.0" ||
+      result.platform !== "darwin-arm64-colima-vz" ||
+      result.initial_containers !== 0 ||
+      result.initial_images !== 0 ||
+      result.initial_volumes !== 0 ||
+      result.socket_contract !== "receipt-owned-unix"
+    ) {
+      refuse("provider result was refused");
+    }
+    exactStringArray(result.initial_networks, ["bridge", "host", "none"], "provider networks");
+    return;
   }
-  exactStringArray(result.initial_networks, ["bridge", "host", "none"], "provider networks");
+  if (result?.evidence_class === "controlled-fake") {
+    exactKeys(
+      result,
+      [
+        "evidence_class",
+        "platform",
+        "provider_contract_sha256",
+        "provider_evidence_sha256",
+        "provider_name",
+        "runtime_name",
+      ],
+      "provider result",
+    );
+    if (
+      !lowerHex(result.provider_contract_sha256, 64) ||
+      !lowerHex(result.provider_evidence_sha256, 64) ||
+      result.provider_name !== "controlled-fake" ||
+      result.runtime_name !== "none" ||
+      result.platform !== "deterministic-posix"
+    ) {
+      refuse("provider result was refused");
+    }
+    return;
+  }
+  refuse("provider result was refused");
 }
 
 function validateRegistryIntent(result, fixtureId) {
@@ -766,12 +791,22 @@ export function validateReceiptChain(receipts, fixtureId) {
     );
     previousBytes = canonicalBytes(receipt);
   }
+  const providerIntent = receipts.find((receipt) => receipt.phase === "provider-create-intent");
+  const providerPassed = receipts.find((receipt) => receipt.phase === "provider-create-passed");
+  if (
+    providerPassed !== undefined &&
+    providerPassed.result.provider_contract_sha256 !==
+      providerIntent?.result.provider_contract_sha256
+  ) {
+    refuse("provider result contract binding was refused");
+  }
   return Object.freeze({
     head: receipts.at(-1),
     head_sha256: sha256(previousBytes),
     manifest_eligible:
       receipts.length === SUCCESS_PATH.length - 1 &&
-      receipts.every((receipt, index) => receipt.phase === SUCCESS_PATH[index]),
+      receipts.every((receipt, index) => receipt.phase === SUCCESS_PATH[index]) &&
+      providerPassed?.result.evidence_class === "deterministic-fixture",
     terminal:
       receipts.at(-1).phase === "finalize-passed" ||
       receipts.at(-1).phase === "failure-cleanup-passed" ||
@@ -966,19 +1001,23 @@ export function buildEnvironmentManifest(candidate, candidateBytes, receipts) {
       runtime_secrets_absent: true,
     },
     environment: {
-      colima_version: provider.colima_version,
-      docker_client_version: provider.docker_client_version,
-      docker_server_version: provider.docker_server_version,
+      evidence_class: provider.evidence_class,
       platform: provider.platform,
+      provider_contract_sha256: provider.provider_contract_sha256,
+      provider_name: provider.provider_name,
+      provider_version: provider.provider_version,
       registry_authentication: registry.authentication,
       registry_image: registry.image,
       registry_transport: registry.transport,
+      runtime_client_version: provider.runtime_client_version,
+      runtime_name: provider.runtime_name,
+      runtime_server_version: provider.runtime_server_version,
     },
     excluded_claims: candidate.excluded_claims,
     feature: "CPR-45",
     receipt: { count: receipts.length, head_sha256: state.head_sha256 },
     run_id: candidate.run_id,
-    schema: "synveda.clean-engine.environment.v1",
+    schema: "synveda.clean-engine.synthetic-environment.v1",
     selection: candidate.selection,
     source: candidate.source,
   };

@@ -43,10 +43,12 @@ import {
   createOwnedProviderRoot,
   inspectControlledProviderArtifacts,
   launchControlledFakeActor,
+  mirrorControlledFakeProviderEffect,
   planControlledProviderRoot,
   probeControlledProcessGroup,
   providerRootPreflight,
   publishControlledProviderArtifact,
+  publishControlledFakeProviderIdentity,
   publishOwnedProviderRootMirror,
   publishProviderRootReservation,
   publishRecoveredAbort,
@@ -99,7 +101,7 @@ const FAKE_PROVIDER_CONTRACT = Object.freeze({
   kind: "deterministic-fake-provider-v1",
   max_hold_milliseconds: 30_000,
   reconcile_outcomes: Object.freeze(["failed", "passed", "unknown"]),
-  result_contract: "clean-engine-provider-receipt-v2",
+  result_contract: "clean-engine-provider-receipt-v3",
   schema: "synveda.clean-engine.fake-provider-contract.v1",
 });
 const FAKE_PROVIDER_CONTRACT_SHA256 = digest(canonicalBytes(FAKE_PROVIDER_CONTRACT));
@@ -1227,7 +1229,7 @@ function validatePlan(plan, candidateBytes, stateMetadata) {
     "plan receipt",
   );
   if (
-    plan.schema !== "synveda.clean-engine.receipt.v2" ||
+    plan.schema !== "synveda.clean-engine.receipt.v3" ||
     plan.sequence !== 0 ||
     plan.outcome !== "passed" ||
     plan.phase !== "plan" ||
@@ -1824,13 +1826,45 @@ function loadState(roots, checkSource, allowCompetingStaging = false) {
       fail("controlled provider root plan mutation slot was ambiguous");
     }
     [providerSlot] = matchingProviderSlots;
+  } else {
+    const providerOwnedReceipt = receipts.find(
+      (receipt) =>
+        receipt.phase === "preflight-refused" || receipt.phase === "provider-create-intent",
+    );
+    if (providerOwnedReceipt !== undefined) {
+      const matchingProviderSlots = inventory.mutationSlots.filter((slot) => {
+        if (slot.value.action !== "provider-create") return false;
+        const close = mutationClosesBySlot.get(slot.value.journal_sequence);
+        const resultSequence = close?.value.result_sequence ?? receiptState.head.sequence;
+        return (
+          providerOwnedReceipt.sequence > slot.value.source_sequence &&
+          providerOwnedReceipt.sequence <= resultSequence
+        );
+      });
+      if (matchingProviderSlots.length !== 1) {
+        fail("synchronous provider mutation slot was ambiguous");
+      }
+      [providerSlot] = matchingProviderSlots;
+    } else if (inventory.mutationLease?.value.action === "provider-create") {
+      providerSlot = inventory.mutationLease;
+    }
   }
   const providerClose =
     providerSlot === undefined
       ? undefined
       : mutationClosesBySlot.get(providerSlot.value.journal_sequence);
-  const providerIntentReceipt =
+  const providerIntentCandidate =
     providerSlot === undefined ? undefined : receipts[providerSlot.value.source_sequence + 1];
+  const providerIntentReceipt =
+    providerIntentCandidate?.phase === "provider-create-intent"
+      ? providerIntentCandidate
+      : undefined;
+  const providerPassedCandidate =
+    providerSlot === undefined ? undefined : receipts[providerSlot.value.source_sequence + 2];
+  const providerPassedReceipt =
+    providerPassedCandidate?.phase === "provider-create-passed"
+      ? providerPassedCandidate
+      : undefined;
   const providerTerminalReceipt =
     providerClose !== undefined
       ? receipts[providerClose.value.result_sequence]
@@ -1848,7 +1882,9 @@ function loadState(roots, checkSource, allowCompetingStaging = false) {
       close: providerClose,
       fixtureId: candidate.value.run_id,
       intentReceipt: providerIntentReceipt,
+      passedReceipt: providerPassedReceipt,
       slot: providerSlot,
+      synchronousContractSha256: FAKE_PROVIDER_CONTRACT_SHA256,
       terminalReceipt: providerTerminalReceipt,
     });
   } catch (error) {
@@ -2049,7 +2085,7 @@ function plan(roots, values) {
         state_device: String(stateMetadata.dev),
         state_inode: String(stateMetadata.ino),
       },
-      schema: "synveda.clean-engine.receipt.v2",
+      schema: "synveda.clean-engine.receipt.v3",
       sequence: 0,
     };
     writeExclusive(join(pending, "00-plan.json"), canonicalBytes(receipt));
@@ -2220,6 +2256,25 @@ function publishMutationBlocker(
       continue;
     }
     holdFakeProvider(beforeLinkMilliseconds);
+    reassertAuthority?.();
+    try {
+      const currentStage = inspectPendingFile(
+        stagePath,
+        "pending mutation publication",
+        runMetadata.dev,
+        new Set([1n]),
+      );
+      if (
+        !sameMutationArtifact(staged, currentStage) ||
+        !readPrivate(stagePath, "pending mutation publication", 1, 0n).equals(bytes)
+      ) {
+        fail("pending mutation publication identity changed");
+      }
+    } catch (error) {
+      if (!mutationStageWasRemoved(stagePath)) throw error;
+      reassertAuthority?.();
+      continue;
+    }
     try {
       linkSync(stagePath, destinationPath);
     } catch (error) {
@@ -2498,6 +2553,10 @@ function publishMutationClose(
     const current = reassertAuthority();
     const currentEnvironmentSha256 =
       current.environment === undefined ? ZERO_SHA256 : digest(current.environment.bytes);
+    const currentOperationEvidenceSha256 =
+      slot.value.action === "provider-create"
+        ? current.providerState.operationEvidenceSha256
+        : ZERO_SHA256;
     if (
       current.mutationLease === undefined ||
       !current.mutationLease.bytes.equals(slot.bytes) ||
@@ -2505,7 +2564,8 @@ function publishMutationClose(
       current.environmentPublication !== undefined ||
       current.receiptState.head.sequence !== close.result_sequence ||
       current.receiptState.head_sha256 !== close.result_head_sha256 ||
-      currentEnvironmentSha256 !== close.result_environment_sha256
+      currentEnvironmentSha256 !== close.result_environment_sha256 ||
+      currentOperationEvidenceSha256 !== close.operation_evidence_sha256
     ) {
       fail("mutation close authority changed", 73);
     }
@@ -2651,6 +2711,13 @@ function providerAdapterReceipt(adapterResult) {
   ) {
     fail("fake provider result was refused", 70);
   }
+  if (
+    adapterResult.outcome === "passed" &&
+    (adapterResult.result.evidence_class !== "deterministic-fixture" ||
+      adapterResult.result.provider_contract_sha256 !== FAKE_PROVIDER_CONTRACT_SHA256)
+  ) {
+    fail("fake provider result was refused", 70);
+  }
   return {
     phase: adapterResult.outcome === "passed" ? "provider-create-passed" : "provider-create-failed",
     result: adapterResult.result,
@@ -2746,18 +2813,14 @@ function controlledProviderFailureResult(safeCode, collision = false) {
   };
 }
 
-function controlledProviderPassedResult(settlementSha256) {
+function controlledProviderPassedResult(providerIdentitySha256) {
   return {
-    colima_version: "0.10.3",
-    docker_client_version: "29.4.0",
-    docker_server_version: "29.4.0",
-    engine_identity_sha256: settlementSha256,
-    initial_containers: 0,
-    initial_images: 0,
-    initial_networks: ["bridge", "host", "none"],
-    initial_volumes: 0,
-    platform: "darwin-arm64-colima-vz",
-    socket_contract: "receipt-owned-unix",
+    evidence_class: "controlled-fake",
+    platform: "deterministic-posix",
+    provider_contract_sha256: CONTROLLED_FAKE_PROVIDER_CONTRACT_SHA256,
+    provider_evidence_sha256: providerIdentitySha256,
+    provider_name: "controlled-fake",
+    runtime_name: "none",
   };
 }
 
@@ -2786,6 +2849,24 @@ function controlledProviderDirectory(state) {
 function controlledPause(milliseconds) {
   if (milliseconds === 0) return Promise.resolve();
   return new Promise((resolvePromise) => setTimeout(resolvePromise, milliseconds));
+}
+
+async function publishControlledFakeProviderEvidence(
+  roots,
+  held,
+  providerDirectory,
+  afterEffectMirrorHoldMilliseconds,
+  afterProviderIdentityHoldMilliseconds,
+) {
+  mirrorControlledFakeProviderEffect(providerDirectory);
+  assertMutationLeaseHeld(roots, held);
+  await controlledPause(afterEffectMirrorHoldMilliseconds);
+  assertMutationLeaseHeld(roots, held);
+  const identity = publishControlledFakeProviderIdentity(providerDirectory);
+  assertMutationLeaseHeld(roots, held);
+  await controlledPause(afterProviderIdentityHoldMilliseconds);
+  assertMutationLeaseHeld(roots, held);
+  return identity;
 }
 
 export async function executeControlledProviderCreateForExecutor(argumentsValue) {
@@ -2922,7 +3003,14 @@ export async function executeControlledProviderCreateForExecutor(argumentsValue)
   state = assertMutationLeaseHeld(roots, held);
   if (!sourceClosureMatches(roots, state.candidate)) {
     actor.abort();
-    const settled = await actor.settle();
+    await actor.settle();
+    const providerIdentity = await publishControlledFakeProviderEvidence(
+      roots,
+      held,
+      providerDirectory,
+      argumentsValue.adapter.after_effect_mirror_hold_milliseconds,
+      argumentsValue.adapter.after_provider_identity_hold_milliseconds,
+    );
     const receipt = appendReceiptWithLease(roots, {
       phase: "provider-create-failed",
       result: controlledProviderFailureResult("evidence-refused"),
@@ -2932,7 +3020,7 @@ export async function executeControlledProviderCreateForExecutor(argumentsValue)
       held,
       "completed",
       { beforeLinkMilliseconds: argumentsValue.adapter.close_prelink_hold_milliseconds },
-      settled.settlement.sha256,
+      providerIdentity.sha256,
     );
     return receipt;
   }
@@ -2942,6 +3030,14 @@ export async function executeControlledProviderCreateForExecutor(argumentsValue)
   const settled = await actor.settle();
   assertMutationLeaseHeld(roots, held);
   await controlledPause(argumentsValue.adapter.after_settlement_hold_milliseconds);
+  state = assertMutationLeaseHeld(roots, held);
+  const providerIdentity = await publishControlledFakeProviderEvidence(
+    roots,
+    held,
+    providerDirectory,
+    argumentsValue.adapter.after_effect_mirror_hold_milliseconds,
+    argumentsValue.adapter.after_provider_identity_hold_milliseconds,
+  );
   state = assertMutationLeaseHeld(roots, held);
   const sourceMatches = sourceClosureMatches(roots, state.candidate);
   const passed =
@@ -2956,7 +3052,7 @@ export async function executeControlledProviderCreateForExecutor(argumentsValue)
   const receipt = appendReceiptWithLease(roots, {
     phase: passed ? "provider-create-passed" : "provider-create-failed",
     result: passed
-      ? controlledProviderPassedResult(settled.settlement.sha256)
+      ? controlledProviderPassedResult(providerIdentity.sha256)
       : controlledProviderFailureResult(safeCode),
   });
   assertMutationLeaseHeld(roots, held);
@@ -2965,7 +3061,7 @@ export async function executeControlledProviderCreateForExecutor(argumentsValue)
     held,
     "completed",
     { beforeLinkMilliseconds: argumentsValue.adapter.close_prelink_hold_milliseconds },
-    settled.settlement.sha256,
+    providerIdentity.sha256,
   );
   return receipt;
 }
@@ -3318,6 +3414,10 @@ export async function recoverControlledProviderCreateForExecutor(argumentsValue)
         state = assertProviderRecoveryHeld(roots, held);
         assertControlledActorAbsent(state.providerState);
       }
+      mirrorControlledFakeProviderEffect(providerDirectory);
+      state = assertProviderRecoveryHeld(roots, held);
+      const providerIdentity = publishControlledFakeProviderIdentity(providerDirectory);
+      state = assertProviderRecoveryHeld(roots, held);
       const sourceMatches = sourceClosureMatches(roots, state.candidate);
       const passed =
         decision.value.decision === "start" &&
@@ -3332,7 +3432,7 @@ export async function recoverControlledProviderCreateForExecutor(argumentsValue)
       appendReceiptWithLease(roots, {
         phase: passed ? "provider-create-passed" : "provider-create-failed",
         result: passed
-          ? controlledProviderPassedResult(settlement.sha256)
+          ? controlledProviderPassedResult(providerIdentity.sha256)
           : controlledProviderFailureResult(safeCode),
       });
       state = assertProviderRecoveryHeld(roots, held);
