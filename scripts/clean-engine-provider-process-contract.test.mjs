@@ -145,6 +145,18 @@ function processPresent(pid) {
   }
 }
 
+function knownAbsentPid() {
+  for (let candidate = 999_999; candidate >= 999_000; candidate -= 1) {
+    try {
+      process.kill(candidate, 0);
+    } catch (error) {
+      if (error?.code === "ESRCH") return candidate;
+      throw error;
+    }
+  }
+  throw new Error("a test-owned absent PID was unavailable");
+}
+
 async function waitForProcessAbsent(pid, timeoutMilliseconds = 7_000) {
   const deadline = Date.now() + timeoutMilliseconds;
   while (Date.now() < deadline) {
@@ -223,6 +235,14 @@ function rewriteCanonicalArtifact(path, value) {
   const bytes = providerProcessBytes(value);
   writeDurable(path, bytes);
   return providerProcessDigest(bytes);
+}
+
+function moveToPrivateStage(path) {
+  const artifactBytes = readFileSync(path);
+  unlinkDurable(path);
+  const stage = join(dirname(path), privateStageName(path, artifactBytes));
+  writeDurable(stage, artifactBytes);
+  return stage;
 }
 
 function fileIdentity(path, role) {
@@ -382,9 +402,13 @@ test("the tagged Colima contract is closed and cannot authorize a live start", (
     "durable-evidence-state-veto-gate-v2",
   );
   assert.equal(CONTROLLED_BACKGROUND_PROVIDER_CONTRACT.kind,
-    "controlled-background-provider-v3");
+    "controlled-background-provider-v4");
   assert.equal(CONTROLLED_BACKGROUND_PROVIDER_CONTRACT.schema,
-    "synveda.clean-engine.controlled-background-provider-contract.v3");
+    "synveda.clean-engine.controlled-background-provider-contract.v4");
+  assert.equal(
+    CONTROLLED_BACKGROUND_PROVIDER_CONTRACT.child_process_identity_proof,
+    "full-causal-record-hmac-sha256-v1",
+  );
   assert.equal(CONTROLLED_BACKGROUND_PROVIDER_CONTRACT.private_file_publication,
     "fsync-stage-link-no-replace-v1");
   assert.equal(CONTROLLED_BACKGROUND_PROVIDER_CONTRACT.root_publication,
@@ -678,6 +702,277 @@ test("every state-authority checkpoint is a veto before its next effect", async 
         await cleanupFixture(state);
       }
     });
+  }
+});
+
+test("durable child process identities remain probeable before parent witnesses", async (t) => {
+  const evidenceSuffix = [
+    "controller-witness.json",
+    "provider-start-decision.json",
+    "hostagent-witness.json",
+    "engine-witness.json",
+    "context-witness.json",
+    "controller-settlement.json",
+    "provider-identity.json",
+  ];
+
+  await t.test(
+    "controller readiness proves an absent group without a controller witness",
+    async () => {
+      const state = fixture();
+      try {
+        const started = await launch(state, 1_000);
+        await waitForProcessAbsent(started.hostagentPid);
+        for (const name of evidenceSuffix) {
+          unlinkDurable(join(state.evidenceDirectory, name));
+        }
+        unlinkDurable(hostagentRecordPath(state));
+
+        const prefix = inspectControlledBackgroundProviderPrefix(
+          state.evidenceDirectory,
+          state.fixtureId,
+          { expectedCreateBindings: createBindings(), providerBase: state.providerBase },
+        );
+        assert.equal(prefix.evidenceStage, "controller-launch-decision");
+        assert.deepEqual(prefix.effectFrontier, {
+          disposition: "complete",
+          effect: "controller-ready",
+        });
+        assert.equal(prefix.residual.controller_presence, "proved-absent");
+        assert.equal(prefix.residual.hostagent_presence, "not-started");
+        assert.equal(prefix.residual.sockets, "absent");
+      } finally {
+        await cleanupFixture(state);
+      }
+    },
+  );
+
+  await t.test("host-agent PID proves absence without a host-agent witness", async () => {
+    const state = fixture();
+    try {
+      const started = await launch(state, 1_000);
+      await waitForProcessAbsent(started.hostagentPid);
+      for (const name of evidenceSuffix.slice(2)) {
+        unlinkDurable(join(state.evidenceDirectory, name));
+      }
+
+      const prefix = inspectControlledBackgroundProviderPrefix(
+        state.evidenceDirectory,
+        state.fixtureId,
+        { expectedCreateBindings: createBindings(), providerBase: state.providerBase },
+      );
+      assert.equal(prefix.evidenceStage, "provider-start-decision");
+      assert.deepEqual(prefix.effectFrontier, {
+        disposition: "complete",
+        effect: "hostagent-pid",
+      });
+      assert.equal(prefix.residual.controller_presence, "proved-absent");
+      assert.equal(prefix.residual.hostagent_presence, "proved-absent");
+      assert.equal(prefix.residual.sockets, "absent");
+    } finally {
+      await cleanupFixture(state);
+    }
+  });
+});
+
+test("pre-witness child records authenticate live PIDs and complete private stages", async (t) => {
+  await t.test("controller readiness refuses a live process-group relabel", async () => {
+    const state = fixture();
+    let inspected = false;
+    try {
+      planControlledBackgroundProviderCreate({
+        bindings: createBindings(),
+        evidenceDirectory: state.evidenceDirectory,
+        fixtureId: state.fixtureId,
+        providerBase: state.providerBase,
+      });
+      await assert.rejects(
+        () =>
+          launchControlledBackgroundProviderWithAuthorityGate(
+            {
+              evidenceDirectory: state.evidenceDirectory,
+              fixtureId: state.fixtureId,
+              maximumLifetimeMilliseconds: 2_000,
+              providerBase: state.providerBase,
+            },
+            ({ checkpoint }) => {
+              if (checkpoint !== "before-start-decision-publication") return;
+              unlinkDurable(join(state.evidenceDirectory, "controller-witness.json"));
+              const current = inspectControlledBackgroundProviderPrefix(
+                state.evidenceDirectory,
+                state.fixtureId,
+                { expectedCreateBindings: createBindings(), providerBase: state.providerBase },
+              );
+              assert.equal(current.residual.controller_presence, "observed-present");
+              assert.deepEqual(current.effectFrontier, {
+                disposition: "complete",
+                effect: "controller-ready",
+              });
+              const readyPath = join(providerRootPath(state), "t", "controller-ready.json");
+              const ready = JSON.parse(readFileSync(readyPath, "utf8"));
+              ready.controller_pid = knownAbsentPid();
+              ready.controller_pgid = ready.controller_pid;
+              rewriteCanonicalArtifact(readyPath, ready);
+              assert.throws(
+                () =>
+                  inspectControlledBackgroundProviderPrefix(
+                    state.evidenceDirectory,
+                    state.fixtureId,
+                    { expectedCreateBindings: createBindings(), providerBase: state.providerBase },
+                  ),
+                /controller readiness was refused/,
+              );
+              inspected = true;
+            },
+          ),
+        /controller readiness was refused/,
+      );
+      assert.equal(inspected, true);
+    } finally {
+      await cleanupFixture(state);
+    }
+  });
+
+  await t.test("controller readiness stage retains live process classification", async () => {
+    const state = fixture();
+    let inspected = false;
+    try {
+      planControlledBackgroundProviderCreate({
+        bindings: createBindings(),
+        evidenceDirectory: state.evidenceDirectory,
+        fixtureId: state.fixtureId,
+        providerBase: state.providerBase,
+      });
+      await assert.rejects(
+        () =>
+          launchControlledBackgroundProviderWithAuthorityGate(
+            {
+              evidenceDirectory: state.evidenceDirectory,
+              fixtureId: state.fixtureId,
+              maximumLifetimeMilliseconds: 2_000,
+              providerBase: state.providerBase,
+            },
+            ({ checkpoint }) => {
+              if (checkpoint !== "before-start-decision-publication") return;
+              unlinkDurable(join(state.evidenceDirectory, "controller-witness.json"));
+              moveToPrivateStage(
+                join(providerRootPath(state), "t", "controller-ready.json"),
+              );
+              const current = inspectControlledBackgroundProviderPrefix(
+                state.evidenceDirectory,
+                state.fixtureId,
+                { expectedCreateBindings: createBindings(), providerBase: state.providerBase },
+              );
+              assert.equal(current.residual.controller_presence, "observed-present");
+              assert.deepEqual(current.effectFrontier, {
+                disposition: "pending",
+                effect: "controller-ready",
+              });
+              inspected = true;
+            },
+          ),
+        /authority checkpoint prefix was refused/,
+      );
+      assert.equal(inspected, true);
+      assert.equal(
+        existsSync(join(state.evidenceDirectory, "provider-start-decision.json")),
+        false,
+      );
+      assert.equal(existsSync(hostagentRecordPath(state)), false);
+      const sockets = providerSocketPaths(state);
+      assert.equal(existsSync(sockets.hostagent), false);
+      assert.equal(existsSync(sockets.engine), false);
+    } finally {
+      await cleanupFixture(state);
+    }
+  });
+
+  for (const staged of [false, true]) {
+    await t.test(
+      staged
+        ? "host-agent PID stage retains live process classification"
+        : "host-agent PID record refuses a live process relabel",
+      async () => {
+        const state = fixture();
+        let inspected = false;
+        let liveHostagentPid;
+        try {
+          planControlledBackgroundProviderCreate({
+            bindings: createBindings(),
+            evidenceDirectory: state.evidenceDirectory,
+            fixtureId: state.fixtureId,
+            providerBase: state.providerBase,
+          });
+          await assert.rejects(
+            () =>
+              launchControlledBackgroundProviderWithAuthorityGate(
+                {
+                  evidenceDirectory: state.evidenceDirectory,
+                  fixtureId: state.fixtureId,
+                  maximumLifetimeMilliseconds: 2_000,
+                  providerBase: state.providerBase,
+                },
+                ({ checkpoint }) => {
+                  if (checkpoint !== "before-provider-identity-publication") return;
+                  for (const name of [
+                    "hostagent-witness.json",
+                    "engine-witness.json",
+                    "context-witness.json",
+                    "controller-settlement.json",
+                  ]) {
+                    unlinkDurable(join(state.evidenceDirectory, name));
+                  }
+                  const pidPath = hostagentRecordPath(state);
+                  const pidRecord = JSON.parse(readFileSync(pidPath, "utf8"));
+                  liveHostagentPid = pidRecord.pid;
+                  if (staged) moveToPrivateStage(pidPath);
+                  const current = inspectControlledBackgroundProviderPrefix(
+                    state.evidenceDirectory,
+                    state.fixtureId,
+                    { expectedCreateBindings: createBindings(), providerBase: state.providerBase },
+                  );
+                  assert.equal(current.residual.controller_presence, "proved-absent");
+                  assert.equal(current.residual.hostagent_presence, "observed-present");
+                  assert.deepEqual(current.effectFrontier, {
+                    disposition: staged ? "pending" : "complete",
+                    effect: "hostagent-pid",
+                  });
+                  if (!staged) {
+                    pidRecord.pid = knownAbsentPid();
+                    rewriteCanonicalArtifact(pidPath, pidRecord);
+                    assert.throws(
+                      () =>
+                        inspectControlledBackgroundProviderPrefix(
+                          state.evidenceDirectory,
+                          state.fixtureId,
+                          {
+                            expectedCreateBindings: createBindings(),
+                            providerBase: state.providerBase,
+                          },
+                        ),
+                      /hostagent PID record was refused/,
+                    );
+                  }
+                  inspected = true;
+                },
+              ),
+            staged
+              ? /authority checkpoint prefix was refused/
+              : /hostagent PID record was refused/,
+          );
+          assert.equal(inspected, true);
+          assert.equal(
+            existsSync(join(state.evidenceDirectory, "provider-identity.json")),
+            false,
+          );
+        } finally {
+          if (Number.isSafeInteger(liveHostagentPid)) {
+            await waitForProcessAbsent(liveHostagentPid);
+          }
+          await cleanupFixture(state);
+        }
+      },
+    );
   }
 });
 

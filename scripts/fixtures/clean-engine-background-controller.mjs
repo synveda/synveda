@@ -47,6 +47,13 @@ function proof(secret, action, challenge, processIdentity) {
     .digest("hex");
 }
 
+function artifactProof(secret, action, value) {
+  return createHmac("sha256", secret)
+    .update(`synveda.clean-engine.background-provider-artifact.v1\0${action}\0`)
+    .update(bytes(value))
+    .digest("hex");
+}
+
 function proofEquals(left, right) {
   return (
     typeof left === "string" &&
@@ -421,6 +428,7 @@ function validateStartGate(config, configSha256, processIdentity, expectedSha256
     witness.create_authority_sha256 !== config.create_authority_sha256 ||
     witness.hostagent_config_sha256 !== config.hostagent_config_sha256 ||
     witness.root_owner_sha256 !== config.root_owner_sha256 ||
+    witness.argv_contract !== "repository-digest-bound-eval-controller-v3" ||
     witness.execution_protocol !== "authenticated-ipc-start-shutdown-v2" ||
     launch.schema !==
       "synveda.clean-engine.background-controller-launch-decision.v1" ||
@@ -610,6 +618,10 @@ async function main() {
     process.argv[1],
     process.argv[2],
   );
+  const controllerLaunchDecisionSha256 = process.argv[3];
+  if (!/^[0-9a-f]{64}$/.test(controllerLaunchDecisionSha256 ?? "")) {
+    throw new Error("controller launch decision digest was refused");
+  }
   const controllerProcessIdentity = digest(
     Buffer.from(
       [
@@ -623,21 +635,22 @@ async function main() {
       "utf8",
     ),
   );
-  publish(config.controller_ready, {
+  const controllerReady = {
+    controller_config_sha256: configSha256,
     controller_environment_keys: Object.keys(process.env).sort(),
+    controller_launch_decision_sha256: controllerLaunchDecisionSha256,
+    controller_pgid: process.pid,
     controller_pid: process.pid,
     controller_process_instance_sha256: controllerProcessIdentity,
     controller_script_sha256: digest(Buffer.from(evaluatedSource(), "utf8")),
     fixture_id: config.fixture_id,
     node_sha256: digest(readFileSync(process.execPath)),
-    proof_sha256: proof(
-      config.controller_nonce,
-      "controller-ready",
-      config.fixture_id,
-      controllerProcessIdentity,
-    ),
-    schema: "synveda.clean-engine.background-controller-ready.v2",
+    schema: "synveda.clean-engine.background-controller-ready.v3",
     working_directory: process.cwd(),
+  };
+  publish(config.controller_ready, {
+    ...controllerReady,
+    proof_sha256: artifactProof(config.controller_nonce, "controller-ready", controllerReady),
   });
   let child;
   let state = "waiting";
@@ -682,7 +695,7 @@ async function main() {
         )) {
           throw new Error("controller start was refused");
         }
-        validateStartGate(
+        const startDecision = validateStartGate(
           config,
           configSha256,
           controllerProcessIdentity,
@@ -698,6 +711,8 @@ async function main() {
               hostagentSource,
               config.hostagent_config,
               config.hostagent_config_sha256,
+              message.start_decision_sha256,
+              startDecision.controller_witness_sha256,
             ],
             {
               cwd: config.working_directory,

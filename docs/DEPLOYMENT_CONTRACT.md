@@ -207,7 +207,7 @@ mutation-journal label. A durable launch decision precedes the controller and a
 distinct durable start decision precedes the host agent; the controller
 reopens and validates the authority, owner, launch/witness chain, start
 decision and host-agent configuration before spawning. The explicitly
-authorised v3 fixture launcher additionally exposes only a synchronous veto
+authorised v4 fixture launcher additionally exposes only a synchronous veto
 checkpoint before root publication, controller spawn, start-decision
 publication, start delivery and provider-identity publication. Each veto is followed by a
 non-mutating comparison of the complete ordered evidence/private-file frontier
@@ -219,6 +219,11 @@ Private root/config/readiness/PID files publish through a fsynced private stage
 and no-replace hard link; sockets are created under a `0177` umask before their
 mode and parent durability are rechecked. A non-mutating prefix inspector
 classifies exact causal evidence and root residuals without repairing them.
+The controller-readiness and host-agent PID records HMAC their complete causal
+configuration, launch/start, PID/process and toolchain identities. A final or
+canonical-complete staged child record can therefore be negative-probed before
+its later parent witness; PID relabelling and elapsed-lifetime absence remain
+refused.
 The launcher binds captured controller
 and host-agent source bytes plus child-side runtime/source witnesses. Both
 children open their digest-bound configuration through exact no-follow

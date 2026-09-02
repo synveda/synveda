@@ -167,6 +167,7 @@ export const COLIMA_LIVE_PREPARATION_CONTRACT_SHA256 = providerProcessDigest(
 
 export const CONTROLLED_BACKGROUND_PROVIDER_CONTRACT = Object.freeze({
   artifact_order: CONTROLLED_BACKGROUND_CREATION_ARTIFACTS,
+  child_process_identity_proof: "full-causal-record-hmac-sha256-v1",
   controller_group_probe: "negative-pgid-esrch-v1",
   engine_protocol: "authenticated-content-free-version-v1",
   environment_names: COLIMA_LIVE_PREPARATION_CONTRACT.environment_names,
@@ -174,7 +175,7 @@ export const CONTROLLED_BACKGROUND_PROVIDER_CONTRACT = Object.freeze({
   home_policy: COLIMA_LIVE_PREPARATION_CONTRACT.home_policy,
   hostagent_protocol: "authenticated-challenge-v1",
   launch_protocol: "durable-evidence-state-veto-gate-v2",
-  kind: "controlled-background-provider-v3",
+  kind: "controlled-background-provider-v4",
   lifecycle_exposure_authorized: false,
   live_preparation_contract_sha256: COLIMA_LIVE_PREPARATION_CONTRACT_SHA256,
   max_lifetime_milliseconds: 30_000,
@@ -183,7 +184,7 @@ export const CONTROLLED_BACKGROUND_PROVIDER_CONTRACT = Object.freeze({
   provider_kind: "controlled-background-fake",
   root_publication: "authority-before-mkdir-owner-atomic-v1",
   root_layout: CONTROLLED_BACKGROUND_ROOT_LAYOUT,
-  schema: "synveda.clean-engine.controlled-background-provider-contract.v3",
+  schema: "synveda.clean-engine.controlled-background-provider-contract.v4",
   socket_publication: "umask-0177-listen-chmod-fsync-v1",
   state_authority_gate: "synchronous-veto-only-five-checkpoint-v1",
   toolchain_roles: Object.freeze(["controller-script", "hostagent-script", "node-runtime"]),
@@ -1420,6 +1421,13 @@ function proof(secret, action, challenge, processIdentity) {
     .digest("hex");
 }
 
+function artifactProof(secret, action, value) {
+  return createHmac("sha256", secret)
+    .update(`synveda.clean-engine.background-provider-artifact.v1\0${action}\0`)
+    .update(providerProcessBytes(value))
+    .digest("hex");
+}
+
 function proofEquals(left, right) {
   return (
     lowerHex(left, 64) &&
@@ -1882,6 +1890,9 @@ function validateControllerReady(value, expected, secret) {
     value,
     [
       "controller_environment_keys",
+      "controller_config_sha256",
+      "controller_launch_decision_sha256",
+      "controller_pgid",
       "controller_pid",
       "controller_process_instance_sha256",
       "controller_script_sha256",
@@ -1895,33 +1906,46 @@ function validateControllerReady(value, expected, secret) {
   );
   validateEnvironmentKeys(value.controller_environment_keys, "controller environment");
   if (
-    value.schema !== "synveda.clean-engine.background-controller-ready.v2" ||
+    value.schema !== "synveda.clean-engine.background-controller-ready.v3" ||
     value.fixture_id !== expected.fixtureId ||
+    value.controller_config_sha256 !== expected.controllerConfigSha256 ||
+    value.controller_launch_decision_sha256 !== expected.controllerLaunchDecisionSha256 ||
+    value.controller_pgid !== expected.controllerPgid ||
     value.controller_pid !== expected.controllerPid ||
+    value.controller_pgid !== value.controller_pid ||
     !lowerHex(value.controller_process_instance_sha256, 64) ||
     value.controller_script_sha256 !== expected.controllerScriptSha256 ||
     value.node_sha256 !== expected.nodeSha256 ||
     value.working_directory !== expected.workingDirectory ||
     !proofEquals(
       value.proof_sha256,
-      proof(
-        secret,
-        "controller-ready",
-        expected.fixtureId,
-        value.controller_process_instance_sha256,
-      ),
+      artifactProof(secret, "controller-ready", {
+        controller_config_sha256: value.controller_config_sha256,
+        controller_environment_keys: value.controller_environment_keys,
+        controller_launch_decision_sha256: value.controller_launch_decision_sha256,
+        controller_pgid: value.controller_pgid,
+        controller_pid: value.controller_pid,
+        controller_process_instance_sha256: value.controller_process_instance_sha256,
+        controller_script_sha256: value.controller_script_sha256,
+        fixture_id: value.fixture_id,
+        node_sha256: value.node_sha256,
+        schema: value.schema,
+        working_directory: value.working_directory,
+      }),
     )
   ) {
     fail("controlled background controller readiness was refused");
   }
 }
 
-function validatePidRecord(value, expected, toolchain) {
+function validatePidRecord(value, expected, toolchain, secret) {
   exactKeys(
     value,
     [
       "environment_keys",
+      "controller_witness_sha256",
       "fixture_id",
+      "hostagent_config_sha256",
       "hostagent_script_sha256",
       "instance_nonce_sha256",
       "node_sha256",
@@ -1929,6 +1953,8 @@ function validatePidRecord(value, expected, toolchain) {
       "ppid",
       "process_instance_sha256",
       "profile",
+      "proof_sha256",
+      "provider_start_decision_sha256",
       "schema",
       "working_directory",
     ],
@@ -1937,16 +1963,38 @@ function validatePidRecord(value, expected, toolchain) {
   validateEnvironmentKeys(value.environment_keys, "hostagent environment");
   const components = new Map(toolchain.components.map((component) => [component.role, component]));
   if (
-    value.schema !== "synveda.clean-engine.background-hostagent-witness.v1" ||
+    value.schema !== "synveda.clean-engine.background-hostagent-pid.v2" ||
     value.fixture_id !== expected.fixtureId ||
+    value.controller_witness_sha256 !== expected.controllerWitnessSha256 ||
+    value.hostagent_config_sha256 !== expected.hostagentConfigSha256 ||
     value.profile !== expected.profile ||
     value.pid !== expected.pid ||
     value.ppid !== expected.controllerPid ||
     value.process_instance_sha256 !== expected.processIdentity ||
+    value.provider_start_decision_sha256 !== expected.providerStartDecisionSha256 ||
     value.instance_nonce_sha256 !== expected.instanceNonceSha256 ||
     value.hostagent_script_sha256 !== components.get("hostagent-script")?.sha256 ||
     value.node_sha256 !== components.get("node-runtime")?.sha256 ||
-    value.working_directory !== expected.workingDirectory
+    value.working_directory !== expected.workingDirectory ||
+    !proofEquals(
+      value.proof_sha256,
+      artifactProof(secret, "hostagent-pid", {
+        controller_witness_sha256: value.controller_witness_sha256,
+        environment_keys: value.environment_keys,
+        fixture_id: value.fixture_id,
+        hostagent_config_sha256: value.hostagent_config_sha256,
+        hostagent_script_sha256: value.hostagent_script_sha256,
+        instance_nonce_sha256: value.instance_nonce_sha256,
+        node_sha256: value.node_sha256,
+        pid: value.pid,
+        ppid: value.ppid,
+        process_instance_sha256: value.process_instance_sha256,
+        profile: value.profile,
+        provider_start_decision_sha256: value.provider_start_decision_sha256,
+        schema: value.schema,
+        working_directory: value.working_directory,
+      }),
+    )
   ) {
     fail("controlled background hostagent PID record was refused");
   }
@@ -1968,15 +2016,19 @@ function revalidateHostagentPidRecord(paths, fixtureId, evidence, instanceNonce)
   validatePidRecord(
     pidRecord.value,
     {
+      controllerWitnessSha256: evidence.controllerWitness.sha256,
       controllerPid: evidence.controllerWitness.value.controller_pid,
       fixtureId,
+      hostagentConfigSha256: evidence.controllerWitness.value.hostagent_config_sha256,
       instanceNonceSha256: providerProcessDigest(Buffer.from(instanceNonce, "ascii")),
       pid: pidRecord.value.pid,
       processIdentity: evidence.hostagentWitness.value.process_instance_sha256,
       profile: paths.profile,
+      providerStartDecisionSha256: evidence.providerStartDecision.sha256,
       workingDirectory: paths.root,
     },
     evidence.toolchain.value,
+    instanceNonce,
   );
   return pidRecord;
 }
@@ -2189,6 +2241,7 @@ async function launchControlledBackgroundProviderImpl({
       toolchainBundle.execution.controllerSource,
       root.paths.controllerConfig,
       controllerConfigArtifact.sha256,
+      controllerLaunchDecision.sha256,
     ],
     {
       cwd: root.paths.root,
@@ -2215,6 +2268,9 @@ async function launchControlledBackgroundProviderImpl({
     validateControllerReady(
       ready.value,
       {
+        controllerConfigSha256: controllerConfigArtifact.sha256,
+        controllerLaunchDecisionSha256: controllerLaunchDecision.sha256,
+        controllerPgid: controller.pid,
         controllerPid: controller.pid,
         controllerScriptSha256: components.get("controller-script").sha256,
         fixtureId,
@@ -2225,7 +2281,7 @@ async function launchControlledBackgroundProviderImpl({
     );
     controllerProcessIdentity = ready.value.controller_process_instance_sha256;
     const controllerWitnessValue = {
-      argv_contract: "repository-digest-bound-eval-controller-v2",
+      argv_contract: "repository-digest-bound-eval-controller-v3",
       controller_config_sha256: controllerConfigArtifact.sha256,
       controller_nonce_sha256: providerProcessDigest(Buffer.from(controllerNonce, "ascii")),
       controller_pgid: controller.pid,
@@ -2348,17 +2404,21 @@ async function launchControlledBackgroundProviderImpl({
     validatePidRecord(
       pidRecord.value,
       {
+        controllerWitnessSha256: controllerWitness.sha256,
         controllerPid: controller.pid,
         fixtureId,
+        hostagentConfigSha256: hostagentConfigArtifact.sha256,
         instanceNonceSha256: providerProcessDigest(
           Buffer.from(root.ownershipNonce, "ascii"),
         ),
         pid: started.hostagent_pid,
         processIdentity: started.hostagent_process_instance_sha256,
         profile: root.paths.profile,
+        providerStartDecisionSha256: startDecision.sha256,
         workingDirectory: root.paths.root,
       },
       toolchainValue,
+      root.ownershipNonce,
     );
     const haSocket = socketIdentity(
       root.paths.haSocket,
@@ -2945,7 +3005,7 @@ function validateCreationArtifactChain(
   if (
     controllerWitness.value.schema !== "synveda.clean-engine.background-controller-witness.v2" ||
     controllerWitness.value.fixture_id !== fixtureId ||
-    controllerWitness.value.argv_contract !== "repository-digest-bound-eval-controller-v2" ||
+    controllerWitness.value.argv_contract !== "repository-digest-bound-eval-controller-v3" ||
     controllerWitness.value.execution_protocol !== "authenticated-ipc-start-shutdown-v2" ||
     !lowerHex(controllerWitness.value.controller_config_sha256, 64) ||
     !lowerHex(controllerWitness.value.controller_nonce_sha256, 64) ||
@@ -3426,7 +3486,7 @@ function validateCreationArtifactPrefix(
     if (
       controllerWitness.value.schema !== "synveda.clean-engine.background-controller-witness.v2" ||
       controllerWitness.value.fixture_id !== fixtureId ||
-      controllerWitness.value.argv_contract !== "repository-digest-bound-eval-controller-v2" ||
+      controllerWitness.value.argv_contract !== "repository-digest-bound-eval-controller-v3" ||
       controllerWitness.value.execution_protocol !== "authenticated-ipc-start-shutdown-v2" ||
       controllerWitness.value.controller_launch_decision_sha256 !== controllerLaunchDecision.sha256 ||
       controllerWitness.value.create_authority_sha256 !== createAuthority.sha256 ||
@@ -3450,6 +3510,9 @@ function validateCreationArtifactPrefix(
     validateControllerReady(
       controllerReady.value,
       {
+        controllerConfigSha256: controllerConfig.sha256,
+        controllerLaunchDecisionSha256: controllerLaunchDecision.sha256,
+        controllerPgid: controllerWitness.value.controller_pgid,
         controllerPid: controllerWitness.value.controller_pid,
         controllerScriptSha256: controllerConfig.value.controller_script_sha256,
         fixtureId,
@@ -3551,17 +3614,21 @@ function validateCreationArtifactPrefix(
     validatePidRecord(
       pidRecord.value,
       {
+        controllerWitnessSha256: controllerWitness.sha256,
         controllerPid: controllerWitness.value.controller_pid,
         fixtureId,
+        hostagentConfigSha256: hostagentConfig.sha256,
         instanceNonceSha256: providerProcessDigest(
           Buffer.from(createAuthority.value.ownership_nonce, "ascii"),
         ),
         pid: pidRecord.value.pid,
         processIdentity: hostagentWitness.value.process_instance_sha256,
         profile: paths.profile,
+        providerStartDecisionSha256: providerStartDecision.sha256,
         workingDirectory: paths.root,
       },
       toolchain.value,
+      createAuthority.value.ownership_nonce,
     );
     if (
       canonical(privateFileIdentity(
@@ -4504,12 +4571,19 @@ function inspectProgressiveRoot(paths, createAuthority, artifacts) {
       ? "not-started"
       : "unattested";
   if (ready !== undefined) {
-    if (controllerConfig === undefined) {
-      fail("controlled background controller readiness lacked its config");
+    if (
+      controllerConfig === undefined ||
+      artifacts["controller-launch-decision.json"] === undefined
+    ) {
+      fail("controlled background controller readiness lacked launch authority");
     }
     validateControllerReady(
       ready.value,
       {
+        controllerConfigSha256: controllerConfig.sha256,
+        controllerLaunchDecisionSha256:
+          artifacts["controller-launch-decision.json"].sha256,
+        controllerPgid: ready.value.controller_pgid,
         controllerPid: ready.value.controller_pid,
         controllerScriptSha256: controllerConfig.value.controller_script_sha256,
         fixtureId: createAuthority.value.fixture_id,
@@ -4518,12 +4592,12 @@ function inspectProgressiveRoot(paths, createAuthority, artifacts) {
       },
       controllerConfig.value.controller_nonce,
     );
-    if (
-      entriesByPath.has(relative(paths.root, paths.controllerReady)) &&
-      artifacts["controller-witness.json"] !== undefined
-    ) {
-      controllerPresence = processObservation(probeProcessGroup(ready.value.controller_pid));
-    }
+    // The child's fsynced readiness file is itself the durable process-group
+    // identity.  Recovery must be able to prove that group absent even when
+    // the parent died before publishing its later controller witness.  A
+    // canonical-complete private stage is equally durable; positive or EPERM
+    // probes remain conservatively blocking.
+    controllerPresence = processObservation(probeProcessGroup(ready.value.controller_pid));
   }
   const pid = progressiveArtifact(
     paths.pidRecord,
@@ -4535,31 +4609,38 @@ function inspectProgressiveRoot(paths, createAuthority, artifacts) {
       : "unattested";
   if (pid !== undefined) {
     const controllerWitness = artifacts["controller-witness.json"];
+    const providerStartDecision = artifacts["provider-start-decision.json"];
     const toolchain = artifacts["background-toolchain.json"];
-    if (controllerWitness === undefined || toolchain === undefined) {
-      fail("controlled background hostagent PID record lacked process evidence");
+    if (
+      controllerWitness === undefined ||
+      providerStartDecision === undefined ||
+      toolchain === undefined
+    ) {
+      fail("controlled background hostagent PID record lacked start authority");
     }
     validatePidRecord(
       pid.value,
       {
+        controllerWitnessSha256: controllerWitness.sha256,
         controllerPid: controllerWitness.value.controller_pid,
         fixtureId: createAuthority.value.fixture_id,
+        hostagentConfigSha256: hostagentConfig.sha256,
         instanceNonceSha256: providerProcessDigest(
           Buffer.from(createAuthority.value.ownership_nonce, "ascii"),
         ),
         pid: pid.value.pid,
         processIdentity: pid.value.process_instance_sha256,
         profile: paths.profile,
+        providerStartDecisionSha256: providerStartDecision.sha256,
         workingDirectory: paths.root,
       },
       toolchain.value,
+      createAuthority.value.ownership_nonce,
     );
-    if (
-      entriesByPath.has(relative(paths.root, paths.pidRecord)) &&
-      artifacts["hostagent-witness.json"] !== undefined
-    ) {
-      hostagentPresence = processObservation(processPresence(pid.value.pid));
-    }
+    // The fsynced PID record precedes the parent-owned host-agent witness.  It
+    // therefore remains the only exact negative-probe handle after a crash in
+    // that publication window.  Never infer absence from elapsed lifetime.
+    hostagentPresence = processObservation(processPresence(pid.value.pid));
   }
   const socketCount = [paths.haSocket, paths.engineSocket].filter((path) =>
     entriesByPath.has(relative(paths.root, path))).length;

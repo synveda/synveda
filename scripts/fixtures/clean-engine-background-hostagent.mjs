@@ -51,6 +51,13 @@ function proof(secret, action, challenge, processIdentity) {
     .digest("hex");
 }
 
+function artifactProof(secret, action, value) {
+  return createHmac("sha256", secret)
+    .update(`synveda.clean-engine.background-provider-artifact.v1\0${action}\0`)
+    .update(bytes(value))
+    .digest("hex");
+}
+
 function proofEquals(left, right) {
   return (
     typeof left === "string" &&
@@ -213,7 +220,7 @@ function readConfig(path, expectedSha256) {
   ) {
     throw new Error("config was refused");
   }
-  return value;
+  return { configSha256: digest(configBytes), value };
 }
 
 function serverResponse(config, processIdentity, kind, request) {
@@ -339,7 +346,15 @@ async function closeServer(endpoint) {
 }
 
 async function main() {
-  const config = readConfig(process.argv[1], process.argv[2]);
+  const { configSha256, value: config } = readConfig(process.argv[1], process.argv[2]);
+  const providerStartDecisionSha256 = process.argv[3];
+  const controllerWitnessSha256 = process.argv[4];
+  if (
+    !/^[0-9a-f]{64}$/.test(providerStartDecisionSha256 ?? "") ||
+    !/^[0-9a-f]{64}$/.test(controllerWitnessSha256 ?? "")
+  ) {
+    throw new Error("provider start decision digest was refused");
+  }
   process.umask(0o177);
   const processIdentity = digest(
     Buffer.from(
@@ -378,9 +393,11 @@ async function main() {
   chmodSync(config.engine_socket, 0o600);
   syncDirectory(dirname(config.ha_socket));
   syncDirectory(dirname(config.engine_socket));
-  const pidRecord = {
+  const pidIdentity = {
+    controller_witness_sha256: controllerWitnessSha256,
     environment_keys: Object.keys(process.env).sort(),
     fixture_id: config.fixture_id,
+    hostagent_config_sha256: configSha256,
     hostagent_script_sha256: config.hostagent_script_sha256,
     instance_nonce_sha256: digest(Buffer.from(config.instance_nonce, "ascii")),
     node_sha256: config.node_sha256,
@@ -388,8 +405,13 @@ async function main() {
     ppid: process.ppid,
     process_instance_sha256: processIdentity,
     profile: config.profile,
-    schema: "synveda.clean-engine.background-hostagent-witness.v1",
+    provider_start_decision_sha256: providerStartDecisionSha256,
+    schema: "synveda.clean-engine.background-hostagent-pid.v2",
     working_directory: process.cwd(),
+  };
+  const pidRecord = {
+    ...pidIdentity,
+    proof_sha256: artifactProof(config.instance_nonce, "hostagent-pid", pidIdentity),
   };
   publish(config.pid_record, pidRecord);
   if (typeof process.send !== "function") throw new Error("controller channel was unavailable");

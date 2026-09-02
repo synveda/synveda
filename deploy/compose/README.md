@@ -230,7 +230,7 @@ truthfully. Before root mutation, a recoverable fixture-only create authority
 binds the exact base/evidence directory identities, intended receipt/slot-shaped
 inputs and ownership nonce. A controller-launch decision is durable before the
 controller process, and a separate start decision is durable before the host
-agent. The v3 process contract inserts a synchronous veto-only authority
+agent. The v4 process contract inserts a synchronous veto-only authority
 checkpoint before root publication, controller spawn, start-decision
 publication, start delivery and terminal provider identity. Each checkpoint
 compares the full ordered evidence and private-root effect frontier with
@@ -241,6 +241,10 @@ fsynced stages plus no-replace hard links, so interruption cannot expose a
 partially written final. A separate non-mutating inspector validates causal
 evidence/root prefixes, distinguishes unattested/observed/proved-absent process
 state and retains partial or linked stages for the future state recovery path.
+Complete controller-readiness and host-agent PID records are HMAC-bound to
+their configuration, launch/start, process and toolchain identities before a
+PID/PGID probe, including from a canonical-complete private stage. Elapsed
+lifetime and relabelled PIDs never prove absence.
 The controller and host agent reopen their exact digest-bound configuration
 through no-follow descriptors. The controller also revalidates that exact
 authority, root owner, launch/witness chain, start decision and host-agent

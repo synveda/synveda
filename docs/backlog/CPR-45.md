@@ -488,7 +488,7 @@ ACLs, xattrs, flags and bind mounts remain trusted-host limits.
 
 ### Immediate next slice
 
-The inner background contract is now v3. It places synchronous veto-only
+The inner background contract is now v4. It places synchronous veto-only
 checkpoints before root publication, controller spawn, start-decision
 publication, start delivery and provider-identity publication; each checkpoint
 reopens the full ordered evidence/private-file frontier, compares it with
@@ -498,7 +498,11 @@ candidate, immediately before synchronous publication. Private
 root/config/readiness/PID evidence uses
 fsynced stages and no-replace links, sockets start under a restrictive umask,
 and a non-mutating inspector validates a single global causal frontier and
-reports unattested, observed-present or proved-absent process state.
+reports unattested, observed-present or proved-absent process state. The child
+readiness and PID records now authenticate their complete configuration,
+launch/start, process and toolchain identities before any negative PID/PGID
+probe. This permits exact recovery classification before the later parent
+witness while PID relabelling and elapsed-lifetime inference remain refused.
 
 Now wrap the fixture-only background-create chain in state-born authority under the
 append-only mutation journal. Reassert the real slot/head before each effect

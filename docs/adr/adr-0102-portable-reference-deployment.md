@@ -172,12 +172,16 @@ Colima 0.10.3 at `00f6c297e92a82c04a4ab507db0a61435650d7e8`
 and Lima 2.2.0 at `de0816ea4bdc5267b428ab21025889b8dd785526`,
 records the proposed fixed command and explicit short roots, inherits ambient
 `HOME` unchanged, and blocks while the exact Docker/helper/disk closure is
-unresolved. Its v3 process contract has five synchronous veto-only checkpoints
+unresolved. Its v4 process contract has five synchronous veto-only checkpoints
 before root/controller/start/identity effects, compares each complete ordered
 evidence/private-file frontier with launcher-owned identities, uses fsynced
 private stages and no-replace links for root/config/readiness/PID evidence,
 creates sockets under a restrictive umask and exposes a non-mutating
-causal-prefix inspector. Terminal identity is prevalidated after fresh
+causal-prefix inspector. Controller readiness and host-agent PID records HMAC
+their complete causal configuration, launch/start, process and toolchain
+identity, so a durable child record can be negative-probed before its later
+parent witness without accepting PID relabelling or lifetime-based absence.
+Terminal identity is prevalidated after fresh
 authenticated provider probes. These
 are prerequisites for, not a claim of, mutation-journal integration. Its
 repository-fixed fake proves that controller-group `ESRCH`

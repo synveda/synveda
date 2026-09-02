@@ -124,10 +124,12 @@ authorised fixed-fixture launcher. A recoverable fixture-only authority is
 durable before root mutation; separate immutable decisions precede controller
 and host-agent creation, and controller-side reproof of the full gate chain
 blocks changed evidence or pre-start controller death without a host-agent
-effect. Its v3 contract now has five synchronous veto-only effect checkpoints,
+effect. Its v4 contract now has five synchronous veto-only effect checkpoints,
 atomic fsynced private-file publication and a non-mutating global causal-prefix
 inspector with an exact evidence/private-file frontier and bounded process
-observations;
+observations. Full HMAC-bound controller-readiness and host-agent PID records
+make negative probes safe before the later parent witness; elapsed lifetime
+never proves absence;
 this removes partial-final ambiguity but is still only preparation for the
 state-born wrapper. This is not mutation-journal authority. The canary distinguishes the
 background controller, host agent, Engine, both sockets and Docker context,
