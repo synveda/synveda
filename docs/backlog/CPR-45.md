@@ -487,29 +487,44 @@ or absent.
 This remains fixed-fake trusted-process POSIX evidence. The state-integrated
 adapter accepts no caller function, command, environment, path or provider
 selection; the standalone process canary accepts only validated private
-fixture/evidence roots and bounded test controls. Inner operation-evidence and
-retirement helpers reject state-born authority: the state receipt and close
-must use the outer settlement, while fixture retirement remains explicitly
-`state_integration: not-authorized`. Cleanup and finalization therefore remain
-blocked for the state-owned root. Only test fixture modules invoke these seams
-and no supported lifecycle target exposes them. The exported authority-gated
-helpers are unsupported internal composition hooks, not a JavaScript security
-boundary; owner-UID code execution and journal mutation are one trusted-host
-boundary. Process probes do not prove another PID namespace, and ACLs, xattrs,
-flags and bind mounts remain trusted-host limits. No Docker, Colima, resolver,
-registry, database, live-provider or host-management command ran in this
-slice; only bounded repository-owned fake processes and sockets were used.
+fixture/evidence roots and bounded test controls. Legacy retirement v1 and
+operation-evidence APIs remain fixture-only and
+`state_integration: not-authorized`. A distinct retirement-v2 seam now accepts
+only the exact `mutation-journal-v2` creation chain plus explicit cleanup
+intent, operation-plan, slot, create-settlement, create-close and source
+bindings. It preserves the immutable create head and publishes a separate
+plan, per-step progress and terminal settlement. Before authenticated stop,
+each stale-socket or leaf-first unlink/rmdir, and every append-only publication
+frontier, a closed synchronous checkpoint reasserts those bindings and exact
+resource or stage identity. Final-consumption vetoes remain effective across
+retries; partial stages are recoverable only when their filename commits to
+the exactly reconstructable bytes. A read-only v2 prefix observation commits
+the expected cleanup plan even before publication, exact residual inventory,
+process state and pending publication identities.
+
+The new seam deliberately emits neither result-receipt nor close authority and
+is not yet called by the mutation-state owner. No real cleanup slot, outer
+cleanup settlement, action-dispatched recovery, receipt or close exists, so
+state-owned cleanup and finalization remain blocked. Only test fixture modules
+invoke these seams and no supported lifecycle target exposes them. The
+authority-gated helpers are unsupported internal composition hooks, not a
+JavaScript security boundary; owner-UID code execution and journal mutation
+are one trusted-host boundary. Process probes do not prove another PID
+namespace, and ACLs, xattrs, flags and bind mounts remain trusted-host limits.
+No Docker, Colima, resolver, registry, database, live-provider or
+host-management command ran in this slice; only bounded repository-owned fake
+processes and sockets were used.
 
 ### Immediate next slice
 
-Add the dedicated state-born provider-cleanup operation under receipt v4 and
-mutation slot v2. It must bind the existing create close and outer settlement,
-publish an immutable cleanup plan/progress/settlement chain, preserve the
-create evidence head, reassert source and mutation authority before each exact
-unlink/rmdir or authenticated stop, and close with the distinct cleanup
-settlement digest. Recovery must not broaden the fixture retirement helper or
-infer deletion authority from a receipt. Finalization remains blocked until
-that cleanup result and close are durable.
+Add exact controlled-background cleanup intent/pass variants to receipt v4,
+then integrate the dedicated provider-cleanup operation with mutation slot v2.
+The state owner must compose the new retirement checkpoints with the actual
+slot and source frontier, publish a distinct outer cleanup settlement, recover
+only through action-dispatched observation-v2 claims, and bind that outer
+settlement—not the inner retirement settlement—into receipt and close.
+Recovery must not infer deletion authority from a receipt. Finalization remains
+blocked until that cleanup result and close are durable.
 
 Before invoking Colima, finish the selected live toolchain manifest for the
 pinned Colima/Lima and Docker CLI, every transitive helper and the exact disk

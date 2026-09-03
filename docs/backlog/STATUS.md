@@ -227,15 +227,20 @@ proof, can retire an exact mutation-stage alias and publish a v2 observation
 claim. Recovery never launches, signals, deletes, repairs inner evidence or
 replays controller/start. Unattested process windows remain blocking. Foreign
 collision settlement is historical after publication while all Synveda-owned
-evidence remains exact. The standalone leaf-first retirement protocol remains
-fixture-only and rejects state-born evidence; therefore the state-owned root
-cannot yet publish cleanup or finalization. Internal authority callbacks are
+evidence remains exact. Legacy retirement v1 stays fixture-only. A distinct
+retirement-v2 seam accepts only the bound state-born creation chain, preserves
+its immutable head, gates authenticated stop, every exact leaf-first removal
+and every append-only publication frontier, and exposes a read-only,
+operation-bound prefix observation. It emits no receipt or close authority and
+is not yet composed by the mutation-state owner, so the state-owned root still
+cannot publish cleanup or finalization. Internal authority callbacks are
 trusted owner-UID composition hooks, not a JavaScript security boundary.
 
 Only test fixtures expose this seam; no supported lifecycle target or
-Docker/Colima action is enabled. Next add a dedicated state-born cleanup slot
-and immutable plan/progress/settlement without broadening the fixture deletion
-authority. Then finish exact live Docker/helper/disk-image and OS-version
+Docker/Colima action is enabled. Next add controlled-background cleanup
+receipt-v4 variants, then compose the dedicated cleanup slot, outer settlement,
+action-dispatched recovery and close around retirement v2 without broadening
+fixture deletion authority. Then finish exact live Docker/helper/disk-image and OS-version
 closure without repurposing `HOME`. Registry, builder, proxy, browser and exact
 cleanup evidence follow; Linux/reference HTTPS must pass before legacy
 Rauthy/Temporal assets are deleted. Backup/restore, upgrade and Apalis remain

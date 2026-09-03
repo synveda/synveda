@@ -234,17 +234,24 @@ Launch without authenticated readiness and start without authenticated PID
 remain permanently unattested; live/unidentifiable state refuses. A claim
 after durable close is inert, and exhausted claim/slot capacity fails closed.
 
-The standalone retirement helper remains fixture-only. It authenticates stop,
-fsyncs absence and performs individual leaf-first unlink/rmdir steps only after
-exact inventory revalidation. It rejects state-born evidence, so the controlled
-state root has no cleanup or finalization authority. No supported lifecycle
-target exposes these fixtures and no Docker/Colima effect is enabled. The
-`*WithAuthorityGate` exports are internal composition hooks, not a security
-boundary against arbitrary owner-UID JavaScript: owner-UID code execution and
-journal mutation are one trusted-host boundary. Other PID namespaces, ACLs,
-xattrs, file flags and bind mounts remain trusted-host limits. A truthful live
-provider identity, TLS registry auth, zero-read builder and destruction
-evidence remain pending.
+Legacy retirement v1 remains fixture-only. It authenticates stop, fsyncs
+absence and performs individual leaf-first unlink/rmdir steps only after exact
+inventory revalidation. A distinct retirement-v2 seam accepts the exact
+state-born create chain plus immutable cleanup/source bindings. It requires a
+closed authority checkpoint before authenticated shutdown delivery, every
+stale-socket or resource removal, every publication mutation and final
+consumption. Publication recovery binds declared, actual and inode identities;
+the read-only prefix observation also binds the expected operation, residual
+inventory and process state. The inner settlement grants no receipt or close
+authority, and the mutation-state owner does not yet compose this seam, so the
+controlled state root has no supported cleanup or finalization authority. No
+supported lifecycle target exposes these fixtures and no Docker/Colima effect
+is enabled. The `*WithAuthorityGate` exports are internal composition hooks,
+not a security boundary against arbitrary owner-UID JavaScript: owner-UID code
+execution and journal mutation are one trusted-host boundary. Other PID
+namespaces, ACLs, xattrs, file flags and bind mounts remain trusted-host limits.
+A truthful live provider identity, TLS registry auth, zero-read builder and
+destruction evidence remain pending.
 
 ## Residual and external limits
 

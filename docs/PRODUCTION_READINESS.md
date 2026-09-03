@@ -113,13 +113,17 @@ start. State tests retain controller-without-readiness and start-without-PID as
 permanently unattested. Collision settlement remains valid across later foreign
 root removal/replacement while Synveda evidence stays exact.
 
-The fixture-only retirement path still proves authenticated stop, durable
-socket absence and exact leaf-first removal with append-only interruption
-recovery. It rejects state-born evidence and grants no result-receipt authority.
-This is fixed-fake trusted-owner POSIX evidence only. Internal authority
-callbacks are not a JavaScript security boundary. No supported lifecycle target
-exposes the fixtures; there is no Docker/Colima mutation or environment
-manifest. State-born cleanup and finalization remain refused.
+Legacy retirement v1 remains fixture-only. A separate retirement-v2 seam now
+proves state-bound authenticated stop, durable socket absence, exact leaf-first
+removal, strict append-only interruption recovery and operation-bound read-only
+prefix observation. Its synchronous checkpoints cover every effect,
+publication mutation and final consumption, but its inner settlement grants no
+result-receipt or close authority. This is fixed-fake trusted-owner POSIX
+evidence only. Internal authority callbacks are not a JavaScript security
+boundary. The mutation-state owner does not yet supply a cleanup slot, outer
+settlement, recovery, receipt or close; no supported lifecycle target exposes
+the fixtures, and there is no Docker/Colima mutation or environment manifest.
+Supported state-born cleanup and finalization remain refused.
 Live Linux/provider CI and a current Docker Desktop/provider run remain absent.
 Consequently this evidence improves the boundary without changing readiness. One
 frozen Docker Desktop candidate also proved bounded PostgreSQL/Keycloak

@@ -29,6 +29,10 @@ import {
   COLIMA_LIVE_PREPARATION_CONTRACT_SHA256,
   CONTROLLED_BACKGROUND_AUTHORITY_CHECKPOINTS,
   CONTROLLED_BACKGROUND_PROVIDER_CONTRACT,
+  CONTROLLED_BACKGROUND_RETIREMENT_AUTHORITY_CHECKPOINTS,
+  CONTROLLED_BACKGROUND_RETIREMENT_CONTRACT,
+  CONTROLLED_BACKGROUND_RETIREMENT_CONTRACT_SHA256,
+  CONTROLLED_BACKGROUND_RETIREMENT_OPERATION_KIND,
   ProviderProcessContractFailure,
   authorizeColimaLiveStart,
   controlledBackgroundEngineArchitecture,
@@ -36,18 +40,49 @@ import {
   controlledBackgroundOperationEvidence,
   inspectControlledBackgroundProvider,
   inspectControlledBackgroundProviderPrefix,
+  inspectControlledBackgroundRetirementPrefix,
   launchControlledBackgroundProvider,
   launchControlledBackgroundProviderWithAuthorityGate,
   planControlledBackgroundProviderCreate,
   planControlledBackgroundProviderCreateWithAuthorityGate,
   planControlledBackgroundProviderOperation,
   planControlledBackgroundRetirement,
+  planControlledBackgroundRetirementWithAuthorityGate,
   providerProcessBytes,
   providerProcessDigest,
   retireControlledBackgroundProvider,
+  retireControlledBackgroundProviderWithAuthorityGate,
   validateColimaLiveHostEligibility,
   validateColimaLivePreparationContract,
 } from "../deploy/compose/scripts/clean-engine-provider-process-contract.mjs";
+
+const STATE_RETIREMENT_CHECKPOINT_KEYS = Object.freeze([
+  "checkpoint",
+  "cleanup_intent_sha256",
+  "cleanup_operation_plan_sha256",
+  "cleanup_plan_sha256",
+  "cleanup_slot_sequence",
+  "cleanup_slot_sha256",
+  "completed_steps",
+  "create_close_sha256",
+  "create_settlement_sha256",
+  "create_slot_sha256",
+  "next_action",
+  "next_resources",
+  "operation_kind",
+  "provider_identity_sha256",
+  "publication_disposition",
+  "publication_expected_sha256",
+  "publication_phase",
+  "publication_stage_declared_sha256",
+  "publication_stage_identity_sha256",
+  "publication_stage_sha256",
+  "publication_target_name",
+  "resource_identity_sha256",
+  "retirement_contract_sha256",
+  "source_head_sha256",
+  "source_sequence",
+].sort());
 
 function fixture() {
   const temporary = realpathSync(process.platform === "darwin" ? "/private/tmp" : "/tmp");
@@ -81,6 +116,22 @@ function bindings(seed = "1") {
   };
 }
 
+function stateRetirementBindings(create, seed = "1") {
+  const digit = Number.parseInt(seed, 16);
+  const value = (offset) => ((digit + offset) % 16).toString(16).repeat(64);
+  return {
+    cleanup_intent_sha256: value(0),
+    cleanup_operation_plan_sha256: value(1),
+    cleanup_slot_sequence: 1,
+    cleanup_slot_sha256: value(2),
+    create_close_sha256: value(3),
+    create_settlement_sha256: value(4),
+    create_slot_sha256: create.create_slot_sha256,
+    source_head_sha256: value(5),
+    source_sequence: 8,
+  };
+}
+
 function createBindings(seed = "a", stateIntegration = "fixture-only") {
   const digit = Number.parseInt(seed, 16);
   const value = (offset) => ((digit + offset) % 16).toString(16).repeat(64);
@@ -103,6 +154,51 @@ async function launch(state, maximumLifetimeMilliseconds = 5_000) {
     providerBase: state.providerBase,
   });
   return launchPlanned(state, maximumLifetimeMilliseconds);
+}
+
+async function launchState(state, maximumLifetimeMilliseconds = 5_000) {
+  const runDirectory = join(state.root, "state-run");
+  const evidenceDirectory = join(runDirectory, "provider");
+  mkdirSync(runDirectory, { mode: 0o700 });
+  mkdirSync(evidenceDirectory, { mode: 0o700 });
+  chmodSync(runDirectory, 0o700);
+  chmodSync(evidenceDirectory, 0o700);
+  state.evidenceDirectory = evidenceDirectory;
+  const slotBytes = providerProcessBytes({
+    fixture_id: state.fixtureId,
+    schema: "synveda.test.state-retirement-slot.v1",
+  });
+  writeDurable(join(runDirectory, ".mutation-slot-00"), slotBytes);
+  const create = {
+    ...createBindings("a", "mutation-journal-v2"),
+    create_slot_sha256: providerProcessDigest(slotBytes),
+  };
+  const operationPlan = planControlledBackgroundProviderOperation({
+    evidenceDirectory: state.evidenceDirectory,
+    fixtureId: state.fixtureId,
+    ownershipNonce: create.ownership_nonce,
+    providerBase: state.providerBase,
+  });
+  planControlledBackgroundProviderCreateWithAuthorityGate(
+    {
+      bindings: create,
+      evidenceDirectory: state.evidenceDirectory,
+      fixtureId: state.fixtureId,
+      operationPlan,
+      providerBase: state.providerBase,
+    },
+    () => undefined,
+  );
+  const started = await launchControlledBackgroundProviderWithAuthorityGate(
+    {
+      evidenceDirectory: state.evidenceDirectory,
+      fixtureId: state.fixtureId,
+      maximumLifetimeMilliseconds,
+      providerBase: state.providerBase,
+    },
+    () => undefined,
+  );
+  return Object.freeze({ create, operationPlan, started });
 }
 
 async function launchPlanned(
@@ -187,9 +283,31 @@ async function cleanupFixture(state) {
   if (Number.isSafeInteger(pid) && processPresent(pid)) {
     try {
       if (!existsSync(join(state.evidenceDirectory, "provider-retirement-plan.json"))) {
-        await plan(state);
+        const authorityPath = join(
+          state.evidenceDirectory,
+          "background-create-authority.json",
+        );
+        const authority = JSON.parse(readFileSync(authorityPath, "utf8"));
+        if (authority.state_integration === "mutation-journal-v2") {
+          await planStateRetirement(
+            state,
+            { create_slot_sha256: authority.create_slot_sha256 },
+          );
+        } else {
+          await plan(state);
+        }
       }
-      await retire(state);
+      const retirementPlan = JSON.parse(
+        readFileSync(
+          join(state.evidenceDirectory, "provider-retirement-plan.json"),
+          "utf8",
+        ),
+      );
+      if (retirementPlan.state_integration === "mutation-journal-v2") {
+        await retireState(state);
+      } else {
+        await retire(state);
+      }
     } catch {
       await waitForProcessAbsent(pid);
     }
@@ -230,6 +348,140 @@ function unlinkDurable(path) {
   } finally {
     closeSync(descriptor);
   }
+}
+
+function evidenceSnapshot(directory) {
+  return readdirSync(directory)
+    .sort()
+    .map((name) => {
+      const path = join(directory, name);
+      const metadata = lstatSync(path, { bigint: true });
+      return [
+        name,
+        String(metadata.dev),
+        String(metadata.ino),
+        String(metadata.nlink),
+        (metadata.mode & 0o7777n).toString(8).padStart(4, "0"),
+        String(metadata.uid),
+        String(metadata.size),
+        providerProcessDigest(readFileSync(path)),
+      ];
+    });
+}
+
+function stagesFor(directory, targetName) {
+  const prefix = `.provider-process-stage-${targetName.slice(0, -5)}-`;
+  return readdirSync(directory)
+    .filter((name) => name.startsWith(prefix))
+    .sort();
+}
+
+function stateProgressBytes(planArtifact, sequence, recoveredAbsence) {
+  const step = planArtifact.value.retirement_steps[sequence];
+  assert.notEqual(step, undefined);
+  const previousSha256 =
+    sequence === 0
+      ? planArtifact.sha256
+      : providerProcessDigest(
+          readFileSync(
+            join(
+              dirname(planArtifact.path),
+              `retirement-step-${String(sequence - 1).padStart(2, "0")}.json`,
+            ),
+          ),
+        );
+  return providerProcessBytes({
+    action: step.action,
+    fixture_id: planArtifact.value.fixture_id,
+    plan_sha256: planArtifact.sha256,
+    previous_sha256: previousSha256,
+    recovered_absence: recoveredAbsence,
+    resource_identity_sha256: providerProcessDigest(
+      providerProcessBytes(
+        step.resources.map((resource) =>
+          resource === "."
+            ? planArtifact.value.root
+            : planArtifact.value.root_inventory.find(
+                (entry) => entry.relative_path === resource,
+              ),
+        ),
+      ),
+    ),
+    resources: step.resources,
+    schema: "synveda.clean-engine.provider-retirement-step.v2",
+    sequence,
+  });
+}
+
+function assertStateRetirementObservation(inspected) {
+  const observation = inspected.observation;
+  assert.deepEqual(Object.keys(observation).sort(), [
+    "absent_resources",
+    "cleanup_plan_sha256",
+    "cleanup_stage",
+    "completed_steps",
+    "create_evidence_head_sha256",
+    "final_progress_sha256",
+    "next_step",
+    "plan_publication",
+    "process_residual",
+    "progress_publication",
+    "progress_publication_recovered_absence",
+    "progress_publication_sequence",
+    "provider_settlement_sha256",
+    "remaining_inventory_sha256",
+    "retirement_contract_sha256",
+    "root_disposition",
+    "schema",
+    "settlement_publication",
+  ]);
+  const publicationKeys = [
+    "disposition",
+    "final_identity_sha256",
+    "final_sha256",
+    "stage_actual_sha256",
+    "stage_declared_sha256",
+    "stage_identity_sha256",
+  ];
+  for (const publication of [
+    observation.plan_publication,
+    observation.progress_publication,
+    observation.settlement_publication,
+  ]) {
+    assert.deepEqual(Object.keys(publication).sort(), publicationKeys);
+  }
+  assert.deepEqual(Object.keys(observation.process_residual).sort(), [
+    "controller_pgid",
+    "controller_presence",
+    "controller_process_instance_sha256",
+    "hostagent_pid",
+    "hostagent_presence",
+    "hostagent_process_instance_sha256",
+  ]);
+  if (observation.next_step !== null) {
+    assert.deepEqual(Object.keys(observation.next_step).sort(), [
+      "action",
+      "disposition",
+      "resource_identity_sha256",
+      "resources",
+      "sequence",
+    ]);
+  }
+  assert.equal(observation.cleanup_stage, inspected.cleanupStage);
+  assert.equal(observation.completed_steps, inspected.completedSteps);
+  assert.equal(
+    observation.create_evidence_head_sha256,
+    inspected.createEvidenceHeadSha256,
+  );
+  assert.equal(
+    observation.remaining_inventory_sha256,
+    inspected.remainingInventorySha256,
+  );
+  assert.equal(observation.root_disposition, inspected.rootDisposition);
+  assert.equal(
+    inspected.observationSha256,
+    providerProcessDigest(providerProcessBytes(observation)),
+  );
 }
 
 function rewriteCanonicalArtifact(path, value) {
@@ -335,6 +587,32 @@ async function retire(state, options = {}) {
     providerBase: state.providerBase,
     ...options,
   });
+}
+
+async function planStateRetirement(state, create, authorityGate = () => undefined) {
+  const cleanupBindings = stateRetirementBindings(create);
+  const planned = await planControlledBackgroundRetirementWithAuthorityGate(
+    {
+      bindings: cleanupBindings,
+      evidenceDirectory: state.evidenceDirectory,
+      fixtureId: state.fixtureId,
+      providerBase: state.providerBase,
+    },
+    authorityGate,
+  );
+  return Object.freeze({ bindings: cleanupBindings, ...planned });
+}
+
+async function retireState(state, authorityGate = () => undefined, options = {}) {
+  return retireControlledBackgroundProviderWithAuthorityGate(
+    {
+      evidenceDirectory: state.evidenceDirectory,
+      fixtureId: state.fixtureId,
+      providerBase: state.providerBase,
+      ...options,
+    },
+    authorityGate,
+  );
 }
 
 test("the tagged Colima contract is closed and cannot authorize a live start", () => {
@@ -2559,6 +2837,1557 @@ test("retirement keeps separate immutable create and cleanup evidence heads", as
   }
 });
 
+test("state retirement has a distinct closed contract and fixture APIs stay isolated", async () => {
+  assert.equal(
+    CONTROLLED_BACKGROUND_RETIREMENT_OPERATION_KIND,
+    "controlled-background-provider-cleanup-v1",
+  );
+  assert.equal(
+    CONTROLLED_BACKGROUND_RETIREMENT_CONTRACT.schema,
+    "synveda.clean-engine.controlled-background-retirement-contract.v1",
+  );
+  assert.equal(
+    CONTROLLED_BACKGROUND_RETIREMENT_CONTRACT.create_provider_contract_sha256,
+    providerProcessDigest(providerProcessBytes(CONTROLLED_BACKGROUND_PROVIDER_CONTRACT)),
+  );
+  assert.equal(
+    CONTROLLED_BACKGROUND_RETIREMENT_CONTRACT_SHA256,
+    providerProcessDigest(
+      providerProcessBytes(CONTROLLED_BACKGROUND_RETIREMENT_CONTRACT),
+    ),
+  );
+  assert.deepEqual(
+    CONTROLLED_BACKGROUND_RETIREMENT_CONTRACT.effect_checkpoints,
+    CONTROLLED_BACKGROUND_RETIREMENT_AUTHORITY_CHECKPOINTS,
+  );
+  assert.equal(
+    CONTROLLED_BACKGROUND_RETIREMENT_CONTRACT.operation_kind,
+    CONTROLLED_BACKGROUND_RETIREMENT_OPERATION_KIND,
+  );
+
+  const state = fixture();
+  try {
+    const { create } = await launchState(state);
+    await assert.rejects(
+      () => plan(state),
+      /retirement integration was refused/,
+    );
+    const planned = await planStateRetirement(state, create);
+    assert.equal(
+      planned.plan.value.schema,
+      "synveda.clean-engine.controlled-background-provider-retirement-plan.v2",
+    );
+    assert.equal(
+      planned.plan.value.retirement_contract_sha256,
+      CONTROLLED_BACKGROUND_RETIREMENT_CONTRACT_SHA256,
+    );
+    await assert.rejects(
+      () => retire(state),
+      /retirement integration was refused/,
+    );
+    const retired = await retireState(state);
+    assert.equal(retired.complete, true);
+    assert.equal(
+      retired.settlement.value.schema,
+      "synveda.clean-engine.controlled-background-provider-retirement-settlement.v2",
+    );
+    assert.equal(retired.settlement.value.result_receipt_authorized, false);
+    assert.throws(
+      () =>
+        controlledBackgroundOperationEvidence({
+          action: "provider-cleanup",
+          evidenceDirectory: state.evidenceDirectory,
+          fixtureId: state.fixtureId,
+        }),
+      /operation evidence integration was refused/,
+    );
+  } finally {
+    await cleanupFixture(state);
+  }
+});
+
+test("state retirement gates every exact effect and preserves the immutable create head", async () => {
+  const state = fixture();
+  try {
+    const { create, started } = await launchState(state);
+    const createBytes = new Map(
+      CONTROLLED_BACKGROUND_PROVIDER_CONTRACT.artifact_order.map((name) => [
+        name,
+        readFileSync(join(state.evidenceDirectory, name)),
+      ]),
+    );
+    const observed = [];
+    const gate = (checkpoint) => {
+      observed.push(checkpoint);
+    };
+    const planned = await planStateRetirement(state, create, gate);
+    const retired = await retireState(state, gate);
+    assert.equal(retired.complete, true);
+    const inspected = inspectControlledBackgroundRetirementPrefix(
+      state.evidenceDirectory,
+      state.fixtureId,
+      {
+        expectedBindings: planned.bindings,
+        providerBase: state.providerBase,
+      },
+    );
+    assert.equal(inspected.cleanupStage, "settled");
+    assert.equal(inspected.rootDisposition, "retired");
+    assert.equal(inspected.createEvidenceHeadSha256, started.providerIdentity.sha256);
+    assert.equal(
+      inspected.providerSettlementSha256,
+      retired.cleanup_operation_evidence_sha256,
+    );
+    const publicationCheckpoints = new Map([
+      [
+        "before-retirement-plan-publication",
+        ["publish-retirement-plan", /^provider-retirement-plan\.json$/],
+      ],
+      [
+        "before-retirement-progress-publication",
+        ["publish-retirement-progress", /^retirement-step-[0-9]{2}\.json$/],
+      ],
+      [
+        "before-retirement-settlement-publication",
+        [
+          "publish-retirement-settlement",
+          /^provider-retirement-settlement\.json$/,
+        ],
+      ],
+    ]);
+    const effectActions = new Map([
+      ["before-hostagent-shutdown-delivery", new Set([
+        "authenticated-hostagent-stop",
+      ])],
+      ["before-stale-socket-unlink", new Set(["unlink-stale-socket"])],
+      ["before-resource-unlink", new Set(["unlink", "unlink-owner"])],
+      ["before-resource-rmdir", new Set(["rmdir", "rmdir-root"])],
+    ]);
+    for (const checkpoint of observed) {
+      assert.deepEqual(
+        Object.keys(checkpoint).sort(),
+        STATE_RETIREMENT_CHECKPOINT_KEYS,
+      );
+      assert.equal(Object.isFrozen(checkpoint), true);
+      assert.equal(Object.isFrozen(checkpoint.next_resources), true);
+      for (const [name, value] of Object.entries(planned.bindings)) {
+        assert.equal(checkpoint[name], value, `${name} binding changed`);
+      }
+      assert.equal(
+        checkpoint.operation_kind,
+        CONTROLLED_BACKGROUND_RETIREMENT_OPERATION_KIND,
+      );
+      assert.equal(checkpoint.cleanup_plan_sha256, planned.plan.sha256);
+      assert.equal(
+        checkpoint.provider_identity_sha256,
+        started.providerIdentity.sha256,
+      );
+      assert.equal(
+        checkpoint.retirement_contract_sha256,
+        CONTROLLED_BACKGROUND_RETIREMENT_CONTRACT_SHA256,
+      );
+      const publication = publicationCheckpoints.get(checkpoint.checkpoint);
+      if (publication !== undefined) {
+        assert.equal(checkpoint.next_action, publication[0]);
+        assert.match(checkpoint.publication_target_name, publication[1]);
+        assert.notEqual(checkpoint.publication_phase, "not-applicable");
+      } else {
+        assert.equal(effectActions.get(checkpoint.checkpoint)?.has(
+          checkpoint.next_action,
+        ), true);
+        assert.equal(checkpoint.publication_disposition, "not-applicable");
+        assert.equal(checkpoint.publication_phase, "not-applicable");
+        assert.equal(checkpoint.publication_target_name, "not-applicable");
+        assert.equal(checkpoint.publication_expected_sha256, "0".repeat(64));
+        assert.equal(checkpoint.publication_stage_sha256, "0".repeat(64));
+        assert.equal(
+          checkpoint.publication_stage_declared_sha256,
+          "0".repeat(64),
+        );
+        assert.equal(
+          checkpoint.publication_stage_identity_sha256,
+          "0".repeat(64),
+        );
+      }
+    }
+    assert.equal(
+      observed.some(
+        (entry) => entry.checkpoint === "before-retirement-plan-publication",
+      ),
+      true,
+    );
+    assert.equal(
+      observed.some(
+        (entry) => entry.checkpoint === "before-hostagent-shutdown-delivery",
+      ),
+      true,
+    );
+    for (const step of planned.plan.value.retirement_steps.slice(1)) {
+      const checkpoint =
+        step.action === "unlink" || step.action === "unlink-owner"
+          ? "before-resource-unlink"
+          : "before-resource-rmdir";
+      assert.equal(
+        observed.some(
+          (entry) =>
+            entry.checkpoint === checkpoint &&
+            entry.next_resources.join("\0") === step.resources.join("\0"),
+        ),
+        true,
+        `missing gate for ${step.action} ${step.resources.join(",")}`,
+      );
+    }
+    for (let sequence = 0; sequence < planned.plan.value.retirement_steps.length; sequence += 1) {
+      assert.equal(
+        observed.some(
+          (entry) =>
+            entry.checkpoint === "before-retirement-progress-publication" &&
+            entry.completed_steps === sequence,
+        ),
+        true,
+        `missing progress gate ${sequence}`,
+      );
+    }
+    assert.equal(
+      observed.some(
+        (entry) =>
+          entry.checkpoint === "before-retirement-settlement-publication",
+      ),
+      true,
+    );
+    for (const [name, bytes] of createBytes) {
+      assert.deepEqual(readFileSync(join(state.evidenceDirectory, name)), bytes);
+    }
+  } finally {
+    await cleanupFixture(state);
+  }
+});
+
+test("state retirement authority is a synchronous veto at plan and shutdown boundaries", async () => {
+  const state = fixture();
+  try {
+    const { create } = await launchState(state);
+    await assert.rejects(
+      () =>
+        planControlledBackgroundRetirementWithAuthorityGate(
+          {
+            bindings: stateRetirementBindings(create),
+            evidenceDirectory: state.evidenceDirectory,
+            fixtureId: state.fixtureId,
+            providerBase: state.providerBase,
+          },
+          undefined,
+        ),
+      /retirement authority gate was refused/,
+    );
+    assert.equal(
+      readdirSync(state.evidenceDirectory).some((name) =>
+        name.includes("provider-retirement-plan"),
+      ),
+      false,
+    );
+    await assert.rejects(
+      () => planStateRetirement(state, create, async () => undefined),
+      /retirement authority gate returned authority/,
+    );
+    assert.equal(
+      readdirSync(state.evidenceDirectory).some((name) =>
+        name.includes("provider-retirement-plan"),
+      ),
+      false,
+    );
+    await planStateRetirement(state, create);
+    await assert.rejects(
+      () => retireState(state, () => ({ forged: true })),
+      /retirement authority gate returned authority/,
+    );
+    const hostagentPid = JSON.parse(
+      readFileSync(hostagentRecordPath(state), "utf8"),
+    ).pid;
+    assert.equal(processPresent(hostagentPid), true);
+    assert.equal(
+      existsSync(join(state.evidenceDirectory, "retirement-step-00.json")),
+      false,
+    );
+    await retireState(state);
+  } finally {
+    await cleanupFixture(state);
+  }
+});
+
+test("state retirement plan publication rejects provider-base replacement", async () => {
+  const state = fixture();
+  try {
+    const launched = await launchState(state);
+    const originalBaseInode = lstatSync(state.providerBase, { bigint: true }).ino;
+    const displacedBase = join(state.root, "provider-base-original");
+    const rootName = basename(launched.started.paths.root);
+    let baseWasReplaced = false;
+    await assert.rejects(
+      () =>
+        planStateRetirement(state, launched.create, (checkpoint) => {
+          if (checkpoint.publication_phase !== "before-stage-write") return;
+          renameSync(state.providerBase, displacedBase);
+          mkdirSync(state.providerBase, { mode: 0o700 });
+          chmodSync(state.providerBase, 0o700);
+          renameSync(
+            join(displacedBase, rootName),
+            launched.started.paths.root,
+          );
+          baseWasReplaced = true;
+        }),
+      /create authority was refused|provider base changed/,
+    );
+    assert.equal(baseWasReplaced, true);
+    renameSync(
+      launched.started.paths.root,
+      join(displacedBase, rootName),
+    );
+    rmdirSync(state.providerBase);
+    renameSync(displacedBase, state.providerBase);
+    assert.equal(
+      lstatSync(state.providerBase, { bigint: true }).ino,
+      originalBaseInode,
+    );
+    assert.deepEqual(
+      stagesFor(state.evidenceDirectory, "provider-retirement-plan.json"),
+      [],
+    );
+    assert.equal(existsSync(launched.started.paths.haSocket), true);
+    assert.equal(existsSync(launched.started.paths.engineSocket), true);
+    await planStateRetirement(state, launched.create);
+    await retireState(state);
+  } finally {
+    await cleanupFixture(state);
+  }
+});
+
+test("state retirement gates each exact stale-socket unlink", async () => {
+  const state = fixture();
+  try {
+    const launched = await launchState(state);
+    const planned = await planStateRetirement(state, launched.create);
+    const socketStep = planned.plan.value.retirement_steps[0];
+    assert.equal(socketStep.action, "authenticated-hostagent-stop");
+    assert.equal(socketStep.resources.length, 2);
+    const socketPaths = socketStep.resources.map((resource) =>
+      join(planned.plan.value.root.path, resource),
+    );
+    process.kill(launched.started.hostagentPid, "SIGKILL");
+    await waitForProcessAbsent(launched.started.hostagentPid);
+    assert.deepEqual(socketPaths.map((path) => existsSync(path)), [true, true]);
+
+    await assert.rejects(
+      () =>
+        retireState(state, (checkpoint) => {
+          if (checkpoint.checkpoint === "before-stale-socket-unlink") {
+            assert.equal(checkpoint.next_action, "unlink-stale-socket");
+            assert.equal(checkpoint.publication_phase, "not-applicable");
+            throw new Error("veto first stale socket");
+          }
+        }),
+      /veto first stale socket/,
+    );
+    assert.deepEqual(socketPaths.map((path) => existsSync(path)), [true, true]);
+
+    await assert.rejects(
+      () =>
+        retireState(state, (checkpoint) => {
+          if (
+            checkpoint.checkpoint === "before-stale-socket-unlink" &&
+            checkpoint.next_resources[0] === socketStep.resources[1]
+          ) {
+            throw new Error("veto second stale socket");
+          }
+        }),
+      /veto second stale socket/,
+    );
+    assert.deepEqual(socketPaths.map((path) => existsSync(path)), [false, true]);
+    assert.equal(
+      existsSync(join(state.evidenceDirectory, "retirement-step-00.json")),
+      false,
+    );
+    await retireState(state);
+  } finally {
+    await cleanupFixture(state);
+  }
+});
+
+test("state retirement vetoes the named deletion without broadening or recording it", async () => {
+  const state = fixture();
+  try {
+    const { create } = await launchState(state);
+    const planned = await planStateRetirement(state, create);
+    const firstDelete = planned.plan.value.retirement_steps[1];
+    const resourcePath = join(planned.plan.value.root.path, firstDelete.resources[0]);
+    await assert.rejects(
+      () =>
+        retireState(state, (checkpoint) => {
+          if (
+            checkpoint.checkpoint === "before-resource-unlink" &&
+            checkpoint.next_resources[0] === firstDelete.resources[0]
+          ) {
+            throw new Error("test deletion veto");
+          }
+        }),
+      /test deletion veto/,
+    );
+    assert.equal(existsSync(resourcePath), true);
+    assert.deepEqual(
+      readdirSync(state.evidenceDirectory)
+        .filter((name) => name.startsWith("retirement-step-"))
+        .sort(),
+      ["retirement-step-00.json"],
+    );
+    await retireState(state);
+  } finally {
+    await cleanupFixture(state);
+  }
+});
+
+test("state retirement inspection is read-only and recovery converges delete-before-progress", async () => {
+  const state = fixture();
+  try {
+    const { create } = await launchState(state);
+    const planned = await planStateRetirement(state, create);
+    const deleted = planned.plan.value.retirement_steps[1].resources[0];
+    await assert.rejects(
+      () =>
+        retireState(state, () => undefined, {
+          crashAfterDeleteSyscallSequence: 1,
+        }),
+      /pre-fsync retirement crash/,
+    );
+    assert.equal(existsSync(join(planned.plan.value.root.path, deleted)), false);
+    const before = readdirSync(state.evidenceDirectory)
+      .sort()
+      .map((name) => {
+        const metadata = lstatSync(join(state.evidenceDirectory, name), {
+          bigint: true,
+        });
+        return [name, String(metadata.dev), String(metadata.ino), String(metadata.nlink)];
+      });
+    const inspected = inspectControlledBackgroundRetirementPrefix(
+      state.evidenceDirectory,
+      state.fixtureId,
+      {
+        expectedBindings: planned.bindings,
+        providerBase: state.providerBase,
+      },
+    );
+    const after = readdirSync(state.evidenceDirectory)
+      .sort()
+      .map((name) => {
+        const metadata = lstatSync(join(state.evidenceDirectory, name), {
+          bigint: true,
+        });
+        return [name, String(metadata.dev), String(metadata.ino), String(metadata.nlink)];
+      });
+    assert.deepEqual(after, before);
+    assert.equal(inspected.cleanupStage, "retiring");
+    assert.equal(inspected.completedSteps, 1);
+    const retired = await retireState(state);
+    assert.equal(retired.complete, true);
+    const recovered = JSON.parse(
+      readFileSync(join(state.evidenceDirectory, "retirement-step-01.json"), "utf8"),
+    );
+    assert.equal(recovered.recovered_absence, true);
+  } finally {
+    await cleanupFixture(state);
+  }
+});
+
+test("not-started state retirement observation binds the exact cleanup operation", async () => {
+  const state = fixture();
+  try {
+    const { create } = await launchState(state);
+    const before = evidenceSnapshot(state.evidenceDirectory);
+    const inspect = (expectedBindings) =>
+      inspectControlledBackgroundRetirementPrefix(
+        state.evidenceDirectory,
+        state.fixtureId,
+        {
+          expectedBindings,
+          providerBase: state.providerBase,
+        },
+      );
+    const first = inspect(stateRetirementBindings(create, "1"));
+    const second = inspect(stateRetirementBindings(create, "2"));
+    assertStateRetirementObservation(first);
+    assertStateRetirementObservation(second);
+    assert.equal(first.cleanupStage, "not-started");
+    assert.equal(second.cleanupStage, "not-started");
+    assert.notEqual(first.cleanupPlanSha256, "0".repeat(64));
+    assert.notEqual(first.cleanupPlanSha256, second.cleanupPlanSha256);
+    assert.notEqual(first.observationSha256, second.observationSha256);
+    assert.deepEqual(evidenceSnapshot(state.evidenceDirectory), before);
+    await planStateRetirement(state, create);
+    await retireState(state);
+  } finally {
+    await cleanupFixture(state);
+  }
+});
+
+test("state retirement plan publication gates and observes every strict frontier", async () => {
+  const state = fixture();
+  try {
+    const { create } = await launchState(state);
+    const inspect = () =>
+      inspectControlledBackgroundRetirementPrefix(
+        state.evidenceDirectory,
+        state.fixtureId,
+        {
+          expectedBindings: stateRetirementBindings(create),
+          providerBase: state.providerBase,
+        },
+      );
+    const observations = [inspect()];
+    assert.equal(observations[0].observation.schema,
+      "synveda.clean-engine.retirement-prefix-observation.v2");
+    assert.equal(observations[0].cleanupStage, "not-started");
+
+    await assert.rejects(
+      () =>
+        planStateRetirement(state, create, (checkpoint) => {
+          if (checkpoint.publication_phase === "before-stage-write") {
+            assert.equal(checkpoint.publication_disposition, "absent");
+            assert.equal(checkpoint.publication_target_name,
+              "provider-retirement-plan.json");
+            assert.equal(checkpoint.publication_stage_sha256, "0".repeat(64));
+            throw new Error("veto plan stage write");
+          }
+        }),
+      /veto plan stage write/,
+    );
+    assert.deepEqual(stagesFor(
+      state.evidenceDirectory,
+      "provider-retirement-plan.json",
+    ), []);
+
+    let stagedCheckpoint;
+    await assert.rejects(
+      () =>
+        planStateRetirement(state, create, (checkpoint) => {
+          if (checkpoint.publication_phase === "before-final-link") {
+            stagedCheckpoint = checkpoint;
+            throw new Error("veto plan link");
+          }
+        }),
+      /veto plan link/,
+    );
+    assert.equal(stagedCheckpoint.publication_disposition, "staged-complete");
+    assert.equal(
+      stagedCheckpoint.publication_expected_sha256,
+      stagedCheckpoint.publication_stage_declared_sha256,
+    );
+    assert.equal(
+      stagedCheckpoint.publication_expected_sha256,
+      stagedCheckpoint.publication_stage_sha256,
+    );
+    assert.notEqual(
+      stagedCheckpoint.publication_stage_identity_sha256,
+      "0".repeat(64),
+    );
+    const beforeStagedInspection = evidenceSnapshot(state.evidenceDirectory);
+    observations.push(inspect());
+    assert.deepEqual(evidenceSnapshot(state.evidenceDirectory), beforeStagedInspection);
+    assert.equal(observations.at(-1).cleanupStage, "plan-publication-pending");
+    assert.equal(
+      observations.at(-1).cleanupPlanPublication.disposition,
+      "staged-complete",
+    );
+
+    await assert.rejects(
+      () =>
+        planStateRetirement(state, create, (checkpoint) => {
+          if (checkpoint.publication_phase === "before-stage-removal") {
+            throw new Error("veto plan stage retirement");
+          }
+        }),
+      /veto plan stage retirement/,
+    );
+    const planStage = stagesFor(
+      state.evidenceDirectory,
+      "provider-retirement-plan.json",
+    )[0];
+    const planPath = join(state.evidenceDirectory, "provider-retirement-plan.json");
+    assert.equal(lstatSync(join(state.evidenceDirectory, planStage), {
+      bigint: true,
+    }).nlink, 2n);
+    assert.equal(lstatSync(planPath, { bigint: true }).nlink, 2n);
+    observations.push(inspect());
+    assert.equal(
+      observations.at(-1).cleanupPlanPublication.disposition,
+      "linked-complete",
+    );
+
+    let finalConsumption = false;
+    const planned = await planStateRetirement(state, create, (checkpoint) => {
+      if (checkpoint.publication_phase === "before-final-consumption") {
+        finalConsumption = true;
+      }
+    });
+    assert.equal(finalConsumption, true);
+    assert.equal(lstatSync(planPath, { bigint: true }).nlink, 1n);
+    assert.deepEqual(stagesFor(
+      state.evidenceDirectory,
+      "provider-retirement-plan.json",
+    ), []);
+    observations.push(inspect());
+    assert.equal(observations.at(-1).cleanupStage, "retiring");
+
+    const planBytes = readFileSync(planPath);
+    unlinkDurable(planPath);
+    const partialStage = join(
+      state.evidenceDirectory,
+      artifactStageName("provider-retirement-plan.json", planBytes),
+    );
+    writeDurable(partialStage, planBytes.subarray(0, planBytes.length - 1));
+    observations.push(inspect());
+    assert.equal(
+      observations.at(-1).cleanupPlanPublication.disposition,
+      "staged-partial",
+    );
+    const partialSnapshot = evidenceSnapshot(state.evidenceDirectory);
+    await assert.rejects(
+      () =>
+        planStateRetirement(state, create, (checkpoint) => {
+          if (checkpoint.publication_phase === "before-partial-stage-removal") {
+            throw new Error("veto partial plan retirement");
+          }
+        }),
+      /veto partial plan retirement/,
+    );
+    assert.deepEqual(evidenceSnapshot(state.evidenceDirectory), partialSnapshot);
+    const repaired = await planStateRetirement(state, create);
+    assert.deepEqual(repaired.plan.bytes, planBytes);
+    assert.deepEqual(repaired.plan.bytes, planned.plan.bytes);
+    assert.deepEqual(stagesFor(
+      state.evidenceDirectory,
+      "provider-retirement-plan.json",
+    ), []);
+    for (const observation of observations) {
+      assertStateRetirementObservation(observation);
+    }
+    const observationDigests = observations.map(({ observationSha256 }) =>
+      observationSha256);
+    assert.equal(new Set(observationDigests).size, observationDigests.length);
+    await retireState(state);
+  } finally {
+    await cleanupFixture(state);
+  }
+});
+
+test("state retirement progress and settlement publication recover exact frontiers", async () => {
+  const state = fixture();
+  try {
+    const { create } = await launchState(state);
+    const planned = await planStateRetirement(state, create);
+    const inspect = () =>
+      inspectControlledBackgroundRetirementPrefix(
+        state.evidenceDirectory,
+        state.fixtureId,
+        {
+          expectedBindings: planned.bindings,
+          providerBase: state.providerBase,
+        },
+      );
+    const observations = [inspect()];
+
+    await assert.rejects(
+      () =>
+        retireState(state, (checkpoint) => {
+          if (
+            checkpoint.checkpoint === "before-retirement-progress-publication" &&
+            checkpoint.completed_steps === 0 &&
+            checkpoint.publication_phase === "before-stage-write"
+          ) {
+            throw new Error("veto progress stage write");
+          }
+        }, { stopAfterSequence: 0 }),
+      /veto progress stage write/,
+    );
+    assert.deepEqual(stagesFor(
+      state.evidenceDirectory,
+      "retirement-step-00.json",
+    ), []);
+    observations.push(inspect());
+    assert.equal(observations.at(-1).observation.next_step.disposition,
+      "all-absent");
+
+    await assert.rejects(
+      () =>
+        retireState(state, (checkpoint) => {
+          if (
+            checkpoint.checkpoint === "before-retirement-progress-publication" &&
+            checkpoint.completed_steps === 0 &&
+            checkpoint.publication_phase === "before-final-link"
+          ) {
+            assert.equal(checkpoint.publication_target_name,
+              "retirement-step-00.json");
+            assert.equal(
+              checkpoint.publication_expected_sha256,
+              checkpoint.publication_stage_sha256,
+            );
+            throw new Error("veto progress link");
+          }
+        }, { stopAfterSequence: 0 }),
+      /veto progress link/,
+    );
+    const stagedSnapshot = evidenceSnapshot(state.evidenceDirectory);
+    observations.push(inspect());
+    assert.deepEqual(evidenceSnapshot(state.evidenceDirectory), stagedSnapshot);
+    assert.equal(observations.at(-1).cleanupStage,
+      "progress-publication-pending");
+    assert.equal(
+      observations.at(-1).pendingProgress.publication.disposition,
+      "staged-complete",
+    );
+
+    await assert.rejects(
+      () =>
+        retireState(state, (checkpoint) => {
+          if (
+            checkpoint.checkpoint === "before-retirement-progress-publication" &&
+            checkpoint.completed_steps === 0 &&
+            checkpoint.publication_phase === "before-stage-removal"
+          ) {
+            throw new Error("veto progress stage retirement");
+          }
+        }, { stopAfterSequence: 0 }),
+      /veto progress stage retirement/,
+    );
+    observations.push(inspect());
+    assert.equal(
+      observations.at(-1).pendingProgress.publication.disposition,
+      "linked-complete",
+    );
+    let progressFinalConsumed = false;
+    const stopped = await retireState(state, (checkpoint) => {
+      if (
+        checkpoint.checkpoint === "before-retirement-progress-publication" &&
+        checkpoint.completed_steps === 0 &&
+        checkpoint.publication_phase === "before-final-consumption"
+      ) {
+        progressFinalConsumed = true;
+      }
+    }, {
+      stopAfterSequence: 0,
+    });
+    assert.equal(stopped.complete, false);
+    assert.equal(stopped.completed_steps, 1);
+    assert.equal(progressFinalConsumed, true);
+    observations.push(inspect());
+    assert.equal(observations.at(-1).completedSteps, 1);
+
+    await assert.rejects(
+      () =>
+        retireState(state, () => undefined, {
+          crashAfterDeleteSyscallSequence: 1,
+        }),
+      /pre-fsync retirement crash/,
+    );
+    observations.push(inspect());
+    assert.equal(observations.at(-1).observation.next_step.disposition,
+      "all-absent");
+
+    await assert.rejects(
+      () =>
+        retireState(state, (checkpoint) => {
+          if (
+            checkpoint.checkpoint === "before-retirement-settlement-publication" &&
+            checkpoint.publication_phase === "before-stage-write"
+          ) {
+            throw new Error("veto settlement stage write");
+          }
+        }),
+      /veto settlement stage write/,
+    );
+    assert.deepEqual(stagesFor(
+      state.evidenceDirectory,
+      "provider-retirement-settlement.json",
+    ), []);
+    observations.push(inspect());
+    assert.equal(observations.at(-1).cleanupStage, "progress-complete");
+
+    await assert.rejects(
+      () =>
+        retireState(state, (checkpoint) => {
+          if (
+            checkpoint.checkpoint === "before-retirement-settlement-publication" &&
+            checkpoint.publication_phase === "before-final-link"
+          ) {
+            throw new Error("veto settlement link");
+          }
+        }),
+      /veto settlement link/,
+    );
+    const settlementStageSnapshot = evidenceSnapshot(state.evidenceDirectory);
+    observations.push(inspect());
+    assert.deepEqual(
+      evidenceSnapshot(state.evidenceDirectory),
+      settlementStageSnapshot,
+    );
+    assert.equal(observations.at(-1).cleanupStage,
+      "settlement-publication-pending");
+    assert.equal(
+      observations.at(-1).providerSettlementPublication.disposition,
+      "staged-complete",
+    );
+
+    await assert.rejects(
+      () =>
+        retireState(state, (checkpoint) => {
+          if (
+            checkpoint.checkpoint === "before-retirement-settlement-publication" &&
+            checkpoint.publication_phase === "before-stage-removal"
+          ) {
+            throw new Error("veto settlement stage retirement");
+          }
+        }),
+      /veto settlement stage retirement/,
+    );
+    observations.push(inspect());
+    assert.equal(
+      observations.at(-1).providerSettlementPublication.disposition,
+      "linked-complete",
+    );
+    let consumedFinal = false;
+    const retired = await retireState(state, (checkpoint) => {
+      if (
+        checkpoint.checkpoint === "before-retirement-settlement-publication" &&
+        checkpoint.publication_phase === "before-final-consumption"
+      ) {
+        consumedFinal = true;
+      }
+    });
+    assert.equal(retired.complete, true);
+    assert.equal(consumedFinal, true);
+    observations.push(inspect());
+    assert.equal(observations.at(-1).cleanupStage, "settled");
+    assert.equal(observations.at(-1).rootDisposition, "retired");
+    for (const observation of observations) {
+      assertStateRetirementObservation(observation);
+    }
+    const observationDigests = observations.map(({ observationSha256 }) =>
+      observationSha256);
+    assert.equal(new Set(observationDigests).size, observationDigests.length);
+  } finally {
+    await cleanupFixture(state);
+  }
+});
+
+test("state retirement final-consumption vetoes remain effective across retries", async (t) => {
+  await t.test("plan", async () => {
+    const state = fixture();
+    try {
+      const launched = await launchState(state);
+      let vetoes = 0;
+      const gate = (checkpoint) => {
+        if (
+          checkpoint.checkpoint === "before-retirement-plan-publication" &&
+          checkpoint.publication_phase === "before-final-consumption"
+        ) {
+          vetoes += 1;
+          throw new Error("persistent plan consumption veto");
+        }
+      };
+      await assert.rejects(
+        () => planStateRetirement(state, launched.create, gate),
+        /persistent plan consumption veto/,
+      );
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        await assert.rejects(
+          () => retireState(state, gate),
+          /persistent plan consumption veto/,
+        );
+        assert.equal(processPresent(launched.started.hostagentPid), true);
+        assert.equal(existsSync(launched.started.paths.haSocket), true);
+        assert.equal(existsSync(launched.started.paths.engineSocket), true);
+        assert.equal(
+          existsSync(join(state.evidenceDirectory, "retirement-step-00.json")),
+          false,
+        );
+      }
+      assert.equal(vetoes, 3);
+      await retireState(state);
+    } finally {
+      await cleanupFixture(state);
+    }
+  });
+
+  await t.test("progress", async () => {
+    const state = fixture();
+    try {
+      const launched = await launchState(state);
+      const planned = await planStateRetirement(state, launched.create);
+      const nextResource = planned.plan.value.retirement_steps[1].resources[0];
+      const nextPath = join(planned.plan.value.root.path, nextResource);
+      let vetoes = 0;
+      const gate = (checkpoint) => {
+        if (
+          checkpoint.checkpoint === "before-retirement-progress-publication" &&
+          checkpoint.completed_steps === 0 &&
+          checkpoint.publication_phase === "before-final-consumption"
+        ) {
+          vetoes += 1;
+          throw new Error("persistent progress consumption veto");
+        }
+      };
+      await assert.rejects(
+        () => retireState(state, gate),
+        /persistent progress consumption veto/,
+      );
+      assert.equal(
+        existsSync(join(state.evidenceDirectory, "retirement-step-00.json")),
+        true,
+      );
+      assert.equal(existsSync(nextPath), true);
+      for (let attempt = 0; attempt < 2; attempt += 1) {
+        await assert.rejects(
+          () => retireState(state, gate),
+          /persistent progress consumption veto/,
+        );
+        assert.equal(existsSync(nextPath), true);
+        assert.equal(
+          existsSync(join(state.evidenceDirectory, "retirement-step-01.json")),
+          false,
+        );
+      }
+      assert.equal(vetoes, 3);
+      await retireState(state);
+    } finally {
+      await cleanupFixture(state);
+    }
+  });
+
+  await t.test("settlement", async () => {
+    const state = fixture();
+    try {
+      const launched = await launchState(state);
+      await planStateRetirement(state, launched.create);
+      let vetoes = 0;
+      const gate = (checkpoint) => {
+        if (
+          checkpoint.checkpoint ===
+            "before-retirement-settlement-publication" &&
+          checkpoint.publication_phase === "before-final-consumption"
+        ) {
+          vetoes += 1;
+          throw new Error("persistent settlement consumption veto");
+        }
+      };
+      await assert.rejects(
+        () => retireState(state, gate),
+        /persistent settlement consumption veto/,
+      );
+      assert.equal(
+        existsSync(
+          join(
+            state.evidenceDirectory,
+            "provider-retirement-settlement.json",
+          ),
+        ),
+        true,
+      );
+      await assert.rejects(
+        () => retireState(state, gate),
+        /persistent settlement consumption veto/,
+      );
+      assert.equal(vetoes, 2);
+      const retired = await retireState(state);
+      assert.equal(retired.complete, true);
+    } finally {
+      await cleanupFixture(state);
+    }
+  });
+});
+
+test("partial state progress and settlement stages require exact authority to recover", async (t) => {
+  for (const recoveredAbsence of [false, true]) {
+    await t.test(`progress recovered_absence=${recoveredAbsence}`, async () => {
+      const state = fixture();
+      try {
+        const launched = await launchState(state);
+        const planned = await planStateRetirement(state, launched.create);
+        if (recoveredAbsence) {
+          process.kill(launched.started.hostagentPid, "SIGKILL");
+          await waitForProcessAbsent(launched.started.hostagentPid);
+        }
+        await assert.rejects(
+          () =>
+            retireState(state, () => undefined, {
+              crashAfterHostagentSettlement: true,
+            }),
+          /hostagent-settlement crash/,
+        );
+        const expectedBytes = stateProgressBytes(
+          planned.plan,
+          0,
+          recoveredAbsence,
+        );
+        const progressStage = join(
+          state.evidenceDirectory,
+          artifactStageName("retirement-step-00.json", expectedBytes),
+        );
+        writeDurable(
+          progressStage,
+          expectedBytes.subarray(0, expectedBytes.length - 1),
+        );
+        const inspected = inspectControlledBackgroundRetirementPrefix(
+          state.evidenceDirectory,
+          state.fixtureId,
+          {
+            expectedBindings: planned.bindings,
+            providerBase: state.providerBase,
+          },
+        );
+        assert.equal(inspected.cleanupStage, "progress-publication-pending");
+        assert.equal(
+          inspected.pendingProgress.publication.disposition,
+          "staged-partial",
+        );
+        assert.equal(
+          inspected.pendingProgress.recoveredAbsence,
+          recoveredAbsence,
+        );
+        const beforeVeto = evidenceSnapshot(state.evidenceDirectory);
+        await assert.rejects(
+          () =>
+            retireState(state, (checkpoint) => {
+              if (
+                checkpoint.checkpoint ===
+                  "before-retirement-progress-publication" &&
+                checkpoint.publication_phase ===
+                  "before-partial-stage-removal"
+              ) {
+                assert.equal(
+                  checkpoint.publication_stage_declared_sha256,
+                  providerProcessDigest(expectedBytes),
+                );
+                throw new Error("veto partial progress retirement");
+              }
+            }, { stopAfterSequence: 0 }),
+          /veto partial progress retirement/,
+        );
+        assert.deepEqual(evidenceSnapshot(state.evidenceDirectory), beforeVeto);
+        const resumed = await retireState(state, () => undefined, {
+          stopAfterSequence: 0,
+        });
+        assert.equal(resumed.complete, false);
+        assert.deepEqual(
+          readFileSync(join(state.evidenceDirectory, "retirement-step-00.json")),
+          expectedBytes,
+        );
+        assert.equal(existsSync(progressStage), false);
+        await retireState(state);
+      } finally {
+        await cleanupFixture(state);
+      }
+    });
+  }
+
+  await t.test("settlement", async () => {
+    const state = fixture();
+    try {
+      const launched = await launchState(state);
+      const planned = await planStateRetirement(state, launched.create);
+      await retireState(state);
+      const settlementName = "provider-retirement-settlement.json";
+      const settlementPath = join(state.evidenceDirectory, settlementName);
+      const expectedBytes = readFileSync(settlementPath);
+      unlinkDurable(settlementPath);
+      const settlementStage = join(
+        state.evidenceDirectory,
+        artifactStageName(settlementName, expectedBytes),
+      );
+      writeDurable(
+        settlementStage,
+        expectedBytes.subarray(0, expectedBytes.length - 1),
+      );
+      const inspected = inspectControlledBackgroundRetirementPrefix(
+        state.evidenceDirectory,
+        state.fixtureId,
+        {
+          expectedBindings: planned.bindings,
+          providerBase: state.providerBase,
+        },
+      );
+      assert.equal(inspected.cleanupStage, "settlement-publication-pending");
+      assert.equal(
+        inspected.providerSettlementPublication.disposition,
+        "staged-partial",
+      );
+      const beforeVeto = evidenceSnapshot(state.evidenceDirectory);
+      await assert.rejects(
+        () =>
+          retireState(state, (checkpoint) => {
+            if (
+              checkpoint.checkpoint ===
+                "before-retirement-settlement-publication" &&
+              checkpoint.publication_phase === "before-partial-stage-removal"
+            ) {
+              throw new Error("veto partial settlement retirement");
+            }
+          }),
+        /veto partial settlement retirement/,
+      );
+      assert.deepEqual(evidenceSnapshot(state.evidenceDirectory), beforeVeto);
+      const resumed = await retireState(state);
+      assert.equal(resumed.complete, true);
+      assert.deepEqual(readFileSync(settlementPath), expectedBytes);
+      assert.equal(existsSync(settlementStage), false);
+    } finally {
+      await cleanupFixture(state);
+    }
+  });
+
+  await t.test("foreign progress digest", async () => {
+    const state = fixture();
+    try {
+      const launched = await launchState(state);
+      const planned = await planStateRetirement(state, launched.create);
+      await assert.rejects(
+        () =>
+          retireState(state, () => undefined, {
+            crashAfterHostagentSettlement: true,
+          }),
+        /hostagent-settlement crash/,
+      );
+      const expectedBytes = stateProgressBytes(planned.plan, 0, false);
+      const stagePath = join(
+        state.evidenceDirectory,
+        `.provider-process-stage-retirement-step-00-${"f".repeat(64)}-${"4".repeat(32)}`,
+      );
+      writeDurable(stagePath, expectedBytes.subarray(0, expectedBytes.length - 1));
+      const before = evidenceSnapshot(state.evidenceDirectory);
+      assert.throws(
+        () =>
+          inspectControlledBackgroundRetirementPrefix(
+            state.evidenceDirectory,
+            state.fixtureId,
+            {
+              expectedBindings: planned.bindings,
+              providerBase: state.providerBase,
+            },
+          ),
+        /progress stage was refused/,
+      );
+      await assert.rejects(
+        () => retireState(state),
+        /progress stage was refused/,
+      );
+      assert.deepEqual(evidenceSnapshot(state.evidenceDirectory), before);
+      unlinkDurable(stagePath);
+      await retireState(state);
+    } finally {
+      await cleanupFixture(state);
+    }
+  });
+
+  await t.test("foreign settlement digest", async () => {
+    const state = fixture();
+    try {
+      const launched = await launchState(state);
+      const planned = await planStateRetirement(state, launched.create);
+      await retireState(state);
+      const settlementName = "provider-retirement-settlement.json";
+      const settlementPath = join(state.evidenceDirectory, settlementName);
+      const expectedBytes = readFileSync(settlementPath);
+      unlinkDurable(settlementPath);
+      const stagePath = join(
+        state.evidenceDirectory,
+        `.provider-process-stage-provider-retirement-settlement-${"f".repeat(64)}-${"5".repeat(32)}`,
+      );
+      writeDurable(stagePath, expectedBytes.subarray(0, expectedBytes.length - 1));
+      const before = evidenceSnapshot(state.evidenceDirectory);
+      assert.throws(
+        () =>
+          inspectControlledBackgroundRetirementPrefix(
+            state.evidenceDirectory,
+            state.fixtureId,
+            {
+              expectedBindings: planned.bindings,
+              providerBase: state.providerBase,
+            },
+          ),
+        /settlement.*stage digest was refused/,
+      );
+      await assert.rejects(
+        () => retireState(state),
+        /settlement.*stage digest was refused/,
+      );
+      assert.deepEqual(evidenceSnapshot(state.evidenceDirectory), before);
+      unlinkDurable(stagePath);
+      await retireState(state);
+    } finally {
+      await cleanupFixture(state);
+    }
+  });
+});
+
+test("state plan publication retires exact redundant stages only under authority", async () => {
+  const state = fixture();
+  try {
+    const launched = await launchState(state);
+    const planned = await planStateRetirement(state, launched.create);
+    const planName = "provider-retirement-plan.json";
+    const planBytes = readFileSync(join(state.evidenceDirectory, planName));
+
+    const completeStage = join(
+      state.evidenceDirectory,
+      artifactStageName(planName, planBytes, "6".repeat(32)),
+    );
+    writeDurable(completeStage, planBytes);
+    let inspected = inspectControlledBackgroundRetirementPrefix(
+      state.evidenceDirectory,
+      state.fixtureId,
+      {
+        expectedBindings: planned.bindings,
+        providerBase: state.providerBase,
+      },
+    );
+    assert.equal(inspected.cleanupPlanPublication.disposition,
+      "redundant-complete");
+    const completeSnapshot = evidenceSnapshot(state.evidenceDirectory);
+    await assert.rejects(
+      () =>
+        planStateRetirement(state, launched.create, (checkpoint) => {
+          if (checkpoint.publication_phase === "before-stage-removal") {
+            throw new Error("veto redundant complete retirement");
+          }
+        }),
+      /veto redundant complete retirement/,
+    );
+    assert.deepEqual(evidenceSnapshot(state.evidenceDirectory), completeSnapshot);
+    await planStateRetirement(state, launched.create);
+    assert.equal(existsSync(completeStage), false);
+
+    const partialStage = join(
+      state.evidenceDirectory,
+      artifactStageName(planName, planBytes, "7".repeat(32)),
+    );
+    writeDurable(partialStage, planBytes.subarray(0, planBytes.length - 1));
+    inspected = inspectControlledBackgroundRetirementPrefix(
+      state.evidenceDirectory,
+      state.fixtureId,
+      {
+        expectedBindings: planned.bindings,
+        providerBase: state.providerBase,
+      },
+    );
+    assert.equal(inspected.cleanupPlanPublication.disposition,
+      "redundant-partial");
+    const partialSnapshot = evidenceSnapshot(state.evidenceDirectory);
+    await assert.rejects(
+      () =>
+        planStateRetirement(state, launched.create, (checkpoint) => {
+          if (checkpoint.publication_phase === "before-partial-stage-removal") {
+            throw new Error("veto redundant partial retirement");
+          }
+        }),
+      /veto redundant partial retirement/,
+    );
+    assert.deepEqual(evidenceSnapshot(state.evidenceDirectory), partialSnapshot);
+    await planStateRetirement(state, launched.create);
+    assert.equal(existsSync(partialStage), false);
+    await retireState(state);
+  } finally {
+    await cleanupFixture(state);
+  }
+});
+
+test("foreign state plan stages are preserved and block provider mutation", async (t) => {
+  const cases = [
+    "wrong-digest",
+    "partial-wrong-digest",
+    "canonical-conflict",
+    "ambiguous",
+    "foreign-link",
+  ];
+  for (const scenario of cases) {
+    await t.test(scenario, async () => {
+      const state = fixture();
+      try {
+        const launched = await launchState(state);
+        const planned = await planStateRetirement(state, launched.create);
+        const planName = "provider-retirement-plan.json";
+        const planPath = join(state.evidenceDirectory, planName);
+        const expectedBytes = readFileSync(planPath);
+        unlinkDurable(planPath);
+        const paths = [];
+        if (scenario === "wrong-digest" || scenario === "partial-wrong-digest") {
+          const path = join(
+            state.evidenceDirectory,
+            `.provider-process-stage-provider-retirement-plan-${"f".repeat(64)}-${"1".repeat(32)}`,
+          );
+          writeDurable(
+            path,
+            scenario === "partial-wrong-digest"
+              ? expectedBytes.subarray(0, expectedBytes.length - 1)
+              : expectedBytes,
+          );
+          paths.push(path);
+        } else if (scenario === "canonical-conflict") {
+          const bytes = providerProcessBytes({ schema: "foreign-state-plan" });
+          const path = join(
+            state.evidenceDirectory,
+            artifactStageName(planName, bytes),
+          );
+          writeDurable(path, bytes);
+          paths.push(path);
+        } else if (scenario === "ambiguous") {
+          for (const nonce of ["2".repeat(32), "3".repeat(32)]) {
+            const path = join(
+              state.evidenceDirectory,
+              artifactStageName(planName, expectedBytes, nonce),
+            );
+            writeDurable(path, expectedBytes.subarray(0, expectedBytes.length - 1));
+            paths.push(path);
+          }
+        } else {
+          const foreign = join(state.root, "foreign-plan-source");
+          writeDurable(foreign, expectedBytes);
+          const path = join(
+            state.evidenceDirectory,
+            artifactStageName(planName, expectedBytes),
+          );
+          linkSync(foreign, path);
+          paths.push(path, foreign);
+        }
+        const before = paths.map((path) => [path, readFileSync(path), lstatSync(path, {
+          bigint: true,
+        }).ino]);
+        assert.throws(
+          () =>
+            inspectControlledBackgroundRetirementPrefix(
+              state.evidenceDirectory,
+              state.fixtureId,
+              {
+                expectedBindings: planned.bindings,
+                providerBase: state.providerBase,
+              },
+            ),
+          /stage|publication/,
+        );
+        await assert.rejects(
+          () => planStateRetirement(state, launched.create),
+          /stage|publication/,
+        );
+        for (const [path, bytes, inode] of before) {
+          assert.deepEqual(readFileSync(path), bytes);
+          assert.equal(lstatSync(path, { bigint: true }).ino, inode);
+        }
+        assert.equal(existsSync(launched.started.paths.haSocket), true);
+        assert.equal(existsSync(launched.started.paths.engineSocket), true);
+        for (const path of paths) {
+          if (existsSync(path)) unlinkDurable(path);
+        }
+        const repaired = await planStateRetirement(state, launched.create);
+        assert.deepEqual(repaired.plan.bytes, planned.plan.bytes);
+        await retireState(state);
+      } finally {
+        await cleanupFixture(state);
+      }
+    });
+  }
+});
+
+test("state publication refuses a same-byte stage inode replacement after authority", async () => {
+  const state = fixture();
+  try {
+    const launched = await launchState(state);
+    await assert.rejects(
+      () =>
+        planStateRetirement(state, launched.create, (checkpoint) => {
+          if (checkpoint.publication_phase === "before-final-link") {
+            throw new Error("leave exact plan stage");
+          }
+        }),
+      /leave exact plan stage/,
+    );
+    const name = "provider-retirement-plan.json";
+    const stageName = stagesFor(state.evidenceDirectory, name)[0];
+    const stagePath = join(state.evidenceDirectory, stageName);
+    const bytes = readFileSync(stagePath);
+    const originalInode = lstatSync(stagePath, { bigint: true }).ino;
+    const heldStageDescriptor = openSync(stagePath, constants.O_RDONLY);
+    try {
+      await assert.rejects(
+        () =>
+          planStateRetirement(state, launched.create, (checkpoint) => {
+            if (checkpoint.publication_phase === "before-final-link") {
+              unlinkDurable(stagePath);
+              writeDurable(stagePath, bytes);
+              assert.notEqual(lstatSync(stagePath, { bigint: true }).ino,
+                originalInode);
+            }
+          }),
+        /publication changed/,
+      );
+    } finally {
+      closeSync(heldStageDescriptor);
+    }
+    assert.equal(existsSync(join(state.evidenceDirectory, name)), false);
+    assert.deepEqual(readFileSync(stagePath), bytes);
+    assert.equal(existsSync(launched.started.paths.haSocket), true);
+    unlinkDurable(stagePath);
+    await planStateRetirement(state, launched.create);
+    await retireState(state);
+  } finally {
+    await cleanupFixture(state);
+  }
+});
+
+test("state retirement plan progress and settlement schemas are hard cuts", async (t) => {
+  await t.test("plan", async () => {
+    const state = fixture();
+    let launched;
+    try {
+      launched = await launchState(state);
+      const planned = await planStateRetirement(state, launched.create);
+      const planPath = join(
+        state.evidenceDirectory,
+        "provider-retirement-plan.json",
+      );
+      const plan = JSON.parse(readFileSync(planPath, "utf8"));
+      plan.schema =
+        "synveda.clean-engine.controlled-background-provider-retirement-plan.v1";
+      rewriteCanonicalArtifact(planPath, plan);
+      assert.throws(
+        () =>
+          inspectControlledBackgroundRetirementPrefix(
+            state.evidenceDirectory,
+            state.fixtureId,
+            {
+              expectedBindings: planned.bindings,
+              providerBase: state.providerBase,
+            },
+          ),
+        /state retirement plan was refused/,
+      );
+      await assert.rejects(
+        () => retireState(state),
+        /state retirement plan was refused/,
+      );
+      assert.equal(existsSync(launched.started.paths.haSocket), true);
+      assert.equal(existsSync(launched.started.paths.engineSocket), true);
+    } finally {
+      if (
+        launched !== undefined &&
+        processPresent(launched.started.hostagentPid)
+      ) {
+        process.kill(launched.started.hostagentPid, "SIGKILL");
+        await waitForProcessAbsent(launched.started.hostagentPid);
+      }
+      await cleanupFixture(state);
+    }
+  });
+
+  await t.test("progress", async () => {
+    const state = fixture();
+    try {
+      const launched = await launchState(state);
+      const planned = await planStateRetirement(state, launched.create);
+      await retireState(state, () => undefined, { stopAfterSequence: 0 });
+      const progressPath = join(
+        state.evidenceDirectory,
+        "retirement-step-00.json",
+      );
+      const progress = JSON.parse(readFileSync(progressPath, "utf8"));
+      progress.schema = "synveda.clean-engine.provider-retirement-step.v1";
+      rewriteCanonicalArtifact(progressPath, progress);
+      assert.throws(
+        () =>
+          inspectControlledBackgroundRetirementPrefix(
+            state.evidenceDirectory,
+            state.fixtureId,
+            {
+              expectedBindings: planned.bindings,
+              providerBase: state.providerBase,
+            },
+          ),
+        /retirement progress was refused/,
+      );
+      await assert.rejects(
+        () => retireState(state),
+        /retirement progress was refused/,
+      );
+    } finally {
+      await cleanupFixture(state);
+    }
+  });
+
+  await t.test("settlement", async () => {
+    const state = fixture();
+    try {
+      const launched = await launchState(state);
+      const planned = await planStateRetirement(state, launched.create);
+      await retireState(state);
+      const settlementPath = join(
+        state.evidenceDirectory,
+        "provider-retirement-settlement.json",
+      );
+      const settlement = JSON.parse(readFileSync(settlementPath, "utf8"));
+      settlement.schema =
+        "synveda.clean-engine.controlled-background-provider-retirement-settlement.v1";
+      rewriteCanonicalArtifact(settlementPath, settlement);
+      assert.throws(
+        () =>
+          inspectControlledBackgroundRetirementPrefix(
+            state.evidenceDirectory,
+            state.fixtureId,
+            {
+              expectedBindings: planned.bindings,
+              providerBase: state.providerBase,
+            },
+          ),
+        /retirement settlement (?:changed|was refused)/,
+      );
+      await assert.rejects(
+        () => retireState(state),
+        /retirement settlement (?:changed|was refused)/,
+      );
+    } finally {
+      await cleanupFixture(state);
+    }
+  });
+});
+
+test("state retirement APIs reject fixture-only plans in both directions", async () => {
+  const state = fixture();
+  try {
+    await launch(state);
+    const fixturePlan = await plan(state);
+    await assert.rejects(
+      () =>
+        planControlledBackgroundRetirementWithAuthorityGate(
+          {
+            bindings: stateRetirementBindings({
+              create_slot_sha256: createBindings().create_slot_sha256,
+            }),
+            evidenceDirectory: state.evidenceDirectory,
+            fixtureId: state.fixtureId,
+            providerBase: state.providerBase,
+          },
+          () => undefined,
+        ),
+      /retirement integration was refused/,
+    );
+    await assert.rejects(
+      () => retireState(state),
+      /retirement integration was refused/,
+    );
+    assert.equal(
+      JSON.parse(readFileSync(fixturePlan.plan.path, "utf8")).state_integration,
+      "not-authorized",
+    );
+    await retire(state);
+  } finally {
+    await cleanupFixture(state);
+  }
+});
+
 test("retirement refuses a create slot not bound by the launch authority", async () => {
   const state = fixture();
   try {
@@ -3247,4 +5076,18 @@ test("the retirement implementation contains no recursive removal primitive", ()
   assert.doesNotMatch(source, /\brmSync\b|\brm\s+-rf\b|\bremoveAll\b/);
   assert.match(source, /unlinkSync\(/);
   assert.match(source, /rmdirSync\(/);
+});
+
+test("state retirement stage creation is parent-directory durable before linking", () => {
+  const source = readFileSync(
+    new URL(
+      "../deploy/compose/scripts/clean-engine-provider-process-contract.mjs",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  assert.match(
+    source,
+    /writeExclusive\(stagePath, expectedBytes\);\n\s+syncDirectory\(evidenceDirectory\);\n\s+continue;/,
+  );
 });

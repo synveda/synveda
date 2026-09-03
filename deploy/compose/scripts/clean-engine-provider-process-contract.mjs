@@ -231,6 +231,9 @@ export const CONTROLLED_BACKGROUND_PROVIDER_CONTRACT_SHA256 = providerProcessDig
 export const CONTROLLED_BACKGROUND_OPERATION_KIND =
   "controlled-background-provider-create-v1";
 
+export const CONTROLLED_BACKGROUND_RETIREMENT_OPERATION_KIND =
+  "controlled-background-provider-cleanup-v1";
+
 export const CONTROLLED_BACKGROUND_AUTHORITY_CHECKPOINTS = Object.freeze([
   "before-create-authority-publication",
   "before-root-publication",
@@ -239,6 +242,38 @@ export const CONTROLLED_BACKGROUND_AUTHORITY_CHECKPOINTS = Object.freeze([
   "before-hostagent-start-delivery",
   "before-provider-identity-publication",
 ]);
+
+export const CONTROLLED_BACKGROUND_RETIREMENT_AUTHORITY_CHECKPOINTS =
+  Object.freeze([
+    "before-retirement-plan-publication",
+    "before-hostagent-shutdown-delivery",
+    "before-stale-socket-unlink",
+    "before-resource-unlink",
+    "before-resource-rmdir",
+    "before-retirement-progress-publication",
+    "before-retirement-settlement-publication",
+  ]);
+
+export const CONTROLLED_BACKGROUND_RETIREMENT_CONTRACT = Object.freeze({
+  authority_checkpoint:
+    "closed-effect-and-publication-frontier-with-exact-stage-identity-v1",
+  create_provider_contract_sha256: CONTROLLED_BACKGROUND_PROVIDER_CONTRACT_SHA256,
+  effect_authority:
+    "synchronous-state-veto-before-every-exact-effect-and-publication-frontier-v2",
+  effect_checkpoints: CONTROLLED_BACKGROUND_RETIREMENT_AUTHORITY_CHECKPOINTS,
+  fixture_contract: "retirement-v1-remains-fixture-only",
+  kind: "controlled-background-provider-retirement-v1",
+  operation_kind: CONTROLLED_BACKGROUND_RETIREMENT_OPERATION_KIND,
+  process_stop: "authenticated-ipc-no-pid-signal-v1",
+  artifact_publication: "append-only-fsync-stage-link-no-replace-strict-recovery-v2",
+  provider_kind: "controlled-background-fake",
+  resource_retirement: "exact-inventory-leaf-first-no-recursion-v1",
+  schema: "synveda.clean-engine.controlled-background-retirement-contract.v1",
+  state_integration: "mutation-journal-v2",
+});
+
+export const CONTROLLED_BACKGROUND_RETIREMENT_CONTRACT_SHA256 =
+  providerProcessDigest(providerProcessBytes(CONTROLLED_BACKGROUND_RETIREMENT_CONTRACT));
 
 function lowerHex(value, length) {
   return typeof value === "string" && value.length === length && /^[0-9a-f]+$/.test(value);
@@ -262,6 +297,199 @@ function invokeAuthorityGate(authorityGate, checkpoint, evidenceHeadSha256, reva
   const revalidated = revalidate();
   if (revalidated !== undefined) {
     fail("controlled background authority revalidation returned authority", 70);
+  }
+}
+
+function invokeRetirementAuthorityGate(authorityGate, checkpointValue, revalidate) {
+  const publicationDispositions = new Set([
+    "absent",
+    "final",
+    "linked-complete",
+    "not-applicable",
+    "redundant-complete",
+    "redundant-partial",
+    "staged-complete",
+    "staged-partial",
+  ]);
+  const publicationPhases = new Set([
+    "before-final-consumption",
+    "before-final-link",
+    "before-partial-stage-removal",
+    "before-stage-removal",
+    "before-stage-write",
+    "not-applicable",
+  ]);
+  if (
+    typeof authorityGate !== "function" ||
+    checkpointValue === null ||
+    Array.isArray(checkpointValue) ||
+    typeof checkpointValue !== "object" ||
+    typeof revalidate !== "function"
+  ) {
+    fail("controlled background retirement authority gate was refused", 70);
+  }
+  exactKeys(
+    checkpointValue,
+    [
+      "checkpoint",
+      "cleanup_intent_sha256",
+      "cleanup_operation_plan_sha256",
+      "cleanup_plan_sha256",
+      "cleanup_slot_sequence",
+      "cleanup_slot_sha256",
+      "completed_steps",
+      "create_close_sha256",
+      "create_settlement_sha256",
+      "create_slot_sha256",
+      "next_action",
+      "next_resources",
+      "operation_kind",
+      "provider_identity_sha256",
+      "publication_disposition",
+      "publication_expected_sha256",
+      "publication_phase",
+      "publication_stage_declared_sha256",
+      "publication_stage_identity_sha256",
+      "publication_stage_sha256",
+      "publication_target_name",
+      "resource_identity_sha256",
+      "retirement_contract_sha256",
+      "source_head_sha256",
+      "source_sequence",
+    ],
+    "controlled background retirement authority checkpoint",
+  );
+  validateStateRetirementBindings({
+    cleanup_intent_sha256: checkpointValue.cleanup_intent_sha256,
+    cleanup_operation_plan_sha256:
+      checkpointValue.cleanup_operation_plan_sha256,
+    cleanup_slot_sequence: checkpointValue.cleanup_slot_sequence,
+    cleanup_slot_sha256: checkpointValue.cleanup_slot_sha256,
+    create_close_sha256: checkpointValue.create_close_sha256,
+    create_settlement_sha256: checkpointValue.create_settlement_sha256,
+    create_slot_sha256: checkpointValue.create_slot_sha256,
+    source_head_sha256: checkpointValue.source_head_sha256,
+    source_sequence: checkpointValue.source_sequence,
+  });
+  if (
+    !CONTROLLED_BACKGROUND_RETIREMENT_AUTHORITY_CHECKPOINTS.includes(
+      checkpointValue.checkpoint,
+    ) ||
+    !lowerHex(checkpointValue.cleanup_plan_sha256, 64) ||
+    !Number.isSafeInteger(checkpointValue.completed_steps) ||
+    checkpointValue.completed_steps < 0 ||
+    typeof checkpointValue.next_action !== "string" ||
+    !/^[a-z][a-z0-9-]{0,63}$/.test(checkpointValue.next_action) ||
+    !Array.isArray(checkpointValue.next_resources) ||
+    checkpointValue.next_resources.length < 1 ||
+    checkpointValue.next_resources.some(
+      (resource) => typeof resource !== "string" || resource.length < 1,
+    ) ||
+    checkpointValue.operation_kind !==
+      CONTROLLED_BACKGROUND_RETIREMENT_OPERATION_KIND ||
+    !publicationDispositions.has(checkpointValue.publication_disposition) ||
+    !lowerHex(checkpointValue.publication_expected_sha256, 64) ||
+    !publicationPhases.has(checkpointValue.publication_phase) ||
+    !lowerHex(checkpointValue.publication_stage_declared_sha256, 64) ||
+    !lowerHex(checkpointValue.publication_stage_identity_sha256, 64) ||
+    !lowerHex(checkpointValue.publication_stage_sha256, 64) ||
+    typeof checkpointValue.publication_target_name !== "string" ||
+    checkpointValue.publication_target_name.length < 1 ||
+    !lowerHex(checkpointValue.provider_identity_sha256, 64) ||
+    !lowerHex(checkpointValue.resource_identity_sha256, 64) ||
+    checkpointValue.retirement_contract_sha256 !==
+      CONTROLLED_BACKGROUND_RETIREMENT_CONTRACT_SHA256
+  ) {
+    fail("controlled background retirement authority gate was refused", 70);
+  }
+  const allowedPublicationFrontiers = new Map([
+    ["before-final-consumption", new Set(["final"])],
+    ["before-final-link", new Set(["staged-complete"])],
+    [
+      "before-partial-stage-removal",
+      new Set(["redundant-partial", "staged-partial"]),
+    ],
+    [
+      "before-stage-removal",
+      new Set(["linked-complete", "redundant-complete"]),
+    ],
+    ["before-stage-write", new Set(["absent"])],
+    ["not-applicable", new Set(["not-applicable"])],
+  ]);
+  const stageAbsent = new Set(["absent", "final", "not-applicable"]).has(
+    checkpointValue.publication_disposition,
+  );
+  const publicationIsNotApplicable =
+    checkpointValue.publication_disposition === "not-applicable";
+  if (
+    !allowedPublicationFrontiers
+      .get(checkpointValue.publication_phase)
+      ?.has(checkpointValue.publication_disposition) ||
+    stageAbsent !==
+      (checkpointValue.publication_stage_declared_sha256 === ZERO_SHA256 &&
+        checkpointValue.publication_stage_identity_sha256 === ZERO_SHA256 &&
+        checkpointValue.publication_stage_sha256 === ZERO_SHA256) ||
+    publicationIsNotApplicable !==
+      (checkpointValue.publication_expected_sha256 === ZERO_SHA256 &&
+        checkpointValue.publication_target_name === "not-applicable") ||
+    (!publicationIsNotApplicable &&
+      (!artifactNameAllowed(checkpointValue.publication_target_name) ||
+        checkpointValue.publication_expected_sha256 === ZERO_SHA256))
+  ) {
+    fail("controlled background retirement publication authority was refused", 70);
+  }
+  const effectCheckpointActions = new Map([
+    ["before-hostagent-shutdown-delivery", new Set(["authenticated-hostagent-stop"])],
+    ["before-stale-socket-unlink", new Set(["unlink-stale-socket"])],
+    ["before-resource-unlink", new Set(["unlink", "unlink-owner"])],
+    ["before-resource-rmdir", new Set(["rmdir", "rmdir-root"])],
+  ]);
+  const effectActions = effectCheckpointActions.get(checkpointValue.checkpoint);
+  const publicationCheckpoint = new Map([
+    [
+      "before-retirement-plan-publication",
+      {
+        action: "publish-retirement-plan",
+        target: (name) => name === "provider-retirement-plan.json",
+      },
+    ],
+    [
+      "before-retirement-progress-publication",
+      {
+        action: "publish-retirement-progress",
+        target: (name) => /^retirement-step-[0-9]{2}\.json$/.test(name),
+      },
+    ],
+    [
+      "before-retirement-settlement-publication",
+      {
+        action: "publish-retirement-settlement",
+        target: (name) => name === "provider-retirement-settlement.json",
+      },
+    ],
+  ]).get(checkpointValue.checkpoint);
+  if (
+    (effectActions !== undefined &&
+      (!effectActions.has(checkpointValue.next_action) ||
+        checkpointValue.publication_phase !== "not-applicable")) ||
+    (publicationCheckpoint !== undefined &&
+      (checkpointValue.next_action !== publicationCheckpoint.action ||
+        checkpointValue.publication_phase === "not-applicable" ||
+        !publicationCheckpoint.target(checkpointValue.publication_target_name))) ||
+    (effectActions === undefined && publicationCheckpoint === undefined)
+  ) {
+    fail("controlled background retirement checkpoint semantics were refused", 70);
+  }
+  const result = authorityGate(Object.freeze({
+    ...checkpointValue,
+    next_resources: Object.freeze([...checkpointValue.next_resources]),
+  }));
+  if (result !== undefined) {
+    fail("controlled background retirement authority gate returned authority", 70);
+  }
+  const revalidated = revalidate();
+  if (revalidated !== undefined) {
+    fail("controlled background retirement authority revalidation returned authority", 70);
   }
 }
 
@@ -694,7 +922,9 @@ function publishArtifact(directory, name, value, { reassertAuthority } = {}) {
     }
     fail(`${name} publication failed`, 70);
   }
-  reconcileArtifactPublication(directory, name, valueBytes, { reassertAuthority });
+  reconcileArtifactPublication(directory, name, valueBytes, {
+    reassertAuthority,
+  });
   return canonicalArtifact(finalPath, name);
 }
 
@@ -1743,7 +1973,15 @@ function controllerStartProofIdentity(processIdentity, startDecisionSha256) {
   return `${processIdentity}\0${startDecisionSha256}`;
 }
 
-function requestSocket(path, request, timeoutMilliseconds = 2_000) {
+function requestSocket(
+  path,
+  request,
+  timeoutMilliseconds = 2_000,
+  beforeWrite,
+) {
+  if (beforeWrite !== undefined && typeof beforeWrite !== "function") {
+    fail("provider process request boundary was refused", 70);
+  }
   return new Promise((resolvePromise, rejectPromise) => {
     let response = Buffer.alloc(0);
     let settled = false;
@@ -1770,7 +2008,22 @@ function requestSocket(path, request, timeoutMilliseconds = 2_000) {
       }
     });
     socket.once("connect", () => {
-      socket.end(`${canonical(request)}\n`);
+      try {
+        const result = beforeWrite?.();
+        if (result !== undefined) {
+          fail("provider process request boundary returned authority", 70);
+        }
+        socket.end(`${canonical(request)}\n`);
+      } catch (error) {
+        finish(
+          error instanceof ProviderProcessContractFailure
+            ? error
+            : new ProviderProcessContractFailure(
+                "provider process request boundary was refused",
+                70,
+              ),
+        );
+      }
     });
     socket.once("end", () => {
       if (settled) return;
@@ -5400,6 +5653,41 @@ function validateRetirementBindings(value) {
   }
 }
 
+function validateStateRetirementBindings(value) {
+  exactKeys(
+    value,
+    [
+      "cleanup_intent_sha256",
+      "cleanup_operation_plan_sha256",
+      "cleanup_slot_sequence",
+      "cleanup_slot_sha256",
+      "create_close_sha256",
+      "create_settlement_sha256",
+      "create_slot_sha256",
+      "source_head_sha256",
+      "source_sequence",
+    ],
+    "controlled background state retirement bindings",
+  );
+  if (
+    !lowerHex(value.cleanup_intent_sha256, 64) ||
+    !lowerHex(value.cleanup_operation_plan_sha256, 64) ||
+    !Number.isSafeInteger(value.cleanup_slot_sequence) ||
+    value.cleanup_slot_sequence < 1 ||
+    value.cleanup_slot_sequence > 63 ||
+    !lowerHex(value.cleanup_slot_sha256, 64) ||
+    !lowerHex(value.create_close_sha256, 64) ||
+    !lowerHex(value.create_settlement_sha256, 64) ||
+    !lowerHex(value.create_slot_sha256, 64) ||
+    !lowerHex(value.source_head_sha256, 64) ||
+    !Number.isSafeInteger(value.source_sequence) ||
+    value.source_sequence < 1 ||
+    value.source_sequence > 63
+  ) {
+    fail("controlled background state retirement bindings were refused", 64);
+  }
+}
+
 function validateRootOwner(value, expected) {
   exactKeys(
     value,
@@ -5536,6 +5824,251 @@ export async function planControlledBackgroundRetirement({
   return Object.freeze({ evidence, instanceNonce, paths, plan });
 }
 
+function stateRetirementPlanValue({
+  bindings,
+  evidence,
+  fixtureId,
+  inventory,
+  owner,
+  pidRecord,
+  providerBase,
+}) {
+  return Object.freeze({
+    base: directoryIdentity(providerBase, "controlled background provider base"),
+    cleanup_intent_sha256: bindings.cleanup_intent_sha256,
+    cleanup_operation_plan_sha256: bindings.cleanup_operation_plan_sha256,
+    cleanup_slot_sequence: bindings.cleanup_slot_sequence,
+    cleanup_slot_sha256: bindings.cleanup_slot_sha256,
+    controller_pgid: evidence.controllerWitness.value.controller_pgid,
+    create_close_sha256: bindings.create_close_sha256,
+    create_settlement_sha256: bindings.create_settlement_sha256,
+    create_slot_sha256: bindings.create_slot_sha256,
+    fixture_id: fixtureId,
+    hostagent_pid: pidRecord.value.pid,
+    provider_contract_sha256: CONTROLLED_BACKGROUND_PROVIDER_CONTRACT_SHA256,
+    provider_identity_sha256: evidence.providerIdentity.sha256,
+    provider_root_owner_sha256: owner.sha256,
+    retirement_contract_sha256: CONTROLLED_BACKGROUND_RETIREMENT_CONTRACT_SHA256,
+    retirement_steps: retirementSteps(inventory),
+    root: inventory.root,
+    root_inventory: inventory.entries,
+    schema: "synveda.clean-engine.controlled-background-provider-retirement-plan.v2",
+    source_head_sha256: bindings.source_head_sha256,
+    source_sequence: bindings.source_sequence,
+    state_integration: "mutation-journal-v2",
+  });
+}
+
+export async function planControlledBackgroundRetirementWithAuthorityGate(
+  {
+    bindings,
+    evidenceDirectory,
+    fixtureId,
+    providerBase,
+  },
+  authorityGate,
+) {
+  validateStateRetirementBindings(bindings);
+  const paths = validateControlledBackgroundRoots({
+    evidenceDirectory,
+    fixtureId,
+    providerBase,
+  });
+  const evidence = inspectControlledBackgroundProvider(evidenceDirectory, fixtureId, {
+    revalidateCurrentToolchain: false,
+  });
+  if (evidence.createAuthority.value.state_integration !== "mutation-journal-v2") {
+    fail("controlled background state retirement integration was refused", 73);
+  }
+  if (bindings.create_slot_sha256 !== evidence.createAuthority.value.create_slot_sha256) {
+    fail("controlled background state create slot binding was refused");
+  }
+  inspectStateArtifactPublication(
+    evidenceDirectory,
+    "provider-retirement-plan.json",
+    "controlled background state retirement plan",
+  );
+  for (const name of readdirSync(evidenceDirectory)) {
+    const targetName = parseArtifactStageName(name)?.targetName ?? name;
+    if (
+      /^(?:retirement-step-[0-9]{2}|provider-retirement-settlement)\.json$/.test(
+        targetName,
+      )
+    ) {
+      fail("controlled background state retirement evidence preceded its plan");
+    }
+  }
+  const owner = readCanonicalArtifactOnly(
+    paths.ownerMarker,
+    "controlled background root owner",
+  );
+  validateRootOwner(owner.value, {
+    createAuthoritySha256: evidence.createAuthority.sha256,
+    fixtureId,
+    paths,
+  });
+  if (
+    owner.sha256 !== evidence.providerIdentity.value.root_owner_sha256 ||
+    owner.sha256 !== evidence.controllerWitness.value.root_owner_sha256
+  ) {
+    fail("controlled background state root owner binding was refused");
+  }
+  const instanceNonce = owner.value.ownership_nonce;
+  const pidRecord = revalidateHostagentPidRecord(
+    paths,
+    fixtureId,
+    evidence,
+    instanceNonce,
+  );
+  const presence = processPresence(pidRecord.value.pid);
+  if (presence === "unknown") {
+    fail("controlled background state hostagent identity was unavailable", 69);
+  }
+  if (presence === "present") {
+    const hostagentProbe = await probeHostagent(
+      paths,
+      fixtureId,
+      instanceNonce,
+      pidRecord.value.pid,
+      evidence.hostagentWitness.value.process_instance_sha256,
+    );
+    const engineProbe = await probeEngine(
+      paths,
+      fixtureId,
+      instanceNonce,
+      evidence.hostagentWitness.value.process_instance_sha256,
+    );
+    if (
+      providerProcessDigest(providerProcessBytes(stableHostagentProbe(hostagentProbe))) !==
+        evidence.controllerSettlement.value.hostagent_after_controller_sha256 ||
+      providerProcessDigest(providerProcessBytes(stableEngineProbe(engineProbe))) !==
+        evidence.controllerSettlement.value.engine_after_controller_sha256
+    ) {
+      fail("controlled background state running identity changed");
+    }
+  }
+  if (
+    probeProcessGroup(evidence.controllerWitness.value.controller_pgid) !==
+    "absent"
+  ) {
+    fail("controlled background state controller identity remained uncertain", 73);
+  }
+  const inventory = creationInventoryForPlanning(
+    paths,
+    evidence.providerIdentity.value,
+    presence === "absent",
+  );
+  const planValue = stateRetirementPlanValue({
+    bindings,
+    evidence,
+    fixtureId,
+    inventory,
+    owner,
+    pidRecord,
+    providerBase,
+  });
+  const expectedPlanSha256 = providerProcessDigest(providerProcessBytes(planValue));
+  const revalidate = (expectedPublication) => () => {
+    const currentEvidence = inspectControlledBackgroundProvider(
+      evidenceDirectory,
+      fixtureId,
+      { revalidateCurrentToolchain: false },
+    );
+    if (currentEvidence.createAuthority.value.state_integration !== "mutation-journal-v2") {
+      fail("controlled background state create evidence changed", 73);
+    }
+    for (const name of Object.keys(evidence)) {
+      if (!sameArtifactIdentity(currentEvidence[name], evidence[name])) {
+        fail("controlled background state create evidence changed", 73);
+      }
+    }
+    const currentOwner = readCanonicalArtifactOnly(
+      paths.ownerMarker,
+      "controlled background root owner",
+    );
+    validateRootOwner(currentOwner.value, {
+      createAuthoritySha256: evidence.createAuthority.sha256,
+      fixtureId,
+      paths,
+    });
+    if (!sameArtifactIdentity(currentOwner, owner)) {
+      fail("controlled background state root owner changed", 73);
+    }
+    if (
+      canonical(
+        directoryIdentity(providerBase, "controlled background provider base"),
+      ) !== canonical(planValue.base)
+    ) {
+      fail("controlled background state provider base changed", 73);
+    }
+    const currentPidRecord = revalidateHostagentPidRecord(
+      paths,
+      fixtureId,
+      currentEvidence,
+      instanceNonce,
+    );
+    const currentPresence = processPresence(currentPidRecord.value.pid);
+    if (
+      currentPidRecord.value.pid !== pidRecord.value.pid ||
+      currentPresence === "unknown"
+    ) {
+      fail("controlled background state hostagent identity was unavailable", 69);
+    }
+    const currentInventory = creationInventoryForPlanning(
+      paths,
+      currentEvidence.providerIdentity.value,
+      currentPresence === "absent",
+    );
+    if (canonical(currentInventory) !== canonical(inventory)) {
+      fail("controlled background state retirement inventory changed", 73);
+    }
+    if (
+      probeProcessGroup(currentEvidence.controllerWitness.value.controller_pgid) !==
+      "absent"
+    ) {
+      fail("controlled background state controller identity remained uncertain", 73);
+    }
+    const currentPublication = inspectStateArtifactPublication(
+      evidenceDirectory,
+      "provider-retirement-plan.json",
+      "controlled background state retirement plan",
+    );
+    if (!sameStatePublication(currentPublication, expectedPublication)) {
+      fail("controlled background state retirement plan publication changed", 73);
+    }
+  };
+  const plan = publishStateRetirementArtifact(
+    evidenceDirectory,
+    "provider-retirement-plan.json",
+    planValue,
+    (publication, phase) => {
+      invokeRetirementAuthorityGate(
+        authorityGate,
+        Object.freeze({
+          checkpoint: "before-retirement-plan-publication",
+          ...stateRetirementAuthorityBindingFields(bindings),
+          cleanup_plan_sha256: expectedPlanSha256,
+          completed_steps: 0,
+          next_action: "publish-retirement-plan",
+          next_resources: Object.freeze(["provider-retirement-plan.json"]),
+          provider_identity_sha256: evidence.providerIdentity.sha256,
+          ...statePublicationAuthorityFields(
+            publication,
+            phase,
+            "provider-retirement-plan.json",
+            expectedPlanSha256,
+          ),
+          resource_identity_sha256: expectedPlanSha256,
+          retirement_contract_sha256:
+            CONTROLLED_BACKGROUND_RETIREMENT_CONTRACT_SHA256,
+        }),
+        revalidate(publication),
+      );
+    },
+  );
+  return Object.freeze({ evidence, instanceNonce, paths, plan });
+}
+
 function validateDirectoryIdentity(value, label) {
   exactKeys(value, ["device", "inode", "mode", "path", "uid"], label);
   if (
@@ -5630,6 +6163,122 @@ function validateRetirementPlan(value, evidence, paths, planSha256) {
   }
 }
 
+function validateStateRetirementPlan(value, evidence, paths, planSha256) {
+  exactKeys(
+    value,
+    [
+      "base",
+      "cleanup_intent_sha256",
+      "cleanup_operation_plan_sha256",
+      "cleanup_slot_sequence",
+      "cleanup_slot_sha256",
+      "controller_pgid",
+      "create_close_sha256",
+      "create_settlement_sha256",
+      "create_slot_sha256",
+      "fixture_id",
+      "hostagent_pid",
+      "provider_contract_sha256",
+      "provider_identity_sha256",
+      "provider_root_owner_sha256",
+      "retirement_contract_sha256",
+      "retirement_steps",
+      "root",
+      "root_inventory",
+      "schema",
+      "source_head_sha256",
+      "source_sequence",
+      "state_integration",
+    ],
+    "controlled background state retirement plan",
+  );
+  validateDirectoryIdentity(value.base, "controlled background state retirement base");
+  validateDirectoryIdentity(value.root, "controlled background state retirement root");
+  validateStateRetirementBindings({
+    cleanup_intent_sha256: value.cleanup_intent_sha256,
+    cleanup_operation_plan_sha256: value.cleanup_operation_plan_sha256,
+    cleanup_slot_sequence: value.cleanup_slot_sequence,
+    cleanup_slot_sha256: value.cleanup_slot_sha256,
+    create_close_sha256: value.create_close_sha256,
+    create_settlement_sha256: value.create_settlement_sha256,
+    create_slot_sha256: value.create_slot_sha256,
+    source_head_sha256: value.source_head_sha256,
+    source_sequence: value.source_sequence,
+  });
+  if (
+    value.schema !==
+      "synveda.clean-engine.controlled-background-provider-retirement-plan.v2" ||
+    value.fixture_id !== evidence.providerIdentity.value.fixture_id ||
+    value.provider_contract_sha256 !== CONTROLLED_BACKGROUND_PROVIDER_CONTRACT_SHA256 ||
+    value.provider_identity_sha256 !== evidence.providerIdentity.sha256 ||
+    value.provider_root_owner_sha256 !== evidence.providerIdentity.value.root_owner_sha256 ||
+    value.retirement_contract_sha256 !==
+      CONTROLLED_BACKGROUND_RETIREMENT_CONTRACT_SHA256 ||
+    value.root.path !== paths.root ||
+    value.base.path !== paths.base ||
+    value.state_integration !== "mutation-journal-v2" ||
+    evidence.createAuthority.value.state_integration !== "mutation-journal-v2" ||
+    value.create_slot_sha256 !== evidence.createAuthority.value.create_slot_sha256 ||
+    value.controller_pgid !== evidence.controllerWitness.value.controller_pgid ||
+    !Number.isSafeInteger(value.hostagent_pid) ||
+    value.hostagent_pid < 2 ||
+    providerProcessDigest(
+      providerProcessBytes({
+        fixture_id: value.fixture_id,
+        pid: value.hostagent_pid,
+        process_instance_sha256:
+          evidence.hostagentWitness.value.process_instance_sha256,
+        profile: paths.profile,
+        schema: "synveda.clean-engine.background-hostagent-probe.v1",
+      }),
+    ) !== evidence.controllerSettlement.value.hostagent_after_controller_sha256 ||
+    !lowerHex(planSha256, 64) ||
+    !Array.isArray(value.root_inventory) ||
+    !Array.isArray(value.retirement_steps) ||
+    canonical(value.root) !== canonical(evidence.providerIdentity.value.provider_root) ||
+    canonical(value.root_inventory) !==
+      canonical(evidence.providerIdentity.value.provider_root_inventory)
+  ) {
+    fail("controlled background state retirement plan was refused");
+  }
+  for (const entry of value.root_inventory) {
+    if (!new Set(["directory", "file", "socket"]).has(entry.kind)) {
+      fail("controlled background state retirement inventory kind was refused");
+    }
+    validateResourceIdentity(
+      entry,
+      entry.kind,
+      "controlled background state retirement inventory",
+    );
+  }
+  if (
+    new Set(value.root_inventory.map((entry) => entry.relative_path)).size !==
+      value.root_inventory.length ||
+    canonical(value.root_inventory.map((entry) => entry.relative_path).sort()) !==
+      canonical(expectedRootPaths(paths)) ||
+    canonical(value.retirement_steps) !==
+      canonical(retirementSteps({ entries: value.root_inventory }))
+  ) {
+    fail("controlled background state retirement order was refused");
+  }
+}
+
+function retirementPlanVersion(plan) {
+  if (
+    plan.schema ===
+      "synveda.clean-engine.controlled-background-provider-retirement-plan.v1"
+  ) {
+    return 1;
+  }
+  if (
+    plan.schema ===
+      "synveda.clean-engine.controlled-background-provider-retirement-plan.v2"
+  ) {
+    return 2;
+  }
+  fail("controlled background retirement plan version was refused");
+}
+
 function exactProgressiveIdentity(current, planned) {
   if (
     current.kind !== planned.kind ||
@@ -5664,6 +6313,7 @@ function assertRootSubset(paths, plan, completedCount, additionallyCompleted = n
   const rootRemoved = plan.retirement_steps
     .slice(0, completedCount)
     .some((step) => step.action === "rmdir-root");
+  assertNoSymlinkComponents(paths.base, "controlled background provider base");
   const currentBase = directoryIdentity(paths.base, "controlled background provider base");
   if (canonical(currentBase) !== canonical(plan.base)) {
     fail("controlled background provider base identity changed");
@@ -5678,6 +6328,7 @@ function assertRootSubset(paths, plan, completedCount, additionallyCompleted = n
     }
     return Object.freeze({ entries: [], rootAbsent: true });
   }
+  assertNoSymlinkComponents(paths.root, "controlled background provider root");
   const current = scanRootInventory(paths);
   if (canonical(current.root) !== canonical(plan.root)) {
     fail("controlled background provider root identity changed");
@@ -5712,7 +6363,49 @@ function stepIdentitySha256(plan, step) {
   return providerProcessDigest(providerProcessBytes(identities));
 }
 
+function validateRetirementProgressArtifact(
+  artifact,
+  planArtifact,
+  sequence,
+  previousSha256,
+) {
+  const planVersion = retirementPlanVersion(planArtifact.value);
+  const step = planArtifact.value.retirement_steps[sequence];
+  exactKeys(
+    artifact.value,
+    [
+      "action",
+      "fixture_id",
+      "plan_sha256",
+      "previous_sha256",
+      "recovered_absence",
+      "resource_identity_sha256",
+      "resources",
+      "schema",
+      "sequence",
+    ],
+    "controlled background retirement progress",
+  );
+  if (
+    step === undefined ||
+    artifact.value.schema !==
+      `synveda.clean-engine.provider-retirement-step.v${planVersion}` ||
+    artifact.value.fixture_id !== planArtifact.value.fixture_id ||
+    artifact.value.plan_sha256 !== planArtifact.sha256 ||
+    artifact.value.previous_sha256 !== previousSha256 ||
+    artifact.value.sequence !== sequence ||
+    artifact.value.action !== step.action ||
+    canonical(artifact.value.resources) !== canonical(step.resources) ||
+    artifact.value.resource_identity_sha256 !==
+      stepIdentitySha256(planArtifact.value, step) ||
+    typeof artifact.value.recovered_absence !== "boolean"
+  ) {
+    fail("controlled background retirement progress was refused");
+  }
+}
+
 function readProgress(evidenceDirectory, planArtifact) {
+  retirementPlanVersion(planArtifact.value);
   validateEvidenceDirectoryInventory(evidenceDirectory);
   for (const name of readdirSync(evidenceDirectory)) {
     const stage = parseArtifactStageName(name);
@@ -5736,36 +6429,12 @@ function readProgress(evidenceDirectory, planArtifact) {
       fail("controlled background retirement progress was not contiguous");
     }
     const artifact = canonicalArtifact(join(evidenceDirectory, name), name);
-    const step = planArtifact.value.retirement_steps[sequence];
-    exactKeys(
-      artifact.value,
-      [
-        "action",
-        "fixture_id",
-        "plan_sha256",
-        "previous_sha256",
-        "recovered_absence",
-        "resource_identity_sha256",
-        "resources",
-        "schema",
-        "sequence",
-      ],
-      "controlled background retirement progress",
+    validateRetirementProgressArtifact(
+      artifact,
+      planArtifact,
+      sequence,
+      previousSha256,
     );
-    if (
-      step === undefined ||
-      artifact.value.schema !== "synveda.clean-engine.provider-retirement-step.v1" ||
-      artifact.value.fixture_id !== planArtifact.value.fixture_id ||
-      artifact.value.plan_sha256 !== planArtifact.sha256 ||
-      artifact.value.previous_sha256 !== previousSha256 ||
-      artifact.value.sequence !== sequence ||
-      artifact.value.action !== step.action ||
-      canonical(artifact.value.resources) !== canonical(step.resources) ||
-      artifact.value.resource_identity_sha256 !== stepIdentitySha256(planArtifact.value, step) ||
-      typeof artifact.value.recovered_absence !== "boolean"
-    ) {
-      fail("controlled background retirement progress was refused");
-    }
     progress.push(artifact);
     previousSha256 = artifact.sha256;
   }
@@ -5781,6 +6450,7 @@ function readProgress(evidenceDirectory, planArtifact) {
 }
 
 function progressValue(planArtifact, progress, recoveredAbsence) {
+  const planVersion = retirementPlanVersion(planArtifact.value);
   const sequence = progress.length;
   const step = planArtifact.value.retirement_steps[sequence];
   if (step === undefined) fail("controlled background retirement was already complete");
@@ -5792,7 +6462,7 @@ function progressValue(planArtifact, progress, recoveredAbsence) {
     recovered_absence: recoveredAbsence,
     resource_identity_sha256: stepIdentitySha256(planArtifact.value, step),
     resources: step.resources,
-    schema: "synveda.clean-engine.provider-retirement-step.v1",
+    schema: `synveda.clean-engine.provider-retirement-step.v${planVersion}`,
     sequence,
   };
 }
@@ -5803,6 +6473,481 @@ function progressName(progress) {
 
 function progressStages(evidenceDirectory, progress) {
   return artifactStages(evidenceDirectory, progressName(progress));
+}
+
+function canonicalStageArtifact(stage, label) {
+  let value;
+  try {
+    value = JSON.parse(stage.bytes.toString("utf8"));
+  } catch {
+    fail(`${label} was not canonical JSON`);
+  }
+  if (
+    !providerProcessBytes(value).equals(stage.bytes) ||
+    providerProcessDigest(stage.bytes) !== stage.sha256
+  ) {
+    fail(`${label} was not canonical JSON`);
+  }
+  return Object.freeze({
+    bytes: stage.bytes,
+    metadata: stage.metadata,
+    path: stage.path,
+    sha256: stage.sha256,
+    value,
+  });
+}
+
+function statePublicationStageSnapshot(stage, targetName) {
+  const actualSha256 = providerProcessDigest(stage.bytes);
+  let canonicalComplete = false;
+  try {
+    const value = JSON.parse(stage.bytes.toString("utf8"));
+    canonicalComplete = providerProcessBytes(value).equals(stage.bytes);
+  } catch {
+    canonicalComplete = false;
+  }
+  const value = {
+    actual_sha256: actualSha256,
+    canonical_complete: canonicalComplete,
+    declared_sha256: stage.sha256,
+    device: String(stage.metadata.dev),
+    inode: String(stage.metadata.ino),
+    links: String(stage.metadata.nlink),
+    mode: (stage.metadata.mode & 0o7777n).toString(8).padStart(4, "0"),
+    name: stage.name,
+    size: String(stage.metadata.size),
+    target_name: targetName,
+    uid: String(stage.metadata.uid),
+  };
+  return Object.freeze({
+    ...value,
+    identity_sha256: providerProcessDigest(providerProcessBytes(value)),
+  });
+}
+
+function inspectStateArtifactPublication(evidenceDirectory, targetName, label) {
+  const stages = artifactStages(evidenceDirectory, targetName);
+  if (stages.length > 1) {
+    fail(`${label} publication stages were ambiguous`);
+  }
+  const stage = stages[0];
+  const stageSnapshot =
+    stage === undefined
+      ? undefined
+      : statePublicationStageSnapshot(stage, targetName);
+  const finalPath = join(evidenceDirectory, targetName);
+  const finalExists = pathEntryExists(finalPath);
+  let artifact;
+  if (finalExists) {
+    artifact = readCanonicalArtifactOnly(
+      finalPath,
+      label,
+      new Set([stage?.metadata.nlink === 2n ? 2n : 1n]),
+    );
+  }
+  if (stage !== undefined && stage.metadata.nlink === 2n) {
+    if (
+      artifact === undefined ||
+      artifact.metadata.dev !== stage.metadata.dev ||
+      artifact.metadata.ino !== stage.metadata.ino ||
+      !artifact.bytes.equals(stage.bytes) ||
+      stageSnapshot.canonical_complete !== true ||
+      stageSnapshot.actual_sha256 !== stageSnapshot.declared_sha256
+    ) {
+      fail(`${label} publication link was refused`);
+    }
+  }
+  if (
+    stage !== undefined &&
+    stage.metadata.nlink === 1n &&
+    artifact !== undefined &&
+    artifact.metadata.dev === stage.metadata.dev &&
+    artifact.metadata.ino === stage.metadata.ino
+  ) {
+    fail(`${label} publication stage was refused`);
+  }
+  const disposition =
+    stage === undefined
+      ? artifact === undefined
+        ? "absent"
+        : "final"
+      : stage.metadata.nlink === 2n
+        ? "linked-complete"
+        : artifact === undefined
+          ? stageSnapshot.canonical_complete
+            ? "staged-complete"
+            : "staged-partial"
+          : stageSnapshot.canonical_complete
+            ? "redundant-complete"
+            : "redundant-partial";
+  let stagedArtifact;
+  if (stageSnapshot?.canonical_complete === true) {
+    stagedArtifact = canonicalStageArtifact(stage, `${label} stage`);
+  }
+  return Object.freeze({
+    artifact,
+    disposition,
+    rawStage: stage,
+    stage: stagedArtifact,
+    stageSnapshot,
+  });
+}
+
+function sameStatePublication(left, right) {
+  const sameOptionalArtifact =
+    (left.artifact === undefined && right.artifact === undefined) ||
+    sameArtifactIdentity(left.artifact, right.artifact);
+  return (
+    left.disposition === right.disposition &&
+    sameOptionalArtifact &&
+    canonical(left.stageSnapshot ?? null) ===
+      canonical(right.stageSnapshot ?? null) &&
+    (left.rawStage === undefined) === (right.rawStage === undefined) &&
+    (left.rawStage === undefined ||
+      (left.rawStage.bytes.equals(right.rawStage.bytes) &&
+        sameMetadata(left.rawStage.metadata, right.rawStage.metadata)))
+  );
+}
+
+function assertStatePublicationExpected(publication, expectedBytes, label) {
+  const expectedSha256 = providerProcessDigest(expectedBytes);
+  if (
+    publication.artifact !== undefined &&
+    !publication.artifact.bytes.equals(expectedBytes)
+  ) {
+    fail(`${label} changed`);
+  }
+  if (
+    publication.stageSnapshot?.declared_sha256 !== undefined &&
+    publication.stageSnapshot.declared_sha256 !== expectedSha256
+  ) {
+    fail(`${label} stage digest was refused`);
+  }
+  if (
+    publication.stage !== undefined &&
+    !publication.stage.bytes.equals(expectedBytes)
+  ) {
+    fail(`${label} stage changed`);
+  }
+  return expectedSha256;
+}
+
+function statePublicationAuthorityFields(
+  publication,
+  phase,
+  targetName = "not-applicable",
+  expectedSha256 = ZERO_SHA256,
+) {
+  return Object.freeze({
+    publication_disposition: publication.disposition,
+    publication_expected_sha256: expectedSha256,
+    publication_phase: phase,
+    publication_stage_declared_sha256:
+      publication.stageSnapshot?.declared_sha256 ?? ZERO_SHA256,
+    publication_stage_identity_sha256:
+      publication.stageSnapshot?.identity_sha256 ?? ZERO_SHA256,
+    publication_stage_sha256:
+      publication.stageSnapshot?.actual_sha256 ?? ZERO_SHA256,
+    publication_target_name: targetName,
+  });
+}
+
+function stateRetirementAuthorityBindingFields(value) {
+  return Object.freeze({
+    cleanup_intent_sha256: value.cleanup_intent_sha256,
+    cleanup_operation_plan_sha256: value.cleanup_operation_plan_sha256,
+    cleanup_slot_sequence: value.cleanup_slot_sequence,
+    cleanup_slot_sha256: value.cleanup_slot_sha256,
+    create_close_sha256: value.create_close_sha256,
+    create_settlement_sha256: value.create_settlement_sha256,
+    create_slot_sha256: value.create_slot_sha256,
+    operation_kind: CONTROLLED_BACKGROUND_RETIREMENT_OPERATION_KIND,
+    source_head_sha256: value.source_head_sha256,
+    source_sequence: value.source_sequence,
+  });
+}
+
+function publishStateRetirementArtifact(
+  evidenceDirectory,
+  targetName,
+  value,
+  authorizeMutation,
+) {
+  if (
+    typeof authorizeMutation !== "function" ||
+    (targetName !== "provider-retirement-plan.json" &&
+      targetName !== "provider-retirement-settlement.json" &&
+      !/^retirement-step-[0-9]{2}\.json$/.test(targetName))
+  ) {
+    fail("controlled background state publication authority was refused", 70);
+  }
+  const expectedBytes = providerProcessBytes(value);
+  const expectedSha256 = providerProcessDigest(expectedBytes);
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const observed = inspectStateArtifactPublication(
+      evidenceDirectory,
+      targetName,
+      `controlled background state ${targetName}`,
+    );
+    if (observed.artifact !== undefined && !observed.artifact.bytes.equals(expectedBytes)) {
+      fail(`controlled background state ${targetName} changed`);
+    }
+    if (observed.stageSnapshot?.declared_sha256 !== undefined &&
+      observed.stageSnapshot.declared_sha256 !== expectedSha256) {
+      fail(`controlled background state ${targetName} stage digest was refused`);
+    }
+    if (observed.disposition === "final") {
+      const result = authorizeMutation(observed, "before-final-consumption");
+      if (result !== undefined) {
+        fail("controlled background state publication authority returned a value", 70);
+      }
+      const verified = inspectStateArtifactPublication(
+        evidenceDirectory,
+        targetName,
+        `controlled background state ${targetName}`,
+      );
+      if (!sameStatePublication(observed, verified)) {
+        fail(`controlled background state ${targetName} publication changed`, 73);
+      }
+      return observed.artifact;
+    }
+    if (observed.disposition === "absent") {
+      const result = authorizeMutation(observed, "before-stage-write");
+      if (result !== undefined) {
+        fail("controlled background state publication authority returned a value", 70);
+      }
+      const verified = inspectStateArtifactPublication(
+        evidenceDirectory,
+        targetName,
+        `controlled background state ${targetName}`,
+      );
+      if (!sameStatePublication(observed, verified)) {
+        fail(`controlled background state ${targetName} publication changed`, 73);
+      }
+      const stagePath = join(
+        evidenceDirectory,
+        artifactStageName(targetName, expectedSha256),
+      );
+      writeExclusive(stagePath, expectedBytes);
+      syncDirectory(evidenceDirectory);
+      continue;
+    }
+    if (
+      observed.disposition === "staged-partial" ||
+      observed.disposition === "redundant-partial"
+    ) {
+      const result = authorizeMutation(observed, "before-partial-stage-removal");
+      if (result !== undefined) {
+        fail("controlled background state publication authority returned a value", 70);
+      }
+      const verified = inspectStateArtifactPublication(
+        evidenceDirectory,
+        targetName,
+        `controlled background state ${targetName}`,
+      );
+      if (!sameStatePublication(observed, verified)) {
+        fail(`controlled background state ${targetName} publication changed`, 73);
+      }
+      removeExactStage(evidenceDirectory, observed.rawStage);
+      continue;
+    }
+    if (observed.disposition === "staged-complete") {
+      if (!observed.stage.bytes.equals(expectedBytes)) {
+        fail(`controlled background state ${targetName} stage changed`);
+      }
+      const result = authorizeMutation(observed, "before-final-link");
+      if (result !== undefined) {
+        fail("controlled background state publication authority returned a value", 70);
+      }
+      const verified = inspectStateArtifactPublication(
+        evidenceDirectory,
+        targetName,
+        `controlled background state ${targetName}`,
+      );
+      if (!sameStatePublication(observed, verified)) {
+        fail(`controlled background state ${targetName} publication changed`, 73);
+      }
+      try {
+        linkSync(observed.rawStage.path, join(evidenceDirectory, targetName));
+        syncDirectory(evidenceDirectory);
+      } catch (error) {
+        if (error?.code !== "EEXIST") {
+          fail(`controlled background state ${targetName} publication failed`, 70);
+        }
+      }
+      continue;
+    }
+    if (
+      observed.disposition === "linked-complete" ||
+      observed.disposition === "redundant-complete"
+    ) {
+      if (!observed.stage.bytes.equals(expectedBytes)) {
+        fail(`controlled background state ${targetName} stage changed`);
+      }
+      const result = authorizeMutation(observed, "before-stage-removal");
+      if (result !== undefined) {
+        fail("controlled background state publication authority returned a value", 70);
+      }
+      const verified = inspectStateArtifactPublication(
+        evidenceDirectory,
+        targetName,
+        `controlled background state ${targetName}`,
+      );
+      if (!sameStatePublication(observed, verified)) {
+        fail(`controlled background state ${targetName} publication changed`, 73);
+      }
+      removeExactStage(evidenceDirectory, observed.rawStage);
+      continue;
+    }
+    fail(`controlled background state ${targetName} publication was refused`);
+  }
+  fail(`controlled background state ${targetName} publication did not converge`, 75);
+}
+
+function inspectStateRetirementProgress(evidenceDirectory, planArtifact) {
+  validateEvidenceDirectoryInventory(evidenceDirectory);
+  const progressStagesByName = readdirSync(evidenceDirectory)
+    .map((name) => ({ name, parsed: parseArtifactStageName(name) }))
+    .filter(({ parsed }) => parsed?.targetName.startsWith("retirement-step-"));
+  if (progressStagesByName.length > 1) {
+    fail("controlled background state retirement progress stages were ambiguous");
+  }
+  for (const { parsed } of progressStagesByName) {
+    const sequence = Number.parseInt(
+      parsed.targetName.slice("retirement-step-".length, -5),
+      10,
+    );
+    if (
+      !Number.isSafeInteger(sequence) ||
+      sequence < 0 ||
+      sequence >= planArtifact.value.retirement_steps.length
+    ) {
+      fail("controlled background state retirement progress stage exceeded its plan");
+    }
+  }
+  const names = readdirSync(evidenceDirectory)
+    .filter((name) => /^retirement-step-[0-9]{2}\.json$/.test(name))
+    .sort();
+  if (names.length > planArtifact.value.retirement_steps.length) {
+    fail("controlled background state retirement progress overflowed");
+  }
+  const progress = [];
+  let previousSha256 = planArtifact.sha256;
+  let pending;
+  for (const [sequence, name] of names.entries()) {
+    if (name !== `retirement-step-${String(sequence).padStart(2, "0")}.json`) {
+      fail("controlled background state retirement progress was not contiguous");
+    }
+    const publication = inspectStateArtifactPublication(
+      evidenceDirectory,
+      name,
+      "controlled background state retirement progress",
+    );
+    if (publication.artifact === undefined) {
+      fail("controlled background state retirement progress was unavailable", 69);
+    }
+    validateRetirementProgressArtifact(
+      publication.artifact,
+      planArtifact,
+      sequence,
+      previousSha256,
+    );
+    assertStatePublicationExpected(
+      publication,
+      providerProcessBytes(
+        progressValue(
+          planArtifact,
+          progress,
+          publication.artifact.value.recovered_absence,
+        ),
+      ),
+      "controlled background state retirement progress",
+    );
+    if (publication.disposition !== "final") {
+      if (sequence !== names.length - 1) {
+        fail("controlled background state retirement progress stage was not terminal");
+      }
+      pending = Object.freeze({
+        artifact: publication.artifact,
+        publication,
+        recoveredAbsence: publication.artifact.value.recovered_absence,
+        sequence,
+      });
+      break;
+    }
+    progress.push(publication.artifact);
+    previousSha256 = publication.artifact.sha256;
+  }
+  const stageEntry = progressStagesByName[0];
+  if (stageEntry !== undefined && pending === undefined) {
+    const expectedName = progressName(progress);
+    if (stageEntry.parsed.targetName !== expectedName) {
+      fail("controlled background state retirement progress stage was not the next slot");
+    }
+    const publication = inspectStateArtifactPublication(
+      evidenceDirectory,
+      expectedName,
+      "controlled background state retirement progress",
+    );
+    if (publication.rawStage === undefined) {
+      fail("controlled background state retirement progress stage was unavailable", 69);
+    }
+    const stagedArtifact = publication.stage;
+    if (stagedArtifact !== undefined) {
+      validateRetirementProgressArtifact(
+        stagedArtifact,
+        planArtifact,
+        progress.length,
+        previousSha256,
+      );
+    }
+    let recoveredAbsence = stagedArtifact?.value.recovered_absence ?? null;
+    if (stagedArtifact === undefined) {
+      const candidateByDigest = new Map(
+        [false, true].map((candidate) => {
+          const candidateBytes = providerProcessBytes(
+            progressValue(planArtifact, progress, candidate),
+          );
+          return [providerProcessDigest(candidateBytes), candidate];
+        }),
+      );
+      recoveredAbsence =
+        candidateByDigest.get(publication.stageSnapshot.declared_sha256) ?? null;
+    }
+    if (typeof recoveredAbsence !== "boolean") {
+      fail("controlled background state retirement progress stage was refused");
+    }
+    assertStatePublicationExpected(
+      publication,
+      providerProcessBytes(
+        progressValue(planArtifact, progress, recoveredAbsence),
+      ),
+      "controlled background state retirement progress",
+    );
+    pending = Object.freeze({
+      artifact: stagedArtifact,
+      publication,
+      recoveredAbsence,
+      sequence: progress.length,
+    });
+  }
+  return Object.freeze({ pending, progress: Object.freeze(progress) });
+}
+
+function sameStateRetirementProgress(left, right) {
+  return (
+    left.progress.length === right.progress.length &&
+    left.progress.every((artifact, index) =>
+      sameArtifactIdentity(artifact, right.progress[index])) &&
+    (left.pending === undefined) === (right.pending === undefined) &&
+    (left.pending === undefined ||
+      (left.pending.sequence === right.pending.sequence &&
+        left.pending.recoveredAbsence === right.pending.recoveredAbsence &&
+        sameStatePublication(
+          left.pending.publication,
+          right.pending.publication,
+        )))
+  );
 }
 
 function selectStagedProgressRecovery(
@@ -5890,7 +7035,20 @@ async function waitForHostagentAbsence(pid, paths, timeoutMilliseconds = 5_000) 
   fail("controlled background hostagent remained present", 69);
 }
 
-async function stopHostagent(paths, planArtifact, evidence, instanceNonce) {
+async function stopHostagent(
+  paths,
+  planArtifact,
+  evidence,
+  instanceNonce,
+  authorizeEffect,
+) {
+  const planVersion = retirementPlanVersion(planArtifact.value);
+  if (
+    (authorizeEffect !== undefined && typeof authorizeEffect !== "function") ||
+    (planVersion === 2 && typeof authorizeEffect !== "function")
+  ) {
+    fail("controlled background stop authority was refused", 70);
+  }
   const pidRecord = revalidateHostagentPidRecord(
     paths,
     planArtifact.value.fixture_id,
@@ -5918,7 +7076,17 @@ async function stopHostagent(paths, planArtifact, evidence, instanceNonce) {
     for (const resource of presentResources) {
       const path = join(paths.root, resource);
       const planned = plannedByPath.get(resource);
-      const current = inventoryIdentity(path, paths.root, BigInt(planArtifact.value.root.device));
+      authorizeEffect?.({
+        additionallyCompleted: new Set(completed),
+        checkpoint: "before-stale-socket-unlink",
+        resource,
+        step: socketStep,
+      });
+      const current = inventoryIdentity(
+        path,
+        paths.root,
+        BigInt(planArtifact.value.root.device),
+      );
       if (planned === undefined || !exactProgressiveIdentity(current, planned)) {
         fail("controlled background stale socket identity changed");
       }
@@ -5958,11 +7126,54 @@ async function stopHostagent(paths, planArtifact, evidence, instanceNonce) {
     instanceNonce,
     processIdentity,
   );
-  const challenge = randomBytes(32).toString("hex");
+  const challenge = providerProcessDigest(
+    providerProcessBytes({
+      cleanup_plan_sha256:
+        planVersion === 2
+          ? planArtifact.sha256
+          : ZERO_SHA256,
+      nonce: randomBytes(32).toString("hex"),
+      schema: "synveda.clean-engine.background-shutdown-challenge.v1",
+    }),
+  );
   const response = await requestSocket(paths.haSocket, {
     action: "shutdown",
     challenge,
     proof_sha256: proof(instanceNonce, "hostagent-shutdown", challenge, processIdentity),
+  }, 2_000, () => {
+    authorizeEffect?.({
+      additionallyCompleted: new Set(),
+      checkpoint: "before-hostagent-shutdown-delivery",
+      resource: socketStep.resources[0],
+      step: socketStep,
+    });
+    const currentPidRecord = revalidateHostagentPidRecord(
+      paths,
+      planArtifact.value.fixture_id,
+      evidence,
+      instanceNonce,
+    );
+    if (
+      currentPidRecord.value.pid !== pid ||
+      processPresence(pid) !== "present"
+    ) {
+      fail("controlled background hostagent identity changed", 73);
+    }
+    assertRootSubset(paths, planArtifact.value, 0);
+    const plannedByPath = new Map(
+      planArtifact.value.root_inventory.map((entry) => [entry.relative_path, entry]),
+    );
+    for (const resource of socketStep.resources) {
+      const planned = plannedByPath.get(resource);
+      const current = inventoryIdentity(
+        join(paths.root, resource),
+        paths.root,
+        BigInt(planArtifact.value.root.device),
+      );
+      if (planned === undefined || !exactProgressiveIdentity(current, planned)) {
+        fail("controlled background shutdown socket identity changed", 73);
+      }
+    }
   });
   exactKeys(
     response,
@@ -6010,10 +7221,26 @@ function syncDeletionAbsence(paths, step) {
   }
 }
 
-function deleteStep(paths, plan, step) {
+function deleteStep(paths, plan, step, authorizeEffect) {
   if (step.resources.length !== 1) fail("controlled background deletion step was refused");
+  const planVersion = retirementPlanVersion(plan);
+  if (
+    (authorizeEffect !== undefined && typeof authorizeEffect !== "function") ||
+    (planVersion === 2 && typeof authorizeEffect !== "function")
+  ) {
+    fail("controlled background deletion authority was refused", 70);
+  }
   const resource = step.resources[0];
   const path = resource === "." ? paths.root : join(paths.root, resource);
+  authorizeEffect?.({
+    additionallyCompleted: new Set(),
+    checkpoint:
+      step.action === "unlink" || step.action === "unlink-owner"
+        ? "before-resource-unlink"
+        : "before-resource-rmdir",
+    resource,
+    step,
+  });
   if (resource === ".") {
     if (
       canonical(directoryIdentity(path, "controlled background retirement root")) !==
@@ -6113,6 +7340,116 @@ function validateRetirementSettlement(value, planArtifact, evidence, progress) {
   ) {
     fail("controlled background retirement settlement was refused");
   }
+}
+
+function validateStateRetirementSettlement(
+  value,
+  planArtifact,
+  evidence,
+  progress,
+) {
+  exactKeys(
+    value,
+    [
+      "cleanup_operation_plan_sha256",
+      "cleanup_plan_sha256",
+      "cleanup_slot_sha256",
+      "create_close_sha256",
+      "create_settlement_sha256",
+      "final_progress_sha256",
+      "fixture_id",
+      "outcome",
+      "provider_identity_sha256",
+      "provider_kind",
+      "resources",
+      "result_receipt_authorized",
+      "retirement_contract_sha256",
+      "root_disposition",
+      "safe_code",
+      "schema",
+      "source_closure",
+      "state_integration",
+    ],
+    "controlled background state retirement settlement",
+  );
+  exactKeys(
+    value.resources,
+    [
+      "docker_context",
+      "engine",
+      "engine_socket",
+      "hostagent",
+      "hostagent_socket",
+      "provider_root",
+    ],
+    "controlled background state retired resources",
+  );
+  const retiredResources = {
+    docker_context: "retired",
+    engine: "retired",
+    engine_socket: "retired",
+    hostagent: "retired",
+    hostagent_socket: "retired",
+    provider_root: "retired",
+  };
+  if (
+    value.schema !==
+      "synveda.clean-engine.controlled-background-provider-retirement-settlement.v2" ||
+    value.fixture_id !== planArtifact.value.fixture_id ||
+    value.provider_kind !== "controlled-background-fake" ||
+    value.cleanup_operation_plan_sha256 !==
+      planArtifact.value.cleanup_operation_plan_sha256 ||
+    value.cleanup_plan_sha256 !== planArtifact.sha256 ||
+    value.cleanup_slot_sha256 !== planArtifact.value.cleanup_slot_sha256 ||
+    value.create_close_sha256 !== planArtifact.value.create_close_sha256 ||
+    value.create_settlement_sha256 !== planArtifact.value.create_settlement_sha256 ||
+    value.provider_identity_sha256 !== evidence.providerIdentity.sha256 ||
+    value.retirement_contract_sha256 !==
+      CONTROLLED_BACKGROUND_RETIREMENT_CONTRACT_SHA256 ||
+    progress.length !== planArtifact.value.retirement_steps.length ||
+    value.final_progress_sha256 !== progress.at(-1)?.sha256 ||
+    value.outcome !== "passed" ||
+    value.root_disposition !== "retired" ||
+    value.safe_code !== "none" ||
+    value.result_receipt_authorized !== false ||
+    value.source_closure !== "state-authority-reasserted" ||
+    value.state_integration !== "mutation-journal-v2" ||
+    canonical(value.resources) !== canonical(retiredResources)
+  ) {
+    fail("controlled background state retirement settlement was refused");
+  }
+}
+
+function stateRetirementSettlementValue(planArtifact, evidence, progress) {
+  return Object.freeze({
+    cleanup_operation_plan_sha256:
+      planArtifact.value.cleanup_operation_plan_sha256,
+    cleanup_plan_sha256: planArtifact.sha256,
+    cleanup_slot_sha256: planArtifact.value.cleanup_slot_sha256,
+    create_close_sha256: planArtifact.value.create_close_sha256,
+    create_settlement_sha256: planArtifact.value.create_settlement_sha256,
+    final_progress_sha256: progress.at(-1)?.sha256,
+    fixture_id: planArtifact.value.fixture_id,
+    outcome: "passed",
+    provider_identity_sha256: evidence.providerIdentity.sha256,
+    provider_kind: "controlled-background-fake",
+    resources: Object.freeze({
+      docker_context: "retired",
+      engine: "retired",
+      engine_socket: "retired",
+      hostagent: "retired",
+      hostagent_socket: "retired",
+      provider_root: "retired",
+    }),
+    result_receipt_authorized: false,
+    retirement_contract_sha256: CONTROLLED_BACKGROUND_RETIREMENT_CONTRACT_SHA256,
+    root_disposition: "retired",
+    safe_code: "none",
+    schema:
+      "synveda.clean-engine.controlled-background-provider-retirement-settlement.v2",
+    source_closure: "state-authority-reasserted",
+    state_integration: "mutation-journal-v2",
+  });
 }
 
 export async function retireControlledBackgroundProvider({
@@ -6300,6 +7637,1260 @@ export async function retireControlledBackgroundProvider({
     completed_steps: progress.length,
     create_operation_evidence_sha256: evidence.providerIdentity.sha256,
     settlement,
+  });
+}
+
+function sameArtifactIdentity(left, right) {
+  return (
+    left !== undefined &&
+    right !== undefined &&
+    left.bytes.equals(right.bytes) &&
+    sameMetadata(left.metadata, right.metadata)
+  );
+}
+
+function stateRetirementResourceIdentitySha256(plan, resources) {
+  const byPath = new Map(
+    plan.root_inventory.map((entry) => [entry.relative_path, entry]),
+  );
+  const identities = resources.map((resource) => {
+    if (resource === ".") return plan.root;
+    const identity = byPath.get(resource);
+    if (identity === undefined) {
+      fail("controlled background state retirement resource was refused");
+    }
+    return identity;
+  });
+  return providerProcessDigest(providerProcessBytes(identities));
+}
+
+function observeStateRetirementProcesses(
+  evidence,
+  plan,
+  {
+    hostagentRetirementRecorded = false,
+    requireHostagentAbsent = false,
+  } = {},
+) {
+  let hostagentPresence = "retired-by-authorized-progress";
+  if (!hostagentRetirementRecorded) {
+    const currentHostagentPresence = processPresence(plan.hostagent_pid);
+    if (
+      currentHostagentPresence === "unknown" ||
+      (requireHostagentAbsent && currentHostagentPresence !== "absent")
+    ) {
+      fail("controlled background state hostagent identity remained uncertain", 73);
+    }
+    hostagentPresence = processObservation(currentHostagentPresence);
+  }
+  return Object.freeze({
+    controller_pgid: plan.controller_pgid,
+    controller_presence: "retired-before-plan-publication",
+    controller_process_instance_sha256:
+      evidence.controllerWitness.value.controller_process_instance_sha256,
+    hostagent_pid: plan.hostagent_pid,
+    hostagent_presence: hostagentPresence,
+    hostagent_process_instance_sha256:
+      evidence.hostagentWitness.value.process_instance_sha256,
+  });
+}
+
+function readStateRetirementPlan(evidenceDirectory, evidence, paths) {
+  const publication = inspectStateArtifactPublication(
+    evidenceDirectory,
+    "provider-retirement-plan.json",
+    "controlled background state retirement plan",
+  );
+  if (publication.disposition !== "final" || publication.artifact === undefined) {
+    fail("controlled background state retirement plan publication was incomplete", 69);
+  }
+  validateStateRetirementPlan(
+    publication.artifact.value,
+    evidence,
+    paths,
+    publication.artifact.sha256,
+  );
+  return publication.artifact;
+}
+
+function revalidateStateRetirementExecution({
+  additionallyCompleted = new Set(),
+  evidence,
+  evidenceDirectory,
+  expectedPendingPublication,
+  expectedProgress,
+  fixtureId,
+  planArtifact,
+  providerBase,
+  requireHostagentAbsent = false,
+  subsetCompletedCount,
+}) {
+  const paths = validateControlledBackgroundRoots({
+    evidenceDirectory,
+    fixtureId,
+    providerBase,
+  });
+  const currentEvidence = inspectControlledBackgroundProvider(
+    evidenceDirectory,
+    fixtureId,
+    { revalidateCurrentToolchain: false },
+  );
+  for (const name of Object.keys(evidence)) {
+    if (!sameArtifactIdentity(currentEvidence[name], evidence[name])) {
+      fail("controlled background state create evidence changed", 73);
+    }
+  }
+  const currentPlan = readStateRetirementPlan(
+    evidenceDirectory,
+    currentEvidence,
+    paths,
+  );
+  if (!sameArtifactIdentity(currentPlan, planArtifact)) {
+    fail("controlled background state retirement plan changed", 73);
+  }
+  const currentPrefix = inspectStateRetirementProgress(
+    evidenceDirectory,
+    currentPlan,
+  );
+  if (
+    currentPrefix.progress.length !== expectedProgress.length ||
+    currentPrefix.progress.some(
+      (artifact, index) => !sameArtifactIdentity(artifact, expectedProgress[index]),
+    ) ||
+    (expectedPendingPublication === undefined) !==
+      (currentPrefix.pending === undefined) ||
+    (expectedPendingPublication !== undefined &&
+      !sameStatePublication(
+        currentPrefix.pending.publication,
+        expectedPendingPublication,
+      ))
+  ) {
+    fail("controlled background state retirement progress changed", 73);
+  }
+  observeStateRetirementProcesses(currentEvidence, currentPlan.value, {
+    hostagentRetirementRecorded: expectedProgress.length > 0,
+    requireHostagentAbsent,
+  });
+  assertRootSubset(
+    paths,
+    planArtifact.value,
+    subsetCompletedCount,
+    additionallyCompleted,
+  );
+}
+
+function invokeStateRetirementEffect({
+  additionallyCompleted,
+  authorityGate,
+  checkpoint,
+  evidence,
+  evidenceDirectory,
+  expectedProgress,
+  fixtureId,
+  planArtifact,
+  providerBase,
+  resources,
+  subsetCompletedCount,
+  nextAction,
+}) {
+  invokeRetirementAuthorityGate(
+    authorityGate,
+    Object.freeze({
+      checkpoint,
+      ...stateRetirementAuthorityBindingFields(planArtifact.value),
+      cleanup_plan_sha256: planArtifact.sha256,
+      completed_steps: expectedProgress.length,
+      next_action: nextAction,
+      next_resources: Object.freeze([...resources]),
+      provider_identity_sha256: evidence.providerIdentity.sha256,
+      ...statePublicationAuthorityFields(
+        { disposition: "not-applicable" },
+        "not-applicable",
+      ),
+      resource_identity_sha256: stateRetirementResourceIdentitySha256(
+        planArtifact.value,
+        resources,
+      ),
+      retirement_contract_sha256: CONTROLLED_BACKGROUND_RETIREMENT_CONTRACT_SHA256,
+    }),
+    () =>
+      revalidateStateRetirementExecution({
+        additionallyCompleted,
+        evidence,
+        evidenceDirectory,
+        expectedProgress,
+        fixtureId,
+        planArtifact,
+        providerBase,
+        requireHostagentAbsent:
+          checkpoint !== "before-hostagent-shutdown-delivery",
+        subsetCompletedCount,
+      }),
+  );
+}
+
+function publishStateRetirementProgress({
+  authorityGate,
+  evidence,
+  evidenceDirectory,
+  fixtureId,
+  pending,
+  planArtifact,
+  progress,
+  providerBase,
+  recoveredAbsence,
+}) {
+  const step = planArtifact.value.retirement_steps[progress.length];
+  if (step === undefined) {
+    fail("controlled background state retirement was already complete");
+  }
+  const value = progressValue(planArtifact, progress, recoveredAbsence);
+  const bytes = providerProcessBytes(value);
+  if (pending?.artifact !== undefined && !pending.artifact.bytes.equals(bytes)) {
+    fail("controlled background state retirement progress stage disagreed");
+  }
+  const revalidate = (publication) => () =>
+    revalidateStateRetirementExecution({
+      evidence,
+      evidenceDirectory,
+      expectedPendingPublication:
+        publication.disposition === "absent" ||
+        publication.disposition === "final"
+          ? undefined
+          : publication,
+      expectedProgress:
+        publication.disposition === "final"
+          ? [...progress, publication.artifact]
+          : progress,
+      fixtureId,
+      planArtifact,
+      providerBase,
+      requireHostagentAbsent: true,
+      subsetCompletedCount: progress.length + 1,
+    });
+  return publishStateRetirementArtifact(
+    evidenceDirectory,
+    progressName(progress),
+    value,
+    (publication, phase) =>
+      invokeRetirementAuthorityGate(
+        authorityGate,
+        Object.freeze({
+          checkpoint: "before-retirement-progress-publication",
+          ...stateRetirementAuthorityBindingFields(planArtifact.value),
+          cleanup_plan_sha256: planArtifact.sha256,
+          completed_steps: progress.length,
+          next_action: "publish-retirement-progress",
+          next_resources: Object.freeze([...step.resources]),
+          provider_identity_sha256: evidence.providerIdentity.sha256,
+          ...statePublicationAuthorityFields(
+            publication,
+            phase,
+            progressName(progress),
+            providerProcessDigest(bytes),
+          ),
+          resource_identity_sha256: stepIdentitySha256(
+            planArtifact.value,
+            step,
+          ),
+          retirement_contract_sha256:
+            CONTROLLED_BACKGROUND_RETIREMENT_CONTRACT_SHA256,
+        }),
+        revalidate(publication),
+      ),
+  );
+}
+
+function reassertStateRetirementFinalConsumption({
+  authorityGate,
+  evidence,
+  evidenceDirectory,
+  fixtureId,
+  planArtifact,
+  prefix,
+  providerBase,
+}) {
+  if (prefix.pending !== undefined) return;
+  const completedSteps = prefix.progress.length;
+  const nextStep = planArtifact.value.retirement_steps[completedSteps];
+  const additionallyCompleted = new Set(
+    (nextStep?.resources ?? []).filter(
+      (resource) => !resourceExists(rootPaths(providerBase, fixtureId), resource),
+    ),
+  );
+  let checkpoint;
+  let nextAction;
+  let nextResources;
+  let publicationTargetName;
+  let publishedArtifact;
+  let resourceIdentitySha256;
+  if (completedSteps === 0) {
+    checkpoint = "before-retirement-plan-publication";
+    nextAction = "publish-retirement-plan";
+    nextResources = Object.freeze(["provider-retirement-plan.json"]);
+    publicationTargetName = "provider-retirement-plan.json";
+    publishedArtifact = planArtifact;
+    resourceIdentitySha256 = planArtifact.sha256;
+  } else {
+    const sequence = completedSteps - 1;
+    const step = planArtifact.value.retirement_steps[sequence];
+    checkpoint = "before-retirement-progress-publication";
+    nextAction = "publish-retirement-progress";
+    nextResources = Object.freeze([...step.resources]);
+    publicationTargetName = `retirement-step-${String(sequence).padStart(2, "0")}.json`;
+    publishedArtifact = prefix.progress[sequence];
+    resourceIdentitySha256 = stepIdentitySha256(planArtifact.value, step);
+  }
+  const publication = inspectStateArtifactPublication(
+    evidenceDirectory,
+    publicationTargetName,
+    `controlled background state ${publicationTargetName}`,
+  );
+  if (
+    publication.disposition !== "final" ||
+    !sameArtifactIdentity(publication.artifact, publishedArtifact)
+  ) {
+    fail("controlled background state retirement consumption frontier changed", 73);
+  }
+  invokeRetirementAuthorityGate(
+    authorityGate,
+    Object.freeze({
+      checkpoint,
+      ...stateRetirementAuthorityBindingFields(planArtifact.value),
+      cleanup_plan_sha256: planArtifact.sha256,
+      completed_steps: completedSteps === 0 ? 0 : completedSteps - 1,
+      next_action: nextAction,
+      next_resources: nextResources,
+      provider_identity_sha256: evidence.providerIdentity.sha256,
+      ...statePublicationAuthorityFields(
+        publication,
+        "before-final-consumption",
+        publicationTargetName,
+        publishedArtifact.sha256,
+      ),
+      resource_identity_sha256: resourceIdentitySha256,
+      retirement_contract_sha256: CONTROLLED_BACKGROUND_RETIREMENT_CONTRACT_SHA256,
+    }),
+    () =>
+      revalidateStateRetirementExecution({
+        additionallyCompleted,
+        evidence,
+        evidenceDirectory,
+        expectedProgress: prefix.progress,
+        fixtureId,
+        planArtifact,
+        providerBase,
+        requireHostagentAbsent: completedSteps > 0,
+        subsetCompletedCount: completedSteps,
+      }),
+  );
+}
+
+function validateStateRetirementArguments({
+  crashAfterDeleteSyscallSequence,
+  crashAfterDeleteSequence,
+  crashAfterHostagentSettlement,
+  stopAfterSequence,
+}) {
+  if (
+    crashAfterDeleteSyscallSequence !== undefined &&
+    (!Number.isSafeInteger(crashAfterDeleteSyscallSequence) ||
+      crashAfterDeleteSyscallSequence < 1)
+  ) {
+    fail("controlled background state syscall crash sequence was refused", 64);
+  }
+  if (
+    crashAfterDeleteSequence !== undefined &&
+    (!Number.isSafeInteger(crashAfterDeleteSequence) ||
+      crashAfterDeleteSequence < 1)
+  ) {
+    fail("controlled background state crash sequence was refused", 64);
+  }
+  if (typeof crashAfterHostagentSettlement !== "boolean") {
+    fail("controlled background state hostagent crash point was refused", 64);
+  }
+  if (
+    stopAfterSequence !== undefined &&
+    (!Number.isSafeInteger(stopAfterSequence) || stopAfterSequence < 0)
+  ) {
+    fail("controlled background state stop sequence was refused", 64);
+  }
+}
+
+export async function retireControlledBackgroundProviderWithAuthorityGate(
+  {
+    crashAfterDeleteSyscallSequence,
+    crashAfterDeleteSequence,
+    crashAfterHostagentSettlement = false,
+    evidenceDirectory,
+    fixtureId,
+    providerBase,
+    stopAfterSequence,
+  },
+  authorityGate,
+) {
+  validateStateRetirementArguments({
+    crashAfterDeleteSyscallSequence,
+    crashAfterDeleteSequence,
+    crashAfterHostagentSettlement,
+    stopAfterSequence,
+  });
+  if (typeof authorityGate !== "function") {
+    fail("controlled background state retirement authority gate was refused", 70);
+  }
+  const paths = validateControlledBackgroundRoots({
+    evidenceDirectory,
+    fixtureId,
+    providerBase,
+  });
+  const evidence = inspectControlledBackgroundProvider(evidenceDirectory, fixtureId);
+  if (evidence.createAuthority.value.state_integration !== "mutation-journal-v2") {
+    fail("controlled background state retirement integration was refused", 73);
+  }
+  const planArtifact = readStateRetirementPlan(
+    evidenceDirectory,
+    evidence,
+    paths,
+  );
+  let prefix = inspectStateRetirementProgress(evidenceDirectory, planArtifact);
+  if (prefix.progress.length > planArtifact.value.retirement_steps.length) {
+    fail("controlled background state retirement progress overflowed");
+  }
+  const initialSettlementPublication = inspectStateArtifactPublication(
+    evidenceDirectory,
+    "provider-retirement-settlement.json",
+    "controlled background state retirement settlement",
+  );
+  if (initialSettlementPublication.disposition !== "absent") {
+    if (
+      prefix.pending !== undefined ||
+      prefix.progress.length !== planArtifact.value.retirement_steps.length
+    ) {
+      fail("controlled background state retirement settlement preceded completion");
+    }
+    if (initialSettlementPublication.artifact !== undefined) {
+      validateStateRetirementSettlement(
+        initialSettlementPublication.artifact.value,
+        planArtifact,
+        evidence,
+        prefix.progress,
+      );
+    }
+    if (initialSettlementPublication.stage !== undefined) {
+      validateStateRetirementSettlement(
+        initialSettlementPublication.stage.value,
+        planArtifact,
+        evidence,
+        prefix.progress,
+      );
+    }
+  }
+  if (initialSettlementPublication.disposition === "absent") {
+    reassertStateRetirementFinalConsumption({
+      authorityGate,
+      evidence,
+      evidenceDirectory,
+      fixtureId,
+      planArtifact,
+      prefix,
+      providerBase,
+    });
+  }
+  while (prefix.progress.length < planArtifact.value.retirement_steps.length) {
+    const sequence = prefix.progress.length;
+    const step = planArtifact.value.retirement_steps[sequence];
+    const present = step.resources.map((resource) => resourceExists(paths, resource));
+    if (prefix.pending !== undefined) {
+      if (present.some(Boolean)) {
+        fail("controlled background state retirement progress stage preceded mutation");
+      }
+      if (typeof prefix.pending.recoveredAbsence !== "boolean") {
+        fail("controlled background state retirement progress stage was refused");
+      }
+      if (sequence === 0) {
+        syncSocketAbsence(paths);
+      } else {
+        syncDeletionAbsence(paths, step);
+      }
+      assertRootSubset(paths, planArtifact.value, sequence + 1);
+      publishStateRetirementProgress({
+        authorityGate,
+        evidence,
+        evidenceDirectory,
+        fixtureId,
+        pending: prefix.pending,
+        planArtifact,
+        progress: prefix.progress,
+        providerBase,
+        recoveredAbsence: prefix.pending.recoveredAbsence,
+      });
+      prefix = inspectStateRetirementProgress(evidenceDirectory, planArtifact);
+      if (stopAfterSequence === sequence) {
+        return Object.freeze({
+          complete: false,
+          completed_steps: prefix.progress.length,
+        });
+      }
+      continue;
+    }
+    if (sequence === 0) {
+      const marker = readCanonicalArtifactOnly(
+        paths.ownerMarker,
+        "controlled background root owner",
+      );
+      validateRootOwner(marker.value, {
+        createAuthoritySha256: evidence.createAuthority.sha256,
+        fixtureId,
+        paths,
+      });
+      if (marker.sha256 !== planArtifact.value.provider_root_owner_sha256) {
+        fail("controlled background state root owner changed");
+      }
+      const authorizeEffect = ({
+        additionallyCompleted,
+        checkpoint,
+        resource,
+        step: authorizedStep,
+      }) =>
+        invokeStateRetirementEffect({
+          additionallyCompleted,
+          authorityGate,
+          checkpoint,
+          evidence,
+          evidenceDirectory,
+          expectedProgress: prefix.progress,
+          fixtureId,
+          nextAction:
+            checkpoint === "before-stale-socket-unlink"
+              ? "unlink-stale-socket"
+              : authorizedStep.action,
+          planArtifact,
+          providerBase,
+          resources:
+            checkpoint === "before-stale-socket-unlink"
+              ? [resource]
+              : authorizedStep.resources,
+          subsetCompletedCount: sequence,
+        });
+      const recoveredAbsence = await stopHostagent(
+        paths,
+        planArtifact,
+        evidence,
+        marker.value.ownership_nonce,
+        authorizeEffect,
+      );
+      if (crashAfterHostagentSettlement) {
+        fail("simulated controlled background state hostagent-settlement crash", 75);
+      }
+      assertRootSubset(paths, planArtifact.value, sequence + 1);
+      publishStateRetirementProgress({
+        authorityGate,
+        evidence,
+        evidenceDirectory,
+        fixtureId,
+        planArtifact,
+        progress: prefix.progress,
+        providerBase,
+        recoveredAbsence,
+      });
+      prefix = inspectStateRetirementProgress(evidenceDirectory, planArtifact);
+      if (stopAfterSequence === sequence) {
+        return Object.freeze({
+          complete: false,
+          completed_steps: prefix.progress.length,
+        });
+      }
+      continue;
+    }
+    if (present.some(Boolean) && !present.every(Boolean)) {
+      fail("controlled background state retirement step was partial");
+    }
+    const recoveredAbsence = present.every((value) => !value);
+    if (recoveredAbsence) {
+      syncDeletionAbsence(paths, step);
+      assertRootSubset(paths, planArtifact.value, sequence + 1);
+    } else {
+      assertRootSubset(paths, planArtifact.value, sequence);
+      deleteStep(paths, planArtifact.value, step, ({ checkpoint }) =>
+        invokeStateRetirementEffect({
+          additionallyCompleted: new Set(),
+          authorityGate,
+          checkpoint,
+          evidence,
+          evidenceDirectory,
+          expectedProgress: prefix.progress,
+          fixtureId,
+          nextAction: step.action,
+          planArtifact,
+          providerBase,
+          resources: step.resources,
+          subsetCompletedCount: sequence,
+        }),
+      );
+      if (crashAfterDeleteSyscallSequence === sequence) {
+        fail("simulated controlled background state pre-fsync retirement crash", 75);
+      }
+      syncDeletionAbsence(paths, step);
+      assertRootSubset(paths, planArtifact.value, sequence + 1);
+      if (crashAfterDeleteSequence === sequence) {
+        fail("simulated controlled background state retirement crash", 75);
+      }
+    }
+    publishStateRetirementProgress({
+      authorityGate,
+      evidence,
+      evidenceDirectory,
+      fixtureId,
+      planArtifact,
+      progress: prefix.progress,
+      providerBase,
+      recoveredAbsence,
+    });
+    prefix = inspectStateRetirementProgress(evidenceDirectory, planArtifact);
+    if (stopAfterSequence === sequence) {
+      return Object.freeze({
+        complete: false,
+        completed_steps: prefix.progress.length,
+      });
+    }
+  }
+  assertRootSubset(paths, planArtifact.value, prefix.progress.length);
+  const expectedSettlementValue = stateRetirementSettlementValue(
+    planArtifact,
+    evidence,
+    prefix.progress,
+  );
+  const expectedSettlementBytes = providerProcessBytes(expectedSettlementValue);
+  const expectedSettlementSha256 = providerProcessDigest(expectedSettlementBytes);
+  const revalidateSettlement = (expectedPublication) => () => {
+    revalidateStateRetirementExecution({
+      evidence,
+      evidenceDirectory,
+      expectedProgress: prefix.progress,
+      fixtureId,
+      planArtifact,
+      providerBase,
+      requireHostagentAbsent: true,
+      subsetCompletedCount: prefix.progress.length,
+    });
+    const current = inspectStateArtifactPublication(
+      evidenceDirectory,
+      "provider-retirement-settlement.json",
+      "controlled background state retirement settlement",
+    );
+    if (!sameStatePublication(current, expectedPublication)) {
+      fail("controlled background state retirement settlement changed", 73);
+    }
+  };
+  const settlement = publishStateRetirementArtifact(
+    evidenceDirectory,
+    "provider-retirement-settlement.json",
+    expectedSettlementValue,
+    (publication, phase) =>
+        invokeRetirementAuthorityGate(
+          authorityGate,
+          Object.freeze({
+            checkpoint: "before-retirement-settlement-publication",
+            ...stateRetirementAuthorityBindingFields(planArtifact.value),
+            cleanup_plan_sha256: planArtifact.sha256,
+            completed_steps: prefix.progress.length,
+            next_action: "publish-retirement-settlement",
+            next_resources: Object.freeze([
+              "provider-retirement-settlement.json",
+            ]),
+            provider_identity_sha256: evidence.providerIdentity.sha256,
+            ...statePublicationAuthorityFields(
+              publication,
+              phase,
+              "provider-retirement-settlement.json",
+              expectedSettlementSha256,
+            ),
+            resource_identity_sha256: expectedSettlementSha256,
+            retirement_contract_sha256:
+              CONTROLLED_BACKGROUND_RETIREMENT_CONTRACT_SHA256,
+          }),
+          revalidateSettlement(publication),
+        ),
+  );
+  validateStateRetirementSettlement(
+    settlement.value,
+    planArtifact,
+    evidence,
+    prefix.progress,
+  );
+  assertRootSubset(paths, planArtifact.value, prefix.progress.length);
+  return Object.freeze({
+    cleanup_operation_evidence_sha256: settlement.sha256,
+    complete: true,
+    completed_steps: prefix.progress.length,
+    create_operation_evidence_sha256: evidence.providerIdentity.sha256,
+    settlement,
+  });
+}
+
+function stateArtifactIdentitySha256(artifact) {
+  if (artifact === undefined) return ZERO_SHA256;
+  const metadata = artifact.metadata;
+  return providerProcessDigest(providerProcessBytes({
+    actual_sha256: artifact.sha256,
+    device: String(metadata.dev),
+    inode: String(metadata.ino),
+    links: String(metadata.nlink),
+    mode: (metadata.mode & 0o7777n).toString(8).padStart(4, "0"),
+    size: String(metadata.size),
+    uid: String(metadata.uid),
+  }));
+}
+
+function statePublicationObservation(publication) {
+  if (publication === undefined) {
+    return Object.freeze({
+      disposition: "absent",
+      final_identity_sha256: ZERO_SHA256,
+      final_sha256: ZERO_SHA256,
+      stage_actual_sha256: ZERO_SHA256,
+      stage_declared_sha256: ZERO_SHA256,
+      stage_identity_sha256: ZERO_SHA256,
+    });
+  }
+  return Object.freeze({
+    disposition: publication.disposition,
+    final_identity_sha256: stateArtifactIdentitySha256(publication.artifact),
+    final_sha256: publication.artifact?.sha256 ?? ZERO_SHA256,
+    stage_actual_sha256:
+      publication.stageSnapshot?.actual_sha256 ?? ZERO_SHA256,
+    stage_declared_sha256:
+      publication.stageSnapshot?.declared_sha256 ?? ZERO_SHA256,
+    stage_identity_sha256:
+      publication.stageSnapshot?.identity_sha256 ?? ZERO_SHA256,
+  });
+}
+
+function currentRetirementRootObservation(expectedEntries, current) {
+  const currentPaths = new Set(current.entries.map((entry) => entry.relative_path));
+  const absentResources = expectedEntries
+    .map((entry) => entry.relative_path)
+    .filter((resource) => !currentPaths.has(resource))
+    .sort();
+  if (current.rootAbsent) absentResources.push(".");
+  return Object.freeze({
+    absentResources: Object.freeze(absentResources),
+    inventorySha256: providerProcessDigest(providerProcessBytes({
+      entries: current.entries,
+      root: current.rootAbsent ? null : current.root,
+    })),
+    rootDisposition: current.rootAbsent ? "retired" : "owned",
+  });
+}
+
+function inspectPlannedRetirementRoot(
+  paths,
+  plan,
+  completedSteps,
+  nextStep,
+  pendingProgress,
+) {
+  let current;
+  if (nextStep === undefined) {
+    current = assertRootSubset(paths, plan, completedSteps);
+  } else {
+    const absent = nextStep.resources.filter(
+      (resource) => !resourceExists(paths, resource),
+    );
+    if (
+      completedSteps > 0 &&
+      absent.length > 0 &&
+      absent.length !== nextStep.resources.length
+    ) {
+      fail("controlled background state retirement step was partial");
+    }
+    if (pendingProgress !== undefined && absent.length !== nextStep.resources.length) {
+      fail("controlled background state retirement progress stage preceded mutation");
+    }
+    current = assertRootSubset(
+      paths,
+      plan,
+      completedSteps,
+      new Set(absent),
+    );
+  }
+  return currentRetirementRootObservation(
+    plan.root_inventory,
+    Object.freeze({
+      entries: current.entries,
+      root: current.rootAbsent ? undefined : plan.root,
+      rootAbsent: current.rootAbsent,
+    }),
+  );
+}
+
+function retirementPrefixResult({
+  cleanupPlan,
+  cleanupStage,
+  completedSteps,
+  evidence,
+  expectedCleanupPlanSha256,
+  nextStep,
+  pendingProgress,
+  planPublication,
+  processResidual,
+  progress,
+  providerSettlement,
+  rootObservation,
+  settlementPublication,
+}) {
+  const planObservation = statePublicationObservation(planPublication);
+  const progressObservation = statePublicationObservation(
+    pendingProgress?.publication,
+  );
+  const settlementObservation = statePublicationObservation(
+    settlementPublication,
+  );
+  const nextPresence = Object.freeze(
+    (nextStep?.resources ?? []).map((resource) => ({
+      present: !rootObservation.absentResources.includes(resource),
+      resource,
+    })),
+  );
+  const nextDisposition =
+    nextPresence.length === 0
+      ? "complete"
+      : nextPresence.every(({ present }) => present)
+        ? "all-present"
+        : nextPresence.every(({ present }) => !present)
+          ? "all-absent"
+          : "partial";
+  const cleanupPlanSha256 =
+    cleanupPlan?.sha256 ??
+    planPublication.stageSnapshot?.declared_sha256 ??
+    expectedCleanupPlanSha256 ??
+    ZERO_SHA256;
+  const finalProgressSha256 = progress.at(-1)?.sha256 ?? ZERO_SHA256;
+  const providerSettlementSha256 = providerSettlement?.sha256 ?? ZERO_SHA256;
+  const observation = Object.freeze({
+    absent_resources: rootObservation.absentResources,
+    cleanup_plan_sha256: cleanupPlanSha256,
+    cleanup_stage: cleanupStage,
+    completed_steps: completedSteps,
+    create_evidence_head_sha256: evidence.providerIdentity.sha256,
+    final_progress_sha256: finalProgressSha256,
+    next_step:
+      nextStep === undefined
+        ? null
+        : Object.freeze({
+            action: nextStep.action,
+            disposition: nextDisposition,
+            resource_identity_sha256: stepIdentitySha256(
+              cleanupPlan.value,
+              nextStep,
+            ),
+            resources: Object.freeze([...nextStep.resources]),
+            sequence: nextStep.sequence,
+          }),
+    plan_publication: planObservation,
+    process_residual: processResidual,
+    progress_publication: progressObservation,
+    progress_publication_recovered_absence:
+      pendingProgress?.recoveredAbsence ?? null,
+    progress_publication_sequence: pendingProgress?.sequence ?? null,
+    provider_settlement_sha256: providerSettlementSha256,
+    remaining_inventory_sha256: rootObservation.inventorySha256,
+    retirement_contract_sha256: CONTROLLED_BACKGROUND_RETIREMENT_CONTRACT_SHA256,
+    root_disposition: rootObservation.rootDisposition,
+    schema: "synveda.clean-engine.retirement-prefix-observation.v2",
+    settlement_publication: settlementObservation,
+  });
+  return Object.freeze({
+    cleanupPlan,
+    cleanupPlanPublication: planPublication,
+    cleanupPlanSha256,
+    cleanupStage,
+    completedSteps,
+    createEvidenceHeadSha256: evidence.providerIdentity.sha256,
+    evidence,
+    finalProgressSha256,
+    observation,
+    observationSha256: providerProcessDigest(providerProcessBytes(observation)),
+    pendingProgress,
+    processResidual,
+    providerSettlement,
+    providerSettlementPublication: settlementPublication,
+    providerSettlementSha256,
+    remainingInventorySha256: rootObservation.inventorySha256,
+    rootDisposition: rootObservation.rootDisposition,
+  });
+}
+
+function assertStateRetirementPlanBindings(plan, expectedBindings) {
+  if (
+    expectedBindings !== undefined &&
+    canonical({
+      cleanup_intent_sha256: plan.cleanup_intent_sha256,
+      cleanup_operation_plan_sha256: plan.cleanup_operation_plan_sha256,
+      cleanup_slot_sequence: plan.cleanup_slot_sequence,
+      cleanup_slot_sha256: plan.cleanup_slot_sha256,
+      create_close_sha256: plan.create_close_sha256,
+      create_settlement_sha256: plan.create_settlement_sha256,
+      create_slot_sha256: plan.create_slot_sha256,
+      source_head_sha256: plan.source_head_sha256,
+      source_sequence: plan.source_sequence,
+    }) !== canonical(expectedBindings)
+  ) {
+    fail("controlled background state retirement bindings changed");
+  }
+}
+
+export function inspectControlledBackgroundRetirementPrefix(
+  evidenceDirectory,
+  fixtureId,
+  { expectedBindings, providerBase } = {},
+) {
+  if (expectedBindings === undefined) {
+    fail("controlled background state retirement inspection bindings were required", 64);
+  }
+  validateStateRetirementBindings(expectedBindings);
+  const paths = validateControlledBackgroundRoots({
+    evidenceDirectory,
+    fixtureId,
+    providerBase,
+  });
+  const evidence = inspectControlledBackgroundProvider(evidenceDirectory, fixtureId);
+  if (evidence.createAuthority.value.state_integration !== "mutation-journal-v2") {
+    fail("controlled background state retirement inspection was refused", 73);
+  }
+  const planPublication = inspectStateArtifactPublication(
+    evidenceDirectory,
+    "provider-retirement-plan.json",
+    "controlled background state retirement plan",
+  );
+  const planArtifact = planPublication.artifact ?? planPublication.stage;
+  if (planPublication.disposition !== "final") {
+    const unexpected = readdirSync(evidenceDirectory).some((name) => {
+      const targetName = parseArtifactStageName(name)?.targetName ?? name;
+      return /^(?:retirement-step-[0-9]{2}|provider-retirement-settlement)\.json$/.test(
+        targetName,
+      );
+    });
+    if (unexpected) {
+      fail("controlled background state retirement evidence preceded its plan");
+    }
+    const owner = readCanonicalArtifactOnly(
+      paths.ownerMarker,
+      "controlled background root owner",
+    );
+    validateRootOwner(owner.value, {
+      createAuthoritySha256: evidence.createAuthority.sha256,
+      fixtureId,
+      paths,
+    });
+    if (
+      owner.sha256 !== evidence.providerIdentity.value.root_owner_sha256 ||
+      owner.sha256 !== evidence.controllerWitness.value.root_owner_sha256
+    ) {
+      fail("controlled background state root owner binding was refused");
+    }
+    const pidRecord = revalidateHostagentPidRecord(
+      paths,
+      fixtureId,
+      evidence,
+      owner.value.ownership_nonce,
+    );
+    const hostagentPresence = processPresence(pidRecord.value.pid);
+    const controllerPresence = probeProcessGroup(
+      evidence.controllerWitness.value.controller_pgid,
+    );
+    if (hostagentPresence === "unknown" || controllerPresence !== "absent") {
+      fail("controlled background state process identity remained uncertain", 73);
+    }
+    const inventory = creationInventoryForPlanning(
+      paths,
+      evidence.providerIdentity.value,
+      hostagentPresence === "absent",
+    );
+    const expectedPlanValue = stateRetirementPlanValue({
+      bindings: expectedBindings,
+      evidence,
+      fixtureId,
+      inventory,
+      owner,
+      pidRecord,
+      providerBase,
+    });
+    const expectedPlanBytes = providerProcessBytes(expectedPlanValue);
+    assertStatePublicationExpected(
+      planPublication,
+      expectedPlanBytes,
+      "controlled background state retirement plan",
+    );
+    if (planArtifact !== undefined) {
+      validateStateRetirementPlan(
+        planArtifact.value,
+        evidence,
+        paths,
+        planArtifact.sha256,
+      );
+      assertStateRetirementPlanBindings(planArtifact.value, expectedBindings);
+    }
+    const current = scanRootInventory(paths);
+    const rootObservation = currentRetirementRootObservation(
+      evidence.providerIdentity.value.provider_root_inventory,
+      Object.freeze({ ...current, rootAbsent: false }),
+    );
+    const repeatedOwner = readCanonicalArtifactOnly(
+      paths.ownerMarker,
+      "controlled background root owner",
+    );
+    validateRootOwner(repeatedOwner.value, {
+      createAuthoritySha256: evidence.createAuthority.sha256,
+      fixtureId,
+      paths,
+    });
+    const repeatedPidRecord = revalidateHostagentPidRecord(
+      paths,
+      fixtureId,
+      evidence,
+      repeatedOwner.value.ownership_nonce,
+    );
+    const repeatedHostagentPresence = processPresence(
+      repeatedPidRecord.value.pid,
+    );
+    const repeatedControllerPresence = probeProcessGroup(
+      evidence.controllerWitness.value.controller_pgid,
+    );
+    creationInventoryForPlanning(
+      paths,
+      evidence.providerIdentity.value,
+      repeatedHostagentPresence === "absent",
+    );
+    const repeatedCurrent = scanRootInventory(paths);
+    const repeatedRootObservation = currentRetirementRootObservation(
+      evidence.providerIdentity.value.provider_root_inventory,
+      Object.freeze({ ...repeatedCurrent, rootAbsent: false }),
+    );
+    if (
+      repeatedHostagentPresence !== hostagentPresence ||
+      repeatedControllerPresence !== controllerPresence ||
+      canonical(repeatedRootObservation) !== canonical(rootObservation)
+    ) {
+      fail("controlled background state retirement observation changed", 73);
+    }
+    const repeatedEvidence = inspectControlledBackgroundProvider(
+      evidenceDirectory,
+      fixtureId,
+    );
+    const repeatedPlanPublication = inspectStateArtifactPublication(
+      evidenceDirectory,
+      "provider-retirement-plan.json",
+      "controlled background state retirement plan",
+    );
+    if (
+      canonical(
+        directoryIdentity(providerBase, "controlled background provider base"),
+      ) !== canonical(expectedPlanValue.base) ||
+      !sameArtifactIdentity(owner, repeatedOwner) ||
+      !sameArtifactIdentity(pidRecord, repeatedPidRecord) ||
+      Object.keys(evidence).some((name) =>
+        !sameArtifactIdentity(evidence[name], repeatedEvidence[name])) ||
+      !sameStatePublication(planPublication, repeatedPlanPublication) ||
+      readdirSync(evidenceDirectory).some((name) => {
+        const targetName = parseArtifactStageName(name)?.targetName ?? name;
+        return /^(?:retirement-step-[0-9]{2}|provider-retirement-settlement)\.json$/.test(
+          targetName,
+        );
+      })
+    ) {
+      fail("controlled background state retirement observation changed", 73);
+    }
+    assertStatePublicationExpected(
+      repeatedPlanPublication,
+      expectedPlanBytes,
+      "controlled background state retirement plan",
+    );
+    return retirementPrefixResult({
+      cleanupPlan: planArtifact,
+      cleanupStage:
+        planPublication.disposition === "absent"
+          ? "not-started"
+          : "plan-publication-pending",
+      completedSteps: 0,
+      evidence,
+      expectedCleanupPlanSha256: providerProcessDigest(expectedPlanBytes),
+      nextStep: undefined,
+      pendingProgress: undefined,
+      planPublication,
+      processResidual: Object.freeze({
+        controller_pgid: evidence.controllerWitness.value.controller_pgid,
+        controller_presence: processObservation(controllerPresence),
+        controller_process_instance_sha256:
+          evidence.controllerWitness.value.controller_process_instance_sha256,
+        hostagent_pid: pidRecord.value.pid,
+        hostagent_presence: processObservation(hostagentPresence),
+        hostagent_process_instance_sha256:
+          evidence.hostagentWitness.value.process_instance_sha256,
+      }),
+      progress: Object.freeze([]),
+      providerSettlement: undefined,
+      rootObservation,
+      settlementPublication: undefined,
+    });
+  }
+  validateStateRetirementPlan(
+    planArtifact.value,
+    evidence,
+    paths,
+    planArtifact.sha256,
+  );
+  assertStateRetirementPlanBindings(planArtifact.value, expectedBindings);
+  const progressPrefix = inspectStateRetirementProgress(
+    evidenceDirectory,
+    planArtifact,
+  );
+  const completedSteps = progressPrefix.progress.length;
+  const nextStep = planArtifact.value.retirement_steps[completedSteps];
+  const rootObservation = inspectPlannedRetirementRoot(
+    paths,
+    planArtifact.value,
+    completedSteps,
+    nextStep,
+    progressPrefix.pending,
+  );
+  const processOptions = {
+    hostagentRetirementRecorded: completedSteps > 0,
+    requireHostagentAbsent:
+      completedSteps > 0 ||
+      nextStep?.resources.every((resource) =>
+        rootObservation.absentResources.includes(resource),
+      ) === true,
+  };
+  const processResidual = observeStateRetirementProcesses(
+    evidence,
+    planArtifact.value,
+    processOptions,
+  );
+  const repeatedRootObservation = inspectPlannedRetirementRoot(
+    paths,
+    planArtifact.value,
+    completedSteps,
+    nextStep,
+    progressPrefix.pending,
+  );
+  const repeatedProcessResidual = observeStateRetirementProcesses(
+    evidence,
+    planArtifact.value,
+    processOptions,
+  );
+  if (
+    canonical(repeatedRootObservation) !== canonical(rootObservation) ||
+    canonical(repeatedProcessResidual) !== canonical(processResidual)
+  ) {
+    fail("controlled background state retirement observation changed", 73);
+  }
+  const settlementPublication = inspectStateArtifactPublication(
+    evidenceDirectory,
+    "provider-retirement-settlement.json",
+    "controlled background state retirement settlement",
+  );
+  const providerSettlement =
+    settlementPublication.artifact ?? settlementPublication.stage;
+  if (settlementPublication.disposition !== "absent") {
+    if (nextStep !== undefined || progressPrefix.pending !== undefined) {
+      fail("controlled background state retirement settlement preceded completion");
+    }
+    assertStatePublicationExpected(
+      settlementPublication,
+      providerProcessBytes(
+        stateRetirementSettlementValue(
+          planArtifact,
+          evidence,
+          progressPrefix.progress,
+        ),
+      ),
+      "controlled background state retirement settlement",
+    );
+    if (settlementPublication.artifact !== undefined) {
+      validateStateRetirementSettlement(
+        settlementPublication.artifact.value,
+        planArtifact,
+        evidence,
+        progressPrefix.progress,
+      );
+    }
+    if (settlementPublication.stage !== undefined) {
+      validateStateRetirementSettlement(
+        settlementPublication.stage.value,
+        planArtifact,
+        evidence,
+        progressPrefix.progress,
+      );
+    }
+  }
+  const cleanupStage =
+    settlementPublication.disposition !== "absent" &&
+    settlementPublication.disposition !== "final"
+      ? "settlement-publication-pending"
+      : settlementPublication.disposition === "final"
+        ? "settled"
+        : progressPrefix.pending !== undefined
+          ? "progress-publication-pending"
+          : nextStep === undefined
+            ? "progress-complete"
+            : "retiring";
+  const repeatedEvidence = inspectControlledBackgroundProvider(
+    evidenceDirectory,
+    fixtureId,
+  );
+  const repeatedPlanPublication = inspectStateArtifactPublication(
+    evidenceDirectory,
+    "provider-retirement-plan.json",
+    "controlled background state retirement plan",
+  );
+  const repeatedProgressPrefix = inspectStateRetirementProgress(
+    evidenceDirectory,
+    planArtifact,
+  );
+  const repeatedSettlementPublication = inspectStateArtifactPublication(
+    evidenceDirectory,
+    "provider-retirement-settlement.json",
+    "controlled background state retirement settlement",
+  );
+  if (
+    Object.keys(evidence).some((name) =>
+      !sameArtifactIdentity(evidence[name], repeatedEvidence[name])) ||
+    !sameStatePublication(planPublication, repeatedPlanPublication) ||
+    !sameStateRetirementProgress(progressPrefix, repeatedProgressPrefix) ||
+    !sameStatePublication(
+      settlementPublication,
+      repeatedSettlementPublication,
+    )
+  ) {
+    fail("controlled background state retirement observation changed", 73);
+  }
+  if (repeatedSettlementPublication.disposition !== "absent") {
+    assertStatePublicationExpected(
+      repeatedSettlementPublication,
+      providerProcessBytes(
+        stateRetirementSettlementValue(
+          planArtifact,
+          evidence,
+          progressPrefix.progress,
+        ),
+      ),
+      "controlled background state retirement settlement",
+    );
+  }
+  return retirementPrefixResult({
+    cleanupPlan: planArtifact,
+    cleanupStage,
+    completedSteps,
+    evidence,
+    nextStep,
+    pendingProgress: progressPrefix.pending,
+    planPublication,
+    processResidual,
+    progress: progressPrefix.progress,
+    providerSettlement,
+    rootObservation,
+    settlementPublication,
   });
 }
 

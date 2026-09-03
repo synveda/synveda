@@ -224,14 +224,20 @@ unattested; present or unidentifiable processes also block. At most eight
 claims and 64 slots bound the journal. Abandoned append and finalization slots
 remain blocking evidence.
 
-The same inner protocol remains directly testable only in fixture mode. Its
-retirement helper binds the creation inventory, stops through authenticated
-IPC, publishes a leaf-first plan and applies only individual unlink/rmdir
-steps after exact remaining-subset revalidation. Recovered absence fsyncs its
-parent. Unknown/replaced resources remain blocking. Inner operation-evidence
-and retirement APIs reject state-born authority; fixture retirement is
-`state_integration: not-authorized` and cannot close a state cleanup result.
-State-born cleanup and finalization therefore remain open.
+The same inner create protocol remains directly testable in fixture mode.
+Legacy retirement v1 and operation-evidence APIs stay fixture-only and
+`state_integration: not-authorized`. A separate retirement-v2 boundary accepts
+only the exact state-born create chain and explicit cleanup intent,
+operation-plan, slot, create-settlement, create-close and source bindings. It
+stops through authenticated IPC, applies only individual leaf-first
+unlink/rmdir steps after exact remaining-subset revalidation, fsyncs recovered
+absence, and uses parent-durable append-only plan/progress/settlement
+publication. Unknown/replaced resources and foreign publication stages remain
+blocking. Every destructive or publication frontier is synchronously gated;
+the read-only prefix observation binds the expected operation even before its
+plan exists. The inner settlement grants no result-receipt or close authority.
+State-born cleanup and finalization remain open until the mutation owner
+supplies the outer cleanup slot, settlement, recovery, receipt and close.
 
 Receipt and environment bytes are canonical, fsynced in private staging files
 and linked to their final names without replacement. The current internal
@@ -277,10 +283,11 @@ content-free authority, toolchain, controller/start, authenticated endpoint and
 provider-identity evidence, while the run contains a state-owned outer
 settlement. Its receipt class is `controlled-background-fake`. `registry/`,
 `runtime/` and `evidence/` remain empty. There is no Docker/Colima invocation,
-live provider executor or environment manifest. The fixture-only deletion
-settlement carries no state authority, so controlled runs reject provider
-cleanup and finalization. The `*WithAuthorityGate` exports are unsupported
-internal composition hooks, not a JavaScript security boundary; owner-UID code
+live provider executor or environment manifest. Retirement v2 is not yet
+composed by the state owner and its inner settlement carries no receipt/close
+authority, so controlled runs still reject supported provider cleanup and
+finalization. The `*WithAuthorityGate` exports are unsupported internal
+composition hooks, not a JavaScript security boundary; owner-UID code
 execution and journal mutation are one trusted-host boundary. This checkpoint
 must not be reported as clean-Engine, Docker, Colima or browser evidence.
 

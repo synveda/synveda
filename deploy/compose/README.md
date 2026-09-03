@@ -221,20 +221,23 @@ reclaimed; an abandoned append or finalization slot still requires operator
 inspection.
 
 This remains an internal fake-only contract, not a provider runner. The adapter
-accepts no function, command, path, environment or provider selector. The
-standalone inner retirement helper is fixture-only: it authenticates shutdown,
-binds the creation inventory and applies individual leaf-first unlink/rmdir
-steps with fsynced absence and append-only recovery. It rejects state-born
-evidence, so controlled state runs remain non-finalizable and gain no cleanup
-authority. The internal `*WithAuthorityGate` callbacks are trusted owner-UID
-composition hooks, not a JavaScript security boundary.
+accepts no function, command, path, environment or provider selector. Legacy
+retirement v1 stays fixture-only. A separate retirement-v2 seam accepts only
+the exact state-born create chain and cleanup/source bindings, authenticates
+shutdown, and gates every exact leaf-first removal and append-only publication
+frontier. Its read-only prefix observation binds the operation, residual
+inventory, process state and pending publication identities. It grants no
+receipt or close authority. The internal `*WithAuthorityGate` callbacks are
+trusted owner-UID composition hooks, not a JavaScript security boundary.
 
 No supported lifecycle target exposes either test-only seam; there is no live
 provider mutation or environment manifest. `registry/`, `runtime/` and
-`evidence/` remain empty. Next add a distinct state-born cleanup slot and outer
-settlement, then finish the live Docker/helper/disk closure before exposing a
-supported lifecycle target or making any Docker claim. Superseded receipt and
-mutation schemas are discarded and regenerated.
+`evidence/` remain empty. Next add controlled-background cleanup receipt-v4
+variants and compose the real state cleanup slot, outer settlement,
+action-dispatched recovery and close around retirement v2. Then finish the live
+Docker/helper/disk closure before exposing a supported lifecycle target or
+making any Docker claim. Superseded receipt and mutation schemas are discarded
+and regenerated.
 The manual browser ceremony below remains usable for fixture development but
 cannot be labelled a clean-Engine result.
 
@@ -603,14 +606,15 @@ open. Candidate planning now binds the source and selection closure, prepares
 the private synthetic proxy template and contacts no Docker endpoint. The
 append-only receipt grammar, cleanup-only failure branch, permanent mutation
 journal, synchronous rollback fake, state-born background create wrapper,
-fixture-only exact retirement and success-only manifest finalizer are
-deterministic fixed-fake contracts, not a live provider claim. Six outer gates
+fixture retirement v1, state-gated retirement-v2 seam and success-only manifest
+finalizer are deterministic fixed-fake contracts, not a live provider claim. Six outer gates
 reassert the actual slot, operation plan, source and causal frontier. The
 outer settlement and close bind only complete identity, a no-live-process exact
-residual or a preserved foreign collision. The separate fixture retirement
-proves exact fake-root deletion but rejects mutation-journal authority. No
-supported lifecycle target exposes the test fixtures; state-born cleanup and
-exact live-provider retirement remain prerequisites for a real effect.
+residual or a preserved foreign collision. Retirement v2 accepts the exact
+mutation-journal create chain but is not yet composed with an outer cleanup
+settlement, receipt, recovery or close. No supported lifecycle target exposes
+the test fixtures; supported state-born cleanup and exact live-provider
+retirement remain prerequisites for a real effect.
 Separately, every development source build proves the embedded local builder
 grammar before mutation; none of that is live provider evidence. The core
 Collector remains private but

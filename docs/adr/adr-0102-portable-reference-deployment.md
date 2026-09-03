@@ -170,15 +170,21 @@ readiness and start without authenticated PID remain permanently uncertain;
 live or unidentifiable process state also blocks settlement. Permanent slots,
 settlements, closes and bounded recovery claims are never deleted or reused.
 
-The standalone inner retirement protocol remains fixture-only. It binds the
-complete creation inventory, stops only through authenticated IPC and applies
+Legacy inner retirement v1 remains fixture-only. It binds the complete
+creation inventory, stops only through authenticated IPC and applies
 individual leaf-first unlink/rmdir actions after exact revalidation; recovered
-absence fsyncs the parent. It rejects state-born create evidence, so no cleanup
-or finalization authority exists yet for the state-owned root. The exported
-authority-gated helpers are unsupported internal composition hooks, not a
-JavaScript security boundary. Owner-UID code and journal writes share one
-trusted-host boundary; ACLs, xattrs, flags, bind mounts and other PID namespaces
-remain outside this deterministic evidence.
+absence fsyncs the parent. A separate retirement-v2 contract accepts only the
+exact state-born create chain and explicit cleanup/source bindings. It keeps
+the create head immutable, gates every process/resource effect and every
+durable publication frontier, persists exact progress/settlement, and exposes
+an operation-bound read-only prefix observation. It grants no result-receipt or
+close authority. Until the mutation owner supplies a cleanup slot, outer
+settlement, recovery claim, receipt and close, no supported cleanup or
+finalization authority exists for the state-owned root. The authority-gated
+helpers are unsupported internal composition hooks, not a JavaScript security
+boundary. Owner-UID code and journal writes share one trusted-host boundary;
+ACLs, xattrs, flags, bind mounts and other PID namespaces remain outside this
+deterministic evidence.
 
 The live-preparation record still pins Colima 0.10.3 at
 `00f6c297e92a82c04a4ab507db0a61435650d7e8` and Lima 2.2.0 at
@@ -239,10 +245,12 @@ Colima or supported lifecycle evidence.
 - The controlled clean-Engine seams remain internal and fake-only. The
   deterministic background create path distinguishes controller, host agent,
   Engine, both sockets and Docker context; its outer settlement is integrated
-  with receipt v4 and close v3. The distinct exact-retirement path remains
-  fixture-only and cannot clean the state-owned root. A live adapter must still
-  close the transitive Docker/helper/disk identities and add separate
-  state-born cleanup evidence without weakening the immutable journal. A
+  with receipt v4 and close v3. Legacy retirement v1 remains fixture-only; the
+  distinct retirement-v2 boundary accepts the state-born chain but is not yet
+  composed with a cleanup slot, outer settlement, recovery, receipt or close,
+  so it cannot clean the state-owned root through a supported lifecycle. A live
+  adapter must still close the transitive Docker/helper/disk identities and
+  complete that state-owned cleanup evidence without weakening the immutable journal. A
   supported runner and source/image environment manifest remain required before
   it can support a Docker or Colima acceptance claim.
 - Reversal trigger: if measured operation failure semantics cannot be made
