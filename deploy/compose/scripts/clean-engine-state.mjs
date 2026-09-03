@@ -37,13 +37,20 @@ import {
   CONTROLLED_BACKGROUND_AUTHORITY_CHECKPOINTS,
   CONTROLLED_BACKGROUND_OPERATION_KIND,
   CONTROLLED_BACKGROUND_PROVIDER_CONTRACT_SHA256,
+  CONTROLLED_BACKGROUND_RETIREMENT_AUTHORITY_CHECKPOINTS,
+  CONTROLLED_BACKGROUND_RETIREMENT_CONTRACT_SHA256,
+  CONTROLLED_BACKGROUND_RETIREMENT_OPERATION_KIND,
   ProviderProcessContractFailure,
+  inspectControlledBackgroundProvider,
   inspectControlledBackgroundProviderPrefix,
+  inspectControlledBackgroundRetirementPrefix,
   launchControlledBackgroundProviderWithAuthorityGate,
   planControlledBackgroundProviderCreateWithAuthorityGate,
   planControlledBackgroundProviderOperation,
+  planControlledBackgroundRetirementWithAuthorityGate,
   providerProcessBytes,
   providerProcessDigest,
+  retireControlledBackgroundProviderWithAuthorityGate,
   validateControlledBackgroundProviderOperationPlan,
 } from "./clean-engine-provider-process-contract.mjs";
 
@@ -67,7 +74,12 @@ const MUTATION_CLOSE_SCHEMA = "synveda.clean-engine.mutation-close.v3";
 const MUTATION_RECOVERY_PREFIX = ".mutation-recovery-";
 const MUTATION_RECOVERY_SCHEMA = "synveda.clean-engine.mutation-recovery.v2";
 const MUTATION_OPERATION_PREFIX = ".mutation-operation-";
-const MUTATION_OPERATION_SCHEMA = "synveda.clean-engine.background-create-settlement.v1";
+const BACKGROUND_CREATE_SETTLEMENT_SCHEMA =
+  "synveda.clean-engine.background-create-settlement.v1";
+const BACKGROUND_CLEANUP_OPERATION_PLAN_SCHEMA =
+  "synveda.clean-engine.background-cleanup-operation-plan.v1";
+const BACKGROUND_CLEANUP_SETTLEMENT_SCHEMA =
+  "synveda.clean-engine.background-cleanup-settlement.v1";
 const MUTATION_STAGE_PREFIX = ".mutation-stage-";
 const MUTATION_OWNER_PROBE = "opaque-process-instance-v1";
 const MAX_MUTATION_RECOVERIES = 8;
@@ -109,6 +121,22 @@ const BACKGROUND_PROVIDER_ADAPTER_FIELDS = Object.freeze([
   "before_start_hold_milliseconds",
   "kind",
   "maximum_lifetime_milliseconds",
+]);
+const BACKGROUND_CLEANUP_ADAPTER_FIELDS = Object.freeze([
+  "after_claim_hold_milliseconds",
+  "after_intent_hold_milliseconds",
+  "after_plan_hold_milliseconds",
+  "after_result_hold_milliseconds",
+  "after_retirement_hold_milliseconds",
+  "after_slot_hold_milliseconds",
+  "after_settlement_hold_milliseconds",
+  "before_close_hold_milliseconds",
+  "close_prelink_hold_milliseconds",
+  "crash_after_delete_sequence",
+  "crash_after_delete_syscall_sequence",
+  "crash_after_hostagent_settlement",
+  "kind",
+  "stop_after_sequence",
 ]);
 const REQUESTED_ASSERTIONS = Object.freeze([
   "browser-pkce-admin-logout-no-capture",
@@ -933,6 +961,156 @@ function backgroundCreateBindings(slot) {
   });
 }
 
+function backgroundCleanupBindings(slot) {
+  if (
+    slot.value.action !== "provider-cleanup" ||
+    slot.value.operation_kind !==
+      CONTROLLED_BACKGROUND_RETIREMENT_OPERATION_KIND
+  ) {
+    fail("background cleanup mutation operation was refused", 70);
+  }
+  const operationPlan = slot.value.operation_plan;
+  return Object.freeze({
+    cleanup_intent_sha256: slot.value.intent_receipt_sha256,
+    cleanup_operation_plan_sha256: operationPlanSha256(operationPlan),
+    cleanup_slot_sequence: slot.value.journal_sequence,
+    cleanup_slot_sha256: digest(slot.bytes),
+    create_close_sha256: operationPlan.create_close_sha256,
+    create_settlement_sha256: operationPlan.create_settlement_sha256,
+    create_slot_sha256: operationPlan.create_slot_sha256,
+    source_head_sha256: slot.value.source_head_sha256,
+    source_sequence: slot.value.source_sequence,
+  });
+}
+
+function validateBoundDirectoryIdentity(value, label) {
+  exactKeys(value, ["device", "inode", "mode", "path", "uid"], label);
+  if (
+    typeof value.path !== "string" ||
+    !isAbsolute(value.path) ||
+    resolve(value.path) !== value.path ||
+    value.mode !== "0700" ||
+    value.uid !== String(OWNER_UID) ||
+    typeof value.device !== "string" ||
+    !/^[0-9]+$/.test(value.device) ||
+    typeof value.inode !== "string" ||
+    !/^[0-9]+$/.test(value.inode)
+  ) {
+    fail(`${label} was refused`, 70);
+  }
+}
+
+function currentBoundDirectoryIdentity(path, label) {
+  const metadata = ownedPrivateDirectory(path, label);
+  return Object.freeze({
+    device: String(metadata.dev),
+    inode: String(metadata.ino),
+    mode: modeString(metadata),
+    path,
+    uid: String(metadata.uid),
+  });
+}
+
+function validateBackgroundCleanupOperationPlan(value) {
+  exactKeys(
+    value,
+    [
+      "create_close_sha256",
+      "create_operation_plan_sha256",
+      "create_settlement_sha256",
+      "create_slot_sequence",
+      "create_slot_sha256",
+      "evidence_directory",
+      "fixture_id",
+      "provider_base",
+      "provider_contract_sha256",
+      "provider_identity_sha256",
+      "provider_kind",
+      "provider_resource",
+      "provider_root_key",
+      "retirement_contract_sha256",
+      "schema",
+      "state_integration",
+    ],
+    "background cleanup operation plan",
+  );
+  validateBoundDirectoryIdentity(
+    value.evidence_directory,
+    "background cleanup evidence directory",
+  );
+  validateBoundDirectoryIdentity(value.provider_base, "background cleanup provider base");
+  if (
+    value.schema !== BACKGROUND_CLEANUP_OPERATION_PLAN_SCHEMA ||
+    !onlyLowerHex(value.fixture_id, 32) ||
+    value.create_slot_sequence !== 0 ||
+    !onlyLowerHex(value.create_slot_sha256, 64) ||
+    value.create_slot_sha256 === ZERO_SHA256 ||
+    !onlyLowerHex(value.create_operation_plan_sha256, 64) ||
+    value.create_operation_plan_sha256 === ZERO_SHA256 ||
+    !onlyLowerHex(value.create_settlement_sha256, 64) ||
+    value.create_settlement_sha256 === ZERO_SHA256 ||
+    !onlyLowerHex(value.create_close_sha256, 64) ||
+    value.create_close_sha256 === ZERO_SHA256 ||
+    value.provider_contract_sha256 !==
+      CONTROLLED_BACKGROUND_PROVIDER_CONTRACT_SHA256 ||
+    !onlyLowerHex(value.provider_identity_sha256, 64) ||
+    value.provider_identity_sha256 === ZERO_SHA256 ||
+    value.provider_kind !== "controlled-background-fake" ||
+    value.provider_resource !== `synveda-cpr45-${value.fixture_id}` ||
+    value.provider_root_key !== `svb-${value.fixture_id.slice(0, 12)}` ||
+    value.retirement_contract_sha256 !==
+      CONTROLLED_BACKGROUND_RETIREMENT_CONTRACT_SHA256 ||
+    value.state_integration !== "mutation-journal-v2"
+  ) {
+    fail("background cleanup operation plan was refused", 70);
+  }
+}
+
+function backgroundCleanupOperationPlan({
+  createClose,
+  createEvidence,
+  createSettlement,
+  createSlot,
+}) {
+  if (
+    createClose === undefined ||
+    createSettlement === undefined ||
+    createSlot === undefined ||
+    createSlot.value.action !== "provider-create" ||
+    createSlot.value.operation_kind !== CONTROLLED_BACKGROUND_OPERATION_KIND ||
+    createClose.value.disposition !== "completed" ||
+    createClose.value.operation_evidence_sha256 !== digest(createSettlement.bytes) ||
+    createSettlement.value.disposition !== "complete-identity" ||
+    createSettlement.value.safe_code !== "none" ||
+    createEvidence?.providerIdentity?.sha256 !==
+      createSettlement.value.evidence_head_sha256
+  ) {
+    fail("background cleanup create authority was refused", 73);
+  }
+  const createPlan = createSlot.value.operation_plan;
+  const value = Object.freeze({
+    create_close_sha256: digest(createClose.bytes),
+    create_operation_plan_sha256: operationPlanSha256(createPlan),
+    create_settlement_sha256: digest(createSettlement.bytes),
+    create_slot_sequence: createSlot.value.journal_sequence,
+    create_slot_sha256: digest(createSlot.bytes),
+    evidence_directory: createPlan.evidence_directory,
+    fixture_id: createSlot.value.fixture_id,
+    provider_base: createPlan.provider_base,
+    provider_contract_sha256: createSlot.value.operation_contract_sha256,
+    provider_identity_sha256: createEvidence.providerIdentity.sha256,
+    provider_kind: "controlled-background-fake",
+    provider_resource: createPlan.provider_resource,
+    provider_root_key: createPlan.provider_root_key,
+    retirement_contract_sha256:
+      CONTROLLED_BACKGROUND_RETIREMENT_CONTRACT_SHA256,
+    schema: BACKGROUND_CLEANUP_OPERATION_PLAN_SCHEMA,
+    state_integration: "mutation-journal-v2",
+  });
+  validateBackgroundCleanupOperationPlan(value);
+  return value;
+}
+
 function validateMutationOperation(value) {
   if (value.action === "provider-create") {
     if (
@@ -963,6 +1141,25 @@ function validateMutationOperation(value) {
       value.operation_plan.provider_contract_sha256 !== value.operation_contract_sha256
     ) {
       fail("provider mutation operation binding was refused");
+    }
+    return;
+  }
+  if (
+    value.action === "provider-cleanup" &&
+    value.operation_kind === CONTROLLED_BACKGROUND_RETIREMENT_OPERATION_KIND &&
+    value.operation_contract_sha256 ===
+      CONTROLLED_BACKGROUND_RETIREMENT_CONTRACT_SHA256 &&
+    value.operation_plan !== null &&
+    !Array.isArray(value.operation_plan) &&
+    typeof value.operation_plan === "object"
+  ) {
+    validateBackgroundCleanupOperationPlan(value.operation_plan);
+    if (
+      value.operation_plan.fixture_id !== value.fixture_id ||
+      value.operation_plan.retirement_contract_sha256 !==
+        value.operation_contract_sha256
+    ) {
+      fail("background cleanup mutation operation binding was refused");
     }
     return;
   }
@@ -1082,7 +1279,7 @@ function recoveryFileName(slotSequence, sequence) {
 
 function recoveryChainRootSha256(fixtureId, leaseSha256, operation) {
   return digest(canonicalBytes({
-    action: "provider-create",
+    action: operation.action,
     fixture_id: fixtureId,
     lease_sha256: leaseSha256,
     operation_contract_sha256: operation.operation_contract_sha256,
@@ -1136,7 +1333,7 @@ function validateRecoveryClaims(claims, fixtureId, slot) {
       claim.value.slot_sequence < 0 ||
       claim.value.slot_sequence >= MAX_MUTATION_SLOTS ||
       claim.value.fixture_id !== fixtureId ||
-      claim.value.action !== "provider-create" ||
+      claim.value.action !== slot.value.action ||
       !onlyLowerHex(claim.value.lease_sha256, 64) ||
       claim.value.lease_sha256 !== (leaseSha256 ?? claims[0].value.lease_sha256) ||
       claim.value.chain_root_sha256 !==
@@ -1183,6 +1380,87 @@ function validateRecoveryClaims(claims, fixtureId, slot) {
     ) {
       fail("deterministic provider recovery observation was refused");
     }
+    if (slot.value.operation_kind === CONTROLLED_BACKGROUND_RETIREMENT_OPERATION_KIND) {
+      const cleanupStages = new Set([
+        "not-started",
+        "plan-publication-pending",
+        "retiring",
+        "progress-publication-pending",
+        "progress-complete",
+        "settlement-publication-pending",
+        "settled",
+      ]);
+      const expectedDisposition =
+        claim.value.observed_evidence_stage === "not-started"
+          ? "not-reached"
+          : claim.value.observed_evidence_stage === "settled"
+            ? "complete"
+            : "pending";
+      if (
+        slot.value.action !== "provider-cleanup" ||
+        !cleanupStages.has(claim.value.observed_evidence_stage) ||
+        claim.value.observed_effect_name !== "provider-cleanup" ||
+        claim.value.observed_effect_disposition !== expectedDisposition ||
+        claim.value.observed_evidence_head_sha256 !==
+          slot.value.operation_plan.provider_identity_sha256 ||
+        claim.value.observed_evidence_prefix_sha256 === ZERO_SHA256 ||
+        claim.value.observed_residual_sha256 === ZERO_SHA256
+      ) {
+        fail("background cleanup recovery observation was refused");
+      }
+      const observed = claimObservation(claim);
+      if (
+        observed.observed_settlement_sha256 !== ZERO_SHA256 &&
+        observed.observed_evidence_stage !== "settled"
+      ) {
+        fail("background cleanup recovery settlement observation was refused");
+      }
+      if (
+        previous !== undefined &&
+        previous.value.operation_kind ===
+          CONTROLLED_BACKGROUND_RETIREMENT_OPERATION_KIND
+      ) {
+        const previousObserved = claimObservation(previous);
+        const previousSettledPrefix =
+          previousObserved.observed_evidence_stage === "settled";
+        const previousOuterSettlement =
+          previousObserved.observed_settlement_sha256 !== ZERO_SHA256;
+        const stageRank = new Map([
+          ["not-started", 0],
+          ["plan-publication-pending", 1],
+          ["retiring", 2],
+          ["progress-publication-pending", 3],
+          ["progress-complete", 4],
+          ["settlement-publication-pending", 5],
+          ["settled", 6],
+        ]);
+        const previousStage = previousObserved.observed_evidence_stage;
+        const currentStage = observed.observed_evidence_stage;
+        const publicationRollback = new Set([
+          "plan-publication-pending:not-started",
+          "progress-publication-pending:retiring",
+          "settlement-publication-pending:progress-complete",
+        ]).has(`${previousStage}:${currentStage}`);
+        if (
+          (stageRank.get(currentStage) < stageRank.get(previousStage) &&
+            !publicationRollback) ||
+          (previousSettledPrefix &&
+            (observed.observed_evidence_stage !== "settled" ||
+              canonical({
+                ...observed,
+                observed_settlement_sha256: ZERO_SHA256,
+              }) !==
+                canonical({
+                  ...previousObserved,
+                  observed_settlement_sha256: ZERO_SHA256,
+                }))) ||
+          (previousOuterSettlement &&
+            canonical(observed) !== canonical(previousObserved))
+        ) {
+          fail("background cleanup recovery settlement history was refused");
+        }
+      }
+    }
     if (
       (previous === undefined &&
         (claim.value.sequence !== 0 || claim.value.parent_sha256 !== ZERO_SHA256)) ||
@@ -1199,12 +1477,17 @@ function validateRecoveryClaims(claims, fixtureId, slot) {
 
 function authoritativeRecoveriesAtClose(recoveries, close, slot) {
   if (close.value.authority === "owner") {
-    return close.value.authority_sha256 === digest(slot.bytes) ? [] : undefined;
+    return close.value.authority_sha256 === digest(slot.bytes) &&
+      recoveries.length === 0
+      ? []
+      : undefined;
   }
   const authorityIndex = recoveries.findIndex(
     (recovery) => digest(recovery.bytes) === close.value.authority_sha256,
   );
-  return authorityIndex === -1 ? undefined : recoveries.slice(0, authorityIndex + 1);
+  return authorityIndex !== -1 && authorityIndex === recoveries.length - 1
+    ? recoveries
+    : undefined;
 }
 
 function validateMutationCloseValue(value, slot, fixtureId) {
@@ -1250,7 +1533,7 @@ function validateMutationCloseValue(value, slot, fixtureId) {
   }
 }
 
-function validateMutationOperationSettlement(value, slot, fixtureId) {
+function validateBackgroundCreateSettlement(value, slot, fixtureId) {
   exactKeys(
     value,
     [
@@ -1285,7 +1568,7 @@ function validateMutationOperationSettlement(value, slot, fixtureId) {
   validatePendingEvidenceSnapshot(value.pending_evidence_publication);
   validatePendingPrivateSnapshots(value.pending_private_publications);
   if (
-    value.schema !== MUTATION_OPERATION_SCHEMA ||
+    value.schema !== BACKGROUND_CREATE_SETTLEMENT_SCHEMA ||
     value.fixture_id !== fixtureId ||
     slot.value.action !== "provider-create" ||
     slot.value.operation_kind !== CONTROLLED_BACKGROUND_OPERATION_KIND ||
@@ -1342,6 +1625,88 @@ function validateMutationOperationSettlement(value, slot, fixtureId) {
   ) {
     fail("mutation operation settlement was refused");
   }
+}
+
+function validateBackgroundCleanupSettlement(value, slot, fixtureId) {
+  exactKeys(
+    value,
+    [
+      "authority",
+      "authority_sha256",
+      "cleanup_plan_sha256",
+      "disposition",
+      "effect_disposition",
+      "effect_name",
+      "evidence_head_sha256",
+      "evidence_prefix_sha256",
+      "evidence_stage",
+      "fixture_id",
+      "operation_contract_sha256",
+      "operation_kind",
+      "operation_plan_sha256",
+      "provider_retirement_settlement_sha256",
+      "residual_sha256",
+      "result_receipt_authorized",
+      "root_disposition",
+      "safe_code",
+      "schema",
+      "slot_sequence",
+      "slot_sha256",
+      "source_head_sha256",
+    ],
+    "background cleanup settlement",
+  );
+  if (
+    value.schema !== BACKGROUND_CLEANUP_SETTLEMENT_SCHEMA ||
+    value.fixture_id !== fixtureId ||
+    slot.value.action !== "provider-cleanup" ||
+    slot.value.operation_kind !==
+      CONTROLLED_BACKGROUND_RETIREMENT_OPERATION_KIND ||
+    value.slot_sequence !== slot.value.journal_sequence ||
+    value.slot_sha256 !== digest(slot.bytes) ||
+    value.operation_kind !== slot.value.operation_kind ||
+    value.operation_contract_sha256 !== slot.value.operation_contract_sha256 ||
+    value.operation_plan_sha256 !== operationPlanSha256(slot.value.operation_plan) ||
+    !new Set(["owner", "recovery"]).has(value.authority) ||
+    !onlyLowerHex(value.authority_sha256, 64) ||
+    !onlyLowerHex(value.cleanup_plan_sha256, 64) ||
+    value.cleanup_plan_sha256 === ZERO_SHA256 ||
+    value.disposition !== "complete-retirement" ||
+    value.effect_disposition !== "complete" ||
+    value.effect_name !== "provider-cleanup" ||
+    value.evidence_head_sha256 !==
+      slot.value.operation_plan.provider_identity_sha256 ||
+    !onlyLowerHex(value.evidence_prefix_sha256, 64) ||
+    value.evidence_prefix_sha256 === ZERO_SHA256 ||
+    value.evidence_stage !== "settled" ||
+    !onlyLowerHex(value.provider_retirement_settlement_sha256, 64) ||
+    value.provider_retirement_settlement_sha256 === ZERO_SHA256 ||
+    !onlyLowerHex(value.residual_sha256, 64) ||
+    value.residual_sha256 === ZERO_SHA256 ||
+    value.result_receipt_authorized !== true ||
+    value.root_disposition !== "retired" ||
+    value.safe_code !== "none" ||
+    value.source_head_sha256 !== slot.value.intent_receipt_sha256
+  ) {
+    fail("background cleanup settlement was refused");
+  }
+}
+
+function validateMutationOperationSettlement(value, slot, fixtureId) {
+  if (
+    slot.value.action === "provider-create" &&
+    slot.value.operation_kind === CONTROLLED_BACKGROUND_OPERATION_KIND
+  ) {
+    return validateBackgroundCreateSettlement(value, slot, fixtureId);
+  }
+  if (
+    slot.value.action === "provider-cleanup" &&
+    slot.value.operation_kind ===
+      CONTROLLED_BACKGROUND_RETIREMENT_OPERATION_KIND
+  ) {
+    return validateBackgroundCleanupSettlement(value, slot, fixtureId);
+  }
+  fail("mutation operation settlement action was refused");
 }
 
 function validatePendingEvidenceSnapshot(value) {
@@ -1968,7 +2333,12 @@ function validatePlanRunInventory(run, stateMetadata) {
   }
   for (const [sequence, claims] of recoveriesBySlot) {
     const slot = mutationSlots[sequence];
-    if (slot.value.action !== "provider-create" || claims.length > MAX_MUTATION_RECOVERIES) {
+    const recoverableAction =
+      slot.value.action === "provider-create" ||
+      (slot.value.action === "provider-cleanup" &&
+        slot.value.operation_kind ===
+          CONTROLLED_BACKGROUND_RETIREMENT_OPERATION_KIND);
+    if (!recoverableAction || claims.length > MAX_MUTATION_RECOVERIES) {
       fail("mutation recovery action was refused");
     }
     validateRecoveryClaims(claims, slot.value.fixture_id, slot);
@@ -1990,6 +2360,7 @@ function validatePlanRunInventory(run, stateMetadata) {
     environmentPublication,
     mutationCloses,
     mutationOperations,
+    operationsBySlot,
     mutationLease: activeMutationSlot,
     mutationRecoveries: activeMutationRecoveries,
     mutationSlots,
@@ -2079,6 +2450,9 @@ function loadState(roots, checkSource, allowCompetingStaging = false) {
     const lease = slot.value;
     const sourceReceipt = receipts[lease.source_sequence];
     const providerIntentReceipt = receipts[lease.source_sequence + 1];
+    const controlledCleanup =
+      lease.action === "provider-cleanup" &&
+      lease.operation_kind === CONTROLLED_BACKGROUND_RETIREMENT_OPERATION_KIND;
     if (
       sourceReceipt === undefined ||
       digest(canonicalBytes(sourceReceipt)) !== lease.source_head_sha256 ||
@@ -2094,7 +2468,16 @@ function loadState(roots, checkSource, allowCompetingStaging = false) {
               (providerIntentReceipt.phase === "provider-create-intent" &&
                 digest(canonicalBytes(providerIntentReceipt)) === lease.intent_receipt_sha256)
             )))) ||
-      (lease.action !== "provider-create" && lease.intent_receipt_sha256 !== ZERO_SHA256)
+      (controlledCleanup &&
+        (sourceReceipt.phase !== "project-cleanup-passed" ||
+          lease.intent_receipt_sha256 === ZERO_SHA256 ||
+          (providerIntentReceipt !== undefined &&
+            (providerIntentReceipt.phase !== "provider-cleanup-intent" ||
+              digest(canonicalBytes(providerIntentReceipt)) !==
+                lease.intent_receipt_sha256)))) ||
+      (lease.action !== "provider-create" &&
+        !controlledCleanup &&
+        lease.intent_receipt_sha256 !== ZERO_SHA256)
     ) {
       fail("mutation slot receipt binding was refused");
     }
@@ -2121,6 +2504,9 @@ function loadState(roots, checkSource, allowCompetingStaging = false) {
     if (close === undefined) continue;
     const resultReceipt = receipts[close.value.result_sequence];
     const resultDelta = close.value.result_sequence - lease.source_sequence;
+    const boundOperation = inventory.operationsBySlot.get(sequence);
+    const expectedOperationEvidenceSha256 =
+      boundOperation === undefined ? ZERO_SHA256 : digest(boundOperation.bytes);
     const slotRecoveries = inventory.allMutationRecoveries.filter(
       (recovery) => recovery.value.slot_sequence === sequence,
     );
@@ -2165,11 +2551,17 @@ function loadState(roots, checkSource, allowCompetingStaging = false) {
           (resultDelta === 0 && sourceReceipt.phase !== "finalize-passed") ||
           close.value.result_environment_sha256 === ZERO_SHA256)) ||
       (close.value.disposition === "completed" &&
+        controlledCleanup &&
+        (resultDelta !== 2 ||
+          providerIntentReceipt?.phase !== "provider-cleanup-intent" ||
+          resultReceipt.phase !== "provider-cleanup-passed")) ||
+      (close.value.disposition === "completed" &&
+        !controlledCleanup &&
         new Set(["append-receipt", "provider-cleanup"]).has(lease.action) &&
         (resultDelta > 2 ||
           (resultDelta === 2 && !resultReceipt.phase.endsWith("-failed")))) ||
-      (lease.action !== "provider-create" &&
-        close.value.operation_evidence_sha256 !== ZERO_SHA256)
+      close.value.operation_evidence_sha256 !==
+        expectedOperationEvidenceSha256
     ) {
       fail("mutation close receipt binding was refused");
     }
@@ -2207,9 +2599,19 @@ function loadState(roots, checkSource, allowCompetingStaging = false) {
   if (inventory.mutationLease !== undefined) {
     const lease = inventory.mutationLease.value;
     const delta = receiptState.head.sequence - lease.source_sequence;
+    const controlledCleanup =
+      lease.action === "provider-cleanup" &&
+      lease.operation_kind === CONTROLLED_BACKGROUND_RETIREMENT_OPERATION_KIND;
     if (
       delta < 0 ||
-      (new Set(["append-receipt", "provider-cleanup"]).has(lease.action) &&
+      (controlledCleanup &&
+        (delta > 2 ||
+          (delta === 1 &&
+            receiptState.head.phase !== "provider-cleanup-intent") ||
+          (delta === 2 &&
+            receiptState.head.phase !== "provider-cleanup-passed"))) ||
+      (!controlledCleanup &&
+        new Set(["append-receipt", "provider-cleanup"]).has(lease.action) &&
         (delta > 2 ||
           (delta === 2 && !receiptState.head.phase.endsWith("-failed")))) ||
       (lease.action === "provider-create" &&
@@ -2269,6 +2671,10 @@ function loadState(roots, checkSource, allowCompetingStaging = false) {
     fail("provider mutation slot was ambiguous");
   }
   const providerSlot = providerSlots[0];
+  const cleanupSlots = inventory.mutationSlots.filter(
+    (slot) => slot.value.action === "provider-cleanup",
+  );
+  const cleanupSlot = cleanupSlots.at(-1);
   const providerClose =
     providerSlot === undefined
       ? undefined
@@ -2295,6 +2701,7 @@ function loadState(roots, checkSource, allowCompetingStaging = false) {
   const providerEntries = readdirSync(inventory.providerDirectory).sort();
   let providerState;
   let operationSettlement;
+  let cleanupSettlement;
   if (providerSlot === undefined) {
     if (providerEntries.length !== 0 || inventory.mutationOperations.length !== 0) {
       fail("provider evidence was outside a mutation slot");
@@ -2352,27 +2759,76 @@ function loadState(roots, checkSource, allowCompetingStaging = false) {
     ) {
       fail("background provider intent binding was refused");
     }
+    operationSettlement = inventory.operationsBySlot.get(
+      providerSlot.value.journal_sequence,
+    );
+    const controlledCleanup =
+      cleanupSlot?.value.operation_kind ===
+        CONTROLLED_BACKGROUND_RETIREMENT_OPERATION_KIND;
+    if (cleanupSlot !== undefined && !controlledCleanup) {
+      fail("background provider cleanup requires dedicated ownership evidence");
+    }
     let prefix;
+    let createEvidence;
     try {
-      prefix = inspectControlledBackgroundProviderPrefix(
-        inventory.providerDirectory,
-        candidate.value.run_id,
-        {
-          expectedCreateBindings: bindings,
-          providerBase: operationPlan.provider_base.path,
-          revalidateCurrentToolchain: false,
-        },
-      );
+      if (controlledCleanup) {
+        createEvidence = inspectControlledBackgroundProvider(
+          inventory.providerDirectory,
+          candidate.value.run_id,
+          {
+            expectedCreateBindings: bindings,
+            revalidateCurrentToolchain: false,
+          },
+        );
+        if (operationSettlement === undefined) {
+          fail("background cleanup lacked its completed create settlement");
+        }
+        prefix = Object.freeze({
+          effectFrontier: Object.freeze({
+            disposition: operationSettlement.value.effect_disposition,
+            effect: operationSettlement.value.effect_name,
+          }),
+          evidenceHeadSha256: operationSettlement.value.evidence_head_sha256,
+          evidencePrefixSha256: operationSettlement.value.evidence_prefix_sha256,
+          evidenceStage: operationSettlement.value.evidence_stage,
+          pendingPublication:
+            operationSettlement.value.pending_evidence_publication ?? undefined,
+          residual: Object.freeze({
+            controller_presence: operationSettlement.value.controller_presence,
+            hostagent_presence: operationSettlement.value.hostagent_presence,
+            private_publications:
+              operationSettlement.value.pending_private_publications,
+            root_disposition: operationSettlement.value.root_disposition,
+            sockets: operationSettlement.value.sockets,
+            static_root_identity_sha256:
+              operationSettlement.value.static_root_identity_sha256,
+          }),
+          residualSha256: operationSettlement.value.residual_sha256,
+        });
+      } else {
+        prefix = inspectControlledBackgroundProviderPrefix(
+          inventory.providerDirectory,
+          candidate.value.run_id,
+          {
+            expectedCreateBindings: bindings,
+            providerBase: operationPlan.provider_base.path,
+            revalidateCurrentToolchain: false,
+          },
+        );
+        if (operationSettlement?.value.disposition === "complete-identity") {
+          createEvidence = inspectControlledBackgroundProvider(
+            inventory.providerDirectory,
+            candidate.value.run_id,
+            {
+              expectedCreateBindings: bindings,
+              revalidateCurrentToolchain: false,
+            },
+          );
+        }
+      }
     } catch (error) {
       if (error instanceof ProviderProcessContractFailure) fail(error.message, error.exitStatus);
       throw error;
-    }
-    operationSettlement = inventory.mutationOperations.find(
-      (operation) =>
-        operation.value.slot_sequence === providerSlot.value.journal_sequence,
-    );
-    if (inventory.mutationOperations.length !== Number(operationSettlement !== undefined)) {
-      fail("mutation operation settlement was outside the background provider slot");
     }
     const historicalResourceCollision =
       operationSettlement?.value.safe_code === "resource-collision";
@@ -2569,7 +3025,8 @@ function loadState(roots, checkSource, allowCompetingStaging = false) {
       providerClose !== undefined &&
       ((providerClose.value.disposition === "completed" && operationSettlement === undefined) ||
         providerClose.value.operation_evidence_sha256 !== operationEvidenceSha256 ||
-        (providerClose.value.disposition === "aborted-before-effect" &&
+        (!controlledCleanup &&
+          providerClose.value.disposition === "aborted-before-effect" &&
           (operationSettlement !== undefined ||
             prefix.evidenceStage !== "empty" ||
             prefix.pendingPublication !== undefined ||
@@ -2585,8 +3042,12 @@ function loadState(roots, checkSource, allowCompetingStaging = false) {
     providerState = Object.freeze({
       bindings,
       contract: "controlled-background-fake",
+      createClose: providerClose,
+      createEvidence,
+      createSlot: providerSlot,
       operationEvidenceSha256,
       operationPlan,
+      passedReceipt: providerPassedReceipt,
       prefix,
       settlement: operationSettlement,
     });
@@ -2600,11 +3061,237 @@ function loadState(roots, checkSource, allowCompetingStaging = false) {
   ) {
     fail("deterministic provider close operation evidence was refused");
   }
+  let cleanupState = Object.freeze({
+    contract: "journal-only",
+    operationEvidenceSha256: ZERO_SHA256,
+  });
+  if (
+    cleanupSlot?.value.operation_kind ===
+      CONTROLLED_BACKGROUND_RETIREMENT_OPERATION_KIND
+  ) {
+    if (
+      providerState.contract !== "controlled-background-fake" ||
+      providerState.createClose === undefined ||
+      providerState.createEvidence === undefined ||
+      providerState.settlement === undefined
+    ) {
+      fail("background cleanup create authority was refused");
+    }
+    const expectedOperationPlan = backgroundCleanupOperationPlan({
+      createClose: providerState.createClose,
+      createEvidence: providerState.createEvidence,
+      createSettlement: providerState.settlement,
+      createSlot: providerState.createSlot,
+    });
+    for (const superseded of cleanupSlots.slice(0, -1)) {
+      const supersededClose = mutationClosesBySlot.get(
+        superseded.value.journal_sequence,
+      );
+      if (
+        superseded.value.operation_kind !==
+          CONTROLLED_BACKGROUND_RETIREMENT_OPERATION_KIND ||
+        canonical(superseded.value.operation_plan) !==
+          canonical(expectedOperationPlan) ||
+        supersededClose?.value.disposition !== "aborted-before-effect" ||
+        inventory.operationsBySlot.has(superseded.value.journal_sequence)
+      ) {
+        fail("superseded background cleanup slot was refused");
+      }
+    }
+    if (
+      canonical(cleanupSlot.value.operation_plan) !==
+      canonical(expectedOperationPlan)
+    ) {
+      fail("background cleanup operation plan binding was refused");
+    }
+    const cleanupIntentCandidate =
+      receipts[cleanupSlot.value.source_sequence + 1];
+    const cleanupIntentReceipt =
+      cleanupIntentCandidate?.phase === "provider-cleanup-intent"
+        ? cleanupIntentCandidate
+        : undefined;
+    const cleanupPassedCandidate =
+      receipts[cleanupSlot.value.source_sequence + 2];
+    const cleanupPassedReceipt =
+      cleanupPassedCandidate?.phase === "provider-cleanup-passed"
+        ? cleanupPassedCandidate
+        : undefined;
+    const cleanupClose = mutationClosesBySlot.get(
+      cleanupSlot.value.journal_sequence,
+    );
+    const bindings = backgroundCleanupBindings(cleanupSlot);
+    let prefix;
+    try {
+      prefix = inspectControlledBackgroundRetirementPrefix(
+        expectedOperationPlan.evidence_directory.path,
+        candidate.value.run_id,
+        {
+          expectedBindings: bindings,
+          providerBase: expectedOperationPlan.provider_base.path,
+        },
+      );
+    } catch (error) {
+      if (error instanceof ProviderProcessContractFailure) {
+        fail(error.message, error.exitStatus);
+      }
+      throw error;
+    }
+    cleanupSettlement = inventory.operationsBySlot.get(
+      cleanupSlot.value.journal_sequence,
+    );
+    if (
+      cleanupIntentReceipt === undefined &&
+      (prefix.cleanupStage !== "not-started" ||
+        cleanupSettlement !== undefined)
+    ) {
+      fail("background cleanup evidence preceded its intent");
+    }
+    if (
+      cleanupIntentReceipt !== undefined &&
+      canonical(cleanupIntentReceipt.result) !==
+        canonical(backgroundCleanupIntentResult(cleanupSlot))
+    ) {
+      fail("background cleanup intent binding was refused");
+    }
+    if (cleanupSettlement !== undefined) {
+      const value = cleanupSettlement.value;
+      const recoveries = cleanupClose === undefined
+        ? inventory.allMutationRecoveries.filter(
+            (recovery) =>
+              recovery.value.slot_sequence ===
+              cleanupSlot.value.journal_sequence,
+          )
+        : authoritativeRecoveriesBySlot.get(
+            cleanupSlot.value.journal_sequence,
+          ) ?? [];
+      const settlementSha256 = digest(cleanupSettlement.bytes);
+      const authorityIndex = recoveries.findIndex(
+        (recovery) => digest(recovery.bytes) === value.authority_sha256,
+      );
+      const authorityClaim =
+        authorityIndex === -1 ? undefined : recoveries[authorityIndex];
+      const settledObservation = settlementObservation(cleanupSettlement);
+      const claimsBindSettlement = recoveries.every((recovery, index) => {
+        const observed = claimObservation(recovery);
+        if (observed.observed_settlement_sha256 === ZERO_SHA256) {
+          return value.authority === "recovery" && index <= authorityIndex;
+        }
+        return (
+          observed.observed_settlement_sha256 === settlementSha256 &&
+          canonical(observed) === canonical(settledObservation) &&
+          (value.authority === "owner" || index > authorityIndex)
+        );
+      });
+      const authorityValid =
+        (value.authority === "owner" &&
+          value.authority_sha256 === digest(cleanupSlot.bytes) &&
+          recoveries.every(
+            (recovery) =>
+              canonical(claimObservation(recovery)) ===
+              canonical(settledObservation),
+          )) ||
+        (value.authority === "recovery" &&
+          authorityClaim !== undefined &&
+          authorityIndex ===
+            recoveries.findLastIndex(
+              (recovery) =>
+                claimObservation(recovery).observed_settlement_sha256 ===
+                ZERO_SHA256,
+            ) &&
+          canonical(claimObservation(authorityClaim)) ===
+            canonical({
+              ...settledObservation,
+              observed_settlement_sha256: ZERO_SHA256,
+            }));
+      if (
+        !authorityValid ||
+        !claimsBindSettlement ||
+        value.cleanup_plan_sha256 !== prefix.cleanupPlanSha256 ||
+        value.evidence_head_sha256 !== prefix.createEvidenceHeadSha256 ||
+        value.evidence_prefix_sha256 !== prefix.observationSha256 ||
+        value.provider_retirement_settlement_sha256 !==
+          prefix.providerSettlementSha256 ||
+        value.residual_sha256 !== prefix.remainingInventorySha256 ||
+        prefix.cleanupStage !== "settled" ||
+        prefix.rootDisposition !== "retired" ||
+        prefix.providerSettlementPublication?.disposition !== "final" ||
+        prefix.pendingProgress !== undefined
+      ) {
+        fail("background cleanup settlement authority was refused");
+      }
+    } else {
+      const recoveries = inventory.allMutationRecoveries.filter(
+        (recovery) =>
+          recovery.value.slot_sequence === cleanupSlot.value.journal_sequence,
+      );
+      if (
+        recoveries.some(
+          (recovery) =>
+            claimObservation(recovery).observed_settlement_sha256 !==
+            ZERO_SHA256,
+        )
+      ) {
+        fail("background cleanup recovery observation was refused");
+      }
+    }
+    const operationEvidenceSha256 =
+      cleanupSettlement === undefined
+        ? ZERO_SHA256
+        : digest(cleanupSettlement.bytes);
+    if (
+      cleanupPassedReceipt !== undefined &&
+      (cleanupSettlement === undefined ||
+        canonical(cleanupPassedReceipt.result) !==
+          canonical(
+            backgroundCleanupPassedResult(cleanupSlot, cleanupSettlement),
+          ))
+    ) {
+      fail("background cleanup result binding was refused");
+    }
+    if (
+      cleanupPassedReceipt !== undefined &&
+      cleanupIntentReceipt === undefined
+    ) {
+      fail("background cleanup pass lacked its intent");
+    }
+    if (
+      cleanupClose !== undefined &&
+      ((cleanupClose.value.disposition === "completed" &&
+        (cleanupSettlement === undefined ||
+          cleanupPassedReceipt === undefined)) ||
+        cleanupClose.value.operation_evidence_sha256 !==
+          operationEvidenceSha256 ||
+        (cleanupClose.value.disposition === "aborted-before-effect" &&
+          (cleanupSettlement !== undefined ||
+            cleanupIntentReceipt !== undefined ||
+            prefix.cleanupStage !== "not-started")))
+    ) {
+      fail("background cleanup close operation evidence was refused");
+    }
+    cleanupState = Object.freeze({
+      bindings,
+      close: cleanupClose,
+      contract: "controlled-background-retirement",
+      intentReceipt: cleanupIntentReceipt,
+      operationEvidenceSha256,
+      operationPlan: expectedOperationPlan,
+      passedReceipt: cleanupPassedReceipt,
+      prefix,
+      settlement: cleanupSettlement,
+      slot: cleanupSlot,
+    });
+  } else if (
+    cleanupSlot !== undefined &&
+    providerState.contract === "controlled-background-fake"
+  ) {
+    fail("background provider cleanup requires dedicated ownership evidence");
+  }
   if (
     providerState.contract === "controlled-background-fake" &&
     receipts.some(
       (receipt) =>
-        receipt.phase.startsWith("provider-cleanup-") ||
+        (receipt.phase.startsWith("provider-cleanup-") &&
+          cleanupState.contract !== "controlled-background-retirement") ||
         receipt.phase.startsWith("failure-cleanup-") ||
         receipt.phase === "finalize-passed",
     )
@@ -2700,6 +3387,8 @@ function loadState(roots, checkSource, allowCompetingStaging = false) {
     mutationStages: inventory.mutationStages,
     pendingPublication: inventory.pendingPublication,
     operationSettlement,
+    cleanupSettlement,
+    cleanupState,
     providerState,
   };
 }
@@ -3209,6 +3898,29 @@ function assertMutationLeaseHeld(roots, held, allowRecovery = false) {
   return state;
 }
 
+function operationSettlementForSlot(state, slot) {
+  if (slot === undefined) return undefined;
+  if (
+    slot.value.action === "provider-create" &&
+    slot.value.operation_kind === CONTROLLED_BACKGROUND_OPERATION_KIND
+  ) {
+    return state.providerState.settlement;
+  }
+  if (
+    slot.value.action === "provider-cleanup" &&
+    slot.value.operation_kind ===
+      CONTROLLED_BACKGROUND_RETIREMENT_OPERATION_KIND
+  ) {
+    return state.cleanupState.settlement;
+  }
+  return undefined;
+}
+
+function operationEvidenceForSlot(state, slot) {
+  const settlement = operationSettlementForSlot(state, slot);
+  return settlement === undefined ? ZERO_SHA256 : digest(settlement.bytes);
+}
+
 function publishMutationClose(
   roots,
   state,
@@ -3218,10 +3930,7 @@ function publishMutationClose(
   publicationHolds = {},
   operationEvidenceSha256 = ZERO_SHA256,
 ) {
-  const expectedOperationEvidenceSha256 =
-    slot.value.action === "provider-create"
-      ? state.providerState.operationEvidenceSha256
-      : ZERO_SHA256;
+  const expectedOperationEvidenceSha256 = operationEvidenceForSlot(state, slot);
   if (operationEvidenceSha256 !== expectedOperationEvidenceSha256) {
     fail("mutation close operation evidence was refused", 70);
   }
@@ -3234,12 +3943,29 @@ function publishMutationClose(
     fail("mutation close ownership was refused", 73);
   }
   if (
+    slot.value.operation_kind ===
+      CONTROLLED_BACKGROUND_RETIREMENT_OPERATION_KIND &&
+    disposition === "completed"
+  ) {
+    assertBackgroundCleanupComplete(roots, state);
+  }
+  if (
     slot.value.operation_kind === CONTROLLED_BACKGROUND_OPERATION_KIND &&
     disposition === "aborted-before-effect" &&
     (state.operationSettlement !== undefined ||
       !backgroundPrefixIsEmpty(state.providerState.prefix))
   ) {
     fail("background provider close disposition was refused", 73);
+  }
+  if (
+    slot.value.operation_kind ===
+      CONTROLLED_BACKGROUND_RETIREMENT_OPERATION_KIND &&
+    disposition === "aborted-before-effect" &&
+    (state.cleanupState.settlement !== undefined ||
+      state.cleanupState.intentReceipt !== undefined ||
+      state.cleanupState.prefix.cleanupStage !== "not-started")
+  ) {
+    fail("background cleanup close disposition was refused", 73);
   }
   const result = state.receiptState;
   if (
@@ -3269,7 +3995,11 @@ function publishMutationClose(
         "provider-create-passed",
       ]).has(result.head.phase)) ||
       (slot.value.action === "finalize-environment" &&
-        result.head.phase !== "finalize-passed"))
+        result.head.phase !== "finalize-passed") ||
+      (slot.value.action === "provider-cleanup" &&
+        slot.value.operation_kind ===
+          CONTROLLED_BACKGROUND_RETIREMENT_OPERATION_KIND &&
+        result.head.phase !== "provider-cleanup-passed"))
   ) {
     fail("mutation close result was refused", 70);
   }
@@ -3300,10 +4030,14 @@ function publishMutationClose(
     const current = reassertAuthority();
     const currentEnvironmentSha256 =
       current.environment === undefined ? ZERO_SHA256 : digest(current.environment.bytes);
-    const currentOperationEvidenceSha256 =
-      slot.value.action === "provider-create"
-        ? current.providerState.operationEvidenceSha256
-        : ZERO_SHA256;
+    const currentOperationEvidenceSha256 = operationEvidenceForSlot(current, slot);
+    if (
+      slot.value.operation_kind ===
+        CONTROLLED_BACKGROUND_RETIREMENT_OPERATION_KIND &&
+      close.disposition === "completed"
+    ) {
+      assertBackgroundCleanupComplete(roots, current);
+    }
     if (
       current.mutationLease === undefined ||
       !current.mutationLease.bytes.equals(slot.bytes) ||
@@ -3320,7 +4054,13 @@ function publishMutationClose(
       (slot.value.operation_kind === CONTROLLED_BACKGROUND_OPERATION_KIND &&
         close.disposition === "aborted-before-effect" &&
         (current.operationSettlement !== undefined ||
-          !backgroundPrefixIsEmpty(current.providerState.prefix)))
+          !backgroundPrefixIsEmpty(current.providerState.prefix))) ||
+      (slot.value.operation_kind ===
+          CONTROLLED_BACKGROUND_RETIREMENT_OPERATION_KIND &&
+        close.disposition === "aborted-before-effect" &&
+        (current.cleanupState.settlement !== undefined ||
+          current.cleanupState.intentReceipt !== undefined ||
+          current.cleanupState.prefix.cleanupStage !== "not-started"))
     ) {
       fail("mutation close authority changed", 73);
     }
@@ -3362,9 +4102,15 @@ function closeMutationLease(
           roots,
           () => assertMutationLeaseHeld(roots, held, false),
         )
-      : () => {
+      : held.lease.operation_kind ===
+          CONTROLLED_BACKGROUND_RETIREMENT_OPERATION_KIND
+        ? backgroundCleanupReceiptReassertion(
+            roots,
+            () => assertMutationLeaseHeld(roots, held, false),
+          )
+        : () => {
           assertMutationLeaseHeld(roots, held, false);
-        };
+          };
   reconcileReceiptPublication(roots, receiptAuthority);
   reconcileEnvironmentPublication(roots);
   const state = assertMutationLeaseHeld(roots, held, false);
@@ -3486,6 +4232,51 @@ function validateBackgroundProviderAdapter(adapter) {
   }
 }
 
+function validateBackgroundCleanupAdapter(adapter) {
+  exactKeys(
+    adapter,
+    BACKGROUND_CLEANUP_ADAPTER_FIELDS,
+    "background cleanup adapter",
+  );
+  const holds = [
+    adapter.after_claim_hold_milliseconds,
+    adapter.after_intent_hold_milliseconds,
+    adapter.after_plan_hold_milliseconds,
+    adapter.after_result_hold_milliseconds,
+    adapter.after_retirement_hold_milliseconds,
+    adapter.after_settlement_hold_milliseconds,
+    adapter.after_slot_hold_milliseconds,
+    adapter.before_close_hold_milliseconds,
+    adapter.close_prelink_hold_milliseconds,
+  ];
+  const optionalSequences = [
+    adapter.crash_after_delete_sequence,
+    adapter.crash_after_delete_syscall_sequence,
+    adapter.stop_after_sequence,
+  ];
+  if (
+    adapter.kind !== "controlled-background-provider-cleanup-v1" ||
+    holds.some(
+      (milliseconds) =>
+        !Number.isSafeInteger(milliseconds) ||
+        milliseconds < 0 ||
+        milliseconds > 30_000,
+    ) ||
+    optionalSequences.some(
+      (sequence) =>
+        sequence !== null &&
+        (!Number.isSafeInteger(sequence) || sequence < 0),
+    ) ||
+    (adapter.crash_after_delete_sequence !== null &&
+      adapter.crash_after_delete_sequence < 1) ||
+    (adapter.crash_after_delete_syscall_sequence !== null &&
+      adapter.crash_after_delete_syscall_sequence < 1) ||
+    typeof adapter.crash_after_hostagent_settlement !== "boolean"
+  ) {
+    fail("background cleanup adapter was refused", 64);
+  }
+}
+
 function providerIntentResult(fixtureId) {
   return {
     operation_kind: DETERMINISTIC_PROVIDER_OPERATION_KIND,
@@ -3533,6 +4324,50 @@ function backgroundProviderFailureResult(settlement, phase = "provider-create-fa
     });
   }
   return refusedProviderResult(settlement.value.safe_code);
+}
+
+function backgroundCleanupIntentResult(slot) {
+  return Object.freeze({
+    operation_kind: slot.value.operation_kind,
+    operation_plan_sha256: operationPlanSha256(slot.value.operation_plan),
+    provider_resource: slot.value.operation_plan.provider_resource,
+    retirement_contract_sha256: slot.value.operation_contract_sha256,
+    scope: "exact-receipt-owned-only",
+  });
+}
+
+function backgroundCleanupPassedResult(slot, settlement) {
+  return Object.freeze({
+    context_absent: true,
+    inert_staging_absent: true,
+    operation_evidence_sha256: digest(settlement.bytes),
+    operation_kind: slot.value.operation_kind,
+    operation_plan_sha256: operationPlanSha256(slot.value.operation_plan),
+    provider_absent: true,
+    retirement_contract_sha256: slot.value.operation_contract_sha256,
+    runtime_root_absent: true,
+    socket_absent: true,
+    source_closure_unchanged: true,
+  });
+}
+
+function backgroundCleanupPrefixObservation(prefix, settlement) {
+  const disposition =
+    prefix.cleanupStage === "not-started"
+      ? "not-reached"
+      : prefix.cleanupStage === "settled"
+        ? "complete"
+        : "pending";
+  return Object.freeze({
+    observed_effect_disposition: disposition,
+    observed_effect_name: "provider-cleanup",
+    observed_evidence_head_sha256: prefix.createEvidenceHeadSha256,
+    observed_evidence_prefix_sha256: prefix.observationSha256,
+    observed_evidence_stage: prefix.cleanupStage,
+    observed_residual_sha256: prefix.remainingInventorySha256,
+    observed_settlement_sha256:
+      settlement === undefined ? ZERO_SHA256 : digest(settlement.bytes),
+  });
 }
 
 function validateBackgroundProspectiveReceipt(state, receipt) {
@@ -4027,6 +4862,868 @@ export async function executeBackgroundProviderCreateForExecutor(argumentsValue)
   });
 }
 
+function exactActiveStateInventory(roots, state) {
+  return canonical(readdirSync(roots.stateBase).sort()) ===
+    canonical([`.run-${state.candidate.run_id}`, "active"].sort());
+}
+
+function assertBackgroundCleanupComplete(roots, state) {
+  const cleanup = state.cleanupState;
+  const prefix = cleanup.prefix;
+  if (
+    cleanup.contract !== "controlled-background-retirement" ||
+    prefix.cleanupStage !== "settled" ||
+    prefix.rootDisposition !== "retired" ||
+    prefix.pendingProgress !== undefined ||
+    prefix.providerSettlementPublication?.disposition !== "final"
+  ) {
+    fail("background cleanup lifecycle evidence was refused", 73);
+  }
+  if (
+    prefix.providerSettlement === undefined ||
+    prefix.providerSettlement.value.result_receipt_authorized !== false
+  ) {
+    fail("background cleanup inner settlement was refused", 73);
+  }
+  if (
+    prefix.processResidual.controller_presence !==
+      "retired-before-plan-publication" ||
+    prefix.processResidual.hostagent_presence !==
+      "retired-by-authorized-progress"
+  ) {
+    fail("background cleanup process residual was refused", 73);
+  }
+  if (
+    prefix.createEvidenceHeadSha256 !==
+      cleanup.operationPlan.provider_identity_sha256 ||
+    prefix.providerSettlementSha256 === ZERO_SHA256
+  ) {
+    fail("background cleanup identity evidence was refused", 73);
+  }
+  if (!exactActiveStateInventory(roots, state)) {
+    fail("background cleanup inert staging was refused", 73);
+  }
+  if (!sourceClosureMatches(roots, state.candidate)) {
+    fail("background cleanup source closure changed", 73);
+  }
+  return state;
+}
+
+function validateBackgroundCleanupProspectiveReceipt(roots, state, receipt) {
+  const slot = state.mutationLease;
+  if (
+    slot?.value.action !== "provider-cleanup" ||
+    slot.value.operation_kind !==
+      CONTROLLED_BACKGROUND_RETIREMENT_OPERATION_KIND ||
+    receipt.sequence !== state.receiptState.head.sequence + 1 ||
+    receipt.previous_sha256 !== state.receiptState.head_sha256
+  ) {
+    fail("background cleanup receipt authority was refused", 73);
+  }
+  let expectedResult;
+  if (receipt.phase === "provider-cleanup-intent") {
+    if (
+      state.receiptState.head.sequence !== slot.value.source_sequence ||
+      state.receiptState.head_sha256 !== slot.value.source_head_sha256 ||
+      state.receiptState.head.phase !== "project-cleanup-passed" ||
+      state.cleanupState.settlement !== undefined ||
+      state.cleanupState.prefix.cleanupStage !== "not-started"
+    ) {
+      fail("background cleanup intent authority was refused", 73);
+    }
+    expectedResult = backgroundCleanupIntentResult(slot);
+  } else if (receipt.phase === "provider-cleanup-passed") {
+    if (
+      state.receiptState.head.phase !== "provider-cleanup-intent" ||
+      state.receiptState.head_sha256 !== slot.value.intent_receipt_sha256 ||
+      state.cleanupState.settlement === undefined
+    ) {
+      fail("background cleanup pass authority was refused", 73);
+    }
+    assertBackgroundCleanupComplete(roots, state);
+    expectedResult = backgroundCleanupPassedResult(
+      slot,
+      state.cleanupState.settlement,
+    );
+  } else {
+    fail("background cleanup receipt phase was refused", 73);
+  }
+  if (canonical(receipt.result) !== canonical(expectedResult)) {
+    fail("background cleanup receipt result was refused", 73);
+  }
+}
+
+function backgroundCleanupReceiptReassertion(roots, assertAuthority) {
+  if (typeof assertAuthority !== "function") {
+    fail("background cleanup receipt authority was refused", 70);
+  }
+  return (receipt) => {
+    const state = assertAuthority();
+    validateBackgroundCleanupProspectiveReceipt(roots, state, receipt);
+    if (!sourceClosureMatches(roots, state.candidate)) {
+      fail("background cleanup source closure changed", 73);
+    }
+  };
+}
+
+function assertBackgroundCleanupStateAuthority(
+  roots,
+  state,
+  { requireExecution = false, requireSource = true } = {},
+) {
+  const slot = state.mutationLease;
+  const operationPlan = slot?.value.operation_plan;
+  if (
+    slot?.value.action !== "provider-cleanup" ||
+    slot.value.operation_kind !==
+      CONTROLLED_BACKGROUND_RETIREMENT_OPERATION_KIND ||
+    slot.value.operation_contract_sha256 !==
+      CONTROLLED_BACKGROUND_RETIREMENT_CONTRACT_SHA256 ||
+    state.cleanupState.contract !== "controlled-background-retirement" ||
+    canonical(operationPlan) !== canonical(state.cleanupState.operationPlan) ||
+    canonical(
+      currentBoundDirectoryIdentity(
+        operationPlan.evidence_directory.path,
+        "background cleanup evidence directory",
+      ),
+    ) !== canonical(operationPlan.evidence_directory) ||
+    canonical(
+      currentBoundDirectoryIdentity(
+        operationPlan.provider_base.path,
+        "background cleanup provider base",
+      ),
+    ) !== canonical(operationPlan.provider_base) ||
+    (requireSource && !sourceClosureMatches(roots, state.candidate)) ||
+    (requireExecution &&
+      (state.receiptState.head.phase !== "provider-cleanup-intent" ||
+        state.receiptState.head_sha256 !==
+          slot.value.intent_receipt_sha256 ||
+        state.cleanupState.settlement !== undefined))
+  ) {
+    fail("background cleanup state authority was refused", 73);
+  }
+  return state;
+}
+
+function assertBackgroundCleanupOwnerAuthority(roots, held) {
+  return assertBackgroundCleanupStateAuthority(
+    roots,
+    assertMutationLeaseHeld(roots, held, false),
+  );
+}
+
+function assertBackgroundCleanupExecutionAuthority(roots, held) {
+  return assertBackgroundCleanupStateAuthority(
+    roots,
+    assertMutationLeaseHeld(roots, held, false),
+    { requireExecution: true },
+  );
+}
+
+function backgroundCleanupResourceIdentitySha256(plan, resources) {
+  const byPath = new Map(
+    plan.root_inventory.map((entry) => [entry.relative_path, entry]),
+  );
+  const identities = resources.map((resource) => {
+    if (resource === ".") return plan.root;
+    const identity = byPath.get(resource);
+    if (identity === undefined) {
+      fail("background cleanup checkpoint resource was refused", 73);
+    }
+    return identity;
+  });
+  return providerProcessDigest(providerProcessBytes(identities));
+}
+
+function backgroundCleanupPublicationPhase(disposition) {
+  const phases = new Map([
+    ["absent", "before-stage-write"],
+    ["final", "before-final-consumption"],
+    ["linked-complete", "before-stage-removal"],
+    ["redundant-complete", "before-stage-removal"],
+    ["redundant-partial", "before-partial-stage-removal"],
+    ["staged-complete", "before-final-link"],
+    ["staged-partial", "before-partial-stage-removal"],
+  ]);
+  const phase = phases.get(disposition);
+  if (phase === undefined) {
+    fail("background cleanup publication frontier was refused", 73);
+  }
+  return phase;
+}
+
+function backgroundCleanupPublicationCheckpointFields(
+  observation,
+  targetName,
+  expectedSha256,
+) {
+  const phase = backgroundCleanupPublicationPhase(observation.disposition);
+  const finalPresent = new Set([
+    "final",
+    "linked-complete",
+    "redundant-complete",
+    "redundant-partial",
+  ]).has(observation.disposition);
+  const stagePresent = !new Set(["absent", "final"]).has(
+    observation.disposition,
+  );
+  const completeStage = new Set([
+    "linked-complete",
+    "redundant-complete",
+    "staged-complete",
+  ]).has(observation.disposition);
+  if (
+    (finalPresent
+      ? observation.final_sha256 !== expectedSha256 ||
+        observation.final_identity_sha256 === ZERO_SHA256
+      : observation.final_sha256 !== ZERO_SHA256 ||
+        observation.final_identity_sha256 !== ZERO_SHA256) ||
+    (stagePresent
+      ? observation.stage_declared_sha256 !== expectedSha256 ||
+        observation.stage_identity_sha256 === ZERO_SHA256 ||
+        observation.stage_actual_sha256 === ZERO_SHA256
+      : observation.stage_declared_sha256 !== ZERO_SHA256 ||
+        observation.stage_identity_sha256 !== ZERO_SHA256 ||
+        observation.stage_actual_sha256 !== ZERO_SHA256) ||
+    (completeStage && observation.stage_actual_sha256 !== expectedSha256)
+  ) {
+    fail("background cleanup publication identity was refused", 73);
+  }
+  return Object.freeze({
+    publication_disposition: observation.disposition,
+    publication_expected_sha256: expectedSha256,
+    publication_phase: phase,
+    publication_stage_declared_sha256:
+      observation.stage_declared_sha256,
+    publication_stage_identity_sha256:
+      observation.stage_identity_sha256,
+    publication_stage_sha256: observation.stage_actual_sha256,
+    publication_target_name: targetName,
+  });
+}
+
+function backgroundCleanupEffectCheckpointFields() {
+  return Object.freeze({
+    publication_disposition: "not-applicable",
+    publication_expected_sha256: ZERO_SHA256,
+    publication_phase: "not-applicable",
+    publication_stage_declared_sha256: ZERO_SHA256,
+    publication_stage_identity_sha256: ZERO_SHA256,
+    publication_stage_sha256: ZERO_SHA256,
+    publication_target_name: "not-applicable",
+  });
+}
+
+function backgroundCleanupProgressValue(prefix, recoveredAbsence) {
+  const planArtifact = prefix.cleanupPlan;
+  const sequence = prefix.completedSteps;
+  const step = planArtifact?.value.retirement_steps[sequence];
+  if (step === undefined || typeof recoveredAbsence !== "boolean") {
+    fail("background cleanup progress frontier was refused", 73);
+  }
+  return Object.freeze({
+    action: step.action,
+    fixture_id: planArtifact.value.fixture_id,
+    plan_sha256: planArtifact.sha256,
+    previous_sha256:
+      sequence === 0 ? planArtifact.sha256 : prefix.finalProgressSha256,
+    recovered_absence: recoveredAbsence,
+    resource_identity_sha256: backgroundCleanupResourceIdentitySha256(
+      planArtifact.value,
+      step.resources,
+    ),
+    resources: Object.freeze([...step.resources]),
+    schema: "synveda.clean-engine.provider-retirement-step.v2",
+    sequence,
+  });
+}
+
+function backgroundCleanupInnerSettlementValue(prefix) {
+  const plan = prefix.cleanupPlan?.value;
+  if (plan === undefined || prefix.finalProgressSha256 === ZERO_SHA256) {
+    fail("background cleanup settlement frontier was refused", 73);
+  }
+  return Object.freeze({
+    cleanup_operation_plan_sha256: plan.cleanup_operation_plan_sha256,
+    cleanup_plan_sha256: prefix.cleanupPlanSha256,
+    cleanup_slot_sha256: plan.cleanup_slot_sha256,
+    create_close_sha256: plan.create_close_sha256,
+    create_settlement_sha256: plan.create_settlement_sha256,
+    final_progress_sha256: prefix.finalProgressSha256,
+    fixture_id: plan.fixture_id,
+    outcome: "passed",
+    provider_identity_sha256: plan.provider_identity_sha256,
+    provider_kind: "controlled-background-fake",
+    resources: Object.freeze({
+      docker_context: "retired",
+      engine: "retired",
+      engine_socket: "retired",
+      hostagent: "retired",
+      hostagent_socket: "retired",
+      provider_root: "retired",
+    }),
+    result_receipt_authorized: false,
+    retirement_contract_sha256:
+      CONTROLLED_BACKGROUND_RETIREMENT_CONTRACT_SHA256,
+    root_disposition: "retired",
+    safe_code: "none",
+    schema:
+      "synveda.clean-engine.controlled-background-provider-retirement-settlement.v2",
+    source_closure: "state-authority-reasserted",
+    state_integration: "mutation-journal-v2",
+  });
+}
+
+function backgroundCleanupProcessAuthorityGate(roots, assertAuthority) {
+  if (typeof assertAuthority !== "function") {
+    fail("background cleanup process authority was refused", 70);
+  }
+  const authorizedEffects = new Map();
+  return (checkpoint) => {
+    if (
+      checkpoint === null ||
+      Array.isArray(checkpoint) ||
+      typeof checkpoint !== "object" ||
+      !CONTROLLED_BACKGROUND_RETIREMENT_AUTHORITY_CHECKPOINTS.includes(
+        checkpoint.checkpoint,
+      )
+    ) {
+      fail("background cleanup process authority was refused", 70);
+    }
+    const state = assertAuthority();
+    const slot = state.mutationLease;
+    const bindings = backgroundCleanupBindings(slot);
+    const prefix = state.cleanupState.prefix;
+    const planArtifact = prefix.cleanupPlan;
+    const plan = planArtifact?.value;
+    const base = {
+      cleanup_intent_sha256: bindings.cleanup_intent_sha256,
+      cleanup_operation_plan_sha256: bindings.cleanup_operation_plan_sha256,
+      cleanup_plan_sha256: prefix.cleanupPlanSha256,
+      cleanup_slot_sequence: bindings.cleanup_slot_sequence,
+      cleanup_slot_sha256: bindings.cleanup_slot_sha256,
+      create_close_sha256: bindings.create_close_sha256,
+      create_settlement_sha256: bindings.create_settlement_sha256,
+      create_slot_sha256: bindings.create_slot_sha256,
+      operation_kind: slot.value.operation_kind,
+      provider_identity_sha256:
+        state.cleanupState.operationPlan.provider_identity_sha256,
+      retirement_contract_sha256: slot.value.operation_contract_sha256,
+      source_head_sha256: bindings.source_head_sha256,
+      source_sequence: bindings.source_sequence,
+    };
+    const candidates = [];
+    if (
+      checkpoint.checkpoint === "before-retirement-plan-publication" &&
+      prefix.completedSteps === 0 &&
+      prefix.providerSettlementSha256 === ZERO_SHA256
+    ) {
+      const expectedSha256 = prefix.cleanupPlanSha256;
+      candidates.push({
+        checkpoint: "before-retirement-plan-publication",
+        ...base,
+        completed_steps: 0,
+        next_action: "publish-retirement-plan",
+        next_resources: ["provider-retirement-plan.json"],
+        ...backgroundCleanupPublicationCheckpointFields(
+          prefix.observation.plan_publication,
+          "provider-retirement-plan.json",
+          expectedSha256,
+        ),
+        resource_identity_sha256: expectedSha256,
+      });
+    }
+    const nextStep = prefix.observation.next_step;
+    if (
+      checkpoint.checkpoint === "before-hostagent-shutdown-delivery" &&
+      plan !== undefined &&
+      nextStep?.sequence === 0 &&
+      nextStep.action === "authenticated-hostagent-stop" &&
+      nextStep.disposition === "all-present" &&
+      prefix.processResidual.hostagent_presence === "observed-present"
+    ) {
+      candidates.push({
+        checkpoint: "before-hostagent-shutdown-delivery",
+        ...base,
+        completed_steps: 0,
+        next_action: nextStep.action,
+        next_resources: [...nextStep.resources],
+        ...backgroundCleanupEffectCheckpointFields(),
+        resource_identity_sha256: nextStep.resource_identity_sha256,
+      });
+    }
+    if (
+      checkpoint.checkpoint === "before-stale-socket-unlink" &&
+      plan !== undefined &&
+      nextStep?.sequence === 0 &&
+      nextStep.action === "authenticated-hostagent-stop" &&
+      new Set(["all-present", "partial"]).has(nextStep.disposition) &&
+      prefix.processResidual.hostagent_presence === "proved-absent"
+    ) {
+      const absent = new Set(prefix.observation.absent_resources);
+      for (const resource of nextStep.resources.filter(
+        (candidate) => !absent.has(candidate),
+      )) {
+        candidates.push({
+          checkpoint: "before-stale-socket-unlink",
+          ...base,
+          completed_steps: 0,
+          next_action: "unlink-stale-socket",
+          next_resources: [resource],
+          ...backgroundCleanupEffectCheckpointFields(),
+          resource_identity_sha256: backgroundCleanupResourceIdentitySha256(
+            plan,
+            [resource],
+          ),
+        });
+      }
+    }
+    const effectCheckpointByAction = new Map([
+      ["rmdir", "before-resource-rmdir"],
+      ["rmdir-root", "before-resource-rmdir"],
+      ["unlink", "before-resource-unlink"],
+      ["unlink-owner", "before-resource-unlink"],
+    ]);
+    if (
+      plan !== undefined &&
+      nextStep !== null &&
+      nextStep !== undefined &&
+      nextStep.sequence === prefix.completedSteps &&
+      nextStep.disposition === "all-present" &&
+      effectCheckpointByAction.get(nextStep.action) === checkpoint.checkpoint
+    ) {
+      if (
+        nextStep.action === "rmdir-root" &&
+        (prefix.rootDisposition !== "owned" ||
+          canonical(prefix.observation.absent_resources) !==
+            canonical(
+              plan.root_inventory
+                .map((entry) => entry.relative_path)
+                .sort(),
+            ))
+      ) {
+        fail("background cleanup root retirement frontier was refused", 73);
+      }
+      candidates.push({
+        checkpoint: checkpoint.checkpoint,
+        ...base,
+        completed_steps: prefix.completedSteps,
+        next_action: nextStep.action,
+        next_resources: [...nextStep.resources],
+        ...backgroundCleanupEffectCheckpointFields(),
+        resource_identity_sha256: nextStep.resource_identity_sha256,
+      });
+    }
+    if (
+      checkpoint.checkpoint === "before-retirement-progress-publication" &&
+      plan !== undefined
+    ) {
+      if (checkpoint.publication_phase === "before-final-consumption") {
+        const sequence = prefix.completedSteps - 1;
+        const step = plan.retirement_steps[sequence];
+        if (
+          sequence >= 0 &&
+          step !== undefined &&
+          prefix.finalProgressSha256 !== ZERO_SHA256
+        ) {
+          candidates.push({
+            checkpoint: "before-retirement-progress-publication",
+            ...base,
+            completed_steps: sequence,
+            next_action: "publish-retirement-progress",
+            next_resources: [...step.resources],
+            publication_disposition: "final",
+            publication_expected_sha256: prefix.finalProgressSha256,
+            publication_phase: "before-final-consumption",
+            publication_stage_declared_sha256: ZERO_SHA256,
+            publication_stage_identity_sha256: ZERO_SHA256,
+            publication_stage_sha256: ZERO_SHA256,
+            publication_target_name: `retirement-step-${String(sequence).padStart(2, "0")}.json`,
+            resource_identity_sha256: backgroundCleanupResourceIdentitySha256(
+              plan,
+              step.resources,
+            ),
+          });
+        }
+      } else if (
+        nextStep?.sequence === prefix.completedSteps &&
+        nextStep.disposition === "all-absent"
+      ) {
+        const effect = authorizedEffects.get(prefix.completedSteps);
+        const recoveredAbsence =
+          prefix.pendingProgress?.recoveredAbsence ??
+          (prefix.completedSteps === 0
+            ? effect !== "authenticated-hostagent-stop"
+            : effect === undefined);
+        const progressValue = backgroundCleanupProgressValue(
+          prefix,
+          recoveredAbsence,
+        );
+        const expectedSha256 = providerProcessDigest(
+          providerProcessBytes(progressValue),
+        );
+        candidates.push({
+          checkpoint: "before-retirement-progress-publication",
+          ...base,
+          completed_steps: prefix.completedSteps,
+          next_action: "publish-retirement-progress",
+          next_resources: [...nextStep.resources],
+          ...backgroundCleanupPublicationCheckpointFields(
+            prefix.observation.progress_publication,
+            `retirement-step-${String(prefix.completedSteps).padStart(2, "0")}.json`,
+            expectedSha256,
+          ),
+          resource_identity_sha256: nextStep.resource_identity_sha256,
+        });
+      }
+    }
+    if (
+      checkpoint.checkpoint === "before-retirement-settlement-publication" &&
+      plan !== undefined &&
+      nextStep === null &&
+      prefix.completedSteps === plan.retirement_steps.length &&
+      prefix.rootDisposition === "retired"
+    ) {
+      const expectedSha256 = providerProcessDigest(
+        providerProcessBytes(backgroundCleanupInnerSettlementValue(prefix)),
+      );
+      candidates.push({
+        checkpoint: "before-retirement-settlement-publication",
+        ...base,
+        completed_steps: prefix.completedSteps,
+        next_action: "publish-retirement-settlement",
+        next_resources: ["provider-retirement-settlement.json"],
+        ...backgroundCleanupPublicationCheckpointFields(
+          prefix.observation.settlement_publication,
+          "provider-retirement-settlement.json",
+          expectedSha256,
+        ),
+        resource_identity_sha256: expectedSha256,
+      });
+    }
+    if (!candidates.some((candidate) => canonical(candidate) === canonical(checkpoint))) {
+      fail("background cleanup process authority changed", 73);
+    }
+    if (
+      new Set([
+        "before-hostagent-shutdown-delivery",
+        "before-stale-socket-unlink",
+        "before-resource-unlink",
+        "before-resource-rmdir",
+      ]).has(checkpoint.checkpoint)
+    ) {
+      authorizedEffects.set(
+        checkpoint.completed_steps,
+        checkpoint.next_action,
+      );
+    }
+  };
+}
+
+function backgroundCleanupAuthorityGateWithTestObserver(gate, observer) {
+  if (observer === undefined) return gate;
+  if (typeof observer !== "function") {
+    fail("background cleanup authority test observer was refused", 64);
+  }
+  return (checkpoint) => {
+    observer(checkpoint, gate);
+    return gate(checkpoint);
+  };
+}
+
+function publishBackgroundCleanupSettlement(
+  roots,
+  state,
+  slot,
+  reassertAuthority,
+) {
+  if (
+    typeof reassertAuthority !== "function" ||
+    state.mutationLease === undefined ||
+    !state.mutationLease.bytes.equals(slot.bytes) ||
+    slot.value.operation_kind !==
+      CONTROLLED_BACKGROUND_RETIREMENT_OPERATION_KIND ||
+    state.cleanupState.settlement !== undefined ||
+    state.receiptState.head.phase !== "provider-cleanup-intent" ||
+    state.receiptState.head_sha256 !== slot.value.intent_receipt_sha256
+  ) {
+    fail("background cleanup settlement authority was refused", 73);
+  }
+  assertBackgroundCleanupComplete(roots, state);
+  const recovery = state.mutationRecoveries.at(-1);
+  const prefix = state.cleanupState.prefix;
+  const settlement = {
+    authority: recovery === undefined ? "owner" : "recovery",
+    authority_sha256:
+      recovery === undefined ? digest(slot.bytes) : digest(recovery.bytes),
+    cleanup_plan_sha256: prefix.cleanupPlanSha256,
+    disposition: "complete-retirement",
+    effect_disposition: "complete",
+    effect_name: "provider-cleanup",
+    evidence_head_sha256: prefix.createEvidenceHeadSha256,
+    evidence_prefix_sha256: prefix.observationSha256,
+    evidence_stage: "settled",
+    fixture_id: slot.value.fixture_id,
+    operation_contract_sha256: slot.value.operation_contract_sha256,
+    operation_kind: slot.value.operation_kind,
+    operation_plan_sha256: operationPlanSha256(slot.value.operation_plan),
+    provider_retirement_settlement_sha256:
+      prefix.providerSettlementSha256,
+    residual_sha256: prefix.remainingInventorySha256,
+    result_receipt_authorized: true,
+    root_disposition: "retired",
+    safe_code: "none",
+    schema: BACKGROUND_CLEANUP_SETTLEMENT_SCHEMA,
+    slot_sequence: slot.value.journal_sequence,
+    slot_sha256: digest(slot.bytes),
+    source_head_sha256: slot.value.intent_receipt_sha256,
+  };
+  validateBackgroundCleanupSettlement(
+    settlement,
+    slot,
+    slot.value.fixture_id,
+  );
+  const bytes = canonicalBytes(settlement);
+  const name = mutationOperationFileName(slot.value.journal_sequence);
+  const expectedObservationSha256 = prefix.observationSha256;
+  const expectedInnerSettlementSha256 = prefix.providerSettlementSha256;
+  const reassertSettlementPublication = () => {
+    const current = reassertAuthority();
+    assertBackgroundCleanupComplete(roots, current);
+    if (
+      current.cleanupState.settlement !== undefined ||
+      current.cleanupState.prefix.observationSha256 !==
+        expectedObservationSha256 ||
+      current.cleanupState.prefix.providerSettlementSha256 !==
+        expectedInnerSettlementSha256
+    ) {
+      fail("background cleanup settlement observation changed", 73);
+    }
+  };
+  if (!publishMutationBlocker(state.run, name, bytes, {
+    reassertAuthority: reassertSettlementPublication,
+  })) {
+    const existing = parseCanonical(
+      join(state.run, name),
+      "background cleanup settlement",
+    );
+    if (!existing.bytes.equals(bytes)) {
+      fail("background cleanup settlement publication conflicted", 73);
+    }
+  }
+  const verified = loadState(roots, false);
+  if (
+    verified.cleanupState.settlement === undefined ||
+    !verified.cleanupState.settlement.bytes.equals(bytes)
+  ) {
+    fail("background cleanup settlement publication was not durable", 70);
+  }
+  return verified;
+}
+
+export async function executeBackgroundProviderCleanupForExecutor(argumentsValue) {
+  validateBackgroundCleanupAdapter(argumentsValue.adapter);
+  const roots = prepareRoots(
+    argumentsValue.repoRoot,
+    argumentsValue.stateBase,
+    false,
+  );
+  const initial = loadState(roots, true);
+  const retryableCleanup =
+    initial.cleanupState.contract === "journal-only" ||
+    (initial.cleanupState.contract === "controlled-background-retirement" &&
+      initial.cleanupState.close?.value.disposition === "aborted-before-effect" &&
+      initial.cleanupState.intentReceipt === undefined &&
+      initial.cleanupState.settlement === undefined &&
+      initial.cleanupState.prefix.cleanupStage === "not-started");
+  if (
+    initial.receiptState.head.phase !== "project-cleanup-passed" ||
+    initial.pendingPublication !== undefined ||
+    initial.environment !== undefined ||
+    initial.environmentPublication !== undefined ||
+    initial.providerState.contract !== "controlled-background-fake" ||
+    initial.providerState.createClose?.value.disposition !== "completed" ||
+    initial.providerState.settlement?.value.disposition !==
+      "complete-identity" ||
+    initial.providerState.passedReceipt?.phase !== "provider-create-passed" ||
+    !retryableCleanup
+  ) {
+    fail("background cleanup state was refused", 73);
+  }
+  const operationPlan = backgroundCleanupOperationPlan({
+    createClose: initial.providerState.createClose,
+    createEvidence: initial.providerState.createEvidence,
+    createSettlement: initial.providerState.settlement,
+    createSlot: initial.providerState.createSlot,
+  });
+  const intentResult = Object.freeze({
+    operation_kind: CONTROLLED_BACKGROUND_RETIREMENT_OPERATION_KIND,
+    operation_plan_sha256: operationPlanSha256(operationPlan),
+    provider_resource: operationPlan.provider_resource,
+    retirement_contract_sha256:
+      CONTROLLED_BACKGROUND_RETIREMENT_CONTRACT_SHA256,
+    scope: "exact-receipt-owned-only",
+  });
+  let intendedReceipt;
+  try {
+    intendedReceipt = createNextReceipt(
+      initial.receipts,
+      initial.candidate.run_id,
+      "provider-cleanup-intent",
+      intentResult,
+    );
+  } catch (error) {
+    if (error instanceof ReceiptFailure) fail(error.message);
+    throw error;
+  }
+  const expectedSource = Object.freeze({
+    sequence: initial.receiptState.head.sequence,
+    sha256: initial.receiptState.head_sha256,
+  });
+  const reassertSlotPublication = () => {
+    const current = loadState(roots, true);
+    const currentRetryableCleanup =
+      current.cleanupState.contract === "journal-only" ||
+      (current.cleanupState.contract === "controlled-background-retirement" &&
+        current.cleanupState.close?.value.disposition ===
+          "aborted-before-effect" &&
+        current.cleanupState.intentReceipt === undefined &&
+        current.cleanupState.settlement === undefined &&
+        current.cleanupState.prefix.cleanupStage === "not-started");
+    const currentPlan =
+      current.providerState.contract === "controlled-background-fake" &&
+      currentRetryableCleanup
+        ? backgroundCleanupOperationPlan({
+            createClose: current.providerState.createClose,
+            createEvidence: current.providerState.createEvidence,
+            createSettlement: current.providerState.settlement,
+            createSlot: current.providerState.createSlot,
+          })
+        : undefined;
+    if (
+      current.receiptState.head.sequence !== expectedSource.sequence ||
+      current.receiptState.head_sha256 !== expectedSource.sha256 ||
+      current.receiptState.head.phase !== "project-cleanup-passed" ||
+      currentPlan === undefined ||
+      canonical(currentPlan) !== canonical(operationPlan)
+    ) {
+      fail("background cleanup slot authority changed", 73);
+    }
+  };
+  const held = acquireMutationLease(
+    roots,
+    "provider-cleanup",
+    digest(canonicalBytes(intendedReceipt)),
+    expectedSource,
+    { reassertAuthority: reassertSlotPublication },
+    {
+      contractSha256: CONTROLLED_BACKGROUND_RETIREMENT_CONTRACT_SHA256,
+      kind: CONTROLLED_BACKGROUND_RETIREMENT_OPERATION_KIND,
+      plan: operationPlan,
+    },
+  );
+  holdFakeProvider(argumentsValue.adapter.after_slot_hold_milliseconds);
+  const assertAuthority = () =>
+    assertBackgroundCleanupOwnerAuthority(roots, held);
+  const assertExecutionAuthority = () =>
+    assertBackgroundCleanupExecutionAuthority(roots, held);
+  appendReceiptWithLease(
+    roots,
+    { phase: "provider-cleanup-intent", result: intentResult },
+    {
+      reassertAuthority: backgroundCleanupReceiptReassertion(
+        roots,
+        assertAuthority,
+      ),
+    },
+  );
+  holdFakeProvider(argumentsValue.adapter.after_intent_hold_milliseconds);
+  let state = assertExecutionAuthority();
+  const gate = backgroundCleanupAuthorityGateWithTestObserver(
+    backgroundCleanupProcessAuthorityGate(
+      roots,
+      assertExecutionAuthority,
+    ),
+    argumentsValue.testAuthorityCheckpointObserver,
+  );
+  if (
+    new Set(["not-started", "plan-publication-pending"]).has(
+      state.cleanupState.prefix.cleanupStage,
+    )
+  ) {
+    await planControlledBackgroundRetirementWithAuthorityGate(
+      {
+        bindings: state.cleanupState.bindings,
+        evidenceDirectory: operationPlan.evidence_directory.path,
+        fixtureId: operationPlan.fixture_id,
+        providerBase: operationPlan.provider_base.path,
+      },
+      gate,
+    );
+  }
+  holdFakeProvider(argumentsValue.adapter.after_plan_hold_milliseconds);
+  state = assertExecutionAuthority();
+  const retired = await retireControlledBackgroundProviderWithAuthorityGate(
+    {
+      crashAfterDeleteSequence:
+        argumentsValue.adapter.crash_after_delete_sequence ?? undefined,
+      crashAfterDeleteSyscallSequence:
+        argumentsValue.adapter.crash_after_delete_syscall_sequence ?? undefined,
+      crashAfterHostagentSettlement:
+        argumentsValue.adapter.crash_after_hostagent_settlement,
+      evidenceDirectory: operationPlan.evidence_directory.path,
+      fixtureId: operationPlan.fixture_id,
+      providerBase: operationPlan.provider_base.path,
+      stopAfterSequence:
+        argumentsValue.adapter.stop_after_sequence ?? undefined,
+    },
+    gate,
+  );
+  if (retired.complete !== true) {
+    fail("background cleanup retirement remained incomplete", 75);
+  }
+  holdFakeProvider(argumentsValue.adapter.after_retirement_hold_milliseconds);
+  state = assertExecutionAuthority();
+  assertBackgroundCleanupComplete(roots, state);
+  state = publishBackgroundCleanupSettlement(
+    roots,
+    state,
+    state.mutationLease,
+    assertExecutionAuthority,
+  );
+  holdFakeProvider(argumentsValue.adapter.after_settlement_hold_milliseconds);
+  const reassertReceipt = backgroundCleanupReceiptReassertion(
+    roots,
+    assertBackgroundCleanupOwnerAuthority.bind(undefined, roots, held),
+  );
+  const receipt = appendReceiptWithLease(
+    roots,
+    {
+      phase: "provider-cleanup-passed",
+      result: backgroundCleanupPassedResult(
+        state.mutationLease,
+        state.cleanupState.settlement,
+      ),
+    },
+    { reassertAuthority: reassertReceipt },
+  );
+  holdFakeProvider(argumentsValue.adapter.after_result_hold_milliseconds);
+  holdFakeProvider(argumentsValue.adapter.before_close_hold_milliseconds);
+  state = assertBackgroundCleanupOwnerAuthority(roots, held);
+  assertBackgroundCleanupComplete(roots, state);
+  closeMutationLease(
+    roots,
+    held,
+    "completed",
+    {
+      beforeLinkMilliseconds:
+        argumentsValue.adapter.close_prelink_hold_milliseconds,
+    },
+    state.cleanupState.operationEvidenceSha256,
+  );
+  return receipt;
+}
+
 function sourceClosureMatches(roots, candidate) {
   try {
     return canonical(sourceClosure(roots.repoRoot)) === canonical(candidate.source);
@@ -4041,7 +5738,12 @@ function providerRecoveryBase(state) {
   if (lease === undefined) {
     fail("no abandoned provider mutation was available", 73);
   }
-  if (lease.value.action !== "provider-create") {
+  const recoverableCreate = lease.value.action === "provider-create";
+  const recoverableCleanup =
+    lease.value.action === "provider-cleanup" &&
+    lease.value.operation_kind ===
+      CONTROLLED_BACKGROUND_RETIREMENT_OPERATION_KIND;
+  if (!recoverableCreate && !recoverableCleanup) {
     fail("mutation recovery action was refused", 73);
   }
   return {
@@ -4049,6 +5751,7 @@ function providerRecoveryBase(state) {
     lease,
     leaseSha256: digest(lease.bytes),
     operation: Object.freeze({
+      action: lease.value.action,
       operation_contract_sha256: lease.value.operation_contract_sha256,
       operation_kind: lease.value.operation_kind,
       operation_plan: lease.value.operation_plan,
@@ -4058,6 +5761,15 @@ function providerRecoveryBase(state) {
 }
 
 function providerRecoveryObservation(state) {
+  if (
+    state.mutationLease?.value.operation_kind ===
+      CONTROLLED_BACKGROUND_RETIREMENT_OPERATION_KIND
+  ) {
+    return backgroundCleanupPrefixObservation(
+      state.cleanupState.prefix,
+      state.cleanupState.settlement,
+    );
+  }
   if (state.mutationLease?.value.operation_kind !== CONTROLLED_BACKGROUND_OPERATION_KIND) {
     return Object.freeze({
       observed_effect_disposition: "not-reached",
@@ -4084,6 +5796,26 @@ export function providerRecoveryConfirmationForExecutor(argumentsValue) {
   const roots = prepareRoots(argumentsValue.repoRoot, argumentsValue.stateBase, false);
   const state = loadState(roots, false);
   const base = providerRecoveryBase(state);
+  return providerRecoveryConfirmation(base);
+}
+
+export function backgroundProviderCleanupRecoveryConfirmationForExecutor(
+  argumentsValue,
+) {
+  const roots = prepareRoots(
+    argumentsValue.repoRoot,
+    argumentsValue.stateBase,
+    false,
+  );
+  const state = loadState(roots, false);
+  const base = providerRecoveryBase(state);
+  if (
+    base.operation.action !== "provider-cleanup" ||
+    base.operation.operation_kind !==
+      CONTROLLED_BACKGROUND_RETIREMENT_OPERATION_KIND
+  ) {
+    fail("background cleanup recovery action was refused", 73);
+  }
   return providerRecoveryConfirmation(base);
 }
 
@@ -4118,12 +5850,27 @@ function acquireProviderRecovery(roots, confirmation, ownerProbe, publicationHol
   }
   const observation = providerRecoveryObservation(state);
   const sequence = (latest?.value.sequence ?? -1) + 1;
-  if (sequence >= MAX_MUTATION_RECOVERIES) {
+  const cleanupNeedsFinalObservationClaim =
+    base.operation.operation_kind ===
+      CONTROLLED_BACKGROUND_RETIREMENT_OPERATION_KIND &&
+    state.cleanupState.settlement === undefined &&
+    state.cleanupState.prefix.cleanupStage !== "settled" &&
+    !(
+      state.receiptState.head.sequence === base.lease.value.source_sequence &&
+      state.receiptState.head_sha256 === base.lease.value.source_head_sha256 &&
+      state.pendingPublication === undefined &&
+      state.cleanupState.prefix.cleanupStage === "not-started"
+    );
+  if (
+    sequence >= MAX_MUTATION_RECOVERIES ||
+    (cleanupNeedsFinalObservationClaim &&
+      sequence >= MAX_MUTATION_RECOVERIES - 1)
+  ) {
     fail("provider mutation recovery capacity was exhausted", 73);
   }
   const owner = currentProcessIdentity();
   const claim = {
-    action: "provider-create",
+    action: base.operation.action,
     chain_root_sha256: recoveryChainRootSha256(
       base.fixtureId,
       base.leaseSha256,
@@ -4212,7 +5959,7 @@ function assertProviderRecoveryHeld(roots, held) {
     fail("provider recovery claim ownership was refused", 73);
   }
   const currentObservation = providerRecoveryObservation(state);
-  const settlement = state.operationSettlement;
+  const settlement = operationSettlementForSlot(state, state.mutationLease);
   const authorisedSettlementTransition =
     held.observation.observed_settlement_sha256 === ZERO_SHA256 &&
     settlement !== undefined &&
@@ -4230,6 +5977,115 @@ function assertProviderRecoveryHeld(roots, held) {
     fail("provider recovery observation changed", 73);
   }
   return state;
+}
+
+function assertBackgroundCleanupRecoveryHeld(
+  roots,
+  held,
+  { requireExecution = false, requireSource = true } = {},
+) {
+  const current = parseCanonical(held.path, "mutation recovery claim");
+  const metadata = mutationHeldIdentity(held.path);
+  if (!sameMetadata(held.identity, metadata) || !current.bytes.equals(held.bytes)) {
+    fail("background cleanup recovery claim identity changed");
+  }
+  const state = loadState(roots, false);
+  const latest = state.mutationRecoveries.at(-1);
+  if (
+    latest === undefined ||
+    !latest.bytes.equals(held.bytes) ||
+    state.mutationLease === undefined ||
+    !state.mutationLease.bytes.equals(held.base.lease.bytes)
+  ) {
+    fail("background cleanup recovery ownership was refused", 73);
+  }
+  return assertBackgroundCleanupStateAuthority(roots, state, {
+    requireExecution,
+    requireSource,
+  });
+}
+
+function refreshBackgroundCleanupRecoveryObservation(roots, held) {
+  const state = assertBackgroundCleanupRecoveryHeld(roots, held, {
+    requireExecution: true,
+  });
+  const observation = providerRecoveryObservation(state);
+  if (canonical(observation) === canonical(held.observation)) return held;
+  const latest = state.mutationRecoveries.at(-1);
+  if (latest === undefined || !latest.bytes.equals(held.bytes)) {
+    fail("background cleanup recovery predecessor changed", 73);
+  }
+  const sequence = latest.value.sequence + 1;
+  if (sequence >= MAX_MUTATION_RECOVERIES) {
+    fail("provider mutation recovery capacity was exhausted", 73);
+  }
+  const owner = currentProcessIdentity();
+  const base = held.base;
+  const claim = {
+    action: base.operation.action,
+    chain_root_sha256: recoveryChainRootSha256(
+      base.fixtureId,
+      base.leaseSha256,
+      base.operation,
+    ),
+    fixture_id: base.fixtureId,
+    lease_sha256: base.leaseSha256,
+    nonce: randomBytes(16).toString("hex"),
+    ...observation,
+    operation_contract_sha256: base.operation.operation_contract_sha256,
+    operation_kind: base.operation.operation_kind,
+    operation_plan_sha256: operationPlanSha256(
+      base.operation.operation_plan,
+    ),
+    owner_boot_sha256: owner.boot_sha256,
+    owner_instance_sha256: owner.instance_sha256,
+    owner_pid: owner.pid,
+    owner_probe: owner.probe,
+    parent_sha256: digest(latest.bytes),
+    schema: MUTATION_RECOVERY_SCHEMA,
+    sequence,
+    slot_sequence: base.slotSequence,
+    source_head_sha256: state.receiptState.head_sha256,
+  };
+  const bytes = canonicalBytes(claim);
+  const name = recoveryFileName(base.slotSequence, sequence);
+  const path = join(state.run, name);
+  const reassertClaimPublication = () => {
+    const current = assertBackgroundCleanupRecoveryHeld(roots, held, {
+      requireExecution: true,
+    });
+    if (
+      canonical(providerRecoveryObservation(current)) !==
+      canonical(observation)
+    ) {
+      fail("background cleanup recovery observation changed", 73);
+    }
+  };
+  if (
+    !publishMutationBlocker(state.run, name, bytes, {
+      reassertAuthority: reassertClaimPublication,
+    })
+  ) {
+    fail("another provider recovery won the mutation claim", 73);
+  }
+  const refreshed = Object.freeze({
+    base,
+    bytes,
+    claim,
+    identity: mutationHeldIdentity(path),
+    observation,
+    path,
+  });
+  const verified = assertBackgroundCleanupRecoveryHeld(roots, refreshed, {
+    requireExecution: true,
+  });
+  if (
+    canonical(providerRecoveryObservation(verified)) !==
+    canonical(observation)
+  ) {
+    fail("background cleanup recovery refresh was not durable", 70);
+  }
+  return refreshed;
 }
 
 function backgroundPrefixIsEmpty(prefix) {
@@ -4422,7 +6278,7 @@ function publishBackgroundOperationSettlement(
     operation_kind: slot.value.operation_kind,
     operation_plan_sha256: operationPlanSha256(slot.value.operation_plan),
     safe_code: safeCode,
-    schema: MUTATION_OPERATION_SCHEMA,
+    schema: BACKGROUND_CREATE_SETTLEMENT_SCHEMA,
     slot_sequence: slot.value.journal_sequence,
     slot_sha256: digest(slot.bytes),
     source_head_sha256: sourceHeadSha256,
@@ -4467,25 +6323,40 @@ function closeRecoveredProviderMutation(
   publicationHolds = {},
   operationEvidenceSha256 = ZERO_SHA256,
 ) {
-  assertProviderRecoveryHeld(roots, held);
+  const cleanupRecovery =
+    held.base.operation.operation_kind ===
+    CONTROLLED_BACKGROUND_RETIREMENT_OPERATION_KIND;
+  const cleanupAuthorityOptions =
+    cleanupRecovery && disposition === "aborted-before-effect"
+      ? { requireSource: false }
+      : undefined;
+  const assertHeld = () =>
+    cleanupRecovery
+      ? assertBackgroundCleanupRecoveryHeld(
+          roots,
+          held,
+          cleanupAuthorityOptions,
+        )
+      : assertProviderRecoveryHeld(roots, held);
+  assertHeld();
   const receiptAuthority =
     held.base.operation.operation_kind === CONTROLLED_BACKGROUND_OPERATION_KIND
       ? backgroundReceiptReassertion(
           roots,
           () => assertProviderRecoveryHeld(roots, held),
         )
-      : () => {
-          assertProviderRecoveryHeld(roots, held);
-        };
+      : cleanupRecovery
+        ? backgroundCleanupReceiptReassertion(roots, assertHeld)
+        : assertHeld;
   reconcileReceiptPublication(roots, receiptAuthority);
   reconcileEnvironmentPublication(roots);
-  const state = assertProviderRecoveryHeld(roots, held);
+  const state = assertHeld();
   return publishMutationClose(
     roots,
     state,
     state.mutationLease,
     disposition,
-    () => assertProviderRecoveryHeld(roots, held),
+    assertHeld,
     publicationHolds,
     operationEvidenceSha256,
   );
@@ -4644,6 +6515,161 @@ export function recoverBackgroundProviderCreateForExecutor(argumentsValue) {
   });
 }
 
+export async function recoverBackgroundProviderCleanupForExecutor(
+  argumentsValue,
+) {
+  validateBackgroundCleanupAdapter(argumentsValue.adapter);
+  const roots = prepareRoots(
+    argumentsValue.repoRoot,
+    argumentsValue.stateBase,
+    false,
+  );
+  const initial = loadState(roots, false);
+  if (
+    initial.mutationLease?.value.action !== "provider-cleanup" ||
+    initial.mutationLease.value.operation_kind !==
+      CONTROLLED_BACKGROUND_RETIREMENT_OPERATION_KIND ||
+    initial.mutationLease.value.operation_contract_sha256 !==
+      CONTROLLED_BACKGROUND_RETIREMENT_CONTRACT_SHA256 ||
+    initial.cleanupState.contract !== "controlled-background-retirement"
+  ) {
+    fail("background cleanup recovery requires the matching dedicated executor", 73);
+  }
+  let held = acquireProviderRecovery(
+    roots,
+    argumentsValue.confirmation,
+    defaultMutationOwnerProbe,
+  );
+  holdFakeProvider(argumentsValue.adapter.after_claim_hold_milliseconds);
+  const assertAuthority = (options) =>
+    assertBackgroundCleanupRecoveryHeld(roots, held, options);
+  let state = assertAuthority({ requireSource: false });
+  if (
+    state.receiptState.head.sequence ===
+      state.mutationLease.value.source_sequence &&
+    state.receiptState.head_sha256 ===
+      state.mutationLease.value.source_head_sha256 &&
+    state.pendingPublication === undefined &&
+    state.cleanupState.prefix.cleanupStage === "not-started"
+  ) {
+    closeRecoveredProviderMutation(roots, held, "aborted-before-effect");
+    return state.receiptState.head;
+  }
+  reconcileReceiptPublication(
+    roots,
+    backgroundCleanupReceiptReassertion(
+      roots,
+      () => assertAuthority(),
+    ),
+  );
+  state = assertAuthority();
+  if (
+    state.receiptState.head.phase !== "provider-cleanup-intent" &&
+    state.receiptState.head.phase !== "provider-cleanup-passed"
+  ) {
+    fail("background cleanup recovery receipt state was refused", 73);
+  }
+  if (state.cleanupState.settlement === undefined) {
+    const gate = backgroundCleanupAuthorityGateWithTestObserver(
+      backgroundCleanupProcessAuthorityGate(
+        roots,
+        () => assertAuthority({ requireExecution: true }),
+      ),
+      argumentsValue.testAuthorityCheckpointObserver,
+    );
+    if (
+      new Set(["not-started", "plan-publication-pending"]).has(
+        state.cleanupState.prefix.cleanupStage,
+      )
+    ) {
+      await planControlledBackgroundRetirementWithAuthorityGate(
+        {
+          bindings: state.cleanupState.bindings,
+          evidenceDirectory:
+            state.cleanupState.operationPlan.evidence_directory.path,
+          fixtureId: state.cleanupState.operationPlan.fixture_id,
+          providerBase: state.cleanupState.operationPlan.provider_base.path,
+        },
+        gate,
+      );
+    }
+    holdFakeProvider(argumentsValue.adapter.after_plan_hold_milliseconds);
+    state = assertAuthority();
+    const retired = await retireControlledBackgroundProviderWithAuthorityGate(
+      {
+        crashAfterDeleteSequence:
+          argumentsValue.adapter.crash_after_delete_sequence ?? undefined,
+        crashAfterDeleteSyscallSequence:
+          argumentsValue.adapter.crash_after_delete_syscall_sequence ??
+          undefined,
+        crashAfterHostagentSettlement:
+          argumentsValue.adapter.crash_after_hostagent_settlement,
+        evidenceDirectory:
+          state.cleanupState.operationPlan.evidence_directory.path,
+        fixtureId: state.cleanupState.operationPlan.fixture_id,
+        providerBase: state.cleanupState.operationPlan.provider_base.path,
+        stopAfterSequence:
+          argumentsValue.adapter.stop_after_sequence ?? undefined,
+      },
+      gate,
+    );
+    if (retired.complete !== true) {
+      fail("background cleanup retirement remained incomplete", 75);
+    }
+    holdFakeProvider(
+      argumentsValue.adapter.after_retirement_hold_milliseconds,
+    );
+    state = assertAuthority();
+    assertBackgroundCleanupComplete(roots, state);
+    held = refreshBackgroundCleanupRecoveryObservation(roots, held);
+    state = assertAuthority({ requireExecution: true });
+    state = publishBackgroundCleanupSettlement(
+      roots,
+      state,
+      state.mutationLease,
+      () => assertAuthority(),
+    );
+  }
+  holdFakeProvider(argumentsValue.adapter.after_settlement_hold_milliseconds);
+  state = assertAuthority();
+  assertBackgroundCleanupComplete(roots, state);
+  if (state.receiptState.head.phase === "provider-cleanup-intent") {
+    appendReceiptWithLease(
+      roots,
+      {
+        phase: "provider-cleanup-passed",
+        result: backgroundCleanupPassedResult(
+          state.mutationLease,
+          state.cleanupState.settlement,
+        ),
+      },
+      {
+        reassertAuthority: backgroundCleanupReceiptReassertion(
+          roots,
+          () => assertAuthority(),
+        ),
+      },
+    );
+    holdFakeProvider(argumentsValue.adapter.after_result_hold_milliseconds);
+    state = assertAuthority();
+  }
+  if (state.receiptState.head.phase !== "provider-cleanup-passed") {
+    fail("background cleanup recovery terminal receipt was refused", 73);
+  }
+  holdFakeProvider(argumentsValue.adapter.before_close_hold_milliseconds);
+  closeRecoveredProviderMutation(
+    roots,
+    held,
+    "completed",
+    {
+      beforeLinkMilliseconds:
+        argumentsValue.adapter.close_prelink_hold_milliseconds,
+    },
+    state.cleanupState.operationEvidenceSha256,
+  );
+  return state.receiptState.head;
+}
+
 export function appendReceiptForExecutor(argumentsValue) {
   if (
     typeof argumentsValue.phase === "string" &&
@@ -4656,7 +6682,21 @@ export function appendReceiptForExecutor(argumentsValue) {
   }
   const roots = prepareRoots(argumentsValue.repoRoot, argumentsValue.stateBase, false);
   const initial = loadState(roots, false);
-  if (initial.providerState.contract === "controlled-background-fake") {
+  if (
+    initial.providerState.contract === "controlled-background-fake" &&
+    typeof argumentsValue.phase === "string" &&
+    argumentsValue.phase.startsWith("failure-cleanup-")
+  ) {
+    fail("background provider failure cleanup requires dedicated ownership evidence", 73);
+  }
+  if (
+    initial.providerState.contract === "controlled-background-fake" &&
+    (initial.providerState.createClose?.value.disposition !== "completed" ||
+      initial.providerState.settlement?.value.disposition !==
+        "complete-identity" ||
+      initial.providerState.passedReceipt?.phase !== "provider-create-passed" ||
+      initial.cleanupState.contract !== "journal-only")
+  ) {
     fail("background provider continuation requires dedicated ownership evidence", 73);
   }
   return withMutationLease(roots, "append-receipt", () =>
@@ -5014,6 +7054,13 @@ export function finalizeEnvironmentForExecutor(argumentsValue) {
   const roots = prepareRoots(argumentsValue.repoRoot, argumentsValue.stateBase, false);
   const initial = loadState(roots, false);
   if (initial.providerState.contract === "controlled-background-fake") {
+    if (
+      initial.cleanupState.contract === "controlled-background-retirement" &&
+      initial.cleanupState.close?.value.disposition === "completed" &&
+      initial.cleanupState.passedReceipt?.phase === "provider-cleanup-passed"
+    ) {
+      fail("controlled background evidence is not eligible for environment finalization", 73);
+    }
     fail("background provider cleanup must complete before finalization", 73);
   }
   return withMutationLease(roots, "finalize-environment", () =>

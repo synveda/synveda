@@ -227,25 +227,35 @@ proof, can retire an exact mutation-stage alias and publish a v2 observation
 claim. Recovery never launches, signals, deletes, repairs inner evidence or
 replays controller/start. Unattested process windows remain blocking. Foreign
 collision settlement is historical after publication while all Synveda-owned
-evidence remains exact. Legacy retirement v1 stays fixture-only. A distinct
-retirement-v2 seam accepts only the bound state-born creation chain, preserves
-its immutable head, gates authenticated stop, every exact leaf-first removal
-and every append-only publication frontier, and exposes a read-only,
-operation-bound prefix observation. It emits no receipt or close authority and
-is not yet composed by the mutation-state owner, so the state-owned root still
-cannot publish cleanup or finalization. Internal authority callbacks are
+evidence remains exact. Legacy retirement v1 stays fixture-only. The mutation
+owner now composes the distinct retirement-v2 seam through a dedicated cleanup
+plan, slot and intent that bind the completed create slot, outer create
+settlement and close, immutable provider identity, source head and exact parent
+directory identities. State authority is reasserted before authenticated stop,
+every exact leaf-first removal and every append-only publication frontier. The
+inner retirement settlement remains explicitly ineligible for a result receipt
+or close; a distinct outer cleanup settlement is the only operation evidence
+accepted by the cleanup pass and close.
+
+Cleanup recovery is action-dispatched and observation-bound. It may abort an
+untouched pre-intent slot without effect; otherwise it must retain the latest
+claim, reserve capacity for a final settled-prefix snapshot, and refresh that
+claim before the outer settlement when retirement changed the observation.
+Owner close permits no recovery claim, recovery close binds the latest claim,
+and both reassert completed retirement at the final no-replace link. Earlier
+claims, regressed settled observations, changed source or parent identities,
+and inert state staging fail closed. Internal authority callbacks remain
 trusted owner-UID composition hooks, not a JavaScript security boundary.
 
-Only test fixtures expose this seam; no supported lifecycle target or
-Docker/Colima action is enabled. Receipt v4 now has exact provider-class-bound
-controlled cleanup intent/pass variants, while treating operation evidence as
-an opaque nonzero digest. Next compose the dedicated cleanup slot, outer
-settlement, action-dispatched recovery and close around retirement v2, and
-prove that only the outer settlement supplies receipt/close evidence. Then
-finish exact live Docker/helper/disk-image and OS-version closure without
-repurposing `HOME`. Registry, builder, proxy, browser and exact cleanup evidence
-follow; Linux/reference HTTPS must pass before legacy Rauthy/Temporal assets
-are deleted. Backup/restore, upgrade and Apalis remain open CPR-45 slices.
+Only test fixtures expose these seams; no supported lifecycle target or
+Docker/Colima action is enabled. Controlled-background evidence remains
+structurally ineligible for the synthetic finalizer, so finalization stays
+blocked. Next integrate this reviewed state-owned cleanup boundary with the
+closed live provider lifecycle after completing the exact Docker/helper/disk-
+image and OS-version closure without repurposing `HOME`. Registry, builder,
+proxy, browser and live cleanup evidence follow; Linux/reference HTTPS must
+pass before legacy Rauthy/Temporal assets are deleted. Backup/restore, upgrade
+and Apalis remain open CPR-45 slices.
 
 ## Unscheduled — not listed in the Sequencing section
 

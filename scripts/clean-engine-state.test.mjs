@@ -2247,7 +2247,7 @@ test("a provider close binds the newest permanent recovery claim", () => {
   }
 });
 
-test("a recovery claim published after an owner close remains inert history", () => {
+test("a recovery claim published after an owner close invalidates the journal", () => {
   const state = fixture();
   try {
     assert.equal(run(state, "plan").status, 0);
@@ -2261,26 +2261,33 @@ test("a recovery claim published after an owner close remains inert history", ()
     writeFileSync(join(active, ".mutation-recovery-00-00"), canonicalBytes(claim), {
       mode: 0o600,
     });
-    assert.equal(run(state, "status").status, 0);
+    const refused = run(state, "status");
+    assert.equal(refused.status, 78);
+    assert.match(
+      refused.stderr,
+      /mutation close (?:authority|receipt binding) was refused/,
+    );
     const close = parse(join(active, ".mutation-close-00"));
     assert.equal(close.authority, "owner");
     const candidate = parse(join(active, "candidate.json"));
-    appendReceiptForExecutor({
-      phase: "registry-intent",
-      repoRoot: state.repo,
-      result: cleanEngineReceiptResult("registry-intent", candidate.run_id),
-      stateBase: state.state,
-    });
+    assert.throws(
+      () => appendReceiptForExecutor({
+        phase: "registry-intent",
+        repoRoot: state.repo,
+        result: cleanEngineReceiptResult("registry-intent", candidate.run_id),
+        stateBase: state.state,
+      }),
+      /mutation close (?:authority|receipt binding) was refused/,
+    );
     assertPrivate(join(active, ".mutation-recovery-00-00"), 0o600);
-    assertPrivate(join(active, ".mutation-slot-01"), 0o600);
-    assertPrivate(join(active, ".mutation-close-01"), 0o600);
-    assert.equal(run(state, "verify").status, 0);
+    assert.equal(existsSync(join(active, ".mutation-slot-01")), false);
+    assert.equal(run(state, "verify").status, 78);
   } finally {
     rmSync(state.root, { recursive: true, force: true });
   }
 });
 
-test("late recovery contenders cannot replace a closed recovery generation", () => {
+test("a trailing recovery claim invalidates a closed recovery generation", () => {
   const state = fixture();
   try {
     assert.equal(run(state, "plan").status, 0);
@@ -2315,24 +2322,32 @@ test("late recovery contenders cannot replace a closed recovery generation", () 
     writeFileSync(join(active, ".mutation-recovery-00-02"), canonicalBytes(claim2), {
       mode: 0o600,
     });
-    assert.equal(run(state, "status").status, 0);
+    const refused = run(state, "status");
+    assert.equal(refused.status, 78);
+    assert.match(
+      refused.stderr,
+      /mutation close (?:authority|receipt binding) was refused/,
+    );
     const close = parse(join(active, ".mutation-close-00"));
     assert.equal(
       close.authority_sha256,
       sha256(readFileSync(join(active, ".mutation-recovery-00-01"))),
     );
-    appendReceiptForExecutor({
-      phase: "failure-cleanup-intent",
-      repoRoot: state.repo,
-      result: {
-        authorized_resources: ["provider"],
-        scope: "exact-receipt-owned-only",
-      },
-      stateBase: state.state,
-    });
+    assert.throws(
+      () => appendReceiptForExecutor({
+        phase: "failure-cleanup-intent",
+        repoRoot: state.repo,
+        result: {
+          authorized_resources: ["provider"],
+          scope: "exact-receipt-owned-only",
+        },
+        stateBase: state.state,
+      }),
+      /mutation close (?:authority|receipt binding) was refused/,
+    );
     assertPrivate(join(active, ".mutation-recovery-00-02"), 0o600);
-    assertPrivate(join(active, ".mutation-slot-01"), 0o600);
-    assert.equal(run(state, "verify").status, 0);
+    assert.equal(existsSync(join(active, ".mutation-slot-01")), false);
+    assert.equal(run(state, "verify").status, 78);
   } finally {
     rmSync(state.root, { recursive: true, force: true });
   }

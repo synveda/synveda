@@ -113,20 +113,26 @@ start. State tests retain controller-without-readiness and start-without-PID as
 permanently unattested. Collision settlement remains valid across later foreign
 root removal/replacement while Synveda evidence stays exact.
 
-Legacy retirement v1 remains fixture-only. A separate retirement-v2 seam now
-proves state-bound authenticated stop, durable socket absence, exact leaf-first
-removal, strict append-only interruption recovery and operation-bound read-only
-prefix observation. Its synchronous checkpoints cover every effect,
-publication mutation and final consumption, but its inner settlement grants no
-result-receipt or close authority. This is fixed-fake trusted-owner POSIX
-evidence only. Receipt v4 now has an exact provider-class-bound controlled
-cleanup intent/pass grammar, but cannot identify the artifact behind its opaque
-operation-evidence digest. Internal authority callbacks are not a JavaScript
-security boundary. The mutation-state owner does not yet supply a cleanup
-slot, outer settlement, recovery, receipt or close; no supported lifecycle
-target exposes the fixtures, and there is no Docker/Colima mutation or
-environment manifest. Supported state-born cleanup and finalization remain
-refused.
+Legacy retirement v1 remains fixture-only. The mutation-state owner now
+composes the distinct retirement-v2 seam through a dedicated cleanup plan,
+slot and intent bound to the completed state-born create settlement and close,
+immutable provider identity, source head and live parent-directory identities.
+Its exact synchronous state gates cover authenticated stop, every leaf-first
+removal, recovered absence, publication mutation and final consumption. The
+inner retirement settlement still grants no result-receipt or close authority;
+only the distinct outer cleanup settlement can bind the controlled cleanup pass
+and close.
+
+Action-dispatched recovery is observation-bound: an untouched pre-intent slot
+can abort without effect, while an executing recovery reserves capacity and
+publishes a latest settled-prefix claim before its outer settlement. Owner and
+recovery close authority are disjoint, settled history cannot regress, and
+completed retirement is reasserted at close publication. Internal authority
+callbacks are not a JavaScript security boundary. This is fixed-fake trusted-
+owner POSIX evidence only: no supported lifecycle target exposes the fixtures,
+there is no Docker/Colima mutation or live environment manifest, and the
+controlled evidence is ineligible for finalization. Supported live cleanup and
+finalization therefore remain refused.
 Live Linux/provider CI and a current Docker Desktop/provider run remain absent.
 Consequently this evidence improves the boundary without changing readiness. One
 frozen Docker Desktop candidate also proved bounded PostgreSQL/Keycloak

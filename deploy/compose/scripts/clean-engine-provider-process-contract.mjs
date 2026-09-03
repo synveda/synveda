@@ -6312,7 +6312,8 @@ function assertRootSubset(paths, plan, completedCount, additionallyCompleted = n
   for (const resource of additionallyCompleted) completed.add(resource);
   const rootRemoved = plan.retirement_steps
     .slice(0, completedCount)
-    .some((step) => step.action === "rmdir-root");
+    .some((step) => step.action === "rmdir-root") ||
+    additionallyCompleted.has(".");
   assertNoSymlinkComponents(paths.base, "controlled background provider base");
   const currentBase = directoryIdentity(paths.base, "controlled background provider base");
   if (canonical(currentBase) !== canonical(plan.base)) {

@@ -213,7 +213,7 @@ read-only; acquisition may reconcile only exact mutation-stage aliases after
 owner-absence proof. Recovery never launches, signals, deletes, repairs inner
 evidence or replays a durable start. Controller launch without authenticated
 readiness and start without authenticated PID remain permanently unattested.
-A claim linked after an already-durable close is inert history and
+A claim linked after an already-durable close makes the journal invalid and
 cannot reopen that generation. Eight failed recovery attempts or 64 slots
 exhaust the bounded journal and require operator inspection and fresh-plan
 regeneration. The reusable `.mutation-lease` layout is refused rather than
@@ -222,23 +222,30 @@ inspection.
 
 This remains an internal fake-only contract, not a provider runner. The adapter
 accepts no function, command, path, environment or provider selector. Legacy
-retirement v1 stays fixture-only. A separate retirement-v2 seam accepts only
-the exact state-born create chain and cleanup/source bindings, authenticates
-shutdown, and gates every exact leaf-first removal and append-only publication
-frontier. Its read-only prefix observation binds the operation, residual
-inventory, process state and pending publication identities. It grants no
-receipt or close authority. The internal `*WithAuthorityGate` callbacks are
+retirement v1 stays fixture-only. Retirement v2 accepts only the exact state-
+born create chain. The mutation owner composes it through a dedicated cleanup
+plan, slot and intent bound to the completed create slot, outer settlement and
+close, immutable provider identity, source head and exact parent-directory
+identities. It authenticates shutdown and gates every exact leaf-first removal,
+recovered-absence decision and append-only publication frontier. Its read-only
+prefix observation binds the operation, residual inventory, process state and
+pending publication identities. The inner retirement settlement grants no
+receipt or close authority; only the outer cleanup settlement can bind the
+controlled pass and close. The internal `*WithAuthorityGate` callbacks are
 trusted owner-UID composition hooks, not a JavaScript security boundary.
 
 No supported lifecycle target exposes either test-only seam; there is no live
 provider mutation or environment manifest. `registry/`, `runtime/` and
-`evidence/` remain empty. Receipt v4 now has provider-class-bound controlled
-cleanup intent/pass shapes, but its operation-evidence hash is opaque and
-grants no deletion or close authority. Next compose the real state cleanup
-slot, outer settlement, action-dispatched recovery and close around retirement
-v2. Then finish the live Docker/helper/disk closure before exposing a supported
-lifecycle target or making any Docker claim. Superseded receipt and mutation
-schemas are discarded and regenerated.
+`evidence/` remain empty. Receipt v4 has provider-class-bound controlled cleanup
+intent/pass shapes, but the receipt itself grants no deletion authority. The
+state-owned path supplies the dedicated slot and exact checkpoints, publishes a
+distinct outer settlement, and binds that digest through pass and close.
+Recovery may abort only an untouched pre-intent slot or proceed under the newest
+observation claim, reserving capacity for a final settled-prefix refresh. Owner
+close permits no claim and recovery close must name the latest claim. Finish the
+live Docker/helper/disk closure before exposing a supported lifecycle target or
+making any Docker or finalization claim. Superseded receipt and mutation schemas
+are discarded and regenerated.
 The manual browser ceremony below remains usable for fixture development but
 cannot be labelled a clean-Engine result.
 
@@ -612,10 +619,12 @@ finalizer are deterministic fixed-fake contracts, not a live provider claim. Six
 reassert the actual slot, operation plan, source and causal frontier. The
 outer settlement and close bind only complete identity, a no-live-process exact
 residual or a preserved foreign collision. Retirement v2 accepts the exact
-mutation-journal create chain but is not yet composed with an outer cleanup
-settlement, receipt, recovery or close. No supported lifecycle target exposes
-the test fixtures; supported state-born cleanup and exact live-provider
-retirement remain prerequisites for a real effect.
+mutation-journal create chain and is composed by a separate cleanup slot,
+outer settlement, action-dispatched recovery, pass receipt and close. The inner
+retirement settlement remains unauthorized for receipt or close. No supported
+lifecycle target exposes the test fixtures; exact live-provider retirement and
+a separately reviewed environment manifest remain prerequisites for a real
+effect or finalization.
 Separately, every development source build proves the embedded local builder
 grammar before mutation; none of that is live provider evidence. The core
 Collector remains private but

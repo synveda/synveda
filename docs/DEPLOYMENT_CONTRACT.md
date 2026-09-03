@@ -226,22 +226,29 @@ remain blocking evidence.
 
 The same inner create protocol remains directly testable in fixture mode.
 Legacy retirement v1 and operation-evidence APIs stay fixture-only and
-`state_integration: not-authorized`. A separate retirement-v2 boundary accepts
-only the exact state-born create chain and explicit cleanup intent,
-operation-plan, slot, create-settlement, create-close and source bindings. It
-stops through authenticated IPC, applies only individual leaf-first
-unlink/rmdir steps after exact remaining-subset revalidation, fsyncs recovered
-absence, and uses parent-durable append-only plan/progress/settlement
-publication. Unknown/replaced resources and foreign publication stages remain
-blocking. Every destructive or publication frontier is synchronously gated;
-the read-only prefix observation binds the expected operation even before its
-plan exists. The inner settlement grants no result-receipt or close authority.
-Receipt v4 discriminates legacy and controlled provider-cleanup shapes and
-pins the controlled retirement kind, contract and operation-plan digest. Its
-operation-evidence digest is intentionally opaque; only the mutation owner can
-prove that it names the distinct outer cleanup settlement. State-born cleanup
-and finalization remain open until that owner supplies the cleanup slot,
-settlement, recovery, receipt and close.
+`state_integration: not-authorized`. Retirement v2 accepts only the exact
+state-born create chain. The mutation owner supplies a dedicated cleanup plan,
+slot and intent bound to the completed create slot, outer create settlement and
+close, provider identity, source head and exact provider-base/evidence-directory
+identities. It stops through authenticated IPC, applies only individual leaf-
+first unlink/rmdir steps after exact remaining-subset revalidation, fsyncs
+recovered absence, and uses parent-durable append-only plan/progress/settlement
+publication. Unknown/replaced resources, parents and foreign publication stages
+remain blocking. Every destructive or publication frontier is synchronously
+reconstructed and gated from current state; the read-only prefix observation
+binds the expected operation even before its lower plan exists.
+
+The inner retirement settlement grants no result-receipt or close authority.
+The mutation owner publishes a distinct outer cleanup settlement after exact
+completion; receipt v4 and close v3 accept only that digest. Cleanup recovery
+is action-dispatched and binds the latest observation claim, including a
+reserved final settled-prefix refresh when retirement changes the observation.
+An untouched pre-intent recovery may close aborted without effect. Owner close
+requires no claims; a recovered close requires the latest claim. Settled
+history, source closure and completion are reasserted at settlement, receipt
+and the final no-replace close link. This completes the deterministic state-
+born cleanup contract but does not enable a supported provider lifecycle or
+finalization.
 
 Receipt and environment bytes are canonical, fsynced in private staging files
 and linked to their final names without replacement. The current internal
@@ -287,11 +294,12 @@ content-free authority, toolchain, controller/start, authenticated endpoint and
 provider-identity evidence, while the run contains a state-owned outer
 settlement. Its receipt class is `controlled-background-fake`. `registry/`,
 `runtime/` and `evidence/` remain empty. There is no Docker/Colima invocation,
-live provider executor or environment manifest. Retirement v2 is not yet
-composed by the state owner and its inner settlement carries no receipt/close
-authority, so controlled runs still reject supported provider cleanup and
-finalization. The `*WithAuthorityGate` exports are unsupported internal
-composition hooks, not a JavaScript security boundary; owner-UID code
+live provider executor or environment manifest. The state owner composes
+retirement v2 through its dedicated cleanup plan, slot, intent, outer
+settlement, action-dispatched recovery, receipt and close. Its inner settlement
+still carries no receipt/close authority, and controlled evidence remains
+ineligible for finalization. The `*WithAuthorityGate` exports are unsupported
+internal composition hooks, not a JavaScript security boundary; owner-UID code
 execution and journal mutation are one trusted-host boundary. This checkpoint
 must not be reported as clean-Engine, Docker, Colima or browser evidence.
 

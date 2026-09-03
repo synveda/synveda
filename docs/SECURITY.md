@@ -232,30 +232,40 @@ aliases and append an observation-bound claim. It never launches, signals,
 deletes, repairs the inner chain or replays a durable controller/start decision.
 Launch without authenticated readiness and start without authenticated PID
 remain permanently unattested; live/unidentifiable state refuses. A claim
-after durable close is inert, and exhausted claim/slot capacity fails closed.
+after durable close makes the journal invalid and cannot reopen that generation;
+exhausted claim/slot capacity also fails closed.
 
 Legacy retirement v1 remains fixture-only. It authenticates stop, fsyncs
 absence and performs individual leaf-first unlink/rmdir steps only after exact
-inventory revalidation. A distinct retirement-v2 seam accepts the exact
-state-born create chain plus immutable cleanup/source bindings. It requires a
-closed authority checkpoint before authenticated shutdown delivery, every
-stale-socket or resource removal, every publication mutation and final
-consumption. Publication recovery binds declared, actual and inode identities;
-the read-only prefix observation also binds the expected operation, residual
-inventory and process state. The inner settlement grants no receipt or close
-authority. Receipt v4 accepts an exact controlled cleanup result only after a
-controlled create and binds its kind, contract and plan, but the receipt's
-nonzero operation-evidence digest is opaque. It cannot authorize deletion or
-prove that the digest names an outer settlement. The mutation-state owner does
-not yet compose this seam, so the controlled state root has no supported
-cleanup or finalization authority. No supported lifecycle target exposes these
-fixtures and no Docker/Colima effect is enabled. The `*WithAuthorityGate`
-exports are internal composition hooks, not a security boundary against
-arbitrary owner-UID JavaScript: owner-UID code execution and journal mutation
-are one trusted-host boundary. Other PID
-namespaces, ACLs, xattrs, file flags and bind mounts remain trusted-host limits.
-A truthful live provider identity, TLS registry auth, zero-read builder and
-destruction evidence remain pending.
+inventory revalidation. The mutation-state owner composes retirement v2 with a
+dedicated cleanup plan, slot and intent bound to the completed create slot,
+outer create settlement and close, immutable provider identity, source head
+and exact parent-directory identities. A closed state checkpoint is required
+before authenticated shutdown delivery, every stale-socket or resource
+removal, every publication mutation and final consumption. The checkpoint
+reconstructs all fixed fields, resource and stage identities, including the
+exact recovered-absence decision. Publication recovery binds declared, actual
+and inode identities; the read-only prefix observation binds the expected
+operation, residual inventory and process state.
+
+The inner retirement settlement grants no receipt or close authority. Only a
+distinct outer cleanup settlement can bind the controlled cleanup pass and
+close; provider identity, create settlement, the inner settlement and unrelated
+digests are refused. Owner close permits no recovery claims. Action-dispatched
+recovery binds the latest claim, reserves capacity for a final settled-prefix
+snapshot before destructive work when needed, and cannot rewrite a settled
+observation. An untouched pre-intent recovery can only abort without effect.
+Source, parent identities, completed retirement and inert-state absence are
+reasserted at the final close publication.
+
+No supported lifecycle target exposes these fixtures and no Docker/Colima
+effect is enabled. Controlled-background evidence remains ineligible for the
+synthetic finalizer. The `*WithAuthorityGate` exports are internal composition
+hooks, not a security boundary against arbitrary owner-UID JavaScript: owner-
+UID code execution and journal mutation are one trusted-host boundary. Other
+PID namespaces, ACLs, xattrs, file flags and bind mounts remain trusted-host
+limits. A truthful live provider identity, TLS registry auth, zero-read builder
+and destruction evidence remain pending.
 
 ## Residual and external limits
 

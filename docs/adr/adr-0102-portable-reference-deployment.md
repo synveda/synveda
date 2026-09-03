@@ -173,20 +173,27 @@ settlements, closes and bounded recovery claims are never deleted or reused.
 Legacy inner retirement v1 remains fixture-only. It binds the complete
 creation inventory, stops only through authenticated IPC and applies
 individual leaf-first unlink/rmdir actions after exact revalidation; recovered
-absence fsyncs the parent. A separate retirement-v2 contract accepts only the
-exact state-born create chain and explicit cleanup/source bindings. It keeps
-the create head immutable, gates every process/resource effect and every
-durable publication frontier, persists exact progress/settlement, and exposes
-an operation-bound read-only prefix observation. It grants no result-receipt or
-close authority. Receipt v4 now has exact provider-class-bound controlled
-cleanup variants; its evidence digest remains opaque until the mutation owner
-binds it to a distinct outer settlement. Until that owner supplies a cleanup
-slot, outer settlement, recovery claim, receipt and close, no supported cleanup
-or finalization authority exists for the state-owned root. The authority-gated
-helpers are unsupported internal composition hooks, not a JavaScript security
-boundary. Owner-UID code and journal writes share one trusted-host boundary;
-ACLs, xattrs, flags, bind mounts and other PID namespaces remain outside this
-deterministic evidence.
+absence fsyncs the parent. Retirement v2 accepts only the exact state-born
+create chain. The mutation owner composes it through a dedicated cleanup plan,
+slot and intent bound to the completed create slot, outer create settlement and
+close, provider identity, source head and parent-directory identities. The
+create head remains immutable while exact state gates cover every process or
+resource effect and durable publication frontier. Lower progress and
+settlement remain a separate head and expose an operation-bound read-only
+prefix observation.
+
+The inner settlement grants no result-receipt or close authority. Only the
+distinct outer cleanup settlement may bind receipt v4's controlled pass and
+close v3. Action-dispatched recovery holds the newest observation claim and,
+when retirement advances, publishes a reserved final settled-prefix claim
+before outer settlement. Owner close permits no claims; recovery close must
+name the latest claim. Pre-intent recovery is effect-free, settled history
+cannot regress, and completed retirement is reasserted at the final close
+publication. The authority-gated helpers are unsupported internal composition
+hooks, not a JavaScript security boundary. Owner-UID code and journal writes
+share one trusted-host boundary; ACLs, xattrs, flags, bind mounts and other PID
+namespaces remain outside this deterministic evidence. No supported lifecycle
+or finalization authority follows from this fixed-fake contract.
 
 The live-preparation record still pins Colima 0.10.3 at
 `00f6c297e92a82c04a4ab507db0a61435650d7e8` and Lima 2.2.0 at
@@ -248,13 +255,13 @@ Colima or supported lifecycle evidence.
   deterministic background create path distinguishes controller, host agent,
   Engine, both sockets and Docker context; its outer settlement is integrated
   with receipt v4 and close v3. Legacy retirement v1 remains fixture-only; the
-  distinct retirement-v2 boundary accepts the state-born chain but is not yet
-  composed with a cleanup slot, outer settlement, recovery, receipt or close,
-  so it cannot clean the state-owned root through a supported lifecycle. A live
-  adapter must still close the transitive Docker/helper/disk identities and
-  complete that state-owned cleanup evidence without weakening the immutable journal. A
-  supported runner and source/image environment manifest remain required before
-  it can support a Docker or Colima acceptance claim.
+  state owner composes retirement v2 through a dedicated cleanup slot, exact
+  lower checkpoints, an outer settlement, action-dispatched recovery, receipt
+  and close. Only the outer cleanup settlement is operation evidence. A live
+  adapter must still close the transitive Docker/helper/disk identities through
+  the same boundary without weakening the immutable journal. A supported runner
+  and source/image environment manifest remain required before this can support
+  a Docker or Colima acceptance or finalization claim.
 - Reversal trigger: if measured operation failure semantics cannot be made
   correct behind the provider-neutral outbox, remove Apalis and retain the
   Postgres worker path. If single-host Compose cannot reproduce the contract on
