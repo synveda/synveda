@@ -31,7 +31,7 @@ function plan(candidateSha256 = sha256(canonicalBytes(candidate()))) {
       state_device: "42",
       state_inode: "73",
     },
-    schema: "synveda.clean-engine.receipt.v3",
+    schema: "synveda.clean-engine.receipt.v4",
     sequence: 0,
   };
 }
@@ -40,7 +40,8 @@ function result(phase) {
   switch (phase) {
     case "provider-create-intent":
       return {
-        cleanup_command: "colima-delete-data-force",
+        operation_kind: "deterministic-fake-provider-create-v1",
+        operation_plan_sha256: "0".repeat(64),
         preexisting_resource: "absent",
         provider_contract_sha256: "2".repeat(64),
         provider_resource: `synveda-cpr45-${fixtureId}`,
@@ -54,6 +55,8 @@ function result(phase) {
         initial_images: 0,
         initial_networks: ["bridge", "host", "none"],
         initial_volumes: 0,
+        operation_kind: "deterministic-fake-provider-create-v1",
+        operation_plan_sha256: "0".repeat(64),
         platform: "darwin-arm64-colima-vz",
         provider_contract_sha256: "2".repeat(64),
         provider_name: "colima",
@@ -330,7 +333,7 @@ test("provider success binds its explicit evidence class and intent contract", (
   );
 
   const relabelledFixture = result("provider-create-passed");
-  relabelledFixture.evidence_class = "controlled-fake";
+  relabelledFixture.evidence_class = "controlled-background-fake";
   assert.throws(
     () =>
       createNextReceipt(
@@ -347,17 +350,22 @@ test("provider success binds its explicit evidence class and intent contract", (
   controlledReceipts.push(
     createNextReceipt(controlledReceipts, fixtureId, "provider-create-intent", {
       ...result("provider-create-intent"),
+      operation_kind: "controlled-background-provider-create-v1",
+      operation_plan_sha256: "b".repeat(64),
       provider_contract_sha256: controlledContract,
+      provider_root_key: `svb-${fixtureId.slice(0, 12)}`,
     }),
   );
   controlledReceipts.push(
     createNextReceipt(controlledReceipts, fixtureId, "provider-create-passed", {
-      evidence_class: "controlled-fake",
+      evidence_class: "controlled-background-fake",
+      operation_evidence_sha256: "d".repeat(64),
+      operation_kind: "controlled-background-provider-create-v1",
+      operation_plan_sha256: "b".repeat(64),
       platform: "deterministic-posix",
       provider_contract_sha256: controlledContract,
-      provider_evidence_sha256: "d".repeat(64),
-      provider_name: "controlled-fake",
-      runtime_name: "none",
+      provider_name: "controlled-background-fake",
+      runtime_name: "docker-fake",
     }),
   );
   for (const phase of receiptSuccessPath.slice(3, -1)) {

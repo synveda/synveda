@@ -133,7 +133,7 @@ hard link to the immutable mode-0600 `00-plan.json`. The link and run-directory
 device/inode identities use exact 64-bit filesystem values. The receipt hash
 chain is correlation evidence, not a signature or release provenance.
 
-Receipt schema version 3 is an append-only state machine with one exact success
+Receipt schema version 4 is an append-only state machine with one exact success
 path: provider create, registry, proxy, zero-read builder, browser, project
 cleanup, provider cleanup and finalization. Each external mutation must first
 publish its closed intent; each result is a closed content-free assertion.
@@ -141,20 +141,25 @@ Failures can transition only to receipt-owned cleanup, and a reported foreign
 collision is removed from cleanup authority even when cleanup itself is
 retried. A preflight provider collision is terminal and grants no cleanup
 authority. Provider success has an explicit evidence class and must bind the
-same provider-contract digest as its intent. Version-1 and version-2 plan
-receipts predate this contract and are a hard-cut refusal: discard their
+same operation kind, plan and provider-contract digest as its intent. Version-1,
+version-2 and version-3 receipts predate this contract and are a hard-cut
+refusal: discard their
 non-mutating preparation state and create a new plan; there is no compatibility
 mode.
 
 All receipt appends and finalization use an append-only, private, content-free
-mutation journal. A permanent `.mutation-slot-SS` binds the closed action,
-exact source receipt/environment endpoints, intended provider receipt where
-applicable, random nonce, cooperative process-instance challenge and the prior
-close digest. Its permanent `.mutation-close-SS` binds exact result endpoints
-and the slot-owner or recovery authority plus an operation-evidence digest.
+mutation journal. A permanent v2 `.mutation-slot-SS` binds the closed action,
+exact source receipt/environment endpoints, intended provider receipt, random
+nonce, cooperative process-instance challenge, prior close digest, operation
+kind, contract and canonical plan. A permanent
+`.mutation-operation-SS` is the outer provider-operation settlement. A
+permanent v3 `.mutation-close-SS` binds exact result endpoints, operation
+identity, the slot-owner or newest recovery authority and the outer settlement
+digest.
 Recovery attempts append permanent, gap-free `.mutation-recovery-SS-RR`
-claims. These final names are never deleted or reused; the next slot is valid
-only when it binds the prior close exactly. Mutation-close v1 and the reusable
+v2 claims whose chain root binds the same operation. These final names are
+never deleted or reused; the next slot is valid only when it binds the prior
+close exactly. Mutation slot v1, recovery/root v1, close v1/v2 and the reusable
 `.mutation-lease` layout are fresh-plan hard-cut refusals.
 
 Blockers are completed and fsynced under unique private staging names, then
@@ -171,96 +176,70 @@ Generic receipt append cannot own preflight, provider-create, provider-cleanup
 or finalization evidence.
 
 The internal provider-create seam retains the synchronous closed-data fake as
-rollback and adds a separate controlled fake path. The controlled path holds
-one slot across an immutable root plan/reservation, mirrored external-root
-owner, durable actor-launch record, actor/process-group witness, one-way start
-decision, fixed fake-child outcome and ESRCH settlement. The supervisor
-reasserts the actual slot before deciding; the actor validates the exact plan,
-full root/leaf inode-mode-type inventory, owner mirror, launch and witness,
-including their digest-bound slot fields, before start. Only that actor signals
-its own group, while its directly owned children exit on parent-IPC loss. The
-settlement binds the exact optional effect and outcome digests. After
-settlement, the exact fixed effect is mirrored into append-only state and a
-controlled-fake provider identity binds the slot, intent, contract, root
-plan/owner, settlement and closed fake resource dispositions. Passing results
-and post-settlement mutation closes bind this identity rather than treating
-process settlement as Engine identity.
-Explicit recovery is bound to the exact canonical slot digest and two-digit
-slot sequence, then appends at most eight recovery claims. It probes but never
-signals a stored PGID and never replays a durable start. A marker-before-mirror
-crash converges only the exact reservation-bound owner; effect-mirror and
-identity-publication crashes converge one identical provider identity; a launch
-without a witness remains blocking. The open slot and newest recovery claim
-block ordinary writers. A live/unidentifiable owner or recovery refuses; an
-abandoned claim can be superseded. A claim appended after a durable close is inert
-history. Claim-attempt or 64-slot exhaustion fails closed for inspection and
-fresh-plan regeneration. Only state-integrated provider-create has
-mutation-journal recovery; abandoned append and finalization slots remain
-blocking evidence.
+rollback. Its controlled path is the lifecycle-unexposed background fake; the
+former detached actor implementation is removed. A canonical
+`background-create-operation-plan.v1` binds the private provider base, evidence
+directory, root key and ownership nonce before the v2 slot and v4 intent become
+durable. The state owner alone publishes `background-create-authority.v1` and
+launches the fixed controller/host-agent chain. The adapter accepts no caller
+function, command, environment, path or provider selector.
 
-A separate lifecycle-unexposed fake process canary fixes the
-background-provider and retirement protocol before state integration. Its
-recoverable pre-effect authority binds the exact fixture roots, directory
-identities, intended receipt/slot-shaped inputs and ownership nonce. It remains
-explicitly `fixture-only`: the inner process module rejects a caller-supplied
-mutation-journal label. A durable launch decision precedes the controller and a
-distinct durable start decision precedes the host agent; the controller
-reopens and validates the authority, owner, launch/witness chain, start
-decision and host-agent configuration before spawning. The explicitly
-authorised v4 fixture launcher additionally exposes only a synchronous veto
-checkpoint before root publication, controller spawn, start-decision
-publication, start delivery and provider-identity publication. Each veto is followed by a
-non-mutating comparison of the complete ordered evidence/private-file frontier
-with launcher-owned identities; it cannot return authority or alter launch
-inputs. The terminal veto runs only after reauthenticating the host agent and
-Engine and prevalidating the complete provider identity, immediately before
-synchronous publication.
-Private root/config/readiness/PID files publish through a fsynced private stage
-and no-replace hard link; sockets are created under a `0177` umask before their
-mode and parent durability are rechecked. A non-mutating prefix inspector
-classifies exact causal evidence and root residuals without repairing them.
-The controller-readiness and host-agent PID records HMAC their complete causal
-configuration, launch/start, PID/process and toolchain identities. A final or
-canonical-complete staged child record can therefore be negative-probed before
-its later parent witness; PID relabelling and elapsed-lifetime absence remain
-refused.
-The launcher binds captured controller
-and host-agent source bytes plus child-side runtime/source witnesses. Both
-children open their digest-bound configuration through exact no-follow
-descriptors. The launcher uses an
-owned working directory and closed environment, and shuts the controller down
-through authenticated bounded IPC rather than a numeric PID or PGID signal.
-Controller-group `ESRCH` is followed by fresh authenticated host-agent and
-Engine probes through their distinct sockets and the exact Docker-context
-endpoint. Its live-preparation record is explicitly Darwin/arm64 VZ, pins
-Colima 0.10.3 and Lima 2.2.0 source revisions, inherits ambient `HOME`
-unchanged, and blocks on unresolved OS, Docker, helper and disk-image closure.
+The process contract has six synchronous veto-only checkpoints: before create
+authority, root publication, controller spawn, start-decision publication,
+start delivery and provider identity. At state integration, each checkpoint
+reopens the exact slot, operation plan, receipt/source head and complete
+evidence/root frontier. It cannot return authority. Private root,
+configuration, readiness and PID files use fsynced stages plus no-replace hard
+links; sockets begin under a `0177` umask. Controller-readiness and host-agent
+PID records HMAC their complete causal configuration, launch/start, process and
+toolchain identities. Negative probes therefore apply only to the authenticated
+record; PID relabelling and elapsed-lifetime absence are refused. Both children
+open configuration through exact no-follow descriptors. Terminal identity is
+prevalidated only after fresh authenticated host-agent and Engine probes and
+binds the complete static root identity, including device, inode, mode, path
+and UID.
 
-Provider identity binds a complete immutable creation-time fake-root inventory;
-the canary requires its exact match before publishing a leaf-first retirement
-plan. Socket absence is fsynced; an abruptly dead
-host agent permits removal only of the exact planned stale socket identities.
-The same rule permits planning after pre-plan process death or graceful expiry:
-all non-socket creation identities remain mandatory and only the two exact
-creation-bound sockets may be present or absent.
-Every later deletion revalidates the exact remaining inventory and uses one
-unlink or rmdir. A recovered absence fsyncs its exact parent and is rechecked
-before progress publication, including provider-root removal. Bounded
-append-only publication/progress reconciles a complete
-pre-link stage or final link awaiting stage removal and discards only a
-reserved same-target/digest partial stage. It also recovers authenticated
-shutdown and delete-before-progress interruption. Unknown or substituted
-evidence/resources remain blocking. Provider-create and provider-cleanup
-retain different evidence heads. This settlement is
-`state_integration: not-authorized` and cannot close a cleanup result or final
-receipt.
+The outer `background-create-settlement.v1` records either
+`complete-identity`/`none` or an `exact-residual` with `evidence-refused` or
+`resource-collision`. No residual with a live or unattested controller or host
+agent can settle. Passing receipt and close bind this outer settlement digest,
+not the inner identity. Source closure is reasserted at intent, all six gates,
+pass and close. A source-obsolete one-link intent stage is retired and closes
+aborted before effect; drift after a complete identity enters
+`execution-failed`.
+
+An unowned provider root is a foreign `ownership-pending` collision. Its root
+identity is observed without inspecting leaves or sockets. The exact collision
+snapshot is reasserted immediately before settlement publication. After that
+settlement is durable, foreign removal or replacement is historical and does
+not invalidate the journal, while all Synveda-owned evidence remains exact.
+
+Recovery confirmation only reads. Acquisition first proves the slot owner and
+newest recovery owner absent, then may reconcile exact mutation-stage aliases,
+rechecks the predecessor bytes and appends an observation-bound v2 claim.
+Recovery never launches, signals, deletes, repairs inner evidence or replays a
+durable controller/start decision. Launch without authenticated controller
+readiness and start without authenticated host-agent PID remain permanently
+unattested; present or unidentifiable processes also block. At most eight
+claims and 64 slots bound the journal. Abandoned append and finalization slots
+remain blocking evidence.
+
+The same inner protocol remains directly testable only in fixture mode. Its
+retirement helper binds the creation inventory, stops through authenticated
+IPC, publishes a leaf-first plan and applies only individual unlink/rmdir
+steps after exact remaining-subset revalidation. Recovered absence fsyncs its
+parent. Unknown/replaced resources remain blocking. Inner operation-evidence
+and retirement APIs reject state-born authority; fixture retirement is
+`state_integration: not-authorized` and cannot close a state cleanup result.
+State-born cleanup and finalization therefore remain open.
 
 Receipt and environment bytes are canonical, fsynced in private staging files
 and linked to their final names without replacement. The current internal
 fixture finalizer emits only `synveda.clean-engine.synthetic-environment.v1`;
-controlled-fake evidence is structurally ineligible for it, and this schema is
-not live environment evidence. A future live provider class requires a distinct
-reviewed environment schema. After the mutation slot has been safely resolved,
+controlled-background-fake evidence is structurally ineligible for it, and
+this schema is not live environment evidence. A future live provider class
+requires a distinct reviewed environment schema. After the mutation slot has
+been safely resolved,
 a partial/noncanonical staging file is discardable; a complete canonical or
 already-linked file is resumed only when it exactly
 reconstructs the next state and otherwise is retained and refused. The
@@ -294,14 +273,16 @@ timings; it accepts no caller-supplied function, path, command, environment or
 provider selector. The state-integrated controlled path invokes only the
 repository-fixed fake child under a short, private, receipt-owned external root.
 `provider/` now contains
-content-free root and actor lifecycle evidence, a state-owned effect mirror and
-a provider identity explicitly classified as controlled fake, but `registry/`,
+content-free authority, toolchain, controller/start, authenticated endpoint and
+provider-identity evidence, while the run contains a state-owned outer
+settlement. Its receipt class is `controlled-background-fake`. `registry/`,
 `runtime/` and `evidence/` remain empty. There is no Docker/Colima invocation,
-live provider executor or environment manifest. The separate process canary's
-fake-root deletion settlement carries no state authority, while the active
-state-integrated validator still requires its unretired owned root. Controlled
-runs therefore reject provider cleanup and finalization. This checkpoint must
-not be reported as clean-Engine, Docker, Colima or browser evidence.
+live provider executor or environment manifest. The fixture-only deletion
+settlement carries no state authority, so controlled runs reject provider
+cleanup and finalization. The `*WithAuthorityGate` exports are unsupported
+internal composition hooks, not a JavaScript security boundary; owner-UID code
+execution and journal mutation are one trusted-host boundary. This checkpoint
+must not be reported as clean-Engine, Docker, Colima or browser evidence.
 
 An uncatchable pre-publication interruption can retain one or more strictly
 validated `.pending-*` or `.run-*` staging directories. They contain no

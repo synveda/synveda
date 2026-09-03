@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { createHash } from "node:crypto";
 
-export const RECEIPT_SCHEMA = "synveda.clean-engine.receipt.v3";
+export const RECEIPT_SCHEMA = "synveda.clean-engine.receipt.v4";
 export const ZERO_SHA256 = "0".repeat(64);
 
 const REGISTRY_IMAGE =
@@ -162,48 +162,35 @@ function validatePlanResult(result, fixtureId) {
 }
 
 function validateProviderIntent(result, fixtureId) {
-  const basicFields = [
-    "cleanup_command",
-    "preexisting_resource",
-    "provider_contract_sha256",
-    "provider_resource",
-    "provider_root_key",
-  ];
-  const controlledFields = [
-    ...basicFields,
-    "ownership_nonce",
-    "preexisting_docker_context",
-    "preexisting_provider_instance",
-    "preexisting_provider_root",
-    "provider_profile",
-    "provider_root_plan_sha256",
-  ];
-  const fields = Object.keys(result ?? {}).sort();
+  exactKeys(
+    result,
+    [
+      "operation_kind",
+      "operation_plan_sha256",
+      "preexisting_resource",
+      "provider_contract_sha256",
+      "provider_resource",
+      "provider_root_key",
+    ],
+    "provider intent result",
+  );
   if (
-    JSON.stringify(fields) !== JSON.stringify(basicFields.sort()) &&
-    JSON.stringify(fields) !== JSON.stringify(controlledFields.sort())
-  ) {
-    refuse("provider intent result fields were refused");
-  }
-  if (
-    result.cleanup_command !== "colima-delete-data-force" ||
+    !new Set([
+      "controlled-background-provider-create-v1",
+      "deterministic-fake-provider-create-v1",
+    ]).has(result.operation_kind) ||
+    !lowerHex(result.operation_plan_sha256, 64) ||
     result.preexisting_resource !== "absent" ||
     !lowerHex(result.provider_contract_sha256, 64) ||
     result.provider_resource !== `synveda-cpr45-${fixtureId}` ||
-    result.provider_root_key !== `sv-c45-${fixtureId.slice(0, 16)}`
+    (result.operation_kind === "deterministic-fake-provider-create-v1" &&
+      (result.operation_plan_sha256 !== ZERO_SHA256 ||
+        result.provider_root_key !== `sv-c45-${fixtureId.slice(0, 16)}`)) ||
+    (result.operation_kind === "controlled-background-provider-create-v1" &&
+      (result.operation_plan_sha256 === ZERO_SHA256 ||
+        result.provider_root_key !== `svb-${fixtureId.slice(0, 12)}`))
   ) {
     refuse("provider intent result was refused");
-  }
-  if (
-    fields.length === controlledFields.length &&
-    (!lowerHex(result.ownership_nonce, 64) ||
-      result.preexisting_docker_context !== "absent" ||
-      result.preexisting_provider_instance !== "absent" ||
-      result.preexisting_provider_root !== "absent" ||
-      result.provider_profile !== `sv-c45-${fixtureId.slice(0, 16)}` ||
-      !lowerHex(result.provider_root_plan_sha256, 64))
-  ) {
-    refuse("controlled provider intent result was refused");
   }
 }
 
@@ -218,6 +205,8 @@ function validateProviderPassed(result) {
         "initial_images",
         "initial_networks",
         "initial_volumes",
+        "operation_kind",
+        "operation_plan_sha256",
         "platform",
         "provider_contract_sha256",
         "provider_name",
@@ -238,6 +227,8 @@ function validateProviderPassed(result) {
       result.runtime_client_version !== "29.4.0" ||
       result.runtime_server_version !== "29.4.0" ||
       result.platform !== "darwin-arm64-colima-vz" ||
+      result.operation_kind !== "deterministic-fake-provider-create-v1" ||
+      result.operation_plan_sha256 !== ZERO_SHA256 ||
       result.initial_containers !== 0 ||
       result.initial_images !== 0 ||
       result.initial_volumes !== 0 ||
@@ -248,14 +239,16 @@ function validateProviderPassed(result) {
     exactStringArray(result.initial_networks, ["bridge", "host", "none"], "provider networks");
     return;
   }
-  if (result?.evidence_class === "controlled-fake") {
+  if (result?.evidence_class === "controlled-background-fake") {
     exactKeys(
       result,
       [
         "evidence_class",
+        "operation_evidence_sha256",
+        "operation_kind",
+        "operation_plan_sha256",
         "platform",
         "provider_contract_sha256",
-        "provider_evidence_sha256",
         "provider_name",
         "runtime_name",
       ],
@@ -263,9 +256,12 @@ function validateProviderPassed(result) {
     );
     if (
       !lowerHex(result.provider_contract_sha256, 64) ||
-      !lowerHex(result.provider_evidence_sha256, 64) ||
-      result.provider_name !== "controlled-fake" ||
-      result.runtime_name !== "none" ||
+      !lowerHex(result.operation_evidence_sha256, 64) ||
+      result.operation_evidence_sha256 === ZERO_SHA256 ||
+      result.operation_kind !== "controlled-background-provider-create-v1" ||
+      !lowerHex(result.operation_plan_sha256, 64) ||
+      result.provider_name !== "controlled-background-fake" ||
+      result.runtime_name !== "docker-fake" ||
       result.platform !== "deterministic-posix"
     ) {
       refuse("provider result was refused");
@@ -795,8 +791,11 @@ export function validateReceiptChain(receipts, fixtureId) {
   const providerPassed = receipts.find((receipt) => receipt.phase === "provider-create-passed");
   if (
     providerPassed !== undefined &&
-    providerPassed.result.provider_contract_sha256 !==
-      providerIntent?.result.provider_contract_sha256
+    (providerPassed.result.provider_contract_sha256 !==
+      providerIntent?.result.provider_contract_sha256 ||
+      providerPassed.result.operation_kind !== providerIntent?.result.operation_kind ||
+      providerPassed.result.operation_plan_sha256 !==
+        providerIntent?.result.operation_plan_sha256)
   ) {
     refuse("provider result contract binding was refused");
   }

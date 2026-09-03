@@ -201,18 +201,24 @@ function mutationLease(state, {
   const active = activeRun(state);
   const candidate = parse(join(active, "candidate.json"));
   const planReceipt = parse(join(active, "00-plan.json"));
+  const providerCreate = action === "provider-create";
   return {
     action,
     fixture_id: candidate.run_id,
     intent_receipt_sha256: intentReceiptSha256,
     journal_sequence: journalSequence,
     nonce: "f".repeat(32),
+    operation_contract_sha256: providerCreate
+      ? "e3c24885d5c85864b7a6f4f2d3f966c01e1dd3d7d450d00531d251ef21227c72"
+      : "0".repeat(64),
+    operation_kind: providerCreate ? "deterministic-fake-provider-create-v1" : "none",
+    operation_plan: null,
     owner_boot_sha256: "a".repeat(64),
     owner_instance_sha256: "b".repeat(64),
     owner_pid: ownerPid,
     owner_probe: "opaque-process-instance-v1",
     previous_close_sha256: previousCloseSha256,
-    schema: "synveda.clean-engine.mutation-slot.v1",
+    schema: "synveda.clean-engine.mutation-slot.v2",
     source_environment_sha256: "0".repeat(64),
     source_head_sha256: sha256(canonicalBytes(planReceipt)),
     source_sequence: 0,
@@ -247,7 +253,7 @@ function fakeProviderAdapter({
 function stageAbandonedProviderLease(state, {
   ownerPid = 2_147_483_647,
   providerContractSha256 =
-    "9b472c7749667e773423d96a56cbc167f454d477cd6b0280b308533bab62bd5f",
+    "e3c24885d5c85864b7a6f4f2d3f966c01e1dd3d7d450d00531d251ef21227c72",
   publishIntent = true,
 } = {}) {
   const active = activeRun(state);
@@ -280,24 +286,37 @@ function stageAbandonedProviderLease(state, {
 
 function stageAbandonedProviderMutation(state, options) {
   const staged = stageAbandonedProviderLease(state, options);
-  const { active, candidate, intentReceipt, leaseBytes } = staged;
+  const { active, candidate, intentReceipt, lease, leaseBytes } = staged;
   const recovery = {
     action: "provider-create",
     chain_root_sha256: sha256(canonicalBytes({
       action: "provider-create",
       fixture_id: candidate.run_id,
       lease_sha256: sha256(leaseBytes),
-      schema: "synveda.clean-engine.mutation-recovery-root.v1",
+      operation_contract_sha256: lease.operation_contract_sha256,
+      operation_kind: lease.operation_kind,
+      operation_plan_sha256: "0".repeat(64),
+      schema: "synveda.clean-engine.mutation-recovery-root.v2",
     })),
     fixture_id: candidate.run_id,
     lease_sha256: sha256(leaseBytes),
     nonce: "e".repeat(32),
+    observed_effect_disposition: "not-reached",
+    observed_effect_name: "none",
+    observed_evidence_head_sha256: "0".repeat(64),
+    observed_evidence_prefix_sha256: "0".repeat(64),
+    observed_evidence_stage: "none",
+    observed_residual_sha256: "0".repeat(64),
+    observed_settlement_sha256: "0".repeat(64),
+    operation_contract_sha256: lease.operation_contract_sha256,
+    operation_kind: lease.operation_kind,
+    operation_plan_sha256: "0".repeat(64),
     owner_boot_sha256: "c".repeat(64),
     owner_instance_sha256: "d".repeat(64),
     owner_pid: 2_147_483_646,
     owner_probe: "opaque-process-instance-v1",
     parent_sha256: "0".repeat(64),
-    schema: "synveda.clean-engine.mutation-recovery.v1",
+    schema: "synveda.clean-engine.mutation-recovery.v2",
     sequence: 0,
     slot_sequence: 0,
     source_head_sha256: sha256(canonicalBytes(intentReceipt)),
@@ -318,6 +337,7 @@ function recoveryClaimForSlot(state, {
   const slotBytes = readFileSync(
     join(active, `.mutation-slot-${String(slotSequence).padStart(2, "0")}`),
   );
+  const slot = JSON.parse(slotBytes.toString("utf8"));
   const receiptNames = readdirSync(active)
     .filter((name) => /^[0-9]{2}-[a-z][a-z0-9-]*\.json$/.test(name))
     .sort();
@@ -328,17 +348,34 @@ function recoveryClaimForSlot(state, {
       action: "provider-create",
       fixture_id: candidate.run_id,
       lease_sha256: sha256(slotBytes),
-      schema: "synveda.clean-engine.mutation-recovery-root.v1",
+      operation_contract_sha256: slot.operation_contract_sha256,
+      operation_kind: slot.operation_kind,
+      operation_plan_sha256: slot.operation_plan === null
+        ? "0".repeat(64)
+        : sha256(canonicalBytes(slot.operation_plan)),
+      schema: "synveda.clean-engine.mutation-recovery-root.v2",
     })),
     fixture_id: candidate.run_id,
     lease_sha256: sha256(slotBytes),
     nonce: ((sequence + 1) % 16).toString(16).repeat(32),
+    observed_effect_disposition: "not-reached",
+    observed_effect_name: "none",
+    observed_evidence_head_sha256: "0".repeat(64),
+    observed_evidence_prefix_sha256: "0".repeat(64),
+    observed_evidence_stage: "none",
+    observed_residual_sha256: "0".repeat(64),
+    observed_settlement_sha256: "0".repeat(64),
+    operation_contract_sha256: slot.operation_contract_sha256,
+    operation_kind: slot.operation_kind,
+    operation_plan_sha256: slot.operation_plan === null
+      ? "0".repeat(64)
+      : sha256(canonicalBytes(slot.operation_plan)),
     owner_boot_sha256: "8".repeat(64),
     owner_instance_sha256: "9".repeat(64),
     owner_pid: ownerPid,
     owner_probe: "opaque-process-instance-v1",
     parent_sha256: previous === undefined ? "0".repeat(64) : sha256(canonicalBytes(previous)),
-    schema: "synveda.clean-engine.mutation-recovery.v1",
+    schema: "synveda.clean-engine.mutation-recovery.v2",
     sequence,
     slot_sequence: slotSequence,
     source_head_sha256: sourceHeadSha256 ?? sha256(canonicalBytes(head)),
@@ -859,24 +896,77 @@ test("mutation lease v1 is a hard-cut refusal", () => {
   }
 });
 
-test("mutation close v1 and non-provider operation evidence are hard-cut refusals", () => {
-  const legacy = fixture();
+test("superseded mutation schemas and non-provider operation evidence are refused", () => {
+  const legacySlot = fixture();
   try {
-    assert.equal(run(legacy, "plan").status, 0);
+    assert.equal(run(legacySlot, "plan").status, 0);
     executeProviderCreateForExecutor({
       adapter: fakeProviderAdapter(),
-      repoRoot: legacy.repo,
-      stateBase: legacy.state,
+      repoRoot: legacySlot.repo,
+      stateBase: legacySlot.state,
     });
-    const closePath = join(activeRun(legacy), ".mutation-close-00");
-    const close = parse(closePath);
-    close.schema = "synveda.clean-engine.mutation-close.v1";
-    writeFileSync(closePath, canonicalBytes(close), { mode: 0o600 });
-    const refused = run(legacy, "status");
+    const slotPath = join(activeRun(legacySlot), ".mutation-slot-00");
+    const slot = parse(slotPath);
+    slot.schema = "synveda.clean-engine.mutation-slot.v1";
+    writeFileSync(slotPath, canonicalBytes(slot), { mode: 0o600 });
+    const refused = run(legacySlot, "status");
     assert.equal(refused.status, 78);
-    assert.equal(refused.stderr, "clean-engine: mutation close was refused\n");
+    assert.equal(refused.stderr, "clean-engine: mutation slot was refused\n");
   } finally {
-    rmSync(legacy.root, { recursive: true, force: true });
+    rmSync(legacySlot.root, { recursive: true, force: true });
+  }
+
+  for (const schema of [
+    "synveda.clean-engine.mutation-close.v1",
+    "synveda.clean-engine.mutation-close.v2",
+  ]) {
+    const legacyClose = fixture();
+    try {
+      assert.equal(run(legacyClose, "plan").status, 0);
+      executeProviderCreateForExecutor({
+        adapter: fakeProviderAdapter(),
+        repoRoot: legacyClose.repo,
+        stateBase: legacyClose.state,
+      });
+      const closePath = join(activeRun(legacyClose), ".mutation-close-00");
+      const close = parse(closePath);
+      close.schema = schema;
+      writeFileSync(closePath, canonicalBytes(close), { mode: 0o600 });
+      const refused = run(legacyClose, "status");
+      assert.equal(refused.status, 78);
+      assert.equal(refused.stderr, "clean-engine: mutation close was refused\n");
+    } finally {
+      rmSync(legacyClose.root, { recursive: true, force: true });
+    }
+  }
+
+  for (const legacyRoot of [false, true]) {
+    const legacyRecovery = fixture();
+    try {
+      assert.equal(run(legacyRecovery, "plan").status, 0);
+      const staged = stageAbandonedProviderMutation(legacyRecovery);
+      const recoveryPath = join(staged.active, ".mutation-recovery-00-00");
+      const recovery = parse(recoveryPath);
+      if (legacyRoot) {
+        recovery.chain_root_sha256 = sha256(canonicalBytes({
+          action: "provider-create",
+          fixture_id: staged.candidate.run_id,
+          lease_sha256: sha256(staged.leaseBytes),
+          operation_contract_sha256: staged.lease.operation_contract_sha256,
+          operation_kind: staged.lease.operation_kind,
+          operation_plan_sha256: "0".repeat(64),
+          schema: "synveda.clean-engine.mutation-recovery-root.v1",
+        }));
+      } else {
+        recovery.schema = "synveda.clean-engine.mutation-recovery.v1";
+      }
+      writeFileSync(recoveryPath, canonicalBytes(recovery), { mode: 0o600 });
+      const refused = run(legacyRecovery, "status");
+      assert.equal(refused.status, 78);
+      assert.equal(refused.stderr, "clean-engine: mutation recovery claim was refused\n");
+    } finally {
+      rmSync(legacyRecovery.root, { recursive: true, force: true });
+    }
   }
 
   const evidence = fixture();
@@ -1132,7 +1222,7 @@ test("a linked slot stage retires without removing its published blocker", () =>
   }
 });
 
-test("a linked recovery stage retires while the exact claim remains authoritative", () => {
+test("recovery confirmation is read-only and acquisition retires a linked claim stage", () => {
   const state = fixture();
   try {
     assert.equal(run(state, "plan").status, 0);
@@ -1148,8 +1238,8 @@ test("a linked recovery stage retires while the exact claim remains authoritativ
       repoRoot: state.repo,
       stateBase: state.state,
     });
-    assert.equal(existsSync(stage), false);
-    assertPrivate(claim, 0o600);
+    assertPrivate(stage, 0o600, false, 2);
+    assertPrivate(claim, 0o600, false, 2);
     const recovered = recoverProviderCreateForExecutor({
       adapter: fakeProviderAdapter({
         reconcileOutcome: "failed",
@@ -1169,6 +1259,7 @@ test("a linked recovery stage retires while the exact claim remains authoritativ
     assertPrivate(join(active, ".mutation-recovery-00-00"), 0o600);
     assertPrivate(join(active, ".mutation-recovery-00-01"), 0o600);
     assertPrivate(join(active, ".mutation-close-00"), 0o600);
+    assert.equal(existsSync(stage), false);
     assert.equal(readdirSync(active).some((name) => name.startsWith(".mutation-stage-")), false);
   } finally {
     rmSync(state.root, { recursive: true, force: true });
@@ -1438,7 +1529,7 @@ test("the fake provider adapter holds one slot across intent effect and result",
     const intent = parse(join(activeRun(state), "01-provider-create-intent.json"));
     assert.equal(
       intent.result.provider_contract_sha256,
-      "9b472c7749667e773423d96a56cbc167f454d477cd6b0280b308533bab62bd5f",
+      "e3c24885d5c85864b7a6f4f2d3f966c01e1dd3d7d450d00531d251ef21227c72",
     );
     assert.equal(intent.result.provider_resource, `synveda-cpr45-${candidate.run_id}`);
     assertPrivate(join(activeRun(state), ".mutation-slot-00"), 0o600);
@@ -1461,7 +1552,7 @@ test("the synchronous fake cannot publish controlled-provider evidence", () => {
               evidence_class: "controlled-fake",
               platform: "deterministic-posix",
               provider_contract_sha256:
-                "9b472c7749667e773423d96a56cbc167f454d477cd6b0280b308533bab62bd5f",
+                "e3c24885d5c85864b7a6f4f2d3f966c01e1dd3d7d450d00531d251ef21227c72",
               provider_evidence_sha256: "d".repeat(64),
               provider_name: "controlled-fake",
               runtime_name: "none",
@@ -1506,7 +1597,7 @@ test("persisted synchronous state cannot be relabelled as controlled evidence", 
     writeFileSync(closePath, canonicalBytes(close), { mode: 0o600 });
     const refused = run(state, "status");
     assert.equal(refused.status, 78);
-    assert.match(refused.stderr, /synchronous provider passing evidence was refused/);
+    assert.equal(refused.stderr, "clean-engine: provider result was refused\n");
   } finally {
     rmSync(state.root, { recursive: true, force: true });
   }
@@ -1822,7 +1913,7 @@ test("provider recovery rejects a mismatched fixed fake contract before claiming
         repoRoot: state.repo,
         stateBase: state.state,
       }),
-      /synchronous provider mutation intent was refused/,
+      /deterministic provider intent binding was refused/,
     );
     assertPrivate(join(active, ".mutation-slot-00"), 0o600);
     assert.deepEqual(
@@ -1861,10 +1952,15 @@ test("a same-PID mismatched owner challenge is unidentifiable and cannot be reco
       ownerPid: process.pid,
       publishIntent: false,
     });
+    const stage = join(active, `.mutation-stage-${"a".repeat(32)}`);
+    const stageBytes = canonicalBytes({ schema: "synveda.test.live-owner-stage" });
+    writeFileSync(stage, stageBytes, { mode: 0o600 });
+    const stageIdentity = lstatSync(stage, { bigint: true });
     const confirmation = providerRecoveryConfirmationForExecutor({
       repoRoot: state.repo,
       stateBase: state.state,
     });
+    assertPrivate(stage, 0o600);
     assert.throws(
       () => recoverProviderCreateForExecutor({
         adapter: fakeProviderAdapter(),
@@ -1874,6 +1970,10 @@ test("a same-PID mismatched owner challenge is unidentifiable and cannot be reco
       }),
       /provider mutation owner is active or could not be identified/,
     );
+    const currentStageIdentity = lstatSync(stage, { bigint: true });
+    assert.equal(currentStageIdentity.dev, stageIdentity.dev);
+    assert.equal(currentStageIdentity.ino, stageIdentity.ino);
+    assert.deepEqual(readFileSync(stage), stageBytes);
     assertPrivate(join(active, ".mutation-slot-00"), 0o600);
     assert.equal(readdirSync(active).some((name) => name.startsWith(".mutation-recovery-")), false);
   } finally {
@@ -2371,7 +2471,7 @@ test("two simultaneous provider recoverers publish one terminal branch", async (
     const refused = results.find(({ status }) => status === 73);
     assert.match(
       refused.stderr,
-      /^(?:another provider recovery (?:is active or could not be identified|won the mutation claim)|no abandoned provider mutation was available)\n$/,
+      /^(?:another provider recovery (?:is active or could not be identified|won the mutation claim)|no abandoned provider mutation was available|provider recovery observation changed before claim publication)\n$/,
     );
     const active = activeRun(state);
     assert.equal(parse(join(active, "02-provider-create-failed.json")).phase,
@@ -2656,10 +2756,11 @@ test("a finalized environment is mandatory, private and not replaceable", () => 
   }
 });
 
-test("receipt schemas v1 and v2 are explicit pre-provider hard-cut refusals", () => {
+test("receipt schemas v1 through v3 are explicit pre-provider hard-cut refusals", () => {
   for (const schema of [
     "synveda.clean-engine.receipt.v1",
     "synveda.clean-engine.receipt.v2",
+    "synveda.clean-engine.receipt.v3",
   ]) {
     const state = fixture();
     try {

@@ -179,18 +179,20 @@ covered by the closed exclusions. Its private proxy template contains only
 no-replace hard-linked active receipt prevent rounded or partial publication.
 Pre-publication crash residue is inert and grants no provider
 authority, but the later final cleanup must remove it. Preparation creates no
-Engine and carries no Docker auth. The version-3 synthetic receipt grammar
+Engine and carries no Docker auth. The version-4 synthetic receipt grammar
 phase-binds collisions, replays retired cleanup authority and admits a final
 manifest only after the exact success sequence. Provider success is explicitly
-classified and binds its intent contract; v1/v2 receipts fail closed. The
+classified and binds its operation kind, plan and intent contract; v1/v2/v3
+receipts fail closed. The
 fixture finalizer emits an explicitly non-live synthetic schema and rejects
-controlled-fake evidence. The append-only mutation
-journal binds permanent numbered slots to exact source receipt/environment
-endpoints, the prior close and a cooperative owner challenge. Permanent closes
-bind exact result endpoints, owner/recovery authority and the operation-evidence
-digest; per-slot recovery claims form a gap-free prefix. Final journal names
-are never deleted or reused. Mutation-close v1 is refused as a fresh-plan hard
-cut.
+controlled-background-fake evidence. The append-only mutation journal uses
+slot v2, recovery/root v2 and close v3. Permanent numbered slots bind exact
+source receipt/environment endpoints, prior close, cooperative owner challenge,
+operation kind, contract and plan. Permanent outer settlements bind the
+observed provider frontier. Closes bind exact result endpoints, owner/recovery
+authority and the outer settlement digest; per-slot recovery claims form a
+gap-free prefix. Final journal names are never deleted or reused. Slot v1,
+recovery/root v1 and close v1/v2 are fresh-plan hard cuts.
 Unique fsynced stages and atomic no-replace links prevent partial final files;
 only stage aliases reconcile. Every close link follows authority, result,
 operation-evidence and staged-inode reproof. A displaced live close stage
@@ -199,60 +201,50 @@ confers no authority and cannot block that close; its final no-replace link
 loses. Generic append cannot own preflight, provider-create, provider-cleanup
 or finalization evidence.
 
-Recovery requires the exact slot sequence and canonical digest and appends a
-bounded claim chain while the open slot and newest claim block ordinary
-writers; live/unidentifiable owners refuse, and an abandoned recovery can be
-superseded without PID-based adoption. A claim appended after a durable close
-is inert history. Exhausted recovery or slot capacity fails closed. The
-synchronous fake remains the rollback. A separate controlled fake path reserves
-a short private external root, mirrors its inode/mode/UID-bound owner marker and
-publishes an immutable launch, actor/process-group witness, one-way start
-decision, fixed-child outcome and ESRCH settlement. Before start the supervisor
-reasserts the actual slot and the actor rechecks the exact plan, owner, launch,
-witness, digest-bound slot fields and full root/leaf inventory. Only the actor
-signals its own group; its directly owned children exit on parent-IPC loss.
-The settlement binds the exact optional effect and outcome digests. The effect
-is mirrored into append-only state and a controlled-fake identity binds the
-slot, intent, contract, root plan/owner and settlement; passing receipts and
-post-settlement mutation closes bind that identity. Recovery probes but never
-signals a stored PGID and cannot replay a durable start. Effect-mirror and
-identity-publication crashes converge without replay. A launch without a
-witness remains uncertain evidence. Terminal success requires a passing
-outcome, completed ESRCH settlement and the exact provider-identity digest in
-both receipt and mutation close. Attempts to relabel controlled-fake identity
-as live evidence fail closed.
+The synchronous fake remains rollback. The state-born controlled path executes
+only the repository-fixed background controller/host-agent fixtures beneath a
+short private root. Its canonical plan and mutation slot precede intent and
+root mutation. Six synchronous veto-only gates cover create-authority, root,
+controller, start-decision, start-delivery and identity publication. Each gate
+reopens the slot, operation plan, source head and complete causal frontier.
+The adapter accepts no caller function, command, environment, path or provider
+selector.
 
-This remains trusted-process, fake-command-only POSIX evidence. The
-state-integrated closed adapter accepts no function, command, path, environment
-or provider selector; its absence/cleanup fields are not external discovery or
-deletion authority. A separate lifecycle-unexposed canary uses an explicitly
-authorised fixed-fixture launcher and validated private roots to distinguish
-controller, host agent, Engine, sockets and Docker context. Provider identity
-binds the complete creation-time fake-root inventory, which must match exactly
-before a retirement plan can grant deletion authority. Retirement uses
-authenticated bounded shutdown, fsyncs socket absence and applies only exact
-individual unlink/rmdir steps with append-only recovery. Foreign stages,
-settlements, resources and recreated roots remain preserved. Its distinct
-create/cleanup evidence is explicitly state-unintegrated and cannot authorize
-a result receipt.
+Private root/config/readiness/PID artifacts publish through fsynced no-replace
+links and sockets begin under a restrictive umask. HMAC-bound child records
+tie PID/PGID probes to their configuration, start/launch, process instance and
+toolchain; elapsed time and caller-supplied PIDs cannot prove absence. Terminal
+identity follows fresh authenticated probes of both sockets and binds the
+static root device/inode/mode/path/UID identity. Same-byte inode replacement is
+therefore refused before settlement, receipt or close.
 
-Deletion and recovered absence both fsync the exact parent and recheck absence
-before progress publication, including terminal provider-root removal.
+The outer settlement admits only a complete identity or an exact residual with
+no live/unattested process. An unowned root is a foreign collision: only the
+root itself is observed, leaves and sockets are not inspected, and no deletion
+authority is gained. Once that exact collision is durably settled, later
+foreign-root changes are historical while Synveda evidence remains exact.
+Passing receipt and close bind the outer settlement, never the inner identity.
+Source closure is rechecked at intent, all six effect gates, pass and close.
 
-If the recorded host-agent PID is absent before planning, recovery still
-requires every creation-bound non-socket identity. Only the two exact recorded
-socket identities may be stale or absent; a present process still requires
-authenticated live evidence and an unidentifiable process is refused.
+Recovery confirmation is non-mutating. Acquisition first proves the slot owner
+and newest recoverer absent, then may reconcile only exact mutation-stage
+aliases and append an observation-bound claim. It never launches, signals,
+deletes, repairs the inner chain or replays a durable controller/start decision.
+Launch without authenticated readiness and start without authenticated PID
+remain permanently unattested; live/unidentifiable state refuses. A claim
+after durable close is inert, and exhausted claim/slot capacity fails closed.
 
-Cooperative owner challenges and process probes do not protect against a
-hostile same-user writer or prove another PID namespace. No supported lifecycle
-target exposes the test-only execution/recovery fixtures; no Docker/Colima
-effect or live deletion authority is enabled. The state-integrated owned root
-has no deletion settlement, so controlled provider cleanup and finalization
-fail closed. A truthful live-provider identity, TLS registry auth, a zero-read
-remote-builder canary and exact destruction evidence remain pending.
-ACLs, xattrs, file flags, bind mounts and hostile same-user path replacement
-remain trusted-host limits.
+The standalone retirement helper remains fixture-only. It authenticates stop,
+fsyncs absence and performs individual leaf-first unlink/rmdir steps only after
+exact inventory revalidation. It rejects state-born evidence, so the controlled
+state root has no cleanup or finalization authority. No supported lifecycle
+target exposes these fixtures and no Docker/Colima effect is enabled. The
+`*WithAuthorityGate` exports are internal composition hooks, not a security
+boundary against arbitrary owner-UID JavaScript: owner-UID code execution and
+journal mutation are one trusted-host boundary. Other PID namespaces, ACLs,
+xattrs, file flags and bind mounts remain trusted-host limits. A truthful live
+provider identity, TLS registry auth, zero-read builder and destruction
+evidence remain pending.
 
 ## Residual and external limits
 

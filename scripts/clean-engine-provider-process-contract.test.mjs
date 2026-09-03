@@ -39,6 +39,8 @@ import {
   launchControlledBackgroundProvider,
   launchControlledBackgroundProviderWithAuthorityGate,
   planControlledBackgroundProviderCreate,
+  planControlledBackgroundProviderCreateWithAuthorityGate,
+  planControlledBackgroundProviderOperation,
   planControlledBackgroundRetirement,
   providerProcessBytes,
   providerProcessDigest,
@@ -352,6 +354,13 @@ test("the tagged Colima contract is closed and cannot authorize a live start", (
     "ambient-inherited-unchanged");
   assert.equal(COLIMA_LIVE_PREPARATION_CONTRACT.helper_closure, "unresolved-blocking");
   assert.equal(COLIMA_LIVE_PREPARATION_CONTRACT.start_authorized, false);
+  assert.deepEqual(COLIMA_LIVE_PREPARATION_CONTRACT.process_identities, [
+    "synveda-state-owner",
+    "colima-controller",
+    "lima-hostagent",
+    "guest-engine",
+    "docker-context",
+  ]);
   assert.deepEqual(COLIMA_LIVE_PREPARATION_CONTRACT.target_host, {
     architecture: "arm64",
     os_version_gate: "unresolved-blocking",
@@ -416,8 +425,9 @@ test("the tagged Colima contract is closed and cannot authorize a live start", (
   assert.equal(CONTROLLED_BACKGROUND_PROVIDER_CONTRACT.socket_publication,
     "umask-0177-listen-chmod-fsync-v1");
   assert.equal(CONTROLLED_BACKGROUND_PROVIDER_CONTRACT.state_authority_gate,
-    "synchronous-veto-only-five-checkpoint-v1");
+    "synchronous-veto-only-six-checkpoint-v2");
   assert.deepEqual(CONTROLLED_BACKGROUND_AUTHORITY_CHECKPOINTS, [
+    "before-create-authority-publication",
     "before-root-publication",
     "before-controller-spawn",
     "before-start-decision-publication",
@@ -545,7 +555,10 @@ test("the read-only inspector identifies empty, authorised and complete create p
         checkpoints.push(checkpoint);
       },
     );
-    assert.deepEqual(checkpoints, CONTROLLED_BACKGROUND_AUTHORITY_CHECKPOINTS);
+    assert.deepEqual(
+      checkpoints,
+      CONTROLLED_BACKGROUND_AUTHORITY_CHECKPOINTS.slice(1),
+    );
     const complete = inspectControlledBackgroundProviderPrefix(
       state.evidenceDirectory,
       state.fixtureId,
@@ -565,7 +578,7 @@ test("the read-only inspector identifies empty, authorised and complete create p
   }
 });
 
-test("every state-authority checkpoint is a veto before its next effect", async (t) => {
+test("every authority callback checkpoint is a veto before its next effect", async (t) => {
   const expectations = [
     {
       checkpoint: "before-root-publication",
@@ -595,6 +608,7 @@ test("every state-authority checkpoint is a veto before its next effect", async 
       head: "controller-witness.json",
       hostagent: "not-started",
       next: "provider-start-decision.json",
+      pendingEffect: "provider-start-decision",
       replaySafe: false,
       root: "owned",
       sockets: "absent",
@@ -617,6 +631,7 @@ test("every state-authority checkpoint is a veto before its next effect", async 
       head: "controller-settlement.json",
       hostagent: "observed-present",
       next: "provider-identity.json",
+      pendingEffect: "provider-identity",
       replaySafe: false,
       root: "owned",
       sockets: "present",
@@ -655,7 +670,7 @@ test("every state-authority checkpoint is a veto before its next effect", async 
         );
         assert.deepEqual(
           observed.map(({ checkpoint }) => checkpoint),
-          CONTROLLED_BACKGROUND_AUTHORITY_CHECKPOINTS.slice(0, index + 1),
+          CONTROLLED_BACKGROUND_AUTHORITY_CHECKPOINTS.slice(1, index + 2),
         );
         const prefix = inspectControlledBackgroundProviderPrefix(
           state.evidenceDirectory,
@@ -672,10 +687,21 @@ test("every state-authority checkpoint is a veto before its next effect", async 
         assert.equal(prefix.residual.controller_presence, expectation.controller);
         assert.equal(prefix.residual.hostagent_presence, expectation.hostagent);
         assert.equal(prefix.residual.sockets, expectation.sockets);
-        assert.deepEqual(prefix.effectFrontier, {
-          disposition: "complete",
-          effect: expectation.stage,
-        });
+        if (expectation.pendingEffect === undefined) {
+          assert.equal(prefix.pendingPublication, undefined);
+          assert.deepEqual(prefix.effectFrontier, {
+            disposition: "complete",
+            effect: expectation.stage,
+          });
+        } else {
+          assert.equal(prefix.pendingPublication.target_name, expectation.next);
+          assert.equal(prefix.pendingPublication.disposition, "staged-complete");
+          assert.equal(prefix.pendingPublication.links, 1);
+          assert.deepEqual(prefix.effectFrontier, {
+            disposition: "pending",
+            effect: expectation.pendingEffect,
+          });
+        }
         if (index < 4) {
           assert.equal(existsSync(hostagentRecordPath(state)), false);
         }
@@ -786,47 +812,48 @@ test("pre-witness child records authenticate live PIDs and complete private stag
         fixtureId: state.fixtureId,
         providerBase: state.providerBase,
       });
-      await assert.rejects(
+      const execution = launchControlledBackgroundProviderWithAuthorityGate(
+        {
+          beforeStartDecisionHoldMilliseconds: 1_500,
+          evidenceDirectory: state.evidenceDirectory,
+          fixtureId: state.fixtureId,
+          maximumLifetimeMilliseconds: 5_000,
+          providerBase: state.providerBase,
+        },
+        () => undefined,
+      );
+      const refusal = assert.rejects(
+        execution,
+        /create-prefix stage order was refused/,
+      );
+      await waitForPath(join(state.evidenceDirectory, "controller-witness.json"));
+      unlinkDurable(join(state.evidenceDirectory, "controller-witness.json"));
+      const current = inspectControlledBackgroundProviderPrefix(
+        state.evidenceDirectory,
+        state.fixtureId,
+        { expectedCreateBindings: createBindings(), providerBase: state.providerBase },
+      );
+      assert.equal(current.residual.controller_presence, "observed-present");
+      assert.deepEqual(current.effectFrontier, {
+        disposition: "complete",
+        effect: "controller-ready",
+      });
+      const readyPath = join(providerRootPath(state), "t", "controller-ready.json");
+      const ready = JSON.parse(readFileSync(readyPath, "utf8"));
+      ready.controller_pid = knownAbsentPid();
+      ready.controller_pgid = ready.controller_pid;
+      rewriteCanonicalArtifact(readyPath, ready);
+      assert.throws(
         () =>
-          launchControlledBackgroundProviderWithAuthorityGate(
-            {
-              evidenceDirectory: state.evidenceDirectory,
-              fixtureId: state.fixtureId,
-              maximumLifetimeMilliseconds: 2_000,
-              providerBase: state.providerBase,
-            },
-            ({ checkpoint }) => {
-              if (checkpoint !== "before-start-decision-publication") return;
-              unlinkDurable(join(state.evidenceDirectory, "controller-witness.json"));
-              const current = inspectControlledBackgroundProviderPrefix(
-                state.evidenceDirectory,
-                state.fixtureId,
-                { expectedCreateBindings: createBindings(), providerBase: state.providerBase },
-              );
-              assert.equal(current.residual.controller_presence, "observed-present");
-              assert.deepEqual(current.effectFrontier, {
-                disposition: "complete",
-                effect: "controller-ready",
-              });
-              const readyPath = join(providerRootPath(state), "t", "controller-ready.json");
-              const ready = JSON.parse(readFileSync(readyPath, "utf8"));
-              ready.controller_pid = knownAbsentPid();
-              ready.controller_pgid = ready.controller_pid;
-              rewriteCanonicalArtifact(readyPath, ready);
-              assert.throws(
-                () =>
-                  inspectControlledBackgroundProviderPrefix(
-                    state.evidenceDirectory,
-                    state.fixtureId,
-                    { expectedCreateBindings: createBindings(), providerBase: state.providerBase },
-                  ),
-                /controller readiness was refused/,
-              );
-              inspected = true;
-            },
+          inspectControlledBackgroundProviderPrefix(
+            state.evidenceDirectory,
+            state.fixtureId,
+            { expectedCreateBindings: createBindings(), providerBase: state.providerBase },
           ),
         /controller readiness was refused/,
       );
+      inspected = true;
+      await refusal;
       assert.equal(inspected, true);
     } finally {
       await cleanupFixture(state);
@@ -843,36 +870,37 @@ test("pre-witness child records authenticate live PIDs and complete private stag
         fixtureId: state.fixtureId,
         providerBase: state.providerBase,
       });
-      await assert.rejects(
-        () =>
-          launchControlledBackgroundProviderWithAuthorityGate(
-            {
-              evidenceDirectory: state.evidenceDirectory,
-              fixtureId: state.fixtureId,
-              maximumLifetimeMilliseconds: 2_000,
-              providerBase: state.providerBase,
-            },
-            ({ checkpoint }) => {
-              if (checkpoint !== "before-start-decision-publication") return;
-              unlinkDurable(join(state.evidenceDirectory, "controller-witness.json"));
-              moveToPrivateStage(
-                join(providerRootPath(state), "t", "controller-ready.json"),
-              );
-              const current = inspectControlledBackgroundProviderPrefix(
-                state.evidenceDirectory,
-                state.fixtureId,
-                { expectedCreateBindings: createBindings(), providerBase: state.providerBase },
-              );
-              assert.equal(current.residual.controller_presence, "observed-present");
-              assert.deepEqual(current.effectFrontier, {
-                disposition: "pending",
-                effect: "controller-ready",
-              });
-              inspected = true;
-            },
-          ),
-        /authority checkpoint prefix was refused/,
+      const execution = launchControlledBackgroundProviderWithAuthorityGate(
+        {
+          beforeStartDecisionHoldMilliseconds: 1_500,
+          evidenceDirectory: state.evidenceDirectory,
+          fixtureId: state.fixtureId,
+          maximumLifetimeMilliseconds: 5_000,
+          providerBase: state.providerBase,
+        },
+        () => undefined,
       );
+      const refusal = assert.rejects(
+        execution,
+        /create-prefix stage order was refused/,
+      );
+      await waitForPath(join(state.evidenceDirectory, "controller-witness.json"));
+      unlinkDurable(join(state.evidenceDirectory, "controller-witness.json"));
+      moveToPrivateStage(
+        join(providerRootPath(state), "t", "controller-ready.json"),
+      );
+      const current = inspectControlledBackgroundProviderPrefix(
+        state.evidenceDirectory,
+        state.fixtureId,
+        { expectedCreateBindings: createBindings(), providerBase: state.providerBase },
+      );
+      assert.equal(current.residual.controller_presence, "observed-present");
+      assert.deepEqual(current.effectFrontier, {
+        disposition: "pending",
+        effect: "controller-ready",
+      });
+      inspected = true;
+      await refusal;
       assert.equal(inspected, true);
       assert.equal(
         existsSync(join(state.evidenceDirectory, "provider-start-decision.json")),
@@ -903,63 +931,64 @@ test("pre-witness child records authenticate live PIDs and complete private stag
             fixtureId: state.fixtureId,
             providerBase: state.providerBase,
           });
-          await assert.rejects(
-            () =>
-              launchControlledBackgroundProviderWithAuthorityGate(
-                {
-                  evidenceDirectory: state.evidenceDirectory,
-                  fixtureId: state.fixtureId,
-                  maximumLifetimeMilliseconds: 2_000,
-                  providerBase: state.providerBase,
-                },
-                ({ checkpoint }) => {
-                  if (checkpoint !== "before-provider-identity-publication") return;
-                  for (const name of [
-                    "hostagent-witness.json",
-                    "engine-witness.json",
-                    "context-witness.json",
-                    "controller-settlement.json",
-                  ]) {
-                    unlinkDurable(join(state.evidenceDirectory, name));
-                  }
-                  const pidPath = hostagentRecordPath(state);
-                  const pidRecord = JSON.parse(readFileSync(pidPath, "utf8"));
-                  liveHostagentPid = pidRecord.pid;
-                  if (staged) moveToPrivateStage(pidPath);
-                  const current = inspectControlledBackgroundProviderPrefix(
-                    state.evidenceDirectory,
-                    state.fixtureId,
-                    { expectedCreateBindings: createBindings(), providerBase: state.providerBase },
-                  );
-                  assert.equal(current.residual.controller_presence, "proved-absent");
-                  assert.equal(current.residual.hostagent_presence, "observed-present");
-                  assert.deepEqual(current.effectFrontier, {
-                    disposition: staged ? "pending" : "complete",
-                    effect: "hostagent-pid",
-                  });
-                  if (!staged) {
-                    pidRecord.pid = knownAbsentPid();
-                    rewriteCanonicalArtifact(pidPath, pidRecord);
-                    assert.throws(
-                      () =>
-                        inspectControlledBackgroundProviderPrefix(
-                          state.evidenceDirectory,
-                          state.fixtureId,
-                          {
-                            expectedCreateBindings: createBindings(),
-                            providerBase: state.providerBase,
-                          },
-                        ),
-                      /hostagent PID record was refused/,
-                    );
-                  }
-                  inspected = true;
-                },
-              ),
+          const execution = launchControlledBackgroundProviderWithAuthorityGate(
+            {
+              beforeIdentityProbeHoldMilliseconds: 1_500,
+              evidenceDirectory: state.evidenceDirectory,
+              fixtureId: state.fixtureId,
+              maximumLifetimeMilliseconds: 5_000,
+              providerBase: state.providerBase,
+            },
+            () => undefined,
+          );
+          const refusal = assert.rejects(
+            execution,
             staged
               ? /authority checkpoint prefix was refused/
               : /hostagent PID record was refused/,
           );
+          await waitForPath(join(state.evidenceDirectory, "controller-settlement.json"));
+          for (const name of [
+            "hostagent-witness.json",
+            "engine-witness.json",
+            "context-witness.json",
+            "controller-settlement.json",
+          ]) {
+            unlinkDurable(join(state.evidenceDirectory, name));
+          }
+          const pidPath = hostagentRecordPath(state);
+          const pidRecord = JSON.parse(readFileSync(pidPath, "utf8"));
+          liveHostagentPid = pidRecord.pid;
+          if (staged) moveToPrivateStage(pidPath);
+          const current = inspectControlledBackgroundProviderPrefix(
+            state.evidenceDirectory,
+            state.fixtureId,
+            { expectedCreateBindings: createBindings(), providerBase: state.providerBase },
+          );
+          assert.equal(current.residual.controller_presence, "proved-absent");
+          assert.equal(current.residual.hostagent_presence, "observed-present");
+          assert.deepEqual(current.effectFrontier, {
+            disposition: staged ? "pending" : "complete",
+            effect: "hostagent-pid",
+          });
+          if (!staged) {
+            pidRecord.pid = knownAbsentPid();
+            rewriteCanonicalArtifact(pidPath, pidRecord);
+            assert.throws(
+              () =>
+                inspectControlledBackgroundProviderPrefix(
+                  state.evidenceDirectory,
+                  state.fixtureId,
+                  {
+                    expectedCreateBindings: createBindings(),
+                    providerBase: state.providerBase,
+                  },
+                ),
+              /hostagent PID record was refused/,
+            );
+          }
+          inspected = true;
+          await refusal;
           assert.equal(inspected, true);
           assert.equal(
             existsSync(join(state.evidenceDirectory, "provider-identity.json")),
@@ -1040,7 +1069,7 @@ test("authority gates reject causal-prefix mutation before the named effect", as
               rewriteCanonicalArtifact(path, JSON.parse(readFileSync(path, "utf8")));
             },
           ),
-        /checkpoint artifact changed/,
+        /staged authority checkpoint changed/,
       );
       assert.equal(
         existsSync(join(state.evidenceDirectory, "provider-identity.json")),
@@ -1117,7 +1146,7 @@ test("authority gates reject causal-prefix mutation before the named effect", as
         () =>
           launchControlledBackgroundProviderWithAuthorityGate(
             {
-              beforeIdentityProbeHoldMilliseconds: 100,
+              beforeIdentityProbeHoldMilliseconds: 1_000,
               evidenceDirectory: state.evidenceDirectory,
               fixtureId: state.fixtureId,
               maximumLifetimeMilliseconds: 5_000,
@@ -1781,7 +1810,7 @@ test("evidence-prefix inspection is non-mutating and validates complete next sta
   }
 });
 
-test("an interrupted root mkdir is an exact residual and unknown leaves remain blocking", async () => {
+test("an interrupted root mkdir is a foreign collision whose leaves remain uninspected", async () => {
   const state = fixture();
   try {
     planControlledBackgroundProviderCreate({
@@ -1799,7 +1828,13 @@ test("an interrupted root mkdir is an exact residual and unknown leaves remain b
       { expectedCreateBindings: createBindings(), providerBase: state.providerBase },
     );
     assert.equal(interrupted.residual.root_disposition, "ownership-pending");
-    assert.deepEqual(interrupted.residual.root_inventory, []);
+    assert.equal(interrupted.residual.root_inventory.length, 1);
+    assert.equal(interrupted.residual.root_inventory[0].path, root);
+    assert.equal(interrupted.residual.root_inventory[0].kind, "directory");
+    assert.deepEqual(interrupted.effectFrontier, {
+      disposition: "complete",
+      effect: "provider-root-collision",
+    });
     assert.match(interrupted.residualSha256, /^[0-9a-f]{64}$/);
     assert.equal(interrupted.replaySafe, false);
 
@@ -1823,15 +1858,18 @@ test("an interrupted root mkdir is an exact residual and unknown leaves remain b
 
     const unknown = join(root, "foreign-leaf");
     writeDurable(unknown, Buffer.from("foreign\n", "utf8"));
-    assert.throws(
-      () =>
-        inspectControlledBackgroundProviderPrefix(
-          state.evidenceDirectory,
-          state.fixtureId,
-          { expectedCreateBindings: createBindings(), providerBase: state.providerBase },
-        ),
-      /root inventory was refused/,
+    const withUnknownLeaf = inspectControlledBackgroundProviderPrefix(
+      state.evidenceDirectory,
+      state.fixtureId,
+      { expectedCreateBindings: createBindings(), providerBase: state.providerBase },
     );
+    assert.equal(withUnknownLeaf.residual.root_disposition, "ownership-pending");
+    assert.equal(withUnknownLeaf.residual.root_inventory.length, 1);
+    assert.equal(withUnknownLeaf.residual.root_inventory[0].path, root);
+    assert.deepEqual(withUnknownLeaf.effectFrontier, {
+      disposition: "complete",
+      effect: "provider-root-collision",
+    });
     assert.equal(readFileSync(unknown, "utf8"), "foreign\n");
   } finally {
     rmSync(state.root, { force: true, recursive: true });
@@ -1841,6 +1879,19 @@ test("an interrupted root mkdir is an exact residual and unknown leaves remain b
 test("launch requires one exact fixture-only create authority before root mutation", async () => {
   const state = fixture();
   try {
+    await assert.rejects(
+      () =>
+        launchControlledBackgroundProviderWithAuthorityGate(
+          {
+            evidenceDirectory: state.evidenceDirectory,
+            fixtureId: state.fixtureId,
+            maximumLifetimeMilliseconds: 5_000,
+            providerBase: state.providerBase,
+          },
+          undefined,
+        ),
+      /authority gate was refused/,
+    );
     await assert.rejects(() => launchPlanned(state), /create-authority.*unavailable/);
     assert.equal(existsSync(providerRootPath(state)), false);
     assert.deepEqual(readdirSync(state.evidenceDirectory), []);
@@ -1853,12 +1904,82 @@ test("launch requires one exact fixture-only create authority before root mutati
           fixtureId: state.fixtureId,
           providerBase: state.providerBase,
         }),
-      /create bindings were refused/,
+      /create integration was refused/,
     );
     assert.equal(existsSync(providerRootPath(state)), false);
     assert.deepEqual(readdirSync(state.evidenceDirectory), []);
   } finally {
     await cleanupFixture(state);
+  }
+});
+
+test("state create authority is published only through its first synchronous gate", () => {
+  const state = fixture();
+  try {
+    const runDirectory = join(state.root, "state-run");
+    const evidenceDirectory = join(runDirectory, "provider");
+    mkdirSync(runDirectory, { mode: 0o700 });
+    mkdirSync(evidenceDirectory, { mode: 0o700 });
+    const ownershipNonce = "d".repeat(64);
+    const operationPlan = planControlledBackgroundProviderOperation({
+      evidenceDirectory,
+      fixtureId: state.fixtureId,
+      ownershipNonce,
+      providerBase: state.providerBase,
+    });
+    const slotBytes = providerProcessBytes({
+      fixture_id: state.fixtureId,
+      schema: "synveda.test.mutation-slot",
+    });
+    writeDurable(join(runDirectory, ".mutation-slot-00"), slotBytes);
+    const stateBindings = {
+      ...createBindings("a", "mutation-journal-v2"),
+      create_slot_sha256: providerProcessDigest(slotBytes),
+      ownership_nonce: ownershipNonce,
+    };
+    const argumentsValue = {
+      bindings: stateBindings,
+      evidenceDirectory,
+      fixtureId: state.fixtureId,
+      operationPlan,
+      providerBase: state.providerBase,
+    };
+
+    assert.throws(
+      () =>
+        planControlledBackgroundProviderCreateWithAuthorityGate(
+          argumentsValue,
+          () => ({ forged: true }),
+        ),
+      /gate returned authority/,
+    );
+    const vetoedStages = readdirSync(evidenceDirectory);
+    assert.equal(vetoedStages.length, 1);
+    assert.match(
+      vetoedStages[0],
+      /^\.provider-process-stage-background-create-authority-[0-9a-f]{64}-[0-9a-f]{32}$/,
+    );
+    const vetoedStage = lstatSync(join(evidenceDirectory, vetoedStages[0]));
+    assert.equal(vetoedStage.isFile(), true);
+    assert.equal(vetoedStage.isSymbolicLink(), false);
+    assert.equal(vetoedStage.mode & 0o777, 0o600);
+    assert.equal(vetoedStage.nlink, 1);
+
+    const observed = [];
+    const planned = planControlledBackgroundProviderCreateWithAuthorityGate(
+      argumentsValue,
+      (checkpoint) => {
+        observed.push(checkpoint);
+      },
+    );
+    assert.equal(observed.length, 1);
+    assert.equal(observed[0].checkpoint, "before-create-authority-publication");
+    assert.equal(observed[0].evidence_head_sha256, "0".repeat(64));
+    assert.equal(observed[0].authority_sha256, planned.authority.sha256);
+    assert.deepEqual(readdirSync(evidenceDirectory), ["background-create-authority.json"]);
+    assert.equal(existsSync(providerRootPath(state)), false);
+  } finally {
+    rmSync(state.root, { force: true, recursive: true });
   }
 });
 
@@ -2023,7 +2144,10 @@ test("a future evidence artifact blocks launch before root mutation", async () =
       providerProcessBytes({ schema: "foreign" }),
     );
 
-    await assert.rejects(() => launchPlanned(state), /pre-launch evidence inventory/);
+    await assert.rejects(
+      () => launchPlanned(state),
+      /creation artifact chain had a gap/,
+    );
     assert.equal(existsSync(providerRootPath(state)), false);
   } finally {
     await cleanupFixture(state);

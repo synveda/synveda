@@ -85,65 +85,41 @@ ACL/default-ACL and SELinux/xattr/file-flag contract on Linux or a private
 synthetic Docker client proxy configuration, canary remote builder and private
 registry. Current ACL exploit and metadata-retention evidence is macOS plus
 deterministic Linux grammar coverage. This is not public PKIX/browser trust,
-explicit custom-CA/proxy support, a clean-volume login or recovery evidence. One
-append-only version-3 receipt machine now deterministically enforces closed
-intent/result schemas, collision-preserving cleanup-only failure paths,
-no-replace artifact publication and an exact success-only synthetic manifest.
-The fixture-only manifest schema is explicitly non-live and controlled-fake
-evidence is structurally ineligible. Provider success is classified and bound
-to the exact provider-contract digest from its intent; receipt v1/v2 state is
-refused. Its permanent, gap-free mutation slots, closes and per-slot recovery
-claims bind each source/result endpoint, prior close and exact owner/recovery
-authority plus operation evidence; final journal names are never deleted or
-reused, and mutation-close v1 is a fresh-plan refusal. Only staged aliases
-reconcile, and every close link follows exact authority, endpoint,
-operation-evidence and staged-inode revalidation. A cooperatively displaced
-stage retries only after those checks. Generic append cannot fabricate
-preflight, provider-create, provider-cleanup or finalization evidence. The
-synchronous deterministic fake remains a rollback path. A separate controlled
-fake path holds the slot across a private external-root reservation/owner,
-durable launch and actor/process-group witness, one-way start decision, fixed
-fake-child outcome and ESRCH settlement. The supervisor reasserts the actual
-slot at the start gate while the actor validates the digest-bound slot fields
-and full root inventory; only the actor signals its group and its directly
-owned children exit on parent-IPC loss. Settlements bind exact optional effect
-and outcome digests. Recovery never signals a stored PGID or replays a durable
-start. Crash tests cover
-root collision, marker-to-mirror convergence, launch-without-witness refusal,
-supervisor and actor SIGTERM/SIGKILL, timeout, an actor-owned remaining
-descendant, source/root drift, effect/identity publication and result/close
-publication. After settlement, the exact effect is mirrored into append-only
-state and a controlled-fake identity binds the slot, intent, contract, root
-plan/owner and settlement.
-Terminal success and the mutation close bind that identity, and relabelling it
-as live evidence fails closed. The closed adapter accepts no caller function,
-command, path, environment or provider selector.
+explicit custom-CA/proxy support, a clean-volume login or recovery evidence.
+One append-only version-4 receipt machine now enforces closed intent/results,
+collision-preserving failure branches, no-replace publication and an exact
+success-only synthetic manifest. Receipt v1/v2/v3, mutation slot v1,
+recovery/root v1 and close v1/v2 are direct hard-cut refusals. Slot v2 binds
+source/result predecessors plus operation kind, contract and plan; recovery v2
+binds a fresh observation; close v3 binds the outer operation settlement.
+Final journal names are never deleted or reused, and generic append cannot own
+preflight, provider-create, provider-cleanup or finalization.
 
-An additional lifecycle-unexposed fake canary uses only its explicitly
-authorised fixed-fixture launcher. A recoverable fixture-only authority is
-durable before root mutation; separate immutable decisions precede controller
-and host-agent creation, and controller-side reproof of the full gate chain
-blocks changed evidence or pre-start controller death without a host-agent
-effect. Its v4 contract now has five synchronous veto-only effect checkpoints,
-atomic fsynced private-file publication and a non-mutating global causal-prefix
-inspector with an exact evidence/private-file frontier and bounded process
-observations. Full HMAC-bound controller-readiness and host-agent PID records
-make negative probes safe before the later parent witness; elapsed lifetime
-never proves absence;
-this removes partial-final ambiguity but is still only preparation for the
-state-born wrapper. This is not mutation-journal authority. The canary distinguishes the
-background controller, host agent, Engine, both sockets and Docker context,
-then proves exact fake-root
-retirement through authenticated shutdown, durable socket absence, an exact
-creation-bound inventory, immutable leaf-first actions and append-only
-interruption recovery. It preserves foreign evidence and resource substitutions and retains
-separate create/cleanup evidence heads. This settlement explicitly has no
-mutation-state or result-receipt authority.
+The synchronous deterministic fake remains rollback. The superseded actor
+path is removed. The lifecycle-unexposed controlled background fake is now
+state-born: plan, slot and intent precede root mutation, and the outer owner
+reasserts the exact journal/source/frontier at all six create/root/controller/
+start/identity checkpoints. The inner v4 contract has HMAC-bound child
+identities, fsynced no-replace evidence, restrictive socket creation, fresh
+socket authentication and static root identity. Same-byte inode changes,
+source drift and causal-prefix mutation fail closed.
 
-This is fixed-fake POSIX process/filesystem evidence only. No supported
-lifecycle target exposes the test fixture modules; there is no Docker/Colima
-mutation or environment manifest. The state-integrated owned root remains
-unretired, so controlled cleanup and finalization refuse.
+An immutable outer settlement admits only complete identity, an exact residual
+without live/unattested processes, or a preserved foreign-root collision.
+Passing receipt and close bind that settlement, not the inner identity.
+Recovery confirmation is read-only; acquisition follows owner-absence proof
+and never launches, signals, deletes, repairs evidence or replays controller/
+start. State tests retain controller-without-readiness and start-without-PID as
+permanently unattested. Collision settlement remains valid across later foreign
+root removal/replacement while Synveda evidence stays exact.
+
+The fixture-only retirement path still proves authenticated stop, durable
+socket absence and exact leaf-first removal with append-only interruption
+recovery. It rejects state-born evidence and grants no result-receipt authority.
+This is fixed-fake trusted-owner POSIX evidence only. Internal authority
+callbacks are not a JavaScript security boundary. No supported lifecycle target
+exposes the fixtures; there is no Docker/Colima mutation or environment
+manifest. State-born cleanup and finalization remain refused.
 Live Linux/provider CI and a current Docker Desktop/provider run remain absent.
 Consequently this evidence improves the boundary without changing readiness. One
 frozen Docker Desktop candidate also proved bounded PostgreSQL/Keycloak

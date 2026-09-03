@@ -448,7 +448,9 @@ function validateStartGate(config, configSha256, processIdentity, expectedSha256
     authority.provider_contract_sha256 !== config.provider_contract_sha256 ||
     authority.provider_root_path !== config.working_directory ||
     authority.root_preexisting !== "absent" ||
-    authority.state_integration !== "fixture-only" ||
+    !new Set(["fixture-only", "mutation-journal-v2"]).has(
+      authority.state_integration,
+    ) ||
     owner.schema !== "synveda.clean-engine.background-provider-root-owner.v2" ||
     owner.fixture_id !== config.fixture_id ||
     owner.create_authority_sha256 !== config.create_authority_sha256 ||

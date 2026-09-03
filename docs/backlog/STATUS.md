@@ -199,72 +199,47 @@ fixture selection plus a private non-secret synthetic proxy template. Its
 complete run publishes through a no-replace hard-linked active receipt; inert
 pre-publication crash residue grants no provider authority and remains pending
 final cleanup. Planning reaches no Docker/provider/host authority.
-The new version-3 append-only receipt machine closes all intent/result schemas,
-collision-safe cleanup-only failure branches and success-only synthetic-manifest
-eligibility. Provider success is explicitly classified and binds its exact
-intent contract; receipt v1/v2 state is refused. Receipt and manifest
-publication use no-replace artifact staging.
-The append-only mutation journal keeps permanent, gap-free slots, closes and
-per-slot recovery claims; each generation binds its source/result endpoints,
-prior close and exact owner/recovery authority. Final journal names are never
-deleted or reused. Concurrent fake writers, append versus finalize, tamper,
-partial/complete/linked stages, stale names, capacity exhaustion and a
-cooperatively removed live close stage are covered. Every close link follows
-exact authority, endpoint, operation-evidence and staged-inode revalidation;
-reconciliation retries only after the same checks. Generic append cannot own
-provider-create, provider-cleanup or finalization evidence. The synchronous
-closed-data fake remains rollback. A separate controlled fake path holds the
-slot across a private root plan/reservation, mirrored inode/mode/UID owner,
-durable actor launch/witness, one-way start, fixed-child effect/outcome and
-ESRCH settlement. The supervisor reasserts the actual slot before deciding;
-the actor validates the complete root inventory and digest-bound authority.
-Only the actor signals its group, and directly owned children exit on parent
-IPC loss. Settlement binds exact optional effect/outcome evidence; the effect
-is then mirrored into state and a controlled-fake identity binds the slot,
-intent, contract, root plan/owner and settlement. Passing receipts and
-post-settlement closes bind that identity. Exact confirmation recovers
-pre-reservation, marker/mirror, post-outcome, effect-mirror,
-identity-publication, terminal-receipt and close crashes without replay or
-stored-PGID signalling; launch-without-witness stays blocked. The
-contract-derived adapter
-accepts no caller function, command, path, environment or provider selection,
-and generic append cannot create preflight evidence. A separate
-lifecycle-unexposed fake canary now pins the Colima 0.10.3/Lima 2.2.0
-background-process contract
-for Darwin/arm64, executes digest-bound fixture source under an owned working
-directory, and places a recoverable fixture-only authority before root
-mutation, a durable decision before controller launch and a controller-reproved
-durable decision before host-agent spawn. It rejects mutation-journal
-relabelling, changed gate inputs and pre-start controller death without a
-host-agent effect. The v4 inner contract now publishes every private
-root/config/readiness/PID file through a fsynced stage and no-replace link,
-creates sockets under a restrictive umask, offers five synchronous veto-only
-state checkpoints and validates one ordered evidence/private-file frontier
-without mutating it. Complete HMAC-bound child records permit negative
-PID/PGID probes before their later parent witnesses without trusting elapsed
-lifetime or a caller-relabelled PID. Terminal identity is prevalidated and both provider
-sockets are freshly reauthenticated. It proves that controller `ESRCH` is distinct from authenticated
-host-agent, Engine and Docker-context identity. Provider identity also binds the
-complete creation-time root inventory before retirement authority. It inherits ambient `HOME`
-unchanged while isolating all provider roots and its helper path. Its immutable
-leaf-first inventory, authenticated stop, durable socket absence and
-append-only progress recover exact publication, shutdown and
-delete-before-progress interruptions while preserving collisions and
-substitutions. Create and cleanup retain separate evidence heads.
+The clean-Engine state is now receipt v4 with receipt v1/v2/v3 refused. Its
+append-only journal hard-cuts mutation slot v2, recovery/root v2 and close v3.
+Every slot binds source/result predecessors plus an operation kind, contract
+and canonical plan; every provider close binds the outer operation settlement.
+Permanent slots, settlements, closes and bounded recovery claims are never
+deleted or reused. Only private publication aliases reconcile, after exact
+authority, endpoint, operation-evidence and inode/byte revalidation. Generic
+append cannot own preflight, provider-create, provider-cleanup or finalization.
 
-Only test fixtures expose either seam; no supported lifecycle target or
-Docker/Colima action is enabled. The new retirement settlement is explicitly
-state-unintegrated, the older mutation-owned root remains unretired, and
-cleanup/finalization still refuse. Next hard-cut receipt/slot/recovery/close
-schemas and bind background create through the state-born wrapper; only after
-that create close is durable may a separate cleanup slot be added. Then finish
-the exact live Docker/helper/disk-image and OS-version closure without
-repurposing `HOME`. TLS private-registry, remote-builder canary, live proxy,
-browser and exact-cleanup evidence follow; only then is the privileged mapping
-installed for the first live run. Linux/reference HTTPS follows before the legacy
-Rauthy/Temporal callers
-can be cut over and deleted. Backup/restore, upgrade and Apalis remain open
-CPR-45 slices.
+The synchronous closed-data fake remains rollback. The superseded controlled
+actor implementation and fixtures are deleted. The lifecycle-unexposed
+background fake is now state-born: its operation plan and slot precede intent
+and root mutation, and the outer journal reasserts the exact slot, source and
+causal frontier at create-authority publication plus all five inner
+root/controller/start/identity gates. The v4
+inner process contract uses HMAC-bound readiness/PID identities, fsynced
+no-replace publication, restrictive socket creation, fresh socket probes and a
+complete static root identity. A v1 outer settlement classifies only a complete
+identity, an exact residual with no live or unattested process state, or a
+preserved foreign-root collision.
+Passing receipt and close bind that settlement rather than the inner identity.
+Source drift is fenced at intent, every process effect gate, pass and close.
+
+Recovery confirmation is read-only; only acquisition, after owner-absence
+proof, can retire an exact mutation-stage alias and publish a v2 observation
+claim. Recovery never launches, signals, deletes, repairs inner evidence or
+replays controller/start. Unattested process windows remain blocking. Foreign
+collision settlement is historical after publication while all Synveda-owned
+evidence remains exact. The standalone leaf-first retirement protocol remains
+fixture-only and rejects state-born evidence; therefore the state-owned root
+cannot yet publish cleanup or finalization. Internal authority callbacks are
+trusted owner-UID composition hooks, not a JavaScript security boundary.
+
+Only test fixtures expose this seam; no supported lifecycle target or
+Docker/Colima action is enabled. Next add a dedicated state-born cleanup slot
+and immutable plan/progress/settlement without broadening the fixture deletion
+authority. Then finish exact live Docker/helper/disk-image and OS-version
+closure without repurposing `HOME`. Registry, builder, proxy, browser and exact
+cleanup evidence follow; Linux/reference HTTPS must pass before legacy
+Rauthy/Temporal assets are deleted. Backup/restore, upgrade and Apalis remain
+open CPR-45 slices.
 
 ## Unscheduled — not listed in the Sequencing section
 

@@ -123,92 +123,69 @@ exact duplicate witnesses are retained without extension; malformed
 generation-1 candidates fail closed, while a later-generation legacy event is
 a different fact and cannot prevent generation-1 repair.
 
-The clean-Engine provider seam now has two fake-only execution paths. The
-original synchronous closed-data adapter remains the rollback. The controlled
-path creates a private, receipt-reserved external filesystem root, mirrors its
-inode/mode/UID-bound owner marker, publishes a durable launch record and starts
-one detached actor which remains its process-group leader. The supervisor
-reasserts the actual mutation slot immediately before its one-way decision;
-the actor independently validates the root plan, complete root/leaf inventory,
-owner mirror, launch and witness, including their digest-bound slot fields,
-before its fixed fake child can start. Only the actor signals its own group;
-its directly owned children also exit if their private parent IPC closes. A
-provider result can close only after a negative PGID probe reports `ESRCH`.
-The settlement binds the exact optional effect and outcome digests. After
-settlement, the supervisor copies the exact fixed effect, when present, into
-append-only state and publishes a provider identity that binds the slot,
-intent, fixed-fake contract, root plan/owner, settlement and closed fake
-resource dispositions. The mutation close and a passing receipt bind that
-identity digest; the receipt also labels the evidence explicitly as
-`controlled-fake`, so it cannot be reclassified as live provider evidence.
-Immediately before linking a close, the publisher re-proves its authority,
-result endpoints, operation evidence and staged inode/bytes.
-Recovery never signals a stored PGID or replays a durable start. A
-marker-before-mirror crash converges only an exact reservation-bound marker;
-crashes after effect mirroring or identity publication converge the same
-identity without replay, and a launch without a witness remains an explicit
-blocker because its PGID was not durably recorded.
+The clean-Engine provider seam has two fake-only execution paths. The original
+synchronous closed-data adapter remains the rollback. The superseded detached
+actor path is removed. The controlled path is the lifecycle-unexposed
+background process canary, wrapped in state-born authority without making its
+inner process model the operation authority.
 
-This is deterministic POSIX process/filesystem evidence for the fixed fake
-command and actor-owned descendant, not Docker, Colima or live-provider
-evidence. The state-integrated controlled root has no deletion settlement yet,
-so controlled runs cannot publish provider-cleanup or finalization evidence.
-Receipt schema v3 separates deterministic-fixture from controlled-fake
-evidence and requires future live evidence to add a distinct reviewed shape.
-It binds provider success to its intent contract; receipt v1/v2 state is
-refused and regenerated. Mutation-close schema v2 adds the
-operation-evidence digest and remains a fresh-plan hard cut; v1 closes are
-refused, not translated.
+Receipt schema v4, mutation slot v2, mutation recovery/root v2 and mutation
+close v3 are fresh-plan hard cuts; earlier versions are refused rather than
+translated. A canonical background-create operation plan binds the private
+provider base, evidence directory, root key and ownership nonce. The slot binds
+that plan, operation kind and v4 process contract before intent or root
+mutation. The inner create authority then binds the slot and intent. Passing
+receipt and close use the immutable outer background-create settlement digest
+as operation evidence, never the inner provider-identity digest.
 
-A separate lifecycle-unexposed process canary locks the discovered background
-provider semantics before state integration. Its explicitly authorised
-launcher runs only the fixed fake fixture. A recoverable fixture-only authority
-precedes root creation, an immutable launch decision precedes the controller,
-and an immutable start decision precedes the host agent. The controller reopens
-the authority, owner, launch/witness chain, start decision and host-agent
-configuration before spawning; this inner contract cannot claim
-mutation-journal integration. The live-preparation record pins
-Colima 0.10.3 at `00f6c297e92a82c04a4ab507db0a61435650d7e8`
-and Lima 2.2.0 at `de0816ea4bdc5267b428ab21025889b8dd785526`,
-records the proposed fixed command and explicit short roots, inherits ambient
-`HOME` unchanged, and blocks while the exact Docker/helper/disk closure is
-unresolved. Its v4 process contract has five synchronous veto-only checkpoints
-before root/controller/start/identity effects, compares each complete ordered
-evidence/private-file frontier with launcher-owned identities, uses fsynced
-private stages and no-replace links for root/config/readiness/PID evidence,
-creates sockets under a restrictive umask and exposes a non-mutating
-causal-prefix inspector. Controller readiness and host-agent PID records HMAC
-their complete causal configuration, launch/start, process and toolchain
-identity, so a durable child record can be negative-probed before its later
-parent witness without accepting PID relabelling or lifetime-based absence.
-Terminal identity is prevalidated after fresh
-authenticated provider probes. These
-are prerequisites for, not a claim of, mutation-journal integration. Its
-repository-fixed fake proves that controller-group `ESRCH`
-can coexist with a separately authenticated host agent, Engine and Docker
-context. Provider identity binds the complete creation-time root inventory;
-retirement must match it exactly before publishing its immutable leaf-first
-plan, stop by authenticated provider protocol rather than a stored PID,
-then revalidate each remaining inode/link/type/mode/owner subset before an
-individual unlink or directory removal. Append-only progress repairs an exact
-delete-before-progress interruption and preserves every unknown or replaced
-resource. Create and cleanup use distinct evidence heads. This canary remains
-`state_integration: not-authorized`; it cannot authorize a cleanup result,
-final receipt or live start.
+The v4 process contract places six synchronous veto-only checkpoints: before
+create-authority publication, root publication, controller spawn,
+start-decision publication, start delivery and terminal identity publication.
+At state integration, each checkpoint
+reopens the actual slot, receipt/source head, operation plan and complete causal
+evidence/root frontier. Private root/config/readiness/PID records use fsynced
+stages and no-replace links; sockets begin under a restrictive umask. Complete
+controller-readiness and host-agent PID records HMAC their causal
+configuration, launch/start, process and toolchain identity before any
+negative PID/PGID probe. Elapsed lifetime never proves absence. Terminal
+identity is prevalidated only after both provider sockets are freshly
+reauthenticated and it binds the static root identity, including device,
+inode, mode, path and UID.
 
-Deletion and recovered absence fsync the exact parent and recheck absence
-before publishing progress, including the terminal provider root.
+The outer settlement records only a complete identity or an exact settleable
+residual. A root encountered before a valid owner marker is a foreign
+`resource-collision`: its leaves are not inspected or adopted. Once the exact
+collision and current Synveda evidence are durably settled, later foreign-root
+removal or replacement is irrelevant historical state; Synveda-owned evidence
+remains exact. Source closure is required at intent, pass and close. A stale
+staged intent is retired before effect; drift after complete identity enters
+the closed execution-failure branch.
 
-If the recorded process is already absent before planning, every non-socket
-creation identity remains mandatory and only the two exact creation-bound
-sockets may be stale or absent. A present process must still authenticate.
+Recovery confirmation is read-only. Recovery acquisition first proves the
+recorded owner and newest recoverer absent, then may reconcile only exact
+mutation-stage aliases and append a v2 claim bound to the fresh observation.
+It never launches, signals, deletes, repairs the inner chain or replays a
+durable controller/start decision. Controller launch without authenticated
+readiness and start without authenticated PID remain permanently uncertain;
+live or unidentifiable process state also blocks settlement. Permanent slots,
+settlements, closes and bounded recovery claims are never deleted or reused.
 
-The unsupported canary intentionally keeps canonical artifact publication,
-process authentication, inventory validation and retirement in one internal
-protocol module. Splitting those responsibilities now would export
-deletion-bearing primitives without an independent authority seam. Revisit the
-module boundary before a supported lifecycle target is introduced; size alone
-does not authorize weakening the closed validator.
+The standalone inner retirement protocol remains fixture-only. It binds the
+complete creation inventory, stops only through authenticated IPC and applies
+individual leaf-first unlink/rmdir actions after exact revalidation; recovered
+absence fsyncs the parent. It rejects state-born create evidence, so no cleanup
+or finalization authority exists yet for the state-owned root. The exported
+authority-gated helpers are unsupported internal composition hooks, not a
+JavaScript security boundary. Owner-UID code and journal writes share one
+trusted-host boundary; ACLs, xattrs, flags, bind mounts and other PID namespaces
+remain outside this deterministic evidence.
+
+The live-preparation record still pins Colima 0.10.3 at
+`00f6c297e92a82c04a4ab507db0a61435650d7e8` and Lima 2.2.0 at
+`de0816ea4bdc5267b428ab21025889b8dd785526`, inherits ambient `HOME` unchanged
+and blocks while the exact OS, Docker, helper and disk-image closure is
+unresolved. Neither the state wrapper nor its fixture retirement is Docker,
+Colima or supported lifecycle evidence.
 
 ## Options considered
 
@@ -260,13 +237,14 @@ does not authorize weakening the closed validator.
 - Keycloak/database downgrade and schema rollback remain constrained by the
   tested version window; zero downtime is not promised.
 - The controlled clean-Engine seams remain internal and fake-only. The
-  deterministic background canary now distinguishes controller, host agent,
-  Engine, both sockets and Docker context and proves exact fake-root retirement.
-  Its settlement is not integrated with the receipt state. A live adapter must
-  still close the transitive Docker/helper/disk identities and integrate
-  separate create/cleanup evidence without weakening the immutable journal. A
-  supported runner and source/image environment manifest remain required
-  before it can support a Docker or Colima acceptance claim.
+  deterministic background create path distinguishes controller, host agent,
+  Engine, both sockets and Docker context; its outer settlement is integrated
+  with receipt v4 and close v3. The distinct exact-retirement path remains
+  fixture-only and cannot clean the state-owned root. A live adapter must still
+  close the transitive Docker/helper/disk identities and add separate
+  state-born cleanup evidence without weakening the immutable journal. A
+  supported runner and source/image environment manifest remain required before
+  it can support a Docker or Colima acceptance claim.
 - Reversal trigger: if measured operation failure semantics cannot be made
   correct behind the provider-neutral outbox, remove Apalis and retain the
   Postgres worker path. If single-host Compose cannot reproduce the contract on

@@ -126,7 +126,7 @@ export const COLIMA_LIVE_PREPARATION_CONTRACT = Object.freeze({
   lima_start_semantics: "background-hostagent",
   optional_environment_names: Object.freeze(["__CF_USER_TEXT_ENCODING"]),
   process_identities: Object.freeze([
-    "synveda-actor",
+    "synveda-state-owner",
     "colima-controller",
     "lima-hostagent",
     "guest-engine",
@@ -186,7 +186,7 @@ export const CONTROLLED_BACKGROUND_PROVIDER_CONTRACT = Object.freeze({
   root_layout: CONTROLLED_BACKGROUND_ROOT_LAYOUT,
   schema: "synveda.clean-engine.controlled-background-provider-contract.v4",
   socket_publication: "umask-0177-listen-chmod-fsync-v1",
-  state_authority_gate: "synchronous-veto-only-five-checkpoint-v1",
+  state_authority_gate: "synchronous-veto-only-six-checkpoint-v2",
   toolchain_roles: Object.freeze(["controller-script", "hostagent-script", "node-runtime"]),
 });
 
@@ -228,7 +228,11 @@ export const CONTROLLED_BACKGROUND_PROVIDER_CONTRACT_SHA256 = providerProcessDig
   providerProcessBytes(CONTROLLED_BACKGROUND_PROVIDER_CONTRACT),
 );
 
+export const CONTROLLED_BACKGROUND_OPERATION_KIND =
+  "controlled-background-provider-create-v1";
+
 export const CONTROLLED_BACKGROUND_AUTHORITY_CHECKPOINTS = Object.freeze([
+  "before-create-authority-publication",
   "before-root-publication",
   "before-controller-spawn",
   "before-start-decision-publication",
@@ -316,6 +320,37 @@ function sameMetadata(left, right) {
     left.size === right.size &&
     left.uid === right.uid
   );
+}
+
+function noFollowEntryIdentity(path, label) {
+  let before;
+  try {
+    before = lstatSync(path, { bigint: true });
+  } catch {
+    fail(`${label} was unavailable`, 69);
+  }
+  const after = lstatSync(path, { bigint: true });
+  if (!sameMetadata(before, after)) fail(`${label} identity changed`);
+  const kind = before.isDirectory()
+    ? "directory"
+    : before.isFile()
+      ? "file"
+      : before.isSymbolicLink()
+        ? "symlink"
+        : before.isSocket()
+          ? "socket"
+          : "other";
+  return Object.freeze({
+    device: String(before.dev),
+    inode: String(before.ino),
+    kind,
+    links: String(before.nlink),
+    mode: (before.mode & 0o7777n).toString(8).padStart(4, "0"),
+    path,
+    sha256: ZERO_SHA256,
+    size: String(before.size),
+    uid: String(before.uid),
+  });
 }
 
 function syncDirectory(path) {
@@ -470,7 +505,15 @@ function removeExactStage(directory, stage) {
   }
 }
 
-function reconcileArtifactPublication(directory, name, expectedBytes) {
+function reconcileArtifactPublication(
+  directory,
+  name,
+  expectedBytes,
+  { reassertAuthority } = {},
+) {
+  if (reassertAuthority !== undefined && typeof reassertAuthority !== "function") {
+    fail("provider process publication authority was refused", 70);
+  }
   const expectedSha256 = providerProcessDigest(expectedBytes);
   const finalPath = join(directory, name);
   let final;
@@ -497,10 +540,21 @@ function reconcileArtifactPublication(directory, name, expectedBytes) {
       fail("provider process artifact stage link was foreign");
     }
     if (stage.metadata.nlink === 1n && stage.bytes.equals(expectedBytes) && final === undefined) {
+      if (reassertAuthority?.() !== undefined) {
+        fail("provider process publication authority returned a value", 70);
+      }
       try {
+        const currentStage = openedStage(stage.path, "provider process artifact stage");
+        if (
+          !sameMetadata(currentStage.metadata, stage.metadata) ||
+          !currentStage.bytes.equals(expectedBytes)
+        ) {
+          fail("provider process artifact stage changed");
+        }
         linkSync(stage.path, finalPath);
         syncDirectory(directory);
       } catch (error) {
+        if (error instanceof ProviderProcessContractFailure) throw error;
         if (error?.code !== "EEXIST") fail(`${name} recovery publication failed`, 70);
       }
       final = openedFile(
@@ -604,28 +658,43 @@ function writeExclusive(path, bytes) {
   }
 }
 
-function publishArtifact(directory, name, value) {
+function publishArtifact(directory, name, value, { reassertAuthority } = {}) {
   if (!artifactNameAllowed(name)) {
     fail("provider process artifact name was refused", 64);
   }
+  if (reassertAuthority !== undefined && typeof reassertAuthority !== "function") {
+    fail("provider process publication authority was refused", 70);
+  }
   const finalPath = join(directory, name);
   const valueBytes = providerProcessBytes(value);
-  const recovered = reconcileArtifactPublication(directory, name, valueBytes);
+  const recovered = reconcileArtifactPublication(directory, name, valueBytes, {
+    reassertAuthority,
+  });
   if (recovered !== undefined) return canonicalArtifact(finalPath, name);
   const stageName = artifactStageName(name, providerProcessDigest(valueBytes));
   const stagePath = join(directory, stageName);
   writeExclusive(stagePath, valueBytes);
+  if (reassertAuthority?.() !== undefined) {
+    fail("provider process publication authority returned a value", 70);
+  }
   try {
+    const staged = openedStage(stagePath, "provider process artifact stage");
+    if (!staged.bytes.equals(valueBytes) || staged.metadata.nlink !== 1n) {
+      fail("provider process artifact stage changed");
+    }
     linkSync(stagePath, finalPath);
     syncDirectory(directory);
   } catch (error) {
+    if (error instanceof ProviderProcessContractFailure) throw error;
     if (error?.code === "EEXIST") {
-      const existing = reconcileArtifactPublication(directory, name, valueBytes);
+      const existing = reconcileArtifactPublication(directory, name, valueBytes, {
+        reassertAuthority,
+      });
       if (existing !== undefined) return canonicalArtifact(finalPath, name);
     }
     fail(`${name} publication failed`, 70);
   }
-  reconcileArtifactPublication(directory, name, valueBytes);
+  reconcileArtifactPublication(directory, name, valueBytes, { reassertAuthority });
   return canonicalArtifact(finalPath, name);
 }
 
@@ -840,6 +909,104 @@ function rootPaths(base, fixtureId) {
   });
 }
 
+export function validateControlledBackgroundProviderOperationPlan(value) {
+  exactKeys(
+    value,
+    [
+      "evidence_directory",
+      "fixture_id",
+      "ownership_nonce",
+      "provider_base",
+      "provider_contract_sha256",
+      "provider_kind",
+      "provider_profile",
+      "provider_resource",
+      "provider_root_key",
+      "provider_root_path",
+      "schema",
+      "state_integration",
+    ],
+    "controlled background operation plan",
+  );
+  if (
+    value.schema !== "synveda.clean-engine.background-create-operation-plan.v1" ||
+    !lowerHex(value.fixture_id, 32) ||
+    !lowerHex(value.ownership_nonce, 64) ||
+    value.provider_contract_sha256 !== CONTROLLED_BACKGROUND_PROVIDER_CONTRACT_SHA256 ||
+    value.provider_kind !== "controlled-background-fake" ||
+    value.provider_profile !== rootKey(value.fixture_id) ||
+    value.provider_resource !== `synveda-cpr45-${value.fixture_id}` ||
+    value.provider_root_key !== rootKey(value.fixture_id) ||
+    value.state_integration !== "mutation-journal-v2"
+  ) {
+    fail("controlled background operation plan was refused", 64);
+  }
+  validateDirectoryIdentity(value.provider_base, "controlled background operation base");
+  validateDirectoryIdentity(
+    value.evidence_directory,
+    "controlled background operation evidence directory",
+  );
+  const paths = validateControlledBackgroundRoots({
+    evidenceDirectory: value.evidence_directory.path,
+    fixtureId: value.fixture_id,
+    providerBase: value.provider_base.path,
+  });
+  if (
+    canonical(value.provider_base) !==
+      canonical(directoryIdentity(paths.base, "controlled background provider base")) ||
+    canonical(value.evidence_directory) !==
+      canonical(
+        directoryIdentity(
+          value.evidence_directory.path,
+          "controlled background evidence directory",
+        ),
+      ) ||
+    value.provider_root_path !== paths.root
+  ) {
+    fail("controlled background operation plan identity changed");
+  }
+  return paths;
+}
+
+export function planControlledBackgroundProviderOperation({
+  evidenceDirectory,
+  fixtureId,
+  ownershipNonce,
+  providerBase,
+}) {
+  if (!lowerHex(ownershipNonce, 64)) {
+    fail("controlled background operation ownership nonce was refused", 64);
+  }
+  const paths = validateControlledBackgroundRoots({
+    evidenceDirectory,
+    fixtureId,
+    providerBase,
+  });
+  validateEvidenceDirectoryInventory(evidenceDirectory);
+  if (readdirSync(evidenceDirectory).length !== 0 || pathEntryExists(paths.root)) {
+    fail("controlled background operation preflight was refused", 73);
+  }
+  const value = {
+    evidence_directory: directoryIdentity(
+      evidenceDirectory,
+      "controlled background evidence directory",
+    ),
+    fixture_id: fixtureId,
+    ownership_nonce: ownershipNonce,
+    provider_base: directoryIdentity(providerBase, "controlled background provider base"),
+    provider_contract_sha256: CONTROLLED_BACKGROUND_PROVIDER_CONTRACT_SHA256,
+    provider_kind: "controlled-background-fake",
+    provider_profile: paths.profile,
+    provider_resource: `synveda-cpr45-${fixtureId}`,
+    provider_root_key: paths.profile,
+    provider_root_path: paths.root,
+    schema: "synveda.clean-engine.background-create-operation-plan.v1",
+    state_integration: "mutation-journal-v2",
+  };
+  validateControlledBackgroundProviderOperationPlan(value);
+  return Object.freeze(value);
+}
+
 function validateCreateBindings(value) {
   exactKeys(
     value,
@@ -865,7 +1032,7 @@ function validateCreateBindings(value) {
     !Number.isSafeInteger(value.source_sequence) ||
     value.source_sequence < 0 ||
     value.source_sequence > 63 ||
-    value.state_integration !== "fixture-only"
+    !new Set(["fixture-only", "mutation-journal-v2"]).has(value.state_integration)
   ) {
     fail("controlled background create bindings were refused", 64);
   }
@@ -886,7 +1053,11 @@ function createBindingsFromAuthority(value) {
 function validateAuthorityCheckpointFrontier(prefix, expectedStage, paths) {
   const finalPaths = new Set(
     prefix.residual.root_inventory
-      .filter((entry) => parsePrivateStageName(basename(entry.relative_path)) === undefined)
+      .filter(
+        (entry) =>
+          typeof entry.relative_path === "string" &&
+          parsePrivateStageName(basename(entry.relative_path)) === undefined,
+      )
       .map((entry) => entry.relative_path),
   );
   const has = (path) => finalPaths.has(relative(paths.root, path));
@@ -1002,6 +1173,60 @@ function revalidateAuthorityCheckpointPrefix(argumentsValue, expectedPrefix) {
   if (current.residualSha256 !== expectedPrefix.residualSha256) {
     fail("controlled background authority checkpoint prefix changed", 73);
   }
+}
+
+function stagedAuthorityReassertion({
+  authorityGate,
+  checkpoint,
+  checkpointArguments,
+  evidenceHeadSha256,
+  expectedPrefix,
+  targetName,
+  targetValue,
+}) {
+  const targetSha256 = providerProcessDigest(providerProcessBytes(targetValue));
+  return () => {
+    const result = authorityGate(
+      Object.freeze({ checkpoint, evidence_head_sha256: evidenceHeadSha256 }),
+    );
+    if (result !== undefined) {
+      fail("controlled background authority gate returned authority", 70);
+    }
+    const current = inspectControlledBackgroundProviderPrefix(
+      checkpointArguments.evidenceDirectory,
+      checkpointArguments.fixtureId,
+      {
+        expectedCreateBindings: checkpointArguments.expectedCreateBindings,
+        providerBase: checkpointArguments.providerBase,
+        revalidateCurrentToolchain: true,
+      },
+    );
+    if (
+      current.evidenceHeadSha256 !== expectedPrefix.evidenceHeadSha256 ||
+      current.evidencePrefixSha256 !== expectedPrefix.evidencePrefixSha256 ||
+      current.evidenceStage !== expectedPrefix.evidenceStage ||
+      canonical(current.residual) !== canonical(expectedPrefix.residual) ||
+      current.pendingPublication?.target_name !== targetName ||
+      current.pendingPublication?.actual_sha256 !== targetSha256 ||
+      current.pendingPublication?.declared_sha256 !== targetSha256 ||
+      current.pendingPublication?.disposition !== "staged-complete" ||
+      canonical(Object.keys(current.artifacts).sort()) !==
+        canonical(Object.keys(expectedPrefix.artifacts).sort())
+    ) {
+      fail("controlled background staged authority checkpoint changed", 73);
+    }
+    for (const name of Object.keys(expectedPrefix.artifacts)) {
+      const expected = expectedPrefix.artifacts[name];
+      const artifact = current.artifacts[name];
+      if (
+        artifact === undefined ||
+        !artifact.bytes.equals(expected.bytes) ||
+        !sameMetadata(artifact.metadata, expected.metadata)
+      ) {
+        fail("controlled background staged authority artifact changed", 73);
+      }
+    }
+  };
 }
 
 function createAuthorityValue({ bindings, evidenceDirectory, fixtureId, paths }) {
@@ -1130,13 +1355,26 @@ function validateControlledBackgroundRoots({ evidenceDirectory, fixtureId, provi
   return paths;
 }
 
-export function planControlledBackgroundProviderCreate({
-  bindings,
-  evidenceDirectory,
-  fixtureId,
-  providerBase,
-}) {
+function planControlledBackgroundProviderCreateImpl(
+  {
+    bindings,
+    evidenceDirectory,
+    fixtureId,
+    operationPlan,
+    providerBase,
+  },
+  authorityGate,
+) {
+  if (authorityGate !== undefined && typeof authorityGate !== "function") {
+    fail("controlled background create-authority gate was refused", 70);
+  }
   validateCreateBindings(bindings);
+  if (
+    (authorityGate === undefined && bindings.state_integration !== "fixture-only") ||
+    (authorityGate !== undefined && bindings.state_integration !== "mutation-journal-v2")
+  ) {
+    fail("controlled background create integration was refused", 64);
+  }
   const paths = validateControlledBackgroundRoots({
     evidenceDirectory,
     fixtureId,
@@ -1153,19 +1391,84 @@ export function planControlledBackgroundProviderCreate({
   if (pathEntryExists(paths.root)) {
     fail("controlled background provider root collided", 73);
   }
+  if (authorityGate !== undefined) {
+    validateControlledBackgroundProviderOperationPlan(operationPlan);
+    if (
+      operationPlan.fixture_id !== fixtureId ||
+      operationPlan.ownership_nonce !== bindings.ownership_nonce ||
+      operationPlan.provider_root_path !== paths.root ||
+      canonical(operationPlan.provider_base) !==
+        canonical(directoryIdentity(providerBase, "controlled background provider base")) ||
+      canonical(operationPlan.evidence_directory) !==
+        canonical(
+          directoryIdentity(
+            evidenceDirectory,
+            "controlled background evidence directory",
+          ),
+        )
+    ) {
+      fail("controlled background create operation plan binding was refused", 73);
+    }
+  } else if (operationPlan !== undefined) {
+    fail("controlled background fixture operation plan was refused", 64);
+  }
+  assertMutationJournalOperationOpen(evidenceDirectory, bindings);
   const value = createAuthorityValue({
     bindings,
     evidenceDirectory,
     fixtureId,
     paths,
   });
+  const reassertAuthority = authorityGate === undefined
+    ? undefined
+    : () => {
+        const result = authorityGate(Object.freeze({
+          authority_sha256: providerProcessDigest(providerProcessBytes(value)),
+          checkpoint: "before-create-authority-publication",
+          evidence_head_sha256: ZERO_SHA256,
+        }));
+        if (result !== undefined) {
+          fail("controlled background create-authority gate returned authority", 70);
+        }
+        assertMutationJournalOperationOpen(evidenceDirectory, bindings);
+        const currentPaths = validateControlledBackgroundRoots({
+          evidenceDirectory,
+          fixtureId,
+          providerBase,
+        });
+        if (currentPaths.root !== paths.root || pathEntryExists(paths.root)) {
+          fail("controlled background create-authority root changed", 73);
+        }
+        const prefix = inspectCreationEvidencePrefix(evidenceDirectory);
+        if (
+          Object.keys(prefix.artifacts).length !== 0 ||
+          prefix.pendingPublication?.target_name !== "background-create-authority.json" ||
+          prefix.pendingPublication?.actual_sha256 !==
+            providerProcessDigest(providerProcessBytes(value)) ||
+          prefix.pendingPublication?.disposition !== "staged-complete"
+        ) {
+          fail("controlled background create-authority prefix changed", 73);
+        }
+      };
   const authority = publishArtifact(
     evidenceDirectory,
     "background-create-authority.json",
     value,
+    { reassertAuthority },
   );
   validateCreateAuthority(authority.value, evidenceDirectory, fixtureId, paths);
   return Object.freeze({ authority, paths });
+}
+
+export function planControlledBackgroundProviderCreate(argumentsValue) {
+  return planControlledBackgroundProviderCreateImpl(argumentsValue, undefined);
+}
+
+export function planControlledBackgroundProviderCreateWithAuthorityGate(
+  argumentsValue,
+  authorityGate,
+) {
+  return planControlledBackgroundProviderCreateImpl(argumentsValue, authorityGate);
 }
 
 function rootOwnerValue(paths, fixtureId, ownershipNonce, createAuthoritySha256) {
@@ -1696,8 +1999,13 @@ function requestControllerStart(controller, expected, secret, timeoutMillisecond
     };
     const onError = () =>
       finish(new ProviderProcessContractFailure("controller start channel failed", 69));
-    const onClose = () =>
-      finish(new ProviderProcessContractFailure("controller closed before start", 69));
+    const onClose = (status, signal) =>
+      finish(
+        new ProviderProcessContractFailure(
+          `controller closed before start: ${status ?? signal ?? "unknown"}`,
+          69,
+        ),
+      );
     const onMessage = (value) => {
       try {
         exactKeys(
@@ -2064,16 +2372,44 @@ function contextWitnessValue(root, context, engineSocketIdentity, providerIdenti
   };
 }
 
+function assertMutationJournalOperationOpen(evidenceDirectory, bindings) {
+  if (bindings.state_integration !== "mutation-journal-v2") return;
+  if (basename(evidenceDirectory) !== "provider") {
+    fail("controlled background state evidence directory was refused", 73);
+  }
+  const runDirectory = dirname(evidenceDirectory);
+  secureDirectory(runDirectory, "controlled background state run directory");
+  const sequence = String(bindings.create_slot_sequence).padStart(2, "0");
+  const slot = readCanonicalArtifactOnly(
+    join(runDirectory, `.mutation-slot-${sequence}`),
+    "controlled background state mutation slot",
+  );
+  if (slot.sha256 !== bindings.create_slot_sha256) {
+    fail("controlled background state mutation slot changed", 73);
+  }
+  if (
+    pathEntryExists(join(runDirectory, `.mutation-operation-${sequence}`)) ||
+    pathEntryExists(join(runDirectory, `.mutation-close-${sequence}`)) ||
+    readdirSync(runDirectory).some((name) => /^\.mutation-stage-[0-9a-f]{32}$/.test(name))
+  ) {
+    fail("controlled background state operation was already settling", 73);
+  }
+}
+
 async function launchControlledBackgroundProviderImpl({
   beforeDetachHoldMilliseconds = 0,
   beforeIdentityProbeHoldMilliseconds = 0,
+  beforeStartDecisionHoldMilliseconds = 0,
   beforeStartHoldMilliseconds = 0,
   evidenceDirectory,
   fixtureId,
   maximumLifetimeMilliseconds = 30_000,
   providerBase,
   requireShutdownDuringStart = false,
-}, authorityGate) {
+}, authorityGate, allowedStateIntegrations) {
+  if (typeof authorityGate !== "function") {
+    fail("controlled background authority gate was refused", 70);
+  }
   if (
     CONTROLLED_BACKGROUND_PROVIDER_CONTRACT.fixture_launch_authorized !== true ||
     CONTROLLED_BACKGROUND_PROVIDER_CONTRACT.lifecycle_exposure_authorized !== false
@@ -2094,6 +2430,9 @@ async function launchControlledBackgroundProviderImpl({
     !Number.isSafeInteger(beforeIdentityProbeHoldMilliseconds) ||
     beforeIdentityProbeHoldMilliseconds < 0 ||
     beforeIdentityProbeHoldMilliseconds > 5_000 ||
+    !Number.isSafeInteger(beforeStartDecisionHoldMilliseconds) ||
+    beforeStartDecisionHoldMilliseconds < 0 ||
+    beforeStartDecisionHoldMilliseconds > 5_000 ||
     !Number.isSafeInteger(beforeStartHoldMilliseconds) ||
     beforeStartHoldMilliseconds < 0 ||
     beforeStartHoldMilliseconds > 5_000 ||
@@ -2102,10 +2441,32 @@ async function launchControlledBackgroundProviderImpl({
     fail("controlled background pre-start hold was refused", 64);
   }
   const engineArchitecture = controlledBackgroundEngineArchitecture(process.arch);
-  const authority = canonicalArtifact(
-    join(evidenceDirectory, "background-create-authority.json"),
-    "background-create-authority.json",
-  );
+  const preliminaryPrefix = inspectCreationEvidencePrefix(evidenceDirectory);
+  const preliminaryAuthority =
+    preliminaryPrefix.artifacts["background-create-authority.json"];
+  if (preliminaryAuthority === undefined) {
+    fail("background-create-authority.json was unavailable", 69);
+  }
+  if (!allowedStateIntegrations.has(preliminaryAuthority.value.state_integration)) {
+    fail("controlled background launch integration was refused", 73);
+  }
+  const stateIntegrated = preliminaryAuthority.value.state_integration === "mutation-journal-v2";
+  if (stateIntegrated && preliminaryPrefix.pendingPublication !== undefined) {
+    fail("controlled background state authority publication was incomplete", 73);
+  }
+  assertMutationJournalOperationOpen(evidenceDirectory, preliminaryAuthority.value);
+  const authority = stateIntegrated
+    ? preliminaryAuthority
+    : canonicalArtifact(
+        join(evidenceDirectory, "background-create-authority.json"),
+        "background-create-authority.json",
+      );
+  const effectiveAuthorityGate = stateIntegrated
+    ? (checkpoint) => {
+        assertMutationJournalOperationOpen(evidenceDirectory, authority.value);
+        return authorityGate(checkpoint);
+      }
+    : authorityGate;
   validateEvidenceDirectoryInventory(evidenceDirectory);
   exactArray(
     readdirSync(evidenceDirectory).sort(),
@@ -2124,7 +2485,7 @@ async function launchControlledBackgroundProviderImpl({
   };
   const rootCheckpoint = captureAuthorityCheckpointPrefix(rootCheckpointArguments);
   invokeAuthorityGate(
-    authorityGate,
+    effectiveAuthorityGate,
     "before-root-publication",
     authority.sha256,
     () => revalidateAuthorityCheckpointPrefix(rootCheckpointArguments, rootCheckpoint),
@@ -2224,7 +2585,7 @@ async function launchControlledBackgroundProviderImpl({
     controllerCheckpointArguments,
   );
   invokeAuthorityGate(
-    authorityGate,
+    effectiveAuthorityGate,
     "before-controller-spawn",
     controllerLaunchDecision.sha256,
     () =>
@@ -2318,27 +2679,34 @@ async function launchControlledBackgroundProviderImpl({
     const startDecisionCheckpoint = captureAuthorityCheckpointPrefix(
       startDecisionCheckpointArguments,
     );
-    invokeAuthorityGate(
-      authorityGate,
-      "before-start-decision-publication",
-      controllerWitness.sha256,
-      () =>
-        revalidateAuthorityCheckpointPrefix(
-          startDecisionCheckpointArguments,
-          startDecisionCheckpoint,
-        ),
-    );
+    if (beforeStartDecisionHoldMilliseconds > 0) {
+      await new Promise((resolvePromise) =>
+        setTimeout(resolvePromise, beforeStartDecisionHoldMilliseconds),
+      );
+    }
+    const startDecisionValue = {
+      controller_witness_sha256: controllerWitness.sha256,
+      create_authority_sha256: authority.sha256,
+      create_intent_sha256: authority.value.create_intent_sha256,
+      create_slot_sha256: authority.value.create_slot_sha256,
+      decision: "start",
+      fixture_id: fixtureId,
+      schema: "synveda.clean-engine.background-provider-start-decision.v1",
+    };
     const startDecision = publishArtifact(
       evidenceDirectory,
       "provider-start-decision.json",
+      startDecisionValue,
       {
-        controller_witness_sha256: controllerWitness.sha256,
-        create_authority_sha256: authority.sha256,
-        create_intent_sha256: authority.value.create_intent_sha256,
-        create_slot_sha256: authority.value.create_slot_sha256,
-        decision: "start",
-        fixture_id: fixtureId,
-        schema: "synveda.clean-engine.background-provider-start-decision.v1",
+        reassertAuthority: stagedAuthorityReassertion({
+          authorityGate: effectiveAuthorityGate,
+          checkpoint: "before-start-decision-publication",
+          checkpointArguments: startDecisionCheckpointArguments,
+          evidenceHeadSha256: controllerWitness.sha256,
+          expectedPrefix: startDecisionCheckpoint,
+          targetName: "provider-start-decision.json",
+          targetValue: startDecisionValue,
+        }),
       },
     );
     if (beforeStartHoldMilliseconds > 0) {
@@ -2366,7 +2734,7 @@ async function launchControlledBackgroundProviderImpl({
       hostagentStartCheckpointArguments,
     );
     invokeAuthorityGate(
-      authorityGate,
+      effectiveAuthorityGate,
       "before-hostagent-start-delivery",
       startDecision.sha256,
       () =>
@@ -2648,20 +3016,21 @@ async function launchControlledBackgroundProviderImpl({
       fixtureId,
       { revalidateCurrentToolchain: true },
     );
-    invokeAuthorityGate(
-      authorityGate,
-      "before-provider-identity-publication",
-      controllerSettlement.sha256,
-      () =>
-        revalidateAuthorityCheckpointPrefix(
-          identityCheckpointArguments,
-          identityCheckpoint,
-        ),
-    );
     const providerIdentity = publishArtifact(
       evidenceDirectory,
       "provider-identity.json",
       providerIdentityValue,
+      {
+        reassertAuthority: stagedAuthorityReassertion({
+          authorityGate: effectiveAuthorityGate,
+          checkpoint: "before-provider-identity-publication",
+          checkpointArguments: identityCheckpointArguments,
+          evidenceHeadSha256: controllerSettlement.sha256,
+          expectedPrefix: identityCheckpoint,
+          targetName: "provider-identity.json",
+          targetValue: providerIdentityValue,
+        }),
+      },
     );
     return Object.freeze({
       contextWitness,
@@ -2694,24 +3063,40 @@ async function launchControlledBackgroundProviderImpl({
 }
 
 export async function launchControlledBackgroundProvider(argumentsValue) {
-  return launchControlledBackgroundProviderImpl(argumentsValue, () => undefined);
+  return launchControlledBackgroundProviderImpl(
+    argumentsValue,
+    () => undefined,
+    new Set(["fixture-only"]),
+  );
 }
 
 export async function launchControlledBackgroundProviderWithAuthorityGate(
   argumentsValue,
   authorityGate,
 ) {
-  return launchControlledBackgroundProviderImpl(argumentsValue, authorityGate);
+  return launchControlledBackgroundProviderImpl(
+    argumentsValue,
+    authorityGate,
+    new Set(["fixture-only", "mutation-journal-v2"]),
+  );
 }
 
 function readCreationArtifacts(evidenceDirectory) {
-  validateEvidenceDirectoryInventory(evidenceDirectory);
-  const artifacts = {};
-  for (const name of CONTROLLED_BACKGROUND_CREATION_ARTIFACTS) {
-    artifacts[name] = canonicalArtifact(join(evidenceDirectory, name), name);
+  const prefix = inspectCreationEvidencePrefix(evidenceDirectory, {
+    allowRetirementEvidence: true,
+  });
+  if (
+    Object.keys(prefix.artifacts).length !==
+      CONTROLLED_BACKGROUND_CREATION_ARTIFACTS.length ||
+    CONTROLLED_BACKGROUND_CREATION_ARTIFACTS.some(
+      (name) => prefix.artifacts[name] === undefined,
+    ) ||
+    (prefix.pendingPublication !== undefined &&
+      prefix.pendingPublication.disposition !== "linked-complete")
+  ) {
+    fail("controlled background provider evidence was incomplete");
   }
-  validateEvidenceDirectoryInventory(evidenceDirectory);
-  return artifacts;
+  return prefix.artifacts;
 }
 
 function readCanonicalArtifactOnly(path, label, expectedLinks = new Set([1n])) {
@@ -2734,7 +3119,10 @@ function readCanonicalArtifactOnly(path, label, expectedLinks = new Set([1n])) {
   });
 }
 
-function inspectCreationEvidencePrefix(evidenceDirectory) {
+function inspectCreationEvidencePrefix(
+  evidenceDirectory,
+  { allowRetirementEvidence = false } = {},
+) {
   secureDirectory(evidenceDirectory, "controlled background evidence directory");
   const entries = readdirSync(evidenceDirectory).sort();
   if (entries.length > MAX_EVIDENCE_ENTRIES) {
@@ -2751,6 +3139,16 @@ function inspectCreationEvidencePrefix(evidenceDirectory) {
   for (const name of entries) {
     if (CONTROLLED_BACKGROUND_CREATION_ARTIFACTS.includes(name)) continue;
     const parsed = parseArtifactStageName(name);
+    if (
+      allowRetirementEvidence &&
+      ((artifactNameAllowed(name) &&
+        !CONTROLLED_BACKGROUND_CREATION_ARTIFACTS.includes(name)) ||
+        (parsed !== undefined &&
+          artifactNameAllowed(parsed.targetName) &&
+          !CONTROLLED_BACKGROUND_CREATION_ARTIFACTS.includes(parsed.targetName)))
+    ) {
+      continue;
+    }
     if (
       parsed === undefined ||
       !CONTROLLED_BACKGROUND_CREATION_ARTIFACTS.includes(parsed.targetName)
@@ -3911,14 +4309,67 @@ export function inspectControlledBackgroundProviderPrefix(
       { expectedCreateBindings, providerBase, revalidateCurrentToolchain },
     );
   }
-  if (
-    validated.paths === undefined &&
-    pathEntryExists(expectedPaths.root)
-  ) {
-    fail("controlled background provider root preceded create authority");
+  let authenticatedRoot = false;
+  if (validated.paths !== undefined && pathEntryExists(expectedPaths.root)) {
+    try {
+      const rootMetadata = lstatSync(expectedPaths.root, { bigint: true });
+      if (
+        !rootMetadata.isSymbolicLink() &&
+        rootMetadata.isDirectory() &&
+        rootMetadata.uid === BigInt(process.getuid()) &&
+        (rootMetadata.mode & 0o7777n) === 0o700n &&
+        pathEntryExists(expectedPaths.ownerMarker)
+      ) {
+        const owner = readCanonicalArtifactOnly(
+          expectedPaths.ownerMarker,
+          "controlled background progressive root owner",
+          new Set([1n, 2n]),
+        );
+        validateRootOwner(owner.value, {
+          createAuthoritySha256: prefix.artifacts["background-create-authority.json"].sha256,
+          fixtureId,
+          paths: expectedPaths,
+        });
+        authenticatedRoot =
+          owner.value.ownership_nonce ===
+          prefix.artifacts["background-create-authority.json"].value.ownership_nonce;
+      }
+    } catch (error) {
+      if (!(error instanceof ProviderProcessContractFailure)) throw error;
+      authenticatedRoot = false;
+    }
   }
+  const unownedRootCollision =
+    pathEntryExists(expectedPaths.root) &&
+    (validated.paths === undefined || !authenticatedRoot);
+  const collisionRoot = unownedRootCollision
+    ? noFollowEntryIdentity(
+        expectedPaths.root,
+        "controlled background unowned provider collision",
+      )
+    : undefined;
   const residual =
-    validated.paths === undefined
+    unownedRootCollision
+      ? Object.freeze({
+          controller_presence:
+            prefix.artifacts["controller-launch-decision.json"] === undefined
+              ? "not-started"
+              : "unattested",
+          hostagent_presence:
+            prefix.artifacts["provider-start-decision.json"] === undefined
+              ? "not-started"
+              : "unattested",
+          inventory_sha256: providerProcessDigest(providerProcessBytes(collisionRoot)),
+          private_publications: Object.freeze([]),
+          root: collisionRoot,
+          root_disposition: "ownership-pending",
+          root_inventory: Object.freeze([collisionRoot]),
+          sockets: "uninspected",
+          static_root_identity_sha256: providerProcessDigest(
+            providerProcessBytes({ entries: [collisionRoot], root: collisionRoot }),
+          ),
+        })
+      : validated.paths === undefined
       ? Object.freeze({
           controller_presence: "not-started",
           hostagent_presence: "not-started",
@@ -3928,13 +4379,29 @@ export function inspectControlledBackgroundProviderPrefix(
           root_disposition: "absent",
           root_inventory: Object.freeze([]),
           sockets: "absent",
+          static_root_identity_sha256: ZERO_SHA256,
         })
       : inspectProgressiveRoot(
           validated.paths,
           prefix.artifacts["background-create-authority.json"],
           prefix.artifacts,
         );
-  const effectFrontier = validateProgressiveEffectPrefix(expectedPaths, prefix, residual);
+  const providerIdentity = prefix.artifacts["provider-identity.json"];
+  if (
+    providerIdentity !== undefined &&
+    validated.paths !== undefined &&
+    residual.static_root_identity_sha256 !==
+      staticRootIdentitySha256(
+        validated.paths,
+        providerIdentity.value.provider_root,
+        providerIdentity.value.provider_root_inventory,
+      )
+  ) {
+    fail("controlled background provider static root identity changed", 73);
+  }
+  const effectFrontier = unownedRootCollision
+    ? Object.freeze({ disposition: "complete", effect: "provider-root-collision" })
+    : validateProgressiveEffectPrefix(expectedPaths, prefix, residual);
   if (
     residual.root_disposition === "absent" &&
     Object.keys(prefix.artifacts).some(
@@ -4130,6 +4597,37 @@ function progressiveRootContract(paths) {
   return Object.freeze({ dynamicEntries, kinds, staticEntries });
 }
 
+function staticRootIdentitySha256(paths, root, entries) {
+  if (root === undefined) return ZERO_SHA256;
+  const dynamicPaths = new Set(
+    progressiveRootContract(paths).dynamicEntries.map((path) =>
+      relative(paths.root, path),
+    ),
+  );
+  const staticEntries = entries
+    .filter(
+      (entry) =>
+        !dynamicPaths.has(entry.relative_path) &&
+        parsePrivateStageName(basename(entry.relative_path)) === undefined,
+    )
+    .map((entry) =>
+      entry.kind === "directory"
+        ? {
+            device: entry.device,
+            inode: entry.inode,
+            kind: entry.kind,
+            mode: entry.mode,
+            relative_path: entry.relative_path,
+            uid: entry.uid,
+          }
+        : entry,
+    )
+    .sort((left, right) => left.relative_path.localeCompare(right.relative_path));
+  return providerProcessDigest(
+    providerProcessBytes({ entries: staticEntries, root }),
+  );
+}
+
 function progressiveFile(path, rootPath, rootDevice, isStage) {
   const label = isStage
     ? "controlled background progressive private-file stage"
@@ -4179,6 +4677,7 @@ function inspectProgressiveRoot(paths, createAuthority, artifacts) {
       root_disposition: "absent",
       root_inventory: Object.freeze([]),
       sockets: "absent",
+      static_root_identity_sha256: ZERO_SHA256,
     });
   }
   const rootMetadata = secureDirectory(paths.root, "controlled background progressive root");
@@ -4299,16 +4798,20 @@ function inspectProgressiveRoot(paths, createAuthority, artifacts) {
     const publication = Object.freeze({
       actual_sha256: candidate.artifact.sha256,
       declared_sha256: candidate.parsed.value_sha256,
+      device: candidate.identity.device,
       disposition:
         candidate.identity.links === "2"
           ? "linked-complete"
           : canonicalComplete
             ? "staged-complete"
             : "staged-partial",
+      inode: candidate.identity.inode,
       links: Number(candidate.identity.links),
+      mode: candidate.identity.mode,
       name: basename(candidate.identity.relative_path),
       size: candidate.identity.size,
       target_path: candidate.target,
+      uid: candidate.identity.uid,
     });
     stagesByTarget.set(
       candidate.target,
@@ -4656,6 +5159,11 @@ function inspectProgressiveRoot(paths, createAuthority, artifacts) {
     root_disposition: rootDisposition,
     root_inventory: Object.freeze(orderedEntries),
     sockets: socketCount === 0 ? "absent" : socketCount === 2 ? "present" : "partial",
+    static_root_identity_sha256: staticRootIdentitySha256(
+      paths,
+      root,
+      orderedEntries,
+    ),
   });
 }
 
@@ -4675,7 +5183,12 @@ function validateProgressiveEffectPrefix(paths, prefix, residual) {
     residual.private_publications.map((publication) => publication.target_path),
   );
   const evidenceStatus = (name) => {
-    if (prefix.pendingPublication?.target_name === name) return "pending";
+    if (
+      prefix.pendingPublication?.target_name === name &&
+      prefix.pendingPublication.disposition !== "linked-complete"
+    ) {
+      return "pending";
+    }
     return prefix.artifacts[name] === undefined ? "absent" : "complete";
   };
   const rootStatus = (path) => {
@@ -4688,7 +5201,10 @@ function validateProgressiveEffectPrefix(paths, prefix, residual) {
     ["provider-root", residual.root_disposition === "absent" ? "absent" : "complete"],
     ...progressiveRootContract(paths).staticEntries
       .slice(0, -2)
-      .map((path) => [relative(paths.root, path), rootStatus(path)]),
+      .map((path, index) => [
+        `provider-root-step-${String(index).padStart(2, "0")}`,
+        rootStatus(path),
+      ]),
     ["toolchain", evidenceStatus("background-toolchain.json")],
     ["hostagent-config", rootStatus(paths.hostagentConfig)],
     ["controller-config", rootStatus(paths.controllerConfig)],
@@ -4933,6 +5449,9 @@ export async function planControlledBackgroundRetirement({
   const evidence = inspectControlledBackgroundProvider(evidenceDirectory, fixtureId, {
     revalidateCurrentToolchain: true,
   });
+  if (evidence.createAuthority.value.state_integration !== "fixture-only") {
+    fail("controlled background retirement integration was refused", 73);
+  }
   if (bindings.create_slot_sha256 !== evidence.createAuthority.value.create_slot_sha256) {
     fail("controlled background create slot binding was refused");
   }
@@ -5629,6 +6148,9 @@ export async function retireControlledBackgroundProvider({
   }
   const paths = rootPaths(providerBase, fixtureId);
   const evidence = inspectControlledBackgroundProvider(evidenceDirectory, fixtureId);
+  if (evidence.createAuthority.value.state_integration !== "fixture-only") {
+    fail("controlled background retirement integration was refused", 73);
+  }
   const planArtifact = canonicalArtifact(
     join(evidenceDirectory, "provider-retirement-plan.json"),
     "provider-retirement-plan.json",
@@ -5783,6 +6305,9 @@ export async function retireControlledBackgroundProvider({
 
 export function controlledBackgroundOperationEvidence({ action, evidenceDirectory, fixtureId }) {
   const evidence = inspectControlledBackgroundProvider(evidenceDirectory, fixtureId);
+  if (evidence.createAuthority.value.state_integration !== "fixture-only") {
+    fail("controlled background operation evidence integration was refused", 73);
+  }
   if (action === "provider-create") return evidence.providerIdentity.sha256;
   if (action === "provider-cleanup") {
     const settlement = canonicalArtifact(
