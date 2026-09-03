@@ -178,9 +178,11 @@ exact state-born create chain and explicit cleanup/source bindings. It keeps
 the create head immutable, gates every process/resource effect and every
 durable publication frontier, persists exact progress/settlement, and exposes
 an operation-bound read-only prefix observation. It grants no result-receipt or
-close authority. Until the mutation owner supplies a cleanup slot, outer
-settlement, recovery claim, receipt and close, no supported cleanup or
-finalization authority exists for the state-owned root. The authority-gated
+close authority. Receipt v4 now has exact provider-class-bound controlled
+cleanup variants; its evidence digest remains opaque until the mutation owner
+binds it to a distinct outer settlement. Until that owner supplies a cleanup
+slot, outer settlement, recovery claim, receipt and close, no supported cleanup
+or finalization authority exists for the state-owned root. The authority-gated
 helpers are unsupported internal composition hooks, not a JavaScript security
 boundary. Owner-UID code and journal writes share one trusted-host boundary;
 ACLs, xattrs, flags, bind mounts and other PID namespaces remain outside this

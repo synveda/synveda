@@ -1,5 +1,9 @@
 #!/usr/bin/env node
 import { createHash } from "node:crypto";
+import {
+  CONTROLLED_BACKGROUND_RETIREMENT_CONTRACT_SHA256,
+  CONTROLLED_BACKGROUND_RETIREMENT_OPERATION_KIND,
+} from "./clean-engine-provider-process-contract.mjs";
 
 export const RECEIPT_SCHEMA = "synveda.clean-engine.receipt.v4";
 export const ZERO_SHA256 = "0".repeat(64);
@@ -449,7 +453,40 @@ function validateProjectCleanupPassed(result) {
   for (const value of Object.values(result)) exactBoolean(value, "project cleanup assertion");
 }
 
-function validateProviderCleanupIntent(result, fixtureId) {
+function controlledBackgroundProvider(receipts) {
+  return receipts.find((receipt) => receipt.phase === "provider-create-passed")
+    ?.result.evidence_class === "controlled-background-fake";
+}
+
+function validateControlledProviderCleanupIntent(result, fixtureId) {
+  exactKeys(
+    result,
+    [
+      "operation_kind",
+      "operation_plan_sha256",
+      "provider_resource",
+      "retirement_contract_sha256",
+      "scope",
+    ],
+    "controlled provider cleanup intent result",
+  );
+  if (
+    result.operation_kind !== CONTROLLED_BACKGROUND_RETIREMENT_OPERATION_KIND ||
+    !lowerHex(result.operation_plan_sha256, 64) ||
+    result.operation_plan_sha256 === ZERO_SHA256 ||
+    result.provider_resource !== `synveda-cpr45-${fixtureId}` ||
+    result.retirement_contract_sha256 !==
+      CONTROLLED_BACKGROUND_RETIREMENT_CONTRACT_SHA256 ||
+    result.scope !== "exact-receipt-owned-only"
+  ) {
+    refuse("controlled provider cleanup intent result was refused");
+  }
+}
+
+function validateProviderCleanupIntent(result, fixtureId, previousReceipts) {
+  if (controlledBackgroundProvider(previousReceipts)) {
+    return validateControlledProviderCleanupIntent(result, fixtureId);
+  }
   exactKeys(result, ["command", "provider_resource", "scope"], "provider cleanup intent result");
   if (
     result.command !== "colima-delete-data-force" ||
@@ -460,7 +497,53 @@ function validateProviderCleanupIntent(result, fixtureId) {
   }
 }
 
-function validateProviderCleanupPassed(result) {
+function validateControlledProviderCleanupPassed(result, previousReceipts) {
+  exactKeys(
+    result,
+    [
+      "context_absent",
+      "inert_staging_absent",
+      "operation_evidence_sha256",
+      "operation_kind",
+      "operation_plan_sha256",
+      "provider_absent",
+      "retirement_contract_sha256",
+      "runtime_root_absent",
+      "socket_absent",
+      "source_closure_unchanged",
+    ],
+    "controlled provider cleanup result",
+  );
+  for (const key of [
+    "context_absent",
+    "inert_staging_absent",
+    "provider_absent",
+    "runtime_root_absent",
+    "socket_absent",
+    "source_closure_unchanged",
+  ]) {
+    exactBoolean(result[key], `controlled provider cleanup ${key}`);
+  }
+  const intent = previousReceipts.at(-1);
+  if (
+    intent?.phase !== "provider-cleanup-intent" ||
+    !lowerHex(result.operation_evidence_sha256, 64) ||
+    result.operation_evidence_sha256 === ZERO_SHA256 ||
+    result.operation_kind !== CONTROLLED_BACKGROUND_RETIREMENT_OPERATION_KIND ||
+    result.operation_kind !== intent.result.operation_kind ||
+    result.operation_plan_sha256 !== intent.result.operation_plan_sha256 ||
+    result.retirement_contract_sha256 !==
+      CONTROLLED_BACKGROUND_RETIREMENT_CONTRACT_SHA256 ||
+    result.retirement_contract_sha256 !== intent.result.retirement_contract_sha256
+  ) {
+    refuse("controlled provider cleanup result contract binding was refused");
+  }
+}
+
+function validateProviderCleanupPassed(result, previousReceipts) {
+  if (controlledBackgroundProvider(previousReceipts)) {
+    return validateControlledProviderCleanupPassed(result, previousReceipts);
+  }
   exactKeys(
     result,
     [
@@ -701,8 +784,10 @@ function validateResult(phase, result, fixtureId, previousSha256, previousReceip
     case "compose-browser-passed": return validateBrowserPassed(result);
     case "project-cleanup-intent": return validateProjectCleanupIntent(result, fixtureId);
     case "project-cleanup-passed": return validateProjectCleanupPassed(result);
-    case "provider-cleanup-intent": return validateProviderCleanupIntent(result, fixtureId);
-    case "provider-cleanup-passed": return validateProviderCleanupPassed(result);
+    case "provider-cleanup-intent":
+      return validateProviderCleanupIntent(result, fixtureId, previousReceipts);
+    case "provider-cleanup-passed":
+      return validateProviderCleanupPassed(result, previousReceipts);
     case "finalize-passed": return validateFinalizePassed(result, previousSha256);
     case "failure-cleanup-intent": return validateFailureCleanupIntent(result, previousReceipts);
     case "failure-cleanup-passed": return validateFailureCleanupPassed(result);

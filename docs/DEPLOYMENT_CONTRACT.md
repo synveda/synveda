@@ -236,8 +236,12 @@ publication. Unknown/replaced resources and foreign publication stages remain
 blocking. Every destructive or publication frontier is synchronously gated;
 the read-only prefix observation binds the expected operation even before its
 plan exists. The inner settlement grants no result-receipt or close authority.
-State-born cleanup and finalization remain open until the mutation owner
-supplies the outer cleanup slot, settlement, recovery, receipt and close.
+Receipt v4 discriminates legacy and controlled provider-cleanup shapes and
+pins the controlled retirement kind, contract and operation-plan digest. Its
+operation-evidence digest is intentionally opaque; only the mutation owner can
+prove that it names the distinct outer cleanup settlement. State-born cleanup
+and finalization remain open until that owner supplies the cleanup slot,
+settlement, recovery, receipt and close.
 
 Receipt and environment bytes are canonical, fsynced in private staging files
 and linked to their final names without replacement. The current internal

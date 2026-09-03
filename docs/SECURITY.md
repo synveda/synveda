@@ -243,12 +243,16 @@ stale-socket or resource removal, every publication mutation and final
 consumption. Publication recovery binds declared, actual and inode identities;
 the read-only prefix observation also binds the expected operation, residual
 inventory and process state. The inner settlement grants no receipt or close
-authority, and the mutation-state owner does not yet compose this seam, so the
-controlled state root has no supported cleanup or finalization authority. No
-supported lifecycle target exposes these fixtures and no Docker/Colima effect
-is enabled. The `*WithAuthorityGate` exports are internal composition hooks,
-not a security boundary against arbitrary owner-UID JavaScript: owner-UID code
-execution and journal mutation are one trusted-host boundary. Other PID
+authority. Receipt v4 accepts an exact controlled cleanup result only after a
+controlled create and binds its kind, contract and plan, but the receipt's
+nonzero operation-evidence digest is opaque. It cannot authorize deletion or
+prove that the digest names an outer settlement. The mutation-state owner does
+not yet compose this seam, so the controlled state root has no supported
+cleanup or finalization authority. No supported lifecycle target exposes these
+fixtures and no Docker/Colima effect is enabled. The `*WithAuthorityGate`
+exports are internal composition hooks, not a security boundary against
+arbitrary owner-UID JavaScript: owner-UID code execution and journal mutation
+are one trusted-host boundary. Other PID
 namespaces, ACLs, xattrs, file flags and bind mounts remain trusted-host limits.
 A truthful live provider identity, TLS registry auth, zero-read builder and
 destruction evidence remain pending.

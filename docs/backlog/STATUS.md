@@ -237,14 +237,15 @@ cannot publish cleanup or finalization. Internal authority callbacks are
 trusted owner-UID composition hooks, not a JavaScript security boundary.
 
 Only test fixtures expose this seam; no supported lifecycle target or
-Docker/Colima action is enabled. Next add controlled-background cleanup
-receipt-v4 variants, then compose the dedicated cleanup slot, outer settlement,
-action-dispatched recovery and close around retirement v2 without broadening
-fixture deletion authority. Then finish exact live Docker/helper/disk-image and OS-version
-closure without repurposing `HOME`. Registry, builder, proxy, browser and exact
-cleanup evidence follow; Linux/reference HTTPS must pass before legacy
-Rauthy/Temporal assets are deleted. Backup/restore, upgrade and Apalis remain
-open CPR-45 slices.
+Docker/Colima action is enabled. Receipt v4 now has exact provider-class-bound
+controlled cleanup intent/pass variants, while treating operation evidence as
+an opaque nonzero digest. Next compose the dedicated cleanup slot, outer
+settlement, action-dispatched recovery and close around retirement v2, and
+prove that only the outer settlement supplies receipt/close evidence. Then
+finish exact live Docker/helper/disk-image and OS-version closure without
+repurposing `HOME`. Registry, builder, proxy, browser and exact cleanup evidence
+follow; Linux/reference HTTPS must pass before legacy Rauthy/Temporal assets
+are deleted. Backup/restore, upgrade and Apalis remain open CPR-45 slices.
 
 ## Unscheduled — not listed in the Sequencing section
 

@@ -119,11 +119,14 @@ removal, strict append-only interruption recovery and operation-bound read-only
 prefix observation. Its synchronous checkpoints cover every effect,
 publication mutation and final consumption, but its inner settlement grants no
 result-receipt or close authority. This is fixed-fake trusted-owner POSIX
-evidence only. Internal authority callbacks are not a JavaScript security
-boundary. The mutation-state owner does not yet supply a cleanup slot, outer
-settlement, recovery, receipt or close; no supported lifecycle target exposes
-the fixtures, and there is no Docker/Colima mutation or environment manifest.
-Supported state-born cleanup and finalization remain refused.
+evidence only. Receipt v4 now has an exact provider-class-bound controlled
+cleanup intent/pass grammar, but cannot identify the artifact behind its opaque
+operation-evidence digest. Internal authority callbacks are not a JavaScript
+security boundary. The mutation-state owner does not yet supply a cleanup
+slot, outer settlement, recovery, receipt or close; no supported lifecycle
+target exposes the fixtures, and there is no Docker/Colima mutation or
+environment manifest. Supported state-born cleanup and finalization remain
+refused.
 Live Linux/provider CI and a current Docker Desktop/provider run remain absent.
 Consequently this evidence improves the boundary without changing readiness. One
 frozen Docker Desktop candidate also proved bounded PostgreSQL/Keycloak

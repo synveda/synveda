@@ -503,13 +503,18 @@ the expected cleanup plan even before publication, exact residual inventory,
 process state and pending publication identities.
 
 The new seam deliberately emits neither result-receipt nor close authority and
-is not yet called by the mutation-state owner. No real cleanup slot, outer
-cleanup settlement, action-dispatched recovery, receipt or close exists, so
-state-owned cleanup and finalization remain blocked. Only test fixture modules
-invoke these seams and no supported lifecycle target exposes them. The
-authority-gated helpers are unsupported internal composition hooks, not a
-JavaScript security boundary; owner-UID code execution and journal mutation
-are one trusted-host boundary. Process probes do not prove another PID
+is not yet called by the mutation-state owner. Receipt v4 now discriminates
+legacy Colima cleanup from a controlled-background intent/pass variant. The
+controlled form pins the retirement kind and contract, binds the operation-plan
+digest, rejects provider-class substitution and retains the six content-free
+absence assertions. Its nonzero operation-evidence digest is opaque at this
+layer and cannot authorize deletion or identify an outer settlement. No real
+cleanup slot, outer cleanup settlement, action-dispatched recovery, receipt or
+close exists, so state-owned cleanup and finalization remain blocked. Only test
+fixture modules invoke these seams and no supported lifecycle target exposes
+them. The authority-gated helpers are unsupported internal composition hooks,
+not a JavaScript security boundary; owner-UID code execution and journal
+mutation are one trusted-host boundary. Process probes do not prove another PID
 namespace, and ACLs, xattrs, flags and bind mounts remain trusted-host limits.
 No Docker, Colima, resolver, registry, database, live-provider or
 host-management command ran in this slice; only bounded repository-owned fake
@@ -517,14 +522,14 @@ processes and sockets were used.
 
 ### Immediate next slice
 
-Add exact controlled-background cleanup intent/pass variants to receipt v4,
-then integrate the dedicated provider-cleanup operation with mutation slot v2.
-The state owner must compose the new retirement checkpoints with the actual
-slot and source frontier, publish a distinct outer cleanup settlement, recover
-only through action-dispatched observation-v2 claims, and bind that outer
-settlement—not the inner retirement settlement—into receipt and close.
-Recovery must not infer deletion authority from a receipt. Finalization remains
-blocked until that cleanup result and close are durable.
+Integrate the dedicated provider-cleanup operation with mutation slot v2. The
+state owner must compose the retirement checkpoints with the actual slot and
+source frontier, publish a distinct outer cleanup settlement, recover only
+through action-dispatched observation-v2 claims, and bind that outer
+settlement—not the inner retirement settlement, provider identity or create
+settlement—into receipt and close. Recovery must not infer deletion authority
+from a receipt. Finalization remains blocked until that cleanup result and
+close are durable.
 
 Before invoking Colima, finish the selected live toolchain manifest for the
 pinned Colima/Lima and Docker CLI, every transitive helper and the exact disk

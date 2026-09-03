@@ -13,6 +13,10 @@ import {
   sha256,
   validateReceiptChain,
 } from "../deploy/compose/scripts/clean-engine-receipts.mjs";
+import {
+  CONTROLLED_BACKGROUND_RETIREMENT_CONTRACT_SHA256,
+  CONTROLLED_BACKGROUND_RETIREMENT_OPERATION_KIND,
+} from "../deploy/compose/scripts/clean-engine-provider-process-contract.mjs";
 
 const fixtureId = "a".repeat(32);
 const hash = (value) => createHash("sha256").update(value).digest("hex");
@@ -157,6 +161,66 @@ function result(phase) {
     default:
       throw new Error(`missing fixture result for ${phase}`);
   }
+}
+
+const CONTROLLED_CREATE_PLAN_SHA256 = "b".repeat(64);
+const CONTROLLED_CREATE_CONTRACT_SHA256 = "c".repeat(64);
+const CONTROLLED_CLEANUP_PLAN_SHA256 = "e".repeat(64);
+
+function controlledResult(phase) {
+  switch (phase) {
+    case "provider-create-intent":
+      return {
+        operation_kind: "controlled-background-provider-create-v1",
+        operation_plan_sha256: CONTROLLED_CREATE_PLAN_SHA256,
+        preexisting_resource: "absent",
+        provider_contract_sha256: CONTROLLED_CREATE_CONTRACT_SHA256,
+        provider_resource: `synveda-cpr45-${fixtureId}`,
+        provider_root_key: `svb-${fixtureId.slice(0, 12)}`,
+      };
+    case "provider-create-passed":
+      return {
+        evidence_class: "controlled-background-fake",
+        operation_evidence_sha256: "d".repeat(64),
+        operation_kind: "controlled-background-provider-create-v1",
+        operation_plan_sha256: CONTROLLED_CREATE_PLAN_SHA256,
+        platform: "deterministic-posix",
+        provider_contract_sha256: CONTROLLED_CREATE_CONTRACT_SHA256,
+        provider_name: "controlled-background-fake",
+        runtime_name: "docker-fake",
+      };
+    case "provider-cleanup-intent":
+      return {
+        operation_kind: CONTROLLED_BACKGROUND_RETIREMENT_OPERATION_KIND,
+        operation_plan_sha256: CONTROLLED_CLEANUP_PLAN_SHA256,
+        provider_resource: `synveda-cpr45-${fixtureId}`,
+        retirement_contract_sha256:
+          CONTROLLED_BACKGROUND_RETIREMENT_CONTRACT_SHA256,
+        scope: "exact-receipt-owned-only",
+      };
+    case "provider-cleanup-passed":
+      return {
+        ...result("provider-cleanup-passed"),
+        operation_evidence_sha256: "f".repeat(64),
+        operation_kind: CONTROLLED_BACKGROUND_RETIREMENT_OPERATION_KIND,
+        operation_plan_sha256: CONTROLLED_CLEANUP_PLAN_SHA256,
+        retirement_contract_sha256:
+          CONTROLLED_BACKGROUND_RETIREMENT_CONTRACT_SHA256,
+      };
+    default:
+      return result(phase);
+  }
+}
+
+function successThroughProjectCleanup(resultForPhase = result) {
+  const receipts = [plan()];
+  const cleanupIndex = receiptSuccessPath.indexOf("provider-cleanup-intent");
+  for (const phase of receiptSuccessPath.slice(1, cleanupIndex)) {
+    receipts.push(
+      createNextReceipt(receipts, fixtureId, phase, resultForPhase(phase)),
+    );
+  }
+  return receipts;
 }
 
 function successBeforeFinalize(initialPlan = plan()) {
@@ -346,31 +410,25 @@ test("provider success binds its explicit evidence class and intent contract", (
   );
 
   const controlledReceipts = [plan()];
-  const controlledContract = "c".repeat(64);
   controlledReceipts.push(
-    createNextReceipt(controlledReceipts, fixtureId, "provider-create-intent", {
-      ...result("provider-create-intent"),
-      operation_kind: "controlled-background-provider-create-v1",
-      operation_plan_sha256: "b".repeat(64),
-      provider_contract_sha256: controlledContract,
-      provider_root_key: `svb-${fixtureId.slice(0, 12)}`,
-    }),
+    createNextReceipt(
+      controlledReceipts,
+      fixtureId,
+      "provider-create-intent",
+      controlledResult("provider-create-intent"),
+    ),
   );
   controlledReceipts.push(
-    createNextReceipt(controlledReceipts, fixtureId, "provider-create-passed", {
-      evidence_class: "controlled-background-fake",
-      operation_evidence_sha256: "d".repeat(64),
-      operation_kind: "controlled-background-provider-create-v1",
-      operation_plan_sha256: "b".repeat(64),
-      platform: "deterministic-posix",
-      provider_contract_sha256: controlledContract,
-      provider_name: "controlled-background-fake",
-      runtime_name: "docker-fake",
-    }),
+    createNextReceipt(
+      controlledReceipts,
+      fixtureId,
+      "provider-create-passed",
+      controlledResult("provider-create-passed"),
+    ),
   );
   for (const phase of receiptSuccessPath.slice(3, -1)) {
     controlledReceipts.push(
-      createNextReceipt(controlledReceipts, fixtureId, phase, result(phase)),
+      createNextReceipt(controlledReceipts, fixtureId, phase, controlledResult(phase)),
     );
   }
   assert.equal(validateReceiptChain(controlledReceipts, fixtureId).manifest_eligible, false);
@@ -378,6 +436,165 @@ test("provider success binds its explicit evidence class and intent contract", (
     () => buildEnvironmentManifest(candidate(), canonicalBytes(candidate()), controlledReceipts),
     /environment manifest is not eligible/,
   );
+});
+
+test("controlled background cleanup receipts are exact and provider-class bound", () => {
+  const deterministic = successThroughProjectCleanup();
+  assert.throws(
+    () =>
+      createNextReceipt(
+        deterministic,
+        fixtureId,
+        "provider-cleanup-intent",
+        controlledResult("provider-cleanup-intent"),
+      ),
+    /provider cleanup intent result fields were refused/,
+  );
+
+  const controlled = successThroughProjectCleanup(controlledResult);
+  assert.throws(
+    () =>
+      createNextReceipt(
+        controlled,
+        fixtureId,
+        "provider-cleanup-intent",
+        result("provider-cleanup-intent"),
+      ),
+    /controlled provider cleanup intent result fields were refused/,
+  );
+
+  const intentMutations = [
+    (value) => {
+      value.operation_kind = "controlled-background-provider-cleanup-v2";
+    },
+    (value) => {
+      value.operation_plan_sha256 = "0".repeat(64);
+    },
+    (value) => {
+      value.operation_plan_sha256 = "g".repeat(64);
+    },
+    (value) => {
+      value.retirement_contract_sha256 = "a".repeat(64);
+    },
+    (value) => {
+      value.scope = "caller-selected";
+    },
+    (value) => {
+      value.provider_resource = "foreign";
+    },
+    (value) => {
+      value.command = "colima-delete-data-force";
+    },
+    (value) => {
+      delete value.operation_kind;
+    },
+  ];
+  for (const mutate of intentMutations) {
+    const value = structuredClone(controlledResult("provider-cleanup-intent"));
+    mutate(value);
+    assert.throws(
+      () =>
+        createNextReceipt(
+          controlled,
+          fixtureId,
+          "provider-cleanup-intent",
+          value,
+        ),
+      ReceiptFailure,
+    );
+  }
+
+  controlled.push(
+    createNextReceipt(
+      controlled,
+      fixtureId,
+      "provider-cleanup-intent",
+      controlledResult("provider-cleanup-intent"),
+    ),
+  );
+  assert.throws(
+    () =>
+      createNextReceipt(
+        controlled,
+        fixtureId,
+        "provider-cleanup-passed",
+        result("provider-cleanup-passed"),
+      ),
+    /controlled provider cleanup result fields were refused/,
+  );
+
+  const passMutations = [
+    (value) => {
+      value.operation_evidence_sha256 = "0".repeat(64);
+    },
+    (value) => {
+      value.operation_evidence_sha256 = "g".repeat(64);
+    },
+    (value) => {
+      value.operation_kind = "controlled-background-provider-cleanup-v2";
+    },
+    (value) => {
+      value.operation_plan_sha256 = "a".repeat(64);
+    },
+    (value) => {
+      value.retirement_contract_sha256 = "a".repeat(64);
+    },
+    (value) => {
+      value.provider_absent = false;
+    },
+    (value) => {
+      value.command = "colima-delete-data-force";
+    },
+    (value) => {
+      delete value.operation_evidence_sha256;
+    },
+  ];
+  for (const mutate of passMutations) {
+    const value = structuredClone(controlledResult("provider-cleanup-passed"));
+    mutate(value);
+    assert.throws(
+      () =>
+        createNextReceipt(
+          controlled,
+          fixtureId,
+          "provider-cleanup-passed",
+          value,
+        ),
+      ReceiptFailure,
+    );
+  }
+
+  const legacy = successThroughProjectCleanup();
+  legacy.push(
+    createNextReceipt(
+      legacy,
+      fixtureId,
+      "provider-cleanup-intent",
+      result("provider-cleanup-intent"),
+    ),
+  );
+  assert.throws(
+    () =>
+      createNextReceipt(
+        legacy,
+        fixtureId,
+        "provider-cleanup-passed",
+        controlledResult("provider-cleanup-passed"),
+      ),
+    /provider cleanup result fields were refused/,
+  );
+
+  controlled.push(
+    createNextReceipt(
+      controlled,
+      fixtureId,
+      "provider-cleanup-passed",
+      controlledResult("provider-cleanup-passed"),
+    ),
+  );
+  const state = validateReceiptChain(controlled, fixtureId);
+  assert.equal(state.manifest_eligible, false);
+  assert.equal(state.terminal, false);
 });
 
 test("a failed phase can only enter exact cleanup and can never publish a manifest", () => {

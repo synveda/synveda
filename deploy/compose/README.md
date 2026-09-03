@@ -232,12 +232,13 @@ trusted owner-UID composition hooks, not a JavaScript security boundary.
 
 No supported lifecycle target exposes either test-only seam; there is no live
 provider mutation or environment manifest. `registry/`, `runtime/` and
-`evidence/` remain empty. Next add controlled-background cleanup receipt-v4
-variants and compose the real state cleanup slot, outer settlement,
-action-dispatched recovery and close around retirement v2. Then finish the live
-Docker/helper/disk closure before exposing a supported lifecycle target or
-making any Docker claim. Superseded receipt and mutation schemas are discarded
-and regenerated.
+`evidence/` remain empty. Receipt v4 now has provider-class-bound controlled
+cleanup intent/pass shapes, but its operation-evidence hash is opaque and
+grants no deletion or close authority. Next compose the real state cleanup
+slot, outer settlement, action-dispatched recovery and close around retirement
+v2. Then finish the live Docker/helper/disk closure before exposing a supported
+lifecycle target or making any Docker claim. Superseded receipt and mutation
+schemas are discarded and regenerated.
 The manual browser ceremony below remains usable for fixture development but
 cannot be labelled a clean-Engine result.
 
