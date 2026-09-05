@@ -391,11 +391,13 @@ use fsynced staging plus no-replace links. The fixture-only manifest schema is
 explicitly non-live and controlled background evidence cannot become eligible.
 Provider success carries an explicit evidence class and must bind the exact
 provider-contract digest from its intent; receipt v1/v2/v3 state is a
-fresh-plan hard cut. Mutation slot v3 binds the exact source receipt and
+fresh-plan hard cut. Mutation slot v1-v3, recovery/root v1-v2 and close v1-v4
+are also refused and require regeneration; there is no translator. Mutation
+slot v4 binds the exact source receipt and
 environment, previous close, operation kind, contract and canonical operation
-plan. Recovery v2 binds that operation and its exact observed evidence/root
-frontier; close v4 binds the result, owner or newest recovery authority and the
-outer operation-settlement digest. The recovery root is v2. Permanent,
+plan. Recovery v3 binds that operation and its exact observed evidence/root
+frontier; close v5 binds the result, owner or newest recovery authority and the
+outer operation-settlement digest. The recovery root is v3. Permanent,
 gap-free slots, settlements, closes and per-slot recovery claims are never
 deleted or reused. Only unique staging aliases reconcile. Every final link
 re-proves authority, endpoints, operation evidence and staged inode/bytes; a
@@ -408,7 +410,7 @@ The provider seam retains two fixed fake-only paths. The synchronous
 state-integrated actor protocol and its fixtures are deleted. The controlled
 path is now the separately supervised background fake: a canonical operation
 plan binds the private provider base, evidence directory, exact root key and
-ownership nonce before slot acquisition; the v3 slot and v4 intent become
+ownership nonce before slot acquisition; the v4 slot and v4 intent become
 durable before root mutation. The state owner alone publishes the inner create
 authority and launches the repository-fixed controller/host-agent chain. No
 caller function, command, environment or provider selector enters the adapter.
@@ -435,7 +437,7 @@ identity enters the closed execution-failure branch.
 
 Recovery confirmation is read-only. After proving the recorded owner and any
 newest recoverer absent, acquisition alone may reconcile exact mutation-stage
-aliases, then appends a v2 claim bound to a fresh observation. Recovery never
+aliases, then appends a v3 claim bound to a fresh observation. Recovery never
 launches, signals, deletes, repairs the inner chain or replays a durable
 controller/start decision. Unauthenticated controller-launch and start-without-
 PID windows remain permanently uncertain. A complete identity, an exact
@@ -490,14 +492,14 @@ A new pure provider-adapter registry reserves
 `colima-vz-docker-live-create-v1` and
 `colima-vz-docker-live-cleanup-v1` plus distinct live evidence schema names. The
 create operation contract digest is
-`34af3ffb3993172112c9218e737db57acb9ad78b8dc0e89240bbcb2d8ab269b5`;
-cleanup is `47a6ca5a6b76542a05b5631c24eaed5cefaa9ea6c33bcfe1c4aa997e7db393b3`
+`56454e1623ab4585d1392015e2d185906b664a5fcd993f7272ea4ae019540d56`;
+cleanup is `bbb1dd967566a2d1fbe8e16bf82c0cc921ed18f5a29db752b95f81cb9fb405fd`
 and binds the create digest. Registry digest
-`50ebdacaafa2b98de3a9acdd82fc563f3f99045df53a96280515a8e5627ed901`
+`c1888f35c807031165c7a099611914f056ec82057103a8efe5e6cd0a92ee041b`
 accepts only an exact action, operation kind, operation-contract digest and
 provider-class tuple. It compares all fields after the content-addressed key,
 cannot select either fake class and returns only closed metadata. Create grants
-state planning only through `mutation-journal-v3-plan-only`; execution,
+state planning only through `mutation-journal-v4-plan-only`; execution,
 provider recovery, lifecycle exposure and finalization remain false, while
 cleanup remains wholly deny-only. The registry imports no process,
 mutation-state, receipt or fake-provider module; state reaches it only through
@@ -509,12 +511,13 @@ The new `synveda.clean-engine.colima-live-provider-operation-plan.v1` binds the
 active run/candidate/head, exact registry resolution, production requirements,
 private preparation-observation digest and provider profile/resource. It
 persists no private paths, command, environment, `HOME`, binding key or
-credentials. The state owner embeds it in a `provider-plan` mutation slot v3
-and owner close v4 after revalidating the production observation before slot
+credentials. The state owner embeds it in a `provider-plan` mutation slot v4
+and owner close v5 after revalidating the production observation before slot
 acquisition and again at the close link. Planning and both fake executors
 therefore compete on the same atomic slot name. Completion changes no receipt
 or environment, writes no provider evidence and blocks later mutation and
-finalization. An abandoned slot can only be explicitly recovered by an
+finalization except the exact inert intent successor. An abandoned slot can
+only be explicitly recovered by an
 `aborted-before-effect` journal close before retry; this grants no provider
 recovery. Six plan-boundary and five focused state plan/race/crash tests cover the
 new boundary. The supported lifecycle still exposes only `plan`, `status` and
@@ -570,7 +573,7 @@ resources, source or inert state staging refuse.
 
 After complete retirement, the owner publishes a distinct outer cleanup
 settlement. Receipt v4 accepts only that digest as operation evidence for the
-controlled cleanup pass, and close v4 binds the same digest; the inner
+controlled cleanup pass, and close v5 binds the same digest; the inner
 retirement settlement, provider identity, create settlement and unrelated
 digests are rejected. Owner close is valid only before any recovery claim.
 Action-dispatched cleanup recovery may abort an untouched pre-intent slot
@@ -591,22 +594,24 @@ environment finalizer, so finalization remains blocked. No Docker, Colima,
 resolver, registry, database, live-provider or host-management command ran in
 this slice; only bounded repository-owned fake processes and sockets were used.
 
-The live effect-intent boundary is now defined without publication. A read-only
-state seam accepts only the newest completed owner `provider-plan` and projects
-its slot, close, embedded-plan and preparation-observation digests. Only the
-direct in-memory return reflects that state read; serialization loses
-provenance. Separate structural helpers bind a candidate to a projection and
-plan and an empty prefix to the candidate, but authenticate neither state nor
-observation and deliberately accept manufactured or replayed values. The
-candidate can state only `provider-create` with `requested-not-authorized`; the
-logical pre-effect prefix has exactly zero entries and does not use the reserved
-live create-evidence schema. Neither value is durable, and neither asserts
-provider/resource/process/host-agent/Engine/socket/context absence. Seven
-focused tests cover exact shapes, cross-binding, explicit manufactured-value
-acceptance, an actually empty prefix, content-free output and static absence of
-process, state-mutation, receipt and lifecycle seams. A recursive snapshot also
-proves the state projection changes no source or journal byte or enumerated
-mode/owner/link/inode/size metadata.
+The live effect-intent boundary is now durably inert. A state seam accepts only
+the newest completed owner `provider-plan` and projects its slot, close,
+embedded-plan and preparation-observation digests. Separate structural helpers
+bind a candidate to that projection and an empty prefix to the candidate, but
+authenticate neither state nor observation; serialized values carry no
+provenance. The candidate can state only `provider-create` with
+`requested-not-authorized`, and the logical pre-effect prefix has zero entries.
+
+The state owner publishes those values only through the distinct
+`provider-intent` action. Production operation kind
+`colima-live-provider-intent-publication-v1` has contract digest
+`b380e6da1968da2e5bfa2c3552bf3f38d60197d7a8ab42f29c74f9bf29f8a6b8`;
+the fixture operation has a distinct kind, schema, evidence class and digest
+`44a39b9065f73db7f67425332f899e748ae1cb5c1037953c0e3593d0c4560c70`.
+Neither tuple is registered with the provider adapter. Both authorize only
+state publication through `mutation-journal-v4-inert-intent-only`; effect,
+receipt, provider-effect recovery, cleanup, lifecycle and finalization
+capabilities remain false.
 
 The state owner now composes those structures with a read-only pre-effect
 admission observation. The production API accepts only repository/state and
@@ -621,36 +626,45 @@ revalidated. Only `ENOENT` at an exact target is observed absence; every file,
 directory, hard link or symlink is an opaque foreign collision and is never
 traversed or adopted. Unrelated parent entries remain preparation drift.
 
-The direct, recursively frozen
-`synveda.clean-engine.colima-live-pre-effect-admission.v1` result is explicitly
-`point-in-time-not-effect-authority`. An all-absent result contains the existing
-non-authorizing intent and empty prefix; any collision suppresses both. It also
-closes the provider profile, derived Lima instance and a bounded logical future
-supervisor label. That label is not a PID, PGID, process identity or liveness
-observation. Fixture observation and aggregate schemas, evidence classes and
-HMAC domains are distinct from production. The observer writes nothing and
-makes no VM, Engine, socket, context, process, cleanup, recovery, receipt,
-lifecycle or finalization claim. Deterministic tests cover successful
-composition, collision suppression, crossed provenance, target/parent/source
-drift, no traversal, content-free output and complete source/state/preparation
-snapshots.
+The publisher obtains that admission internally at four boundaries: the
+initial baseline, immediately before slot link, after slot acquisition and
+immediately before close link. Every canonical admission must equal the initial
+all-absent value. Slot v4 contains content-free generic journal metadata and an
+`operation_plan` containing only the publication plan; its owner close v5
+commits with result sequence zero and zero receipt, environment
+and operation-evidence delta. It creates no provider, registry, runtime,
+environment or operation-settlement artifact. One no-replace journal CAS wins.
+Collision or drift before slot publication leaves no permanent slot; after
+acquisition it owner-aborts that generation before effect.
+
+An abandoned open intent requires an exact read-only confirmation and can only
+append an all-zero recovery v3 observation followed by an
+`aborted-before-effect` close. Generic provider execution recovery refuses it.
+Exact completed retries return historical non-authorizing completion without a
+fresh root claim. Crash, collision, source drift, competing writer, recovery,
+schema-hard-cut and validly rehashed semantic-tamper tests exercise these
+boundaries. The production publisher accepts no fixture requirements or
+checkpoint seam, while deterministic fixture persistence is schema- and
+contract-distinct.
+
+Repeated root observations and the journal hard-link CAS are not an atomic
+reservation of the separate Colima/Lima namespaces. They authorize no root,
+process, VM, Engine, socket or context creation. The supervisor label remains
+logical rather than a PID, PGID, ownership or liveness claim. A future effect
+owner must perform fresh admission.
 
 ### Immediate next slice
 
-Publish the inert intent only through a distinct successor action in the shared
-mutation journal, with a reviewed slot/close hard cut and exact crash handling.
-That writer must rerun admission internally while holding its own causal CAS;
-neither this point-in-time result nor an extracted serialized projection,
-candidate or prefix is proof. It must recheck the two target names at the
-no-replace publication boundary and never write an out-of-journal provider
-artifact. Keep process start, provider execution/recovery, receipts, cleanup,
-lifecycle exposure and finalization disabled.
-
-Then close cooperative process-group ownership, host-agent/Engine/socket/context
-identities, uncertain-start classification and dynamic-tree retirement under
-adversarial tests. Do not branch through, relabel or mutate the deterministic
-controlled-background class. Finalization remains blocked until a separately
-reviewed live environment-manifest schema exists.
+Define the future effect owner's fresh admission and process-start decision as
+a new, closed boundary after the completed inert intent. It must treat the
+historical intent only as requested state, re-observe the exact roots and source,
+and publish no process or provider artifact in this slice. Keep provider start,
+execution/recovery, receipts, cleanup, lifecycle exposure and finalization
+disabled while cooperative process-group ownership, host-agent/Engine/socket/
+context identities, uncertain-start classification and dynamic-tree retirement
+are specified and tested. Do not branch through, relabel or mutate the
+deterministic controlled-background class. Finalization remains blocked until a
+separately reviewed live environment-manifest schema exists.
 
 The first real invocation must use the closed helper `PATH`, explicit provider
 roots, `--mount none`, the receipt-owned disk copy and the privately bound real

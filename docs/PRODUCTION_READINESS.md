@@ -88,10 +88,10 @@ deterministic Linux grammar coverage. This is not public PKIX/browser trust,
 explicit custom-CA/proxy support, a clean-volume login or recovery evidence.
 One append-only version-4 receipt machine now enforces closed intent/results,
 collision-preserving failure branches, no-replace publication and an exact
-success-only synthetic manifest. Receipt v1/v2/v3, mutation slot v1/v2,
-recovery/root v1 and close v1/v2/v3 are direct hard-cut refusals. Slot v3 binds
-source/result predecessors plus operation kind, contract and plan; recovery v2
-binds a fresh observation; close v4 binds the outer operation settlement.
+success-only synthetic manifest. Receipt v1/v2/v3, mutation slot v1-v3,
+recovery/root v1-v2 and close v1-v4 are direct hard-cut refusals. Slot v4 binds
+source/result predecessors plus operation kind, contract and plan; recovery v3
+binds a fresh observation; close v5 binds the outer operation settlement.
 Final journal names are never deleted or reused, and generic append cannot own
 preflight, provider-create, provider-cleanup or finalization.
 
@@ -149,34 +149,35 @@ deny-only. The registry still imports no state, receipt, process or fake-provide
 path.
 
 The state owner embeds one content-free live operation plan in a dedicated
-mutation slot v3 and close v4. It binds the active candidate/head, exact registry
+mutation slot v4 and close v5. It binds the active candidate/head, exact registry
 resolution, production requirements and private observation digest. The same
 slot CAS serializes it against fake-provider mutation; completion changes no
-receipt or environment, writes no provider evidence and blocks all later effect
-or finalization paths. An abandoned slot can only be recovered by an explicit
-effect-free abort. Preparation has sixteen deterministic tests, the registry
-fourteen, the effect-free plan boundary six and state has five focused plan/race/crash
-tests. This is not a live OS probe, provider start, Docker Engine identity,
-cleanup or environment-manifest result, so no readiness status changes.
+receipt or environment, writes no provider evidence and blocks every later
+mutation except the exact inert intent successor. An abandoned slot can only
+be recovered by an explicit effect-free abort. This is not a live OS probe,
+provider start, Docker Engine identity, cleanup or environment-manifest result,
+so no readiness status changes.
 
-A read-only state projection now reduces the newest completed owner plan to its
-slot, close, embedded-plan and preparation-observation digests. Only its direct
-in-memory return reflects the state just read; serialization loses that
-provenance. Separate unauthenticated structural helpers can derive only a
-`provider-create` request marked `requested-not-authorized` and a logical
-pre-effect prefix with zero entries. They do not prove state or observation,
-are not published, inhabit no provider-evidence schema and assert no resource
-or process absence. Seven focused contract tests, including manufactured-value
-acceptance, plus the recursive read-only state regression pass. The state owner
-now composes the completed plan with two exact state/source reads and two full
-production-observation reconstructions. It classifies only the exact future
-Colima-profile and Lima-instance roots: no-follow `ENOENT` is point-in-time
-absence, while every existing entry is an opaque collision that yields no intent
-or prefix. The frozen result is non-authorizing and non-durable; its supervisor
-label is logical rather than a PID/PGID claim, fixture evidence is schema-
-distinct, and any future publisher must rerun admission under its shared CAS.
-This closes a read-only admission boundary only; it adds no live/provider/
-readiness evidence.
+A state projection reduces the newest completed owner plan to its slot, close,
+embedded-plan and preparation-observation digests. Separate structural helpers
+derive only a `provider-create` request marked `requested-not-authorized` and a
+zero-entry logical pre-effect prefix; serialized values carry no state or
+observation provenance. The state owner publishes them only through a distinct
+`provider-intent` journal action, with production and fixture operation kinds,
+contracts, schemas and evidence classes kept separate.
+
+Publication reconstructs the complete state/source/root admission initially,
+immediately before the slot link, after slot acquisition and immediately before
+the close link. Every canonical admission must equal the initial all-absent
+baseline. A successful owner close changes no receipt or environment, writes no
+provider or operation evidence and grants no effect authority. Collisions and
+drift abort before effect; abandoned slots can only acquire an all-zero recovery
+v3 claim and an `aborted-before-effect` close. Completed retries return the
+historical non-authorizing result and make no fresh absence claim. The root
+observations and journal CAS are not an atomic reservation of the separate
+Colima/Lima namespaces. This adds deterministic inert-state evidence only—not a
+live provider, process, VM, Engine, socket, context, cleanup, finalization or
+readiness result.
 
 Live Linux/provider CI and a current Docker Desktop/provider run remain absent.
 Consequently this evidence improves the boundary without changing readiness. One

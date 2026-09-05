@@ -186,13 +186,15 @@ classified and binds its operation kind, plan and intent contract; v1/v2/v3
 receipts fail closed. The
 fixture finalizer emits an explicitly non-live synthetic schema and rejects
 controlled-background-fake evidence. The append-only mutation journal uses
-slot v3, recovery/root v2 and close v4. Permanent numbered slots bind exact
+slot v4, recovery/root v3 and close v5. Permanent numbered slots bind exact
 source receipt/environment endpoints, prior close, cooperative owner challenge,
 operation kind, contract and plan. Permanent outer settlements bind the
 observed provider frontier. Closes bind exact result endpoints, owner/recovery
 authority and the outer settlement digest; per-slot recovery claims form a
-gap-free prefix. Final journal names are never deleted or reused. Slot v1,
-recovery/root v1 and close v1/v2 are fresh-plan hard cuts.
+gap-free prefix. Final journal names are never deleted or reused. Slot v1-v3,
+recovery/root v1-v2 and close v1-v4 are fresh-plan hard cuts. This is a full
+state hard cut: deterministic runs made with an older journal or live-plan
+contract must be reset and regenerated; there is no translator.
 Unique fsynced stages and atomic no-replace links prevent partial final files;
 only stage aliases reconcile. Every close link follows authority, result,
 operation-evidence and staged-inode reproof. A displaced live close stage
@@ -277,7 +279,7 @@ provider class as one content-addressed tuple; a hash match never substitutes
 for comparing all four fields. Create and cleanup use distinct contracts and
 evidence schema names, cleanup binds the create-contract digest, and neither can
 select the deterministic or controlled-background fake. The create tuple grants
-only state planning through `mutation-journal-v3-plan-only`; execution,
+only state planning through `mutation-journal-v4-plan-only`; execution,
 provider recovery, lifecycle and finalization remain false, and cleanup remains
 fully deny-only. The registry imports no process, state, receipt or fake-provider
 module, and hostile tuple values are not echoed in refusals.
@@ -288,22 +290,23 @@ The full private observation is revalidated before acquisition and at the
 owner-close link, but paths, command, environment, `HOME`, binding key and
 credentials are never copied into the journal. Planning shares the mutation
 slot CAS with both fake executors, writes no receipt/provider/environment
-evidence and centrally blocks every later mutation. Crash recovery can only
+evidence and blocks every later mutation except the exact inert
+`provider-intent` successor. Crash recovery can only
 abort an abandoned effect-free plan slot; it cannot finish a plan or recover a
 provider effect. A production-shaped plan fixture exists only under
 `scripts/fixtures` and the supported lifecycle imports neither it nor the
 state test seam.
 
-The subsequent intent contract is deliberately non-authorizing. A read-only
-state seam projects only the completed plan slot, close, embedded-plan and
-preparation-observation digests. Only the direct in-memory result reflects the
-state just read; serialized values lose that provenance. Candidate and empty-
-prefix validators close only unauthenticated structural bindings and therefore
-deliberately accept caller-manufactured, replayed values. The candidate can
-state only `provider-create` with `requested-not-authorized`, and its logical
-pre-effect prefix must contain zero entries. Neither value is written or
-accepted by state, receipts or lifecycle. They contain no provider path,
-identity, PID, socket, command, environment or absence assertion.
+The subsequent intent contract is deliberately non-authorizing. A state seam
+projects only the completed plan slot, close, embedded-plan and preparation-
+observation digests. Candidate and empty-prefix validators close only
+unauthenticated structural bindings; the candidate can state only
+`provider-create` with `requested-not-authorized`, and its logical pre-effect
+prefix contains zero entries. The state owner, rather than the provider
+adapter, owns a distinct production operation kind and contract for publishing
+that inert value. Fixture publication has a different kind, contract, schema
+and evidence class. Neither variant is registered as provider execution or
+accepted by receipts, cleanup, finalization or lifecycle.
 
 The state-owned admission operation now obtains the completed plan and
 projection internally and accepts no caller-supplied plan, projection,
@@ -315,13 +318,24 @@ and Lima-instance leaves beneath pinned private parents. Only exact-leaf
 `ENOENT` is observed absence; every existing entry is an opaque foreign
 collision that is neither traversed nor adopted and yields no intent or prefix.
 
-Its recursively frozen result is expressly point-in-time, non-authorizing and
-non-durable. A bounded logical supervisor label is not a PID/PGID, ownership or
-liveness claim. Fixture evidence has distinct aggregate/root schemas, evidence
-classes and HMAC domains. Serialization loses provenance, so a later intent
-publisher must rerun admission inside its shared-CAS/no-replace decision. No
-caller-supplied preparation or admission value can be relabelled as process,
-VM, Engine, socket or context absence.
+The publisher obtains every admission internally. It first establishes a
+canonical all-absent baseline, then requires exact equality immediately before
+the slot link, after slot acquisition and immediately before the close link.
+Only an owner close with zero receipt, environment and operation-evidence delta
+commits the inert intent through `mutation-journal-v4-inert-intent-only`.
+Collision or drift before slot publication leaves no permanent slot; collision
+or drift after acquisition owner-aborts that generation before effect. An
+abandoned open intent requires an explicit recovery confirmation; the journal
+repair may append only an all-zero recovery v3 observation and an
+`aborted-before-effect` close. That is not provider-effect recovery.
+
+The repeated root observations and journal hard-link CAS do not atomically
+reserve the separate Colima/Lima namespaces. They authorize no creation,
+process, VM, Engine, socket or context action, and a future effect owner must
+perform fresh admission. A bounded logical supervisor label is not a PID/PGID,
+ownership or liveness claim. Exact completed retries return the historical
+non-authorizing completion without claiming current absence. Serialized values
+lose provenance and cannot be supplied back as authority.
 
 No supported lifecycle target exposes these fixtures and no Docker/Colima
 effect is enabled. Controlled-background evidence remains ineligible for the

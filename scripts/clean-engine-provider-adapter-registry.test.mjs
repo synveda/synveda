@@ -34,11 +34,11 @@ import {
 } from "../deploy/compose/scripts/clean-engine-colima-live-contract.mjs";
 
 const CREATE_CONTRACT_SHA256 =
-  "34af3ffb3993172112c9218e737db57acb9ad78b8dc0e89240bbcb2d8ab269b5";
+  "56454e1623ab4585d1392015e2d185906b664a5fcd993f7272ea4ae019540d56";
 const CLEANUP_CONTRACT_SHA256 =
-  "47a6ca5a6b76542a05b5631c24eaed5cefaa9ea6c33bcfe1c4aa997e7db393b3";
+  "bbb1dd967566a2d1fbe8e16bf82c0cc921ed18f5a29db752b95f81cb9fb405fd";
 const REGISTRY_SHA256 =
-  "50ebdacaafa2b98de3a9acdd82fc563f3f99045df53a96280515a8e5627ed901";
+  "c1888f35c807031165c7a099611914f056ec82057103a8efe5e6cd0a92ee041b";
 
 function clone(value) {
   return structuredClone(value);
@@ -124,7 +124,7 @@ test("create grants only state planning while cleanup remains deny only", () => 
   );
   assert.equal(
     COLIMA_LIVE_CREATE_OPERATION_CONTRACT.state_integration,
-    "mutation-journal-v3-plan-only",
+    "mutation-journal-v4-plan-only",
   );
   assert.equal(COLIMA_LIVE_CLEANUP_OPERATION_CONTRACT.state_integration, "not-authorized");
   assert.deepEqual(PROVIDER_ADAPTER_DENY_ONLY_CAPABILITIES, {
@@ -182,7 +182,7 @@ test("exact create and cleanup tuples resolve only their closed capabilities", (
       CREATE_TUPLE,
       COLIMA_LIVE_CREATE_EVIDENCE_SCHEMA,
       PROVIDER_ADAPTER_PLAN_ONLY_CAPABILITIES,
-      "mutation-journal-v3-plan-only",
+      "mutation-journal-v4-plan-only",
     ],
     [
       CLEANUP_TUPLE,

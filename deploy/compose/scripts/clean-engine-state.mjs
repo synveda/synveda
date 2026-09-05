@@ -70,10 +70,27 @@ import {
   validateColimaLiveProviderOperationPlan,
 } from "./clean-engine-live-provider-plan.mjs";
 import {
+  COLIMA_LIVE_FIXTURE_PRE_EFFECT_ADMISSION_SCHEMA,
+  COLIMA_LIVE_FIXTURE_PROVIDER_INTENT_OPERATION_CONTRACT_SHA256,
+  COLIMA_LIVE_FIXTURE_PROVIDER_INTENT_OPERATION_KIND,
+  COLIMA_LIVE_PRE_EFFECT_ADMISSION_SCHEMA,
+  COLIMA_LIVE_PROVIDER_INTENT_ACTION,
+  COLIMA_LIVE_PROVIDER_INTENT_OPERATION_CONTRACT_SHA256,
+  COLIMA_LIVE_PROVIDER_INTENT_OPERATION_KIND,
+  LiveProviderIntentFailure,
   buildColimaLiveEffectIntentCandidateStructure,
   buildColimaLiveEmptyPreEffectPrefixStructure,
   buildColimaLivePlanCompletionProjectionStructure,
+  buildColimaLiveProviderIntentCompletion,
+  buildColimaLiveProviderIntentPublicationPlan,
+  liveProviderIntentBytes,
+  validateColimaLiveProviderIntentPublicationPlan,
 } from "./clean-engine-live-provider-intent.mjs";
+
+export {
+  COLIMA_LIVE_FIXTURE_PRE_EFFECT_ADMISSION_SCHEMA,
+  COLIMA_LIVE_PRE_EFFECT_ADMISSION_SCHEMA,
+};
 
 const REGISTRY_IMAGE =
   "registry:3.1.1@sha256:1be55279f18a2fe1a74edf2664cac61c1bea305b7b4642dab412e7affdcb3e33";
@@ -90,10 +107,10 @@ const ENVIRONMENT_STAGING_NAME = ".environment-publish";
 const LEGACY_MUTATION_LEASE_NAME = ".mutation-lease";
 const MUTATION_SLOT_PREFIX = ".mutation-slot-";
 const MUTATION_CLOSE_PREFIX = ".mutation-close-";
-const MUTATION_SLOT_SCHEMA = "synveda.clean-engine.mutation-slot.v3";
-const MUTATION_CLOSE_SCHEMA = "synveda.clean-engine.mutation-close.v4";
+const MUTATION_SLOT_SCHEMA = "synveda.clean-engine.mutation-slot.v4";
+const MUTATION_CLOSE_SCHEMA = "synveda.clean-engine.mutation-close.v5";
 const MUTATION_RECOVERY_PREFIX = ".mutation-recovery-";
-const MUTATION_RECOVERY_SCHEMA = "synveda.clean-engine.mutation-recovery.v2";
+const MUTATION_RECOVERY_SCHEMA = "synveda.clean-engine.mutation-recovery.v3";
 const MUTATION_OPERATION_PREFIX = ".mutation-operation-";
 const BACKGROUND_CREATE_SETTLEMENT_SCHEMA =
   "synveda.clean-engine.background-create-settlement.v1";
@@ -108,10 +125,6 @@ const MAX_MUTATION_SLOTS = 64;
 const MAX_MUTATION_STAGES = 16;
 const MAX_MUTATION_PUBLICATION_ATTEMPTS = 16;
 const LIVE_PROVIDER_PLAN_ACTION = "provider-plan";
-export const COLIMA_LIVE_PRE_EFFECT_ADMISSION_SCHEMA =
-  "synveda.clean-engine.colima-live-pre-effect-admission.v1";
-export const COLIMA_LIVE_FIXTURE_PRE_EFFECT_ADMISSION_SCHEMA =
-  "synveda.clean-engine.colima-live-fixture-pre-effect-admission.v1";
 const DETERMINISTIC_PROVIDER_OPERATION_KIND = "deterministic-fake-provider-create-v1";
 const FAKE_PROVIDER_ADAPTER_FIELDS = Object.freeze([
   "close_prelink_hold_milliseconds",
@@ -1137,6 +1150,39 @@ function backgroundCleanupOperationPlan({
   return value;
 }
 
+function liveProviderIntentFixtureOnly(operationKind, contractSha256) {
+  if (
+    operationKind === COLIMA_LIVE_PROVIDER_INTENT_OPERATION_KIND &&
+    contractSha256 === COLIMA_LIVE_PROVIDER_INTENT_OPERATION_CONTRACT_SHA256
+  ) {
+    return false;
+  }
+  if (
+    operationKind === COLIMA_LIVE_FIXTURE_PROVIDER_INTENT_OPERATION_KIND &&
+    contractSha256 ===
+      COLIMA_LIVE_FIXTURE_PROVIDER_INTENT_OPERATION_CONTRACT_SHA256
+  ) {
+    return true;
+  }
+  fail("live provider intent operation contract was refused");
+}
+
+function validateLiveProviderIntentPublicationPlanForState(
+  value,
+  fixtureOnly,
+) {
+  try {
+    return validateColimaLiveProviderIntentPublicationPlan(value, {
+      fixtureOnly,
+    });
+  } catch (error) {
+    if (error instanceof LiveProviderIntentFailure) {
+      fail(error.message, error.exitStatus);
+    }
+    throw error;
+  }
+}
+
 function validateMutationOperation(value) {
   if (value.action === LIVE_PROVIDER_PLAN_ACTION) {
     if (
@@ -1161,6 +1207,32 @@ function validateMutationOperation(value) {
       value.operation_plan.fixture_id !== value.fixture_id
     ) {
       fail("live provider planning operation binding was refused");
+    }
+    return;
+  }
+  if (value.action === COLIMA_LIVE_PROVIDER_INTENT_ACTION) {
+    if (
+      value.operation_plan === null ||
+      Array.isArray(value.operation_plan) ||
+      typeof value.operation_plan !== "object"
+    ) {
+      fail("live provider intent operation was refused");
+    }
+    const fixtureOnly = liveProviderIntentFixtureOnly(
+      value.operation_kind,
+      value.operation_contract_sha256,
+    );
+    validateLiveProviderIntentPublicationPlanForState(
+      value.operation_plan,
+      fixtureOnly,
+    );
+    if (
+      value.operation_plan.fixture_id !== value.fixture_id ||
+      value.operation_plan.operation_kind !== value.operation_kind ||
+      value.operation_plan.operation_contract_sha256 !==
+        value.operation_contract_sha256
+    ) {
+      fail("live provider intent operation binding was refused");
     }
     return;
   }
@@ -1256,6 +1328,7 @@ function validateMutationLeaseValue(value, fixtureId) {
       "finalize-environment",
       "provider-cleanup",
       "provider-create",
+      COLIMA_LIVE_PROVIDER_INTENT_ACTION,
       LIVE_PROVIDER_PLAN_ACTION,
     ]).has(value.action) ||
     !onlyLowerHex(value.intent_receipt_sha256, 64) ||
@@ -1338,7 +1411,7 @@ function recoveryChainRootSha256(fixtureId, leaseSha256, operation) {
     operation_contract_sha256: operation.operation_contract_sha256,
     operation_kind: operation.operation_kind,
     operation_plan_sha256: operationPlanSha256(operation.operation_plan),
-    schema: "synveda.clean-engine.mutation-recovery-root.v2",
+    schema: "synveda.clean-engine.mutation-recovery-root.v3",
   }));
 }
 
@@ -1413,7 +1486,8 @@ function validateRecoveryClaims(claims, fixtureId, slot) {
     }
     if (
       (slot.value.operation_kind === DETERMINISTIC_PROVIDER_OPERATION_KIND ||
-        slot.value.action === LIVE_PROVIDER_PLAN_ACTION) &&
+        slot.value.action === LIVE_PROVIDER_PLAN_ACTION ||
+        slot.value.action === COLIMA_LIVE_PROVIDER_INTENT_ACTION) &&
       canonical({
         observed_effect_disposition: claim.value.observed_effect_disposition,
         observed_effect_name: claim.value.observed_effect_name,
@@ -2390,6 +2464,7 @@ function validatePlanRunInventory(run, stateMetadata) {
     const recoverableAction =
       slot.value.action === "provider-create" ||
       slot.value.action === LIVE_PROVIDER_PLAN_ACTION ||
+      slot.value.action === COLIMA_LIVE_PROVIDER_INTENT_ACTION ||
       (slot.value.action === "provider-cleanup" &&
         slot.value.operation_kind ===
           CONTROLLED_BACKGROUND_RETIREMENT_OPERATION_KIND);
@@ -2624,6 +2699,9 @@ function loadState(roots, checkSource, allowCompetingStaging = false) {
           providerIntentReceipt?.phase !== "provider-cleanup-intent" ||
           resultReceipt.phase !== "provider-cleanup-passed")) ||
       (close.value.disposition === "completed" &&
+        lease.action === COLIMA_LIVE_PROVIDER_INTENT_ACTION &&
+        resultDelta !== 0) ||
+      (close.value.disposition === "completed" &&
         !controlledCleanup &&
         new Set(["append-receipt", "provider-cleanup"]).has(lease.action) &&
         (resultDelta > 2 ||
@@ -2699,7 +2777,8 @@ function loadState(roots, checkSource, allowCompetingStaging = false) {
               receiptState.head.phase !== "execution-failed")))) ||
       (lease.action === "finalize-environment" &&
         (delta > 1 ||
-          (delta === 1 && receiptState.head.phase !== "finalize-passed")))
+          (delta === 1 && receiptState.head.phase !== "finalize-passed"))) ||
+      (lease.action === COLIMA_LIVE_PROVIDER_INTENT_ACTION && delta !== 0)
     ) {
       fail("open mutation slot did not cover the receipt head");
     }
@@ -2768,11 +2847,7 @@ function loadState(roots, checkSource, allowCompetingStaging = false) {
       mutationClosesBySlot.get(slot.value.journal_sequence)?.value.disposition ===
       "completed",
   );
-  if (
-    completedLiveProviderPlans.length > 1 ||
-    (completedLiveProviderPlans.length === 1 &&
-      completedLiveProviderPlans[0] !== inventory.mutationSlots.at(-1))
-  ) {
+  if (completedLiveProviderPlans.length > 1) {
     fail("live provider plan journal was ambiguous");
   }
   const completedLiveProviderPlanSlot = completedLiveProviderPlans[0];
@@ -2786,6 +2861,117 @@ function loadState(roots, checkSource, allowCompetingStaging = false) {
           operationPlan: completedLiveProviderPlanSlot.value.operation_plan,
           slot: completedLiveProviderPlanSlot,
         });
+  const liveProviderIntentSlots = inventory.mutationSlots.filter(
+    (slot) => slot.value.action === COLIMA_LIVE_PROVIDER_INTENT_ACTION,
+  );
+  if (
+    liveProviderIntentSlots.length > 0 &&
+    completedLiveProviderPlanSlot === undefined
+  ) {
+    fail("live provider intent lacked a completed plan");
+  }
+  if (completedLiveProviderPlanSlot !== undefined) {
+    const planSequence = completedLiveProviderPlanSlot.value.journal_sequence;
+    if (
+      inventory.mutationSlots
+        .slice(planSequence + 1)
+        .some(
+          (slot) => slot.value.action !== COLIMA_LIVE_PROVIDER_INTENT_ACTION,
+        )
+    ) {
+      fail("live provider plan successor was refused");
+    }
+  }
+  let intentFixtureOnly;
+  for (const [index, slot] of liveProviderIntentSlots.entries()) {
+    const fixtureOnly = liveProviderIntentFixtureOnly(
+      slot.value.operation_kind,
+      slot.value.operation_contract_sha256,
+    );
+    if (
+      intentFixtureOnly !== undefined &&
+      fixtureOnly !== intentFixtureOnly
+    ) {
+      fail("live provider intent evidence classes were mixed");
+    }
+    intentFixtureOnly = fixtureOnly;
+    const close = mutationClosesBySlot.get(slot.value.journal_sequence);
+    const publicationPlan = validateLiveProviderIntentPublicationPlanForState(
+      slot.value.operation_plan,
+      fixtureOnly,
+    );
+    const expectedProjection = buildColimaLivePlanCompletionProjectionStructure({
+      operationPlanSha256: liveProviderPlanDigest(
+        liveProviderPlanBytes(liveProviderPlan.operationPlan),
+      ),
+      planCloseSha256: digest(liveProviderPlan.close.bytes),
+      planSlotSha256: digest(liveProviderPlan.slot.bytes),
+      preparationObservationSha256:
+        liveProviderPlan.operationPlan.preparation_observation_sha256,
+    });
+    if (
+      !liveProviderPlanBytes(publicationPlan.provider_operation_plan).equals(
+        liveProviderPlanBytes(liveProviderPlan.operationPlan),
+      ) ||
+      !canonicalBytes(
+        publicationPlan.admission.completion_projection,
+      ).equals(canonicalBytes(expectedProjection)) ||
+      slot.value.source_sequence !== 0 ||
+      slot.value.source_head_sha256 !== digest(plan.bytes) ||
+      slot.value.source_environment_sha256 !== ZERO_SHA256 ||
+      slot.value.intent_receipt_sha256 !== ZERO_SHA256 ||
+      liveProviderIntentSlots
+        .slice(0, index)
+        .some(
+          (predecessor) =>
+            mutationClosesBySlot.get(
+              predecessor.value.journal_sequence,
+            )?.value.disposition !== "aborted-before-effect",
+        ) ||
+      (close !== undefined &&
+        (close.value.result_sequence !== 0 ||
+          close.value.result_head_sha256 !== digest(plan.bytes) ||
+          close.value.result_environment_sha256 !== ZERO_SHA256 ||
+          close.value.operation_evidence_sha256 !== ZERO_SHA256 ||
+          (close.value.disposition === "completed" &&
+            close.value.authority !== "owner")))
+    ) {
+      fail("live provider intent journal was refused");
+    }
+  }
+  const completedLiveProviderIntents = liveProviderIntentSlots.filter(
+    (slot) =>
+      mutationClosesBySlot.get(slot.value.journal_sequence)?.value.disposition ===
+      "completed",
+  );
+  if (
+    completedLiveProviderIntents.length > 1 ||
+    (completedLiveProviderIntents.length === 1 &&
+      completedLiveProviderIntents[0] !== inventory.mutationSlots.at(-1))
+  ) {
+    fail("live provider intent journal was ambiguous");
+  }
+  const completedLiveProviderIntentSlot = completedLiveProviderIntents[0];
+  const completedLiveProviderIntent =
+    completedLiveProviderIntentSlot === undefined
+      ? undefined
+      : Object.freeze({
+          close: mutationClosesBySlot.get(
+            completedLiveProviderIntentSlot.value.journal_sequence,
+          ),
+          fixtureOnly: intentFixtureOnly,
+          publicationPlan:
+            completedLiveProviderIntentSlot.value.operation_plan,
+          slot: completedLiveProviderIntentSlot,
+        });
+  const liveProviderIntent =
+    completedLiveProviderIntent?.fixtureOnly === false
+      ? completedLiveProviderIntent
+      : undefined;
+  const liveProviderFixtureIntent =
+    completedLiveProviderIntent?.fixtureOnly === true
+      ? completedLiveProviderIntent
+      : undefined;
   const providerSlots = inventory.mutationSlots.filter(
     (slot) => slot.value.action === "provider-create",
   );
@@ -2830,9 +3016,13 @@ function loadState(roots, checkSource, allowCompetingStaging = false) {
     }
     providerState = Object.freeze({
       contract:
-        liveProviderPlan === undefined
-          ? "synchronous-fake"
-          : "live-provider-plan-only",
+        liveProviderIntent !== undefined
+          ? "live-provider-intent-only"
+          : liveProviderFixtureIntent !== undefined
+            ? "live-provider-fixture-intent-only"
+            : liveProviderPlan === undefined
+              ? "synchronous-fake"
+              : "live-provider-plan-only",
       operationEvidenceSha256: ZERO_SHA256,
     });
   } else if (providerSlot.value.operation_kind === DETERMINISTIC_PROVIDER_OPERATION_KIND) {
@@ -3499,6 +3689,8 @@ function loadState(roots, checkSource, allowCompetingStaging = false) {
     candidateBytes: candidate.bytes,
     environment,
     environmentPublication: inventory.environmentPublication,
+    liveProviderFixtureIntent,
+    liveProviderIntent,
     liveProviderPlan,
     plan: plan.value,
     receiptState,
@@ -3725,6 +3917,8 @@ function publishMutationBlocker(
   destinationName,
   bytes,
   {
+    afterAuthorityObserver,
+    afterLinkObserver,
     afterLinkMilliseconds = 0,
     beforeLinkMilliseconds = 0,
     reassertAuthority,
@@ -3748,10 +3942,41 @@ function publishMutationBlocker(
   if (reassertAuthority !== undefined && typeof reassertAuthority !== "function") {
     fail("mutation publication authority was refused", 70);
   }
+  if (
+    afterAuthorityObserver !== undefined &&
+    typeof afterAuthorityObserver !== "function"
+  ) {
+    fail("mutation publication authority observer was refused", 70);
+  }
+  if (afterLinkObserver !== undefined && typeof afterLinkObserver !== "function") {
+    fail("mutation publication observer was refused", 70);
+  }
   const runMetadata = ownedPrivateDirectory(run, "active run state");
   const destinationPath = join(run, destinationName);
   for (let attempt = 0; attempt < MAX_MUTATION_PUBLICATION_ATTEMPTS; attempt += 1) {
     const stagePath = join(run, `${MUTATION_STAGE_PREFIX}${randomBytes(16).toString("hex")}`);
+    const reassert = (witness, retireOwnStageOnFailure) => {
+      try {
+        if (reassertAuthority?.(witness) !== undefined) {
+          fail("mutation publication authority returned a value", 70);
+        }
+        if (
+          witness !== undefined &&
+          afterAuthorityObserver?.(witness) !== undefined
+        ) {
+          fail("mutation publication authority observer returned a value", 70);
+        }
+      } catch (error) {
+        if (
+          retireOwnStageOnFailure &&
+          witness !== undefined &&
+          !mutationStageWasRemoved(stagePath)
+        ) {
+          retireUnlinkedMutationStage(run, stagePath, witness.identity);
+        }
+        throw error;
+      }
+    };
     writeExclusive(stagePath, bytes);
     let staged;
     try {
@@ -3766,15 +3991,17 @@ function publishMutationBlocker(
       }
     } catch (error) {
       if (!mutationStageWasRemoved(stagePath)) throw error;
-      if (reassertAuthority?.() !== undefined) {
-        fail("mutation publication authority returned a value", 70);
-      }
+      reassert(undefined, false);
       continue;
     }
+    const witness = Object.freeze({
+      bytes,
+      destinationName,
+      identity: staged,
+      stagePath,
+    });
     holdFakeProvider(beforeLinkMilliseconds);
-    if (reassertAuthority?.() !== undefined) {
-      fail("mutation publication authority returned a value", 70);
-    }
+    reassert(witness, true);
     try {
       const currentStage = inspectPendingFile(
         stagePath,
@@ -3790,9 +4017,7 @@ function publishMutationBlocker(
       }
     } catch (error) {
       if (!mutationStageWasRemoved(stagePath)) throw error;
-      if (reassertAuthority?.() !== undefined) {
-        fail("mutation publication authority returned a value", 70);
-      }
+      reassert(undefined, false);
       continue;
     }
     try {
@@ -3803,9 +4028,7 @@ function publishMutationBlocker(
         return false;
       }
       if (error?.code === "ENOENT") {
-        if (reassertAuthority?.() !== undefined) {
-          fail("mutation publication authority returned a value", 70);
-        }
+        reassert(undefined, false);
         continue;
       }
       retireUnlinkedMutationStage(run, stagePath, staged);
@@ -3835,6 +4058,17 @@ function publishMutationBlocker(
           !sameMutationArtifact(staged, linkedStage)
         ) {
           fail("mutation blocker publication identity changed");
+        }
+        if (
+          afterLinkObserver?.(
+            Object.freeze({
+              destinationName,
+              destinationPath,
+              stagePath,
+            }),
+          ) !== undefined
+        ) {
+          fail("mutation publication observer returned a value", 70);
         }
         unlinkSync(stagePath);
       } catch (error) {
@@ -3903,8 +4137,19 @@ function acquireMutationLease(
 ) {
   const active = activeMutationRun(roots);
   const initial = reconcileMutationStages(roots);
-  if (initial.liveProviderPlan !== undefined) {
+  if (
+    initial.liveProviderPlan !== undefined &&
+    action !== COLIMA_LIVE_PROVIDER_INTENT_ACTION
+  ) {
     fail("live provider execution remains disabled after state planning", 73);
+  }
+  if (
+    action === COLIMA_LIVE_PROVIDER_INTENT_ACTION &&
+    (initial.liveProviderPlan === undefined ||
+      initial.liveProviderIntent !== undefined ||
+      initial.liveProviderFixtureIntent !== undefined)
+  ) {
+    fail("live provider intent publication state was refused", 73);
   }
   if (initial.mutationRecoveries.length > 0) {
     fail("a clean-engine mutation recovery is active or abandoned", 73);
@@ -3921,6 +4166,7 @@ function acquireMutationLease(
     "finalize-environment",
     "provider-cleanup",
     "provider-create",
+    COLIMA_LIVE_PROVIDER_INTENT_ACTION,
     LIVE_PROVIDER_PLAN_ACTION,
   ]).has(action)) {
     fail("mutation action was refused", 70);
@@ -4156,8 +4402,8 @@ function publishMutationClose(
   validateMutationCloseValue(close, slot, slot.value.fixture_id);
   const closeBytes = canonicalBytes(close);
   const closeName = mutationCloseFileName(slot.value.journal_sequence);
-  const reassertClosePublication = () => {
-    const current = reassertAuthority();
+  const reassertClosePublication = (publicationStage) => {
+    const current = reassertAuthority(publicationStage);
     const currentEnvironmentSha256 =
       current.environment === undefined ? ZERO_SHA256 : digest(current.environment.bytes);
     const currentOperationEvidenceSha256 = operationEvidenceForSlot(current, slot);
@@ -4232,9 +4478,9 @@ function closeMutationLease(
   ) {
     fail("mutation close additional authority was refused", 70);
   }
-  const assertHeld = () => {
+  const assertHeld = (publicationStage) => {
     const state = assertMutationLeaseHeld(roots, held, false);
-    additionalReassertAuthority?.(state);
+    additionalReassertAuthority?.(state, publicationStage);
     return state;
   };
   assertHeld();
@@ -4859,12 +5105,10 @@ export function recordLiveProviderOperationPlanForTest(argumentsValue) {
   });
 }
 
-function completedLiveProviderPlanSnapshot(state) {
+function completedLiveProviderPlanCoreSnapshot(state) {
   const completed = state.liveProviderPlan;
   if (
     completed === undefined ||
-    state.mutationLease !== undefined ||
-    state.mutationStages.length !== 0 ||
     state.pendingPublication !== undefined ||
     state.environment !== undefined ||
     state.environmentPublication !== undefined ||
@@ -4872,10 +5116,12 @@ function completedLiveProviderPlanSnapshot(state) {
     state.receipts.length !== 1 ||
     state.receiptState.head.phase !== "plan" ||
     state.receiptState.head.sequence !== 0 ||
-    state.providerState.contract !== "live-provider-plan-only" ||
+    !new Set([
+      "live-provider-fixture-intent-only",
+      "live-provider-intent-only",
+      "live-provider-plan-only",
+    ]).has(state.providerState.contract) ||
     state.providerState.operationEvidenceSha256 !== ZERO_SHA256 ||
-    state.mutationSlots.at(-1) !== completed.slot ||
-    state.mutationCloses.at(-1) !== completed.close ||
     completed.close.value.disposition !== "completed" ||
     completed.close.value.authority !== "owner" ||
     completed.close.value.operation_evidence_sha256 !== ZERO_SHA256 ||
@@ -4895,6 +5141,214 @@ function completedLiveProviderPlanSnapshot(state) {
         operationPlan.preparation_observation_sha256,
     }),
     operationPlan,
+  });
+}
+
+function abortedLiveProviderIntentTail(state) {
+  const completedPlanSequence = state.liveProviderPlan.slot.value.journal_sequence;
+  const tail = state.mutationSlots.slice(completedPlanSequence + 1);
+  const closes = new Map(
+    state.mutationCloses.map((close) => [close.value.slot_sequence, close]),
+  );
+  if (
+    tail.some(
+      (slot) =>
+        slot.value.action !== COLIMA_LIVE_PROVIDER_INTENT_ACTION ||
+        closes.get(slot.value.journal_sequence)?.value.disposition !==
+          "aborted-before-effect",
+    )
+  ) {
+    fail("completed live provider plan was unavailable", 69);
+  }
+  return tail;
+}
+
+function completedLiveProviderPlanSnapshot(state) {
+  const snapshot = completedLiveProviderPlanCoreSnapshot(state);
+  const tail = abortedLiveProviderIntentTail(state);
+  const expectedLastClose =
+    tail.length === 0
+      ? state.liveProviderPlan.close
+      : state.mutationCloses.find(
+          (close) =>
+            close.value.slot_sequence === tail.at(-1).value.journal_sequence,
+        );
+  if (
+    state.mutationLease !== undefined ||
+    state.mutationRecoveries.length !== 0 ||
+    state.mutationStages.length !== 0 ||
+    state.liveProviderIntent !== undefined ||
+    state.liveProviderFixtureIntent !== undefined ||
+    state.providerState.contract !== "live-provider-plan-only" ||
+    state.mutationCloses.at(-1) !== expectedLastClose
+  ) {
+    fail("completed live provider plan was unavailable", 69);
+  }
+  return snapshot;
+}
+
+function validateLiveProviderIntentPublicationStages(state, ownStage) {
+  if (
+    state.mutationStages.some(
+      (stage) => stage.linkedDestination !== undefined,
+    )
+  ) {
+    fail("live provider intent publication stage was refused", 73);
+  }
+  if (ownStage === undefined) return;
+  const staged = state.mutationStages.find(
+    (stage) => stage.path === ownStage.stagePath,
+  );
+  if (
+    staged === undefined ||
+    staged.name !== ownStage.stagePath.split(sep).at(-1) ||
+    !sameMetadata(staged.metadata, ownStage.identity)
+  ) {
+    fail("live provider intent publication stage changed", 73);
+  }
+  const parsed = parseCanonical(
+    ownStage.stagePath,
+    "live provider intent publication stage",
+    1,
+  );
+  if (!parsed.bytes.equals(ownStage.bytes)) {
+    fail("live provider intent publication stage changed", 73);
+  }
+}
+
+function availableLiveProviderIntentPlanSnapshot(
+  state,
+  publicationPlan,
+  ownStage,
+  fixtureOnly,
+) {
+  const snapshot = completedLiveProviderPlanCoreSnapshot(state);
+  assertLiveProviderIntentVariantHistory(state, fixtureOnly);
+  const tail = abortedLiveProviderIntentTail(state);
+  const expectedLastClose =
+    tail.length === 0
+      ? state.liveProviderPlan.close
+      : state.mutationCloses.find(
+          (close) =>
+            close.value.slot_sequence === tail.at(-1).value.journal_sequence,
+        );
+  if (
+    state.mutationLease !== undefined ||
+    state.mutationRecoveries.length !== 0 ||
+    state.liveProviderIntent !== undefined ||
+    state.liveProviderFixtureIntent !== undefined ||
+    state.providerState.contract !== "live-provider-plan-only" ||
+    state.mutationCloses.at(-1) !== expectedLastClose
+  ) {
+    fail("live provider intent publication state was refused", 73);
+  }
+  validateLiveProviderIntentPublicationStages(state, ownStage);
+  if (ownStage !== undefined) {
+    const staged = parseCanonical(
+      ownStage.stagePath,
+      "prospective live provider intent slot",
+      1,
+    );
+    validateMutationLeaseValue(staged.value, state.candidate.run_id);
+    const previousClose = state.mutationCloses.at(-1);
+    if (
+      ownStage.destinationName !==
+        mutationSlotFileName(state.mutationSlots.length) ||
+      staged.value.action !== COLIMA_LIVE_PROVIDER_INTENT_ACTION ||
+      staged.value.journal_sequence !== state.mutationSlots.length ||
+      staged.value.source_sequence !== 0 ||
+      staged.value.source_head_sha256 !== state.receiptState.head_sha256 ||
+      staged.value.source_environment_sha256 !== ZERO_SHA256 ||
+      staged.value.intent_receipt_sha256 !== ZERO_SHA256 ||
+      staged.value.previous_close_sha256 !== digest(previousClose.bytes) ||
+      !canonicalBytes(staged.value.operation_plan).equals(
+        canonicalBytes(publicationPlan),
+      ) ||
+      mutationOwnerState(staged.value) !== "current"
+    ) {
+      fail("prospective live provider intent slot was refused", 73);
+    }
+  }
+  return snapshot;
+}
+
+function heldLiveProviderIntentPlanSnapshot(
+  state,
+  held,
+  publicationPlan,
+  ownStage,
+  fixtureOnly,
+) {
+  const snapshot = completedLiveProviderPlanCoreSnapshot(state);
+  assertLiveProviderIntentVariantHistory(state, fixtureOnly);
+  const planSequence = state.liveProviderPlan.slot.value.journal_sequence;
+  const tail = state.mutationSlots.slice(planSequence + 1);
+  const intentSlot = tail.at(-1);
+  const closes = new Map(
+    state.mutationCloses.map((close) => [close.value.slot_sequence, close]),
+  );
+  const current = parseCanonical(held.path, "mutation slot");
+  const currentIdentity = mutationHeldIdentity(held.path);
+  if (
+    intentSlot === undefined ||
+    intentSlot !== state.mutationLease ||
+    !intentSlot.bytes.equals(held.leaseBytes) ||
+    !current.bytes.equals(held.leaseBytes) ||
+    !sameMetadata(currentIdentity, held.identity) ||
+    intentSlot.value.action !== COLIMA_LIVE_PROVIDER_INTENT_ACTION ||
+    !canonicalBytes(intentSlot.value.operation_plan).equals(
+      canonicalBytes(publicationPlan),
+    ) ||
+    tail
+      .slice(0, -1)
+      .some(
+        (slot) =>
+          slot.value.action !== COLIMA_LIVE_PROVIDER_INTENT_ACTION ||
+          closes.get(slot.value.journal_sequence)?.value.disposition !==
+            "aborted-before-effect",
+      ) ||
+    state.mutationRecoveries.length !== 0 ||
+    state.liveProviderIntent !== undefined ||
+    state.liveProviderFixtureIntent !== undefined ||
+    state.providerState.contract !== "live-provider-plan-only"
+  ) {
+    fail("held live provider intent state was refused", 73);
+  }
+  validateLiveProviderIntentPublicationStages(state, ownStage);
+  if (ownStage !== undefined) {
+    const stagedClose = parseCanonical(
+      ownStage.stagePath,
+      "prospective live provider intent close",
+      1,
+    );
+    validateMutationCloseValue(
+      stagedClose.value,
+      intentSlot,
+      state.candidate.run_id,
+    );
+    if (
+      ownStage.destinationName !==
+        mutationCloseFileName(intentSlot.value.journal_sequence) ||
+      stagedClose.value.disposition !== "completed" ||
+      stagedClose.value.authority !== "owner" ||
+      stagedClose.value.result_sequence !== 0 ||
+      stagedClose.value.result_head_sha256 !==
+        state.receiptState.head_sha256 ||
+      stagedClose.value.result_environment_sha256 !== ZERO_SHA256 ||
+      stagedClose.value.operation_evidence_sha256 !== ZERO_SHA256
+    ) {
+      fail("prospective live provider intent close was refused", 73);
+    }
+  }
+  return snapshot;
+}
+
+function liveProviderIntentCompletion(completed) {
+  return buildColimaLiveProviderIntentCompletion({
+    closeSha256: digest(completed.close.bytes),
+    fixtureOnly: completed.fixtureOnly,
+    publicationPlan: completed.publicationPlan,
+    slotSha256: digest(completed.slot.bytes),
   });
 }
 
@@ -5081,14 +5535,20 @@ export function projectLiveProviderPlanCompletionForExecutor(argumentsValue) {
 
 function observeColimaLivePreEffectAdmission(
   admittedArguments,
-  { admissionSchema, authority, fixtureOnly, testCheckpoint },
+  {
+    admissionSchema,
+    authority,
+    fixtureOnly,
+    stateSnapshot = completedLiveProviderPlanSnapshot,
+    testCheckpoint,
+  },
 ) {
   const roots = prepareRoots(
     admittedArguments.repoRoot,
     admittedArguments.stateBase,
     false,
   );
-  const firstState = completedLiveProviderPlanSnapshot(loadState(roots, true));
+  const firstState = stateSnapshot(loadState(roots, true));
   const firstRoots = observeLivePreEffectRoots(
     admittedArguments,
     firstState,
@@ -5099,7 +5559,7 @@ function observeColimaLivePreEffectAdmission(
     testCheckpoint("after-first-admission-observation");
   }
 
-  const secondState = completedLiveProviderPlanSnapshot(loadState(roots, true));
+  const secondState = stateSnapshot(loadState(roots, true));
   if (!sameLiveProviderPlanSnapshot(firstState, secondState)) {
     fail("live provider pre-effect state changed", 73);
   }
@@ -5171,6 +5631,374 @@ export function observeColimaLivePreEffectAdmissionForTest(argumentsValue) {
     {
       admissionSchema: COLIMA_LIVE_FIXTURE_PRE_EFFECT_ADMISSION_SCHEMA,
       authority: "fixture-only-point-in-time-not-effect-authority",
+      fixtureOnly: true,
+      testCheckpoint: admittedArguments.testCheckpoint,
+    },
+  );
+}
+
+function observeLiveProviderIntentAdmission(
+  argumentsValue,
+  { boundary, fixtureOnly, stateSnapshot, testCheckpoint },
+) {
+  const checkpoint =
+    testCheckpoint === undefined
+      ? undefined
+      : (name) => testCheckpoint(`${boundary}:${name}`);
+  return observeColimaLivePreEffectAdmission(
+    argumentsValue,
+    {
+      admissionSchema: fixtureOnly
+        ? COLIMA_LIVE_FIXTURE_PRE_EFFECT_ADMISSION_SCHEMA
+        : COLIMA_LIVE_PRE_EFFECT_ADMISSION_SCHEMA,
+      authority: fixtureOnly
+        ? "fixture-only-point-in-time-not-effect-authority"
+        : "point-in-time-not-effect-authority",
+      fixtureOnly,
+      stateSnapshot,
+      testCheckpoint: checkpoint,
+    },
+  );
+}
+
+function buildLiveProviderIntentPublicationPlan(
+  admission,
+  fixtureOnly,
+  operationPlan,
+) {
+  try {
+    return buildColimaLiveProviderIntentPublicationPlan({
+      admission,
+      fixtureOnly,
+      operationPlan,
+    });
+  } catch (error) {
+    if (error instanceof LiveProviderIntentFailure) {
+      fail(error.message, error.exitStatus);
+    }
+    throw error;
+  }
+}
+
+function sameLiveProviderIntentValue(left, right) {
+  return liveProviderIntentBytes(left).equals(liveProviderIntentBytes(right));
+}
+
+function assertLiveProviderIntentAdmissionAbsent(admission) {
+  if (
+    admission.root_observation.root_set_disposition !== "observed-absent" ||
+    admission.intent_candidate === null ||
+    admission.pre_effect_prefix === null
+  ) {
+    fail("live provider intent roots were not absent", 73);
+  }
+  return admission;
+}
+
+function completedLiveProviderIntentForVariant(state, fixtureOnly) {
+  const own = fixtureOnly
+    ? state.liveProviderFixtureIntent
+    : state.liveProviderIntent;
+  const other = fixtureOnly
+    ? state.liveProviderIntent
+    : state.liveProviderFixtureIntent;
+  if (other !== undefined) {
+    fail("live provider intent evidence class already differs", 73);
+  }
+  return own;
+}
+
+function validateHistoricalLiveProviderIntentRetry(
+  argumentsValue,
+  completed,
+  fixtureOnly,
+) {
+  const operationPlan = completed.publicationPlan.provider_operation_plan;
+  if (
+    colimaLiveDigest(colimaLiveBytes(argumentsValue.observation)) !==
+      operationPlan.preparation_observation_sha256 ||
+    (fixtureOnly &&
+      colimaLiveDigest(colimaLiveBytes(argumentsValue.requirements)) !==
+        completed.publicationPlan.admission.root_observation.requirements_sha256)
+  ) {
+    fail("completed live provider intent retry differed", 73);
+  }
+  return liveProviderIntentCompletion(completed);
+}
+
+function assertLiveProviderIntentVariantHistory(state, fixtureOnly) {
+  for (const slot of state.mutationSlots) {
+    if (slot.value.action !== COLIMA_LIVE_PROVIDER_INTENT_ACTION) continue;
+    if (
+      liveProviderIntentFixtureOnly(
+        slot.value.operation_kind,
+        slot.value.operation_contract_sha256,
+      ) !== fixtureOnly
+    ) {
+      fail("live provider intent evidence classes were mixed", 73);
+    }
+  }
+}
+
+function publishColimaLiveProviderIntent(
+  admittedArguments,
+  { fixtureOnly, testCheckpoint },
+) {
+  const roots = prepareRoots(
+    admittedArguments.repoRoot,
+    admittedArguments.stateBase,
+    false,
+  );
+  reconcileMutationStages(roots);
+  const initial = loadState(roots, true);
+  const completed = completedLiveProviderIntentForVariant(
+    initial,
+    fixtureOnly,
+  );
+  if (completed !== undefined) {
+    return validateHistoricalLiveProviderIntentRetry(
+      admittedArguments,
+      completed,
+      fixtureOnly,
+    );
+  }
+  assertLiveProviderIntentVariantHistory(initial, fixtureOnly);
+  const baselineAdmission = observeLiveProviderIntentAdmission(
+    admittedArguments,
+    {
+      boundary: "initial",
+      fixtureOnly,
+      stateSnapshot: completedLiveProviderPlanSnapshot,
+      testCheckpoint,
+    },
+  );
+  assertLiveProviderIntentAdmissionAbsent(baselineAdmission);
+  const operationPlan = completedLiveProviderPlanSnapshot(
+    loadState(roots, true),
+  ).operationPlan;
+  const publicationPlan = buildLiveProviderIntentPublicationPlan(
+    baselineAdmission,
+    fixtureOnly,
+    operationPlan,
+  );
+  testCheckpoint?.("after-initial-admission");
+  const reassertSlotPublication = (ownStage) => {
+    const currentAdmission = observeLiveProviderIntentAdmission(
+      admittedArguments,
+      {
+        boundary: "before-slot-link",
+        fixtureOnly,
+        stateSnapshot: (state) =>
+          availableLiveProviderIntentPlanSnapshot(
+            state,
+            publicationPlan,
+            ownStage,
+            fixtureOnly,
+          ),
+        testCheckpoint,
+      },
+    );
+    assertLiveProviderIntentAdmissionAbsent(currentAdmission);
+    const rebuilt = buildLiveProviderIntentPublicationPlan(
+      currentAdmission,
+      fixtureOnly,
+      operationPlan,
+    );
+    if (
+      !sameLiveProviderIntentValue(currentAdmission, baselineAdmission) ||
+      !sameLiveProviderIntentValue(rebuilt, publicationPlan)
+    ) {
+      fail("live provider intent observation changed before slot publication", 73);
+    }
+  };
+  if (
+    publicationPlan.admission.completion_projection.operation_plan_sha256 !==
+    liveProviderPlanDigest(liveProviderPlanBytes(operationPlan))
+  ) {
+    fail("live provider intent completed plan binding changed", 73);
+  }
+  const expectedSource = Object.freeze({
+    sequence: initial.receiptState.head.sequence,
+    sha256: initial.receiptState.head_sha256,
+  });
+  let afterSlotLinkFailure;
+  const held = acquireMutationLease(
+    roots,
+    COLIMA_LIVE_PROVIDER_INTENT_ACTION,
+    ZERO_SHA256,
+    expectedSource,
+    {
+      afterAuthorityObserver:
+        testCheckpoint === undefined
+          ? undefined
+          : () => testCheckpoint("after-slot-authority-reassertion"),
+      afterLinkObserver:
+        testCheckpoint === undefined
+          ? undefined
+          : () => {
+              try {
+                testCheckpoint("after-slot-link");
+              } catch (error) {
+                afterSlotLinkFailure = error;
+              }
+            },
+      reassertAuthority: reassertSlotPublication,
+    },
+    Object.freeze({
+      contractSha256: publicationPlan.operation_contract_sha256,
+      kind: publicationPlan.operation_kind,
+      plan: publicationPlan,
+    }),
+  );
+  let publicationFailure;
+  try {
+    if (afterSlotLinkFailure !== undefined) throw afterSlotLinkFailure;
+    const acquiredAdmission = observeLiveProviderIntentAdmission(
+      admittedArguments,
+      {
+        boundary: "after-slot-acquisition",
+        fixtureOnly,
+        stateSnapshot: (state) =>
+          heldLiveProviderIntentPlanSnapshot(
+            state,
+            held,
+            publicationPlan,
+            undefined,
+            fixtureOnly,
+          ),
+        testCheckpoint,
+      },
+    );
+    assertLiveProviderIntentAdmissionAbsent(acquiredAdmission);
+    const acquiredPlan = buildLiveProviderIntentPublicationPlan(
+      acquiredAdmission,
+      fixtureOnly,
+      operationPlan,
+    );
+    if (
+      !sameLiveProviderIntentValue(acquiredAdmission, baselineAdmission) ||
+      !sameLiveProviderIntentValue(acquiredPlan, publicationPlan)
+    ) {
+      fail("live provider intent observation changed after slot acquisition", 73);
+    }
+    testCheckpoint?.("after-slot-acquisition");
+    let afterCloseLinkFailure;
+    closeMutationLease(
+      roots,
+      held,
+      "completed",
+      {
+        afterLinkObserver:
+          testCheckpoint === undefined
+            ? undefined
+            : () => {
+                try {
+                  testCheckpoint("after-close-link");
+                } catch (error) {
+                  afterCloseLinkFailure = error;
+                }
+              },
+      },
+      ZERO_SHA256,
+      (state, ownStage) => {
+        if (ownStage === undefined) return;
+        const closeAdmission = observeLiveProviderIntentAdmission(
+          admittedArguments,
+          {
+            boundary: "before-close-link",
+            fixtureOnly,
+            stateSnapshot: (current) =>
+              heldLiveProviderIntentPlanSnapshot(
+                current,
+                held,
+                publicationPlan,
+                ownStage,
+                fixtureOnly,
+              ),
+            testCheckpoint,
+          },
+        );
+        assertLiveProviderIntentAdmissionAbsent(closeAdmission);
+        const closePlan = buildLiveProviderIntentPublicationPlan(
+          closeAdmission,
+          fixtureOnly,
+          operationPlan,
+        );
+        if (
+          !sameLiveProviderIntentValue(closeAdmission, baselineAdmission) ||
+          !sameLiveProviderIntentValue(closeAdmission, acquiredAdmission) ||
+          !sameLiveProviderIntentValue(closePlan, publicationPlan) ||
+          state.mutationLease === undefined ||
+          !state.mutationLease.bytes.equals(held.leaseBytes)
+        ) {
+          fail("live provider intent observation changed before close publication", 73);
+        }
+      },
+    );
+    if (afterCloseLinkFailure !== undefined) throw afterCloseLinkFailure;
+  } catch (error) {
+    publicationFailure = error;
+  }
+  if (publicationFailure !== undefined) {
+    let state;
+    try {
+      state = loadState(roots, false);
+    } catch (error) {
+      throw error;
+    }
+    if (
+      state.mutationLease !== undefined &&
+      state.mutationLease.bytes.equals(held.leaseBytes)
+    ) {
+      closeMutationLease(
+        roots,
+        held,
+        "aborted-before-effect",
+      );
+    }
+    throw publicationFailure;
+  }
+  const verified = loadState(roots, true);
+  const recorded = completedLiveProviderIntentForVariant(
+    verified,
+    fixtureOnly,
+  );
+  if (
+    recorded === undefined ||
+    !canonicalBytes(recorded.publicationPlan).equals(
+      canonicalBytes(publicationPlan),
+    )
+  ) {
+    fail("live provider intent publication was not durable", 70);
+  }
+  return liveProviderIntentCompletion(recorded);
+}
+
+export function publishColimaLiveProviderIntentForExecutor(argumentsValue) {
+  return publishColimaLiveProviderIntent(
+    admissionArguments(argumentsValue),
+    { fixtureOnly: false, testCheckpoint: undefined },
+  );
+}
+
+// This unsupported fixture seam replaces only the production-pinned root
+// evidence. It has a distinct operation contract, persisted schema and result.
+export function publishColimaLiveProviderIntentForTest(argumentsValue) {
+  const admittedArguments = admissionArguments(argumentsValue, [
+    "requirements",
+    "testCheckpoint",
+  ]);
+  if (
+    admittedArguments.requirements === null ||
+    Array.isArray(admittedArguments.requirements) ||
+    typeof admittedArguments.requirements !== "object" ||
+    typeof admittedArguments.testCheckpoint !== "function"
+  ) {
+    fail("live provider fixture intent arguments were refused", 64);
+  }
+  return publishColimaLiveProviderIntent(
+    admittedArguments,
+    {
       fixtureOnly: true,
       testCheckpoint: admittedArguments.testCheckpoint,
     },
@@ -6428,11 +7256,18 @@ function providerRecoveryBase(state) {
   }
   const recoverableCreate = lease.value.action === "provider-create";
   const recoverablePlan = lease.value.action === LIVE_PROVIDER_PLAN_ACTION;
+  const recoverableIntent =
+    lease.value.action === COLIMA_LIVE_PROVIDER_INTENT_ACTION;
   const recoverableCleanup =
     lease.value.action === "provider-cleanup" &&
     lease.value.operation_kind ===
       CONTROLLED_BACKGROUND_RETIREMENT_OPERATION_KIND;
-  if (!recoverableCreate && !recoverablePlan && !recoverableCleanup) {
+  if (
+    !recoverableCreate &&
+    !recoverablePlan &&
+    !recoverableIntent &&
+    !recoverableCleanup
+  ) {
     fail("mutation recovery action was refused", 73);
   }
   return {
@@ -6494,6 +7329,27 @@ export function liveProviderPlanRecoveryConfirmationForExecutor(argumentsValue) 
   const base = providerRecoveryBase(state);
   if (base.operation.action !== LIVE_PROVIDER_PLAN_ACTION) {
     fail("live provider plan recovery action was refused", 73);
+  }
+  return providerRecoveryConfirmation(base);
+}
+
+export function liveProviderIntentRecoveryConfirmationForExecutor(
+  argumentsValue,
+) {
+  exactKeys(
+    argumentsValue,
+    ["repoRoot", "stateBase"],
+    "live provider intent recovery confirmation arguments",
+  );
+  const roots = prepareRoots(
+    argumentsValue.repoRoot,
+    argumentsValue.stateBase,
+    false,
+  );
+  const state = loadState(roots, false);
+  const base = providerRecoveryBase(state);
+  if (base.operation.action !== COLIMA_LIVE_PROVIDER_INTENT_ACTION) {
+    fail("live provider intent recovery action was refused", 73);
   }
   return providerRecoveryConfirmation(base);
 }
@@ -7059,6 +7915,69 @@ function closeRecoveredProviderMutation(
     publicationHolds,
     operationEvidenceSha256,
   );
+}
+
+export function recoverLiveProviderIntentForExecutor(argumentsValue) {
+  exactKeys(
+    argumentsValue,
+    ["confirmation", "repoRoot", "stateBase"],
+    "live provider intent recovery arguments",
+  );
+  if (typeof argumentsValue.confirmation !== "string") {
+    fail("live provider intent recovery confirmation was refused", 64);
+  }
+  const roots = prepareRoots(
+    argumentsValue.repoRoot,
+    argumentsValue.stateBase,
+    false,
+  );
+  const initial = loadState(roots, false);
+  if (
+    initial.mutationLease?.value.action !==
+      COLIMA_LIVE_PROVIDER_INTENT_ACTION ||
+    initial.liveProviderPlan === undefined ||
+    initial.liveProviderIntent !== undefined ||
+    initial.liveProviderFixtureIntent !== undefined ||
+    initial.receiptState.head.sequence !==
+      initial.mutationLease.value.source_sequence ||
+    initial.receiptState.head_sha256 !==
+      initial.mutationLease.value.source_head_sha256 ||
+    initial.environment !== undefined ||
+    initial.pendingPublication !== undefined ||
+    initial.environmentPublication !== undefined ||
+    initial.mutationOperations.length !== 0 ||
+    initial.providerState.contract !== "live-provider-plan-only" ||
+    initial.cleanupState.contract !== "journal-only"
+  ) {
+    fail("live provider intent recovery requires an effect-free intent slot", 73);
+  }
+  const held = acquireProviderRecovery(
+    roots,
+    argumentsValue.confirmation,
+    defaultMutationOwnerProbe,
+  );
+  const state = assertProviderRecoveryHeld(roots, held);
+  if (
+    state.mutationLease?.value.action !==
+      COLIMA_LIVE_PROVIDER_INTENT_ACTION ||
+    state.liveProviderPlan === undefined ||
+    state.liveProviderIntent !== undefined ||
+    state.liveProviderFixtureIntent !== undefined ||
+    state.receiptState.head.sequence !==
+      state.mutationLease.value.source_sequence ||
+    state.receiptState.head_sha256 !==
+      state.mutationLease.value.source_head_sha256 ||
+    state.environment !== undefined ||
+    state.pendingPublication !== undefined ||
+    state.environmentPublication !== undefined ||
+    state.mutationOperations.length !== 0 ||
+    state.providerState.contract !== "live-provider-plan-only" ||
+    state.cleanupState.contract !== "journal-only"
+  ) {
+    fail("live provider intent recovery observation changed", 73);
+  }
+  closeRecoveredProviderMutation(roots, held, "aborted-before-effect");
+  return state.receiptState.head;
 }
 
 export function recoverLiveProviderPlanForExecutor(argumentsValue) {

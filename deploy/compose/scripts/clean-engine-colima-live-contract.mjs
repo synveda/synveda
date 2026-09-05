@@ -11,21 +11,25 @@ import {
   realpathSync,
 } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import {
+  COLIMA_LIVE_FIXTURE_PRE_EFFECT_ROOT_OBSERVATION_SCHEMA,
+  COLIMA_LIVE_OBSERVATION_SCHEMA,
+  COLIMA_LIVE_PRE_EFFECT_ROOT_OBSERVATION_SCHEMA,
+  COLIMA_LIVE_PUBLIC_PROJECTION_SCHEMA,
+  COLIMA_LIVE_REQUIREMENTS_SCHEMA,
+} from "./clean-engine-colima-live-schemas.mjs";
+
+export {
+  COLIMA_LIVE_FIXTURE_PRE_EFFECT_ROOT_OBSERVATION_SCHEMA,
+  COLIMA_LIVE_OBSERVATION_SCHEMA,
+  COLIMA_LIVE_PRE_EFFECT_ROOT_OBSERVATION_SCHEMA,
+  COLIMA_LIVE_PUBLIC_PROJECTION_SCHEMA,
+  COLIMA_LIVE_REQUIREMENTS_SCHEMA,
+};
 
 const ZERO_SHA256 = "0".repeat(64);
 const MAX_COMPONENTS = 16;
 const HASH_CHUNK_BYTES = 1024 * 1024;
-
-export const COLIMA_LIVE_REQUIREMENTS_SCHEMA =
-  "synveda.clean-engine.colima-live-requirements.v1";
-export const COLIMA_LIVE_OBSERVATION_SCHEMA =
-  "synveda.clean-engine.colima-live-observation.v1";
-export const COLIMA_LIVE_PUBLIC_PROJECTION_SCHEMA =
-  "synveda.clean-engine.colima-live-public-projection.v1";
-export const COLIMA_LIVE_PRE_EFFECT_ROOT_OBSERVATION_SCHEMA =
-  "synveda.clean-engine.colima-live-pre-effect-root-observation.v1";
-export const COLIMA_LIVE_FIXTURE_PRE_EFFECT_ROOT_OBSERVATION_SCHEMA =
-  "synveda.clean-engine.colima-live-fixture-pre-effect-root-observation.v1";
 
 const ROOT_LAYOUT = Object.freeze({
   artifact_directory: "a",

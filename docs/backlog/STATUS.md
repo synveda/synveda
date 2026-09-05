@@ -200,7 +200,8 @@ complete run publishes through a no-replace hard-linked active receipt; inert
 pre-publication crash residue grants no provider authority and remains pending
 final cleanup. Planning reaches no Docker/provider/host authority.
 The clean-Engine state is now receipt v4 with receipt v1/v2/v3 refused. Its
-append-only journal hard-cuts mutation slot v3, recovery/root v2 and close v4.
+append-only journal uses mutation slot v4, recovery/root v3 and close v5;
+slot v1-v3, recovery/root v1-v2 and close v1-v4 require reset/regeneration.
 Every slot binds source/result predecessors plus an operation kind, contract
 and canonical plan; every provider close binds the outer operation settlement.
 Permanent slots, settlements, closes and bounded recovery claims are never
@@ -265,36 +266,32 @@ evidence identities, binds both contracts to the production requirements
 digest and selects only an exact action/kind/contract/class tuple. Create grants
 state planning only; execution, provider recovery, lifecycle and finalization
 remain false, while cleanup is still deny-only. The content-free live operation
-plan is embedded in a dedicated mutation slot v3 and owner close v4, sharing the
+plan is embedded in a dedicated mutation slot v4 and owner close v5, sharing the
 same atomic slot with both fake executors. It binds active source, registry,
 production-requirements and private-observation digests, writes no receipt,
-provider or environment evidence, and blocks later mutation. Effect-free crash
-recovery can only abort the abandoned plan slot before retry. Sixteen
-preparation, fourteen registry, six plan-boundary and five focused state tests
-pass. A read-only state seam now projects only the exact completed plan slot,
-close, embedded-plan and observation digests. Only its direct return reflects
-that state read; serialized values lose provenance. Unauthenticated structural
-helpers can derive only a `provider-create` candidate marked
-`requested-not-authorized` and a logical pre-effect prefix with zero entries;
-they deliberately accept manufactured values and prove no state or observation.
-Seven focused tests cover schema, cross-binding, empty prefix, content-free
-refusal and absence of state/process/lifecycle coupling, while a recursive state
-snapshot proves the projection is read-only. The state owner now composes the
-completed plan with a full read-only `S1/O1/S2/O2` admission observation. It
-accepts no caller plan/projection/candidate/prefix, requires both state and
-observation snapshots to match, and classifies only the exact Colima profile and
-Lima instance roots with no-follow metadata under pinned private parents. Only
-`ENOENT` is absence; every existing entry is an opaque foreign collision and
-suppresses the intent and prefix. Production and fixture schemas, evidence
-classes and HMAC domains are distinct. The recursively frozen result is
-point-in-time and non-authorizing; its bounded supervisor label is logical, not
-a PID/PGID or liveness claim. It writes nothing and proves no VM, Engine, socket,
-context or process absence.
+provider or environment evidence, and blocks later mutation except the exact
+inert intent successor. Effect-free crash recovery can only abort the abandoned
+plan slot before retry. A state seam projects only the exact completed plan
+slot, close, embedded-plan and observation digests; structural helpers derive a
+`provider-create` candidate marked `requested-not-authorized` and a zero-entry
+logical prefix, but serialized values carry no provenance.
 
-No Docker, Colima or Lima process ran. Next journal the inert intent through a
-distinct shared-CAS action that reruns admission and exact no-replace root
-checks internally; serialized admission values are never proof and execution
-remains disabled. Live-provider identity, builder,
+The state owner now persists that request through the distinct
+`provider-intent` action and `mutation-journal-v4-inert-intent-only`. Production
+and fixture operation kinds, contracts, schemas and evidence classes are
+separate, and neither tuple is registered for provider execution. The publisher
+reconstructs complete state/source/root admission initially, before slot link,
+after slot acquisition and before close link; every canonical value must equal
+the all-absent baseline. The owner close changes no receipt or environment and
+writes no provider or operation evidence. Collisions and drift abort before
+effect. Abandoned intent recovery is explicit, all-zero and abort-only; exact
+completed retries return historical non-authorizing state without a fresh root
+claim. Shared journal CAS does not reserve the separate Colima/Lima namespaces,
+so a future effect owner must perform fresh admission.
+
+No Docker, Colima or Lima process ran. Next define the future effect owner's
+fresh admission and inert process-start decision without starting a provider or
+publishing an out-of-journal artifact. Live-provider identity, builder,
 proxy, browser and cleanup evidence follow; Linux/reference HTTPS must pass
 before legacy Rauthy/Temporal assets are deleted. Backup/restore, upgrade and
 Apalis remain open CPR-45 slices.

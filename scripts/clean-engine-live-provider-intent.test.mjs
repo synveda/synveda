@@ -2,16 +2,36 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import {
+  COLIMA_LIVE_FIXTURE_PROVIDER_INTENT_COMPLETION_SCHEMA,
+  COLIMA_LIVE_FIXTURE_PROVIDER_INTENT_OPERATION_CONTRACT,
+  COLIMA_LIVE_FIXTURE_PROVIDER_INTENT_OPERATION_CONTRACT_SHA256,
+  COLIMA_LIVE_FIXTURE_PROVIDER_INTENT_OPERATION_KIND,
+  COLIMA_LIVE_FIXTURE_PROVIDER_INTENT_PUBLICATION_PLAN_SCHEMA,
+  COLIMA_LIVE_PROVIDER_INTENT_ACTION,
+  COLIMA_LIVE_PROVIDER_INTENT_COMPLETION_SCHEMA,
+  COLIMA_LIVE_PROVIDER_INTENT_OPERATION_CONTRACT,
+  COLIMA_LIVE_PROVIDER_INTENT_OPERATION_CONTRACT_SHA256,
+  COLIMA_LIVE_PROVIDER_INTENT_OPERATION_KIND,
+  COLIMA_LIVE_PROVIDER_INTENT_PUBLICATION_PLAN_SCHEMA,
   LiveProviderIntentFailure,
   buildColimaLiveEffectIntentCandidateStructure,
   buildColimaLiveEmptyPreEffectPrefixStructure,
   buildColimaLivePlanCompletionProjectionStructure,
+  buildColimaLiveProviderIntentCompletion,
+  buildColimaLiveProviderIntentPublicationPlan,
   liveProviderIntentBytes,
   liveProviderIntentDigest,
   validateColimaLiveEffectIntentCandidateStructure,
   validateColimaLiveEmptyPreEffectPrefixStructure,
   validateColimaLivePlanCompletionProjectionStructure,
+  validateColimaLiveProviderIntentCompletion,
+  validateColimaLiveProviderIntentPublicationPlan,
 } from "../deploy/compose/scripts/clean-engine-live-provider-intent.mjs";
+import {
+  ProviderAdapterRegistryFailure,
+  authorizeProviderAdapterPlanning,
+  resolveProviderAdapter,
+} from "../deploy/compose/scripts/clean-engine-provider-adapter-registry.mjs";
 import {
   cleanEngineLiveEffectIntentFixture,
   cleanEngineLiveEmptyPreEffectPrefixFixture,
@@ -30,6 +50,12 @@ function expectRefusal(operation, exitStatus) {
   });
 }
 
+function assertRecursivelyFrozen(value) {
+  if (value === null || typeof value !== "object") return;
+  assert.equal(Object.isFrozen(value), true);
+  for (const child of Object.values(value)) assertRecursivelyFrozen(child);
+}
+
 function fixture() {
   const { completionProjection, operationPlan } =
     cleanEngineLivePlanCompletionProjectionFixture();
@@ -38,6 +64,64 @@ function fixture() {
     operationPlan,
   );
   return { completionProjection, intent, operationPlan };
+}
+
+function admissionFixture(fixtureOnly = false) {
+  const { completionProjection, intent, operationPlan } = fixture();
+  const preEffectPrefix = buildColimaLiveEmptyPreEffectPrefixStructure({
+    completionProjection,
+    intent,
+    operationPlan,
+  });
+  return {
+    admission: {
+      authority: fixtureOnly
+        ? "fixture-only-point-in-time-not-effect-authority"
+        : "point-in-time-not-effect-authority",
+      completion_projection: completionProjection,
+      intent_candidate: intent,
+      pre_effect_prefix: preEffectPrefix,
+      root_observation: {
+        evidence_class: fixtureOnly ? "fixture-only" : "production-pinned",
+        planned_names: {
+          lima_instance: `colima-${operationPlan.provider_profile}`,
+          provider_profile: operationPlan.provider_profile,
+        },
+        preparation_observation_sha256:
+          operationPlan.preparation_observation_sha256,
+        requirements_sha256: fixtureOnly
+          ? "9".repeat(64)
+          : operationPlan.requirements_sha256,
+        root_observations: [
+          {
+            disposition: "observed-absent",
+            parent_identity_hmac_sha256: "1".repeat(64),
+            role: "colima-profile-root",
+            target_entry_identity_hmac_sha256: "0".repeat(64),
+            target_path_hmac_sha256: "2".repeat(64),
+          },
+          {
+            disposition: "observed-absent",
+            parent_identity_hmac_sha256: "3".repeat(64),
+            role: "lima-instance-root",
+            target_entry_identity_hmac_sha256: "0".repeat(64),
+            target_path_hmac_sha256: "4".repeat(64),
+          },
+        ],
+        root_set_disposition: "observed-absent",
+        schema: fixtureOnly
+          ? "synveda.clean-engine.colima-live-fixture-pre-effect-root-observation.v1"
+          : "synveda.clean-engine.colima-live-pre-effect-root-observation.v1",
+      },
+      schema: fixtureOnly
+        ? "synveda.clean-engine.colima-live-fixture-pre-effect-admission.v1"
+        : "synveda.clean-engine.colima-live-pre-effect-admission.v1",
+      supervisor_process_group_label:
+        `sv-c45-colima-pg-${operationPlan.fixture_id}-` +
+        completionProjection.plan_slot_sha256.slice(0, 12),
+    },
+    operationPlan,
+  };
 }
 
 test("the completed-plan projection is minimal, exact and immutable", () => {
@@ -307,6 +391,237 @@ test("the three contract values contain no private, live or fake evidence", () =
   }
 });
 
+test("intent publication has distinct inert production and fixture contracts", () => {
+  const variants = [
+    {
+      contract: COLIMA_LIVE_PROVIDER_INTENT_OPERATION_CONTRACT,
+      digest: COLIMA_LIVE_PROVIDER_INTENT_OPERATION_CONTRACT_SHA256,
+      evidenceClass: "production-pinned",
+      kind: COLIMA_LIVE_PROVIDER_INTENT_OPERATION_KIND,
+      publicationPlanSchema:
+        COLIMA_LIVE_PROVIDER_INTENT_PUBLICATION_PLAN_SCHEMA,
+      schema:
+        "synveda.clean-engine.colima-live-provider-intent-operation-contract.v1",
+    },
+    {
+      contract: COLIMA_LIVE_FIXTURE_PROVIDER_INTENT_OPERATION_CONTRACT,
+      digest:
+        COLIMA_LIVE_FIXTURE_PROVIDER_INTENT_OPERATION_CONTRACT_SHA256,
+      evidenceClass: "fixture-only",
+      kind: COLIMA_LIVE_FIXTURE_PROVIDER_INTENT_OPERATION_KIND,
+      publicationPlanSchema:
+        COLIMA_LIVE_FIXTURE_PROVIDER_INTENT_PUBLICATION_PLAN_SCHEMA,
+      schema:
+        "synveda.clean-engine.colima-live-fixture-provider-intent-operation-contract.v1",
+    },
+  ];
+  assert.equal(COLIMA_LIVE_PROVIDER_INTENT_ACTION, "provider-intent");
+  assert.notEqual(variants[0].kind, variants[1].kind);
+  assert.notEqual(variants[0].digest, variants[1].digest);
+  assert.equal(
+    variants[0].digest,
+    "b380e6da1968da2e5bfa2c3552bf3f38d60197d7a8ab42f29c74f9bf29f8a6b8",
+  );
+  assert.equal(
+    variants[1].digest,
+    "44a39b9065f73db7f67425332f899e748ae1cb5c1037953c0e3593d0c4560c70",
+  );
+  for (const value of variants) {
+    assert.deepEqual(value.contract, {
+      action: COLIMA_LIVE_PROVIDER_INTENT_ACTION,
+      cleanup_authorized: false,
+      effect_execution_authorized: false,
+      evidence_class: value.evidenceClass,
+      finalization_authorized: false,
+      lifecycle_exposed: false,
+      operation_kind: value.kind,
+      provider_class: "colima-vz-docker-live",
+      provider_recovery_authorized: false,
+      publication_plan_schema: value.publicationPlanSchema,
+      receipt_publication_authorized: false,
+      recovery_disposition: "aborted-before-effect-only",
+      schema: value.schema,
+      state_integration: "mutation-journal-v4-inert-intent-only",
+      state_intent_publication_authorized: true,
+      target_create_operation_contract_sha256:
+        "56454e1623ab4585d1392015e2d185906b664a5fcd993f7272ea4ae019540d56",
+      target_create_operation_kind: "colima-vz-docker-live-create-v1",
+      target_provider_plan_schema:
+        "synveda.clean-engine.colima-live-provider-operation-plan.v1",
+      target_provider_plan_state_integration: "mutation-journal-v4-plan-only",
+    });
+    assert.equal(value.digest, digest(value.contract));
+    assertRecursivelyFrozen(value.contract);
+
+    const tuple = {
+      action: value.contract.action,
+      operation_contract_sha256: value.digest,
+      operation_kind: value.kind,
+      provider_class: value.contract.provider_class,
+    };
+    for (const operation of [resolveProviderAdapter, authorizeProviderAdapterPlanning]) {
+      assert.throws(
+        () => operation(tuple),
+        (error) => {
+          assert.ok(error instanceof ProviderAdapterRegistryFailure);
+          assert.equal(error.exitStatus, 69);
+          return true;
+        },
+      );
+    }
+  }
+});
+
+test("publication plans bind all three observations and keep fixtures distinct", () => {
+  const built = [];
+  for (const fixtureOnly of [false, true]) {
+    const { admission, operationPlan } = admissionFixture(fixtureOnly);
+    const publicationPlan = buildColimaLiveProviderIntentPublicationPlan({
+      admission,
+      fixtureOnly,
+      operationPlan,
+    });
+    built.push(publicationPlan);
+    assert.equal(
+      validateColimaLiveProviderIntentPublicationPlan(publicationPlan, {
+        fixtureOnly,
+      }),
+      publicationPlan,
+    );
+    assert.equal(
+      publicationPlan.schema,
+      fixtureOnly
+        ? COLIMA_LIVE_FIXTURE_PROVIDER_INTENT_PUBLICATION_PLAN_SCHEMA
+        : COLIMA_LIVE_PROVIDER_INTENT_PUBLICATION_PLAN_SCHEMA,
+    );
+    assert.equal(
+      publicationPlan.publication_claim,
+      "canonical-root-observation-equal-before-slot-link-after-slot-acquisition-before-close-link",
+    );
+    assert.equal(publicationPlan.admission_sha256, digest(admission));
+    assert.equal(
+      publicationPlan.root_observation_sha256,
+      digest(admission.root_observation),
+    );
+    assert.equal(
+      publicationPlan.provider_operation_plan_sha256,
+      digest(operationPlan),
+    );
+    assertRecursivelyFrozen(publicationPlan);
+    const completion = buildColimaLiveProviderIntentCompletion({
+      closeSha256: "6".repeat(64),
+      fixtureOnly,
+      publicationPlan,
+      slotSha256: "7".repeat(64),
+    });
+    const expectedCompletion = {
+      authority: fixtureOnly
+        ? "fixture-only-durable-inert-intent-not-effect-authority"
+        : "durable-inert-intent-not-effect-authority",
+      completed_plan_projection_sha256: digest(
+        publicationPlan.admission.completion_projection,
+      ),
+      evidence_class: fixtureOnly ? "fixture-only" : "production-pinned",
+      intent_close_sha256: "6".repeat(64),
+      intent_publication_plan_sha256: digest(publicationPlan),
+      intent_slot_sha256: "7".repeat(64),
+      schema: fixtureOnly
+        ? COLIMA_LIVE_FIXTURE_PROVIDER_INTENT_COMPLETION_SCHEMA
+        : COLIMA_LIVE_PROVIDER_INTENT_COMPLETION_SCHEMA,
+    };
+    assert.deepEqual(completion, expectedCompletion);
+    const completionExpectation = {
+      closeSha256: "6".repeat(64),
+      fixtureOnly,
+      publicationPlan,
+      slotSha256: "7".repeat(64),
+    };
+    assert.equal(
+      validateColimaLiveProviderIntentCompletion(
+        completion,
+        completionExpectation,
+      ),
+      completion,
+    );
+    assertRecursivelyFrozen(completion);
+    for (const changed of [
+      { ...completion, ignored: true },
+      { ...completion, schema: "synveda.clean-engine.invalid-completion.v1" },
+      { ...completion, authority: "effect-authority" },
+      { ...completion, evidence_class: "unreviewed" },
+      { ...completion, intent_close_sha256: "7".repeat(64) },
+      { ...completion, intent_slot_sha256: "6".repeat(64) },
+      { ...completion, completed_plan_projection_sha256: "f".repeat(64) },
+      { ...completion, intent_publication_plan_sha256: "f".repeat(64) },
+    ]) {
+      expectRefusal(() =>
+        validateColimaLiveProviderIntentCompletion(
+          changed,
+          completionExpectation,
+        ),
+      );
+    }
+    const missing = { ...completion };
+    delete missing.intent_close_sha256;
+    expectRefusal(() =>
+      validateColimaLiveProviderIntentCompletion(missing, completionExpectation),
+    );
+    expectRefusal(() =>
+      validateColimaLiveProviderIntentCompletion(completion, {
+        ...completionExpectation,
+        closeSha256: "7".repeat(64),
+        slotSha256: "6".repeat(64),
+      }),
+    );
+    expectRefusal(
+      () =>
+        validateColimaLiveProviderIntentCompletion(completion, {
+          ...completionExpectation,
+          unreviewed: true,
+        }),
+      70,
+    );
+    expectRefusal(
+      () =>
+        validateColimaLiveProviderIntentCompletion(completion, {
+          ...completionExpectation,
+          fixtureOnly: fixtureOnly ? "true" : "false",
+        }),
+      70,
+    );
+  }
+  assert.notEqual(built[0].schema, built[1].schema);
+  assert.notEqual(built[0].operation_kind, built[1].operation_kind);
+  expectRefusal(() =>
+    validateColimaLiveProviderIntentPublicationPlan(built[0], {
+      fixtureOnly: true,
+    }),
+  );
+  for (const options of [
+    {},
+    { fixtureOnly: "false" },
+    { fixtureOnly: false, ignored: true },
+  ]) {
+    expectRefusal(
+      () => validateColimaLiveProviderIntentPublicationPlan(built[0], options),
+      70,
+    );
+  }
+  expectRefusal(() =>
+    buildColimaLiveProviderIntentPublicationPlan({
+      ...admissionFixture(false),
+      fixtureOnly: false,
+      unreviewed: true,
+    }),
+  );
+  const authorized = structuredClone(built[0]);
+  authorized.admission.intent_candidate.effect_authorization = "authorized";
+  authorized.admission_sha256 = digest(authorized.admission);
+  expectRefusal(() =>
+    validateColimaLiveProviderIntentPublicationPlan(authorized),
+  );
+});
+
 test("the structural module directly owns no mutation, process, network or lifecycle seam", () => {
   const source = readFileSync(
     new URL(
@@ -334,14 +649,38 @@ test("the structural module directly owns no mutation, process, network or lifec
   );
   assert.match(
     state,
-    /if \(initial\.liveProviderPlan !== undefined\) \{\s*fail\("live provider execution remains disabled after state planning", 73\);/u,
+    /initial\.liveProviderPlan !== undefined &&\s*action !== COLIMA_LIVE_PROVIDER_INTENT_ACTION[\s\S]*?fail\("live provider execution remains disabled after state planning", 73\);/u,
   );
 
   const receipts = readFileSync(
     new URL("../deploy/compose/scripts/clean-engine-receipts.mjs", import.meta.url),
     "utf8",
   );
-  assert.doesNotMatch(receipts, /colima-live-effect-intent/u);
+  const providerProcess = readFileSync(
+    new URL(
+      "../deploy/compose/scripts/clean-engine-provider-process-contract.mjs",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  const registry = readFileSync(
+    new URL(
+      "../deploy/compose/scripts/clean-engine-provider-adapter-registry.mjs",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  for (const source of [receipts, providerProcess, registry]) {
+    assert.doesNotMatch(
+      source,
+      /colima-live-(?:fixture-)?provider-intent-publication-v1/u,
+    );
+  }
+
+  const admissionComparisons = state.match(
+    /sameLiveProviderIntentValue\(\s*(?:current|acquired|close)Admission,\s*baselineAdmission\s*\)/gu,
+  );
+  assert.equal(admissionComparisons?.length, 3);
 
   const lifecycle = readFileSync(
     new URL(

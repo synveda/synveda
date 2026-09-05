@@ -165,13 +165,13 @@ More than eight retained inert directories fail closed.
 The internal version-4 receipt state machine closes every intent/result,
 failure-cleanup and success-only environment-manifest transition. Canonical
 receipts and the manifest use no-replace publication. Its mutation journal is
-append-only: permanent v3 `.mutation-slot-SS`, v1
-`.mutation-operation-SS`, v2 `.mutation-recovery-SS-RR` and v4
+append-only: permanent v4 `.mutation-slot-SS`, v1
+`.mutation-operation-SS`, v3 `.mutation-recovery-SS-RR` and v5
 `.mutation-close-SS` records are never deleted or reused. Slots bind exact
 source/environment predecessors, prior close, owner, operation kind, contract
 and plan. Provider closes bind the outer operation settlement. Provider success
 is explicitly classified and binds its intent contract. Receipt v1/v2/v3,
-slot v1/v2, recovery/root v1 and close v1/v2/v3 are fresh-plan hard-cut
+slot v1/v2/v3, recovery/root v1/v2 and close v1/v2/v3/v4 are fresh-plan hard-cut
 refusals. Only
 unguessable `.mutation-stage-*` aliases are
 retired. Every close link follows revalidation of the same authority, result
@@ -189,8 +189,10 @@ Controlled-background-fake evidence is structurally ineligible; a future live
 provider must introduce its own reviewed environment schema before any
 acceptance claim.
 
-Only the state-integrated provider-create seam has mutation-journal recovery.
-The synchronous deterministic fake remains the rollback. The removed actor
+The state-integrated provider-create seam and inert provider-intent publication
+have distinct mutation-journal recovery. Intent recovery can only record an
+all-zero observation and abort before effect; it cannot inspect, adopt or replay
+a provider effect. The synchronous deterministic fake remains the rollback. The removed actor
 path is not retained. The controlled background path first binds a canonical
 provider-base/evidence/root plan into its slot and intent, then the state owner
 publishes the inner authority and starts only the repository-fixed controller
@@ -252,7 +254,7 @@ names. It selects only an exact action, operation kind, operation-contract
 digest and provider-class tuple. Both contracts bind the production preparation
 requirements digest, and cleanup also binds the exact create-contract digest.
 The create entry now grants only state planning through
-`mutation-journal-v3-plan-only`; execution, provider recovery, lifecycle
+`mutation-journal-v4-plan-only`; execution, provider recovery, lifecycle
 exposure and finalization remain false. Cleanup remains deny-only. The registry
 imports no process, state, receipt or fake-provider implementation.
 
@@ -263,19 +265,19 @@ private preparation-observation digest, provider profile/resource and the
 all-effect-denied capability set. The production builder revalidates the full
 private observation before slot acquisition and again at the close publication
 boundary. No path, command, environment, `HOME`, binding key or credential is
-persisted in the plan. Mutation slot v3 and close v4 serialize this plan against
+persisted in the plan. Mutation slot v4 and close v5 serialize this plan against
 every fake or future effect writer through the same no-replace slot name; the
 close binds the embedded plan digest and changes no receipt or environment.
 
-A read-only state seam now projects that exact newest completed owner plan into
-four digests: its slot, close, embedded plan and preparation observation. The
-direct in-memory return reflects the state just read; a serialized projection
-has no provenance. Separate structural helpers can derive a minimal
-`provider-create` candidate marked `requested-not-authorized` and a logical
-pre-effect prefix with zero entries, but validation authenticates neither state
-nor observation. Neither value is written. They contain no path, command,
-environment, provider identity or absence claim and do not use the reserved
-live create-evidence schema.
+A state seam projects that exact newest completed owner plan into four digests:
+its slot, close, embedded plan and preparation observation. Separate structural
+helpers derive a minimal `provider-create` candidate marked
+`requested-not-authorized` and a logical zero-entry pre-effect prefix, but a
+serialized value has no provenance. The state owner can persist the request
+only through the distinct `provider-intent` successor and
+`mutation-journal-v4-inert-intent-only`. Production and fixture kinds,
+contracts, schemas and evidence classes are separate, and neither tuple is a
+provider-adapter entry.
 
 The read-only state-owned admission seam accepts only the repository/state and
 preparation-observation inputs. It derives the completed plan and projection
@@ -288,20 +290,25 @@ hard link or symlink is an opaque foreign collision; it is not opened, read,
 traversed, removed or adopted, and unrelated siblings remain drift. A collision
 returns no intent or prefix.
 
-The direct production result uses
-`synveda.clean-engine.colima-live-pre-effect-admission.v1` and authority
-`point-in-time-not-effect-authority`; fixture evidence has distinct schemas,
-classes and HMAC domains. The bounded supervisor process-group value is only a
-logical future-run label, not a PID, PGID, process or liveness observation.
-Serialization loses state provenance. A future durable writer must rerun this
-admission and the exact root checks within its own shared-CAS/no-replace
-decision; callers cannot submit the result, projection, candidate or prefix as
-proof.
+The publisher derives every admission internally. It requires the initial
+canonical all-absent value to equal fresh values immediately before the slot
+link, after slot acquisition and immediately before the close link. Its slot v4
+and owner close v5 change no receipt or environment and write no provider or
+operation evidence. Collision or drift aborts before effect; abandoned intent
+recovery is explicit, all-zero and abort-only. Completed retries return
+historical non-authorizing state without a fresh absence claim.
+
+These point-in-time root observations and the journal hard-link CAS do not
+atomically reserve the separate Colima/Lima namespaces. The bounded supervisor
+label is not a PID, PGID, ownership or liveness fact, and a future effect owner
+must perform fresh admission. Serialized admission, projection, candidate or
+prefix values cannot be supplied as proof.
 
 No supported lifecycle target exposes a plan fixture or live-intent seam; there
-is no live provider execution, recovery, cleanup or environment manifest. `registry/`,
+is no live provider execution, provider-effect recovery, cleanup or environment manifest. `registry/`,
 `runtime/`, `provider/` and `evidence/` remain empty. A completed plan centrally
-blocks every other mutation and finalization. An abandoned plan slot may only
+blocks every other mutation and finalization except its exact inert intent
+successor. An abandoned plan slot may only
 be explicitly recovered as `aborted-before-effect`; this journal repair grants
 no provider-recovery capability, after which the same exact plan may compete for
 the next slot. Receipt v4 has provider-class-bound controlled cleanup
@@ -310,9 +317,7 @@ state-owned path supplies the dedicated slot and exact checkpoints, publishes a
 distinct outer settlement, and binds that digest through pass and close.
 Recovery may abort only an untouched pre-intent slot or proceed under the newest
 observation claim, reserving capacity for a final settled-prefix refresh. Owner
-close permits no claim and recovery close must name the latest claim. The inert
-intent may next enter only a distinct shared-CAS action that recomputes admission
-internally. Causal
+close permits no claim and recovery close must name the latest claim. Causal
 process/socket/Engine/context ownership and exact dynamic-tree cleanup must be
 proved before exposing a supported lifecycle target or making any Docker or
 finalization claim. Superseded receipt and mutation schemas are discarded and
