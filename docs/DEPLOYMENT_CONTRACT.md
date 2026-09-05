@@ -382,14 +382,33 @@ structurally valid values. The structures do not inhabit the reserved
 create-evidence schema or assert resource, process, host-agent, Engine, socket
 or context absence.
 
-These three values are deterministic and content-free, but none is published.
-The completed-plan mutation seal, receipt grammar, registry capabilities and
-supported `plan|status|verify` lifecycle remain unchanged. A future durable
-intent must be composed by one admission operation that obtains the projection
-internally, reopens journal/source and the full production observation, and
-rejects caller-supplied serialized projections or candidates as proof. It must
-then gain a truthful live-absence observation and win a distinct shared-CAS
-journal action; an out-of-journal provider file is forbidden.
+The state owner composes these values only through
+`synveda.clean-engine.colima-live-pre-effect-admission.v1`. Its production call
+accepts repository/state and preparation-observation inputs, derives the
+completed plan/projection internally, and rejects caller-supplied plan,
+projection, candidate, prefix, requirements or checkpoints. It validates
+state/source and reconstructs the full production observation twice in
+`S1/O1/S2/O2` order. Both state snapshots and both observation values must be
+identical. The observer pins and revalidates the two private parents, then uses
+no-follow metadata only on the exact future Colima-profile and Lima-instance
+roots. `ENOENT` means observed absence; every existing entry is an opaque
+foreign collision and suppresses candidate/prefix construction. Unrelated
+siblings remain preparation drift.
+
+The recursively frozen aggregate is labelled
+`point-in-time-not-effect-authority`. It closes only the derived profile,
+instance and a bounded logical future supervisor label; the latter is not a
+PID, PGID, process identity or liveness observation. Fixture root and aggregate
+schemas, evidence classes and HMAC domains are distinct from production. The
+operation writes nothing, and neither the aggregate nor its serialized nested
+values prove VM, Engine, socket, context or process absence.
+
+None of these values is published. The completed-plan mutation seal, receipt
+grammar, registry capabilities and supported `plan|status|verify` lifecycle
+remain unchanged. A future durable intent writer must rerun admission and exact
+no-replace root checks internally while winning a distinct shared-CAS journal
+action; serialized admission values are never proof and an out-of-journal
+provider file is forbidden.
 
 An uncatchable pre-publication interruption can retain one or more strictly
 validated `.pending-*` or `.run-*` staging directories. They contain no

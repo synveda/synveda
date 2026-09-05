@@ -277,6 +277,27 @@ nor observation. Neither value is written. They contain no path, command,
 environment, provider identity or absence claim and do not use the reserved
 live create-evidence schema.
 
+The read-only state-owned admission seam accepts only the repository/state and
+preparation-observation inputs. It derives the completed plan and projection
+internally, reads state/source and the complete observation twice in
+`S1/O1/S2/O2` order, and requires both pairs to match. It no-follow samples only
+`COLIMA_HOME/<provider-profile>` and
+`LIMA_HOME/colima-<provider-profile>` beneath pinned, revalidated private
+parents. Exact-leaf `ENOENT` is observed absence. Any existing file, directory,
+hard link or symlink is an opaque foreign collision; it is not opened, read,
+traversed, removed or adopted, and unrelated siblings remain drift. A collision
+returns no intent or prefix.
+
+The direct production result uses
+`synveda.clean-engine.colima-live-pre-effect-admission.v1` and authority
+`point-in-time-not-effect-authority`; fixture evidence has distinct schemas,
+classes and HMAC domains. The bounded supervisor process-group value is only a
+logical future-run label, not a PID, PGID, process or liveness observation.
+Serialization loses state provenance. A future durable writer must rerun this
+admission and the exact root checks within its own shared-CAS/no-replace
+decision; callers cannot submit the result, projection, candidate or prefix as
+proof.
+
 No supported lifecycle target exposes a plan fixture or live-intent seam; there
 is no live provider execution, recovery, cleanup or environment manifest. `registry/`,
 `runtime/`, `provider/` and `evidence/` remain empty. A completed plan centrally
@@ -289,11 +310,9 @@ state-owned path supplies the dedicated slot and exact checkpoints, publishes a
 distinct outer settlement, and binds that digest through pass and close.
 Recovery may abort only an untouched pre-intent slot or proceed under the newest
 observation claim, reserving capacity for a final settled-prefix refresh. Owner
-close permits no claim and recovery close must name the latest claim. Next add
-a composed live pre-effect admission observer that obtains the state projection
-internally, reopens journal/source and production observation, and refuses
-serialized candidates as proof. Only then may the inert intent enter a distinct
-shared-CAS action. Causal
+close permits no claim and recovery close must name the latest claim. The inert
+intent may next enter only a distinct shared-CAS action that recomputes admission
+internally. Causal
 process/socket/Engine/context ownership and exact dynamic-tree cleanup must be
 proved before exposing a supported lifecycle target or making any Docker or
 finalization claim. Superseded receipt and mutation schemas are discarded and

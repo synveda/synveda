@@ -2,21 +2,24 @@ import assert from "node:assert/strict";
 import { createHash, randomBytes } from "node:crypto";
 import {
   chmodSync,
+  existsSync,
   linkSync,
+  lstatSync,
   mkdirSync,
-  mkdtempSync,
   readFileSync,
-  realpathSync,
+  readdirSync,
+  readlinkSync,
   renameSync,
   rmSync,
   rmdirSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { test } from "node:test";
 import {
   COLIMA_LIVE_OBSERVATION_SCHEMA,
+  COLIMA_LIVE_FIXTURE_PRE_EFFECT_ROOT_OBSERVATION_SCHEMA,
   COLIMA_LIVE_PUBLIC_PROJECTION_SCHEMA,
   COLIMA_LIVE_REQUIREMENTS,
   COLIMA_LIVE_REQUIREMENTS_SCHEMA,
@@ -26,8 +29,8 @@ import {
   buildColimaLiveObservationForTest,
   colimaLiveBytes,
   colimaLiveDigest,
-  colimaLiveLimaNetworkConfigBytesForTest,
   colimaLivePublicProjectionForTest,
+  observeColimaLivePreEffectRootsForTest,
   revalidateColimaLiveObservationForTest,
   validateColimaLiveObservationForTest,
   validateColimaLiveRequirements,
@@ -41,21 +44,11 @@ import {
   COLIMA_LIVE_CREATE_OPERATION_KIND,
   COLIMA_LIVE_PROVIDER_CLASS,
 } from "../deploy/compose/scripts/clean-engine-provider-adapter-registry.mjs";
-
-const COMPONENT_LAYOUT = Object.freeze({
-  "colima-binary": ["b/colima", 0o500],
-  "docker-cli-binary": ["b/docker", 0o500],
-  "lima-guestagent": ["a/lima-guestagent.Linux-aarch64.gz", 0o400],
-  "lima-network-config": ["l/_config/networks.yaml", 0o400],
-  "lima-wrapper": ["b/lima", 0o500],
-  "limactl-binary": ["b/limactl", 0o500],
-  "ssh-client": ["b/ssh", 0o500],
-  "ssh-keygen": ["b/ssh-keygen", 0o500],
-  "state-owner-node": ["x/node", 0o500],
-  "state-owner-script": ["x/state.mjs", 0o400],
-  "sw-vers": ["b/sw_vers", 0o500],
-  "system-profiler": ["b/system_profiler", 0o500],
-});
+import {
+  cloneColimaLiveObservationInput,
+  createCleanEngineColimaLiveObservationFixture,
+  writePrivateColimaLiveFixtureFile,
+} from "./fixtures/clean-engine-colima-live-observation-fixture.mjs";
 
 function digest(algorithm, bytes) {
   return createHash(algorithm).update(bytes).digest("hex");
@@ -66,7 +59,7 @@ function clone(value) {
 }
 
 function cloneInput(input) {
-  return { ...clone(input), binding_key: Buffer.from(input.binding_key) };
+  return cloneColimaLiveObservationInput(input);
 }
 
 function expectRefusal(operation, exitStatus) {
@@ -78,103 +71,63 @@ function expectRefusal(operation, exitStatus) {
 }
 
 function writePrivate(path, bytes, mode) {
-  writeFileSync(path, bytes, { flag: "wx", mode });
-  chmodSync(path, mode);
+  writePrivateColimaLiveFixtureFile(path, bytes, mode);
 }
 
 function fixture(t) {
-  const temporaryRoot = realpathSync(process.platform === "darwin" ? "/private/tmp" : "/tmp");
-  const root = realpathSync(mkdtempSync(join(temporaryRoot, "s-colima-live-")));
-  chmodSync(root, 0o700);
-  t.after(() => rmSync(root, { force: true, recursive: true }));
-
-  const providerRoot = join(root, "p");
-  const home = join(root, "h");
-  const external = join(root, "x");
-  for (const path of [
-    providerRoot,
-    home,
-    external,
-    ...["a", "b", "c", "d", "k", "l", "l/_config", "t"].map((name) =>
-      join(providerRoot, name),
-    ),
-  ]) {
-    mkdirSync(path, { mode: 0o700 });
-    chmodSync(path, 0o700);
-  }
-
-  const componentPaths = {};
-  const componentBytes = new Map();
-  for (const [role, [relativePath, mode]] of Object.entries(COMPONENT_LAYOUT)) {
-    const path = relativePath.startsWith("x/")
-      ? join(root, relativePath)
-      : join(providerRoot, relativePath);
-    const bytes =
-      role === "lima-network-config"
-        ? colimaLiveLimaNetworkConfigBytesForTest()
-        : Buffer.from(`synveda deterministic ${role}\n`, "utf8");
-    writePrivate(path, bytes, mode);
-    componentPaths[role] = path;
-    componentBytes.set(role, bytes);
-  }
-
-  const diskBytes = Buffer.from("synveda deterministic colima disk image\n", "utf8");
-  const sourceDisk = join(root, "source.raw.gz");
-  const copiedDisk = join(providerRoot, "a", "colima-disk-image.raw.gz");
-  writePrivate(sourceDisk, diskBytes, 0o400);
-  writePrivate(copiedDisk, diskBytes, 0o400);
-
-  const requirements = clone(COLIMA_LIVE_REQUIREMENTS);
-  for (const component of requirements.components) {
-    if (component.expected_sha256 === "0".repeat(64)) continue;
-    const bytes = componentBytes.get(component.role);
-    component.expected_sha256 = digest("sha256", bytes);
-    component.expected_size = String(bytes.length);
-  }
-  const colima = requirements.components.find((entry) => entry.role === "colima-binary");
-  requirements.release_artifacts.colima.sha256 = colima.expected_sha256;
-  requirements.release_artifacts.colima.size = colima.expected_size;
-  requirements.release_artifacts.disk_image.sha256 = digest("sha256", diskBytes);
-  requirements.release_artifacts.disk_image.sha512 = digest("sha512", diskBytes);
-  requirements.release_artifacts.disk_image.size = String(diskBytes.length);
-
-  const fixtureId = randomBytes(16).toString("hex");
-  const input = {
-    binding_key: randomBytes(32),
-    component_paths: componentPaths,
-    environment: {
-      COLIMA_CACHE_HOME: join(providerRoot, "k"),
-      COLIMA_DOWNLOADER: "native",
-      COLIMA_HOME: join(providerRoot, "c"),
-      DOCKER_CONFIG: join(providerRoot, "d"),
-      HOME: home,
-      LANG: "C",
-      LC_ALL: "C",
-      LIMA_HOME: join(providerRoot, "l"),
-      PATH: join(providerRoot, "b"),
-      SSH: join(providerRoot, "b", "ssh"),
-      TMPDIR: join(providerRoot, "t"),
-      XPC_SERVICE_NAME: "0",
-    },
-    fixture_id: fixtureId,
-    host: {
-      architecture: "arm64",
-      boot_session_sha256: "a".repeat(64),
-      build_version: "22A400",
-      kernel_release: "22.1.0",
-      platform: "darwin",
-      product_version: "13.0.0",
-    },
-    provider_profile: `synveda-cpr45-${fixtureId}`,
-    provider_root: providerRoot,
-    receipt_owned_disk_image_path: copiedDisk,
-    source_disk_image_path: sourceDisk,
-  };
-  return { componentBytes, copiedDisk, diskBytes, home, input, providerRoot, requirements, root, sourceDisk };
+  const state = createCleanEngineColimaLiveObservationFixture();
+  t.after(() => rmSync(state.root, { force: true, recursive: true }));
+  return state;
 }
 
 function build(state) {
   return buildColimaLiveObservationForTest(state.requirements, state.input);
+}
+
+function snapshotTree(root, opaqueDirectories = new Set()) {
+  const entries = [];
+  function visit(path) {
+    const metadata = lstatSync(path, { bigint: true });
+    const kind = metadata.isDirectory()
+      ? "directory"
+      : metadata.isFile()
+        ? "file"
+        : metadata.isSymbolicLink()
+          ? "symlink"
+          : "other";
+    entries.push({
+      ctime_nanoseconds: String(metadata.ctimeNs),
+      device: String(metadata.dev),
+      gid: String(metadata.gid),
+      inode: String(metadata.ino),
+      kind,
+      links: String(metadata.nlink),
+      mode: (metadata.mode & 0o7777n).toString(8).padStart(4, "0"),
+      mtime_nanoseconds: String(metadata.mtimeNs),
+      path: relative(root, path) || ".",
+      sha256: metadata.isFile()
+        ? digest("sha256", readFileSync(path))
+        : undefined,
+      size: String(metadata.size),
+      symlink_target: metadata.isSymbolicLink() ? readlinkSync(path) : undefined,
+      uid: String(metadata.uid),
+    });
+    if (metadata.isDirectory() && !opaqueDirectories.has(path)) {
+      for (const name of readdirSync(path).sort()) visit(join(path, name));
+    }
+  }
+  visit(root);
+  return entries;
+}
+
+function preEffectPaths(state) {
+  return {
+    colima: join(state.input.environment.COLIMA_HOME, state.input.provider_profile),
+    lima: join(
+      state.input.environment.LIMA_HOME,
+      `colima-${state.input.provider_profile}`,
+    ),
+  };
 }
 
 test("production live requirements are exact, pinned and execution-disabled", () => {
@@ -276,6 +229,298 @@ test("a closed fixture builds, validates and deterministically revalidates", (t)
   );
 });
 
+test("pre-effect observation reports only the two exact point-in-time absences", (t) => {
+  const state = fixture(t);
+  const observation = build(state);
+  const before = snapshotTree(state.root);
+  const result = observeColimaLivePreEffectRootsForTest(
+    state.requirements,
+    observation,
+    state.input,
+  );
+  assert.deepEqual(snapshotTree(state.root), before);
+  assert.deepEqual(Object.keys(result).sort(), [
+    "evidence_class",
+    "planned_names",
+    "preparation_observation_sha256",
+    "requirements_sha256",
+    "root_observations",
+    "root_set_disposition",
+    "schema",
+  ]);
+  assert.equal(
+    result.schema,
+    COLIMA_LIVE_FIXTURE_PRE_EFFECT_ROOT_OBSERVATION_SCHEMA,
+  );
+  assert.equal(result.evidence_class, "fixture-only");
+  assert.equal(result.root_set_disposition, "observed-absent");
+  assert.deepEqual(result.planned_names, {
+    lima_instance: `colima-${state.input.provider_profile}`,
+    provider_profile: state.input.provider_profile,
+  });
+  assert.equal(
+    result.preparation_observation_sha256,
+    colimaLiveDigest(colimaLiveBytes(observation)),
+  );
+  assert.equal(
+    result.requirements_sha256,
+    colimaLiveDigest(colimaLiveBytes(state.requirements)),
+  );
+  assert.deepEqual(
+    result.root_observations.map((entry) => [entry.role, entry.disposition]),
+    [
+      ["colima-profile-root", "observed-absent"],
+      ["lima-instance-root", "observed-absent"],
+    ],
+  );
+  for (const entry of result.root_observations) {
+    assert.deepEqual(Object.keys(entry).sort(), [
+      "disposition",
+      "parent_identity_hmac_sha256",
+      "role",
+      "target_entry_identity_hmac_sha256",
+      "target_path_hmac_sha256",
+    ]);
+    assert.match(entry.parent_identity_hmac_sha256, /^[0-9a-f]{64}$/u);
+    assert.match(entry.target_path_hmac_sha256, /^[0-9a-f]{64}$/u);
+    assert.equal(entry.target_entry_identity_hmac_sha256, "0".repeat(64));
+    assert.ok(Object.isFrozen(entry));
+  }
+  assert.ok(Object.isFrozen(result));
+  assert.ok(Object.isFrozen(result.planned_names));
+  assert.ok(Object.isFrozen(result.root_observations));
+  const serialized = colimaLiveBytes(result).toString("utf8");
+  for (const forbidden of [
+    state.root,
+    state.home,
+    state.providerRoot,
+    "binding_key",
+    "command",
+    "DOCKER_CONFIG",
+    "HOME",
+    "PID",
+    "PGID",
+    "socket",
+  ]) {
+    assert.equal(serialized.includes(forbidden), false, forbidden);
+  }
+});
+
+test("each existing target kind is an opaque foreign collision", (t) => {
+  const cases = ["file", "hardlink", "directory", "symlink", "dangling-symlink"];
+  for (const [index, kind] of cases.entries()) {
+    const state = fixture(t);
+    const observation = build(state);
+    const paths = preEffectPaths(state);
+    const target = index % 2 === 0 ? paths.colima : paths.lima;
+    const outside = join(state.root, `outside-${kind}`);
+    let protectedDirectory;
+    let protectedSentinel;
+    if (kind === "file") {
+      writePrivate(target, Buffer.from("foreign file\n", "utf8"), 0o600);
+    } else if (kind === "hardlink") {
+      writePrivate(outside, Buffer.from("foreign hardlink\n", "utf8"), 0o600);
+      linkSync(outside, target);
+    } else if (kind === "directory") {
+      mkdirSync(target, { mode: 0o700 });
+      protectedDirectory = target;
+      protectedSentinel = join(target, "must-not-be-read");
+      writePrivate(protectedSentinel, Buffer.from("opaque sentinel\n", "utf8"), 0o600);
+      chmodSync(target, 0o000);
+    } else if (kind === "symlink") {
+      mkdirSync(outside, { mode: 0o700 });
+      protectedSentinel = join(outside, "must-not-be-read");
+      writePrivate(protectedSentinel, Buffer.from("outside sentinel\n", "utf8"), 0o600);
+      symlinkSync(outside, target);
+    } else {
+      symlinkSync(join(state.root, "missing-outside-target"), target);
+    }
+
+    const opaqueDirectories = new Set(
+      protectedDirectory === undefined ? [] : [protectedDirectory],
+    );
+    const fixtureBefore = snapshotTree(state.root, opaqueDirectories);
+    const outsideBefore = existsSync(outside)
+      ? snapshotTree(outside)
+      : undefined;
+    const result = observeColimaLivePreEffectRootsForTest(
+      state.requirements,
+      observation,
+      state.input,
+    );
+    assert.equal(result.root_set_disposition, "foreign-collision", kind);
+    const collision = result.root_observations.find(
+      (entry) => entry.disposition === "foreign-collision",
+    );
+    assert.notEqual(collision, undefined, kind);
+    assert.match(collision.target_entry_identity_hmac_sha256, /^[0-9a-f]{64}$/u);
+    assert.notEqual(collision.target_entry_identity_hmac_sha256, "0".repeat(64));
+    assert.equal(lstatSync(target).isSymbolicLink(), kind.includes("symlink"));
+    assert.deepEqual(
+      snapshotTree(state.root, opaqueDirectories),
+      fixtureBefore,
+    );
+    if (outsideBefore !== undefined) {
+      assert.deepEqual(snapshotTree(outside), outsideBefore);
+    }
+    if (protectedDirectory !== undefined) {
+      chmodSync(protectedDirectory, 0o700);
+      assert.equal(
+        readFileSync(protectedSentinel, "utf8"),
+        "opaque sentinel\n",
+      );
+    }
+  }
+});
+
+test("both exact collisions are bounded while unrelated siblings remain drift", (t) => {
+  const both = fixture(t);
+  const bothObservation = build(both);
+  const bothPaths = preEffectPaths(both);
+  mkdirSync(bothPaths.colima, { mode: 0o700 });
+  writePrivate(bothPaths.lima, Buffer.from("foreign\n", "utf8"), 0o600);
+  const collision = observeColimaLivePreEffectRootsForTest(
+    both.requirements,
+    bothObservation,
+    both.input,
+  );
+  assert.deepEqual(
+    collision.root_observations.map((entry) => entry.disposition),
+    ["foreign-collision", "foreign-collision"],
+  );
+
+  for (const parent of ["COLIMA_HOME", "LIMA_HOME"]) {
+    const state = fixture(t);
+    const observation = build(state);
+    writePrivate(
+      join(state.input.environment[parent], "unrelated-entry"),
+      Buffer.from("unrelated\n", "utf8"),
+      0o600,
+    );
+    expectRefusal(() =>
+      observeColimaLivePreEffectRootsForTest(
+        state.requirements,
+        observation,
+        state.input,
+      ),
+    );
+  }
+});
+
+test("collision-aware revalidation does not weaken the preparation contract", (t) => {
+  const state = fixture(t);
+  const observation = build(state);
+  const target = preEffectPaths(state).colima;
+  mkdirSync(target, { mode: 0o700 });
+  assert.equal(
+    observeColimaLivePreEffectRootsForTest(
+      state.requirements,
+      observation,
+      state.input,
+    ).root_set_disposition,
+    "foreign-collision",
+  );
+  expectRefusal(() =>
+    revalidateColimaLiveObservationForTest(
+      state.requirements,
+      observation,
+      state.input,
+    ),
+  );
+
+  const changedInput = cloneInput(state.input);
+  changedInput.binding_key = randomBytes(32);
+  expectRefusal(() =>
+    observeColimaLivePreEffectRootsForTest(
+      state.requirements,
+      observation,
+      changedInput,
+    ),
+  );
+});
+
+test("fixture checkpoints refuse target and parent transitions", (t) => {
+  const cases = [
+    {
+      name: "absent-to-present",
+      prepare() {},
+      mutate(state, target) {
+        writePrivate(target, Buffer.from("appeared\n", "utf8"), 0o600);
+      },
+    },
+    {
+      name: "collision-to-absent",
+      prepare(state, target) {
+        writePrivate(target, Buffer.from("departing\n", "utf8"), 0o600);
+      },
+      mutate(state, target) {
+        rmSync(target);
+      },
+    },
+    {
+      name: "collision-identity-replacement",
+      prepare(state, target) {
+        writePrivate(target, Buffer.from("first\n", "utf8"), 0o600);
+      },
+      mutate(state, target) {
+        rmSync(target);
+        writePrivate(target, Buffer.from("second\n", "utf8"), 0o600);
+      },
+    },
+    {
+      name: "parent-replacement",
+      prepare() {},
+      mutate(state) {
+        const parent = state.input.environment.COLIMA_HOME;
+        renameSync(parent, `${parent}-displaced`);
+        mkdirSync(parent, { mode: 0o700 });
+        chmodSync(parent, 0o700);
+      },
+    },
+    {
+      name: "parent-symlink-replacement",
+      prepare() {},
+      mutate(state) {
+        const parent = state.input.environment.COLIMA_HOME;
+        const displaced = `${parent}-displaced`;
+        renameSync(parent, displaced);
+        symlinkSync(displaced, parent);
+      },
+    },
+  ];
+  for (const value of cases) {
+    const state = fixture(t);
+    const target = preEffectPaths(state).colima;
+    value.prepare(state, target);
+    let checkpoints = 0;
+    expectRefusal(() =>
+      observeColimaLivePreEffectRootsForTest(
+        state.requirements,
+        state.observation,
+        state.input,
+        (checkpoint) => {
+          assert.equal(checkpoint, "after-first-root-sample");
+          checkpoints += 1;
+          value.mutate(state, target);
+        },
+      ),
+    );
+    assert.equal(checkpoints, 1, value.name);
+  }
+
+  const state = fixture(t);
+  expectRefusal(
+    () =>
+      observeColimaLivePreEffectRootsForTest(
+        state.requirements,
+        state.observation,
+        state.input,
+        "not-a-checkpoint",
+      ),
+    64,
+  );
+});
+
 test("public projection omits private paths, HOME, fixture and component identities", (t) => {
   const state = fixture(t);
   const observation = build(state);
@@ -310,8 +555,30 @@ test("the preparation observer imports no process execution surface", () => {
     new URL("../deploy/compose/scripts/clean-engine-colima-live-contract.mjs", import.meta.url),
     "utf8",
   );
-  assert.equal(source.includes("node:child_process"), false);
+  assert.doesNotMatch(source, /node:(?:child_process|net)/u);
   assert.equal(/\b(?:execFile|execSync|fork|spawn)(?:Sync)?\s*\(/u.test(source), false);
+  assert.doesNotMatch(
+    source,
+    /\b(?:chmod|link|mkdir|rename|rm|rmdir|symlink|unlink|writeFile)Sync\s*\(/u,
+  );
+  const targetStart = source.indexOf("function captureAdmissionTarget");
+  const targetEnd = source.indexOf("function captureAdmissionRoots", targetStart);
+  assert.ok(targetStart >= 0 && targetEnd > targetStart);
+  const targetSource = source.slice(targetStart, targetEnd);
+  assert.match(targetSource, /optionalNoFollowMetadata\(\s*targetPath/gu);
+  assert.match(targetSource, /readdirSync\(parent\.path\)/u);
+  assert.doesNotMatch(
+    targetSource,
+    /\b(?:openSync|readFileSync|readdirSync|readlinkSync|realpathSync|statSync)\(\s*targetPath/u,
+  );
+  const noFollowStart = source.indexOf("function optionalNoFollowMetadata");
+  const noFollowEnd = source.indexOf("function recordedDirectoryMatches", noFollowStart);
+  const noFollowSource = source.slice(noFollowStart, noFollowEnd);
+  assert.match(noFollowSource, /lstatSync\(path, \{ bigint: true \}\)/u);
+  assert.doesNotMatch(
+    noFollowSource,
+    /\b(?:openSync|readFileSync|readdirSync|readlinkSync|realpathSync|statSync)\s*\(/u,
+  );
 });
 
 test("input paths, profile and closed environment refuse ambient drift", (t) => {

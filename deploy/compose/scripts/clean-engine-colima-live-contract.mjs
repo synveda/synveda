@@ -22,6 +22,10 @@ export const COLIMA_LIVE_OBSERVATION_SCHEMA =
   "synveda.clean-engine.colima-live-observation.v1";
 export const COLIMA_LIVE_PUBLIC_PROJECTION_SCHEMA =
   "synveda.clean-engine.colima-live-public-projection.v1";
+export const COLIMA_LIVE_PRE_EFFECT_ROOT_OBSERVATION_SCHEMA =
+  "synveda.clean-engine.colima-live-pre-effect-root-observation.v1";
+export const COLIMA_LIVE_FIXTURE_PRE_EFFECT_ROOT_OBSERVATION_SCHEMA =
+  "synveda.clean-engine.colima-live-fixture-pre-effect-root-observation.v1";
 
 const ROOT_LAYOUT = Object.freeze({
   artifact_directory: "a",
@@ -928,6 +932,271 @@ function directoryPaths(providerRoot) {
   });
 }
 
+function admissionMetadataEqual(left, right) {
+  return (
+    sameMetadata(left, right) &&
+    left.mtimeNs === right.mtimeNs &&
+    left.ctimeNs === right.ctimeNs
+  );
+}
+
+function admissionEntryKind(metadata) {
+  if (metadata.isDirectory()) return "directory";
+  if (metadata.isFile()) return "file";
+  if (metadata.isSymbolicLink()) return "symlink";
+  if (metadata.isSocket()) return "socket";
+  if (metadata.isFIFO()) return "fifo";
+  if (metadata.isCharacterDevice()) return "character-device";
+  if (metadata.isBlockDevice()) return "block-device";
+  return "other";
+}
+
+function admissionEntryIdentity(metadata) {
+  return Object.freeze({
+    ctime_nanoseconds: String(metadata.ctimeNs),
+    device: String(metadata.dev),
+    inode: String(metadata.ino),
+    kind: admissionEntryKind(metadata),
+    links: String(metadata.nlink),
+    mode: mode(metadata),
+    mtime_nanoseconds: String(metadata.mtimeNs),
+    size: String(metadata.size),
+    uid: String(metadata.uid),
+  });
+}
+
+function optionalNoFollowMetadata(path, label) {
+  try {
+    return lstatSync(path, { bigint: true });
+  } catch (error) {
+    if (error?.code === "ENOENT") return undefined;
+    fail(`${label} presence was unavailable`, 69);
+  }
+}
+
+function recordedDirectoryMatches(metadata, recorded) {
+  return (
+    metadata.isDirectory() &&
+    !metadata.isSymbolicLink() &&
+    String(metadata.dev) === recorded.device &&
+    String(metadata.ino) === recorded.inode &&
+    mode(metadata) === recorded.mode &&
+    String(metadata.uid) === recorded.uid
+  );
+}
+
+function captureAdmissionTarget(parent, targetName, role, baseEntries) {
+  if (
+    typeof targetName !== "string" ||
+    targetName.length < 1 ||
+    targetName.includes(sep) ||
+    targetName === "." ||
+    targetName === ".."
+  ) {
+    fail("Colima live pre-effect target name was refused", 70);
+  }
+  assertNoSymlinkComponents(parent.path, `Colima live ${role} parent`);
+  let descriptor;
+  try {
+    const namedBefore = lstatSync(parent.path, { bigint: true });
+    descriptor = openSync(
+      parent.path,
+      constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
+    );
+    const openedBefore = fstatSync(descriptor, { bigint: true });
+    if (
+      !admissionMetadataEqual(namedBefore, openedBefore) ||
+      !recordedDirectoryMatches(openedBefore, parent) ||
+      openedBefore.uid !== BigInt(process.getuid()) ||
+      (openedBefore.mode & 0o7777n) !== 0o700n
+    ) {
+      fail(`Colima live ${role} parent identity was refused`);
+    }
+    const targetPath = join(parent.path, targetName);
+    const targetBefore = optionalNoFollowMetadata(
+      targetPath,
+      `Colima live ${role}`,
+    );
+    const inventory = readdirSync(parent.path).sort();
+    exactArray(
+      inventory,
+      [...baseEntries, ...(targetBefore === undefined ? [] : [targetName])].sort(),
+      `Colima live ${role} parent inventory`,
+    );
+    const targetAfter = optionalNoFollowMetadata(
+      targetPath,
+      `Colima live ${role}`,
+    );
+    const openedAfter = fstatSync(descriptor, { bigint: true });
+    const namedAfter = lstatSync(parent.path, { bigint: true });
+    if (
+      !admissionMetadataEqual(namedBefore, openedAfter) ||
+      !admissionMetadataEqual(namedBefore, namedAfter) ||
+      (targetBefore === undefined) !== (targetAfter === undefined) ||
+      (targetBefore !== undefined &&
+        !admissionMetadataEqual(targetBefore, targetAfter))
+    ) {
+      fail(`Colima live ${role} observation changed`, 73);
+    }
+    return Object.freeze({
+      disposition:
+        targetBefore === undefined ? "observed-absent" : "foreign-collision",
+      entryIdentity:
+        targetBefore === undefined
+          ? undefined
+          : admissionEntryIdentity(targetBefore),
+      parentIdentity: Object.freeze({
+        path: parent.path,
+        role: `${role}-parent`,
+        ...admissionEntryIdentity(openedBefore),
+      }),
+      role,
+      targetName,
+      targetPath,
+    });
+  } catch (error) {
+    if (error instanceof ColimaLiveContractFailure) throw error;
+    fail(`Colima live ${role} observation was unavailable`, 69);
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor);
+  }
+}
+
+function captureAdmissionRoots(observation) {
+  const directories = new Map(
+    observation.directories.map((entry) => [entry.role, entry]),
+  );
+  const providerProfile = observation.provider_profile;
+  const limaInstance = `colima-${providerProfile}`;
+  return Object.freeze([
+    captureAdmissionTarget(
+      directories.get("colima-home"),
+      providerProfile,
+      "colima-profile-root",
+      [],
+    ),
+    captureAdmissionTarget(
+      directories.get("lima-home"),
+      limaInstance,
+      "lima-instance-root",
+      ["_config"],
+    ),
+  ]);
+}
+
+function admissionInventory(value) {
+  return Object.freeze({
+    colimaProfilePresent:
+      value[0].disposition === "foreign-collision",
+    limaInstancePresent:
+      value[1].disposition === "foreign-collision",
+  });
+}
+
+function admissionHmac(bindingKey, fixtureId, role, purpose, schema, value) {
+  return createHmac("sha256", bindingKey)
+    .update(schema, "utf8")
+    .update("\0", "ascii")
+    .update(fixtureId, "ascii")
+    .update("\0", "ascii")
+    .update(role, "ascii")
+    .update("\0", "ascii")
+    .update(purpose, "ascii")
+    .update("\0", "ascii")
+    .update(colimaLiveBytes(value))
+    .digest("hex");
+}
+
+function admissionRootProjection(root, input, schema) {
+  const parentIdentityHmac = admissionHmac(
+    input.binding_key,
+    input.fixture_id,
+    root.role,
+    "parent-identity",
+    schema,
+    root.parentIdentity,
+  );
+  const targetPathHmac = admissionHmac(
+    input.binding_key,
+    input.fixture_id,
+    root.role,
+    "target-path",
+    schema,
+    root.targetPath,
+  );
+  const targetEntryIdentityHmac =
+    root.entryIdentity === undefined
+      ? ZERO_SHA256
+      : admissionHmac(
+          input.binding_key,
+          input.fixture_id,
+          root.role,
+          "target-entry-identity",
+          schema,
+          { path_hmac_sha256: targetPathHmac, ...root.entryIdentity },
+        );
+  return Object.freeze({
+    disposition: root.disposition,
+    parent_identity_hmac_sha256: parentIdentityHmac,
+    role: root.role,
+    target_entry_identity_hmac_sha256: targetEntryIdentityHmac,
+    target_path_hmac_sha256: targetPathHmac,
+  });
+}
+
+function observePreEffectRoots(
+  requirements,
+  value,
+  input,
+  { evidenceClass, schema, testCheckpoint },
+) {
+  validateObservationShape(value, requirements);
+  validateBuildInput(input, requirements);
+  validateObservationInputBinding(value, input);
+  const first = captureAdmissionRoots(value);
+  if (testCheckpoint !== undefined) {
+    testCheckpoint("after-first-root-sample");
+  }
+  const rebuilt = buildObservation(requirements, input, admissionInventory(first));
+  const expected = colimaLiveBytes(value);
+  const actual = colimaLiveBytes(rebuilt);
+  if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) {
+    fail("Colima live observation changed during pre-effect revalidation", 73);
+  }
+  const second = captureAdmissionRoots(value);
+  const firstProjection = first.map((root) =>
+    admissionRootProjection(root, input, schema),
+  );
+  const secondProjection = second.map((root) =>
+    admissionRootProjection(root, input, schema),
+  );
+  const firstBytes = colimaLiveBytes(firstProjection);
+  const secondBytes = colimaLiveBytes(secondProjection);
+  if (
+    firstBytes.length !== secondBytes.length ||
+    !timingSafeEqual(firstBytes, secondBytes)
+  ) {
+    fail("Colima live pre-effect root observation changed", 73);
+  }
+  const rootSetDisposition = firstProjection.some(
+    (root) => root.disposition === "foreign-collision",
+  )
+    ? "foreign-collision"
+    : "observed-absent";
+  return deepFreeze({
+    evidence_class: evidenceClass,
+    planned_names: {
+      lima_instance: `colima-${value.provider_profile}`,
+      provider_profile: value.provider_profile,
+    },
+    preparation_observation_sha256: colimaLiveDigest(expected),
+    requirements_sha256: colimaLiveDigest(colimaLiveBytes(requirements)),
+    root_observations: firstProjection,
+    root_set_disposition: rootSetDisposition,
+    schema,
+  });
+}
+
 function validateHost(host, requirements) {
   exactKeys(
     host,
@@ -1048,7 +1317,42 @@ function validateBuildInput(input, requirements) {
   }
 }
 
-function buildObservation(requirements, input) {
+function validateObservationInputBinding(value, input) {
+  const directories = new Map(
+    value.directories.map((entry) => [entry.role, entry.path]),
+  );
+  const components = Object.fromEntries(
+    value.components.map((entry) => [entry.role, entry.path]),
+  );
+  const observedVariables = Object.fromEntries(
+    value.environment.variables.map((entry) => [entry.name, entry.value]),
+  );
+  const inputVariables = Object.fromEntries(
+    Object.entries(input.environment).filter(([name]) => name !== "HOME"),
+  );
+  const homePathHmac = createHmac("sha256", input.binding_key)
+    .update(
+      `home\0${input.fixture_id}\0${input.environment.HOME}`,
+      "utf8",
+    )
+    .digest("hex");
+  if (
+    input.fixture_id !== value.fixture_id ||
+    input.provider_profile !== value.provider_profile ||
+    input.provider_root !== directories.get("provider-root") ||
+    input.receipt_owned_disk_image_path !==
+      value.receipt_owned_disk_image.path ||
+    input.source_disk_image_path !== value.source_disk_image.path ||
+    canonical(input.component_paths) !== canonical(components) ||
+    canonical(inputVariables) !== canonical(observedVariables) ||
+    canonical(input.host) !== canonical(value.host) ||
+    homePathHmac !== value.environment.home.path_hmac_sha256
+  ) {
+    fail("Colima live observation input binding was refused", 73);
+  }
+}
+
+function buildObservation(requirements, input, preEffectInventory = undefined) {
   validateRequirementShape(requirements);
   validateBuildInput(input, requirements);
   let providerRoot;
@@ -1084,12 +1388,32 @@ function buildObservation(requirements, input) {
     "Colima live toolchain directory");
   exactDirectoryEntries(directoriesByRole["artifact-directory"], stagedArtifactNames,
     "Colima live artifact directory");
-  exactDirectoryEntries(directoriesByRole["lima-home"], ["_config"], "Colima live Lima home");
+  const colimaProfilePresent = preEffectInventory?.colimaProfilePresent ?? false;
+  const limaInstancePresent = preEffectInventory?.limaInstancePresent ?? false;
+  if (
+    typeof colimaProfilePresent !== "boolean" ||
+    typeof limaInstancePresent !== "boolean" ||
+    (preEffectInventory !== undefined &&
+      canonical(Object.keys(preEffectInventory).sort()) !==
+        canonical(["colimaProfilePresent", "limaInstancePresent"]))
+  ) {
+    fail("Colima live pre-effect inventory was refused", 70);
+  }
+  exactDirectoryEntries(
+    directoriesByRole["lima-home"],
+    ["_config", ...(limaInstancePresent ? [`colima-${input.provider_profile}`] : [])],
+    "Colima live Lima home",
+  );
   exactDirectoryEntries(directoriesByRole["lima-config-directory"], ["networks.yaml"],
     "Colima live Lima config directory");
-  for (const role of ["colima-cache-home", "colima-home", "docker-config", "temporary-directory"]) {
+  for (const role of ["colima-cache-home", "docker-config", "temporary-directory"]) {
     exactDirectoryEntries(directoriesByRole[role], [], `Colima live ${role}`);
   }
+  exactDirectoryEntries(
+    directoriesByRole["colima-home"],
+    colimaProfilePresent ? [input.provider_profile] : [],
+    "Colima live colima-home",
+  );
   const components = requirements.components.map((requirement) =>
     withParentIdentity(
       openedFileIdentity(
@@ -1481,6 +1805,14 @@ export function revalidateColimaLiveObservation(value, input) {
   return value;
 }
 
+export function observeColimaLivePreEffectRoots(value, input) {
+  validateColimaLiveRequirements(COLIMA_LIVE_REQUIREMENTS);
+  return observePreEffectRoots(COLIMA_LIVE_REQUIREMENTS, value, input, {
+    evidenceClass: "production-pinned",
+    schema: COLIMA_LIVE_PRE_EFFECT_ROOT_OBSERVATION_SCHEMA,
+  });
+}
+
 export function authorizeColimaLiveObservation(value) {
   validateColimaLiveObservation(value);
   fail("Colima live execution remains disabled after preparation observation", 69);
@@ -1519,6 +1851,25 @@ export function revalidateColimaLiveObservationForTest(requirements, value, inpu
     fail("Colima live fixture observation changed during revalidation", 73);
   }
   return value;
+}
+
+// This fixture-only seam exercises the same bounded no-follow root observer
+// without requiring the pinned production binaries and disk image. Its result
+// is not production evidence and no supported lifecycle imports it.
+export function observeColimaLivePreEffectRootsForTest(
+  requirements,
+  value,
+  input,
+  testCheckpoint = undefined,
+) {
+  if (testCheckpoint !== undefined && typeof testCheckpoint !== "function") {
+    fail("Colima live fixture checkpoint was refused", 64);
+  }
+  return observePreEffectRoots(requirements, value, input, {
+    evidenceClass: "fixture-only",
+    schema: COLIMA_LIVE_FIXTURE_PRE_EFFECT_ROOT_OBSERVATION_SCHEMA,
+    testCheckpoint,
+  });
 }
 
 export function authorizeColimaLiveObservationForTest(requirements, value) {

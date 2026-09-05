@@ -54,6 +54,15 @@ import {
   validateControlledBackgroundProviderOperationPlan,
 } from "./clean-engine-provider-process-contract.mjs";
 import {
+  COLIMA_LIVE_FIXTURE_PRE_EFFECT_ROOT_OBSERVATION_SCHEMA,
+  COLIMA_LIVE_PRE_EFFECT_ROOT_OBSERVATION_SCHEMA,
+  ColimaLiveContractFailure,
+  colimaLiveBytes,
+  colimaLiveDigest,
+  observeColimaLivePreEffectRoots,
+  observeColimaLivePreEffectRootsForTest,
+} from "./clean-engine-colima-live-contract.mjs";
+import {
   LiveProviderPlanFailure,
   buildColimaLiveProviderOperationPlan,
   liveProviderPlanBytes,
@@ -61,6 +70,8 @@ import {
   validateColimaLiveProviderOperationPlan,
 } from "./clean-engine-live-provider-plan.mjs";
 import {
+  buildColimaLiveEffectIntentCandidateStructure,
+  buildColimaLiveEmptyPreEffectPrefixStructure,
   buildColimaLivePlanCompletionProjectionStructure,
 } from "./clean-engine-live-provider-intent.mjs";
 
@@ -97,6 +108,10 @@ const MAX_MUTATION_SLOTS = 64;
 const MAX_MUTATION_STAGES = 16;
 const MAX_MUTATION_PUBLICATION_ATTEMPTS = 16;
 const LIVE_PROVIDER_PLAN_ACTION = "provider-plan";
+export const COLIMA_LIVE_PRE_EFFECT_ADMISSION_SCHEMA =
+  "synveda.clean-engine.colima-live-pre-effect-admission.v1";
+export const COLIMA_LIVE_FIXTURE_PRE_EFFECT_ADMISSION_SCHEMA =
+  "synveda.clean-engine.colima-live-fixture-pre-effect-admission.v1";
 const DETERMINISTIC_PROVIDER_OPERATION_KIND = "deterministic-fake-provider-create-v1";
 const FAKE_PROVIDER_ADAPTER_FIELDS = Object.freeze([
   "close_prelink_hold_milliseconds",
@@ -4844,13 +4859,7 @@ export function recordLiveProviderOperationPlanForTest(argumentsValue) {
   });
 }
 
-export function projectLiveProviderPlanCompletionForExecutor(argumentsValue) {
-  const roots = prepareRoots(
-    argumentsValue.repoRoot,
-    argumentsValue.stateBase,
-    false,
-  );
-  const state = loadState(roots, true);
+function completedLiveProviderPlanSnapshot(state) {
   const completed = state.liveProviderPlan;
   if (
     completed === undefined ||
@@ -4875,15 +4884,297 @@ export function projectLiveProviderPlanCompletionForExecutor(argumentsValue) {
     fail("completed live provider plan was unavailable", 69);
   }
   const operationPlan = completed.operationPlan;
-  return buildColimaLivePlanCompletionProjectionStructure({
-    operationPlanSha256: liveProviderPlanDigest(
-      liveProviderPlanBytes(operationPlan),
-    ),
-    planCloseSha256: digest(completed.close.bytes),
-    planSlotSha256: digest(completed.slot.bytes),
-    preparationObservationSha256:
-      operationPlan.preparation_observation_sha256,
+  return Object.freeze({
+    completionProjection: buildColimaLivePlanCompletionProjectionStructure({
+      operationPlanSha256: liveProviderPlanDigest(
+        liveProviderPlanBytes(operationPlan),
+      ),
+      planCloseSha256: digest(completed.close.bytes),
+      planSlotSha256: digest(completed.slot.bytes),
+      preparationObservationSha256:
+        operationPlan.preparation_observation_sha256,
+    }),
+    operationPlan,
   });
+}
+
+function admissionArguments(argumentsValue, additionalFields = []) {
+  const fields = [
+    "observation",
+    "observationInput",
+    "repoRoot",
+    "stateBase",
+    ...additionalFields,
+  ];
+  if (
+    argumentsValue === null ||
+    Array.isArray(argumentsValue) ||
+    typeof argumentsValue !== "object" ||
+    JSON.stringify(Object.keys(argumentsValue).sort()) !==
+      JSON.stringify(fields.sort()) ||
+    typeof argumentsValue.repoRoot !== "string" ||
+    argumentsValue.repoRoot.length === 0 ||
+    typeof argumentsValue.stateBase !== "string" ||
+    argumentsValue.stateBase.length === 0 ||
+    argumentsValue.observation === null ||
+    Array.isArray(argumentsValue.observation) ||
+    typeof argumentsValue.observation !== "object" ||
+    argumentsValue.observationInput === null ||
+    Array.isArray(argumentsValue.observationInput) ||
+    typeof argumentsValue.observationInput !== "object"
+  ) {
+    fail("live provider pre-effect admission arguments were refused", 64);
+  }
+  return argumentsValue;
+}
+
+function observeLivePreEffectRoots(argumentsValue, snapshot, fixtureOnly) {
+  try {
+    if (
+      colimaLiveDigest(colimaLiveBytes(argumentsValue.observation)) !==
+      snapshot.operationPlan.preparation_observation_sha256
+    ) {
+      fail("live provider pre-effect observation binding was refused", 73);
+    }
+    return fixtureOnly
+      ? observeColimaLivePreEffectRootsForTest(
+          argumentsValue.requirements,
+          argumentsValue.observation,
+          argumentsValue.observationInput,
+        )
+      : observeColimaLivePreEffectRoots(
+          argumentsValue.observation,
+          argumentsValue.observationInput,
+        );
+  } catch (error) {
+    if (error instanceof ColimaLiveContractFailure) {
+      fail("live provider pre-effect observation was refused", error.exitStatus);
+    }
+    throw error;
+  }
+}
+
+function sameLiveProviderPlanSnapshot(left, right) {
+  return (
+    canonicalBytes(left.completionProjection).equals(
+      canonicalBytes(right.completionProjection),
+    ) &&
+    liveProviderPlanBytes(left.operationPlan).equals(
+      liveProviderPlanBytes(right.operationPlan),
+    )
+  );
+}
+
+function validateLivePreEffectRootBinding(rootObservation, snapshot, fixtureOnly) {
+  const operationPlan = snapshot.operationPlan;
+  exactKeys(
+    rootObservation,
+    [
+      "evidence_class",
+      "planned_names",
+      "preparation_observation_sha256",
+      "requirements_sha256",
+      "root_observations",
+      "root_set_disposition",
+      "schema",
+    ],
+    "live provider pre-effect root observation",
+  );
+  exactKeys(
+    rootObservation.planned_names,
+    ["lima_instance", "provider_profile"],
+    "live provider pre-effect planned names",
+  );
+  const expectedRoles = ["colima-profile-root", "lima-instance-root"];
+  if (
+    !Array.isArray(rootObservation.root_observations) ||
+    rootObservation.root_observations.length !== expectedRoles.length
+  ) {
+    fail("live provider pre-effect root observation was refused", 70);
+  }
+  for (const [index, root] of rootObservation.root_observations.entries()) {
+    exactKeys(
+      root,
+      [
+        "disposition",
+        "parent_identity_hmac_sha256",
+        "role",
+        "target_entry_identity_hmac_sha256",
+        "target_path_hmac_sha256",
+      ],
+      "live provider pre-effect root",
+    );
+    if (
+      root.role !== expectedRoles[index] ||
+      !new Set(["foreign-collision", "observed-absent"]).has(
+        root.disposition,
+      ) ||
+      !onlyLowerHex(root.parent_identity_hmac_sha256, 64) ||
+      !onlyLowerHex(root.target_entry_identity_hmac_sha256, 64) ||
+      !onlyLowerHex(root.target_path_hmac_sha256, 64) ||
+      (root.disposition === "observed-absent") !==
+        (root.target_entry_identity_hmac_sha256 === ZERO_SHA256)
+    ) {
+      fail("live provider pre-effect root observation was refused", 70);
+    }
+  }
+  const expectedDisposition = rootObservation.root_observations.some(
+    (root) => root.disposition === "foreign-collision",
+  )
+    ? "foreign-collision"
+    : "observed-absent";
+  if (
+    rootObservation.evidence_class !==
+      (fixtureOnly ? "fixture-only" : "production-pinned") ||
+    rootObservation.schema !==
+      (fixtureOnly
+        ? COLIMA_LIVE_FIXTURE_PRE_EFFECT_ROOT_OBSERVATION_SCHEMA
+        : COLIMA_LIVE_PRE_EFFECT_ROOT_OBSERVATION_SCHEMA) ||
+    (!fixtureOnly &&
+      rootObservation.requirements_sha256 !==
+        operationPlan.requirements_sha256) ||
+    !onlyLowerHex(rootObservation.requirements_sha256, 64) ||
+    rootObservation.root_set_disposition !== expectedDisposition ||
+    rootObservation.preparation_observation_sha256 !==
+      operationPlan.preparation_observation_sha256 ||
+    rootObservation.planned_names.provider_profile !==
+      operationPlan.provider_profile ||
+    rootObservation.planned_names.lima_instance !==
+      `colima-${operationPlan.provider_profile}` ||
+    operationPlan.provider_resource !== operationPlan.provider_profile
+  ) {
+    fail("live provider pre-effect observation binding was refused", 73);
+  }
+}
+
+function deepFreezeAdmission(value) {
+  if (value !== null && typeof value === "object" && !Object.isFrozen(value)) {
+    for (const child of Object.values(value)) deepFreezeAdmission(child);
+    Object.freeze(value);
+  }
+  return value;
+}
+
+function liveSupervisorProcessGroupLabel(snapshot) {
+  const label =
+    `sv-c45-colima-pg-${snapshot.operationPlan.fixture_id}-` +
+    snapshot.completionProjection.plan_slot_sha256.slice(0, 12);
+  if (
+    !/^sv-c45-colima-pg-[0-9a-f]{32}-[0-9a-f]{12}$/u.test(label) ||
+    Buffer.byteLength(label, "ascii") > 63
+  ) {
+    fail("live provider supervisor label was refused", 70);
+  }
+  return label;
+}
+
+export function projectLiveProviderPlanCompletionForExecutor(argumentsValue) {
+  const roots = prepareRoots(
+    argumentsValue.repoRoot,
+    argumentsValue.stateBase,
+    false,
+  );
+  return completedLiveProviderPlanSnapshot(
+    loadState(roots, true),
+  ).completionProjection;
+}
+
+function observeColimaLivePreEffectAdmission(
+  admittedArguments,
+  { admissionSchema, authority, fixtureOnly, testCheckpoint },
+) {
+  const roots = prepareRoots(
+    admittedArguments.repoRoot,
+    admittedArguments.stateBase,
+    false,
+  );
+  const firstState = completedLiveProviderPlanSnapshot(loadState(roots, true));
+  const firstRoots = observeLivePreEffectRoots(
+    admittedArguments,
+    firstState,
+    fixtureOnly,
+  );
+  validateLivePreEffectRootBinding(firstRoots, firstState, fixtureOnly);
+  if (testCheckpoint !== undefined) {
+    testCheckpoint("after-first-admission-observation");
+  }
+
+  const secondState = completedLiveProviderPlanSnapshot(loadState(roots, true));
+  if (!sameLiveProviderPlanSnapshot(firstState, secondState)) {
+    fail("live provider pre-effect state changed", 73);
+  }
+  const secondRoots = observeLivePreEffectRoots(
+    admittedArguments,
+    secondState,
+    fixtureOnly,
+  );
+  validateLivePreEffectRootBinding(secondRoots, secondState, fixtureOnly);
+  if (!colimaLiveBytes(firstRoots).equals(colimaLiveBytes(secondRoots))) {
+    fail("live provider pre-effect observation changed", 73);
+  }
+
+  let intentCandidate = null;
+  let preEffectPrefix = null;
+  if (secondRoots.root_set_disposition === "observed-absent") {
+    intentCandidate = buildColimaLiveEffectIntentCandidateStructure({
+      completionProjection: secondState.completionProjection,
+      operationPlan: secondState.operationPlan,
+    });
+    preEffectPrefix = buildColimaLiveEmptyPreEffectPrefixStructure({
+      completionProjection: secondState.completionProjection,
+      intent: intentCandidate,
+      operationPlan: secondState.operationPlan,
+    });
+  }
+  return deepFreezeAdmission({
+    authority,
+    completion_projection: secondState.completionProjection,
+    intent_candidate: intentCandidate,
+    pre_effect_prefix: preEffectPrefix,
+    root_observation: secondRoots,
+    schema: admissionSchema,
+    supervisor_process_group_label:
+      liveSupervisorProcessGroupLabel(secondState),
+  });
+}
+
+export function observeColimaLivePreEffectAdmissionForExecutor(argumentsValue) {
+  return observeColimaLivePreEffectAdmission(
+    admissionArguments(argumentsValue),
+    {
+      admissionSchema: COLIMA_LIVE_PRE_EFFECT_ADMISSION_SCHEMA,
+      authority: "point-in-time-not-effect-authority",
+      fixtureOnly: false,
+      testCheckpoint: undefined,
+    },
+  );
+}
+
+// This unsupported fixture seam substitutes only the small-file observation
+// requirements. State, plan and projection provenance remain internally read;
+// the caller cannot supply any of them, and the result has a distinct schema.
+export function observeColimaLivePreEffectAdmissionForTest(argumentsValue) {
+  const admittedArguments = admissionArguments(argumentsValue, [
+    "requirements",
+    "testCheckpoint",
+  ]);
+  if (
+    admittedArguments.requirements === null ||
+    Array.isArray(admittedArguments.requirements) ||
+    typeof admittedArguments.requirements !== "object" ||
+    typeof admittedArguments.testCheckpoint !== "function"
+  ) {
+    fail("live provider fixture admission arguments were refused", 64);
+  }
+  return observeColimaLivePreEffectAdmission(
+    admittedArguments,
+    {
+      admissionSchema: COLIMA_LIVE_FIXTURE_PRE_EFFECT_ADMISSION_SCHEMA,
+      authority: "fixture-only-point-in-time-not-effect-authority",
+      fixtureOnly: true,
+      testCheckpoint: admittedArguments.testCheckpoint,
+    },
+  );
 }
 
 export function executeProviderCreateForExecutor(argumentsValue) {

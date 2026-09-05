@@ -167,8 +167,16 @@ provenance. Separate unauthenticated structural helpers can derive only a
 pre-effect prefix with zero entries. They do not prove state or observation,
 are not published, inhabit no provider-evidence schema and assert no resource
 or process absence. Seven focused contract tests, including manufactured-value
-acceptance, plus the recursive read-only state regression pass. This closes
-schema confusion only; it adds no live/provider/readiness evidence.
+acceptance, plus the recursive read-only state regression pass. The state owner
+now composes the completed plan with two exact state/source reads and two full
+production-observation reconstructions. It classifies only the exact future
+Colima-profile and Lima-instance roots: no-follow `ENOENT` is point-in-time
+absence, while every existing entry is an opaque collision that yields no intent
+or prefix. The frozen result is non-authorizing and non-durable; its supervisor
+label is logical rather than a PID/PGID claim, fixture evidence is schema-
+distinct, and any future publisher must rerun admission under its shared CAS.
+This closes a read-only admission boundary only; it adds no live/provider/
+readiness evidence.
 
 Live Linux/provider CI and a current Docker Desktop/provider run remain absent.
 Consequently this evidence improves the boundary without changing readiness. One

@@ -279,14 +279,22 @@ helpers can derive only a `provider-create` candidate marked
 they deliberately accept manufactured values and prove no state or observation.
 Seven focused tests cover schema, cross-binding, empty prefix, content-free
 refusal and absence of state/process/lifecycle coupling, while a recursive state
-snapshot proves the projection is read-only. The values are not published and
-no deterministic production-artifact fixture is presented as live evidence.
+snapshot proves the projection is read-only. The state owner now composes the
+completed plan with a full read-only `S1/O1/S2/O2` admission observation. It
+accepts no caller plan/projection/candidate/prefix, requires both state and
+observation snapshots to match, and classifies only the exact Colima profile and
+Lima instance roots with no-follow metadata under pinned private parents. Only
+`ENOENT` is absence; every existing entry is an opaque foreign collision and
+suppresses the intent and prefix. Production and fixture schemas, evidence
+classes and HMAC domains are distinct. The recursively frozen result is
+point-in-time and non-authorizing; its bounded supervisor label is logical, not
+a PID/PGID or liveness claim. It writes nothing and proves no VM, Engine, socket,
+context or process absence.
 
-No Docker, Colima or Lima process ran. Next add a truthful live pre-effect
-admission observer that obtains state internally, reopens journal/source and
-the full observation, and rejects serialized candidates as proof. Then journal
-the inert intent through a distinct shared-CAS action while execution remains
-disabled. Live-provider identity, builder,
+No Docker, Colima or Lima process ran. Next journal the inert intent through a
+distinct shared-CAS action that reruns admission and exact no-replace root
+checks internally; serialized admission values are never proof and execution
+remains disabled. Live-provider identity, builder,
 proxy, browser and cleanup evidence follow; Linux/reference HTTPS must pass
 before legacy Rauthy/Temporal assets are deleted. Backup/restore, upgrade and
 Apalis remain open CPR-45 slices.

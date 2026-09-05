@@ -305,11 +305,23 @@ pre-effect prefix must contain zero entries. Neither value is written or
 accepted by state, receipts or lifecycle. They contain no provider path,
 identity, PID, socket, command, environment or absence assertion.
 
-A future admission operation must obtain the projection internally, reopen the
-journal/source and full private production observation in the same read-only
-operation, and refuse every caller-supplied serialized projection or candidate
-as proof. In particular, caller-supplied host preparation data cannot be
-relabelled as process, VM or Engine absence.
+The state-owned admission operation now obtains the completed plan and
+projection internally and accepts no caller-supplied plan, projection,
+candidate, prefix, requirements or test hook. It validates state/source,
+rebuilds the full private production observation, revalidates state/source, and
+rebuilds the observation again. The two state snapshots and two observation
+results must match. It no-follow samples only the exact derived Colima-profile
+and Lima-instance leaves beneath pinned private parents. Only exact-leaf
+`ENOENT` is observed absence; every existing entry is an opaque foreign
+collision that is neither traversed nor adopted and yields no intent or prefix.
+
+Its recursively frozen result is expressly point-in-time, non-authorizing and
+non-durable. A bounded logical supervisor label is not a PID/PGID, ownership or
+liveness claim. Fixture evidence has distinct aggregate/root schemas, evidence
+classes and HMAC domains. Serialization loses provenance, so a later intent
+publisher must rerun admission inside its shared-CAS/no-replace decision. No
+caller-supplied preparation or admission value can be relabelled as process,
+VM, Engine, socket or context absence.
 
 No supported lifecycle target exposes these fixtures and no Docker/Colima
 effect is enabled. Controlled-background evidence remains ineligible for the

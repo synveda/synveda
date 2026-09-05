@@ -14,6 +14,7 @@ import {
   readlinkSync,
   realpathSync,
   readdirSync,
+  renameSync,
   rmSync,
   symlinkSync,
   unlinkSync,
@@ -25,15 +26,23 @@ import test from "node:test";
 import {
   appendProviderCleanupReceiptForExecutor,
   appendReceiptForExecutor,
+  COLIMA_LIVE_FIXTURE_PRE_EFFECT_ADMISSION_SCHEMA,
+  COLIMA_LIVE_PRE_EFFECT_ADMISSION_SCHEMA,
   executeProviderCreateForExecutor,
   finalizeEnvironmentForExecutor,
   liveProviderPlanRecoveryConfirmationForExecutor,
+  observeColimaLivePreEffectAdmissionForExecutor,
+  observeColimaLivePreEffectAdmissionForTest,
   projectLiveProviderPlanCompletionForExecutor,
   providerRecoveryConfirmationForExecutor,
   recordLiveProviderOperationPlanForTest,
   recoverLiveProviderPlanForExecutor,
   recoverProviderCreateForExecutor,
 } from "../deploy/compose/scripts/clean-engine-state.mjs";
+import {
+  colimaLiveBytes,
+  colimaLiveDigest,
+} from "../deploy/compose/scripts/clean-engine-colima-live-contract.mjs";
 import {
   buildColimaLiveEffectIntentCandidateStructure,
 } from "../deploy/compose/scripts/clean-engine-live-provider-intent.mjs";
@@ -47,6 +56,10 @@ import {
 } from "../deploy/compose/scripts/clean-engine-receipts.mjs";
 import { cleanEngineReceiptResult } from "./fixtures/clean-engine-receipt-fixture.mjs";
 import { cleanEngineLiveProviderOperationPlan } from "./fixtures/clean-engine-live-provider-plan-fixture.mjs";
+import {
+  createCleanEngineColimaLiveObservationFixture,
+  writePrivateColimaLiveFixtureFile,
+} from "./fixtures/clean-engine-colima-live-observation-fixture.mjs";
 
 const stateTool = resolve("deploy/compose/scripts/clean-engine-state.mjs");
 
@@ -200,10 +213,12 @@ function snapshotTree(root) {
   function visit(path, relativePath) {
     const metadata = lstatSync(path, { bigint: true });
     const entry = {
+      ctimeNs: String(metadata.ctimeNs),
       dev: String(metadata.dev),
       gid: String(metadata.gid),
       ino: String(metadata.ino),
       mode: String(metadata.mode),
+      mtimeNs: String(metadata.mtimeNs),
       nlink: String(metadata.nlink),
       path: relativePath,
       size: String(metadata.size),
@@ -229,6 +244,12 @@ function snapshotTree(root) {
   }
   visit(root, ".");
   return snapshot;
+}
+
+function assertRecursivelyFrozen(value) {
+  if (value === null || typeof value !== "object") return;
+  assert.equal(Object.isFrozen(value), true);
+  for (const child of Object.values(value)) assertRecursivelyFrozen(child);
 }
 
 function activeRun(state) {
@@ -460,6 +481,36 @@ async function waitForMutationPublicationStage(state, timeoutMilliseconds = 8_00
     !readdirSync(active).some((name) => name.startsWith(".mutation-stage-"))
   ) {
     assert.ok(Date.now() < deadline, "timed out waiting for linked mutation publication");
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
+  }
+}
+
+async function waitForPublishedMutationSlot(
+  state,
+  expectedAction,
+  timeoutMilliseconds = 8_000,
+) {
+  const active = activeRun(state);
+  const path = join(active, ".mutation-slot-00");
+  const deadline = Date.now() + timeoutMilliseconds;
+  while (true) {
+    try {
+      const metadata = lstatSync(path, { bigint: true });
+      if (
+        metadata.isFile() &&
+        metadata.nlink === 1n &&
+        metadata.size >= 2n &&
+        !readdirSync(active).some((name) => name.startsWith(".mutation-stage-"))
+      ) {
+        const value = parse(path);
+        assert.equal(value.schema, "synveda.clean-engine.mutation-slot.v3");
+        assert.equal(value.action, expectedAction);
+        return;
+      }
+    } catch (error) {
+      if (error?.code !== "ENOENT") throw error;
+    }
+    assert.ok(Date.now() < deadline, "timed out waiting for published mutation slot");
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
   }
 }
@@ -742,6 +793,464 @@ test("a live provider operation plan is journaled once and grants no effect auth
   }
 });
 
+test("live pre-effect admission rejects caller provenance and publishes nothing", () => {
+  assert.equal(
+    COLIMA_LIVE_PRE_EFFECT_ADMISSION_SCHEMA,
+    "synveda.clean-engine.colima-live-pre-effect-admission.v1",
+  );
+  const sensitive = "/private/never-inspect-caller-provenance";
+  const base = {
+    observation: {},
+    observationInput: {},
+    repoRoot: sensitive,
+    stateBase: `${sensitive}-state`,
+  };
+  for (const value of [
+    null,
+    {},
+    { ...base, completionProjection: {} },
+    { ...base, intent: {} },
+    { ...base, operationPlan: {} },
+    { ...base, preEffectPrefix: {} },
+    { ...base, providerRoot: sensitive },
+    { ...base, requirements: {} },
+    { ...base, testHoldMilliseconds: 1 },
+    { ...base, repoRoot: null },
+    { ...base, repoRoot: 1 },
+    { ...base, repoRoot: {} },
+    { ...base, stateBase: [] },
+    { ...base, stateBase: "" },
+    { ...base, observation: null },
+    { ...base, observation: [] },
+    { ...base, observationInput: undefined },
+    { ...base, observationInput: "not-an-object" },
+  ]) {
+    assert.throws(
+      () => observeColimaLivePreEffectAdmissionForExecutor(value),
+      (error) => {
+        assert.equal(error.exitStatus, 64);
+        assert.equal(error.message.includes(sensitive), false);
+        return true;
+      },
+    );
+  }
+
+  const state = fixture();
+  try {
+    assert.equal(run(state, "plan").status, 0);
+    const operationPlan = liveProviderOperationPlan(state);
+    recordLiveProviderOperationPlanForTest({
+      operationPlan,
+      repoRoot: state.repo,
+      stateBase: state.state,
+    });
+    const before = snapshotTree(state.root);
+    assert.throws(
+      () =>
+        observeColimaLivePreEffectAdmissionForExecutor({
+          observation: {},
+          observationInput: {},
+          repoRoot: state.repo,
+          stateBase: state.state,
+      }),
+      (error) => {
+        assert.equal(
+          error.message,
+          "live provider pre-effect observation binding was refused",
+        );
+        assert.equal(error.exitStatus, 73);
+        return true;
+      },
+    );
+    assert.deepEqual(snapshotTree(state.root), before);
+    assert.equal(
+      readdirSync(activeRun(state)).some((name) =>
+        /(?:admission|effect-intent)/u.test(name),
+      ),
+      false,
+    );
+  } finally {
+    rmSync(state.root, { recursive: true, force: true });
+  }
+});
+
+test("fixture admission composes state provenance with exact absent roots", () => {
+  const state = fixture();
+  let preparation;
+  try {
+    assert.equal(run(state, "plan").status, 0);
+    const fixtureId = parse(join(activeRun(state), "candidate.json")).run_id;
+    preparation = createCleanEngineColimaLiveObservationFixture({ fixtureId });
+    const observationSha256 = colimaLiveDigest(
+      colimaLiveBytes(preparation.observation),
+    );
+    const operationPlan = liveProviderOperationPlan(state, observationSha256);
+    recordLiveProviderOperationPlanForTest({
+      operationPlan,
+      repoRoot: state.repo,
+      stateBase: state.state,
+    });
+    const stateBefore = snapshotTree(state.root);
+    const preparationBefore = snapshotTree(preparation.root);
+    const result = observeColimaLivePreEffectAdmissionForTest({
+      observation: preparation.observation,
+      observationInput: preparation.input,
+      repoRoot: state.repo,
+      requirements: preparation.requirements,
+      stateBase: state.state,
+      testCheckpoint() {},
+    });
+
+    assert.deepEqual(snapshotTree(state.root), stateBefore);
+    assert.deepEqual(snapshotTree(preparation.root), preparationBefore);
+    assert.deepEqual(Object.keys(result).sort(), [
+      "authority",
+      "completion_projection",
+      "intent_candidate",
+      "pre_effect_prefix",
+      "root_observation",
+      "schema",
+      "supervisor_process_group_label",
+    ]);
+    assert.equal(
+      result.schema,
+      COLIMA_LIVE_FIXTURE_PRE_EFFECT_ADMISSION_SCHEMA,
+    );
+    assert.equal(
+      result.authority,
+      "fixture-only-point-in-time-not-effect-authority",
+    );
+    assert.equal(result.root_observation.evidence_class, "fixture-only");
+    assert.equal(
+      result.root_observation.schema,
+      "synveda.clean-engine.colima-live-fixture-pre-effect-root-observation.v1",
+    );
+    assert.equal(result.root_observation.root_set_disposition, "observed-absent");
+    assert.equal(
+      result.completion_projection.operation_plan_sha256,
+      sha256(canonicalBytes(operationPlan)),
+    );
+    assert.equal(
+      result.completion_projection.preparation_observation_sha256,
+      observationSha256,
+    );
+    assert.equal(result.intent_candidate.effect_name, "provider-create");
+    assert.equal(
+      result.intent_candidate.effect_authorization,
+      "requested-not-authorized",
+    );
+    assert.equal(result.pre_effect_prefix.entry_count, 0);
+    const expectedLabel =
+      `sv-c45-colima-pg-${fixtureId}-` +
+      result.completion_projection.plan_slot_sha256.slice(0, 12);
+    assert.equal(result.supervisor_process_group_label, expectedLabel);
+    assert.match(
+      result.supervisor_process_group_label,
+      /^sv-c45-colima-pg-[0-9a-f]{32}-[0-9a-f]{12}$/u,
+    );
+    assert.equal(
+      Buffer.byteLength(result.supervisor_process_group_label, "ascii"),
+      62,
+    );
+    assertRecursivelyFrozen(result);
+
+    const serialized = canonicalBytes(result).toString("utf8");
+    for (const forbidden of [
+      preparation.root,
+      preparation.home,
+      preparation.providerRoot,
+      "binding_key",
+      "command",
+      "HOME",
+      "PID",
+      "PGID",
+      "socket",
+      "docker-context",
+      "guest-engine",
+      "hostagent",
+    ]) {
+      assert.equal(serialized.includes(forbidden), false, forbidden);
+    }
+  } finally {
+    if (preparation !== undefined) {
+      rmSync(preparation.root, { recursive: true, force: true });
+    }
+    rmSync(state.root, { recursive: true, force: true });
+  }
+});
+
+test("fixture admission classifies a collision without constructing intent", () => {
+  const state = fixture();
+  let preparation;
+  try {
+    assert.equal(run(state, "plan").status, 0);
+    const fixtureId = parse(join(activeRun(state), "candidate.json")).run_id;
+    preparation = createCleanEngineColimaLiveObservationFixture({ fixtureId });
+    const operationPlan = liveProviderOperationPlan(
+      state,
+      colimaLiveDigest(colimaLiveBytes(preparation.observation)),
+    );
+    recordLiveProviderOperationPlanForTest({
+      operationPlan,
+      repoRoot: state.repo,
+      stateBase: state.state,
+    });
+    const collisionPath = join(
+      preparation.input.environment.COLIMA_HOME,
+      preparation.input.provider_profile,
+    );
+    writePrivateColimaLiveFixtureFile(
+      collisionPath,
+      Buffer.from("foreign collision\n", "utf8"),
+      0o600,
+    );
+    const stateBefore = snapshotTree(state.root);
+    const preparationBefore = snapshotTree(preparation.root);
+    const result = observeColimaLivePreEffectAdmissionForTest({
+      observation: preparation.observation,
+      observationInput: preparation.input,
+      repoRoot: state.repo,
+      requirements: preparation.requirements,
+      stateBase: state.state,
+      testCheckpoint() {},
+    });
+    assert.equal(result.root_observation.root_set_disposition, "foreign-collision");
+    assert.equal(result.intent_candidate, null);
+    assert.equal(result.pre_effect_prefix, null);
+    assertRecursivelyFrozen(result);
+    assert.deepEqual(snapshotTree(state.root), stateBefore);
+    assert.deepEqual(snapshotTree(preparation.root), preparationBefore);
+  } finally {
+    if (preparation !== undefined) {
+      rmSync(preparation.root, { recursive: true, force: true });
+    }
+    rmSync(state.root, { recursive: true, force: true });
+  }
+});
+
+test("fixture admission refuses crossed observations before touching their roots", () => {
+  const state = fixture();
+  let ownPreparation;
+  let foreignPreparation;
+  try {
+    assert.equal(run(state, "plan").status, 0);
+    const fixtureId = parse(join(activeRun(state), "candidate.json")).run_id;
+    ownPreparation = createCleanEngineColimaLiveObservationFixture({ fixtureId });
+    foreignPreparation = createCleanEngineColimaLiveObservationFixture({
+      fixtureId: "f".repeat(32),
+    });
+    const operationPlan = liveProviderOperationPlan(
+      state,
+      colimaLiveDigest(colimaLiveBytes(ownPreparation.observation)),
+    );
+    recordLiveProviderOperationPlanForTest({
+      operationPlan,
+      repoRoot: state.repo,
+      stateBase: state.state,
+    });
+    chmodSync(foreignPreparation.providerRoot, 0o000);
+    const stateBefore = snapshotTree(state.root);
+    assert.throws(
+      () =>
+        observeColimaLivePreEffectAdmissionForTest({
+          observation: foreignPreparation.observation,
+          observationInput: foreignPreparation.input,
+          repoRoot: state.repo,
+          requirements: foreignPreparation.requirements,
+          stateBase: state.state,
+          testCheckpoint() {},
+        }),
+      (error) => {
+        assert.equal(
+          error.message,
+          "live provider pre-effect observation binding was refused",
+        );
+        assert.equal(error.exitStatus, 73);
+        return true;
+      },
+    );
+    assert.deepEqual(snapshotTree(state.root), stateBefore);
+    chmodSync(foreignPreparation.providerRoot, 0o700);
+
+    assert.throws(
+      () =>
+        observeColimaLivePreEffectAdmissionForExecutor({
+          observation: ownPreparation.observation,
+          observationInput: ownPreparation.input,
+          repoRoot: state.repo,
+          stateBase: state.state,
+        }),
+      /live provider pre-effect observation was refused/u,
+    );
+  } finally {
+    if (foreignPreparation !== undefined) {
+      chmodSync(foreignPreparation.providerRoot, 0o700);
+      rmSync(foreignPreparation.root, { recursive: true, force: true });
+    }
+    if (ownPreparation !== undefined) {
+      rmSync(ownPreparation.root, { recursive: true, force: true });
+    }
+    rmSync(state.root, { recursive: true, force: true });
+  }
+});
+
+test("fixture admission refuses drift between its two state-root observations", () => {
+  const cases = [
+    {
+      name: "target-appeared",
+      prepare() {},
+      mutate({ preparation }) {
+        writePrivateColimaLiveFixtureFile(
+          join(
+            preparation.input.environment.COLIMA_HOME,
+            preparation.input.provider_profile,
+          ),
+          Buffer.from("appeared\n", "utf8"),
+          0o600,
+        );
+      },
+      restore() {},
+    },
+    {
+      name: "collision-disappeared",
+      prepare({ preparation }) {
+        writePrivateColimaLiveFixtureFile(
+          join(
+            preparation.input.environment.COLIMA_HOME,
+            preparation.input.provider_profile,
+          ),
+          Buffer.from("collision\n", "utf8"),
+          0o600,
+        );
+      },
+      mutate({ preparation }) {
+        rmSync(
+          join(
+            preparation.input.environment.COLIMA_HOME,
+            preparation.input.provider_profile,
+          ),
+        );
+      },
+      restore() {},
+    },
+    {
+      name: "static-component-replaced",
+      prepare() {},
+      mutate({ preparation }) {
+        const path = preparation.input.component_paths["docker-cli-binary"];
+        renameSync(path, `${path}-displaced`);
+        writePrivateColimaLiveFixtureFile(
+          path,
+          preparation.componentBytes.get("docker-cli-binary"),
+          0o500,
+        );
+      },
+      restore() {},
+    },
+    {
+      name: "source-drifted",
+      prepare() {},
+      mutate({ state }) {
+        writeFileSync(join(state.repo, "source.txt"), "drifted source\n");
+      },
+      restore({ state }) {
+        writeFileSync(join(state.repo, "source.txt"), "fixture source\n");
+      },
+    },
+  ];
+
+  for (const value of cases) {
+    const state = fixture();
+    let preparation;
+    try {
+      assert.equal(run(state, "plan").status, 0);
+      const fixtureId = parse(join(activeRun(state), "candidate.json")).run_id;
+      preparation = createCleanEngineColimaLiveObservationFixture({ fixtureId });
+      const operationPlan = liveProviderOperationPlan(
+        state,
+        colimaLiveDigest(colimaLiveBytes(preparation.observation)),
+      );
+      recordLiveProviderOperationPlanForTest({
+        operationPlan,
+        repoRoot: state.repo,
+        stateBase: state.state,
+      });
+      const context = { preparation, state };
+      value.prepare(context);
+      let checkpoints = 0;
+      assert.throws(
+        () =>
+          observeColimaLivePreEffectAdmissionForTest({
+            observation: preparation.observation,
+            observationInput: preparation.input,
+            repoRoot: state.repo,
+            requirements: preparation.requirements,
+            stateBase: state.state,
+            testCheckpoint(checkpoint) {
+              assert.equal(checkpoint, "after-first-admission-observation");
+              checkpoints += 1;
+              value.mutate(context);
+            },
+          }),
+        (error) => {
+          assert.equal(error.exitStatus >= 70, true, value.name);
+          return true;
+        },
+      );
+      assert.equal(checkpoints, 1, value.name);
+      value.restore(context);
+      assert.equal(
+        readdirSync(activeRun(state)).some((name) =>
+          /(?:admission|effect-intent)/u.test(name),
+        ),
+        false,
+      );
+      assert.equal(run(state, "verify").status, 0, value.name);
+    } finally {
+      if (preparation !== undefined) {
+        rmSync(preparation.root, { recursive: true, force: true });
+      }
+      rmSync(state.root, { recursive: true, force: true });
+    }
+  }
+});
+
+test("live pre-effect admission has no supported mutation or lifecycle surface", () => {
+  const stateSource = readFileSync(
+    new URL("../deploy/compose/scripts/clean-engine-state.mjs", import.meta.url),
+    "utf8",
+  );
+  const start = stateSource.indexOf(
+    "function completedLiveProviderPlanSnapshot",
+  );
+  const end = stateSource.indexOf(
+    "export function executeProviderCreateForExecutor",
+    start,
+  );
+  assert.ok(start >= 0 && end > start);
+  const admissionSource = stateSource.slice(start, end);
+  assert.doesNotMatch(
+    admissionSource,
+    /\b(?:acquire|append|close|execute|finalize|launch|publish|reconcile|recover|spawn|unlink|write)[A-Za-z0-9_]*\s*\(/u,
+  );
+
+  const lifecycle = readFileSync(
+    new URL(
+      "../deploy/compose/scripts/clean-engine-acceptance.sh",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  assert.match(lifecycle, /plan\|status\|verify/u);
+  assert.doesNotMatch(lifecycle, /pre-effect-admission|live-admission/u);
+
+  const receipts = readFileSync(
+    new URL("../deploy/compose/scripts/clean-engine-receipts.mjs", import.meta.url),
+    "utf8",
+  );
+  assert.doesNotMatch(receipts, /colima-live-pre-effect-admission/u);
+});
+
 test("a live provider plan is run-bound, immutable and fails closed on drift", () => {
   const state = fixture();
   const other = fixture();
@@ -877,12 +1386,7 @@ test("an abandoned effect-free live plan slot is explicitly aborted before retry
     );
     child.stdout.resume();
     child.stderr.resume();
-    const slotPath = join(activeRun(state), ".mutation-slot-00");
-    const deadline = Date.now() + 8_000;
-    while (!existsSync(slotPath)) {
-      assert.ok(Date.now() < deadline, "timed out waiting for live plan slot");
-      await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
-    }
+    await waitForPublishedMutationSlot(state, "provider-plan");
     assert.throws(
       () =>
         projectLiveProviderPlanCompletionForExecutor({

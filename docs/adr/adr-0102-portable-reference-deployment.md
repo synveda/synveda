@@ -244,10 +244,17 @@ values. The candidate records only `provider-create` and
 Neither value enters state, a receipt or the reserved provider-evidence schema.
 No resource/process/VM/Engine/socket/context absence is inferred.
 
-The next admission operation must obtain the projection internally, reopen
-journal/source and full production observation, and reject serialized
-projections or candidates as proof. Durable publication remains a separate
-shared-CAS journal decision after a truthful live-absence observer exists.
+The state owner now composes those values through a read-only admission
+operation. It derives the plan/projection internally, validates state/source and
+the complete production observation twice in `S1/O1/S2/O2` order, and rejects
+caller-supplied provenance. It no-follow samples only the exact future Colima
+profile and Lima instance roots beneath pinned private parents. Exact `ENOENT`
+is a point-in-time absence; every existing entry is an opaque foreign collision
+and suppresses both candidate and prefix. The frozen result has distinct
+production/fixture evidence identities and closes only a logical future
+supervisor label, not a PID/PGID, ownership or liveness fact. Serialization
+loses provenance. Durable publication remains a separate shared-CAS journal
+decision that must rerun admission and no-replace root checks internally.
 
 ## Options considered
 

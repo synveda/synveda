@@ -608,21 +608,43 @@ process, state-mutation, receipt and lifecycle seams. A recursive snapshot also
 proves the state projection changes no source or journal byte or enumerated
 mode/owner/link/inode/size metadata.
 
+The state owner now composes those structures with a read-only pre-effect
+admission observation. The production API accepts only repository/state and
+preparation-observation inputs; it derives the completed plan and projection
+internally and rejects caller-supplied plan, projection, candidate, prefix,
+requirements or checkpoint data. It reads validated state/source, rebuilds the
+full production observation, rereads state/source, then rebuilds the observation
+again (`S1/O1/S2/O2`). Both state snapshots and both observations must match.
+The exact future Colima profile root and Lima instance root are sampled with
+no-follow metadata calls while their private parent directories are pinned and
+revalidated. Only `ENOENT` at an exact target is observed absence; every file,
+directory, hard link or symlink is an opaque foreign collision and is never
+traversed or adopted. Unrelated parent entries remain preparation drift.
+
+The direct, recursively frozen
+`synveda.clean-engine.colima-live-pre-effect-admission.v1` result is explicitly
+`point-in-time-not-effect-authority`. An all-absent result contains the existing
+non-authorizing intent and empty prefix; any collision suppresses both. It also
+closes the provider profile, derived Lima instance and a bounded logical future
+supervisor label. That label is not a PID, PGID, process identity or liveness
+observation. Fixture observation and aggregate schemas, evidence classes and
+HMAC domains are distinct from production. The observer writes nothing and
+makes no VM, Engine, socket, context, process, cleanup, recovery, receipt,
+lifecycle or finalization claim. Deterministic tests cover successful
+composition, collision suppression, crossed provenance, target/parent/source
+drift, no traversal, content-free output and complete source/state/preparation
+snapshots.
+
 ### Immediate next slice
 
-Design one truthful read-only live pre-effect admission observer. It must obtain
-the exact completed-plan projection internally, reopen journal/source and the
-current full production observation in the same operation, and reject every
-caller-supplied serialized projection or candidate as proof. It must then
-distinguish exact private-root absence from a foreign collision without
-traversing or adopting it, and close the bounded provider/Lima/process-group
-names that can be known before start. It must not infer live absence from the
-caller-supplied host preparation record. After adversarial deterministic tests,
-publish the inert intent only through a distinct successor action in the shared
-mutation journal, with a reviewed slot/close hard cut and exact crash handling;
-never write an out-of-journal provider artifact. Keep process start, provider
-execution/recovery, receipts, cleanup, lifecycle exposure and finalization
-disabled.
+Publish the inert intent only through a distinct successor action in the shared
+mutation journal, with a reviewed slot/close hard cut and exact crash handling.
+That writer must rerun admission internally while holding its own causal CAS;
+neither this point-in-time result nor an extracted serialized projection,
+candidate or prefix is proof. It must recheck the two target names at the
+no-replace publication boundary and never write an out-of-journal provider
+artifact. Keep process start, provider execution/recovery, receipts, cleanup,
+lifecycle exposure and finalization disabled.
 
 Then close cooperative process-group ownership, host-agent/Engine/socket/context
 identities, uncertain-start classification and dynamic-tree retirement under
