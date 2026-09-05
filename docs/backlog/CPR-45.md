@@ -457,6 +457,35 @@ path, and inherits ambient `HOME` unchanged because Lima resolves it even when
 `HOME` environment value. The toolchain evidence necessarily records absolute
 runtime and fixture-source paths, which may reside beneath that home directory.
 
+A separate, non-executing live-provider preparation contract now closes the
+next input boundary without changing that immutable fake contract. Requirements
+schema `synveda.clean-engine.colima-live-requirements.v1` pins the official
+Colima 0.10.3 Darwin/arm64 release, Lima 2.2.0 Darwin/arm64 archive and extracted
+wrapper/`limactl`/guest-agent bytes, and the Colima-core 0.10.4 arm64 Docker disk
+image by exact size and digest. Its current canonical digest is
+`017dc54f40dea6a5f0eba46088879f3783ee62ca5cb3c8d5677a882b7ac1bddc`.
+The private observation schema binds exact staged paths, bytes, modes, parents,
+the dynamically selected Docker CLI, SSH helpers, state-owner closure and macOS
+probes, a closed environment, HMAC-hidden `HOME` path plus physical directory
+identity, exact host build/boot inputs and distinct source/receipt-owned disk
+inodes. The source disk is a preselected local file; the observer downloads
+nothing and imports no process-execution API. Its host record is explicitly
+preparation input, not a live probe or admission fact. The public projection
+contains no raw path, `HOME`, fixture, profile or component identity.
+
+All three capability bits remain false: preparation cannot authorize execution,
+lifecycle exposure or finalization. The module is not registered with mutation
+state, receipts, cleanup, a lifecycle target or the environment finalizer. Its
+fixture-only seams permit small deterministic files instead of committing the
+official disk image; any future state adapter must accept only the production
+requirements digest. Fifteen deterministic tests cover pin/schema drift,
+role/path/environment/HOME/host/file/disk replacement, private projection,
+revalidation and unconditional authorization refusal. No Docker, Colima or
+Lima process was invoked. The existing before-root source-drift fixture now
+waits for the durable create-authority marker rather than racing the intent
+receipt's post-link source read; drift is still injected while the provider
+root is absent and is refused by the next exact authority gate.
+
 The standalone fixture launcher creates a separately detached fake host agent
 only after its pre-effect gates. Its recoverable fixture-only create authority
 binds the canonical base/evidence directory identities, intended
@@ -530,21 +559,22 @@ this slice; only bounded repository-owned fake processes and sockets were used.
 
 ### Immediate next slice
 
-Integrate the reviewed state-owned create and cleanup boundary with one closed
-live provider lifecycle only after the exact live toolchain, helper, disk-image
-and operating-system identity contract is complete. Keep finalization blocked
-until that live provider has a separately reviewed environment-manifest schema;
-the deterministic controlled-background class must not be relabelled as live.
+Define a closed provider-adapter registry keyed by action, operation kind,
+operation-contract digest and provider class. Add fresh live create/cleanup
+operation kinds and evidence schemas; never relabel the deterministic
+controlled-background class. Integrate the production requirements digest with
+state-owned planning while keeping every execution capability false. The live
+supervisor must then establish exact pre-intent absence, process-group ownership,
+host-agent/Engine/socket/context identities and crash recovery before any
+supported lifecycle target may invoke Colima. Finalization remains blocked
+until a separately reviewed live environment-manifest schema exists.
 
-Before invoking Colima, finish the selected live toolchain manifest for the
-pinned Colima/Lima and Docker CLI, every transitive helper and the exact disk
-image. Audit the actual inherited home dependency without repurposing `HOME`;
-retain the closed helper `PATH`, explicit provider roots, `--mount none`, exact
-pre-intent absence and distinct host-agent/Engine/context identities. Expose
-execution and recovery through one supported lifecycle target only after the
-state integration and fixed live closure pass deterministic conformance and
-independent review. Then, with explicit authority, create and destroy one fresh
-isolated provider and publish its exact content-free environment evidence.
+The first real invocation must use the closed helper `PATH`, explicit provider
+roots, `--mount none`, the receipt-owned disk copy and the privately bound real
+`HOME`. It requires explicit authority, a fresh isolated provider, exact
+content-free evidence and exact cleanup. Only after deterministic conformance
+and independent review may execution and recovery appear behind one supported
+lifecycle target.
 Subsequent bounded steps add the globally clean Engine proof, TLS/bcrypt
 private registry,
 authenticated push/pull, synthetic Docker-client proxy activation, a zero-read

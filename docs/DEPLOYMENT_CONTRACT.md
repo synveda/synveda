@@ -303,6 +303,37 @@ internal composition hooks, not a JavaScript security boundary; owner-UID code
 execution and journal mutation are one trusted-host boundary. This checkpoint
 must not be reported as clean-Engine, Docker, Colima or browser evidence.
 
+### Live-provider preparation input
+
+The separate `synveda.clean-engine.colima-live-requirements.v1` contract is the
+only repository-owned candidate input for a later macOS/arm64 Colima/VZ
+provider. It pins Colima 0.10.3, Lima 2.2.0, their selected extracted runtime
+files and the Colima-core 0.10.4 arm64 Docker disk image by exact release URL,
+size and digest. It also closes the command template, private root layout,
+staged file locations/modes and required dynamic roles for Docker CLI, SSH,
+state-owner and macOS probe executables. The canonical production requirements
+digest is
+`017dc54f40dea6a5f0eba46088879f3783ee62ca5cb3c8d5677a882b7ac1bddc`.
+
+`synveda.clean-engine.colima-live-observation.v1` is private per-run evidence.
+It binds exact file and parent identities, a toolchain-only `PATH`, explicit
+private Colima/Lima/Docker/temp roots, the real but unserialized `HOME` through
+an HMAC path binding and physical directory identity, exact host build/boot
+inputs, and distinct exact source and receipt-owned disk files. It accepts only
+a local preselected disk and performs bounded streaming hashes; it neither
+downloads nor executes a process. Raw paths, fixture/profile identity, `HOME`
+and component identities are absent from its public projection. The host fields
+are preparation inputs, not live probes or VZ admission evidence.
+
+The requirements and observation both state `execution_authorized: false`,
+`lifecycle_exposure_authorized: false` and `finalization_eligible: false`.
+There is intentionally no state adapter, operation kind, receipt class,
+finalizer registration or lifecycle command for this schema. Test-only fixture
+seams may substitute small exact bytes, but future mutation state may accept
+only the production requirements digest. A later live provider needs fresh
+create/cleanup schemas, causal process/socket/Engine/context ownership and
+dynamic-tree retirement; it must not reuse the controlled-background fake.
+
 An uncatchable pre-publication interruption can retain one or more strictly
 validated `.pending-*` or `.run-*` staging directories. They contain no
 provider, registry, runtime or evidence mutation, have no `active` authority

@@ -2159,7 +2159,8 @@ test("state recovery preserves permanently unattested process windows without re
 test("source drift is fenced before root start pass and close boundaries", async (t) => {
   const cases = [
     {
-      marker: (active) => join(active, "01-provider-create-intent.json"),
+      marker: (active) =>
+        join(active, "provider", "background-create-authority.json"),
       mode: "source-drift-before-root",
       passReceipt: false,
       phase: "provider-create-failed",

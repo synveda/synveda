@@ -250,12 +250,20 @@ trusted owner-UID composition hooks, not a JavaScript security boundary.
 Only test fixtures expose these seams; no supported lifecycle target or
 Docker/Colima action is enabled. Controlled-background evidence remains
 structurally ineligible for the synthetic finalizer, so finalization stays
-blocked. Next integrate this reviewed state-owned cleanup boundary with the
-closed live provider lifecycle after completing the exact Docker/helper/disk-
-image and OS-version closure without repurposing `HOME`. Registry, builder,
-proxy, browser and live cleanup evidence follow; Linux/reference HTTPS must
-pass before legacy Rauthy/Temporal assets are deleted. Backup/restore, upgrade
-and Apalis remain open CPR-45 slices.
+blocked. A separate non-executing live-preparation requirements/observation
+contract now pins official Colima 0.10.3, Lima 2.2.0 and Colima-core 0.10.4
+disk artifacts, exact staged and dynamically observed helper identities, the
+closed private environment, HMAC-hidden `HOME` binding, host build/boot inputs
+and a distinct receipt-owned disk copy. Its production requirements digest is
+`017dc54f40dea6a5f0eba46088879f3783ee62ca5cb3c8d5677a882b7ac1bddc`;
+all execution, lifecycle and finalization authorizations remain false. The
+observer has no process-execution surface, no state/receipt/finalizer
+registration and no lifecycle target. Fifteen deterministic tests pass; no
+Docker, Colima or Lima process ran. Next add a closed provider-adapter registry
+and fresh live operation schemas around this exact digest while retaining the
+execution denial. Registry, builder, proxy, browser and live cleanup evidence
+follow; Linux/reference HTTPS must pass before legacy Rauthy/Temporal assets
+are deleted. Backup/restore, upgrade and Apalis remain open CPR-45 slices.
 
 ## Unscheduled — not listed in the Sequencing section
 

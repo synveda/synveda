@@ -234,6 +234,24 @@ receipt or close authority; only the outer cleanup settlement can bind the
 controlled pass and close. The internal `*WithAuthorityGate` callbacks are
 trusted owner-UID composition hooks, not a JavaScript security boundary.
 
+The repository now also has a separate deterministic live-provider preparation
+contract. It pins the official Colima 0.10.3 and Lima 2.2.0 Darwin/arm64
+artifacts, selected Lima runtime files and the Colima-core 0.10.4 arm64 Docker
+disk image. A private observation can bind exact staged and dynamically selected
+helper bytes, modes and parent identities; a toolchain-only environment; an
+HMAC-hidden real `HOME` plus physical directory identity; exact host build/boot
+inputs; and distinct source and receipt-owned disk identities. It downloads and
+executes nothing. Its public projection omits all raw paths, `HOME`, profile,
+fixture and component identities.
+
+This preparation schema is not registered with the state journal, receipt
+machine or finalizer. `execution_authorized`, `lifecycle_exposure_authorized`
+and `finalization_eligible` are all false, and the supported commands remain
+only `plan`, `status` and `verify`. The host record is supplied preparation
+input, not a live VZ probe. Future live work must use fresh operation/evidence
+schemas keyed to the exact production requirements digest; it cannot relabel or
+reuse the controlled-background fake.
+
 No supported lifecycle target exposes either test-only seam; there is no live
 provider mutation or environment manifest. `registry/`, `runtime/` and
 `evidence/` remain empty. Receipt v4 has provider-class-bound controlled cleanup
@@ -243,9 +261,11 @@ distinct outer settlement, and binds that digest through pass and close.
 Recovery may abort only an untouched pre-intent slot or proceed under the newest
 observation claim, reserving capacity for a final settled-prefix refresh. Owner
 close permits no claim and recovery close must name the latest claim. Finish the
-live Docker/helper/disk closure before exposing a supported lifecycle target or
-making any Docker or finalization claim. Superseded receipt and mutation schemas
-are discarded and regenerated.
+production live-preparation binding through fresh live operation schemas, then
+prove causal process/socket/Engine/context ownership and exact dynamic-tree
+cleanup before exposing a supported lifecycle target or making any Docker or
+finalization claim. Superseded receipt and mutation schemas are discarded and
+regenerated.
 The manual browser ceremony below remains usable for fixture development but
 cannot be labelled a clean-Engine result.
 

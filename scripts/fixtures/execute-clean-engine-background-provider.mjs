@@ -31,14 +31,14 @@ const adapter = {
       ? 30_000
       : mode === "foreign-collision-after-authority"
         ? 1_500
-        : 0,
+        : mode === "source-drift-before-root"
+          ? 1_500
+          : 0,
   after_evidence_hold_milliseconds: mode === "hold-after-evidence" ? 30_000 : 0,
   after_intent_hold_milliseconds:
     mode === "hold-after-intent"
       ? 30_000
       : mode === "foreign-collision-hold-after-settlement"
-        ? 1_500
-      : mode === "source-drift-before-root"
         ? 1_500
         : 0,
   after_result_hold_milliseconds:

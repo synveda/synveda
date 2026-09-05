@@ -195,11 +195,19 @@ share one trusted-host boundary; ACLs, xattrs, flags, bind mounts and other PID
 namespaces remain outside this deterministic evidence. No supported lifecycle
 or finalization authority follows from this fixed-fake contract.
 
-The live-preparation record still pins Colima 0.10.3 at
-`00f6c297e92a82c04a4ab507db0a61435650d7e8` and Lima 2.2.0 at
-`de0816ea4bdc5267b428ab21025889b8dd785526`, inherits ambient `HOME` unchanged
-and blocks while the exact OS, Docker, helper and disk-image closure is
-unresolved. Neither the state wrapper nor its fixture retirement is Docker,
+The immutable fake still binds its legacy live-preparation declaration, which
+pins Colima 0.10.3 source revision
+`00f6c297e92a82c04a4ab507db0a61435650d7e8` and Lima 2.2.0 source revision
+`de0816ea4bdc5267b428ab21025889b8dd785526`. It is not rotated or relabelled.
+A separate `synveda.clean-engine.colima-live-requirements.v1` record now pins
+the official Darwin/arm64 release bytes, selected extracted Lima runtime files
+and Colima-core 0.10.4 arm64 Docker disk image. Its private observation closes
+the staged and dynamic helper identities, toolchain-only environment, HMAC-
+hidden real `HOME` directory identity, exact host build/boot inputs, command
+expansion and distinct source/receipt-owned disk files. It performs no process
+execution, and its host data is preparation input rather than a live probe.
+Execution, lifecycle exposure and finalization remain false, and no state,
+receipt, lifecycle or finalizer path accepts it. Neither contract is Docker,
 Colima or supported lifecycle evidence.
 
 ## Options considered
@@ -258,10 +266,12 @@ Colima or supported lifecycle evidence.
   state owner composes retirement v2 through a dedicated cleanup slot, exact
   lower checkpoints, an outer settlement, action-dispatched recovery, receipt
   and close. Only the outer cleanup settlement is operation evidence. A live
-  adapter must still close the transitive Docker/helper/disk identities through
-  the same boundary without weakening the immutable journal. A supported runner
-  and source/image environment manifest remain required before this can support
-  a Docker or Colima acceptance or finalization claim.
+  preparation contract now closes exact Docker/helper/disk/host input identities
+  without executing them. A live adapter must bind its production requirements
+  digest through fresh operation schemas and close causal process/socket/Engine/
+  context ownership without weakening the immutable journal. A supported runner,
+  dynamic-tree cleanup and source/image environment manifest remain required
+  before this can support a Docker or Colima acceptance or finalization claim.
 - Reversal trigger: if measured operation failure semantics cannot be made
   correct behind the provider-neutral outbox, remove Apalis and retain the
   Postgres worker path. If single-host Compose cannot reproduce the contract on

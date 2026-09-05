@@ -258,6 +258,19 @@ observation. An untouched pre-intent recovery can only abort without effect.
 Source, parent identities, completed retirement and inert-state absence are
 reasserted at the final close publication.
 
+The live-provider preparation module is a separate deny-by-construction input
+boundary, not an extension of the fake. Its production record pins official
+Colima/Lima/disk bytes and closes staged paths, file modes, dynamic helper roles,
+the exact environment and host build/boot inputs. It reads regular one-link
+files with no-follow opens and bounded streaming hashes, compares descriptor
+and named identities before and after each read, requires a distinct private
+receipt-owned disk copy, and rejects symlinked or writable private inputs. The
+real `HOME` path is retained only as a keyed private binding plus physical
+directory identity; raw `HOME` and all tool/provider paths are absent from the
+public projection. Host data remains caller-supplied preparation evidence and
+cannot attest VZ or authorize a process. The observer imports no child-process
+API and every execution, lifecycle and finalization capability is false.
+
 No supported lifecycle target exposes these fixtures and no Docker/Colima
 effect is enabled. Controlled-background evidence remains ineligible for the
 synthetic finalizer. The `*WithAuthorityGate` exports are internal composition

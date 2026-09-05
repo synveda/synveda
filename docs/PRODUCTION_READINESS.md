@@ -1,6 +1,6 @@
 # Production readiness
 
-Assessment date: 2026-09-02. Scope: the current context-platform checkout as a
+Assessment date: 2026-09-05. Scope: the current context-platform checkout as a
 service for individuals and small teams. Passing repository gates establishes
 repeatable behaviour; it does not establish availability, recoverability,
 supportability or a releasable supply chain.
@@ -133,6 +133,19 @@ owner POSIX evidence only: no supported lifecycle target exposes the fixtures,
 there is no Docker/Colima mutation or live environment manifest, and the
 controlled evidence is ineligible for finalization. Supported live cleanup and
 finalization therefore remain refused.
+
+The next provider-input boundary is deterministic but remains deliberately
+non-executing. A separate live-preparation requirements record pins exact
+official Colima 0.10.3, Lima 2.2.0 and Colima-core 0.10.4 disk artifacts. Its
+private observation binds staged and dynamically selected helper identities,
+closed environment paths, an HMAC-hidden physical `HOME`, host build/boot
+inputs and distinct source/receipt-owned disk identities. The observer has no
+child-process API; its three capability flags refuse execution, lifecycle
+exposure and finalization, and no state, receipt, lifecycle or finalizer accepts
+it. Fifteen deterministic tests pass. This closes input ambiguity only: it is
+not a live OS probe, provider start, Docker Engine identity, cleanup or
+environment-manifest result, so no readiness status changes.
+
 Live Linux/provider CI and a current Docker Desktop/provider run remain absent.
 Consequently this evidence improves the boundary without changing readiness. One
 frozen Docker Desktop candidate also proved bounded PostgreSQL/Keycloak
