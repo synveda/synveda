@@ -86,6 +86,12 @@ import {
   liveProviderIntentBytes,
   validateColimaLiveProviderIntentPublicationPlan,
 } from "./clean-engine-live-provider-intent.mjs";
+import {
+  LiveProviderStartDecisionFailure,
+  buildColimaLiveCompletedProviderIntentProjectionStructure,
+  buildColimaLiveProviderStartFreshAdmissionStructure,
+  liveProviderStartDecisionBytes,
+} from "./clean-engine-live-provider-start-decision.mjs";
 
 export {
   COLIMA_LIVE_FIXTURE_PRE_EFFECT_ADMISSION_SCHEMA,
@@ -5352,6 +5358,66 @@ function liveProviderIntentCompletion(completed) {
   });
 }
 
+function completedLiveProviderIntentSnapshot(state, fixtureOnly) {
+  const planSnapshot = completedLiveProviderPlanCoreSnapshot(state);
+  const completed = completedLiveProviderIntentForVariant(state, fixtureOnly);
+  assertLiveProviderIntentVariantHistory(state, fixtureOnly);
+  const expectedProviderContract = fixtureOnly
+    ? "live-provider-fixture-intent-only"
+    : "live-provider-intent-only";
+  if (
+    completed === undefined ||
+    completed.fixtureOnly !== fixtureOnly ||
+    completed.slot !== state.mutationSlots.at(-1) ||
+    completed.close !== state.mutationCloses.at(-1) ||
+    completed.close.value.slot_sequence !==
+      completed.slot.value.journal_sequence ||
+    completed.close.value.disposition !== "completed" ||
+    completed.close.value.authority !== "owner" ||
+    completed.close.value.result_sequence !== 0 ||
+    completed.close.value.result_head_sha256 !==
+      state.receiptState.head_sha256 ||
+    completed.close.value.result_environment_sha256 !== ZERO_SHA256 ||
+    completed.close.value.operation_evidence_sha256 !== ZERO_SHA256 ||
+    state.mutationLease !== undefined ||
+    state.mutationRecoveries.length !== 0 ||
+    state.mutationStages.length !== 0 ||
+    state.pendingPublication !== undefined ||
+    state.environment !== undefined ||
+    state.environmentPublication !== undefined ||
+    state.operationSettlement !== undefined ||
+    state.cleanupSettlement !== undefined ||
+    state.providerState.contract !== expectedProviderContract ||
+    state.providerState.operationEvidenceSha256 !== ZERO_SHA256 ||
+    state.cleanupState.contract !== "journal-only" ||
+    state.cleanupState.operationEvidenceSha256 !== ZERO_SHA256
+  ) {
+    fail("completed live provider intent was unavailable", 69);
+  }
+
+  const source = Object.freeze({
+    closeAuthority: completed.close.value.authority,
+    fixtureOnly: completed.fixtureOnly,
+    intentCompletion: liveProviderIntentCompletion(completed),
+    intentPublicationPlan: completed.publicationPlan,
+  });
+  let completedIntentProjection;
+  try {
+    completedIntentProjection =
+      buildColimaLiveCompletedProviderIntentProjectionStructure(source);
+  } catch (error) {
+    if (error instanceof LiveProviderStartDecisionFailure) {
+      fail("completed live provider intent projection was refused", error.exitStatus);
+    }
+    throw error;
+  }
+  return Object.freeze({
+    ...planSnapshot,
+    completedIntentProjection,
+    source,
+  });
+}
+
 function admissionArguments(argumentsValue, additionalFields = []) {
   const fields = [
     "observation",
@@ -5415,6 +5481,23 @@ function sameLiveProviderPlanSnapshot(left, right) {
     ) &&
     liveProviderPlanBytes(left.operationPlan).equals(
       liveProviderPlanBytes(right.operationPlan),
+    )
+  );
+}
+
+function sameCompletedLiveProviderIntentSnapshot(left, right) {
+  return (
+    sameLiveProviderPlanSnapshot(left, right) &&
+    left.source.closeAuthority === right.source.closeAuthority &&
+    left.source.fixtureOnly === right.source.fixtureOnly &&
+    liveProviderIntentBytes(left.source.intentCompletion).equals(
+      liveProviderIntentBytes(right.source.intentCompletion),
+    ) &&
+    liveProviderIntentBytes(left.source.intentPublicationPlan).equals(
+      liveProviderIntentBytes(right.source.intentPublicationPlan),
+    ) &&
+    liveProviderStartDecisionBytes(left.completedIntentProjection).equals(
+      liveProviderStartDecisionBytes(right.completedIntentProjection),
     )
   );
 }
@@ -5635,6 +5718,109 @@ export function observeColimaLivePreEffectAdmissionForTest(argumentsValue) {
       testCheckpoint: admittedArguments.testCheckpoint,
     },
   );
+}
+
+function buildLiveProviderStartFreshAdmission(snapshot, rootObservation) {
+  try {
+    return buildColimaLiveProviderStartFreshAdmissionStructure({
+      completedIntentProjection: snapshot.completedIntentProjection,
+      rootObservation,
+      source: snapshot.source,
+    });
+  } catch (error) {
+    if (error instanceof LiveProviderStartDecisionFailure) {
+      fail("live provider start fresh admission was refused", error.exitStatus);
+    }
+    throw error;
+  }
+}
+
+function observeColimaLiveProviderStartFreshAdmission(
+  admittedArguments,
+  { fixtureOnly, testCheckpoint },
+) {
+  const roots = prepareRoots(
+    admittedArguments.repoRoot,
+    admittedArguments.stateBase,
+    false,
+  );
+  const firstState = completedLiveProviderIntentSnapshot(
+    loadState(roots, true),
+    fixtureOnly,
+  );
+  const firstRoots = observeLivePreEffectRoots(
+    admittedArguments,
+    firstState,
+    fixtureOnly,
+  );
+  validateLivePreEffectRootBinding(firstRoots, firstState, fixtureOnly);
+  const firstAdmission = buildLiveProviderStartFreshAdmission(
+    firstState,
+    firstRoots,
+  );
+  testCheckpoint?.("after-first-process-start-admission-observation");
+
+  const secondState = completedLiveProviderIntentSnapshot(
+    loadState(roots, true),
+    fixtureOnly,
+  );
+  if (!sameCompletedLiveProviderIntentSnapshot(firstState, secondState)) {
+    fail("completed live provider intent state changed", 73);
+  }
+  const secondRoots = observeLivePreEffectRoots(
+    admittedArguments,
+    secondState,
+    fixtureOnly,
+  );
+  validateLivePreEffectRootBinding(secondRoots, secondState, fixtureOnly);
+  if (!colimaLiveBytes(firstRoots).equals(colimaLiveBytes(secondRoots))) {
+    fail("live provider start fresh observation changed", 73);
+  }
+  const secondAdmission = buildLiveProviderStartFreshAdmission(
+    secondState,
+    secondRoots,
+  );
+  if (
+    !liveProviderStartDecisionBytes(firstAdmission).equals(
+      liveProviderStartDecisionBytes(secondAdmission),
+    )
+  ) {
+    fail("live provider start fresh admission changed", 73);
+  }
+  return secondAdmission;
+}
+
+export function observeColimaLiveProviderStartFreshAdmissionForExecutor(
+  argumentsValue,
+) {
+  return observeColimaLiveProviderStartFreshAdmission(
+    admissionArguments(argumentsValue),
+    { fixtureOnly: false, testCheckpoint: undefined },
+  );
+}
+
+// This unsupported fixture seam substitutes only the small-file observation
+// requirements and an O1/S2 checkpoint. Journal and admission provenance stay
+// state-owned, and the returned value remains non-authorizing and read-only.
+export function observeColimaLiveProviderStartFreshAdmissionForTest(
+  argumentsValue,
+) {
+  const admittedArguments = admissionArguments(argumentsValue, [
+    "requirements",
+    "testCheckpoint",
+  ]);
+  if (
+    admittedArguments.requirements === null ||
+    Array.isArray(admittedArguments.requirements) ||
+    typeof admittedArguments.requirements !== "object" ||
+    typeof admittedArguments.testCheckpoint !== "function"
+  ) {
+    fail("live provider fixture start admission arguments were refused", 64);
+  }
+  return observeColimaLiveProviderStartFreshAdmission(admittedArguments, {
+    fixtureOnly: true,
+    testCheckpoint: admittedArguments.testCheckpoint,
+  });
 }
 
 function observeLiveProviderIntentAdmission(

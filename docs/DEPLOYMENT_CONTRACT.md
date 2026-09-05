@@ -447,12 +447,20 @@ reserve provider namespaces. State decision publication is false and state
 integration is `not-integrated`; the contracts are absent from the adapter
 registry and journal and leave slot v4, close v5 and recovery/root v3 intact.
 
-The next state seam must reconstruct the completed intent internally and perform
-a fresh `S1/O1/S2/O2` source/root observation. Caller-supplied serialized plans,
-projections, candidates or historical admissions are not authority. Journal
-reader, writer, successor grammar, hard-cut digests, CAS publication and
-abort-only recovery must subsequently change as one indivisible persistence
-slice.
+The state-owned observer reconstructs the completed intent internally and
+performs a fresh `S1/O1/S2/O2` source/root observation. It requires byte-equal
+completed-intent projections, intent completion/publication plans, operation
+plans, roots and derived admissions. Production and fixture exports hard-code
+their class and accept no caller-supplied state, source, plan, projection,
+candidate, historical admission, root result or authority. Repeated calls are
+fresh: a newly present foreign root yields a null candidate. The result is
+point-in-time evidence only and the observer writes no state or provider
+artifact.
+
+Journal reader, writer, successor grammar, hard-cut digests, CAS publication
+and abort-only recovery must subsequently change as one indivisible persistence
+slice. Until that cut, start-decision state publication remains false and no
+process-start authority exists.
 
 An uncatchable pre-publication interruption can retain one or more strictly
 validated `.pending-*` or `.run-*` staging directories. They contain no

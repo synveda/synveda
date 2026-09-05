@@ -668,24 +668,30 @@ publication, recovery, cleanup, lifecycle and finalization. They make no atomic
 reservation across the journal and provider namespaces. State integration and
 state decision publication are also explicitly disabled.
 
-These are canonical structural values only. They authenticate neither state nor
-observation provenance, are not registered with the provider adapter, are not
-accepted by the state journal and publish nothing. Slot v4, close v5 and
-recovery/root v3 therefore remain unchanged. A later persistence cut must change
-all readers, writers and recovery grammar together.
+The structural values alone authenticate neither state nor observation
+provenance. The state owner now reconstructs their source from the validated,
+terminal completed intent slot and owner close, then performs two independently
+loaded state snapshots and two fresh root observations in strict
+`S1/O1/S2/O2` order. Completed-intent projections, intent completions,
+publication plans, embedded operation plans, root observations and the two
+derived admissions must be byte-identical. The production and fixture exports
+hard-code their evidence class; callers cannot supply state snapshots, source,
+plan, projection, historical admission, root result, candidate or authority.
+
+This observer returns only the point-in-time non-authorizing structural
+admission. It is not registered with the provider adapter, is not accepted by
+the journal and publishes nothing. Repeated calls re-read state and roots;
+appearance of a foreign root returns a null candidate rather than replaying an
+earlier all-absent result. Slot v4, close v5 and recovery/root v3 therefore
+remain unchanged.
 
 ### Immediate next slice
 
-Add the state-owned fresh-admission observer after the completed inert intent.
-It must reconstruct the predecessor projection from validated state, treat the
-historical intent only as requested state, and rerun exact source/root
-observation in `S1/O1/S2/O2` order. The caller must not supply the plan,
-projection or candidate. Production and fixture evidence remain distinct, and
-the observer must publish no journal, process or provider artifact.
-
-Only after that provenance boundary is independently accepted may one
-indivisible persistence slice introduce the journal hard cuts, successor
-grammar, CAS publisher and abort-only recovery. Keep provider start,
+Introduce the process-start-decision journal integration as one indivisible
+persistence slice: hard-cut every journal reader/writer and close/recovery
+binding, add the exact successor grammar, publish only after repeated
+state-owned fresh admission at each CAS boundary, and add all-zero abort-only
+recovery. Keep provider start,
 execution/recovery, receipts, cleanup, lifecycle exposure and finalization
 disabled while cooperative process-group ownership, host-agent/Engine/socket/
 context identities, uncertain-start classification and dynamic-tree retirement

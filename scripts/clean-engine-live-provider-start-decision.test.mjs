@@ -808,7 +808,16 @@ test("the structural boundary directly owns no effect seam and leaves start guar
     new URL("../deploy/compose/scripts/clean-engine-state.mjs", import.meta.url),
     "utf8",
   );
-  assert.doesNotMatch(state, /provider-start-decision/u);
+  assert.match(
+    state,
+    /observeColimaLiveProviderStartFreshAdmissionForExecutor/u,
+  );
+  assert.doesNotMatch(state, /COLIMA_LIVE_PROVIDER_START_DECISION_ACTION/u);
+  assert.doesNotMatch(
+    state,
+    /(?:publish|recover|execute)ColimaLiveProviderStartDecision/u,
+  );
+  assert.doesNotMatch(state, /case "provider-start-decision"/u);
   const lifecycle = readFileSync(
     new URL(
       "../deploy/compose/scripts/clean-engine-acceptance.sh",

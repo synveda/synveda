@@ -294,16 +294,23 @@ observation; a foreign collision derives no candidate. Both contracts deny
 every process, adapter, effect, root, artifact, evidence, runtime, receipt,
 environment, recovery, cleanup, lifecycle and finalization capability. They
 also deny state decision publication and set `state_integration` to
-`not-integrated`. They carry no state or observation provenance, are not
-registered or journal-integrated, and leave slot v4, close v5 and recovery/root
-v3 unchanged.
+`not-integrated`. The state owner now reconstructs the terminal
+completed-intent source internally and performs two independent state loads and
+two fresh root observations in strict `S1/O1/S2/O2` order. Production and
+fixture APIs hard-code their evidence class and reject caller-supplied state,
+source, plan, projection, admission, root, candidate or authority. Equal
+all-absent samples return only the point-in-time non-authorizing decision; a
+fresh collision returns no candidate. The observer writes no journal, receipt,
+environment, provider, runtime or process artifact, is absent from lifecycle
+and adapter registries, and leaves slot v4, close v5 and recovery/root v3
+unchanged.
 
-No Docker, Colima or Lima process ran. Next add the state-owned fresh
-`S1/O1/S2/O2` admission observer without persistence, then introduce journal
-grammar, hard cuts, CAS publication and abort-only recovery as one indivisible
-slice. Live-provider identity, builder, proxy, browser and cleanup evidence
-follow; Linux/reference HTTPS must pass before legacy Rauthy/Temporal assets are
-deleted. Backup/restore, upgrade and Apalis remain open CPR-45 slices.
+No Docker, Colima or Lima process ran. Next introduce process-start-decision
+journal grammar, hard cuts, CAS publication and abort-only recovery as one
+indivisible slice. Live-provider identity, builder, proxy, browser and cleanup
+evidence follow; Linux/reference HTTPS must pass before legacy Rauthy/Temporal
+assets are deleted. Backup/restore, upgrade and Apalis remain open CPR-45
+slices.
 
 ## Unscheduled — not listed in the Sequencing section
 

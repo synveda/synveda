@@ -278,12 +278,20 @@ finalization remain false; cross-namespace atomic reservation is explicitly
 false. State decision publication is also false and state integration is
 `not-integrated` until the indivisible journal cut exists.
 
-Structural values authenticate neither state nor observation provenance and are
-not a journal integration or provider-adapter entry. Slot v4, close v5 and
-recovery/root v3 remain current. The next state-owned observer must reconstruct
-the predecessor from validated state and rerun fresh `S1/O1/S2/O2` admission.
-Only after that seam is accepted may one indivisible persistence change hard-cut
-the journal schemas and update grammar, CAS publication and abort-only recovery.
+Structural values alone authenticate neither state nor observation provenance.
+The state owner now reconstructs the predecessor exclusively from the validated
+terminal intent slot and owner close and reruns fresh `S1/O1/S2/O2` admission.
+Both completed-intent snapshots, root observations and derived admissions must
+be byte-equal. Production and fixture exports hard-code their class and reject
+caller-supplied state, source, plan, projection, root result, historical
+admission, candidate or authority. A later root collision suppresses the
+candidate rather than replaying an earlier observation.
+
+The observer is read-only, point-in-time evidence, not a journal integration or
+provider-adapter entry. Slot v4, close v5 and recovery/root v3 remain current.
+The next indivisible persistence change must hard-cut the journal schemas and
+update reader, writer, grammar, CAS publication and abort-only recovery
+together. No process authority follows from the observer.
 
 ## Options considered
 

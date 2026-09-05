@@ -34,6 +34,8 @@ import {
   liveProviderPlanRecoveryConfirmationForExecutor,
   observeColimaLivePreEffectAdmissionForExecutor,
   observeColimaLivePreEffectAdmissionForTest,
+  observeColimaLiveProviderStartFreshAdmissionForExecutor,
+  observeColimaLiveProviderStartFreshAdmissionForTest,
   projectLiveProviderPlanCompletionForExecutor,
   providerRecoveryConfirmationForExecutor,
   publishColimaLiveProviderIntentForExecutor,
@@ -56,6 +58,12 @@ import {
   buildColimaLiveEffectIntentCandidateStructure,
   buildColimaLiveProviderIntentPublicationPlan,
 } from "../deploy/compose/scripts/clean-engine-live-provider-intent.mjs";
+import {
+  COLIMA_LIVE_FIXTURE_COMPLETED_PROVIDER_INTENT_PROJECTION_SCHEMA,
+  COLIMA_LIVE_FIXTURE_PROCESS_START_DECISION_CANDIDATE_SCHEMA,
+  COLIMA_LIVE_FIXTURE_PROCESS_START_FRESH_ADMISSION_SCHEMA,
+  liveProviderStartDecisionBytes,
+} from "../deploy/compose/scripts/clean-engine-live-provider-start-decision.mjs";
 import {
   COLIMA_LIVE_PRE_EFFECT_ROOT_OBSERVATION_SCHEMA,
 } from "../deploy/compose/scripts/clean-engine-colima-live-schemas.mjs";
@@ -312,6 +320,68 @@ function fixtureIntentArguments(state, preparation, testCheckpoint = () => {}) {
   };
 }
 
+function prepareCompletedLiveProviderIntentFixture(state) {
+  const prepared = prepareLiveProviderIntentFixture(state);
+  const intentCompletion = publishColimaLiveProviderIntentForTest(
+    fixtureIntentArguments(state, prepared.preparation),
+  );
+  return { ...prepared, intentCompletion };
+}
+
+function fixtureStartAdmissionArguments(
+  state,
+  preparation,
+  testCheckpoint = () => {},
+) {
+  return {
+    observation: preparation.observation,
+    observationInput: preparation.input,
+    repoRoot: state.repo,
+    requirements: preparation.requirements,
+    stateBase: state.state,
+    testCheckpoint,
+  };
+}
+
+function assertNoStartDecisionArtifacts(active) {
+  assert.equal(
+    readdirSync(active).some((name) => /start-decision/u.test(name)),
+    false,
+  );
+  assert.equal(existsSync(join(active, "environment.json")), false);
+  assert.deepEqual(
+    readdirSync(active)
+      .filter((name) => /^\.mutation-slot-/u.test(name))
+      .sort(),
+    [".mutation-slot-00", ".mutation-slot-01"],
+  );
+  assert.deepEqual(
+    readdirSync(active)
+      .filter((name) => /^\.mutation-close-/u.test(name))
+      .sort(),
+    [".mutation-close-00", ".mutation-close-01"],
+  );
+  assert.deepEqual(
+    readdirSync(active).filter((name) => /^\.mutation-operation-/u.test(name)),
+    [],
+  );
+  assert.deepEqual(
+    readdirSync(active).filter((name) => /^\.mutation-stage-/u.test(name)),
+    [],
+  );
+  assert.deepEqual(
+    readdirSync(active).filter((name) => /^\.pending/u.test(name)),
+    [],
+  );
+  assert.deepEqual(
+    readdirSync(active).filter((name) => /^[0-9]{2}-.*\.json$/u.test(name)),
+    ["00-plan.json"],
+  );
+  for (const directory of ["evidence", "provider", "registry", "runtime"]) {
+    assert.deepEqual(readdirSync(join(active, directory)), []);
+  }
+}
+
 function productionIntentPublicationPlanForFixture(
   state,
   preparation,
@@ -340,7 +410,11 @@ function productionIntentPublicationPlanForFixture(
   });
 }
 
-function stageAbortedProductionLiveProviderIntent(state, publicationPlan) {
+function stageProductionLiveProviderIntent(
+  state,
+  publicationPlan,
+  disposition,
+) {
   const active = activeRun(state);
   const previousCloseBytes = readFileSync(join(active, ".mutation-close-00"));
   const slot = {
@@ -359,7 +433,7 @@ function stageAbortedProductionLiveProviderIntent(state, publicationPlan) {
   const close = {
     authority: "owner",
     authority_sha256: sha256(slotBytes),
-    disposition: "aborted-before-effect",
+    disposition,
     fixture_id: slot.fixture_id,
     operation_evidence_sha256: "0".repeat(64),
     operation_contract_sha256: slot.operation_contract_sha256,
@@ -375,6 +449,67 @@ function stageAbortedProductionLiveProviderIntent(state, publicationPlan) {
   writeFileSync(join(active, ".mutation-close-01"), canonicalBytes(close), {
     mode: 0o600,
   });
+}
+
+function stageAbortedProductionLiveProviderIntent(state, publicationPlan) {
+  stageProductionLiveProviderIntent(
+    state,
+    publicationPlan,
+    "aborted-before-effect",
+  );
+}
+
+function stageCompletedProductionLiveProviderIntent(state, publicationPlan) {
+  stageProductionLiveProviderIntent(state, publicationPlan, "completed");
+}
+
+function replaceCompletedFixtureIntentGeneration(state) {
+  const active = activeRun(state);
+  const firstSlot = parse(join(active, ".mutation-slot-01"));
+  const firstClosePath = join(active, ".mutation-close-01");
+  const firstCloseBytes = readFileSync(firstClosePath);
+  const firstClose = JSON.parse(firstCloseBytes.toString("utf8"));
+  firstClose.disposition = "aborted-before-effect";
+  const abortedCloseBytes = canonicalBytes(firstClose);
+  writeFileSync(firstClosePath, abortedCloseBytes, { mode: 0o600 });
+
+  const secondSlot = {
+    ...mutationLease(state, {
+      action: "provider-intent",
+      journalSequence: 2,
+      previousCloseSha256: sha256(abortedCloseBytes),
+    }),
+    operation_contract_sha256:
+      COLIMA_LIVE_FIXTURE_PROVIDER_INTENT_OPERATION_CONTRACT_SHA256,
+    operation_kind: COLIMA_LIVE_FIXTURE_PROVIDER_INTENT_OPERATION_KIND,
+    operation_plan: firstSlot.operation_plan,
+  };
+  const secondSlotBytes = canonicalBytes(secondSlot);
+  const secondSlotPath = join(active, ".mutation-slot-02");
+  writeFileSync(secondSlotPath, secondSlotBytes, { mode: 0o600 });
+  const secondClose = {
+    authority: "owner",
+    authority_sha256: sha256(secondSlotBytes),
+    disposition: "completed",
+    fixture_id: secondSlot.fixture_id,
+    operation_contract_sha256: secondSlot.operation_contract_sha256,
+    operation_evidence_sha256: "0".repeat(64),
+    operation_kind: secondSlot.operation_kind,
+    operation_plan_sha256: sha256(canonicalBytes(secondSlot.operation_plan)),
+    result_environment_sha256: secondSlot.source_environment_sha256,
+    result_head_sha256: secondSlot.source_head_sha256,
+    result_sequence: secondSlot.source_sequence,
+    schema: "synveda.clean-engine.mutation-close.v5",
+    slot_sequence: secondSlot.journal_sequence,
+    slot_sha256: sha256(secondSlotBytes),
+  };
+  const secondClosePath = join(active, ".mutation-close-02");
+  writeFileSync(secondClosePath, canonicalBytes(secondClose), { mode: 0o600 });
+  return () => {
+    unlinkSync(secondClosePath);
+    unlinkSync(secondSlotPath);
+    writeFileSync(firstClosePath, firstCloseBytes, { mode: 0o600 });
+  };
 }
 
 function mutationLease(state, {
@@ -1239,6 +1374,560 @@ test("fixture intent publication commits one inert state-only successor", () => 
     }
     rmSync(state.root, { recursive: true, force: true });
   }
+});
+
+test("completed fixture intent derives a fresh inert process-start admission", () => {
+  const state = fixture();
+  let preparation;
+  try {
+    const prepared = prepareCompletedLiveProviderIntentFixture(state);
+    preparation = prepared.preparation;
+    const stateBefore = snapshotTree(state.root);
+    const preparationBefore = snapshotTree(preparation.root);
+    const checkpoints = [];
+    const result = observeColimaLiveProviderStartFreshAdmissionForTest(
+      fixtureStartAdmissionArguments(state, preparation, (checkpoint) => {
+        checkpoints.push(checkpoint);
+      }),
+    );
+
+    assert.deepEqual(Object.keys(result).sort(), [
+      "authority",
+      "completed_intent_projection",
+      "process_start_decision_candidate",
+      "root_observation",
+      "schema",
+      "supervisor_process_group_label",
+    ]);
+    assert.equal(
+      result.schema,
+      COLIMA_LIVE_FIXTURE_PROCESS_START_FRESH_ADMISSION_SCHEMA,
+    );
+    assert.equal(
+      result.authority,
+      "fixture-only-point-in-time-not-process-start-authority",
+    );
+    assert.equal(
+      result.completed_intent_projection.schema,
+      COLIMA_LIVE_FIXTURE_COMPLETED_PROVIDER_INTENT_PROJECTION_SCHEMA,
+    );
+    assert.equal(
+      result.completed_intent_projection.provider_intent_slot_sha256,
+      prepared.intentCompletion.intent_slot_sha256,
+    );
+    assert.equal(
+      result.completed_intent_projection.provider_intent_close_sha256,
+      prepared.intentCompletion.intent_close_sha256,
+    );
+    assert.equal(
+      result.completed_intent_projection.provider_intent_publication_plan_sha256,
+      prepared.intentCompletion.intent_publication_plan_sha256,
+    );
+    assert.equal(
+      result.completed_intent_projection.completed_plan_projection_sha256,
+      prepared.intentCompletion.completed_plan_projection_sha256,
+    );
+    assert.equal(result.root_observation.root_set_disposition, "observed-absent");
+    const candidate = result.process_start_decision_candidate;
+    assert.notEqual(candidate, null);
+    assert.equal(
+      candidate.schema,
+      COLIMA_LIVE_FIXTURE_PROCESS_START_DECISION_CANDIDATE_SCHEMA,
+    );
+    assert.equal(candidate.decision, "requested-not-executed-not-authorized");
+    assert.equal(candidate.effect_name, "provider-process-start");
+    assert.equal(candidate.process_state, "not-reached");
+    assert.equal(candidate.process_start_authorized, false);
+    assert.equal(candidate.cross_namespace_atomic_reservation, false);
+    assert.equal(candidate.future_effect_fresh_admission_required, true);
+    assert.equal(
+      candidate.completed_intent_projection_sha256,
+      sha256(liveProviderStartDecisionBytes(result.completed_intent_projection)),
+    );
+    assert.equal(
+      candidate.root_observation_sha256,
+      sha256(liveProviderStartDecisionBytes(result.root_observation)),
+    );
+    assert.deepEqual(checkpoints, [
+      "after-first-process-start-admission-observation",
+    ]);
+    assertRecursivelyFrozen(result);
+    assert.deepEqual(snapshotTree(state.root), stateBefore);
+    assert.deepEqual(snapshotTree(preparation.root), preparationBefore);
+    assertNoStartDecisionArtifacts(prepared.active);
+
+    const serialized = liveProviderStartDecisionBytes(result).toString("utf8");
+    for (const forbidden of [
+      preparation.root,
+      preparation.home,
+      preparation.providerRoot,
+      preparation.input.binding_key.toString("hex"),
+      preparation.input.binding_key.toString("base64"),
+      "binding_key",
+      "command",
+      "credential",
+      "docker-context",
+      "environment.json",
+      "guest-engine",
+      "host-agent",
+      "hostagent",
+      "HOME",
+      "PGID",
+      "PID",
+      "provider-start-decision.json",
+      "socket",
+    ]) {
+      assert.equal(serialized.includes(forbidden), false, forbidden);
+    }
+
+    checkpoints.length = 0;
+    const repeatedStateBefore = snapshotTree(state.root);
+    const repeatedPreparationBefore = snapshotTree(preparation.root);
+    const repeated = observeColimaLiveProviderStartFreshAdmissionForTest(
+      fixtureStartAdmissionArguments(state, preparation, (checkpoint) => {
+        checkpoints.push(checkpoint);
+      }),
+    );
+    assert.deepEqual(repeated, result);
+    assert.deepEqual(checkpoints, [
+      "after-first-process-start-admission-observation",
+    ]);
+    assert.deepEqual(snapshotTree(state.root), repeatedStateBefore);
+    assert.deepEqual(snapshotTree(preparation.root), repeatedPreparationBefore);
+
+    const collisionPath = join(
+      preparation.input.environment.COLIMA_HOME,
+      preparation.input.provider_profile,
+    );
+    writePrivateColimaLiveFixtureFile(
+      collisionPath,
+      Buffer.from("foreign collision\n", "utf8"),
+      0o600,
+    );
+    const collisionStateBefore = snapshotTree(state.root);
+    const collisionPreparationBefore = snapshotTree(preparation.root);
+    const collision = observeColimaLiveProviderStartFreshAdmissionForTest(
+      fixtureStartAdmissionArguments(state, preparation),
+    );
+    assert.equal(collision.root_observation.root_set_disposition, "foreign-collision");
+    assert.equal(collision.process_start_decision_candidate, null);
+    assertRecursivelyFrozen(collision);
+    assert.deepEqual(snapshotTree(state.root), collisionStateBefore);
+    assert.deepEqual(snapshotTree(preparation.root), collisionPreparationBefore);
+    unlinkSync(collisionPath);
+
+    const restoredStateBefore = snapshotTree(state.root);
+    const restoredPreparationBefore = snapshotTree(preparation.root);
+    const restored = observeColimaLiveProviderStartFreshAdmissionForTest(
+      fixtureStartAdmissionArguments(state, preparation),
+    );
+    assert.notEqual(restored.process_start_decision_candidate, null);
+    assert.deepEqual(snapshotTree(state.root), restoredStateBefore);
+    assert.deepEqual(snapshotTree(preparation.root), restoredPreparationBefore);
+    assertNoStartDecisionArtifacts(prepared.active);
+    assert.equal(run(state, "status").status, 0);
+    assert.equal(run(state, "verify").status, 0);
+  } finally {
+    if (preparation !== undefined) {
+      rmSync(preparation.root, { recursive: true, force: true });
+    }
+    rmSync(state.root, { recursive: true, force: true });
+  }
+});
+
+test("process-start admission rejects caller provenance and the wrong intent class", () => {
+  const state = fixture();
+  const incomplete = fixture();
+  const production = fixture();
+  let foreignPreparation;
+  let preparation;
+  let incompletePreparation;
+  let productionPreparation;
+  try {
+    const prepared = prepareCompletedLiveProviderIntentFixture(state);
+    preparation = prepared.preparation;
+    const incompletePrepared = prepareLiveProviderIntentFixture(incomplete);
+    incompletePreparation = incompletePrepared.preparation;
+    assert.throws(
+      () =>
+        observeColimaLiveProviderStartFreshAdmissionForTest(
+          fixtureStartAdmissionArguments(incomplete, incompletePreparation),
+        ),
+      /completed live provider intent was unavailable/u,
+    );
+
+    const productionPrepared = prepareLiveProviderIntentFixture(production);
+    productionPreparation = productionPrepared.preparation;
+    stageCompletedProductionLiveProviderIntent(
+      production,
+      productionIntentPublicationPlanForFixture(
+        production,
+        productionPreparation,
+        productionPrepared.operationPlan,
+      ),
+    );
+    assert.throws(
+      () =>
+        observeColimaLiveProviderStartFreshAdmissionForTest(
+          fixtureStartAdmissionArguments(production, productionPreparation),
+        ),
+      (error) => {
+        assert.equal(
+          error.message,
+          "live provider intent evidence class already differs",
+        );
+        assert.equal(error.exitStatus, 73);
+        return true;
+      },
+    );
+
+    const stateBefore = snapshotTree(state.state);
+    chmodSync(preparation.providerRoot, 0o000);
+    try {
+      const base = fixtureStartAdmissionArguments(state, preparation);
+      for (const field of [
+        "admission",
+        "authority",
+        "closeAuthority",
+        "completedIntentProjection",
+        "completed_intent_projection",
+        "fixtureOnly",
+        "intentCompletion",
+        "intentPublicationPlan",
+        "operationPlan",
+        "processStartDecisionCandidate",
+        "rootObservation",
+        "source",
+        "stateSnapshot",
+      ]) {
+        assert.throws(
+          () =>
+            observeColimaLiveProviderStartFreshAdmissionForTest({
+              ...base,
+              [field]: null,
+            }),
+          (error) => {
+            assert.equal(error.exitStatus, 64, field);
+            return true;
+          },
+        );
+      }
+      assert.throws(
+        () =>
+          observeColimaLiveProviderStartFreshAdmissionForExecutor({
+            observation: preparation.observation,
+            observationInput: preparation.input,
+            repoRoot: state.repo,
+            stateBase: state.state,
+          }),
+        (error) => {
+          assert.equal(error.message, "live provider intent evidence class already differs");
+          assert.equal(error.exitStatus, 73);
+          return true;
+        },
+      );
+
+      const executorBase = {
+        observation: preparation.observation,
+        observationInput: preparation.input,
+        repoRoot: state.repo,
+        stateBase: state.state,
+      };
+      for (const malformed of [
+        null,
+        {},
+        { ...executorBase, observation: null },
+        { ...executorBase, observationInput: [] },
+        { ...executorBase, repoRoot: "" },
+        { ...executorBase, stateBase: 1 },
+      ]) {
+        assert.throws(
+          () =>
+            observeColimaLiveProviderStartFreshAdmissionForExecutor(malformed),
+          (error) => {
+            assert.equal(error.exitStatus, 64);
+            return true;
+          },
+        );
+      }
+      for (const malformed of [
+        { ...base, requirements: null },
+        { ...base, requirements: [] },
+        { ...base, testCheckpoint: null },
+      ]) {
+        assert.throws(
+          () => observeColimaLiveProviderStartFreshAdmissionForTest(malformed),
+          (error) => {
+            assert.equal(error.exitStatus, 64);
+            return true;
+          },
+        );
+      }
+    } finally {
+      chmodSync(preparation.providerRoot, 0o700);
+    }
+
+    foreignPreparation = createCleanEngineColimaLiveObservationFixture({
+      fixtureId: "f".repeat(32),
+    });
+    chmodSync(foreignPreparation.providerRoot, 0o000);
+    assert.throws(
+      () =>
+        observeColimaLiveProviderStartFreshAdmissionForTest({
+          observation: foreignPreparation.observation,
+          observationInput: foreignPreparation.input,
+          repoRoot: state.repo,
+          requirements: foreignPreparation.requirements,
+          stateBase: state.state,
+          testCheckpoint() {},
+        }),
+      (error) => {
+        assert.equal(
+          error.message,
+          "live provider pre-effect observation binding was refused",
+        );
+        assert.equal(error.exitStatus, 73);
+        return true;
+      },
+    );
+    chmodSync(foreignPreparation.providerRoot, 0o700);
+    assert.deepEqual(snapshotTree(state.state), stateBefore);
+    assertNoStartDecisionArtifacts(prepared.active);
+    assertNoStartDecisionArtifacts(productionPrepared.active);
+  } finally {
+    if (foreignPreparation !== undefined) {
+      chmodSync(foreignPreparation.providerRoot, 0o700);
+      rmSync(foreignPreparation.root, { recursive: true, force: true });
+    }
+    if (incompletePreparation !== undefined) {
+      rmSync(incompletePreparation.root, { recursive: true, force: true });
+    }
+    if (productionPreparation !== undefined) {
+      rmSync(productionPreparation.root, { recursive: true, force: true });
+    }
+    if (preparation !== undefined) {
+      chmodSync(preparation.providerRoot, 0o700);
+      rmSync(preparation.root, { recursive: true, force: true });
+    }
+    rmSync(incomplete.root, { recursive: true, force: true });
+    rmSync(production.root, { recursive: true, force: true });
+    rmSync(state.root, { recursive: true, force: true });
+  }
+});
+
+test("process-start admission refuses state and root drift between fresh samples", () => {
+  const cases = [
+    {
+      errorMessage: "live provider start fresh observation changed",
+      exitStatus: 73,
+      name: "target-appeared",
+      mutate({ preparation }) {
+        writePrivateColimaLiveFixtureFile(
+          join(
+            preparation.input.environment.COLIMA_HOME,
+            preparation.input.provider_profile,
+          ),
+          Buffer.from("appeared\n", "utf8"),
+          0o600,
+        );
+      },
+      restore({ preparation }) {
+        unlinkSync(
+          join(
+            preparation.input.environment.COLIMA_HOME,
+            preparation.input.provider_profile,
+          ),
+        );
+      },
+    },
+    {
+      errorMessage: "live provider start fresh observation changed",
+      exitStatus: 73,
+      name: "collision-disappeared",
+      prepare({ preparation }) {
+        writePrivateColimaLiveFixtureFile(
+          join(
+            preparation.input.environment.COLIMA_HOME,
+            preparation.input.provider_profile,
+          ),
+          Buffer.from("collision\n", "utf8"),
+          0o600,
+        );
+      },
+      mutate({ preparation }) {
+        unlinkSync(
+          join(
+            preparation.input.environment.COLIMA_HOME,
+            preparation.input.provider_profile,
+          ),
+        );
+      },
+      restore({ preparation }) {
+        writePrivateColimaLiveFixtureFile(
+          join(
+            preparation.input.environment.COLIMA_HOME,
+            preparation.input.provider_profile,
+          ),
+          Buffer.from("collision\n", "utf8"),
+          0o600,
+        );
+      },
+    },
+    {
+      errorMessage: "source worktree is not clean",
+      exitStatus: 78,
+      name: "source-drifted",
+      mutate({ state }) {
+        writeFileSync(join(state.repo, "source.txt"), "drifted source\n");
+      },
+      restore({ state }) {
+        writeFileSync(join(state.repo, "source.txt"), "fixture source\n");
+      },
+    },
+    {
+      errorMessage: "mutation close was refused",
+      exitStatus: 78,
+      name: "intent-slot-drifted",
+      mutate({ active }) {
+        const path = join(active, ".mutation-slot-01");
+        const slot = parse(path);
+        slot.intent_receipt_sha256 = "f".repeat(64);
+        writeFileSync(path, canonicalBytes(slot), { mode: 0o600 });
+      },
+      restore({ active, slotBytes }) {
+        writeFileSync(join(active, ".mutation-slot-01"), slotBytes, {
+          mode: 0o600,
+        });
+      },
+    },
+    {
+      errorMessage: "mutation close receipt binding was refused",
+      exitStatus: 78,
+      name: "intent-close-drifted",
+      mutate({ active }) {
+        const path = join(active, ".mutation-close-01");
+        const close = parse(path);
+        close.result_head_sha256 = "f".repeat(64);
+        writeFileSync(path, canonicalBytes(close), { mode: 0o600 });
+      },
+      restore({ active, closeBytes }) {
+        writeFileSync(join(active, ".mutation-close-01"), closeBytes, {
+          mode: 0o600,
+        });
+      },
+    },
+    {
+      errorMessage: "completed live provider intent state changed",
+      exitStatus: 73,
+      name: "valid-completed-intent-generation-changed",
+      mutate(context) {
+        context.restoreGeneration =
+          replaceCompletedFixtureIntentGeneration(context.state);
+      },
+      restore({ restoreGeneration }) {
+        restoreGeneration();
+      },
+    },
+  ];
+
+  for (const value of cases) {
+    const state = fixture();
+    let preparation;
+    try {
+      const prepared = prepareCompletedLiveProviderIntentFixture(state);
+      preparation = prepared.preparation;
+      const context = {
+        active: prepared.active,
+        closeBytes: readFileSync(join(prepared.active, ".mutation-close-01")),
+        preparation,
+        slotBytes: readFileSync(join(prepared.active, ".mutation-slot-01")),
+        state,
+      };
+      value.prepare?.(context);
+      const stateBefore = snapshotTree(state.state);
+      let checkpoints = 0;
+      assert.throws(
+        () =>
+          observeColimaLiveProviderStartFreshAdmissionForTest(
+            fixtureStartAdmissionArguments(state, preparation, (checkpoint) => {
+              assert.equal(
+                checkpoint,
+                "after-first-process-start-admission-observation",
+              );
+              checkpoints += 1;
+              value.mutate(context);
+            }),
+        ),
+        (error) => {
+          assert.equal(error.message, value.errorMessage, value.name);
+          assert.equal(error.exitStatus, value.exitStatus, value.name);
+          return true;
+        },
+      );
+      assert.equal(checkpoints, 1, value.name);
+      value.restore(context);
+      if (
+        !value.name.includes("intent-") &&
+        !value.name.includes("generation-")
+      ) {
+        assert.deepEqual(snapshotTree(state.state), stateBefore, value.name);
+      }
+      assertNoStartDecisionArtifacts(prepared.active);
+      assert.equal(run(state, "verify").status, 0, value.name);
+    } finally {
+      if (preparation !== undefined) {
+        rmSync(preparation.root, { recursive: true, force: true });
+      }
+      rmSync(state.root, { recursive: true, force: true });
+    }
+  }
+});
+
+test("state-owned process-start admission has no persistence or effect surface", () => {
+  const stateSource = readFileSync(
+    new URL("../deploy/compose/scripts/clean-engine-state.mjs", import.meta.url),
+    "utf8",
+  );
+  const start = stateSource.indexOf(
+    "function completedLiveProviderIntentSnapshot",
+  );
+  const end = stateSource.indexOf(
+    "function observeLiveProviderIntentAdmission",
+    start,
+  );
+  assert.ok(start >= 0 && end > start);
+  const observerSource = stateSource.slice(start, end);
+  assert.doesNotMatch(
+    observerSource,
+    /\b(?:acquire|append|close|execute|finalize|launch|link|publish|reconcile|recover|rename|spawn|unlink|write)[A-Za-z0-9_]*\s*\(/u,
+  );
+  assert.doesNotMatch(
+    observerSource,
+    /buildColimaLiveProviderStartDecision(?:PublicationPlan|Completion)/u,
+  );
+  assert.doesNotMatch(
+    observerSource,
+    /(?:providerAdapter|providerProcess|mutationOperation|receiptFileName)/u,
+  );
+
+  const lifecycle = readFileSync(
+    new URL(
+      "../deploy/compose/scripts/clean-engine-acceptance.sh",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  assert.match(lifecycle, /plan\|status\|verify/u);
+  assert.doesNotMatch(lifecycle, /process-start-fresh-admission/u);
+
+  const registry = readFileSync(
+    new URL(
+      "../deploy/compose/scripts/clean-engine-provider-adapter-registry.mjs",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  assert.doesNotMatch(registry, /provider-start-decision-publication/u);
 });
 
 test("intent publication reasserts its evidence class after a competing abort", () => {
