@@ -267,6 +267,24 @@ admission. The logical supervisor label is not a PID/PGID, ownership or
 liveness fact. Serialized values lose provenance and cannot be submitted as
 authority.
 
+The next boundary first exists as a closed, effect-free structural contract,
+separate for production and fixtures. It binds the exact completed intent slot,
+close, publication plan and completed-plan projection, and its only decision
+value is `requested-not-executed-not-authorized`. An all-absent observation
+derives that inert candidate; a foreign collision derives `null`. Process
+start/spawn/signal, adapter/effect execution, root mutation, provider/evidence/
+runtime/receipt/environment publication, recovery, cleanup, lifecycle and
+finalization remain false; cross-namespace atomic reservation is explicitly
+false. State decision publication is also false and state integration is
+`not-integrated` until the indivisible journal cut exists.
+
+Structural values authenticate neither state nor observation provenance and are
+not a journal integration or provider-adapter entry. Slot v4, close v5 and
+recovery/root v3 remain current. The next state-owned observer must reconstruct
+the predecessor from validated state and rerun fresh `S1/O1/S2/O2` admission.
+Only after that seam is accepted may one indivisible persistence change hard-cut
+the journal schemas and update grammar, CAS publication and abort-only recovery.
+
 ## Options considered
 
 1. **Keep contributor and installed Compose separate** — preserves current

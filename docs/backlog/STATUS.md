@@ -287,14 +287,23 @@ writes no provider or operation evidence. Collisions and drift abort before
 effect. Abandoned intent recovery is explicit, all-zero and abort-only; exact
 completed retries return historical non-authorizing state without a fresh root
 claim. Shared journal CAS does not reserve the separate Colima/Lima namespaces,
-so a future effect owner must perform fresh admission.
+so a future effect owner must perform fresh admission. Closed production and
+fixture process-start-decision structures now bind the completed intent and can
+derive only `requested-not-executed-not-authorized` from an all-absent
+observation; a foreign collision derives no candidate. Both contracts deny
+every process, adapter, effect, root, artifact, evidence, runtime, receipt,
+environment, recovery, cleanup, lifecycle and finalization capability. They
+also deny state decision publication and set `state_integration` to
+`not-integrated`. They carry no state or observation provenance, are not
+registered or journal-integrated, and leave slot v4, close v5 and recovery/root
+v3 unchanged.
 
-No Docker, Colima or Lima process ran. Next define the future effect owner's
-fresh admission and inert process-start decision without starting a provider or
-publishing an out-of-journal artifact. Live-provider identity, builder,
-proxy, browser and cleanup evidence follow; Linux/reference HTTPS must pass
-before legacy Rauthy/Temporal assets are deleted. Backup/restore, upgrade and
-Apalis remain open CPR-45 slices.
+No Docker, Colima or Lima process ran. Next add the state-owned fresh
+`S1/O1/S2/O2` admission observer without persistence, then introduce journal
+grammar, hard cuts, CAS publication and abort-only recovery as one indivisible
+slice. Live-provider identity, builder, proxy, browser and cleanup evidence
+follow; Linux/reference HTTPS must pass before legacy Rauthy/Temporal assets are
+deleted. Backup/restore, upgrade and Apalis remain open CPR-45 slices.
 
 ## Unscheduled — not listed in the Sequencing section
 

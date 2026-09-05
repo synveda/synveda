@@ -431,6 +431,29 @@ retries return the historical non-authorizing completion without a fresh root
 claim. Serialized admission values are never accepted as authority, and the
 supported lifecycle remains `plan|status|verify`.
 
+The successor process-start-decision structures are closed and effect-free but
+not yet a state integration. Production operation kind
+`colima-live-provider-start-decision-publication-v1` has contract digest
+`3f854fdfacd07607a5e48b54d4e94a7681c34bc7fb7c19d38440a59e79375c82`;
+the fixture-only domain has digest
+`59a735387a1da53ad7aaaae9877b2d087ce329833ce04bc0db437357f591bdef`.
+They bind the completed intent slot, close, publication-plan and completed-plan
+projection digests. An all-absent root observation derives only
+`requested-not-executed-not-authorized`; a foreign collision derives no
+candidate. Process start/spawn/signal, adapter/effect execution, root mutation,
+provider/evidence/runtime/receipt/environment publication, recovery, cleanup,
+lifecycle and finalization are false. The structures do not prove provenance or
+reserve provider namespaces. State decision publication is false and state
+integration is `not-integrated`; the contracts are absent from the adapter
+registry and journal and leave slot v4, close v5 and recovery/root v3 intact.
+
+The next state seam must reconstruct the completed intent internally and perform
+a fresh `S1/O1/S2/O2` source/root observation. Caller-supplied serialized plans,
+projections, candidates or historical admissions are not authority. Journal
+reader, writer, successor grammar, hard-cut digests, CAS publication and
+abort-only recovery must subsequently change as one indivisible persistence
+slice.
+
 An uncatchable pre-publication interruption can retain one or more strictly
 validated `.pending-*` or `.run-*` staging directories. They contain no
 provider, registry, runtime or evidence mutation, have no `active` authority

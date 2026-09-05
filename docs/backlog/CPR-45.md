@@ -653,12 +653,39 @@ process, VM, Engine, socket or context creation. The supervisor label remains
 logical rather than a PID, PGID, ownership or liveness claim. A future effect
 owner must perform fresh admission.
 
+The next process-start boundary now has a closed, effect-free Colima/Lima
+structural contract. Production operation kind
+`colima-live-provider-start-decision-publication-v1` has contract digest
+`3f854fdfacd07607a5e48b54d4e94a7681c34bc7fb7c19d38440a59e79375c82`;
+the structurally separate fixture contract has digest
+`59a735387a1da53ad7aaaae9877b2d087ce329833ce04bc0db437357f591bdef`.
+Both bind the exact completed intent slot, close, publication plan and completed
+plan projection. An all-absent fresh observation can derive only
+`requested-not-executed-not-authorized`; a foreign collision derives no
+candidate. The contracts explicitly deny process start/spawn/signal, adapter or
+effect execution, root mutation, artifact/evidence/runtime/receipt/environment
+publication, recovery, cleanup, lifecycle and finalization. They make no atomic
+reservation across the journal and provider namespaces. State integration and
+state decision publication are also explicitly disabled.
+
+These are canonical structural values only. They authenticate neither state nor
+observation provenance, are not registered with the provider adapter, are not
+accepted by the state journal and publish nothing. Slot v4, close v5 and
+recovery/root v3 therefore remain unchanged. A later persistence cut must change
+all readers, writers and recovery grammar together.
+
 ### Immediate next slice
 
-Define the future effect owner's fresh admission and process-start decision as
-a new, closed boundary after the completed inert intent. It must treat the
-historical intent only as requested state, re-observe the exact roots and source,
-and publish no process or provider artifact in this slice. Keep provider start,
+Add the state-owned fresh-admission observer after the completed inert intent.
+It must reconstruct the predecessor projection from validated state, treat the
+historical intent only as requested state, and rerun exact source/root
+observation in `S1/O1/S2/O2` order. The caller must not supply the plan,
+projection or candidate. Production and fixture evidence remain distinct, and
+the observer must publish no journal, process or provider artifact.
+
+Only after that provenance boundary is independently accepted may one
+indivisible persistence slice introduce the journal hard cuts, successor
+grammar, CAS publisher and abort-only recovery. Keep provider start,
 execution/recovery, receipts, cleanup, lifecycle exposure and finalization
 disabled while cooperative process-group ownership, host-agent/Engine/socket/
 context identities, uncertain-start classification and dynamic-tree retirement
