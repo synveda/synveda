@@ -408,7 +408,7 @@ The provider seam retains two fixed fake-only paths. The synchronous
 state-integrated actor protocol and its fixtures are deleted. The controlled
 path is now the separately supervised background fake: a canonical operation
 plan binds the private provider base, evidence directory, exact root key and
-ownership nonce before slot acquisition; the v2 slot and v4 intent become
+ownership nonce before slot acquisition; the v3 slot and v4 intent become
 durable before root mutation. The state owner alone publishes the inner create
 authority and launches the repository-fixed controller/host-agent chain. No
 caller function, command, environment or provider selector enters the adapter.
@@ -591,17 +591,44 @@ environment finalizer, so finalization remains blocked. No Docker, Colima,
 resolver, registry, database, live-provider or host-management command ran in
 this slice; only bounded repository-owned fake processes and sockets were used.
 
+The live effect-intent boundary is now defined without publication. A read-only
+state seam accepts only the newest completed owner `provider-plan` and projects
+its slot, close, embedded-plan and preparation-observation digests. Only the
+direct in-memory return reflects that state read; serialization loses
+provenance. Separate structural helpers bind a candidate to a projection and
+plan and an empty prefix to the candidate, but authenticate neither state nor
+observation and deliberately accept manufactured or replayed values. The
+candidate can state only `provider-create` with `requested-not-authorized`; the
+logical pre-effect prefix has exactly zero entries and does not use the reserved
+live create-evidence schema. Neither value is durable, and neither asserts
+provider/resource/process/host-agent/Engine/socket/context absence. Seven
+focused tests cover exact shapes, cross-binding, explicit manufactured-value
+acceptance, an actually empty prefix, content-free output and static absence of
+process, state-mutation, receipt and lifecycle seams. A recursive snapshot also
+proves the state projection changes no source or journal byte or enumerated
+mode/owner/link/inode/size metadata.
+
 ### Immediate next slice
 
-Design a fresh live effect-intent and evidence prefix that consumes only the
-completed plan slot/close and re-presents the full private preparation input for
-current revalidation. Keep execution and provider recovery disabled until exact
-pre-intent absence, process-group ownership, host-agent/Engine/socket/context
-identities, uncertain-start classification and dynamic-tree retirement are
-closed under adversarial tests. Do not branch through, relabel or mutate the
-deterministic controlled-background class, and do not expose a supported
-lifecycle target. Finalization remains blocked until a separately reviewed live
-environment-manifest schema exists.
+Design one truthful read-only live pre-effect admission observer. It must obtain
+the exact completed-plan projection internally, reopen journal/source and the
+current full production observation in the same operation, and reject every
+caller-supplied serialized projection or candidate as proof. It must then
+distinguish exact private-root absence from a foreign collision without
+traversing or adopting it, and close the bounded provider/Lima/process-group
+names that can be known before start. It must not infer live absence from the
+caller-supplied host preparation record. After adversarial deterministic tests,
+publish the inert intent only through a distinct successor action in the shared
+mutation journal, with a reviewed slot/close hard cut and exact crash handling;
+never write an out-of-journal provider artifact. Keep process start, provider
+execution/recovery, receipts, cleanup, lifecycle exposure and finalization
+disabled.
+
+Then close cooperative process-group ownership, host-agent/Engine/socket/context
+identities, uncertain-start classification and dynamic-tree retirement under
+adversarial tests. Do not branch through, relabel or mutate the deterministic
+controlled-background class. Finalization remains blocked until a separately
+reviewed live environment-manifest schema exists.
 
 The first real invocation must use the closed helper `PATH`, explicit provider
 roots, `--mount none`, the receipt-owned disk copy and the privately bound real

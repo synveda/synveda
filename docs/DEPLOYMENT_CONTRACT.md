@@ -148,19 +148,19 @@ non-mutating preparation state and create a new plan; there is no compatibility
 mode.
 
 All receipt appends and finalization use an append-only, private, content-free
-mutation journal. A permanent v2 `.mutation-slot-SS` binds the closed action,
+mutation journal. A permanent v3 `.mutation-slot-SS` binds the closed action,
 exact source receipt/environment endpoints, intended provider receipt, random
 nonce, cooperative process-instance challenge, prior close digest, operation
 kind, contract and canonical plan. A permanent
 `.mutation-operation-SS` is the outer provider-operation settlement. A
-permanent v3 `.mutation-close-SS` binds exact result endpoints, operation
+permanent v4 `.mutation-close-SS` binds exact result endpoints, operation
 identity, the slot-owner or newest recovery authority and the outer settlement
 digest.
 Recovery attempts append permanent, gap-free `.mutation-recovery-SS-RR`
 v2 claims whose chain root binds the same operation. These final names are
 never deleted or reused; the next slot is valid only when it binds the prior
-close exactly. Mutation slot v1, recovery/root v1, close v1/v2 and the reusable
-`.mutation-lease` layout are fresh-plan hard-cut refusals.
+close exactly. Mutation slot v1/v2, recovery/root v1, close v1/v2/v3 and the
+reusable `.mutation-lease` layout are fresh-plan hard-cut refusals.
 
 Blockers are completed and fsynced under unique private staging names, then
 linked atomically without replacement. Interruption leaves either an inert
@@ -179,7 +179,7 @@ The internal provider-create seam retains the synchronous closed-data fake as
 rollback. Its controlled path is the lifecycle-unexposed background fake; the
 former detached actor implementation is removed. A canonical
 `background-create-operation-plan.v1` binds the private provider base, evidence
-directory, root key and ownership nonce before the v2 slot and v4 intent become
+directory, root key and ownership nonce before the v3 slot and v4 intent become
 durable. The state owner alone publishes `background-create-authority.v1` and
 launches the fixed controller/host-agent chain. The adapter accepts no caller
 function, command, environment, path or provider selector.
@@ -365,6 +365,31 @@ production builder derives a plan from a fully revalidated production
 observation. A later live provider still needs causal
 process/socket/Engine/context ownership and dynamic-tree retirement and must not
 reuse the controlled-background fake.
+
+The read-only state owner can project an already validated, newest completed
+owner plan into
+`synveda.clean-engine.colima-live-plan-completion-projection.v1`. The projection
+contains only the slot, close, embedded-plan and preparation-observation
+digests. Only the direct in-memory return reflects the state just read; a
+serialized or reconstructed projection carries no state provenance. Separate
+structural helpers close the internal bindings of
+`synveda.clean-engine.colima-live-effect-intent-candidate.v1`, which states only
+`provider-create` and `requested-not-authorized`, and
+`synveda.clean-engine.colima-live-empty-pre-effect-prefix.v1` projection binds
+the candidate digest and has exactly zero entries. Those helpers authenticate
+neither state nor observation and deliberately accept manufactured or replayed
+structurally valid values. The structures do not inhabit the reserved
+create-evidence schema or assert resource, process, host-agent, Engine, socket
+or context absence.
+
+These three values are deterministic and content-free, but none is published.
+The completed-plan mutation seal, receipt grammar, registry capabilities and
+supported `plan|status|verify` lifecycle remain unchanged. A future durable
+intent must be composed by one admission operation that obtains the projection
+internally, reopens journal/source and the full production observation, and
+rejects caller-supplied serialized projections or candidates as proof. It must
+then gain a truthful live-absence observation and win a distinct shared-CAS
+journal action; an out-of-journal provider file is forbidden.
 
 An uncatchable pre-publication interruption can retain one or more strictly
 validated `.pending-*` or `.run-*` staging directories. They contain no

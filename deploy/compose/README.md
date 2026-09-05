@@ -165,13 +165,14 @@ More than eight retained inert directories fail closed.
 The internal version-4 receipt state machine closes every intent/result,
 failure-cleanup and success-only environment-manifest transition. Canonical
 receipts and the manifest use no-replace publication. Its mutation journal is
-append-only: permanent v2 `.mutation-slot-SS`, v1
-`.mutation-operation-SS`, v2 `.mutation-recovery-SS-RR` and v3
+append-only: permanent v3 `.mutation-slot-SS`, v1
+`.mutation-operation-SS`, v2 `.mutation-recovery-SS-RR` and v4
 `.mutation-close-SS` records are never deleted or reused. Slots bind exact
 source/environment predecessors, prior close, owner, operation kind, contract
 and plan. Provider closes bind the outer operation settlement. Provider success
 is explicitly classified and binds its intent contract. Receipt v1/v2/v3,
-slot v1, recovery/root v1 and close v1/v2 are fresh-plan hard-cut refusals. Only
+slot v1/v2, recovery/root v1 and close v1/v2/v3 are fresh-plan hard-cut
+refusals. Only
 unguessable `.mutation-stage-*` aliases are
 retired. Every close link follows revalidation of the same authority, result
 endpoints, operation evidence and staged inode/bytes. If a cooperative verifier
@@ -266,8 +267,18 @@ persisted in the plan. Mutation slot v3 and close v4 serialize this plan against
 every fake or future effect writer through the same no-replace slot name; the
 close binds the embedded plan digest and changes no receipt or environment.
 
-No supported lifecycle target exposes either test-only seam; there is no live
-provider execution, recovery, cleanup or environment manifest. `registry/`,
+A read-only state seam now projects that exact newest completed owner plan into
+four digests: its slot, close, embedded plan and preparation observation. The
+direct in-memory return reflects the state just read; a serialized projection
+has no provenance. Separate structural helpers can derive a minimal
+`provider-create` candidate marked `requested-not-authorized` and a logical
+pre-effect prefix with zero entries, but validation authenticates neither state
+nor observation. Neither value is written. They contain no path, command,
+environment, provider identity or absence claim and do not use the reserved
+live create-evidence schema.
+
+No supported lifecycle target exposes a plan fixture or live-intent seam; there
+is no live provider execution, recovery, cleanup or environment manifest. `registry/`,
 `runtime/`, `provider/` and `evidence/` remain empty. A completed plan centrally
 blocks every other mutation and finalization. An abandoned plan slot may only
 be explicitly recovered as `aborted-before-effect`; this journal repair grants
@@ -278,12 +289,15 @@ state-owned path supplies the dedicated slot and exact checkpoints, publishes a
 distinct outer settlement, and binds that digest through pass and close.
 Recovery may abort only an untouched pre-intent slot or proceed under the newest
 observation claim, reserving capacity for a final settled-prefix refresh. Owner
-close permits no claim and recovery close must name the latest claim. Next bind
-the accepted live plan to a fresh effect intent and evidence chain without
-granting a supported lifecycle command. Then prove causal process/socket/Engine/context
-ownership and exact dynamic-tree cleanup before exposing a supported lifecycle
-target or making any Docker or finalization claim. Superseded receipt and
-mutation schemas are discarded and regenerated.
+close permits no claim and recovery close must name the latest claim. Next add
+a composed live pre-effect admission observer that obtains the state projection
+internally, reopens journal/source and production observation, and refuses
+serialized candidates as proof. Only then may the inert intent enter a distinct
+shared-CAS action. Causal
+process/socket/Engine/context ownership and exact dynamic-tree cleanup must be
+proved before exposing a supported lifecycle target or making any Docker or
+finalization claim. Superseded receipt and mutation schemas are discarded and
+regenerated.
 The manual browser ceremony below remains usable for fixture development but
 cannot be labelled a clean-Engine result.
 

@@ -294,6 +294,23 @@ provider effect. A production-shaped plan fixture exists only under
 `scripts/fixtures` and the supported lifecycle imports neither it nor the
 state test seam.
 
+The subsequent intent contract is deliberately non-authorizing. A read-only
+state seam projects only the completed plan slot, close, embedded-plan and
+preparation-observation digests. Only the direct in-memory result reflects the
+state just read; serialized values lose that provenance. Candidate and empty-
+prefix validators close only unauthenticated structural bindings and therefore
+deliberately accept caller-manufactured, replayed values. The candidate can
+state only `provider-create` with `requested-not-authorized`, and its logical
+pre-effect prefix must contain zero entries. Neither value is written or
+accepted by state, receipts or lifecycle. They contain no provider path,
+identity, PID, socket, command, environment or absence assertion.
+
+A future admission operation must obtain the projection internally, reopen the
+journal/source and full private production observation in the same read-only
+operation, and refuse every caller-supplied serialized projection or candidate
+as proof. In particular, caller-supplied host preparation data cannot be
+relabelled as process, VM or Engine absence.
+
 No supported lifecycle target exposes these fixtures and no Docker/Colima
 effect is enabled. Controlled-background evidence remains ineligible for the
 synthetic finalizer. The `*WithAuthorityGate` exports are internal composition

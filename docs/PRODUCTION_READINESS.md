@@ -88,8 +88,8 @@ deterministic Linux grammar coverage. This is not public PKIX/browser trust,
 explicit custom-CA/proxy support, a clean-volume login or recovery evidence.
 One append-only version-4 receipt machine now enforces closed intent/results,
 collision-preserving failure branches, no-replace publication and an exact
-success-only synthetic manifest. Receipt v1/v2/v3, mutation slot v1,
-recovery/root v1 and close v1/v2 are direct hard-cut refusals. Slot v2 binds
+success-only synthetic manifest. Receipt v1/v2/v3, mutation slot v1/v2,
+recovery/root v1 and close v1/v2/v3 are direct hard-cut refusals. Slot v3 binds
 source/result predecessors plus operation kind, contract and plan; recovery v2
 binds a fresh observation; close v4 binds the outer operation settlement.
 Final journal names are never deleted or reused, and generic append cannot own
@@ -158,6 +158,17 @@ effect-free abort. Preparation has sixteen deterministic tests, the registry
 fourteen, the effect-free plan boundary six and state has five focused plan/race/crash
 tests. This is not a live OS probe, provider start, Docker Engine identity,
 cleanup or environment-manifest result, so no readiness status changes.
+
+A read-only state projection now reduces the newest completed owner plan to its
+slot, close, embedded-plan and preparation-observation digests. Only its direct
+in-memory return reflects the state just read; serialization loses that
+provenance. Separate unauthenticated structural helpers can derive only a
+`provider-create` request marked `requested-not-authorized` and a logical
+pre-effect prefix with zero entries. They do not prove state or observation,
+are not published, inhabit no provider-evidence schema and assert no resource
+or process absence. Seven focused contract tests, including manufactured-value
+acceptance, plus the recursive read-only state regression pass. This closes
+schema confusion only; it adds no live/provider/readiness evidence.
 
 Live Linux/provider CI and a current Docker Desktop/provider run remain absent.
 Consequently this evidence improves the boundary without changing readiness. One

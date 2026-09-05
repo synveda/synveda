@@ -57,8 +57,12 @@ import {
   LiveProviderPlanFailure,
   buildColimaLiveProviderOperationPlan,
   liveProviderPlanBytes,
+  liveProviderPlanDigest,
   validateColimaLiveProviderOperationPlan,
 } from "./clean-engine-live-provider-plan.mjs";
+import {
+  buildColimaLivePlanCompletionProjectionStructure,
+} from "./clean-engine-live-provider-intent.mjs";
 
 const REGISTRY_IMAGE =
   "registry:3.1.1@sha256:1be55279f18a2fe1a74edf2664cac61c1bea305b7b4642dab412e7affdcb3e33";
@@ -4837,6 +4841,48 @@ export function recordLiveProviderOperationPlanForTest(argumentsValue) {
   return recordLiveProviderOperationPlan(roots, operationPlan, () => {
     holdFakeProvider(holdMilliseconds);
     return operationPlan;
+  });
+}
+
+export function projectLiveProviderPlanCompletionForExecutor(argumentsValue) {
+  const roots = prepareRoots(
+    argumentsValue.repoRoot,
+    argumentsValue.stateBase,
+    false,
+  );
+  const state = loadState(roots, true);
+  const completed = state.liveProviderPlan;
+  if (
+    completed === undefined ||
+    state.mutationLease !== undefined ||
+    state.mutationStages.length !== 0 ||
+    state.pendingPublication !== undefined ||
+    state.environment !== undefined ||
+    state.environmentPublication !== undefined ||
+    state.mutationOperations.length !== 0 ||
+    state.receipts.length !== 1 ||
+    state.receiptState.head.phase !== "plan" ||
+    state.receiptState.head.sequence !== 0 ||
+    state.providerState.contract !== "live-provider-plan-only" ||
+    state.providerState.operationEvidenceSha256 !== ZERO_SHA256 ||
+    state.mutationSlots.at(-1) !== completed.slot ||
+    state.mutationCloses.at(-1) !== completed.close ||
+    completed.close.value.disposition !== "completed" ||
+    completed.close.value.authority !== "owner" ||
+    completed.close.value.operation_evidence_sha256 !== ZERO_SHA256 ||
+    completed.close.value.result_environment_sha256 !== ZERO_SHA256
+  ) {
+    fail("completed live provider plan was unavailable", 69);
+  }
+  const operationPlan = completed.operationPlan;
+  return buildColimaLivePlanCompletionProjectionStructure({
+    operationPlanSha256: liveProviderPlanDigest(
+      liveProviderPlanBytes(operationPlan),
+    ),
+    planCloseSha256: digest(completed.close.bytes),
+    planSlotSha256: digest(completed.slot.bytes),
+    preparationObservationSha256:
+      operationPlan.preparation_observation_sha256,
   });
 }
 

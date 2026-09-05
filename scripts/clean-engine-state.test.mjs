@@ -11,6 +11,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readlinkSync,
   realpathSync,
   readdirSync,
   rmSync,
@@ -27,11 +28,15 @@ import {
   executeProviderCreateForExecutor,
   finalizeEnvironmentForExecutor,
   liveProviderPlanRecoveryConfirmationForExecutor,
+  projectLiveProviderPlanCompletionForExecutor,
   providerRecoveryConfirmationForExecutor,
   recordLiveProviderOperationPlanForTest,
   recoverLiveProviderPlanForExecutor,
   recoverProviderCreateForExecutor,
 } from "../deploy/compose/scripts/clean-engine-state.mjs";
+import {
+  buildColimaLiveEffectIntentCandidateStructure,
+} from "../deploy/compose/scripts/clean-engine-live-provider-intent.mjs";
 import {
   canonicalBytes,
   createFinalization,
@@ -188,6 +193,42 @@ function assertPrivate(path, mode, directory = false, links = 1) {
   if (!directory) assert.equal(metadata.nlink, links);
   assert.equal(metadata.mode & 0o777, mode);
   assert.equal(metadata.uid, process.getuid());
+}
+
+function snapshotTree(root) {
+  const snapshot = [];
+  function visit(path, relativePath) {
+    const metadata = lstatSync(path, { bigint: true });
+    const entry = {
+      dev: String(metadata.dev),
+      gid: String(metadata.gid),
+      ino: String(metadata.ino),
+      mode: String(metadata.mode),
+      nlink: String(metadata.nlink),
+      path: relativePath,
+      size: String(metadata.size),
+      uid: String(metadata.uid),
+    };
+    if (metadata.isDirectory()) {
+      entry.kind = "directory";
+      snapshot.push(entry);
+      for (const name of readdirSync(path).sort()) {
+        visit(join(path, name), join(relativePath, name));
+      }
+    } else if (metadata.isFile()) {
+      entry.kind = "file";
+      entry.sha256 = sha256(readFileSync(path));
+      snapshot.push(entry);
+    } else if (metadata.isSymbolicLink()) {
+      entry.kind = "symbolic-link";
+      entry.target = readlinkSync(path);
+      snapshot.push(entry);
+    } else {
+      assert.fail(`unsupported fixture entry at ${relativePath}`);
+    }
+  }
+  visit(root, ".");
+  return snapshot;
 }
 
 function activeRun(state) {
@@ -619,6 +660,44 @@ test("a live provider operation plan is journaled once and grants no effect auth
     assert.equal(run(state, "status").status, 0);
     assert.equal(run(state, "verify").status, 0);
 
+    const beforeProjection = snapshotTree(state.root);
+    const slotBytes = readFileSync(slotPath);
+    const closeBytes = readFileSync(closePath);
+    const projected = projectLiveProviderPlanCompletionForExecutor({
+      repoRoot: state.repo,
+      stateBase: state.state,
+    });
+    assert.equal(projected.plan_slot_sha256, sha256(slotBytes));
+    assert.equal(projected.plan_close_sha256, sha256(closeBytes));
+    assert.equal(
+      projected.operation_plan_sha256,
+      sha256(canonicalBytes(operationPlan)),
+    );
+    assert.equal(
+      projected.preparation_observation_sha256,
+      operationPlan.preparation_observation_sha256,
+    );
+    const structuralIntent = buildColimaLiveEffectIntentCandidateStructure({
+      completionProjection: projected,
+      operationPlan,
+    });
+    assert.equal(structuralIntent.effect_authorization, "requested-not-authorized");
+    assert.deepEqual(snapshotTree(state.root), beforeProjection);
+
+    const unrelatedStage = join(active, `.mutation-stage-${"9".repeat(32)}`);
+    writeFileSync(unrelatedStage, "{", { mode: 0o600 });
+    const beforeRefusal = snapshotTree(state.root);
+    assert.throws(
+      () =>
+        projectLiveProviderPlanCompletionForExecutor({
+          repoRoot: state.repo,
+          stateBase: state.state,
+        }),
+      /completed live provider plan was unavailable/u,
+    );
+    assert.deepEqual(snapshotTree(state.root), beforeRefusal);
+    unlinkSync(unrelatedStage);
+
     const idempotent = recordLiveProviderOperationPlanForTest({
       operationPlan,
       repoRoot: state.repo,
@@ -804,6 +883,14 @@ test("an abandoned effect-free live plan slot is explicitly aborted before retry
       assert.ok(Date.now() < deadline, "timed out waiting for live plan slot");
       await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
     }
+    assert.throws(
+      () =>
+        projectLiveProviderPlanCompletionForExecutor({
+          repoRoot: state.repo,
+          stateBase: state.state,
+        }),
+      /completed live provider plan was unavailable/u,
+    );
     child.kill("SIGKILL");
     const [status, signal] = await once(child, "close");
     assert.equal(status, null);
@@ -829,6 +916,14 @@ test("an abandoned effect-free live plan slot is explicitly aborted before retry
     });
     assert.equal(recovered.phase, "plan");
     assert.equal(parse(join(activeRun(state), ".mutation-close-00")).disposition, "aborted-before-effect");
+    assert.throws(
+      () =>
+        projectLiveProviderPlanCompletionForExecutor({
+          repoRoot: state.repo,
+          stateBase: state.state,
+        }),
+      /completed live provider plan was unavailable/u,
+    );
     const retried = recordLiveProviderOperationPlanForTest({
       operationPlan,
       repoRoot: state.repo,
@@ -837,6 +932,13 @@ test("an abandoned effect-free live plan slot is explicitly aborted before retry
     assert.deepEqual(retried.operationPlan, operationPlan);
     assert.equal(parse(join(activeRun(state), ".mutation-slot-01")).action, "provider-plan");
     assert.equal(parse(join(activeRun(state), ".mutation-close-01")).disposition, "completed");
+    assert.equal(
+      projectLiveProviderPlanCompletionForExecutor({
+        repoRoot: state.repo,
+        stateBase: state.state,
+      }).operation_plan_sha256,
+      sha256(canonicalBytes(operationPlan)),
+    );
     assert.equal(run(state, "verify").status, 0);
   } finally {
     rmSync(state.root, { recursive: true, force: true });

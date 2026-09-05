@@ -231,8 +231,23 @@ produces no provider evidence and blocks all later mutation/finalization while
 execution remains disabled. An abandoned slot may only be explicitly closed
 `aborted-before-effect`; this is journal repair, not provider recovery. The
 supported lifecycle remains `plan|status|verify` and imports no live executor or
-test fixture. A later, separately reviewed effect intent/evidence chain remains
-required.
+test fixture.
+
+The next contract boundary remains read-only and non-durable. State projects
+the newest completed owner plan into only its slot, close, embedded-plan and
+preparation-observation digests. Only a direct in-memory return reflects that
+read; serialization loses provenance. Separate structural helpers close the
+candidate/plan and empty-prefix/candidate digest bindings, but authenticate
+neither state nor observation and deliberately accept manufactured or replayed
+values. The candidate records only `provider-create` and
+`requested-not-authorized`; its logical pre-effect prefix has zero entries.
+Neither value enters state, a receipt or the reserved provider-evidence schema.
+No resource/process/VM/Engine/socket/context absence is inferred.
+
+The next admission operation must obtain the projection internally, reopen
+journal/source and full production observation, and reject serialized
+projections or candidates as proof. Durable publication remains a separate
+shared-CAS journal decision after a truthful live-absence observer exists.
 
 ## Options considered
 
@@ -291,10 +306,12 @@ required.
   lower checkpoints, an outer settlement, action-dispatched recovery, receipt
   and close. Only the outer cleanup settlement is operation evidence. A live
   preparation contract now closes exact Docker/helper/disk/host input identities
-  without executing them. A deny-only registry now binds its production
-  requirements digest through fresh create/cleanup operation schemas, but grants
-  no state or execution capability. A live state adapter must consume only those
-  exact tuples and close causal process/socket/Engine/context ownership without
+  without executing them. A tuple-closed registry binds its production
+  requirements digest through fresh create/cleanup operation schemas; create
+  grants plan-state publication only, while all effect capabilities and all
+  cleanup capabilities remain false. The inert intent contract adds no state or
+  execution capability. A later live state adapter must consume only those exact
+  tuples and close causal process/socket/Engine/context ownership without
   weakening the immutable journal. A supported runner, dynamic-tree cleanup and
   source/image environment manifest remain required before this can support a
   Docker or Colima acceptance or finalization claim.

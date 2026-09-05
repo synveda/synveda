@@ -271,10 +271,23 @@ production-requirements and private-observation digests, writes no receipt,
 provider or environment evidence, and blocks later mutation. Effect-free crash
 recovery can only abort the abandoned plan slot before retry. Sixteen
 preparation, fourteen registry, six plan-boundary and five focused state tests
-pass. No Docker, Colima or Lima process ran. Next add a separately reviewed live
-effect-intent/evidence prefix while execution stays disabled. Live-provider
-identity, builder, proxy, browser and cleanup evidence follow; Linux/reference
-HTTPS must pass
+pass. A read-only state seam now projects only the exact completed plan slot,
+close, embedded-plan and observation digests. Only its direct return reflects
+that state read; serialized values lose provenance. Unauthenticated structural
+helpers can derive only a `provider-create` candidate marked
+`requested-not-authorized` and a logical pre-effect prefix with zero entries;
+they deliberately accept manufactured values and prove no state or observation.
+Seven focused tests cover schema, cross-binding, empty prefix, content-free
+refusal and absence of state/process/lifecycle coupling, while a recursive state
+snapshot proves the projection is read-only. The values are not published and
+no deterministic production-artifact fixture is presented as live evidence.
+
+No Docker, Colima or Lima process ran. Next add a truthful live pre-effect
+admission observer that obtains state internally, reopens journal/source and
+the full observation, and rejects serialized candidates as proof. Then journal
+the inert intent through a distinct shared-CAS action while execution remains
+disabled. Live-provider identity, builder,
+proxy, browser and cleanup evidence follow; Linux/reference HTTPS must pass
 before legacy Rauthy/Temporal assets are deleted. Backup/restore, upgrade and
 Apalis remain open CPR-45 slices.
 
