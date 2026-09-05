@@ -186,7 +186,7 @@ classified and binds its operation kind, plan and intent contract; v1/v2/v3
 receipts fail closed. The
 fixture finalizer emits an explicitly non-live synthetic schema and rejects
 controlled-background-fake evidence. The append-only mutation journal uses
-slot v2, recovery/root v2 and close v3. Permanent numbered slots bind exact
+slot v3, recovery/root v2 and close v4. Permanent numbered slots bind exact
 source receipt/environment endpoints, prior close, cooperative owner challenge,
 operation kind, contract and plan. Permanent outer settlements bind the
 observed provider frontier. Closes bind exact result endpoints, owner/recovery
@@ -276,11 +276,23 @@ uses the exact action, fresh operation kind, operation-contract digest and
 provider class as one content-addressed tuple; a hash match never substitutes
 for comparing all four fields. Create and cleanup use distinct contracts and
 evidence schema names, cleanup binds the create-contract digest, and neither can
-select the deterministic or controlled-background fake. Exact resolution
-returns only descriptive metadata with state-planning, execution, recovery,
-lifecycle and finalization capabilities false. The registry imports no process,
-state, receipt or fake-provider module, and hostile tuple values are not echoed
-in refusals.
+select the deterministic or controlled-background fake. The create tuple grants
+only state planning through `mutation-journal-v3-plan-only`; execution,
+provider recovery, lifecycle and finalization remain false, and cleanup remains
+fully deny-only. The registry imports no process, state, receipt or fake-provider
+module, and hostile tuple values are not echoed in refusals.
+
+The state-owned live plan persists only registry/source/observation digests and
+the exact provider profile/resource inside a dedicated `provider-plan` slot.
+The full private observation is revalidated before acquisition and at the
+owner-close link, but paths, command, environment, `HOME`, binding key and
+credentials are never copied into the journal. Planning shares the mutation
+slot CAS with both fake executors, writes no receipt/provider/environment
+evidence and centrally blocks every later mutation. Crash recovery can only
+abort an abandoned effect-free plan slot; it cannot finish a plan or recover a
+provider effect. A production-shaped plan fixture exists only under
+`scripts/fixtures` and the supported lifecycle imports neither it nor the
+state test seam.
 
 No supported lifecycle target exposes these fixtures and no Docker/Colima
 effect is enabled. Controlled-background evidence remains ineligible for the

@@ -26,7 +26,10 @@ import {
   appendReceiptForExecutor,
   executeProviderCreateForExecutor,
   finalizeEnvironmentForExecutor,
+  liveProviderPlanRecoveryConfirmationForExecutor,
   providerRecoveryConfirmationForExecutor,
+  recordLiveProviderOperationPlanForTest,
+  recoverLiveProviderPlanForExecutor,
   recoverProviderCreateForExecutor,
 } from "../deploy/compose/scripts/clean-engine-state.mjs";
 import {
@@ -38,6 +41,7 @@ import {
   sha256,
 } from "../deploy/compose/scripts/clean-engine-receipts.mjs";
 import { cleanEngineReceiptResult } from "./fixtures/clean-engine-receipt-fixture.mjs";
+import { cleanEngineLiveProviderOperationPlan } from "./fixtures/clean-engine-live-provider-plan-fixture.mjs";
 
 const stateTool = resolve("deploy/compose/scripts/clean-engine-state.mjs");
 
@@ -191,6 +195,18 @@ function activeRun(state) {
   return join(state.state, `.run-${receipt.fixture_id}`);
 }
 
+function liveProviderOperationPlan(state, observationSha256 = "e".repeat(64)) {
+  const active = activeRun(state);
+  const candidate = parse(join(active, "candidate.json"));
+  const planReceipt = parse(join(active, "00-plan.json"));
+  return cleanEngineLiveProviderOperationPlan({
+    candidateSha256: sha256(canonicalBytes(candidate)),
+    fixtureId: candidate.run_id,
+    observationSha256,
+    sourceHeadSha256: sha256(canonicalBytes(planReceipt)),
+  });
+}
+
 function mutationLease(state, {
   action = "append-receipt",
   intentReceiptSha256 = "0".repeat(64),
@@ -218,7 +234,7 @@ function mutationLease(state, {
     owner_pid: ownerPid,
     owner_probe: "opaque-process-instance-v1",
     previous_close_sha256: previousCloseSha256,
-    schema: "synveda.clean-engine.mutation-slot.v2",
+    schema: "synveda.clean-engine.mutation-slot.v3",
     source_environment_sha256: "0".repeat(64),
     source_head_sha256: sha256(canonicalBytes(planReceipt)),
     source_sequence: 0,
@@ -560,6 +576,328 @@ test("one active plan is a durable lease and cannot be replaced", () => {
     assert.equal(second.stdout, "");
     assert.equal(second.stderr, "clean-engine: an active clean-engine plan already exists\n");
     assert.deepEqual(readFileSync(join(activeRun(state), "candidate.json")), original);
+  } finally {
+    rmSync(state.root, { recursive: true, force: true });
+  }
+});
+
+test("a live provider operation plan is journaled once and grants no effect authority", () => {
+  const state = fixture();
+  try {
+    assert.equal(run(state, "plan").status, 0);
+    const operationPlan = liveProviderOperationPlan(state);
+    const fixtureId = parse(join(activeRun(state), "candidate.json")).run_id;
+    const recorded = recordLiveProviderOperationPlanForTest({
+      operationPlan,
+      repoRoot: state.repo,
+      stateBase: state.state,
+    });
+    assert.deepEqual(recorded.operationPlan, operationPlan);
+
+    const active = activeRun(state);
+    const slotPath = join(active, ".mutation-slot-00");
+    const closePath = join(active, ".mutation-close-00");
+    const slot = parse(slotPath);
+    const close = parse(closePath);
+    assertPrivate(slotPath, 0o600);
+    assertPrivate(closePath, 0o600);
+    assert.equal(slot.schema, "synveda.clean-engine.mutation-slot.v3");
+    assert.equal(slot.action, "provider-plan");
+    assert.deepEqual(slot.operation_plan, operationPlan);
+    assert.equal(close.schema, "synveda.clean-engine.mutation-close.v4");
+    assert.equal(close.disposition, "completed");
+    assert.equal(close.operation_plan_sha256, sha256(canonicalBytes(operationPlan)));
+    assert.equal(close.operation_evidence_sha256, "0".repeat(64));
+    assert.deepEqual(
+      readdirSync(active).filter((name) => /^[0-9]{2}-.*\.json$/u.test(name)),
+      ["00-plan.json"],
+    );
+    for (const directory of ["evidence", "provider", "registry", "runtime"]) {
+      assert.deepEqual(readdirSync(join(active, directory)), []);
+    }
+    assert.equal(existsSync(join(active, "environment.json")), false);
+    assert.equal(run(state, "status").status, 0);
+    assert.equal(run(state, "verify").status, 0);
+
+    const idempotent = recordLiveProviderOperationPlanForTest({
+      operationPlan,
+      repoRoot: state.repo,
+      stateBase: state.state,
+    });
+    assert.deepEqual(idempotent.operationPlan, operationPlan);
+    assert.equal(readdirSync(active).filter((name) => /^\.mutation-slot-/u.test(name)).length, 1);
+
+    for (const operation of [
+      () =>
+        executeProviderCreateForExecutor({
+          adapter: fakeProviderAdapter(),
+          repoRoot: state.repo,
+          stateBase: state.state,
+        }),
+      () =>
+        appendReceiptForExecutor({
+          phase: "registry-intent",
+          repoRoot: state.repo,
+          result: cleanEngineReceiptResult("registry-intent", fixtureId),
+          stateBase: state.state,
+        }),
+      () =>
+        appendProviderCleanupReceiptForExecutor({
+          phase: "provider-cleanup-intent",
+          repoRoot: state.repo,
+          result: cleanEngineReceiptResult("provider-cleanup-intent", fixtureId),
+          stateBase: state.state,
+        }),
+      () =>
+        finalizeEnvironmentForExecutor({
+          repoRoot: state.repo,
+          stateBase: state.state,
+        }),
+    ]) {
+      assert.throws(operation, /live provider execution remains disabled after state planning/u);
+    }
+    assert.equal(existsSync(join(active, "01-provider-create-intent.json")), false);
+    assert.equal(existsSync(join(active, "environment.json")), false);
+  } finally {
+    rmSync(state.root, { recursive: true, force: true });
+  }
+});
+
+test("a live provider plan is run-bound, immutable and fails closed on drift", () => {
+  const state = fixture();
+  const other = fixture();
+  try {
+    assert.equal(run(state, "plan").status, 0);
+    assert.equal(run(other, "plan").status, 0);
+    const operationPlan = liveProviderOperationPlan(state);
+    for (const [field, value] of [
+      ["source_candidate_sha256", "d".repeat(64)],
+      ["source_head_sha256", "d".repeat(64)],
+    ]) {
+      const stateMismatched = structuredClone(operationPlan);
+      stateMismatched[field] = value;
+      assert.throws(
+        () =>
+          recordLiveProviderOperationPlanForTest({
+            operationPlan: stateMismatched,
+            repoRoot: state.repo,
+            stateBase: state.state,
+          }),
+        /live provider planning operation binding was refused/u,
+      );
+      assert.equal(
+        readdirSync(activeRun(state)).some((name) => /^\.mutation-slot-/u.test(name)),
+        false,
+      );
+    }
+    assert.throws(
+      () =>
+        recordLiveProviderOperationPlanForTest({
+          operationPlan,
+          repoRoot: other.repo,
+          stateBase: other.state,
+        }),
+      /live provider planning operation binding was refused/u,
+    );
+    assert.equal(
+      readdirSync(activeRun(other)).some((name) => /^\.mutation-slot-/u.test(name)),
+      false,
+    );
+
+    recordLiveProviderOperationPlanForTest({
+      operationPlan,
+      repoRoot: state.repo,
+      stateBase: state.state,
+    });
+    const active = activeRun(state);
+    const slotPath = join(active, ".mutation-slot-00");
+    const original = readFileSync(slotPath);
+    const changed = structuredClone(operationPlan);
+    changed.preparation_observation_sha256 = "d".repeat(64);
+    assert.throws(
+      () =>
+        recordLiveProviderOperationPlanForTest({
+          operationPlan: changed,
+          repoRoot: state.repo,
+          stateBase: state.state,
+        }),
+      /already differs/u,
+    );
+    assert.deepEqual(readFileSync(slotPath), original);
+
+    const corrupted = parse(slotPath);
+    corrupted.operation_plan.capabilities.execution_authorized = true;
+    writeFileSync(slotPath, canonicalBytes(corrupted), { mode: 0o600 });
+    const refused = run(state, "status");
+    assert.equal(refused.status, 69);
+    assert.equal(refused.stdout, "");
+    assert.match(refused.stderr, /live provider operation plan was refused/u);
+  } finally {
+    rmSync(state.root, { recursive: true, force: true });
+    rmSync(other.root, { recursive: true, force: true });
+  }
+});
+
+test("live provider planning and the fake executor share one atomic mutation slot", async () => {
+  const state = fixture();
+  try {
+    assert.equal(run(state, "plan").status, 0);
+    const operationPlan = liveProviderOperationPlan(state);
+    const helper = resolve("scripts/fixtures/race-clean-engine-live-provider-plan.mjs");
+    const launch = (action) => {
+      const child = spawn(
+        process.execPath,
+        [helper, action, state.repo, state.state, JSON.stringify(operationPlan)],
+        {
+          env: { PATH: process.env.PATH, LANG: "C", LC_ALL: "C" },
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
+      child.stdout.resume();
+      child.stderr.resume();
+      return new Promise((resolvePromise) => {
+        child.on("close", (status, signal) => resolvePromise({ signal, status }));
+      });
+    };
+    const results = await Promise.all([launch("plan"), launch("fake")]);
+    assert.deepEqual(
+      results.map((value) => value.status).sort((left, right) => left - right),
+      [0, 73],
+    );
+    assert.equal(results.every((value) => value.signal === null), true);
+    assert.equal(run(state, "status").status, 0);
+    const active = activeRun(state);
+    const slots = readdirSync(active).filter((name) => /^\.mutation-slot-/u.test(name));
+    const closes = readdirSync(active).filter((name) => /^\.mutation-close-/u.test(name));
+    assert.deepEqual(slots, [".mutation-slot-00"]);
+    assert.deepEqual(closes, [".mutation-close-00"]);
+    const action = parse(join(active, slots[0])).action;
+    assert.ok(new Set(["provider-create", "provider-plan"]).has(action));
+    assert.equal(
+      action === "provider-plan",
+      existsSync(join(active, "01-provider-create-intent.json")) === false,
+    );
+  } finally {
+    rmSync(state.root, { recursive: true, force: true });
+  }
+});
+
+test("an abandoned effect-free live plan slot is explicitly aborted before retry", async () => {
+  const state = fixture();
+  try {
+    assert.equal(run(state, "plan").status, 0);
+    const operationPlan = liveProviderOperationPlan(state);
+    const helper = resolve("scripts/fixtures/race-clean-engine-live-provider-plan.mjs");
+    const child = spawn(
+      process.execPath,
+      [helper, "plan", state.repo, state.state, JSON.stringify(operationPlan), "30000"],
+      {
+        env: { PATH: process.env.PATH, LANG: "C", LC_ALL: "C" },
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+    child.stdout.resume();
+    child.stderr.resume();
+    const slotPath = join(activeRun(state), ".mutation-slot-00");
+    const deadline = Date.now() + 8_000;
+    while (!existsSync(slotPath)) {
+      assert.ok(Date.now() < deadline, "timed out waiting for live plan slot");
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
+    }
+    child.kill("SIGKILL");
+    const [status, signal] = await once(child, "close");
+    assert.equal(status, null);
+    assert.equal(signal, "SIGKILL");
+
+    assert.throws(
+      () =>
+        recordLiveProviderOperationPlanForTest({
+          operationPlan,
+          repoRoot: state.repo,
+          stateBase: state.state,
+        }),
+      /explicit recovery/u,
+    );
+    const confirmation = liveProviderPlanRecoveryConfirmationForExecutor({
+      repoRoot: state.repo,
+      stateBase: state.state,
+    });
+    const recovered = recoverLiveProviderPlanForExecutor({
+      confirmation,
+      repoRoot: state.repo,
+      stateBase: state.state,
+    });
+    assert.equal(recovered.phase, "plan");
+    assert.equal(parse(join(activeRun(state), ".mutation-close-00")).disposition, "aborted-before-effect");
+    const retried = recordLiveProviderOperationPlanForTest({
+      operationPlan,
+      repoRoot: state.repo,
+      stateBase: state.state,
+    });
+    assert.deepEqual(retried.operationPlan, operationPlan);
+    assert.equal(parse(join(activeRun(state), ".mutation-slot-01")).action, "provider-plan");
+    assert.equal(parse(join(activeRun(state), ".mutation-close-01")).disposition, "completed");
+    assert.equal(run(state, "verify").status, 0);
+  } finally {
+    rmSync(state.root, { recursive: true, force: true });
+  }
+});
+
+test("source drift after live plan acquisition leaves only an aborted or abortable slot", async () => {
+  const state = fixture();
+  try {
+    assert.equal(run(state, "plan").status, 0);
+    const operationPlan = liveProviderOperationPlan(state);
+    const helper = resolve("scripts/fixtures/race-clean-engine-live-provider-plan.mjs");
+    const child = spawn(
+      process.execPath,
+      [helper, "plan", state.repo, state.state, JSON.stringify(operationPlan), "750"],
+      {
+        env: { PATH: process.env.PATH, LANG: "C", LC_ALL: "C" },
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+    child.stdout.resume();
+    child.stderr.resume();
+    const active = activeRun(state);
+    const slotPath = join(active, ".mutation-slot-00");
+    const deadline = Date.now() + 8_000;
+    while (!existsSync(slotPath)) {
+      assert.ok(Date.now() < deadline, "timed out waiting for live plan slot");
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
+    }
+    writeFileSync(join(state.repo, "source.txt"), "source changed during planning\n");
+    const [status, signal] = await once(child, "close");
+    assert.equal(status, 78);
+    assert.equal(signal, null);
+    assert.deepEqual(
+      readdirSync(active).filter((name) => /^[0-9]{2}-.*\.json$/u.test(name)),
+      ["00-plan.json"],
+    );
+
+    if (!existsSync(join(active, ".mutation-close-00"))) {
+      const confirmation = liveProviderPlanRecoveryConfirmationForExecutor({
+        repoRoot: state.repo,
+        stateBase: state.state,
+      });
+      recoverLiveProviderPlanForExecutor({
+        confirmation,
+        repoRoot: state.repo,
+        stateBase: state.state,
+      });
+    }
+    assert.equal(
+      parse(join(active, ".mutation-close-00")).disposition,
+      "aborted-before-effect",
+    );
+    writeFileSync(join(state.repo, "source.txt"), "fixture source\n");
+    const retried = recordLiveProviderOperationPlanForTest({
+      operationPlan,
+      repoRoot: state.repo,
+      stateBase: state.state,
+    });
+    assert.deepEqual(retried.operationPlan, operationPlan);
+    assert.equal(run(state, "verify").status, 0);
   } finally {
     rmSync(state.root, { recursive: true, force: true });
   }
@@ -907,11 +1245,16 @@ test("superseded mutation schemas and non-provider operation evidence are refuse
     });
     const slotPath = join(activeRun(legacySlot), ".mutation-slot-00");
     const slot = parse(slotPath);
-    slot.schema = "synveda.clean-engine.mutation-slot.v1";
-    writeFileSync(slotPath, canonicalBytes(slot), { mode: 0o600 });
-    const refused = run(legacySlot, "status");
-    assert.equal(refused.status, 78);
-    assert.equal(refused.stderr, "clean-engine: mutation slot was refused\n");
+    for (const schema of [
+      "synveda.clean-engine.mutation-slot.v1",
+      "synveda.clean-engine.mutation-slot.v2",
+    ]) {
+      slot.schema = schema;
+      writeFileSync(slotPath, canonicalBytes(slot), { mode: 0o600 });
+      const refused = run(legacySlot, "status");
+      assert.equal(refused.status, 78);
+      assert.equal(refused.stderr, "clean-engine: mutation slot was refused\n");
+    }
   } finally {
     rmSync(legacySlot.root, { recursive: true, force: true });
   }
@@ -919,6 +1262,7 @@ test("superseded mutation schemas and non-provider operation evidence are refuse
   for (const schema of [
     "synveda.clean-engine.mutation-close.v1",
     "synveda.clean-engine.mutation-close.v2",
+    "synveda.clean-engine.mutation-close.v3",
   ]) {
     const legacyClose = fixture();
     try {

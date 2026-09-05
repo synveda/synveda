@@ -25,7 +25,7 @@ export const COLIMA_LIVE_CLEANUP_OPERATION_KIND =
   "colima-vz-docker-live-cleanup-v1";
 export const COLIMA_LIVE_PROVIDER_CLASS = "colima-vz-docker-live";
 
-const ADAPTER_ID = "colima-vz-docker-live-preparation-only-v1";
+const ADAPTER_ID = "colima-vz-docker-live-plan-only-v1";
 const TUPLE_FIELDS = Object.freeze([
   "action",
   "operation_contract_sha256",
@@ -104,16 +104,24 @@ export const PROVIDER_ADAPTER_DENY_ONLY_CAPABILITIES = deepFreeze({
   state_planning_authorized: false,
 });
 
+export const PROVIDER_ADAPTER_PLAN_ONLY_CAPABILITIES = deepFreeze({
+  execution_authorized: false,
+  finalization_eligible: false,
+  lifecycle_exposure_authorized: false,
+  recovery_authorized: false,
+  state_planning_authorized: true,
+});
+
 export const COLIMA_LIVE_CREATE_OPERATION_CONTRACT = deepFreeze({
   action: "provider-create",
-  capabilities: PROVIDER_ADAPTER_DENY_ONLY_CAPABILITIES,
+  capabilities: PROVIDER_ADAPTER_PLAN_ONLY_CAPABILITIES,
   evidence_schema: COLIMA_LIVE_CREATE_EVIDENCE_SCHEMA,
   operation_kind: COLIMA_LIVE_CREATE_OPERATION_KIND,
   preparation_observation_schema: COLIMA_LIVE_OBSERVATION_SCHEMA,
   provider_class: COLIMA_LIVE_PROVIDER_CLASS,
   requirements_sha256: COLIMA_LIVE_REQUIREMENTS_SHA256,
   schema: COLIMA_LIVE_CREATE_OPERATION_CONTRACT_SCHEMA,
-  state_integration: "not-authorized",
+  state_integration: "mutation-journal-v3-plan-only",
 });
 
 export const COLIMA_LIVE_CREATE_OPERATION_CONTRACT_SHA256 =
@@ -139,7 +147,7 @@ export const COLIMA_LIVE_CLEANUP_OPERATION_CONTRACT_SHA256 =
     providerAdapterRegistryBytes(COLIMA_LIVE_CLEANUP_OPERATION_CONTRACT),
   );
 
-function validateCapabilities(value) {
+function validateCapabilities(value, expected) {
   exactKeys(
     value,
     [
@@ -151,7 +159,7 @@ function validateCapabilities(value) {
     ],
     "provider adapter capabilities",
   );
-  if (!sameCanonical(value, PROVIDER_ADAPTER_DENY_ONLY_CAPABILITIES)) {
+  if (!sameCanonical(value, expected)) {
     fail("provider adapter capabilities were refused", 69);
   }
 }
@@ -172,7 +180,7 @@ export function validateColimaLiveCreateOperationContract(value) {
     ],
     "Colima live create operation contract",
   );
-  validateCapabilities(value.capabilities);
+  validateCapabilities(value.capabilities, PROVIDER_ADAPTER_PLAN_ONLY_CAPABILITIES);
   if (!sameCanonical(value, COLIMA_LIVE_CREATE_OPERATION_CONTRACT)) {
     fail("Colima live create operation contract was refused");
   }
@@ -195,7 +203,7 @@ export function validateColimaLiveCleanupOperationContract(value) {
     ],
     "Colima live cleanup operation contract",
   );
-  validateCapabilities(value.capabilities);
+  validateCapabilities(value.capabilities, PROVIDER_ADAPTER_DENY_ONLY_CAPABILITIES);
   if (!sameCanonical(value, COLIMA_LIVE_CLEANUP_OPERATION_CONTRACT)) {
     fail("Colima live cleanup operation contract was refused");
   }
@@ -241,14 +249,14 @@ function entryFor(contract, operationContractSha256) {
   return {
     action: tuple.action,
     adapter_id: ADAPTER_ID,
-    capabilities: PROVIDER_ADAPTER_DENY_ONLY_CAPABILITIES,
+    capabilities: contract.capabilities,
     evidence_schema: contract.evidence_schema,
     key_sha256: providerAdapterRegistryKey(tuple),
     operation_contract_sha256: tuple.operation_contract_sha256,
     operation_kind: tuple.operation_kind,
     provider_class: tuple.provider_class,
     requirements_sha256: contract.requirements_sha256,
-    state_integration: "not-authorized",
+    state_integration: contract.state_integration,
   };
 }
 
@@ -304,8 +312,8 @@ function validateEntry(value) {
     ],
     "provider adapter registry entry",
   );
-  validateCapabilities(value.capabilities);
   const expected = expectedContract(value);
+  validateCapabilities(value.capabilities, expected.contract.capabilities);
   const tuple = {
     action: value.action,
     operation_contract_sha256: value.operation_contract_sha256,
@@ -320,7 +328,7 @@ function validateEntry(value) {
     value.operation_kind !== expected.contract.operation_kind ||
     value.provider_class !== COLIMA_LIVE_PROVIDER_CLASS ||
     value.requirements_sha256 !== COLIMA_LIVE_REQUIREMENTS_SHA256 ||
-    value.state_integration !== "not-authorized"
+    value.state_integration !== expected.contract.state_integration
   ) {
     fail("provider adapter registry entry was refused");
   }
@@ -387,6 +395,21 @@ export function resolveProviderAdapter(value) {
 export function authorizeProviderAdapter(value) {
   resolveProviderAdapter(value);
   fail("provider adapter execution remains disabled", 69);
+}
+
+export function authorizeProviderAdapterPlanning(value) {
+  const resolution = resolveProviderAdapter(value);
+  if (
+    resolution.action !== "provider-create" ||
+    resolution.state_integration !== "mutation-journal-v3-plan-only" ||
+    !sameCanonical(
+      resolution.capabilities,
+      PROVIDER_ADAPTER_PLAN_ONLY_CAPABILITIES,
+    )
+  ) {
+    fail("provider adapter state planning was refused", 69);
+  }
+  return resolution;
 }
 
 validateProviderAdapterRegistry(PROVIDER_ADAPTER_REGISTRY);

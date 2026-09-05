@@ -240,7 +240,7 @@ binds the expected operation even before its lower plan exists.
 
 The inner retirement settlement grants no result-receipt or close authority.
 The mutation owner publishes a distinct outer cleanup settlement after exact
-completion; receipt v4 and close v3 accept only that digest. Cleanup recovery
+completion; receipt v4 and close v4 accept only that digest. Cleanup recovery
 is action-dispatched and binds the latest observation claim, including a
 reserved final settled-prefix refresh when retirement changes the observation.
 An untouched pre-intent recovery may close aborted without effect. Owner close
@@ -325,28 +325,46 @@ downloads nor executes a process. Raw paths, fixture/profile identity, `HOME`
 and component identities are absent from its public projection. The host fields
 are preparation inputs, not live probes or VZ admission evidence.
 
-The deny-only provider-adapter registry reserves two fresh operation contracts:
+The closed provider-adapter registry reserves two fresh operation contracts:
 
 - `colima-vz-docker-live-create-v1`, contract digest
-  `84bd2ea1cb9db59f3c35a346322adb00d8cd0688270d3700953ea1bd0a8d6549`;
+  `34af3ffb3993172112c9218e737db57acb9ad78b8dc0e89240bbcb2d8ab269b5`;
 - `colima-vz-docker-live-cleanup-v1`, contract digest
-  `b308db23a9bae5dc33dd02052c1302834e7ce086125efda2729fcc0333c79375`.
+  `47a6ca5a6b76542a05b5631c24eaed5cefaa9ea6c33bcfe1c4aa997e7db393b3`.
 
 Their evidence schema names are distinct from every deterministic and
 controlled-background fake schema. Cleanup binds the exact create-contract
 digest, and both contracts bind the production requirements digest. Registry
-digest `217912f0a551651cf7ee27654fb6f874f1e2358793772dec0e071bba09171241`
+digest `50ebdacaafa2b98de3a9acdd82fc563f3f99045df53a96280515a8e5627ed901`
 selects only an exact action, operation kind, operation-contract digest and
 `colima-vz-docker-live` provider-class tuple.
 
-Exact selection is not authority. State planning, execution, recovery,
-lifecycle exposure and finalization capabilities are all false. There is
-intentionally no state adapter, evidence persistence, receipt class, finalizer
-registration or lifecycle command for either operation. Test-only preparation
-seams may substitute small exact bytes, but future mutation state may accept
-only the production requirements and operation-contract digests. A later live
-provider needs causal process/socket/Engine/context ownership and dynamic-tree
-retirement; it must not reuse the controlled-background fake.
+Exact selection grants no effect authority. The create entry grants only
+`state_planning_authorized` through `mutation-journal-v3-plan-only`; execution,
+provider recovery, lifecycle exposure and finalization remain false. Cleanup
+retains all five capabilities false. The state owner records the create plan as
+an embedded, content-free
+`synveda.clean-engine.colima-live-provider-operation-plan.v1` inside a
+dedicated `provider-plan` mutation slot v3 and owner close v4. That plan binds
+the active run/candidate/head, exact registry resolution, production
+requirements and private observation digest without persisting paths, commands,
+environment, `HOME`, binding material or credentials. It changes no receipt or
+environment and produces no provider evidence.
+
+The plan competes on the same atomic mutation-slot name as the fixed fake, so
+the two cannot both publish. Production planning delegates bounded, read-only
+filesystem observation to the preparation contract before acquisition and at
+close publication; it has no process or network execution surface. A completed plan
+blocks all later mutation and finalization while execution is disabled. An
+abandoned planning slot can only be explicitly closed
+`aborted-before-effect`; this repairs the state journal and is not provider
+recovery. No receipt class, finalizer registration or lifecycle command accepts
+the live operation. Test fixtures can pass a prebuilt production-shaped plan
+through a state test seam without proving production evidence; only the
+production builder derives a plan from a fully revalidated production
+observation. A later live provider still needs causal
+process/socket/Engine/context ownership and dynamic-tree retirement and must not
+reuse the controlled-background fake.
 
 An uncatchable pre-publication interruption can retain one or more strictly
 validated `.pending-*` or `.run-*` staging directories. They contain no

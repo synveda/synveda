@@ -14,12 +14,14 @@ import {
   COLIMA_LIVE_CREATE_OPERATION_KIND,
   COLIMA_LIVE_PROVIDER_CLASS,
   PROVIDER_ADAPTER_DENY_ONLY_CAPABILITIES,
+  PROVIDER_ADAPTER_PLAN_ONLY_CAPABILITIES,
   PROVIDER_ADAPTER_REGISTRY,
   PROVIDER_ADAPTER_REGISTRY_SCHEMA,
   PROVIDER_ADAPTER_REGISTRY_SHA256,
   PROVIDER_ADAPTER_RESOLUTION_SCHEMA,
   ProviderAdapterRegistryFailure,
   authorizeProviderAdapter,
+  authorizeProviderAdapterPlanning,
   providerAdapterRegistryKey,
   resolveProviderAdapter,
   validateColimaLiveCleanupOperationContract,
@@ -32,11 +34,11 @@ import {
 } from "../deploy/compose/scripts/clean-engine-colima-live-contract.mjs";
 
 const CREATE_CONTRACT_SHA256 =
-  "84bd2ea1cb9db59f3c35a346322adb00d8cd0688270d3700953ea1bd0a8d6549";
+  "34af3ffb3993172112c9218e737db57acb9ad78b8dc0e89240bbcb2d8ab269b5";
 const CLEANUP_CONTRACT_SHA256 =
-  "b308db23a9bae5dc33dd02052c1302834e7ce086125efda2729fcc0333c79375";
+  "47a6ca5a6b76542a05b5631c24eaed5cefaa9ea6c33bcfe1c4aa997e7db393b3";
 const REGISTRY_SHA256 =
-  "217912f0a551651cf7ee27654fb6f874f1e2358793772dec0e071bba09171241";
+  "50ebdacaafa2b98de3a9acdd82fc563f3f99045df53a96280515a8e5627ed901";
 
 function clone(value) {
   return structuredClone(value);
@@ -103,7 +105,7 @@ test("live operation identities are fresh, exact and content addressed", () => {
   );
 });
 
-test("both operation contracts bind preparation and remain deny only", () => {
+test("create grants only state planning while cleanup remains deny only", () => {
   assert.equal(
     COLIMA_LIVE_CREATE_OPERATION_CONTRACT.preparation_observation_schema,
     COLIMA_LIVE_OBSERVATION_SCHEMA,
@@ -120,7 +122,10 @@ test("both operation contracts bind preparation and remain deny only", () => {
     COLIMA_LIVE_CLEANUP_OPERATION_CONTRACT.create_operation_contract_sha256,
     COLIMA_LIVE_CREATE_OPERATION_CONTRACT_SHA256,
   );
-  assert.equal(COLIMA_LIVE_CREATE_OPERATION_CONTRACT.state_integration, "not-authorized");
+  assert.equal(
+    COLIMA_LIVE_CREATE_OPERATION_CONTRACT.state_integration,
+    "mutation-journal-v3-plan-only",
+  );
   assert.equal(COLIMA_LIVE_CLEANUP_OPERATION_CONTRACT.state_integration, "not-authorized");
   assert.deepEqual(PROVIDER_ADAPTER_DENY_ONLY_CAPABILITIES, {
     execution_authorized: false,
@@ -129,9 +134,16 @@ test("both operation contracts bind preparation and remain deny only", () => {
     recovery_authorized: false,
     state_planning_authorized: false,
   });
+  assert.deepEqual(PROVIDER_ADAPTER_PLAN_ONLY_CAPABILITIES, {
+    execution_authorized: false,
+    finalization_eligible: false,
+    lifecycle_exposure_authorized: false,
+    recovery_authorized: false,
+    state_planning_authorized: true,
+  });
   assert.equal(
     COLIMA_LIVE_CREATE_OPERATION_CONTRACT.capabilities,
-    PROVIDER_ADAPTER_DENY_ONLY_CAPABILITIES,
+    PROVIDER_ADAPTER_PLAN_ONLY_CAPABILITIES,
   );
   assert.equal(
     COLIMA_LIVE_CLEANUP_OPERATION_CONTRACT.capabilities,
@@ -164,10 +176,20 @@ test("the registry contains exactly two unique exact tuple keys", () => {
   assertDeepFrozen(PROVIDER_ADAPTER_REGISTRY);
 });
 
-test("exact create and cleanup tuples resolve only descriptive capabilities", () => {
-  for (const [request, evidenceSchema] of [
-    [CREATE_TUPLE, COLIMA_LIVE_CREATE_EVIDENCE_SCHEMA],
-    [CLEANUP_TUPLE, COLIMA_LIVE_CLEANUP_EVIDENCE_SCHEMA],
+test("exact create and cleanup tuples resolve only their closed capabilities", () => {
+  for (const [request, evidenceSchema, capabilities, stateIntegration] of [
+    [
+      CREATE_TUPLE,
+      COLIMA_LIVE_CREATE_EVIDENCE_SCHEMA,
+      PROVIDER_ADAPTER_PLAN_ONLY_CAPABILITIES,
+      "mutation-journal-v3-plan-only",
+    ],
+    [
+      CLEANUP_TUPLE,
+      COLIMA_LIVE_CLEANUP_EVIDENCE_SCHEMA,
+      PROVIDER_ADAPTER_DENY_ONLY_CAPABILITIES,
+      "not-authorized",
+    ],
   ]) {
     const resolution = resolveProviderAdapter(request);
     assert.equal(resolution.schema, PROVIDER_ADAPTER_RESOLUTION_SCHEMA);
@@ -181,8 +203,8 @@ test("exact create and cleanup tuples resolve only descriptive capabilities", ()
     assert.equal(resolution.evidence_schema, evidenceSchema);
     assert.equal(resolution.requirements_sha256, COLIMA_LIVE_REQUIREMENTS_SHA256);
     assert.equal(resolution.registry_sha256, PROVIDER_ADAPTER_REGISTRY_SHA256);
-    assert.equal(resolution.state_integration, "not-authorized");
-    assert.deepEqual(resolution.capabilities, PROVIDER_ADAPTER_DENY_ONLY_CAPABILITIES);
+    assert.equal(resolution.state_integration, stateIntegration);
+    assert.deepEqual(resolution.capabilities, capabilities);
     assertDeepFrozen(resolution);
   }
 });
@@ -346,7 +368,11 @@ test("registry mutation, reordering and duplicate selection are refused", () => 
   }
 });
 
-test("resolution never grants execution even for either exact tuple", () => {
+test("planning authority is create-only and execution remains denied", () => {
+  const planning = authorizeProviderAdapterPlanning(CREATE_TUPLE);
+  assert.equal(planning.capabilities.state_planning_authorized, true);
+  assert.equal(planning.capabilities.execution_authorized, false);
+  expectRefusal(() => authorizeProviderAdapterPlanning(CLEANUP_TUPLE), 69);
   expectRefusal(() => authorizeProviderAdapter(CREATE_TUPLE), 69);
   expectRefusal(() => authorizeProviderAdapter(CLEANUP_TUPLE), 69);
 });
@@ -367,7 +393,7 @@ test("refusals do not reproduce hostile tuple values", () => {
   );
 });
 
-test("the registry has no execution, state, receipt or fake-provider seam", () => {
+test("the registry has no execution, state implementation, receipt or fake-provider seam", () => {
   const registrySource = readFileSync(
     new URL(
       "../deploy/compose/scripts/clean-engine-provider-adapter-registry.mjs",
@@ -385,8 +411,18 @@ test("the registry has no execution, state, receipt or fake-provider seam", () =
   assert.doesNotMatch(registrySource, /\b(?:spawn|spawnSync|exec|execFile|fork)\s*\(/u);
   assert.doesNotMatch(registrySource, /process\.(?:argv|env)/u);
 
+  const stateSource = readFileSync(
+    new URL("../deploy/compose/scripts/clean-engine-state.mjs", import.meta.url),
+    "utf8",
+  );
+  assert.match(stateSource, /clean-engine-live-provider-plan/u);
+  assert.doesNotMatch(stateSource, /clean-engine-provider-adapter-registry/u);
+  assert.doesNotMatch(
+    stateSource,
+    /colima-vz-docker-live-(?:create|cleanup)-v1/u,
+  );
+
   for (const relativePath of [
-    "../deploy/compose/scripts/clean-engine-state.mjs",
     "../deploy/compose/scripts/clean-engine-receipts.mjs",
     "../deploy/compose/scripts/clean-engine-provider-process-contract.mjs",
   ]) {

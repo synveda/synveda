@@ -32,6 +32,15 @@ import {
   validateColimaLiveObservationForTest,
   validateColimaLiveRequirements,
 } from "../deploy/compose/scripts/clean-engine-colima-live-contract.mjs";
+import {
+  LiveProviderPlanFailure,
+  buildColimaLiveProviderOperationPlan,
+} from "../deploy/compose/scripts/clean-engine-live-provider-plan.mjs";
+import {
+  COLIMA_LIVE_CREATE_OPERATION_CONTRACT_SHA256,
+  COLIMA_LIVE_CREATE_OPERATION_KIND,
+  COLIMA_LIVE_PROVIDER_CLASS,
+} from "../deploy/compose/scripts/clean-engine-provider-adapter-registry.mjs";
 
 const COMPONENT_LAYOUT = Object.freeze({
   "colima-binary": ["b/colima", 0o500],
@@ -509,6 +518,37 @@ test("complete preparation evidence still cannot authorize execution", (t) => {
   expectRefusal(
     () => authorizeColimaLiveObservationForTest(state.requirements, observation),
     69,
+  );
+});
+
+test("fixture preparation cannot be stamped as a production operation plan", (t) => {
+  const state = fixture(t);
+  const observation = build(state);
+  assert.notEqual(observation.requirements_sha256, COLIMA_LIVE_REQUIREMENTS_SHA256);
+  assert.throws(
+    () =>
+      buildColimaLiveProviderOperationPlan({
+        observation,
+        observationInput: state.input,
+        stateBinding: {
+          candidate_sha256: "b".repeat(64),
+          fixture_id: state.input.fixture_id,
+          source_head_sha256: "c".repeat(64),
+          source_sequence: 0,
+        },
+        tuple: {
+          action: "provider-create",
+          operation_contract_sha256:
+            COLIMA_LIVE_CREATE_OPERATION_CONTRACT_SHA256,
+          operation_kind: COLIMA_LIVE_CREATE_OPERATION_KIND,
+          provider_class: COLIMA_LIVE_PROVIDER_CLASS,
+        },
+      }),
+    (error) => {
+      assert.ok(error instanceof LiveProviderPlanFailure);
+      assert.match(error.message, /preparation observation was refused/u);
+      return true;
+    },
   );
 });
 

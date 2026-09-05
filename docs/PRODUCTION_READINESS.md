@@ -91,7 +91,7 @@ collision-preserving failure branches, no-replace publication and an exact
 success-only synthetic manifest. Receipt v1/v2/v3, mutation slot v1,
 recovery/root v1 and close v1/v2 are direct hard-cut refusals. Slot v2 binds
 source/result predecessors plus operation kind, contract and plan; recovery v2
-binds a fresh observation; close v3 binds the outer operation settlement.
+binds a fresh observation; close v4 binds the outer operation settlement.
 Final journal names are never deleted or reused, and generic append cannot own
 preflight, provider-create, provider-cleanup or finalization.
 
@@ -140,14 +140,23 @@ official Colima 0.10.3, Lima 2.2.0 and Colima-core 0.10.4 disk artifacts. Its
 private observation binds staged and dynamically selected helper identities,
 closed environment paths, an HMAC-hidden physical `HOME`, host build/boot
 inputs and distinct source/receipt-owned disk identities. The observer has no
-child-process API. A separate closed registry now reserves distinct live create
-and cleanup operation contracts and evidence schema names, selects only their
-exact action/kind/contract/class tuples and binds both to the production
-requirements digest. State planning, execution, recovery, lifecycle exposure
-and finalization all remain false; the registry imports no state, receipt,
-process or fake-provider path. Preparation has fifteen deterministic tests and
-the registry has fourteen. This closes input and type-confusion ambiguity only:
-it is not a live OS probe, provider start, Docker Engine identity, state plan,
+child-process API. A separate closed registry reserves distinct live create and
+cleanup operation contracts and evidence schema names, selects only their exact
+action/kind/contract/class tuples and binds both to the production requirements
+digest. Create now grants state planning only; execution, provider recovery,
+lifecycle exposure and finalization remain false, while cleanup remains wholly
+deny-only. The registry still imports no state, receipt, process or fake-provider
+path.
+
+The state owner embeds one content-free live operation plan in a dedicated
+mutation slot v3 and close v4. It binds the active candidate/head, exact registry
+resolution, production requirements and private observation digest. The same
+slot CAS serializes it against fake-provider mutation; completion changes no
+receipt or environment, writes no provider evidence and blocks all later effect
+or finalization paths. An abandoned slot can only be recovered by an explicit
+effect-free abort. Preparation has sixteen deterministic tests, the registry
+fourteen, the effect-free plan boundary six and state has five focused plan/race/crash
+tests. This is not a live OS probe, provider start, Docker Engine identity,
 cleanup or environment-manifest result, so no readiness status changes.
 
 Live Linux/provider CI and a current Docker Desktop/provider run remain absent.

@@ -552,13 +552,13 @@ test("the background owner binds one operation through settlement receipt and cl
     const close = parse(join(active, ".mutation-close-00"));
     const authority = parse(join(active, "provider", "background-create-authority.json"));
     assert.equal(receipt.phase, "provider-create-passed");
-    assert.equal(slot.schema, "synveda.clean-engine.mutation-slot.v2");
+    assert.equal(slot.schema, "synveda.clean-engine.mutation-slot.v3");
     assert.equal(intent.schema, "synveda.clean-engine.receipt.v4");
     assert.equal(settlement.authority, "owner");
     assert.equal(settlement.authority_sha256, sha256(slotBytes));
     assert.equal(settlement.disposition, "complete-identity");
     assert.equal(receipt.result.operation_evidence_sha256, sha256(settlementBytes));
-    assert.equal(close.schema, "synveda.clean-engine.mutation-close.v3");
+    assert.equal(close.schema, "synveda.clean-engine.mutation-close.v4");
     assert.equal(close.operation_evidence_sha256, sha256(settlementBytes));
     assert.equal(
       intent.result.operation_plan_sha256,

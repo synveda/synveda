@@ -53,6 +53,12 @@ import {
   retireControlledBackgroundProviderWithAuthorityGate,
   validateControlledBackgroundProviderOperationPlan,
 } from "./clean-engine-provider-process-contract.mjs";
+import {
+  LiveProviderPlanFailure,
+  buildColimaLiveProviderOperationPlan,
+  liveProviderPlanBytes,
+  validateColimaLiveProviderOperationPlan,
+} from "./clean-engine-live-provider-plan.mjs";
 
 const REGISTRY_IMAGE =
   "registry:3.1.1@sha256:1be55279f18a2fe1a74edf2664cac61c1bea305b7b4642dab412e7affdcb3e33";
@@ -69,8 +75,8 @@ const ENVIRONMENT_STAGING_NAME = ".environment-publish";
 const LEGACY_MUTATION_LEASE_NAME = ".mutation-lease";
 const MUTATION_SLOT_PREFIX = ".mutation-slot-";
 const MUTATION_CLOSE_PREFIX = ".mutation-close-";
-const MUTATION_SLOT_SCHEMA = "synveda.clean-engine.mutation-slot.v2";
-const MUTATION_CLOSE_SCHEMA = "synveda.clean-engine.mutation-close.v3";
+const MUTATION_SLOT_SCHEMA = "synveda.clean-engine.mutation-slot.v3";
+const MUTATION_CLOSE_SCHEMA = "synveda.clean-engine.mutation-close.v4";
 const MUTATION_RECOVERY_PREFIX = ".mutation-recovery-";
 const MUTATION_RECOVERY_SCHEMA = "synveda.clean-engine.mutation-recovery.v2";
 const MUTATION_OPERATION_PREFIX = ".mutation-operation-";
@@ -86,6 +92,7 @@ const MAX_MUTATION_RECOVERIES = 8;
 const MAX_MUTATION_SLOTS = 64;
 const MAX_MUTATION_STAGES = 16;
 const MAX_MUTATION_PUBLICATION_ATTEMPTS = 16;
+const LIVE_PROVIDER_PLAN_ACTION = "provider-plan";
 const DETERMINISTIC_PROVIDER_OPERATION_KIND = "deterministic-fake-provider-create-v1";
 const FAKE_PROVIDER_ADAPTER_FIELDS = Object.freeze([
   "close_prelink_hold_milliseconds",
@@ -1112,6 +1119,32 @@ function backgroundCleanupOperationPlan({
 }
 
 function validateMutationOperation(value) {
+  if (value.action === LIVE_PROVIDER_PLAN_ACTION) {
+    if (
+      value.operation_plan === null ||
+      Array.isArray(value.operation_plan) ||
+      typeof value.operation_plan !== "object"
+    ) {
+      fail("live provider planning operation was refused");
+    }
+    try {
+      validateColimaLiveProviderOperationPlan(value.operation_plan);
+    } catch (error) {
+      if (error instanceof LiveProviderPlanFailure) {
+        fail(error.message, error.exitStatus);
+      }
+      throw error;
+    }
+    if (
+      value.operation_kind !== value.operation_plan.operation_kind ||
+      value.operation_contract_sha256 !==
+        value.operation_plan.operation_contract_sha256 ||
+      value.operation_plan.fixture_id !== value.fixture_id
+    ) {
+      fail("live provider planning operation binding was refused");
+    }
+    return;
+  }
   if (value.action === "provider-create") {
     if (
       value.operation_kind === DETERMINISTIC_PROVIDER_OPERATION_KIND &&
@@ -1204,6 +1237,7 @@ function validateMutationLeaseValue(value, fixtureId) {
       "finalize-environment",
       "provider-cleanup",
       "provider-create",
+      LIVE_PROVIDER_PLAN_ACTION,
     ]).has(value.action) ||
     !onlyLowerHex(value.intent_receipt_sha256, 64) ||
     !Number.isSafeInteger(value.journal_sequence) ||
@@ -1359,7 +1393,8 @@ function validateRecoveryClaims(claims, fixtureId, slot) {
       fail("mutation recovery claim was refused");
     }
     if (
-      slot.value.operation_kind === DETERMINISTIC_PROVIDER_OPERATION_KIND &&
+      (slot.value.operation_kind === DETERMINISTIC_PROVIDER_OPERATION_KIND ||
+        slot.value.action === LIVE_PROVIDER_PLAN_ACTION) &&
       canonical({
         observed_effect_disposition: claim.value.observed_effect_disposition,
         observed_effect_name: claim.value.observed_effect_name,
@@ -2335,6 +2370,7 @@ function validatePlanRunInventory(run, stateMetadata) {
     const slot = mutationSlots[sequence];
     const recoverableAction =
       slot.value.action === "provider-create" ||
+      slot.value.action === LIVE_PROVIDER_PLAN_ACTION ||
       (slot.value.action === "provider-cleanup" &&
         slot.value.operation_kind ===
           CONTROLLED_BACKGROUND_RETIREMENT_OPERATION_KIND);
@@ -2480,6 +2516,19 @@ function loadState(roots, checkSource, allowCompetingStaging = false) {
         lease.intent_receipt_sha256 !== ZERO_SHA256)
     ) {
       fail("mutation slot receipt binding was refused");
+    }
+    if (
+      lease.action === LIVE_PROVIDER_PLAN_ACTION &&
+      (lease.source_sequence !== 0 ||
+        lease.source_head_sha256 !== digest(plan.bytes) ||
+        lease.source_environment_sha256 !== ZERO_SHA256 ||
+        lease.operation_plan.source_sequence !== 0 ||
+        lease.operation_plan.source_head_sha256 !== digest(plan.bytes) ||
+        lease.operation_plan.source_candidate_sha256 !== digest(candidate.bytes) ||
+        lease.operation_plan.fixture_id !== candidate.value.run_id ||
+        lease.operation_plan.provider_resource !== plan.value.result.provider_resource)
+    ) {
+      fail("live provider plan state binding was refused");
     }
     if (
       sequence === 0 &&
@@ -2664,6 +2713,60 @@ function loadState(roots, checkSource, allowCompetingStaging = false) {
       fail(`${receipt.phase} receipt was outside its mutation action`);
     }
   }
+  const liveProviderPlanSlots = inventory.mutationSlots.filter(
+    (slot) => slot.value.action === LIVE_PROVIDER_PLAN_ACTION,
+  );
+  for (const slot of liveProviderPlanSlots) {
+    const sequence = slot.value.journal_sequence;
+    const close = mutationClosesBySlot.get(sequence);
+    if (
+      inventory.mutationSlots
+        .slice(0, sequence)
+        .some(
+          (predecessor) =>
+            predecessor.value.action !== LIVE_PROVIDER_PLAN_ACTION ||
+            mutationClosesBySlot.get(predecessor.value.journal_sequence)?.value
+              .disposition !== "aborted-before-effect",
+        ) ||
+      receipts.length !== 1 ||
+      receiptState.head.phase !== "plan" ||
+      inventory.environment !== undefined ||
+      inventory.environmentPublication !== undefined ||
+      inventory.pendingPublication !== undefined ||
+      (close !== undefined &&
+        (close.value.result_sequence !== 0 ||
+          close.value.result_head_sha256 !== digest(plan.bytes) ||
+          close.value.result_environment_sha256 !== ZERO_SHA256 ||
+          close.value.operation_evidence_sha256 !== ZERO_SHA256 ||
+          (close.value.disposition === "completed" &&
+            close.value.authority !== "owner")))
+    ) {
+      fail("live provider plan journal was refused");
+    }
+  }
+  const completedLiveProviderPlans = liveProviderPlanSlots.filter(
+    (slot) =>
+      mutationClosesBySlot.get(slot.value.journal_sequence)?.value.disposition ===
+      "completed",
+  );
+  if (
+    completedLiveProviderPlans.length > 1 ||
+    (completedLiveProviderPlans.length === 1 &&
+      completedLiveProviderPlans[0] !== inventory.mutationSlots.at(-1))
+  ) {
+    fail("live provider plan journal was ambiguous");
+  }
+  const completedLiveProviderPlanSlot = completedLiveProviderPlans[0];
+  const liveProviderPlan =
+    completedLiveProviderPlanSlot === undefined
+      ? undefined
+      : Object.freeze({
+          close: mutationClosesBySlot.get(
+            completedLiveProviderPlanSlot.value.journal_sequence,
+          ),
+          operationPlan: completedLiveProviderPlanSlot.value.operation_plan,
+          slot: completedLiveProviderPlanSlot,
+        });
   const providerSlots = inventory.mutationSlots.filter(
     (slot) => slot.value.action === "provider-create",
   );
@@ -2707,7 +2810,10 @@ function loadState(roots, checkSource, allowCompetingStaging = false) {
       fail("provider evidence was outside a mutation slot");
     }
     providerState = Object.freeze({
-      contract: "synchronous-fake",
+      contract:
+        liveProviderPlan === undefined
+          ? "synchronous-fake"
+          : "live-provider-plan-only",
       operationEvidenceSha256: ZERO_SHA256,
     });
   } else if (providerSlot.value.operation_kind === DETERMINISTIC_PROVIDER_OPERATION_KIND) {
@@ -3374,6 +3480,7 @@ function loadState(roots, checkSource, allowCompetingStaging = false) {
     candidateBytes: candidate.bytes,
     environment,
     environmentPublication: inventory.environmentPublication,
+    liveProviderPlan,
     plan: plan.value,
     receiptState,
     receipts,
@@ -3777,6 +3884,9 @@ function acquireMutationLease(
 ) {
   const active = activeMutationRun(roots);
   const initial = reconcileMutationStages(roots);
+  if (initial.liveProviderPlan !== undefined) {
+    fail("live provider execution remains disabled after state planning", 73);
+  }
   if (initial.mutationRecoveries.length > 0) {
     fail("a clean-engine mutation recovery is active or abandoned", 73);
   }
@@ -3792,6 +3902,7 @@ function acquireMutationLease(
     "finalize-environment",
     "provider-cleanup",
     "provider-create",
+    LIVE_PROVIDER_PLAN_ACTION,
   ]).has(action)) {
     fail("mutation action was refused", 70);
   }
@@ -4094,32 +4205,42 @@ function closeMutationLease(
   disposition,
   publicationHolds = {},
   operationEvidenceSha256 = ZERO_SHA256,
+  additionalReassertAuthority,
 ) {
-  assertMutationLeaseHeld(roots, held, false);
+  if (
+    additionalReassertAuthority !== undefined &&
+    typeof additionalReassertAuthority !== "function"
+  ) {
+    fail("mutation close additional authority was refused", 70);
+  }
+  const assertHeld = () => {
+    const state = assertMutationLeaseHeld(roots, held, false);
+    additionalReassertAuthority?.(state);
+    return state;
+  };
+  assertHeld();
   const receiptAuthority =
     held.lease.operation_kind === CONTROLLED_BACKGROUND_OPERATION_KIND
       ? backgroundReceiptReassertion(
           roots,
-          () => assertMutationLeaseHeld(roots, held, false),
+          assertHeld,
         )
       : held.lease.operation_kind ===
           CONTROLLED_BACKGROUND_RETIREMENT_OPERATION_KIND
         ? backgroundCleanupReceiptReassertion(
             roots,
-            () => assertMutationLeaseHeld(roots, held, false),
+            assertHeld,
           )
-        : () => {
-          assertMutationLeaseHeld(roots, held, false);
-          };
+        : assertHeld;
   reconcileReceiptPublication(roots, receiptAuthority);
   reconcileEnvironmentPublication(roots);
-  const state = assertMutationLeaseHeld(roots, held, false);
+  const state = assertHeld();
   return publishMutationClose(
     roots,
     state,
     state.mutationLease,
     disposition,
-    () => assertMutationLeaseHeld(roots, held, false),
+    assertHeld,
     publicationHolds,
     operationEvidenceSha256,
   );
@@ -4491,6 +4612,234 @@ function refusedProviderResult(safeCode = "evidence-refused") {
   };
 }
 
+function validateLiveProviderOperationPlanForState(value) {
+  try {
+    return validateColimaLiveProviderOperationPlan(value);
+  } catch (error) {
+    if (error instanceof LiveProviderPlanFailure) {
+      fail(error.message, error.exitStatus);
+    }
+    throw error;
+  }
+}
+
+function liveProviderPlanStateBinding(state) {
+  return Object.freeze({
+    candidate_sha256: digest(state.candidateBytes),
+    fixture_id: state.candidate.run_id,
+    source_head_sha256: state.receiptState.head_sha256,
+    source_sequence: state.receiptState.head.sequence,
+  });
+}
+
+function assertLiveProviderOperationPlanStateBinding(operationPlan, state) {
+  const expected = liveProviderPlanStateBinding(state);
+  if (
+    operationPlan.fixture_id !== expected.fixture_id ||
+    operationPlan.source_candidate_sha256 !== expected.candidate_sha256 ||
+    operationPlan.source_head_sha256 !== expected.source_head_sha256 ||
+    operationPlan.source_sequence !== expected.source_sequence ||
+    operationPlan.provider_resource !== state.plan.result.provider_resource
+  ) {
+    fail("live provider planning operation binding was refused", 73);
+  }
+  return operationPlan;
+}
+
+function assertLiveProviderPlanningState(
+  roots,
+  state,
+  { allowClosePublicationStage = false } = {},
+) {
+  const stateEntries = readdirSync(roots.stateBase).sort();
+  const expectedEntries = [`.run-${state.candidate.run_id}`, "active"].sort();
+  const nonPlanSlots = state.mutationSlots.filter(
+    (slot) => slot.value.action !== LIVE_PROVIDER_PLAN_ACTION,
+  );
+  const closedSequences = new Set(
+    state.mutationCloses.map((close) => close.value.slot_sequence),
+  );
+  const abandonedHistoricalPlan = state.mutationSlots.some(
+    (slot) =>
+      slot !== state.mutationLease &&
+      slot !== state.liveProviderPlan?.slot &&
+      (!closedSequences.has(slot.value.journal_sequence) ||
+        state.mutationCloses.find(
+          (close) => close.value.slot_sequence === slot.value.journal_sequence,
+        )?.value.disposition !== "aborted-before-effect"),
+  );
+  if (
+    JSON.stringify(stateEntries) !== JSON.stringify(expectedEntries) ||
+    state.receipts.length !== 1 ||
+    state.receiptState.head.phase !== "plan" ||
+    state.receiptState.head.sequence !== 0 ||
+    state.pendingPublication !== undefined ||
+    state.environment !== undefined ||
+    state.environmentPublication !== undefined ||
+    (allowClosePublicationStage
+      ? state.mutationStages.length > 1
+      : state.mutationStages.length !== 0) ||
+    state.mutationOperations.length !== 0 ||
+    nonPlanSlots.length !== 0 ||
+    abandonedHistoricalPlan ||
+    !new Set(["live-provider-plan-only", "synchronous-fake"]).has(
+      state.providerState.contract,
+    ) ||
+    state.cleanupState.contract !== "journal-only"
+  ) {
+    fail("live provider planning requires pristine state", 73);
+  }
+  return state;
+}
+
+function refuseCompletedLiveProviderPlan(state) {
+  if (state.liveProviderPlan !== undefined) {
+    fail("live provider execution remains disabled after state planning", 73);
+  }
+}
+
+function buildLiveProviderOperationPlan(argumentsValue, state) {
+  try {
+    return buildColimaLiveProviderOperationPlan({
+      observation: argumentsValue.observation,
+      observationInput: argumentsValue.observationInput,
+      stateBinding: liveProviderPlanStateBinding(state),
+      tuple: argumentsValue.adapterTuple,
+    });
+  } catch (error) {
+    if (error instanceof LiveProviderPlanFailure) {
+      fail(error.message, error.exitStatus);
+    }
+    throw error;
+  }
+}
+
+function recordLiveProviderOperationPlan(roots, operationPlan, rebuild) {
+  validateLiveProviderOperationPlanForState(operationPlan);
+  const initial = assertLiveProviderPlanningState(
+    roots,
+    loadState(roots, true),
+  );
+  assertLiveProviderOperationPlanStateBinding(operationPlan, initial);
+  if (initial.liveProviderPlan !== undefined) {
+    if (
+      !liveProviderPlanBytes(initial.liveProviderPlan.operationPlan).equals(
+        liveProviderPlanBytes(operationPlan),
+      )
+    ) {
+      fail("live provider operation plan already differs", 73);
+    }
+    return initial.liveProviderPlan;
+  }
+  if (initial.mutationLease !== undefined) {
+    fail("an abandoned live provider plan requires explicit recovery", 73);
+  }
+  const expectedSource = Object.freeze({
+    sequence: initial.receiptState.head.sequence,
+    sha256: initial.receiptState.head_sha256,
+  });
+  const held = acquireMutationLease(
+    roots,
+    LIVE_PROVIDER_PLAN_ACTION,
+    ZERO_SHA256,
+    expectedSource,
+    {},
+    Object.freeze({
+      contractSha256: operationPlan.operation_contract_sha256,
+      kind: operationPlan.operation_kind,
+      plan: operationPlan,
+    }),
+  );
+  let planningFailure;
+  const reassertPlanningAuthority = () => {
+    assertMutationLeaseHeld(roots, held, false);
+    const current = assertLiveProviderPlanningState(
+      roots,
+      loadState(roots, true),
+      { allowClosePublicationStage: true },
+    );
+    if (
+      current.mutationLease === undefined ||
+      !current.mutationLease.bytes.equals(held.leaseBytes)
+    ) {
+      fail("live provider planning authority changed", 73);
+    }
+    const rebuilt = rebuild(current);
+    validateLiveProviderOperationPlanForState(rebuilt);
+    if (
+      !liveProviderPlanBytes(rebuilt).equals(liveProviderPlanBytes(operationPlan))
+    ) {
+      fail("live provider preparation changed during state planning", 73);
+    }
+  };
+  try {
+    reassertPlanningAuthority();
+  } catch (error) {
+    planningFailure = error;
+  }
+  closeMutationLease(
+    roots,
+    held,
+    planningFailure === undefined ? "completed" : "aborted-before-effect",
+    {},
+    ZERO_SHA256,
+    planningFailure === undefined ? reassertPlanningAuthority : undefined,
+  );
+  if (planningFailure !== undefined) throw planningFailure;
+  const verified = loadState(roots, true);
+  if (
+    verified.liveProviderPlan === undefined ||
+    !liveProviderPlanBytes(verified.liveProviderPlan.operationPlan).equals(
+      liveProviderPlanBytes(operationPlan),
+    )
+  ) {
+    fail("live provider operation plan was not durable", 70);
+  }
+  return verified.liveProviderPlan;
+}
+
+export function recordLiveProviderOperationPlanForExecutor(argumentsValue) {
+  const roots = prepareRoots(
+    argumentsValue.repoRoot,
+    argumentsValue.stateBase,
+    false,
+  );
+  reconcileMutationStages(roots);
+  const initial = assertLiveProviderPlanningState(roots, loadState(roots, true));
+  const operationPlan = buildLiveProviderOperationPlan(argumentsValue, initial);
+  return recordLiveProviderOperationPlan(
+    roots,
+    operationPlan,
+    (current) => buildLiveProviderOperationPlan(argumentsValue, current),
+  );
+}
+
+// This owner-UID test seam exercises journal serialization with a prebuilt
+// production-shaped plan. The supported lifecycle never imports or exposes it.
+export function recordLiveProviderOperationPlanForTest(argumentsValue) {
+  const roots = prepareRoots(
+    argumentsValue.repoRoot,
+    argumentsValue.stateBase,
+    false,
+  );
+  reconcileMutationStages(roots);
+  const operationPlan = validateLiveProviderOperationPlanForState(
+    argumentsValue.operationPlan,
+  );
+  const holdMilliseconds = argumentsValue.holdMilliseconds ?? 0;
+  if (
+    !Number.isSafeInteger(holdMilliseconds) ||
+    holdMilliseconds < 0 ||
+    holdMilliseconds > 30_000
+  ) {
+    fail("live provider plan test hold was refused", 64);
+  }
+  return recordLiveProviderOperationPlan(roots, operationPlan, () => {
+    holdFakeProvider(holdMilliseconds);
+    return operationPlan;
+  });
+}
+
 export function executeProviderCreateForExecutor(argumentsValue) {
   validateFakeProviderAdapter(argumentsValue.adapter);
   const roots = prepareRoots(argumentsValue.repoRoot, argumentsValue.stateBase, false);
@@ -4498,6 +4847,7 @@ export function executeProviderCreateForExecutor(argumentsValue) {
     beforeLinkMilliseconds: argumentsValue.adapter.close_prelink_hold_milliseconds,
   };
   const initial = loadState(roots, true);
+  refuseCompletedLiveProviderPlan(initial);
   if (
     initial.receiptState.head.phase !== "plan" ||
     initial.pendingPublication !== undefined ||
@@ -4734,6 +5084,7 @@ export async function executeBackgroundProviderCreateForExecutor(argumentsValue)
   validateBackgroundProviderAdapter(argumentsValue.adapter);
   const roots = prepareRoots(argumentsValue.repoRoot, argumentsValue.stateBase, false);
   const initial = loadState(roots, true);
+  refuseCompletedLiveProviderPlan(initial);
   if (
     initial.receiptState.head.phase !== "plan" ||
     initial.pendingPublication !== undefined ||
@@ -5739,11 +6090,12 @@ function providerRecoveryBase(state) {
     fail("no abandoned provider mutation was available", 73);
   }
   const recoverableCreate = lease.value.action === "provider-create";
+  const recoverablePlan = lease.value.action === LIVE_PROVIDER_PLAN_ACTION;
   const recoverableCleanup =
     lease.value.action === "provider-cleanup" &&
     lease.value.operation_kind ===
       CONTROLLED_BACKGROUND_RETIREMENT_OPERATION_KIND;
-  if (!recoverableCreate && !recoverableCleanup) {
+  if (!recoverableCreate && !recoverablePlan && !recoverableCleanup) {
     fail("mutation recovery action was refused", 73);
   }
   return {
@@ -5796,6 +6148,16 @@ export function providerRecoveryConfirmationForExecutor(argumentsValue) {
   const roots = prepareRoots(argumentsValue.repoRoot, argumentsValue.stateBase, false);
   const state = loadState(roots, false);
   const base = providerRecoveryBase(state);
+  return providerRecoveryConfirmation(base);
+}
+
+export function liveProviderPlanRecoveryConfirmationForExecutor(argumentsValue) {
+  const roots = prepareRoots(argumentsValue.repoRoot, argumentsValue.stateBase, false);
+  const state = loadState(roots, false);
+  const base = providerRecoveryBase(state);
+  if (base.operation.action !== LIVE_PROVIDER_PLAN_ACTION) {
+    fail("live provider plan recovery action was refused", 73);
+  }
   return providerRecoveryConfirmation(base);
 }
 
@@ -6362,6 +6724,48 @@ function closeRecoveredProviderMutation(
   );
 }
 
+export function recoverLiveProviderPlanForExecutor(argumentsValue) {
+  const roots = prepareRoots(
+    argumentsValue.repoRoot,
+    argumentsValue.stateBase,
+    false,
+  );
+  const initial = loadState(roots, false);
+  if (
+    initial.mutationLease?.value.action !== LIVE_PROVIDER_PLAN_ACTION ||
+    initial.liveProviderPlan !== undefined ||
+    initial.receiptState.head.sequence !==
+      initial.mutationLease.value.source_sequence ||
+    initial.receiptState.head_sha256 !==
+      initial.mutationLease.value.source_head_sha256 ||
+    initial.environment !== undefined ||
+    initial.providerState.contract !== "synchronous-fake" ||
+    initial.cleanupState.contract !== "journal-only"
+  ) {
+    fail("live provider plan recovery requires an effect-free planning slot", 73);
+  }
+  const held = acquireProviderRecovery(
+    roots,
+    argumentsValue.confirmation,
+    defaultMutationOwnerProbe,
+  );
+  const state = assertProviderRecoveryHeld(roots, held);
+  if (
+    state.mutationLease?.value.action !== LIVE_PROVIDER_PLAN_ACTION ||
+    state.receiptState.head.sequence !== state.mutationLease.value.source_sequence ||
+    state.receiptState.head_sha256 !== state.mutationLease.value.source_head_sha256 ||
+    state.environment !== undefined ||
+    state.pendingPublication !== undefined ||
+    state.environmentPublication !== undefined ||
+    state.providerState.contract !== "synchronous-fake" ||
+    state.cleanupState.contract !== "journal-only"
+  ) {
+    fail("live provider plan recovery observation changed", 73);
+  }
+  closeRecoveredProviderMutation(roots, held, "aborted-before-effect");
+  return state.receiptState.head;
+}
+
 export function recoverProviderCreateForExecutor(argumentsValue) {
   validateFakeProviderAdapter(argumentsValue.adapter);
   const roots = prepareRoots(argumentsValue.repoRoot, argumentsValue.stateBase, false);
@@ -6682,6 +7086,7 @@ export function appendReceiptForExecutor(argumentsValue) {
   }
   const roots = prepareRoots(argumentsValue.repoRoot, argumentsValue.stateBase, false);
   const initial = loadState(roots, false);
+  refuseCompletedLiveProviderPlan(initial);
   if (
     initial.providerState.contract === "controlled-background-fake" &&
     typeof argumentsValue.phase === "string" &&
@@ -6713,6 +7118,7 @@ export function appendProviderCleanupReceiptForExecutor(argumentsValue) {
   }
   const roots = prepareRoots(argumentsValue.repoRoot, argumentsValue.stateBase, false);
   const initial = loadState(roots, false);
+  refuseCompletedLiveProviderPlan(initial);
   if (initial.providerState.contract === "controlled-background-fake") {
     fail("background provider cleanup requires dedicated ownership evidence", 73);
   }
@@ -7053,6 +7459,7 @@ function reconcileEnvironmentPublication(roots) {
 export function finalizeEnvironmentForExecutor(argumentsValue) {
   const roots = prepareRoots(argumentsValue.repoRoot, argumentsValue.stateBase, false);
   const initial = loadState(roots, false);
+  refuseCompletedLiveProviderPlan(initial);
   if (initial.providerState.contract === "controlled-background-fake") {
     if (
       initial.cleanupState.contract === "controlled-background-retirement" &&

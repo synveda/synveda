@@ -250,27 +250,37 @@ The separate provider-adapter registry reserves fresh
 names. It selects only an exact action, operation kind, operation-contract
 digest and provider-class tuple. Both contracts bind the production preparation
 requirements digest, and cleanup also binds the exact create-contract digest.
-Resolution is descriptive: state planning, execution, recovery, lifecycle
-exposure and finalization capabilities are all false.
+The create entry now grants only state planning through
+`mutation-journal-v3-plan-only`; execution, provider recovery, lifecycle
+exposure and finalization remain false. Cleanup remains deny-only. The registry
+imports no process, state, receipt or fake-provider implementation.
 
-Neither live contract is registered with the state journal, receipt machine or
-finalizer, and the supported commands remain only `plan`, `status` and
-`verify`. The registry imports no process, state, receipt or fake-provider
-surface. The host record is supplied preparation input, not a live VZ probe.
-Future live state work must consume the exact registry tuple through new
-state-owned evidence; it cannot relabel or reuse the controlled-background fake.
+The state owner embeds `synveda.clean-engine.colima-live-provider-operation-plan.v1`
+in a dedicated `provider-plan` mutation slot. It binds the active run, candidate
+and plan-receipt digests, exact registry resolution, production requirements,
+private preparation-observation digest, provider profile/resource and the
+all-effect-denied capability set. The production builder revalidates the full
+private observation before slot acquisition and again at the close publication
+boundary. No path, command, environment, `HOME`, binding key or credential is
+persisted in the plan. Mutation slot v3 and close v4 serialize this plan against
+every fake or future effect writer through the same no-replace slot name; the
+close binds the embedded plan digest and changes no receipt or environment.
 
 No supported lifecycle target exposes either test-only seam; there is no live
-provider mutation or environment manifest. `registry/`, `runtime/` and
-`evidence/` remain empty. Receipt v4 has provider-class-bound controlled cleanup
+provider execution, recovery, cleanup or environment manifest. `registry/`,
+`runtime/`, `provider/` and `evidence/` remain empty. A completed plan centrally
+blocks every other mutation and finalization. An abandoned plan slot may only
+be explicitly recovered as `aborted-before-effect`; this journal repair grants
+no provider-recovery capability, after which the same exact plan may compete for
+the next slot. Receipt v4 has provider-class-bound controlled cleanup
 intent/pass shapes, but the receipt itself grants no deletion authority. The
 state-owned path supplies the dedicated slot and exact checkpoints, publishes a
 distinct outer settlement, and binds that digest through pass and close.
 Recovery may abort only an untouched pre-intent slot or proceed under the newest
 observation claim, reserving capacity for a final settled-prefix refresh. Owner
 close permits no claim and recovery close must name the latest claim. Next bind
-the deny-only live create tuple to a new state-owned plan and evidence chain,
-without granting execution. Then prove causal process/socket/Engine/context
+the accepted live plan to a fresh effect intent and evidence chain without
+granting a supported lifecycle command. Then prove causal process/socket/Engine/context
 ownership and exact dynamic-tree cleanup before exposing a supported lifecycle
 target or making any Docker or finalization claim. Superseded receipt and
 mutation schemas are discarded and regenerated.

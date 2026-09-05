@@ -129,8 +129,8 @@ actor path is removed. The controlled path is the lifecycle-unexposed
 background process canary, wrapped in state-born authority without making its
 inner process model the operation authority.
 
-Receipt schema v4, mutation slot v2, mutation recovery/root v2 and mutation
-close v3 are fresh-plan hard cuts; earlier versions are refused rather than
+Receipt schema v4, mutation slot v3, mutation recovery/root v2 and mutation
+close v4 are fresh-plan hard cuts; earlier versions are refused rather than
 translated. A canonical background-create operation plan binds the private
 provider base, evidence directory, root key and ownership nonce. The slot binds
 that plan, operation kind and v4 process contract before intent or root
@@ -184,7 +184,7 @@ prefix observation.
 
 The inner settlement grants no result-receipt or close authority. Only the
 distinct outer cleanup settlement may bind receipt v4's controlled pass and
-close v3. Action-dispatched recovery holds the newest observation claim and,
+close v4. Action-dispatched recovery holds the newest observation claim and,
 when retirement advances, publishes a reserved final settled-prefix claim
 before outer settlement. Owner close permits no claims; recovery close must
 name the latest claim. Pre-intent recovery is effect-free, settled history
@@ -215,10 +215,24 @@ cleanup operation/evidence identities without changing the immutable fake. Its
 lookup key is the exact action, operation kind, operation-contract digest and
 `colima-vz-docker-live` provider class. Both contracts bind the production
 requirements digest; cleanup additionally binds the create-contract digest.
-The registry is descriptive only: state planning, execution, recovery,
-lifecycle exposure and finalization remain false, and it imports no process,
-state, receipt or fake-provider implementation. State integration requires a
-later, separately reviewed operation plan and evidence chain.
+The create entry grants only state planning through
+`mutation-journal-v3-plan-only`; execution, provider recovery, lifecycle
+exposure and finalization remain false, cleanup remains wholly deny-only, and
+the registry imports no process, state, receipt or fake-provider implementation.
+
+The state owner embeds the exact live plan in a dedicated `provider-plan`
+mutation slot v3. The plan binds the active run/candidate/head, registry tuple,
+production requirements, private observation digest and provider
+profile/resource, but persists no paths, command, environment, `HOME`, binding
+key or credentials. The production observation is revalidated before slot
+acquisition and at the owner-close v4 publication boundary. This action shares
+the same slot CAS as fake-provider mutation, changes no receipt or environment,
+produces no provider evidence and blocks all later mutation/finalization while
+execution remains disabled. An abandoned slot may only be explicitly closed
+`aborted-before-effect`; this is journal repair, not provider recovery. The
+supported lifecycle remains `plan|status|verify` and imports no live executor or
+test fixture. A later, separately reviewed effect intent/evidence chain remains
+required.
 
 ## Options considered
 
@@ -272,7 +286,7 @@ later, separately reviewed operation plan and evidence chain.
 - The controlled clean-Engine seams remain internal and fake-only. The
   deterministic background create path distinguishes controller, host agent,
   Engine, both sockets and Docker context; its outer settlement is integrated
-  with receipt v4 and close v3. Legacy retirement v1 remains fixture-only; the
+  with receipt v4 and close v4. Legacy retirement v1 remains fixture-only; the
   state owner composes retirement v2 through a dedicated cleanup slot, exact
   lower checkpoints, an outer settlement, action-dispatched recovery, receipt
   and close. Only the outer cleanup settlement is operation evidence. A live
