@@ -210,6 +210,16 @@ Execution, lifecycle exposure and finalization remain false, and no state,
 receipt, lifecycle or finalizer path accepts it. Neither contract is Docker,
 Colima or supported lifecycle evidence.
 
+A separate closed provider-adapter registry reserves fresh live create and
+cleanup operation/evidence identities without changing the immutable fake. Its
+lookup key is the exact action, operation kind, operation-contract digest and
+`colima-vz-docker-live` provider class. Both contracts bind the production
+requirements digest; cleanup additionally binds the create-contract digest.
+The registry is descriptive only: state planning, execution, recovery,
+lifecycle exposure and finalization remain false, and it imports no process,
+state, receipt or fake-provider implementation. State integration requires a
+later, separately reviewed operation plan and evidence chain.
+
 ## Options considered
 
 1. **Keep contributor and installed Compose separate** — preserves current
@@ -267,11 +277,13 @@ Colima or supported lifecycle evidence.
   lower checkpoints, an outer settlement, action-dispatched recovery, receipt
   and close. Only the outer cleanup settlement is operation evidence. A live
   preparation contract now closes exact Docker/helper/disk/host input identities
-  without executing them. A live adapter must bind its production requirements
-  digest through fresh operation schemas and close causal process/socket/Engine/
-  context ownership without weakening the immutable journal. A supported runner,
-  dynamic-tree cleanup and source/image environment manifest remain required
-  before this can support a Docker or Colima acceptance or finalization claim.
+  without executing them. A deny-only registry now binds its production
+  requirements digest through fresh create/cleanup operation schemas, but grants
+  no state or execution capability. A live state adapter must consume only those
+  exact tuples and close causal process/socket/Engine/context ownership without
+  weakening the immutable journal. A supported runner, dynamic-tree cleanup and
+  source/image environment manifest remain required before this can support a
+  Docker or Colima acceptance or finalization claim.
 - Reversal trigger: if measured operation failure semantics cannot be made
   correct behind the provider-neutral outbox, remove Apalis and retain the
   Postgres worker path. If single-host Compose cannot reproduce the contract on

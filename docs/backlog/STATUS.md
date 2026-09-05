@@ -258,12 +258,18 @@ and a distinct receipt-owned disk copy. Its production requirements digest is
 `017dc54f40dea6a5f0eba46088879f3783ee62ca5cb3c8d5677a882b7ac1bddc`;
 all execution, lifecycle and finalization authorizations remain false. The
 observer has no process-execution surface, no state/receipt/finalizer
-registration and no lifecycle target. Fifteen deterministic tests pass; no
-Docker, Colima or Lima process ran. Next add a closed provider-adapter registry
-and fresh live operation schemas around this exact digest while retaining the
-execution denial. Registry, builder, proxy, browser and live cleanup evidence
-follow; Linux/reference HTTPS must pass before legacy Rauthy/Temporal assets
-are deleted. Backup/restore, upgrade and Apalis remain open CPR-45 slices.
+registration and no lifecycle target. Fifteen deterministic tests pass. A
+separate pure registry now reserves distinct live create/cleanup operation and
+evidence identities, binds both contracts to the production requirements
+digest and selects only an exact action/kind/contract/class tuple. All five
+state-planning, execution, recovery, lifecycle and finalization capabilities
+remain false; fourteen adversarial registry tests pass. No Docker, Colima or
+Lima process ran. Next bind only the exact deny-only create tuple to a fresh
+state-owned plan and evidence prefix. Execution, live-provider identity,
+builder, proxy, browser and live cleanup evidence follow; Linux/reference HTTPS
+must pass
+before legacy Rauthy/Temporal assets are deleted. Backup/restore, upgrade and
+Apalis remain open CPR-45 slices.
 
 ## Unscheduled — not listed in the Sequencing section
 

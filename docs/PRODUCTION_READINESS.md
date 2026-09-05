@@ -140,11 +140,15 @@ official Colima 0.10.3, Lima 2.2.0 and Colima-core 0.10.4 disk artifacts. Its
 private observation binds staged and dynamically selected helper identities,
 closed environment paths, an HMAC-hidden physical `HOME`, host build/boot
 inputs and distinct source/receipt-owned disk identities. The observer has no
-child-process API; its three capability flags refuse execution, lifecycle
-exposure and finalization, and no state, receipt, lifecycle or finalizer accepts
-it. Fifteen deterministic tests pass. This closes input ambiguity only: it is
-not a live OS probe, provider start, Docker Engine identity, cleanup or
-environment-manifest result, so no readiness status changes.
+child-process API. A separate closed registry now reserves distinct live create
+and cleanup operation contracts and evidence schema names, selects only their
+exact action/kind/contract/class tuples and binds both to the production
+requirements digest. State planning, execution, recovery, lifecycle exposure
+and finalization all remain false; the registry imports no state, receipt,
+process or fake-provider path. Preparation has fifteen deterministic tests and
+the registry has fourteen. This closes input and type-confusion ambiguity only:
+it is not a live OS probe, provider start, Docker Engine identity, state plan,
+cleanup or environment-manifest result, so no readiness status changes.
 
 Live Linux/provider CI and a current Docker Desktop/provider run remain absent.
 Consequently this evidence improves the boundary without changing readiness. One

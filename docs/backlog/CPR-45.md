@@ -486,6 +486,23 @@ waits for the durable create-authority marker rather than racing the intent
 receipt's post-link source read; drift is still injected while the provider
 root is absent and is refused by the next exact authority gate.
 
+A new pure provider-adapter registry reserves
+`colima-vz-docker-live-create-v1` and
+`colima-vz-docker-live-cleanup-v1` plus distinct live evidence schema names. The
+create operation contract digest is
+`84bd2ea1cb9db59f3c35a346322adb00d8cd0688270d3700953ea1bd0a8d6549`;
+cleanup is `b308db23a9bae5dc33dd02052c1302834e7ce086125efda2729fcc0333c79375`
+and binds the create digest. Registry digest
+`217912f0a551651cf7ee27654fb6f874f1e2358793772dec0e071bba09171241`
+accepts only an exact action, operation kind, operation-contract digest and
+provider-class tuple. It compares all fields after the content-addressed key,
+cannot select either fake class and returns only descriptive metadata. State
+planning, execution, recovery, lifecycle exposure and finalization remain
+false. The registry imports no process, mutation-state, receipt or fake-provider
+module; neither state nor the supported lifecycle imports it. Fourteen
+deterministic tests cover tuple confusion, contract and registry drift,
+capability escalation, fake relabelling, immutability and content-free refusal.
+
 The standalone fixture launcher creates a separately detached fake host agent
 only after its pre-effect gates. Its recoverable fixture-only create authority
 binds the canonical base/evidence directory identities, intended
@@ -559,15 +576,15 @@ this slice; only bounded repository-owned fake processes and sockets were used.
 
 ### Immediate next slice
 
-Define a closed provider-adapter registry keyed by action, operation kind,
-operation-contract digest and provider class. Add fresh live create/cleanup
-operation kinds and evidence schemas; never relabel the deterministic
-controlled-background class. Integrate the production requirements digest with
-state-owned planning while keeping every execution capability false. The live
-supervisor must then establish exact pre-intent absence, process-group ownership,
-host-agent/Engine/socket/context identities and crash recovery before any
-supported lifecycle target may invoke Colima. Finalization remains blocked
-until a separately reviewed live environment-manifest schema exists.
+Integrate only the exact deny-only live create tuple and production requirements
+digest with a fresh state-owned operation plan, slot and evidence prefix. This
+next step may make planning durable but must keep execution, recovery, lifecycle
+exposure and finalization false; it must not branch through, relabel or mutate
+the deterministic controlled-background class. The later live supervisor must
+then establish exact pre-intent absence, process-group ownership, host-agent/
+Engine/socket/context identities and crash recovery before any supported
+lifecycle target may invoke Colima. Finalization remains blocked until a
+separately reviewed live environment-manifest schema exists.
 
 The first real invocation must use the closed helper `PATH`, explicit provider
 roots, `--mount none`, the receipt-owned disk copy and the privately bound real

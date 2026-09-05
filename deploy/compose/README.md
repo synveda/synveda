@@ -244,13 +244,21 @@ inputs; and distinct source and receipt-owned disk identities. It downloads and
 executes nothing. Its public projection omits all raw paths, `HOME`, profile,
 fixture and component identities.
 
-This preparation schema is not registered with the state journal, receipt
-machine or finalizer. `execution_authorized`, `lifecycle_exposure_authorized`
-and `finalization_eligible` are all false, and the supported commands remain
-only `plan`, `status` and `verify`. The host record is supplied preparation
-input, not a live VZ probe. Future live work must use fresh operation/evidence
-schemas keyed to the exact production requirements digest; it cannot relabel or
-reuse the controlled-background fake.
+The separate provider-adapter registry reserves fresh
+`colima-vz-docker-live-create-v1` and
+`colima-vz-docker-live-cleanup-v1` operation kinds and distinct evidence schema
+names. It selects only an exact action, operation kind, operation-contract
+digest and provider-class tuple. Both contracts bind the production preparation
+requirements digest, and cleanup also binds the exact create-contract digest.
+Resolution is descriptive: state planning, execution, recovery, lifecycle
+exposure and finalization capabilities are all false.
+
+Neither live contract is registered with the state journal, receipt machine or
+finalizer, and the supported commands remain only `plan`, `status` and
+`verify`. The registry imports no process, state, receipt or fake-provider
+surface. The host record is supplied preparation input, not a live VZ probe.
+Future live state work must consume the exact registry tuple through new
+state-owned evidence; it cannot relabel or reuse the controlled-background fake.
 
 No supported lifecycle target exposes either test-only seam; there is no live
 provider mutation or environment manifest. `registry/`, `runtime/` and
@@ -260,12 +268,12 @@ state-owned path supplies the dedicated slot and exact checkpoints, publishes a
 distinct outer settlement, and binds that digest through pass and close.
 Recovery may abort only an untouched pre-intent slot or proceed under the newest
 observation claim, reserving capacity for a final settled-prefix refresh. Owner
-close permits no claim and recovery close must name the latest claim. Finish the
-production live-preparation binding through fresh live operation schemas, then
-prove causal process/socket/Engine/context ownership and exact dynamic-tree
-cleanup before exposing a supported lifecycle target or making any Docker or
-finalization claim. Superseded receipt and mutation schemas are discarded and
-regenerated.
+close permits no claim and recovery close must name the latest claim. Next bind
+the deny-only live create tuple to a new state-owned plan and evidence chain,
+without granting execution. Then prove causal process/socket/Engine/context
+ownership and exact dynamic-tree cleanup before exposing a supported lifecycle
+target or making any Docker or finalization claim. Superseded receipt and
+mutation schemas are discarded and regenerated.
 The manual browser ceremony below remains usable for fixture development but
 cannot be labelled a clean-Engine result.
 

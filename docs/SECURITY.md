@@ -271,6 +271,17 @@ public projection. Host data remains caller-supplied preparation evidence and
 cannot attest VZ or authorize a process. The observer imports no child-process
 API and every execution, lifecycle and finalization capability is false.
 
+The live provider-adapter registry is a separate pure selection boundary. It
+uses the exact action, fresh operation kind, operation-contract digest and
+provider class as one content-addressed tuple; a hash match never substitutes
+for comparing all four fields. Create and cleanup use distinct contracts and
+evidence schema names, cleanup binds the create-contract digest, and neither can
+select the deterministic or controlled-background fake. Exact resolution
+returns only descriptive metadata with state-planning, execution, recovery,
+lifecycle and finalization capabilities false. The registry imports no process,
+state, receipt or fake-provider module, and hostile tuple values are not echoed
+in refusals.
+
 No supported lifecycle target exposes these fixtures and no Docker/Colima
 effect is enabled. Controlled-background evidence remains ineligible for the
 synthetic finalizer. The `*WithAuthorityGate` exports are internal composition

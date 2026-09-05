@@ -325,14 +325,28 @@ downloads nor executes a process. Raw paths, fixture/profile identity, `HOME`
 and component identities are absent from its public projection. The host fields
 are preparation inputs, not live probes or VZ admission evidence.
 
-The requirements and observation both state `execution_authorized: false`,
-`lifecycle_exposure_authorized: false` and `finalization_eligible: false`.
-There is intentionally no state adapter, operation kind, receipt class,
-finalizer registration or lifecycle command for this schema. Test-only fixture
+The deny-only provider-adapter registry reserves two fresh operation contracts:
+
+- `colima-vz-docker-live-create-v1`, contract digest
+  `84bd2ea1cb9db59f3c35a346322adb00d8cd0688270d3700953ea1bd0a8d6549`;
+- `colima-vz-docker-live-cleanup-v1`, contract digest
+  `b308db23a9bae5dc33dd02052c1302834e7ce086125efda2729fcc0333c79375`.
+
+Their evidence schema names are distinct from every deterministic and
+controlled-background fake schema. Cleanup binds the exact create-contract
+digest, and both contracts bind the production requirements digest. Registry
+digest `217912f0a551651cf7ee27654fb6f874f1e2358793772dec0e071bba09171241`
+selects only an exact action, operation kind, operation-contract digest and
+`colima-vz-docker-live` provider-class tuple.
+
+Exact selection is not authority. State planning, execution, recovery,
+lifecycle exposure and finalization capabilities are all false. There is
+intentionally no state adapter, evidence persistence, receipt class, finalizer
+registration or lifecycle command for either operation. Test-only preparation
 seams may substitute small exact bytes, but future mutation state may accept
-only the production requirements digest. A later live provider needs fresh
-create/cleanup schemas, causal process/socket/Engine/context ownership and
-dynamic-tree retirement; it must not reuse the controlled-background fake.
+only the production requirements and operation-contract digests. A later live
+provider needs causal process/socket/Engine/context ownership and dynamic-tree
+retirement; it must not reuse the controlled-background fake.
 
 An uncatchable pre-publication interruption can retain one or more strictly
 validated `.pending-*` or `.run-*` staging directories. They contain no
