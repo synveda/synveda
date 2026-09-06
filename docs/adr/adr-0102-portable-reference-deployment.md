@@ -200,16 +200,25 @@ The immutable fake still binds its legacy live-preparation declaration, which
 pins Colima 0.10.3 source revision
 `00f6c297e92a82c04a4ab507db0a61435650d7e8` and Lima 2.2.0 source revision
 `de0816ea4bdc5267b428ab21025889b8dd785526`. It is not rotated or relabelled.
-A separate `synveda.clean-engine.colima-live-requirements.v1` record now pins
+A separate `synveda.clean-engine.colima-live-requirements.v2` record now pins
 the official Darwin/arm64 release bytes, selected extracted Lima runtime files
-and Colima-core 0.10.4 arm64 Docker disk image. Its private observation closes
-the staged and dynamic helper identities, toolchain-only environment, HMAC-
-hidden real `HOME` directory identity, exact host build/boot inputs, command
-expansion and distinct source/receipt-owned disk files. It performs no process
-execution, and its host data is preparation input rather than a live probe.
-Execution, lifecycle exposure and finalization remain false, and no state,
-receipt, lifecycle or finalizer path accepts it. Neither contract is Docker,
-Colima or supported lifecycle evidence.
+and Colima-core 0.10.4 arm64 Docker disk image. The staged closure uses Lima's
+release guest-agent and default-template locations, a mode-0600 user-v2 network
+baseline with gateway `192.168.5.2`, `--activate=false` and the gRPC port
+forwarder. Its private observation v2 closes staged and dynamic helper
+identities, a toolchain-only environment, exact host build/boot inputs, command
+expansion and distinct source/receipt-owned disk files. Six receipt-owned
+mutation namespaces isolate Colima cache/home, Docker config, Lima home,
+`HOME`, and temporary files. `HOME` is the empty private `h` namespace; Lima
+home has only `_config`. Each complete bounded top-level inventory is sampled
+twice with no-follow metadata and HMAC-projected as pristine or collision.
+`/bin/sh` and `/usr/sbin/ioreg` remain explicit exact-OS-build trusted inputs,
+not live per-file observations. It performs no process execution, and its host
+data is preparation input rather than a live probe. V1 requirements and
+observation plus old or falsely relabelled two-target root evidence are refused;
+public projection is generated only as v2. Execution, lifecycle exposure and
+finalization remain false, and no receipt, lifecycle or finalizer path accepts
+it. Neither contract is Docker, Colima or supported lifecycle evidence.
 
 A separate closed provider-adapter registry reserves fresh live create and
 cleanup operation/evidence identities without changing the immutable fake. Its
@@ -250,18 +259,18 @@ registered with the provider adapter. Both contracts deny execution, receipt,
 provider-effect recovery, cleanup, lifecycle and finalization authority.
 
 Publication derives all admission values internally. It requires the initial
-canonical all-absent admission to equal the observations immediately before
-the slot link, after slot acquisition and immediately before the close link.
+canonical pristine-namespace admission to equal the observations immediately
+before the slot link, after slot acquisition and immediately before the close link.
 Slot v5 contains only content-free state, and its owner close v6 commits with
 zero receipt, environment and operation-evidence delta. Collision or drift
 before slot publication leaves no permanent slot; after acquisition it
 owner-aborts that generation. An abandoned intent can only append an all-zero
 recovery v4 observation and close `aborted-before-effect`. Exact completed
-retries return historical non-authorizing state without claiming current root
-absence.
+retries return historical non-authorizing state without claiming current
+namespace state.
 
-The repeated observations and journal CAS do not atomically reserve the
-separate Colima/Lima namespaces. No resource, process, VM, Engine, socket or
+The repeated observations and journal CAS do not atomically reserve the six
+private mutation namespaces. No resource, process, VM, Engine, socket or
 context authority is inferred, and a future effect owner must perform fresh
 admission. The logical supervisor label is not a PID/PGID, ownership or
 liveness fact. Serialized values lose provenance and cannot be submitted as
@@ -281,9 +290,9 @@ Structural values alone authenticate neither state nor observation provenance.
 The state owner reconstructs the predecessor exclusively from the validated
 terminal intent slot and owner close, then reruns fresh `S1/O1/S2/O2` admission
 at the initial, pre-slot-link, post-slot-acquisition and pre-close-link
-boundaries. Completed-intent snapshots, root observations, derived admissions
-and publication plans must remain byte-equal. Production and fixture publishers
-hard-code their class and reject caller-supplied state, source, plan, projection,
+boundaries. Completed-intent snapshots, namespace observations, derived
+admissions and publication plans must remain byte-equal. Production and fixture
+publishers hard-code their class and reject caller-supplied state, source, plan, projection,
 root result, historical admission, candidate or authority.
 
 A pre-CAS collision leaves no slot; a post-CAS collision aborts the generation.
@@ -295,13 +304,16 @@ state without re-reading roots. No process authority follows from persistence.
 
 After that terminal decision, a separate read-only seam may project its exact
 slot, close, publication-plan, candidate and predecessor identities and perform
-a current `S1/O1/S2/O2` state/root observation. Stable all-absent roots derive
-only a deny-only process-effect candidate with every authority flag false;
-stable collision derives `null`. The result is not persisted and introduces no
-journal action, operation kind, contract digest, registry entry or receipt. Its
+a current `S1/O1/S2/O2` state/namespace observation. Stable pristine namespaces
+derive only a deny-only process-effect candidate with every authority flag
+false; stable collision derives `null`. The result is not persisted and
+introduces no journal action, operation kind, contract digest, registry entry or receipt. Its
 authorization function always refuses. Actual process invocation therefore
 requires a later indivisible durable effect-slot/fresh-admission hard cut with
-authenticated process evidence and uncertain-start recovery.
+an atomic cross-namespace reservation, complete recursive settlement, and
+causal ownership/recovery for the outer process, detached Lima hostagent,
+usernet and SSH ControlMaster. Live macOS proxy observation and per-file OS
+executable identity are also open.
 
 ## Options considered
 

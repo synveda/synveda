@@ -2,6 +2,7 @@
 import { createHash } from "node:crypto";
 import {
   COLIMA_LIVE_FIXTURE_PRE_EFFECT_ROOT_OBSERVATION_SCHEMA,
+  COLIMA_LIVE_MUTATION_SURFACE_ROLES,
   COLIMA_LIVE_PRE_EFFECT_ROOT_OBSERVATION_SCHEMA,
 } from "./clean-engine-colima-live-schemas.mjs";
 import {
@@ -87,10 +88,9 @@ const ROOT_OBSERVATION_FIELDS = Object.freeze([
 ]);
 const ROOT_FIELDS = Object.freeze([
   "disposition",
-  "parent_identity_hmac_sha256",
+  "namespace_identity_hmac_sha256",
+  "observed_entry_set_hmac_sha256",
   "role",
-  "target_entry_identity_hmac_sha256",
-  "target_path_hmac_sha256",
 ]);
 const PUBLICATION_PLAN_FIELDS = Object.freeze([
   "admission",
@@ -429,7 +429,7 @@ function validateAdmissionRootObservation(value, operationPlan, fixtureOnly) {
     ["lima_instance", "provider_profile"],
     "live provider intent planned names",
   );
-  const roles = ["colima-profile-root", "lima-instance-root"];
+  const roles = COLIMA_LIVE_MUTATION_SURFACE_ROLES;
   if (
     !Array.isArray(value.root_observations) ||
     value.root_observations.length !== roles.length
@@ -440,10 +440,9 @@ function validateAdmissionRootObservation(value, operationPlan, fixtureOnly) {
     exactKeys(root, ROOT_FIELDS, "live provider intent root");
     if (
       root.role !== roles[index] ||
-      root.disposition !== "observed-absent" ||
-      !nonzeroSha256(root.parent_identity_hmac_sha256) ||
-      root.target_entry_identity_hmac_sha256 !== ZERO_SHA256 ||
-      !nonzeroSha256(root.target_path_hmac_sha256)
+      root.disposition !== "observed-pristine" ||
+      !nonzeroSha256(root.namespace_identity_hmac_sha256) ||
+      !nonzeroSha256(root.observed_entry_set_hmac_sha256)
     ) {
       fail("live provider intent root was refused", 69);
     }
@@ -451,7 +450,7 @@ function validateAdmissionRootObservation(value, operationPlan, fixtureOnly) {
   if (
     value.schema !== variant.rootObservationSchema ||
     value.evidence_class !== variant.evidenceClass ||
-    value.root_set_disposition !== "observed-absent" ||
+    value.root_set_disposition !== "observed-pristine" ||
     !nonzeroSha256(value.requirements_sha256) ||
     (!fixtureOnly &&
       value.requirements_sha256 !== operationPlan.requirements_sha256) ||

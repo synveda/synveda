@@ -25,6 +25,9 @@ import {
   cleanEngineLiveProviderProcessStartRootObservationFixture,
   cleanEngineLiveProviderProcessStartSourceFixture,
 } from "./fixtures/clean-engine-live-provider-process-start-fixture.mjs";
+import {
+  COLIMA_LIVE_MUTATION_SURFACE_ROLES,
+} from "../deploy/compose/scripts/clean-engine-colima-live-schemas.mjs";
 
 function clone(value) {
   return structuredClone(value);
@@ -53,23 +56,23 @@ test("production and fixture post-decision admissions are exact and deny only", 
   const variants = [
     {
       admissionDigest:
-        "b55ec1e54f9738d804264978ca4c9a7861ba1b8ea6eb95926c356d0344caee32",
+        "c37ff49e8ddc67d9462276cbeff5ce37ed84dad3081a1222486133ecb5054d0e",
       candidateDigest:
-        "0a80af769a9d180c8fb595723ced11b0fac187d2612edea3eb32475fdf064462",
+        "199151bbdad6a022a08508bb6bb9e3e84cc11fb0e4c5e24e8de7ae3303dd2845",
       evidenceClass: "production-pinned",
       fixture: cleanEngineLiveProviderProcessStartFreshAdmissionFixture(false),
       projectionDigest:
-        "15176a863cb83c6ebb50ab2d61cc51da0207f4cfbf9325202002c76dcdc5623c",
+        "89898372c0e1b603b5ca8ce8a93aa1f1a3dc9a1222aebc1216ffdd1fb2c55fe6",
     },
     {
       admissionDigest:
-        "4790f7c0567f20289612d9bde7397f7d1fb4263427ef345ae2de2388b42b9cb6",
+        "05ff78983ea5a01c90c4bbaccc6e512cde3c6de2502abf6af31db64510b12121",
       candidateDigest:
-        "ef775366526953f9a08a06df72c219873ede8b80275ac3d255762900b0b2c3fc",
+        "7c6592c632b5f74240d96a0fbb6a87fe740173a3c51e4058dd242cf1d1169cb3",
       evidenceClass: "fixture-only",
       fixture: cleanEngineLiveProviderProcessStartFreshAdmissionFixture(true),
       projectionDigest:
-        "d692ce5a71da35b73de405ae57d142928a69ed1ee4b61418977b6623ec6a5982",
+        "9bb72e289c91573afb129b20251ee4e5089ee6b6ace430cef898ada129b9fd0c",
     },
   ];
   assert.equal(
@@ -226,7 +229,7 @@ test("the completed decision projection refuses every authority binding drift", 
   }
 });
 
-test("fresh absence yields only a false-authority candidate and collisions yield null", () => {
+test("fresh pristine namespaces yield only a false-authority candidate", () => {
   for (const fixtureOnly of [false, true]) {
     const fixture =
       cleanEngineLiveProviderProcessStartFreshAdmissionFixture(fixtureOnly);
@@ -262,7 +265,7 @@ test("fresh absence yields only a false-authority candidate and collisions yield
       );
     }
 
-    for (const role of ["colima-profile-root", "lima-instance-root"]) {
+    for (const role of COLIMA_LIVE_MUTATION_SURFACE_ROLES) {
       const rootObservation =
         cleanEngineLiveProviderProcessStartRootObservationFixture(
           fixture.source,

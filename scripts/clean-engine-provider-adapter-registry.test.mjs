@@ -34,11 +34,11 @@ import {
 } from "../deploy/compose/scripts/clean-engine-colima-live-contract.mjs";
 
 const CREATE_CONTRACT_SHA256 =
-  "13a87072a49103db0b3c4f36b64b8fbd0d74bd794c4a359fb77b41184ee289a7";
+  "dd77ff375f8d7e9a8e711d771f78b62f5c07f50352e2f1b4b746ed14f3a9c51b";
 const CLEANUP_CONTRACT_SHA256 =
-  "8d3f43e02f2edc27f7a2b2f89ef5e3986a85326afabe92192e2430cd18558e1a";
+  "6704795b58343a741bb552dc9ff28417a5bc23e1c3395b5eb7b98bb0dc593f0a";
 const REGISTRY_SHA256 =
-  "0fe6ec1645e18711a1d5d31bd1d21205ab7956a44ff04c38257e4f0b6efab642";
+  "d3906132f2a1308b356457e543d6fa8de9ee65f81afb66b56a7d70018d748996";
 
 function clone(value) {
   return structuredClone(value);
@@ -250,6 +250,20 @@ test("partial, extra, malformed and unknown tuples fail closed", () => {
   }
   expectRefusal(() => resolveProviderAdapter(null));
   expectRefusal(() => resolveProviderAdapter([]));
+});
+
+test("the superseded v1 preparation registry tuple is refused", () => {
+  const historicalCreate = {
+    ...CREATE_TUPLE,
+    operation_contract_sha256:
+      "13a87072a49103db0b3c4f36b64b8fbd0d74bd794c4a359fb77b41184ee289a7",
+  };
+  for (const operation of [
+    resolveProviderAdapter,
+    authorizeProviderAdapterPlanning,
+  ]) {
+    expectRefusal(() => operation(historicalCreate), 69);
+  }
 });
 
 test("crossed create and cleanup tuple fields never select an adapter", () => {

@@ -33,6 +33,11 @@ import {
   resolveProviderAdapter,
 } from "../deploy/compose/scripts/clean-engine-provider-adapter-registry.mjs";
 import {
+  COLIMA_LIVE_FIXTURE_PRE_EFFECT_ROOT_OBSERVATION_SCHEMA,
+  COLIMA_LIVE_MUTATION_SURFACE_ROLES,
+  COLIMA_LIVE_PRE_EFFECT_ROOT_OBSERVATION_SCHEMA,
+} from "../deploy/compose/scripts/clean-engine-colima-live-schemas.mjs";
+import {
   cleanEngineLiveEffectIntentFixture,
   cleanEngineLiveEmptyPreEffectPrefixFixture,
   cleanEngineLivePlanCompletionProjectionFixture,
@@ -92,26 +97,18 @@ function admissionFixture(fixtureOnly = false) {
         requirements_sha256: fixtureOnly
           ? "9".repeat(64)
           : operationPlan.requirements_sha256,
-        root_observations: [
-          {
-            disposition: "observed-absent",
-            parent_identity_hmac_sha256: "1".repeat(64),
-            role: "colima-profile-root",
-            target_entry_identity_hmac_sha256: "0".repeat(64),
-            target_path_hmac_sha256: "2".repeat(64),
-          },
-          {
-            disposition: "observed-absent",
-            parent_identity_hmac_sha256: "3".repeat(64),
-            role: "lima-instance-root",
-            target_entry_identity_hmac_sha256: "0".repeat(64),
-            target_path_hmac_sha256: "4".repeat(64),
-          },
-        ],
-        root_set_disposition: "observed-absent",
+        root_observations: COLIMA_LIVE_MUTATION_SURFACE_ROLES.map(
+          (role, index) => ({
+            disposition: "observed-pristine",
+            namespace_identity_hmac_sha256: "13579b"[index].repeat(64),
+            observed_entry_set_hmac_sha256: "2468ac"[index].repeat(64),
+            role,
+          }),
+        ),
+        root_set_disposition: "observed-pristine",
         schema: fixtureOnly
-          ? "synveda.clean-engine.colima-live-fixture-pre-effect-root-observation.v1"
-          : "synveda.clean-engine.colima-live-pre-effect-root-observation.v1",
+          ? COLIMA_LIVE_FIXTURE_PRE_EFFECT_ROOT_OBSERVATION_SCHEMA
+          : COLIMA_LIVE_PRE_EFFECT_ROOT_OBSERVATION_SCHEMA,
       },
       schema: fixtureOnly
         ? "synveda.clean-engine.colima-live-fixture-pre-effect-admission.v1"
@@ -420,11 +417,11 @@ test("intent publication has distinct inert production and fixture contracts", (
   assert.notEqual(variants[0].digest, variants[1].digest);
   assert.equal(
     variants[0].digest,
-    "8cad231ffcc14cd58a90df10faee867bcb8a752d46772e1ccedc666d744648ee",
+    "a89e57ff3769616ff5c88aa63de9dd854bd2b821cf7516db33fa0f09b775edfc",
   );
   assert.equal(
     variants[1].digest,
-    "d8269df82f7d10c9bfe02f36a9e42d05138d4dc1798a08bcee1c023b2eedfcc2",
+    "4963be65ad92040a20de26c4d048ee11858538c72820c657643ebeedb68f7400",
   );
   for (const value of variants) {
     assert.deepEqual(value.contract, {
@@ -444,7 +441,7 @@ test("intent publication has distinct inert production and fixture contracts", (
       state_integration: "mutation-journal-v5-inert-intent-only",
       state_intent_publication_authorized: true,
       target_create_operation_contract_sha256:
-        "13a87072a49103db0b3c4f36b64b8fbd0d74bd794c4a359fb77b41184ee289a7",
+        "dd77ff375f8d7e9a8e711d771f78b62f5c07f50352e2f1b4b746ed14f3a9c51b",
       target_create_operation_kind: "colima-vz-docker-live-create-v1",
       target_provider_plan_schema:
         "synveda.clean-engine.colima-live-provider-operation-plan.v1",
@@ -467,6 +464,49 @@ test("intent publication has distinct inert production and fixture contracts", (
           assert.equal(error.exitStatus, 69);
           return true;
         },
+      );
+    }
+  }
+});
+
+test("superseded two-target root evidence cannot be relabelled as v2", () => {
+  for (const fixtureOnly of [false, true]) {
+    const { admission, operationPlan } = admissionFixture(fixtureOnly);
+    const oldRoots = ["colima-profile-root", "lima-instance-root"].map(
+      (role, index) => ({
+        disposition: "observed-absent",
+        parent_identity_hmac_sha256: `${index * 2 + 1}`.repeat(64),
+        role,
+        target_entry_identity_hmac_sha256: "0".repeat(64),
+        target_path_hmac_sha256: `${index * 2 + 2}`.repeat(64),
+      }),
+    );
+    const oldObservation = {
+      ...admission.root_observation,
+      root_observations: oldRoots,
+      root_set_disposition: "observed-absent",
+      schema: fixtureOnly
+        ? "synveda.clean-engine.colima-live-fixture-pre-effect-root-observation.v1"
+        : "synveda.clean-engine.colima-live-pre-effect-root-observation.v1",
+    };
+    const relabelledObservation = {
+      ...oldObservation,
+      root_observations: oldRoots.map((root) => ({
+        ...root,
+        disposition: "observed-pristine",
+      })),
+      root_set_disposition: "observed-pristine",
+      schema: fixtureOnly
+        ? COLIMA_LIVE_FIXTURE_PRE_EFFECT_ROOT_OBSERVATION_SCHEMA
+        : COLIMA_LIVE_PRE_EFFECT_ROOT_OBSERVATION_SCHEMA,
+    };
+    for (const rootObservation of [oldObservation, relabelledObservation]) {
+      expectRefusal(() =>
+        buildColimaLiveProviderIntentPublicationPlan({
+          admission: { ...admission, root_observation: rootObservation },
+          fixtureOnly,
+          operationPlan,
+        }),
       );
     }
   }
@@ -508,6 +548,17 @@ test("publication plans bind all three observations and keep fixtures distinct",
       digest(operationPlan),
     );
     assertRecursivelyFrozen(publicationPlan);
+    expectRefusal(() =>
+      validateColimaLiveProviderIntentPublicationPlan(
+        {
+          ...publicationPlan,
+          operation_contract_sha256: fixtureOnly
+            ? "d8269df82f7d10c9bfe02f36a9e42d05138d4dc1798a08bcee1c023b2eedfcc2"
+            : "8cad231ffcc14cd58a90df10faee867bcb8a752d46772e1ccedc666d744648ee",
+        },
+        { fixtureOnly },
+      ),
+    );
     const completion = buildColimaLiveProviderIntentCompletion({
       closeSha256: "6".repeat(64),
       fixtureOnly,

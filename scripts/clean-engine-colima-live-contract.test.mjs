@@ -20,6 +20,7 @@ import { test } from "node:test";
 import {
   COLIMA_LIVE_OBSERVATION_SCHEMA,
   COLIMA_LIVE_FIXTURE_PRE_EFFECT_ROOT_OBSERVATION_SCHEMA,
+  COLIMA_LIVE_MUTATION_SURFACE_ROLES,
   COLIMA_LIVE_PUBLIC_PROJECTION_SCHEMA,
   COLIMA_LIVE_REQUIREMENTS,
   COLIMA_LIVE_REQUIREMENTS_SCHEMA,
@@ -120,14 +121,15 @@ function snapshotTree(root, opaqueDirectories = new Set()) {
   return entries;
 }
 
-function preEffectPaths(state) {
-  return {
-    colima: join(state.input.environment.COLIMA_HOME, state.input.provider_profile),
-    lima: join(
-      state.input.environment.LIMA_HOME,
-      `colima-${state.input.provider_profile}`,
-    ),
-  };
+function mutationNamespaces(state) {
+  return [
+    ["colima-cache-namespace", state.input.environment.COLIMA_CACHE_HOME],
+    ["colima-home-namespace", state.input.environment.COLIMA_HOME],
+    ["docker-config-namespace", state.input.environment.DOCKER_CONFIG],
+    ["lima-home-namespace", state.input.environment.LIMA_HOME],
+    ["private-home-namespace", state.input.environment.HOME],
+    ["temporary-namespace", state.input.environment.TMPDIR],
+  ].map(([role, path]) => ({ path, role }));
 }
 
 test("production live requirements are exact, pinned and execution-disabled", () => {
@@ -135,6 +137,80 @@ test("production live requirements are exact, pinned and execution-disabled", ()
   assert.equal(COLIMA_LIVE_REQUIREMENTS.authorizations.execution_authorized, false);
   assert.equal(COLIMA_LIVE_REQUIREMENTS.authorizations.lifecycle_exposure_authorized, false);
   assert.equal(COLIMA_LIVE_REQUIREMENTS.authorizations.finalization_eligible, false);
+  assert.ok(COLIMA_LIVE_REQUIREMENTS.command_template.includes("--activate=false"));
+  assert.ok(COLIMA_LIVE_REQUIREMENTS.command_template.includes("grpc"));
+  assert.ok(COLIMA_LIVE_REQUIREMENTS.command_template.includes("192.168.5.2"));
+  assert.deepEqual(
+    COLIMA_LIVE_REQUIREMENTS.mutation_surface.namespaces.map(
+      (entry) => entry.role,
+    ),
+    COLIMA_LIVE_MUTATION_SURFACE_ROLES,
+  );
+  assert.deepEqual(
+    COLIMA_LIVE_REQUIREMENTS.mutation_surface.namespaces.map((entry) => [
+      entry.role,
+      entry.effect_policy,
+    ]),
+    [
+      ["colima-cache-namespace", "expected-no-write-v1"],
+      ["colima-home-namespace", "expected-owned-mutation-v1"],
+      ["docker-config-namespace", "expected-owned-mutation-v1"],
+      ["lima-home-namespace", "expected-owned-mutation-v1"],
+      ["private-home-namespace", "expected-no-write-v1"],
+      ["temporary-namespace", "expected-owned-mutation-v1"],
+    ],
+  );
+  assert.deepEqual(COLIMA_LIVE_REQUIREMENTS.host.system_executables, [
+    {
+      path: "/bin/sh",
+      purpose: "lima-wrapper-interpreter",
+      trust_policy: "exact-os-build-trusted-boundary-v1",
+    },
+    {
+      path: "/usr/sbin/ioreg",
+      purpose: "lima-machine-id-probe",
+      trust_policy: "exact-os-build-trusted-boundary-v1",
+    },
+  ]);
+  assert.deepEqual(
+    COLIMA_LIVE_REQUIREMENTS.mutation_surface.derived_child_environment,
+    { LIMA_SSH_PORT_FORWARDER: "false" },
+  );
+  assert.equal(
+    COLIMA_LIVE_REQUIREMENTS.mutation_surface.maximum_entry_name_bytes,
+    255,
+  );
+  assert.equal(
+    COLIMA_LIVE_REQUIREMENTS.mutation_surface.maximum_top_level_entries,
+    64,
+  );
+  const guestAgent = COLIMA_LIVE_REQUIREMENTS.components.find(
+    (entry) => entry.role === "lima-guestagent",
+  );
+  const defaultTemplate = COLIMA_LIVE_REQUIREMENTS.components.find(
+    (entry) => entry.role === "lima-default-template",
+  );
+  const networkConfig = COLIMA_LIVE_REQUIREMENTS.components.find(
+    (entry) => entry.role === "lima-network-config",
+  );
+  assert.equal(
+    guestAgent.stage_relative_path,
+    "share/lima/lima-guestagent.Linux-aarch64.gz",
+  );
+  assert.deepEqual(
+    {
+      expected_sha256: defaultTemplate.expected_sha256,
+      expected_size: defaultTemplate.expected_size,
+      stage_relative_path: defaultTemplate.stage_relative_path,
+    },
+    {
+      expected_sha256:
+        "9b36702315b0716108a64631faf62a664d94f8f4a57acf3174f80022b308f5a3",
+      expected_size: "34256",
+      stage_relative_path: "share/lima/templates/default.yaml",
+    },
+  );
+  assert.equal(networkConfig.mode_policy, "private-mutable-data-0600");
   assert.equal(
     COLIMA_LIVE_REQUIREMENTS.release_artifacts.colima.sha256,
     "980ad8bf61a4ca370243f4cb41401a61276dcd2c2502bee7b9b86f9250169f34",
@@ -183,12 +259,45 @@ test("pinned requirements refuse field, provenance, release and authorization dr
     (value) => {
       value.authorizations.execution_authorized = true;
     },
+    (value) => {
+      value.environment.home_policy = "external-home";
+    },
+    (value) => {
+      value.host.system_executables[0].path = "/bin/false";
+    },
+    (value) => {
+      value.mutation_surface.derived_child_environment.LIMA_SSH_PORT_FORWARDER =
+        "true";
+    },
+    (value) => {
+      value.mutation_surface.maximum_entry_name_bytes = 256;
+    },
+    (value) => {
+      value.mutation_surface.maximum_top_level_entries = 65;
+    },
+    (value) => {
+      value.mutation_surface.namespaces[0].effect_policy =
+        "expected-owned-mutation-v1";
+    },
   ];
   for (const mutate of mutations) {
     const requirements = clone(COLIMA_LIVE_REQUIREMENTS);
     mutate(requirements);
     expectRefusal(() => validateColimaLiveRequirements(requirements));
   }
+});
+
+test("superseded v1 preparation generations are refused", (t) => {
+  const requirements = clone(COLIMA_LIVE_REQUIREMENTS);
+  requirements.schema = "synveda.clean-engine.colima-live-requirements.v1";
+  expectRefusal(() => validateColimaLiveRequirements(requirements));
+
+  const state = fixture(t);
+  const observation = clone(build(state));
+  observation.schema = "synveda.clean-engine.colima-live-observation.v1";
+  expectRefusal(() =>
+    validateColimaLiveObservationForTest(state.requirements, observation),
+  );
 });
 
 test("fixture requirements refuse missing, duplicate and misplaced component roles", (t) => {
@@ -199,7 +308,9 @@ test("fixture requirements refuse missing, duplicate and misplaced component rol
       value.components[1].role = value.components[0].role;
     },
     (value) => {
-      value.components[7].stage_relative_path = "b/ssh";
+      value.components.find(
+        (entry) => entry.role === "ssh-keygen",
+      ).stage_relative_path = "b/ssh";
     },
     (value) => {
       value.components[0].stage_relative_path = "a/colima";
@@ -220,8 +331,8 @@ test("a closed fixture builds, validates and deterministically revalidates", (t)
   const observation = build(state);
   assert.equal(observation.schema, COLIMA_LIVE_OBSERVATION_SCHEMA);
   assert.equal(observation.requirements_sha256, colimaLiveDigest(colimaLiveBytes(state.requirements)));
-  assert.equal(observation.components.length, 12);
-  assert.equal(observation.directories.length, 9);
+  assert.equal(observation.components.length, 13);
+  assert.equal(observation.directories.length, 13);
   assert.equal(validateColimaLiveObservationForTest(state.requirements, observation), observation);
   assert.equal(
     revalidateColimaLiveObservationForTest(state.requirements, observation, state.input),
@@ -229,7 +340,7 @@ test("a closed fixture builds, validates and deterministically revalidates", (t)
   );
 });
 
-test("pre-effect observation reports only the two exact point-in-time absences", (t) => {
+test("pre-effect observation binds all six complete mutation namespaces", (t) => {
   const state = fixture(t);
   const observation = build(state);
   const before = snapshotTree(state.root);
@@ -253,7 +364,7 @@ test("pre-effect observation reports only the two exact point-in-time absences",
     COLIMA_LIVE_FIXTURE_PRE_EFFECT_ROOT_OBSERVATION_SCHEMA,
   );
   assert.equal(result.evidence_class, "fixture-only");
-  assert.equal(result.root_set_disposition, "observed-absent");
+  assert.equal(result.root_set_disposition, "observed-pristine");
   assert.deepEqual(result.planned_names, {
     lima_instance: `colima-${state.input.provider_profile}`,
     provider_profile: state.input.provider_profile,
@@ -268,22 +379,22 @@ test("pre-effect observation reports only the two exact point-in-time absences",
   );
   assert.deepEqual(
     result.root_observations.map((entry) => [entry.role, entry.disposition]),
-    [
-      ["colima-profile-root", "observed-absent"],
-      ["lima-instance-root", "observed-absent"],
-    ],
+    COLIMA_LIVE_MUTATION_SURFACE_ROLES.map((role) => [
+      role,
+      "observed-pristine",
+    ]),
   );
   for (const entry of result.root_observations) {
     assert.deepEqual(Object.keys(entry).sort(), [
       "disposition",
-      "parent_identity_hmac_sha256",
+      "namespace_identity_hmac_sha256",
+      "observed_entry_set_hmac_sha256",
       "role",
-      "target_entry_identity_hmac_sha256",
-      "target_path_hmac_sha256",
     ]);
-    assert.match(entry.parent_identity_hmac_sha256, /^[0-9a-f]{64}$/u);
-    assert.match(entry.target_path_hmac_sha256, /^[0-9a-f]{64}$/u);
-    assert.equal(entry.target_entry_identity_hmac_sha256, "0".repeat(64));
+    assert.match(entry.namespace_identity_hmac_sha256, /^[0-9a-f]{64}$/u);
+    assert.match(entry.observed_entry_set_hmac_sha256, /^[0-9a-f]{64}$/u);
+    assert.notEqual(entry.namespace_identity_hmac_sha256, "0".repeat(64));
+    assert.notEqual(entry.observed_entry_set_hmac_sha256, "0".repeat(64));
     assert.ok(Object.isFrozen(entry));
   }
   assert.ok(Object.isFrozen(result));
@@ -306,13 +417,13 @@ test("pre-effect observation reports only the two exact point-in-time absences",
   }
 });
 
-test("each existing target kind is an opaque foreign collision", (t) => {
+test("file, link and directory entries are opaque foreign collisions", (t) => {
   const cases = ["file", "hardlink", "directory", "symlink", "dangling-symlink"];
   for (const [index, kind] of cases.entries()) {
     const state = fixture(t);
     const observation = build(state);
-    const paths = preEffectPaths(state);
-    const target = index % 2 === 0 ? paths.colima : paths.lima;
+    const namespace = mutationNamespaces(state)[index];
+    const target = join(namespace.path, `foreign-${kind}`);
     const outside = join(state.root, `outside-${kind}`);
     let protectedDirectory;
     let protectedSentinel;
@@ -353,8 +464,9 @@ test("each existing target kind is an opaque foreign collision", (t) => {
       (entry) => entry.disposition === "foreign-collision",
     );
     assert.notEqual(collision, undefined, kind);
-    assert.match(collision.target_entry_identity_hmac_sha256, /^[0-9a-f]{64}$/u);
-    assert.notEqual(collision.target_entry_identity_hmac_sha256, "0".repeat(64));
+    assert.equal(collision.role, namespace.role);
+    assert.match(collision.observed_entry_set_hmac_sha256, /^[0-9a-f]{64}$/u);
+    assert.notEqual(collision.observed_entry_set_hmac_sha256, "0".repeat(64));
     assert.equal(lstatSync(target).isSymbolicLink(), kind.includes("symlink"));
     assert.deepEqual(
       snapshotTree(state.root, opaqueDirectories),
@@ -373,44 +485,84 @@ test("each existing target kind is an opaque foreign collision", (t) => {
   }
 });
 
-test("both exact collisions are bounded while unrelated siblings remain drift", (t) => {
-  const both = fixture(t);
-  const bothObservation = build(both);
-  const bothPaths = preEffectPaths(both);
-  mkdirSync(bothPaths.colima, { mode: 0o700 });
-  writePrivate(bothPaths.lima, Buffer.from("foreign\n", "utf8"), 0o600);
+test("namespace collisions accept exact bounds and refuse excess", (t) => {
+  const all = fixture(t);
+  const allObservation = build(all);
+  for (const [index, namespace] of mutationNamespaces(all).entries()) {
+    writePrivate(
+      join(namespace.path, `foreign-${index}`),
+      Buffer.from(`foreign ${index}\n`, "utf8"),
+      0o600,
+    );
+  }
   const collision = observeColimaLivePreEffectRootsForTest(
-    both.requirements,
-    bothObservation,
-    both.input,
+    all.requirements,
+    allObservation,
+    all.input,
   );
   assert.deepEqual(
     collision.root_observations.map((entry) => entry.disposition),
-    ["foreign-collision", "foreign-collision"],
+    COLIMA_LIVE_MUTATION_SURFACE_ROLES.map(() => "foreign-collision"),
   );
 
-  for (const parent of ["COLIMA_HOME", "LIMA_HOME"]) {
-    const state = fixture(t);
-    const observation = build(state);
+  const atLimit = fixture(t);
+  const atLimitObservation = build(atLimit);
+  const atLimitNamespace = mutationNamespaces(atLimit)[0];
+  const boundaryNames = [
+    "x".repeat(255),
+    ...Array.from(
+      { length: 63 },
+      (_, index) => `foreign-${String(index).padStart(2, "0")}`,
+    ),
+  ];
+  for (const [index, name] of boundaryNames.entries()) {
     writePrivate(
-      join(state.input.environment[parent], "unrelated-entry"),
-      Buffer.from("unrelated\n", "utf8"),
+      join(atLimitNamespace.path, name),
+      Buffer.from(`${index}\n`, "utf8"),
       0o600,
     );
-    expectRefusal(() =>
-      observeColimaLivePreEffectRootsForTest(
-        state.requirements,
-        observation,
-        state.input,
-      ),
+  }
+  const boundary = observeColimaLivePreEffectRootsForTest(
+    atLimit.requirements,
+    atLimitObservation,
+    atLimit.input,
+  );
+  assert.equal(boundary.root_set_disposition, "foreign-collision");
+  assert.equal(
+    boundary.root_observations.find(
+      (entry) => entry.role === atLimitNamespace.role,
+    )?.disposition,
+    "foreign-collision",
+  );
+
+  const excessive = fixture(t);
+  const excessiveObservation = build(excessive);
+  const targetNamespace = mutationNamespaces(excessive)[0];
+  for (let index = 0; index < 65; index += 1) {
+    writePrivate(
+      join(targetNamespace.path, `foreign-${String(index).padStart(2, "0")}`),
+      Buffer.from(`${index}\n`, "utf8"),
+      0o600,
     );
   }
+  expectRefusal(
+    () =>
+      observeColimaLivePreEffectRootsForTest(
+        excessive.requirements,
+        excessiveObservation,
+        excessive.input,
+      ),
+    69,
+  );
 });
 
 test("collision-aware revalidation does not weaken the preparation contract", (t) => {
   const state = fixture(t);
   const observation = build(state);
-  const target = preEffectPaths(state).colima;
+  const target = join(
+    mutationNamespaces(state)[1].path,
+    state.input.provider_profile,
+  );
   mkdirSync(target, { mode: 0o700 });
   assert.equal(
     observeColimaLivePreEffectRootsForTest(
@@ -490,7 +642,10 @@ test("fixture checkpoints refuse target and parent transitions", (t) => {
   ];
   for (const value of cases) {
     const state = fixture(t);
-    const target = preEffectPaths(state).colima;
+    const target = join(
+      mutationNamespaces(state)[1].path,
+      state.input.provider_profile,
+    );
     value.prepare(state, target);
     let checkpoints = 0;
     expectRefusal(() =>
@@ -561,23 +716,27 @@ test("the preparation observer imports no process execution surface", () => {
     source,
     /\b(?:chmod|link|mkdir|rename|rm|rmdir|symlink|unlink|writeFile)Sync\s*\(/u,
   );
-  const targetStart = source.indexOf("function captureAdmissionTarget");
-  const targetEnd = source.indexOf("function captureAdmissionRoots", targetStart);
-  assert.ok(targetStart >= 0 && targetEnd > targetStart);
-  const targetSource = source.slice(targetStart, targetEnd);
-  assert.match(targetSource, /optionalNoFollowMetadata\(\s*targetPath/gu);
-  assert.match(targetSource, /readdirSync\(parent\.path\)/u);
-  assert.doesNotMatch(
-    targetSource,
-    /\b(?:openSync|readFileSync|readdirSync|readlinkSync|realpathSync|statSync)\(\s*targetPath/u,
+  assert.doesNotMatch(source, /\breaddirSync\s*\(/u);
+  assert.match(source, /\bopendirSync\s*\(/u);
+  const namespaceStart = source.indexOf("function captureAdmissionNamespace");
+  const namespaceEnd = source.indexOf(
+    "function captureAdmissionRoots",
+    namespaceStart,
   );
-  const noFollowStart = source.indexOf("function optionalNoFollowMetadata");
-  const noFollowEnd = source.indexOf("function recordedDirectoryMatches", noFollowStart);
-  const noFollowSource = source.slice(noFollowStart, noFollowEnd);
-  assert.match(noFollowSource, /lstatSync\(path, \{ bigint: true \}\)/u);
+  assert.ok(namespaceStart >= 0 && namespaceEnd > namespaceStart);
+  const namespaceSource = source.slice(namespaceStart, namespaceEnd);
+  assert.equal(
+    namespaceSource.match(/boundedDirectoryEntries\(\s*parent\.path,/gu)
+      ?.length,
+    2,
+  );
+  assert.match(
+    namespaceSource,
+    /lstatSync\(join\(parent\.path, name\), \{ bigint: true \}\)/gu,
+  );
   assert.doesNotMatch(
-    noFollowSource,
-    /\b(?:openSync|readFileSync|readdirSync|readlinkSync|realpathSync|statSync)\s*\(/u,
+    namespaceSource,
+    /\b(?:readFileSync|readlinkSync|realpathSync|statSync)\s*\(/u,
   );
 });
 
@@ -616,24 +775,25 @@ test("input paths, profile and closed environment refuse ambient drift", (t) => 
   }
 });
 
-test("HOME must be absolute, non-symlinked, disjoint and privately bound", (t) => {
+test("HOME must be the receipt-private empty namespace", (t) => {
   const state = fixture(t);
   const relative = cloneInput(state.input);
   relative.environment.HOME = "relative-home";
   expectRefusal(() => buildColimaLiveObservationForTest(state.requirements, relative), 69);
 
-  const overlap = cloneInput(state.input);
-  overlap.environment.HOME = state.providerRoot;
-  expectRefusal(() => buildColimaLiveObservationForTest(state.requirements, overlap));
+  const external = cloneInput(state.input);
+  external.environment.HOME = state.external;
+  expectRefusal(() => buildColimaLiveObservationForTest(state.requirements, external));
 
-  const linkedHome = join(state.root, "linked-home");
-  symlinkSync(state.home, linkedHome);
-  const linked = cloneInput(state.input);
-  linked.environment.HOME = linkedHome;
-  expectRefusal(() => buildColimaLiveObservationForTest(state.requirements, linked));
+  rmdirSync(state.home);
+  symlinkSync(state.external, state.home);
+  expectRefusal(() => buildColimaLiveObservationForTest(state.requirements, state.input));
+  rmSync(state.home);
+  mkdirSync(state.home, { mode: 0o700 });
+  chmodSync(state.home, 0o700);
 
   const observation = build(state);
-  assert.equal(JSON.stringify(observation).includes(state.home), false);
+  assert.equal(JSON.stringify(observation.environment.home).includes(state.home), false);
   const firstBinding = observation.environment.home.path_hmac_sha256;
   const rebound = cloneInput(state.input);
   rebound.binding_key = randomBytes(32);

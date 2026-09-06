@@ -137,11 +137,18 @@ finalization therefore remain refused.
 The next provider-input boundary is deterministic but remains deliberately
 non-executing. A separate live-preparation requirements record pins exact
 official Colima 0.10.3, Lima 2.2.0 and Colima-core 0.10.4 disk artifacts. Its
-private observation binds staged and dynamically selected helper identities,
-closed environment paths, an HMAC-hidden physical `HOME`, host build/boot
-inputs and distinct source/receipt-owned disk identities. The observer has no
-child-process API. A separate closed registry reserves distinct live create and
-cleanup operation contracts and evidence schema names, selects only their exact
+v2 private observation binds the upstream-correct Lima guest-agent/default-
+template layout, private network baseline, staged and dynamically selected
+helper identities, closed environment paths, host build/boot inputs and
+distinct source/receipt-owned disk identities. Six receipt-owned whole
+mutation namespaces isolate Colima cache/home, Docker config, Lima home,
+`HOME`, and temporary files. `HOME` is an empty private namespace; each bounded
+top-level inventory is sampled twice with no-follow metadata and HMAC-projected
+as pristine or collision. The observer has no child-process API. The pinned
+command disables Docker-context activation and uses the gRPC port forwarder;
+`/bin/sh` and `/usr/sbin/ioreg` remain declared OS-build-bound inputs rather
+than live per-file evidence. A separate closed registry reserves distinct live
+create and cleanup operation contracts and evidence schema names, selects only their exact
 action/kind/contract/class tuples and binds both to the production requirements
 digest. Create now grants state planning only; execution, provider recovery,
 lifecycle exposure and finalization remain false, while cleanup remains wholly
@@ -154,8 +161,8 @@ resolution, production requirements and private observation digest. The same
 slot CAS serializes it against fake-provider mutation; completion changes no
 receipt or environment, writes no provider evidence and blocks every later
 mutation except the exact inert intent, which may then be followed by its exact
-decision. An abandoned slot can only
-be recovered by an explicit effect-free abort. This is not a live OS probe,
+decision. An abandoned slot can only be recovered by an explicit effect-free
+abort. This is not a live OS probe,
 provider start, Docker Engine identity, cleanup or environment-manifest result,
 so no readiness status changes.
 
@@ -169,9 +176,9 @@ and fixture operation kinds, contracts, schemas and evidence classes kept
 separate. The decision publication plan is v2 and may state only
 `requested-not-executed-not-authorized`.
 
-Each publisher reconstructs complete state/source/root admission initially,
+Each publisher reconstructs complete state/source/namespace admission initially,
 immediately before the slot link, after slot acquisition and immediately before
-the close link. Every canonical admission must equal the initial all-absent
+the close link. Every canonical admission must equal the initial pristine
 baseline. A successful owner close changes no receipt or environment, writes no
 provider or operation evidence and grants no effect authority. Collisions and
 drift abort before effect; abandoned slots can only acquire an all-zero recovery
@@ -179,23 +186,29 @@ v4 claim and an `aborted-before-effect` close. Generic provider recovery refuses
 inert decisions. The ordered journal permits aborted plan, intent and decision
 generations before each matching owner completion, and a completed decision is
 terminal. Completed retries return the historical non-authorizing result and
-make no fresh absence claim. The root observations and journal CAS are not an
-atomic reservation of the separate Colima/Lima namespaces. This adds
+make no fresh namespace claim. The observations and journal CAS are not an
+atomic reservation of the six mutation namespaces. This adds
 deterministic inert-state evidence only—not a live provider, process, VM,
 Engine, socket, context, cleanup, finalization or readiness result.
 
 A subsequent read-only seam now reconstructs the exact completed terminal
-decision and repeats current state/root observation in `S1/O1/S2/O2` order.
-Stable absence yields only a deny-only process-effect candidate with every
-authority flag false; stable collision yields no candidate. It adds no journal
+decision and repeats current state/namespace observation in `S1/O1/S2/O2` order.
+Stable pristine namespaces yield only a deny-only process-effect candidate with
+every authority flag false; stable collision yields no candidate. It adds no journal
 action, operation contract, registry row, receipt or persistent artifact, and
 its authorization entry point always refuses. This closes only the
 post-decision observation shape; it is not process, provider, recovery or
 readiness evidence.
 
+Process execution remains blocked on an atomic six-namespace reservation,
+complete recursive post-start settlement, and causal identity/recovery for the
+outer process, detached Lima hostagent, usernet and SSH ControlMaster. Live
+macOS proxy observation and individual OS-executable identity evidence also
+remain open.
+
 Live Linux/provider CI and a current Docker Desktop/provider run remain absent.
-Consequently this evidence improves the boundary without changing readiness. One
-frozen Docker Desktop candidate also proved bounded PostgreSQL/Keycloak
+Consequently this evidence improves the boundary without changing readiness.
+One frozen Docker Desktop candidate also proved bounded PostgreSQL/Keycloak
 bootstrap, optimized
 Keycloak, realm convergence, issuer metadata, Collector, worker and gateway
 startup for its exact historical source/image closure. That private run is

@@ -253,15 +253,23 @@ Docker/Colima action is enabled. Controlled-background evidence remains
 structurally ineligible for the synthetic finalizer, so finalization stays
 blocked. A separate non-executing live-preparation requirements/observation
 contract now pins official Colima 0.10.3, Lima 2.2.0 and Colima-core 0.10.4
-disk artifacts, exact staged and dynamically observed helper identities, the
-closed private environment, HMAC-hidden `HOME` binding, host build/boot inputs
-and a distinct receipt-owned disk copy. Its production requirements digest is
-`017dc54f40dea6a5f0eba46088879f3783ee62ca5cb3c8d5677a882b7ac1bddc`;
+disk artifacts, the upstream-correct release guest-agent/default-template and
+private network layout, exact staged and dynamically observed helper
+identities, the non-activating gRPC-forwarder command, closed private environment,
+host build/boot inputs and a distinct receipt-owned disk copy. Six whole
+receipt-owned mutation namespaces isolate Colima cache/home, Docker config,
+Lima home, `HOME`, and temp. `HOME` is an empty private namespace; each bounded
+top-level inventory is no-follow sampled twice and HMAC-projected as pristine
+or collision. `/bin/sh` and `/usr/sbin/ioreg` are declared OS-build-bound but
+not yet individually observed. Its v2 production requirements digest is
+`f07ea041a8442616977cf2a6cdcf1a1b8bd1a147a60930a30e63ca275670daa7`;
 all execution, lifecycle and finalization authorizations remain false. The
 observer has no process-execution or receipt/finalizer surface and no lifecycle
-target; the plan boundary consumes only its revalidated digest. Sixteen
-deterministic tests pass. A
-separate pure registry now reserves distinct live create/cleanup operation and
+target; the plan boundary consumes only its revalidated digest. V1 requirements
+and observation plus old or falsely relabelled two-target root evidence are
+refused; public projection is generated only as v2. Twenty-two deterministic
+preparation tests pass. A separate pure registry now reserves distinct live
+create/cleanup operation and
 evidence identities, binds both contracts to the production requirements
 digest and selects only an exact action/kind/contract/class tuple. Create grants
 state planning only; execution, provider recovery, lifecycle and finalization
@@ -277,44 +285,48 @@ The state owner now persists that request through the distinct
 `provider-intent` action and `mutation-journal-v5-inert-intent-only`. Production
 and fixture operation kinds, contracts, schemas and evidence classes are
 separate, and neither tuple is registered for provider execution. The publisher
-reconstructs complete state/source/root admission initially, before slot link,
-after slot acquisition and before close link; every canonical value must equal
-the all-absent baseline. The owner close changes no receipt or environment and
-writes no provider or operation evidence. Collisions and drift abort before
-effect. Abandoned intent recovery is explicit, all-zero and abort-only; exact
-completed retries return historical non-authorizing state without a fresh root
-claim.
+reconstructs complete state/source/namespace admission initially, before slot
+link, after slot acquisition and before close link; every canonical value must
+equal the pristine-namespace baseline. The owner close changes no receipt or
+environment and writes no provider or operation evidence. Collisions and drift
+abort before effect. Abandoned intent recovery is explicit, all-zero and
+abort-only; exact completed retries return historical non-authorizing state
+without a fresh namespace claim.
 
 The state owner also persists the completed-intent successor through
 `provider-start-decision` and
 `mutation-journal-v5-inert-start-decision-only`. Its publication plan v2 can
 derive only `requested-not-executed-not-authorized`. The owner reconstructs the
-terminal intent and fresh `S1/O1/S2/O2` root admission at the initial,
+terminal intent and fresh `S1/O1/S2/O2` namespace admission at the initial,
 pre-slot-link, post-slot-acquisition and pre-close-link boundaries; every value
 must match. Production and fixture classes cannot cross. A pre-CAS collision
 leaves no slot; a post-CAS collision aborts that generation. Abandoned decision
 recovery is all-zero and abort-only, and a completed decision is terminal.
-Historical retry reads no current roots. Race, SIGTERM/SIGKILL, class-crossing,
-schema and rehashed-tamper tests cover the ordered grammar.
+Historical retry reads no current namespace state. Race, SIGTERM/SIGKILL,
+class-crossing, schema and rehashed-tamper tests cover the ordered grammar.
 
-Shared journal CAS does not reserve the separate Colima/Lima namespaces. The
+Shared journal CAS does not reserve the six mutation namespaces. The
 decision writes no process, adapter, provider, evidence, runtime, receipt or
 environment artifact and grants no effect, provider recovery, cleanup,
 lifecycle or finalization authority.
 
 A post-decision read-only seam now reconstructs the exact terminal decision and
-performs a current `S1/O1/S2/O2` state/root observation. Stable absence yields
-only a process-effect candidate with every authority flag explicitly false;
-stable collision yields `null`. The admission grants nothing, is never persisted
-and introduces no journal action, operation kind, registry row, receipt or
-lifecycle surface. Its authorization entry point always refuses.
+performs a current `S1/O1/S2/O2` state/namespace observation. Stable pristine
+namespaces yield only a process-effect candidate with every authority flag
+explicitly false; stable collision yields `null`. The admission grants nothing,
+is never persisted and introduces no journal action, operation kind, registry
+row, receipt or lifecycle surface. Its authorization entry point always refuses.
 
 No Docker, Colima or Lima process ran. Next implement the actual process effect
-as one indivisible journal-schema hard cut with a durable effect slot,
-synchronous fresh gate, causal process-group/host-agent/Engine/socket/context
-evidence, uncertain-start recovery, receipts/settlement and dynamic-tree
-retirement before registering or invoking a live provider. Live-provider
-identity, builder, proxy, browser and cleanup evidence follow; Linux/reference
+as one indivisible journal-schema hard cut with a durable effect slot, an atomic
+six-namespace reservation, synchronous fresh gate, complete recursive
+post-start settlement, and causal ownership/recovery for the outer process,
+detached Lima hostagent, usernet and SSH ControlMaster. Bind live macOS proxy
+inputs and individual OS-executable identities before adding authenticated
+Engine/socket/context evidence, uncertain-start recovery, receipts and
+dynamic-tree retirement before registering or invoking a live provider.
+Live-provider identity, builder, proxy, browser and cleanup evidence follow;
+Linux/reference
 HTTPS must pass before legacy Rauthy/Temporal assets are deleted. Backup/restore,
 upgrade and Apalis remain open CPR-45 slices.
 

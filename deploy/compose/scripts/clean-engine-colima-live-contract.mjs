@@ -6,13 +6,14 @@ import {
   fstatSync,
   lstatSync,
   openSync,
+  opendirSync,
   readSync,
-  readdirSync,
   realpathSync,
 } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
   COLIMA_LIVE_FIXTURE_PRE_EFFECT_ROOT_OBSERVATION_SCHEMA,
+  COLIMA_LIVE_MUTATION_SURFACE_ROLES,
   COLIMA_LIVE_OBSERVATION_SCHEMA,
   COLIMA_LIVE_PRE_EFFECT_ROOT_OBSERVATION_SCHEMA,
   COLIMA_LIVE_PUBLIC_PROJECTION_SCHEMA,
@@ -21,6 +22,7 @@ import {
 
 export {
   COLIMA_LIVE_FIXTURE_PRE_EFFECT_ROOT_OBSERVATION_SCHEMA,
+  COLIMA_LIVE_MUTATION_SURFACE_ROLES,
   COLIMA_LIVE_OBSERVATION_SCHEMA,
   COLIMA_LIVE_PRE_EFFECT_ROOT_OBSERVATION_SCHEMA,
   COLIMA_LIVE_PUBLIC_PROJECTION_SCHEMA,
@@ -30,6 +32,8 @@ export {
 const ZERO_SHA256 = "0".repeat(64);
 const MAX_COMPONENTS = 16;
 const HASH_CHUNK_BYTES = 1024 * 1024;
+const MAX_MUTATION_SURFACE_ENTRY_NAME_BYTES = 255;
+const MAX_MUTATION_SURFACE_ENTRIES = 64;
 
 const ROOT_LAYOUT = Object.freeze({
   artifact_directory: "a",
@@ -37,6 +41,8 @@ const ROOT_LAYOUT = Object.freeze({
   colima_home: "c",
   docker_config: "d",
   lima_home: "l",
+  lima_share_root: "share",
+  private_home: "h",
   temporary_directory: "t",
   toolchain_directory: "b",
 });
@@ -80,7 +86,7 @@ const LIMA_NETWORK_CONFIG_BYTES = Buffer.from(
   "networks:\n" +
     "  user-v2:\n" +
     "    mode: user-v2\n" +
-    "    gateway: 192.168.104.1\n" +
+    "    gateway: 192.168.5.2\n" +
     "    netmask: 255.255.255.0\n",
   "utf8",
 );
@@ -88,6 +94,7 @@ const LIMA_NETWORK_CONFIG_BYTES = Buffer.from(
 const COMPONENT_ROLES = Object.freeze([
   "colima-binary",
   "docker-cli-binary",
+  "lima-default-template",
   "lima-guestagent",
   "lima-network-config",
   "lima-wrapper",
@@ -107,9 +114,65 @@ const DIRECTORY_ROLES = Object.freeze([
   "docker-config",
   "lima-config-directory",
   "lima-home",
+  "lima-share-directory",
+  "lima-share-root",
+  "lima-template-directory",
+  "private-home",
   "provider-root",
   "temporary-directory",
   "toolchain-directory",
+]);
+
+const MUTATION_SURFACE_NAMESPACES = Object.freeze([
+  Object.freeze({
+    baseline_entries: Object.freeze([]),
+    directory_role: "colima-cache-home",
+    effect_policy: "expected-no-write-v1",
+    role: "colima-cache-namespace",
+  }),
+  Object.freeze({
+    baseline_entries: Object.freeze([]),
+    directory_role: "colima-home",
+    effect_policy: "expected-owned-mutation-v1",
+    role: "colima-home-namespace",
+  }),
+  Object.freeze({
+    baseline_entries: Object.freeze([]),
+    directory_role: "docker-config",
+    effect_policy: "expected-owned-mutation-v1",
+    role: "docker-config-namespace",
+  }),
+  Object.freeze({
+    baseline_entries: Object.freeze(["_config"]),
+    directory_role: "lima-home",
+    effect_policy: "expected-owned-mutation-v1",
+    role: "lima-home-namespace",
+  }),
+  Object.freeze({
+    baseline_entries: Object.freeze([]),
+    directory_role: "private-home",
+    effect_policy: "expected-no-write-v1",
+    role: "private-home-namespace",
+  }),
+  Object.freeze({
+    baseline_entries: Object.freeze([]),
+    directory_role: "temporary-directory",
+    effect_policy: "expected-owned-mutation-v1",
+    role: "temporary-namespace",
+  }),
+]);
+
+const SYSTEM_EXECUTABLES = Object.freeze([
+  Object.freeze({
+    path: "/bin/sh",
+    purpose: "lima-wrapper-interpreter",
+    trust_policy: "exact-os-build-trusted-boundary-v1",
+  }),
+  Object.freeze({
+    path: "/usr/sbin/ioreg",
+    purpose: "lima-machine-id-probe",
+    trust_policy: "exact-os-build-trusted-boundary-v1",
+  }),
 ]);
 
 function canonical(value) {
@@ -205,7 +268,7 @@ export const COLIMA_LIVE_REQUIREMENTS = deepFreeze({
     "--ssh-config=false",
     "--ssh-port",
     "0",
-    "--activate=true",
+    "--activate=false",
     "--kubernetes=false",
     "--template=false",
     "--binfmt=false",
@@ -213,12 +276,14 @@ export const COLIMA_LIVE_REQUIREMENTS = deepFreeze({
     "--network-address=false",
     "--network-host-addresses=false",
     "--network-preferred-route=false",
+    "--gateway-address",
+    "192.168.5.2",
     "--save-config=false",
     "--force-disk-image=false",
     "--downloader",
     "native",
     "--port-forwarder",
-    "ssh",
+    "grpc",
     "--disk-image",
     "<receipt-owned-disk-image>",
   ],
@@ -244,15 +309,26 @@ export const COLIMA_LIVE_REQUIREMENTS = deepFreeze({
       stageRelativePath: "b/docker",
     }),
     component({
+      expectedSha256: "9b36702315b0716108a64631faf62a664d94f8f4a57acf3174f80022b308f5a3",
+      expectedSize: "34256",
+      kind: "configuration",
+      location: "private-lima-template",
+      maximumSize: "65536",
+      modePolicy: "private-data-0400",
+      provenance: "lima-v2.2.0-darwin-arm64-release",
+      role: "lima-default-template",
+      stageRelativePath: "share/lima/templates/default.yaml",
+    }),
+    component({
       expectedSha256: "d3fda5670ef5fcf14094efec95d410021cd4c585a2a1b6a16a97131f73fbe2f1",
       expectedSize: "7275764",
       kind: "data",
-      location: "private-artifact",
+      location: "private-lima-share",
       maximumSize: "16777216",
       modePolicy: "private-data-0400",
       provenance: "lima-v2.2.0-darwin-arm64-release",
       role: "lima-guestagent",
-      stageRelativePath: "a/lima-guestagent.Linux-aarch64.gz",
+      stageRelativePath: "share/lima/lima-guestagent.Linux-aarch64.gz",
     }),
     component({
       expectedSha256: NETWORK_CONFIG_SHA256,
@@ -260,7 +336,7 @@ export const COLIMA_LIVE_REQUIREMENTS = deepFreeze({
       kind: "configuration",
       location: "private-lima-config",
       maximumSize: "4096",
-      modePolicy: "private-data-0400",
+      modePolicy: "private-mutable-data-0600",
       provenance: "synveda-user-v2-network-config-v1",
       role: "lima-network-config",
       stageRelativePath: "l/_config/networks.yaml",
@@ -344,7 +420,7 @@ export const COLIMA_LIVE_REQUIREMENTS = deepFreeze({
   ],
   environment: {
     forbidden_names: FORBIDDEN_ENVIRONMENT_NAMES,
-    home_policy: "private-hmac-path-and-physical-directory-identity-v1",
+    home_policy: "receipt-private-empty-namespace-hmac-and-physical-identity-v2",
     names: ENVIRONMENT_NAMES,
     path_policy: "receipt-private-toolchain-only-v1",
     serialized_home_value: false,
@@ -354,11 +430,25 @@ export const COLIMA_LIVE_REQUIREMENTS = deepFreeze({
     minimum_product_version: "13.0.0",
     os_build_policy: "exact-private-observation-v1",
     platform: "darwin",
+    system_executables: SYSTEM_EXECUTABLES,
     system_library_policy: "exact-os-build-trusted-boundary-v1",
     virtualization: "apple-virtualization-framework-vz",
   },
   legacy_preparation_contract_sha256:
     "fb364b1cd89e7534b10dbd69d1092c93e64d17746b11692dec3b4252f83cbf51",
+  mutation_surface: {
+    admission_observation:
+      "bounded-no-follow-whole-top-level-namespace-hmac-v2",
+    derived_child_environment: Object.freeze({
+      LIMA_SSH_PORT_FORWARDER: "false",
+    }),
+    maximum_entry_name_bytes: MAX_MUTATION_SURFACE_ENTRY_NAME_BYTES,
+    maximum_top_level_entries: MAX_MUTATION_SURFACE_ENTRIES,
+    namespaces: MUTATION_SURFACE_NAMESPACES,
+    post_start_inventory:
+      "complete-bounded-dynamic-tree-required-before-identity-v1",
+    reservation: "none-same-uid-trusted-host-boundary-v1",
+  },
   provider_class: "colima-vz-docker-live",
   provider_kind: "colima",
   release_artifacts: {
@@ -469,6 +559,16 @@ function exactStagedPath(entry) {
       return (
         entry.stage_relative_path === `${ROOT_LAYOUT.lima_home}/_config/networks.yaml`
       );
+    case "private-lima-share":
+      return (
+        entry.stage_relative_path ===
+        `${ROOT_LAYOUT.lima_share_root}/lima/${name}`
+      );
+    case "private-lima-template":
+      return (
+        entry.stage_relative_path ===
+        `${ROOT_LAYOUT.lima_share_root}/lima/templates/default.yaml`
+      );
     case "private-toolchain":
       return entry.stage_relative_path === `${ROOT_LAYOUT.toolchain_directory}/${name}`;
     case "state-owner-runtime":
@@ -488,6 +588,7 @@ function validateRequirementShape(value) {
       "environment",
       "host",
       "legacy_preparation_contract_sha256",
+      "mutation_surface",
       "provider_class",
       "provider_kind",
       "release_artifacts",
@@ -513,6 +614,37 @@ function validateRequirementShape(value) {
   ) {
     fail("Colima live requirements identity was refused");
   }
+  exactKeys(
+    value.mutation_surface,
+    [
+      "admission_observation",
+      "derived_child_environment",
+      "maximum_entry_name_bytes",
+      "maximum_top_level_entries",
+      "namespaces",
+      "post_start_inventory",
+      "reservation",
+    ],
+    "Colima live mutation surface",
+  );
+  if (
+    value.mutation_surface.admission_observation !==
+      "bounded-no-follow-whole-top-level-namespace-hmac-v2" ||
+    canonical(value.mutation_surface.derived_child_environment) !==
+      canonical({ LIMA_SSH_PORT_FORWARDER: "false" }) ||
+    value.mutation_surface.maximum_entry_name_bytes !==
+      MAX_MUTATION_SURFACE_ENTRY_NAME_BYTES ||
+    value.mutation_surface.maximum_top_level_entries !==
+      MAX_MUTATION_SURFACE_ENTRIES ||
+    value.mutation_surface.post_start_inventory !==
+      "complete-bounded-dynamic-tree-required-before-identity-v1" ||
+    value.mutation_surface.reservation !==
+      "none-same-uid-trusted-host-boundary-v1" ||
+    canonical(value.mutation_surface.namespaces) !==
+      canonical(MUTATION_SURFACE_NAMESPACES)
+  ) {
+    fail("Colima live mutation surface was refused");
+  }
   exactArray(value.command_template, COLIMA_LIVE_REQUIREMENTS.command_template,
     "Colima live command template");
   exactKeys(
@@ -528,7 +660,7 @@ function validateRequirementShape(value) {
   );
   if (
     value.environment.home_policy !==
-      "private-hmac-path-and-physical-directory-identity-v1" ||
+      "receipt-private-empty-namespace-hmac-and-physical-identity-v2" ||
     value.environment.path_policy !== "receipt-private-toolchain-only-v1" ||
     value.environment.serialized_home_value !== false
   ) {
@@ -541,6 +673,7 @@ function validateRequirementShape(value) {
       "minimum_product_version",
       "os_build_policy",
       "platform",
+      "system_executables",
       "system_library_policy",
       "virtualization",
     ],
@@ -551,6 +684,7 @@ function validateRequirementShape(value) {
     value.host.minimum_product_version !== "13.0.0" ||
     value.host.os_build_policy !== "exact-private-observation-v1" ||
     value.host.platform !== "darwin" ||
+    canonical(value.host.system_executables) !== canonical(SYSTEM_EXECUTABLES) ||
     value.host.system_library_policy !== "exact-os-build-trusted-boundary-v1" ||
     value.host.virtualization !== "apple-virtualization-framework-vz"
   ) {
@@ -591,12 +725,20 @@ function validateRequirementShape(value) {
       expectedSize > maximumSize ||
       (entry.expected_sha256 === ZERO_SHA256) !== (expectedSize === 0) ||
       !new Set(["configuration", "data", "executable", "source"]).has(entry.kind) ||
-      !new Set(["private-artifact", "private-lima-config", "private-toolchain", "state-owner-runtime"]).has(entry.location) ||
+      !new Set([
+        "private-artifact",
+        "private-lima-config",
+        "private-lima-share",
+        "private-lima-template",
+        "private-toolchain",
+        "state-owner-runtime",
+      ]).has(entry.location) ||
       !new Set([
         "external-executable-not-writable",
         "external-source-not-writable",
         "private-data-0400",
         "private-executable-0500",
+        "private-mutable-data-0600",
       ]).has(entry.mode_policy) ||
       typeof entry.provenance !== "string" ||
       !/^[a-z0-9][a-z0-9.-]{2,127}$/u.test(entry.provenance) ||
@@ -776,6 +918,11 @@ function validateMode(metadata, policy, label) {
         fail(`${label} mode was refused`);
       }
       return;
+    case "private-mutable-data-0600":
+      if (currentUid < 0n || metadata.uid !== currentUid || permissions !== 0o600n) {
+        fail(`${label} mode was refused`);
+      }
+      return;
     case "external-executable-not-writable":
       if ((permissions & 0o111n) === 0n || (permissions & 0o022n) !== 0n) {
         fail(`${label} mode was refused`);
@@ -885,6 +1032,11 @@ function validateObservedMode(value, policy, label) {
         fail(`${label} mode was refused`);
       }
       return;
+    case "private-mutable-data-0600":
+      if (currentUid === null || value.uid !== currentUid || permissions !== 0o600) {
+        fail(`${label} mode was refused`);
+      }
+      return;
     case "external-executable-not-writable":
       if ((permissions & 0o111) === 0 || (permissions & 0o022) !== 0) {
         fail(`${label} mode was refused`);
@@ -912,13 +1064,47 @@ function isWithin(parent, child) {
   return rel !== "" && rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
 }
 
-function exactDirectoryEntries(path, expected, label) {
-  let entries;
-  try {
-    entries = readdirSync(path).sort();
-  } catch {
-    fail(`${label} inventory was unavailable`, 69);
+function boundedDirectoryEntries(
+  path,
+  maximumEntries,
+  label,
+  { boundExceededStatus = 69 } = {},
+) {
+  if (!Number.isSafeInteger(maximumEntries) || maximumEntries < 0) {
+    fail(`${label} inventory bound was refused`, 70);
   }
+  let directory;
+  try {
+    directory = opendirSync(path);
+    const entries = [];
+    for (;;) {
+      const entry = directory.readSync();
+      if (entry === null) return entries.sort();
+      if (entries.length >= maximumEntries) {
+        fail(`${label} inventory exceeded its bound`, boundExceededStatus);
+      }
+      entries.push(entry.name);
+    }
+  } catch (error) {
+    if (error instanceof ColimaLiveContractFailure) throw error;
+    fail(`${label} inventory was unavailable`, 69);
+  } finally {
+    if (directory !== undefined) {
+      try {
+        directory.closeSync();
+      } catch (error) {
+        if (error?.code !== "ERR_DIR_CLOSED") {
+          fail(`${label} inventory close was unavailable`, 69);
+        }
+      }
+    }
+  }
+}
+
+function exactDirectoryEntries(path, expected, label) {
+  const entries = boundedDirectoryEntries(path, expected.length, label, {
+    boundExceededStatus: 78,
+  });
   exactArray(entries, [...expected].sort(), `${label} inventory`);
 }
 
@@ -930,6 +1116,19 @@ function directoryPaths(providerRoot) {
     "docker-config": join(providerRoot, ROOT_LAYOUT.docker_config),
     "lima-config-directory": join(providerRoot, ROOT_LAYOUT.lima_home, "_config"),
     "lima-home": join(providerRoot, ROOT_LAYOUT.lima_home),
+    "lima-share-directory": join(
+      providerRoot,
+      ROOT_LAYOUT.lima_share_root,
+      "lima",
+    ),
+    "lima-share-root": join(providerRoot, ROOT_LAYOUT.lima_share_root),
+    "lima-template-directory": join(
+      providerRoot,
+      ROOT_LAYOUT.lima_share_root,
+      "lima",
+      "templates",
+    ),
+    "private-home": join(providerRoot, ROOT_LAYOUT.private_home),
     "provider-root": providerRoot,
     "temporary-directory": join(providerRoot, ROOT_LAYOUT.temporary_directory),
     "toolchain-directory": join(providerRoot, ROOT_LAYOUT.toolchain_directory),
@@ -969,15 +1168,6 @@ function admissionEntryIdentity(metadata) {
   });
 }
 
-function optionalNoFollowMetadata(path, label) {
-  try {
-    return lstatSync(path, { bigint: true });
-  } catch (error) {
-    if (error?.code === "ENOENT") return undefined;
-    fail(`${label} presence was unavailable`, 69);
-  }
-}
-
 function recordedDirectoryMatches(metadata, recorded) {
   return (
     metadata.isDirectory() &&
@@ -989,17 +1179,9 @@ function recordedDirectoryMatches(metadata, recorded) {
   );
 }
 
-function captureAdmissionTarget(parent, targetName, role, baseEntries) {
-  if (
-    typeof targetName !== "string" ||
-    targetName.length < 1 ||
-    targetName.includes(sep) ||
-    targetName === "." ||
-    targetName === ".."
-  ) {
-    fail("Colima live pre-effect target name was refused", 70);
-  }
-  assertNoSymlinkComponents(parent.path, `Colima live ${role} parent`);
+function captureAdmissionNamespace(parent, namespace) {
+  const { baseline_entries: baselineEntries, role } = namespace;
+  assertNoSymlinkComponents(parent.path, `Colima live ${role}`);
   let descriptor;
   try {
     const namedBefore = lstatSync(parent.path, { bigint: true });
@@ -1014,49 +1196,70 @@ function captureAdmissionTarget(parent, targetName, role, baseEntries) {
       openedBefore.uid !== BigInt(process.getuid()) ||
       (openedBefore.mode & 0o7777n) !== 0o700n
     ) {
-      fail(`Colima live ${role} parent identity was refused`);
+      fail(`Colima live ${role} identity was refused`);
     }
-    const targetPath = join(parent.path, targetName);
-    const targetBefore = optionalNoFollowMetadata(
-      targetPath,
+    const inventoryBefore = boundedDirectoryEntries(
+      parent.path,
+      MAX_MUTATION_SURFACE_ENTRIES,
       `Colima live ${role}`,
     );
-    const inventory = readdirSync(parent.path).sort();
-    exactArray(
-      inventory,
-      [...baseEntries, ...(targetBefore === undefined ? [] : [targetName])].sort(),
-      `Colima live ${role} parent inventory`,
-    );
-    const targetAfter = optionalNoFollowMetadata(
-      targetPath,
+    if (
+      baselineEntries.some((name) => !inventoryBefore.includes(name)) ||
+      inventoryBefore.some(
+        (name) =>
+          typeof name !== "string" ||
+          name.length < 1 ||
+          Buffer.byteLength(name, "utf8") >
+            MAX_MUTATION_SURFACE_ENTRY_NAME_BYTES ||
+          name.includes(sep) ||
+          name === "." ||
+          name === "..",
+      )
+    ) {
+      fail(`Colima live ${role} inventory was refused`, 69);
+    }
+    const entryIdentities = inventoryBefore.map((name) => {
+      const metadata = lstatSync(join(parent.path, name), { bigint: true });
+      return Object.freeze({ name, ...admissionEntryIdentity(metadata) });
+    });
+    const inventoryAfter = boundedDirectoryEntries(
+      parent.path,
+      MAX_MUTATION_SURFACE_ENTRIES,
       `Colima live ${role}`,
     );
+    const entriesAfter = inventoryAfter.map((name) => ({
+      name,
+      ...admissionEntryIdentity(
+        lstatSync(join(parent.path, name), { bigint: true }),
+      ),
+    }));
     const openedAfter = fstatSync(descriptor, { bigint: true });
     const namedAfter = lstatSync(parent.path, { bigint: true });
     if (
       !admissionMetadataEqual(namedBefore, openedAfter) ||
       !admissionMetadataEqual(namedBefore, namedAfter) ||
-      (targetBefore === undefined) !== (targetAfter === undefined) ||
-      (targetBefore !== undefined &&
-        !admissionMetadataEqual(targetBefore, targetAfter))
+      canonical(inventoryBefore) !== canonical(inventoryAfter) ||
+      canonical(entryIdentities) !== canonical(entriesAfter)
     ) {
       fail(`Colima live ${role} observation changed`, 73);
     }
+    const residualEntries = entryIdentities.filter(
+      (entry) => !baselineEntries.includes(entry.name),
+    );
     return Object.freeze({
       disposition:
-        targetBefore === undefined ? "observed-absent" : "foreign-collision",
-      entryIdentity:
-        targetBefore === undefined
-          ? undefined
-          : admissionEntryIdentity(targetBefore),
-      parentIdentity: Object.freeze({
+        residualEntries.length === 0
+          ? "observed-pristine"
+          : "foreign-collision",
+      inventory: Object.freeze([...inventoryBefore]),
+      namespaceIdentity: Object.freeze({
         path: parent.path,
-        role: `${role}-parent`,
+        role,
         ...admissionEntryIdentity(openedBefore),
       }),
+      observedEntries: Object.freeze(entryIdentities),
+      residualEntries: Object.freeze(residualEntries),
       role,
-      targetName,
-      targetPath,
     });
   } catch (error) {
     if (error instanceof ColimaLiveContractFailure) throw error;
@@ -1070,31 +1273,22 @@ function captureAdmissionRoots(observation) {
   const directories = new Map(
     observation.directories.map((entry) => [entry.role, entry]),
   );
-  const providerProfile = observation.provider_profile;
-  const limaInstance = `colima-${providerProfile}`;
-  return Object.freeze([
-    captureAdmissionTarget(
-      directories.get("colima-home"),
-      providerProfile,
-      "colima-profile-root",
-      [],
+  return Object.freeze(
+    MUTATION_SURFACE_NAMESPACES.map((namespace) =>
+      captureAdmissionNamespace(
+        directories.get(namespace.directory_role),
+        namespace,
+      ),
     ),
-    captureAdmissionTarget(
-      directories.get("lima-home"),
-      limaInstance,
-      "lima-instance-root",
-      ["_config"],
-    ),
-  ]);
+  );
 }
 
 function admissionInventory(value) {
-  return Object.freeze({
-    colimaProfilePresent:
-      value[0].disposition === "foreign-collision",
-    limaInstancePresent:
-      value[1].disposition === "foreign-collision",
-  });
+  return Object.freeze(
+    Object.fromEntries(
+      value.map((namespace) => [namespace.role, namespace.inventory]),
+    ),
+  );
 }
 
 function admissionHmac(bindingKey, fixtureId, role, purpose, schema, value) {
@@ -1112,39 +1306,27 @@ function admissionHmac(bindingKey, fixtureId, role, purpose, schema, value) {
 }
 
 function admissionRootProjection(root, input, schema) {
-  const parentIdentityHmac = admissionHmac(
+  const namespaceIdentityHmac = admissionHmac(
     input.binding_key,
     input.fixture_id,
     root.role,
-    "parent-identity",
+    "namespace-identity",
     schema,
-    root.parentIdentity,
+    root.namespaceIdentity,
   );
-  const targetPathHmac = admissionHmac(
+  const observedEntrySetHmac = admissionHmac(
     input.binding_key,
     input.fixture_id,
     root.role,
-    "target-path",
+    "observed-entry-set",
     schema,
-    root.targetPath,
+    root.observedEntries,
   );
-  const targetEntryIdentityHmac =
-    root.entryIdentity === undefined
-      ? ZERO_SHA256
-      : admissionHmac(
-          input.binding_key,
-          input.fixture_id,
-          root.role,
-          "target-entry-identity",
-          schema,
-          { path_hmac_sha256: targetPathHmac, ...root.entryIdentity },
-        );
   return Object.freeze({
     disposition: root.disposition,
-    parent_identity_hmac_sha256: parentIdentityHmac,
+    namespace_identity_hmac_sha256: namespaceIdentityHmac,
+    observed_entry_set_hmac_sha256: observedEntrySetHmac,
     role: root.role,
-    target_entry_identity_hmac_sha256: targetEntryIdentityHmac,
-    target_path_hmac_sha256: targetPathHmac,
   });
 }
 
@@ -1186,7 +1368,7 @@ function observePreEffectRoots(
     (root) => root.disposition === "foreign-collision",
   )
     ? "foreign-collision"
-    : "observed-absent";
+    : "observed-pristine";
   return deepFreeze({
     evidence_class: evidenceClass,
     planned_names: {
@@ -1232,14 +1414,14 @@ function validateHost(host, requirements) {
   return Object.freeze({ ...host });
 }
 
-function expectedEnvironment(providerRoot, home) {
+function expectedEnvironment(providerRoot) {
   const paths = directoryPaths(providerRoot);
   return Object.freeze({
     COLIMA_CACHE_HOME: paths["colima-cache-home"],
     COLIMA_DOWNLOADER: "native",
     COLIMA_HOME: paths["colima-home"],
     DOCKER_CONFIG: paths["docker-config"],
-    HOME: home,
+    HOME: paths["private-home"],
     LANG: "C",
     LC_ALL: "C",
     LIMA_HOME: paths["lima-home"],
@@ -1250,9 +1432,9 @@ function expectedEnvironment(providerRoot, home) {
   });
 }
 
-function validateEnvironment(environment, providerRoot, home) {
+function validateEnvironment(environment, providerRoot) {
   exactKeys(environment, ENVIRONMENT_NAMES, "Colima live execution environment");
-  const expected = expectedEnvironment(providerRoot, home);
+  const expected = expectedEnvironment(providerRoot);
   if (canonical(environment) !== canonical(expected)) {
     fail("Colima live execution environment was refused");
   }
@@ -1386,38 +1568,79 @@ function buildObservation(requirements, input, preEffectInventory = undefined) {
   const stagedArtifactNames = requirements.components
     .filter((entry) => entry.location === "private-artifact")
     .map((entry) => entry.stage_relative_path.split("/").at(-1));
+  const stagedLimaShareNames = requirements.components
+    .filter((entry) => entry.location === "private-lima-share")
+    .map((entry) => entry.stage_relative_path.split("/").at(-1));
+  const stagedLimaTemplateNames = requirements.components
+    .filter((entry) => entry.location === "private-lima-template")
+    .map((entry) => entry.stage_relative_path.split("/").at(-1));
+  stagedLimaShareNames.push("templates");
   stagedArtifactNames.push(requirements.source_disk_image.copy_relative_path.split("/").at(-1));
   exactDirectoryEntries(providerRoot, Object.values(ROOT_LAYOUT), "Colima live provider root");
   exactDirectoryEntries(directoriesByRole["toolchain-directory"], stagedToolchainNames,
     "Colima live toolchain directory");
   exactDirectoryEntries(directoriesByRole["artifact-directory"], stagedArtifactNames,
     "Colima live artifact directory");
-  const colimaProfilePresent = preEffectInventory?.colimaProfilePresent ?? false;
-  const limaInstancePresent = preEffectInventory?.limaInstancePresent ?? false;
-  if (
-    typeof colimaProfilePresent !== "boolean" ||
-    typeof limaInstancePresent !== "boolean" ||
-    (preEffectInventory !== undefined &&
-      canonical(Object.keys(preEffectInventory).sort()) !==
-        canonical(["colimaProfilePresent", "limaInstancePresent"]))
-  ) {
-    fail("Colima live pre-effect inventory was refused", 70);
-  }
   exactDirectoryEntries(
-    directoriesByRole["lima-home"],
-    ["_config", ...(limaInstancePresent ? [`colima-${input.provider_profile}`] : [])],
-    "Colima live Lima home",
+    directoriesByRole["lima-share-root"],
+    ["lima"],
+    "Colima live Lima share root",
   );
+  exactDirectoryEntries(
+    directoriesByRole["lima-share-directory"],
+    stagedLimaShareNames,
+    "Colima live Lima share directory",
+  );
+  exactDirectoryEntries(
+    directoriesByRole["lima-template-directory"],
+    stagedLimaTemplateNames,
+    "Colima live Lima template directory",
+  );
+  const mutationInventory = Object.fromEntries(
+    MUTATION_SURFACE_NAMESPACES.map((namespace) => [
+      namespace.role,
+      [...namespace.baseline_entries],
+    ]),
+  );
+  if (preEffectInventory !== undefined) {
+    exactKeys(
+      preEffectInventory,
+      COLIMA_LIVE_MUTATION_SURFACE_ROLES,
+      "Colima live pre-effect inventory",
+    );
+    for (const namespace of MUTATION_SURFACE_NAMESPACES) {
+      const entries = preEffectInventory[namespace.role];
+      if (
+        !Array.isArray(entries) ||
+        entries.length > MAX_MUTATION_SURFACE_ENTRIES ||
+        new Set(entries).size !== entries.length ||
+        canonical(entries) !== canonical([...entries].sort()) ||
+        namespace.baseline_entries.some((name) => !entries.includes(name)) ||
+        entries.some(
+          (name) =>
+            typeof name !== "string" ||
+            name.length < 1 ||
+            Buffer.byteLength(name, "utf8") >
+              MAX_MUTATION_SURFACE_ENTRY_NAME_BYTES ||
+            name.includes(sep) ||
+            name === "." ||
+            name === "..",
+        )
+      ) {
+        fail("Colima live pre-effect inventory was refused", 70);
+      }
+      mutationInventory[namespace.role] = [...entries];
+    }
+  }
+  for (const namespace of MUTATION_SURFACE_NAMESPACES) {
+    exactDirectoryEntries(
+      directoriesByRole[namespace.directory_role],
+      mutationInventory[namespace.role],
+      `Colima live ${namespace.role}`,
+    );
+  }
   exactDirectoryEntries(directoriesByRole["lima-config-directory"], ["networks.yaml"],
     "Colima live Lima config directory");
-  for (const role of ["colima-cache-home", "docker-config", "temporary-directory"]) {
-    exactDirectoryEntries(directoriesByRole[role], [], `Colima live ${role}`);
-  }
-  exactDirectoryEntries(
-    directoriesByRole["colima-home"],
-    colimaProfilePresent ? [input.provider_profile] : [],
-    "Colima live colima-home",
-  );
   const components = requirements.components.map((requirement) =>
     withParentIdentity(
       openedFileIdentity(
@@ -1464,14 +1687,14 @@ function buildObservation(requirements, input, preEffectInventory = undefined) {
   if (typeof home !== "string" || !isAbsolute(home) || resolve(home) !== home) {
     fail("Colima live HOME was refused", 69);
   }
-  if (home === providerRoot || isWithin(home, providerRoot) || isWithin(providerRoot, home)) {
-    fail("Colima live HOME/provider overlap was refused");
+  if (home !== directoriesByRole["private-home"]) {
+    fail("Colima live receipt-private HOME binding was refused");
   }
   const homeIdentity = directoryIdentity(home, "Colima live HOME", {
-    privateDirectory: false,
+    privateDirectory: true,
     revealPath: false,
   });
-  const environment = validateEnvironment(input.environment, providerRoot, home);
+  const environment = validateEnvironment(input.environment, providerRoot);
   const serializedVariables = Object.entries(environment)
     .filter(([name]) => name !== "HOME")
     .map(([name, value]) => Object.freeze({ name, value }));
@@ -1679,7 +1902,11 @@ function validateObservationShape(value, requirements) {
         ? "toolchain-directory"
         : requirement.location === "private-artifact"
           ? "artifact-directory"
-          : "lima-config-directory";
+          : requirement.location === "private-lima-share"
+            ? "lima-share-directory"
+            : requirement.location === "private-lima-template"
+              ? "lima-template-directory"
+              : "lima-config-directory";
     if (
       entry.parent_identity_sha256 !==
       identityDigest(observedDirectoryIdentity(directoriesByRole.get(parentRole)))
@@ -1701,6 +1928,19 @@ function validateObservationShape(value, requirements) {
     !lowerHex(value.environment.home.path_hmac_sha256, 64)
   ) {
     fail("Colima live observed HOME was refused");
+  }
+  const privateHomeDirectory = directoriesByRole.get("private-home");
+  const expectedHomeIdentity = {
+    device: privateHomeDirectory.device,
+    inode: privateHomeDirectory.inode,
+    mode: privateHomeDirectory.mode,
+    uid: privateHomeDirectory.uid,
+  };
+  if (
+    canonical(value.environment.home.directory_identity) !==
+    canonical(expectedHomeIdentity)
+  ) {
+    fail("Colima live observed HOME directory binding was refused");
   }
   exactArray(value.environment.names, ENVIRONMENT_NAMES, "Colima live observed environment names");
   const expectedVariableNames = ENVIRONMENT_NAMES.filter((name) => name !== "HOME");
@@ -1724,7 +1964,7 @@ function validateObservationShape(value, requirements) {
     value.environment.variables.map((entry) => [entry.name, entry.value]),
   );
   const expectedVariables = Object.fromEntries(
-    Object.entries(expectedEnvironment(providerRoot, "<private-home>")).filter(
+    Object.entries(expectedEnvironment(providerRoot)).filter(
       ([name]) => name !== "HOME",
     ),
   );

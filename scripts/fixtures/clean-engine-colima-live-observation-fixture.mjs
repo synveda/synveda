@@ -16,8 +16,12 @@ import {
 const COMPONENT_LAYOUT = Object.freeze({
   "colima-binary": ["b/colima", 0o500],
   "docker-cli-binary": ["b/docker", 0o500],
-  "lima-guestagent": ["a/lima-guestagent.Linux-aarch64.gz", 0o400],
-  "lima-network-config": ["l/_config/networks.yaml", 0o400],
+  "lima-default-template": ["share/lima/templates/default.yaml", 0o400],
+  "lima-guestagent": [
+    "share/lima/lima-guestagent.Linux-aarch64.gz",
+    0o400,
+  ],
+  "lima-network-config": ["l/_config/networks.yaml", 0o600],
   "lima-wrapper": ["b/lima", 0o500],
   "limactl-binary": ["b/limactl", 0o500],
   "ssh-client": ["b/ssh", 0o500],
@@ -58,15 +62,25 @@ export function createCleanEngineColimaLiveObservationFixture({
   chmodSync(root, 0o700);
 
   const providerRoot = join(root, "p");
-  const home = join(root, "h");
+  const home = join(providerRoot, "h");
   const external = join(root, "x");
   for (const path of [
     providerRoot,
-    home,
     external,
-    ...["a", "b", "c", "d", "k", "l", "l/_config", "t"].map((name) =>
-      join(providerRoot, name),
-    ),
+    ...[
+      "a",
+      "b",
+      "c",
+      "d",
+      "h",
+      "k",
+      "l",
+      "l/_config",
+      "share",
+      "share/lima",
+      "share/lima/templates",
+      "t",
+    ].map((name) => join(providerRoot, name)),
   ]) {
     mkdirSync(path, { mode: 0o700 });
     chmodSync(path, 0o700);

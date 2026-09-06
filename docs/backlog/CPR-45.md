@@ -461,26 +461,46 @@ runtime and fixture-source paths, which may reside beneath that home directory.
 
 A separate, non-executing live-provider preparation contract now closes the
 next input boundary without changing that immutable fake contract. Requirements
-schema `synveda.clean-engine.colima-live-requirements.v1` pins the official
+schema `synveda.clean-engine.colima-live-requirements.v2` pins the official
 Colima 0.10.3 Darwin/arm64 release, Lima 2.2.0 Darwin/arm64 archive and extracted
-wrapper/`limactl`/guest-agent bytes, and the Colima-core 0.10.4 arm64 Docker disk
-image by exact size and digest. Its current canonical digest is
-`017dc54f40dea6a5f0eba46088879f3783ee62ca5cb3c8d5677a882b7ac1bddc`.
-The private observation schema binds exact staged paths, bytes, modes, parents,
-the dynamically selected Docker CLI, SSH helpers, state-owner closure and macOS
-probes, a closed environment, HMAC-hidden `HOME` path plus physical directory
-identity, exact host build/boot inputs and distinct source/receipt-owned disk
-inodes. The source disk is a preselected local file; the observer downloads
-nothing and imports no process-execution API. Its host record is explicitly
-preparation input, not a live probe or admission fact. The public projection
-contains no raw path, `HOME`, fixture, profile or component identity.
+wrapper/`limactl` bytes, release guest agent at
+`share/lima/lima-guestagent.Linux-aarch64.gz`, release default template at
+`share/lima/templates/default.yaml`, and the Colima-core 0.10.4 arm64 Docker
+disk image by exact size and digest. The private Lima network baseline is mode
+0600 with the user-v2 gateway `192.168.5.2`. The command pins
+`--activate=false` and `--port-forwarder grpc`, with
+`LIMA_SSH_PORT_FORWARDER=false` as the derived child setting. Its current
+canonical digest is
+`f07ea041a8442616977cf2a6cdcf1a1b8bd1a147a60930a30e63ca275670daa7`.
+The private observation v2 schema binds exact staged paths, bytes, modes,
+parents, the dynamically selected Docker CLI, SSH helpers, state-owner closure
+and macOS probes, a closed environment, exact host build/boot inputs and
+distinct source/receipt-owned disk inodes. `/bin/sh` and `/usr/sbin/ioreg` are
+declared exact-OS-build trusted-boundary inputs. They are not yet individually
+observed live.
+
+Six receipt-owned mutation namespaces cover Colima cache, Colima home, Docker
+config, Lima home, `HOME` and temporary files. `HOME` is exactly the private
+`h` namespace; Lima home contains only the staged `_config` baseline and the
+other five start empty. Pre-effect root observation v2 no-follow samples each
+complete bounded top-level inventory twice. Its public result exposes only
+namespace and complete-entry-set HMACs plus `observed-pristine` or
+`foreign-collision`; no entry is traversed or adopted. The source disk is a
+preselected local file; the observer downloads nothing and imports no
+process-execution API. Its host record is preparation input, not a live probe
+or admission fact. Public projection v2 contains no raw private provider,
+component or `HOME` path and no fixture or profile identity; the declared OS
+executable paths remain non-private OS-build-bound metadata. V1 requirements
+and observation plus old or falsely relabelled two-target root evidence are
+refused; public projection is generated only as v2.
 
 All three capability bits remain false: preparation cannot authorize execution,
 lifecycle exposure or finalization. The module is not registered with mutation
 state, receipts, cleanup, a lifecycle target or the environment finalizer. Its
 fixture-only seams permit small deterministic files instead of committing the
 official disk image; any future state adapter must accept only the production
-requirements digest. Sixteen deterministic tests cover pin/schema drift,
+requirements digest. Twenty-two deterministic preparation tests cover
+pin/schema/generation drift, whole-namespace collisions, bounded inventory,
 role/path/environment/HOME/host/file/disk replacement, private projection,
 revalidation and unconditional authorization refusal. No Docker, Colima or
 Lima process was invoked. The existing before-root source-drift fixture now
@@ -492,10 +512,10 @@ A new pure provider-adapter registry reserves
 `colima-vz-docker-live-create-v1` and
 `colima-vz-docker-live-cleanup-v1` plus distinct live evidence schema names. The
 create operation contract digest is
-`13a87072a49103db0b3c4f36b64b8fbd0d74bd794c4a359fb77b41184ee289a7`;
-cleanup is `8d3f43e02f2edc27f7a2b2f89ef5e3986a85326afabe92192e2430cd18558e1a`
+`dd77ff375f8d7e9a8e711d771f78b62f5c07f50352e2f1b4b746ed14f3a9c51b`;
+cleanup is `6704795b58343a741bb552dc9ff28417a5bc23e1c3395b5eb7b98bb0dc593f0a`
 and binds the create digest. Registry digest
-`0fe6ec1645e18711a1d5d31bd1d21205ab7956a44ff04c38257e4f0b6efab642`
+`d3906132f2a1308b356457e543d6fa8de9ee65f81afb66b56a7d70018d748996`
 accepts only an exact action, operation kind, operation-contract digest and
 provider-class tuple. It compares all fields after the content-addressed key,
 cannot select either fake class and returns only closed metadata. Create grants
@@ -503,8 +523,8 @@ state planning only through `mutation-journal-v5-plan-only`; execution,
 provider recovery, lifecycle exposure and finalization remain false, while
 cleanup remains wholly deny-only. The registry imports no process,
 mutation-state, receipt or fake-provider module; state reaches it only through
-the non-executing live-plan boundary. Fourteen deterministic tests cover tuple confusion,
-contract and registry drift, capability escalation, fake relabelling,
+the non-executing live-plan boundary. Fifteen deterministic tests cover tuple
+confusion, contract and registry drift, capability escalation, fake relabelling,
 immutability and content-free refusal.
 
 The new `synveda.clean-engine.colima-live-provider-operation-plan.v1` binds the
@@ -519,9 +539,9 @@ or environment, writes no provider evidence and blocks later mutation and
 finalization except the exact inert intent successor. An abandoned slot can
 only be explicitly recovered by an
 `aborted-before-effect` journal close before retry; this grants no provider
-recovery. Six plan-boundary and five focused state plan/race/crash tests cover the
-new boundary. The supported lifecycle still exposes only `plan`, `status` and
-`verify`.
+recovery. Six plan-boundary and five focused state plan/race/crash tests cover
+the new boundary. The supported lifecycle still exposes only `plan`, `status`
+and `verify`.
 
 The standalone fixture launcher creates a separately detached fake host agent
 only after its pre-effect gates. Its recoverable fixture-only create authority
@@ -599,29 +619,30 @@ The state owner projects only content-free slot, close, plan and observation
 digests. Intent candidates remain `provider-create`/
 `requested-not-authorized` with a zero-entry logical prefix. Production intent
 operation kind `colima-live-provider-intent-publication-v1` now has contract
-digest `8cad231ffcc14cd58a90df10faee867bcb8a752d46772e1ccedc666d744648ee`;
+digest `a89e57ff3769616ff5c88aa63de9dd854bd2b821cf7516db33fa0f09b775edfc`;
 the separate fixture digest is
-`d8269df82f7d10c9bfe02f36a9e42d05138d4dc1798a08bcee1c023b2eedfcc2`.
+`4963be65ad92040a20de26c4d048ee11858538c72820c657643ebeedb68f7400`.
 They authorize only `mutation-journal-v5-inert-intent-only` publication.
 
 The successor `provider-start-decision` uses production operation kind
 `colima-live-provider-start-decision-publication-v1` with contract digest
-`2d9033bd071e24125e61533ec75500f6bc6d909226a0209be95ecd80df407cb5`;
+`9b4957d5b0918b78adde1ce336c923499a205043f05845931456b0246c6fc6e6`;
 the distinct fixture digest is
-`83866dac58880b4d0bf69361cb23a9e34df2bd624687d0cf8e297867e3acef7c`.
+`407c7b466548373c320d600344d6c488578afed150914b2b06cd47bf52d55167`.
 Its publication plan is schema v2 and authorizes only
 `mutation-journal-v5-inert-start-decision-only`. Both contracts bind the exact
 completed intent and allow only `requested-not-executed-not-authorized` from an
-all-absent observation. They remain absent from the provider-adapter registry.
+`observed-pristine` namespace observation. They remain absent from the
+provider-adapter registry.
 
-The publisher reconstructs state/source and fresh root admission at four
+The publisher reconstructs state/source and fresh namespace admission at four
 boundaries: initial, immediately before slot link, after slot acquisition and
 immediately before close link. Every canonical completed-intent projection,
 intent completion/publication plan, root observation, admission and decision
-publication plan must equal the initial all-absent value. Slot v5 and owner
-close v6 have result sequence zero and zero receipt, environment and operation-
-evidence delta. They create no process, provider, registry, runtime, receipt,
-environment or operation-settlement artifact. A pre-CAS collision leaves no
+publication plan must equal the initial pristine-namespace value. Slot v5 and
+owner close v6 have result sequence zero and zero receipt, environment and
+operation-evidence delta. They create no process, provider, registry, runtime,
+receipt, environment or operation-settlement artifact. A pre-CAS collision leaves no
 slot; a post-CAS collision owner-aborts that generation.
 
 The journal grammar is ordered and class-closed: aborted plan generations before
@@ -632,7 +653,7 @@ Abandoned intent and decision slots accept only an all-zero recovery v4 claim
 and `aborted-before-effect` recovery close; generic effect recovery refuses
 them. Exact completed retry checks the preparation-observation and fixture-
 requirements digests and returns historical non-authorizing state without
-reading or claiming current root absence.
+reading or claiming current namespace state.
 
 Mutation slot v5, close v6, recovery v4 and recovery-root v4 are an indivisible
 full-state hard cut. Slot v1-v4, close v1-v5 and recovery/root v1-v3 are refused
@@ -641,8 +662,8 @@ collision, source drift, competing writer, recovery, class-crossing, schema and
 validly rehashed semantic-tamper tests cover the boundary. No Docker, Colima or
 Lima process ran in this slice.
 
-Repeated root observations and the journal hard-link CAS do not atomically
-reserve the separate Colima/Lima namespaces. Process start/spawn/signal,
+Repeated whole-namespace observations and the journal hard-link CAS do not
+atomically reserve the six mutation namespaces. Process start/spawn/signal,
 adapter/effect execution, root mutation, provider/evidence/runtime/receipt/
 environment publication, provider-effect recovery, cleanup, lifecycle and
 finalization remain false. The logical supervisor label is not a PID, PGID,
@@ -650,11 +671,11 @@ ownership or liveness fact.
 
 The next read-only boundary now projects the exact completed terminal decision,
 including its slot, close, publication-plan, candidate and predecessor digests,
-and re-observes state and roots in `S1/O1/S2/O2` order. Stable all-absent roots
-yield a process-start-effect candidate that explicitly denies every process,
-adapter, root, publication, recovery, lifecycle and finalization capability;
-stable collision yields `null`. Production and fixture schemas remain distinct.
-The admission is not persisted and adds no journal action, operation kind,
+and re-observes state and namespaces in `S1/O1/S2/O2` order. Stable pristine
+namespaces yield a process-start-effect candidate that explicitly denies every
+process, adapter, root, publication, recovery, lifecycle and finalization
+capability; stable collision yields `null`. Production and fixture schemas
+remain distinct. The admission is not persisted and adds no journal action,
 contract digest, registry row, receipt or provider artifact. Its explicit
 authorization function always refuses, and no Docker, Colima or Lima process
 ran.
@@ -662,18 +683,22 @@ ran.
 ### Immediate next slice
 
 Implement the process-start effect as one indivisible journal-schema hard cut
-before invoking a provider: a durable effect slot, synchronous fresh gate,
-exact cooperative process-group ownership, authenticated host-agent/Engine/
-socket/context evidence, uncertain-start recovery, receipts/settlement and
-dynamic-tree retirement. Keep the execution path unsupported and unregistered
-until those contracts and crash/recovery tests exist. Do not branch through,
-relabel or mutate the deterministic controlled-background class.
+before invoking a provider: a durable effect slot, synchronous fresh gate and
+an atomic reservation spanning all six mutation namespaces. Add complete
+recursive post-start inventory; causal process identity and recovery for the
+outer process, detached Lima hostagent, usernet process and SSH ControlMaster;
+authenticated Engine/socket/context evidence; uncertain-start recovery;
+receipts/settlement; and dynamic-tree retirement. Bind live macOS proxy inputs
+and individual `/bin/sh` and `/usr/sbin/ioreg` identities. Keep the execution
+path unsupported and unregistered until those contracts and crash/recovery
+tests exist. Do not branch through, relabel or mutate the deterministic
+controlled-background class.
 Finalization remains blocked until a separately reviewed live environment-
 manifest schema exists.
 
 The first real invocation must use the closed helper `PATH`, explicit provider
-roots, `--mount none`, the receipt-owned disk copy and the privately bound real
-`HOME`. It requires explicit authority, a fresh isolated provider, exact
+roots, `--mount none`, the receipt-owned disk copy and receipt-private `HOME`.
+It requires explicit authority, a fresh isolated provider, exact
 content-free evidence and exact cleanup. Only after deterministic conformance
 and independent review may execution and recovery appear behind one supported
 lifecycle target.

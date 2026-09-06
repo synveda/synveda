@@ -34,6 +34,9 @@ import {
   resolveProviderAdapter,
 } from "../deploy/compose/scripts/clean-engine-provider-adapter-registry.mjs";
 import {
+  COLIMA_LIVE_MUTATION_SURFACE_ROLES,
+} from "../deploy/compose/scripts/clean-engine-colima-live-schemas.mjs";
+import {
   COLIMA_LIVE_PREPARATION_CONTRACT,
   COLIMA_LIVE_PREPARATION_CONTRACT_SHA256,
   CONTROLLED_BACKGROUND_PROVIDER_CONTRACT_SHA256,
@@ -78,13 +81,13 @@ test("production and fixture process-start contracts are exact, inert and unregi
       contract: COLIMA_LIVE_PROVIDER_START_DECISION_OPERATION_CONTRACT,
       digest: COLIMA_LIVE_PROVIDER_START_DECISION_OPERATION_CONTRACT_SHA256,
       expectedDigest:
-        "2d9033bd071e24125e61533ec75500f6bc6d909226a0209be95ecd80df407cb5",
+        "9b4957d5b0918b78adde1ce336c923499a205043f05845931456b0246c6fc6e6",
       evidenceClass: "production-pinned",
       fixtureOnly: false,
       intentCompletionSchema:
         "synveda.clean-engine.colima-live-provider-intent-completion.v1",
       intentContractSha256:
-        "8cad231ffcc14cd58a90df10faee867bcb8a752d46772e1ccedc666d744648ee",
+        "a89e57ff3769616ff5c88aa63de9dd854bd2b821cf7516db33fa0f09b775edfc",
       intentKind: "colima-live-provider-intent-publication-v1",
       kind: COLIMA_LIVE_PROVIDER_START_DECISION_OPERATION_KIND,
     },
@@ -94,13 +97,13 @@ test("production and fixture process-start contracts are exact, inert and unregi
       digest:
         COLIMA_LIVE_FIXTURE_PROVIDER_START_DECISION_OPERATION_CONTRACT_SHA256,
       expectedDigest:
-        "83866dac58880b4d0bf69361cb23a9e34df2bd624687d0cf8e297867e3acef7c",
+        "407c7b466548373c320d600344d6c488578afed150914b2b06cd47bf52d55167",
       evidenceClass: "fixture-only",
       fixtureOnly: true,
       intentCompletionSchema:
         "synveda.clean-engine.colima-live-fixture-provider-intent-completion.v1",
       intentContractSha256:
-        "d8269df82f7d10c9bfe02f36a9e42d05138d4dc1798a08bcee1c023b2eedfcc2",
+        "4963be65ad92040a20de26c4d048ee11858538c72820c657643ebeedb68f7400",
       intentKind: "colima-live-fixture-provider-intent-publication-v1",
       kind: COLIMA_LIVE_FIXTURE_PROVIDER_START_DECISION_OPERATION_KIND,
     },
@@ -284,7 +287,7 @@ test("the completed intent projection is exact, source-bound and immutable", () 
   );
 });
 
-test("fresh admission produces only an inert decision for all-absent roots", () => {
+test("fresh admission produces only an inert decision for pristine namespaces", () => {
   for (const fixtureOnly of [false, true]) {
     const fixture = cleanEngineLiveProviderStartFreshAdmissionFixture(fixtureOnly);
     const { admission } = fixture;
@@ -357,7 +360,7 @@ test("fresh admission produces only an inert decision for all-absent roots", () 
   }
 });
 
-test("fresh root and admission shapes fail closed on every authority binding", () => {
+test("fresh namespace and admission shapes fail closed on every authority binding", () => {
   for (const fixtureOnly of [false, true]) {
     const fixture = cleanEngineLiveProviderStartFreshAdmissionFixture(fixtureOnly);
     const root = fixture.rootObservation;
@@ -381,8 +384,11 @@ test("fresh root and admission shapes fail closed on every authority binding", (
       {
         ...root,
         root_observations: [
-          { ...root.root_observations[0], role: "lima-instance-root" },
-          root.root_observations[1],
+          {
+            ...root.root_observations[0],
+            role: COLIMA_LIVE_MUTATION_SURFACE_ROLES[1],
+          },
+          ...root.root_observations.slice(1),
         ],
       },
       { ...root, root_set_disposition: "foreign-collision" },
@@ -391,9 +397,9 @@ test("fresh root and admission shapes fail closed on every authority binding", (
         root_observations: [
           {
             ...root.root_observations[0],
-            parent_identity_hmac_sha256: ["1".repeat(64)],
+            namespace_identity_hmac_sha256: ["1".repeat(64)],
           },
-          root.root_observations[1],
+          ...root.root_observations.slice(1),
         ],
       },
       {
@@ -401,19 +407,9 @@ test("fresh root and admission shapes fail closed on every authority binding", (
         root_observations: [
           {
             ...root.root_observations[0],
-            target_entry_identity_hmac_sha256: ["6".repeat(64)],
+            observed_entry_set_hmac_sha256: ["6".repeat(64)],
           },
-          root.root_observations[1],
-        ],
-      },
-      {
-        ...root,
-        root_observations: [
-          {
-            ...root.root_observations[0],
-            target_path_hmac_sha256: { value: "2".repeat(64) },
-          },
-          root.root_observations[1],
+          ...root.root_observations.slice(1),
         ],
       },
       { ...root, ignored: true },
@@ -455,9 +451,8 @@ test("fresh root and admission shapes fail closed on every authority binding", (
 test("a foreign root collision yields no decision and cannot become a plan", () => {
   for (const fixtureOnly of [false, true]) {
     for (const collisionRole of [
-      "colima-profile-root",
-      "lima-instance-root",
-      ["colima-profile-root", "lima-instance-root"],
+      ...COLIMA_LIVE_MUTATION_SURFACE_ROLES,
+      [...COLIMA_LIVE_MUTATION_SURFACE_ROLES],
     ]) {
       const fixture =
         cleanEngineLiveProviderStartDecisionSourceFixture(fixtureOnly);
@@ -505,7 +500,7 @@ test("a foreign root collision yields no decision and cannot become a plan", () 
       const nonStringCollision = structuredClone(rootObservation);
       nonStringCollision.root_observations.find(
         (root) => root.disposition === "foreign-collision",
-      ).target_entry_identity_hmac_sha256 = ["6".repeat(64)];
+      ).observed_entry_set_hmac_sha256 = ["6".repeat(64)];
       expectRefusal(() =>
         buildColimaLiveProviderStartFreshAdmissionStructure({
           completedIntentProjection: fixture.completedIntentProjection,
@@ -561,6 +556,17 @@ test("publication plans and completion structures are exact and variant-bound", 
       "mutation-journal-v5-inert-start-decision-only",
     );
     assertRecursivelyFrozen(publicationPlan);
+    expectRefusal(() =>
+      validateColimaLiveProviderStartDecisionPublicationPlan(
+        {
+          ...publicationPlan,
+          operation_contract_sha256: fixtureOnly
+            ? "83866dac58880b4d0bf69361cb23a9e34df2bd624687d0cf8e297867e3acef7c"
+            : "2d9033bd071e24125e61533ec75500f6bc6d909226a0209be95ecd80df407cb5",
+        },
+        fixture.source,
+      ),
+    );
 
     for (const field of Object.keys(publicationPlan)) {
       const changed = {

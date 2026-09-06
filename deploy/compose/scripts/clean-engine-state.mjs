@@ -55,6 +55,7 @@ import {
 } from "./clean-engine-provider-process-contract.mjs";
 import {
   COLIMA_LIVE_FIXTURE_PRE_EFFECT_ROOT_OBSERVATION_SCHEMA,
+  COLIMA_LIVE_MUTATION_SURFACE_ROLES,
   COLIMA_LIVE_PRE_EFFECT_ROOT_OBSERVATION_SCHEMA,
   ColimaLiveContractFailure,
   colimaLiveBytes,
@@ -4135,6 +4136,7 @@ function publishMutationBlocker(
     afterAuthorityObserver,
     afterLinkObserver,
     afterLinkMilliseconds = 0,
+    beforeStageObserver,
     beforeLinkMilliseconds = 0,
     reassertAuthority,
   } = {},
@@ -4166,8 +4168,17 @@ function publishMutationBlocker(
   if (afterLinkObserver !== undefined && typeof afterLinkObserver !== "function") {
     fail("mutation publication observer was refused", 70);
   }
+  if (
+    beforeStageObserver !== undefined &&
+    typeof beforeStageObserver !== "function"
+  ) {
+    fail("mutation publication pre-stage observer was refused", 70);
+  }
   const runMetadata = ownedPrivateDirectory(run, "active run state");
   const destinationPath = join(run, destinationName);
+  if (beforeStageObserver?.() !== undefined) {
+    fail("mutation publication pre-stage observer returned a value", 70);
+  }
   for (let attempt = 0; attempt < MAX_MUTATION_PUBLICATION_ATTEMPTS; attempt += 1) {
     const stagePath = join(run, `${MUTATION_STAGE_PREFIX}${randomBytes(16).toString("hex")}`);
     const reassert = (witness, retireOwnStageOnFailure) => {
@@ -5820,7 +5831,7 @@ function validateLivePreEffectRootBinding(rootObservation, snapshot, fixtureOnly
     ["lima_instance", "provider_profile"],
     "live provider pre-effect planned names",
   );
-  const expectedRoles = ["colima-profile-root", "lima-instance-root"];
+  const expectedRoles = COLIMA_LIVE_MUTATION_SURFACE_ROLES;
   if (
     !Array.isArray(rootObservation.root_observations) ||
     rootObservation.root_observations.length !== expectedRoles.length
@@ -5832,23 +5843,21 @@ function validateLivePreEffectRootBinding(rootObservation, snapshot, fixtureOnly
       root,
       [
         "disposition",
-        "parent_identity_hmac_sha256",
+        "namespace_identity_hmac_sha256",
+        "observed_entry_set_hmac_sha256",
         "role",
-        "target_entry_identity_hmac_sha256",
-        "target_path_hmac_sha256",
       ],
       "live provider pre-effect root",
     );
     if (
       root.role !== expectedRoles[index] ||
-      !new Set(["foreign-collision", "observed-absent"]).has(
+      !new Set(["foreign-collision", "observed-pristine"]).has(
         root.disposition,
       ) ||
-      !onlyLowerHex(root.parent_identity_hmac_sha256, 64) ||
-      !onlyLowerHex(root.target_entry_identity_hmac_sha256, 64) ||
-      !onlyLowerHex(root.target_path_hmac_sha256, 64) ||
-      (root.disposition === "observed-absent") !==
-        (root.target_entry_identity_hmac_sha256 === ZERO_SHA256)
+      !onlyLowerHex(root.namespace_identity_hmac_sha256, 64) ||
+      root.namespace_identity_hmac_sha256 === ZERO_SHA256 ||
+      !onlyLowerHex(root.observed_entry_set_hmac_sha256, 64) ||
+      root.observed_entry_set_hmac_sha256 === ZERO_SHA256
     ) {
       fail("live provider pre-effect root observation was refused", 70);
     }
@@ -5857,7 +5866,7 @@ function validateLivePreEffectRootBinding(rootObservation, snapshot, fixtureOnly
     (root) => root.disposition === "foreign-collision",
   )
     ? "foreign-collision"
-    : "observed-absent";
+    : "observed-pristine";
   if (
     rootObservation.evidence_class !==
       (fixtureOnly ? "fixture-only" : "production-pinned") ||
@@ -5956,7 +5965,7 @@ function observeColimaLivePreEffectAdmission(
 
   let intentCandidate = null;
   let preEffectPrefix = null;
-  if (secondRoots.root_set_disposition === "observed-absent") {
+  if (secondRoots.root_set_disposition === "observed-pristine") {
     intentCandidate = buildColimaLiveEffectIntentCandidateStructure({
       completionProjection: secondState.completionProjection,
       operationPlan: secondState.operationPlan,
@@ -6140,12 +6149,12 @@ function sameLiveProviderStartDecisionValue(left, right) {
   );
 }
 
-function assertLiveProviderStartDecisionAdmissionAbsent(admission) {
+function assertLiveProviderStartDecisionAdmissionPristine(admission) {
   if (
-    admission.root_observation.root_set_disposition !== "observed-absent" ||
+    admission.root_observation.root_set_disposition !== "observed-pristine" ||
     admission.process_start_decision_candidate === null
   ) {
-    fail("live provider start decision roots were not absent", 73);
+    fail("live provider start decision namespaces were not pristine", 73);
   }
   return admission;
 }
@@ -6660,7 +6669,7 @@ function publishColimaLiveProviderStartDecision(
       testCheckpoint,
     },
   );
-  assertLiveProviderStartDecisionAdmissionAbsent(baseline.admission);
+  assertLiveProviderStartDecisionAdmissionPristine(baseline.admission);
   const publicationPlan = buildLiveProviderStartDecisionPublicationPlan(
     baseline.admission,
     baseline.snapshot,
@@ -6682,7 +6691,7 @@ function publishColimaLiveProviderStartDecision(
         testCheckpoint,
       },
     );
-    assertLiveProviderStartDecisionAdmissionAbsent(current.admission);
+    assertLiveProviderStartDecisionAdmissionPristine(current.admission);
     const rebuilt = buildLiveProviderStartDecisionPublicationPlan(
       current.admission,
       current.snapshot,
@@ -6725,6 +6734,10 @@ function publishColimaLiveProviderStartDecision(
                 afterSlotLinkFailure = error;
               }
             },
+      beforeStageObserver:
+        testCheckpoint === undefined
+          ? undefined
+          : () => testCheckpoint("before-slot-stage"),
       reassertAuthority: reassertSlotPublication,
     },
     Object.freeze({
@@ -6752,7 +6765,7 @@ function publishColimaLiveProviderStartDecision(
         testCheckpoint,
       },
     );
-    assertLiveProviderStartDecisionAdmissionAbsent(acquired.admission);
+    assertLiveProviderStartDecisionAdmissionPristine(acquired.admission);
     const acquiredPlan = buildLiveProviderStartDecisionPublicationPlan(
       acquired.admission,
       acquired.snapshot,
@@ -6806,7 +6819,7 @@ function publishColimaLiveProviderStartDecision(
             testCheckpoint,
           },
         );
-        assertLiveProviderStartDecisionAdmissionAbsent(closing.admission);
+        assertLiveProviderStartDecisionAdmissionPristine(closing.admission);
         const closingPlan = buildLiveProviderStartDecisionPublicationPlan(
           closing.admission,
           closing.snapshot,
@@ -6938,13 +6951,13 @@ function sameLiveProviderIntentValue(left, right) {
   return liveProviderIntentBytes(left).equals(liveProviderIntentBytes(right));
 }
 
-function assertLiveProviderIntentAdmissionAbsent(admission) {
+function assertLiveProviderIntentAdmissionPristine(admission) {
   if (
-    admission.root_observation.root_set_disposition !== "observed-absent" ||
+    admission.root_observation.root_set_disposition !== "observed-pristine" ||
     admission.intent_candidate === null ||
     admission.pre_effect_prefix === null
   ) {
-    fail("live provider intent roots were not absent", 73);
+    fail("live provider intent namespaces were not pristine", 73);
   }
   return admission;
 }
@@ -7026,7 +7039,7 @@ function publishColimaLiveProviderIntent(
       testCheckpoint,
     },
   );
-  assertLiveProviderIntentAdmissionAbsent(baselineAdmission);
+  assertLiveProviderIntentAdmissionPristine(baselineAdmission);
   const operationPlan = completedLiveProviderPlanSnapshot(
     loadState(roots, true),
   ).operationPlan;
@@ -7052,7 +7065,7 @@ function publishColimaLiveProviderIntent(
         testCheckpoint,
       },
     );
-    assertLiveProviderIntentAdmissionAbsent(currentAdmission);
+    assertLiveProviderIntentAdmissionPristine(currentAdmission);
     const rebuilt = buildLiveProviderIntentPublicationPlan(
       currentAdmission,
       fixtureOnly,
@@ -7096,6 +7109,10 @@ function publishColimaLiveProviderIntent(
                 afterSlotLinkFailure = error;
               }
             },
+      beforeStageObserver:
+        testCheckpoint === undefined
+          ? undefined
+          : () => testCheckpoint("before-slot-stage"),
       reassertAuthority: reassertSlotPublication,
     },
     Object.freeze({
@@ -7123,7 +7140,7 @@ function publishColimaLiveProviderIntent(
         testCheckpoint,
       },
     );
-    assertLiveProviderIntentAdmissionAbsent(acquiredAdmission);
+    assertLiveProviderIntentAdmissionPristine(acquiredAdmission);
     const acquiredPlan = buildLiveProviderIntentPublicationPlan(
       acquiredAdmission,
       fixtureOnly,
@@ -7172,7 +7189,7 @@ function publishColimaLiveProviderIntent(
             testCheckpoint,
           },
         );
-        assertLiveProviderIntentAdmissionAbsent(closeAdmission);
+        assertLiveProviderIntentAdmissionPristine(closeAdmission);
         const closePlan = buildLiveProviderIntentPublicationPlan(
           closeAdmission,
           fixtureOnly,

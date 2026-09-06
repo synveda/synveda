@@ -240,12 +240,23 @@ trusted owner-UID composition hooks, not a JavaScript security boundary.
 The repository now also has a separate deterministic live-provider preparation
 contract. It pins the official Colima 0.10.3 and Lima 2.2.0 Darwin/arm64
 artifacts, selected Lima runtime files and the Colima-core 0.10.4 arm64 Docker
-disk image. A private observation can bind exact staged and dynamically selected
-helper bytes, modes and parent identities; a toolchain-only environment; an
-HMAC-hidden real `HOME` plus physical directory identity; exact host build/boot
-inputs; and distinct source and receipt-owned disk identities. It downloads and
-executes nothing. Its public projection omits all raw paths, `HOME`, profile,
-fixture and component identities.
+disk image. Requirements/observation v2 bind the release guest agent and default
+template at their upstream Lima share paths, a private mode-0600 user-v2 network
+baseline, `--activate=false`, and the gRPC port forwarder. A private observation
+binds exact staged and dynamically selected helper bytes, modes and parent
+identities; a toolchain-only environment; exact host build/boot inputs; and
+distinct source and receipt-owned disk identities. Six receipt-owned whole
+mutation namespaces cover Colima cache/home, Docker config, Lima home, `HOME`,
+and temp. `HOME` is exactly the empty private `h` namespace; Lima home has only
+the `_config` baseline. Each bounded top-level inventory is sampled twice with
+no-follow metadata and separately HMAC-projected as pristine or collision.
+`/bin/sh` and `/usr/sbin/ioreg` are declared OS-build-bound inputs, not
+individually observed live. The module downloads and executes nothing, refuses
+v1 requirements/observation and old or falsely relabelled two-target root
+evidence, and regenerates the public projection only as v2. That projection
+omits raw private provider/component/`HOME` paths plus profile and fixture
+identities. The declared OS executable paths remain non-private OS-build-bound
+metadata.
 
 The separate provider-adapter registry reserves fresh
 `colima-vz-docker-live-create-v1` and
@@ -258,9 +269,10 @@ The create entry now grants only state planning through
 exposure and finalization remain false. Cleanup remains deny-only. The registry
 imports no process, state, receipt or fake-provider implementation.
 
-The state owner embeds `synveda.clean-engine.colima-live-provider-operation-plan.v1`
-in a dedicated `provider-plan` mutation slot. It binds the active run, candidate
-and plan-receipt digests, exact registry resolution, production requirements,
+The state owner embeds
+`synveda.clean-engine.colima-live-provider-operation-plan.v1` in a dedicated
+`provider-plan` mutation slot. It binds the active run, candidate and
+plan-receipt digests, exact registry resolution, production requirements,
 private preparation-observation digest, provider profile/resource and the
 all-effect-denied capability set. The production builder revalidates the full
 private observation before slot acquisition and again at the close publication
@@ -282,65 +294,68 @@ provider-adapter entry.
 The read-only state-owned admission seam accepts only the repository/state and
 preparation-observation inputs. It derives the completed plan and projection
 internally, reads state/source and the complete observation twice in
-`S1/O1/S2/O2` order, and requires both pairs to match. It no-follow samples only
-`COLIMA_HOME/<provider-profile>` and
-`LIMA_HOME/colima-<provider-profile>` beneath pinned, revalidated private
-parents. Exact-leaf `ENOENT` is observed absence. Any existing file, directory,
-hard link or symlink is an opaque foreign collision; it is not opened, read,
-traversed, removed or adopted, and unrelated siblings remain drift. A collision
-returns no intent or prefix.
+`S1/O1/S2/O2` order, and requires both pairs to match. It no-follow samples the
+complete bounded top-level inventories of all six pinned private namespaces.
+Only the declared empty or Lima `_config` baseline is pristine. Any additional
+file, directory, hard link, socket or symlink is an opaque foreign collision;
+it is not traversed or adopted and returns no intent or prefix.
 
 The publisher derives every admission internally. It requires the initial
-canonical all-absent value to equal fresh values immediately before the slot
-link, after slot acquisition and immediately before the close link. Its slot v5
-and owner close v6 change no receipt or environment and write no provider or
-operation evidence. Collision or drift aborts before effect; abandoned intent
-recovery v4 is explicit, all-zero and abort-only. Completed retries return
-historical non-authorizing state without a fresh absence claim.
+canonical pristine-namespace value to equal fresh values immediately before
+the slot link, after slot acquisition and immediately before the close link.
+Its slot v5 and owner close v6 change no receipt or environment and write no
+provider or operation evidence. Collision or drift aborts before effect;
+abandoned intent recovery v4 is explicit, all-zero and abort-only. Completed retries return
+historical non-authorizing state without a fresh namespace claim.
 
 The same state owner can now persist the successor
 `provider-start-decision` through
 `mutation-journal-v5-inert-start-decision-only`. It reconstructs the completed
 intent through the version-2 decision publication plan and repeats fresh
-`S1/O1/S2/O2` root admission at the initial,
+`S1/O1/S2/O2` namespace admission at the initial,
 pre-slot-link, post-slot-acquisition and pre-close-link boundaries. Every
-admission and publication plan must equal the initial all-absent value. The
-slot v5 and owner close v6 again have zero receipt, environment and operation-
-evidence delta. Production and fixture kinds, contracts and evidence classes
-are distinct, and neither is registered for provider execution.
+admission and publication plan must equal the initial pristine-namespace
+value. The slot v5 and owner close v6 again have zero receipt, environment and
+operation-evidence delta. Production and fixture kinds, contracts and evidence
+classes are distinct, and neither is registered for provider execution.
 
 A pre-CAS collision leaves no decision slot; a post-CAS collision aborts that
 generation. An abandoned decision can acquire only an all-zero recovery v4
 claim and an `aborted-before-effect` close. A completed decision is terminal;
 an exact retry returns its historical, non-authorizing completion without
-reading current roots. Race, crash, recovery and rehashed-tamper tests enforce
-the ordered plan/intent/decision grammar.
+reading current namespace state. Race, crash, recovery and rehashed-tamper
+tests enforce the ordered plan/intent/decision grammar.
 
 A separate read-only post-decision seam projects that exact completed terminal
-decision and observes state and roots again in `S1/O1/S2/O2` order. Stable
-all-absent roots yield a process-start-effect candidate whose process, adapter,
-root, publication, recovery, lifecycle and finalization authorities are all
-explicitly false; a stable foreign collision yields `null`. The admission is
-point-in-time data, grants nothing, and the deliberate authorization entry
+decision and observes state and namespaces again in `S1/O1/S2/O2` order. Stable
+pristine namespaces yield a process-start-effect candidate whose process,
+adapter, root, publication, recovery, lifecycle and finalization authorities
+are all explicitly false; a stable foreign collision yields `null`. The
+admission is point-in-time data, grants nothing, and the deliberate authorization entry
 point always refuses it. This seam adds no journal action, operation kind,
 registry row, receipt, persistence or provider/process mutation.
 
-These point-in-time root observations and the journal hard-link CAS do not
-atomically reserve the separate Colima/Lima namespaces. The bounded supervisor
+These point-in-time namespace observations and the journal hard-link CAS do not
+atomically reserve the six mutation namespaces. The bounded supervisor
 label is not a PID, PGID, ownership or liveness fact, and a future effect owner
 must acquire a separate durable effect slot and perform another fresh admission.
 Serialized admission, projection, candidate or prefix values cannot be supplied
 as proof.
 
+Before execution can be enabled, a later owner must add an atomic six-namespace
+reservation, complete recursive post-start settlement, and causal identity and
+recovery for the outer process, detached Lima hostagent, usernet and SSH
+ControlMaster. Live macOS proxy observation and per-file OS-executable identity
+also remain open.
+
 No supported lifecycle target exposes a plan, live-intent or start-decision
-fixture seam; there
-is no live provider execution, provider-effect recovery, cleanup or environment manifest. `registry/`,
-`runtime/`, `provider/` and `evidence/` remain empty. A completed plan centrally
+fixture seam; there is no live provider execution, provider-effect recovery,
+cleanup or environment manifest. `registry/`, `runtime/`, `provider/` and
+`evidence/` remain empty. A completed plan centrally
 blocks every other mutation and finalization except its exact inert intent,
 which may then be followed by its exact decision. A completed decision permits
-no persisted successor. An abandoned
-plan slot may only
-be explicitly recovered as `aborted-before-effect`; this journal repair grants
+no persisted successor. An abandoned plan slot may only be explicitly recovered
+as `aborted-before-effect`; this journal repair grants
 no provider-recovery capability, after which the same exact plan may compete for
 the next slot. Receipt v4 has provider-class-bound controlled cleanup
 intent/pass shapes, but the receipt itself grants no deletion authority. The

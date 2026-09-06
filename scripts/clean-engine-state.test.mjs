@@ -21,7 +21,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import test from "node:test";
 import {
   appendProviderCleanupReceiptForExecutor,
@@ -85,6 +85,7 @@ import {
   liveProviderProcessStartBytes,
 } from "../deploy/compose/scripts/clean-engine-live-provider-process-start.mjs";
 import {
+  COLIMA_LIVE_FIXTURE_PRE_EFFECT_ROOT_OBSERVATION_SCHEMA,
   COLIMA_LIVE_PRE_EFFECT_ROOT_OBSERVATION_SCHEMA,
 } from "../deploy/compose/scripts/clean-engine-colima-live-schemas.mjs";
 import {
@@ -1186,7 +1187,7 @@ test("live pre-effect admission rejects caller provenance and publishes nothing"
   }
 });
 
-test("fixture admission composes state provenance with exact absent roots", () => {
+test("fixture admission composes state provenance with pristine namespaces", () => {
   const state = fixture();
   let preparation;
   try {
@@ -1235,9 +1236,9 @@ test("fixture admission composes state provenance with exact absent roots", () =
     assert.equal(result.root_observation.evidence_class, "fixture-only");
     assert.equal(
       result.root_observation.schema,
-      "synveda.clean-engine.colima-live-fixture-pre-effect-root-observation.v1",
+      COLIMA_LIVE_FIXTURE_PRE_EFFECT_ROOT_OBSERVATION_SCHEMA,
     );
-    assert.equal(result.root_observation.root_set_disposition, "observed-absent");
+    assert.equal(result.root_observation.root_set_disposition, "observed-pristine");
     assert.equal(
       result.completion_projection.operation_plan_sha256,
       sha256(canonicalBytes(operationPlan)),
@@ -1336,6 +1337,7 @@ test("fixture intent publication commits one inert state-only successor", () => 
       [
         "initial:after-first-admission-observation",
         "after-initial-admission",
+        "before-slot-stage",
         "before-slot-link:after-first-admission-observation",
         "after-slot-authority-reassertion",
         "after-slot-link",
@@ -1491,7 +1493,7 @@ test("completed fixture intent derives a fresh inert process-start admission", (
       result.completed_intent_projection.completed_plan_projection_sha256,
       prepared.intentCompletion.completed_plan_projection_sha256,
     );
-    assert.equal(result.root_observation.root_set_disposition, "observed-absent");
+    assert.equal(result.root_observation.root_set_disposition, "observed-pristine");
     const candidate = result.process_start_decision_candidate;
     assert.notEqual(candidate, null);
     assert.equal(
@@ -1779,7 +1781,7 @@ test("process-start admission rejects caller provenance and the wrong intent cla
   }
 });
 
-test("process-start admission refuses state and root drift between fresh samples", () => {
+test("process-start admission refuses state and namespace drift between fresh samples", () => {
   const cases = [
     {
       errorMessage: "live provider start fresh observation changed",
@@ -2026,6 +2028,7 @@ test("fixture start decision publication commits one inert terminal successor", 
     assert.deepEqual(checkpoints, [
       "initial:after-first-process-start-admission-observation",
       "after-initial-admission",
+      "before-slot-stage",
       "before-slot-link:after-first-process-start-admission-observation",
       "after-slot-authority-reassertion",
       "after-slot-link",
@@ -2390,7 +2393,7 @@ test("decision journal refuses a direct plan successor and class switching", () 
   }
 });
 
-test("start decision publication refuses a current root collision without a slot", () => {
+test("start decision publication refuses a current namespace collision without a slot", () => {
   const state = fixture();
   let preparation;
   try {
@@ -2411,7 +2414,7 @@ test("start decision publication refuses a current root collision without a slot
         publishColimaLiveProviderStartDecisionForTest(
           fixtureStartAdmissionArguments(state, preparation),
         ),
-      /start decision roots were not absent/u,
+      /start decision namespaces were not pristine/u,
     );
     assert.deepEqual(snapshotTree(state.state), before);
     assertNoStartDecisionArtifacts(prepared.active);
@@ -2424,7 +2427,7 @@ test("start decision publication refuses a current root collision without a slot
   }
 });
 
-test("root drift after start decision acquisition aborts and a fresh retry wins", () => {
+test("namespace drift after start decision acquisition aborts and a fresh retry wins", () => {
   const state = fixture();
   let preparation;
   try {
@@ -2448,7 +2451,7 @@ test("root drift after start decision acquisition aborts and a fresh retry wins"
             );
           }),
         ),
-      /start decision roots were not absent|start fresh observation changed/u,
+      /start decision namespaces were not pristine|start fresh observation changed/u,
     );
     assert.equal(changed, true);
     assert.equal(
@@ -2837,6 +2840,7 @@ test("two start decision writers leave one inert terminal CAS winner", async () 
       "scripts/fixtures/race-clean-engine-live-provider-start-decision.mjs",
     );
     const releasePath = join(state.root, "release-start-decision-writers");
+    const preStageReleasePath = `${releasePath}-pre-stage`;
     const serialized = JSON.stringify({
       observation: preparation.observation,
       observationInput: preparation.input,
@@ -2852,6 +2856,7 @@ test("two start decision writers leave one inert terminal CAS winner", async () 
           serialized,
           "after-slot-authority-reassertion",
           releasePath,
+          preStageReleasePath,
         ],
         {
           env: { PATH: process.env.PATH, LANG: "C", LC_ALL: "C" },
@@ -2869,18 +2874,23 @@ test("two start decision writers leave one inert terminal CAS winner", async () 
     };
     const first = launch();
     const second = launch();
-    const deadline = Date.now() + 8_000;
-    while (
-      readdirSync(state.root).filter((name) =>
-        name.startsWith("release-start-decision-writers.ready-"),
-      ).length !== 2
-    ) {
-      assert.ok(
-        Date.now() < deadline,
-        `timed out waiting for decision stages: ${first.stderr}${second.stderr}`,
-      );
-      await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
-    }
+    const waitForBoth = async (path, label) => {
+      const deadline = Date.now() + 8_000;
+      while (
+        readdirSync(state.root).filter((name) =>
+          name.startsWith(`${basename(path)}.ready-`),
+        ).length !== 2
+      ) {
+        assert.ok(
+          Date.now() < deadline,
+          `timed out waiting for ${label}: ${first.stderr}${second.stderr}`,
+        );
+        await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
+      }
+    };
+    await waitForBoth(preStageReleasePath, "pre-stage decision writers");
+    writeFileSync(preStageReleasePath, "release\n", { mode: 0o600 });
+    await waitForBoth(releasePath, "decision stages");
     assert.equal(
       readdirSync(active).filter((name) => name.startsWith(".mutation-stage-"))
         .length,
@@ -4020,6 +4030,7 @@ test("two intent writers tolerate competing stages and one journal CAS wins", as
       "scripts/fixtures/race-clean-engine-live-provider-intent.mjs",
     );
     const releasePath = join(state.root, "release-intent-writers");
+    const preStageReleasePath = `${releasePath}-pre-stage`;
     const serialized = JSON.stringify({
       observation: preparation.observation,
       observationInput: preparation.input,
@@ -4035,6 +4046,7 @@ test("two intent writers tolerate competing stages and one journal CAS wins", as
           serialized,
           "after-slot-authority-reassertion",
           releasePath,
+          preStageReleasePath,
         ],
         {
           env: { PATH: process.env.PATH, LANG: "C", LC_ALL: "C" },
@@ -4052,18 +4064,23 @@ test("two intent writers tolerate competing stages and one journal CAS wins", as
     };
     const first = launch();
     const second = launch();
-    const deadline = Date.now() + 8_000;
-    while (
-      readdirSync(state.root).filter((name) =>
-        name.startsWith("release-intent-writers.ready-"),
-      ).length !== 2
-    ) {
-      assert.ok(
-        Date.now() < deadline,
-        `timed out waiting for competing stages: ${first.stderr}${second.stderr}`,
-      );
-      await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
-    }
+    const waitForBoth = async (path, label) => {
+      const deadline = Date.now() + 8_000;
+      while (
+        readdirSync(state.root).filter((name) =>
+          name.startsWith(`${basename(path)}.ready-`),
+        ).length !== 2
+      ) {
+        assert.ok(
+          Date.now() < deadline,
+          `timed out waiting for ${label}: ${first.stderr}${second.stderr}`,
+        );
+        await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
+      }
+    };
+    await waitForBoth(preStageReleasePath, "pre-stage intent writers");
+    writeFileSync(preStageReleasePath, "release\n", { mode: 0o600 });
+    await waitForBoth(releasePath, "competing intent stages");
     assert.equal(
       readdirSync(active).filter((name) => name.startsWith(".mutation-stage-"))
         .length,
@@ -4480,7 +4497,7 @@ test("fixture admission refuses crossed observations before touching their roots
   }
 });
 
-test("fixture admission refuses drift between its two state-root observations", () => {
+test("fixture admission refuses drift between its state-namespace observations", () => {
   const cases = [
     {
       name: "target-appeared",
@@ -4579,7 +4596,11 @@ test("fixture admission refuses drift between its two state-root observations", 
             },
           }),
         (error) => {
-          assert.equal(error.exitStatus >= 70, true, value.name);
+          assert.equal(
+            error.exitStatus >= 70,
+            true,
+            `${value.name}: ${error.stack}`,
+          );
           return true;
         },
       );

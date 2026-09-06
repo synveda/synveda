@@ -6,6 +6,11 @@ import {
   buildColimaLiveProviderIntentPublicationPlan,
 } from "../../deploy/compose/scripts/clean-engine-live-provider-intent.mjs";
 import {
+  COLIMA_LIVE_FIXTURE_PRE_EFFECT_ROOT_OBSERVATION_SCHEMA,
+  COLIMA_LIVE_MUTATION_SURFACE_ROLES,
+  COLIMA_LIVE_PRE_EFFECT_ROOT_OBSERVATION_SCHEMA,
+} from "../../deploy/compose/scripts/clean-engine-colima-live-schemas.mjs";
+import {
   buildColimaLiveCompletedProviderIntentProjectionStructure,
   buildColimaLiveProviderStartFreshAdmissionStructure,
 } from "../../deploy/compose/scripts/clean-engine-live-provider-start-decision.mjs";
@@ -15,7 +20,7 @@ import {
 } from "./clean-engine-live-provider-intent-fixture.mjs";
 
 function rootObservation(operationPlan, fixtureOnly, collisionRole) {
-  const roles = ["colima-profile-root", "lima-instance-root"];
+  const roles = COLIMA_LIVE_MUTATION_SURFACE_ROLES;
   const collisionRoles = new Set(
     Array.isArray(collisionRole)
       ? collisionRole
@@ -26,13 +31,12 @@ function rootObservation(operationPlan, fixtureOnly, collisionRole) {
   const roots = roles.map((role, index) => {
     const collision = collisionRoles.has(role);
     return {
-      disposition: collision ? "foreign-collision" : "observed-absent",
-      parent_identity_hmac_sha256: `${index * 2 + 1}`.repeat(64),
+      disposition: collision ? "foreign-collision" : "observed-pristine",
+      namespace_identity_hmac_sha256: "13579b"[index].repeat(64),
+      observed_entry_set_hmac_sha256: (collision ? "bcdef1" : "2468ac")[
+        index
+      ].repeat(64),
       role,
-      target_entry_identity_hmac_sha256: collision
-        ? `${index * 2 + 6}`.repeat(64)
-        : "0".repeat(64),
-      target_path_hmac_sha256: `${index * 2 + 2}`.repeat(64),
     };
   });
   return {
@@ -48,10 +52,10 @@ function rootObservation(operationPlan, fixtureOnly, collisionRole) {
       : operationPlan.requirements_sha256,
     root_observations: roots,
     root_set_disposition:
-      collisionRoles.size === 0 ? "observed-absent" : "foreign-collision",
+      collisionRoles.size === 0 ? "observed-pristine" : "foreign-collision",
     schema: fixtureOnly
-      ? "synveda.clean-engine.colima-live-fixture-pre-effect-root-observation.v1"
-      : "synveda.clean-engine.colima-live-pre-effect-root-observation.v1",
+      ? COLIMA_LIVE_FIXTURE_PRE_EFFECT_ROOT_OBSERVATION_SCHEMA
+      : COLIMA_LIVE_PRE_EFFECT_ROOT_OBSERVATION_SCHEMA,
   };
 }
 

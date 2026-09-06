@@ -86,6 +86,10 @@ test("every registry, preparation and source binding fails closed on drift", () 
       value.operation_contract_sha256 = "f".repeat(64);
     },
     (value) => {
+      value.operation_contract_sha256 =
+        "13a87072a49103db0b3c4f36b64b8fbd0d74bd794c4a359fb77b41184ee289a7";
+    },
+    (value) => {
       value.operation_kind = "other";
     },
     (value) => {
@@ -105,6 +109,10 @@ test("every registry, preparation and source binding fails closed on drift", () 
     },
     (value) => {
       value.registry_sha256 = "f".repeat(64);
+    },
+    (value) => {
+      value.registry_sha256 =
+        "0fe6ec1645e18711a1d5d31bd1d21205ab7956a44ff04c38257e4f0b6efab642";
     },
     (value) => {
       value.requirements_sha256 = "f".repeat(64);

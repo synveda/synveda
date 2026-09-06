@@ -307,37 +307,57 @@ must not be reported as clean-Engine, Docker, Colima or browser evidence.
 
 ### Live-provider preparation input
 
-The separate `synveda.clean-engine.colima-live-requirements.v1` contract is the
+The separate `synveda.clean-engine.colima-live-requirements.v2` contract is the
 only repository-owned candidate input for a later macOS/arm64 Colima/VZ
 provider. It pins Colima 0.10.3, Lima 2.2.0, their selected extracted runtime
 files and the Colima-core 0.10.4 arm64 Docker disk image by exact release URL,
-size and digest. It also closes the command template, private root layout,
-staged file locations/modes and required dynamic roles for Docker CLI, SSH,
-state-owner and macOS probe executables. The canonical production requirements
-digest is
-`017dc54f40dea6a5f0eba46088879f3783ee62ca5cb3c8d5677a882b7ac1bddc`.
+size and digest. The staged Lima closure includes the release guest agent at
+`share/lima/lima-guestagent.Linux-aarch64.gz`, the release default template at
+`share/lima/templates/default.yaml`, and a private mutable
+`l/_config/networks.yaml` whose user-v2 gateway is `192.168.5.2`. The command
+pins `--activate=false` and `--port-forwarder grpc`; the latter derives
+`LIMA_SSH_PORT_FORWARDER=false` for Lima children. `/bin/sh` and
+`/usr/sbin/ioreg` are declared exact-OS-build trusted-boundary inputs rather
+than falsely described as staged binaries. The canonical production
+requirements digest is
+`f07ea041a8442616977cf2a6cdcf1a1b8bd1a147a60930a30e63ca275670daa7`.
 
-`synveda.clean-engine.colima-live-observation.v1` is private per-run evidence.
-It binds exact file and parent identities, a toolchain-only `PATH`, explicit
-private Colima/Lima/Docker/temp roots, the real but unserialized `HOME` through
-an HMAC path binding and physical directory identity, exact host build/boot
-inputs, and distinct exact source and receipt-owned disk files. It accepts only
-a local preselected disk and performs bounded streaming hashes; it neither
-downloads nor executes a process. Raw paths, fixture/profile identity, `HOME`
-and component identities are absent from its public projection. The host fields
-are preparation inputs, not live probes or VZ admission evidence.
+`synveda.clean-engine.colima-live-observation.v2` is private per-run evidence.
+It binds exact file and parent identities, a toolchain-only `PATH`, exact host
+build/boot inputs and distinct source and receipt-owned disk files. Its private
+root contains six dedicated mutation namespaces: Colima cache, Colima home,
+Docker config, Lima home, `HOME`, and temporary files. `HOME` is exactly the
+receipt-owned `h` directory and is empty at admission. It is not serialized as
+an environment variable; the private observation binds its directory path and
+identity plus an HMAC, while root and public projections expose no raw private
+`HOME` path. Lima home has only the staged `_config` baseline; the other five
+namespaces are empty. Colima cache and private `HOME` are expected not to be
+written; Colima home, Docker config, Lima home and temp are expected owned
+mutation surfaces. The pre-effect root-observation v2 contract samples each
+complete bounded top-level inventory twice with no-follow metadata, accepting
+at most 64 entries whose names are at most 255 bytes. It returns only namespace
+and complete-entry-set HMACs plus `observed-pristine` or `foreign-collision`.
+It accepts only a local preselected disk and performs bounded streaming hashes;
+it neither downloads nor executes a process. Raw
+private provider/component/`HOME` paths and fixture/profile identity are absent
+from public projection v2; the declared `/bin/sh` and `/usr/sbin/ioreg` paths
+remain non-private OS-build-bound metadata. Host fields remain preparation
+inputs, not live probes or VZ admission evidence. V1 requirements/observation
+and old or falsely relabelled two-target root evidence are refused; the public
+projection regenerates only as v2. Downstream v1-named contracts retain their
+names but reject the superseded digest chain.
 
 The closed provider-adapter registry reserves two fresh operation contracts:
 
 - `colima-vz-docker-live-create-v1`, contract digest
-  `13a87072a49103db0b3c4f36b64b8fbd0d74bd794c4a359fb77b41184ee289a7`;
+  `dd77ff375f8d7e9a8e711d771f78b62f5c07f50352e2f1b4b746ed14f3a9c51b`;
 - `colima-vz-docker-live-cleanup-v1`, contract digest
-  `8d3f43e02f2edc27f7a2b2f89ef5e3986a85326afabe92192e2430cd18558e1a`.
+  `6704795b58343a741bb552dc9ff28417a5bc23e1c3395b5eb7b98bb0dc593f0a`.
 
 Their evidence schema names are distinct from every deterministic and
 controlled-background fake schema. Cleanup binds the exact create-contract
 digest, and both contracts bind the production requirements digest. Registry
-digest `0fe6ec1645e18711a1d5d31bd1d21205ab7956a44ff04c38257e4f0b6efab642`
+digest `d3906132f2a1308b356457e543d6fa8de9ee65f81afb66b56a7d70018d748996`
 selects only an exact action, operation kind, operation-contract digest and
 `colima-vz-docker-live` provider-class tuple.
 
@@ -358,8 +378,8 @@ the two cannot both publish. Production planning delegates bounded, read-only
 filesystem observation to the preparation contract before acquisition and at
 close publication; it has no process or network execution surface. A completed
 plan blocks all later mutation and finalization except its exact inert intent
-successor while execution is disabled. An
-abandoned planning slot can only be explicitly closed
+successor while execution is disabled. An abandoned planning slot can only be
+explicitly closed
 `aborted-before-effect`; this repairs the state journal and is not provider
 recovery. No receipt class, finalizer registration or lifecycle command accepts
 the live operation. Test fixtures can pass a prebuilt production-shaped plan
@@ -392,25 +412,25 @@ derives the completed plan/projection internally, and rejects caller-supplied
 plan, projection, candidate, prefix, requirements or checkpoints. It validates
 state/source and reconstructs the full production observation twice in
 `S1/O1/S2/O2` order. Both state snapshots and both observation values must be
-identical. The observer pins and revalidates the two private parents, then uses
-no-follow metadata only on the exact future Colima-profile and Lima-instance
-roots. `ENOENT` means observed absence; every existing entry is an opaque
-foreign collision and suppresses candidate/prefix construction. Unrelated
-siblings remain preparation drift.
+identical. The observer pins and revalidates each of the six private namespace
+directories, then no-follow samples every bounded top-level entry. The exact
+baseline is `observed-pristine`; every additional file, directory, hard link,
+socket or symlink is an opaque foreign collision and suppresses
+candidate/prefix construction. No entry is traversed or adopted.
 
 The state owner can durably publish that request only through the distinct
 `provider-intent` successor. Production operation kind
 `colima-live-provider-intent-publication-v1` has contract digest
-`8cad231ffcc14cd58a90df10faee867bcb8a752d46772e1ccedc666d744648ee`;
+`a89e57ff3769616ff5c88aa63de9dd854bd2b821cf7516db33fa0f09b775edfc`;
 the deterministic fixture uses a different operation kind, schema, evidence
 class and contract digest
-`d8269df82f7d10c9bfe02f36a9e42d05138d4dc1798a08bcee1c023b2eedfcc2`.
+`4963be65ad92040a20de26c4d048ee11858538c72820c657643ebeedb68f7400`.
 Neither contract is a provider-adapter entry. Both grant only inert state
 publication through `mutation-journal-v5-inert-intent-only`; effect execution,
 receipt publication, provider-effect recovery, cleanup, finalization and
 lifecycle exposure are false.
 
-The publisher establishes an initial canonical all-absent admission and
+The publisher establishes an initial canonical pristine-namespace admission and
 requires an exactly equal reconstruction immediately before the slot link,
 after slot acquisition and immediately before the close link. The permanent
 slot v5 contains content-free generic journal metadata; its `operation_plan`
@@ -422,24 +442,24 @@ drift before slot publication leaves no permanent slot; after acquisition it
 closes that generation `aborted-before-effect`. An abandoned intent can only be
 repaired through an explicit all-zero recovery v4 claim and abort close.
 
-The repeated root observations are point-in-time evidence, not an atomic
-reservation across the separate Colima/Lima and journal namespaces. They do
-not authorize a process, VM, Engine, socket, context or root creation, and a
-future effect owner must perform fresh admission. The bounded supervisor label
-is logical, not a PID, PGID, ownership or liveness claim. Exact completed
-retries return the historical non-authorizing completion without a fresh root
-claim. Serialized admission values are never accepted as authority, and the
-supported lifecycle remains `plan|status|verify`.
+The repeated namespace observations are point-in-time evidence, not an atomic
+reservation across the six mutation namespaces and the journal. They do not
+authorize a process, VM, Engine, socket, context or root creation, and a future
+effect owner must perform fresh admission. The bounded supervisor label is
+logical, not a PID, PGID, ownership or liveness claim. Exact completed
+retries return the historical non-authorizing completion without a fresh
+namespace claim. Serialized admission values are never accepted as authority,
+and the supported lifecycle remains `plan|status|verify`.
 
 The successor process-start decision is also durable and inert. Production
 operation kind
 `colima-live-provider-start-decision-publication-v1` has contract digest
-`2d9033bd071e24125e61533ec75500f6bc6d909226a0209be95ecd80df407cb5`;
+`9b4957d5b0918b78adde1ce336c923499a205043f05845931456b0246c6fc6e6`;
 the fixture-only domain has digest
-`83866dac58880b4d0bf69361cb23a9e34df2bd624687d0cf8e297867e3acef7c`.
+`407c7b466548373c320d600344d6c488578afed150914b2b06cd47bf52d55167`.
 Their production and fixture publication-plan schemas are v2. They bind the
 completed intent slot, close, publication-plan and completed-plan
-projection digests. An all-absent root observation derives only
+projection digests. An `observed-pristine` namespace observation derives only
 `requested-not-executed-not-authorized`; a foreign collision derives no
 candidate. Process start/spawn/signal, adapter/effect execution, root mutation,
 provider/evidence/runtime/receipt/environment publication, provider-effect
@@ -449,14 +469,15 @@ decision record through `mutation-journal-v5-inert-start-decision-only`; the
 contracts remain absent from the provider-adapter registry.
 
 The state owner reconstructs the completed intent internally and performs a
-fresh `S1/O1/S2/O2` source/root observation at the initial, pre-slot-link,
+fresh `S1/O1/S2/O2` source/namespace observation at the initial, pre-slot-link,
 post-slot-acquisition and pre-close-link boundaries. Every completed-intent
 projection, intent completion/publication plan, embedded operation plan, root
 observation and derived admission must remain byte-identical to the initial
-all-absent value. Production and fixture publishers hard-code their class and
-accept no caller-supplied state, source, plan, projection, candidate, historical
-admission, root result or authority. A pre-CAS collision leaves no slot; a
-post-CAS collision owner-aborts the generation. One hard-link CAS writer wins.
+pristine-namespace value. Production and fixture publishers hard-code their
+class and accept no caller-supplied state, source, plan, projection, candidate,
+historical admission, root result or authority. A pre-CAS collision leaves no
+slot; a post-CAS collision owner-aborts the generation. One hard-link CAS
+writer wins.
 
 The journal grammar is strictly aborted plans followed by one completed owner
 plan, aborted same-class intents followed by one completed owner intent, then
@@ -465,8 +486,8 @@ A completed decision is terminal. An abandoned decision admits only an exact
 all-zero recovery v4 claim and a recovery-authority `aborted-before-effect`
 close; generic provider execution recovery refuses it. Exact completed retries
 validate the observation and fixture-requirements identities, then return the
-historical non-authorizing completion without reading or claiming current root
-absence.
+historical non-authorizing completion without reading or claiming current
+namespace-pristine state.
 
 Mutation slot v5, close v6, recovery v4 and recovery-root v4 are one full-state
 hard cut. State made with slot v1-v4, close v1-v5 or recovery/root v1-v3 is
@@ -478,15 +499,21 @@ exists.
 
 The post-decision process-start-effect admission is a separate read-only
 contract, not another journal operation. The state owner reconstructs the exact
-completed terminal decision and samples current state and roots in
-`S1/O1/S2/O2` order. A stable all-absent observation produces only a candidate
+completed terminal decision and samples current state and namespaces in
+`S1/O1/S2/O2` order. A stable pristine observation produces only a candidate
 with every process, adapter, root, publication, recovery, lifecycle and
 finalization capability false; a stable collision produces `null`. Production
 and fixture schemas remain distinct. The value grants nothing, the explicit
 authorization function always refuses it, and no operation kind, contract
 digest, registry entry, receipt, state slot or persistent artifact is added.
 An eventual effect owner requires an indivisible durable effect-slot and fresh-
-admission hard cut.
+admission hard cut. It must also hold an atomic cross-namespace reservation,
+settle the complete recursive post-start filesystem inventory, and establish
+causal ownership and recovery for the outer process, detached Lima hostagent,
+usernet process and SSH ControlMaster before any runtime or lifecycle exposure.
+Those controls, live macOS proxy observation and per-file identity evidence for
+the two OS-build-bound executables are not implemented; live execution remains
+disabled.
 
 An uncatchable pre-publication interruption can retain one or more strictly
 validated `.pending-*` or `.run-*` staging directories. They contain no

@@ -2,6 +2,7 @@
 import { createHash } from "node:crypto";
 import {
   COLIMA_LIVE_FIXTURE_PRE_EFFECT_ROOT_OBSERVATION_SCHEMA,
+  COLIMA_LIVE_MUTATION_SURFACE_ROLES,
   COLIMA_LIVE_PRE_EFFECT_ROOT_OBSERVATION_SCHEMA,
 } from "./clean-engine-colima-live-schemas.mjs";
 import {
@@ -57,10 +58,9 @@ const ROOT_OBSERVATION_FIELDS = Object.freeze([
 ]);
 const ROOT_FIELDS = Object.freeze([
   "disposition",
-  "parent_identity_hmac_sha256",
+  "namespace_identity_hmac_sha256",
+  "observed_entry_set_hmac_sha256",
   "role",
-  "target_entry_identity_hmac_sha256",
-  "target_path_hmac_sha256",
 ]);
 const CANDIDATE_FIELDS = Object.freeze([
   "cleanup_authorized",
@@ -446,23 +446,22 @@ function validateRootObservation(value, source) {
     ["lima_instance", "provider_profile"],
     "live provider process start planned names",
   );
-  const roles = ["colima-profile-root", "lima-instance-root"];
-  if (!Array.isArray(value.root_observations) || value.root_observations.length !== 2) {
+  const roles = COLIMA_LIVE_MUTATION_SURFACE_ROLES;
+  if (
+    !Array.isArray(value.root_observations) ||
+    value.root_observations.length !== roles.length
+  ) {
     fail("live provider process start root observation was refused", 69);
   }
   for (const [index, root] of value.root_observations.entries()) {
     exactKeys(root, ROOT_FIELDS, "live provider process start root");
     if (
       root.role !== roles[index] ||
-      !new Set(["foreign-collision", "observed-absent"]).has(
+      !new Set(["foreign-collision", "observed-pristine"]).has(
         root.disposition,
       ) ||
-      !nonzeroSha256(root.parent_identity_hmac_sha256) ||
-      !nonzeroSha256(root.target_path_hmac_sha256) ||
-      typeof root.target_entry_identity_hmac_sha256 !== "string" ||
-      !/^[0-9a-f]{64}$/u.test(root.target_entry_identity_hmac_sha256) ||
-      (root.disposition === "observed-absent") !==
-        (root.target_entry_identity_hmac_sha256 === ZERO_SHA256)
+      !nonzeroSha256(root.namespace_identity_hmac_sha256) ||
+      !nonzeroSha256(root.observed_entry_set_hmac_sha256)
     ) {
       fail("live provider process start root was refused", 69);
     }
@@ -471,7 +470,7 @@ function validateRootObservation(value, source) {
     (root) => root.disposition === "foreign-collision",
   )
     ? "foreign-collision"
-    : "observed-absent";
+    : "observed-pristine";
   if (
     value.schema !== selected.rootObservationSchema ||
     value.evidence_class !== selected.evidenceClass ||
@@ -522,7 +521,7 @@ export function validateColimaLiveProviderProcessStartEffectCandidateStructure(
   validateRootObservation(expected.rootObservation, expected.source);
   exactKeys(value, CANDIDATE_FIELDS, "live provider process start candidate");
   if (
-    expected.rootObservation.root_set_disposition !== "observed-absent" ||
+    expected.rootObservation.root_set_disposition !== "observed-pristine" ||
     value.schema !== selected.candidateSchema ||
     value.completed_start_decision_projection_sha256 !==
       valueDigest(expected.completedStartDecisionProjection) ||
@@ -572,7 +571,7 @@ export function buildColimaLiveProviderProcessStartEffectCandidateStructure(
     value.source,
   );
   validateRootObservation(value.rootObservation, value.source);
-  if (value.rootObservation.root_set_disposition !== "observed-absent") {
+  if (value.rootObservation.root_set_disposition !== "observed-pristine") {
     fail("live provider collision cannot become a process start candidate", 73);
   }
   const candidate = {
@@ -632,7 +631,7 @@ export function validateColimaLiveProviderProcessStartEffectFreshAdmissionStruct
   ) {
     fail("live provider process start admission was refused", 69);
   }
-  if (value.root_observation.root_set_disposition === "observed-absent") {
+  if (value.root_observation.root_set_disposition === "observed-pristine") {
     validateColimaLiveProviderProcessStartEffectCandidateStructure(
       value.process_start_effect_candidate,
       {
@@ -663,7 +662,7 @@ export function buildColimaLiveProviderProcessStartEffectFreshAdmissionStructure
   );
   validateRootObservation(value.rootObservation, value.source);
   const candidate =
-    value.rootObservation.root_set_disposition === "observed-absent"
+    value.rootObservation.root_set_disposition === "observed-pristine"
       ? buildColimaLiveProviderProcessStartEffectCandidateStructure(value)
       : null;
   const admission = {
