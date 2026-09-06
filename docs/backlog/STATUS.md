@@ -348,9 +348,23 @@ It grants reservation recovery only; process, adapter, root, provider-effect
 recovery, receipt/environment/provider/runtime/evidence publication, cleanup,
 lifecycle and finalization remain false. No supported command exposes the seam,
 and no Docker, Colima or Lima process ran. ADR-0104 is proposed as the next
-CPR-45 boundary; it is not implemented. It selects a sibling effect branch
-after the completed start decision, not a successor to ADR-0103's terminal
-no-spawn completion. The proposed branch uses a distinct effect-witness inode
+CPR-45 state boundary; its effect generation is not implemented. A
+deterministic, non-persisted read-only prerequisite projection now binds the
+exact deny-only admission
+to the proposed sibling predecessor, fixed marker, distinct-witness rule and
+future atomic receipt v6/slot v7/recovery/root v6/close v8 cut. It keeps every
+authority false and defines no action, operation kind, contract, state
+artifact, publisher, executor, recovery API or production importer. The named
+future versions are unmet requirements; current persisted versions and
+ADR-0103's v1 evidence remain unchanged. Caller-held projection bytes are not
+state provenance or branch selection.
+Its exact upstream validation transitively loads the current plan/registry/
+live-observation modules, but projection construction performs no observation
+I/O or mutation.
+
+The proposed branch starts after the completed start decision, not as a
+successor to ADR-0103's terminal no-spawn completion. It uses a distinct
+effect-witness inode
 at the same fixed provider-root CAS and leaves ADR-0103's one-link
 `not-started` witness and retired-marker semantics unchanged. It requires a
 durable single-use start-attempt fence, causal identity for the outer Colima

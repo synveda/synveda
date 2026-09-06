@@ -521,6 +521,20 @@ and fixture schemas remain distinct. The value grants nothing, the explicit
 authorization function always refuses it, and no operation kind, contract
 digest, registry entry, receipt, state slot or persistent artifact is added.
 
+A deterministic, non-persisted read-only effect-generation prerequisite projection consumes only that exact
+deny-only admission. It binds the proposed sibling-effect predecessor, terminal
+no-spawn exclusion, fixed marker, distinct-witness rule and unmet one-shot
+attempt, complete bounded causal graph, authenticated endpoint, recursive
+filesystem inventory and exact-retirement requirements. It names receipt v6,
+slot v7, recovery/root
+v6 and close v8 only as one future atomic cut. Every authority remains false;
+there is no action, operation kind, contract, state artifact, publisher,
+executor, recovery API or production importer. Current receipt v5, slot v6,
+recovery/root v5, close v7 and ADR-0103 v1 records remain unchanged. Serialized
+projection bytes do not carry state provenance or select a branch.
+Exact validation transitively loads the current plan/registry/live-observation
+modules, but projection construction invokes no observation I/O or mutation.
+
 ### Cooperative no-spawn reservation
 
 After one completed matching-class start decision, aborted reservation

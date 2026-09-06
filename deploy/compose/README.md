@@ -340,6 +340,20 @@ admission is point-in-time data, grants nothing, and the deliberate authorizatio
 point always refuses it. This seam adds no journal action, operation kind,
 registry row, receipt, persistence or provider/process mutation.
 
+A separate deterministic, non-persisted read-only prerequisite projection binds that exact deny-only admission
+to ADR-0104's proposed sibling-effect shape. It records the terminal no-spawn
+exclusion, fixed marker, distinct future witness and unmet atomic
+generation/attempt/complete-causal-graph/endpoint/filesystem-inventory/
+retirement requirements. Every
+authority flag remains false. It adds no action, operation kind, contract,
+state artifact, publisher, executor, recovery API or production importer.
+Receipt v6, slot v7, recovery/root v6 and close v8 are named only as one future
+atomic cut; current persisted versions and ADR-0103 v1 evidence are unchanged.
+The projection is replayable data, not state provenance or branch selection.
+Its exact upstream validation transitively loads the current plan/registry/
+live-observation modules, while a filesystem tripwire proves projection
+construction performs no observation I/O or mutation.
+
 The internal state/test seam may then publish one cooperative no-spawn
 reservation generation. A v6 slot is durable before a private mode-0600 witness
 stage is written and fsynced. Its immutable plan binds one canonical provider

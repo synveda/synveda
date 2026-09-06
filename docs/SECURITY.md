@@ -379,6 +379,21 @@ foreign collision produces no candidate. Its logical supervisor label is not a
 PID or PGID. The admission is not persisted, has no operation kind or registry
 entry, and the only exposed authorization function unconditionally refuses it.
 
+The successor effect-generation prerequisite projection is deterministic,
+non-persisted, read-only and non-authorizing. It binds the exact admission to the proposed
+sibling branch, terminal no-spawn exclusion, fixed marker, distinct future
+witness and unmet atomic generation/attempt/complete-causal-graph/endpoint/
+filesystem-inventory/retirement requirements. Every authority flag is false. It exposes no action, operation
+kind, operation contract, publisher, executor or recovery entry point, and no
+production authority surface imports it. The future receipt v6, slot v7,
+recovery/root v6 and close v8 names are requirements only; current state
+versions and ADR-0103 v1 evidence remain unchanged. Serialized projection bytes
+are replayable data and never state provenance.
+Exact validation transitively loads the current plan/registry/live-observation
+modules. A filesystem tripwire proves projection construction invokes none of
+the observation module's file operations; no mutation or new registry
+authority is created.
+
 The successor no-spawn reservation is a cooperative same-UID exclusion
 protocol, not a hostile-principal boundary. Its v6 slot precedes filesystem
 mutation. A private fsynced mode-0600 witness binds the exact state run,

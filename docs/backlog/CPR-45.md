@@ -742,8 +742,22 @@ not a PID, PGID, ownership or liveness fact.
 ### Immediate next slice
 
 [ADR-0104](../adr/adr-0104-indivisible-live-provider-effect-generation.md) is
-proposed only; no process-effect implementation or authority exists in the
-current tree. A standalone deterministic preparation fixture now validates
+proposed only; no process-effect state generation or authority exists in the
+current tree. A deterministic, non-persisted read-only prerequisite projection binds the exact
+deny-only post-decision admission to the proposed sibling-effect predecessor,
+fixed marker and distinct-witness constraints. It records the future atomic
+receipt v6, slot v7, recovery/root v6 and close v8 cut plus the still-unmet
+attempt, complete bounded causal graph, endpoint, recursive filesystem
+inventory and retirement requirements.
+Every authority flag is false; it defines no action, operation kind, contract,
+persisted artifact, publisher, executor, recovery API or production importer.
+Current persisted versions and ADR-0103's terminal v1 no-spawn evidence are
+unchanged, and caller-held projection bytes carry no state provenance.
+Exact source validation transitively loads the current plan/registry/live-
+observation modules, but building the projection performs no observation I/O
+or mutation and creates no new registry authority.
+
+A standalone deterministic preparation fixture validates
 the closed four-role causal shape with four repository-owned Node processes:
 pre-spawn fsynced edges, IPC-only role keys, authenticated private endpoints,
 recursive quiescence, one signed recursive deadline, detach/reparent
@@ -760,6 +774,8 @@ open evidence requirement.
 
 Implement ADR-0104's sibling effect branch directly after the exact completed
 start decision, never after ADR-0103's terminal no-spawn completion.
+Treat the read-only prerequisite projection only as a closed review input; it does
+not select the branch or authorize publication.
 Use a distinct effect witness published at the fixed provider-root marker
 basename; never reuse the generic mutation-slot inode, ADR-0103's retired marker
 inode or its immutable no-spawn witness. The mutation slot remains journal

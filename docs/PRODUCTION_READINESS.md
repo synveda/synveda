@@ -208,6 +208,19 @@ its authorization entry point always refuses. This closes only the
 post-decision observation shape; it is not process, provider, recovery or
 readiness evidence.
 
+A deterministic, non-persisted read-only prerequisite projection now binds that exact admission to
+ADR-0104's proposed sibling-effect constraints and unmet atomic
+generation/attempt/complete-causal-graph/endpoint/filesystem-inventory/
+retirement requirements.
+Every authority remains false, there is no production importer, and no action,
+operation contract, state artifact or recovery API exists. Its future receipt
+v6, slot v7, recovery/root v6 and close v8 names do not consume those versions;
+the current state and ADR-0103 v1 no-spawn evidence remain unchanged. This is
+not implementation, execution, recovery, platform or readiness evidence.
+Exact upstream validation transitively loads current plan/registry/live-
+observation modules; a filesystem tripwire proves projection construction
+performs no observation I/O or mutation.
+
 The current state generation adds one deterministic cooperative reservation and
 still performs no provider process action. A v6 slot precedes a private fsynced
 witness. One fixed no-replace provider-root hard-link CAS binds the exact state

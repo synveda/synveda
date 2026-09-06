@@ -234,6 +234,24 @@ fixture evidence only. It MUST NOT import or relabel the class-closed
 controlled-background v5 fake, and it cannot establish live provider support
 without separate environment and platform evidence plus independent review.
 
+A deterministic, non-persisted read-only prerequisite projection now binds the exact deny-only
+post-decision admission to this proposed branch shape. It records the terminal
+no-spawn sibling, fixed marker, distinct-witness rule, future one-shot attempt,
+complete bounded causal graph, endpoint, recursive filesystem inventory and
+retirement requirements, and names the
+future receipt v6, slot v7, recovery/root v6 and close v8 schemas as one unmet
+atomic cut. Every authority flag is false. The projection defines no action,
+operation kind, operation contract, persisted artifact, publisher, executor or
+recovery entry point and has no production importer. It does not consume or
+implement the numbered generation: the current receipt v5, slot v6,
+recovery/root v5, close v7 and ADR-0103 v1 no-spawn evidence remain unchanged.
+Caller-held projection bytes are replayable prerequisite data, not state
+provenance or branch selection.
+Its direct dependencies are the schema leaf and the existing process-start
+validator. Exact upstream validation transitively loads the current
+plan/registry/live-observation modules, but the projection build invokes no
+observation I/O or mutation and creates no new registry or effect authority.
+
 The standalone fixture uses four repository-owned Node processes to exercise
 fsynced pre-spawn causal edges, inherited-IPC-only HMAC keys, fresh private
 endpoint challenges, a recursive durable quiescence fence, actual hostagent
