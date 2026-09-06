@@ -249,10 +249,23 @@ claims, regressed settled observations, changed source or parent identities,
 and inert state staging fail closed. Internal authority callbacks remain
 trusted owner-UID composition hooks, not a JavaScript security boundary.
 
-Only test fixtures expose these seams; no supported lifecycle target or
-Docker/Colima action is enabled. Controlled-background evidence remains
-structurally ineligible for the synthetic finalizer, so finalization stays
-blocked. A separate non-executing live-preparation requirements/observation
+Run-inventory validation now consumes one sorted snapshot bound to one directory
+generation and stable mutation-stage identity. Private-stage changes and
+an append-only recognised final-name candidate discard the whole stale attempt;
+the next stable scan must prove its topology. Reconciliation reloads after
+exact disappearance or same-inode link progress and fsyncs before every
+zero-stage return. Sixteen supersessions plus one final scan are bounded, while
+stable corruption, identity replacement, unrecognised entry changes,
+final-name removal and capture failures remain fatal. A deterministic pipe
+barrier proves competing cleanup owners resolve as winner 0/loser 73 with
+exactly one cleanup settlement and close rather than the former transient
+status 69.
+
+Only tests and test fixture modules pass these observer hooks; no supported
+lifecycle target or Docker/Colima action exposes them. Controlled-background
+evidence remains structurally ineligible for the synthetic finalizer, so
+finalization stays blocked. A separate non-executing live-preparation
+requirements/observation
 contract now pins official Colima 0.10.3, Lima 2.2.0 and Colima-core 0.10.4
 disk artifacts, the upstream-correct release guest-agent/default-template and
 private network layout, exact staged and dynamically observed helper

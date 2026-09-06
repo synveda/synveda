@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { readSync, writeSync } from "node:fs";
 import { resolve } from "node:path";
 import { executeBackgroundProviderCleanupForExecutor } from "../../deploy/compose/scripts/clean-engine-state.mjs";
 
@@ -17,6 +18,7 @@ if (
     "hold-before-close-link",
     "inert-before-outer",
     "pass",
+    "publication-barrier",
     "source-drift-before-plan",
     "stop-after-first",
   ]).has(mode)
@@ -53,11 +55,23 @@ const adapter = {
   stop_after_sequence: mode === "stop-after-first" ? 0 : null,
 };
 
+const testMutationPublicationCheckpoint =
+  mode === "publication-barrier"
+    ? (checkpoint) => {
+        writeSync(1, `${checkpoint}\n`);
+        const release = Buffer.alloc(1);
+        if (readSync(0, release, 0, 1, null) !== 1 || release[0] !== 0x63) {
+          throw new Error("mutation publication test barrier was unavailable");
+        }
+      }
+    : undefined;
+
 try {
   await executeBackgroundProviderCleanupForExecutor({
     adapter,
     repoRoot: resolve(repoRoot),
     stateBase: resolve(stateBase),
+    testMutationPublicationCheckpoint,
   });
 } catch (error) {
   process.stderr.write(`${error.message}\n`);

@@ -260,6 +260,18 @@ observation. An untouched pre-intent recovery can only abort without effect.
 Source, parent identities, completed retirement and inert-state absence are
 reasserted at the final close publication.
 
+The active-run loader never validates a mutation journal against a mixture of
+directory generations. It captures sorted names plus the private run and
+mutation-stage identities, validates only that capture, then requires the same
+generation afterward. Private-stage creation or retirement and an append-only,
+recognised final-name candidate cause a whole-snapshot retry; the next stable
+scan must prove the resulting topology. Retries are bounded to 16 supersessions
+and one final attempt. Reconciliation reloads after confirmed stage absence or
+same-inode publication-link progress and fsyncs the run directory before every
+zero-stage return. Same-name identity replacement, unrecognised inventory
+changes, final-name removal, capture failures, and stable validation or
+reconciliation failures still fail closed.
+
 The live-provider preparation module is a separate deny-by-construction input
 boundary, not an extension of the fake. Its v4 production record pins official
 Colima/Lima/disk bytes, the release guest-agent and default-template layout,

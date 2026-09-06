@@ -19,6 +19,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
+import { createInterface } from "node:readline";
 import test from "node:test";
 import {
   appendReceiptForExecutor,
@@ -391,6 +392,111 @@ function launchCleanupOwner(state, mode) {
   child.stderr.setEncoding("utf8");
   child.stderr.on("data", (chunk) => { stderr += chunk; });
   return { child, closed: once(child, "close"), stderr: () => stderr };
+}
+
+function launchBarrierCleanupOwner(state) {
+  const child = spawn(
+    process.execPath,
+    [cleanupFixture, state.repo, state.state, "publication-barrier"],
+    {
+      env: {
+        HOME: process.env.HOME,
+        LANG: "C",
+        LC_ALL: "C",
+        PATH: process.env.PATH,
+      },
+      stdio: ["pipe", "pipe", "pipe"],
+    },
+  );
+  let stderr = "";
+  let stdinFailure;
+  child.stderr.setEncoding("utf8");
+  child.stderr.on("data", (chunk) => { stderr += chunk; });
+  child.stdin.on("error", (error) => { stdinFailure = error; });
+  const checkpoints = [];
+  const waiters = [];
+  const lines = createInterface({ input: child.stdout, crlfDelay: Infinity });
+  lines.on("line", (checkpoint) => {
+    const waiter = waiters.shift();
+    if (waiter === undefined) {
+      checkpoints.push(checkpoint);
+    } else {
+      waiter.resolve(checkpoint);
+    }
+  });
+  const closed = once(child, "close");
+  child.once("close", () => {
+    for (const waiter of waiters.splice(0)) {
+      waiter.reject(new Error(`cleanup owner exited before checkpoint: ${stderr}`));
+    }
+  });
+  return {
+    child,
+    closed,
+    async closeWithin(timeoutMilliseconds = 45_000) {
+      let timeout;
+      try {
+        return await Promise.race([
+          closed,
+          new Promise((_, rejectPromise) => {
+            timeout = setTimeout(
+              () => rejectPromise(new Error(`timed out waiting for cleanup owner: ${stderr}`)),
+              timeoutMilliseconds,
+            );
+          }),
+        ]);
+      } finally {
+        clearTimeout(timeout);
+      }
+    },
+    async checkpoint(expected) {
+      if (child.exitCode !== null || child.signalCode !== null) {
+        throw new Error(`cleanup owner exited before ${expected}: ${stderr}`);
+      }
+      const checkpoint = checkpoints.length === 0
+        ? await new Promise((resolvePromise, rejectPromise) => {
+            let timeout;
+            const waiter = {
+              reject(error) {
+                clearTimeout(timeout);
+                rejectPromise(error);
+              },
+              resolve(value) {
+                clearTimeout(timeout);
+                resolvePromise(value);
+              },
+            };
+            timeout = setTimeout(() => {
+              const index = waiters.indexOf(waiter);
+              if (index !== -1) waiters.splice(index, 1);
+              rejectPromise(new Error(`timed out waiting for ${expected}: ${stderr}`));
+            }, 12_000);
+            waiters.push(waiter);
+          })
+        : checkpoints.shift();
+      assert.equal(checkpoint, expected, stderr);
+    },
+    async release() {
+      if (
+        stdinFailure !== undefined ||
+        child.exitCode !== null ||
+        child.signalCode !== null ||
+        child.stdin.destroyed
+      ) {
+        throw stdinFailure ?? new Error(`cleanup owner input was unavailable: ${stderr}`);
+      }
+      await new Promise((resolvePromise, rejectPromise) => {
+        child.stdin.write("c", (error) => {
+          if (error) {
+            rejectPromise(error);
+          } else {
+            resolvePromise();
+          }
+        });
+      });
+    },
+    stderr: () => stderr,
+  };
 }
 
 function launchCleanupRecovery(state, confirmation, mode) {
@@ -1129,7 +1235,7 @@ test("cleanup recovery converges deletion completed before progress publication"
   }
 });
 
-test("competing cleanup owners publish one operation slot and one close", async () => {
+test("cleanup acquisition rescans a concurrently retired inert mutation stage", async () => {
   const state = fixture();
   try {
     await executeBackgroundProviderCreateForExecutor({
@@ -1139,36 +1245,422 @@ test("competing cleanup owners publish one operation slot and one close", async 
       stateBase: state.state,
     });
     continueThroughProjectCleanup(state);
-    const owners = [
-      launchCleanupOwner(state, "pass"),
-      launchCleanupOwner(state, "pass"),
-    ];
-    const outcomes = await Promise.all(
-      owners.map(async (owner) => {
-        const [status, signal] = await owner.closed;
-        return { signal, status, stderr: owner.stderr() };
-      }),
+    const active = activeRun(state);
+    const stage = join(active, `.mutation-stage-${"b".repeat(32)}`);
+    writeFileSync(stage, "{", { mode: 0o600 });
+    let retirements = 0;
+    const receipt = await executeBackgroundProviderCleanupForExecutor({
+      adapter: cleanupAdapter(),
+      repoRoot: state.repo,
+      stateBase: state.state,
+      testMutationPublicationCheckpoint(checkpoint) {
+        if (checkpoint !== "before-mutation-stage-reconciliation") return;
+        assert.equal(retirements, 0);
+        unlinkSync(stage);
+        retirements += 1;
+      },
+    });
+    assert.equal(retirements, 1);
+    assert.equal(receipt.phase, "provider-cleanup-passed");
+    assert.equal(
+      readdirSync(active).some((name) => name.startsWith(".mutation-stage-")),
+      false,
     );
+    assert.equal(verify(state).status, 0);
+  } finally {
+    rmSync(state.root, { force: true, recursive: true });
+  }
+});
+
+test("cleanup reconciliation rescans a stage linked to its final destination", async () => {
+  const state = fixture();
+  try {
+    await executeBackgroundProviderCreateForExecutor({
+      adapter: cleanupProviderAdapter(),
+      providerBase: state.providerBase,
+      repoRoot: state.repo,
+      stateBase: state.state,
+    });
+    continueThroughProjectCleanup(state);
+    const active = activeRun(state);
+    const closeName = readdirSync(active)
+      .filter((name) => /^\.mutation-close-[0-9]{2}$/.test(name))
+      .sort()
+      .at(-1);
+    assert.notEqual(closeName, undefined);
+    const close = join(active, closeName);
+    const stage = join(active, `.mutation-stage-${"a".repeat(32)}`);
+    linkSync(close, stage);
+    unlinkSync(close);
+    let restorations = 0;
+    const receipt = await executeBackgroundProviderCleanupForExecutor({
+      adapter: cleanupAdapter(),
+      repoRoot: state.repo,
+      stateBase: state.state,
+      testMutationPublicationCheckpoint(checkpoint) {
+        if (
+          checkpoint !== "before-mutation-stage-reconciliation" ||
+          restorations !== 0
+        ) {
+          return;
+        }
+        linkSync(stage, close);
+        restorations += 1;
+      },
+    });
+    assert.equal(restorations, 1);
+    assert.equal(receipt.phase, "provider-cleanup-passed");
+    assert.equal(existsSync(close), true);
+    assert.equal(existsSync(stage), false);
+    assert.equal(verify(state).status, 0);
+  } finally {
+    rmSync(state.root, { force: true, recursive: true });
+  }
+});
+
+test("cleanup reconciliation refuses same-name mutation stage replacement", async () => {
+  const state = fixture();
+  try {
+    await executeBackgroundProviderCreateForExecutor({
+      adapter: cleanupProviderAdapter(),
+      providerBase: state.providerBase,
+      repoRoot: state.repo,
+      stateBase: state.state,
+    });
+    continueThroughProjectCleanup(state);
+    const active = activeRun(state);
+    const stage = join(active, `.mutation-stage-${"c".repeat(32)}`);
+    writeFileSync(stage, "original", { mode: 0o600 });
+    let replacements = 0;
+    await assert.rejects(
+      () => executeBackgroundProviderCleanupForExecutor({
+        adapter: cleanupAdapter(),
+        repoRoot: state.repo,
+        stateBase: state.state,
+        testMutationPublicationCheckpoint(checkpoint) {
+          if (checkpoint !== "before-mutation-stage-reconciliation") return;
+          unlinkSync(stage);
+          writeFileSync(stage, "replacement", { mode: 0o600 });
+          replacements += 1;
+        },
+      }),
+      (error) => {
+        assert.equal(error.exitStatus, 78);
+        assert.equal(error.message, "pending mutation publication identity changed");
+        return true;
+      },
+    );
+    assert.equal(replacements, 1);
+    assert.equal(readFileSync(stage, "utf8"), "replacement");
+    const cleanupSlots = readdirSync(active)
+      .filter((name) => name.startsWith(".mutation-slot-"))
+      .map((name) => parse(join(active, name)))
+      .filter((slot) => slot.action === "provider-cleanup");
+    assert.equal(cleanupSlots.length, 0);
+  } finally {
+    rmSync(state.root, { force: true, recursive: true });
+  }
+});
+
+test("cleanup inventory validation refuses same-name mutation stage replacement", async () => {
+  const state = fixture();
+  try {
+    await executeBackgroundProviderCreateForExecutor({
+      adapter: cleanupProviderAdapter(),
+      providerBase: state.providerBase,
+      repoRoot: state.repo,
+      stateBase: state.state,
+    });
+    continueThroughProjectCleanup(state);
+    const active = activeRun(state);
+    const stage = join(active, `.mutation-stage-${"e".repeat(32)}`);
+    let replacements = 0;
+    await assert.rejects(
+      () => executeBackgroundProviderCleanupForExecutor({
+        adapter: cleanupAdapter(),
+        repoRoot: state.repo,
+        stateBase: state.state,
+        testMutationPublicationCheckpoint(checkpoint) {
+          if (checkpoint === "before-slot-stage") {
+            writeFileSync(stage, "original", { mode: 0o600 });
+          }
+          if (checkpoint === "before-mutation-stage-validation") {
+            unlinkSync(stage);
+            writeFileSync(stage, "replacement", { mode: 0o600 });
+            replacements += 1;
+          }
+        },
+      }),
+      (error) => {
+        assert.equal(error.exitStatus, 78);
+        assert.equal(
+          error.message,
+          "plan run inventory changed outside mutation staging",
+        );
+        return true;
+      },
+    );
+    assert.equal(replacements, 1);
+    assert.equal(readFileSync(stage, "utf8"), "replacement");
+    assert.equal(existsSync(join(active, "13-provider-cleanup-intent.json")), false);
+    assert.equal(
+      existsSync(join(active, "provider", "provider-retirement-plan.json")),
+      false,
+    );
+  } finally {
+    rmSync(state.root, { force: true, recursive: true });
+  }
+});
+
+test("cleanup inventory validation retries a stage final-link transition", async () => {
+  const state = fixture();
+  try {
+    await executeBackgroundProviderCreateForExecutor({
+      adapter: cleanupProviderAdapter(),
+      providerBase: state.providerBase,
+      repoRoot: state.repo,
+      stateBase: state.state,
+    });
+    continueThroughProjectCleanup(state);
+    const active = activeRun(state);
+    const stage = join(active, `.mutation-stage-${"f".repeat(32)}`);
+    let destination;
+    let links = 0;
+    let validations = 0;
+    await assert.rejects(
+      () => executeBackgroundProviderCleanupForExecutor({
+        adapter: cleanupAdapter(),
+        repoRoot: state.repo,
+        stateBase: state.state,
+        testMutationPublicationCheckpoint(checkpoint) {
+          if (checkpoint === "before-slot-stage") {
+            writeFileSync(stage, "{}\n", { mode: 0o600 });
+          }
+          if (checkpoint !== "before-mutation-stage-validation") return;
+          validations += 1;
+          if (links !== 0) return;
+          const cleanupSlots = readdirSync(active)
+            .filter((name) => /^\.mutation-slot-[0-9]{2}$/.test(name))
+            .map((name) => parse(join(active, name)))
+            .filter((slot) => slot.action === "provider-cleanup");
+          assert.equal(cleanupSlots.length, 1);
+          const sequence = String(cleanupSlots[0].journal_sequence).padStart(2, "0");
+          destination = join(active, `.mutation-close-${sequence}`);
+          linkSync(stage, destination);
+          links += 1;
+        },
+      }),
+      (error) => {
+        assert.equal(error.exitStatus, 78);
+        assert.equal(error.message, "mutation close sequence was refused");
+        return true;
+      },
+    );
+    assert.equal(links, 1);
+    assert.equal(validations, 2);
+    assert.equal(lstatSync(stage).nlink, 2);
+    assert.equal(lstatSync(destination).ino, lstatSync(stage).ino);
+  } finally {
+    rmSync(state.root, { force: true, recursive: true });
+  }
+});
+
+test("cleanup acquisition bounds repeated mutation inventory supersession", async () => {
+  const state = fixture();
+  try {
+    await executeBackgroundProviderCreateForExecutor({
+      adapter: cleanupProviderAdapter(),
+      providerBase: state.providerBase,
+      repoRoot: state.repo,
+      stateBase: state.state,
+    });
+    continueThroughProjectCleanup(state);
+    const active = activeRun(state);
+    const stagePath = (generation) =>
+      join(
+        active,
+        `.mutation-stage-${generation.toString(16).padStart(32, "d")}`,
+      );
+    let generation = 0;
+    let currentStage;
+    await assert.rejects(
+      () => executeBackgroundProviderCleanupForExecutor({
+        adapter: cleanupAdapter(),
+        repoRoot: state.repo,
+        stateBase: state.state,
+        testMutationPublicationCheckpoint(checkpoint) {
+          if (checkpoint === "before-slot-stage") {
+            currentStage = stagePath(generation);
+            writeFileSync(currentStage, "{", { mode: 0o600 });
+          }
+          if (checkpoint === "before-mutation-stage-validation") {
+            assert.equal(existsSync(currentStage), true);
+            unlinkSync(currentStage);
+            generation += 1;
+            currentStage = stagePath(generation);
+            writeFileSync(currentStage, "{", { mode: 0o600 });
+          }
+        },
+      }),
+      (error) => {
+        assert.equal(error.exitStatus, 73);
+        assert.equal(error.message, "plan run inventory was repeatedly superseded");
+        return true;
+      },
+    );
+    assert.equal(generation, 17);
+    assert.equal(existsSync(currentStage), true);
+    const entries = readdirSync(active);
+    assert.equal(
+      entries.filter((name) => name.startsWith(".mutation-stage-")).length,
+      1,
+    );
+    const cleanupSlots = entries
+      .filter((name) => name.startsWith(".mutation-slot-"))
+      .map((name) => parse(join(active, name)))
+      .filter((slot) => slot.action === "provider-cleanup");
+    assert.equal(cleanupSlots.length, 1);
+    const sequence = String(cleanupSlots[0].journal_sequence).padStart(2, "0");
+    assert.equal(existsSync(join(active, "13-provider-cleanup-intent.json")), false);
+    assert.equal(
+      existsSync(join(active, "provider", "provider-retirement-plan.json")),
+      false,
+    );
+    assert.equal(existsSync(join(active, `.mutation-operation-${sequence}`)), false);
+    assert.equal(existsSync(join(active, `.mutation-close-${sequence}`)), false);
+    assert.equal(verify(state).status, 0);
+  } finally {
+    rmSync(state.root, { force: true, recursive: true });
+  }
+});
+
+test("cleanup reconciliation bounds repeated mutation stage supersession", async () => {
+  const state = fixture();
+  try {
+    await executeBackgroundProviderCreateForExecutor({
+      adapter: cleanupProviderAdapter(),
+      providerBase: state.providerBase,
+      repoRoot: state.repo,
+      stateBase: state.state,
+    });
+    continueThroughProjectCleanup(state);
+    const active = activeRun(state);
+    const stagePath = (generation) =>
+      join(
+        active,
+        `.mutation-stage-${generation.toString(16).padStart(32, "a")}`,
+      );
+    let generation = 0;
+    let currentStage = stagePath(generation);
+    writeFileSync(currentStage, "{}", { mode: 0o600 });
+    await assert.rejects(
+      () => executeBackgroundProviderCleanupForExecutor({
+        adapter: cleanupAdapter(),
+        repoRoot: state.repo,
+        stateBase: state.state,
+        testMutationPublicationCheckpoint(checkpoint) {
+          if (checkpoint !== "before-mutation-stage-reconciliation") return;
+          assert.equal(existsSync(currentStage), true);
+          unlinkSync(currentStage);
+          generation += 1;
+          currentStage = stagePath(generation);
+          writeFileSync(currentStage, "{}", { mode: 0o600 });
+        },
+      }),
+      (error) => {
+        assert.equal(error.exitStatus, 73);
+        assert.equal(
+          error.message,
+          "mutation publication reconciliation was repeatedly superseded",
+        );
+        return true;
+      },
+    );
+    assert.equal(generation, 17);
+    assert.equal(existsSync(currentStage), true);
+    assert.equal(
+      readdirSync(active).filter((name) => name.startsWith(".mutation-stage-"))
+        .length,
+      1,
+    );
+    const cleanupSlots = readdirSync(active)
+      .filter((name) => name.startsWith(".mutation-slot-"))
+      .map((name) => parse(join(active, name)))
+      .filter((slot) => slot.action === "provider-cleanup");
+    assert.equal(cleanupSlots.length, 0);
+  } finally {
+    rmSync(state.root, { force: true, recursive: true });
+  }
+});
+
+test("competing cleanup owners publish one operation slot and one close", async () => {
+  const state = fixture();
+  const owners = [];
+  try {
+    await executeBackgroundProviderCreateForExecutor({
+      adapter: cleanupProviderAdapter(),
+      providerBase: state.providerBase,
+      repoRoot: state.repo,
+      stateBase: state.state,
+    });
+    continueThroughProjectCleanup(state);
+    const winner = launchBarrierCleanupOwner(state);
+    const loser = launchBarrierCleanupOwner(state);
+    owners.push(winner, loser);
+    await Promise.all([
+      winner.checkpoint("before-slot-stage"),
+      loser.checkpoint("before-slot-stage"),
+    ]);
+    await loser.release();
+    await loser.checkpoint("after-slot-authority-reassertion");
+    await winner.release();
+    await winner.checkpoint("after-slot-authority-reassertion");
+    await winner.release();
+    await winner.checkpoint("before-mutation-stage-validation");
+    await loser.release();
+    const [loserStatus, loserSignal] = await loser.closeWithin();
+    assert.equal(loserStatus, 73, loser.stderr());
+    assert.equal(loserSignal, null, loser.stderr());
+    assert.equal(loser.stderr(), "another clean-engine mutation is active\n");
+    await winner.release();
+    const [winnerStatus, winnerSignal] = await winner.closeWithin();
+    assert.equal(winner.stderr(), "");
+    const outcomes = [
+      { signal: winnerSignal, status: winnerStatus, stderr: winner.stderr() },
+      { signal: loserSignal, status: loserStatus, stderr: loser.stderr() },
+    ];
     assert.deepEqual(
       outcomes.map(({ status }) => status).sort((left, right) => left - right),
       [0, 73],
     );
     assert.equal(outcomes.find(({ status }) => status === 0).signal, null);
-    assert.match(
-      outcomes.find(({ status }) => status === 73).stderr,
-      /another clean-engine mutation|background cleanup state was refused/,
-    );
     const active = activeRun(state);
+    assert.equal(
+      readdirSync(active).some((name) => name.startsWith(".mutation-stage-")),
+      false,
+    );
     const cleanupSlots = readdirSync(active)
       .filter((name) => name.startsWith(".mutation-slot-"))
       .map((name) => parse(join(active, name)))
       .filter((slot) => slot.action === "provider-cleanup");
     assert.equal(cleanupSlots.length, 1);
     const sequence = String(cleanupSlots[0].journal_sequence).padStart(2, "0");
-    assert.equal(existsSync(join(active, `.mutation-operation-${sequence}`)), true);
-    assert.equal(existsSync(join(active, `.mutation-close-${sequence}`)), true);
+    assert.deepEqual(
+      readdirSync(active).filter((name) => name === `.mutation-operation-${sequence}`),
+      [`.mutation-operation-${sequence}`],
+    );
+    assert.deepEqual(
+      readdirSync(active).filter((name) => name === `.mutation-close-${sequence}`),
+      [`.mutation-close-${sequence}`],
+    );
     assert.equal(verify(state).status, 0);
   } finally {
+    for (const owner of owners) {
+      if (owner.child.exitCode === null && owner.child.signalCode === null) {
+        owner.child.kill("SIGKILL");
+        await owner.closed;
+      }
+    }
     rmSync(state.root, { force: true, recursive: true });
   }
 });

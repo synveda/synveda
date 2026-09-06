@@ -256,6 +256,7 @@ const MAX_MUTATION_RECOVERIES = 8;
 const MAX_MUTATION_SLOTS = 64;
 const MAX_MUTATION_STAGES = 16;
 const MAX_MUTATION_PUBLICATION_ATTEMPTS = 16;
+const MAX_PLAN_RUN_INVENTORY_SUPERSESSIONS = 16;
 const LIVE_PROVIDER_PLAN_ACTION = "provider-plan";
 const DETERMINISTIC_PROVIDER_OPERATION_KIND = "deterministic-fake-provider-create-v1";
 const FAKE_PROVIDER_ADAPTER_FIELDS = Object.freeze([
@@ -2539,7 +2540,133 @@ function validateProxyTemplate(path) {
   if (canonical(value) !== canonical(PROXY_TEMPLATE)) fail("proxy template contract was refused");
 }
 
-function validatePlanRunInventory(run, stateMetadata) {
+function sameStringEntries(left, right) {
+  return (
+    left.length === right.length &&
+    left.every((entry, index) => entry === right[index])
+  );
+}
+
+function sameMutationStageIdentity(left, right) {
+  return (
+    left.dev === right.dev &&
+    left.ino === right.ino &&
+    left.uid === right.uid &&
+    left.mode === right.mode &&
+    left.size === right.size &&
+    left.mtimeNs === right.mtimeNs
+  );
+}
+
+function isMutationPublicationDestinationName(name) {
+  return (
+    /^\.mutation-(?:slot|close|operation)-[0-9]{2}$/.test(name) ||
+    /^\.mutation-recovery-[0-9]{2}-[0-9]{2}$/.test(name)
+  );
+}
+
+// Mutation publishers retire private aliases cooperatively. Validate only a
+// directory generation that stayed exact for the whole scan; a missing alias
+// must never be skipped while the rest of its stale inventory is accepted.
+function planRunInventorySnapshotTransition(left, right) {
+  if (
+    !left.metadata.isDirectory() ||
+    !right.metadata.isDirectory() ||
+    left.metadata.dev !== right.metadata.dev ||
+    left.metadata.ino !== right.metadata.ino ||
+    left.metadata.uid !== right.metadata.uid ||
+    left.metadata.mode !== right.metadata.mode
+  ) {
+    return "refused";
+  }
+  const commonStageNames = [...left.mutationStages.keys()].filter((name) =>
+    right.mutationStages.has(name),
+  );
+  let mutationStageMetadataChanged = false;
+  for (const name of commonStageNames) {
+    const metadata = left.mutationStages.get(name);
+    const current = right.mutationStages.get(name);
+    if (!sameMutationStageIdentity(metadata, current)) {
+      return "refused";
+    }
+    mutationStageMetadataChanged ||= !sameMetadata(metadata, current);
+  }
+  const leftEntries = new Set(left.entries);
+  const rightEntries = new Set(right.entries);
+  for (const name of left.entries) {
+    if (!rightEntries.has(name) && !/^\.mutation-stage-[0-9a-f]{32}$/.test(name)) {
+      return "refused";
+    }
+  }
+  for (const name of right.entries) {
+    if (
+      !leftEntries.has(name) &&
+      !/^\.mutation-stage-[0-9a-f]{32}$/.test(name) &&
+      !isMutationPublicationDestinationName(name)
+    ) {
+      return "refused";
+    }
+  }
+  if (
+    !sameStringEntries(left.entries, right.entries) ||
+    mutationStageMetadataChanged
+  ) {
+    return "superseded";
+  }
+  return left.stable &&
+    right.stable &&
+    sameMetadata(left.metadata, right.metadata) &&
+    left.mutationStages.size === right.mutationStages.size
+    ? "same"
+    : "superseded";
+}
+
+function capturePlanRunInventorySnapshot(run) {
+  const before = ownedPrivateDirectory(run, "active run state");
+  let entries;
+  try {
+    entries = readdirSync(run).sort();
+  } catch {
+    fail("plan run inventory was unavailable", 69);
+  }
+  const mutationStageNames = entries.filter((entry) =>
+    /^\.mutation-stage-[0-9a-f]{32}$/.test(entry),
+  );
+  if (mutationStageNames.length > MAX_MUTATION_STAGES) {
+    fail("plan run inventory was refused");
+  }
+  const mutationStages = new Map();
+  let stageDisappeared = false;
+  for (const name of mutationStageNames) {
+    try {
+      mutationStages.set(name, exactLstat(join(run, name)));
+    } catch (error) {
+      if (error?.code === "ENOENT") {
+        stageDisappeared = true;
+        break;
+      }
+      fail("pending mutation publication was unavailable", 69);
+    }
+  }
+  const after = ownedPrivateDirectory(run, "active run state");
+  return {
+    entries,
+    metadata: after,
+    mutationStages,
+    stageDisappeared,
+    stable:
+      !stageDisappeared &&
+      before.uid === after.uid &&
+      sameMetadata(before, after),
+  };
+}
+
+function validatePlanRunInventorySnapshot(
+  run,
+  stateMetadata,
+  entries,
+  beforeMutationStageValidationObserver,
+) {
   const required = [
     "00-plan.json",
     "candidate.json",
@@ -2549,7 +2676,6 @@ function validatePlanRunInventory(run, stateMetadata) {
     "registry",
     "runtime",
   ];
-  const entries = readdirSync(run).sort();
   const receipts = entries.filter((entry) => /^[0-9]{2}-[a-z][a-z0-9-]*\.json$/.test(entry));
   const hasReceiptStaging = entries.includes(RECEIPT_STAGING_NAME);
   const hasEnvironment = entries.includes(ENVIRONMENT_NAME);
@@ -2698,6 +2824,9 @@ function validatePlanRunInventory(run, stateMetadata) {
   ];
   const linkedMutationDestinations = new Map();
   const mutationStages = mutationStageNames.map((name) => {
+    if (beforeMutationStageValidationObserver?.(name) !== undefined) {
+      fail("mutation inventory test observer returned a value", 70);
+    }
     const path = join(run, name);
     const metadata = inspectPendingFile(
       path,
@@ -2927,7 +3056,62 @@ function validatePlanRunInventory(run, stateMetadata) {
   };
 }
 
-function loadState(roots, checkSource, allowCompetingStaging = false) {
+function validatePlanRunInventory(
+  run,
+  beforeMutationStageValidationObserver,
+) {
+  if (
+    beforeMutationStageValidationObserver !== undefined &&
+    typeof beforeMutationStageValidationObserver !== "function"
+  ) {
+    fail("mutation inventory test observer was refused", 64);
+  }
+  for (
+    let supersessions = 0;
+    supersessions <= MAX_PLAN_RUN_INVENTORY_SUPERSESSIONS;
+    supersessions += 1
+  ) {
+    const snapshot = capturePlanRunInventorySnapshot(run);
+    if (!snapshot.stable) {
+      const confirmed = capturePlanRunInventorySnapshot(run);
+      if (
+        planRunInventorySnapshotTransition(snapshot, confirmed) ===
+        "superseded"
+      ) {
+        continue;
+      }
+      fail("plan run inventory changed outside mutation staging");
+    }
+    let inventory;
+    let validationFailure;
+    try {
+      inventory = validatePlanRunInventorySnapshot(
+        run,
+        snapshot.metadata,
+        snapshot.entries,
+        beforeMutationStageValidationObserver,
+      );
+    } catch (error) {
+      validationFailure = error;
+    }
+    const confirmed = capturePlanRunInventorySnapshot(run);
+    const transition = planRunInventorySnapshotTransition(snapshot, confirmed);
+    if (transition === "superseded") continue;
+    if (transition === "refused") {
+      fail("plan run inventory changed outside mutation staging");
+    }
+    if (validationFailure !== undefined) throw validationFailure;
+    return { inventory, stateMetadata: snapshot.metadata };
+  }
+  fail("plan run inventory was repeatedly superseded", 73);
+}
+
+function loadState(
+  roots,
+  checkSource,
+  allowCompetingStaging = false,
+  beforeMutationStageValidationObserver,
+) {
   const entries = readdirSync(roots.stateBase).sort();
   if (
     entries.length > MAX_INERT_STAGING + 2 ||
@@ -2943,8 +3127,10 @@ function loadState(roots, checkSource, allowCompetingStaging = false) {
   const runName = `.run-${activePlan.value.fixture_id}`;
   if (!entries.includes(runName)) fail("state base inventory was refused");
   const run = join(roots.stateBase, runName);
-  const stateMetadata = ownedPrivateDirectory(run, "active run state");
-  const inventory = validatePlanRunInventory(run, stateMetadata);
+  const { inventory, stateMetadata } = validatePlanRunInventory(
+    run,
+    beforeMutationStageValidationObserver,
+  );
   const candidate = parseCanonical(join(run, "candidate.json"), "candidate");
   validateCandidate(candidate.value);
   const plan = parseCanonical(join(run, "00-plan.json"), "plan receipt", 2);
@@ -4757,6 +4943,30 @@ function mutationStageWasRemoved(stagePath) {
   }
 }
 
+function mutationStageObservationTransition(stagePath, identity) {
+  let current;
+  try {
+    current = exactLstat(stagePath);
+  } catch (error) {
+    if (error?.code === "ENOENT") return "removed";
+    fail("pending mutation publication was unavailable", 69);
+  }
+  if (
+    !sameMutationStageIdentity(identity, current)
+  ) {
+    fail("pending mutation publication identity changed");
+  }
+  return sameMetadata(identity, current) ? "same" : "superseded";
+}
+
+function syncMutationStageRecoveryDirectory(run) {
+  try {
+    syncDirectory(run);
+  } catch {
+    fail("pending mutation publication recovery failed", 70);
+  }
+}
+
 // Publish a complete, fsynced blocker through an unguessable private staging
 // name. The final name is created atomically with link(2), so interruption can
 // leave only an inert one-link stage or a valid two-link final artifact.
@@ -4773,10 +4983,7 @@ function publishMutationBlocker(
     reassertAuthority,
   } = {},
 ) {
-  if (
-    !/^\.mutation-(?:slot|close|operation)-[0-9]{2}$/.test(destinationName) &&
-    !/^\.mutation-recovery-[0-9]{2}-[0-9]{2}$/.test(destinationName)
-  ) {
+  if (!isMutationPublicationDestinationName(destinationName)) {
     fail("mutation publication destination was refused", 70);
   }
   for (const milliseconds of [afterLinkMilliseconds, beforeLinkMilliseconds]) {
@@ -4945,40 +5152,87 @@ function publishMutationBlocker(
   fail("mutation publication was repeatedly superseded", 73);
 }
 
-function reconcileMutationStages(roots) {
-  const state = loadState(roots, false);
-  if (state.mutationStages.length === 0) return state;
-  const runMetadata = ownedPrivateDirectory(state.run, "active run state");
-  for (const stage of state.mutationStages) {
-    const expectedLinks = stage.linkedDestination === undefined ? 1n : 2n;
-    const current = inspectPendingFile(
-      stage.path,
-      "pending mutation publication",
-      runMetadata.dev,
-      new Set([expectedLinks]),
-    );
-    if (!sameMetadata(stage.metadata, current)) {
-      fail("pending mutation publication identity changed");
+function reconcileMutationStages(
+  roots,
+  beforeMutationStageReconciliationObserver,
+) {
+  if (
+    beforeMutationStageReconciliationObserver !== undefined &&
+    typeof beforeMutationStageReconciliationObserver !== "function"
+  ) {
+    fail("mutation reconciliation test observer was refused", 64);
+  }
+  let supersessions = 0;
+  while (true) {
+    const state = loadState(roots, false);
+    if (state.mutationStages.length === 0) {
+      syncMutationStageRecoveryDirectory(state.run);
+      return state;
     }
-    if (stage.linkedDestination !== undefined) {
-      const destination = inspectPendingFile(
-        join(state.run, stage.linkedDestination),
-        "published mutation blocker",
-        runMetadata.dev,
-        new Set([2n]),
-      );
-      if (!sameMutationArtifact(current, destination)) {
-        fail("pending mutation publication link was refused");
+    const runMetadata = ownedPrivateDirectory(state.run, "active run state");
+    let stageWasSuperseded = false;
+    for (const stage of state.mutationStages) {
+      if (beforeMutationStageReconciliationObserver?.(stage.name) !== undefined) {
+        fail("mutation reconciliation test observer returned a value", 70);
+      }
+      const expectedLinks = stage.linkedDestination === undefined ? 1n : 2n;
+      let current;
+      try {
+        current = inspectPendingFile(
+          stage.path,
+          "pending mutation publication",
+          runMetadata.dev,
+          new Set([expectedLinks]),
+        );
+        if (!sameMetadata(stage.metadata, current)) {
+          fail("pending mutation publication identity changed");
+        }
+        if (stage.linkedDestination !== undefined) {
+          const destination = inspectPendingFile(
+            join(state.run, stage.linkedDestination),
+            "published mutation blocker",
+            runMetadata.dev,
+            new Set([2n]),
+          );
+          if (!sameMutationArtifact(current, destination)) {
+            fail("pending mutation publication link was refused");
+          }
+        }
+      } catch (error) {
+        const transition = mutationStageObservationTransition(
+          stage.path,
+          stage.metadata,
+        );
+        if (transition === "same") throw error;
+        if (transition === "removed") {
+          syncMutationStageRecoveryDirectory(state.run);
+        }
+        stageWasSuperseded = true;
+        break;
+      }
+      try {
+        unlinkSync(stage.path);
+      } catch (error) {
+        if (error?.code !== "ENOENT") {
+          fail("pending mutation publication recovery failed", 70);
+        }
+        stageWasSuperseded = true;
+      }
+      syncMutationStageRecoveryDirectory(state.run);
+      if (stageWasSuperseded) break;
+    }
+    if (!stageWasSuperseded) {
+      const verified = loadState(roots, false);
+      if (verified.mutationStages.length === 0) {
+        syncMutationStageRecoveryDirectory(verified.run);
+        return verified;
       }
     }
-    try {
-      unlinkSync(stage.path);
-      syncDirectory(state.run);
-    } catch {
-      fail("pending mutation publication recovery failed", 70);
+    supersessions += 1;
+    if (supersessions > MAX_PLAN_RUN_INVENTORY_SUPERSESSIONS) {
+      fail("mutation publication reconciliation was repeatedly superseded", 73);
     }
   }
-  return loadState(roots, false);
 }
 
 function acquireMutationLease(
@@ -4992,9 +5246,30 @@ function acquireMutationLease(
     kind: "none",
     plan: null,
   }),
+  testObservers = {},
 ) {
+  if (
+    testObservers === null ||
+    Array.isArray(testObservers) ||
+    typeof testObservers !== "object" ||
+    Object.keys(testObservers).some(
+      (name) =>
+        !new Set([
+          "afterPublishedInventorySnapshot",
+          "beforeMutationStageReconciliation",
+        ]).has(name),
+    ) ||
+    Object.values(testObservers).some(
+      (observer) => observer !== undefined && typeof observer !== "function",
+    )
+  ) {
+    fail("mutation acquisition test observers were refused", 64);
+  }
   const active = activeMutationRun(roots);
-  const initial = reconcileMutationStages(roots);
+  const initial = reconcileMutationStages(
+    roots,
+    testObservers.beforeMutationStageReconciliation,
+  );
   if (
     initial.liveProviderPlan !== undefined &&
     !new Set([
@@ -5140,7 +5415,12 @@ function acquireMutationLease(
     leaseBytes,
     path: leasePath,
   });
-  const verified = loadState(roots, false);
+  const verified = loadState(
+    roots,
+    false,
+    false,
+    testObservers.afterPublishedInventorySnapshot,
+  );
   if (
     verified.mutationLease === undefined ||
     !verified.mutationLease.bytes.equals(leaseBytes) ||
@@ -10209,8 +10489,40 @@ function publishBackgroundCleanupSettlement(
   return verified;
 }
 
+function callBackgroundCleanupMutationPublicationCheckpoint(
+  observer,
+  checkpoint,
+) {
+  if (observer === undefined) return;
+  if (
+    typeof observer !== "function" ||
+    !new Set([
+      "after-slot-authority-reassertion",
+      "before-mutation-stage-reconciliation",
+      "before-mutation-stage-validation",
+      "before-slot-stage",
+    ]).has(checkpoint)
+  ) {
+    fail("background cleanup mutation publication test observer was refused", 64);
+  }
+  if (observer(checkpoint) !== undefined) {
+    fail("background cleanup mutation publication test observer returned a value", 70);
+  }
+}
+
 export async function executeBackgroundProviderCleanupForExecutor(argumentsValue) {
   validateBackgroundCleanupAdapter(argumentsValue.adapter);
+  const mutationPublicationCheckpoint = (checkpoint) =>
+    callBackgroundCleanupMutationPublicationCheckpoint(
+      argumentsValue.testMutationPublicationCheckpoint,
+      checkpoint,
+    );
+  if (
+    argumentsValue.testMutationPublicationCheckpoint !== undefined &&
+    typeof argumentsValue.testMutationPublicationCheckpoint !== "function"
+  ) {
+    fail("background cleanup mutation publication test observer was refused", 64);
+  }
   const roots = prepareRoots(
     argumentsValue.repoRoot,
     argumentsValue.stateBase,
@@ -10303,11 +10615,37 @@ export async function executeBackgroundProviderCleanupForExecutor(argumentsValue
     "provider-cleanup",
     digest(canonicalBytes(intendedReceipt)),
     expectedSource,
-    { reassertAuthority: reassertSlotPublication },
+    {
+      afterAuthorityObserver:
+        argumentsValue.testMutationPublicationCheckpoint === undefined
+          ? undefined
+          : () => mutationPublicationCheckpoint(
+              "after-slot-authority-reassertion",
+            ),
+      beforeStageObserver:
+        argumentsValue.testMutationPublicationCheckpoint === undefined
+          ? undefined
+          : () => mutationPublicationCheckpoint("before-slot-stage"),
+      reassertAuthority: reassertSlotPublication,
+    },
     {
       contractSha256: CONTROLLED_BACKGROUND_RETIREMENT_CONTRACT_SHA256,
       kind: CONTROLLED_BACKGROUND_RETIREMENT_OPERATION_KIND,
       plan: operationPlan,
+    },
+    {
+      afterPublishedInventorySnapshot:
+        argumentsValue.testMutationPublicationCheckpoint === undefined
+          ? undefined
+          : () => mutationPublicationCheckpoint(
+              "before-mutation-stage-validation",
+            ),
+      beforeMutationStageReconciliation:
+        argumentsValue.testMutationPublicationCheckpoint === undefined
+          ? undefined
+          : () => mutationPublicationCheckpoint(
+              "before-mutation-stage-reconciliation",
+            ),
     },
   );
   holdFakeProvider(argumentsValue.adapter.after_slot_hold_milliseconds);

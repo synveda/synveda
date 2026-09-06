@@ -623,11 +623,26 @@ settlement. Recovery settlement and close must name the latest claim. Settled
 observations cannot regress or change, and completion is reasserted again at
 the final close link.
 
-Only test fixture modules invoke these seams and no supported lifecycle target
-exposes them. The authority-gated helpers are unsupported internal composition
-hooks, not a JavaScript security boundary; owner-UID code execution and journal
-mutation are one trusted-host boundary. Process probes do not prove another PID
-namespace, and ACLs, xattrs, flags and bind mounts remain trusted-host limits.
+Concurrent private mutation publication cannot invalidate an otherwise valid
+publisher through a stale directory read. The loader validates one captured,
+sorted run inventory and accepts it only when the directory generation and
+mutation-stage identities remain exact. Private-stage creation or retirement
+and an append-only recognised final-name candidate discard the whole snapshot;
+the next stable scan must prove its topology. Up to 16 supersessions are retried
+before one final scan, and continued churn fails content-free with status 73.
+Reconciliation similarly reloads after exact stage disappearance or same-inode
+publication-link progress, and fsyncs before every zero-stage return. Same-name
+identity replacement, unrecognised entry changes, final-name removal, capture
+failure and every stable invalid topology remain hard failures. A pipe-barrier
+regression fixes the former winner-69/loser-73 interleaving at winner 0/loser 73
+with one cleanup slot, settlement and close.
+
+Only tests and test fixture modules pass these observer hooks; no supported
+lifecycle target exposes them. The authority-gated helpers are unsupported
+internal composition hooks, not a JavaScript security boundary; owner-UID code
+execution and journal mutation are one trusted-host boundary. Process probes do
+not prove another PID namespace, and ACLs, xattrs, flags and bind mounts remain
+trusted-host limits.
 Controlled-background evidence is structurally ineligible for the synthetic
 environment finalizer, so finalization remains blocked. No Docker, Colima,
 resolver, registry, database, live-provider or host-management command ran in
