@@ -100,6 +100,12 @@ import {
   liveProviderStartDecisionBytes,
   validateColimaLiveProviderStartDecisionPublicationPlan,
 } from "./clean-engine-live-provider-start-decision.mjs";
+import {
+  LiveProviderProcessStartFailure,
+  buildColimaLiveCompletedProviderStartDecisionProjectionStructure,
+  buildColimaLiveProviderProcessStartEffectFreshAdmissionStructure,
+  liveProviderProcessStartBytes,
+} from "./clean-engine-live-provider-process-start.mjs";
 
 export {
   COLIMA_LIVE_FIXTURE_PRE_EFFECT_ADMISSION_SCHEMA,
@@ -5617,13 +5623,20 @@ function abortedLiveProviderStartDecisionTail(state, completedIntent) {
   return tail;
 }
 
-function completedLiveProviderIntentCoreSnapshot(state, fixtureOnly) {
+function completedLiveProviderIntentSourceSnapshot(
+  state,
+  fixtureOnly,
+  providerStatePhase,
+) {
+  if (!new Set(["intent", "start-decision"]).has(providerStatePhase)) {
+    fail("completed live provider intent snapshot phase was refused", 70);
+  }
   const planSnapshot = completedLiveProviderPlanCoreSnapshot(state);
   const completed = completedLiveProviderIntentForVariant(state, fixtureOnly);
   assertLiveProviderIntentVariantHistory(state, fixtureOnly);
-  const expectedProviderContract = fixtureOnly
-    ? "live-provider-fixture-intent-only"
-    : "live-provider-intent-only";
+  const expectedProviderContract = `live-provider-${
+    fixtureOnly ? "fixture-" : ""
+  }${providerStatePhase}-only`;
   if (
     completed === undefined ||
     completed.fixtureOnly !== fixtureOnly ||
@@ -5670,6 +5683,14 @@ function completedLiveProviderIntentCoreSnapshot(state, fixtureOnly) {
     completedIntentProjection,
     source,
   });
+}
+
+function completedLiveProviderIntentCoreSnapshot(state, fixtureOnly) {
+  return completedLiveProviderIntentSourceSnapshot(
+    state,
+    fixtureOnly,
+    "intent",
+  );
 }
 
 function completedLiveProviderIntentSnapshot(state, fixtureOnly) {
@@ -6368,6 +6389,223 @@ function liveProviderStartDecisionCompletion(completed) {
     }
     throw error;
   }
+}
+
+function completedLiveProviderStartDecisionCoreSnapshot(state, fixtureOnly) {
+  const completed = completedLiveProviderStartDecisionForVariant(
+    state,
+    fixtureOnly,
+  );
+  if (completed === undefined) {
+    fail("completed live provider start decision was unavailable", 69);
+  }
+  const intentSnapshot = completedLiveProviderIntentSourceSnapshot(
+    state,
+    fixtureOnly,
+    "start-decision",
+  );
+  assertLiveProviderStartDecisionVariantHistory(state, fixtureOnly);
+  const expectedProviderContract = fixtureOnly
+    ? "live-provider-fixture-start-decision-only"
+    : "live-provider-start-decision-only";
+  if (
+    completed === undefined ||
+    completed.fixtureOnly !== fixtureOnly ||
+    completed.close.value.slot_sequence !==
+      completed.slot.value.journal_sequence ||
+    completed.close.value.disposition !== "completed" ||
+    completed.close.value.authority !== "owner" ||
+    completed.close.value.result_sequence !== 0 ||
+    completed.close.value.result_head_sha256 !==
+      state.receiptState.head_sha256 ||
+    completed.close.value.result_environment_sha256 !== ZERO_SHA256 ||
+    completed.close.value.operation_evidence_sha256 !== ZERO_SHA256 ||
+    state.mutationCloses.at(-1) !== completed.close ||
+    state.mutationLease !== undefined ||
+    state.mutationRecoveries.length !== 0 ||
+    state.mutationStages.length !== 0 ||
+    state.pendingPublication !== undefined ||
+    state.environment !== undefined ||
+    state.environmentPublication !== undefined ||
+    state.mutationOperations.length !== 0 ||
+    state.operationSettlement !== undefined ||
+    state.cleanupSettlement !== undefined ||
+    state.providerState.contract !== expectedProviderContract ||
+    state.providerState.operationEvidenceSha256 !== ZERO_SHA256 ||
+    state.cleanupState.contract !== "journal-only" ||
+    state.cleanupState.operationEvidenceSha256 !== ZERO_SHA256 ||
+    !liveProviderStartDecisionBytes(completed.source).equals(
+      liveProviderStartDecisionBytes(intentSnapshot.source),
+    )
+  ) {
+    fail("completed live provider start decision was unavailable", 69);
+  }
+  const source = Object.freeze({
+    closeAuthority: completed.close.value.authority,
+    fixtureOnly: completed.fixtureOnly,
+    startDecisionCompletion: liveProviderStartDecisionCompletion(completed),
+    startDecisionPublicationPlan: completed.publicationPlan,
+    startDecisionSource: completed.source,
+  });
+  let completedStartDecisionProjection;
+  try {
+    completedStartDecisionProjection =
+      buildColimaLiveCompletedProviderStartDecisionProjectionStructure(source);
+  } catch (error) {
+    if (error instanceof LiveProviderProcessStartFailure) {
+      fail(
+        "completed live provider start decision projection was refused",
+        error.exitStatus,
+      );
+    }
+    throw error;
+  }
+  return Object.freeze({
+    ...intentSnapshot,
+    completedStartDecisionProjection,
+    source,
+  });
+}
+
+function sameCompletedLiveProviderStartDecisionSnapshot(left, right) {
+  return (
+    sameLiveProviderPlanSnapshot(left, right) &&
+    liveProviderStartDecisionBytes(left.completedIntentProjection).equals(
+      liveProviderStartDecisionBytes(right.completedIntentProjection),
+    ) &&
+    left.source.closeAuthority === right.source.closeAuthority &&
+    left.source.fixtureOnly === right.source.fixtureOnly &&
+    liveProviderStartDecisionBytes(left.source.startDecisionCompletion).equals(
+      liveProviderStartDecisionBytes(right.source.startDecisionCompletion),
+    ) &&
+    liveProviderStartDecisionBytes(
+      left.source.startDecisionPublicationPlan,
+    ).equals(
+      liveProviderStartDecisionBytes(
+        right.source.startDecisionPublicationPlan,
+      ),
+    ) &&
+    liveProviderStartDecisionBytes(left.source.startDecisionSource).equals(
+      liveProviderStartDecisionBytes(right.source.startDecisionSource),
+    ) &&
+    liveProviderProcessStartBytes(
+      left.completedStartDecisionProjection,
+    ).equals(
+      liveProviderProcessStartBytes(
+        right.completedStartDecisionProjection,
+      ),
+    )
+  );
+}
+
+function buildLiveProviderProcessStartEffectFreshAdmission(
+  snapshot,
+  rootObservation,
+) {
+  try {
+    return buildColimaLiveProviderProcessStartEffectFreshAdmissionStructure({
+      completedStartDecisionProjection:
+        snapshot.completedStartDecisionProjection,
+      rootObservation,
+      source: snapshot.source,
+    });
+  } catch (error) {
+    if (error instanceof LiveProviderProcessStartFailure) {
+      fail("live provider process start admission was refused", error.exitStatus);
+    }
+    throw error;
+  }
+}
+
+function observeColimaLiveProviderStartEffectFreshAdmission(
+  admittedArguments,
+  { fixtureOnly, testCheckpoint },
+) {
+  const roots = prepareRoots(
+    admittedArguments.repoRoot,
+    admittedArguments.stateBase,
+    false,
+  );
+  const firstState = completedLiveProviderStartDecisionCoreSnapshot(
+    loadState(roots, true),
+    fixtureOnly,
+  );
+  const firstRoots = observeLivePreEffectRoots(
+    admittedArguments,
+    firstState,
+    fixtureOnly,
+  );
+  validateLivePreEffectRootBinding(firstRoots, firstState, fixtureOnly);
+  const firstAdmission = buildLiveProviderProcessStartEffectFreshAdmission(
+    firstState,
+    firstRoots,
+  );
+  testCheckpoint?.("after-first-process-start-effect-admission-observation");
+
+  const secondState = completedLiveProviderStartDecisionCoreSnapshot(
+    loadState(roots, true),
+    fixtureOnly,
+  );
+  if (!sameCompletedLiveProviderStartDecisionSnapshot(firstState, secondState)) {
+    fail("completed live provider start decision state changed", 73);
+  }
+  const secondRoots = observeLivePreEffectRoots(
+    admittedArguments,
+    secondState,
+    fixtureOnly,
+  );
+  validateLivePreEffectRootBinding(secondRoots, secondState, fixtureOnly);
+  if (!colimaLiveBytes(firstRoots).equals(colimaLiveBytes(secondRoots))) {
+    fail("live provider process start root observation changed", 73);
+  }
+  const secondAdmission = buildLiveProviderProcessStartEffectFreshAdmission(
+    secondState,
+    secondRoots,
+  );
+  if (
+    !liveProviderProcessStartBytes(firstAdmission).equals(
+      liveProviderProcessStartBytes(secondAdmission),
+    )
+  ) {
+    fail("live provider process start admission changed", 73);
+  }
+  return secondAdmission;
+}
+
+export function observeColimaLiveProviderStartEffectFreshAdmissionForExecutor(
+  argumentsValue,
+) {
+  return observeColimaLiveProviderStartEffectFreshAdmission(
+    admissionArguments(argumentsValue),
+    { fixtureOnly: false, testCheckpoint: undefined },
+  );
+}
+
+// This unsupported fixture seam substitutes only the bounded observation
+// requirements and the O1/S2 checkpoint. State and decision provenance remain
+// internally reconstructed, and the result grants no process authority.
+export function observeColimaLiveProviderStartEffectFreshAdmissionForTest(
+  argumentsValue,
+) {
+  const admittedArguments = admissionArguments(argumentsValue, [
+    "requirements",
+    "testCheckpoint",
+  ]);
+  if (
+    admittedArguments.requirements === null ||
+    Array.isArray(admittedArguments.requirements) ||
+    typeof admittedArguments.requirements !== "object" ||
+    typeof admittedArguments.testCheckpoint !== "function"
+  ) {
+    fail("live provider fixture process start admission arguments were refused", 64);
+  }
+  return observeColimaLiveProviderStartEffectFreshAdmission(
+    admittedArguments,
+    {
+      fixtureOnly: true,
+      testCheckpoint: admittedArguments.testCheckpoint,
+    },
+  );
 }
 
 function validateHistoricalLiveProviderStartDecisionRetry(

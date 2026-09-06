@@ -354,6 +354,15 @@ ownership or liveness claim. Exact completed retries return the historical
 non-authorizing completion without claiming current absence. Serialized values
 lose provenance and cannot be supplied back as authority.
 
+The post-decision effect-admission seam remains read-only and deny-only. It
+reconstructs the completed terminal decision from state, then requires equal
+state and root observations in `S1/O1/S2/O2` order. Stable absence can produce
+only a candidate whose process start/spawn/signal/group, adapter, root,
+publication, recovery, lifecycle and finalization flags are false; a stable
+foreign collision produces no candidate. Its logical supervisor label is not a
+PID or PGID. The admission is not persisted, has no operation kind or registry
+entry, and the only exposed authorization function unconditionally refuses it.
+
 No supported lifecycle target exposes these fixtures and no Docker/Colima
 effect is enabled. Controlled-background evidence remains ineligible for the
 synthetic finalizer. The `*WithAuthorityGate` exports are internal composition

@@ -302,13 +302,21 @@ decision writes no process, adapter, provider, evidence, runtime, receipt or
 environment artifact and grants no effect, provider recovery, cleanup,
 lifecycle or finalization authority.
 
-No Docker, Colima or Lima process ran. Next specify the process-start/effect
-authority, causal process-group/host-agent/Engine/socket/context identities,
-uncertain-start classification and dynamic-tree retirement before registering
-or invoking a live provider. Live-provider identity, builder, proxy, browser
-and cleanup evidence follow; Linux/reference HTTPS must pass before legacy
-Rauthy/Temporal assets are deleted. Backup/restore, upgrade and Apalis remain
-open CPR-45 slices.
+A post-decision read-only seam now reconstructs the exact terminal decision and
+performs a current `S1/O1/S2/O2` state/root observation. Stable absence yields
+only a process-effect candidate with every authority flag explicitly false;
+stable collision yields `null`. The admission grants nothing, is never persisted
+and introduces no journal action, operation kind, registry row, receipt or
+lifecycle surface. Its authorization entry point always refuses.
+
+No Docker, Colima or Lima process ran. Next implement the actual process effect
+as one indivisible journal-schema hard cut with a durable effect slot,
+synchronous fresh gate, causal process-group/host-agent/Engine/socket/context
+evidence, uncertain-start recovery, receipts/settlement and dynamic-tree
+retirement before registering or invoking a live provider. Live-provider
+identity, builder, proxy, browser and cleanup evidence follow; Linux/reference
+HTTPS must pass before legacy Rauthy/Temporal assets are deleted. Backup/restore,
+upgrade and Apalis remain open CPR-45 slices.
 
 ## Unscheduled — not listed in the Sequencing section
 

@@ -38,6 +38,8 @@ import {
   observeColimaLivePreEffectAdmissionForTest,
   observeColimaLiveProviderStartFreshAdmissionForExecutor,
   observeColimaLiveProviderStartFreshAdmissionForTest,
+  observeColimaLiveProviderStartEffectFreshAdmissionForExecutor,
+  observeColimaLiveProviderStartEffectFreshAdmissionForTest,
   projectLiveProviderPlanCompletionForExecutor,
   providerRecoveryConfirmationForExecutor,
   publishColimaLiveProviderIntentForExecutor,
@@ -76,6 +78,12 @@ import {
   COLIMA_LIVE_PROVIDER_START_DECISION_OPERATION_KIND,
   liveProviderStartDecisionBytes,
 } from "../deploy/compose/scripts/clean-engine-live-provider-start-decision.mjs";
+import {
+  COLIMA_LIVE_FIXTURE_COMPLETED_PROVIDER_START_DECISION_PROJECTION_SCHEMA,
+  COLIMA_LIVE_FIXTURE_PROCESS_START_EFFECT_CANDIDATE_SCHEMA,
+  COLIMA_LIVE_FIXTURE_PROCESS_START_EFFECT_FRESH_ADMISSION_SCHEMA,
+  liveProviderProcessStartBytes,
+} from "../deploy/compose/scripts/clean-engine-live-provider-process-start.mjs";
 import {
   COLIMA_LIVE_PRE_EFFECT_ROOT_OBSERVATION_SCHEMA,
 } from "../deploy/compose/scripts/clean-engine-colima-live-schemas.mjs";
@@ -338,6 +346,15 @@ function prepareCompletedLiveProviderIntentFixture(state) {
     fixtureIntentArguments(state, prepared.preparation),
   );
   return { ...prepared, intentCompletion };
+}
+
+function prepareCompletedLiveProviderStartDecisionFixture(state) {
+  const prepared = prepareCompletedLiveProviderIntentFixture(state);
+  const startDecisionCompletion =
+    publishColimaLiveProviderStartDecisionForTest(
+      fixtureStartAdmissionArguments(state, prepared.preparation),
+    );
+  return { ...prepared, startDecisionCompletion };
 }
 
 function fixtureStartAdmissionArguments(
@@ -1954,7 +1971,7 @@ test("state-owned process-start admission has no persistence or effect surface",
   );
   assert.doesNotMatch(
     observerSource,
-    /(?:providerAdapter|providerProcess|mutationOperation|receiptFileName)/u,
+    /(?:providerAdapter|mutationOperation|receiptFileName)/u,
   );
 
   const lifecycle = readFileSync(
@@ -3068,6 +3085,344 @@ test("start decision crash boundaries reconcile without inventing effects", asyn
         rmSync(state.root, { recursive: true, force: true });
       }
     }
+  }
+});
+
+test("terminal start decision admits only a current deny-only effect candidate", () => {
+  const state = fixture();
+  let preparation;
+  try {
+    const prepared = prepareCompletedLiveProviderStartDecisionFixture(state);
+    preparation = prepared.preparation;
+    const active = prepared.active;
+    const stateBefore = snapshotTree(state.root);
+    const preparationBefore = snapshotTree(preparation.root);
+    const checkpoints = [];
+    const admission =
+      observeColimaLiveProviderStartEffectFreshAdmissionForTest(
+        fixtureStartAdmissionArguments(
+          state,
+          preparation,
+          (checkpoint) => checkpoints.push(checkpoint),
+        ),
+      );
+    assert.deepEqual(Object.keys(admission).sort(), [
+      "authority",
+      "completed_start_decision_projection",
+      "process_start_effect_candidate",
+      "root_observation",
+      "schema",
+      "supervisor_process_group_label",
+    ]);
+    assert.equal(
+      admission.schema,
+      COLIMA_LIVE_FIXTURE_PROCESS_START_EFFECT_FRESH_ADMISSION_SCHEMA,
+    );
+    assert.equal(
+      admission.authority,
+      "fixture-only-point-in-time-deny-only-not-effect-authority",
+    );
+    const projection = admission.completed_start_decision_projection;
+    assert.equal(
+      projection.schema,
+      COLIMA_LIVE_FIXTURE_COMPLETED_PROVIDER_START_DECISION_PROJECTION_SCHEMA,
+    );
+    assert.equal(
+      projection.provider_start_decision_slot_sha256,
+      prepared.startDecisionCompletion.decision_slot_sha256,
+    );
+    assert.equal(
+      projection.provider_start_decision_close_sha256,
+      prepared.startDecisionCompletion.decision_close_sha256,
+    );
+    assert.equal(
+      projection.provider_start_decision_publication_plan_sha256,
+      prepared.startDecisionCompletion.decision_publication_plan_sha256,
+    );
+    assert.equal(
+      projection.decision_candidate_sha256,
+      prepared.startDecisionCompletion.decision_candidate_sha256,
+    );
+    assert.equal(
+      projection.completed_intent_projection_sha256,
+      prepared.startDecisionCompletion.completed_intent_projection_sha256,
+    );
+    const candidate = admission.process_start_effect_candidate;
+    assert.notEqual(candidate, null);
+    assert.equal(
+      candidate.schema,
+      COLIMA_LIVE_FIXTURE_PROCESS_START_EFFECT_CANDIDATE_SCHEMA,
+    );
+    assert.equal(candidate.effect_name, "provider-process-start");
+    assert.equal(
+      candidate.effect_authorization,
+      "denied-no-durable-effect-contract",
+    );
+    assert.equal(candidate.process_state, "not-reached");
+    assert.equal(candidate.durable_effect_slot_required, true);
+    assert.equal(candidate.future_effect_fresh_admission_required, true);
+    assert.equal(candidate.process_start_authorized, false);
+    assert.equal(candidate.process_spawn_authorized, false);
+    assert.equal(candidate.process_signal_authorized, false);
+    assert.equal(candidate.process_group_ownership_authorized, false);
+    assert.equal(candidate.provider_root_mutation_authorized, false);
+    assert.equal(candidate.provider_adapter_execution_authorized, false);
+    assert.equal(candidate.effect_execution_authorized, false);
+    assert.equal(candidate.evidence_publication_authorized, false);
+    assert.equal(candidate.receipt_publication_authorized, false);
+    assert.equal(candidate.provider_recovery_authorized, false);
+    assert.equal(candidate.lifecycle_exposed, false);
+    assert.equal(candidate.finalization_authorized, false);
+    assert.equal(candidate.cross_namespace_atomic_reservation, false);
+    assert.equal(
+      candidate.completed_start_decision_projection_sha256,
+      sha256(liveProviderProcessStartBytes(projection)),
+    );
+    assert.deepEqual(checkpoints, [
+      "after-first-process-start-effect-admission-observation",
+    ]);
+    assertRecursivelyFrozen(admission);
+    assert.deepEqual(snapshotTree(state.root), stateBefore);
+    assert.deepEqual(snapshotTree(preparation.root), preparationBefore);
+    assertInertStartDecisionJournal(active, 2);
+
+    checkpoints.length = 0;
+    const repeated =
+      observeColimaLiveProviderStartEffectFreshAdmissionForTest(
+        fixtureStartAdmissionArguments(
+          state,
+          preparation,
+          (checkpoint) => checkpoints.push(checkpoint),
+        ),
+      );
+    assert.deepEqual(repeated, admission);
+    assert.deepEqual(checkpoints, [
+      "after-first-process-start-effect-admission-observation",
+    ]);
+    assertInertStartDecisionJournal(active, 2);
+
+    const collisionPath = join(
+      preparation.input.environment.COLIMA_HOME,
+      preparation.input.provider_profile,
+    );
+    writePrivateColimaLiveFixtureFile(
+      collisionPath,
+      Buffer.from("foreign collision\n", "utf8"),
+      0o600,
+    );
+    const collisionStateBefore = snapshotTree(state.root);
+    const collisionPreparationBefore = snapshotTree(preparation.root);
+    const collision =
+      observeColimaLiveProviderStartEffectFreshAdmissionForTest(
+        fixtureStartAdmissionArguments(state, preparation),
+      );
+    assert.equal(
+      collision.root_observation.root_set_disposition,
+      "foreign-collision",
+    );
+    assert.equal(collision.process_start_effect_candidate, null);
+    assertRecursivelyFrozen(collision);
+    assert.deepEqual(snapshotTree(state.root), collisionStateBefore);
+    assert.deepEqual(snapshotTree(preparation.root), collisionPreparationBefore);
+    assertInertStartDecisionJournal(active, 2);
+    unlinkSync(collisionPath);
+
+    const restored =
+      observeColimaLiveProviderStartEffectFreshAdmissionForTest(
+        fixtureStartAdmissionArguments(state, preparation),
+      );
+    assert.notEqual(restored.process_start_effect_candidate, null);
+    assert.equal(run(state, "status").status, 0);
+    assert.equal(run(state, "verify").status, 0);
+  } finally {
+    if (preparation !== undefined) {
+      rmSync(preparation.root, { recursive: true, force: true });
+    }
+    rmSync(state.root, { recursive: true, force: true });
+  }
+});
+
+test("post-decision effect admission refuses root and state drift between samples", () => {
+  for (const drift of ["root-appearance", "decision-close-authority"]) {
+    const state = fixture();
+    let preparation;
+    try {
+      const prepared = prepareCompletedLiveProviderStartDecisionFixture(state);
+      preparation = prepared.preparation;
+      const closePath = join(prepared.active, ".mutation-close-02");
+      let changed = false;
+      assert.throws(
+        () =>
+          observeColimaLiveProviderStartEffectFreshAdmissionForTest(
+            fixtureStartAdmissionArguments(
+              state,
+              preparation,
+              (checkpoint) => {
+                if (
+                  checkpoint !==
+                    "after-first-process-start-effect-admission-observation" ||
+                  changed
+                ) {
+                  return;
+                }
+                changed = true;
+                if (drift === "root-appearance") {
+                  writePrivateColimaLiveFixtureFile(
+                    join(
+                      preparation.input.environment.COLIMA_HOME,
+                      preparation.input.provider_profile,
+                    ),
+                    Buffer.from("late foreign collision\n", "utf8"),
+                    0o600,
+                  );
+                } else {
+                  const close = parse(closePath);
+                  close.authority = "recovery";
+                  writeFileSync(closePath, canonicalBytes(close), {
+                    mode: 0o600,
+                  });
+                }
+              },
+            ),
+          ),
+        drift === "root-appearance"
+          ? /root observation changed/u
+          : /mutation close|recovery authority|start decision/u,
+      );
+      assert.equal(changed, true, drift);
+      assert.deepEqual(
+        readdirSync(prepared.active).filter((name) =>
+          /^\.mutation-slot-03|^\.mutation-close-03|^\.mutation-operation-/u.test(
+            name,
+          ),
+        ),
+        [],
+        drift,
+      );
+      for (const directory of ["evidence", "provider", "registry", "runtime"]) {
+        assert.deepEqual(readdirSync(join(prepared.active, directory)), [], drift);
+      }
+    } finally {
+      if (preparation !== undefined) {
+        rmSync(preparation.root, { recursive: true, force: true });
+      }
+      rmSync(state.root, { recursive: true, force: true });
+    }
+  }
+});
+
+test("post-decision effect admission requires current terminal state and closed arguments", () => {
+  for (const phase of ["plan", "intent"]) {
+    const state = fixture();
+    let preparation;
+    try {
+      const prepared =
+        phase === "plan"
+          ? prepareLiveProviderIntentFixture(state)
+          : prepareCompletedLiveProviderIntentFixture(state);
+      preparation = prepared.preparation;
+      assert.throws(
+        () =>
+          observeColimaLiveProviderStartEffectFreshAdmissionForTest(
+            fixtureStartAdmissionArguments(state, preparation),
+          ),
+        /completed live provider start decision was unavailable/u,
+        phase,
+      );
+    } finally {
+      if (preparation !== undefined) {
+        rmSync(preparation.root, { recursive: true, force: true });
+      }
+      rmSync(state.root, { recursive: true, force: true });
+    }
+  }
+
+  const state = fixture();
+  let preparation;
+  try {
+    const prepared = prepareCompletedLiveProviderStartDecisionFixture(state);
+    preparation = prepared.preparation;
+    const argumentsValue = fixtureStartAdmissionArguments(state, preparation);
+    const before = snapshotTree(state.state);
+    assert.throws(
+      () =>
+        observeColimaLiveProviderStartEffectFreshAdmissionForExecutor({
+          observation: preparation.observation,
+          observationInput: preparation.input,
+          repoRoot: state.repo,
+          stateBase: state.state,
+        }),
+      /evidence class already differs|completed live provider start decision/u,
+    );
+    assert.throws(
+      () =>
+        observeColimaLiveProviderStartEffectFreshAdmissionForTest({
+          ...argumentsValue,
+          callerSource: {},
+        }),
+      /pre-effect admission arguments were refused/u,
+    );
+    assert.deepEqual(snapshotTree(state.state), before);
+
+    rmSync(preparation.root, { recursive: true, force: true });
+    preparation = undefined;
+    assert.throws(
+      () =>
+        observeColimaLiveProviderStartEffectFreshAdmissionForTest(
+          argumentsValue,
+        ),
+      /observation|unavailable/u,
+    );
+    assert.deepEqual(snapshotTree(state.state), before);
+  } finally {
+    if (preparation !== undefined) {
+      rmSync(preparation.root, { recursive: true, force: true });
+    }
+    rmSync(state.root, { recursive: true, force: true });
+  }
+});
+
+test("the post-decision effect observer has no provider-effect control surface", () => {
+  const stateSource = readFileSync(stateTool, "utf8");
+  const start = stateSource.indexOf(
+    "function completedLiveProviderStartDecisionCoreSnapshot",
+  );
+  const end = stateSource.indexOf(
+    "function validateHistoricalLiveProviderStartDecisionRetry",
+    start,
+  );
+  assert.ok(start >= 0 && end > start);
+  const observerSource = stateSource.slice(start, end);
+  assert.doesNotMatch(
+    observerSource,
+    /\b(?:acquire|append|chmod|chown|close|copyFile|execute|finalize|fork|kill|launch|link|mkdir|publish|reconcile|recover|rename|retire|rm|rmdir|settle|signal|spawn|symlink|truncate|unlink|write)[A-Za-z0-9_]*\s*\(/u,
+  );
+  assert.doesNotMatch(
+    observerSource,
+    /\b(?:inspectControlledBackgroundProvider|inspectControlledBackgroundProviderPrefix|launchControlledBackgroundProviderWithAuthorityGate|mutationOperationFileName|planControlledBackgroundProviderCreateWithAuthorityGate|planControlledBackgroundProviderOperation|providerAdapterReceipt|providerProcessBytes|providerProcessDigest|receiptFileName|retireControlledBackgroundProviderWithAuthorityGate)\b/u,
+  );
+  assert.doesNotMatch(observerSource, /authorizeColimaLiveProviderProcessStartEffect/u);
+
+  const lifecycle = readFileSync(
+    new URL(
+      "../deploy/compose/scripts/clean-engine-acceptance.sh",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  assert.match(lifecycle, /plan\|status\|verify/u);
+  assert.doesNotMatch(lifecycle, /process-start-effect/u);
+
+  for (const path of [
+    "../deploy/compose/scripts/clean-engine-provider-adapter-registry.mjs",
+    "../deploy/compose/scripts/clean-engine-provider-process-contract.mjs",
+    "../deploy/compose/scripts/clean-engine-receipts.mjs",
+  ]) {
+    const consumer = readFileSync(new URL(path, import.meta.url), "utf8");
+    assert.doesNotMatch(
+      consumer,
+      /clean-engine-live-provider-process-start/u,
+    );
   }
 });
 

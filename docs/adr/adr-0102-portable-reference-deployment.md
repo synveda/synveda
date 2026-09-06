@@ -293,6 +293,16 @@ intent and decision generations before each matching owner completion, and a
 completed decision is terminal. Exact retry returns historical non-authorizing
 state without re-reading roots. No process authority follows from persistence.
 
+After that terminal decision, a separate read-only seam may project its exact
+slot, close, publication-plan, candidate and predecessor identities and perform
+a current `S1/O1/S2/O2` state/root observation. Stable all-absent roots derive
+only a deny-only process-effect candidate with every authority flag false;
+stable collision derives `null`. The result is not persisted and introduces no
+journal action, operation kind, contract digest, registry entry or receipt. Its
+authorization function always refuses. Actual process invocation therefore
+requires a later indivisible durable effect-slot/fresh-admission hard cut with
+authenticated process evidence and uncertain-start recovery.
+
 ## Options considered
 
 1. **Keep contributor and installed Compose separate** — preserves current

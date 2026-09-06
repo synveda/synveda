@@ -184,6 +184,15 @@ atomic reservation of the separate Colima/Lima namespaces. This adds
 deterministic inert-state evidence only—not a live provider, process, VM,
 Engine, socket, context, cleanup, finalization or readiness result.
 
+A subsequent read-only seam now reconstructs the exact completed terminal
+decision and repeats current state/root observation in `S1/O1/S2/O2` order.
+Stable absence yields only a deny-only process-effect candidate with every
+authority flag false; stable collision yields no candidate. It adds no journal
+action, operation contract, registry row, receipt or persistent artifact, and
+its authorization entry point always refuses. This closes only the
+post-decision observation shape; it is not process, provider, recovery or
+readiness evidence.
+
 Live Linux/provider CI and a current Docker Desktop/provider run remain absent.
 Consequently this evidence improves the boundary without changing readiness. One
 frozen Docker Desktop candidate also proved bounded PostgreSQL/Keycloak

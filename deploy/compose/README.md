@@ -316,11 +316,21 @@ an exact retry returns its historical, non-authorizing completion without
 reading current roots. Race, crash, recovery and rehashed-tamper tests enforce
 the ordered plan/intent/decision grammar.
 
+A separate read-only post-decision seam projects that exact completed terminal
+decision and observes state and roots again in `S1/O1/S2/O2` order. Stable
+all-absent roots yield a process-start-effect candidate whose process, adapter,
+root, publication, recovery, lifecycle and finalization authorities are all
+explicitly false; a stable foreign collision yields `null`. The admission is
+point-in-time data, grants nothing, and the deliberate authorization entry
+point always refuses it. This seam adds no journal action, operation kind,
+registry row, receipt, persistence or provider/process mutation.
+
 These point-in-time root observations and the journal hard-link CAS do not
 atomically reserve the separate Colima/Lima namespaces. The bounded supervisor
 label is not a PID, PGID, ownership or liveness fact, and a future effect owner
-must perform fresh admission. Serialized admission, projection, candidate or
-prefix values cannot be supplied as proof.
+must acquire a separate durable effect slot and perform another fresh admission.
+Serialized admission, projection, candidate or prefix values cannot be supplied
+as proof.
 
 No supported lifecycle target exposes a plan, live-intent or start-decision
 fixture seam; there
@@ -328,7 +338,7 @@ is no live provider execution, provider-effect recovery, cleanup or environment 
 `runtime/`, `provider/` and `evidence/` remain empty. A completed plan centrally
 blocks every other mutation and finalization except its exact inert intent,
 which may then be followed by its exact decision. A completed decision permits
-no successor. An abandoned
+no persisted successor. An abandoned
 plan slot may only
 be explicitly recovered as `aborted-before-effect`; this journal repair grants
 no provider-recovery capability, after which the same exact plan may compete for

@@ -648,14 +648,26 @@ environment publication, provider-effect recovery, cleanup, lifecycle and
 finalization remain false. The logical supervisor label is not a PID, PGID,
 ownership or liveness fact.
 
+The next read-only boundary now projects the exact completed terminal decision,
+including its slot, close, publication-plan, candidate and predecessor digests,
+and re-observes state and roots in `S1/O1/S2/O2` order. Stable all-absent roots
+yield a process-start-effect candidate that explicitly denies every process,
+adapter, root, publication, recovery, lifecycle and finalization capability;
+stable collision yields `null`. Production and fixture schemas remain distinct.
+The admission is not persisted and adds no journal action, operation kind,
+contract digest, registry row, receipt or provider artifact. Its explicit
+authorization function always refuses, and no Docker, Colima or Lima process
+ran.
+
 ### Immediate next slice
 
-Specify and close one process-start/effect authority boundary before invoking a
-provider: exact cooperative process-group ownership, host-agent/Engine/socket/
-context identities, uncertain-start classification, fresh decision-to-effect
-admission and dynamic-tree retirement. Keep the execution path unsupported and
-unregistered until those contracts and crash/recovery tests exist. Do not branch
-through, relabel or mutate the deterministic controlled-background class.
+Implement the process-start effect as one indivisible journal-schema hard cut
+before invoking a provider: a durable effect slot, synchronous fresh gate,
+exact cooperative process-group ownership, authenticated host-agent/Engine/
+socket/context evidence, uncertain-start recovery, receipts/settlement and
+dynamic-tree retirement. Keep the execution path unsupported and unregistered
+until those contracts and crash/recovery tests exist. Do not branch through,
+relabel or mutate the deterministic controlled-background class.
 Finalization remains blocked until a separately reviewed live environment-
 manifest schema exists.
 

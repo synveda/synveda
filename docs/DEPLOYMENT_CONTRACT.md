@@ -476,6 +476,18 @@ receipt, environment, settlement, lifecycle or finalizer artifact. The
 supported lifecycle remains `plan|status|verify`, and no process-start authority
 exists.
 
+The post-decision process-start-effect admission is a separate read-only
+contract, not another journal operation. The state owner reconstructs the exact
+completed terminal decision and samples current state and roots in
+`S1/O1/S2/O2` order. A stable all-absent observation produces only a candidate
+with every process, adapter, root, publication, recovery, lifecycle and
+finalization capability false; a stable collision produces `null`. Production
+and fixture schemas remain distinct. The value grants nothing, the explicit
+authorization function always refuses it, and no operation kind, contract
+digest, registry entry, receipt, state slot or persistent artifact is added.
+An eventual effect owner requires an indivisible durable effect-slot and fresh-
+admission hard cut.
+
 An uncatchable pre-publication interruption can retain one or more strictly
 validated `.pending-*` or `.run-*` staging directories. They contain no
 provider, registry, runtime or evidence mutation, have no `active` authority
