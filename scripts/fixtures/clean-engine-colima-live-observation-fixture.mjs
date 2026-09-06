@@ -1,12 +1,14 @@
 import { createHash, randomBytes } from "node:crypto";
 import {
   chmodSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   realpathSync,
+  rmSync,
   writeFileSync,
 } from "node:fs";
-import { join } from "node:path";
+import { dirname, join, sep } from "node:path";
 import {
   COLIMA_LIVE_REQUIREMENTS,
   buildColimaLiveObservationForTest,
@@ -49,19 +51,42 @@ export function writePrivateColimaLiveFixtureFile(path, bytes, mode) {
   chmodSync(path, mode);
 }
 
+function allocateShortFixtureRoot(maximumProviderRootBytes) {
+  const temporaryRoot = realpathSync("/tmp");
+  const fixedBytes =
+    Buffer.byteLength(temporaryRoot, "utf8") +
+    Buffer.byteLength(sep, "utf8") +
+    6 +
+    Buffer.byteLength(`${sep}p`, "utf8");
+  const paddingBytes = maximumProviderRootBytes - fixedBytes;
+  if (paddingBytes < 0) {
+    throw new Error("Colima live fixture root budget was unavailable");
+  }
+  const prefix = `${temporaryRoot}${sep}${"s".repeat(paddingBytes)}`;
+  const root = realpathSync(mkdtempSync(prefix));
+  chmodSync(root, 0o700);
+  const providerRoot = join(root, "p");
+  if (
+    dirname(root) !== temporaryRoot ||
+    Buffer.byteLength(providerRoot, "utf8") !== maximumProviderRootBytes
+  ) {
+    rmSync(root, { force: true, recursive: true });
+    throw new Error("Colima live fixture root shape was refused");
+  }
+  return { providerRoot, root, temporaryRoot };
+}
+
 export function createCleanEngineColimaLiveObservationFixture({
   fixtureId = randomBytes(16).toString("hex"),
 } = {}) {
   if (!/^[0-9a-f]{32}$/u.test(fixtureId)) {
     throw new Error("Colima live observation fixture identity was refused");
   }
-  const temporaryRoot = realpathSync(
-    process.platform === "darwin" ? "/private/tmp" : "/tmp",
-  );
-  const root = realpathSync(mkdtempSync(join(temporaryRoot, "s-colima-live-")));
-  chmodSync(root, 0o700);
-
-  const providerRoot = join(root, "p");
+  const maximumProviderRootBytes =
+    COLIMA_LIVE_REQUIREMENTS.mutation_surface.provider_root_path
+      .maximum_canonical_bytes;
+  const { providerRoot, root, temporaryRoot } =
+    allocateShortFixtureRoot(maximumProviderRootBytes);
   const home = join(providerRoot, "h");
   const external = join(root, "x");
   for (const path of [
@@ -84,6 +109,18 @@ export function createCleanEngineColimaLiveObservationFixture({
   ]) {
     mkdirSync(path, { mode: 0o700 });
     chmodSync(path, 0o700);
+  }
+  const rootMetadata = lstatSync(root, { bigint: true });
+  const providerRootMetadata = lstatSync(providerRoot, { bigint: true });
+  if (
+    realpathSync(providerRoot) !== providerRoot ||
+    rootMetadata.uid !== BigInt(process.getuid()) ||
+    providerRootMetadata.uid !== BigInt(process.getuid()) ||
+    (rootMetadata.mode & 0o7777n) !== 0o700n ||
+    (providerRootMetadata.mode & 0o7777n) !== 0o700n
+  ) {
+    rmSync(root, { force: true, recursive: true });
+    throw new Error("Colima live fixture root identity was refused");
   }
 
   const componentPaths = {};

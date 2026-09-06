@@ -240,7 +240,7 @@ trusted owner-UID composition hooks, not a JavaScript security boundary.
 The repository now also has a separate deterministic live-provider preparation
 contract. It pins the official Colima 0.10.3 and Lima 2.2.0 Darwin/arm64
 artifacts, selected Lima runtime files and the Colima-core 0.10.4 arm64 Docker
-disk image. Requirements/observation v2 bind the release guest agent and default
+disk image. Requirements/observation v3 bind the release guest agent and default
 template at their upstream Lima share paths, a private mode-0600 user-v2 network
 baseline, `--activate=false`, and the gRPC port forwarder. A private observation
 binds exact staged and dynamically selected helper bytes, modes and parent
@@ -250,10 +250,15 @@ mutation namespaces cover Colima cache/home, Docker config, Lima home, `HOME`,
 and temp. `HOME` is exactly the empty private `h` namespace; Lima home has only
 the `_config` baseline. Each bounded top-level inventory is sampled twice with
 no-follow metadata and separately HMAC-projected as pristine or collision.
+The canonical physical provider root is at most 21 UTF-8 bytes so the closed
+`LIMA_HOME` layout and pinned longest Lima socket remain at 103 bytes, below
+Darwin's 104-byte refusal threshold. Lexical input is checked before filesystem
+access and the physical `realpath` is checked again; aliases remain refused.
 `/bin/sh` and `/usr/sbin/ioreg` are declared OS-build-bound inputs, not
 individually observed live. The module downloads and executes nothing, refuses
-v1 requirements/observation and old or falsely relabelled two-target root
-evidence, and regenerates the public projection only as v2. That projection
+v1/v2 requirements, observations and root observations plus old or falsely
+relabelled two-target evidence, and regenerates the public projection only as
+v3. That projection
 omits raw private provider/component/`HOME` paths plus profile and fixture
 identities. The declared OS executable paths remain non-private OS-build-bound
 metadata.

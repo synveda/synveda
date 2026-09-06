@@ -260,15 +260,22 @@ host build/boot inputs and a distinct receipt-owned disk copy. Six whole
 receipt-owned mutation namespaces isolate Colima cache/home, Docker config,
 Lima home, `HOME`, and temp. `HOME` is an empty private namespace; each bounded
 top-level inventory is no-follow sampled twice and HMAC-projected as pristine
-or collision. `/bin/sh` and `/usr/sbin/ioreg` are declared OS-build-bound but
-not yet individually observed. Its v2 production requirements digest is
-`f07ea041a8442616977cf2a6cdcf1a1b8bd1a147a60930a30e63ca275670daa7`;
+or collision. The canonical physical provider root is capped at 21 UTF-8 bytes,
+keeping the closed `/l` layout plus pinned longest Lima socket at 103 bytes and
+below Darwin's 104-byte refusal threshold; lexical and resolved physical paths
+are both checked before traversal. `/bin/sh` and `/usr/sbin/ioreg` are declared
+OS-build-bound but not yet individually observed. Its v3 production
+requirements digest is
+`409bfc2fa03c57d151812c69c395d75c4cf7454f1262d2369f47c97646ebf265`;
 all execution, lifecycle and finalization authorizations remain false. The
 observer has no process-execution or receipt/finalizer surface and no lifecycle
-target; the plan boundary consumes only its revalidated digest. V1 requirements
-and observation plus old or falsely relabelled two-target root evidence are
-refused; public projection is generated only as v2. Twenty-two deterministic
-preparation tests pass. A separate pure registry now reserves distinct live
+target; the plan boundary consumes only its revalidated digest. V1/v2
+requirements, observations and root observations plus old or falsely
+relabelled two-target evidence are refused; public projection is generated only
+as v3. Twenty-three deterministic preparation tests pass, including exact
+21-byte ASCII and non-ASCII roots, lexical and physical overflow, alias refusal
+and serialized over-budget evidence. The fixture allocator is not a production
+root allocator or reservation. A separate pure registry now reserves distinct live
 create/cleanup operation and
 evidence identities, binds both contracts to the production requirements
 digest and selects only an exact action/kind/contract/class tuple. Create grants
@@ -317,12 +324,14 @@ explicitly false; stable collision yields `null`. The admission grants nothing,
 is never persisted and introduces no journal action, operation kind, registry
 row, receipt or lifecycle surface. Its authorization entry point always refuses.
 
-No Docker, Colima or Lima process ran. Next implement the actual process effect
-as one indivisible journal-schema hard cut with a durable effect slot, an atomic
-six-namespace reservation, synchronous fresh gate, complete recursive
-post-start settlement, and causal ownership/recovery for the outer process,
-detached Lima hostagent, usernet and SSH ControlMaster. Bind live macOS proxy
-inputs and individual OS-executable identities before adding authenticated
+No Docker, Colima or Lima process ran. Next record the cooperative same-UID
+aggregate hard-link reservation and same-device requirement in a new ADR, then
+implement its no-spawn grammar as a deliberate state-generation hard cut. It
+must bind all six namespaces and the state run without authorizing execution.
+Only a later indivisible process-effect cut may add a durable effect slot,
+synchronous fresh gate, complete recursive post-start settlement, causal
+ownership/recovery for the outer process, detached Lima hostagent, usernet and
+SSH ControlMaster, live macOS proxy and OS-executable identities, authenticated
 Engine/socket/context evidence, uncertain-start recovery, receipts and
 dynamic-tree retirement before registering or invoking a live provider.
 Live-provider identity, builder, proxy, browser and cleanup evidence follow;

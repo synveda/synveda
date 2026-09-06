@@ -8,6 +8,7 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
+  realpathSync,
   readlinkSync,
   renameSync,
   rmSync,
@@ -15,12 +16,13 @@ import {
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { join, relative } from "node:path";
+import { basename, dirname, join, relative, sep } from "node:path";
 import { test } from "node:test";
 import {
   COLIMA_LIVE_OBSERVATION_SCHEMA,
   COLIMA_LIVE_FIXTURE_PRE_EFFECT_ROOT_OBSERVATION_SCHEMA,
   COLIMA_LIVE_MUTATION_SURFACE_ROLES,
+  COLIMA_LIVE_PRE_EFFECT_ROOT_OBSERVATION_SCHEMA,
   COLIMA_LIVE_PUBLIC_PROJECTION_SCHEMA,
   COLIMA_LIVE_REQUIREMENTS,
   COLIMA_LIVE_REQUIREMENTS_SCHEMA,
@@ -134,6 +136,26 @@ function mutationNamespaces(state) {
 
 test("production live requirements are exact, pinned and execution-disabled", () => {
   assert.equal(COLIMA_LIVE_REQUIREMENTS.schema, COLIMA_LIVE_REQUIREMENTS_SCHEMA);
+  assert.equal(
+    COLIMA_LIVE_REQUIREMENTS_SCHEMA,
+    "synveda.clean-engine.colima-live-requirements.v3",
+  );
+  assert.equal(
+    COLIMA_LIVE_OBSERVATION_SCHEMA,
+    "synveda.clean-engine.colima-live-observation.v3",
+  );
+  assert.equal(
+    COLIMA_LIVE_PUBLIC_PROJECTION_SCHEMA,
+    "synveda.clean-engine.colima-live-public-projection.v3",
+  );
+  assert.equal(
+    COLIMA_LIVE_FIXTURE_PRE_EFFECT_ROOT_OBSERVATION_SCHEMA,
+    "synveda.clean-engine.colima-live-fixture-pre-effect-root-observation.v3",
+  );
+  assert.equal(
+    COLIMA_LIVE_PRE_EFFECT_ROOT_OBSERVATION_SCHEMA,
+    "synveda.clean-engine.colima-live-pre-effect-root-observation.v3",
+  );
   assert.equal(COLIMA_LIVE_REQUIREMENTS.authorizations.execution_authorized, false);
   assert.equal(COLIMA_LIVE_REQUIREMENTS.authorizations.lifecycle_exposure_authorized, false);
   assert.equal(COLIMA_LIVE_REQUIREMENTS.authorizations.finalization_eligible, false);
@@ -184,6 +206,27 @@ test("production live requirements are exact, pinned and execution-disabled", ()
     COLIMA_LIVE_REQUIREMENTS.mutation_surface.maximum_top_level_entries,
     64,
   );
+  assert.deepEqual(
+    COLIMA_LIVE_REQUIREMENTS.mutation_surface.provider_root_path,
+    {
+      encoding: "utf8",
+      maximum_canonical_bytes: 21,
+      policy: "lexical-and-realpath-byte-bound-before-admission-v1",
+      provider_root_to_lima_home_bytes: 2,
+      upstream_longest_socket_from_lima_home_bytes: 80,
+      upstream_refusal_threshold_bytes: 104,
+    },
+  );
+  assert.equal(21 + 2 + 80, 103);
+  assert.ok(
+    21 +
+      COLIMA_LIVE_REQUIREMENTS.mutation_surface.provider_root_path
+        .provider_root_to_lima_home_bytes +
+      COLIMA_LIVE_REQUIREMENTS.mutation_surface.provider_root_path
+        .upstream_longest_socket_from_lima_home_bytes <
+      COLIMA_LIVE_REQUIREMENTS.mutation_surface.provider_root_path
+        .upstream_refusal_threshold_bytes,
+  );
   const guestAgent = COLIMA_LIVE_REQUIREMENTS.components.find(
     (entry) => entry.role === "lima-guestagent",
   );
@@ -226,6 +269,10 @@ test("production live requirements are exact, pinned and execution-disabled", ()
   assert.equal(
     COLIMA_LIVE_REQUIREMENTS_SHA256,
     colimaLiveDigest(colimaLiveBytes(COLIMA_LIVE_REQUIREMENTS)),
+  );
+  assert.equal(
+    COLIMA_LIVE_REQUIREMENTS_SHA256,
+    "409bfc2fa03c57d151812c69c395d75c4cf7454f1262d2369f47c97646ebf265",
   );
   assert.equal(validateColimaLiveRequirements(COLIMA_LIVE_REQUIREMENTS), COLIMA_LIVE_REQUIREMENTS);
   assert.ok(Object.isFrozen(COLIMA_LIVE_REQUIREMENTS));
@@ -276,6 +323,16 @@ test("pinned requirements refuse field, provenance, release and authorization dr
       value.mutation_surface.maximum_top_level_entries = 65;
     },
     (value) => {
+      value.mutation_surface.provider_root_path.maximum_canonical_bytes = 22;
+    },
+    (value) => {
+      value.mutation_surface.provider_root_path.encoding = "characters";
+    },
+    (value) => {
+      value.mutation_surface.provider_root_path.upstream_refusal_threshold_bytes =
+        105;
+    },
+    (value) => {
       value.mutation_surface.namespaces[0].effect_policy =
         "expected-owned-mutation-v1";
     },
@@ -287,17 +344,20 @@ test("pinned requirements refuse field, provenance, release and authorization dr
   }
 });
 
-test("superseded v1 preparation generations are refused", (t) => {
-  const requirements = clone(COLIMA_LIVE_REQUIREMENTS);
-  requirements.schema = "synveda.clean-engine.colima-live-requirements.v1";
-  expectRefusal(() => validateColimaLiveRequirements(requirements));
-
+test("superseded v1 and v2 preparation generations are refused", (t) => {
+  for (const version of ["v1", "v2"]) {
+    const requirements = clone(COLIMA_LIVE_REQUIREMENTS);
+    requirements.schema = `synveda.clean-engine.colima-live-requirements.${version}`;
+    expectRefusal(() => validateColimaLiveRequirements(requirements));
+  }
   const state = fixture(t);
-  const observation = clone(build(state));
-  observation.schema = "synveda.clean-engine.colima-live-observation.v1";
-  expectRefusal(() =>
-    validateColimaLiveObservationForTest(state.requirements, observation),
-  );
+  for (const version of ["v1", "v2"]) {
+    const observation = clone(build(state));
+    observation.schema = `synveda.clean-engine.colima-live-observation.${version}`;
+    expectRefusal(() =>
+      validateColimaLiveObservationForTest(state.requirements, observation),
+    );
+  }
 });
 
 test("fixture requirements refuse missing, duplicate and misplaced component roles", (t) => {
@@ -329,6 +389,17 @@ test("fixture requirements refuse missing, duplicate and misplaced component rol
 test("a closed fixture builds, validates and deterministically revalidates", (t) => {
   const state = fixture(t);
   const observation = build(state);
+  const maximumRootBytes =
+    state.requirements.mutation_surface.provider_root_path
+      .maximum_canonical_bytes;
+  assert.equal(Buffer.byteLength(state.providerRoot, "utf8"), maximumRootBytes);
+  assert.equal(dirname(state.providerRoot), state.root);
+  assert.equal(dirname(state.root), realpathSync("/tmp"));
+  for (const path of [state.root, state.providerRoot]) {
+    const metadata = lstatSync(path, { bigint: true });
+    assert.equal(metadata.uid, BigInt(process.getuid()));
+    assert.equal(metadata.mode & 0o7777n, 0o700n);
+  }
   assert.equal(observation.schema, COLIMA_LIVE_OBSERVATION_SCHEMA);
   assert.equal(observation.requirements_sha256, colimaLiveDigest(colimaLiveBytes(state.requirements)));
   assert.equal(observation.components.length, 13);
@@ -338,6 +409,121 @@ test("a closed fixture builds, validates and deterministically revalidates", (t)
     revalidateColimaLiveObservationForTest(state.requirements, observation, state.input),
     observation,
   );
+});
+
+test("provider-root admission enforces canonical UTF-8 byte length", (t) => {
+  const state = fixture(t);
+  const expectBoundRefusal = (input, forbiddenValues, exitStatus = 64) => {
+    assert.throws(
+      () => buildColimaLiveObservationForTest(state.requirements, input),
+      (error) => {
+        assert.ok(error instanceof ColimaLiveContractFailure);
+        assert.equal(error.exitStatus, exitStatus);
+        assert.equal(
+          error.message,
+          "Colima live provider root path bound was refused",
+        );
+        for (const value of forbiddenValues) {
+          assert.equal(error.message.includes(value), false);
+        }
+        return true;
+      },
+    );
+  };
+
+  const asciiOverflow = cloneInput(state.input);
+  asciiOverflow.provider_root = `${state.providerRoot}x`;
+  assert.equal(Buffer.byteLength(asciiOverflow.provider_root, "utf8"), 22);
+  expectBoundRefusal(asciiOverflow, [asciiOverflow.provider_root, state.root]);
+
+  const unicodeOverflow = cloneInput(state.input);
+  unicodeOverflow.provider_root = `/${"é".repeat(10)}x`;
+  assert.ok(unicodeOverflow.provider_root.length < 22);
+  assert.equal(Buffer.byteLength(unicodeOverflow.provider_root, "utf8"), 22);
+  expectBoundRefusal(unicodeOverflow, [unicodeOverflow.provider_root, state.root]);
+
+  const unicodeState = fixture(t);
+  const maximumRootBytes =
+    unicodeState.requirements.mutation_surface.provider_root_path
+      .maximum_canonical_bytes;
+  const temporaryRoot = dirname(unicodeState.root);
+  const unicodeNameBytes =
+    maximumRootBytes - Buffer.byteLength(temporaryRoot, "utf8") - 1;
+  const uniqueAscii = basename(unicodeState.root).slice(0, unicodeNameBytes - 2);
+  const unicodeRoot = join(temporaryRoot, `${uniqueAscii}¢`);
+  assert.equal(Buffer.byteLength(unicodeRoot, "utf8"), maximumRootBytes);
+  renameSync(unicodeState.providerRoot, unicodeRoot);
+  t.after(() => rmSync(unicodeRoot, { force: true, recursive: true }));
+  const rebaseProviderPath = (path) =>
+    path === unicodeState.providerRoot ||
+    path.startsWith(`${unicodeState.providerRoot}${sep}`)
+      ? `${unicodeRoot}${path.slice(unicodeState.providerRoot.length)}`
+      : path;
+  const unicodeInput = cloneInput(unicodeState.input);
+  unicodeInput.provider_root = unicodeRoot;
+  unicodeInput.receipt_owned_disk_image_path = rebaseProviderPath(
+    unicodeInput.receipt_owned_disk_image_path,
+  );
+  for (const [role, path] of Object.entries(unicodeInput.component_paths)) {
+    unicodeInput.component_paths[role] = rebaseProviderPath(path);
+  }
+  for (const [name, value] of Object.entries(unicodeInput.environment)) {
+    unicodeInput.environment[name] = rebaseProviderPath(value);
+  }
+  const unicodeObservation = buildColimaLiveObservationForTest(
+    unicodeState.requirements,
+    unicodeInput,
+  );
+  assert.equal(
+    validateColimaLiveObservationForTest(
+      unicodeState.requirements,
+      unicodeObservation,
+    ),
+    unicodeObservation,
+  );
+
+  const aliasState = fixture(t);
+  const alias = join(aliasState.root, "q");
+  symlinkSync(aliasState.providerRoot, alias);
+  const aliasInput = cloneInput(aliasState.input);
+  aliasInput.provider_root = alias;
+  aliasInput.receipt_owned_disk_image_path = join(
+    alias,
+    aliasState.requirements.source_disk_image.copy_relative_path,
+  );
+  expectRefusal(
+    () =>
+      buildColimaLiveObservationForTest(aliasState.requirements, aliasInput),
+    78,
+  );
+
+  const serialized = clone(build(aliasState));
+  const serializedRoot = `/${"s".repeat(maximumRootBytes)}`;
+  const providerDirectory = serialized.directories.find(
+    (entry) => entry.role === "provider-root",
+  );
+  providerDirectory.path = serializedRoot;
+  serialized.provider_root_identity_sha256 = colimaLiveDigest(
+    colimaLiveBytes(providerDirectory),
+  );
+  assert.throws(
+    () =>
+      validateColimaLiveObservationForTest(aliasState.requirements, serialized),
+    (error) => {
+      assert.ok(error instanceof ColimaLiveContractFailure);
+      assert.equal(error.exitStatus, 78);
+      assert.equal(error.message, "Colima live provider root path bound was refused");
+      assert.equal(error.message.includes(serializedRoot), false);
+      return true;
+    },
+  );
+
+  const longPhysicalRoot = join(state.root, "long-provider-root");
+  renameSync(state.providerRoot, longPhysicalRoot);
+  symlinkSync(longPhysicalRoot, state.providerRoot);
+  assert.ok(Buffer.byteLength(state.providerRoot, "utf8") <= 21);
+  assert.ok(Buffer.byteLength(realpathSync(state.providerRoot), "utf8") > 21);
+  expectBoundRefusal(state.input, [longPhysicalRoot, state.root], 69);
 });
 
 test("pre-effect observation binds all six complete mutation namespaces", (t) => {

@@ -34,11 +34,11 @@ import {
 } from "../deploy/compose/scripts/clean-engine-colima-live-contract.mjs";
 
 const CREATE_CONTRACT_SHA256 =
-  "dd77ff375f8d7e9a8e711d771f78b62f5c07f50352e2f1b4b746ed14f3a9c51b";
+  "91f847c500e93520dcafcf9e2feb2eabcafc6e3e8d940435d21227d894692404";
 const CLEANUP_CONTRACT_SHA256 =
-  "6704795b58343a741bb552dc9ff28417a5bc23e1c3395b5eb7b98bb0dc593f0a";
+  "87fe5eeb36089cb7963d1526c84d118d2d52f62f7fa4a451edab66712d3530e7";
 const REGISTRY_SHA256 =
-  "d3906132f2a1308b356457e543d6fa8de9ee65f81afb66b56a7d70018d748996";
+  "9c7c290cc2bfb7325bcade3c7c835d4576748c2c004874311cc835e3f990c637";
 
 function clone(value) {
   return structuredClone(value);
@@ -252,17 +252,31 @@ test("partial, extra, malformed and unknown tuples fail closed", () => {
   expectRefusal(() => resolveProviderAdapter([]));
 });
 
-test("the superseded v1 preparation registry tuple is refused", () => {
-  const historicalCreate = {
-    ...CREATE_TUPLE,
-    operation_contract_sha256:
-      "13a87072a49103db0b3c4f36b64b8fbd0d74bd794c4a359fb77b41184ee289a7",
-  };
-  for (const operation of [
-    resolveProviderAdapter,
-    authorizeProviderAdapterPlanning,
-  ]) {
-    expectRefusal(() => operation(historicalCreate), 69);
+test("superseded preparation registry tuples are refused", () => {
+  const historicalTuples = [
+    {
+      ...CREATE_TUPLE,
+      operation_contract_sha256:
+        "13a87072a49103db0b3c4f36b64b8fbd0d74bd794c4a359fb77b41184ee289a7",
+    },
+    {
+      ...CREATE_TUPLE,
+      operation_contract_sha256:
+        "dd77ff375f8d7e9a8e711d771f78b62f5c07f50352e2f1b4b746ed14f3a9c51b",
+    },
+    {
+      ...CLEANUP_TUPLE,
+      operation_contract_sha256:
+        "6704795b58343a741bb552dc9ff28417a5bc23e1c3395b5eb7b98bb0dc593f0a",
+    },
+  ];
+  for (const historicalTuple of historicalTuples) {
+    for (const operation of [
+      resolveProviderAdapter,
+      authorizeProviderAdapterPlanning,
+    ]) {
+      expectRefusal(() => operation(historicalTuple), 69);
+    }
   }
 });
 

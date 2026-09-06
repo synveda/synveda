@@ -261,7 +261,7 @@ Source, parent identities, completed retirement and inert-state absence are
 reasserted at the final close publication.
 
 The live-provider preparation module is a separate deny-by-construction input
-boundary, not an extension of the fake. Its v2 production record pins official
+boundary, not an extension of the fake. Its v3 production record pins official
 Colima/Lima/disk bytes, the release guest-agent and default-template layout,
 the private user-v2 network baseline, the non-activating gRPC-forwarder command,
 staged paths, file modes, dynamic helper roles, the exact environment and host
@@ -276,15 +276,21 @@ private `HOME` path. Along with Colima cache/home, Docker config, Lima home and
 temp, its complete bounded top-level
 inventory is no-follow sampled twice. The separate root-observation result
 exposes only namespace and entry-set HMACs plus pristine/collision disposition.
+The canonical physical provider root is capped at 21 UTF-8 bytes so the closed
+`/l` segment plus the pinned longest Lima Unix-socket suffix totals 103 bytes,
+below Darwin's 104-byte refusal threshold. Overlong lexical input is rejected
+before filesystem access, the resolved physical path is checked again before
+directory traversal, and noncanonical aliases fail closed without their paths
+being echoed.
 Raw private provider/component paths are absent from the public projection.
 The `/bin/sh` and `/usr/sbin/ioreg` paths are declared exact-OS-build
 trusted-boundary inputs but lack
 individual live identity evidence. Host data remains caller-supplied
 preparation evidence and cannot attest VZ or authorize a process. The observer
-imports no child-process API, refuses v1 requirements/observation and old or
-falsely relabelled two-target root evidence, and regenerates the public
-projection only as v2. Every execution, lifecycle and finalization capability
-is false.
+imports no child-process API, refuses v1/v2 requirements, observations and root
+observations plus old or falsely relabelled two-target evidence, and regenerates
+the public projection only as v3. Every execution, lifecycle and finalization
+capability is false.
 
 The live provider-adapter registry is a separate pure selection boundary. It
 uses the exact action, fresh operation kind, operation-contract digest and

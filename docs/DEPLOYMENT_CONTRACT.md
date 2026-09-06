@@ -307,7 +307,7 @@ must not be reported as clean-Engine, Docker, Colima or browser evidence.
 
 ### Live-provider preparation input
 
-The separate `synveda.clean-engine.colima-live-requirements.v2` contract is the
+The separate `synveda.clean-engine.colima-live-requirements.v3` contract is the
 only repository-owned candidate input for a later macOS/arm64 Colima/VZ
 provider. It pins Colima 0.10.3, Lima 2.2.0, their selected extracted runtime
 files and the Colima-core 0.10.4 arm64 Docker disk image by exact release URL,
@@ -318,11 +318,17 @@ size and digest. The staged Lima closure includes the release guest agent at
 pins `--activate=false` and `--port-forwarder grpc`; the latter derives
 `LIMA_SSH_PORT_FORWARDER=false` for Lima children. `/bin/sh` and
 `/usr/sbin/ioreg` are declared exact-OS-build trusted-boundary inputs rather
-than falsely described as staged binaries. The canonical production
-requirements digest is
-`f07ea041a8442616977cf2a6cdcf1a1b8bd1a147a60930a30e63ca275670daa7`.
+than falsely described as staged binaries. Darwin refuses a Unix-socket
+pathname at 104 bytes. The pinned longest Lima socket consumes 80 bytes below
+`LIMA_HOME`, and the closed `/l` segment consumes two, so the canonical
+physical provider root is bounded to 21 UTF-8 bytes: `21 + 2 + 80 = 103`.
+Lexically overlong input is refused before filesystem access, the resolved
+physical path is checked again before traversal, and a short symlink alias
+cannot bypass either the byte budget or the existing canonical-path check. The
+canonical production requirements digest is
+`409bfc2fa03c57d151812c69c395d75c4cf7454f1262d2369f47c97646ebf265`.
 
-`synveda.clean-engine.colima-live-observation.v2` is private per-run evidence.
+`synveda.clean-engine.colima-live-observation.v3` is private per-run evidence.
 It binds exact file and parent identities, a toolchain-only `PATH`, exact host
 build/boot inputs and distinct source and receipt-owned disk files. Its private
 root contains six dedicated mutation namespaces: Colima cache, Colima home,
@@ -333,31 +339,32 @@ identity plus an HMAC, while root and public projections expose no raw private
 `HOME` path. Lima home has only the staged `_config` baseline; the other five
 namespaces are empty. Colima cache and private `HOME` are expected not to be
 written; Colima home, Docker config, Lima home and temp are expected owned
-mutation surfaces. The pre-effect root-observation v2 contract samples each
+mutation surfaces. The pre-effect root-observation v3 contract samples each
 complete bounded top-level inventory twice with no-follow metadata, accepting
 at most 64 entries whose names are at most 255 bytes. It returns only namespace
 and complete-entry-set HMACs plus `observed-pristine` or `foreign-collision`.
 It accepts only a local preselected disk and performs bounded streaming hashes;
 it neither downloads nor executes a process. Raw
 private provider/component/`HOME` paths and fixture/profile identity are absent
-from public projection v2; the declared `/bin/sh` and `/usr/sbin/ioreg` paths
+from public projection v3; the declared `/bin/sh` and `/usr/sbin/ioreg` paths
 remain non-private OS-build-bound metadata. Host fields remain preparation
-inputs, not live probes or VZ admission evidence. V1 requirements/observation
-and old or falsely relabelled two-target root evidence are refused; the public
-projection regenerates only as v2. Downstream v1-named contracts retain their
-names but reject the superseded digest chain.
+inputs, not live probes or VZ admission evidence. V1/v2 requirements,
+observations and root observations plus old or falsely relabelled two-target
+root evidence are refused; the public projection regenerates only as v3.
+Downstream v1-named contracts retain their names but reject every superseded
+digest chain.
 
 The closed provider-adapter registry reserves two fresh operation contracts:
 
 - `colima-vz-docker-live-create-v1`, contract digest
-  `dd77ff375f8d7e9a8e711d771f78b62f5c07f50352e2f1b4b746ed14f3a9c51b`;
+  `91f847c500e93520dcafcf9e2feb2eabcafc6e3e8d940435d21227d894692404`;
 - `colima-vz-docker-live-cleanup-v1`, contract digest
-  `6704795b58343a741bb552dc9ff28417a5bc23e1c3395b5eb7b98bb0dc593f0a`.
+  `87fe5eeb36089cb7963d1526c84d118d2d52f62f7fa4a451edab66712d3530e7`.
 
 Their evidence schema names are distinct from every deterministic and
 controlled-background fake schema. Cleanup binds the exact create-contract
 digest, and both contracts bind the production requirements digest. Registry
-digest `d3906132f2a1308b356457e543d6fa8de9ee65f81afb66b56a7d70018d748996`
+digest `9c7c290cc2bfb7325bcade3c7c835d4576748c2c004874311cc835e3f990c637`
 selects only an exact action, operation kind, operation-contract digest and
 `colima-vz-docker-live` provider-class tuple.
 
@@ -421,10 +428,10 @@ candidate/prefix construction. No entry is traversed or adopted.
 The state owner can durably publish that request only through the distinct
 `provider-intent` successor. Production operation kind
 `colima-live-provider-intent-publication-v1` has contract digest
-`a89e57ff3769616ff5c88aa63de9dd854bd2b821cf7516db33fa0f09b775edfc`;
+`698dde982e97a718e30a17246cfa789086d0e6b4e310d55999717c8785329031`;
 the deterministic fixture uses a different operation kind, schema, evidence
 class and contract digest
-`4963be65ad92040a20de26c4d048ee11858538c72820c657643ebeedb68f7400`.
+`1585540208295af973596864cf309e4ee8a1d9e3c252ab094aee7d907f30cad5`.
 Neither contract is a provider-adapter entry. Both grant only inert state
 publication through `mutation-journal-v5-inert-intent-only`; effect execution,
 receipt publication, provider-effect recovery, cleanup, finalization and
@@ -454,9 +461,9 @@ and the supported lifecycle remains `plan|status|verify`.
 The successor process-start decision is also durable and inert. Production
 operation kind
 `colima-live-provider-start-decision-publication-v1` has contract digest
-`9b4957d5b0918b78adde1ce336c923499a205043f05845931456b0246c6fc6e6`;
+`e6781af8059a121b52582d7223bf8c78819e1c5ee125116986e54a6dc9bc93df`;
 the fixture-only domain has digest
-`407c7b466548373c320d600344d6c488578afed150914b2b06cd47bf52d55167`.
+`47cd1b151580a667127d91eb838a26bb79e21752f9304beb63af834d687fc795`.
 Their production and fixture publication-plan schemas are v2. They bind the
 completed intent slot, close, publication-plan and completed-plan
 projection digests. An `observed-pristine` namespace observation derives only

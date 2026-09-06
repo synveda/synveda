@@ -34,6 +34,8 @@ const MAX_COMPONENTS = 16;
 const HASH_CHUNK_BYTES = 1024 * 1024;
 const MAX_MUTATION_SURFACE_ENTRY_NAME_BYTES = 255;
 const MAX_MUTATION_SURFACE_ENTRIES = 64;
+const DARWIN_UNIX_SOCKET_REFUSAL_THRESHOLD_BYTES = 104;
+const LIMA_LONGEST_SOCKET_FROM_HOME_BYTES = 80;
 
 const ROOT_LAYOUT = Object.freeze({
   artifact_directory: "a",
@@ -45,6 +47,26 @@ const ROOT_LAYOUT = Object.freeze({
   private_home: "h",
   temporary_directory: "t",
   toolchain_directory: "b",
+});
+
+// Darwin accepts at most 103 pathname bytes in a 104-byte sockaddr_un field.
+// The pinned Lima suffix consumes 80 bytes below LIMA_HOME, so the provider
+// root plus the closed "/l" layout segment must fit in the remaining budget.
+const PROVIDER_ROOT_PATH_CONSTRAINT = Object.freeze({
+  encoding: "utf8",
+  maximum_canonical_bytes:
+    DARWIN_UNIX_SOCKET_REFUSAL_THRESHOLD_BYTES -
+    1 -
+    Buffer.byteLength(`/${ROOT_LAYOUT.lima_home}`, "utf8") -
+    LIMA_LONGEST_SOCKET_FROM_HOME_BYTES,
+  policy: "lexical-and-realpath-byte-bound-before-admission-v1",
+  provider_root_to_lima_home_bytes: Buffer.byteLength(
+    `/${ROOT_LAYOUT.lima_home}`,
+    "utf8",
+  ),
+  upstream_longest_socket_from_lima_home_bytes:
+    LIMA_LONGEST_SOCKET_FROM_HOME_BYTES,
+  upstream_refusal_threshold_bytes: DARWIN_UNIX_SOCKET_REFUSAL_THRESHOLD_BYTES,
 });
 
 const ENVIRONMENT_NAMES = Object.freeze([
@@ -435,7 +457,7 @@ export const COLIMA_LIVE_REQUIREMENTS = deepFreeze({
     virtualization: "apple-virtualization-framework-vz",
   },
   legacy_preparation_contract_sha256:
-    "fb364b1cd89e7534b10dbd69d1092c93e64d17746b11692dec3b4252f83cbf51",
+    "f07ea041a8442616977cf2a6cdcf1a1b8bd1a147a60930a30e63ca275670daa7",
   mutation_surface: {
     admission_observation:
       "bounded-no-follow-whole-top-level-namespace-hmac-v2",
@@ -447,6 +469,7 @@ export const COLIMA_LIVE_REQUIREMENTS = deepFreeze({
     namespaces: MUTATION_SURFACE_NAMESPACES,
     post_start_inventory:
       "complete-bounded-dynamic-tree-required-before-identity-v1",
+    provider_root_path: PROVIDER_ROOT_PATH_CONSTRAINT,
     reservation: "none-same-uid-trusted-host-boundary-v1",
   },
   provider_class: "colima-vz-docker-live",
@@ -623,6 +646,7 @@ function validateRequirementShape(value) {
       "maximum_top_level_entries",
       "namespaces",
       "post_start_inventory",
+      "provider_root_path",
       "reservation",
     ],
     "Colima live mutation surface",
@@ -638,6 +662,8 @@ function validateRequirementShape(value) {
       MAX_MUTATION_SURFACE_ENTRIES ||
     value.mutation_surface.post_start_inventory !==
       "complete-bounded-dynamic-tree-required-before-identity-v1" ||
+    canonical(value.mutation_surface.provider_root_path) !==
+      canonical(PROVIDER_ROOT_PATH_CONSTRAINT) ||
     value.mutation_surface.reservation !==
       "none-same-uid-trusted-host-boundary-v1" ||
     canonical(value.mutation_surface.namespaces) !==
@@ -1453,6 +1479,20 @@ function expandCommand(requirements, componentPaths, providerProfile, diskPath) 
   );
 }
 
+function validateProviderRootPathBound(
+  value,
+  requirements,
+  exitStatus,
+) {
+  if (
+    typeof value !== "string" ||
+    Buffer.byteLength(value, "utf8") >
+      requirements.mutation_surface.provider_root_path.maximum_canonical_bytes
+  ) {
+    fail("Colima live provider root path bound was refused", exitStatus);
+  }
+}
+
 function validateBuildInput(input, requirements) {
   exactKeys(
     input,
@@ -1476,6 +1516,7 @@ function validateBuildInput(input, requirements) {
   if (input.provider_profile !== `synveda-cpr45-${input.fixture_id}`) {
     fail("Colima live provider profile was refused", 64);
   }
+  validateProviderRootPathBound(input.provider_root, requirements, 64);
   exactKeys(input.component_paths, COMPONENT_ROLES, "Colima live component paths");
   exactKeys(input.environment, ENVIRONMENT_NAMES, "Colima live input environment");
   validateHost(input.host, requirements);
@@ -1547,6 +1588,7 @@ function buildObservation(requirements, input, preEffectInventory = undefined) {
   } catch {
     fail("Colima live provider root was unavailable", 69);
   }
+  validateProviderRootPathBound(providerRoot, requirements, 69);
   if (providerRoot !== input.provider_root) fail("Colima live provider root was not canonical");
   const directoriesByRole = directoryPaths(providerRoot);
   const directories = DIRECTORY_ROLES.map((role) => Object.freeze({
@@ -1867,6 +1909,7 @@ function validateObservationShape(value, requirements) {
   }
   const directoriesByRole = new Map(value.directories.map((entry) => [entry.role, entry]));
   const providerRoot = directoriesByRole.get("provider-root").path;
+  validateProviderRootPathBound(providerRoot, requirements, 78);
   const expectedDirectories = directoryPaths(providerRoot);
   for (const [role, expectedPath] of Object.entries(expectedDirectories)) {
     if (directoriesByRole.get(role).path !== expectedPath) {

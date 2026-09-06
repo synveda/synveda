@@ -137,14 +137,18 @@ finalization therefore remain refused.
 The next provider-input boundary is deterministic but remains deliberately
 non-executing. A separate live-preparation requirements record pins exact
 official Colima 0.10.3, Lima 2.2.0 and Colima-core 0.10.4 disk artifacts. Its
-v2 private observation binds the upstream-correct Lima guest-agent/default-
+v3 private observation binds the upstream-correct Lima guest-agent/default-
 template layout, private network baseline, staged and dynamically selected
 helper identities, closed environment paths, host build/boot inputs and
 distinct source/receipt-owned disk identities. Six receipt-owned whole
 mutation namespaces isolate Colima cache/home, Docker config, Lima home,
 `HOME`, and temporary files. `HOME` is an empty private namespace; each bounded
 top-level inventory is sampled twice with no-follow metadata and HMAC-projected
-as pristine or collision. The observer has no child-process API. The pinned
+as pristine or collision. Its canonical physical provider root is capped at 21
+UTF-8 bytes, keeping the pinned longest Lima Unix-socket path at 103 bytes,
+below Darwin's 104-byte refusal threshold. Both the lexical input and resolved
+physical path are bounded before traversal. V1/v2 evidence is refused. The
+observer has no child-process API. The pinned
 command disables Docker-context activation and uses the gRPC port forwarder;
 `/bin/sh` and `/usr/sbin/ioreg` remain declared OS-build-bound inputs rather
 than live per-file evidence. A separate closed registry reserves distinct live

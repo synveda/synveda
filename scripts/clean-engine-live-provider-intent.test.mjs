@@ -417,11 +417,11 @@ test("intent publication has distinct inert production and fixture contracts", (
   assert.notEqual(variants[0].digest, variants[1].digest);
   assert.equal(
     variants[0].digest,
-    "a89e57ff3769616ff5c88aa63de9dd854bd2b821cf7516db33fa0f09b775edfc",
+    "698dde982e97a718e30a17246cfa789086d0e6b4e310d55999717c8785329031",
   );
   assert.equal(
     variants[1].digest,
-    "4963be65ad92040a20de26c4d048ee11858538c72820c657643ebeedb68f7400",
+    "1585540208295af973596864cf309e4ee8a1d9e3c252ab094aee7d907f30cad5",
   );
   for (const value of variants) {
     assert.deepEqual(value.contract, {
@@ -441,7 +441,7 @@ test("intent publication has distinct inert production and fixture contracts", (
       state_integration: "mutation-journal-v5-inert-intent-only",
       state_intent_publication_authorized: true,
       target_create_operation_contract_sha256:
-        "dd77ff375f8d7e9a8e711d771f78b62f5c07f50352e2f1b4b746ed14f3a9c51b",
+        "91f847c500e93520dcafcf9e2feb2eabcafc6e3e8d940435d21227d894692404",
       target_create_operation_kind: "colima-vz-docker-live-create-v1",
       target_provider_plan_schema:
         "synveda.clean-engine.colima-live-provider-operation-plan.v1",
@@ -469,7 +469,7 @@ test("intent publication has distinct inert production and fixture contracts", (
   }
 });
 
-test("superseded two-target root evidence cannot be relabelled as v2", () => {
+test("superseded v1/v2 root evidence and relabelled evidence are refused", () => {
   for (const fixtureOnly of [false, true]) {
     const { admission, operationPlan } = admissionFixture(fixtureOnly);
     const oldRoots = ["colima-profile-root", "lima-instance-root"].map(
@@ -500,7 +500,17 @@ test("superseded two-target root evidence cannot be relabelled as v2", () => {
         ? COLIMA_LIVE_FIXTURE_PRE_EFFECT_ROOT_OBSERVATION_SCHEMA
         : COLIMA_LIVE_PRE_EFFECT_ROOT_OBSERVATION_SCHEMA,
     };
-    for (const rootObservation of [oldObservation, relabelledObservation]) {
+    const versionTwoObservation = {
+      ...admission.root_observation,
+      schema: fixtureOnly
+        ? "synveda.clean-engine.colima-live-fixture-pre-effect-root-observation.v2"
+        : "synveda.clean-engine.colima-live-pre-effect-root-observation.v2",
+    };
+    for (const rootObservation of [
+      oldObservation,
+      versionTwoObservation,
+      relabelledObservation,
+    ]) {
       expectRefusal(() =>
         buildColimaLiveProviderIntentPublicationPlan({
           admission: { ...admission, root_observation: rootObservation },

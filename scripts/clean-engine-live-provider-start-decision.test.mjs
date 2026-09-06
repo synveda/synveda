@@ -81,13 +81,13 @@ test("production and fixture process-start contracts are exact, inert and unregi
       contract: COLIMA_LIVE_PROVIDER_START_DECISION_OPERATION_CONTRACT,
       digest: COLIMA_LIVE_PROVIDER_START_DECISION_OPERATION_CONTRACT_SHA256,
       expectedDigest:
-        "9b4957d5b0918b78adde1ce336c923499a205043f05845931456b0246c6fc6e6",
+        "e6781af8059a121b52582d7223bf8c78819e1c5ee125116986e54a6dc9bc93df",
       evidenceClass: "production-pinned",
       fixtureOnly: false,
       intentCompletionSchema:
         "synveda.clean-engine.colima-live-provider-intent-completion.v1",
       intentContractSha256:
-        "a89e57ff3769616ff5c88aa63de9dd854bd2b821cf7516db33fa0f09b775edfc",
+        "698dde982e97a718e30a17246cfa789086d0e6b4e310d55999717c8785329031",
       intentKind: "colima-live-provider-intent-publication-v1",
       kind: COLIMA_LIVE_PROVIDER_START_DECISION_OPERATION_KIND,
     },
@@ -97,13 +97,13 @@ test("production and fixture process-start contracts are exact, inert and unregi
       digest:
         COLIMA_LIVE_FIXTURE_PROVIDER_START_DECISION_OPERATION_CONTRACT_SHA256,
       expectedDigest:
-        "407c7b466548373c320d600344d6c488578afed150914b2b06cd47bf52d55167",
+        "47cd1b151580a667127d91eb838a26bb79e21752f9304beb63af834d687fc795",
       evidenceClass: "fixture-only",
       fixtureOnly: true,
       intentCompletionSchema:
         "synveda.clean-engine.colima-live-fixture-provider-intent-completion.v1",
       intentContractSha256:
-        "4963be65ad92040a20de26c4d048ee11858538c72820c657643ebeedb68f7400",
+        "1585540208295af973596864cf309e4ee8a1d9e3c252ab094aee7d907f30cad5",
       intentKind: "colima-live-fixture-provider-intent-publication-v1",
       kind: COLIMA_LIVE_FIXTURE_PROVIDER_START_DECISION_OPERATION_KIND,
     },

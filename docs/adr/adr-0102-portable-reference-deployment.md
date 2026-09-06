@@ -200,23 +200,29 @@ The immutable fake still binds its legacy live-preparation declaration, which
 pins Colima 0.10.3 source revision
 `00f6c297e92a82c04a4ab507db0a61435650d7e8` and Lima 2.2.0 source revision
 `de0816ea4bdc5267b428ab21025889b8dd785526`. It is not rotated or relabelled.
-A separate `synveda.clean-engine.colima-live-requirements.v2` record now pins
+A separate `synveda.clean-engine.colima-live-requirements.v3` record now pins
 the official Darwin/arm64 release bytes, selected extracted Lima runtime files
 and Colima-core 0.10.4 arm64 Docker disk image. The staged closure uses Lima's
 release guest-agent and default-template locations, a mode-0600 user-v2 network
 baseline with gateway `192.168.5.2`, `--activate=false` and the gRPC port
-forwarder. Its private observation v2 closes staged and dynamic helper
+forwarder. Its private observation v3 closes staged and dynamic helper
 identities, a toolchain-only environment, exact host build/boot inputs, command
 expansion and distinct source/receipt-owned disk files. Six receipt-owned
 mutation namespaces isolate Colima cache/home, Docker config, Lima home,
 `HOME`, and temporary files. `HOME` is the empty private `h` namespace; Lima
 home has only `_config`. Each complete bounded top-level inventory is sampled
 twice with no-follow metadata and HMAC-projected as pristine or collision.
+The canonical physical provider root is limited to 21 UTF-8 bytes. Together
+with the closed two-byte `/l` segment and pinned longest 80-byte Lima socket
+suffix, this stays at 103 bytes and below Darwin's 104-byte refusal threshold.
+The lexical input is bounded before filesystem access and the resolved physical
+path is bounded again before traversal; a symlink alias remains noncanonical.
 `/bin/sh` and `/usr/sbin/ioreg` remain explicit exact-OS-build trusted inputs,
 not live per-file observations. It performs no process execution, and its host
-data is preparation input rather than a live probe. V1 requirements and
-observation plus old or falsely relabelled two-target root evidence are refused;
-public projection is generated only as v2. Execution, lifecycle exposure and
+data is preparation input rather than a live probe. V1/v2 requirements,
+observations and root observations plus old or falsely relabelled two-target
+evidence are refused; public projection is generated only as v3. Execution,
+lifecycle exposure and
 finalization remain false, and no receipt, lifecycle or finalizer path accepts
 it. Neither contract is Docker, Colima or supported lifecycle evidence.
 
