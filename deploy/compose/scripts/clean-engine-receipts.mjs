@@ -5,7 +5,7 @@ import {
   CONTROLLED_BACKGROUND_RETIREMENT_OPERATION_KIND,
 } from "./clean-engine-provider-process-contract.mjs";
 
-export const RECEIPT_SCHEMA = "synveda.clean-engine.receipt.v4";
+export const RECEIPT_SCHEMA = "synveda.clean-engine.receipt.v5";
 export const ZERO_SHA256 = "0".repeat(64);
 
 const REGISTRY_IMAGE =

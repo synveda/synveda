@@ -62,6 +62,8 @@ import {
   colimaLiveDigest,
   observeColimaLivePreEffectRoots,
   observeColimaLivePreEffectRootsForTest,
+  observeColimaLiveProviderReservationRoots,
+  observeColimaLiveProviderReservationRootsForTest,
 } from "./clean-engine-colima-live-contract.mjs";
 import {
   LiveProviderPlanFailure,
@@ -107,6 +109,23 @@ import {
   buildColimaLiveProviderProcessStartEffectFreshAdmissionStructure,
   liveProviderProcessStartBytes,
 } from "./clean-engine-live-provider-process-start.mjs";
+import {
+  COLIMA_LIVE_FIXTURE_PROVIDER_RESERVATION_OPERATION_CONTRACT_SHA256,
+  COLIMA_LIVE_FIXTURE_PROVIDER_RESERVATION_OPERATION_KIND,
+  COLIMA_LIVE_PROVIDER_RESERVATION_ACTION,
+  COLIMA_LIVE_PROVIDER_RESERVATION_NAME,
+  COLIMA_LIVE_PROVIDER_RESERVATION_OPERATION_CONTRACT_SHA256,
+  COLIMA_LIVE_PROVIDER_RESERVATION_OPERATION_KIND,
+  LiveProviderReservationFailure,
+  buildColimaLiveProviderReservationCompletion,
+  buildColimaLiveProviderReservationPublicationPlan,
+  buildColimaLiveProviderReservationSettlement,
+  buildColimaLiveProviderReservationWitness,
+  liveProviderReservationBytes,
+  validateColimaLiveProviderReservationPublicationPlan,
+  validateColimaLiveProviderReservationSettlement,
+  validateColimaLiveProviderReservationWitness,
+} from "./clean-engine-live-provider-reservation.mjs";
 
 export {
   COLIMA_LIVE_FIXTURE_PRE_EFFECT_ADMISSION_SCHEMA,
@@ -128,10 +147,10 @@ const ENVIRONMENT_STAGING_NAME = ".environment-publish";
 const LEGACY_MUTATION_LEASE_NAME = ".mutation-lease";
 const MUTATION_SLOT_PREFIX = ".mutation-slot-";
 const MUTATION_CLOSE_PREFIX = ".mutation-close-";
-const MUTATION_SLOT_SCHEMA = "synveda.clean-engine.mutation-slot.v5";
-const MUTATION_CLOSE_SCHEMA = "synveda.clean-engine.mutation-close.v6";
+const MUTATION_SLOT_SCHEMA = "synveda.clean-engine.mutation-slot.v6";
+const MUTATION_CLOSE_SCHEMA = "synveda.clean-engine.mutation-close.v7";
 const MUTATION_RECOVERY_PREFIX = ".mutation-recovery-";
-const MUTATION_RECOVERY_SCHEMA = "synveda.clean-engine.mutation-recovery.v4";
+const MUTATION_RECOVERY_SCHEMA = "synveda.clean-engine.mutation-recovery.v5";
 const MUTATION_OPERATION_PREFIX = ".mutation-operation-";
 const BACKGROUND_CREATE_SETTLEMENT_SCHEMA =
   "synveda.clean-engine.background-create-settlement.v1";
@@ -140,6 +159,98 @@ const BACKGROUND_CLEANUP_OPERATION_PLAN_SCHEMA =
 const BACKGROUND_CLEANUP_SETTLEMENT_SCHEMA =
   "synveda.clean-engine.background-cleanup-settlement.v1";
 const MUTATION_STAGE_PREFIX = ".mutation-stage-";
+const PROVIDER_RESERVATION_STAGE_PREFIX = ".provider-reservation-stage-";
+const PROVIDER_RESERVATION_WITNESS_PREFIX = ".provider-reservation-witness-";
+const PROVIDER_RESERVATION_RECOVERY_STAGES = Object.freeze({
+  "marker-held": Object.freeze({
+    disposition: "pending",
+    links: 2,
+    settlement: false,
+  }),
+  "marker-linked": Object.freeze({
+    disposition: "pending",
+    links: 2,
+    settlement: false,
+  }),
+  "marker-reacquired": Object.freeze({
+    disposition: "pending",
+    links: 2,
+    settlement: false,
+  }),
+  "not-started": Object.freeze({
+    disposition: "not-reached",
+    links: 0,
+    settlement: false,
+  }),
+  "retirement-authorized-held": Object.freeze({
+    disposition: "pending",
+    links: 2,
+    settlement: true,
+  }),
+  "retirement-authorized-retired": Object.freeze({
+    disposition: "complete",
+    links: 1,
+    settlement: true,
+  }),
+  "stage-only": Object.freeze({
+    disposition: "not-reached",
+    links: 1,
+    settlement: false,
+  }),
+  "stage-retired-before-effect": Object.freeze({
+    disposition: "not-reached",
+    links: 0,
+    settlement: false,
+  }),
+  "witness-linked": Object.freeze({
+    disposition: "pending",
+    links: 3,
+    settlement: false,
+  }),
+  "witness-unlinked": Object.freeze({
+    disposition: "pending",
+    links: 1,
+    settlement: false,
+  }),
+});
+const PROVIDER_RESERVATION_RECOVERY_TRANSITIONS = Object.freeze({
+  "marker-held": Object.freeze([
+    "marker-held",
+    "retirement-authorized-held",
+  ]),
+  "marker-linked": Object.freeze(["marker-linked", "witness-linked"]),
+  "marker-reacquired": Object.freeze([
+    "marker-reacquired",
+    "retirement-authorized-held",
+  ]),
+  "not-started": Object.freeze(["not-started"]),
+  "retirement-authorized-held": Object.freeze([
+    "retirement-authorized-held",
+    "retirement-authorized-retired",
+  ]),
+  "retirement-authorized-retired": Object.freeze([
+    "retirement-authorized-retired",
+  ]),
+  "stage-only": Object.freeze([
+    "stage-only",
+    "stage-retired-before-effect",
+  ]),
+  "stage-retired-before-effect": Object.freeze([
+    "stage-retired-before-effect",
+  ]),
+  "witness-linked": Object.freeze(["marker-held", "witness-linked"]),
+  "witness-unlinked": Object.freeze([
+    "marker-reacquired",
+    "witness-unlinked",
+  ]),
+});
+const PROVIDER_RESERVATION_SETTLEMENT_AUTHORITY_STAGES = Object.freeze([
+  "marker-held",
+  "marker-linked",
+  "marker-reacquired",
+  "witness-linked",
+  "witness-unlinked",
+]);
 const MUTATION_OWNER_PROBE = "opaque-process-instance-v1";
 const MAX_MUTATION_RECOVERIES = 8;
 const MAX_MUTATION_SLOTS = 64;
@@ -165,7 +276,7 @@ const FAKE_PROVIDER_CONTRACT = Object.freeze({
   kind: "deterministic-fake-provider-v1",
   max_hold_milliseconds: 30_000,
   reconcile_outcomes: Object.freeze(["failed", "passed", "unknown"]),
-  result_contract: "clean-engine-provider-receipt-v4",
+  result_contract: "clean-engine-provider-receipt-v5",
   schema: "synveda.clean-engine.fake-provider-contract.v1",
 });
 const FAKE_PROVIDER_CONTRACT_SHA256 = digest(canonicalBytes(FAKE_PROVIDER_CONTRACT));
@@ -1223,6 +1334,39 @@ function liveProviderStartDecisionFixtureOnly(operationKind, contractSha256) {
   fail("live provider start decision operation contract was refused");
 }
 
+function liveProviderReservationFixtureOnly(operationKind, contractSha256) {
+  if (
+    operationKind === COLIMA_LIVE_PROVIDER_RESERVATION_OPERATION_KIND &&
+    contractSha256 ===
+      COLIMA_LIVE_PROVIDER_RESERVATION_OPERATION_CONTRACT_SHA256
+  ) {
+    return false;
+  }
+  if (
+    operationKind ===
+      COLIMA_LIVE_FIXTURE_PROVIDER_RESERVATION_OPERATION_KIND &&
+    contractSha256 ===
+      COLIMA_LIVE_FIXTURE_PROVIDER_RESERVATION_OPERATION_CONTRACT_SHA256
+  ) {
+    return true;
+  }
+  fail("live provider reservation operation contract was refused");
+}
+
+function validateLiveProviderReservationPublicationPlanForState(
+  value,
+  source,
+) {
+  try {
+    return validateColimaLiveProviderReservationPublicationPlan(value, source);
+  } catch (error) {
+    if (error instanceof LiveProviderReservationFailure) {
+      fail(error.message, error.exitStatus);
+    }
+    throw error;
+  }
+}
+
 function validateLiveProviderStartDecisionPublicationPlanForState(
   value,
   source,
@@ -1309,6 +1453,28 @@ function validateMutationOperation(value) {
         value.operation_contract_sha256
     ) {
       fail("live provider start decision operation binding was refused");
+    }
+    return;
+  }
+  if (value.action === COLIMA_LIVE_PROVIDER_RESERVATION_ACTION) {
+    if (
+      value.operation_plan === null ||
+      Array.isArray(value.operation_plan) ||
+      typeof value.operation_plan !== "object"
+    ) {
+      fail("live provider reservation operation was refused");
+    }
+    liveProviderReservationFixtureOnly(
+      value.operation_kind,
+      value.operation_contract_sha256,
+    );
+    if (
+      value.operation_plan.fixture_id !== value.fixture_id ||
+      value.operation_plan.operation_kind !== value.operation_kind ||
+      value.operation_plan.operation_contract_sha256 !==
+        value.operation_contract_sha256
+    ) {
+      fail("live provider reservation operation binding was refused");
     }
     return;
   }
@@ -1406,6 +1572,7 @@ function validateMutationLeaseValue(value, fixtureId) {
       "provider-create",
       COLIMA_LIVE_PROVIDER_INTENT_ACTION,
       COLIMA_LIVE_PROVIDER_START_DECISION_ACTION,
+      COLIMA_LIVE_PROVIDER_RESERVATION_ACTION,
       LIVE_PROVIDER_PLAN_ACTION,
     ]).has(value.action) ||
     !onlyLowerHex(value.intent_receipt_sha256, 64) ||
@@ -1476,6 +1643,10 @@ function mutationOperationFileName(sequence) {
   return `${MUTATION_OPERATION_PREFIX}${String(sequence).padStart(2, "0")}`;
 }
 
+function providerReservationWitnessFileName(sequence) {
+  return `${PROVIDER_RESERVATION_WITNESS_PREFIX}${String(sequence).padStart(2, "0")}`;
+}
+
 function recoveryFileName(slotSequence, sequence) {
   return `${MUTATION_RECOVERY_PREFIX}${String(slotSequence).padStart(2, "0")}-${String(sequence).padStart(2, "0")}`;
 }
@@ -1488,11 +1659,27 @@ function recoveryChainRootSha256(fixtureId, leaseSha256, operation) {
     operation_contract_sha256: operation.operation_contract_sha256,
     operation_kind: operation.operation_kind,
     operation_plan_sha256: operationPlanSha256(operation.operation_plan),
-    schema: "synveda.clean-engine.mutation-recovery-root.v4",
+    schema: "synveda.clean-engine.mutation-recovery-root.v5",
   }));
 }
 
-function validateRecoveryClaims(claims, fixtureId, slot) {
+function reservationRecoveryTopologySha256({
+  evidenceSha256,
+  evidenceStage,
+  localLinks,
+  settlementSha256,
+  slotSequence,
+}) {
+  return digest(canonicalBytes({
+    evidence_sha256: evidenceSha256,
+    evidence_stage: evidenceStage,
+    local_links: localLinks,
+    settlement_sha256: settlementSha256,
+    slot_sequence: slotSequence,
+  }));
+}
+
+function validateRecoveryClaims(claims, fixtureId, slot, operation) {
   const leaseSha256 = digest(slot.bytes);
   let previous;
   for (const claim of claims) {
@@ -1585,6 +1772,77 @@ function validateRecoveryClaims(claims, fixtureId, slot) {
       })
     ) {
       fail("deterministic provider recovery observation was refused");
+    }
+    if (slot.value.action === COLIMA_LIVE_PROVIDER_RESERVATION_ACTION) {
+      const stage =
+        PROVIDER_RESERVATION_RECOVERY_STAGES[
+          claim.value.observed_evidence_stage
+        ];
+      const evidenceExpected =
+        claim.value.observed_evidence_stage !== "not-started";
+      const expectedSettlementSha256 =
+        operation === undefined ? ZERO_SHA256 : digest(operation.bytes);
+      const topologySha256 =
+        stage === undefined || !evidenceExpected
+          ? ZERO_SHA256
+          : reservationRecoveryTopologySha256({
+              evidenceSha256:
+                claim.value.observed_evidence_head_sha256,
+              evidenceStage: claim.value.observed_evidence_stage,
+              localLinks: stage.links,
+              settlementSha256:
+                claim.value.observed_settlement_sha256,
+              slotSequence: claim.value.slot_sequence,
+            });
+      if (
+        stage === undefined ||
+        claim.value.observed_effect_name !== "provider-reservation" ||
+        claim.value.observed_effect_disposition !== stage.disposition ||
+        (!evidenceExpected &&
+          (claim.value.observed_evidence_head_sha256 !== ZERO_SHA256 ||
+            claim.value.observed_evidence_prefix_sha256 !== ZERO_SHA256 ||
+            claim.value.observed_residual_sha256 !== ZERO_SHA256)) ||
+        (evidenceExpected &&
+          (claim.value.observed_evidence_head_sha256 === ZERO_SHA256 ||
+            claim.value.observed_evidence_prefix_sha256 !== topologySha256 ||
+            claim.value.observed_residual_sha256 !== topologySha256)) ||
+        stage.settlement !==
+          (claim.value.observed_settlement_sha256 !== ZERO_SHA256) ||
+        (claim.value.observed_settlement_sha256 !== ZERO_SHA256 &&
+          claim.value.observed_settlement_sha256 !==
+            expectedSettlementSha256)
+      ) {
+        fail("live provider reservation recovery observation was refused");
+      }
+      if (
+        previous === undefined &&
+        new Set([
+          "marker-reacquired",
+          "stage-retired-before-effect",
+        ]).has(claim.value.observed_evidence_stage)
+      ) {
+        fail("live provider reservation recovery history was refused");
+      }
+      if (
+        previous?.value.action === COLIMA_LIVE_PROVIDER_RESERVATION_ACTION
+      ) {
+        const previousStage =
+          previous.value.observed_evidence_stage;
+        if (
+          !liveProviderReservationRecoveryStageReachable(
+            previousStage,
+            claim.value.observed_evidence_stage,
+          ) ||
+          (previousStage !== "not-started" &&
+            previous.value.observed_evidence_head_sha256 !==
+              claim.value.observed_evidence_head_sha256) ||
+          (PROVIDER_RESERVATION_RECOVERY_STAGES[previousStage].settlement &&
+            previous.value.observed_settlement_sha256 !==
+              claim.value.observed_settlement_sha256)
+        ) {
+          fail("live provider reservation recovery history was refused");
+        }
+      }
     }
     if (slot.value.operation_kind === CONTROLLED_BACKGROUND_RETIREMENT_OPERATION_KIND) {
       const cleanupStages = new Set([
@@ -1899,6 +2157,11 @@ function validateBackgroundCleanupSettlement(value, slot, fixtureId) {
 }
 
 function validateMutationOperationSettlement(value, slot, fixtureId) {
+  if (slot.value.action === COLIMA_LIVE_PROVIDER_RESERVATION_ACTION) {
+    // The reservation source and durable witness are reconstructed only after
+    // the complete live-decision journal has been validated below.
+    return;
+  }
   if (
     slot.value.action === "provider-create" &&
     slot.value.operation_kind === CONTROLLED_BACKGROUND_OPERATION_KIND
@@ -2238,7 +2501,7 @@ function validatePlan(plan, candidateBytes, stateMetadata) {
     "plan receipt",
   );
   if (
-    plan.schema !== "synveda.clean-engine.receipt.v4" ||
+    plan.schema !== "synveda.clean-engine.receipt.v5" ||
     plan.sequence !== 0 ||
     plan.outcome !== "passed" ||
     plan.phase !== "plan" ||
@@ -2307,6 +2570,12 @@ function validatePlanRunInventory(run, stateMetadata) {
   const mutationStageNames = entries.filter((entry) =>
     /^\.mutation-stage-[0-9a-f]{32}$/.test(entry),
   );
+  const providerReservationStageNames = entries.filter((entry) =>
+    /^\.provider-reservation-stage-[0-9a-f]{32}$/.test(entry),
+  );
+  const providerReservationWitnessNames = entries.filter((entry) =>
+    /^\.provider-reservation-witness-[0-9]{2}$/.test(entry),
+  );
   if (
     receipts.length < 1 ||
     receipts.length > 64 ||
@@ -2315,6 +2584,8 @@ function validatePlanRunInventory(run, stateMetadata) {
     mutationRecoveryNames.length > MAX_MUTATION_SLOTS * MAX_MUTATION_RECOVERIES ||
     mutationOperationNames.length > MAX_MUTATION_SLOTS ||
     mutationStageNames.length > MAX_MUTATION_STAGES ||
+    providerReservationStageNames.length > 1 ||
+    providerReservationWitnessNames.length > 1 ||
     required.some((entry) => !entries.includes(entry)) ||
     entries.some(
       (entry) =>
@@ -2328,7 +2599,9 @@ function validatePlanRunInventory(run, stateMetadata) {
         !mutationCloseNames.includes(entry) &&
         !mutationRecoveryNames.includes(entry) &&
         !mutationOperationNames.includes(entry) &&
-        !mutationStageNames.includes(entry),
+        !mutationStageNames.includes(entry) &&
+        !providerReservationStageNames.includes(entry) &&
+        !providerReservationWitnessNames.includes(entry),
     )
   ) {
     fail("plan run inventory was refused");
@@ -2470,6 +2743,72 @@ function validatePlanRunInventory(run, stateMetadata) {
       fail("mutation slot sequence was refused");
     }
   }
+  const readReservationArtifact = (name, label) => {
+    if (name === undefined) return undefined;
+    const path = join(run, name);
+    const metadata = inspectPendingFile(
+      path,
+      label,
+      stateMetadata.dev,
+      new Set([1n, 2n, 3n]),
+    );
+    return {
+      ...parseCanonical(path, label, Number(metadata.nlink)),
+      metadata,
+      name,
+      path,
+    };
+  };
+  const providerReservationStage = readReservationArtifact(
+    providerReservationStageNames[0],
+    "provider reservation stage",
+  );
+  const providerReservationWitness = readReservationArtifact(
+    providerReservationWitnessNames[0],
+    "provider reservation witness",
+  );
+  if (
+    providerReservationStage !== undefined &&
+    providerReservationWitness !== undefined
+  ) {
+    if (
+      !sameMutationArtifact(
+        providerReservationStage.metadata,
+        providerReservationWitness.metadata,
+      ) ||
+      providerReservationStage.metadata.nlink !== 3n ||
+      providerReservationWitness.metadata.nlink !== 3n ||
+      !providerReservationStage.bytes.equals(providerReservationWitness.bytes)
+    ) {
+      fail("provider reservation local link topology was refused");
+    }
+  } else {
+    const onlyArtifact =
+      providerReservationStage ?? providerReservationWitness;
+    if (
+      onlyArtifact !== undefined &&
+      !new Set([1n, 2n]).has(onlyArtifact.metadata.nlink)
+    ) {
+      fail("provider reservation local link topology was refused");
+    }
+  }
+  for (const artifact of [
+    providerReservationStage,
+    providerReservationWitness,
+  ]) {
+    if (artifact === undefined) continue;
+    const sequence = artifact.value?.slot_sequence;
+    const slot = Number.isSafeInteger(sequence)
+      ? mutationSlots[sequence]
+      : undefined;
+    if (
+      slot?.value.action !== COLIMA_LIVE_PROVIDER_RESERVATION_ACTION ||
+      (artifact === providerReservationWitness &&
+        artifact.name !== providerReservationWitnessFileName(sequence))
+    ) {
+      fail("provider reservation witness slot binding was refused");
+    }
+  }
   const mutationCloses = mutationCloseNames.map((name) => ({
     ...parseCanonical(
       join(run, name),
@@ -2544,13 +2883,19 @@ function validatePlanRunInventory(run, stateMetadata) {
       slot.value.action === LIVE_PROVIDER_PLAN_ACTION ||
       slot.value.action === COLIMA_LIVE_PROVIDER_INTENT_ACTION ||
       slot.value.action === COLIMA_LIVE_PROVIDER_START_DECISION_ACTION ||
+      slot.value.action === COLIMA_LIVE_PROVIDER_RESERVATION_ACTION ||
       (slot.value.action === "provider-cleanup" &&
         slot.value.operation_kind ===
           CONTROLLED_BACKGROUND_RETIREMENT_OPERATION_KIND);
     if (!recoverableAction || claims.length > MAX_MUTATION_RECOVERIES) {
       fail("mutation recovery action was refused");
     }
-    validateRecoveryClaims(claims, slot.value.fixture_id, slot);
+    validateRecoveryClaims(
+      claims,
+      slot.value.fixture_id,
+      slot,
+      operationsBySlot.get(sequence),
+    );
   }
   const lastSlot = mutationSlots.at(-1);
   const activeMutationSlot =
@@ -2574,6 +2919,8 @@ function validatePlanRunInventory(run, stateMetadata) {
     mutationRecoveries: activeMutationRecoveries,
     mutationSlots,
     mutationStages,
+    providerReservationStage,
+    providerReservationWitness,
     pendingPublication,
     providerDirectory,
     receipts,
@@ -2781,6 +3128,7 @@ function loadState(roots, checkSource, allowCompetingStaging = false) {
         new Set([
           COLIMA_LIVE_PROVIDER_INTENT_ACTION,
           COLIMA_LIVE_PROVIDER_START_DECISION_ACTION,
+          COLIMA_LIVE_PROVIDER_RESERVATION_ACTION,
         ]).has(lease.action) &&
         resultDelta !== 0) ||
       (close.value.disposition === "completed" &&
@@ -2863,6 +3211,7 @@ function loadState(roots, checkSource, allowCompetingStaging = false) {
       (new Set([
         COLIMA_LIVE_PROVIDER_INTENT_ACTION,
         COLIMA_LIVE_PROVIDER_START_DECISION_ACTION,
+        COLIMA_LIVE_PROVIDER_RESERVATION_ACTION,
       ]).has(lease.action) &&
         delta !== 0)
     ) {
@@ -2966,6 +3315,7 @@ function loadState(roots, checkSource, allowCompetingStaging = false) {
             !new Set([
               COLIMA_LIVE_PROVIDER_INTENT_ACTION,
               COLIMA_LIVE_PROVIDER_START_DECISION_ACTION,
+              COLIMA_LIVE_PROVIDER_RESERVATION_ACTION,
             ]).has(slot.value.action),
         )
     ) {
@@ -3077,7 +3427,10 @@ function loadState(roots, checkSource, allowCompetingStaging = false) {
         .slice(intentSequence + 1)
         .some(
           (slot) =>
-            slot.value.action !== COLIMA_LIVE_PROVIDER_START_DECISION_ACTION,
+            !new Set([
+              COLIMA_LIVE_PROVIDER_START_DECISION_ACTION,
+              COLIMA_LIVE_PROVIDER_RESERVATION_ACTION,
+            ]).has(slot.value.action),
         ) ||
       liveProviderStartDecisionSlots.some(
         (slot) => slot.value.journal_sequence <= intentSequence,
@@ -3154,8 +3507,14 @@ function loadState(roots, checkSource, allowCompetingStaging = false) {
   if (
     completedLiveProviderStartDecisions.length > 1 ||
     (completedLiveProviderStartDecisions.length === 1 &&
-      completedLiveProviderStartDecisions[0] !==
-        inventory.mutationSlots.at(-1))
+      inventory.mutationSlots
+        .slice(
+          completedLiveProviderStartDecisions[0].value.journal_sequence + 1,
+        )
+        .some(
+          (slot) =>
+            slot.value.action !== COLIMA_LIVE_PROVIDER_RESERVATION_ACTION,
+        ))
   ) {
     fail("live provider start decision journal was ambiguous");
   }
@@ -3182,6 +3541,265 @@ function loadState(roots, checkSource, allowCompetingStaging = false) {
     completedLiveProviderStartDecision?.fixtureOnly === true
       ? completedLiveProviderStartDecision
       : undefined;
+  const liveProviderReservationSlots = inventory.mutationSlots.filter(
+    (slot) => slot.value.action === COLIMA_LIVE_PROVIDER_RESERVATION_ACTION,
+  );
+  if (
+    liveProviderReservationSlots.length > 0 &&
+    completedLiveProviderStartDecision === undefined
+  ) {
+    fail("live provider reservation lacked a completed start decision");
+  }
+  const reservationSource =
+    completedLiveProviderStartDecision === undefined
+      ? undefined
+      : Object.freeze({
+          closeAuthority:
+            completedLiveProviderStartDecision.close.value.authority,
+          fixtureOnly: completedLiveProviderStartDecision.fixtureOnly,
+          startDecisionCompletion: liveProviderStartDecisionCompletion(
+            completedLiveProviderStartDecision,
+          ),
+          startDecisionPublicationPlan:
+            completedLiveProviderStartDecision.publicationPlan,
+          startDecisionSource: completedLiveProviderStartDecision.source,
+        });
+  let reservationFixtureOnly;
+  let reservationState;
+  const reservationSettlementSequences = new Set();
+  for (const [index, slot] of liveProviderReservationSlots.entries()) {
+    const fixtureOnly = liveProviderReservationFixtureOnly(
+      slot.value.operation_kind,
+      slot.value.operation_contract_sha256,
+    );
+    if (
+      fixtureOnly !== completedLiveProviderStartDecision.fixtureOnly ||
+      (reservationFixtureOnly !== undefined &&
+        fixtureOnly !== reservationFixtureOnly)
+    ) {
+      fail("live provider reservation evidence classes were mixed");
+    }
+    reservationFixtureOnly = fixtureOnly;
+    const publicationPlan =
+      validateLiveProviderReservationPublicationPlanForState(
+        slot.value.operation_plan,
+        reservationSource,
+      );
+    const sequence = slot.value.journal_sequence;
+    const close = mutationClosesBySlot.get(sequence);
+    const settlement = inventory.operationsBySlot.get(sequence);
+    const recoveries = inventory.allMutationRecoveries.filter(
+      (recovery) => recovery.value.slot_sequence === sequence,
+    );
+    let expectedWitness;
+    try {
+      expectedWitness = buildColimaLiveProviderReservationWitness({
+        publicationPlan,
+        slotSequence: sequence,
+        slotSha256: digest(slot.bytes),
+        source: reservationSource,
+      });
+    } catch (error) {
+      if (error instanceof LiveProviderReservationFailure) {
+        fail(error.message, error.exitStatus);
+      }
+      throw error;
+    }
+    const expectedWitnessSha256 = digest(canonicalBytes(expectedWitness));
+    if (
+      recoveries.some(
+        (recovery) =>
+          recovery.value.observed_evidence_stage !== "not-started" &&
+          recovery.value.observed_evidence_head_sha256 !==
+            expectedWitnessSha256,
+      )
+    ) {
+      fail("live provider reservation recovery witness was refused");
+    }
+    if (
+      sequence <=
+        completedLiveProviderStartDecision.slot.value.journal_sequence ||
+      slot.value.source_sequence !== 0 ||
+      slot.value.source_head_sha256 !== digest(plan.bytes) ||
+      slot.value.source_environment_sha256 !== ZERO_SHA256 ||
+      slot.value.intent_receipt_sha256 !== ZERO_SHA256 ||
+      liveProviderReservationSlots
+        .slice(0, index)
+        .some(
+          (predecessor) =>
+            mutationClosesBySlot.get(
+              predecessor.value.journal_sequence,
+            )?.value.disposition !== "aborted-before-effect",
+        )
+    ) {
+      fail("live provider reservation journal was refused");
+    }
+    const stage =
+      inventory.providerReservationStage?.value.slot_sequence === sequence
+        ? inventory.providerReservationStage
+        : undefined;
+    const witness =
+      inventory.providerReservationWitness?.value.slot_sequence === sequence
+        ? inventory.providerReservationWitness
+        : undefined;
+    if (stage !== undefined) {
+      try {
+        validateColimaLiveProviderReservationWitness(stage.value, {
+          publicationPlan,
+          source: reservationSource,
+        });
+      } catch (error) {
+        if (error instanceof LiveProviderReservationFailure) {
+          fail(error.message, error.exitStatus);
+        }
+        throw error;
+      }
+    }
+    if (witness !== undefined) {
+      try {
+        validateColimaLiveProviderReservationWitness(witness.value, {
+          publicationPlan,
+          source: reservationSource,
+        });
+      } catch (error) {
+        if (error instanceof LiveProviderReservationFailure) {
+          fail(error.message, error.exitStatus);
+        }
+        throw error;
+      }
+    }
+    const latestRecovery = recoveries.at(-1);
+    if (
+      latestRecovery !== undefined &&
+      !liveProviderReservationRecoveryStageReachable(
+        latestRecovery.value.observed_evidence_stage,
+        liveProviderReservationEvidenceStage({
+          previousStage: latestRecovery.value.observed_evidence_stage,
+          settlement,
+          stage,
+          witness,
+        }),
+      )
+    ) {
+      fail("live provider reservation recovery topology regressed");
+    }
+    if (settlement !== undefined) {
+      if (
+        stage !== undefined ||
+        witness === undefined ||
+        !new Set([1n, 2n]).has(witness.metadata.nlink)
+      ) {
+        fail("live provider reservation settlement lacked its witness");
+      }
+      try {
+        validateColimaLiveProviderReservationSettlement(settlement.value, {
+          publicationPlan,
+          slotSequence: sequence,
+          slotSha256: digest(slot.bytes),
+          source: reservationSource,
+          witness: witness.value,
+        });
+      } catch (error) {
+        if (error instanceof LiveProviderReservationFailure) {
+          fail(error.message, error.exitStatus);
+        }
+        throw error;
+      }
+      const settlementAuthorityValid =
+        (settlement.value.authority === "owner" &&
+          settlement.value.authority_sha256 === digest(slot.bytes) &&
+          recoveries.every(
+            (recovery) =>
+              recovery.value.observed_settlement_sha256 ===
+              digest(settlement.bytes),
+          )) ||
+        (settlement.value.authority === "recovery" &&
+          (() => {
+            const authorityIndex = recoveries.findIndex(
+              (recovery) =>
+                digest(recovery.bytes) === settlement.value.authority_sha256,
+            );
+            return (
+              authorityIndex !== -1 &&
+              PROVIDER_RESERVATION_SETTLEMENT_AUTHORITY_STAGES.includes(
+                recoveries[authorityIndex].value.observed_evidence_stage,
+              ) &&
+              recoveries
+                .slice(0, authorityIndex + 1)
+                .every(
+                  (recovery) =>
+                    recovery.value.observed_settlement_sha256 === ZERO_SHA256,
+                ) &&
+              recoveries
+                .slice(authorityIndex + 1)
+                .every(
+                  (recovery) =>
+                    recovery.value.observed_settlement_sha256 ===
+                    digest(settlement.bytes),
+                )
+            );
+          })());
+      if (!settlementAuthorityValid) {
+        fail("live provider reservation settlement authority was refused");
+      }
+      reservationSettlementSequences.add(sequence);
+    }
+    if (
+      close?.value.disposition === "aborted-before-effect" &&
+      (stage !== undefined || witness !== undefined || settlement !== undefined)
+    ) {
+      fail("live provider reservation effect could not be aborted");
+    }
+    if (
+      close?.value.disposition === "completed" &&
+      (stage !== undefined ||
+        witness === undefined ||
+        witness.metadata.nlink !== 1n ||
+        settlement === undefined ||
+        close.value.operation_evidence_sha256 !== digest(settlement.bytes))
+    ) {
+      fail("live provider reservation completion was refused");
+    }
+    reservationState = Object.freeze({
+      close,
+      fixtureOnly,
+      publicationPlan,
+      recoveries,
+      settlement,
+      slot,
+      source: reservationSource,
+      stage,
+      witness,
+    });
+  }
+  if (
+    inventory.providerReservationStage !== undefined &&
+    reservationState?.stage === undefined
+  ) {
+    fail("provider reservation stage was outside the current generation");
+  }
+  if (
+    inventory.providerReservationWitness !== undefined &&
+    reservationState?.witness === undefined
+  ) {
+    fail("provider reservation witness was outside the current generation");
+  }
+  const completedLiveProviderReservations = liveProviderReservationSlots.filter(
+    (slot) =>
+      mutationClosesBySlot.get(slot.value.journal_sequence)?.value.disposition ===
+      "completed",
+  );
+  if (
+    completedLiveProviderReservations.length > 1 ||
+    (completedLiveProviderReservations.length === 1 &&
+      completedLiveProviderReservations[0] !== inventory.mutationSlots.at(-1))
+  ) {
+    fail("live provider reservation journal was ambiguous");
+  }
+  const liveProviderReservation =
+    reservationState?.fixtureOnly === false ? reservationState : undefined;
+  const liveProviderFixtureReservation =
+    reservationState?.fixtureOnly === true ? reservationState : undefined;
   const providerSlots = inventory.mutationSlots.filter(
     (slot) => slot.value.action === "provider-create",
   );
@@ -3221,15 +3839,25 @@ function loadState(roots, checkSource, allowCompetingStaging = false) {
   let operationSettlement;
   let cleanupSettlement;
   if (providerSlot === undefined) {
-    if (providerEntries.length !== 0 || inventory.mutationOperations.length !== 0) {
+    if (
+      providerEntries.length !== 0 ||
+      inventory.mutationOperations.some(
+        (operation) =>
+          !reservationSettlementSequences.has(operation.value.slot_sequence),
+      )
+    ) {
       fail("provider evidence was outside a mutation slot");
     }
     providerState = Object.freeze({
       contract:
-        liveProviderStartDecision !== undefined
-          ? "live-provider-start-decision-only"
-          : liveProviderFixtureStartDecision !== undefined
-            ? "live-provider-fixture-start-decision-only"
+        liveProviderReservation !== undefined
+          ? "live-provider-reservation-only"
+          : liveProviderFixtureReservation !== undefined
+            ? "live-provider-fixture-reservation-only"
+            : liveProviderStartDecision !== undefined
+              ? "live-provider-start-decision-only"
+              : liveProviderFixtureStartDecision !== undefined
+                ? "live-provider-fixture-start-decision-only"
             : liveProviderIntent !== undefined
               ? "live-provider-intent-only"
               : liveProviderFixtureIntent !== undefined
@@ -3904,9 +4532,11 @@ function loadState(roots, checkSource, allowCompetingStaging = false) {
     environment,
     environmentPublication: inventory.environmentPublication,
     liveProviderFixtureIntent,
+    liveProviderFixtureReservation,
     liveProviderFixtureStartDecision,
     liveProviderIntent,
     liveProviderPlan,
+    liveProviderReservation,
     liveProviderStartDecision,
     plan: plan.value,
     receiptState,
@@ -3919,6 +4549,8 @@ function loadState(roots, checkSource, allowCompetingStaging = false) {
     mutationRecoveries: inventory.mutationRecoveries,
     mutationSlots: inventory.mutationSlots,
     mutationStages: inventory.mutationStages,
+    providerReservationStage: inventory.providerReservationStage,
+    providerReservationWitness: inventory.providerReservationWitness,
     pendingPublication: inventory.pendingPublication,
     operationSettlement,
     cleanupSettlement,
@@ -4007,7 +4639,7 @@ function plan(roots, values) {
         state_device: String(stateMetadata.dev),
         state_inode: String(stateMetadata.ino),
       },
-      schema: "synveda.clean-engine.receipt.v4",
+      schema: "synveda.clean-engine.receipt.v5",
       sequence: 0,
     };
     writeExclusive(join(pending, "00-plan.json"), canonicalBytes(receipt));
@@ -4368,6 +5000,7 @@ function acquireMutationLease(
     !new Set([
       COLIMA_LIVE_PROVIDER_INTENT_ACTION,
       COLIMA_LIVE_PROVIDER_START_DECISION_ACTION,
+      COLIMA_LIVE_PROVIDER_RESERVATION_ACTION,
     ]).has(action)
   ) {
     fail("live provider execution remains disabled after state planning", 73);
@@ -4389,6 +5022,16 @@ function acquireMutationLease(
   ) {
     fail("live provider start decision publication state was refused", 73);
   }
+  if (
+    action === COLIMA_LIVE_PROVIDER_RESERVATION_ACTION &&
+    ((initial.liveProviderStartDecision === undefined) ===
+      (initial.liveProviderFixtureStartDecision === undefined) ||
+      initial.liveProviderReservation?.close?.value.disposition === "completed" ||
+      initial.liveProviderFixtureReservation?.close?.value.disposition ===
+        "completed")
+  ) {
+    fail("live provider reservation state was refused", 73);
+  }
   if (initial.mutationRecoveries.length > 0) {
     fail("a clean-engine mutation recovery is active or abandoned", 73);
   }
@@ -4406,6 +5049,7 @@ function acquireMutationLease(
     "provider-create",
     COLIMA_LIVE_PROVIDER_INTENT_ACTION,
     COLIMA_LIVE_PROVIDER_START_DECISION_ACTION,
+    COLIMA_LIVE_PROVIDER_RESERVATION_ACTION,
     LIVE_PROVIDER_PLAN_ACTION,
   ]).has(action)) {
     fail("mutation action was refused", 70);
@@ -4432,6 +5076,15 @@ function acquireMutationLease(
     ) !== (initial.liveProviderFixtureIntent !== undefined)
   ) {
     fail("live provider start decision evidence class differed", 73);
+  }
+  if (
+    action === COLIMA_LIVE_PROVIDER_RESERVATION_ACTION &&
+    liveProviderReservationFixtureOnly(
+      operation.kind,
+      operation.contractSha256,
+    ) !== (initial.liveProviderFixtureStartDecision !== undefined)
+  ) {
+    fail("live provider reservation evidence class differed", 73);
   }
   const journalSequence = initial.mutationSlots.length;
   if (journalSequence >= MAX_MUTATION_SLOTS) {
@@ -4525,6 +5178,14 @@ function assertMutationLeaseHeld(roots, held, allowRecovery = false) {
 function operationSettlementForSlot(state, slot) {
   if (slot === undefined) return undefined;
   if (
+    slot.value.action === COLIMA_LIVE_PROVIDER_RESERVATION_ACTION
+  ) {
+    return (
+      state.liveProviderReservation?.settlement ??
+      state.liveProviderFixtureReservation?.settlement
+    );
+  }
+  if (
     slot.value.action === "provider-create" &&
     slot.value.operation_kind === CONTROLLED_BACKGROUND_OPERATION_KIND
   ) {
@@ -4591,6 +5252,24 @@ function publishMutationClose(
   ) {
     fail("background cleanup close disposition was refused", 73);
   }
+  if (
+    slot.value.action === COLIMA_LIVE_PROVIDER_RESERVATION_ACTION &&
+    disposition === "aborted-before-effect" &&
+    (state.providerReservationStage !== undefined ||
+      state.providerReservationWitness !== undefined ||
+      operationSettlementForSlot(state, slot) !== undefined)
+  ) {
+    fail("live provider reservation close disposition was refused", 73);
+  }
+  if (
+    slot.value.action === COLIMA_LIVE_PROVIDER_RESERVATION_ACTION &&
+    disposition === "completed" &&
+    (state.providerReservationStage !== undefined ||
+      state.providerReservationWitness?.metadata.nlink !== 1n ||
+      operationSettlementForSlot(state, slot) === undefined)
+  ) {
+    fail("live provider reservation completion was refused", 73);
+  }
   const result = state.receiptState;
   if (
     slot.value.operation_kind === CONTROLLED_BACKGROUND_OPERATION_KIND &&
@@ -4613,6 +5292,16 @@ function publishMutationClose(
       operationEvidenceSha256 !== ZERO_SHA256)
   ) {
     fail("inert mutation close disposition was refused", 70);
+  }
+  if (
+    disposition === "completed" &&
+    slot.value.action === COLIMA_LIVE_PROVIDER_RESERVATION_ACTION &&
+    (result.head.sequence !== slot.value.source_sequence ||
+      result.head_sha256 !== slot.value.source_head_sha256 ||
+      resultEnvironmentSha256 !== slot.value.source_environment_sha256 ||
+      operationEvidenceSha256 === ZERO_SHA256)
+  ) {
+    fail("live provider reservation close disposition was refused", 70);
   }
   if (
     disposition === "aborted-before-effect" &&
@@ -4698,6 +5387,17 @@ function publishMutationClose(
         (current.cleanupState.settlement !== undefined ||
           current.cleanupState.intentReceipt !== undefined ||
           current.cleanupState.prefix.cleanupStage !== "not-started"))
+      ||
+      (slot.value.action === COLIMA_LIVE_PROVIDER_RESERVATION_ACTION &&
+        close.disposition === "completed" &&
+        (current.providerReservationStage !== undefined ||
+          current.providerReservationWitness?.metadata.nlink !== 1n ||
+          operationSettlementForSlot(current, slot) === undefined)) ||
+      (slot.value.action === COLIMA_LIVE_PROVIDER_RESERVATION_ACTION &&
+        close.disposition === "aborted-before-effect" &&
+        (current.providerReservationStage !== undefined ||
+          current.providerReservationWitness !== undefined ||
+          operationSettlementForSlot(current, slot) !== undefined))
     ) {
       fail("mutation close authority changed", 73);
     }
@@ -6528,17 +7228,19 @@ function buildLiveProviderProcessStartEffectFreshAdmission(
 
 function observeColimaLiveProviderStartEffectFreshAdmission(
   admittedArguments,
-  { fixtureOnly, testCheckpoint },
+  {
+    fixtureOnly,
+    stateSnapshot = (state) =>
+      completedLiveProviderStartDecisionCoreSnapshot(state, fixtureOnly),
+    testCheckpoint,
+  },
 ) {
   const roots = prepareRoots(
     admittedArguments.repoRoot,
     admittedArguments.stateBase,
     false,
   );
-  const firstState = completedLiveProviderStartDecisionCoreSnapshot(
-    loadState(roots, true),
-    fixtureOnly,
-  );
+  const firstState = stateSnapshot(loadState(roots, true));
   const firstRoots = observeLivePreEffectRoots(
     admittedArguments,
     firstState,
@@ -6551,10 +7253,7 @@ function observeColimaLiveProviderStartEffectFreshAdmission(
   );
   testCheckpoint?.("after-first-process-start-effect-admission-observation");
 
-  const secondState = completedLiveProviderStartDecisionCoreSnapshot(
-    loadState(roots, true),
-    fixtureOnly,
-  );
+  const secondState = stateSnapshot(loadState(roots, true));
   if (!sameCompletedLiveProviderStartDecisionSnapshot(firstState, secondState)) {
     fail("completed live provider start decision state changed", 73);
   }
@@ -6615,6 +7314,1208 @@ export function observeColimaLiveProviderStartEffectFreshAdmissionForTest(
       testCheckpoint: admittedArguments.testCheckpoint,
     },
   );
+}
+
+function callLiveProviderReservationCheckpoint(testCheckpoint, name) {
+  if (
+    testCheckpoint !== undefined &&
+    testCheckpoint(name) !== undefined
+  ) {
+    fail("live provider reservation checkpoint returned a value", 70);
+  }
+}
+
+function liveProviderReservationSourceOperationPlan(source) {
+  const operationPlan =
+    source.startDecisionSource?.intentPublicationPlan
+      ?.provider_operation_plan;
+  if (operationPlan === undefined) {
+    fail("live provider reservation source plan was unavailable", 69);
+  }
+  return operationPlan;
+}
+
+function validateLiveProviderReservationArgumentBinding(
+  argumentsValue,
+  source,
+  fixtureOnly,
+) {
+  const operationPlan = liveProviderReservationSourceOperationPlan(source);
+  if (
+    colimaLiveDigest(colimaLiveBytes(argumentsValue.observation)) !==
+      operationPlan.preparation_observation_sha256 ||
+    (fixtureOnly &&
+      colimaLiveDigest(colimaLiveBytes(argumentsValue.requirements)) !==
+        source.startDecisionPublicationPlan.admission.root_observation
+          .requirements_sha256)
+  ) {
+    fail("live provider reservation preparation binding was refused", 73);
+  }
+}
+
+function reservationDirectoryIdentity(path, expected, label) {
+  const metadata = ownedPrivateDirectory(path, label);
+  if (
+    String(metadata.dev) !== expected.device ||
+    String(metadata.ino) !== expected.inode ||
+    String(metadata.uid) !== expected.uid ||
+    modeString(metadata) !== expected.mode
+  ) {
+    fail(`${label} identity changed`, 73);
+  }
+  return metadata;
+}
+
+function liveProviderReservationMarkerPath(argumentsValue) {
+  return join(
+    argumentsValue.observationInput.provider_root,
+    COLIMA_LIVE_PROVIDER_RESERVATION_NAME,
+  );
+}
+
+function liveProviderReservationMarkerIsAbsent(path) {
+  try {
+    exactLstat(path);
+    return false;
+  } catch (error) {
+    if (error?.code === "ENOENT") return true;
+    fail("live provider reservation marker was unavailable", 69);
+  }
+}
+
+function inspectLiveProviderReservationArtifact(
+  path,
+  label,
+  expectedDevice,
+  expectedLinks,
+  expectedBytes,
+  expectedIdentity = undefined,
+) {
+  const metadata = inspectPendingFile(
+    path,
+    label,
+    expectedDevice,
+    new Set([BigInt(expectedLinks)]),
+  );
+  if (
+    (expectedIdentity !== undefined &&
+      !sameMutationArtifact(metadata, expectedIdentity)) ||
+    !readPrivate(path, label, expectedLinks, 0n).equals(expectedBytes)
+  ) {
+    fail(`${label} identity changed`, 73);
+  }
+  return metadata;
+}
+
+function assertLiveProviderReservationBoundDirectories(
+  state,
+  publicationPlan,
+  argumentsValue,
+) {
+  const runMetadata = reservationDirectoryIdentity(
+    state.run,
+    publicationPlan.state_run_identity,
+    "live provider reservation state run",
+  );
+  const providerRootMetadata = reservationDirectoryIdentity(
+    argumentsValue.observationInput.provider_root,
+    publicationPlan.provider_root_identity,
+    "live provider reservation provider root",
+  );
+  if (runMetadata.dev !== providerRootMetadata.dev) {
+    fail("live provider reservation filesystem changed", 73);
+  }
+  return Object.freeze({ providerRootMetadata, runMetadata });
+}
+
+function assertLiveProviderReservationMarkerAbsent(
+  state,
+  publicationPlan,
+  argumentsValue,
+) {
+  assertLiveProviderReservationBoundDirectories(
+    state,
+    publicationPlan,
+    argumentsValue,
+  );
+  if (
+    !liveProviderReservationMarkerIsAbsent(
+      liveProviderReservationMarkerPath(argumentsValue),
+    )
+  ) {
+    fail("live provider reservation marker was not absent", 73);
+  }
+}
+
+function assertLiveProviderReservationLinkedTopology(
+  state,
+  publicationPlan,
+  argumentsValue,
+  expectedLinks,
+) {
+  const { providerRootMetadata, runMetadata } =
+    assertLiveProviderReservationBoundDirectories(
+      state,
+      publicationPlan,
+      argumentsValue,
+    );
+  const artifacts = [
+    state.providerReservationStage,
+    state.providerReservationWitness,
+  ].filter((artifact) => artifact !== undefined);
+  if (
+    artifacts.length === 0 ||
+    artifacts.some(
+      (artifact) => artifact.metadata.nlink !== BigInt(expectedLinks),
+    )
+  ) {
+    fail("live provider reservation local topology changed", 73);
+  }
+  const expectedBytes = artifacts[0].bytes;
+  const expectedIdentity = artifacts[0].metadata;
+  for (const artifact of artifacts) {
+    const metadata = inspectLiveProviderReservationArtifact(
+      artifact.path,
+      "live provider reservation state artifact",
+      runMetadata.dev,
+      expectedLinks,
+      expectedBytes,
+      expectedIdentity,
+    );
+    if (!sameMutationArtifact(metadata, artifact.metadata)) {
+      fail("live provider reservation state artifact changed", 73);
+    }
+  }
+  const marker = inspectLiveProviderReservationArtifact(
+    liveProviderReservationMarkerPath(argumentsValue),
+    "live provider reservation marker",
+    providerRootMetadata.dev,
+    expectedLinks,
+    expectedBytes,
+    expectedIdentity,
+  );
+  if (!sameMutationArtifact(marker, expectedIdentity)) {
+    fail("live provider reservation marker identity changed", 73);
+  }
+  return Object.freeze({ bytes: expectedBytes, identity: expectedIdentity });
+}
+
+function assertLiveProviderReservationRetiredWitness(
+  state,
+  publicationPlan,
+  argumentsValue,
+) {
+  const { runMetadata } = assertLiveProviderReservationBoundDirectories(
+    state,
+    publicationPlan,
+    argumentsValue,
+  );
+  const witness = state.providerReservationWitness;
+  if (
+    state.providerReservationStage !== undefined ||
+    witness === undefined ||
+    witness.metadata.nlink !== 1n
+  ) {
+    fail("live provider reservation retirement was not durable", 73);
+  }
+  inspectLiveProviderReservationArtifact(
+    witness.path,
+    "live provider reservation witness",
+    runMetadata.dev,
+    1,
+    witness.bytes,
+    witness.metadata,
+  );
+  return witness;
+}
+
+function observeLiveProviderReservationPhysicalRoots(
+  argumentsValue,
+  state,
+  source,
+  publicationPlan,
+  fixtureOnly,
+  markerDisposition,
+  testCheckpoint,
+) {
+  validateLiveProviderReservationArgumentBinding(
+    argumentsValue,
+    source,
+    fixtureOnly,
+  );
+  let observation;
+  try {
+    observation = fixtureOnly
+      ? observeColimaLiveProviderReservationRootsForTest(
+          argumentsValue.requirements,
+          argumentsValue.observation,
+          argumentsValue.observationInput,
+          state.run,
+          markerDisposition,
+          testCheckpoint,
+        )
+      : observeColimaLiveProviderReservationRoots(
+          argumentsValue.observation,
+          argumentsValue.observationInput,
+          state.run,
+          markerDisposition,
+        );
+  } catch (error) {
+    if (error instanceof ColimaLiveContractFailure) {
+      fail("live provider reservation root observation was refused", error.exitStatus);
+    }
+    throw error;
+  }
+  if (
+    publicationPlan !== undefined &&
+    (observation.marker_disposition !== markerDisposition ||
+      !liveProviderReservationBytes(observation.root_observation).equals(
+        liveProviderReservationBytes(
+          publicationPlan.admission.root_observation,
+        ),
+      ) ||
+      !liveProviderReservationBytes(observation.provider_root_identity).equals(
+        liveProviderReservationBytes(publicationPlan.provider_root_identity),
+      ) ||
+      !liveProviderReservationBytes(observation.state_run_identity).equals(
+        liveProviderReservationBytes(publicationPlan.state_run_identity),
+      ) ||
+      !liveProviderReservationBytes(observation.namespace_bindings).equals(
+        liveProviderReservationBytes(publicationPlan.namespace_bindings),
+      ))
+  ) {
+    fail("live provider reservation root observation changed", 73);
+  }
+  return observation;
+}
+
+function completedLiveProviderReservationForVariant(state, fixtureOnly) {
+  const own = fixtureOnly
+    ? state.liveProviderFixtureReservation
+    : state.liveProviderReservation;
+  const other = fixtureOnly
+    ? state.liveProviderReservation
+    : state.liveProviderFixtureReservation;
+  if (other !== undefined) {
+    fail("live provider reservation evidence class differed", 73);
+  }
+  return own;
+}
+
+function assertLiveProviderReservationOpenState(
+  state,
+  fixtureOnly,
+  publicationPlan,
+) {
+  const reservation = completedLiveProviderReservationForVariant(
+    state,
+    fixtureOnly,
+  );
+  const expectedContract = fixtureOnly
+    ? "live-provider-fixture-reservation-only"
+    : "live-provider-reservation-only";
+  if (
+    reservation === undefined ||
+    reservation.close !== undefined ||
+    state.mutationLease === undefined ||
+    !state.mutationLease.bytes.equals(reservation.slot.bytes) ||
+    !liveProviderReservationBytes(reservation.publicationPlan).equals(
+      liveProviderReservationBytes(publicationPlan),
+    ) ||
+    state.receiptState.head.sequence !== reservation.slot.value.source_sequence ||
+    state.receiptState.head_sha256 !== reservation.slot.value.source_head_sha256 ||
+    state.environment !== undefined ||
+    state.pendingPublication !== undefined ||
+    state.environmentPublication !== undefined ||
+    state.providerState.contract !== expectedContract ||
+    state.providerState.operationEvidenceSha256 !== ZERO_SHA256 ||
+    state.cleanupState.contract !== "journal-only" ||
+    state.cleanupState.operationEvidenceSha256 !== ZERO_SHA256
+  ) {
+    fail("live provider reservation state changed", 73);
+  }
+  return reservation;
+}
+
+function liveProviderReservationCompletion(reservation) {
+  if (
+    reservation.close?.value.disposition !== "completed" ||
+    reservation.settlement === undefined ||
+    reservation.witness === undefined
+  ) {
+    fail("completed live provider reservation was unavailable", 69);
+  }
+  try {
+    return buildColimaLiveProviderReservationCompletion({
+      closeSha256: digest(reservation.close.bytes),
+      publicationPlan: reservation.publicationPlan,
+      settlement: reservation.settlement.value,
+      slotSequence: reservation.slot.value.journal_sequence,
+      slotSha256: digest(reservation.slot.bytes),
+      source: reservation.source,
+      witness: reservation.witness.value,
+    });
+  } catch (error) {
+    if (error instanceof LiveProviderReservationFailure) {
+      fail(error.message, error.exitStatus);
+    }
+    throw error;
+  }
+}
+
+function buildLiveProviderReservationPublicationPlan(
+  argumentsValue,
+  state,
+  snapshot,
+  admission,
+  fixtureOnly,
+  testCheckpoint,
+) {
+  const observed = observeLiveProviderReservationPhysicalRoots(
+    argumentsValue,
+    state,
+    snapshot.source,
+    undefined,
+    fixtureOnly,
+    "absent",
+    testCheckpoint,
+  );
+  if (
+    !liveProviderReservationBytes(observed.root_observation).equals(
+      liveProviderReservationBytes(admission.root_observation),
+    )
+  ) {
+    fail("live provider reservation admission changed", 73);
+  }
+  try {
+    return buildColimaLiveProviderReservationPublicationPlan({
+      admission,
+      namespaceBindings: observed.namespace_bindings,
+      providerRootIdentity: observed.provider_root_identity,
+      source: snapshot.source,
+      stateRunIdentity: observed.state_run_identity,
+    });
+  } catch (error) {
+    if (error instanceof LiveProviderReservationFailure) {
+      fail(error.message, error.exitStatus);
+    }
+    throw error;
+  }
+}
+
+function completedLiveProviderStartDecisionReservationSnapshot(
+  state,
+  fixtureOnly,
+) {
+  const completed = fixtureOnly
+    ? state.liveProviderFixtureStartDecision
+    : state.liveProviderStartDecision;
+  const other = fixtureOnly
+    ? state.liveProviderStartDecision
+    : state.liveProviderFixtureStartDecision;
+  if (completed === undefined || other !== undefined) {
+    fail("completed live provider start decision was unavailable", 69);
+  }
+  const decisionSequence = completed.slot.value.journal_sequence;
+  const closes = new Map(
+    state.mutationCloses.map((close) => [close.value.slot_sequence, close]),
+  );
+  const reservationTail = state.mutationSlots.slice(decisionSequence + 1);
+  if (
+    reservationTail.some(
+      (slot) =>
+        slot.value.action !== COLIMA_LIVE_PROVIDER_RESERVATION_ACTION ||
+        liveProviderReservationFixtureOnly(
+          slot.value.operation_kind,
+          slot.value.operation_contract_sha256,
+        ) !== fixtureOnly ||
+        closes.get(slot.value.journal_sequence)?.value.disposition !==
+          "aborted-before-effect",
+    ) ||
+    state.mutationLease !== undefined ||
+    state.mutationRecoveries.length !== 0 ||
+    state.providerReservationStage !== undefined ||
+    state.providerReservationWitness !== undefined ||
+    state.mutationOperations.length !== 0
+  ) {
+    fail("completed live provider start decision was unavailable", 69);
+  }
+  const historicalState = {
+    ...state,
+    liveProviderFixtureReservation: undefined,
+    liveProviderReservation: undefined,
+    mutationCloses: state.mutationCloses.filter(
+      (close) => close.value.slot_sequence <= decisionSequence,
+    ),
+    mutationSlots: state.mutationSlots.slice(0, decisionSequence + 1),
+    providerState: Object.freeze({
+      contract: fixtureOnly
+        ? "live-provider-fixture-start-decision-only"
+        : "live-provider-start-decision-only",
+      operationEvidenceSha256: ZERO_SHA256,
+    }),
+  };
+  return completedLiveProviderStartDecisionCoreSnapshot(
+    historicalState,
+    fixtureOnly,
+  );
+}
+
+function availableLiveProviderReservationStartDecisionSnapshot(
+  state,
+  publicationPlan,
+  ownStage,
+  fixtureOnly,
+) {
+  if (
+    state.mutationStages.some(
+      (stage) => stage.linkedDestination !== undefined,
+    )
+  ) {
+    fail("live provider reservation slot stage was refused", 73);
+  }
+  if (ownStage === undefined) {
+    if (state.mutationStages.length !== 0) {
+      fail("live provider reservation slot stage was refused", 73);
+    }
+  } else {
+    const stage = state.mutationStages.find(
+      (candidate) => candidate.path === ownStage.stagePath,
+    );
+    if (
+      stage === undefined ||
+      stage.name !== ownStage.stagePath.split(sep).at(-1) ||
+      !sameMetadata(stage.metadata, ownStage.identity)
+    ) {
+      fail("live provider reservation slot stage changed", 73);
+    }
+    const staged = parseCanonical(
+      ownStage.stagePath,
+      "prospective live provider reservation slot",
+      1,
+    );
+    validateMutationLeaseValue(staged.value, state.candidate.run_id);
+    const previousClose = state.mutationCloses.at(-1);
+    if (
+      ownStage.destinationName !==
+        mutationSlotFileName(state.mutationSlots.length) ||
+      staged.value.action !== COLIMA_LIVE_PROVIDER_RESERVATION_ACTION ||
+      staged.value.journal_sequence !== state.mutationSlots.length ||
+      staged.value.source_sequence !== 0 ||
+      staged.value.source_head_sha256 !== state.receiptState.head_sha256 ||
+      staged.value.source_environment_sha256 !== ZERO_SHA256 ||
+      staged.value.intent_receipt_sha256 !== ZERO_SHA256 ||
+      staged.value.previous_close_sha256 !== digest(previousClose.bytes) ||
+      staged.value.operation_kind !== publicationPlan.operation_kind ||
+      staged.value.operation_contract_sha256 !==
+        publicationPlan.operation_contract_sha256 ||
+      !liveProviderReservationBytes(staged.value.operation_plan).equals(
+        liveProviderReservationBytes(publicationPlan),
+      ) ||
+      mutationOwnerState(staged.value) !== "current"
+    ) {
+      fail("prospective live provider reservation slot was refused", 73);
+    }
+  }
+  return completedLiveProviderStartDecisionReservationSnapshot(
+    { ...state, mutationStages: [] },
+    fixtureOnly,
+  );
+}
+
+function buildLiveProviderReservationWitness(
+  publicationPlan,
+  held,
+  source,
+) {
+  try {
+    return buildColimaLiveProviderReservationWitness({
+      publicationPlan,
+      slotSequence: held.lease.journal_sequence,
+      slotSha256: digest(held.leaseBytes),
+      source,
+    });
+  } catch (error) {
+    if (error instanceof LiveProviderReservationFailure) {
+      fail(error.message, error.exitStatus);
+    }
+    throw error;
+  }
+}
+
+function writeLiveProviderReservationStage(
+  state,
+  witness,
+  testCheckpoint,
+) {
+  const bytes = liveProviderReservationBytes(witness);
+  const path = join(
+    state.run,
+    `${PROVIDER_RESERVATION_STAGE_PREFIX}${randomBytes(16).toString("hex")}`,
+  );
+  writeExclusive(path, bytes);
+  const runMetadata = ownedPrivateDirectory(state.run, "active run state");
+  const identity = inspectLiveProviderReservationArtifact(
+    path,
+    "live provider reservation stage",
+    runMetadata.dev,
+    1,
+    bytes,
+  );
+  callLiveProviderReservationCheckpoint(testCheckpoint, "after-witness-stage");
+  return Object.freeze({ bytes, identity, path });
+}
+
+function linkLiveProviderReservationMarker(
+  state,
+  stage,
+  argumentsValue,
+  testCheckpoint,
+) {
+  const markerPath = liveProviderReservationMarkerPath(argumentsValue);
+  try {
+    linkSync(stage.path, markerPath);
+  } catch (error) {
+    if (error?.code === "EEXIST") return false;
+    fail("live provider reservation marker publication failed", 70);
+  }
+  callLiveProviderReservationCheckpoint(testCheckpoint, "after-marker-link");
+  syncDirectory(argumentsValue.observationInput.provider_root);
+  callLiveProviderReservationCheckpoint(
+    testCheckpoint,
+    "after-marker-directory-sync",
+  );
+  return true;
+}
+
+function linkLiveProviderReservationWitness(
+  state,
+  stage,
+  witnessPath,
+  testCheckpoint,
+) {
+  try {
+    linkSync(stage.path, witnessPath);
+  } catch {
+    fail("live provider reservation witness publication failed", 70);
+  }
+  callLiveProviderReservationCheckpoint(testCheckpoint, "after-state-witness-link");
+  syncDirectory(state.run);
+  callLiveProviderReservationCheckpoint(
+    testCheckpoint,
+    "after-state-witness-directory-sync",
+  );
+}
+
+function unlinkLiveProviderReservationStage(
+  state,
+  stage,
+  expectedLinks,
+  testCheckpoint,
+) {
+  const runMetadata = ownedPrivateDirectory(state.run, "active run state");
+  inspectLiveProviderReservationArtifact(
+    stage.path,
+    "live provider reservation stage",
+    runMetadata.dev,
+    expectedLinks,
+    stage.bytes,
+    stage.identity ?? stage.metadata,
+  );
+  try {
+    unlinkSync(stage.path);
+  } catch {
+    fail("live provider reservation stage retirement failed", 70);
+  }
+  callLiveProviderReservationCheckpoint(testCheckpoint, "after-witness-stage-unlink");
+  syncDirectory(state.run);
+  callLiveProviderReservationCheckpoint(
+    testCheckpoint,
+    "after-witness-stage-directory-sync",
+  );
+}
+
+function publishLiveProviderReservationSettlement(
+  roots,
+  state,
+  reservation,
+  witness,
+  preRetirementRootObservation,
+  reassertAuthority,
+  testCheckpoint,
+) {
+  if (
+    typeof reassertAuthority !== "function" ||
+    state.mutationLease === undefined ||
+    !state.mutationLease.bytes.equals(reservation.slot.bytes) ||
+    reservation.settlement !== undefined ||
+    reservation.witness === undefined ||
+    !liveProviderReservationBytes(reservation.witness.value).equals(
+      liveProviderReservationBytes(witness),
+    )
+  ) {
+    fail("live provider reservation settlement authority was refused", 73);
+  }
+  const recovery = state.mutationRecoveries.at(-1);
+  let settlement;
+  try {
+    settlement = buildColimaLiveProviderReservationSettlement({
+      authority: recovery === undefined ? "owner" : "recovery",
+      authoritySha256:
+        recovery === undefined
+          ? digest(reservation.slot.bytes)
+          : digest(recovery.bytes),
+      preRetirementRootObservation,
+      publicationPlan: reservation.publicationPlan,
+      slotSequence: reservation.slot.value.journal_sequence,
+      slotSha256: digest(reservation.slot.bytes),
+      source: reservation.source,
+      witness,
+    });
+  } catch (error) {
+    if (error instanceof LiveProviderReservationFailure) {
+      fail(error.message, error.exitStatus);
+    }
+    throw error;
+  }
+  const bytes = liveProviderReservationBytes(settlement);
+  const name = mutationOperationFileName(
+    reservation.slot.value.journal_sequence,
+  );
+  let afterLinkFailure;
+  const reassertSettlementPublication = () => {
+    const current = reassertAuthority();
+    const currentReservation =
+      current.liveProviderReservation ??
+      current.liveProviderFixtureReservation;
+    if (
+      currentReservation === undefined ||
+      currentReservation.settlement !== undefined ||
+      currentReservation.witness === undefined ||
+      !currentReservation.slot.bytes.equals(reservation.slot.bytes) ||
+      !currentReservation.witness.bytes.equals(reservation.witness.bytes)
+    ) {
+      fail("live provider reservation settlement source changed", 73);
+    }
+  };
+  if (!publishMutationBlocker(state.run, name, bytes, {
+    afterLinkObserver:
+      testCheckpoint === undefined
+        ? undefined
+        : () => {
+            try {
+              callLiveProviderReservationCheckpoint(
+                testCheckpoint,
+                "after-retirement-authorization-link",
+              );
+            } catch (error) {
+              afterLinkFailure = error;
+            }
+          },
+    reassertAuthority: reassertSettlementPublication,
+  })) {
+    const existing = parseCanonical(
+      join(state.run, name),
+      "live provider reservation settlement",
+    );
+    if (!existing.bytes.equals(bytes)) {
+      fail("live provider reservation settlement publication conflicted", 73);
+    }
+  }
+  const verified = loadState(roots, false);
+  const verifiedReservation =
+    verified.liveProviderReservation ??
+    verified.liveProviderFixtureReservation;
+  if (
+    verifiedReservation?.settlement === undefined ||
+    !verifiedReservation.settlement.bytes.equals(bytes)
+  ) {
+    fail("live provider reservation settlement was not durable", 70);
+  }
+  if (afterLinkFailure !== undefined) throw afterLinkFailure;
+  callLiveProviderReservationCheckpoint(
+    testCheckpoint,
+    "after-retirement-authorization-publication",
+  );
+  return verified;
+}
+
+function retireLiveProviderReservationMarker(
+  roots,
+  state,
+  publicationPlan,
+  argumentsValue,
+  testCheckpoint,
+) {
+  const reservation =
+    state.liveProviderReservation ?? state.liveProviderFixtureReservation;
+  if (
+    reservation?.settlement === undefined ||
+    reservation.witness === undefined
+  ) {
+    fail("live provider reservation retirement authority was refused", 73);
+  }
+  const held = assertLiveProviderReservationLinkedTopology(
+    state,
+    publicationPlan,
+    argumentsValue,
+    2,
+  );
+  const markerPath = liveProviderReservationMarkerPath(argumentsValue);
+  inspectLiveProviderReservationArtifact(
+    markerPath,
+    "live provider reservation marker",
+    BigInt(publicationPlan.provider_root_identity.device),
+    2,
+    held.bytes,
+    held.identity,
+  );
+  try {
+    unlinkSync(markerPath);
+  } catch {
+    fail("live provider reservation marker retirement failed", 70);
+  }
+  callLiveProviderReservationCheckpoint(testCheckpoint, "after-marker-unlink");
+  syncDirectory(argumentsValue.observationInput.provider_root);
+  callLiveProviderReservationCheckpoint(
+    testCheckpoint,
+    "after-marker-retirement-directory-sync",
+  );
+  const verified = loadState(roots, false);
+  const witness = assertLiveProviderReservationRetiredWitness(
+    verified,
+    publicationPlan,
+    argumentsValue,
+  );
+  if (
+    witness.metadata.nlink !== 1n ||
+    !witness.bytes.equals(reservation.witness.bytes)
+  ) {
+    fail("live provider reservation marker retirement was not durable", 70);
+  }
+  return verified;
+}
+
+function reservationAdmissionArguments(argumentsValue, fixtureOnly) {
+  if (!fixtureOnly) return admissionArguments(argumentsValue);
+  const admitted = admissionArguments(argumentsValue, [
+    "requirements",
+    "testCheckpoint",
+  ]);
+  if (
+    admitted.requirements === null ||
+    Array.isArray(admitted.requirements) ||
+    typeof admitted.requirements !== "object" ||
+    typeof admitted.testCheckpoint !== "function"
+  ) {
+    fail("live provider fixture reservation arguments were refused", 64);
+  }
+  return admitted;
+}
+
+function observeLiveProviderReservationStartAdmission(
+  argumentsValue,
+  fixtureOnly,
+) {
+  return observeColimaLiveProviderStartEffectFreshAdmission(
+    argumentsValue,
+    {
+      fixtureOnly,
+      stateSnapshot: (state) =>
+        completedLiveProviderStartDecisionReservationSnapshot(
+          state,
+          fixtureOnly,
+        ),
+      testCheckpoint: fixtureOnly
+        ? argumentsValue.testCheckpoint
+        : undefined,
+    },
+  );
+}
+
+function publishColimaLiveProviderReservation(
+  argumentsValue,
+  fixtureOnly,
+) {
+  const admittedArguments = reservationAdmissionArguments(
+    argumentsValue,
+    fixtureOnly,
+  );
+  const testCheckpoint = fixtureOnly
+    ? admittedArguments.testCheckpoint
+    : undefined;
+  const roots = prepareRoots(
+    admittedArguments.repoRoot,
+    admittedArguments.stateBase,
+    false,
+  );
+  reconcileMutationStages(roots);
+  const initial = loadState(roots, true);
+  const completed = completedLiveProviderReservationForVariant(
+    initial,
+    fixtureOnly,
+  );
+  if (completed?.close?.value.disposition === "completed") {
+    validateLiveProviderReservationArgumentBinding(
+      admittedArguments,
+      completed.source,
+      fixtureOnly,
+    );
+    assertLiveProviderReservationRetiredWitness(
+      initial,
+      completed.publicationPlan,
+      admittedArguments,
+    );
+    return liveProviderReservationCompletion(completed);
+  }
+  const snapshot = completedLiveProviderStartDecisionReservationSnapshot(
+    initial,
+    fixtureOnly,
+  );
+  const startAdmission = observeLiveProviderReservationStartAdmission(
+    admittedArguments,
+    fixtureOnly,
+  );
+  const publicationPlan = buildLiveProviderReservationPublicationPlan(
+    admittedArguments,
+    initial,
+    snapshot,
+    startAdmission,
+    fixtureOnly,
+    undefined,
+  );
+  callLiveProviderReservationCheckpoint(testCheckpoint, "after-reservation-plan");
+  const reassertSlotPublication = (ownStage) => {
+    const current = loadState(roots, true);
+    const currentSnapshot =
+      availableLiveProviderReservationStartDecisionSnapshot(
+        current,
+        publicationPlan,
+        ownStage,
+        fixtureOnly,
+      );
+    if (
+      !sameCompletedLiveProviderStartDecisionSnapshot(
+        snapshot,
+        currentSnapshot,
+      )
+    ) {
+      fail("live provider reservation start decision changed", 73);
+    }
+    assertLiveProviderReservationMarkerAbsent(
+      current,
+      publicationPlan,
+      admittedArguments,
+    );
+    observeLiveProviderReservationPhysicalRoots(
+      admittedArguments,
+      current,
+      snapshot.source,
+      publicationPlan,
+      fixtureOnly,
+      "absent",
+      undefined,
+    );
+  };
+  const expectedSource = Object.freeze({
+    sequence: initial.receiptState.head.sequence,
+    sha256: initial.receiptState.head_sha256,
+  });
+  let afterSlotLinkFailure;
+  const held = acquireMutationLease(
+    roots,
+    COLIMA_LIVE_PROVIDER_RESERVATION_ACTION,
+    ZERO_SHA256,
+    expectedSource,
+    {
+      afterLinkObserver:
+        testCheckpoint === undefined
+          ? undefined
+          : () => {
+              try {
+                callLiveProviderReservationCheckpoint(
+                  testCheckpoint,
+                  "after-reservation-slot-link",
+                );
+              } catch (error) {
+                afterSlotLinkFailure = error;
+              }
+            },
+      reassertAuthority: reassertSlotPublication,
+    },
+    Object.freeze({
+      contractSha256: publicationPlan.operation_contract_sha256,
+      kind: publicationPlan.operation_kind,
+      plan: publicationPlan,
+    }),
+  );
+  if (afterSlotLinkFailure !== undefined) throw afterSlotLinkFailure;
+  callLiveProviderReservationCheckpoint(testCheckpoint, "after-reservation-slot");
+  let state = assertMutationLeaseHeld(roots, held, false);
+  let reservation = assertLiveProviderReservationOpenState(
+    state,
+    fixtureOnly,
+    publicationPlan,
+  );
+  assertLiveProviderReservationMarkerAbsent(
+    state,
+    publicationPlan,
+    admittedArguments,
+  );
+  observeLiveProviderReservationPhysicalRoots(
+    admittedArguments,
+    state,
+    reservation.source,
+    publicationPlan,
+    fixtureOnly,
+    "absent",
+    undefined,
+  );
+  const witness = buildLiveProviderReservationWitness(
+    publicationPlan,
+    held,
+    reservation.source,
+  );
+  const stage = writeLiveProviderReservationStage(
+    state,
+    witness,
+    testCheckpoint,
+  );
+  state = assertMutationLeaseHeld(roots, held, false);
+  reservation = assertLiveProviderReservationOpenState(
+    state,
+    fixtureOnly,
+    publicationPlan,
+  );
+  if (
+    !linkLiveProviderReservationMarker(
+      state,
+      stage,
+      admittedArguments,
+      testCheckpoint,
+    )
+  ) {
+    unlinkLiveProviderReservationStage(state, stage, 1, testCheckpoint);
+    closeMutationLease(
+      roots,
+      held,
+      "aborted-before-effect",
+      {},
+      ZERO_SHA256,
+      (current) => {
+        assertLiveProviderReservationOpenState(
+          current,
+          fixtureOnly,
+          publicationPlan,
+        );
+      },
+    );
+    fail("live provider reservation marker was already held", 73);
+  }
+  state = assertMutationLeaseHeld(roots, held, false);
+  assertLiveProviderReservationOpenState(
+    state,
+    fixtureOnly,
+    publicationPlan,
+  );
+  assertLiveProviderReservationLinkedTopology(
+    state,
+    publicationPlan,
+    admittedArguments,
+    2,
+  );
+  const witnessPath = join(
+    state.run,
+    providerReservationWitnessFileName(held.lease.journal_sequence),
+  );
+  linkLiveProviderReservationWitness(
+    state,
+    stage,
+    witnessPath,
+    testCheckpoint,
+  );
+  state = assertMutationLeaseHeld(roots, held, false);
+  assertLiveProviderReservationOpenState(
+    state,
+    fixtureOnly,
+    publicationPlan,
+  );
+  assertLiveProviderReservationLinkedTopology(
+    state,
+    publicationPlan,
+    admittedArguments,
+    3,
+  );
+  unlinkLiveProviderReservationStage(state, stage, 3, testCheckpoint);
+  state = assertMutationLeaseHeld(roots, held, false);
+  reservation = assertLiveProviderReservationOpenState(
+    state,
+    fixtureOnly,
+    publicationPlan,
+  );
+  assertLiveProviderReservationLinkedTopology(
+    state,
+    publicationPlan,
+    admittedArguments,
+    2,
+  );
+  callLiveProviderReservationCheckpoint(
+    testCheckpoint,
+    "before-retirement-observation",
+  );
+  assertLiveProviderReservationLinkedTopology(
+    state,
+    publicationPlan,
+    admittedArguments,
+    2,
+  );
+  const observed = observeLiveProviderReservationPhysicalRoots(
+    admittedArguments,
+    state,
+    reservation.source,
+    publicationPlan,
+    fixtureOnly,
+    "present",
+    undefined,
+  );
+  assertLiveProviderReservationLinkedTopology(
+    loadState(roots, true),
+    publicationPlan,
+    admittedArguments,
+    2,
+  );
+  callLiveProviderReservationCheckpoint(
+    testCheckpoint,
+    "after-retirement-observation",
+  );
+  const ownerAuthority = () => {
+    const current = assertMutationLeaseHeld(roots, held, false);
+    const currentReservation = assertLiveProviderReservationOpenState(
+      current,
+      fixtureOnly,
+      publicationPlan,
+    );
+    if (currentReservation.settlement !== undefined) {
+      fail("live provider reservation settlement already existed", 73);
+    }
+    assertLiveProviderReservationLinkedTopology(
+      current,
+      publicationPlan,
+      admittedArguments,
+      2,
+    );
+    observeLiveProviderReservationPhysicalRoots(
+      admittedArguments,
+      current,
+      currentReservation.source,
+      publicationPlan,
+      fixtureOnly,
+      "present",
+      undefined,
+    );
+    assertLiveProviderReservationLinkedTopology(
+      loadState(roots, true),
+      publicationPlan,
+      admittedArguments,
+      2,
+    );
+    return current;
+  };
+  state = publishLiveProviderReservationSettlement(
+    roots,
+    state,
+    reservation,
+    witness,
+    observed.root_observation,
+    ownerAuthority,
+    testCheckpoint,
+  );
+  retireLiveProviderReservationMarker(
+    roots,
+    state,
+    publicationPlan,
+    admittedArguments,
+    testCheckpoint,
+  );
+  state = assertMutationLeaseHeld(roots, held, false);
+  reservation = assertLiveProviderReservationOpenState(
+    state,
+    fixtureOnly,
+    publicationPlan,
+  );
+  const retiredWitness = assertLiveProviderReservationRetiredWitness(
+    state,
+    publicationPlan,
+    admittedArguments,
+  );
+  if (reservation.settlement === undefined) {
+    fail("live provider reservation settlement was unavailable", 70);
+  }
+  let afterCloseLinkFailure;
+  const closed = closeMutationLease(
+    roots,
+    held,
+    "completed",
+    {
+      afterLinkObserver:
+        testCheckpoint === undefined
+          ? undefined
+          : () => {
+              try {
+                callLiveProviderReservationCheckpoint(
+                  testCheckpoint,
+                  "after-reservation-close-link",
+                );
+              } catch (error) {
+                afterCloseLinkFailure = error;
+              }
+            },
+    },
+    digest(reservation.settlement.bytes),
+    (current) => {
+      const currentReservation = assertLiveProviderReservationOpenState(
+        current,
+        fixtureOnly,
+        publicationPlan,
+      );
+      if (
+        currentReservation.settlement === undefined ||
+        !currentReservation.settlement.bytes.equals(
+          reservation.settlement.bytes,
+        )
+      ) {
+        fail("live provider reservation settlement changed", 73);
+      }
+      assertLiveProviderReservationRetiredWitness(
+        current,
+        publicationPlan,
+        admittedArguments,
+      );
+    },
+  );
+  if (afterCloseLinkFailure !== undefined) throw afterCloseLinkFailure;
+  callLiveProviderReservationCheckpoint(testCheckpoint, "after-reservation-close");
+  const completedReservation = completedLiveProviderReservationForVariant(
+    closed,
+    fixtureOnly,
+  );
+  if (
+    completedReservation === undefined ||
+    completedReservation.witness?.path !== retiredWitness.path
+  ) {
+    fail("live provider reservation completion was not durable", 70);
+  }
+  return liveProviderReservationCompletion(completedReservation);
+}
+
+export function publishColimaLiveProviderReservationForExecutor(
+  argumentsValue,
+) {
+  return publishColimaLiveProviderReservation(argumentsValue, false);
+}
+
+export function publishColimaLiveProviderReservationForTest(argumentsValue) {
+  return publishColimaLiveProviderReservation(argumentsValue, true);
 }
 
 function validateHistoricalLiveProviderStartDecisionRetry(
@@ -8531,6 +10432,8 @@ function providerRecoveryBase(state) {
     lease.value.action === COLIMA_LIVE_PROVIDER_INTENT_ACTION;
   const recoverableStartDecision =
     lease.value.action === COLIMA_LIVE_PROVIDER_START_DECISION_ACTION;
+  const recoverableReservation =
+    lease.value.action === COLIMA_LIVE_PROVIDER_RESERVATION_ACTION;
   const recoverableCleanup =
     lease.value.action === "provider-cleanup" &&
     lease.value.operation_kind ===
@@ -8540,6 +10443,7 @@ function providerRecoveryBase(state) {
     !recoverablePlan &&
     !recoverableIntent &&
     !recoverableStartDecision &&
+    !recoverableReservation &&
     !recoverableCleanup
   ) {
     fail("mutation recovery action was refused", 73);
@@ -8558,7 +10462,114 @@ function providerRecoveryBase(state) {
   };
 }
 
+function liveProviderReservationEvidenceStage({
+  previousStage,
+  settlement,
+  stage,
+  witness,
+}) {
+  let evidenceStage;
+  if (stage === undefined && witness === undefined) {
+    evidenceStage = new Set([
+      "stage-only",
+      "stage-retired-before-effect",
+    ]).has(previousStage)
+      ? "stage-retired-before-effect"
+      : "not-started";
+  } else if (stage !== undefined && witness === undefined) {
+    evidenceStage =
+      stage.metadata.nlink === 1n ? "stage-only" : "marker-linked";
+  } else if (stage !== undefined && witness !== undefined) {
+    evidenceStage = "witness-linked";
+  } else if (settlement === undefined) {
+    evidenceStage = witness.metadata.nlink === 2n
+      ? new Set(["marker-reacquired", "witness-unlinked"]).has(
+          previousStage,
+        )
+        ? "marker-reacquired"
+        : "marker-held"
+      : "witness-unlinked";
+  } else {
+    evidenceStage =
+      witness.metadata.nlink === 2n
+        ? "retirement-authorized-held"
+        : "retirement-authorized-retired";
+  }
+  return evidenceStage;
+}
+
+function liveProviderReservationRecoveryObservation(state) {
+  const reservation =
+    state.liveProviderReservation ?? state.liveProviderFixtureReservation;
+  if (
+    reservation === undefined ||
+    state.mutationLease === undefined ||
+    !state.mutationLease.bytes.equals(reservation.slot.bytes)
+  ) {
+    fail("live provider reservation recovery state was refused", 73);
+  }
+  const stage = state.providerReservationStage;
+  const witness = state.providerReservationWitness;
+  const settlement = reservation.settlement;
+  const previousStage =
+    state.mutationRecoveries.at(-1)?.value.observed_evidence_stage;
+  const evidenceStage = liveProviderReservationEvidenceStage({
+    previousStage,
+    settlement,
+    stage,
+    witness,
+  });
+  const evidence = witness ?? stage;
+  const evidenceSha256 =
+    evidence === undefined
+      ? evidenceStage === "stage-retired-before-effect"
+        ? state.mutationRecoveries.at(-1).value
+            .observed_evidence_head_sha256
+        : ZERO_SHA256
+      : digest(evidence.bytes);
+  const localLinks =
+    evidence === undefined ? 0 : Number(evidence.metadata.nlink);
+  const settlementSha256 =
+    settlement === undefined ? ZERO_SHA256 : digest(settlement.bytes);
+  const topology =
+    evidenceStage === "not-started"
+      ? undefined
+      : {
+          evidence_sha256: evidenceSha256,
+          evidence_stage: evidenceStage,
+          local_links: localLinks,
+          settlement_sha256: settlementSha256,
+          slot_sequence: reservation.slot.value.journal_sequence,
+        };
+  const topologySha256 =
+    topology === undefined ? ZERO_SHA256 : digest(canonicalBytes(topology));
+  return Object.freeze({
+    observed_effect_disposition:
+      new Set([
+        "not-started",
+        "stage-only",
+        "stage-retired-before-effect",
+      ]).has(evidenceStage)
+        ? "not-reached"
+        : evidenceStage === "retirement-authorized-retired"
+          ? "complete"
+          : "pending",
+    observed_effect_name: "provider-reservation",
+    observed_evidence_head_sha256: evidenceSha256,
+    observed_evidence_prefix_sha256: topologySha256,
+    observed_evidence_stage: evidenceStage,
+    observed_residual_sha256: topologySha256,
+    observed_settlement_sha256: settlementSha256,
+  });
+}
+
 function providerRecoveryObservation(state) {
+  if (
+    state.mutationLease?.value.action ===
+    COLIMA_LIVE_PROVIDER_RESERVATION_ACTION
+  ) {
+    return liveProviderReservationRecoveryObservation(state);
+  }
   if (
     state.mutationLease?.value.operation_kind ===
       CONTROLLED_BACKGROUND_RETIREMENT_OPERATION_KIND
@@ -8594,6 +10605,9 @@ export function providerRecoveryConfirmationForExecutor(argumentsValue) {
   const roots = prepareRoots(argumentsValue.repoRoot, argumentsValue.stateBase, false);
   const state = loadState(roots, false);
   const base = providerRecoveryBase(state);
+  if (base.operation.action === COLIMA_LIVE_PROVIDER_RESERVATION_ACTION) {
+    fail("live provider reservation requires its physical recovery confirmation", 73);
+  }
   return providerRecoveryConfirmation(base);
 }
 
@@ -8668,6 +10682,184 @@ export function liveProviderFixtureStartDecisionRecoveryConfirmationForTest(
   return liveProviderStartDecisionRecoveryConfirmation(argumentsValue, true);
 }
 
+function validateLiveProviderReservationRecoveryArguments(
+  argumentsValue,
+  fixtureOnly,
+  { confirmation, testCheckpoint },
+) {
+  const fields = [
+    "observation",
+    "observationInput",
+    "repoRoot",
+    "stateBase",
+    ...(fixtureOnly ? ["requirements"] : []),
+    ...(confirmation ? ["confirmation"] : []),
+    ...(testCheckpoint ? ["testCheckpoint"] : []),
+  ];
+  exactKeys(
+    argumentsValue,
+    fields,
+    "live provider reservation recovery arguments",
+  );
+  if (
+    typeof argumentsValue.repoRoot !== "string" ||
+    typeof argumentsValue.stateBase !== "string" ||
+    argumentsValue.observation === null ||
+    Array.isArray(argumentsValue.observation) ||
+    typeof argumentsValue.observation !== "object" ||
+    argumentsValue.observationInput === null ||
+    Array.isArray(argumentsValue.observationInput) ||
+    typeof argumentsValue.observationInput !== "object" ||
+    (fixtureOnly &&
+      (argumentsValue.requirements === null ||
+        Array.isArray(argumentsValue.requirements) ||
+        typeof argumentsValue.requirements !== "object")) ||
+    (confirmation && typeof argumentsValue.confirmation !== "string") ||
+    (testCheckpoint && typeof argumentsValue.testCheckpoint !== "function")
+  ) {
+    fail("live provider reservation recovery arguments were refused", 64);
+  }
+  return argumentsValue;
+}
+
+function validateLiveProviderReservationRecoveryPhysicalState(
+  state,
+  argumentsValue,
+  fixtureOnly,
+) {
+  const reservation = completedLiveProviderReservationForVariant(
+    state,
+    fixtureOnly,
+  );
+  if (reservation === undefined) {
+    fail("live provider reservation recovery state was unavailable", 73);
+  }
+  assertLiveProviderReservationOpenState(
+    state,
+    fixtureOnly,
+    reservation.publicationPlan,
+  );
+  validateLiveProviderReservationArgumentBinding(
+    argumentsValue,
+    reservation.source,
+    fixtureOnly,
+  );
+  const stage = state.providerReservationStage;
+  const witness = state.providerReservationWitness;
+  if (stage === undefined && witness === undefined) {
+    assertLiveProviderReservationMarkerAbsent(
+      state,
+      reservation.publicationPlan,
+      argumentsValue,
+    );
+  } else if (stage !== undefined && witness === undefined) {
+    if (stage.metadata.nlink === 1n) {
+      assertLiveProviderReservationMarkerAbsent(
+        state,
+        reservation.publicationPlan,
+        argumentsValue,
+      );
+      const { runMetadata } = assertLiveProviderReservationBoundDirectories(
+        state,
+        reservation.publicationPlan,
+        argumentsValue,
+      );
+      inspectLiveProviderReservationArtifact(
+        stage.path,
+        "live provider reservation stage",
+        runMetadata.dev,
+        1,
+        stage.bytes,
+        stage.metadata,
+      );
+    } else {
+      assertLiveProviderReservationLinkedTopology(
+        state,
+        reservation.publicationPlan,
+        argumentsValue,
+        2,
+      );
+    }
+  } else if (stage !== undefined && witness !== undefined) {
+    assertLiveProviderReservationLinkedTopology(
+      state,
+      reservation.publicationPlan,
+      argumentsValue,
+      3,
+    );
+  } else if (witness.metadata.nlink === 2n) {
+    assertLiveProviderReservationLinkedTopology(
+      state,
+      reservation.publicationPlan,
+      argumentsValue,
+      2,
+    );
+  } else {
+    assertLiveProviderReservationRetiredWitness(
+      state,
+      reservation.publicationPlan,
+      argumentsValue,
+    );
+    if (reservation.settlement === undefined) {
+      assertLiveProviderReservationMarkerAbsent(
+        state,
+        reservation.publicationPlan,
+        argumentsValue,
+      );
+    }
+  }
+  return Object.freeze({
+    observation: liveProviderReservationRecoveryObservation(state),
+    reservation,
+  });
+}
+
+function liveProviderReservationRecoveryConfirmation(
+  argumentsValue,
+  fixtureOnly,
+) {
+  const admittedArguments =
+    validateLiveProviderReservationRecoveryArguments(
+      argumentsValue,
+      fixtureOnly,
+      { confirmation: false, testCheckpoint: false },
+    );
+  const roots = prepareRoots(
+    admittedArguments.repoRoot,
+    admittedArguments.stateBase,
+    false,
+  );
+  const state = loadState(roots, false);
+  const base = providerRecoveryBase(state);
+  if (
+    base.operation.action !== COLIMA_LIVE_PROVIDER_RESERVATION_ACTION ||
+    liveProviderReservationFixtureOnly(
+      base.operation.operation_kind,
+      base.operation.operation_contract_sha256,
+    ) !== fixtureOnly
+  ) {
+    fail("live provider reservation recovery action was refused", 73);
+  }
+  validateLiveProviderReservationRecoveryPhysicalState(
+    state,
+    admittedArguments,
+    fixtureOnly,
+  );
+  return providerRecoveryConfirmation(base);
+}
+
+export function liveProviderReservationRecoveryConfirmationForExecutor(
+  argumentsValue,
+) {
+  return liveProviderReservationRecoveryConfirmation(argumentsValue, false);
+}
+
+export function liveProviderFixtureReservationRecoveryConfirmationForTest(
+  argumentsValue,
+) {
+  return liveProviderReservationRecoveryConfirmation(argumentsValue, true);
+}
+
 export function backgroundProviderCleanupRecoveryConfirmationForExecutor(
   argumentsValue,
 ) {
@@ -8688,7 +10880,19 @@ export function backgroundProviderCleanupRecoveryConfirmationForExecutor(
   return providerRecoveryConfirmation(base);
 }
 
-function acquireProviderRecovery(roots, confirmation, ownerProbe, publicationHolds = {}) {
+function acquireProviderRecovery(
+  roots,
+  confirmation,
+  ownerProbe,
+  publicationHolds = {},
+  additionalReassertObservation = undefined,
+) {
+  if (
+    additionalReassertObservation !== undefined &&
+    typeof additionalReassertObservation !== "function"
+  ) {
+    fail("provider recovery physical observer was refused", 70);
+  }
   let state = loadState(roots, false);
   const observedBase = providerRecoveryBase(state);
   if (confirmation !== providerRecoveryConfirmation(observedBase)) {
@@ -8779,6 +10983,9 @@ function acquireProviderRecovery(roots, confirmation, ownerProbe, publicationHol
     ) {
       fail("provider recovery observation changed before claim publication", 73);
     }
+    if (additionalReassertObservation?.(current) !== undefined) {
+      fail("provider recovery physical observer returned a value", 70);
+    }
   };
   if (!publishMutationBlocker(state.run, name, bytes, {
     ...publicationHolds,
@@ -8813,6 +11020,9 @@ function acquireProviderRecovery(roots, confirmation, ownerProbe, publicationHol
   ) {
     fail("provider recovery source changed", 73);
   }
+  if (additionalReassertObservation?.(state) !== undefined) {
+    fail("provider recovery physical observer returned a value", 70);
+  }
   return held;
 }
 
@@ -8823,6 +11033,12 @@ function assertProviderRecoveryHeld(roots, held) {
     fail("provider recovery claim identity changed");
   }
   const state = loadState(roots, false);
+  if (
+    state.mutationLease?.value.action ===
+    COLIMA_LIVE_PROVIDER_RESERVATION_ACTION
+  ) {
+    fail("live provider reservation requires its physical recovery authority", 73);
+  }
   const latest = state.mutationRecoveries.at(-1);
   if (latest === undefined || !latest.bytes.equals(held.bytes)) {
     fail("provider recovery claim ownership was refused", 73);
@@ -8844,6 +11060,83 @@ function assertProviderRecoveryHeld(roots, held) {
     !authorisedSettlementTransition
   ) {
     fail("provider recovery observation changed", 73);
+  }
+  return state;
+}
+
+function liveProviderReservationRecoveryStageReachable(from, to) {
+  const visited = new Set();
+  const pending = [from];
+  while (pending.length > 0) {
+    const current = pending.shift();
+    if (current === to) return true;
+    if (visited.has(current)) continue;
+    visited.add(current);
+    for (const next of
+      PROVIDER_RESERVATION_RECOVERY_TRANSITIONS[current] ?? []) {
+      if (!visited.has(next)) pending.push(next);
+    }
+  }
+  return false;
+}
+
+function assertLiveProviderReservationRecoveryHeld(
+  roots,
+  held,
+  argumentsValue,
+  fixtureOnly,
+) {
+  const currentClaim = parseCanonical(
+    held.path,
+    "live provider reservation recovery claim",
+  );
+  const claimMetadata = mutationHeldIdentity(held.path);
+  if (
+    !sameMetadata(held.identity, claimMetadata) ||
+    !currentClaim.bytes.equals(held.bytes)
+  ) {
+    fail("live provider reservation recovery claim identity changed", 73);
+  }
+  const state = loadState(roots, false);
+  const latest = state.mutationRecoveries.at(-1);
+  if (
+    latest === undefined ||
+    !latest.bytes.equals(held.bytes) ||
+    state.mutationLease === undefined ||
+    !state.mutationLease.bytes.equals(held.base.lease.bytes)
+  ) {
+    fail("live provider reservation recovery ownership was refused", 73);
+  }
+  const { observation, reservation } =
+    validateLiveProviderReservationRecoveryPhysicalState(
+      state,
+      argumentsValue,
+      fixtureOnly,
+    );
+  const previous = held.observation;
+  const previousStage = previous.observed_evidence_stage;
+  const currentStage = observation.observed_evidence_stage;
+  const settlementTransition =
+    previous.observed_settlement_sha256 === ZERO_SHA256 &&
+    observation.observed_settlement_sha256 !== ZERO_SHA256;
+  if (
+    !liveProviderReservationRecoveryStageReachable(
+      previousStage,
+      currentStage,
+    ) ||
+    (previous.observed_evidence_head_sha256 !== ZERO_SHA256 &&
+      previous.observed_evidence_head_sha256 !==
+        observation.observed_evidence_head_sha256) ||
+    (previous.observed_settlement_sha256 !== ZERO_SHA256 &&
+      previous.observed_settlement_sha256 !==
+        observation.observed_settlement_sha256) ||
+    (settlementTransition &&
+      (reservation.settlement?.value.authority !== "recovery" ||
+        reservation.settlement.value.authority_sha256 !== digest(held.bytes) ||
+        observation.observed_settlement_sha256 !==
+          digest(reservation.settlement.bytes)))
+  ) {
+    fail("live provider reservation recovery observation changed", 73);
   }
   return state;
 }
@@ -9229,6 +11522,349 @@ function closeRecoveredProviderMutation(
     publicationHolds,
     operationEvidenceSha256,
   );
+}
+
+function relinkLiveProviderReservationMarkerForRecovery(
+  roots,
+  state,
+  reservation,
+  argumentsValue,
+  testCheckpoint,
+) {
+  const witness = assertLiveProviderReservationRetiredWitness(
+    state,
+    reservation.publicationPlan,
+    argumentsValue,
+  );
+  if (reservation.settlement !== undefined) {
+    fail("settled live provider reservation could not reacquire its marker", 73);
+  }
+  assertLiveProviderReservationMarkerAbsent(
+    state,
+    reservation.publicationPlan,
+    argumentsValue,
+  );
+  try {
+    linkSync(
+      witness.path,
+      liveProviderReservationMarkerPath(argumentsValue),
+    );
+  } catch (error) {
+    if (error?.code === "EEXIST") {
+      fail("live provider reservation marker was acquired elsewhere", 73);
+    }
+    fail("live provider reservation marker reacquisition failed", 70);
+  }
+  callLiveProviderReservationCheckpoint(
+    testCheckpoint,
+    "after-recovery-marker-link",
+  );
+  syncDirectory(argumentsValue.observationInput.provider_root);
+  callLiveProviderReservationCheckpoint(
+    testCheckpoint,
+    "after-recovery-marker-directory-sync",
+  );
+  const verified = loadState(roots, false);
+  assertLiveProviderReservationLinkedTopology(
+    verified,
+    reservation.publicationPlan,
+    argumentsValue,
+    2,
+  );
+  return verified;
+}
+
+function closeRecoveredLiveProviderReservation(
+  roots,
+  held,
+  argumentsValue,
+  fixtureOnly,
+  disposition,
+  operationEvidenceSha256,
+  testCheckpoint,
+) {
+  const assertHeld = () =>
+    assertLiveProviderReservationRecoveryHeld(
+      roots,
+      held,
+      argumentsValue,
+      fixtureOnly,
+    );
+  const state = assertHeld();
+  const reservation = completedLiveProviderReservationForVariant(
+    state,
+    fixtureOnly,
+  );
+  if (
+    reservation === undefined ||
+    (disposition === "aborted-before-effect" &&
+      (state.providerReservationStage !== undefined ||
+        state.providerReservationWitness !== undefined ||
+        reservation.settlement !== undefined)) ||
+    (disposition === "completed" &&
+      (reservation.settlement === undefined ||
+        state.providerReservationStage !== undefined ||
+        state.providerReservationWitness?.metadata.nlink !== 1n))
+  ) {
+    fail("live provider reservation recovery close was refused", 73);
+  }
+  let afterLinkFailure;
+  const closed = publishMutationClose(
+    roots,
+    state,
+    state.mutationLease,
+    disposition,
+    assertHeld,
+    {
+      afterLinkObserver:
+        testCheckpoint === undefined
+          ? undefined
+          : () => {
+              try {
+                callLiveProviderReservationCheckpoint(
+                  testCheckpoint,
+                  "after-recovery-close-link",
+                );
+              } catch (error) {
+                afterLinkFailure = error;
+              }
+            },
+    },
+    operationEvidenceSha256,
+  );
+  if (afterLinkFailure !== undefined) throw afterLinkFailure;
+  callLiveProviderReservationCheckpoint(
+    testCheckpoint,
+    "after-recovery-close",
+  );
+  return closed;
+}
+
+function recoverColimaLiveProviderReservation(argumentsValue, fixtureOnly) {
+  const admittedArguments =
+    validateLiveProviderReservationRecoveryArguments(
+      argumentsValue,
+      fixtureOnly,
+      { confirmation: true, testCheckpoint: fixtureOnly },
+    );
+  const testCheckpoint = fixtureOnly
+    ? admittedArguments.testCheckpoint
+    : undefined;
+  const roots = prepareRoots(
+    admittedArguments.repoRoot,
+    admittedArguments.stateBase,
+    false,
+  );
+  const initial = loadState(roots, false);
+  const base = providerRecoveryBase(initial);
+  if (
+    base.operation.action !== COLIMA_LIVE_PROVIDER_RESERVATION_ACTION ||
+    liveProviderReservationFixtureOnly(
+      base.operation.operation_kind,
+      base.operation.operation_contract_sha256,
+    ) !== fixtureOnly
+  ) {
+    fail("live provider reservation recovery action was refused", 73);
+  }
+  validateLiveProviderReservationRecoveryPhysicalState(
+    initial,
+    admittedArguments,
+    fixtureOnly,
+  );
+  const held = acquireProviderRecovery(
+    roots,
+    admittedArguments.confirmation,
+    defaultMutationOwnerProbe,
+    {},
+    (current) => {
+      validateLiveProviderReservationRecoveryPhysicalState(
+        current,
+        admittedArguments,
+        fixtureOnly,
+      );
+    },
+  );
+  callLiveProviderReservationCheckpoint(
+    testCheckpoint,
+    "after-recovery-claim",
+  );
+  for (let transition = 0; transition < 12; transition += 1) {
+    const state = assertLiveProviderReservationRecoveryHeld(
+      roots,
+      held,
+      admittedArguments,
+      fixtureOnly,
+    );
+    const reservation = completedLiveProviderReservationForVariant(
+      state,
+      fixtureOnly,
+    );
+    const observation = liveProviderReservationRecoveryObservation(state);
+    switch (observation.observed_evidence_stage) {
+      case "not-started":
+      case "stage-retired-before-effect": {
+        const closed = closeRecoveredLiveProviderReservation(
+          roots,
+          held,
+          admittedArguments,
+          fixtureOnly,
+          "aborted-before-effect",
+          ZERO_SHA256,
+          testCheckpoint,
+        );
+        return closed.receiptState.head;
+      }
+      case "stage-only":
+        callLiveProviderReservationCheckpoint(
+          testCheckpoint,
+          "before-recovery-stage-retirement",
+        );
+        unlinkLiveProviderReservationStage(
+          state,
+          {
+            ...state.providerReservationStage,
+            identity: state.providerReservationStage.metadata,
+          },
+          1,
+          testCheckpoint,
+        );
+        break;
+      case "marker-linked": {
+        callLiveProviderReservationCheckpoint(
+          testCheckpoint,
+          "before-recovery-witness-link",
+        );
+        const witnessPath = join(
+          state.run,
+          providerReservationWitnessFileName(
+            reservation.slot.value.journal_sequence,
+          ),
+        );
+        linkLiveProviderReservationWitness(
+          state,
+          state.providerReservationStage,
+          witnessPath,
+          testCheckpoint,
+        );
+        break;
+      }
+      case "witness-linked":
+        callLiveProviderReservationCheckpoint(
+          testCheckpoint,
+          "before-recovery-stage-unlink",
+        );
+        unlinkLiveProviderReservationStage(
+          state,
+          {
+            ...state.providerReservationStage,
+            identity: state.providerReservationStage.metadata,
+          },
+          3,
+          testCheckpoint,
+        );
+        break;
+      case "witness-unlinked":
+        callLiveProviderReservationCheckpoint(
+          testCheckpoint,
+          "before-recovery-marker-relink",
+        );
+        relinkLiveProviderReservationMarkerForRecovery(
+          roots,
+          state,
+          reservation,
+          admittedArguments,
+          testCheckpoint,
+        );
+        break;
+      case "marker-held":
+      case "marker-reacquired": {
+        callLiveProviderReservationCheckpoint(
+          testCheckpoint,
+          "before-recovery-retirement-observation",
+        );
+        assertLiveProviderReservationLinkedTopology(
+          state,
+          reservation.publicationPlan,
+          admittedArguments,
+          2,
+        );
+        const observed = observeLiveProviderReservationPhysicalRoots(
+          admittedArguments,
+          state,
+          reservation.source,
+          reservation.publicationPlan,
+          fixtureOnly,
+          "present",
+          undefined,
+        );
+        assertLiveProviderReservationLinkedTopology(
+          loadState(roots, false),
+          reservation.publicationPlan,
+          admittedArguments,
+          2,
+        );
+        callLiveProviderReservationCheckpoint(
+          testCheckpoint,
+          "after-recovery-retirement-observation",
+        );
+        const recoveryAuthority = () =>
+          assertLiveProviderReservationRecoveryHeld(
+            roots,
+            held,
+            admittedArguments,
+            fixtureOnly,
+          );
+        publishLiveProviderReservationSettlement(
+          roots,
+          state,
+          reservation,
+          reservation.witness.value,
+          observed.root_observation,
+          recoveryAuthority,
+          testCheckpoint,
+        );
+        break;
+      }
+      case "retirement-authorized-held":
+        retireLiveProviderReservationMarker(
+          roots,
+          state,
+          reservation.publicationPlan,
+          admittedArguments,
+          testCheckpoint,
+        );
+        break;
+      case "retirement-authorized-retired": {
+        const closed = closeRecoveredLiveProviderReservation(
+          roots,
+          held,
+          admittedArguments,
+          fixtureOnly,
+          "completed",
+          digest(reservation.settlement.bytes),
+          testCheckpoint,
+        );
+        const completed = completedLiveProviderReservationForVariant(
+          closed,
+          fixtureOnly,
+        );
+        return liveProviderReservationCompletion(completed);
+      }
+      default:
+        fail("live provider reservation recovery stage was refused", 73);
+    }
+  }
+  fail("live provider reservation recovery did not converge", 73);
+}
+
+export function recoverColimaLiveProviderReservationForExecutor(
+  argumentsValue,
+) {
+  return recoverColimaLiveProviderReservation(argumentsValue, false);
+}
+
+export function recoverColimaLiveProviderReservationForTest(argumentsValue) {
+  return recoverColimaLiveProviderReservation(argumentsValue, true);
 }
 
 function assertRecoverableLiveProviderStartDecisionState(

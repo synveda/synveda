@@ -22,7 +22,7 @@ import {
 export const COLIMA_LIVE_PROVIDER_OPERATION_PLAN_SCHEMA =
   "synveda.clean-engine.colima-live-provider-operation-plan.v1";
 export const COLIMA_LIVE_PROVIDER_PLAN_STATE_INTEGRATION =
-  "mutation-journal-v5-plan-only";
+  "mutation-journal-v6-plan-only";
 
 const ZERO_SHA256 = "0".repeat(64);
 

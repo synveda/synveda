@@ -14,6 +14,7 @@ import {
   rmSync,
   rmdirSync,
   symlinkSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import { basename, dirname, join, relative, sep } from "node:path";
@@ -23,6 +24,7 @@ import {
   COLIMA_LIVE_FIXTURE_PRE_EFFECT_ROOT_OBSERVATION_SCHEMA,
   COLIMA_LIVE_MUTATION_SURFACE_ROLES,
   COLIMA_LIVE_PRE_EFFECT_ROOT_OBSERVATION_SCHEMA,
+  COLIMA_LIVE_PROVIDER_RESERVATION_NAME,
   COLIMA_LIVE_PUBLIC_PROJECTION_SCHEMA,
   COLIMA_LIVE_REQUIREMENTS,
   COLIMA_LIVE_REQUIREMENTS_SCHEMA,
@@ -34,6 +36,7 @@ import {
   colimaLiveDigest,
   colimaLivePublicProjectionForTest,
   observeColimaLivePreEffectRootsForTest,
+  observeColimaLiveProviderReservationRootsForTest,
   revalidateColimaLiveObservationForTest,
   validateColimaLiveObservationForTest,
   validateColimaLiveRequirements,
@@ -138,23 +141,23 @@ test("production live requirements are exact, pinned and execution-disabled", ()
   assert.equal(COLIMA_LIVE_REQUIREMENTS.schema, COLIMA_LIVE_REQUIREMENTS_SCHEMA);
   assert.equal(
     COLIMA_LIVE_REQUIREMENTS_SCHEMA,
-    "synveda.clean-engine.colima-live-requirements.v3",
+    "synveda.clean-engine.colima-live-requirements.v4",
   );
   assert.equal(
     COLIMA_LIVE_OBSERVATION_SCHEMA,
-    "synveda.clean-engine.colima-live-observation.v3",
+    "synveda.clean-engine.colima-live-observation.v4",
   );
   assert.equal(
     COLIMA_LIVE_PUBLIC_PROJECTION_SCHEMA,
-    "synveda.clean-engine.colima-live-public-projection.v3",
+    "synveda.clean-engine.colima-live-public-projection.v4",
   );
   assert.equal(
     COLIMA_LIVE_FIXTURE_PRE_EFFECT_ROOT_OBSERVATION_SCHEMA,
-    "synveda.clean-engine.colima-live-fixture-pre-effect-root-observation.v3",
+    "synveda.clean-engine.colima-live-fixture-pre-effect-root-observation.v4",
   );
   assert.equal(
     COLIMA_LIVE_PRE_EFFECT_ROOT_OBSERVATION_SCHEMA,
-    "synveda.clean-engine.colima-live-pre-effect-root-observation.v3",
+    "synveda.clean-engine.colima-live-pre-effect-root-observation.v4",
   );
   assert.equal(COLIMA_LIVE_REQUIREMENTS.authorizations.execution_authorized, false);
   assert.equal(COLIMA_LIVE_REQUIREMENTS.authorizations.lifecycle_exposure_authorized, false);
@@ -272,7 +275,7 @@ test("production live requirements are exact, pinned and execution-disabled", ()
   );
   assert.equal(
     COLIMA_LIVE_REQUIREMENTS_SHA256,
-    "409bfc2fa03c57d151812c69c395d75c4cf7454f1262d2369f47c97646ebf265",
+    "f08813ed481d42a6ac5f20ff19dffb812efc53705b3d5f73206ee0cccf118aa4",
   );
   assert.equal(validateColimaLiveRequirements(COLIMA_LIVE_REQUIREMENTS), COLIMA_LIVE_REQUIREMENTS);
   assert.ok(Object.isFrozen(COLIMA_LIVE_REQUIREMENTS));
@@ -336,6 +339,9 @@ test("pinned requirements refuse field, provenance, release and authorization dr
       value.mutation_surface.namespaces[0].effect_policy =
         "expected-owned-mutation-v1";
     },
+    (value) => {
+      value.legacy_preparation_contract_sha256 = "f".repeat(64);
+    },
   ];
   for (const mutate of mutations) {
     const requirements = clone(COLIMA_LIVE_REQUIREMENTS);
@@ -344,14 +350,14 @@ test("pinned requirements refuse field, provenance, release and authorization dr
   }
 });
 
-test("superseded v1 and v2 preparation generations are refused", (t) => {
-  for (const version of ["v1", "v2"]) {
+test("superseded v1 through v3 preparation generations are refused", (t) => {
+  for (const version of ["v1", "v2", "v3"]) {
     const requirements = clone(COLIMA_LIVE_REQUIREMENTS);
     requirements.schema = `synveda.clean-engine.colima-live-requirements.${version}`;
     expectRefusal(() => validateColimaLiveRequirements(requirements));
   }
   const state = fixture(t);
-  for (const version of ["v1", "v2"]) {
+  for (const version of ["v1", "v2", "v3"]) {
     const observation = clone(build(state));
     observation.schema = `synveda.clean-engine.colima-live-observation.${version}`;
     expectRefusal(() =>
@@ -408,6 +414,95 @@ test("a closed fixture builds, validates and deterministically revalidates", (t)
   assert.equal(
     revalidateColimaLiveObservationForTest(state.requirements, observation, state.input),
     observation,
+  );
+});
+
+test("reservation root observation binds the marker disposition and state run", (t) => {
+  const state = fixture(t);
+  const observation = build(state);
+  const stateRun = join(state.root, "state-run");
+  mkdirSync(stateRun, { mode: 0o700 });
+  const checkpoints = [];
+  const absent = observeColimaLiveProviderReservationRootsForTest(
+    state.requirements,
+    observation,
+    state.input,
+    stateRun,
+    "absent",
+    (checkpoint) => {
+      checkpoints.push(checkpoint);
+    },
+  );
+  assert.equal(absent.marker_disposition, "absent");
+  assert.equal(absent.root_observation.root_set_disposition, "observed-pristine");
+  assert.equal(absent.namespace_bindings.length, 6);
+  assert.notEqual(
+    absent.provider_root_identity.inode,
+    absent.state_run_identity.inode,
+  );
+  assert.deepEqual(checkpoints, [
+    "after-first-root-sample",
+    "after-reservation-root-observation",
+  ]);
+
+  const marker = join(
+    state.providerRoot,
+    COLIMA_LIVE_PROVIDER_RESERVATION_NAME,
+  );
+  writeFileSync(marker, "opaque reservation\n", { mode: 0o600 });
+  const present = observeColimaLiveProviderReservationRootsForTest(
+    state.requirements,
+    observation,
+    state.input,
+    stateRun,
+    "present",
+  );
+  assert.equal(present.marker_disposition, "present");
+  assert.deepEqual(present.root_observation, absent.root_observation);
+  assert.deepEqual(present.namespace_bindings, absent.namespace_bindings);
+  assert.deepEqual(present.provider_root_identity, absent.provider_root_identity);
+  assert.deepEqual(present.state_run_identity, absent.state_run_identity);
+
+  const extra = join(state.providerRoot, "unexpected-root-entry");
+  writeFileSync(extra, "collision\n", { mode: 0o600 });
+  expectRefusal(
+    () =>
+      observeColimaLiveProviderReservationRootsForTest(
+        state.requirements,
+        observation,
+        state.input,
+        stateRun,
+        "present",
+      ),
+    78,
+  );
+  unlinkSync(extra);
+  unlinkSync(marker);
+
+  chmodSync(stateRun, 0o755);
+  expectRefusal(
+    () =>
+      observeColimaLiveProviderReservationRootsForTest(
+        state.requirements,
+        observation,
+        state.input,
+        stateRun,
+        "absent",
+      ),
+  );
+  chmodSync(stateRun, 0o700);
+  const stateRunAlias = join(state.root, "state-run-alias");
+  symlinkSync(stateRun, stateRunAlias);
+  expectRefusal(
+    () =>
+      observeColimaLiveProviderReservationRootsForTest(
+        state.requirements,
+        observation,
+        state.input,
+        stateRunAlias,
+        "absent",
+      ),
+    78,
   );
 });
 

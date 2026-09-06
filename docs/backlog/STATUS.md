@@ -199,9 +199,10 @@ fixture selection plus a private non-secret synthetic proxy template. Its
 complete run publishes through a no-replace hard-linked active receipt; inert
 pre-publication crash residue grants no provider authority and remains pending
 final cleanup. Planning reaches no Docker/provider/host authority.
-The clean-Engine state is now receipt v4 with receipt v1/v2/v3 refused. Its
-append-only journal uses mutation slot v5, recovery/root v4 and close v6;
-slot v1-v4, recovery/root v1-v3 and close v1-v5 require reset/regeneration.
+The clean-Engine state is now receipt v5 with receipt v1 through v4 refused.
+Its append-only journal uses mutation slot v6, recovery/root v5 and close v7;
+slot v1 through v5, recovery/root v1 through v4 and close v1 through v6 require
+reset/regeneration.
 Every slot binds source/result predecessors plus an operation kind, contract
 and canonical plan; every provider close binds the outer operation settlement.
 Permanent slots, settlements, closes and bounded recovery claims are never
@@ -224,7 +225,7 @@ Passing receipt and close bind that settlement rather than the inner identity.
 Source drift is fenced at intent, every process effect gate, pass and close.
 
 Recovery confirmation is read-only; only acquisition, after owner-absence
-proof, can retire an exact mutation-stage alias and publish a v2 observation
+proof, can retire an exact mutation-stage alias and publish a v5 observation
 claim. Recovery never launches, signals, deletes, repairs inner evidence or
 replays controller/start. Unattested process windows remain blocking. Foreign
 collision settlement is historical after publication while all Synveda-owned
@@ -264,15 +265,18 @@ or collision. The canonical physical provider root is capped at 21 UTF-8 bytes,
 keeping the closed `/l` layout plus pinned longest Lima socket at 103 bytes and
 below Darwin's 104-byte refusal threshold; lexical and resolved physical paths
 are both checked before traversal. `/bin/sh` and `/usr/sbin/ioreg` are declared
-OS-build-bound but not yet individually observed. Its v3 production
+OS-build-bound but not yet individually observed. Its v4 production
 requirements digest is
-`409bfc2fa03c57d151812c69c395d75c4cf7454f1262d2369f47c97646ebf265`;
+`f08813ed481d42a6ac5f20ff19dffb812efc53705b3d5f73206ee0cccf118aa4`;
+the exact v3 predecessor digest
+`409bfc2fa03c57d151812c69c395d75c4cf7454f1262d2369f47c97646ebf265`
+is retained only as the legacy binding;
 all execution, lifecycle and finalization authorizations remain false. The
 observer has no process-execution or receipt/finalizer surface and no lifecycle
-target; the plan boundary consumes only its revalidated digest. V1/v2
+target; the plan boundary consumes only its revalidated digest. V1 through v3
 requirements, observations and root observations plus old or falsely
 relabelled two-target evidence are refused; public projection is generated only
-as v3. Twenty-three deterministic preparation tests pass, including exact
+as v4. Twenty-four deterministic preparation tests pass, including exact
 21-byte ASCII and non-ASCII roots, lexical and physical overflow, alias refusal
 and serialized over-budget evidence. The fixture allocator is not a production
 root allocator or reservation. A separate pure registry now reserves distinct live
@@ -281,7 +285,7 @@ evidence identities, binds both contracts to the production requirements
 digest and selects only an exact action/kind/contract/class tuple. Create grants
 state planning only; execution, provider recovery, lifecycle and finalization
 remain false, while cleanup is still deny-only. The content-free live operation
-plan is embedded in a dedicated mutation slot v5 and owner close v6, sharing the
+plan is embedded in a dedicated mutation slot v6 and owner close v7, sharing the
 same atomic slot with both fake executors. It binds active source, registry,
 production-requirements and private-observation digests, writes no receipt,
 provider or environment evidence, and admits only its exact inert intent,
@@ -289,7 +293,7 @@ followed by that intent's exact decision. Effect-free crash recovery can only
 abort an abandoned generation before retry.
 
 The state owner now persists that request through the distinct
-`provider-intent` action and `mutation-journal-v5-inert-intent-only`. Production
+`provider-intent` action and `mutation-journal-v6-inert-intent-only`. Production
 and fixture operation kinds, contracts, schemas and evidence classes are
 separate, and neither tuple is registered for provider execution. The publisher
 reconstructs complete state/source/namespace admission initially, before slot
@@ -302,38 +306,54 @@ without a fresh namespace claim.
 
 The state owner also persists the completed-intent successor through
 `provider-start-decision` and
-`mutation-journal-v5-inert-start-decision-only`. Its publication plan v2 can
+`mutation-journal-v6-inert-start-decision-only`. Its publication plan v2 can
 derive only `requested-not-executed-not-authorized`. The owner reconstructs the
-terminal intent and fresh `S1/O1/S2/O2` namespace admission at the initial,
+completed intent and fresh `S1/O1/S2/O2` namespace admission at the initial,
 pre-slot-link, post-slot-acquisition and pre-close-link boundaries; every value
 must match. Production and fixture classes cannot cross. A pre-CAS collision
 leaves no slot; a post-CAS collision aborts that generation. Abandoned decision
-recovery is all-zero and abort-only, and a completed decision is terminal.
-Historical retry reads no current namespace state. Race, SIGTERM/SIGKILL,
+recovery is all-zero and abort-only. Historical retry reads no current namespace
+state. Race, SIGTERM/SIGKILL,
 class-crossing, schema and rehashed-tamper tests cover the ordered grammar.
 
-Shared journal CAS does not reserve the six mutation namespaces. The
-decision writes no process, adapter, provider, evidence, runtime, receipt or
-environment artifact and grants no effect, provider recovery, cleanup,
-lifecycle or finalization authority.
-
-A post-decision read-only seam now reconstructs the exact terminal decision and
+A post-decision read-only seam reconstructs the exact decision and
 performs a current `S1/O1/S2/O2` state/namespace observation. Stable pristine
 namespaces yield only a process-effect candidate with every authority flag
 explicitly false; stable collision yields `null`. The admission grants nothing,
 is never persisted and introduces no journal action, operation kind, registry
 row, receipt or lifecycle surface. Its authorization entry point always refuses.
 
-No Docker, Colima or Lima process ran. Next record the cooperative same-UID
-aggregate hard-link reservation and same-device requirement in a new ADR, then
-implement its no-spawn grammar as a deliberate state-generation hard cut. It
-must bind all six namespaces and the state run without authorizing execution.
-Only a later indivisible process-effect cut may add a durable effect slot,
-synchronous fresh gate, complete recursive post-start settlement, causal
-ownership/recovery for the outer process, detached Lima hostagent, usernet and
-SSH ControlMaster, live macOS proxy and OS-executable identities, authenticated
-Engine/socket/context evidence, uncertain-start recovery, receipts and
-dynamic-tree retirement before registering or invoking a live provider.
+The successor is now one deterministic cooperative no-spawn reservation. Its
+v6 slot is durable before a private fsynced mode-0600 witness stage. The
+publication plan binds the exact state run, one provider root and all six
+namespace identities/inventories; all eight directories must be distinct,
+private, current-UID and on one device. One fixed provider-root hard-link CAS
+selects the owner. The durable state witness and marker are checked by exact
+bytes/device/inode/UID/mode/size/link count.
+
+While that exact two-link inode is held, bracketed fresh namespace observation
+must equal the plan. An immutable
+`retirement-authorized-without-process` settlement is published before the
+verified marker is retired, its parent fsynced, the one-link witness proved and
+close v7 bound to the settlement digest. Dedicated v5 recovery can retire an
+inert stage, finish partial witness publication or relink an exact standalone
+witness. Claims bind the deterministic witness, settlement and reachable local
+topology. Replacement, extra links, wrong type/mode/inode, backward topology and
+namespace drift block. Two state bases sharing one root admit exactly one CAS
+winner. Owner/recovery crash boundaries and semantic tampering are covered by
+deterministic tests.
+
+This remains a cooperative same-UID protocol and no hostile-principal boundary.
+It grants reservation recovery only; process, adapter, root, provider-effect
+recovery, receipt/environment/provider/runtime/evidence publication, cleanup,
+lifecycle and finalization remain false. No supported command exposes the seam,
+and no Docker, Colima or Lima process ran. A later indivisible process-effect
+cut must keep the reservation held across start authority/effect, add complete
+recursive post-start settlement, causal ownership/recovery for the outer
+process, detached Lima hostagent, usernet and SSH ControlMaster, live macOS
+proxy and OS-executable identities, authenticated Engine/socket/context
+evidence, uncertain-start recovery, receipts and dynamic-tree retirement before
+registering or invoking a live provider.
 Live-provider identity, builder, proxy, browser and cleanup evidence follow;
 Linux/reference
 HTTPS must pass before legacy Rauthy/Temporal assets are deleted. Backup/restore,

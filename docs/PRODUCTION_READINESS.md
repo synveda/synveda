@@ -86,12 +86,13 @@ synthetic Docker client proxy configuration, canary remote builder and private
 registry. Current ACL exploit and metadata-retention evidence is macOS plus
 deterministic Linux grammar coverage. This is not public PKIX/browser trust,
 explicit custom-CA/proxy support, a clean-volume login or recovery evidence.
-One append-only version-4 receipt machine now enforces closed intent/results,
+One append-only version-5 receipt machine now enforces closed intent/results,
 collision-preserving failure branches, no-replace publication and an exact
-success-only synthetic manifest. Receipt v1/v2/v3, mutation slot v1-v4,
-recovery/root v1-v3 and close v1-v5 are direct hard-cut refusals. Slot v5 binds
-source/result predecessors plus operation kind, contract and plan; recovery v4
-binds a fresh observation; close v6 binds the outer operation settlement.
+success-only synthetic manifest. Receipt v1 through v4, mutation slot v1 through
+v5, recovery/root v1 through v4 and close v1 through v6 are direct hard-cut
+refusals. Slot v6 binds source/result predecessors plus operation kind,
+contract and plan; recovery v5 binds a fresh observation; close v7 binds the
+outer operation settlement.
 Final journal names are never deleted or reused, and generic append cannot own
 preflight, provider-create, provider-cleanup or finalization.
 
@@ -137,7 +138,7 @@ finalization therefore remain refused.
 The next provider-input boundary is deterministic but remains deliberately
 non-executing. A separate live-preparation requirements record pins exact
 official Colima 0.10.3, Lima 2.2.0 and Colima-core 0.10.4 disk artifacts. Its
-v3 private observation binds the upstream-correct Lima guest-agent/default-
+v4 private observation binds the upstream-correct Lima guest-agent/default-
 template layout, private network baseline, staged and dynamically selected
 helper identities, closed environment paths, host build/boot inputs and
 distinct source/receipt-owned disk identities. Six receipt-owned whole
@@ -147,7 +148,7 @@ top-level inventory is sampled twice with no-follow metadata and HMAC-projected
 as pristine or collision. Its canonical physical provider root is capped at 21
 UTF-8 bytes, keeping the pinned longest Lima Unix-socket path at 103 bytes,
 below Darwin's 104-byte refusal threshold. Both the lexical input and resolved
-physical path are bounded before traversal. V1/v2 evidence is refused. The
+physical path are bounded before traversal. V1 through v3 evidence is refused. The
 observer has no child-process API. The pinned
 command disables Docker-context activation and uses the gRPC port forwarder;
 `/bin/sh` and `/usr/sbin/ioreg` remain declared OS-build-bound inputs rather
@@ -160,7 +161,7 @@ deny-only. The registry still imports no state, receipt, process or fake-provide
 path.
 
 The state owner embeds one content-free live operation plan in a dedicated
-mutation slot v5 and close v6. It binds the active candidate/head, exact registry
+mutation slot v6 and close v7. It binds the active candidate/head, exact registry
 resolution, production requirements and private observation digest. The same
 slot CAS serializes it against fake-provider mutation; completion changes no
 receipt or environment, writes no provider evidence and blocks every later
@@ -186,16 +187,14 @@ the close link. Every canonical admission must equal the initial pristine
 baseline. A successful owner close changes no receipt or environment, writes no
 provider or operation evidence and grants no effect authority. Collisions and
 drift abort before effect; abandoned slots can only acquire an all-zero recovery
-v4 claim and an `aborted-before-effect` close. Generic provider recovery refuses
+v5 claim and an `aborted-before-effect` close. Generic provider recovery refuses
 inert decisions. The ordered journal permits aborted plan, intent and decision
-generations before each matching owner completion, and a completed decision is
-terminal. Completed retries return the historical non-authorizing result and
-make no fresh namespace claim. The observations and journal CAS are not an
-atomic reservation of the six mutation namespaces. This adds
+generations before each matching owner completion. Completed retries return the
+historical non-authorizing result and make no fresh namespace claim. This adds
 deterministic inert-state evidence only—not a live provider, process, VM,
 Engine, socket, context, cleanup, finalization or readiness result.
 
-A subsequent read-only seam now reconstructs the exact completed terminal
+A subsequent read-only seam reconstructs the exact completed
 decision and repeats current state/namespace observation in `S1/O1/S2/O2` order.
 Stable pristine namespaces yield only a deny-only process-effect candidate with
 every authority flag false; stable collision yields no candidate. It adds no journal
@@ -204,11 +203,31 @@ its authorization entry point always refuses. This closes only the
 post-decision observation shape; it is not process, provider, recovery or
 readiness evidence.
 
-Process execution remains blocked on an atomic six-namespace reservation,
-complete recursive post-start settlement, and causal identity/recovery for the
-outer process, detached Lima hostagent, usernet and SSH ControlMaster. Live
-macOS proxy observation and individual OS-executable identity evidence also
-remain open.
+The current state generation adds one deterministic cooperative reservation and
+still performs no provider process action. A v6 slot precedes a private fsynced
+witness. One fixed no-replace provider-root hard-link CAS binds the exact state
+run and all six namespace identities on one device. While the exact two-link
+marker/witness inode remains held, a bracketed fresh namespace observation must
+match the plan before immutable retirement authorization is published. The
+exact marker is then retired, its parent fsynced, the one-link witness proved
+and close v7 bound to the settlement digest. Receipt, environment, provider,
+runtime and evidence state remain unchanged.
+
+Dedicated v5 recovery can retire an inert stage, complete partial witness
+publication, or relink an exact standalone witness before settlement. Recovery
+history binds the deterministic witness, settlement and reachable local
+topology. Replacement, extra links, wrong type/mode/inode, backward topology or
+namespace drift blocks. Concurrent state bases sharing the provider root admit
+exactly one CAS winner. Crash-boundary, recovery, malformed-settlement and
+tamper tests are deterministic no-spawn evidence only. The marker coordinates
+cooperative same-UID owners and is not protection against hostile same-UID
+code. `reservation_recovery_authorized` does not grant provider-effect recovery.
+
+Process execution remains blocked on an indivisible generation that keeps this
+reservation held across process authorization and effect, complete recursive
+post-start settlement, and causal identity/recovery for the outer process,
+detached Lima hostagent, usernet and SSH ControlMaster. Live macOS proxy
+observation and individual OS-executable identity evidence also remain open.
 
 Live Linux/provider CI and a current Docker Desktop/provider run remain absent.
 Consequently this evidence improves the boundary without changing readiness.

@@ -381,7 +381,7 @@ content-free `buildx inspect` evidence for exactly one running embedded
 contacts neither Docker nor Colima and does not install the resolver mapping,
 so it closes no live acceptance criterion.
 
-The deterministic executor boundary now validates an append-only version-4
+The deterministic executor boundary now validates an append-only version-5
 receipt grammar from provider intent through registry, proxy, zero-read
 builder, browser, project cleanup and provider cleanup. Every phase has a
 closed content-free result schema; failures enter only an exact receipt-owned
@@ -390,14 +390,15 @@ authority across cleanup retries. Receipt and synthetic-manifest publication
 use fsynced staging plus no-replace links. The fixture-only manifest schema is
 explicitly non-live and controlled background evidence cannot become eligible.
 Provider success carries an explicit evidence class and must bind the exact
-provider-contract digest from its intent; receipt v1/v2/v3 state is a
-fresh-plan hard cut. Mutation slot v1-v4, recovery/root v1-v3 and close v1-v5
+provider-contract digest from its intent; receipt v1 through v4 state is a
+fresh-plan hard cut. Mutation slot v1 through v5, recovery/root v1 through v4
+and close v1 through v6
 are also refused and require regeneration; there is no translator. Mutation
-slot v5 binds the exact source receipt and
+slot v6 binds the exact source receipt and
 environment, previous close, operation kind, contract and canonical operation
-plan. Recovery v4 binds that operation and its exact observed evidence/root
-frontier; close v6 binds the result, owner or newest recovery authority and the
-outer operation-settlement digest. The recovery root is v4. Permanent,
+plan. Recovery v5 binds that operation and its exact observed evidence/root
+frontier; close v7 binds the result, owner or newest recovery authority and the
+outer operation-settlement digest. The recovery root is v5. Permanent,
 gap-free slots, settlements, closes and per-slot recovery claims are never
 deleted or reused. Only unique staging aliases reconcile. Every final link
 re-proves authority, endpoints, operation evidence and staged inode/bytes; a
@@ -437,7 +438,7 @@ identity enters the closed execution-failure branch.
 
 Recovery confirmation is read-only. After proving the recorded owner and any
 newest recoverer absent, acquisition alone may reconcile exact mutation-stage
-aliases, then appends a v3 claim bound to a fresh observation. Recovery never
+aliases, then appends a v5 claim bound to a fresh observation. Recovery never
 launches, signals, deletes, repairs the inner chain or replays a durable
 controller/start decision. Unauthenticated controller-launch and start-without-
 PID windows remain permanently uncertain. A complete identity, an exact
@@ -461,7 +462,7 @@ runtime and fixture-source paths, which may reside beneath that home directory.
 
 A separate, non-executing live-provider preparation contract now closes the
 next input boundary without changing that immutable fake contract. Requirements
-schema `synveda.clean-engine.colima-live-requirements.v3` pins the official
+schema `synveda.clean-engine.colima-live-requirements.v4` pins the official
 Colima 0.10.3 Darwin/arm64 release, Lima 2.2.0 Darwin/arm64 archive and extracted
 wrapper/`limactl` bytes, release guest agent at
 `share/lima/lima-guestagent.Linux-aarch64.gz`, release default template at
@@ -471,8 +472,11 @@ disk image by exact size and digest. The private Lima network baseline is mode
 `--activate=false` and `--port-forwarder grpc`, with
 `LIMA_SSH_PORT_FORWARDER=false` as the derived child setting. Its current
 canonical digest is
-`409bfc2fa03c57d151812c69c395d75c4cf7454f1262d2369f47c97646ebf265`.
-The private observation v3 schema binds exact staged paths, bytes, modes,
+`f08813ed481d42a6ac5f20ff19dffb812efc53705b3d5f73206ee0cccf118aa4`.
+It retains the exact v3 digest
+`409bfc2fa03c57d151812c69c395d75c4cf7454f1262d2369f47c97646ebf265`
+only as `legacy_preparation_contract_sha256`. The private observation v4 schema
+binds exact staged paths, bytes, modes,
 parents, the dynamically selected Docker CLI, SSH helpers, state-owner closure
 and macOS probes, a closed environment, exact host build/boot inputs and
 distinct source/receipt-owned disk inodes. `/bin/sh` and `/usr/sbin/ioreg` are
@@ -487,32 +491,32 @@ UTF-8 bytes: the root, closed two-byte `/l` segment and pinned longest 80-byte
 Lima Unix-socket suffix total 103 bytes, below Darwin's 104-byte refusal
 threshold. Lexically overlong input is refused before filesystem access and the
 resolved physical path is checked again before traversal; a short alias cannot
-bypass the bound or canonical-path requirement. Pre-effect root observation v3
+bypass the bound or canonical-path requirement. Pre-effect root observation v4
 no-follow samples each
 complete bounded top-level inventory twice. Its public result exposes only
 namespace and complete-entry-set HMACs plus `observed-pristine` or
 `foreign-collision`; no entry is traversed or adopted. The source disk is a
 preselected local file; the observer downloads nothing and imports no
 process-execution API. Its host record is preparation input, not a live probe
-or admission fact. Public projection v3 contains no raw private provider,
+or admission fact. Public projection v4 contains no raw private provider,
 component or `HOME` path and no fixture or profile identity; the declared OS
-executable paths remain non-private OS-build-bound metadata. V1/v2 requirements,
-observations and root observations plus old or falsely relabelled two-target
-evidence are refused; public projection is generated only as v3.
+executable paths remain non-private OS-build-bound metadata. V1 through v3
+requirements, observations and root observations plus old or falsely relabelled
+two-target evidence are refused; public projection is generated only as v4.
 
 All three capability bits remain false: preparation cannot authorize execution,
 lifecycle exposure or finalization. The module is not registered with mutation
 state, receipts, cleanup, a lifecycle target or the environment finalizer. Its
 fixture-only seams permit small deterministic files instead of committing the
 official disk image; any future state adapter must accept only the production
-requirements digest. Twenty-three deterministic preparation tests cover
+requirements digest. Twenty-four deterministic preparation tests cover
 pin/schema/generation drift, canonical UTF-8 root-length boundaries, lexical
 and physical overflow, alias refusal, whole-namespace collisions, bounded
 inventory, role/path/environment/HOME/host/file/disk replacement, private
 projection, revalidation and unconditional authorization refusal. The shared
 fixture creates an exact 21-byte canonical provider root beneath the physical
 temporary directory on both Darwin and Linux; this is fixture evidence, not a
-production allocator or reservation. No Docker, Colima or Lima process was
+production allocator. No Docker, Colima or Lima process was
 invoked. The existing before-root source-drift fixture now
 waits for the durable create-authority marker rather than racing the intent
 receipt's post-link source read; drift is still injected while the provider
@@ -522,14 +526,14 @@ A new pure provider-adapter registry reserves
 `colima-vz-docker-live-create-v1` and
 `colima-vz-docker-live-cleanup-v1` plus distinct live evidence schema names. The
 create operation contract digest is
-`91f847c500e93520dcafcf9e2feb2eabcafc6e3e8d940435d21227d894692404`;
-cleanup is `87fe5eeb36089cb7963d1526c84d118d2d52f62f7fa4a451edab66712d3530e7`
+`619f87ed88836eebca0fd38cb7dfb91fb661297df4cc347c9765a0b72d0d099a`;
+cleanup is `5253347dd61e28a0ce6dc8f0e697a98f2ad47cf66a7c667a04d0bd98b95d4793`
 and binds the create digest. Registry digest
-`9c7c290cc2bfb7325bcade3c7c835d4576748c2c004874311cc835e3f990c637`
+`f4663054dc637b4b8511b4877e548dc3d5c9f4b95beb7e4b0ef3a241f122aec6`
 accepts only an exact action, operation kind, operation-contract digest and
 provider-class tuple. It compares all fields after the content-addressed key,
 cannot select either fake class and returns only closed metadata. Create grants
-state planning only through `mutation-journal-v5-plan-only`; execution,
+state planning only through `mutation-journal-v6-plan-only`; execution,
 provider recovery, lifecycle exposure and finalization remain false, while
 cleanup remains wholly deny-only. The registry imports no process,
 mutation-state, receipt or fake-provider module; state reaches it only through
@@ -541,8 +545,8 @@ The new `synveda.clean-engine.colima-live-provider-operation-plan.v1` binds the
 active run/candidate/head, exact registry resolution, production requirements,
 private preparation-observation digest and provider profile/resource. It
 persists no private paths, command, environment, `HOME`, binding key or
-credentials. The state owner embeds it in a `provider-plan` mutation slot v5
-and owner close v6 after revalidating the production observation before slot
+credentials. The state owner embeds it in a `provider-plan` mutation slot v6
+and owner close v7 after revalidating the production observation before slot
 acquisition and again at the close link. Planning and both fake executors
 therefore compete on the same atomic slot name. Completion changes no receipt
 or environment, writes no provider evidence and blocks later mutation and
@@ -602,8 +606,8 @@ inode bind the exactly reconstructable bytes; changed parent identities,
 resources, source or inert state staging refuse.
 
 After complete retirement, the owner publishes a distinct outer cleanup
-settlement. Receipt v4 accepts only that digest as operation evidence for the
-controlled cleanup pass, and close v6 binds the same digest; the inner
+settlement. Receipt v5 accepts only that digest as operation evidence for the
+controlled cleanup pass, and close v7 binds the same digest; the inner
 retirement settlement, provider identity, create settlement and unrelated
 digests are rejected. Owner close is valid only before any recovery claim.
 Action-dispatched cleanup recovery may abort an untouched pre-intent slot
@@ -629,18 +633,18 @@ The state owner projects only content-free slot, close, plan and observation
 digests. Intent candidates remain `provider-create`/
 `requested-not-authorized` with a zero-entry logical prefix. Production intent
 operation kind `colima-live-provider-intent-publication-v1` now has contract
-digest `698dde982e97a718e30a17246cfa789086d0e6b4e310d55999717c8785329031`;
+digest `55b4bdc166aa75b6877bf84c8b7667deb571732fdffc3463bd1c09ad6fbb38e0`;
 the separate fixture digest is
-`1585540208295af973596864cf309e4ee8a1d9e3c252ab094aee7d907f30cad5`.
-They authorize only `mutation-journal-v5-inert-intent-only` publication.
+`d4586c20e632337fed3c91e7ec8159a721d5d1a3b8164d4ebd91ec3152a7cdd1`.
+They authorize only `mutation-journal-v6-inert-intent-only` publication.
 
 The successor `provider-start-decision` uses production operation kind
 `colima-live-provider-start-decision-publication-v1` with contract digest
-`e6781af8059a121b52582d7223bf8c78819e1c5ee125116986e54a6dc9bc93df`;
+`a56c5d8da00a45d6ba5b910fd1aeae73cb418dca08fde9442c0d5f33c89fcdf7`;
 the distinct fixture digest is
-`47cd1b151580a667127d91eb838a26bb79e21752f9304beb63af834d687fc795`.
+`2f34c46886ee2a9e0756b3b0df054ff0c3e8ec99309d59c7ea9b4082a15eece1`.
 Its publication plan is schema v2 and authorizes only
-`mutation-journal-v5-inert-start-decision-only`. Both contracts bind the exact
+`mutation-journal-v6-inert-start-decision-only`. Both contracts bind the exact
 completed intent and allow only `requested-not-executed-not-authorized` from an
 `observed-pristine` namespace observation. They remain absent from the
 provider-adapter registry.
@@ -649,37 +653,29 @@ The publisher reconstructs state/source and fresh namespace admission at four
 boundaries: initial, immediately before slot link, after slot acquisition and
 immediately before close link. Every canonical completed-intent projection,
 intent completion/publication plan, root observation, admission and decision
-publication plan must equal the initial pristine-namespace value. Slot v5 and
-owner close v6 have result sequence zero and zero receipt, environment and
+publication plan must equal the initial pristine-namespace value. Slot v6 and
+owner close v7 have result sequence zero and zero receipt, environment and
 operation-evidence delta. They create no process, provider, registry, runtime,
 receipt, environment or operation-settlement artifact. A pre-CAS collision leaves no
 slot; a post-CAS collision owner-aborts that generation.
 
 The journal grammar is ordered and class-closed: aborted plan generations before
 one completed owner plan, aborted intent generations before one matching-class
-completed owner intent, then aborted decision generations before at most one
-matching-class completed owner decision. A completed decision is terminal.
-Abandoned intent and decision slots accept only an all-zero recovery v4 claim
+completed owner intent, then aborted decision generations before one
+matching-class completed owner decision.
+Abandoned intent and decision slots accept only an all-zero recovery v5 claim
 and `aborted-before-effect` recovery close; generic effect recovery refuses
 them. Exact completed retry checks the preparation-observation and fixture-
 requirements digests and returns historical non-authorizing state without
 reading or claiming current namespace state.
 
-Mutation slot v5, close v6, recovery v4 and recovery-root v4 are an indivisible
-full-state hard cut. Slot v1-v4, close v1-v5 and recovery/root v1-v3 are refused
+Mutation slot v6, close v7, recovery v5 and recovery-root v5 are an indivisible
+full-state hard cut. Slot v1-v5, close v1-v6 and recovery/root v1-v4 are refused
 with reset-and-regenerate guidance; no migration or relabelling exists. Crash,
 collision, source drift, competing writer, recovery, class-crossing, schema and
-validly rehashed semantic-tamper tests cover the boundary. No Docker, Colima or
-Lima process ran in this slice.
+validly rehashed semantic-tamper tests cover the boundary.
 
-Repeated whole-namespace observations and the journal hard-link CAS do not
-atomically reserve the six mutation namespaces. Process start/spawn/signal,
-adapter/effect execution, root mutation, provider/evidence/runtime/receipt/
-environment publication, provider-effect recovery, cleanup, lifecycle and
-finalization remain false. The logical supervisor label is not a PID, PGID,
-ownership or liveness fact.
-
-The next read-only boundary now projects the exact completed terminal decision,
+The post-decision read-only boundary projects the exact completed decision,
 including its slot, close, publication-plan, candidate and predecessor digests,
 and re-observes state and namespaces in `S1/O1/S2/O2` order. Stable pristine
 namespaces yield a process-start-effect candidate that explicitly denies every
@@ -687,23 +683,68 @@ process, adapter, root, publication, recovery, lifecycle and finalization
 capability; stable collision yields `null`. Production and fixture schemas
 remain distinct. The admission is not persisted and adds no journal action,
 contract digest, registry row, receipt or provider artifact. Its explicit
-authorization function always refuses, and no Docker, Colima or Lima process
-ran.
+authorization function always refuses.
+
+ADR-0103 now locks and the state owner implements one cooperative aggregate
+no-spawn reservation. Production operation kind
+`colima-live-provider-reservation-publication-v1` has contract digest
+`eda9f544d1fb9752debcff6bb486081d855a9e0cead01e42d78979da18674c98`;
+the fixture-only operation kind
+`colima-live-fixture-provider-reservation-publication-v1` has digest
+`3c8da820554ef086ed0a84144512b12c845412db682be07064b7e7154fbdc23b`.
+Both use `mutation-journal-v6-no-spawn-reservation-only` and remain absent from
+the provider-adapter registry and supported lifecycle.
+
+After the completed matching-class decision, aborted reservation generations
+may precede at most one completed reservation, which must be the last slot. The
+owner publishes the complete v6 slot before filesystem mutation, writes and
+fsyncs one private mode-0600 immutable witness stage, and revalidates the bound
+state and roots. Its plan binds one provider root, all six fixed namespace
+identities and inventories, and one state run. All eight directory identities
+must be distinct, current-UID, private and on one device. A hard link from the
+stage to fixed basename `.synveda-clean-engine-provider-reservation` is the
+single no-replace CAS. Exact bytes, device, inode, UID, mode, size and link count
+are checked for the stage, marker and durable state witness.
+
+While the exact marker/witness inode remains held with two links, the owner
+brackets a fresh six-namespace observation with topology checks and requires it
+to equal the plan. It then publishes the immutable
+`retirement-authorized-without-process` settlement, retires only the verified
+marker, fsyncs the provider root, proves the witness has one link, and closes v7
+with the settlement digest. Receipt and environment do not advance, and no
+provider, registry, runtime or evidence artifact appears.
+
+Dedicated v5 recovery records bounded topology and settlement evidence. It can
+retire an inert stage and abort, finish a partial witness publication, or relink
+an exact standalone witness to the fixed marker before completing observation,
+settlement and retirement. Claim history must be reachable, bind the
+deterministic witness and match current local topology. Wrong type/mode/inode,
+foreign replacement, extra hard links, backward topology, malformed or orphan
+settlement, and namespace drift fail closed without adoption or cleanup. A
+two-state-base race admits one CAS winner and one durable pre-effect abort;
+owner/recovery interruption tests cover every owner publication boundary plus
+the stage-retirement and multi-transition recovery gaps.
+
+This is cooperative same-UID exclusion, not protection against hostile same-UID
+code. `reservation_recovery_authorized` is true only for the exact marker/witness
+grammar. Process start/spawn/signal/group ownership, adapter/effect execution,
+general root mutation, provider-effect recovery, provider/evidence/runtime/
+receipt/environment publication, cleanup, lifecycle and finalization remain
+false. No Docker, Colima or Lima process ran; only repository-owned deterministic
+fixtures and filesystem state were exercised. The logical supervisor label is
+not a PID, PGID, ownership or liveness fact.
 
 ### Immediate next slice
 
-Record the cooperative same-UID aggregate hard-link reservation in a new ADR,
-then implement and test its no-spawn grammar as a deliberate state-generation
-hard cut. The reservation must atomically bind all six namespaces and the state
-run on one device before any future effect attempt; it grants no protection
-against hostile same-UID code and no process authority. Only after that slice
-may a later indivisible process-effect cut add a durable effect slot,
-synchronous fresh gate, complete recursive post-start inventory, causal
-identity/recovery for the outer process, detached Lima hostagent, usernet and
-SSH ControlMaster, authenticated Engine/socket/context evidence,
-uncertain-start recovery, receipts/settlement and dynamic-tree retirement.
-Keep execution unsupported and unregistered. Do not branch through, relabel or
-mutate the deterministic controlled-background class.
+Integrate this reservation into one indivisible process-effect generation that
+keeps the exact marker held across durable start authority and effect. Add the
+complete recursive post-start inventory, causal identity/recovery for the outer
+process, detached Lima hostagent, usernet and SSH ControlMaster, authenticated
+Engine/socket/context evidence, uncertain-start recovery, receipts/settlement
+and dynamic-tree retirement before registering or invoking a live provider.
+Keep execution unsupported and unregistered until that entire cut passes. Do
+not branch through, relabel or mutate the deterministic controlled-background
+class.
 Finalization remains blocked until a separately reviewed live environment-
 manifest schema exists.
 

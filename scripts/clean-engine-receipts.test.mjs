@@ -35,7 +35,7 @@ function plan(candidateSha256 = sha256(canonicalBytes(candidate()))) {
       state_device: "42",
       state_inode: "73",
     },
-    schema: "synveda.clean-engine.receipt.v4",
+    schema: "synveda.clean-engine.receipt.v5",
     sequence: 0,
   };
 }

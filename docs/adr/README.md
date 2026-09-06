@@ -86,7 +86,7 @@ The template is intentionally excluded. Every other ADR appears exactly once.
 | [ADR-0066](adr-0066-beta-demo-profile.md) | Operator-seeded beta demo | Proposed; amended once | Current (partially superseded by ADR-0100) | OPS-9 | ADR-0100 provides the resumable public-API PulseBoard demo; externally dependent beta evidence remains open. |
 | [ADR-0067](adr-0067-uninstall-and-cleanup.md) | Uninstall and cleanup | Proposed | Current | OPS-10 | — |
 
-## ADR-0068 through ADR-0102
+## ADR-0068 through ADR-0103
 
 | ADR | Concise title | Header status | Current classification | Features | Replacement/removal |
 | --- | --- | --- | --- | --- | --- |
@@ -124,4 +124,5 @@ The template is intentionally excluded. Every other ADR appears exactly once.
 | [ADR-0099](adr-0099-context-platform-product-evaluation.md) | Product delivery, use and trust evaluation | Accepted | Current | CPR-40 | Incorporates the earlier evaluation gates under one outcome model. |
 | [ADR-0100](adr-0100-public-api-pulseboard-demo.md) | Resumable public-API demo | Accepted | Current | CPR-41 | Partially supersedes ADR-0066's demo shape. |
 | [ADR-0101](adr-0101-production-hardening-boundary.md) | Production-hardening boundary | Accepted | Current | CPR-44 | — |
-| [ADR-0102](adr-0102-portable-reference-deployment.md) | Portable reference deployment contract | Accepted | Current (implementation open) | CPR-45 | Compose is the canonical single-host reference; Keycloak replaces Rauthy, workers separate and optional Apalis remains an adapter. Its fixed-fake clean-Engine boundary has state-owned create/cleanup recovery. The live tuple grants only effect-free plan, intent, terminal start-decision state and a fresh deny-only post-decision observation; no process/provider effect, effect recovery, lifecycle or finalization capability follows. |
+| [ADR-0102](adr-0102-portable-reference-deployment.md) | Portable reference deployment contract | Accepted | Current (implementation open) | CPR-45 | Compose is the canonical single-host reference; Keycloak replaces Rauthy, workers separate and optional Apalis remains an adapter. Its fixed-fake clean-Engine boundary has state-owned create/cleanup recovery. The live tuple grants effect-free plan, intent and start-decision state, a deny-only post-decision observation and ADR-0103's no-spawn reservation; no process/provider effect, effect recovery, lifecycle or finalization capability follows. |
+| [ADR-0103](adr-0103-cooperative-live-provider-reservation.md) | Cooperative aggregate live-provider reservation | Accepted | Current | CPR-45 | One fixed provider-root hard-link CAS and immutable witness bind the exact state run and six namespace identities; dedicated physical recovery converges reservation-only state without process, adapter, receipt, lifecycle or provider-effect authority. |

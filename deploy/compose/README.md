@@ -162,17 +162,17 @@ An uncatchable interruption before active-receipt publication can retain a valid
 inert staging directory; it has no provider authority, does not block a later
 plan and must be removed by the future final cleanup before success evidence.
 More than eight retained inert directories fail closed.
-The internal version-4 receipt state machine closes every intent/result,
+The internal version-5 receipt state machine closes every intent/result,
 failure-cleanup and success-only environment-manifest transition. Canonical
 receipts and the manifest use no-replace publication. Its mutation journal is
-append-only: permanent v4 `.mutation-slot-SS`, v1
-`.mutation-operation-SS`, v3 `.mutation-recovery-SS-RR` and v5
+append-only: permanent v6 `.mutation-slot-SS`, v1
+`.mutation-operation-SS`, v5 `.mutation-recovery-SS-RR` and v7
 `.mutation-close-SS` records are never deleted or reused. Slots bind exact
 source/environment predecessors, prior close, owner, operation kind, contract
 and plan. Provider closes bind the outer operation settlement. Provider success
-is explicitly classified and binds its intent contract. Receipt v1/v2/v3,
-slot v1/v2/v3, recovery/root v1/v2 and close v1/v2/v3/v4 are fresh-plan hard-cut
-refusals. Only
+is explicitly classified and binds its intent contract. Receipt v1 through v4,
+slot v1 through v5, recovery/root v1 through v4 and close v1 through v6 are
+fresh-plan hard-cut refusals. Only
 unguessable `.mutation-stage-*` aliases are
 retired. Every close link follows revalidation of the same authority, result
 endpoints, operation evidence and staged inode/bytes. If a cooperative verifier
@@ -240,7 +240,7 @@ trusted owner-UID composition hooks, not a JavaScript security boundary.
 The repository now also has a separate deterministic live-provider preparation
 contract. It pins the official Colima 0.10.3 and Lima 2.2.0 Darwin/arm64
 artifacts, selected Lima runtime files and the Colima-core 0.10.4 arm64 Docker
-disk image. Requirements/observation v3 bind the release guest agent and default
+disk image. Requirements/observation v4 bind the release guest agent and default
 template at their upstream Lima share paths, a private mode-0600 user-v2 network
 baseline, `--activate=false`, and the gRPC port forwarder. A private observation
 binds exact staged and dynamically selected helper bytes, modes and parent
@@ -256,9 +256,9 @@ Darwin's 104-byte refusal threshold. Lexical input is checked before filesystem
 access and the physical `realpath` is checked again; aliases remain refused.
 `/bin/sh` and `/usr/sbin/ioreg` are declared OS-build-bound inputs, not
 individually observed live. The module downloads and executes nothing, refuses
-v1/v2 requirements, observations and root observations plus old or falsely
+v1 through v3 requirements, observations and root observations plus old or falsely
 relabelled two-target evidence, and regenerates the public projection only as
-v3. That projection
+v4. That projection
 omits raw private provider/component/`HOME` paths plus profile and fixture
 identities. The declared OS executable paths remain non-private OS-build-bound
 metadata.
@@ -270,7 +270,7 @@ names. It selects only an exact action, operation kind, operation-contract
 digest and provider-class tuple. Both contracts bind the production preparation
 requirements digest, and cleanup also binds the exact create-contract digest.
 The create entry now grants only state planning through
-`mutation-journal-v5-plan-only`; execution, provider recovery, lifecycle
+`mutation-journal-v6-plan-only`; execution, provider recovery, lifecycle
 exposure and finalization remain false. Cleanup remains deny-only. The registry
 imports no process, state, receipt or fake-provider implementation.
 
@@ -282,7 +282,7 @@ private preparation-observation digest, provider profile/resource and the
 all-effect-denied capability set. The production builder revalidates the full
 private observation before slot acquisition and again at the close publication
 boundary. No path, command, environment, `HOME`, binding key or credential is
-persisted in the plan. Mutation slot v5 and close v6 serialize this plan against
+persisted in the plan. Mutation slot v6 and close v7 serialize this plan against
 every fake or future effect writer through the same no-replace slot name; the
 close binds the embedded plan digest and changes no receipt or environment.
 
@@ -292,7 +292,7 @@ helpers derive a minimal `provider-create` candidate marked
 `requested-not-authorized` and a logical zero-entry pre-effect prefix, but a
 serialized value has no provenance. The state owner can persist the request
 only through the distinct `provider-intent` successor and
-`mutation-journal-v5-inert-intent-only`. Production and fixture kinds,
+`mutation-journal-v6-inert-intent-only`. Production and fixture kinds,
 contracts, schemas and evidence classes are separate, and neither tuple is a
 provider-adapter entry.
 
@@ -308,30 +308,30 @@ it is not traversed or adopted and returns no intent or prefix.
 The publisher derives every admission internally. It requires the initial
 canonical pristine-namespace value to equal fresh values immediately before
 the slot link, after slot acquisition and immediately before the close link.
-Its slot v5 and owner close v6 change no receipt or environment and write no
+Its slot v6 and owner close v7 change no receipt or environment and write no
 provider or operation evidence. Collision or drift aborts before effect;
-abandoned intent recovery v4 is explicit, all-zero and abort-only. Completed retries return
+abandoned intent recovery v5 is explicit, all-zero and abort-only. Completed retries return
 historical non-authorizing state without a fresh namespace claim.
 
 The same state owner can now persist the successor
 `provider-start-decision` through
-`mutation-journal-v5-inert-start-decision-only`. It reconstructs the completed
+`mutation-journal-v6-inert-start-decision-only`. It reconstructs the completed
 intent through the version-2 decision publication plan and repeats fresh
 `S1/O1/S2/O2` namespace admission at the initial,
 pre-slot-link, post-slot-acquisition and pre-close-link boundaries. Every
 admission and publication plan must equal the initial pristine-namespace
-value. The slot v5 and owner close v6 again have zero receipt, environment and
+value. The slot v6 and owner close v7 again have zero receipt, environment and
 operation-evidence delta. Production and fixture kinds, contracts and evidence
 classes are distinct, and neither is registered for provider execution.
 
 A pre-CAS collision leaves no decision slot; a post-CAS collision aborts that
-generation. An abandoned decision can acquire only an all-zero recovery v4
-claim and an `aborted-before-effect` close. A completed decision is terminal;
-an exact retry returns its historical, non-authorizing completion without
-reading current namespace state. Race, crash, recovery and rehashed-tamper
-tests enforce the ordered plan/intent/decision grammar.
+generation. An abandoned decision can acquire only an all-zero recovery v5
+claim and an `aborted-before-effect` close. An exact retry returns its
+historical, non-authorizing completion without reading current namespace state.
+Race, crash, recovery and rehashed-tamper tests enforce the ordered
+plan/intent/decision grammar.
 
-A separate read-only post-decision seam projects that exact completed terminal
+A separate read-only post-decision seam projects that exact completed
 decision and observes state and namespaces again in `S1/O1/S2/O2` order. Stable
 pristine namespaces yield a process-start-effect candidate whose process,
 adapter, root, publication, recovery, lifecycle and finalization authorities
@@ -340,29 +340,49 @@ admission is point-in-time data, grants nothing, and the deliberate authorizatio
 point always refuses it. This seam adds no journal action, operation kind,
 registry row, receipt, persistence or provider/process mutation.
 
-These point-in-time namespace observations and the journal hard-link CAS do not
-atomically reserve the six mutation namespaces. The bounded supervisor
-label is not a PID, PGID, ownership or liveness fact, and a future effect owner
-must acquire a separate durable effect slot and perform another fresh admission.
-Serialized admission, projection, candidate or prefix values cannot be supplied
-as proof.
+The internal state/test seam may then publish one cooperative no-spawn
+reservation generation. A v6 slot is durable before a private mode-0600 witness
+stage is written and fsynced. Its immutable plan binds one canonical provider
+root, all six fixed namespace identities and inventories, and one private state
+run. The eight directories must have distinct identities, retain current-UID
+private modes and share one device. A no-replace hard link at the fixed
+`.synveda-clean-engine-provider-reservation` basename is the sole CAS. Exact
+marker/stage/witness bytes, device, inode, UID, mode, size and link counts are
+checked throughout durable state-witness publication.
 
-Before execution can be enabled, a later owner must add an atomic six-namespace
-reservation, complete recursive post-start settlement, and causal identity and
-recovery for the outer process, detached Lima hostagent, usernet and SSH
-ControlMaster. Live macOS proxy observation and per-file OS-executable identity
-also remain open.
+While the exact marker/witness inode still has two links, fresh namespace
+observation is bracketed by topology checks and must equal the bound plan. The
+owner publishes the immutable `retirement-authorized-without-process`
+settlement before retiring only that verified marker, fsyncing the provider
+root, proving the durable witness has one link and closing v7 with the
+settlement digest. The active state run therefore legitimately retains
+`.provider-reservation-witness-SS` and `.mutation-operation-SS`; `registry/`,
+`runtime/`, `provider/` and `evidence/` remain empty.
 
-No supported lifecycle target exposes a plan, live-intent or start-decision
-fixture seam; there is no live provider execution, provider-effect recovery,
-cleanup or environment manifest. `registry/`, `runtime/`, `provider/` and
-`evidence/` remain empty. A completed plan centrally
+Dedicated v5 recovery can retire an inert witness stage and abort, finish a
+partially linked witness, or reacquire a prematurely absent marker from the
+exact standalone witness before completing settlement and retirement. Recovery
+claims bind the witness digest, settlement and current reachable topology.
+Foreign or wrong-type markers, wrong modes/inodes, extra links, backward
+topology and namespace drift block without adoption. This coordinates only
+cooperative same-UID owners; hostile same-UID code can ignore, unlink or replace
+the marker. It grants reservation recovery only, not provider-effect recovery.
+
+Before execution can be enabled, a later indivisible generation must keep this
+reservation held across process authorization and effect, complete recursive
+post-start settlement, and establish causal identity and recovery for the outer
+process, detached Lima hostagent, usernet and SSH ControlMaster. Live macOS
+proxy observation and per-file OS-executable identity also remain open.
+
+No supported lifecycle target exposes a plan, live-intent, start-decision or
+reservation fixture seam; there is no live provider execution, provider-effect
+recovery, cleanup or environment manifest. A completed plan centrally
 blocks every other mutation and finalization except its exact inert intent,
-which may then be followed by its exact decision. A completed decision permits
-no persisted successor. An abandoned plan slot may only be explicitly recovered
-as `aborted-before-effect`; this journal repair grants
+which may then be followed by its exact decision and reservation. An abandoned
+plan slot may only be explicitly recovered as `aborted-before-effect`; this
+journal repair grants
 no provider-recovery capability, after which the same exact plan may compete for
-the next slot. Receipt v4 has provider-class-bound controlled cleanup
+the next slot. Receipt v5 has provider-class-bound controlled cleanup
 intent/pass shapes, but the receipt itself grants no deletion authority. The
 state-owned path supplies the dedicated slot and exact checkpoints, publishes a
 distinct outer settlement, and binds that digest through pass and close.
@@ -372,7 +392,7 @@ close permits no claim and recovery close must name the latest claim. Causal
 process/socket/Engine/context ownership and exact dynamic-tree cleanup must be
 proved before exposing a supported lifecycle target or making any Docker or
 finalization claim. Superseded receipt and mutation schemas are discarded and
-regenerated. Mutation slot v1-v4, close v1-v5 and recovery/root v1-v3 state is
+regenerated. Mutation slot v1-v5, close v1-v6 and recovery/root v1-v4 state is
 refused rather than migrated or relabelled.
 The manual browser ceremony below remains usable for fixture development but
 cannot be labelled a clean-Engine result.

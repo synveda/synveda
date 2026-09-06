@@ -417,11 +417,11 @@ test("intent publication has distinct inert production and fixture contracts", (
   assert.notEqual(variants[0].digest, variants[1].digest);
   assert.equal(
     variants[0].digest,
-    "698dde982e97a718e30a17246cfa789086d0e6b4e310d55999717c8785329031",
+    "55b4bdc166aa75b6877bf84c8b7667deb571732fdffc3463bd1c09ad6fbb38e0",
   );
   assert.equal(
     variants[1].digest,
-    "1585540208295af973596864cf309e4ee8a1d9e3c252ab094aee7d907f30cad5",
+    "d4586c20e632337fed3c91e7ec8159a721d5d1a3b8164d4ebd91ec3152a7cdd1",
   );
   for (const value of variants) {
     assert.deepEqual(value.contract, {
@@ -438,14 +438,14 @@ test("intent publication has distinct inert production and fixture contracts", (
       receipt_publication_authorized: false,
       recovery_disposition: "aborted-before-effect-only",
       schema: value.schema,
-      state_integration: "mutation-journal-v5-inert-intent-only",
+      state_integration: "mutation-journal-v6-inert-intent-only",
       state_intent_publication_authorized: true,
       target_create_operation_contract_sha256:
-        "91f847c500e93520dcafcf9e2feb2eabcafc6e3e8d940435d21227d894692404",
+        "619f87ed88836eebca0fd38cb7dfb91fb661297df4cc347c9765a0b72d0d099a",
       target_create_operation_kind: "colima-vz-docker-live-create-v1",
       target_provider_plan_schema:
         "synveda.clean-engine.colima-live-provider-operation-plan.v1",
-      target_provider_plan_state_integration: "mutation-journal-v5-plan-only",
+      target_provider_plan_state_integration: "mutation-journal-v6-plan-only",
     });
     assert.equal(value.digest, digest(value.contract));
     assertRecursivelyFrozen(value.contract);
@@ -469,7 +469,7 @@ test("intent publication has distinct inert production and fixture contracts", (
   }
 });
 
-test("superseded v1/v2 root evidence and relabelled evidence are refused", () => {
+test("superseded v1 through v3 root evidence and relabelled evidence are refused", () => {
   for (const fixtureOnly of [false, true]) {
     const { admission, operationPlan } = admissionFixture(fixtureOnly);
     const oldRoots = ["colima-profile-root", "lima-instance-root"].map(
@@ -506,9 +506,16 @@ test("superseded v1/v2 root evidence and relabelled evidence are refused", () =>
         ? "synveda.clean-engine.colima-live-fixture-pre-effect-root-observation.v2"
         : "synveda.clean-engine.colima-live-pre-effect-root-observation.v2",
     };
+    const versionThreeObservation = {
+      ...admission.root_observation,
+      schema: fixtureOnly
+        ? "synveda.clean-engine.colima-live-fixture-pre-effect-root-observation.v3"
+        : "synveda.clean-engine.colima-live-pre-effect-root-observation.v3",
+    };
     for (const rootObservation of [
       oldObservation,
       versionTwoObservation,
+      versionThreeObservation,
       relabelledObservation,
     ]) {
       expectRefusal(() =>

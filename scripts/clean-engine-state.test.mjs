@@ -30,6 +30,7 @@ import {
   COLIMA_LIVE_PRE_EFFECT_ADMISSION_SCHEMA,
   executeProviderCreateForExecutor,
   finalizeEnvironmentForExecutor,
+  liveProviderFixtureReservationRecoveryConfirmationForTest,
   liveProviderFixtureStartDecisionRecoveryConfirmationForTest,
   liveProviderIntentRecoveryConfirmationForExecutor,
   liveProviderPlanRecoveryConfirmationForExecutor,
@@ -44,6 +45,7 @@ import {
   providerRecoveryConfirmationForExecutor,
   publishColimaLiveProviderIntentForExecutor,
   publishColimaLiveProviderIntentForTest,
+  publishColimaLiveProviderReservationForTest,
   publishColimaLiveProviderStartDecisionForExecutor,
   publishColimaLiveProviderStartDecisionForTest,
   recordLiveProviderOperationPlanForTest,
@@ -51,9 +53,11 @@ import {
   recoverLiveProviderPlanForExecutor,
   recoverLiveProviderStartDecisionForExecutor,
   recoverLiveProviderStartDecisionForTest,
+  recoverColimaLiveProviderReservationForTest,
   recoverProviderCreateForExecutor,
 } from "../deploy/compose/scripts/clean-engine-state.mjs";
 import {
+  buildColimaLiveObservationForTest,
   colimaLiveBytes,
   colimaLiveDigest,
 } from "../deploy/compose/scripts/clean-engine-colima-live-contract.mjs";
@@ -85,6 +89,9 @@ import {
   liveProviderProcessStartBytes,
 } from "../deploy/compose/scripts/clean-engine-live-provider-process-start.mjs";
 import {
+  COLIMA_LIVE_FIXTURE_PROVIDER_RESERVATION_COMPLETION_SCHEMA,
+} from "../deploy/compose/scripts/clean-engine-live-provider-reservation.mjs";
+import {
   COLIMA_LIVE_FIXTURE_PRE_EFFECT_ROOT_OBSERVATION_SCHEMA,
   COLIMA_LIVE_PRE_EFFECT_ROOT_OBSERVATION_SCHEMA,
 } from "../deploy/compose/scripts/clean-engine-colima-live-schemas.mjs";
@@ -99,6 +106,7 @@ import {
 import { cleanEngineReceiptResult } from "./fixtures/clean-engine-receipt-fixture.mjs";
 import { cleanEngineLiveProviderOperationPlan } from "./fixtures/clean-engine-live-provider-plan-fixture.mjs";
 import {
+  cloneColimaLiveObservationInput,
   createCleanEngineColimaLiveObservationFixture,
   writePrivateColimaLiveFixtureFile,
 } from "./fixtures/clean-engine-colima-live-observation-fixture.mjs";
@@ -507,7 +515,7 @@ function stageProductionLiveProviderIntent(
     result_environment_sha256: slot.source_environment_sha256,
     result_head_sha256: slot.source_head_sha256,
     result_sequence: slot.source_sequence,
-    schema: "synveda.clean-engine.mutation-close.v6",
+    schema: "synveda.clean-engine.mutation-close.v7",
     slot_sequence: slot.journal_sequence,
     slot_sha256: sha256(slotBytes),
   };
@@ -564,7 +572,7 @@ function replaceCompletedFixtureIntentGeneration(state) {
     result_environment_sha256: secondSlot.source_environment_sha256,
     result_head_sha256: secondSlot.source_head_sha256,
     result_sequence: secondSlot.source_sequence,
-    schema: "synveda.clean-engine.mutation-close.v6",
+    schema: "synveda.clean-engine.mutation-close.v7",
     slot_sequence: secondSlot.journal_sequence,
     slot_sha256: sha256(secondSlotBytes),
   };
@@ -595,7 +603,7 @@ function mutationLease(state, {
     journal_sequence: journalSequence,
     nonce: "f".repeat(32),
     operation_contract_sha256: providerCreate
-      ? "e3c24885d5c85864b7a6f4f2d3f966c01e1dd3d7d450d00531d251ef21227c72"
+      ? "3ce0f279e4d9b981d88f9d84cf7a754acb91f222170902c7b36d07464f199833"
       : "0".repeat(64),
     operation_kind: providerCreate ? "deterministic-fake-provider-create-v1" : "none",
     operation_plan: null,
@@ -604,7 +612,7 @@ function mutationLease(state, {
     owner_pid: ownerPid,
     owner_probe: "opaque-process-instance-v1",
     previous_close_sha256: previousCloseSha256,
-    schema: "synveda.clean-engine.mutation-slot.v5",
+    schema: "synveda.clean-engine.mutation-slot.v6",
     source_environment_sha256: "0".repeat(64),
     source_head_sha256: sha256(canonicalBytes(planReceipt)),
     source_sequence: 0,
@@ -639,7 +647,7 @@ function fakeProviderAdapter({
 function stageAbandonedProviderLease(state, {
   ownerPid = 2_147_483_647,
   providerContractSha256 =
-    "e3c24885d5c85864b7a6f4f2d3f966c01e1dd3d7d450d00531d251ef21227c72",
+    "3ce0f279e4d9b981d88f9d84cf7a754acb91f222170902c7b36d07464f199833",
   publishIntent = true,
 } = {}) {
   const active = activeRun(state);
@@ -682,7 +690,7 @@ function stageAbandonedProviderMutation(state, options) {
       operation_contract_sha256: lease.operation_contract_sha256,
       operation_kind: lease.operation_kind,
       operation_plan_sha256: "0".repeat(64),
-      schema: "synveda.clean-engine.mutation-recovery-root.v4",
+      schema: "synveda.clean-engine.mutation-recovery-root.v5",
     })),
     fixture_id: candidate.run_id,
     lease_sha256: sha256(leaseBytes),
@@ -702,7 +710,7 @@ function stageAbandonedProviderMutation(state, options) {
     owner_pid: 2_147_483_646,
     owner_probe: "opaque-process-instance-v1",
     parent_sha256: "0".repeat(64),
-    schema: "synveda.clean-engine.mutation-recovery.v4",
+    schema: "synveda.clean-engine.mutation-recovery.v5",
     sequence: 0,
     slot_sequence: 0,
     source_head_sha256: sha256(canonicalBytes(intentReceipt)),
@@ -739,7 +747,7 @@ function recoveryClaimForSlot(state, {
       operation_plan_sha256: slot.operation_plan === null
         ? "0".repeat(64)
         : sha256(canonicalBytes(slot.operation_plan)),
-      schema: "synveda.clean-engine.mutation-recovery-root.v4",
+      schema: "synveda.clean-engine.mutation-recovery-root.v5",
     })),
     fixture_id: candidate.run_id,
     lease_sha256: sha256(slotBytes),
@@ -761,7 +769,7 @@ function recoveryClaimForSlot(state, {
     owner_pid: ownerPid,
     owner_probe: "opaque-process-instance-v1",
     parent_sha256: previous === undefined ? "0".repeat(64) : sha256(canonicalBytes(previous)),
-    schema: "synveda.clean-engine.mutation-recovery.v4",
+    schema: "synveda.clean-engine.mutation-recovery.v5",
     sequence,
     slot_sequence: slotSequence,
     source_head_sha256: sourceHeadSha256 ?? sha256(canonicalBytes(head)),
@@ -811,7 +819,7 @@ async function waitForPublishedMutationSlot(
         !readdirSync(active).some((name) => name.startsWith(".mutation-stage-"))
       ) {
         const value = parse(path);
-        assert.equal(value.schema, "synveda.clean-engine.mutation-slot.v5");
+        assert.equal(value.schema, "synveda.clean-engine.mutation-slot.v6");
         assert.equal(value.action, expectedAction);
         return;
       }
@@ -865,6 +873,55 @@ async function waitForRecoveryClaim(state, slotSequence, sequence, timeoutMillis
   ) {
     assert.ok(Date.now() < deadline, "timed out waiting for provider recovery claim");
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
+  }
+}
+
+async function crashLiveProviderReservationAt(
+  state,
+  { action, checkpoint, input, releaseName },
+) {
+  const helper = resolve(
+    "scripts/fixtures/clean-engine-live-provider-reservation-process.mjs",
+  );
+  const releasePath = join(state.root, releaseName);
+  const child = spawn(
+    process.execPath,
+    [
+      helper,
+      action,
+      state.repo,
+      state.state,
+      JSON.stringify(input),
+      checkpoint,
+      releasePath,
+    ],
+    {
+      env: { PATH: process.env.PATH, LANG: "C", LC_ALL: "C" },
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
+  child.stdout.resume();
+  let stderr = "";
+  child.stderr.setEncoding("utf8");
+  child.stderr.on("data", (chunk) => {
+    stderr += chunk;
+  });
+  try {
+    const readyPath = `${releasePath}.ready-${child.pid}`;
+    const deadline = Date.now() + 10_000;
+    while (!existsSync(readyPath)) {
+      assert.equal(child.exitCode, null, stderr);
+      assert.ok(Date.now() < deadline, stderr);
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
+    }
+    child.kill("SIGKILL");
+    const [status, signal] = await once(child, "close");
+    assert.equal(status, null);
+    assert.equal(signal, "SIGKILL");
+  } finally {
+    if (child.exitCode === null && child.signalCode === null) {
+      child.kill("SIGKILL");
+    }
   }
 }
 
@@ -1001,10 +1058,10 @@ test("a live provider operation plan is journaled once and grants no effect auth
     const close = parse(closePath);
     assertPrivate(slotPath, 0o600);
     assertPrivate(closePath, 0o600);
-    assert.equal(slot.schema, "synveda.clean-engine.mutation-slot.v5");
+    assert.equal(slot.schema, "synveda.clean-engine.mutation-slot.v6");
     assert.equal(slot.action, "provider-plan");
     assert.deepEqual(slot.operation_plan, operationPlan);
-    assert.equal(close.schema, "synveda.clean-engine.mutation-close.v6");
+    assert.equal(close.schema, "synveda.clean-engine.mutation-close.v7");
     assert.equal(close.disposition, "completed");
     assert.equal(close.operation_plan_sha256, sha256(canonicalBytes(operationPlan)));
     assert.equal(close.operation_evidence_sha256, "0".repeat(64));
@@ -1354,7 +1411,7 @@ test("fixture intent publication commits one inert state-only successor", () => 
     const close = parse(closePath);
     assertPrivate(slotPath, 0o600);
     assertPrivate(closePath, 0o600);
-    assert.equal(slot.schema, "synveda.clean-engine.mutation-slot.v5");
+    assert.equal(slot.schema, "synveda.clean-engine.mutation-slot.v6");
     assert.equal(slot.action, "provider-intent");
     assert.equal(
       slot.operation_kind,
@@ -1369,7 +1426,7 @@ test("fixture intent publication commits one inert state-only successor", () => 
       slot.operation_plan.schema,
       "synveda.clean-engine.colima-live-fixture-provider-intent-publication-plan.v1",
     );
-    assert.equal(close.schema, "synveda.clean-engine.mutation-close.v6");
+    assert.equal(close.schema, "synveda.clean-engine.mutation-close.v7");
     assert.equal(close.disposition, "completed");
     assert.equal(close.authority, "owner");
     assert.equal(close.result_sequence, 0);
@@ -1996,7 +2053,7 @@ test("state-owned process-start admission has no persistence or effect surface",
   assert.doesNotMatch(registry, /provider-start-decision-publication/u);
 });
 
-test("fixture start decision publication commits one inert terminal successor", () => {
+test("fixture start decision publication commits one inert completed successor", () => {
   const state = fixture();
   let preparation;
   try {
@@ -2044,7 +2101,7 @@ test("fixture start decision publication commits one inert terminal successor", 
     const close = parse(closePath);
     assertPrivate(slotPath, 0o600);
     assertPrivate(closePath, 0o600);
-    assert.equal(slot.schema, "synveda.clean-engine.mutation-slot.v5");
+    assert.equal(slot.schema, "synveda.clean-engine.mutation-slot.v6");
     assert.equal(slot.action, "provider-start-decision");
     assert.equal(
       slot.operation_kind,
@@ -2060,10 +2117,10 @@ test("fixture start decision publication commits one inert terminal successor", 
     );
     assert.equal(
       slot.operation_plan.state_integration,
-      "mutation-journal-v5-inert-start-decision-only",
+      "mutation-journal-v6-inert-start-decision-only",
     );
     assert.equal(slot.intent_receipt_sha256, "0".repeat(64));
-    assert.equal(close.schema, "synveda.clean-engine.mutation-close.v6");
+    assert.equal(close.schema, "synveda.clean-engine.mutation-close.v7");
     assert.equal(close.disposition, "completed");
     assert.equal(close.authority, "owner");
     assert.equal(close.result_sequence, 0);
@@ -2168,7 +2225,7 @@ test("start decision refuses a pre-publication evidence-class crossing", () => {
   }
 });
 
-test("durable start decision state rejects rehashed authority and terminal drift", () => {
+test("durable start decision state rejects rehashed authority and completion drift", () => {
   const cases = [
     {
       expectedStatus: 69,
@@ -2222,7 +2279,7 @@ test("durable start decision state rejects rehashed authority and terminal drift
     },
     {
       expectedStatus: 78,
-      name: "successor after completed decision",
+      name: "second start decision after completed decision",
       mutate({ active, close, slot }) {
         const successor = {
           ...slot,
@@ -2607,7 +2664,7 @@ test("an abandoned start decision is recovered only by an all-zero abort", async
     const closePath = join(active, ".mutation-close-02");
     const recovery = parse(recoveryPath);
     const close = parse(closePath);
-    assert.equal(recovery.schema, "synveda.clean-engine.mutation-recovery.v4");
+    assert.equal(recovery.schema, "synveda.clean-engine.mutation-recovery.v5");
     assert.equal(recovery.action, "provider-start-decision");
     assert.deepEqual(
       {
@@ -2828,7 +2885,7 @@ test("start decision publication refuses collisions at every journal boundary an
   }
 });
 
-test("two start decision writers leave one inert terminal CAS winner", async () => {
+test("two start decision writers leave one inert completed CAS winner", async () => {
   const state = fixture();
   let preparation;
   const children = [];
@@ -3098,7 +3155,7 @@ test("start decision crash boundaries reconcile without inventing effects", asyn
   }
 });
 
-test("terminal start decision admits only a current deny-only effect candidate", () => {
+test("completed start decision admits only a current deny-only effect candidate", () => {
   const state = fixture();
   let preparation;
   try {
@@ -3252,6 +3309,1514 @@ test("terminal start decision admits only a current deny-only effect candidate",
   }
 });
 
+test("the state owner publishes and retires one no-process provider reservation", () => {
+  const state = fixture();
+  let preparation;
+  try {
+    const prepared = prepareCompletedLiveProviderStartDecisionFixture(state);
+    preparation = prepared.preparation;
+    const checkpoints = [];
+    const argumentsValue = fixtureStartAdmissionArguments(
+      state,
+      preparation,
+      (checkpoint) => {
+        checkpoints.push(checkpoint);
+      },
+    );
+    const completion =
+      publishColimaLiveProviderReservationForTest(argumentsValue);
+    assert.equal(
+      completion.schema,
+      COLIMA_LIVE_FIXTURE_PROVIDER_RESERVATION_COMPLETION_SCHEMA,
+    );
+    assert.equal(completion.slot_sequence, 3);
+    assert.equal(completion.state_integration, "mutation-journal-v6-no-spawn-reservation-only");
+    assert.equal(
+      existsSync(
+        join(
+          preparation.providerRoot,
+          ".synveda-clean-engine-provider-reservation",
+        ),
+      ),
+      false,
+    );
+    const witness = join(
+      prepared.active,
+      ".provider-reservation-witness-03",
+    );
+    assertPrivate(witness, 0o600, false, 1);
+    assertPrivate(join(prepared.active, ".mutation-operation-03"), 0o600);
+    assertPrivate(join(prepared.active, ".mutation-close-03"), 0o600);
+    assert.deepEqual(
+      readdirSync(prepared.active).filter((name) =>
+        name.startsWith(".provider-reservation-stage-"),
+      ),
+      [],
+    );
+    assert.deepEqual(
+      readdirSync(prepared.active).filter((name) =>
+        /^\.mutation-slot-/u.test(name),
+      ),
+      [
+        ".mutation-slot-00",
+        ".mutation-slot-01",
+        ".mutation-slot-02",
+        ".mutation-slot-03",
+      ],
+    );
+    assert.deepEqual(
+      readdirSync(prepared.active).filter((name) =>
+        /^[0-9]{2}-.*\.json$/u.test(name),
+      ),
+      ["00-plan.json"],
+    );
+    assert.equal(existsSync(join(prepared.active, "environment.json")), false);
+    for (const directory of ["evidence", "provider", "registry", "runtime"]) {
+      assert.deepEqual(readdirSync(join(prepared.active, directory)), []);
+    }
+    assert.equal(run(state, "verify").status, 0);
+    const repeated =
+      publishColimaLiveProviderReservationForTest(argumentsValue);
+    assert.deepEqual(repeated, completion);
+    assert.equal(
+      checkpoints.includes("after-retirement-authorization-publication"),
+      true,
+    );
+    assert.equal(checkpoints.includes("after-marker-unlink"), true);
+    assert.equal(checkpoints.includes("after-reservation-close"), true);
+  } finally {
+    if (preparation !== undefined) {
+      rmSync(preparation.root, { recursive: true, force: true });
+    }
+    rmSync(state.root, { recursive: true, force: true });
+  }
+});
+
+test("reservation state refuses malformed orphan and non-effect settlements", () => {
+  for (const mutation of [
+    "malformed-root-observation",
+    "orphan-operation",
+    "recovery-evidence-head",
+    "stage-only-recovery-authority",
+  ]) {
+    const state = fixture();
+    let preparation;
+    try {
+      const prepared = prepareCompletedLiveProviderStartDecisionFixture(state);
+      preparation = prepared.preparation;
+      publishColimaLiveProviderReservationForTest(
+        fixtureStartAdmissionArguments(state, preparation),
+      );
+      const slotPath = join(prepared.active, ".mutation-slot-03");
+      const operationPath = join(prepared.active, ".mutation-operation-03");
+      const closePath = join(prepared.active, ".mutation-close-03");
+      const slotBytes = readFileSync(slotPath);
+      const slot = JSON.parse(slotBytes.toString("utf8"));
+      const operation = parse(operationPath);
+      const close = parse(closePath);
+      let expectedError;
+
+      if (mutation === "malformed-root-observation") {
+        operation.pre_retirement_root_observation_sha256 = "f".repeat(64);
+        close.operation_evidence_sha256 = sha256(canonicalBytes(operation));
+        writeFileSync(operationPath, canonicalBytes(operation), { mode: 0o600 });
+        writeFileSync(closePath, canonicalBytes(close), { mode: 0o600 });
+        expectedError = /live provider reservation settlement was refused/u;
+      } else if (mutation === "orphan-operation") {
+        const orphanSlotBytes = readFileSync(
+          join(prepared.active, ".mutation-slot-02"),
+        );
+        const orphan = {
+          ...operation,
+          slot_sequence: 2,
+          slot_sha256: sha256(orphanSlotBytes),
+        };
+        writeFileSync(
+          join(prepared.active, ".mutation-operation-02"),
+          canonicalBytes(orphan),
+          { mode: 0o600 },
+        );
+        expectedError = /mutation operation settlement action was refused/u;
+      } else {
+        const witnessBytes = readFileSync(
+          join(prepared.active, ".provider-reservation-witness-03"),
+        );
+        const zeroSha256 = "0".repeat(64);
+        const evidenceSha256 =
+          mutation === "recovery-evidence-head"
+            ? "d".repeat(64)
+            : sha256(witnessBytes);
+        const evidenceStage =
+          mutation === "recovery-evidence-head"
+            ? "retirement-authorized-retired"
+            : "stage-only";
+        const observedSettlementSha256 =
+          mutation === "recovery-evidence-head"
+            ? sha256(canonicalBytes(operation))
+            : zeroSha256;
+        const topologySha256 = sha256(canonicalBytes({
+          evidence_sha256: evidenceSha256,
+          evidence_stage: evidenceStage,
+          local_links: 1,
+          settlement_sha256: observedSettlementSha256,
+          slot_sequence: 3,
+        }));
+        const leaseSha256 = sha256(slotBytes);
+        const operationPlanSha256 = sha256(
+          canonicalBytes(slot.operation_plan),
+        );
+        const recovery = {
+          action: slot.action,
+          chain_root_sha256: sha256(canonicalBytes({
+            action: slot.action,
+            fixture_id: slot.fixture_id,
+            lease_sha256: leaseSha256,
+            operation_contract_sha256: slot.operation_contract_sha256,
+            operation_kind: slot.operation_kind,
+            operation_plan_sha256: operationPlanSha256,
+            schema: "synveda.clean-engine.mutation-recovery-root.v5",
+          })),
+          fixture_id: slot.fixture_id,
+          lease_sha256: leaseSha256,
+          nonce: "a".repeat(32),
+          observed_effect_disposition:
+            evidenceStage === "stage-only" ? "not-reached" : "complete",
+          observed_effect_name: "provider-reservation",
+          observed_evidence_head_sha256: evidenceSha256,
+          observed_evidence_prefix_sha256: topologySha256,
+          observed_evidence_stage: evidenceStage,
+          observed_residual_sha256: topologySha256,
+          observed_settlement_sha256: observedSettlementSha256,
+          operation_contract_sha256: slot.operation_contract_sha256,
+          operation_kind: slot.operation_kind,
+          operation_plan_sha256: operationPlanSha256,
+          owner_boot_sha256: "b".repeat(64),
+          owner_instance_sha256: "c".repeat(64),
+          owner_pid: 2_147_483_645,
+          owner_probe: "opaque-process-instance-v1",
+          parent_sha256: zeroSha256,
+          schema: "synveda.clean-engine.mutation-recovery.v5",
+          sequence: 0,
+          slot_sequence: 3,
+          source_head_sha256: slot.source_head_sha256,
+        };
+        const recoveryBytes = canonicalBytes(recovery);
+        const recoverySha256 = sha256(recoveryBytes);
+        writeFileSync(
+          join(prepared.active, ".mutation-recovery-03-00"),
+          recoveryBytes,
+          { mode: 0o600 },
+        );
+        if (mutation === "stage-only-recovery-authority") {
+          operation.authority = "recovery";
+          operation.authority_sha256 = recoverySha256;
+        }
+        const operationBytes = canonicalBytes(operation);
+        close.authority = "recovery";
+        close.authority_sha256 = recoverySha256;
+        close.operation_evidence_sha256 = sha256(operationBytes);
+        writeFileSync(operationPath, operationBytes, { mode: 0o600 });
+        writeFileSync(closePath, canonicalBytes(close), { mode: 0o600 });
+        expectedError = mutation === "recovery-evidence-head"
+          ? /live provider reservation recovery witness was refused/u
+          : /live provider reservation recovery topology regressed/u;
+      }
+
+      const refused = run(state, "verify");
+      assert.notEqual(refused.status, 0, `${mutation}: ${refused.stderr}`);
+      assert.match(refused.stderr, expectedError, mutation);
+    } finally {
+      if (preparation !== undefined) {
+        rmSync(preparation.root, { recursive: true, force: true });
+      }
+      rmSync(state.root, { recursive: true, force: true });
+    }
+  }
+});
+
+test("reservation recovery retires an inert stage and a fresh generation completes", async () => {
+  const state = fixture();
+  let preparation;
+  let child;
+  try {
+    const prepared = prepareCompletedLiveProviderStartDecisionFixture(state);
+    preparation = prepared.preparation;
+    const helper = resolve(
+      "scripts/fixtures/clean-engine-live-provider-reservation-process.mjs",
+    );
+    const releasePath = join(state.root, "release-reservation-stage");
+    const serialized = JSON.stringify({
+      observation: preparation.observation,
+      observationInput: preparation.input,
+      requirements: preparation.requirements,
+    });
+    child = spawn(
+      process.execPath,
+      [
+        helper,
+        "publish",
+        state.repo,
+        state.state,
+        serialized,
+        "after-witness-stage",
+        releasePath,
+      ],
+      {
+        env: { PATH: process.env.PATH, LANG: "C", LC_ALL: "C" },
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+    child.stdout.resume();
+    let stderr = "";
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    const readyPath = `${releasePath}.ready-${child.pid}`;
+    const deadline = Date.now() + 10_000;
+    while (!existsSync(readyPath)) {
+      assert.equal(child.exitCode, null, stderr);
+      assert.ok(Date.now() < deadline, stderr);
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
+    }
+    const stageName = readdirSync(prepared.active).find((name) =>
+      name.startsWith(".provider-reservation-stage-"),
+    );
+    assert.notEqual(stageName, undefined);
+    assertPrivate(join(prepared.active, stageName), 0o600, false, 1);
+    child.kill("SIGKILL");
+    const [status, signal] = await once(child, "close");
+    child = undefined;
+    assert.equal(status, null);
+    assert.equal(signal, "SIGKILL");
+
+    const confirmationArguments = {
+      observation: preparation.observation,
+      observationInput: preparation.input,
+      repoRoot: state.repo,
+      requirements: preparation.requirements,
+      stateBase: state.state,
+    };
+    assert.throws(
+      () => providerRecoveryConfirmationForExecutor({
+        repoRoot: state.repo,
+        stateBase: state.state,
+      }),
+      /live provider reservation requires its physical recovery confirmation/u,
+    );
+    const confirmation =
+      liveProviderFixtureReservationRecoveryConfirmationForTest(
+        confirmationArguments,
+      );
+    assert.throws(
+      () => recoverProviderCreateForExecutor({
+        adapter: fakeProviderAdapter(),
+        confirmation,
+        repoRoot: state.repo,
+        stateBase: state.state,
+      }),
+      /provider recovery requires the matching dedicated executor/u,
+    );
+    const recovered = recoverColimaLiveProviderReservationForTest({
+      ...confirmationArguments,
+      confirmation,
+      testCheckpoint() {},
+    });
+    assert.equal(recovered.phase, "plan");
+    assert.equal(
+      parse(join(prepared.active, ".mutation-close-03")).disposition,
+      "aborted-before-effect",
+    );
+    assert.equal(
+      readdirSync(prepared.active).some((name) =>
+        name.startsWith(".provider-reservation-stage-"),
+      ),
+      false,
+    );
+    const completion = publishColimaLiveProviderReservationForTest(
+      fixtureStartAdmissionArguments(state, preparation),
+    );
+    assert.equal(completion.slot_sequence, 4);
+    assertPrivate(
+      join(prepared.active, ".provider-reservation-witness-04"),
+      0o600,
+    );
+    assert.equal(run(state, "verify").status, 0);
+  } finally {
+    if (child !== undefined) child.kill("SIGKILL");
+    if (preparation !== undefined) {
+      rmSync(preparation.root, { recursive: true, force: true });
+    }
+    rmSync(state.root, { recursive: true, force: true });
+  }
+});
+
+test("reservation recovery survives a crash after retiring an inert stage", async () => {
+  const state = fixture();
+  let preparation;
+  let child;
+  const stopAt = async (action, serialized, checkpoint, releaseName) => {
+    const helper = resolve(
+      "scripts/fixtures/clean-engine-live-provider-reservation-process.mjs",
+    );
+    const releasePath = join(state.root, releaseName);
+    child = spawn(
+      process.execPath,
+      [
+        helper,
+        action,
+        state.repo,
+        state.state,
+        JSON.stringify(serialized),
+        checkpoint,
+        releasePath,
+      ],
+      {
+        env: { PATH: process.env.PATH, LANG: "C", LC_ALL: "C" },
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+    child.stdout.resume();
+    let stderr = "";
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    const readyPath = `${releasePath}.ready-${child.pid}`;
+    const deadline = Date.now() + 10_000;
+    while (!existsSync(readyPath)) {
+      assert.equal(child.exitCode, null, stderr);
+      assert.ok(Date.now() < deadline, stderr);
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
+    }
+    child.kill("SIGKILL");
+    const [status, signal] = await once(child, "close");
+    child = undefined;
+    assert.equal(status, null);
+    assert.equal(signal, "SIGKILL");
+  };
+  try {
+    const prepared = prepareCompletedLiveProviderStartDecisionFixture(state);
+    preparation = prepared.preparation;
+    const fixtureInput = {
+      observation: preparation.observation,
+      observationInput: preparation.input,
+      requirements: preparation.requirements,
+    };
+    await stopAt(
+      "publish",
+      fixtureInput,
+      "after-witness-stage",
+      "release-owner-stage",
+    );
+    const confirmationArguments = {
+      ...fixtureInput,
+      repoRoot: state.repo,
+      stateBase: state.state,
+    };
+    const firstConfirmation =
+      liveProviderFixtureReservationRecoveryConfirmationForTest(
+        confirmationArguments,
+      );
+    await stopAt(
+      "recover",
+      { ...fixtureInput, confirmation: firstConfirmation },
+      "after-witness-stage-unlink",
+      "release-recovery-stage-retirement",
+    );
+    assert.equal(
+      readdirSync(prepared.active).some((name) =>
+        name.startsWith(".provider-reservation-stage-"),
+      ),
+      false,
+    );
+    const secondConfirmation =
+      liveProviderFixtureReservationRecoveryConfirmationForTest(
+        confirmationArguments,
+      );
+    const recovered = recoverColimaLiveProviderReservationForTest({
+      ...confirmationArguments,
+      confirmation: secondConfirmation,
+      testCheckpoint() {},
+    });
+    assert.equal(recovered.phase, "plan");
+    assert.equal(
+      parse(join(prepared.active, ".mutation-close-03")).disposition,
+      "aborted-before-effect",
+    );
+    assert.deepEqual(
+      readdirSync(prepared.active)
+        .filter((name) => name.startsWith(".mutation-recovery-03-"))
+        .sort(),
+      [".mutation-recovery-03-00", ".mutation-recovery-03-01"],
+    );
+    assert.equal(run(state, "verify").status, 0);
+  } finally {
+    if (child !== undefined) child.kill("SIGKILL");
+    if (preparation !== undefined) {
+      rmSync(preparation.root, { recursive: true, force: true });
+    }
+    rmSync(state.root, { recursive: true, force: true });
+  }
+});
+
+test("reservation recovery accepts reachable stages across repeated crashes", async () => {
+  const state = fixture();
+  let preparation;
+  let child;
+  const stopAt = async (action, serialized, checkpoint, releaseName) => {
+    const helper = resolve(
+      "scripts/fixtures/clean-engine-live-provider-reservation-process.mjs",
+    );
+    const releasePath = join(state.root, releaseName);
+    child = spawn(
+      process.execPath,
+      [
+        helper,
+        action,
+        state.repo,
+        state.state,
+        JSON.stringify(serialized),
+        checkpoint,
+        releasePath,
+      ],
+      {
+        env: { PATH: process.env.PATH, LANG: "C", LC_ALL: "C" },
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+    child.stdout.resume();
+    let stderr = "";
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    const readyPath = `${releasePath}.ready-${child.pid}`;
+    const deadline = Date.now() + 10_000;
+    while (!existsSync(readyPath)) {
+      assert.equal(child.exitCode, null, stderr);
+      assert.ok(Date.now() < deadline, stderr);
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
+    }
+    child.kill("SIGKILL");
+    const [status, signal] = await once(child, "close");
+    child = undefined;
+    assert.equal(status, null);
+    assert.equal(signal, "SIGKILL");
+  };
+  try {
+    const prepared = prepareCompletedLiveProviderStartDecisionFixture(state);
+    preparation = prepared.preparation;
+    const fixtureInput = {
+      observation: preparation.observation,
+      observationInput: preparation.input,
+      requirements: preparation.requirements,
+    };
+    await stopAt(
+      "publish",
+      fixtureInput,
+      "after-marker-directory-sync",
+      "release-owner-marker-linked",
+    );
+    const confirmationArguments = {
+      ...fixtureInput,
+      repoRoot: state.repo,
+      stateBase: state.state,
+    };
+    const firstConfirmation =
+      liveProviderFixtureReservationRecoveryConfirmationForTest(
+        confirmationArguments,
+      );
+    await stopAt(
+      "recover",
+      { ...fixtureInput, confirmation: firstConfirmation },
+      "after-witness-stage-directory-sync",
+      "release-recovery-marker-held",
+    );
+
+    const marker = join(
+      preparation.providerRoot,
+      ".synveda-clean-engine-provider-reservation",
+    );
+    const witness = join(
+      prepared.active,
+      ".provider-reservation-witness-03",
+    );
+    assertPrivate(marker, 0o600, false, 2);
+    assertPrivate(witness, 0o600, false, 2);
+    assert.equal(lstatSync(marker).ino, lstatSync(witness).ino);
+    assert.equal(
+      readdirSync(prepared.active).some((name) =>
+        name.startsWith(".provider-reservation-stage-"),
+      ),
+      false,
+    );
+
+    const secondConfirmation =
+      liveProviderFixtureReservationRecoveryConfirmationForTest(
+        confirmationArguments,
+      );
+    await crashLiveProviderReservationAt(state, {
+      action: "recover",
+      checkpoint: "after-marker-retirement-directory-sync",
+      input: { ...fixtureInput, confirmation: secondConfirmation },
+      releaseName: "release-second-recovery-after-marker-retirement",
+    });
+    assert.equal(existsSync(marker), false);
+    assertPrivate(witness, 0o600, false, 1);
+    const thirdConfirmation =
+      liveProviderFixtureReservationRecoveryConfirmationForTest(
+        confirmationArguments,
+      );
+    const completion = recoverColimaLiveProviderReservationForTest({
+      ...confirmationArguments,
+      confirmation: thirdConfirmation,
+      testCheckpoint() {},
+    });
+    assert.equal(
+      completion.schema,
+      COLIMA_LIVE_FIXTURE_PROVIDER_RESERVATION_COMPLETION_SCHEMA,
+    );
+    assert.equal(existsSync(marker), false);
+    assertPrivate(witness, 0o600, false, 1);
+    assert.deepEqual(
+      readdirSync(prepared.active)
+        .filter((name) => name.startsWith(".mutation-recovery-03-"))
+        .sort(),
+      [
+        ".mutation-recovery-03-00",
+        ".mutation-recovery-03-01",
+        ".mutation-recovery-03-02",
+      ],
+    );
+    assert.equal(run(state, "verify").status, 0);
+  } finally {
+    if (child !== undefined) child.kill("SIGKILL");
+    if (preparation !== undefined) {
+      rmSync(preparation.root, { recursive: true, force: true });
+    }
+    rmSync(state.root, { recursive: true, force: true });
+  }
+});
+
+test("reservation recovery preserves settlement and newest-close causality", async () => {
+  const state = fixture();
+  let preparation;
+  try {
+    const prepared = prepareCompletedLiveProviderStartDecisionFixture(state);
+    preparation = prepared.preparation;
+    const fixtureInput = {
+      observation: preparation.observation,
+      observationInput: preparation.input,
+      requirements: preparation.requirements,
+    };
+    await crashLiveProviderReservationAt(state, {
+      action: "publish",
+      checkpoint: "before-retirement-observation",
+      input: fixtureInput,
+      releaseName: "release-owner-before-recovery-settlement",
+    });
+    const confirmationArguments = {
+      ...fixtureInput,
+      repoRoot: state.repo,
+      stateBase: state.state,
+    };
+    const firstConfirmation =
+      liveProviderFixtureReservationRecoveryConfirmationForTest(
+        confirmationArguments,
+      );
+    await crashLiveProviderReservationAt(state, {
+      action: "recover",
+      checkpoint: "after-retirement-authorization-publication",
+      input: { ...fixtureInput, confirmation: firstConfirmation },
+      releaseName: "release-first-recovery-after-settlement",
+    });
+
+    const marker = join(
+      preparation.providerRoot,
+      ".synveda-clean-engine-provider-reservation",
+    );
+    const witness = join(
+      prepared.active,
+      ".provider-reservation-witness-03",
+    );
+    assertPrivate(marker, 0o600, false, 2);
+    assertPrivate(witness, 0o600, false, 2);
+    const operationPath = join(
+      prepared.active,
+      ".mutation-operation-03",
+    );
+    assertPrivate(operationPath, 0o600);
+
+    const secondConfirmation =
+      liveProviderFixtureReservationRecoveryConfirmationForTest(
+        confirmationArguments,
+      );
+    await crashLiveProviderReservationAt(state, {
+      action: "recover",
+      checkpoint: "after-marker-retirement-directory-sync",
+      input: { ...fixtureInput, confirmation: secondConfirmation },
+      releaseName: "release-causal-recovery-after-marker-retirement",
+    });
+    assert.equal(existsSync(marker), false);
+    assertPrivate(witness, 0o600, false, 1);
+    const thirdConfirmation =
+      liveProviderFixtureReservationRecoveryConfirmationForTest(
+        confirmationArguments,
+      );
+    const completion = recoverColimaLiveProviderReservationForTest({
+      ...confirmationArguments,
+      confirmation: thirdConfirmation,
+      testCheckpoint() {},
+    });
+    assert.equal(
+      completion.schema,
+      COLIMA_LIVE_FIXTURE_PROVIDER_RESERVATION_COMPLETION_SCHEMA,
+    );
+    const firstClaimPath = join(
+      prepared.active,
+      ".mutation-recovery-03-00",
+    );
+    const secondClaimPath = join(
+      prepared.active,
+      ".mutation-recovery-03-01",
+    );
+    const thirdClaimPath = join(
+      prepared.active,
+      ".mutation-recovery-03-02",
+    );
+    const firstClaim = parse(firstClaimPath);
+    const secondClaim = parse(secondClaimPath);
+    const thirdClaim = parse(thirdClaimPath);
+    const operationBytes = readFileSync(operationPath);
+    const operation = JSON.parse(operationBytes.toString("utf8"));
+    const close = parse(join(prepared.active, ".mutation-close-03"));
+    assert.equal(firstClaim.observed_settlement_sha256, "0".repeat(64));
+    assert.equal(
+      secondClaim.observed_settlement_sha256,
+      sha256(operationBytes),
+    );
+    assert.equal(
+      thirdClaim.observed_settlement_sha256,
+      sha256(operationBytes),
+    );
+    assert.equal(operation.authority, "recovery");
+    assert.equal(
+      operation.authority_sha256,
+      sha256(readFileSync(firstClaimPath)),
+    );
+    assert.equal(close.authority, "recovery");
+    assert.equal(
+      close.authority_sha256,
+      sha256(readFileSync(thirdClaimPath)),
+    );
+    assert.equal(existsSync(marker), false);
+    assertPrivate(witness, 0o600, false, 1);
+    assert.equal(run(state, "verify").status, 0);
+  } finally {
+    if (preparation !== undefined) {
+      rmSync(preparation.root, { recursive: true, force: true });
+    }
+    rmSync(state.root, { recursive: true, force: true });
+  }
+});
+
+test("reservation state refuses a recovery claim followed by local topology regression", async () => {
+  const state = fixture();
+  let preparation;
+  let child;
+  const stopAt = async (action, serialized, checkpoint, releaseName) => {
+    const helper = resolve(
+      "scripts/fixtures/clean-engine-live-provider-reservation-process.mjs",
+    );
+    const releasePath = join(state.root, releaseName);
+    child = spawn(
+      process.execPath,
+      [
+        helper,
+        action,
+        state.repo,
+        state.state,
+        JSON.stringify(serialized),
+        checkpoint,
+        releasePath,
+      ],
+      {
+        env: { PATH: process.env.PATH, LANG: "C", LC_ALL: "C" },
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+    child.stdout.resume();
+    let stderr = "";
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    const readyPath = `${releasePath}.ready-${child.pid}`;
+    const deadline = Date.now() + 10_000;
+    while (!existsSync(readyPath)) {
+      assert.equal(child.exitCode, null, stderr);
+      assert.ok(Date.now() < deadline, stderr);
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
+    }
+    child.kill("SIGKILL");
+    const [status, signal] = await once(child, "close");
+    child = undefined;
+    assert.equal(status, null);
+    assert.equal(signal, "SIGKILL");
+  };
+  try {
+    const prepared = prepareCompletedLiveProviderStartDecisionFixture(state);
+    preparation = prepared.preparation;
+    const fixtureInput = {
+      observation: preparation.observation,
+      observationInput: preparation.input,
+      requirements: preparation.requirements,
+    };
+    await stopAt(
+      "publish",
+      fixtureInput,
+      "after-marker-directory-sync",
+      "release-owner-marker-before-regression",
+    );
+    const confirmationArguments = {
+      ...fixtureInput,
+      repoRoot: state.repo,
+      stateBase: state.state,
+    };
+    const confirmation =
+      liveProviderFixtureReservationRecoveryConfirmationForTest(
+        confirmationArguments,
+      );
+    await stopAt(
+      "recover",
+      { ...fixtureInput, confirmation },
+      "after-recovery-claim",
+      "release-recovery-claim-before-regression",
+    );
+    const marker = join(
+      preparation.providerRoot,
+      ".synveda-clean-engine-provider-reservation",
+    );
+    unlinkSync(marker);
+    assertPrivate(
+      readdirSync(prepared.active)
+        .filter((name) => name.startsWith(".provider-reservation-stage-"))
+        .map((name) => join(prepared.active, name))[0],
+      0o600,
+      false,
+      1,
+    );
+    const refused = run(state, "verify");
+    assert.notEqual(refused.status, 0, refused.stderr);
+    assert.match(
+      refused.stderr,
+      /live provider reservation recovery topology regressed/u,
+    );
+  } finally {
+    if (child !== undefined) child.kill("SIGKILL");
+    if (preparation !== undefined) {
+      rmSync(preparation.root, { recursive: true, force: true });
+    }
+    rmSync(state.root, { recursive: true, force: true });
+  }
+});
+
+test("reservation state refuses derived recovery stages as the first claim", async () => {
+  for (const derivedStage of [
+    "marker-reacquired",
+    "stage-retired-before-effect",
+  ]) {
+    const state = fixture();
+    let preparation;
+    try {
+      const prepared = prepareCompletedLiveProviderStartDecisionFixture(state);
+      preparation = prepared.preparation;
+      const fixtureInput = {
+        observation: preparation.observation,
+        observationInput: preparation.input,
+        requirements: preparation.requirements,
+      };
+      await crashLiveProviderReservationAt(state, {
+        action: "publish",
+        checkpoint:
+          derivedStage === "marker-reacquired"
+            ? "before-retirement-observation"
+            : "after-witness-stage",
+        input: fixtureInput,
+        releaseName: `release-owner-before-${derivedStage}`,
+      });
+      const confirmationArguments = {
+        ...fixtureInput,
+        repoRoot: state.repo,
+        stateBase: state.state,
+      };
+      const confirmation =
+        liveProviderFixtureReservationRecoveryConfirmationForTest(
+          confirmationArguments,
+        );
+      await crashLiveProviderReservationAt(state, {
+        action: "recover",
+        checkpoint: "after-recovery-claim",
+        input: { ...fixtureInput, confirmation },
+        releaseName: `release-first-claim-before-${derivedStage}`,
+      });
+
+      const recoveryPath = join(
+        prepared.active,
+        ".mutation-recovery-03-00",
+      );
+      const recovery = parse(recoveryPath);
+      if (derivedStage === "stage-retired-before-effect") {
+        const stageName = readdirSync(prepared.active).find((name) =>
+          name.startsWith(".provider-reservation-stage-"),
+        );
+        assert.notEqual(stageName, undefined);
+        unlinkSync(join(prepared.active, stageName));
+      }
+      recovery.observed_effect_disposition =
+        derivedStage === "stage-retired-before-effect"
+          ? "not-reached"
+          : "pending";
+      recovery.observed_evidence_stage = derivedStage;
+      const topologySha256 = sha256(canonicalBytes({
+        evidence_sha256: recovery.observed_evidence_head_sha256,
+        evidence_stage: derivedStage,
+        local_links:
+          derivedStage === "stage-retired-before-effect" ? 0 : 2,
+        settlement_sha256: recovery.observed_settlement_sha256,
+        slot_sequence: recovery.slot_sequence,
+      }));
+      recovery.observed_evidence_prefix_sha256 = topologySha256;
+      recovery.observed_residual_sha256 = topologySha256;
+      writeFileSync(recoveryPath, canonicalBytes(recovery), { mode: 0o600 });
+
+      const refused = run(state, "verify");
+      assert.notEqual(refused.status, 0, `${derivedStage}: ${refused.stderr}`);
+      assert.match(
+        refused.stderr,
+        /live provider reservation recovery history was refused/u,
+        derivedStage,
+      );
+    } finally {
+      if (preparation !== undefined) {
+        rmSync(preparation.root, { recursive: true, force: true });
+      }
+      rmSync(state.root, { recursive: true, force: true });
+    }
+  }
+});
+
+test("reservation recovery durably reacquires a prematurely unlinked marker", async () => {
+  const state = fixture();
+  let preparation;
+  let child;
+  const stopAt = async (action, serialized, checkpoint, releaseName, ready) => {
+    const helper = resolve(
+      "scripts/fixtures/clean-engine-live-provider-reservation-process.mjs",
+    );
+    const releasePath = join(state.root, releaseName);
+    child = spawn(
+      process.execPath,
+      [
+        helper,
+        action,
+        state.repo,
+        state.state,
+        JSON.stringify(serialized),
+        checkpoint,
+        releasePath,
+      ],
+      {
+        env: { PATH: process.env.PATH, LANG: "C", LC_ALL: "C" },
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+    child.stdout.resume();
+    let stderr = "";
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    const readyPath = `${releasePath}.ready-${child.pid}`;
+    const deadline = Date.now() + 10_000;
+    while (!existsSync(readyPath) || !ready()) {
+      assert.equal(child.exitCode, null, stderr);
+      assert.ok(Date.now() < deadline, stderr);
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
+    }
+    return child;
+  };
+  const killStopped = async () => {
+    child.kill("SIGKILL");
+    const [status, signal] = await once(child, "close");
+    child = undefined;
+    assert.equal(status, null);
+    assert.equal(signal, "SIGKILL");
+  };
+  try {
+    const prepared = prepareCompletedLiveProviderStartDecisionFixture(state);
+    preparation = prepared.preparation;
+    const fixtureInput = {
+      observation: preparation.observation,
+      observationInput: preparation.input,
+      requirements: preparation.requirements,
+    };
+    const marker = join(
+      preparation.providerRoot,
+      ".synveda-clean-engine-provider-reservation",
+    );
+    const witness = join(
+      prepared.active,
+      ".provider-reservation-witness-03",
+    );
+    await stopAt(
+      "publish",
+      fixtureInput,
+      "before-retirement-observation",
+      "release-owner-held-marker",
+      () => existsSync(marker) && existsSync(witness),
+    );
+    assertPrivate(marker, 0o600, false, 2);
+    assertPrivate(witness, 0o600, false, 2);
+    assert.equal(lstatSync(marker).ino, lstatSync(witness).ino);
+    unlinkSync(marker);
+    assertPrivate(witness, 0o600, false, 1);
+    await killStopped();
+
+    const confirmationArguments = {
+      ...fixtureInput,
+      repoRoot: state.repo,
+      stateBase: state.state,
+    };
+    const firstConfirmation =
+      liveProviderFixtureReservationRecoveryConfirmationForTest(
+        confirmationArguments,
+      );
+    await stopAt(
+      "recover",
+      { ...fixtureInput, confirmation: firstConfirmation },
+      "after-recovery-marker-link",
+      "release-recovery-marker-link",
+      () => existsSync(marker) && lstatSync(witness).nlink === 2,
+    );
+    assert.equal(lstatSync(marker).ino, lstatSync(witness).ino);
+    await killStopped();
+
+    const secondConfirmation =
+      liveProviderFixtureReservationRecoveryConfirmationForTest(
+        confirmationArguments,
+      );
+    const completion = recoverColimaLiveProviderReservationForTest({
+      ...confirmationArguments,
+      confirmation: secondConfirmation,
+      testCheckpoint() {},
+    });
+    assert.equal(
+      completion.schema,
+      COLIMA_LIVE_FIXTURE_PROVIDER_RESERVATION_COMPLETION_SCHEMA,
+    );
+    assert.equal(existsSync(marker), false);
+    assertPrivate(witness, 0o600, false, 1);
+    assert.deepEqual(
+      readdirSync(prepared.active)
+        .filter((name) => name.startsWith(".mutation-recovery-03-"))
+        .sort(),
+      [".mutation-recovery-03-00", ".mutation-recovery-03-01"],
+    );
+    const settlement = parse(
+      join(prepared.active, ".mutation-operation-03"),
+    );
+    assert.equal(settlement.authority, "recovery");
+    assert.equal(
+      settlement.authority_sha256,
+      sha256(
+        readFileSync(
+          join(prepared.active, ".mutation-recovery-03-01"),
+        ),
+      ),
+    );
+    assert.equal(run(state, "verify").status, 0);
+  } finally {
+    if (child !== undefined) child.kill("SIGKILL");
+    if (preparation !== undefined) {
+      rmSync(preparation.root, { recursive: true, force: true });
+    }
+    rmSync(state.root, { recursive: true, force: true });
+  }
+});
+
+test("reservation crash boundaries converge without process or receipt authority", async () => {
+  const cases = [
+    "after-reservation-plan",
+    "after-reservation-slot-link",
+    "after-reservation-slot",
+    "after-witness-stage",
+    "after-marker-link",
+    "after-marker-directory-sync",
+    "after-state-witness-link",
+    "after-state-witness-directory-sync",
+    "after-witness-stage-unlink",
+    "after-witness-stage-directory-sync",
+    "before-retirement-observation",
+    "after-retirement-observation",
+    "after-retirement-authorization-link",
+    "after-retirement-authorization-publication",
+    "after-marker-unlink",
+    "after-marker-retirement-directory-sync",
+    "after-reservation-close-link",
+    "after-reservation-close",
+  ];
+  const helper = resolve(
+    "scripts/fixtures/clean-engine-live-provider-reservation-process.mjs",
+  );
+  for (const [index, checkpoint] of cases.entries()) {
+    const state = fixture();
+    let preparation;
+    let child;
+    try {
+      const prepared = prepareCompletedLiveProviderStartDecisionFixture(state);
+      preparation = prepared.preparation;
+      const fixtureInput = {
+        observation: preparation.observation,
+        observationInput: preparation.input,
+        requirements: preparation.requirements,
+      };
+      const releasePath = join(
+        state.root,
+        `release-reservation-boundary-${index}`,
+      );
+      child = spawn(
+        process.execPath,
+        [
+          helper,
+          "publish",
+          state.repo,
+          state.state,
+          JSON.stringify(fixtureInput),
+          checkpoint,
+          releasePath,
+        ],
+        {
+          env: { PATH: process.env.PATH, LANG: "C", LC_ALL: "C" },
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
+      child.stdout.resume();
+      let stderr = "";
+      child.stderr.setEncoding("utf8");
+      child.stderr.on("data", (chunk) => {
+        stderr += chunk;
+      });
+      const readyPath = `${releasePath}.ready-${child.pid}`;
+      const deadline = Date.now() + 15_000;
+      while (!existsSync(readyPath)) {
+        assert.equal(child.exitCode, null, `${checkpoint}: ${stderr}`);
+        assert.ok(Date.now() < deadline, `${checkpoint}: ${stderr}`);
+        await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
+      }
+      const terminationSignal = index % 2 === 0 ? "SIGTERM" : "SIGKILL";
+      child.kill(terminationSignal);
+      const [status, signal] = await once(child, "close");
+      child = undefined;
+      assert.equal(status, null, checkpoint);
+      assert.equal(signal, terminationSignal, checkpoint);
+
+      const confirmationArguments = {
+        ...fixtureInput,
+        repoRoot: state.repo,
+        stateBase: state.state,
+      };
+      const activeEntries = readdirSync(prepared.active);
+      const hasOpenReservation =
+        activeEntries.includes(".mutation-slot-03") &&
+        !activeEntries.includes(".mutation-close-03");
+      if (hasOpenReservation) {
+        const confirmation =
+          liveProviderFixtureReservationRecoveryConfirmationForTest(
+            confirmationArguments,
+          );
+        const recovered = recoverColimaLiveProviderReservationForTest({
+          ...confirmationArguments,
+          confirmation,
+          testCheckpoint() {},
+        });
+        if (recovered.phase === "plan") {
+          publishColimaLiveProviderReservationForTest(
+            fixtureStartAdmissionArguments(state, preparation),
+          );
+        }
+      } else {
+        publishColimaLiveProviderReservationForTest(
+          fixtureStartAdmissionArguments(state, preparation),
+        );
+      }
+
+      const finalEntries = readdirSync(prepared.active);
+      const completedSequence = finalEntries.includes(".mutation-close-04")
+        ? "04"
+        : "03";
+      assert.equal(
+        parse(
+          join(prepared.active, `.mutation-close-${completedSequence}`),
+        ).disposition,
+        "completed",
+        checkpoint,
+      );
+      assertPrivate(
+        join(
+          prepared.active,
+          `.provider-reservation-witness-${completedSequence}`,
+        ),
+        0o600,
+        false,
+        1,
+      );
+      assert.equal(
+        existsSync(
+          join(
+            preparation.providerRoot,
+            ".synveda-clean-engine-provider-reservation",
+          ),
+        ),
+        false,
+        checkpoint,
+      );
+      assert.deepEqual(
+        finalEntries.filter((name) =>
+          name.startsWith(".provider-reservation-stage-"),
+        ),
+        [],
+        checkpoint,
+      );
+      assert.deepEqual(
+        finalEntries.filter((name) => /^[0-9]{2}-.*\.json$/u.test(name)),
+        ["00-plan.json"],
+        checkpoint,
+      );
+      assert.equal(existsSync(join(prepared.active, "environment.json")), false);
+      for (const directory of ["evidence", "provider", "registry", "runtime"]) {
+        assert.deepEqual(readdirSync(join(prepared.active, directory)), []);
+      }
+      assert.equal(run(state, "verify").status, 0, checkpoint);
+    } finally {
+      if (child !== undefined) child.kill("SIGKILL");
+      if (preparation !== undefined) {
+        rmSync(preparation.root, { recursive: true, force: true });
+      }
+      rmSync(state.root, { recursive: true, force: true });
+    }
+  }
+});
+
+test("two state journals sharing one provider root admit one reservation CAS winner", async () => {
+  const firstState = fixture();
+  const secondState = fixture();
+  let preparation;
+  const children = [];
+  try {
+    assert.equal(run(firstState, "plan").status, 0);
+    assert.equal(run(secondState, "plan").status, 0);
+    const firstActive = activeRun(firstState);
+    const secondActive = activeRun(secondState);
+    const firstFixtureId = parse(join(firstActive, "candidate.json")).run_id;
+    const secondFixtureId = parse(join(secondActive, "candidate.json")).run_id;
+    preparation = createCleanEngineColimaLiveObservationFixture({
+      fixtureId: firstFixtureId,
+    });
+    const secondInput = cloneColimaLiveObservationInput(preparation.input);
+    secondInput.fixture_id = secondFixtureId;
+    secondInput.provider_profile = `synveda-cpr45-${secondFixtureId}`;
+    const secondPreparation = {
+      input: secondInput,
+      observation: buildColimaLiveObservationForTest(
+        preparation.requirements,
+        secondInput,
+      ),
+      providerRoot: preparation.providerRoot,
+      requirements: preparation.requirements,
+    };
+    for (const [state, prepared] of [
+      [firstState, preparation],
+      [secondState, secondPreparation],
+    ]) {
+      const operationPlan = liveProviderOperationPlan(
+        state,
+        colimaLiveDigest(colimaLiveBytes(prepared.observation)),
+      );
+      recordLiveProviderOperationPlanForTest({
+        operationPlan,
+        repoRoot: state.repo,
+        stateBase: state.state,
+      });
+      publishColimaLiveProviderIntentForTest(
+        fixtureIntentArguments(state, prepared),
+      );
+      publishColimaLiveProviderStartDecisionForTest(
+        fixtureStartAdmissionArguments(state, prepared),
+      );
+    }
+
+    const helper = resolve(
+      "scripts/fixtures/clean-engine-live-provider-reservation-process.mjs",
+    );
+    const releasePath = join(firstState.root, "release-reservation-writers");
+    const launch = (state, prepared) => {
+      const child = spawn(
+        process.execPath,
+        [
+          helper,
+          "publish",
+          state.repo,
+          state.state,
+          JSON.stringify({
+            observation: prepared.observation,
+            observationInput: prepared.input,
+            requirements: prepared.requirements,
+          }),
+          "after-witness-stage",
+          releasePath,
+        ],
+        {
+          env: { PATH: process.env.PATH, LANG: "C", LC_ALL: "C" },
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
+      child.stdout.resume();
+      const output = { child, stderr: "" };
+      child.stderr.setEncoding("utf8");
+      child.stderr.on("data", (chunk) => {
+        output.stderr += chunk;
+      });
+      children.push(output);
+      return output;
+    };
+    const first = launch(firstState, preparation);
+    const second = launch(secondState, secondPreparation);
+    const deadline = Date.now() + 15_000;
+    while (
+      readdirSync(firstState.root).filter((name) =>
+        name.startsWith(`${basename(releasePath)}.ready-`),
+      ).length !== 2
+    ) {
+      assert.equal(first.child.exitCode, null, first.stderr);
+      assert.equal(second.child.exitCode, null, second.stderr);
+      assert.ok(Date.now() < deadline, `${first.stderr}${second.stderr}`);
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
+    }
+    writeFileSync(releasePath, "release\n", { mode: 0o600 });
+    const results = await Promise.all(
+      children.map(
+        (output) =>
+          new Promise((resolvePromise) => {
+            output.child.on("close", (status, signal) =>
+              resolvePromise({ signal, status, stderr: output.stderr }),
+            );
+          }),
+      ),
+    );
+    children.length = 0;
+    assert.deepEqual(
+      results.map((value) => value.status).sort((left, right) => left - right),
+      [0, 73],
+      results.map((value) => value.stderr).join("\n"),
+    );
+    assert.equal(results.every((value) => value.signal === null), true);
+    assert.equal(
+      results.find((value) => value.status === 73)?.stderr,
+      "live provider reservation marker was already held\n",
+    );
+    const closes = [firstActive, secondActive].map((active) =>
+      parse(join(active, ".mutation-close-03")),
+    );
+    assert.deepEqual(
+      closes.map((close) => close.disposition).sort(),
+      ["aborted-before-effect", "completed"],
+    );
+    assert.equal(
+      [firstActive, secondActive].filter((active) =>
+        existsSync(join(active, ".provider-reservation-witness-03")),
+      ).length,
+      1,
+    );
+    assert.equal(
+      existsSync(
+        join(
+          preparation.providerRoot,
+          ".synveda-clean-engine-provider-reservation",
+        ),
+      ),
+      false,
+    );
+    assert.equal(run(firstState, "verify").status, 0);
+    assert.equal(run(secondState, "verify").status, 0);
+  } finally {
+    for (const { child } of children) child.kill("SIGKILL");
+    if (preparation !== undefined) {
+      rmSync(preparation.root, { recursive: true, force: true });
+    }
+    rmSync(firstState.root, { recursive: true, force: true });
+    rmSync(secondState.root, { recursive: true, force: true });
+  }
+});
+
+test("reservation authority preserves replacement extra-link and namespace drift", async () => {
+  for (const mutation of [
+    "marker-replacement",
+    "marker-symlink",
+    "marker-mode",
+    "extra-hard-link",
+    "namespace-drift",
+  ]) {
+    const state = fixture();
+    let preparation;
+    let child;
+    let cleanupMutation = () => {};
+    try {
+      const prepared = prepareCompletedLiveProviderStartDecisionFixture(state);
+      preparation = prepared.preparation;
+      const fixtureInput = {
+        observation: preparation.observation,
+        observationInput: preparation.input,
+        requirements: preparation.requirements,
+      };
+      const helper = resolve(
+        "scripts/fixtures/clean-engine-live-provider-reservation-process.mjs",
+      );
+      const releasePath = join(
+        state.root,
+        `release-reservation-drift-${mutation}`,
+      );
+      child = spawn(
+        process.execPath,
+        [
+          helper,
+          "publish",
+          state.repo,
+          state.state,
+          JSON.stringify(fixtureInput),
+          "before-retirement-observation",
+          releasePath,
+        ],
+        {
+          env: { PATH: process.env.PATH, LANG: "C", LC_ALL: "C" },
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
+      child.stdout.resume();
+      let stderr = "";
+      child.stderr.setEncoding("utf8");
+      child.stderr.on("data", (chunk) => {
+        stderr += chunk;
+      });
+      const readyPath = `${releasePath}.ready-${child.pid}`;
+      const marker = join(
+        preparation.providerRoot,
+        ".synveda-clean-engine-provider-reservation",
+      );
+      const witness = join(
+        prepared.active,
+        ".provider-reservation-witness-03",
+      );
+      const deadline = Date.now() + 15_000;
+      while (!existsSync(readyPath) || !existsSync(marker) || !existsSync(witness)) {
+        assert.equal(child.exitCode, null, `${mutation}: ${stderr}`);
+        assert.ok(Date.now() < deadline, `${mutation}: ${stderr}`);
+        await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
+      }
+      if (mutation === "marker-replacement") {
+        unlinkSync(marker);
+        writeFileSync(marker, "foreign reservation marker\n", { mode: 0o600 });
+        cleanupMutation = () => unlinkSync(marker);
+      } else if (mutation === "marker-symlink") {
+        unlinkSync(marker);
+        symlinkSync(witness, marker);
+        cleanupMutation = () => unlinkSync(marker);
+      } else if (mutation === "marker-mode") {
+        unlinkSync(marker);
+        writeFileSync(marker, "foreign reservation marker\n", { mode: 0o644 });
+        cleanupMutation = () => unlinkSync(marker);
+      } else if (mutation === "extra-hard-link") {
+        const extra = join(state.root, "foreign-reservation-link");
+        linkSync(witness, extra);
+        cleanupMutation = () => unlinkSync(extra);
+      } else {
+        const drift = join(
+          preparation.input.environment.COLIMA_HOME,
+          "foreign-reservation-drift",
+        );
+        writeFileSync(drift, "foreign namespace entry\n", { mode: 0o600 });
+        cleanupMutation = () => unlinkSync(drift);
+      }
+      writeFileSync(releasePath, "release\n", { mode: 0o600 });
+      const [status, signal] = await once(child, "close");
+      child = undefined;
+      assert.notEqual(status, 0, mutation);
+      assert.equal(signal, null, mutation);
+      assert.equal(existsSync(join(prepared.active, ".mutation-close-03")), false);
+      assert.equal(existsSync(join(prepared.active, ".mutation-operation-03")), false);
+
+      const confirmationArguments = {
+        ...fixtureInput,
+        repoRoot: state.repo,
+        stateBase: state.state,
+      };
+      if (mutation !== "namespace-drift") {
+        assert.throws(
+          () =>
+            liveProviderFixtureReservationRecoveryConfirmationForTest(
+              confirmationArguments,
+            ),
+          /(?:reservation|plan run)/u,
+        );
+      }
+      cleanupMutation();
+      cleanupMutation = () => {};
+      const confirmation =
+        liveProviderFixtureReservationRecoveryConfirmationForTest(
+          confirmationArguments,
+        );
+      if (mutation === "namespace-drift") {
+        assert.throws(
+          () =>
+            recoverColimaLiveProviderReservationForTest({
+              ...confirmationArguments,
+              confirmation,
+              testCheckpoint() {},
+            }),
+          /root observation changed/u,
+        );
+        assert.equal(existsSync(marker), true);
+        assertPrivate(marker, 0o600, false, 2);
+        assertPrivate(witness, 0o600, false, 2);
+        assert.equal(existsSync(join(prepared.active, ".mutation-close-03")), false);
+        assert.equal(run(state, "verify").status, 0, mutation);
+        continue;
+      }
+      const completion = recoverColimaLiveProviderReservationForTest({
+        ...confirmationArguments,
+        confirmation,
+        testCheckpoint() {},
+      });
+      assert.equal(
+        completion.schema,
+        COLIMA_LIVE_FIXTURE_PROVIDER_RESERVATION_COMPLETION_SCHEMA,
+        mutation,
+      );
+      assert.equal(existsSync(marker), false, mutation);
+      assertPrivate(witness, 0o600, false, 1);
+      assert.equal(run(state, "verify").status, 0, mutation);
+    } finally {
+      if (child !== undefined) child.kill("SIGKILL");
+      cleanupMutation();
+      if (preparation !== undefined) {
+        rmSync(preparation.root, { recursive: true, force: true });
+      }
+      rmSync(state.root, { recursive: true, force: true });
+    }
+  }
+});
+
 test("post-decision effect admission refuses root and state drift between samples", () => {
   for (const drift of ["root-appearance", "decision-close-authority"]) {
     const state = fixture();
@@ -3321,7 +4886,7 @@ test("post-decision effect admission refuses root and state drift between sample
   }
 });
 
-test("post-decision effect admission requires current terminal state and closed arguments", () => {
+test("post-decision effect admission requires current completed state and closed arguments", () => {
   for (const phase of ["plan", "intent"]) {
     const state = fixture();
     let preparation;
@@ -3398,7 +4963,7 @@ test("the post-decision effect observer has no provider-effect control surface",
     "function completedLiveProviderStartDecisionCoreSnapshot",
   );
   const end = stateSource.indexOf(
-    "function validateHistoricalLiveProviderStartDecisionRetry",
+    "function callLiveProviderReservationCheckpoint",
     start,
   );
   assert.ok(start >= 0 && end > start);
@@ -3940,7 +5505,7 @@ test("an abandoned inert intent is recovered only by an all-zero abort", async (
     });
     assert.equal(recovered.phase, "plan");
     const recovery = parse(join(active, ".mutation-recovery-01-00"));
-    assert.equal(recovery.schema, "synveda.clean-engine.mutation-recovery.v4");
+    assert.equal(recovery.schema, "synveda.clean-engine.mutation-recovery.v5");
     assert.equal(recovery.action, "provider-intent");
     assert.deepEqual(
       {
@@ -5263,6 +6828,7 @@ test("superseded mutation schemas and non-provider operation evidence are refuse
       "synveda.clean-engine.mutation-slot.v2",
       "synveda.clean-engine.mutation-slot.v3",
       "synveda.clean-engine.mutation-slot.v4",
+      "synveda.clean-engine.mutation-slot.v5",
     ]) {
       slot.schema = schema;
       writeFileSync(slotPath, canonicalBytes(slot), { mode: 0o600 });
@@ -5280,6 +6846,7 @@ test("superseded mutation schemas and non-provider operation evidence are refuse
     "synveda.clean-engine.mutation-close.v3",
     "synveda.clean-engine.mutation-close.v4",
     "synveda.clean-engine.mutation-close.v5",
+    "synveda.clean-engine.mutation-close.v6",
   ]) {
     const legacyClose = fixture();
     try {
@@ -5302,7 +6869,7 @@ test("superseded mutation schemas and non-provider operation evidence are refuse
   }
 
   for (const legacyRoot of [false, true]) {
-    for (const version of [1, 2, 3]) {
+    for (const version of [1, 2, 3, 4]) {
       const legacyRecovery = fixture();
       try {
         assert.equal(run(legacyRecovery, "plan").status, 0);
@@ -5892,7 +7459,7 @@ test("the fake provider adapter holds one slot across intent effect and result",
     const intent = parse(join(activeRun(state), "01-provider-create-intent.json"));
     assert.equal(
       intent.result.provider_contract_sha256,
-      "e3c24885d5c85864b7a6f4f2d3f966c01e1dd3d7d450d00531d251ef21227c72",
+      "3ce0f279e4d9b981d88f9d84cf7a754acb91f222170902c7b36d07464f199833",
     );
     assert.equal(intent.result.provider_resource, `synveda-cpr45-${candidate.run_id}`);
     assertPrivate(join(activeRun(state), ".mutation-slot-00"), 0o600);
@@ -5915,7 +7482,7 @@ test("the synchronous fake cannot publish controlled-provider evidence", () => {
               evidence_class: "controlled-fake",
               platform: "deterministic-posix",
               provider_contract_sha256:
-                "e3c24885d5c85864b7a6f4f2d3f966c01e1dd3d7d450d00531d251ef21227c72",
+                "3ce0f279e4d9b981d88f9d84cf7a754acb91f222170902c7b36d07464f199833",
               provider_evidence_sha256: "d".repeat(64),
               provider_name: "controlled-fake",
               runtime_name: "none",
@@ -7134,11 +8701,12 @@ test("a finalized environment is mandatory, private and not replaceable", () => 
   }
 });
 
-test("receipt schemas v1 through v3 are explicit pre-provider hard-cut refusals", () => {
+test("receipt schemas v1 through v4 are explicit pre-provider hard-cut refusals", () => {
   for (const schema of [
     "synveda.clean-engine.receipt.v1",
     "synveda.clean-engine.receipt.v2",
     "synveda.clean-engine.receipt.v3",
+    "synveda.clean-engine.receipt.v4",
   ]) {
     const state = fixture();
     try {

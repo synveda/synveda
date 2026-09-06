@@ -16,6 +16,7 @@ import {
   COLIMA_LIVE_MUTATION_SURFACE_ROLES,
   COLIMA_LIVE_OBSERVATION_SCHEMA,
   COLIMA_LIVE_PRE_EFFECT_ROOT_OBSERVATION_SCHEMA,
+  COLIMA_LIVE_PROVIDER_RESERVATION_NAME,
   COLIMA_LIVE_PUBLIC_PROJECTION_SCHEMA,
   COLIMA_LIVE_REQUIREMENTS_SCHEMA,
 } from "./clean-engine-colima-live-schemas.mjs";
@@ -25,6 +26,7 @@ export {
   COLIMA_LIVE_MUTATION_SURFACE_ROLES,
   COLIMA_LIVE_OBSERVATION_SCHEMA,
   COLIMA_LIVE_PRE_EFFECT_ROOT_OBSERVATION_SCHEMA,
+  COLIMA_LIVE_PROVIDER_RESERVATION_NAME,
   COLIMA_LIVE_PUBLIC_PROJECTION_SCHEMA,
   COLIMA_LIVE_REQUIREMENTS_SCHEMA,
 };
@@ -457,7 +459,7 @@ export const COLIMA_LIVE_REQUIREMENTS = deepFreeze({
     virtualization: "apple-virtualization-framework-vz",
   },
   legacy_preparation_contract_sha256:
-    "f07ea041a8442616977cf2a6cdcf1a1b8bd1a147a60930a30e63ca275670daa7",
+    "409bfc2fa03c57d151812c69c395d75c4cf7454f1262d2369f47c97646ebf265",
   mutation_surface: {
     admission_observation:
       "bounded-no-follow-whole-top-level-namespace-hmac-v2",
@@ -470,7 +472,7 @@ export const COLIMA_LIVE_REQUIREMENTS = deepFreeze({
     post_start_inventory:
       "complete-bounded-dynamic-tree-required-before-identity-v1",
     provider_root_path: PROVIDER_ROOT_PATH_CONSTRAINT,
-    reservation: "none-same-uid-trusted-host-boundary-v1",
+    reservation: "single-provider-root-hard-link-cooperative-same-uid-v1",
   },
   provider_class: "colima-vz-docker-live",
   provider_kind: "colima",
@@ -633,7 +635,8 @@ function validateRequirementShape(value) {
     value.authorizations.execution_authorized !== false ||
     value.authorizations.lifecycle_exposure_authorized !== false ||
     value.authorizations.finalization_eligible !== false ||
-    !lowerHex(value.legacy_preparation_contract_sha256, 64)
+    value.legacy_preparation_contract_sha256 !==
+      "409bfc2fa03c57d151812c69c395d75c4cf7454f1262d2369f47c97646ebf265"
   ) {
     fail("Colima live requirements identity was refused");
   }
@@ -665,7 +668,7 @@ function validateRequirementShape(value) {
     canonical(value.mutation_surface.provider_root_path) !==
       canonical(PROVIDER_ROOT_PATH_CONSTRAINT) ||
     value.mutation_surface.reservation !==
-      "none-same-uid-trusted-host-boundary-v1" ||
+      "single-provider-root-hard-link-cooperative-same-uid-v1" ||
     canonical(value.mutation_surface.namespaces) !==
       canonical(MUTATION_SURFACE_NAMESPACES)
   ) {
@@ -1134,6 +1137,22 @@ function exactDirectoryEntries(path, expected, label) {
   exactArray(entries, [...expected].sort(), `${label} inventory`);
 }
 
+function exactProviderRootEntries(path, markerDisposition) {
+  if (!new Set(["absent", "present"]).has(markerDisposition)) {
+    fail("Colima live provider reservation marker disposition was refused", 64);
+  }
+  exactDirectoryEntries(
+    path,
+    [
+      ...Object.values(ROOT_LAYOUT),
+      ...(markerDisposition === "present"
+        ? [COLIMA_LIVE_PROVIDER_RESERVATION_NAME]
+        : []),
+    ],
+    "Colima live provider root",
+  );
+}
+
 function directoryPaths(providerRoot) {
   return Object.freeze({
     "artifact-directory": join(providerRoot, ROOT_LAYOUT.artifact_directory),
@@ -1360,21 +1379,28 @@ function observePreEffectRoots(
   requirements,
   value,
   input,
-  { evidenceClass, schema, testCheckpoint },
+  { evidenceClass, markerDisposition = "absent", schema, testCheckpoint },
 ) {
   validateObservationShape(value, requirements);
   validateBuildInput(input, requirements);
   validateObservationInputBinding(value, input);
+  exactProviderRootEntries(input.provider_root, markerDisposition);
   const first = captureAdmissionRoots(value);
   if (testCheckpoint !== undefined) {
     testCheckpoint("after-first-root-sample");
   }
-  const rebuilt = buildObservation(requirements, input, admissionInventory(first));
+  const rebuilt = buildObservation(
+    requirements,
+    input,
+    admissionInventory(first),
+    markerDisposition,
+  );
   const expected = colimaLiveBytes(value);
   const actual = colimaLiveBytes(rebuilt);
   if (expected.length !== actual.length || !timingSafeEqual(expected, actual)) {
     fail("Colima live observation changed during pre-effect revalidation", 73);
   }
+  exactProviderRootEntries(input.provider_root, markerDisposition);
   const second = captureAdmissionRoots(value);
   const firstProjection = first.map((root) =>
     admissionRootProjection(root, input, schema),
@@ -1390,6 +1416,7 @@ function observePreEffectRoots(
   ) {
     fail("Colima live pre-effect root observation changed", 73);
   }
+  exactProviderRootEntries(input.provider_root, markerDisposition);
   const rootSetDisposition = firstProjection.some(
     (root) => root.disposition === "foreign-collision",
   )
@@ -1406,6 +1433,83 @@ function observePreEffectRoots(
     root_observations: firstProjection,
     root_set_disposition: rootSetDisposition,
     schema,
+  });
+}
+
+function observeProviderReservationRoots(
+  requirements,
+  value,
+  input,
+  stateRunPath,
+  markerDisposition,
+  options,
+) {
+  if (
+    typeof stateRunPath !== "string" ||
+    !isAbsolute(stateRunPath) ||
+    resolve(stateRunPath) !== stateRunPath
+  ) {
+    fail("Colima live provider reservation state run was refused", 64);
+  }
+  const rootObservation = observePreEffectRoots(requirements, value, input, {
+    ...options,
+    markerDisposition,
+  });
+  options.testCheckpoint?.("after-reservation-root-observation");
+  const providerRootIdentity = directoryIdentity(
+    input.provider_root,
+    "Colima live provider reservation root",
+    { privateDirectory: true, revealPath: false },
+  );
+  const stateRunIdentity = directoryIdentity(
+    stateRunPath,
+    "Colima live provider reservation state run",
+    { privateDirectory: true, revealPath: false },
+  );
+  const physicalRoots = captureAdmissionRoots(value);
+  const physicalProjection = physicalRoots.map((root) =>
+    admissionRootProjection(root, input, options.schema),
+  );
+  if (
+    !colimaLiveBytes(physicalProjection).equals(
+      colimaLiveBytes(rootObservation.root_observations),
+    )
+  ) {
+    fail("Colima live provider reservation namespaces changed", 73);
+  }
+  const namespaceBindings = physicalRoots.map((root, index) => {
+    const projection = physicalProjection[index];
+    return Object.freeze({
+      device: root.namespaceIdentity.device,
+      inode: root.namespaceIdentity.inode,
+      mode: root.namespaceIdentity.mode,
+      namespace_identity_hmac_sha256:
+        projection.namespace_identity_hmac_sha256,
+      observed_entry_set_hmac_sha256:
+        projection.observed_entry_set_hmac_sha256,
+      role: root.role,
+      uid: root.namespaceIdentity.uid,
+    });
+  });
+  if (
+    providerRootIdentity.device !== stateRunIdentity.device ||
+    providerRootIdentity.uid !== stateRunIdentity.uid ||
+    namespaceBindings.some(
+      (binding) =>
+        binding.device !== providerRootIdentity.device ||
+        binding.uid !== providerRootIdentity.uid ||
+        binding.mode !== "0700",
+    )
+  ) {
+    fail("Colima live provider reservation filesystem identity was refused", 69);
+  }
+  exactProviderRootEntries(input.provider_root, markerDisposition);
+  return deepFreeze({
+    marker_disposition: markerDisposition,
+    namespace_bindings: namespaceBindings,
+    provider_root_identity: providerRootIdentity,
+    root_observation: rootObservation,
+    state_run_identity: stateRunIdentity,
   });
 }
 
@@ -1579,7 +1683,12 @@ function validateObservationInputBinding(value, input) {
   }
 }
 
-function buildObservation(requirements, input, preEffectInventory = undefined) {
+function buildObservation(
+  requirements,
+  input,
+  preEffectInventory = undefined,
+  providerRootMarkerDisposition = "absent",
+) {
   validateRequirementShape(requirements);
   validateBuildInput(input, requirements);
   let providerRoot;
@@ -1618,7 +1727,7 @@ function buildObservation(requirements, input, preEffectInventory = undefined) {
     .map((entry) => entry.stage_relative_path.split("/").at(-1));
   stagedLimaShareNames.push("templates");
   stagedArtifactNames.push(requirements.source_disk_image.copy_relative_path.split("/").at(-1));
-  exactDirectoryEntries(providerRoot, Object.values(ROOT_LAYOUT), "Colima live provider root");
+  exactProviderRootEntries(providerRoot, providerRootMarkerDisposition);
   exactDirectoryEntries(directoriesByRole["toolchain-directory"], stagedToolchainNames,
     "Colima live toolchain directory");
   exactDirectoryEntries(directoriesByRole["artifact-directory"], stagedArtifactNames,
@@ -2100,6 +2209,26 @@ export function observeColimaLivePreEffectRoots(value, input) {
   });
 }
 
+export function observeColimaLiveProviderReservationRoots(
+  value,
+  input,
+  stateRunPath,
+  markerDisposition,
+) {
+  validateColimaLiveRequirements(COLIMA_LIVE_REQUIREMENTS);
+  return observeProviderReservationRoots(
+    COLIMA_LIVE_REQUIREMENTS,
+    value,
+    input,
+    stateRunPath,
+    markerDisposition,
+    {
+      evidenceClass: "production-pinned",
+      schema: COLIMA_LIVE_PRE_EFFECT_ROOT_OBSERVATION_SCHEMA,
+    },
+  );
+}
+
 export function authorizeColimaLiveObservation(value) {
   validateColimaLiveObservation(value);
   fail("Colima live execution remains disabled after preparation observation", 69);
@@ -2157,6 +2286,31 @@ export function observeColimaLivePreEffectRootsForTest(
     schema: COLIMA_LIVE_FIXTURE_PRE_EFFECT_ROOT_OBSERVATION_SCHEMA,
     testCheckpoint,
   });
+}
+
+export function observeColimaLiveProviderReservationRootsForTest(
+  requirements,
+  value,
+  input,
+  stateRunPath,
+  markerDisposition,
+  testCheckpoint = undefined,
+) {
+  if (testCheckpoint !== undefined && typeof testCheckpoint !== "function") {
+    fail("Colima live fixture reservation checkpoint was refused", 64);
+  }
+  return observeProviderReservationRoots(
+    requirements,
+    value,
+    input,
+    stateRunPath,
+    markerDisposition,
+    {
+      evidenceClass: "fixture-only",
+      schema: COLIMA_LIVE_FIXTURE_PRE_EFFECT_ROOT_OBSERVATION_SCHEMA,
+      testCheckpoint,
+    },
+  );
 }
 
 export function authorizeColimaLiveObservationForTest(requirements, value) {
