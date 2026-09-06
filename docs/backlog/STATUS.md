@@ -365,6 +365,18 @@ The controlled-background contract is separately class-closed at v5: it names
 only repository-owned Node controller/host-agent fixture ancestry and exports
 no live preparation, host-validation or start-authority API. It cannot satisfy
 or be substituted for that four-role live effect cut.
+The separate four-role deterministic fixture now exercises the exact
+outer-to-hostagent-to-usernet/SSH-controlmaster causal shape, fsynced pre-spawn
+edges, IPC-only HMAC keys, authenticated private endpoints, recursive durable
+quiescence, one signed recursive deadline, actual hostagent detach with a
+changed parent observation and bounded cooperative shutdown. Its partial-start
+test binds a signed hostagent frontier before recursive cleanup. It remains
+test-only and imports no deployment
+state, reservation, receipt, registry, lifecycle or controlled-background
+module. Its nonce identity is not OS start identity, its graph is not arbitrary
+process-tree proof and it supplies no provider effect, live evidence, recovery,
+state integration or lifecycle authority. This slice was executed on Darwin;
+Linux execution remains open and is not claimed.
 Live-provider identity, builder, proxy, browser and cleanup evidence follow;
 Linux/reference
 HTTPS must pass before legacy Rauthy/Temporal assets are deleted. Backup/restore,

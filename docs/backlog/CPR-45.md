@@ -743,8 +743,23 @@ not a PID, PGID, ownership or liveness fact.
 
 [ADR-0104](../adr/adr-0104-indivisible-live-provider-effect-generation.md) is
 proposed only; no process-effect implementation or authority exists in the
-current tree. Implement its sibling effect branch directly after the exact
-completed start decision, never after ADR-0103's terminal no-spawn completion.
+current tree. A standalone deterministic preparation fixture now validates
+the closed four-role causal shape with four repository-owned Node processes:
+pre-spawn fsynced edges, IPC-only role keys, authenticated private endpoints,
+recursive quiescence, one signed recursive deadline, detach/reparent
+observation and bounded cooperative shutdown. Its tests also bind an
+authenticated partial-start frontier and refuse wrong keys, replay, wrong
+roles, stale identities, wrong fences and a post-fence spawn request. The
+fixture is not imported by deployment code and reports `state_integration`,
+`provider_effect_evidence`, `live_provider_evidence` and
+`lifecycle_authority` as false. It does not provide OS start/boot/PGID/session
+identity, complete arbitrary-descendant observation,
+the six-namespace inventory, crash recovery or any Colima/Lima/SSH/Engine
+evidence. The recorded execution is Darwin-only; Linux execution remains an
+open evidence requirement.
+
+Implement ADR-0104's sibling effect branch directly after the exact completed
+start decision, never after ADR-0103's terminal no-spawn completion.
 Use a distinct effect witness published at the fixed provider-root marker
 basename; never reuse the generic mutation-slot inode, ADR-0103's retired marker
 inode or its immutable no-spawn witness. The mutation slot remains journal

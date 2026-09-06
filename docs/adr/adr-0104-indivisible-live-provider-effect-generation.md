@@ -229,11 +229,26 @@ Docker/Colima/Lima effect, provider-effect recovery, registry capability,
 supported lifecycle, receipt/environment/runtime/provider-evidence
 publication, finalization or readiness claim. The live create registry tuple
 remains planning-only, cleanup remains deny-only and lifecycle remains
-`plan|status|verify`. A future
-repository-owned four-role fixture is deterministic fixture evidence only. It
-MUST NOT import or relabel the class-closed controlled-background v5 fake, and
-it cannot establish live provider support without separate environment and
-platform evidence plus independent review.
+`plan|status|verify`. The repository-owned four-role fixture is deterministic
+fixture evidence only. It MUST NOT import or relabel the class-closed
+controlled-background v5 fake, and it cannot establish live provider support
+without separate environment and platform evidence plus independent review.
+
+The standalone fixture uses four repository-owned Node processes to exercise
+fsynced pre-spawn causal edges, inherited-IPC-only HMAC keys, fresh private
+endpoint challenges, a recursive durable quiescence fence, actual hostagent
+detach/outer exit, a changed authenticated parent observation and cooperative
+leaf-first shutdown under one signed end-to-end deadline. Its injected partial
+start test binds a signed hostagent frontier before recursively verified
+failure cleanup. Its process nonce is explicitly not an OS start identity;
+it neither proves boot/PGID/session identity, arbitrary process-tree
+completeness or the production recursive filesystem inventory, nor exercises
+Colima, Lima, SSH, an Engine or any provider effect. It imports no deployment
+state, reservation, receipt, registry or lifecycle module and implements none
+of this ADR's state-generation, attempt, recovery, settlement or close grammar.
+The executable fixture evidence recorded for this slice is Darwin-only. A
+Linux path is implemented and admitted by the fixture but remains unexecuted,
+so it is not Linux platform evidence.
 
 ## Options considered
 
