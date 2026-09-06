@@ -254,7 +254,7 @@ names. It selects only an exact action, operation kind, operation-contract
 digest and provider-class tuple. Both contracts bind the production preparation
 requirements digest, and cleanup also binds the exact create-contract digest.
 The create entry now grants only state planning through
-`mutation-journal-v4-plan-only`; execution, provider recovery, lifecycle
+`mutation-journal-v5-plan-only`; execution, provider recovery, lifecycle
 exposure and finalization remain false. Cleanup remains deny-only. The registry
 imports no process, state, receipt or fake-provider implementation.
 
@@ -265,7 +265,7 @@ private preparation-observation digest, provider profile/resource and the
 all-effect-denied capability set. The production builder revalidates the full
 private observation before slot acquisition and again at the close publication
 boundary. No path, command, environment, `HOME`, binding key or credential is
-persisted in the plan. Mutation slot v4 and close v5 serialize this plan against
+persisted in the plan. Mutation slot v5 and close v6 serialize this plan against
 every fake or future effect writer through the same no-replace slot name; the
 close binds the embedded plan digest and changes no receipt or environment.
 
@@ -275,7 +275,7 @@ helpers derive a minimal `provider-create` candidate marked
 `requested-not-authorized` and a logical zero-entry pre-effect prefix, but a
 serialized value has no provenance. The state owner can persist the request
 only through the distinct `provider-intent` successor and
-`mutation-journal-v4-inert-intent-only`. Production and fixture kinds,
+`mutation-journal-v5-inert-intent-only`. Production and fixture kinds,
 contracts, schemas and evidence classes are separate, and neither tuple is a
 provider-adapter entry.
 
@@ -292,11 +292,29 @@ returns no intent or prefix.
 
 The publisher derives every admission internally. It requires the initial
 canonical all-absent value to equal fresh values immediately before the slot
-link, after slot acquisition and immediately before the close link. Its slot v4
-and owner close v5 change no receipt or environment and write no provider or
+link, after slot acquisition and immediately before the close link. Its slot v5
+and owner close v6 change no receipt or environment and write no provider or
 operation evidence. Collision or drift aborts before effect; abandoned intent
-recovery is explicit, all-zero and abort-only. Completed retries return
+recovery v4 is explicit, all-zero and abort-only. Completed retries return
 historical non-authorizing state without a fresh absence claim.
+
+The same state owner can now persist the successor
+`provider-start-decision` through
+`mutation-journal-v5-inert-start-decision-only`. It reconstructs the completed
+intent through the version-2 decision publication plan and repeats fresh
+`S1/O1/S2/O2` root admission at the initial,
+pre-slot-link, post-slot-acquisition and pre-close-link boundaries. Every
+admission and publication plan must equal the initial all-absent value. The
+slot v5 and owner close v6 again have zero receipt, environment and operation-
+evidence delta. Production and fixture kinds, contracts and evidence classes
+are distinct, and neither is registered for provider execution.
+
+A pre-CAS collision leaves no decision slot; a post-CAS collision aborts that
+generation. An abandoned decision can acquire only an all-zero recovery v4
+claim and an `aborted-before-effect` close. A completed decision is terminal;
+an exact retry returns its historical, non-authorizing completion without
+reading current roots. Race, crash, recovery and rehashed-tamper tests enforce
+the ordered plan/intent/decision grammar.
 
 These point-in-time root observations and the journal hard-link CAS do not
 atomically reserve the separate Colima/Lima namespaces. The bounded supervisor
@@ -304,11 +322,14 @@ label is not a PID, PGID, ownership or liveness fact, and a future effect owner
 must perform fresh admission. Serialized admission, projection, candidate or
 prefix values cannot be supplied as proof.
 
-No supported lifecycle target exposes a plan fixture or live-intent seam; there
+No supported lifecycle target exposes a plan, live-intent or start-decision
+fixture seam; there
 is no live provider execution, provider-effect recovery, cleanup or environment manifest. `registry/`,
 `runtime/`, `provider/` and `evidence/` remain empty. A completed plan centrally
-blocks every other mutation and finalization except its exact inert intent
-successor. An abandoned plan slot may only
+blocks every other mutation and finalization except its exact inert intent,
+which may then be followed by its exact decision. A completed decision permits
+no successor. An abandoned
+plan slot may only
 be explicitly recovered as `aborted-before-effect`; this journal repair grants
 no provider-recovery capability, after which the same exact plan may compete for
 the next slot. Receipt v4 has provider-class-bound controlled cleanup
@@ -321,7 +342,8 @@ close permits no claim and recovery close must name the latest claim. Causal
 process/socket/Engine/context ownership and exact dynamic-tree cleanup must be
 proved before exposing a supported lifecycle target or making any Docker or
 finalization claim. Superseded receipt and mutation schemas are discarded and
-regenerated.
+regenerated. Mutation slot v1-v4, close v1-v5 and recovery/root v1-v3 state is
+refused rather than migrated or relabelled.
 The manual browser ceremony below remains usable for fixture development but
 cannot be labelled a clean-Engine result.
 

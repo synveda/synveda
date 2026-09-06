@@ -129,9 +129,9 @@ actor path is removed. The controlled path is the lifecycle-unexposed
 background process canary, wrapped in state-born authority without making its
 inner process model the operation authority.
 
-Receipt schema v4, mutation slot v4, mutation recovery/root v3 and mutation
-close v5 are fresh-plan hard cuts; slot v1-v3, recovery/root v1-v2 and close
-v1-v4 are refused rather than translated. A canonical background-create
+Receipt schema v4, mutation slot v5, mutation recovery/root v4 and mutation
+close v6 are fresh-plan hard cuts; slot v1-v4, recovery/root v1-v3 and close
+v1-v5 are refused rather than translated. A canonical background-create
 operation plan binds the private
 provider base, evidence directory, root key and ownership nonce. The slot binds
 that plan, operation kind and v4 process contract before intent or root
@@ -164,7 +164,7 @@ the closed execution-failure branch.
 
 Recovery confirmation is read-only. Recovery acquisition first proves the
 recorded owner and newest recoverer absent, then may reconcile only exact
-mutation-stage aliases and append a v3 claim bound to the fresh observation.
+mutation-stage aliases and append a v4 claim bound to the fresh observation.
 It never launches, signals, deletes, repairs the inner chain or replays a
 durable controller/start decision. Controller launch without authenticated
 readiness and start without authenticated PID remain permanently uncertain;
@@ -185,7 +185,7 @@ prefix observation.
 
 The inner settlement grants no result-receipt or close authority. Only the
 distinct outer cleanup settlement may bind receipt v4's controlled pass and
-close v5. Action-dispatched recovery holds the newest observation claim and,
+close v6. Action-dispatched recovery holds the newest observation claim and,
 when retirement advances, publishes a reserved final settled-prefix claim
 before outer settlement. Owner close permits no claims; recovery close must
 name the latest claim. Pre-intent recovery is effect-free, settled history
@@ -217,16 +217,16 @@ lookup key is the exact action, operation kind, operation-contract digest and
 `colima-vz-docker-live` provider class. Both contracts bind the production
 requirements digest; cleanup additionally binds the create-contract digest.
 The create entry grants only state planning through
-`mutation-journal-v4-plan-only`; execution, provider recovery, lifecycle
+`mutation-journal-v5-plan-only`; execution, provider recovery, lifecycle
 exposure and finalization remain false, cleanup remains wholly deny-only, and
 the registry imports no process, state, receipt or fake-provider implementation.
 
 The state owner embeds the exact live plan in a dedicated `provider-plan`
-mutation slot v4. The plan binds the active run/candidate/head, registry tuple,
+mutation slot v5. The plan binds the active run/candidate/head, registry tuple,
 production requirements, private observation digest and provider
 profile/resource, but persists no paths, command, environment, `HOME`, binding
 key or credentials. The production observation is revalidated before slot
-acquisition and at the owner-close v5 publication boundary. This action shares
+acquisition and at the owner-close v6 publication boundary. This action shares
 the same slot CAS as fake-provider mutation, changes no receipt or environment,
 produces no provider evidence and blocks all later mutation/finalization except
 the exact inert intent successor while execution remains disabled. An
@@ -244,7 +244,7 @@ and `requested-not-authorized`; its logical pre-effect prefix has zero entries.
 
 The state owner alone may persist those values through the distinct
 `provider-intent` successor and
-`mutation-journal-v4-inert-intent-only`. Production and fixture operation
+`mutation-journal-v5-inert-intent-only`. Production and fixture operation
 kinds, contracts, schemas and evidence classes are distinct; neither tuple is
 registered with the provider adapter. Both contracts deny execution, receipt,
 provider-effect recovery, cleanup, lifecycle and finalization authority.
@@ -252,11 +252,11 @@ provider-effect recovery, cleanup, lifecycle and finalization authority.
 Publication derives all admission values internally. It requires the initial
 canonical all-absent admission to equal the observations immediately before
 the slot link, after slot acquisition and immediately before the close link.
-Slot v4 contains only content-free state, and its owner close v5 commits with
+Slot v5 contains only content-free state, and its owner close v6 commits with
 zero receipt, environment and operation-evidence delta. Collision or drift
 before slot publication leaves no permanent slot; after acquisition it
 owner-aborts that generation. An abandoned intent can only append an all-zero
-recovery v3 observation and close `aborted-before-effect`. Exact completed
+recovery v4 observation and close `aborted-before-effect`. Exact completed
 retries return historical non-authorizing state without claiming current root
 absence.
 
@@ -267,31 +267,31 @@ admission. The logical supervisor label is not a PID/PGID, ownership or
 liveness fact. Serialized values lose provenance and cannot be submitted as
 authority.
 
-The next boundary first exists as a closed, effect-free structural contract,
+The next boundary is a durable but effect-free `provider-start-decision`,
 separate for production and fixtures. It binds the exact completed intent slot,
-close, publication plan and completed-plan projection, and its only decision
-value is `requested-not-executed-not-authorized`. An all-absent observation
-derives that inert candidate; a foreign collision derives `null`. Process
-start/spawn/signal, adapter/effect execution, root mutation, provider/evidence/
-runtime/receipt/environment publication, recovery, cleanup, lifecycle and
-finalization remain false; cross-namespace atomic reservation is explicitly
-false. State decision publication is also false and state integration is
-`not-integrated` until the indivisible journal cut exists.
+close, publication plan and completed-plan projection, and its only decision is
+`requested-not-executed-not-authorized`. Its publication-plan schema is v2 and
+its state integration is `mutation-journal-v5-inert-start-decision-only`.
+Process start/spawn/signal, adapter/effect execution, root mutation,
+provider/evidence/runtime/receipt/environment publication, provider-effect
+recovery, cleanup, lifecycle and finalization remain false; cross-namespace
+atomic reservation is explicitly false.
 
 Structural values alone authenticate neither state nor observation provenance.
-The state owner now reconstructs the predecessor exclusively from the validated
-terminal intent slot and owner close and reruns fresh `S1/O1/S2/O2` admission.
-Both completed-intent snapshots, root observations and derived admissions must
-be byte-equal. Production and fixture exports hard-code their class and reject
-caller-supplied state, source, plan, projection, root result, historical
-admission, candidate or authority. A later root collision suppresses the
-candidate rather than replaying an earlier observation.
+The state owner reconstructs the predecessor exclusively from the validated
+terminal intent slot and owner close, then reruns fresh `S1/O1/S2/O2` admission
+at the initial, pre-slot-link, post-slot-acquisition and pre-close-link
+boundaries. Completed-intent snapshots, root observations, derived admissions
+and publication plans must remain byte-equal. Production and fixture publishers
+hard-code their class and reject caller-supplied state, source, plan, projection,
+root result, historical admission, candidate or authority.
 
-The observer is read-only, point-in-time evidence, not a journal integration or
-provider-adapter entry. Slot v4, close v5 and recovery/root v3 remain current.
-The next indivisible persistence change must hard-cut the journal schemas and
-update reader, writer, grammar, CAS publication and abort-only recovery
-together. No process authority follows from the observer.
+A pre-CAS collision leaves no slot; a post-CAS collision aborts the generation.
+Abandoned decisions admit only an all-zero recovery v4 claim and recovery close;
+generic effect recovery refuses them. The journal admits only aborted plan,
+intent and decision generations before each matching owner completion, and a
+completed decision is terminal. Exact retry returns historical non-authorizing
+state without re-reading roots. No process authority follows from persistence.
 
 ## Options considered
 
@@ -345,7 +345,7 @@ together. No process authority follows from the observer.
 - The controlled clean-Engine seams remain internal and fake-only. The
   deterministic background create path distinguishes controller, host agent,
   Engine, both sockets and Docker context; its outer settlement is integrated
-  with receipt v4 and close v5. Legacy retirement v1 remains fixture-only; the
+  with receipt v4 and close v6. Legacy retirement v1 remains fixture-only; the
   state owner composes retirement v2 through a dedicated cleanup slot, exact
   lower checkpoints, an outer settlement, action-dispatched recovery, receipt
   and close. Only the outer cleanup settlement is operation evidence. A live

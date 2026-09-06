@@ -186,13 +186,13 @@ classified and binds its operation kind, plan and intent contract; v1/v2/v3
 receipts fail closed. The
 fixture finalizer emits an explicitly non-live synthetic schema and rejects
 controlled-background-fake evidence. The append-only mutation journal uses
-slot v4, recovery/root v3 and close v5. Permanent numbered slots bind exact
+slot v5, recovery/root v4 and close v6. Permanent numbered slots bind exact
 source receipt/environment endpoints, prior close, cooperative owner challenge,
 operation kind, contract and plan. Permanent outer settlements bind the
 observed provider frontier. Closes bind exact result endpoints, owner/recovery
 authority and the outer settlement digest; per-slot recovery claims form a
-gap-free prefix. Final journal names are never deleted or reused. Slot v1-v3,
-recovery/root v1-v2 and close v1-v4 are fresh-plan hard cuts. This is a full
+gap-free prefix. Final journal names are never deleted or reused. Slot v1-v4,
+recovery/root v1-v3 and close v1-v5 are fresh-plan hard cuts. This is a full
 state hard cut: deterministic runs made with an older journal or live-plan
 contract must be reset and regenerated; there is no translator.
 Unique fsynced stages and atomic no-replace links prevent partial final files;
@@ -279,7 +279,7 @@ provider class as one content-addressed tuple; a hash match never substitutes
 for comparing all four fields. Create and cleanup use distinct contracts and
 evidence schema names, cleanup binds the create-contract digest, and neither can
 select the deterministic or controlled-background fake. The create tuple grants
-only state planning through `mutation-journal-v4-plan-only`; execution,
+only state planning through `mutation-journal-v5-plan-only`; execution,
 provider recovery, lifecycle and finalization remain false, and cleanup remains
 fully deny-only. The registry imports no process, state, receipt or fake-provider
 module, and hostile tuple values are not echoed in refusals.
@@ -322,12 +322,29 @@ The publisher obtains every admission internally. It first establishes a
 canonical all-absent baseline, then requires exact equality immediately before
 the slot link, after slot acquisition and immediately before the close link.
 Only an owner close with zero receipt, environment and operation-evidence delta
-commits the inert intent through `mutation-journal-v4-inert-intent-only`.
+commits the inert intent through `mutation-journal-v5-inert-intent-only`.
 Collision or drift before slot publication leaves no permanent slot; collision
 or drift after acquisition owner-aborts that generation before effect. An
 abandoned open intent requires an explicit recovery confirmation; the journal
-repair may append only an all-zero recovery v3 observation and an
+repair may append only an all-zero recovery v4 observation and an
 `aborted-before-effect` close. That is not provider-effect recovery.
+
+The successor `provider-start-decision` is likewise state-owned, durable and
+inert. Its publication plan v2 binds the completed intent and exact fresh
+all-absent admission. The owner reconstructs and compares that admission at the
+initial, pre-slot-link, post-slot-acquisition and pre-close-link boundaries,
+then may publish only a zero-delta slot v5/owner-close v6 pair. Production and
+fixture operation identities cannot cross. A collision before the slot CAS
+leaves no slot; one after acquisition aborts the generation. An abandoned
+decision accepts only an all-zero recovery v4 claim and abort close, while
+generic provider recovery refuses it. Completed decision retry is historical
+and does not claim current root absence.
+
+The loader admits only aborted plans before one completed owner plan, aborted
+same-class intents before one completed owner intent, then aborted same-class
+decisions before at most one terminal completed owner decision. This decision
+record authorizes no process, root, adapter, provider, evidence, receipt,
+environment, lifecycle or finalizer effect.
 
 The repeated root observations and journal hard-link CAS do not atomically
 reserve the separate Colima/Lima namespaces. They authorize no creation,

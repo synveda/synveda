@@ -242,7 +242,7 @@ binds the expected operation even before its lower plan exists.
 
 The inner retirement settlement grants no result-receipt or close authority.
 The mutation owner publishes a distinct outer cleanup settlement after exact
-completion; receipt v4 and close v5 accept only that digest. Cleanup recovery
+completion; receipt v4 and close v6 accept only that digest. Cleanup recovery
 is action-dispatched and binds the latest observation claim, including a
 reserved final settled-prefix refresh when retirement changes the observation.
 An untouched pre-intent recovery may close aborted without effect. Owner close
@@ -330,24 +330,24 @@ are preparation inputs, not live probes or VZ admission evidence.
 The closed provider-adapter registry reserves two fresh operation contracts:
 
 - `colima-vz-docker-live-create-v1`, contract digest
-  `56454e1623ab4585d1392015e2d185906b664a5fcd993f7272ea4ae019540d56`;
+  `13a87072a49103db0b3c4f36b64b8fbd0d74bd794c4a359fb77b41184ee289a7`;
 - `colima-vz-docker-live-cleanup-v1`, contract digest
-  `bbb1dd967566a2d1fbe8e16bf82c0cc921ed18f5a29db752b95f81cb9fb405fd`.
+  `8d3f43e02f2edc27f7a2b2f89ef5e3986a85326afabe92192e2430cd18558e1a`.
 
 Their evidence schema names are distinct from every deterministic and
 controlled-background fake schema. Cleanup binds the exact create-contract
 digest, and both contracts bind the production requirements digest. Registry
-digest `c1888f35c807031165c7a099611914f056ec82057103a8efe5e6cd0a92ee041b`
+digest `0fe6ec1645e18711a1d5d31bd1d21205ab7956a44ff04c38257e4f0b6efab642`
 selects only an exact action, operation kind, operation-contract digest and
 `colima-vz-docker-live` provider-class tuple.
 
 Exact selection grants no effect authority. The create entry grants only
-`state_planning_authorized` through `mutation-journal-v4-plan-only`; execution,
+`state_planning_authorized` through `mutation-journal-v5-plan-only`; execution,
 provider recovery, lifecycle exposure and finalization remain false. Cleanup
 retains all five capabilities false. The state owner records the create plan as
 an embedded, content-free
 `synveda.clean-engine.colima-live-provider-operation-plan.v1` inside a
-dedicated `provider-plan` mutation slot v4 and owner close v5. That plan binds
+dedicated `provider-plan` mutation slot v5 and owner close v6. That plan binds
 the active run/candidate/head, exact registry resolution, production
 requirements and private observation digest without persisting paths, commands,
 environment, `HOME`, binding material or credentials. It changes no receipt or
@@ -401,26 +401,26 @@ siblings remain preparation drift.
 The state owner can durably publish that request only through the distinct
 `provider-intent` successor. Production operation kind
 `colima-live-provider-intent-publication-v1` has contract digest
-`b380e6da1968da2e5bfa2c3552bf3f38d60197d7a8ab42f29c74f9bf29f8a6b8`;
+`8cad231ffcc14cd58a90df10faee867bcb8a752d46772e1ccedc666d744648ee`;
 the deterministic fixture uses a different operation kind, schema, evidence
 class and contract digest
-`44a39b9065f73db7f67425332f899e748ae1cb5c1037953c0e3593d0c4560c70`.
+`d8269df82f7d10c9bfe02f36a9e42d05138d4dc1798a08bcee1c023b2eedfcc2`.
 Neither contract is a provider-adapter entry. Both grant only inert state
-publication through `mutation-journal-v4-inert-intent-only`; effect execution,
+publication through `mutation-journal-v5-inert-intent-only`; effect execution,
 receipt publication, provider-effect recovery, cleanup, finalization and
 lifecycle exposure are false.
 
 The publisher establishes an initial canonical all-absent admission and
 requires an exactly equal reconstruction immediately before the slot link,
 after slot acquisition and immediately before the close link. The permanent
-slot v4 contains content-free generic journal metadata; its `operation_plan`
+slot v5 contains content-free generic journal metadata; its `operation_plan`
 embeds only the admission, completed provider plan and their digests. The owner
-close v5 commits with result sequence zero and zero
+close v6 commits with result sequence zero and zero
 environment and operation-evidence digests. It creates no receipt, provider,
 registry, runtime, environment or operation-settlement artifact. Collision or
 drift before slot publication leaves no permanent slot; after acquisition it
 closes that generation `aborted-before-effect`. An abandoned intent can only be
-repaired through an explicit all-zero recovery v3 claim and abort close.
+repaired through an explicit all-zero recovery v4 claim and abort close.
 
 The repeated root observations are point-in-time evidence, not an atomic
 reservation across the separate Colima/Lima and journal namespaces. They do
@@ -431,36 +431,50 @@ retries return the historical non-authorizing completion without a fresh root
 claim. Serialized admission values are never accepted as authority, and the
 supported lifecycle remains `plan|status|verify`.
 
-The successor process-start-decision structures are closed and effect-free but
-not yet a state integration. Production operation kind
+The successor process-start decision is also durable and inert. Production
+operation kind
 `colima-live-provider-start-decision-publication-v1` has contract digest
-`3f854fdfacd07607a5e48b54d4e94a7681c34bc7fb7c19d38440a59e79375c82`;
+`2d9033bd071e24125e61533ec75500f6bc6d909226a0209be95ecd80df407cb5`;
 the fixture-only domain has digest
-`59a735387a1da53ad7aaaae9877b2d087ce329833ce04bc0db437357f591bdef`.
-They bind the completed intent slot, close, publication-plan and completed-plan
+`83866dac58880b4d0bf69361cb23a9e34df2bd624687d0cf8e297867e3acef7c`.
+Their production and fixture publication-plan schemas are v2. They bind the
+completed intent slot, close, publication-plan and completed-plan
 projection digests. An all-absent root observation derives only
 `requested-not-executed-not-authorized`; a foreign collision derives no
 candidate. Process start/spawn/signal, adapter/effect execution, root mutation,
-provider/evidence/runtime/receipt/environment publication, recovery, cleanup,
-lifecycle and finalization are false. The structures do not prove provenance or
-reserve provider namespaces. State decision publication is false and state
-integration is `not-integrated`; the contracts are absent from the adapter
-registry and journal and leave slot v4, close v5 and recovery/root v3 intact.
+provider/evidence/runtime/receipt/environment publication, provider-effect
+recovery, cleanup, lifecycle and finalization are false. The structures do not
+prove provenance or reserve provider namespaces. State may publish only this
+decision record through `mutation-journal-v5-inert-start-decision-only`; the
+contracts remain absent from the provider-adapter registry.
 
-The state-owned observer reconstructs the completed intent internally and
-performs a fresh `S1/O1/S2/O2` source/root observation. It requires byte-equal
-completed-intent projections, intent completion/publication plans, operation
-plans, roots and derived admissions. Production and fixture exports hard-code
-their class and accept no caller-supplied state, source, plan, projection,
-candidate, historical admission, root result or authority. Repeated calls are
-fresh: a newly present foreign root yields a null candidate. The result is
-point-in-time evidence only and the observer writes no state or provider
-artifact.
+The state owner reconstructs the completed intent internally and performs a
+fresh `S1/O1/S2/O2` source/root observation at the initial, pre-slot-link,
+post-slot-acquisition and pre-close-link boundaries. Every completed-intent
+projection, intent completion/publication plan, embedded operation plan, root
+observation and derived admission must remain byte-identical to the initial
+all-absent value. Production and fixture publishers hard-code their class and
+accept no caller-supplied state, source, plan, projection, candidate, historical
+admission, root result or authority. A pre-CAS collision leaves no slot; a
+post-CAS collision owner-aborts the generation. One hard-link CAS writer wins.
 
-Journal reader, writer, successor grammar, hard-cut digests, CAS publication
-and abort-only recovery must subsequently change as one indivisible persistence
-slice. Until that cut, start-decision state publication remains false and no
-process-start authority exists.
+The journal grammar is strictly aborted plans followed by one completed owner
+plan, aborted same-class intents followed by one completed owner intent, then
+aborted same-class decisions followed by at most one completed owner decision.
+A completed decision is terminal. An abandoned decision admits only an exact
+all-zero recovery v4 claim and a recovery-authority `aborted-before-effect`
+close; generic provider execution recovery refuses it. Exact completed retries
+validate the observation and fixture-requirements identities, then return the
+historical non-authorizing completion without reading or claiming current root
+absence.
+
+Mutation slot v5, close v6, recovery v4 and recovery-root v4 are one full-state
+hard cut. State made with slot v1-v4, close v1-v5 or recovery/root v1-v3 is
+refused and must be reset and regenerated; there is no migration or relabelling.
+The decision writes no process, adapter, provider, evidence, registry, runtime,
+receipt, environment, settlement, lifecycle or finalizer artifact. The
+supported lifecycle remains `plan|status|verify`, and no process-start authority
+exists.
 
 An uncatchable pre-publication interruption can retain one or more strictly
 validated `.pending-*` or `.run-*` staging directories. They contain no

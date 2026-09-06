@@ -45,13 +45,15 @@ export const COLIMA_LIVE_PROVIDER_START_DECISION_OPERATION_CONTRACT_SCHEMA =
 export const COLIMA_LIVE_FIXTURE_PROVIDER_START_DECISION_OPERATION_CONTRACT_SCHEMA =
   "synveda.clean-engine.colima-live-fixture-provider-start-decision-operation-contract.v1";
 export const COLIMA_LIVE_PROVIDER_START_DECISION_PUBLICATION_PLAN_SCHEMA =
-  "synveda.clean-engine.colima-live-provider-start-decision-publication-plan.v1";
+  "synveda.clean-engine.colima-live-provider-start-decision-publication-plan.v2";
 export const COLIMA_LIVE_FIXTURE_PROVIDER_START_DECISION_PUBLICATION_PLAN_SCHEMA =
-  "synveda.clean-engine.colima-live-fixture-provider-start-decision-publication-plan.v1";
+  "synveda.clean-engine.colima-live-fixture-provider-start-decision-publication-plan.v2";
 export const COLIMA_LIVE_PROVIDER_START_DECISION_COMPLETION_SCHEMA =
   "synveda.clean-engine.colima-live-provider-start-decision-completion.v1";
 export const COLIMA_LIVE_FIXTURE_PROVIDER_START_DECISION_COMPLETION_SCHEMA =
   "synveda.clean-engine.colima-live-fixture-provider-start-decision-completion.v1";
+export const COLIMA_LIVE_PROVIDER_START_DECISION_STATE_INTEGRATION =
+  "mutation-journal-v5-inert-start-decision-only";
 
 const ZERO_SHA256 = "0".repeat(64);
 const PROJECTION_FIELDS = Object.freeze([
@@ -113,6 +115,7 @@ const PUBLICATION_PLAN_FIELDS = Object.freeze([
   "publication_claim",
   "root_observation_sha256",
   "schema",
+  "state_integration",
 ]);
 const COMPLETION_FIELDS = Object.freeze([
   "authority",
@@ -125,9 +128,9 @@ const COMPLETION_FIELDS = Object.freeze([
   "schema",
 ]);
 
-// These values close the future state-owner data shapes only. They carry no
-// state or observation provenance, grant no process authority and are not a
-// journal integration. The state owner must reconstruct their inputs directly.
+// These values close state-owner data shapes only. They carry no process-start
+// or effect authority. The state owner must reconstruct their inputs directly
+// and re-observe roots at every publication boundary.
 
 export class LiveProviderStartDecisionFailure extends Error {
   constructor(message, exitStatus = 78) {
@@ -205,7 +208,7 @@ function variant(fixtureOnly) {
         candidateSchema:
           COLIMA_LIVE_FIXTURE_PROCESS_START_DECISION_CANDIDATE_SCHEMA,
         completionAuthority:
-          "fixture-only-structural-process-start-decision-not-durable-not-effect-authority",
+          "fixture-only-durable-inert-process-start-decision-not-effect-authority",
         completionSchema:
           COLIMA_LIVE_FIXTURE_PROVIDER_START_DECISION_COMPLETION_SCHEMA,
         contractSchema:
@@ -232,7 +235,7 @@ function variant(fixtureOnly) {
         admissionSchema: COLIMA_LIVE_PROCESS_START_FRESH_ADMISSION_SCHEMA,
         candidateSchema: COLIMA_LIVE_PROCESS_START_DECISION_CANDIDATE_SCHEMA,
         completionAuthority:
-          "structural-process-start-decision-not-durable-not-effect-authority",
+          "durable-inert-process-start-decision-not-effect-authority",
         completionSchema: COLIMA_LIVE_PROVIDER_START_DECISION_COMPLETION_SCHEMA,
         contractSchema:
           COLIMA_LIVE_PROVIDER_START_DECISION_OPERATION_CONTRACT_SCHEMA,
@@ -284,8 +287,8 @@ function operationContract(fixtureOnly) {
     recovery_disposition: "aborted-before-effect-only",
     runtime_publication_authorized: false,
     schema: selected.contractSchema,
-    state_integration: "not-integrated",
-    state_process_start_decision_publication_authorized: false,
+    state_integration: COLIMA_LIVE_PROVIDER_START_DECISION_STATE_INTEGRATION,
+    state_process_start_decision_publication_authorized: true,
     target_provider_intent_completion_schema: selected.intentCompletionSchema,
     target_provider_intent_operation_contract_sha256:
       selected.intentContractSha256,
@@ -612,7 +615,9 @@ export function validateColimaLiveProviderStartDecisionPublicationPlan(
       valueDigest(value.admission.root_observation) ||
     value.decision_candidate_sha256 !== valueDigest(candidate) ||
     value.publication_claim !==
-      "future-state-owner-must-reconstruct-equal-fresh-admission-at-each-publication-boundary"
+      "state-owner-reconstructs-equal-fresh-admission-at-each-publication-boundary" ||
+    value.state_integration !==
+      COLIMA_LIVE_PROVIDER_START_DECISION_STATE_INTEGRATION
   ) {
     fail("live provider start decision publication plan was refused", 69);
   }
@@ -648,9 +653,11 @@ export function buildColimaLiveProviderStartDecisionPublicationPlan(value) {
       : COLIMA_LIVE_PROVIDER_START_DECISION_OPERATION_CONTRACT_SHA256,
     operation_kind: selected.operationKind,
     publication_claim:
-      "future-state-owner-must-reconstruct-equal-fresh-admission-at-each-publication-boundary",
+      "state-owner-reconstructs-equal-fresh-admission-at-each-publication-boundary",
     root_observation_sha256: valueDigest(value.admission.root_observation),
     schema: selected.publicationPlanSchema,
+    state_integration:
+      COLIMA_LIVE_PROVIDER_START_DECISION_STATE_INTEGRATION,
   };
   validateColimaLiveProviderStartDecisionPublicationPlan(
     publicationPlan,

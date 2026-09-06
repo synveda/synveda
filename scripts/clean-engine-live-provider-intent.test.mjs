@@ -420,11 +420,11 @@ test("intent publication has distinct inert production and fixture contracts", (
   assert.notEqual(variants[0].digest, variants[1].digest);
   assert.equal(
     variants[0].digest,
-    "b380e6da1968da2e5bfa2c3552bf3f38d60197d7a8ab42f29c74f9bf29f8a6b8",
+    "8cad231ffcc14cd58a90df10faee867bcb8a752d46772e1ccedc666d744648ee",
   );
   assert.equal(
     variants[1].digest,
-    "44a39b9065f73db7f67425332f899e748ae1cb5c1037953c0e3593d0c4560c70",
+    "d8269df82f7d10c9bfe02f36a9e42d05138d4dc1798a08bcee1c023b2eedfcc2",
   );
   for (const value of variants) {
     assert.deepEqual(value.contract, {
@@ -441,14 +441,14 @@ test("intent publication has distinct inert production and fixture contracts", (
       receipt_publication_authorized: false,
       recovery_disposition: "aborted-before-effect-only",
       schema: value.schema,
-      state_integration: "mutation-journal-v4-inert-intent-only",
+      state_integration: "mutation-journal-v5-inert-intent-only",
       state_intent_publication_authorized: true,
       target_create_operation_contract_sha256:
-        "56454e1623ab4585d1392015e2d185906b664a5fcd993f7272ea4ae019540d56",
+        "13a87072a49103db0b3c4f36b64b8fbd0d74bd794c4a359fb77b41184ee289a7",
       target_create_operation_kind: "colima-vz-docker-live-create-v1",
       target_provider_plan_schema:
         "synveda.clean-engine.colima-live-provider-operation-plan.v1",
-      target_provider_plan_state_integration: "mutation-journal-v4-plan-only",
+      target_provider_plan_state_integration: "mutation-journal-v5-plan-only",
     });
     assert.equal(value.digest, digest(value.contract));
     assertRecursivelyFrozen(value.contract);
@@ -649,7 +649,7 @@ test("the structural module directly owns no mutation, process, network or lifec
   );
   assert.match(
     state,
-    /initial\.liveProviderPlan !== undefined &&\s*action !== COLIMA_LIVE_PROVIDER_INTENT_ACTION[\s\S]*?fail\("live provider execution remains disabled after state planning", 73\);/u,
+    /initial\.liveProviderPlan !== undefined &&[\s\S]*?COLIMA_LIVE_PROVIDER_INTENT_ACTION,[\s\S]*?COLIMA_LIVE_PROVIDER_START_DECISION_ACTION,[\s\S]*?\.has\(action\)[\s\S]*?fail\("live provider execution remains disabled after state planning", 73\);/u,
   );
 
   const receipts = readFileSync(

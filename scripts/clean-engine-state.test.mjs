@@ -30,8 +30,10 @@ import {
   COLIMA_LIVE_PRE_EFFECT_ADMISSION_SCHEMA,
   executeProviderCreateForExecutor,
   finalizeEnvironmentForExecutor,
+  liveProviderFixtureStartDecisionRecoveryConfirmationForTest,
   liveProviderIntentRecoveryConfirmationForExecutor,
   liveProviderPlanRecoveryConfirmationForExecutor,
+  liveProviderStartDecisionRecoveryConfirmationForExecutor,
   observeColimaLivePreEffectAdmissionForExecutor,
   observeColimaLivePreEffectAdmissionForTest,
   observeColimaLiveProviderStartFreshAdmissionForExecutor,
@@ -40,9 +42,13 @@ import {
   providerRecoveryConfirmationForExecutor,
   publishColimaLiveProviderIntentForExecutor,
   publishColimaLiveProviderIntentForTest,
+  publishColimaLiveProviderStartDecisionForExecutor,
+  publishColimaLiveProviderStartDecisionForTest,
   recordLiveProviderOperationPlanForTest,
   recoverLiveProviderIntentForExecutor,
   recoverLiveProviderPlanForExecutor,
+  recoverLiveProviderStartDecisionForExecutor,
+  recoverLiveProviderStartDecisionForTest,
   recoverProviderCreateForExecutor,
 } from "../deploy/compose/scripts/clean-engine-state.mjs";
 import {
@@ -60,8 +66,14 @@ import {
 } from "../deploy/compose/scripts/clean-engine-live-provider-intent.mjs";
 import {
   COLIMA_LIVE_FIXTURE_COMPLETED_PROVIDER_INTENT_PROJECTION_SCHEMA,
+  COLIMA_LIVE_FIXTURE_PROVIDER_START_DECISION_COMPLETION_SCHEMA,
+  COLIMA_LIVE_FIXTURE_PROVIDER_START_DECISION_OPERATION_CONTRACT_SHA256,
+  COLIMA_LIVE_FIXTURE_PROVIDER_START_DECISION_OPERATION_KIND,
+  COLIMA_LIVE_FIXTURE_PROVIDER_START_DECISION_PUBLICATION_PLAN_SCHEMA,
   COLIMA_LIVE_FIXTURE_PROCESS_START_DECISION_CANDIDATE_SCHEMA,
   COLIMA_LIVE_FIXTURE_PROCESS_START_FRESH_ADMISSION_SCHEMA,
+  COLIMA_LIVE_PROVIDER_START_DECISION_OPERATION_CONTRACT_SHA256,
+  COLIMA_LIVE_PROVIDER_START_DECISION_OPERATION_KIND,
   liveProviderStartDecisionBytes,
 } from "../deploy/compose/scripts/clean-engine-live-provider-start-decision.mjs";
 import {
@@ -382,6 +394,41 @@ function assertNoStartDecisionArtifacts(active) {
   }
 }
 
+function assertInertStartDecisionJournal(active, terminalSequence) {
+  const expected = Array.from(
+    { length: terminalSequence + 1 },
+    (_, sequence) => String(sequence).padStart(2, "0"),
+  );
+  assert.deepEqual(
+    readdirSync(active)
+      .filter((name) => /^\.mutation-slot-/u.test(name))
+      .sort(),
+    expected.map((sequence) => `.mutation-slot-${sequence}`),
+  );
+  assert.deepEqual(
+    readdirSync(active)
+      .filter((name) => /^\.mutation-close-/u.test(name))
+      .sort(),
+    expected.map((sequence) => `.mutation-close-${sequence}`),
+  );
+  assert.equal(existsSync(join(active, "environment.json")), false);
+  assert.deepEqual(
+    readdirSync(active).filter((name) => /^\.mutation-operation-/u.test(name)),
+    [],
+  );
+  assert.deepEqual(
+    readdirSync(active).filter((name) => /^\.mutation-stage-/u.test(name)),
+    [],
+  );
+  assert.deepEqual(
+    readdirSync(active).filter((name) => /^[0-9]{2}-.*\.json$/u.test(name)),
+    ["00-plan.json"],
+  );
+  for (const directory of ["evidence", "provider", "registry", "runtime"]) {
+    assert.deepEqual(readdirSync(join(active, directory)), []);
+  }
+}
+
 function productionIntentPublicationPlanForFixture(
   state,
   preparation,
@@ -442,7 +489,7 @@ function stageProductionLiveProviderIntent(
     result_environment_sha256: slot.source_environment_sha256,
     result_head_sha256: slot.source_head_sha256,
     result_sequence: slot.source_sequence,
-    schema: "synveda.clean-engine.mutation-close.v5",
+    schema: "synveda.clean-engine.mutation-close.v6",
     slot_sequence: slot.journal_sequence,
     slot_sha256: sha256(slotBytes),
   };
@@ -499,7 +546,7 @@ function replaceCompletedFixtureIntentGeneration(state) {
     result_environment_sha256: secondSlot.source_environment_sha256,
     result_head_sha256: secondSlot.source_head_sha256,
     result_sequence: secondSlot.source_sequence,
-    schema: "synveda.clean-engine.mutation-close.v5",
+    schema: "synveda.clean-engine.mutation-close.v6",
     slot_sequence: secondSlot.journal_sequence,
     slot_sha256: sha256(secondSlotBytes),
   };
@@ -539,7 +586,7 @@ function mutationLease(state, {
     owner_pid: ownerPid,
     owner_probe: "opaque-process-instance-v1",
     previous_close_sha256: previousCloseSha256,
-    schema: "synveda.clean-engine.mutation-slot.v4",
+    schema: "synveda.clean-engine.mutation-slot.v5",
     source_environment_sha256: "0".repeat(64),
     source_head_sha256: sha256(canonicalBytes(planReceipt)),
     source_sequence: 0,
@@ -617,7 +664,7 @@ function stageAbandonedProviderMutation(state, options) {
       operation_contract_sha256: lease.operation_contract_sha256,
       operation_kind: lease.operation_kind,
       operation_plan_sha256: "0".repeat(64),
-      schema: "synveda.clean-engine.mutation-recovery-root.v3",
+      schema: "synveda.clean-engine.mutation-recovery-root.v4",
     })),
     fixture_id: candidate.run_id,
     lease_sha256: sha256(leaseBytes),
@@ -637,7 +684,7 @@ function stageAbandonedProviderMutation(state, options) {
     owner_pid: 2_147_483_646,
     owner_probe: "opaque-process-instance-v1",
     parent_sha256: "0".repeat(64),
-    schema: "synveda.clean-engine.mutation-recovery.v3",
+    schema: "synveda.clean-engine.mutation-recovery.v4",
     sequence: 0,
     slot_sequence: 0,
     source_head_sha256: sha256(canonicalBytes(intentReceipt)),
@@ -674,7 +721,7 @@ function recoveryClaimForSlot(state, {
       operation_plan_sha256: slot.operation_plan === null
         ? "0".repeat(64)
         : sha256(canonicalBytes(slot.operation_plan)),
-      schema: "synveda.clean-engine.mutation-recovery-root.v3",
+      schema: "synveda.clean-engine.mutation-recovery-root.v4",
     })),
     fixture_id: candidate.run_id,
     lease_sha256: sha256(slotBytes),
@@ -696,7 +743,7 @@ function recoveryClaimForSlot(state, {
     owner_pid: ownerPid,
     owner_probe: "opaque-process-instance-v1",
     parent_sha256: previous === undefined ? "0".repeat(64) : sha256(canonicalBytes(previous)),
-    schema: "synveda.clean-engine.mutation-recovery.v3",
+    schema: "synveda.clean-engine.mutation-recovery.v4",
     sequence,
     slot_sequence: slotSequence,
     source_head_sha256: sourceHeadSha256 ?? sha256(canonicalBytes(head)),
@@ -746,7 +793,7 @@ async function waitForPublishedMutationSlot(
         !readdirSync(active).some((name) => name.startsWith(".mutation-stage-"))
       ) {
         const value = parse(path);
-        assert.equal(value.schema, "synveda.clean-engine.mutation-slot.v4");
+        assert.equal(value.schema, "synveda.clean-engine.mutation-slot.v5");
         assert.equal(value.action, expectedAction);
         return;
       }
@@ -936,10 +983,10 @@ test("a live provider operation plan is journaled once and grants no effect auth
     const close = parse(closePath);
     assertPrivate(slotPath, 0o600);
     assertPrivate(closePath, 0o600);
-    assert.equal(slot.schema, "synveda.clean-engine.mutation-slot.v4");
+    assert.equal(slot.schema, "synveda.clean-engine.mutation-slot.v5");
     assert.equal(slot.action, "provider-plan");
     assert.deepEqual(slot.operation_plan, operationPlan);
-    assert.equal(close.schema, "synveda.clean-engine.mutation-close.v5");
+    assert.equal(close.schema, "synveda.clean-engine.mutation-close.v6");
     assert.equal(close.disposition, "completed");
     assert.equal(close.operation_plan_sha256, sha256(canonicalBytes(operationPlan)));
     assert.equal(close.operation_evidence_sha256, "0".repeat(64));
@@ -1288,7 +1335,7 @@ test("fixture intent publication commits one inert state-only successor", () => 
     const close = parse(closePath);
     assertPrivate(slotPath, 0o600);
     assertPrivate(closePath, 0o600);
-    assert.equal(slot.schema, "synveda.clean-engine.mutation-slot.v4");
+    assert.equal(slot.schema, "synveda.clean-engine.mutation-slot.v5");
     assert.equal(slot.action, "provider-intent");
     assert.equal(
       slot.operation_kind,
@@ -1303,7 +1350,7 @@ test("fixture intent publication commits one inert state-only successor", () => 
       slot.operation_plan.schema,
       "synveda.clean-engine.colima-live-fixture-provider-intent-publication-plan.v1",
     );
-    assert.equal(close.schema, "synveda.clean-engine.mutation-close.v5");
+    assert.equal(close.schema, "synveda.clean-engine.mutation-close.v6");
     assert.equal(close.disposition, "completed");
     assert.equal(close.authority, "owner");
     assert.equal(close.result_sequence, 0);
@@ -1892,7 +1939,7 @@ test("state-owned process-start admission has no persistence or effect surface",
     "function completedLiveProviderIntentSnapshot",
   );
   const end = stateSource.indexOf(
-    "function observeLiveProviderIntentAdmission",
+    "function buildLiveProviderStartDecisionPublicationPlan",
     start,
   );
   assert.ok(start >= 0 && end > start);
@@ -1928,6 +1975,1100 @@ test("state-owned process-start admission has no persistence or effect surface",
     "utf8",
   );
   assert.doesNotMatch(registry, /provider-start-decision-publication/u);
+});
+
+test("fixture start decision publication commits one inert terminal successor", () => {
+  const state = fixture();
+  let preparation;
+  try {
+    const prepared = prepareCompletedLiveProviderIntentFixture(state);
+    preparation = prepared.preparation;
+    const active = prepared.active;
+    const repoBefore = snapshotTree(state.repo);
+    const preparationBefore = snapshotTree(preparation.root);
+    const checkpoints = [];
+    const argumentsValue = fixtureStartAdmissionArguments(
+      state,
+      preparation,
+      (checkpoint) => {
+        checkpoints.push(checkpoint);
+      },
+    );
+    const completed = publishColimaLiveProviderStartDecisionForTest(
+      argumentsValue,
+    );
+    assert.equal(
+      completed.schema,
+      COLIMA_LIVE_FIXTURE_PROVIDER_START_DECISION_COMPLETION_SCHEMA,
+    );
+    assert.equal(
+      completed.authority,
+      "fixture-only-durable-inert-process-start-decision-not-effect-authority",
+    );
+    assertRecursivelyFrozen(completed);
+    assert.deepEqual(checkpoints, [
+      "initial:after-first-process-start-admission-observation",
+      "after-initial-admission",
+      "before-slot-link:after-first-process-start-admission-observation",
+      "after-slot-authority-reassertion",
+      "after-slot-link",
+      "after-slot-acquisition:after-first-process-start-admission-observation",
+      "after-slot-acquisition",
+      "before-close-link:after-first-process-start-admission-observation",
+      "after-close-link",
+    ]);
+
+    const slotPath = join(active, ".mutation-slot-02");
+    const closePath = join(active, ".mutation-close-02");
+    const slot = parse(slotPath);
+    const close = parse(closePath);
+    assertPrivate(slotPath, 0o600);
+    assertPrivate(closePath, 0o600);
+    assert.equal(slot.schema, "synveda.clean-engine.mutation-slot.v5");
+    assert.equal(slot.action, "provider-start-decision");
+    assert.equal(
+      slot.operation_kind,
+      COLIMA_LIVE_FIXTURE_PROVIDER_START_DECISION_OPERATION_KIND,
+    );
+    assert.equal(
+      slot.operation_contract_sha256,
+      COLIMA_LIVE_FIXTURE_PROVIDER_START_DECISION_OPERATION_CONTRACT_SHA256,
+    );
+    assert.equal(
+      slot.operation_plan.schema,
+      COLIMA_LIVE_FIXTURE_PROVIDER_START_DECISION_PUBLICATION_PLAN_SCHEMA,
+    );
+    assert.equal(
+      slot.operation_plan.state_integration,
+      "mutation-journal-v5-inert-start-decision-only",
+    );
+    assert.equal(slot.intent_receipt_sha256, "0".repeat(64));
+    assert.equal(close.schema, "synveda.clean-engine.mutation-close.v6");
+    assert.equal(close.disposition, "completed");
+    assert.equal(close.authority, "owner");
+    assert.equal(close.result_sequence, 0);
+    assert.equal(close.result_head_sha256, slot.source_head_sha256);
+    assert.equal(close.result_environment_sha256, "0".repeat(64));
+    assert.equal(close.operation_evidence_sha256, "0".repeat(64));
+    assert.equal(close.operation_plan_sha256, sha256(canonicalBytes(slot.operation_plan)));
+    assertInertStartDecisionJournal(active, 2);
+    assert.deepEqual(snapshotTree(state.repo), repoBefore);
+    assert.deepEqual(snapshotTree(preparation.root), preparationBefore);
+    assert.equal(run(state, "status").status, 0);
+    assert.equal(run(state, "verify").status, 0);
+
+    checkpoints.length = 0;
+    const repeated = publishColimaLiveProviderStartDecisionForTest(
+      argumentsValue,
+    );
+    assert.deepEqual(repeated, completed);
+    assert.deepEqual(checkpoints, []);
+    assertInertStartDecisionJournal(active, 2);
+
+    rmSync(preparation.root, { recursive: true, force: true });
+    preparation = undefined;
+    checkpoints.length = 0;
+    const repeatedWithoutObservableRoots =
+      publishColimaLiveProviderStartDecisionForTest(argumentsValue);
+    assert.deepEqual(repeatedWithoutObservableRoots, completed);
+    assert.deepEqual(checkpoints, []);
+    assertInertStartDecisionJournal(active, 2);
+
+    const beforeHistoricalRefusals = snapshotTree(state.state);
+    assert.throws(
+      () =>
+        publishColimaLiveProviderStartDecisionForTest({
+          ...argumentsValue,
+          observation: {
+            ...argumentsValue.observation,
+            historical_retry_probe: "changed",
+          },
+        }),
+      /completed live provider start decision retry differed/u,
+    );
+    assert.throws(
+      () =>
+        publishColimaLiveProviderStartDecisionForTest({
+          ...argumentsValue,
+          requirements: {
+            ...argumentsValue.requirements,
+            historical_retry_probe: "changed",
+          },
+        }),
+      /completed live provider start decision retry differed/u,
+    );
+    assert.deepEqual(snapshotTree(state.state), beforeHistoricalRefusals);
+    assert.deepEqual(checkpoints, []);
+
+    const beforeCrossClass = snapshotTree(state.state);
+    assert.throws(
+      () =>
+        publishColimaLiveProviderStartDecisionForExecutor({
+          observation: argumentsValue.observation,
+          observationInput: argumentsValue.observationInput,
+          repoRoot: state.repo,
+          stateBase: state.state,
+        }),
+      /evidence class already differs/u,
+    );
+    assert.deepEqual(snapshotTree(state.state), beforeCrossClass);
+  } finally {
+    if (preparation !== undefined) {
+      rmSync(preparation.root, { recursive: true, force: true });
+    }
+    rmSync(state.root, { recursive: true, force: true });
+  }
+});
+
+test("start decision refuses a pre-publication evidence-class crossing", () => {
+  const state = fixture();
+  let preparation;
+  try {
+    const prepared = prepareCompletedLiveProviderIntentFixture(state);
+    preparation = prepared.preparation;
+    const before = snapshotTree(state.state);
+    assert.throws(
+      () =>
+        publishColimaLiveProviderStartDecisionForExecutor({
+          observation: preparation.observation,
+          observationInput: preparation.input,
+          repoRoot: state.repo,
+          stateBase: state.state,
+        }),
+      /live provider intent evidence class already differs/u,
+    );
+    assert.deepEqual(snapshotTree(state.state), before);
+    assertNoStartDecisionArtifacts(prepared.active);
+    assert.equal(run(state, "verify").status, 0);
+  } finally {
+    if (preparation !== undefined) {
+      rmSync(preparation.root, { recursive: true, force: true });
+    }
+    rmSync(state.root, { recursive: true, force: true });
+  }
+});
+
+test("durable start decision state rejects rehashed authority and terminal drift", () => {
+  const cases = [
+    {
+      expectedStatus: 69,
+      name: "authorizing decision candidate",
+      mutate({ close, slot, writeBound }) {
+        slot.operation_plan.admission.process_start_decision_candidate
+          .process_start_authorized = true;
+        slot.operation_plan.decision_candidate_sha256 = sha256(
+          liveProviderStartDecisionBytes(
+            slot.operation_plan.admission.process_start_decision_candidate,
+          ),
+        );
+        slot.operation_plan.admission_sha256 = sha256(
+          liveProviderStartDecisionBytes(slot.operation_plan.admission),
+        );
+        writeBound(slot, close);
+      },
+    },
+    {
+      expectedStatus: 69,
+      name: "completed intent projection",
+      mutate({ close, slot, writeBound }) {
+        const projection =
+          slot.operation_plan.admission.completed_intent_projection;
+        projection.provider_intent_slot_sha256 = "f".repeat(64);
+        slot.operation_plan.admission.process_start_decision_candidate
+          .completed_intent_projection_sha256 = sha256(
+            liveProviderStartDecisionBytes(projection),
+          );
+        slot.operation_plan.completed_intent_projection_sha256 = sha256(
+          liveProviderStartDecisionBytes(projection),
+        );
+        slot.operation_plan.decision_candidate_sha256 = sha256(
+          liveProviderStartDecisionBytes(
+            slot.operation_plan.admission.process_start_decision_candidate,
+          ),
+        );
+        slot.operation_plan.admission_sha256 = sha256(
+          liveProviderStartDecisionBytes(slot.operation_plan.admission),
+        );
+        writeBound(slot, close);
+      },
+    },
+    {
+      expectedStatus: 78,
+      name: "nonzero operation evidence",
+      mutate({ close, closePath }) {
+        close.operation_evidence_sha256 = "f".repeat(64);
+        writeFileSync(closePath, canonicalBytes(close), { mode: 0o600 });
+      },
+    },
+    {
+      expectedStatus: 78,
+      name: "successor after completed decision",
+      mutate({ active, close, slot }) {
+        const successor = {
+          ...slot,
+          journal_sequence: 3,
+          nonce: "e".repeat(32),
+          previous_close_sha256: sha256(canonicalBytes(close)),
+        };
+        writeFileSync(
+          join(active, ".mutation-slot-03"),
+          canonicalBytes(successor),
+          { mode: 0o600 },
+        );
+      },
+    },
+  ];
+
+  for (const value of cases) {
+    const state = fixture();
+    let preparation;
+    try {
+      const prepared = prepareCompletedLiveProviderIntentFixture(state);
+      preparation = prepared.preparation;
+      publishColimaLiveProviderStartDecisionForTest(
+        fixtureStartAdmissionArguments(state, preparation),
+      );
+      const active = prepared.active;
+      const slotPath = join(active, ".mutation-slot-02");
+      const closePath = join(active, ".mutation-close-02");
+      const slotBytes = readFileSync(slotPath);
+      const closeBytes = readFileSync(closePath);
+      const slot = JSON.parse(slotBytes.toString("utf8"));
+      const close = JSON.parse(closeBytes.toString("utf8"));
+      const writeBound = (changedSlot, changedClose) => {
+        const changedSlotBytes = canonicalBytes(changedSlot);
+        writeFileSync(slotPath, changedSlotBytes, { mode: 0o600 });
+        writeFileSync(
+          closePath,
+          canonicalBytes({
+            ...changedClose,
+            authority_sha256: sha256(changedSlotBytes),
+            operation_plan_sha256: sha256(
+              canonicalBytes(changedSlot.operation_plan),
+            ),
+            slot_sha256: sha256(changedSlotBytes),
+          }),
+          { mode: 0o600 },
+        );
+      };
+      value.mutate({ active, close, closePath, slot, writeBound });
+      const refused = run(state, "status");
+      assert.equal(refused.status, value.expectedStatus, value.name);
+      if (existsSync(join(active, ".mutation-slot-03"))) {
+        unlinkSync(join(active, ".mutation-slot-03"));
+      }
+      writeFileSync(slotPath, slotBytes, { mode: 0o600 });
+      writeFileSync(closePath, closeBytes, { mode: 0o600 });
+      assert.equal(run(state, "verify").status, 0, value.name);
+    } finally {
+      if (preparation !== undefined) {
+        rmSync(preparation.root, { recursive: true, force: true });
+      }
+      rmSync(state.root, { recursive: true, force: true });
+    }
+  }
+});
+
+test("decision journal refuses a direct plan successor and class switching", () => {
+  {
+    const state = fixture();
+    let preparation;
+    try {
+      const prepared = prepareCompletedLiveProviderIntentFixture(state);
+      preparation = prepared.preparation;
+      publishColimaLiveProviderStartDecisionForTest(
+        fixtureStartAdmissionArguments(state, preparation),
+      );
+      const active = prepared.active;
+      const decisionSlot = parse(join(active, ".mutation-slot-02"));
+      const decisionClose = parse(join(active, ".mutation-close-02"));
+      unlinkSync(join(active, ".mutation-close-02"));
+      unlinkSync(join(active, ".mutation-slot-02"));
+      unlinkSync(join(active, ".mutation-close-01"));
+      unlinkSync(join(active, ".mutation-slot-01"));
+      const directSlot = {
+        ...decisionSlot,
+        journal_sequence: 1,
+        previous_close_sha256: sha256(
+          readFileSync(join(active, ".mutation-close-00")),
+        ),
+      };
+      const directSlotBytes = canonicalBytes(directSlot);
+      const directClose = {
+        ...decisionClose,
+        authority_sha256: sha256(directSlotBytes),
+        slot_sequence: 1,
+        slot_sha256: sha256(directSlotBytes),
+      };
+      writeFileSync(join(active, ".mutation-slot-01"), directSlotBytes, {
+        mode: 0o600,
+      });
+      writeFileSync(
+        join(active, ".mutation-close-01"),
+        canonicalBytes(directClose),
+        { mode: 0o600 },
+      );
+      const refused = run(state, "status");
+      assert.equal(refused.status, 78);
+      assert.match(
+        refused.stderr,
+        /live provider start decision lacked a completed intent/u,
+      );
+    } finally {
+      if (preparation !== undefined) {
+        rmSync(preparation.root, { recursive: true, force: true });
+      }
+      rmSync(state.root, { recursive: true, force: true });
+    }
+  }
+
+  {
+    const state = fixture();
+    let preparation;
+    try {
+      const prepared = prepareCompletedLiveProviderIntentFixture(state);
+      preparation = prepared.preparation;
+      publishColimaLiveProviderStartDecisionForTest(
+        fixtureStartAdmissionArguments(state, preparation),
+      );
+      const active = prepared.active;
+      const decisionSlot = parse(join(active, ".mutation-slot-02"));
+      const decisionClosePath = join(active, ".mutation-close-02");
+      const decisionClose = parse(decisionClosePath);
+      decisionClose.disposition = "aborted-before-effect";
+      const decisionCloseBytes = canonicalBytes(decisionClose);
+      writeFileSync(decisionClosePath, decisionCloseBytes, { mode: 0o600 });
+      const productionPlan = structuredClone(decisionSlot.operation_plan);
+      productionPlan.operation_contract_sha256 =
+        COLIMA_LIVE_PROVIDER_START_DECISION_OPERATION_CONTRACT_SHA256;
+      productionPlan.operation_kind =
+        COLIMA_LIVE_PROVIDER_START_DECISION_OPERATION_KIND;
+      const crossedSlot = {
+        ...decisionSlot,
+        journal_sequence: 3,
+        nonce: "e".repeat(32),
+        operation_contract_sha256:
+          COLIMA_LIVE_PROVIDER_START_DECISION_OPERATION_CONTRACT_SHA256,
+        operation_kind: COLIMA_LIVE_PROVIDER_START_DECISION_OPERATION_KIND,
+        operation_plan: productionPlan,
+        previous_close_sha256: sha256(decisionCloseBytes),
+      };
+      writeFileSync(
+        join(active, ".mutation-slot-03"),
+        canonicalBytes(crossedSlot),
+        { mode: 0o600 },
+      );
+      const refused = run(state, "status");
+      assert.equal(refused.status, 78);
+      assert.match(
+        refused.stderr,
+        /live provider start decision evidence classes were mixed/u,
+      );
+    } finally {
+      if (preparation !== undefined) {
+        rmSync(preparation.root, { recursive: true, force: true });
+      }
+      rmSync(state.root, { recursive: true, force: true });
+    }
+  }
+});
+
+test("start decision publication refuses a current root collision without a slot", () => {
+  const state = fixture();
+  let preparation;
+  try {
+    const prepared = prepareCompletedLiveProviderIntentFixture(state);
+    preparation = prepared.preparation;
+    const collisionPath = join(
+      preparation.input.environment.COLIMA_HOME,
+      preparation.input.provider_profile,
+    );
+    writePrivateColimaLiveFixtureFile(
+      collisionPath,
+      Buffer.from("foreign collision\n", "utf8"),
+      0o600,
+    );
+    const before = snapshotTree(state.state);
+    assert.throws(
+      () =>
+        publishColimaLiveProviderStartDecisionForTest(
+          fixtureStartAdmissionArguments(state, preparation),
+        ),
+      /start decision roots were not absent/u,
+    );
+    assert.deepEqual(snapshotTree(state.state), before);
+    assertNoStartDecisionArtifacts(prepared.active);
+    assert.equal(run(state, "verify").status, 0);
+  } finally {
+    if (preparation !== undefined) {
+      rmSync(preparation.root, { recursive: true, force: true });
+    }
+    rmSync(state.root, { recursive: true, force: true });
+  }
+});
+
+test("root drift after start decision acquisition aborts and a fresh retry wins", () => {
+  const state = fixture();
+  let preparation;
+  try {
+    const prepared = prepareCompletedLiveProviderIntentFixture(state);
+    preparation = prepared.preparation;
+    const collisionPath = join(
+      preparation.input.environment.COLIMA_HOME,
+      preparation.input.provider_profile,
+    );
+    let changed = false;
+    assert.throws(
+      () =>
+        publishColimaLiveProviderStartDecisionForTest(
+          fixtureStartAdmissionArguments(state, preparation, (checkpoint) => {
+            if (checkpoint !== "after-slot-acquisition" || changed) return;
+            changed = true;
+            writePrivateColimaLiveFixtureFile(
+              collisionPath,
+              Buffer.from("appeared after acquisition\n", "utf8"),
+              0o600,
+            );
+          }),
+        ),
+      /start decision roots were not absent|start fresh observation changed/u,
+    );
+    assert.equal(changed, true);
+    assert.equal(
+      parse(join(prepared.active, ".mutation-close-02")).disposition,
+      "aborted-before-effect",
+    );
+    assert.equal(existsSync(join(prepared.active, ".mutation-operation-02")), false);
+    rmSync(collisionPath);
+    const completed = publishColimaLiveProviderStartDecisionForTest(
+      fixtureStartAdmissionArguments(state, preparation),
+    );
+    assert.equal(
+      completed.schema,
+      COLIMA_LIVE_FIXTURE_PROVIDER_START_DECISION_COMPLETION_SCHEMA,
+    );
+    assert.equal(
+      parse(join(prepared.active, ".mutation-close-03")).disposition,
+      "completed",
+    );
+    assertInertStartDecisionJournal(prepared.active, 3);
+    assert.equal(run(state, "verify").status, 0);
+  } finally {
+    if (preparation !== undefined) {
+      rmSync(preparation.root, { recursive: true, force: true });
+    }
+    rmSync(state.root, { recursive: true, force: true });
+  }
+});
+
+test("an abandoned start decision is recovered only by an all-zero abort", async () => {
+  const state = fixture();
+  let preparation;
+  let child;
+  try {
+    const prepared = prepareCompletedLiveProviderIntentFixture(state);
+    preparation = prepared.preparation;
+    const active = prepared.active;
+    const releasePath = join(state.root, "release-start-decision-writer");
+    const helper = resolve(
+      "scripts/fixtures/race-clean-engine-live-provider-start-decision.mjs",
+    );
+    child = spawn(
+      process.execPath,
+      [
+        helper,
+        state.repo,
+        state.state,
+        JSON.stringify({
+          observation: preparation.observation,
+          observationInput: preparation.input,
+          requirements: preparation.requirements,
+        }),
+        "after-slot-acquisition",
+        releasePath,
+      ],
+      {
+        env: { PATH: process.env.PATH, LANG: "C", LC_ALL: "C" },
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    );
+    let childStderr = "";
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk) => {
+      childStderr += chunk;
+    });
+    child.stdout.resume();
+    const slotPath = join(active, ".mutation-slot-02");
+    const deadline = Date.now() + 8_000;
+    while (true) {
+      try {
+        const metadata = lstatSync(slotPath, { bigint: true });
+        if (
+          metadata.isFile() &&
+          metadata.nlink === 1n &&
+          parse(slotPath).action === "provider-start-decision" &&
+          !readdirSync(active).some((name) =>
+            name.startsWith(".mutation-stage-"),
+          )
+        ) {
+          break;
+        }
+      } catch (error) {
+        if (error?.code !== "ENOENT") throw error;
+      }
+      assert.ok(
+        Date.now() < deadline,
+        `timed out waiting for start decision slot: ${childStderr}`,
+      );
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
+    }
+    child.kill("SIGKILL");
+    const [status, signal] = await once(child, "close");
+    child = undefined;
+    assert.equal(status, null);
+    assert.equal(signal, "SIGKILL");
+
+    const beforeConfirmation = snapshotTree(state.state);
+    const confirmation =
+      liveProviderFixtureStartDecisionRecoveryConfirmationForTest({
+        repoRoot: state.repo,
+        stateBase: state.state,
+      });
+    assert.deepEqual(snapshotTree(state.state), beforeConfirmation);
+    assert.throws(
+      () =>
+        liveProviderStartDecisionRecoveryConfirmationForExecutor({
+          repoRoot: state.repo,
+          stateBase: state.state,
+        }),
+      /start decision recovery action was refused/u,
+    );
+    assert.deepEqual(snapshotTree(state.state), beforeConfirmation);
+    assert.throws(
+      () =>
+        recoverLiveProviderStartDecisionForTest({
+          confirmation: `${confirmation}-wrong`,
+          repoRoot: state.repo,
+          stateBase: state.state,
+        }),
+      (error) => {
+        assert.equal(error.exitStatus, 64);
+        return true;
+      },
+    );
+    assert.equal(existsSync(join(active, ".mutation-recovery-02-00")), false);
+    assert.throws(
+      () =>
+        recoverLiveProviderStartDecisionForExecutor({
+          confirmation,
+          repoRoot: state.repo,
+          stateBase: state.state,
+        }),
+      /effect-free decision slot/u,
+    );
+    assert.throws(
+      () =>
+        recoverProviderCreateForExecutor({
+          adapter: fakeProviderAdapter(),
+          confirmation,
+          repoRoot: state.repo,
+          stateBase: state.state,
+        }),
+      /matching dedicated executor/u,
+    );
+
+    const recovered = recoverLiveProviderStartDecisionForTest({
+      confirmation,
+      repoRoot: state.repo,
+      stateBase: state.state,
+    });
+    assert.equal(recovered.phase, "plan");
+    const recoveryPath = join(active, ".mutation-recovery-02-00");
+    const closePath = join(active, ".mutation-close-02");
+    const recovery = parse(recoveryPath);
+    const close = parse(closePath);
+    assert.equal(recovery.schema, "synveda.clean-engine.mutation-recovery.v4");
+    assert.equal(recovery.action, "provider-start-decision");
+    assert.deepEqual(
+      {
+        disposition: recovery.observed_effect_disposition,
+        effect: recovery.observed_effect_name,
+        evidenceHead: recovery.observed_evidence_head_sha256,
+        evidencePrefix: recovery.observed_evidence_prefix_sha256,
+        evidenceStage: recovery.observed_evidence_stage,
+        residual: recovery.observed_residual_sha256,
+        settlement: recovery.observed_settlement_sha256,
+      },
+      {
+        disposition: "not-reached",
+        effect: "none",
+        evidenceHead: "0".repeat(64),
+        evidencePrefix: "0".repeat(64),
+        evidenceStage: "none",
+        residual: "0".repeat(64),
+        settlement: "0".repeat(64),
+      },
+    );
+    assert.equal(close.disposition, "aborted-before-effect");
+    assert.equal(close.authority, "recovery");
+    assert.equal(close.authority_sha256, sha256(readFileSync(recoveryPath)));
+    assert.equal(close.operation_evidence_sha256, "0".repeat(64));
+
+    const recoveryBytes = readFileSync(recoveryPath);
+    const closeBytes = readFileSync(closePath);
+    for (const [field, replacement] of [
+      ["observed_effect_disposition", "pending"],
+      ["observed_effect_name", "provider-process-start"],
+      ["observed_evidence_head_sha256", "f".repeat(64)],
+      ["observed_evidence_prefix_sha256", "f".repeat(64)],
+      ["observed_evidence_stage", "process-started"],
+      ["observed_residual_sha256", "f".repeat(64)],
+      ["observed_settlement_sha256", "f".repeat(64)],
+    ]) {
+      const changedRecovery = { ...recovery, [field]: replacement };
+      const changedRecoveryBytes = canonicalBytes(changedRecovery);
+      writeFileSync(recoveryPath, changedRecoveryBytes, { mode: 0o600 });
+      writeFileSync(
+        closePath,
+        canonicalBytes({
+          ...close,
+          authority_sha256: sha256(changedRecoveryBytes),
+        }),
+        { mode: 0o600 },
+      );
+      const refused = run(state, "status");
+      assert.equal(refused.status, 78, field);
+      assert.equal(
+        refused.stderr,
+        "clean-engine: deterministic provider recovery observation was refused\n",
+        field,
+      );
+      writeFileSync(recoveryPath, recoveryBytes, { mode: 0o600 });
+      writeFileSync(closePath, closeBytes, { mode: 0o600 });
+    }
+
+    const completed = publishColimaLiveProviderStartDecisionForTest(
+      fixtureStartAdmissionArguments(state, preparation),
+    );
+    assert.equal(
+      completed.schema,
+      COLIMA_LIVE_FIXTURE_PROVIDER_START_DECISION_COMPLETION_SCHEMA,
+    );
+    assert.equal(
+      parse(join(active, ".mutation-close-03")).disposition,
+      "completed",
+    );
+    assertInertStartDecisionJournal(active, 3);
+    assert.equal(run(state, "verify").status, 0);
+  } finally {
+    if (child !== undefined) child.kill("SIGKILL");
+    if (preparation !== undefined) {
+      rmSync(preparation.root, { recursive: true, force: true });
+    }
+    rmSync(state.root, { recursive: true, force: true });
+  }
+});
+
+test("start decision publication refuses collisions at every journal boundary and retries", () => {
+  const cases = [
+    {
+      checkpoint: undefined,
+      name: "initial",
+      prepare(collisionPath) {
+        writePrivateColimaLiveFixtureFile(
+          collisionPath,
+          Buffer.from("initial decision collision\n", "utf8"),
+          0o600,
+        );
+      },
+      permanentSlot: false,
+    },
+    {
+      checkpoint:
+        "before-slot-link:after-first-process-start-admission-observation",
+      name: "slot-prelink",
+      prepare() {},
+      permanentSlot: false,
+    },
+    {
+      checkpoint:
+        "after-slot-acquisition:after-first-process-start-admission-observation",
+      name: "post-acquisition-observation",
+      prepare() {},
+      permanentSlot: true,
+    },
+    {
+      checkpoint: "after-slot-acquisition",
+      name: "before-close-observation",
+      prepare() {},
+      permanentSlot: true,
+    },
+    {
+      checkpoint:
+        "before-close-link:after-first-process-start-admission-observation",
+      name: "close-prelink",
+      prepare() {},
+      permanentSlot: true,
+    },
+  ];
+
+  for (const value of cases) {
+    const state = fixture();
+    let preparation;
+    try {
+      const prepared = prepareCompletedLiveProviderIntentFixture(state);
+      preparation = prepared.preparation;
+      const active = prepared.active;
+      const collisionPath = join(
+        preparation.input.environment.COLIMA_HOME,
+        preparation.input.provider_profile,
+      );
+      value.prepare(collisionPath);
+      let injected = false;
+      const beforeState = snapshotTree(state.state);
+      const beforeEntries = readdirSync(active).sort();
+      assert.throws(
+        () =>
+          publishColimaLiveProviderStartDecisionForTest(
+            fixtureStartAdmissionArguments(
+              state,
+              preparation,
+              (checkpoint) => {
+                if (checkpoint === value.checkpoint && !injected) {
+                  injected = true;
+                  writePrivateColimaLiveFixtureFile(
+                    collisionPath,
+                    Buffer.from(`${value.name} decision collision\n`, "utf8"),
+                    0o600,
+                  );
+                }
+              },
+            ),
+          ),
+        (error) => {
+          assert.equal(error.exitStatus, 73, value.name);
+          return true;
+        },
+      );
+      assert.equal(
+        readdirSync(active).some((name) => name.startsWith(".mutation-stage-")),
+        false,
+        value.name,
+      );
+      assert.equal(
+        existsSync(join(active, ".mutation-slot-02")),
+        value.permanentSlot,
+        value.name,
+      );
+      assert.equal(
+        existsSync(join(active, ".mutation-close-02")),
+        value.permanentSlot,
+        value.name,
+      );
+      if (value.permanentSlot) {
+        assert.equal(
+          parse(join(active, ".mutation-close-02")).disposition,
+          "aborted-before-effect",
+          value.name,
+        );
+        assertInertStartDecisionJournal(active, 2);
+      } else {
+        assert.deepEqual(readdirSync(active).sort(), beforeEntries, value.name);
+        if (value.name === "initial") {
+          assert.deepEqual(snapshotTree(state.state), beforeState, value.name);
+        }
+      }
+      assert.equal(existsSync(join(active, ".mutation-operation-02")), false);
+      if (existsSync(collisionPath)) unlinkSync(collisionPath);
+      const completed = publishColimaLiveProviderStartDecisionForTest(
+        fixtureStartAdmissionArguments(state, preparation),
+      );
+      assert.equal(
+        completed.schema,
+        COLIMA_LIVE_FIXTURE_PROVIDER_START_DECISION_COMPLETION_SCHEMA,
+        value.name,
+      );
+      const completedSequence = value.permanentSlot ? "03" : "02";
+      assert.equal(
+        parse(join(active, `.mutation-close-${completedSequence}`)).disposition,
+        "completed",
+        value.name,
+      );
+      assertInertStartDecisionJournal(
+        active,
+        value.permanentSlot ? 3 : 2,
+      );
+      assert.equal(run(state, "verify").status, 0, value.name);
+    } finally {
+      if (preparation !== undefined) {
+        rmSync(preparation.root, { recursive: true, force: true });
+      }
+      rmSync(state.root, { recursive: true, force: true });
+    }
+  }
+});
+
+test("two start decision writers leave one inert terminal CAS winner", async () => {
+  const state = fixture();
+  let preparation;
+  const children = [];
+  try {
+    const prepared = prepareCompletedLiveProviderIntentFixture(state);
+    preparation = prepared.preparation;
+    const active = prepared.active;
+    const helper = resolve(
+      "scripts/fixtures/race-clean-engine-live-provider-start-decision.mjs",
+    );
+    const releasePath = join(state.root, "release-start-decision-writers");
+    const serialized = JSON.stringify({
+      observation: preparation.observation,
+      observationInput: preparation.input,
+      requirements: preparation.requirements,
+    });
+    const launch = () => {
+      const child = spawn(
+        process.execPath,
+        [
+          helper,
+          state.repo,
+          state.state,
+          serialized,
+          "after-slot-authority-reassertion",
+          releasePath,
+        ],
+        {
+          env: { PATH: process.env.PATH, LANG: "C", LC_ALL: "C" },
+          stdio: ["ignore", "pipe", "pipe"],
+        },
+      );
+      const output = { child, stderr: "" };
+      child.stdout.resume();
+      child.stderr.setEncoding("utf8");
+      child.stderr.on("data", (chunk) => {
+        output.stderr += chunk;
+      });
+      children.push(output);
+      return output;
+    };
+    const first = launch();
+    const second = launch();
+    const deadline = Date.now() + 8_000;
+    while (
+      readdirSync(state.root).filter((name) =>
+        name.startsWith("release-start-decision-writers.ready-"),
+      ).length !== 2
+    ) {
+      assert.ok(
+        Date.now() < deadline,
+        `timed out waiting for decision stages: ${first.stderr}${second.stderr}`,
+      );
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
+    }
+    assert.equal(
+      readdirSync(active).filter((name) => name.startsWith(".mutation-stage-"))
+        .length,
+      2,
+    );
+    writeFileSync(releasePath, "release\n", { mode: 0o600 });
+    const results = await Promise.all(
+      children.map((output) =>
+        new Promise((resolvePromise) => {
+          output.child.on("close", (status, signal) =>
+            resolvePromise({ signal, status, stderr: output.stderr }),
+          );
+        }),
+      ),
+    );
+    children.length = 0;
+    assert.deepEqual(
+      results.map((value) => value.status).sort((left, right) => left - right),
+      [0, 73],
+      results.map((value) => value.stderr).join("\n"),
+    );
+    assert.equal(results.every((value) => value.signal === null), true);
+    assert.equal(
+      results.find((value) => value.status === 73)?.stderr,
+      "another clean-engine mutation is active\n",
+    );
+    assertInertStartDecisionJournal(active, 2);
+    assert.equal(
+      parse(join(active, ".mutation-close-02")).disposition,
+      "completed",
+    );
+    assert.equal(run(state, "verify").status, 0);
+  } finally {
+    for (const { child } of children) child.kill("SIGKILL");
+    if (preparation !== undefined) {
+      rmSync(preparation.root, { recursive: true, force: true });
+    }
+    rmSync(state.root, { recursive: true, force: true });
+  }
+});
+
+test("start decision crash boundaries reconcile without inventing effects", async () => {
+  const cases = [
+    {
+      checkpoint:
+        "before-slot-link:after-first-process-start-admission-observation",
+      disposition: "stage-only",
+      ready(active) {
+        return (
+          !existsSync(join(active, ".mutation-slot-02")) &&
+          readdirSync(active).filter((name) =>
+            name.startsWith(".mutation-stage-"),
+          ).length === 1
+        );
+      },
+    },
+    {
+      checkpoint: "after-slot-link",
+      disposition: "open",
+      ready(active) {
+        const slot = join(active, ".mutation-slot-02");
+        const stageName = readdirSync(active).find((name) =>
+          name.startsWith(".mutation-stage-"),
+        );
+        if (!existsSync(slot) || stageName === undefined) return false;
+        const stage = join(active, stageName);
+        return (
+          lstatSync(slot).nlink === 2 &&
+          lstatSync(stage).nlink === 2 &&
+          lstatSync(slot).ino === lstatSync(stage).ino
+        );
+      },
+    },
+    {
+      checkpoint:
+        "before-close-link:after-first-process-start-admission-observation",
+      disposition: "open",
+      ready(active) {
+        return (
+          existsSync(join(active, ".mutation-slot-02")) &&
+          !existsSync(join(active, ".mutation-close-02")) &&
+          readdirSync(active).some((name) => {
+            if (!name.startsWith(".mutation-stage-")) return false;
+            return lstatSync(join(active, name)).nlink === 1;
+          })
+        );
+      },
+    },
+    {
+      checkpoint: "after-close-link",
+      disposition: "completed",
+      ready(active) {
+        const close = join(active, ".mutation-close-02");
+        const stageName = readdirSync(active).find((name) =>
+          name.startsWith(".mutation-stage-"),
+        );
+        if (!existsSync(close) || stageName === undefined) return false;
+        const stage = join(active, stageName);
+        return (
+          lstatSync(close).nlink === 2 &&
+          lstatSync(stage).nlink === 2 &&
+          lstatSync(close).ino === lstatSync(stage).ino
+        );
+      },
+    },
+  ];
+
+  for (const terminationSignal of ["SIGTERM", "SIGKILL"]) {
+    for (const [index, value] of cases.entries()) {
+      const state = fixture();
+      let preparation;
+      let child;
+      try {
+        const prepared = prepareCompletedLiveProviderIntentFixture(state);
+        preparation = prepared.preparation;
+        const active = prepared.active;
+        const helper = resolve(
+          "scripts/fixtures/race-clean-engine-live-provider-start-decision.mjs",
+        );
+        const releasePath = join(
+          state.root,
+          `release-decision-${terminationSignal}-${index}`,
+        );
+        child = spawn(
+          process.execPath,
+          [
+            helper,
+            state.repo,
+            state.state,
+            JSON.stringify({
+              observation: preparation.observation,
+              observationInput: preparation.input,
+              requirements: preparation.requirements,
+            }),
+            value.checkpoint,
+            releasePath,
+          ],
+          {
+            env: { PATH: process.env.PATH, LANG: "C", LC_ALL: "C" },
+            stdio: ["ignore", "pipe", "pipe"],
+          },
+        );
+        let stderr = "";
+        child.stdout.resume();
+        child.stderr.setEncoding("utf8");
+        child.stderr.on("data", (chunk) => {
+          stderr += chunk;
+        });
+        const readyPath = `${releasePath}.ready-${child.pid}`;
+        const deadline = Date.now() + 8_000;
+        while (!existsSync(readyPath) || !value.ready(active)) {
+          assert.equal(child.exitCode, null, stderr);
+          assert.ok(
+            Date.now() < deadline,
+            `timed out at ${value.checkpoint}: ${stderr}`,
+          );
+          await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
+        }
+        child.kill(terminationSignal);
+        const [status, signal] = await once(child, "close");
+        child = undefined;
+        assert.equal(status, null, value.checkpoint);
+        assert.equal(signal, terminationSignal, value.checkpoint);
+
+        if (value.disposition === "stage-only") {
+          assert.equal(existsSync(join(active, ".mutation-slot-02")), false);
+        } else if (value.disposition === "open") {
+          const confirmation =
+            liveProviderFixtureStartDecisionRecoveryConfirmationForTest({
+              repoRoot: state.repo,
+              stateBase: state.state,
+            });
+          recoverLiveProviderStartDecisionForTest({
+            confirmation,
+            repoRoot: state.repo,
+            stateBase: state.state,
+          });
+          assert.equal(
+            parse(join(active, ".mutation-close-02")).disposition,
+            "aborted-before-effect",
+            value.checkpoint,
+          );
+        }
+        const completed = publishColimaLiveProviderStartDecisionForTest(
+          fixtureStartAdmissionArguments(state, preparation),
+        );
+        assert.equal(
+          completed.schema,
+          COLIMA_LIVE_FIXTURE_PROVIDER_START_DECISION_COMPLETION_SCHEMA,
+          value.checkpoint,
+        );
+        assertInertStartDecisionJournal(
+          active,
+          value.disposition === "open" ? 3 : 2,
+        );
+        assert.equal(run(state, "verify").status, 0, value.checkpoint);
+      } finally {
+        if (child !== undefined) child.kill("SIGKILL");
+        if (preparation !== undefined) {
+          rmSync(preparation.root, { recursive: true, force: true });
+        }
+        rmSync(state.root, { recursive: true, force: true });
+      }
+    }
+  }
 });
 
 test("intent publication reasserts its evidence class after a competing abort", () => {
@@ -2434,7 +3575,7 @@ test("an abandoned inert intent is recovered only by an all-zero abort", async (
     });
     assert.equal(recovered.phase, "plan");
     const recovery = parse(join(active, ".mutation-recovery-01-00"));
-    assert.equal(recovery.schema, "synveda.clean-engine.mutation-recovery.v3");
+    assert.equal(recovery.schema, "synveda.clean-engine.mutation-recovery.v4");
     assert.equal(recovery.action, "provider-intent");
     assert.deepEqual(
       {
@@ -3114,7 +4255,7 @@ test("live pre-effect admission has no supported mutation or lifecycle surface",
     "function admissionArguments",
   );
   const end = stateSource.indexOf(
-    "function observeLiveProviderIntentAdmission",
+    "function buildLiveProviderStartDecisionPublicationPlan",
     start,
   );
   assert.ok(start >= 0 && end > start);
@@ -3745,6 +4886,7 @@ test("superseded mutation schemas and non-provider operation evidence are refuse
       "synveda.clean-engine.mutation-slot.v1",
       "synveda.clean-engine.mutation-slot.v2",
       "synveda.clean-engine.mutation-slot.v3",
+      "synveda.clean-engine.mutation-slot.v4",
     ]) {
       slot.schema = schema;
       writeFileSync(slotPath, canonicalBytes(slot), { mode: 0o600 });
@@ -3761,6 +4903,7 @@ test("superseded mutation schemas and non-provider operation evidence are refuse
     "synveda.clean-engine.mutation-close.v2",
     "synveda.clean-engine.mutation-close.v3",
     "synveda.clean-engine.mutation-close.v4",
+    "synveda.clean-engine.mutation-close.v5",
   ]) {
     const legacyClose = fixture();
     try {
@@ -3783,7 +4926,7 @@ test("superseded mutation schemas and non-provider operation evidence are refuse
   }
 
   for (const legacyRoot of [false, true]) {
-    for (const version of [1, 2]) {
+    for (const version of [1, 2, 3]) {
       const legacyRecovery = fixture();
       try {
         assert.equal(run(legacyRecovery, "plan").status, 0);

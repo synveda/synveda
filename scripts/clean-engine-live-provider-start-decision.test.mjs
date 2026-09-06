@@ -78,13 +78,13 @@ test("production and fixture process-start contracts are exact, inert and unregi
       contract: COLIMA_LIVE_PROVIDER_START_DECISION_OPERATION_CONTRACT,
       digest: COLIMA_LIVE_PROVIDER_START_DECISION_OPERATION_CONTRACT_SHA256,
       expectedDigest:
-        "3f854fdfacd07607a5e48b54d4e94a7681c34bc7fb7c19d38440a59e79375c82",
+        "2d9033bd071e24125e61533ec75500f6bc6d909226a0209be95ecd80df407cb5",
       evidenceClass: "production-pinned",
       fixtureOnly: false,
       intentCompletionSchema:
         "synveda.clean-engine.colima-live-provider-intent-completion.v1",
       intentContractSha256:
-        "b380e6da1968da2e5bfa2c3552bf3f38d60197d7a8ab42f29c74f9bf29f8a6b8",
+        "8cad231ffcc14cd58a90df10faee867bcb8a752d46772e1ccedc666d744648ee",
       intentKind: "colima-live-provider-intent-publication-v1",
       kind: COLIMA_LIVE_PROVIDER_START_DECISION_OPERATION_KIND,
     },
@@ -94,18 +94,26 @@ test("production and fixture process-start contracts are exact, inert and unregi
       digest:
         COLIMA_LIVE_FIXTURE_PROVIDER_START_DECISION_OPERATION_CONTRACT_SHA256,
       expectedDigest:
-        "59a735387a1da53ad7aaaae9877b2d087ce329833ce04bc0db437357f591bdef",
+        "83866dac58880b4d0bf69361cb23a9e34df2bd624687d0cf8e297867e3acef7c",
       evidenceClass: "fixture-only",
       fixtureOnly: true,
       intentCompletionSchema:
         "synveda.clean-engine.colima-live-fixture-provider-intent-completion.v1",
       intentContractSha256:
-        "44a39b9065f73db7f67425332f899e748ae1cb5c1037953c0e3593d0c4560c70",
+        "d8269df82f7d10c9bfe02f36a9e42d05138d4dc1798a08bcee1c023b2eedfcc2",
       intentKind: "colima-live-fixture-provider-intent-publication-v1",
       kind: COLIMA_LIVE_FIXTURE_PROVIDER_START_DECISION_OPERATION_KIND,
     },
   ];
   assert.equal(COLIMA_LIVE_PROVIDER_START_DECISION_ACTION, "provider-start-decision");
+  assert.equal(
+    COLIMA_LIVE_PROVIDER_START_DECISION_PUBLICATION_PLAN_SCHEMA,
+    "synveda.clean-engine.colima-live-provider-start-decision-publication-plan.v2",
+  );
+  assert.equal(
+    COLIMA_LIVE_FIXTURE_PROVIDER_START_DECISION_PUBLICATION_PLAN_SCHEMA,
+    "synveda.clean-engine.colima-live-fixture-provider-start-decision-publication-plan.v2",
+  );
   assert.notEqual(variants[0].kind, variants[1].kind);
   assert.notEqual(variants[0].digest, variants[1].digest);
 
@@ -148,13 +156,16 @@ test("production and fixture process-start contracts are exact, inert and unregi
     );
     assert.equal(
       value.contract.target_provider_intent_state_integration,
-      "mutation-journal-v4-inert-intent-only",
+      "mutation-journal-v5-inert-intent-only",
     );
     assert.equal(
       value.contract.state_process_start_decision_publication_authorized,
-      false,
+      true,
     );
-    assert.equal(value.contract.state_integration, "not-integrated");
+    assert.equal(
+      value.contract.state_integration,
+      "mutation-journal-v5-inert-start-decision-only",
+    );
     assert.equal(value.contract.future_effect_fresh_admission_required, true);
     assert.equal(
       value.contract.decision,
@@ -541,6 +552,14 @@ test("publication plans and completion structures are exact and variant-bound", 
       publicationPlan.decision_candidate_sha256,
       digest(fixture.admission.process_start_decision_candidate),
     );
+    assert.equal(
+      publicationPlan.publication_claim,
+      "state-owner-reconstructs-equal-fresh-admission-at-each-publication-boundary",
+    );
+    assert.equal(
+      publicationPlan.state_integration,
+      "mutation-journal-v5-inert-start-decision-only",
+    );
     assertRecursivelyFrozen(publicationPlan);
 
     for (const field of Object.keys(publicationPlan)) {
@@ -593,8 +612,8 @@ test("publication plans and completion structures are exact and variant-bound", 
     assert.equal(
       completion.authority,
       fixtureOnly
-        ? "fixture-only-structural-process-start-decision-not-durable-not-effect-authority"
-        : "structural-process-start-decision-not-durable-not-effect-authority",
+        ? "fixture-only-durable-inert-process-start-decision-not-effect-authority"
+        : "durable-inert-process-start-decision-not-effect-authority",
     );
     assert.equal(completion.decision_slot_sha256, "9".repeat(64));
     assert.equal(completion.decision_close_sha256, "8".repeat(64));
@@ -812,11 +831,10 @@ test("the structural boundary directly owns no effect seam and leaves start guar
     state,
     /observeColimaLiveProviderStartFreshAdmissionForExecutor/u,
   );
-  assert.doesNotMatch(state, /COLIMA_LIVE_PROVIDER_START_DECISION_ACTION/u);
-  assert.doesNotMatch(
-    state,
-    /(?:publish|recover|execute)ColimaLiveProviderStartDecision/u,
-  );
+  assert.match(state, /COLIMA_LIVE_PROVIDER_START_DECISION_ACTION/u);
+  assert.match(state, /publishColimaLiveProviderStartDecisionForExecutor/u);
+  assert.match(state, /recoverLiveProviderStartDecisionForExecutor/u);
+  assert.doesNotMatch(state, /executeColimaLiveProviderStartDecision/u);
   assert.doesNotMatch(state, /case "provider-start-decision"/u);
   const lifecycle = readFileSync(
     new URL(

@@ -200,8 +200,8 @@ complete run publishes through a no-replace hard-linked active receipt; inert
 pre-publication crash residue grants no provider authority and remains pending
 final cleanup. Planning reaches no Docker/provider/host authority.
 The clean-Engine state is now receipt v4 with receipt v1/v2/v3 refused. Its
-append-only journal uses mutation slot v4, recovery/root v3 and close v5;
-slot v1-v3, recovery/root v1-v2 and close v1-v4 require reset/regeneration.
+append-only journal uses mutation slot v5, recovery/root v4 and close v6;
+slot v1-v4, recovery/root v1-v3 and close v1-v5 require reset/regeneration.
 Every slot binds source/result predecessors plus an operation kind, contract
 and canonical plan; every provider close binds the outer operation settlement.
 Permanent slots, settlements, closes and bounded recovery claims are never
@@ -266,18 +266,15 @@ evidence identities, binds both contracts to the production requirements
 digest and selects only an exact action/kind/contract/class tuple. Create grants
 state planning only; execution, provider recovery, lifecycle and finalization
 remain false, while cleanup is still deny-only. The content-free live operation
-plan is embedded in a dedicated mutation slot v4 and owner close v5, sharing the
+plan is embedded in a dedicated mutation slot v5 and owner close v6, sharing the
 same atomic slot with both fake executors. It binds active source, registry,
 production-requirements and private-observation digests, writes no receipt,
-provider or environment evidence, and blocks later mutation except the exact
-inert intent successor. Effect-free crash recovery can only abort the abandoned
-plan slot before retry. A state seam projects only the exact completed plan
-slot, close, embedded-plan and observation digests; structural helpers derive a
-`provider-create` candidate marked `requested-not-authorized` and a zero-entry
-logical prefix, but serialized values carry no provenance.
+provider or environment evidence, and admits only its exact inert intent,
+followed by that intent's exact decision. Effect-free crash recovery can only
+abort an abandoned generation before retry.
 
 The state owner now persists that request through the distinct
-`provider-intent` action and `mutation-journal-v4-inert-intent-only`. Production
+`provider-intent` action and `mutation-journal-v5-inert-intent-only`. Production
 and fixture operation kinds, contracts, schemas and evidence classes are
 separate, and neither tuple is registered for provider execution. The publisher
 reconstructs complete state/source/root admission initially, before slot link,
@@ -286,31 +283,32 @@ the all-absent baseline. The owner close changes no receipt or environment and
 writes no provider or operation evidence. Collisions and drift abort before
 effect. Abandoned intent recovery is explicit, all-zero and abort-only; exact
 completed retries return historical non-authorizing state without a fresh root
-claim. Shared journal CAS does not reserve the separate Colima/Lima namespaces,
-so a future effect owner must perform fresh admission. Closed production and
-fixture process-start-decision structures now bind the completed intent and can
-derive only `requested-not-executed-not-authorized` from an all-absent
-observation; a foreign collision derives no candidate. Both contracts deny
-every process, adapter, effect, root, artifact, evidence, runtime, receipt,
-environment, recovery, cleanup, lifecycle and finalization capability. They
-also deny state decision publication and set `state_integration` to
-`not-integrated`. The state owner now reconstructs the terminal
-completed-intent source internally and performs two independent state loads and
-two fresh root observations in strict `S1/O1/S2/O2` order. Production and
-fixture APIs hard-code their evidence class and reject caller-supplied state,
-source, plan, projection, admission, root, candidate or authority. Equal
-all-absent samples return only the point-in-time non-authorizing decision; a
-fresh collision returns no candidate. The observer writes no journal, receipt,
-environment, provider, runtime or process artifact, is absent from lifecycle
-and adapter registries, and leaves slot v4, close v5 and recovery/root v3
-unchanged.
+claim.
 
-No Docker, Colima or Lima process ran. Next introduce process-start-decision
-journal grammar, hard cuts, CAS publication and abort-only recovery as one
-indivisible slice. Live-provider identity, builder, proxy, browser and cleanup
-evidence follow; Linux/reference HTTPS must pass before legacy Rauthy/Temporal
-assets are deleted. Backup/restore, upgrade and Apalis remain open CPR-45
-slices.
+The state owner also persists the completed-intent successor through
+`provider-start-decision` and
+`mutation-journal-v5-inert-start-decision-only`. Its publication plan v2 can
+derive only `requested-not-executed-not-authorized`. The owner reconstructs the
+terminal intent and fresh `S1/O1/S2/O2` root admission at the initial,
+pre-slot-link, post-slot-acquisition and pre-close-link boundaries; every value
+must match. Production and fixture classes cannot cross. A pre-CAS collision
+leaves no slot; a post-CAS collision aborts that generation. Abandoned decision
+recovery is all-zero and abort-only, and a completed decision is terminal.
+Historical retry reads no current roots. Race, SIGTERM/SIGKILL, class-crossing,
+schema and rehashed-tamper tests cover the ordered grammar.
+
+Shared journal CAS does not reserve the separate Colima/Lima namespaces. The
+decision writes no process, adapter, provider, evidence, runtime, receipt or
+environment artifact and grants no effect, provider recovery, cleanup,
+lifecycle or finalization authority.
+
+No Docker, Colima or Lima process ran. Next specify the process-start/effect
+authority, causal process-group/host-agent/Engine/socket/context identities,
+uncertain-start classification and dynamic-tree retirement before registering
+or invoking a live provider. Live-provider identity, builder, proxy, browser
+and cleanup evidence follow; Linux/reference HTTPS must pass before legacy
+Rauthy/Temporal assets are deleted. Backup/restore, upgrade and Apalis remain
+open CPR-45 slices.
 
 ## Unscheduled — not listed in the Sequencing section
 

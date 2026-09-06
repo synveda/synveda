@@ -46,7 +46,7 @@ export const COLIMA_LIVE_PROVIDER_INTENT_COMPLETION_SCHEMA =
 export const COLIMA_LIVE_FIXTURE_PROVIDER_INTENT_COMPLETION_SCHEMA =
   "synveda.clean-engine.colima-live-fixture-provider-intent-completion.v1";
 export const COLIMA_LIVE_PROVIDER_INTENT_STATE_INTEGRATION =
-  "mutation-journal-v4-inert-intent-only";
+  "mutation-journal-v5-inert-intent-only";
 
 const PROJECTION_FIELDS = Object.freeze([
   "operation_plan_sha256",
