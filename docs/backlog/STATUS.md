@@ -361,6 +361,12 @@ state provenance or branch selection.
 Its exact upstream validation transitively loads the current plan/registry/
 live-observation modules, but projection construction performs no observation
 I/O or mutation.
+Before that validation or any freeze, a descriptor-only iterative preflight
+rejects proxies without invoking traps, cycles, depth above 16, more than 512
+value occurrences, more than 64 entries per container, and canonical UTF-8
+above 64 KiB including its newline. Repeated acyclic aliases remain valid and
+count per occurrence. Refusals are typed and content-free, while valid
+projection digests remain unchanged. These bounds add no authority.
 
 The proposed branch starts after the completed start decision, not as a
 successor to ADR-0103's terminal no-spawn completion. It uses a distinct

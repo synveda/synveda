@@ -88,6 +88,26 @@ function expectRefusal(operation, pattern = /effect-generation/u) {
   });
 }
 
+function expectStructuralRefusal(operation, pattern) {
+  assert.throws(operation, (error) => {
+    assert.ok(error instanceof LiveProviderEffectGenerationFailure);
+    assert.equal(error.exitStatus, 70);
+    assert.match(error.message, pattern);
+    return true;
+  });
+}
+
+function nestedArray(depth) {
+  let value = "leaf";
+  for (let index = 0; index < depth; index += 1) value = [value];
+  return value;
+}
+
+function binaryTree(depth) {
+  if (depth === 0) return "leaf";
+  return [binaryTree(depth - 1), binaryTree(depth - 1)];
+}
+
 test("structural validation performs no filesystem observation", () => {
   const observedMethods = [
     "closeSync",
@@ -428,6 +448,275 @@ test("hidden inherited symbol and accessor inputs are refused without evaluation
   assert.equal(inputGetterRead, false);
 });
 
+test("canonical graphs have exact cycle depth node entry and byte bounds", () => {
+  const cyclicRecord = {};
+  cyclicRecord.self = cyclicRecord;
+  const cyclicArray = [];
+  cyclicArray.push(cyclicArray);
+  const indirectLeft = {};
+  const indirectRight = { left: indirectLeft };
+  indirectLeft.right = indirectRight;
+  for (const value of [cyclicRecord, cyclicArray, indirectLeft]) {
+    expectStructuralRefusal(
+      () => liveProviderEffectGenerationBytes(value),
+      /canonical cycle was refused/u,
+    );
+  }
+
+  assert.doesNotThrow(() =>
+    liveProviderEffectGenerationBytes(nestedArray(16)),
+  );
+  expectStructuralRefusal(
+    () => liveProviderEffectGenerationBytes(nestedArray(17)),
+    /canonical depth was exceeded/u,
+  );
+
+  assert.doesNotThrow(() =>
+    liveProviderEffectGenerationBytes([binaryTree(8)]),
+  );
+  expectStructuralRefusal(
+    () => liveProviderEffectGenerationBytes([binaryTree(8), "leaf"]),
+    /canonical node budget was exceeded/u,
+  );
+
+  assert.doesNotThrow(() =>
+    liveProviderEffectGenerationBytes(
+      Array.from({ length: 64 }, (_, index) => index),
+    ),
+  );
+  const overwideArray = Array.from({ length: 65 }, (_, index) => index);
+  assert.doesNotThrow(() =>
+    liveProviderEffectGenerationBytes(
+      Object.fromEntries(
+        Array.from({ length: 64 }, (_, index) => [`field-${index}`, index]),
+      ),
+    ),
+  );
+  const overwideRecord = Object.fromEntries(
+    Array.from({ length: 65 }, (_, index) => [`field-${index}`, index]),
+  );
+  const originalDescriptor = Object.getOwnPropertyDescriptor;
+  let overwideDescriptorReads = 0;
+  try {
+    Object.getOwnPropertyDescriptor = (value, key) => {
+      if (value === overwideArray || value === overwideRecord) {
+        overwideDescriptorReads += 1;
+      }
+      return originalDescriptor(value, key);
+    };
+    for (const value of [overwideArray, overwideRecord]) {
+      expectStructuralRefusal(
+        () => liveProviderEffectGenerationBytes(value),
+        /container entry budget was exceeded/u,
+      );
+    }
+  } finally {
+    Object.getOwnPropertyDescriptor = originalDescriptor;
+  }
+  assert.equal(overwideDescriptorReads, 0);
+
+  assert.equal(
+    liveProviderEffectGenerationBytes("x".repeat(65_533)).length,
+    65_536,
+  );
+  expectStructuralRefusal(
+    () => liveProviderEffectGenerationBytes("x".repeat(65_534)),
+    /canonical byte budget was exceeded/u,
+  );
+  const escapedBoundary = `${"\0".repeat(10_922)}a`;
+  assert.equal(
+    liveProviderEffectGenerationBytes(escapedBoundary).length,
+    65_536,
+  );
+  expectStructuralRefusal(
+    () => liveProviderEffectGenerationBytes(`${escapedBoundary}a`),
+    /canonical byte budget was exceeded/u,
+  );
+  assert.equal(
+    liveProviderEffectGenerationBytes({ ["k".repeat(65_526)]: true }).length,
+    65_536,
+  );
+  expectStructuralRefusal(
+    () =>
+      liveProviderEffectGenerationBytes({ ["k".repeat(65_527)]: true }),
+    /canonical byte budget was exceeded/u,
+  );
+});
+
+test("canonical graphs preserve aliases and reject exotic arrays without access", () => {
+  const shared = { value: "same" };
+  assert.deepEqual(
+    liveProviderEffectGenerationBytes({ left: shared, right: shared }),
+    liveProviderEffectGenerationBytes({
+      left: { value: "same" },
+      right: { value: "same" },
+    }),
+  );
+  const sharedSubtree = binaryTree(7);
+  assert.doesNotThrow(() =>
+    liveProviderEffectGenerationBytes([sharedSubtree, sharedSubtree]),
+  );
+  expectStructuralRefusal(
+    () =>
+      liveProviderEffectGenerationBytes([
+        sharedSubtree,
+        sharedSubtree,
+        "first-extra-occurrence",
+        "second-extra-occurrence",
+      ]),
+    /canonical node budget was exceeded/u,
+  );
+
+  let getterRead = false;
+  const accessor = [];
+  Object.defineProperty(accessor, "0", {
+    enumerable: true,
+    get() {
+      getterRead = true;
+      return "unexpected";
+    },
+  });
+  accessor.length = 1;
+  const sparse = new Array(1);
+  const named = [];
+  named.unexpected = true;
+  const symbol = [];
+  symbol[Symbol("unexpected")] = true;
+  const customPrototype = [];
+  Object.setPrototypeOf(customPrototype, Object.create(Array.prototype));
+  for (const value of [accessor, sparse, named, symbol, customPrototype]) {
+    expectStructuralRefusal(
+      () => liveProviderEffectGenerationBytes(value),
+      /canonical value/u,
+    );
+  }
+  assert.equal(getterRead, false);
+});
+
+test("root nested and revoked proxies are refused before any trap or upstream call", () => {
+  let trapCalls = 0;
+  const handler = Object.fromEntries(
+    ["get", "getOwnPropertyDescriptor", "getPrototypeOf", "ownKeys"].map(
+      (name) => [
+        name,
+        () => {
+          trapCalls += 1;
+          throw new Error(`unexpected proxy trap ${name}`);
+        },
+      ],
+    ),
+  );
+  const transparent = new Proxy({}, {});
+  const throwing = new Proxy({}, handler);
+  const nested = { value: new Proxy([], handler) };
+  const revocable = Proxy.revocable({}, handler);
+  revocable.revoke();
+  for (const value of [transparent, throwing, nested, revocable.proxy]) {
+    expectStructuralRefusal(
+      () => liveProviderEffectGenerationBytes(value),
+      /contained a proxy/u,
+    );
+  }
+
+  const fixture = prepared();
+  const rootInput = new Proxy(fixture.input, handler);
+  const admission = new Proxy(fixture.admission, handler);
+  expectStructuralRefusal(
+    () =>
+      buildColimaLiveProviderEffectGenerationPrerequisiteProjectionStructure(
+        rootInput,
+      ),
+    /contained a proxy/u,
+  );
+  expectStructuralRefusal(
+    () =>
+      buildColimaLiveProviderEffectGenerationPrerequisiteProjectionStructure({
+        admission,
+        source: fixture.source,
+      }),
+    /contained a proxy/u,
+  );
+  expectStructuralRefusal(
+    () =>
+      validateColimaLiveProviderEffectGenerationPrerequisiteProjectionStructure(
+        fixture.projection,
+        { admission, source: fixture.source },
+      ),
+    /contained a proxy/u,
+  );
+  assert.equal(trapCalls, 0);
+});
+
+test("builder and validator preflight hostile graphs without freezing caller data", () => {
+  const upstream =
+    cleanEngineLiveProviderProcessStartFreshAdmissionFixture(false);
+  const input = {
+    admission: clone(upstream.admission),
+    source: clone(upstream.source),
+  };
+  const projection =
+    buildColimaLiveProviderEffectGenerationPrerequisiteProjectionStructure(
+      input,
+    );
+  for (const value of [input, input.admission, input.source]) {
+    assert.equal(Object.isFrozen(value), false);
+  }
+  assertRecursivelyFrozen(projection);
+
+  const cyclicBuildInput = clone(input);
+  cyclicBuildInput.source.unexpected = cyclicBuildInput;
+  expectStructuralRefusal(
+    () =>
+      buildColimaLiveProviderEffectGenerationPrerequisiteProjectionStructure(
+        cyclicBuildInput,
+      ),
+    /canonical cycle was refused/u,
+  );
+  assert.equal(Object.isFrozen(cyclicBuildInput), false);
+  assert.equal(Object.isFrozen(cyclicBuildInput.source), false);
+
+  const overwideBuildInput = clone(input);
+  overwideBuildInput.source.unexpected = Object.fromEntries(
+    Array.from({ length: 65 }, (_, index) => [`field-${index}`, index]),
+  );
+  expectStructuralRefusal(
+    () =>
+      buildColimaLiveProviderEffectGenerationPrerequisiteProjectionStructure(
+        overwideBuildInput,
+      ),
+    /container entry budget was exceeded/u,
+  );
+  assert.equal(Object.isFrozen(overwideBuildInput.source), false);
+  assert.equal(
+    Object.isFrozen(overwideBuildInput.source.unexpected),
+    false,
+  );
+
+  const cyclicExpected = clone(input);
+  cyclicExpected.source.unexpected = cyclicExpected;
+  expectStructuralRefusal(
+    () =>
+      validateColimaLiveProviderEffectGenerationPrerequisiteProjectionStructure(
+        projection,
+        cyclicExpected,
+      ),
+    /canonical cycle was refused/u,
+  );
+  assert.equal(Object.isFrozen(cyclicExpected), false);
+
+  const cyclicProjection = clone(projection);
+  cyclicProjection.future_execution_prerequisites.unexpected = cyclicProjection;
+  expectStructuralRefusal(
+    () =>
+      validateColimaLiveProviderEffectGenerationPrerequisiteProjectionStructure(
+        cyclicProjection,
+        input,
+      ),
+    /canonical cycle was refused/u,
+  );
+  assert.equal(Object.isFrozen(cyclicProjection), false);
+});
+
 test("serialized prerequisites contain no private or executable identity", () => {
   for (const fixtureOnly of [false, true]) {
     const raw = liveProviderEffectGenerationBytes(
@@ -512,11 +801,12 @@ test("the prerequisite module remains outside production authority", () => {
   );
   assert.deepEqual(imports, [
     "node:crypto",
+    "node:util/types",
     "./clean-engine-colima-live-schemas.mjs",
     "./clean-engine-live-provider-process-start.mjs",
   ]);
   assert.deepEqual(dependencyClosure(MODULE_PATH), {
-    builtins: ["node:crypto", "node:fs", "node:path"],
+    builtins: ["node:crypto", "node:fs", "node:path", "node:util/types"],
     files: [
       "deploy/compose/scripts/clean-engine-colima-live-contract.mjs",
       "deploy/compose/scripts/clean-engine-colima-live-schemas.mjs",

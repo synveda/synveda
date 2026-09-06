@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { createHash } from "node:crypto";
+import { isProxy } from "node:util/types";
 import { COLIMA_LIVE_PROVIDER_RESERVATION_NAME } from "./clean-engine-colima-live-schemas.mjs";
 import {
   COLIMA_LIVE_FIXTURE_PROCESS_START_EFFECT_FRESH_ADMISSION_SCHEMA,
@@ -16,6 +17,10 @@ export const COLIMA_LIVE_FIXTURE_PROVIDER_EFFECT_GENERATION_PREREQUISITE_PROJECT
   "synveda.clean-engine.colima-live-fixture-provider-effect-generation-prerequisite-projection.v1";
 
 const ZERO_SHA256 = "0".repeat(64);
+const MAX_CANONICAL_DEPTH = 16;
+const MAX_CANONICAL_NODES = 512;
+const MAX_CANONICAL_CONTAINER_ENTRIES = 64;
+const MAX_CANONICAL_BYTES = 64 * 1024;
 const PROJECTION_FIELDS = Object.freeze([
   "admission_schema",
   "admission_sha256",
@@ -107,11 +112,21 @@ function fail(message, exitStatus = 78) {
 }
 
 function closedDataEntries(value, label) {
+  if (isProxy(value)) {
+    fail(`${label} contained a proxy`, 70);
+  }
+  const array = Array.isArray(value);
   const keys = Reflect.ownKeys(value);
+  if (keys.length > MAX_CANONICAL_CONTAINER_ENTRIES + (array ? 1 : 0)) {
+    fail(
+      "live provider effect-generation canonical container entry budget was exceeded",
+      70,
+    );
+  }
   if (keys.some((key) => typeof key !== "string")) {
     fail(`${label} contained a symbol property`, 70);
   }
-  if (Array.isArray(value)) {
+  if (array) {
     const lengthDescriptor = Object.getOwnPropertyDescriptor(value, "length");
     if (
       Object.getPrototypeOf(value) !== Array.prototype ||
@@ -164,7 +179,94 @@ function closedDataEntries(value, label) {
   return Object.freeze({ entries, kind: "record" });
 }
 
-function canonical(value) {
+function debitCanonicalBytes(context, count) {
+  if (count > MAX_CANONICAL_BYTES - context.bytes) {
+    fail("live provider effect-generation canonical byte budget was exceeded", 70);
+  }
+  context.bytes += count;
+}
+
+function debitCanonicalString(context, value) {
+  const remaining = MAX_CANONICAL_BYTES - context.bytes;
+  if (
+    remaining < 2 ||
+    Buffer.byteLength(value, "utf8") > remaining - 2
+  ) {
+    fail("live provider effect-generation canonical byte budget was exceeded", 70);
+  }
+  debitCanonicalBytes(
+    context,
+    Buffer.byteLength(JSON.stringify(value), "utf8"),
+  );
+}
+
+function preflightClosedDataGraph(value) {
+  const active = new WeakSet();
+  const context = { bytes: 1, nodes: 0 };
+  const pending = [{ depth: 0, kind: "value", value }];
+  while (pending.length > 0) {
+    const frame = pending.pop();
+    if (frame.kind === "leave") {
+      active.delete(frame.value);
+      continue;
+    }
+    if (frame.depth > MAX_CANONICAL_DEPTH) {
+      fail("live provider effect-generation canonical depth was exceeded", 70);
+    }
+    context.nodes += 1;
+    if (context.nodes > MAX_CANONICAL_NODES) {
+      fail("live provider effect-generation canonical node budget was exceeded", 70);
+    }
+    const current = frame.value;
+    if (current === null) {
+      debitCanonicalBytes(context, 4);
+      continue;
+    }
+    if (typeof current === "string") {
+      debitCanonicalString(context, current);
+      continue;
+    }
+    if (typeof current === "boolean") {
+      debitCanonicalBytes(context, current ? 4 : 5);
+      continue;
+    }
+    if (typeof current === "number" && Number.isSafeInteger(current)) {
+      debitCanonicalBytes(context, Buffer.byteLength(String(current), "utf8"));
+      continue;
+    }
+    if (typeof current !== "object") {
+      fail("live provider effect-generation canonical value was refused", 70);
+    }
+    if (active.has(current)) {
+      fail("live provider effect-generation canonical cycle was refused", 70);
+    }
+    const inspected = closedDataEntries(
+      current,
+      "live provider effect-generation canonical value",
+    );
+    debitCanonicalBytes(
+      context,
+      2 + Math.max(0, inspected.entries.length - 1),
+    );
+    if (inspected.kind === "record") {
+      for (const [key] of inspected.entries) {
+        debitCanonicalString(context, key);
+        debitCanonicalBytes(context, 1);
+      }
+    }
+    active.add(current);
+    pending.push({ kind: "leave", value: current });
+    for (let index = inspected.entries.length - 1; index >= 0; index -= 1) {
+      pending.push({
+        depth: frame.depth + 1,
+        kind: "value",
+        value: inspected.entries[index][1],
+      });
+    }
+  }
+}
+
+function canonicalUnchecked(value) {
   if (value === null || typeof value === "string" || typeof value === "boolean") {
     return JSON.stringify(value);
   }
@@ -178,15 +280,23 @@ function canonical(value) {
     );
     if (inspected.kind === "array") {
       return `[${inspected.entries
-        .map(([, child]) => canonical(child))
+        .map(([, child]) => canonicalUnchecked(child))
         .join(",")}]`;
     }
     return `{${inspected.entries
       .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0))
-      .map(([key, child]) => `${JSON.stringify(key)}:${canonical(child)}`)
+      .map(
+        ([key, child]) =>
+          `${JSON.stringify(key)}:${canonicalUnchecked(child)}`,
+      )
       .join(",")}}`;
   }
   fail("live provider effect-generation canonical value was refused", 70);
+}
+
+function canonical(value) {
+  preflightClosedDataGraph(value);
+  return canonicalUnchecked(value);
 }
 
 export function liveProviderEffectGenerationBytes(value) {
@@ -201,17 +311,22 @@ function processValueDigest(value) {
   return liveProviderProcessStartDigest(liveProviderProcessStartBytes(value));
 }
 
-function deepFreeze(value) {
+function deepFreezeUnchecked(value) {
   if (value !== null && typeof value === "object") {
     for (const [, child] of closedDataEntries(
       value,
       "live provider effect-generation freeze value",
     ).entries) {
-      deepFreeze(child);
+      deepFreezeUnchecked(child);
     }
     if (!Object.isFrozen(value)) Object.freeze(value);
   }
   return value;
+}
+
+function deepFreeze(value) {
+  preflightClosedDataGraph(value);
+  return deepFreezeUnchecked(value);
 }
 
 function exactKeys(value, keys, label) {
@@ -397,6 +512,7 @@ export function validateColimaLiveProviderEffectGenerationPrerequisiteProjection
   value,
   expected,
 ) {
+  preflightClosedDataGraph(expected);
   exactKeys(
     expected,
     ["admission", "source"],

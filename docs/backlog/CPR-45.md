@@ -756,6 +756,12 @@ unchanged, and caller-held projection bytes carry no state provenance.
 Exact source validation transitively loads the current plan/registry/live-
 observation modules, but building the projection performs no observation I/O
 or mutation and creates no new registry authority.
+An iterative descriptor-only preflight completes before upstream validation or
+freezing. It rejects proxies without invoking traps, cycles, depth above 16,
+more than 512 value occurrences, more than 64 entries in one container, and
+canonical UTF-8 above 64 KiB including the newline. Shared acyclic aliases are
+permitted and counted per occurrence. All such failures are typed and
+content-free; existing valid projection digests remain unchanged.
 
 A standalone deterministic preparation fixture validates
 the closed four-role causal shape with four repository-owned Node processes:

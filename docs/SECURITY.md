@@ -394,6 +394,15 @@ modules. A filesystem tripwire proves projection construction invokes none of
 the observation module's file operations; no mutation or new registry
 authority is created.
 
+Before upstream validation or freezing, an iterative descriptor-only preflight
+rejects every root or nested proxy without invoking its traps, rejects ancestor
+cycles, and bounds the graph to depth 16 from root depth zero, 512 value
+occurrences, 64 entries per container and 64 KiB of canonical UTF-8 including
+the terminal newline. Repeated acyclic aliases remain valid but count once per
+occurrence. Every refusal is a content-free typed configuration failure; valid
+projection bytes and digests are unchanged. These input-safety bounds grant no
+state or effect authority.
+
 The successor no-spawn reservation is a cooperative same-UID exclusion
 protocol, not a hostile-principal boundary. Its v6 slot precedes filesystem
 mutation. A private fsynced mode-0600 witness binds the exact state run,
