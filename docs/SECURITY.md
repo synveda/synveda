@@ -392,7 +392,7 @@ PID or PGID. The admission is not persisted, has no operation kind or registry
 entry, and the only exposed authorization function unconditionally refuses it.
 
 The successor effect-generation prerequisite projection is deterministic,
-non-persisted, read-only and non-authorizing. It binds the exact admission to the proposed
+non-persisted, read-only and non-authorizing. It binds the exact admission to the accepted
 sibling branch, terminal no-spawn exclusion, fixed marker, distinct future
 witness and unmet atomic generation/attempt/complete-causal-graph/endpoint/
 filesystem-inventory/retirement requirements. Every authority flag is false. It exposes no action, operation
@@ -445,11 +445,14 @@ publication, lifecycle and finalization authorities remain false. Hostile
 same-UID code can ignore, unlink or replace the marker and is outside the
 isolation claim.
 
-Before any process effect can be enabled, a later indivisible generation must
-keep this reservation held across start authorization and execution, settle the
-complete recursive post-start tree, and establish causal identity and recovery
-for the outer process, detached Lima hostagent, usernet and SSH ControlMaster.
-Live macOS proxy observation and per-file OS executable identity remain open.
+Before any process effect can be enabled, ADR-0104's indivisible sibling
+generation must branch directly from the exact completed start decision; it
+must not extend this terminal no-spawn reservation or reuse its evidence. The
+sibling must hold its distinct effect witness across start authorization and
+execution, settle the complete recursive post-start tree, and establish causal
+identity and recovery for the outer process, detached Lima hostagent, usernet
+and SSH ControlMaster. Live macOS proxy observation and per-file OS executable
+identity remain open.
 
 No supported lifecycle target exposes these fixtures and no Docker/Colima
 effect is enabled. Controlled-background evidence remains ineligible for the

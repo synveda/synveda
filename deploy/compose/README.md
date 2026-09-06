@@ -341,7 +341,7 @@ point always refuses it. This seam adds no journal action, operation kind,
 registry row, receipt, persistence or provider/process mutation.
 
 A separate deterministic, non-persisted read-only prerequisite projection binds that exact deny-only admission
-to ADR-0104's proposed sibling-effect shape. It records the terminal no-spawn
+to ADR-0104's accepted sibling-effect shape. It records the terminal no-spawn
 exclusion, fixed marker, distinct future witness and unmet atomic
 generation/attempt/complete-causal-graph/endpoint/filesystem-inventory/
 retirement requirements. Every
@@ -382,11 +382,14 @@ topology and namespace drift block without adoption. This coordinates only
 cooperative same-UID owners; hostile same-UID code can ignore, unlink or replace
 the marker. It grants reservation recovery only, not provider-effect recovery.
 
-Before execution can be enabled, a later indivisible generation must keep this
-reservation held across process authorization and effect, complete recursive
-post-start settlement, and establish causal identity and recovery for the outer
-process, detached Lima hostagent, usernet and SSH ControlMaster. Live macOS
-proxy observation and per-file OS-executable identity also remain open.
+Before execution can be enabled, ADR-0104's indivisible sibling generation must
+branch directly from the exact completed start decision and must not extend
+this terminal no-spawn reservation or reuse its evidence. The sibling must hold
+its distinct effect witness across process authorization and effect, complete
+recursive post-start settlement, and establish causal identity and recovery
+for the outer process, detached Lima hostagent, usernet and SSH ControlMaster.
+Live macOS proxy observation and per-file OS-executable identity also remain
+open.
 
 No supported lifecycle target exposes a plan, live-intent, start-decision or
 reservation fixture seam; there is no live provider execution, provider-effect

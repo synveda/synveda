@@ -25,7 +25,7 @@ a user can install, sign in, use, back up, restore or upgrade the product.
 
 [ADR-0102](../adr/adr-0102-portable-reference-deployment.md) fixes the target
 architecture. [ADR-0103](../adr/adr-0103-cooperative-live-provider-reservation.md)
-locks the implemented terminal no-spawn reservation. Proposed
+locks the implemented terminal no-spawn reservation. Accepted
 [ADR-0104](../adr/adr-0104-indivisible-live-provider-effect-generation.md)
 defines the still-absent sibling effect generation. [The deployment
 contract](../DEPLOYMENT_CONTRACT.md) fixes the provider-neutral commands,
@@ -757,9 +757,9 @@ not a PID, PGID, ownership or liveness fact.
 ### Immediate next slice
 
 [ADR-0104](../adr/adr-0104-indivisible-live-provider-effect-generation.md) is
-proposed only; no process-effect state generation or authority exists in the
-current tree. A deterministic, non-persisted read-only prerequisite projection binds the exact
-deny-only post-decision admission to the proposed sibling-effect predecessor,
+accepted as the next atomic state design; no process-effect state generation or
+authority exists in the current tree. A deterministic, non-persisted read-only prerequisite projection binds the exact
+deny-only post-decision admission to the accepted sibling-effect predecessor,
 fixed marker and distinct-witness constraints. It records the future atomic
 receipt v6, slot v7, recovery/root v6 and close v8 cut plus the still-unmet
 attempt, complete bounded causal graph, endpoint, recursive filesystem

@@ -218,7 +218,7 @@ not invalidate the journal, while all Synveda-owned evidence remains exact.
 
 Recovery confirmation only reads. Acquisition first proves the slot owner and
 newest recovery owner absent, then may reconcile exact mutation-stage aliases,
-rechecks the predecessor bytes and appends an observation-bound v3 claim.
+rechecks the predecessor bytes and appends an observation-bound v5 claim.
 Recovery never launches, signals, deletes, repairs inner evidence or replays a
 durable controller/start decision. Launch without authenticated controller
 readiness and start without authenticated host-agent PID remain permanently
@@ -522,7 +522,7 @@ authorization function always refuses it, and no operation kind, contract
 digest, registry entry, receipt, state slot or persistent artifact is added.
 
 A deterministic, non-persisted read-only effect-generation prerequisite projection consumes only that exact
-deny-only admission. It binds the proposed sibling-effect predecessor, terminal
+deny-only admission. It binds the accepted sibling-effect predecessor, terminal
 no-spawn exclusion, fixed marker, distinct-witness rule and unmet one-shot
 attempt, complete bounded causal graph, authenticated endpoint, recursive
 filesystem inventory and exact-retirement requirements. It names receipt v6,
@@ -580,13 +580,16 @@ The contract grants only `reservation_recovery_authorized`; process start,
 spawn, signal/group ownership, adapter/provider-effect execution, general root
 mutation, provider/evidence/runtime/receipt/environment publication,
 `provider_recovery_authorized`, cleanup, lifecycle and finalization remain
-false. An eventual process-effect generation must keep this reservation held
-across indivisible start authority and effect, settle the complete recursive
-post-start filesystem inventory, and establish causal ownership and recovery
-for the outer process, detached Lima hostagent, usernet process and SSH
-ControlMaster before any runtime or lifecycle exposure. Those controls, live
-macOS proxy observation and per-file identity evidence for the two OS-build-
-bound executables are not implemented; live execution remains disabled.
+false. The accepted process-effect design is a sibling generation directly
+after the exact completed start decision; it must never extend this terminal
+no-spawn reservation or reuse its retired marker and immutable witness. Its
+distinct effect witness must remain held across indivisible start authority
+and effect, complete recursive post-start filesystem settlement, and causal
+ownership and recovery for the outer process, detached Lima hostagent, usernet
+process and SSH ControlMaster before any runtime or lifecycle exposure. Those
+controls, live macOS proxy observation and per-file identity evidence for the
+two OS-build-bound executables are not implemented; live execution remains
+disabled.
 
 An uncatchable pre-publication interruption can retain one or more strictly
 validated `.pending-*` or `.run-*` staging directories. They contain no

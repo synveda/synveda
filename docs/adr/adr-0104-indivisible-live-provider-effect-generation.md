@@ -1,6 +1,6 @@
 # ADR-0104: Indivisible live-provider effect generation
 
-- **Status**: Proposed
+- **Status**: Accepted
 - **Date**: 2026-09-06
 - **Feature(s)**: CPR-45
 - **Deciders**: Synveda maintainers
@@ -35,9 +35,8 @@ durable.
 
 ## Decision
 
-Implement the first process-capable boundary, if accepted, as one atomic state
-generation with a sibling effect branch after the exact completed start
-decision:
+Implement the first process-capable boundary as one atomic state generation
+with a sibling effect branch after the exact completed start decision:
 
 ```text
 plan-abort* -> plan-complete
@@ -224,7 +223,7 @@ with reset-and-regenerate guidance. There is no translator, dual reader,
 relabelled evidence or controlled-background compatibility path. This does not
 change Postgres schema epoch 3.
 
-This proposed decision grants the live effect no present process execution,
+This decision grants the live effect no present process execution,
 Docker/Colima/Lima effect, provider-effect recovery, registry capability,
 supported lifecycle, receipt/environment/runtime/provider-evidence
 publication, finalization or readiness claim. The live create registry tuple
@@ -235,7 +234,7 @@ controlled-background v5 fake, and it cannot establish live provider support
 without separate environment and platform evidence plus independent review.
 
 A deterministic, non-persisted read-only prerequisite projection now binds the exact deny-only
-post-decision admission to this proposed branch shape. It records the terminal
+post-decision admission to this accepted branch shape. It records the terminal
 no-spawn sibling, fixed marker, distinct-witness rule, future one-shot attempt,
 complete bounded causal graph, endpoint, recursive filesystem inventory and
 retirement requirements, and names the

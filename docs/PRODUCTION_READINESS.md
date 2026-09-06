@@ -1,6 +1,6 @@
 # Production readiness
 
-Assessment date: 2026-09-05. Scope: the current context-platform checkout as a
+Assessment date: 2026-09-06. Scope: the current context-platform checkout as a
 service for individuals and small teams. Passing repository gates establishes
 repeatable behaviour; it does not establish availability, recoverability,
 supportability or a releasable supply chain.
@@ -209,7 +209,7 @@ post-decision observation shape; it is not process, provider, recovery or
 readiness evidence.
 
 A deterministic, non-persisted read-only prerequisite projection now binds that exact admission to
-ADR-0104's proposed sibling-effect constraints and unmet atomic
+ADR-0104's accepted sibling-effect constraints and unmet atomic
 generation/attempt/complete-causal-graph/endpoint/filesystem-inventory/
 retirement requirements.
 Every authority remains false, there is no production importer, and no action,
@@ -241,11 +241,14 @@ tamper tests are deterministic no-spawn evidence only. The marker coordinates
 cooperative same-UID owners and is not protection against hostile same-UID
 code. `reservation_recovery_authorized` does not grant provider-effect recovery.
 
-Process execution remains blocked on an indivisible generation that keeps this
-reservation held across process authorization and effect, complete recursive
-post-start settlement, and causal identity/recovery for the outer process,
-detached Lima hostagent, usernet and SSH ControlMaster. Live macOS proxy
-observation and individual OS-executable identity evidence also remain open.
+Process execution remains blocked on ADR-0104's indivisible sibling generation,
+which branches directly from the exact completed start decision and must not
+extend this terminal no-spawn reservation or reuse its evidence. The sibling
+must hold its distinct effect witness across process authorization and effect,
+complete recursive post-start settlement, and causal identity/recovery for the
+outer process, detached Lima hostagent, usernet and SSH ControlMaster. Live
+macOS proxy observation and individual OS-executable identity evidence also
+remain open.
 
 Live Linux/provider CI and a current Docker Desktop/provider run remain absent.
 Consequently this evidence improves the boundary without changing readiness.

@@ -1,9 +1,26 @@
 # ADR-0102: Portable reference deployment contract
 
-- **Status**: Accepted
+- **Status**: Accepted; amended by ADR-0104
 - **Date**: 2026-08-27
 - **Feature(s)**: CPR-45
 - **Deciders**: Synveda maintainers
+
+## Amendment (2026-09-06): process effects are a sibling generation
+
+ADR-0104 supersedes this ADR's later statements that an effect generation
+would keep ADR-0103's reservation held. ADR-0103's no-spawn reservation is a
+terminal sibling whose retired marker and immutable witness prove that no
+process belonged to that generation. A process-capable generation instead
+branches directly from the exact completed start decision, publishes a
+distinct effect witness at the same fixed marker basename and holds only that
+new marker/witness inode across its start-attempt and settlement protocol.
+Neither sibling may extend, translate, relabel or reuse the other.
+
+The current generic mutation-recovery claim is v5; the earlier v4 reference
+below records an older intermediate state generation. ADR-0104 is accepted as
+the design for the next atomic hard cut, but its state generation is not yet
+implemented. This amendment grants no process, provider-effect recovery,
+registry, lifecycle, finalization or readiness authority.
 
 ## Context
 
@@ -162,9 +179,11 @@ remains exact. Source closure is required at intent, pass and close. A stale
 staged intent is retired before effect; drift after complete identity enters
 the closed execution-failure branch.
 
-Recovery confirmation is read-only. Recovery acquisition first proves the
-recorded owner and newest recoverer absent, then may reconcile only exact
-mutation-stage aliases and append a v4 claim bound to the fresh observation.
+This original decision recorded generic recovery v4; the amendment above names
+the current v5 generation. Recovery confirmation is read-only. Recovery
+acquisition first proves the recorded owner and newest recoverer absent, then
+may reconcile only exact mutation-stage aliases and append a v4 claim bound to
+the fresh observation.
 It never launches, signals, deletes, repairs the inner chain or replays a
 durable controller/start decision. Controller launch without authenticated
 readiness and start without authenticated PID remain permanently uncertain;
@@ -313,8 +332,8 @@ false; stable collision derives `null`. The result is not persisted and
 introduces no journal action, operation kind, contract digest, registry entry or receipt. Its
 authorization function always refuses.
 
-ADR-0103 adds the only permitted persisted successor: one cooperative no-spawn
-reservation. Its v6 slot precedes filesystem mutation; a private fsynced witness
+ADR-0103 adds the only currently implemented persisted successor: one
+cooperative terminal no-spawn reservation. Its v6 slot precedes filesystem mutation; a private fsynced witness
 binds the exact state run, provider root and six namespace identities on one
 device. One fixed provider-root hard-link CAS selects the owner. While the exact
 two-link marker/witness inode remains held, bracketed fresh observation must
@@ -327,11 +346,13 @@ receipt/environment/provider/runtime/evidence, cleanup, lifecycle and
 finalization authorities remain false. The marker coordinates cooperating
 same-UID owners and is not a hostile-principal boundary.
 
-Actual process invocation therefore requires a later indivisible effect cut
-that keeps this reservation held across start authority and effect, adds
-complete recursive settlement, and establishes causal ownership/recovery for
-the outer process, detached Lima hostagent, usernet and SSH ControlMaster. Live
-macOS proxy observation and per-file OS executable identity are also open.
+This original decision anticipated an indivisible effect cut that would keep
+the no-spawn reservation held across start authority and effect. That
+continuation model is superseded by the amendment above: ADR-0104 instead owns
+a sibling generation with a distinct effect witness. Its complete recursive
+settlement and causal ownership/recovery for the outer process, detached Lima
+hostagent, usernet and SSH ControlMaster remain open, as do live macOS proxy
+observation and per-file OS executable identity.
 
 ## Options considered
 
@@ -395,12 +416,15 @@ macOS proxy observation and per-file OS executable identity are also open.
   grants plan-state publication only, while all effect capabilities and all
   cleanup capabilities remain false. The state owner can journal the inert
   intent and decision through distinct non-provider contracts, then the
-  ADR-0103 no-spawn reservation without gaining execution capability. A later
-  live state adapter must consume only those exact tuples and keep that
-  reservation held while it closes causal process/socket/Engine/context ownership without
-  weakening the immutable journal. A supported runner, dynamic-tree cleanup and
-  source/image environment manifest remain required before this can support a
-  Docker or Colima acceptance or finalization claim.
+  ADR-0103 no-spawn reservation without gaining execution capability. This
+  original consequence expected a later live state adapter to keep that
+  reservation held. The amendment above supersedes that expectation: the
+  adapter must branch from the exact completed decision into ADR-0104's
+  distinct-witness sibling generation while closing causal process/socket/
+  Engine/context ownership without weakening the immutable journal. A
+  supported runner, dynamic-tree cleanup and source/image environment manifest
+  remain required before this can support a Docker or Colima acceptance or
+  finalization claim.
 - Reversal trigger: if measured operation failure semantics cannot be made
   correct behind the provider-neutral outbox, remove Apalis and retain the
   Postgres worker path. If single-host Compose cannot reproduce the contract on
