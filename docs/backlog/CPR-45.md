@@ -24,8 +24,12 @@ acceptance. Static deployment convergence is valuable but does not prove that
 a user can install, sign in, use, back up, restore or upgrade the product.
 
 [ADR-0102](../adr/adr-0102-portable-reference-deployment.md) fixes the target
-architecture. [The deployment contract](../DEPLOYMENT_CONTRACT.md) fixes its
-provider-neutral commands, configuration and external dependency seams.
+architecture. [ADR-0103](../adr/adr-0103-cooperative-live-provider-reservation.md)
+locks the implemented terminal no-spawn reservation. Proposed
+[ADR-0104](../adr/adr-0104-indivisible-live-provider-effect-generation.md)
+defines the still-absent sibling effect generation. [The deployment
+contract](../DEPLOYMENT_CONTRACT.md) fixes the provider-neutral commands,
+configuration and external dependency seams.
 
 ## Scope
 
@@ -737,17 +741,27 @@ not a PID, PGID, ownership or liveness fact.
 
 ### Immediate next slice
 
-Integrate this reservation into one indivisible process-effect generation that
-keeps the exact marker held across durable start authority and effect. Add the
-complete recursive post-start inventory, causal identity/recovery for the outer
-process, detached Lima hostagent, usernet and SSH ControlMaster, authenticated
-Engine/socket/context evidence, uncertain-start recovery, receipts/settlement
-and dynamic-tree retirement before registering or invoking a live provider.
-Keep execution unsupported and unregistered until that entire cut passes. Do
-not branch through, relabel or mutate the deterministic controlled-background
-class.
-Finalization remains blocked until a separately reviewed live environment-
-manifest schema exists.
+[ADR-0104](../adr/adr-0104-indivisible-live-provider-effect-generation.md) is
+proposed only; no process-effect implementation or authority exists in the
+current tree. Implement its sibling effect branch directly after the exact
+completed start decision, never after ADR-0103's terminal no-spawn completion.
+Use a distinct effect witness published at the fixed provider-root marker
+basename; never reuse the generic mutation-slot inode, ADR-0103's retired marker
+inode or its immutable no-spawn witness. The mutation slot remains journal
+authority and the effect witness is only one-to-one-bound physical exclusion
+evidence.
+
+Keep the marker held across the durable single-use start-attempt fence, sole
+invocation, four-role causal identity, authenticated endpoint evidence,
+complete bounded recursive inventory, exact owned retirement, cleanup
+settlement and its bound terminal receipt. After a possible start, recovery
+never replays invocation or downgrades the generation to not-started. Land the
+receipt, slot, recovery, close, envelope and dependent-digest hard cut
+atomically. Keep the provider unregistered and lifecycle-unexposed until create,
+uncertain-start recovery and complete cleanup all pass. Do not branch through,
+relabel or import the class-closed controlled-background v5 fake. Finalization
+remains blocked until a separately reviewed live environment-manifest schema
+exists.
 
 The first real invocation must use the closed helper `PATH`, explicit provider
 roots, `--mount none`, the receipt-owned disk copy and receipt-private `HOME`.

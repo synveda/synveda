@@ -347,13 +347,20 @@ This remains a cooperative same-UID protocol and no hostile-principal boundary.
 It grants reservation recovery only; process, adapter, root, provider-effect
 recovery, receipt/environment/provider/runtime/evidence publication, cleanup,
 lifecycle and finalization remain false. No supported command exposes the seam,
-and no Docker, Colima or Lima process ran. A later indivisible process-effect
-cut must keep the reservation held across start authority/effect, add complete
-recursive post-start settlement, causal ownership/recovery for the outer
-process, detached Lima hostagent, usernet and SSH ControlMaster, live macOS
-proxy and OS-executable identities, authenticated Engine/socket/context
-evidence, uncertain-start recovery, receipts and dynamic-tree retirement before
-registering or invoking a live provider.
+and no Docker, Colima or Lima process ran. ADR-0104 is proposed as the next
+CPR-45 boundary; it is not implemented. It selects a sibling effect branch
+after the completed start decision, not a successor to ADR-0103's terminal
+no-spawn completion. The proposed branch uses a distinct effect-witness inode
+at the same fixed provider-root CAS and leaves ADR-0103's one-link
+`not-started` witness and retired-marker semantics unchanged. It requires a
+durable single-use start-attempt fence, causal identity for the outer Colima
+process, detached Lima hostagent, usernet and SSH ControlMaster, authenticated
+Engine/socket/context evidence, a complete bounded recursive post-start
+inventory, no-replay recovery and exact leaf-first retirement. The live create
+tuple remains planning-only, cleanup deny-only, the supported lifecycle remains
+`plan|status|verify`, and no process, provider, receipt, environment, runtime,
+finalization or readiness authority follows until the complete atomic hard cut
+is implemented and independently reviewed.
 The controlled-background contract is separately class-closed at v5: it names
 only repository-owned Node controller/host-agent fixture ancestry and exports
 no live preparation, host-validation or start-authority API. It cannot satisfy
