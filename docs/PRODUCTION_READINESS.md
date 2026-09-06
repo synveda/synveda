@@ -135,6 +135,11 @@ there is no Docker/Colima mutation or live environment manifest, and the
 controlled evidence is ineligible for finalization. Supported live cleanup and
 finalization therefore remain refused.
 
+The controlled-background contract v5 binds only its repository-owned Node
+fixture ancestry and has no live-named preparation or authorization API. Its
+two-role controller/host-agent evidence cannot be substituted for the separate
+four-role live process-effect prerequisite.
+
 The next provider-input boundary is deterministic but remains deliberately
 non-executing. A separate live-preparation requirements record pins exact
 official Colima 0.10.3, Lima 2.2.0 and Colima-core 0.10.4 disk artifacts. Its

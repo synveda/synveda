@@ -447,22 +447,18 @@ live/unidentifiable observation remains blocking. At most eight claims and 64
 slots keep inspection bounded.
 
 The same inner protocol remains directly exercisable only as a deterministic
-process canary for the background-provider model. Its closed live-preparation
-contract pins Colima 0.10.3 source revision
-`00f6c297e92a82c04a4ab507db0a61435650d7e8` and Lima 2.2.0 source revision
-`de0816ea4bdc5267b428ab21025889b8dd785526`; records the exact proposed
-`--foreground`, Docker, VZ, resource, `--mount none`, forwarding and
-digest-bound disk-image arguments; and remains live-start-disabled while the
-Docker/helper/disk closure is unresolved. The fake canary pre-creates short
-private Colima, Lima, cache, Docker and temporary roots, uses a closed helper
-path, and inherits ambient `HOME` unchanged because Lima resolves it even when
-`LIMA_HOME` is explicit. It persists the closed environment-name set, not the
-`HOME` environment value. The toolchain evidence necessarily records absolute
-runtime and fixture-source paths, which may reside beneath that home directory.
+process canary for the background-provider model. Its v5 contract records only
+repository-owned Node controller/host-agent ancestry, short private Colima,
+Lima, cache, Docker and temporary fixture roots, a closed helper path and the
+closed environment-name set. The fixture inherits ambient `HOME` unchanged and
+does not persist that environment value. Its toolchain evidence necessarily
+records absolute runtime and fixture-source paths, which may reside beneath the
+home directory. This contract defines no live-provider preparation, host
+eligibility or start authority.
 
-A separate, non-executing live-provider preparation contract now closes the
-next input boundary without changing that immutable fake contract. Requirements
-schema `synveda.clean-engine.colima-live-requirements.v4` pins the official
+A separate, non-executing live-provider preparation contract is authoritative
+for the next input boundary. Requirements schema
+`synveda.clean-engine.colima-live-requirements.v4` pins the official
 Colima 0.10.3 Darwin/arm64 release, Lima 2.2.0 Darwin/arm64 archive and extracted
 wrapper/`limactl` bytes, release guest agent at
 `share/lima/lima-guestagent.Linux-aarch64.gz`, release default template at
@@ -593,6 +589,11 @@ operation-evidence APIs remain fixture-only and
 `mutation-journal-v2` creation chain. Its immutable plan, per-step progress and
 inner settlement remain a separate head from creation evidence and grant no
 result-receipt or close authority.
+
+The controlled-background contract v5 binds only repository-owned Node
+controller/host-agent fixture ancestry. Its module exports no live-named
+preparation contract, host validator or start authorizer, so this two-role fake
+cannot be selected as the later four-role live process-effect implementation.
 
 The mutation-state owner now composes that seam through a dedicated controlled-
 background cleanup operation plan, slot and intent. They bind the completed

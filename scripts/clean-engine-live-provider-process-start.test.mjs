@@ -518,8 +518,10 @@ test("the post-decision boundary owns no process, mutation or lifecycle seam", (
     ),
     "utf8",
   );
-  assert.match(
+  assert.doesNotMatch(processContract, /\bCOLIMA_LIVE_[A-Z0-9_]+\b/u);
+  assert.doesNotMatch(
     processContract,
-    /function authorizeColimaLiveStart\([\s\S]*?fail\("Colima live start remains blocked by the unresolved toolchain closure", 69\);/u,
+    /\b(?:authorize|validate)ColimaLive[A-Za-z0-9_]*\b/u,
   );
+  assert.doesNotMatch(processContract, /synveda\.clean-engine\.colima-live-/u);
 });

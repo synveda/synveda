@@ -63,128 +63,41 @@ const CONTROLLED_BACKGROUND_ARTIFACTS = Object.freeze([
   "provider-retirement-settlement.json",
 ]);
 
-export const COLIMA_LIVE_PREPARATION_CONTRACT = Object.freeze({
-  application: Object.freeze({
-    source_revision: "00f6c297e92a82c04a4ab507db0a61435650d7e8",
-    tag: "v0.10.3",
-    version: "0.10.3",
-  }),
-  command: Object.freeze([
-    "colima",
-    "start",
-    "<receipt-owned-profile>",
-    "--foreground",
-    "--runtime",
-    "docker",
-    "--vm-type",
-    "vz",
-    "--arch",
-    "aarch64",
-    "--cpus",
-    "4",
-    "--memory",
-    "6",
-    "--disk",
-    "40",
-    "--root-disk",
-    "20",
-    "--mount",
-    "none",
-    "--ssh-agent=false",
-    "--ssh-config=false",
-    "--activate=true",
-    "--kubernetes=false",
-    "--template=false",
-    "--binfmt=false",
-    "--network-address=false",
-    "--network-host-addresses=false",
-    "--save-config=false",
-    "--port-forwarder",
-    "ssh",
-    "--disk-image",
-    "<digest-bound-receipt-owned-image>",
-  ]),
-  controller_semantics: "waits-after-background-lima-start",
-  environment_names: Object.freeze([
-    "COLIMA_CACHE_HOME",
-    "COLIMA_HOME",
-    "DOCKER_CONFIG",
-    "HOME",
-    "LANG",
-    "LC_ALL",
-    "LIMA_HOME",
-    "PATH",
-    "TMPDIR",
-  ]),
-  helper_closure: "unresolved-blocking",
-  home_policy: "ambient-inherited-unchanged",
-  lima: Object.freeze({
-    source_revision: "de0816ea4bdc5267b428ab21025889b8dd785526",
-    tag: "v2.2.0",
-    version: "2.2.0",
-  }),
-  lima_start_semantics: "background-hostagent",
-  optional_environment_names: Object.freeze(["__CF_USER_TEXT_ENCODING"]),
-  process_identities: Object.freeze([
-    "synveda-state-owner",
-    "colima-controller",
-    "lima-hostagent",
-    "guest-engine",
-    "docker-context",
-  ]),
-  provider: "colima",
-  resource_identities: Object.freeze([
-    "provider-profile",
-    "lima-instance",
-    "disk-image",
-    "lima-hostagent-socket",
-    "docker-engine-socket",
-    "docker-engine",
-    "docker-context",
-    "provider-root",
-  ]),
-  root_layout: CONTROLLED_BACKGROUND_ROOT_LAYOUT,
-  schema: "synveda.clean-engine.colima-live-preparation-contract.v1",
-  start_authorized: false,
-  target_host: Object.freeze({
-    architecture: "arm64",
-    os_version_gate: "unresolved-blocking",
-    platform: "darwin",
-  }),
-  toolchain_requirements: Object.freeze([
-    "colima-binary",
-    "limactl-binary",
-    "docker-cli-binary",
-    "lima-guestagent",
-    "colima-disk-image",
-    "selected-host-helper-closure",
-  ]),
-});
-
-export const COLIMA_LIVE_PREPARATION_CONTRACT_SHA256 = providerProcessDigest(
-  providerProcessBytes(COLIMA_LIVE_PREPARATION_CONTRACT),
-);
+const CONTROLLED_BACKGROUND_ENVIRONMENT_NAMES = Object.freeze([
+  "COLIMA_CACHE_HOME",
+  "COLIMA_HOME",
+  "DOCKER_CONFIG",
+  "HOME",
+  "LANG",
+  "LC_ALL",
+  "LIMA_HOME",
+  "PATH",
+  "TMPDIR",
+]);
+const CONTROLLED_BACKGROUND_OPTIONAL_ENVIRONMENT_NAMES = Object.freeze([
+  "__CF_USER_TEXT_ENCODING",
+]);
 
 export const CONTROLLED_BACKGROUND_PROVIDER_CONTRACT = Object.freeze({
   artifact_order: CONTROLLED_BACKGROUND_CREATION_ARTIFACTS,
   child_process_identity_proof: "full-causal-record-hmac-sha256-v1",
   controller_group_probe: "negative-pgid-esrch-v1",
   engine_protocol: "authenticated-content-free-version-v1",
-  environment_names: COLIMA_LIVE_PREPARATION_CONTRACT.environment_names,
+  environment_names: CONTROLLED_BACKGROUND_ENVIRONMENT_NAMES,
+  fixture_ancestry: "repository-owned-node-controller-hostagent-v1",
   fixture_launch_authorized: true,
-  home_policy: COLIMA_LIVE_PREPARATION_CONTRACT.home_policy,
+  home_policy: "ambient-inherited-unchanged",
   hostagent_protocol: "authenticated-challenge-v1",
   launch_protocol: "durable-evidence-state-veto-gate-v2",
-  kind: "controlled-background-provider-v4",
+  kind: "controlled-background-provider-v5",
   lifecycle_exposure_authorized: false,
-  live_preparation_contract_sha256: COLIMA_LIVE_PREPARATION_CONTRACT_SHA256,
   max_lifetime_milliseconds: 30_000,
-  optional_environment_names: COLIMA_LIVE_PREPARATION_CONTRACT.optional_environment_names,
+  optional_environment_names: CONTROLLED_BACKGROUND_OPTIONAL_ENVIRONMENT_NAMES,
   private_file_publication: "fsync-stage-link-no-replace-v1",
   provider_kind: "controlled-background-fake",
   root_publication: "authority-before-mkdir-owner-atomic-v1",
   root_layout: CONTROLLED_BACKGROUND_ROOT_LAYOUT,
-  schema: "synveda.clean-engine.controlled-background-provider-contract.v4",
+  schema: "synveda.clean-engine.controlled-background-provider-contract.v5",
   socket_publication: "umask-0177-listen-chmod-fsync-v1",
   state_authority_gate: "synchronous-veto-only-six-checkpoint-v2",
   toolchain_roles: Object.freeze(["controller-script", "hostagent-script", "node-runtime"]),
@@ -510,33 +423,6 @@ function exactArray(value, expected, label) {
   if (!Array.isArray(value) || canonical(value) !== canonical(expected)) {
     fail(`${label} was refused`);
   }
-}
-
-export function validateColimaLivePreparationContract(value) {
-  if (canonical(value) !== canonical(COLIMA_LIVE_PREPARATION_CONTRACT)) {
-    fail("Colima live preparation contract was refused");
-  }
-  return value;
-}
-
-export function validateColimaLiveHostEligibility(value, host) {
-  validateColimaLivePreparationContract(value);
-  exactKeys(host, ["architecture", "platform"], "Colima live host eligibility");
-  if (
-    host.architecture !== COLIMA_LIVE_PREPARATION_CONTRACT.target_host.architecture ||
-    host.platform !== COLIMA_LIVE_PREPARATION_CONTRACT.target_host.platform
-  ) {
-    fail("Colima live host shape was refused", 69);
-  }
-  return host;
-}
-
-export function authorizeColimaLiveStart(
-  value,
-  host = { architecture: process.arch, platform: process.platform },
-) {
-  validateColimaLiveHostEligibility(value, host);
-  fail("Colima live start remains blocked by the unresolved toolchain closure", 69);
 }
 
 function sameMetadata(left, right) {
@@ -1075,7 +961,7 @@ export function controlledBackgroundEnvironmentNames({
   ) {
     fail("controlled background environment host was refused", 64);
   }
-  const names = [...COLIMA_LIVE_PREPARATION_CONTRACT.environment_names];
+  const names = [...CONTROLLED_BACKGROUND_ENVIRONMENT_NAMES];
   if (platform === "darwin" && hasCfUserTextEncoding) {
     names.push("__CF_USER_TEXT_ENCODING");
   }

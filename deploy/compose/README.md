@@ -765,6 +765,9 @@ journal, synchronous rollback fake, state-born background create wrapper,
 fixture retirement v1, state-gated retirement-v2 seam and success-only manifest
 finalizer are deterministic fixed-fake contracts, not a live provider claim. Six outer gates
 reassert the actual slot, operation plan, source and causal frontier. The
+controlled-background v5 contract names only its repository-owned Node
+controller/host-agent ancestry and its module exposes no live Colima contract,
+host validator or start authorizer. The
 outer settlement and close bind only complete identity, a no-live-process exact
 residual or a preserved foreign collision. Retirement v2 accepts the exact
 mutation-journal create chain and is composed by a separate cleanup slot,

@@ -291,6 +291,10 @@ state-integrated adapter is closed data with a contract-derived hash and bounded
 timings; it accepts no caller-supplied function, path, command, environment or
 provider selector. The state-integrated controlled path invokes only the
 repository-fixed fake child under a short, private, receipt-owned external root.
+Its v5 contract names only repository-owned Node controller/host-agent fixture
+ancestry and exports no live Colima contract, host validator or start
+authorizer. It cannot supply the separate live-provider preparation or
+process-effect boundary.
 `provider/` now contains
 content-free authority, toolchain, controller/start, authenticated endpoint and
 provider-identity evidence, while the run contains a state-owned outer

@@ -37,13 +37,6 @@ import {
   COLIMA_LIVE_MUTATION_SURFACE_ROLES,
 } from "../deploy/compose/scripts/clean-engine-colima-live-schemas.mjs";
 import {
-  COLIMA_LIVE_PREPARATION_CONTRACT,
-  COLIMA_LIVE_PREPARATION_CONTRACT_SHA256,
-  CONTROLLED_BACKGROUND_PROVIDER_CONTRACT_SHA256,
-  ProviderProcessContractFailure,
-  authorizeColimaLiveStart,
-} from "../deploy/compose/scripts/clean-engine-provider-process-contract.mjs";
-import {
   cleanEngineLiveProviderStartDecisionSourceFixture,
   cleanEngineLiveProviderStartFreshAdmissionFixture,
   cleanEngineLiveProviderStartFreshRootObservationFixture,
@@ -803,31 +796,6 @@ test("the structural boundary directly owns no effect seam and leaves start guar
     /\b(?:appendFile|chmod|link|mkdir|open|rename|rm|rmdir|spawn|unlink|writeFile)Sync\s*\(/u,
   );
   assert.doesNotMatch(source, /export function [A-Za-z0-9_]*(?:execute|launch|publish|recover)/iu);
-
-  assert.equal(
-    COLIMA_LIVE_PREPARATION_CONTRACT_SHA256,
-    "fb364b1cd89e7534b10dbd69d1092c93e64d17746b11692dec3b4252f83cbf51",
-  );
-  assert.equal(
-    CONTROLLED_BACKGROUND_PROVIDER_CONTRACT_SHA256,
-    "8d91f1e7023f4c32c00f2a2d7a75c59809ceb02cfe7588ba4a44cba990646992",
-  );
-  assert.throws(
-    () =>
-      authorizeColimaLiveStart(COLIMA_LIVE_PREPARATION_CONTRACT, {
-        architecture: "arm64",
-        platform: "darwin",
-      }),
-    (error) => {
-      assert.ok(error instanceof ProviderProcessContractFailure);
-      assert.equal(error.exitStatus, 69);
-      assert.equal(
-        error.message,
-        "Colima live start remains blocked by the unresolved toolchain closure",
-      );
-      return true;
-    },
-  );
 
   const state = readFileSync(
     new URL("../deploy/compose/scripts/clean-engine-state.mjs", import.meta.url),

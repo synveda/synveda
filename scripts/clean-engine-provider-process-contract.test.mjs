@@ -25,16 +25,14 @@ import {
 import { basename, dirname, join, relative } from "node:path";
 import { test } from "node:test";
 import {
-  COLIMA_LIVE_PREPARATION_CONTRACT,
-  COLIMA_LIVE_PREPARATION_CONTRACT_SHA256,
   CONTROLLED_BACKGROUND_AUTHORITY_CHECKPOINTS,
   CONTROLLED_BACKGROUND_PROVIDER_CONTRACT,
+  CONTROLLED_BACKGROUND_PROVIDER_CONTRACT_SHA256,
   CONTROLLED_BACKGROUND_RETIREMENT_AUTHORITY_CHECKPOINTS,
   CONTROLLED_BACKGROUND_RETIREMENT_CONTRACT,
   CONTROLLED_BACKGROUND_RETIREMENT_CONTRACT_SHA256,
   CONTROLLED_BACKGROUND_RETIREMENT_OPERATION_KIND,
   ProviderProcessContractFailure,
-  authorizeColimaLiveStart,
   controlledBackgroundEngineArchitecture,
   controlledBackgroundEnvironmentNames,
   controlledBackgroundOperationEvidence,
@@ -52,8 +50,6 @@ import {
   providerProcessDigest,
   retireControlledBackgroundProvider,
   retireControlledBackgroundProviderWithAuthorityGate,
-  validateColimaLiveHostEligibility,
-  validateColimaLivePreparationContract,
 } from "../deploy/compose/scripts/clean-engine-provider-process-contract.mjs";
 
 const STATE_RETIREMENT_CHECKPOINT_KEYS = Object.freeze([
@@ -615,62 +611,48 @@ async function retireState(state, authorityGate = () => undefined, options = {})
   );
 }
 
-test("the tagged Colima contract is closed and cannot authorize a live start", () => {
-  assert.equal(validateColimaLivePreparationContract(COLIMA_LIVE_PREPARATION_CONTRACT),
-    COLIMA_LIVE_PREPARATION_CONTRACT);
-  assert.equal(COLIMA_LIVE_PREPARATION_CONTRACT.application.version, "0.10.3");
-  assert.equal(COLIMA_LIVE_PREPARATION_CONTRACT.application.source_revision,
-    "00f6c297e92a82c04a4ab507db0a61435650d7e8");
-  assert.equal(COLIMA_LIVE_PREPARATION_CONTRACT.lima.version, "2.2.0");
-  assert.equal(COLIMA_LIVE_PREPARATION_CONTRACT.lima.source_revision,
-    "de0816ea4bdc5267b428ab21025889b8dd785526");
-  assert.equal(COLIMA_LIVE_PREPARATION_CONTRACT.controller_semantics,
-    "waits-after-background-lima-start");
-  assert.equal(COLIMA_LIVE_PREPARATION_CONTRACT.lima_start_semantics,
-    "background-hostagent");
-  assert.equal(COLIMA_LIVE_PREPARATION_CONTRACT.home_policy,
-    "ambient-inherited-unchanged");
-  assert.equal(COLIMA_LIVE_PREPARATION_CONTRACT.helper_closure, "unresolved-blocking");
-  assert.equal(COLIMA_LIVE_PREPARATION_CONTRACT.start_authorized, false);
-  assert.deepEqual(COLIMA_LIVE_PREPARATION_CONTRACT.process_identities, [
-    "synveda-state-owner",
-    "colima-controller",
-    "lima-hostagent",
-    "guest-engine",
-    "docker-context",
+test("the controlled background contract has no live-provider ancestry", () => {
+  assert.deepEqual(Object.keys(CONTROLLED_BACKGROUND_PROVIDER_CONTRACT).sort(), [
+    "artifact_order",
+    "child_process_identity_proof",
+    "controller_group_probe",
+    "engine_protocol",
+    "environment_names",
+    "fixture_ancestry",
+    "fixture_launch_authorized",
+    "home_policy",
+    "hostagent_protocol",
+    "kind",
+    "launch_protocol",
+    "lifecycle_exposure_authorized",
+    "max_lifetime_milliseconds",
+    "optional_environment_names",
+    "private_file_publication",
+    "provider_kind",
+    "root_layout",
+    "root_publication",
+    "schema",
+    "socket_publication",
+    "state_authority_gate",
+    "toolchain_roles",
   ]);
-  assert.deepEqual(COLIMA_LIVE_PREPARATION_CONTRACT.target_host, {
-    architecture: "arm64",
-    os_version_gate: "unresolved-blocking",
-    platform: "darwin",
-  });
-  const targetHost = { architecture: "arm64", platform: "darwin" };
   assert.equal(
-    validateColimaLiveHostEligibility(COLIMA_LIVE_PREPARATION_CONTRACT, targetHost),
-    targetHost,
+    CONTROLLED_BACKGROUND_PROVIDER_CONTRACT_SHA256,
+    "f638bfffe34fe7da577f9d19f40837343b7d55a7e248f0c9ba96a15f969c0989",
   );
-  assert.throws(
-    () => authorizeColimaLiveStart(COLIMA_LIVE_PREPARATION_CONTRACT, targetHost),
-    /unresolved toolchain closure/,
-  );
-  assert.throws(
-    () => validateColimaLiveHostEligibility(COLIMA_LIVE_PREPARATION_CONTRACT, {
-      architecture: "x64",
-      platform: "linux",
-    }),
-    /host shape was refused/,
-  );
-  const relabelled = structuredClone(COLIMA_LIVE_PREPARATION_CONTRACT);
-  relabelled.start_authorized = true;
-  assert.throws(
-    () => validateColimaLivePreparationContract(relabelled),
-    /preparation contract was refused/,
+  assert.equal(
+    CONTROLLED_BACKGROUND_RETIREMENT_CONTRACT_SHA256,
+    "3be80b3f8531a9e543936d99875ff7a138ed747f87b03a8cccd67448bab15f9c",
   );
   assert.equal(CONTROLLED_BACKGROUND_PROVIDER_CONTRACT.provider_kind,
     "controlled-background-fake");
   assert.equal(
-    CONTROLLED_BACKGROUND_PROVIDER_CONTRACT.live_preparation_contract_sha256,
-    COLIMA_LIVE_PREPARATION_CONTRACT_SHA256,
+    CONTROLLED_BACKGROUND_PROVIDER_CONTRACT.home_policy,
+    "ambient-inherited-unchanged",
+  );
+  assert.equal(
+    CONTROLLED_BACKGROUND_PROVIDER_CONTRACT.fixture_ancestry,
+    "repository-owned-node-controller-hostagent-v1",
   );
   assert.deepEqual(CONTROLLED_BACKGROUND_PROVIDER_CONTRACT.artifact_order, [
     "background-create-authority.json",
@@ -689,9 +671,9 @@ test("the tagged Colima contract is closed and cannot authorize a live start", (
     "durable-evidence-state-veto-gate-v2",
   );
   assert.equal(CONTROLLED_BACKGROUND_PROVIDER_CONTRACT.kind,
-    "controlled-background-provider-v4");
+    "controlled-background-provider-v5");
   assert.equal(CONTROLLED_BACKGROUND_PROVIDER_CONTRACT.schema,
-    "synveda.clean-engine.controlled-background-provider-contract.v4");
+    "synveda.clean-engine.controlled-background-provider-contract.v5");
   assert.equal(
     CONTROLLED_BACKGROUND_PROVIDER_CONTRACT.child_process_identity_proof,
     "full-causal-record-hmac-sha256-v1",
@@ -719,7 +701,7 @@ test("the tagged Colima contract is closed and cannot authorize a live start", (
       hasCfUserTextEncoding: false,
       platform: "darwin",
     }),
-    COLIMA_LIVE_PREPARATION_CONTRACT.environment_names,
+    CONTROLLED_BACKGROUND_PROVIDER_CONTRACT.environment_names,
   );
   assert.deepEqual(
     controlledBackgroundEnvironmentNames({
@@ -727,7 +709,7 @@ test("the tagged Colima contract is closed and cannot authorize a live start", (
       platform: "darwin",
     }),
     [
-      ...COLIMA_LIVE_PREPARATION_CONTRACT.environment_names,
+      ...CONTROLLED_BACKGROUND_PROVIDER_CONTRACT.environment_names,
       "__CF_USER_TEXT_ENCODING",
     ].sort(),
   );
@@ -736,7 +718,7 @@ test("the tagged Colima contract is closed and cannot authorize a live start", (
       hasCfUserTextEncoding: true,
       platform: "linux",
     }),
-    COLIMA_LIVE_PREPARATION_CONTRACT.environment_names,
+    CONTROLLED_BACKGROUND_PROVIDER_CONTRACT.environment_names,
   );
   assert.equal(controlledBackgroundEngineArchitecture("arm64"), "aarch64");
   assert.equal(controlledBackgroundEngineArchitecture("x64"), "x86_64");
@@ -744,6 +726,16 @@ test("the tagged Colima contract is closed and cannot authorize a live start", (
     () => controlledBackgroundEngineArchitecture("ppc64"),
     /host architecture was refused/,
   );
+  const source = readFileSync(
+    new URL(
+      "../deploy/compose/scripts/clean-engine-provider-process-contract.mjs",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+  assert.doesNotMatch(source, /\bCOLIMA_LIVE_[A-Z0-9_]+\b/u);
+  assert.doesNotMatch(source, /\b(?:authorize|validate)ColimaLive[A-Za-z0-9_]*\b/u);
+  assert.doesNotMatch(source, /synveda\.clean-engine\.colima-live-/u);
 });
 
 test("the read-only inspector identifies empty, authorised and complete create prefixes", async () => {

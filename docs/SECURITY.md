@@ -424,6 +424,13 @@ PID namespaces, ACLs, xattrs, file flags and bind mounts remain trusted-host
 limits. A truthful live provider identity, TLS registry auth, zero-read builder
 and destruction evidence remain pending.
 
+The controlled-background process module is class-closed: contract v5 binds
+only repository-owned Node controller/host-agent fixture ancestry and exposes
+no `COLIMA_LIVE_*` contract or live-start authorizer. The authoritative live
+requirements remain in the separate non-executing live module. Neither a
+matching version string nor the fake's two process roles can grant live effect
+authority.
+
 ## Residual and external limits
 
 - A PostgreSQL superuser, compromised gateway or worker process, or compromised

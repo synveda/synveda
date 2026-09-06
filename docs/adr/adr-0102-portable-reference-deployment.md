@@ -196,11 +196,12 @@ share one trusted-host boundary; ACLs, xattrs, flags, bind mounts and other PID
 namespaces remain outside this deterministic evidence. No supported lifecycle
 or finalization authority follows from this fixed-fake contract.
 
-The immutable fake still binds its legacy live-preparation declaration, which
-pins Colima 0.10.3 source revision
-`00f6c297e92a82c04a4ab507db0a61435650d7e8` and Lima 2.2.0 source revision
-`de0816ea4bdc5267b428ab21025889b8dd785526`. It is not rotated or relabelled.
-A separate `synveda.clean-engine.colima-live-requirements.v4` record now pins
+The controlled-background contract v5 binds only its repository-owned Node
+controller/host-agent fixture ancestry, controlled environment and private
+root layout. Its module exports no `COLIMA_LIVE_*` contract, host validator or
+live-start authorizer, so the two-role fake cannot be substituted for a live
+provider boundary. A separate
+`synveda.clean-engine.colima-live-requirements.v4` record now pins
 the official Darwin/arm64 release bytes, selected extracted Lima runtime files
 and Colima-core 0.10.4 arm64 Docker disk image. The staged closure uses Lima's
 release guest-agent and default-template locations, a mode-0600 user-v2 network
@@ -227,8 +228,9 @@ finalization remain false, and no receipt, lifecycle or finalizer path accepts
 it. Neither contract is Docker, Colima or supported lifecycle evidence.
 
 A separate closed provider-adapter registry reserves fresh live create and
-cleanup operation/evidence identities without changing the immutable fake. Its
-lookup key is the exact action, operation kind, operation-contract digest and
+cleanup operation/evidence identities without selecting or importing the
+controlled fake. Its lookup key is the exact action, operation kind,
+operation-contract digest and
 `colima-vz-docker-live` provider class. Both contracts bind the production
 requirements digest; cleanup additionally binds the create-contract digest.
 The create entry grants only state planning through

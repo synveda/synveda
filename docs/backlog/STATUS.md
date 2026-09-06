@@ -354,6 +354,10 @@ process, detached Lima hostagent, usernet and SSH ControlMaster, live macOS
 proxy and OS-executable identities, authenticated Engine/socket/context
 evidence, uncertain-start recovery, receipts and dynamic-tree retirement before
 registering or invoking a live provider.
+The controlled-background contract is separately class-closed at v5: it names
+only repository-owned Node controller/host-agent fixture ancestry and exports
+no live preparation, host-validation or start-authority API. It cannot satisfy
+or be substituted for that four-role live effect cut.
 Live-provider identity, builder, proxy, browser and cleanup evidence follow;
 Linux/reference
 HTTPS must pass before legacy Rauthy/Temporal assets are deleted. Backup/restore,
