@@ -54,7 +54,9 @@ import {
   validateControlledBackgroundProviderOperationPlan,
 } from "./clean-engine-provider-process-contract.mjs";
 import {
+  COLIMA_LIVE_BASELINE_DESCRIPTOR_BINDING_FIELDS,
   COLIMA_LIVE_FIXTURE_PRE_EFFECT_ROOT_OBSERVATION_SCHEMA,
+  COLIMA_LIVE_MAX_BASELINE_DESCENDANTS,
   COLIMA_LIVE_MUTATION_SURFACE_ROLES,
   COLIMA_LIVE_PRE_EFFECT_ROOT_OBSERVATION_SCHEMA,
   ColimaLiveContractFailure,
@@ -6822,6 +6824,9 @@ function validateLivePreEffectRootBinding(rootObservation, snapshot, fixtureOnly
     exactKeys(
       root,
       [
+        "baseline_descriptor_set_hmac_sha256",
+        "baseline_descriptors",
+        "baseline_relative_identity_hmac_sha256",
         "disposition",
         "namespace_identity_hmac_sha256",
         "observed_entry_set_hmac_sha256",
@@ -6830,9 +6835,62 @@ function validateLivePreEffectRootBinding(rootObservation, snapshot, fixtureOnly
       "live provider pre-effect root",
     );
     if (
+      !Array.isArray(root.baseline_relative_identity_hmac_sha256) ||
+      !Array.isArray(root.baseline_descriptors) ||
+      root.baseline_descriptors.length !==
+        root.baseline_relative_identity_hmac_sha256.length ||
+      root.baseline_descriptors.length >
+        COLIMA_LIVE_MAX_BASELINE_DESCENDANTS
+    ) {
+      fail("live provider pre-effect baseline descriptors were refused", 70);
+    }
+    for (const descriptor of root.baseline_descriptors) {
+      exactKeys(
+        descriptor,
+        COLIMA_LIVE_BASELINE_DESCRIPTOR_BINDING_FIELDS,
+        "live provider pre-effect baseline descriptor",
+      );
+      if (
+        !onlyLowerHex(descriptor.descriptor_sha256, 64) ||
+        descriptor.descriptor_sha256 === ZERO_SHA256 ||
+        !onlyLowerHex(descriptor.relative_identity_hmac_sha256, 64) ||
+        descriptor.relative_identity_hmac_sha256 === ZERO_SHA256
+      ) {
+        fail("live provider pre-effect baseline descriptor was refused", 70);
+      }
+    }
+    if (
+      new Set(
+        root.baseline_descriptors.map((entry) => entry.descriptor_sha256),
+      ).size !== root.baseline_descriptors.length ||
+      canonical(
+        root.baseline_descriptors.map(
+          (entry) => entry.relative_identity_hmac_sha256,
+        ),
+      ) !== canonical(root.baseline_relative_identity_hmac_sha256)
+    ) {
+      fail("live provider pre-effect baseline descriptors were refused", 70);
+    }
+    if (
       root.role !== expectedRoles[index] ||
       !new Set(["foreign-collision", "observed-pristine"]).has(
         root.disposition,
+      ) ||
+      !onlyLowerHex(root.baseline_descriptor_set_hmac_sha256, 64) ||
+      root.baseline_descriptor_set_hmac_sha256 === ZERO_SHA256 ||
+      !Array.isArray(root.baseline_relative_identity_hmac_sha256) ||
+      root.baseline_relative_identity_hmac_sha256.length >
+        COLIMA_LIVE_MAX_BASELINE_DESCENDANTS ||
+      root.baseline_relative_identity_hmac_sha256.some(
+        (identity) =>
+          !onlyLowerHex(identity, 64) || identity === ZERO_SHA256,
+      ) ||
+      new Set(root.baseline_relative_identity_hmac_sha256).size !==
+        root.baseline_relative_identity_hmac_sha256.length ||
+      canonical(root.baseline_relative_identity_hmac_sha256) !==
+        canonical([...root.baseline_relative_identity_hmac_sha256].sort()) ||
+      root.baseline_relative_identity_hmac_sha256.includes(
+        root.namespace_identity_hmac_sha256,
       ) ||
       !onlyLowerHex(root.namespace_identity_hmac_sha256, 64) ||
       root.namespace_identity_hmac_sha256 === ZERO_SHA256 ||
@@ -6841,6 +6899,22 @@ function validateLivePreEffectRootBinding(rootObservation, snapshot, fixtureOnly
     ) {
       fail("live provider pre-effect root observation was refused", 70);
     }
+  }
+  const baselineIdentities = rootObservation.root_observations.flatMap(
+    (root) => root.baseline_relative_identity_hmac_sha256,
+  );
+  const namespaceIdentities = new Set(
+    rootObservation.root_observations.map(
+      (root) => root.namespace_identity_hmac_sha256,
+    ),
+  );
+  if (
+    baselineIdentities.length > COLIMA_LIVE_MAX_BASELINE_DESCENDANTS ||
+    new Set(baselineIdentities).size !== baselineIdentities.length ||
+    namespaceIdentities.size !== rootObservation.root_observations.length ||
+    baselineIdentities.some((identity) => namespaceIdentities.has(identity))
+  ) {
+    fail("live provider pre-effect baseline identity set was refused", 70);
   }
   const expectedDisposition = rootObservation.root_observations.some(
     (root) => root.disposition === "foreign-collision",

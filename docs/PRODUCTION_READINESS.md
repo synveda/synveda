@@ -143,17 +143,21 @@ four-role live process-effect prerequisite.
 The next provider-input boundary is deterministic but remains deliberately
 non-executing. A separate live-preparation requirements record pins exact
 official Colima 0.10.3, Lima 2.2.0 and Colima-core 0.10.4 disk artifacts. Its
-v4 private observation binds the upstream-correct Lima guest-agent/default-
+v5 private observation binds the upstream-correct Lima guest-agent/default-
 template layout, private network baseline, staged and dynamically selected
 helper identities, closed environment paths, host build/boot inputs and
-distinct source/receipt-owned disk identities. Six receipt-owned whole
-mutation namespaces isolate Colima cache/home, Docker config, Lima home,
-`HOME`, and temporary files. `HOME` is an empty private namespace; each bounded
-top-level inventory is sampled twice with no-follow metadata and HMAC-projected
-as pristine or collision. Its canonical physical provider root is capped at 21
+distinct source/receipt-owned disk identities. Six receipt-owned mutation
+namespaces isolate Colima cache/home, Docker config, Lima home, `HOME`, and
+temporary files. `HOME` is an empty private namespace; Lima home has exactly
+the `_config` and `_config/networks.yaml` baseline descendants. Each baseline
+is recursively no-follow sampled twice under a 64-descendant aggregate bound.
+Public evidence contains only keyed opaque relative identities, descriptor
+digests and a set HMAC; raw names, paths, targets and content remain private,
+and unexpected descendants are opaque collisions rather than adopted state.
+Its canonical physical provider root is capped at 21
 UTF-8 bytes, keeping the pinned longest Lima Unix-socket path at 103 bytes,
 below Darwin's 104-byte refusal threshold. Both the lexical input and resolved
-physical path are bounded before traversal. V1 through v3 evidence is refused. The
+physical path are bounded before traversal. V1 through v4 evidence is refused. The
 observer has no child-process API. The pinned
 command disables Docker-context activation and uses the gRPC port forwarder;
 `/bin/sh` and `/usr/sbin/ioreg` remain declared OS-build-bound inputs rather
@@ -208,18 +212,34 @@ its authorization entry point always refuses. This closes only the
 post-decision observation shape; it is not process, provider, recovery or
 readiness evidence.
 
-A deterministic, non-persisted read-only prerequisite projection now binds that exact admission to
-ADR-0104's accepted sibling-effect constraints and unmet atomic
-generation/attempt/complete-causal-graph/endpoint/filesystem-inventory/
-retirement requirements.
-Every authority remains false, there is no production importer, and no action,
-operation contract, state artifact or recovery API exists. Its future receipt
-v6, slot v7, recovery/root v6 and close v8 names do not consume those versions;
-the current state and ADR-0103 v1 no-spawn evidence remain unchanged. This is
-not implementation, execution, recovery, platform or readiness evidence.
-Exact upstream validation transitively loads current plan/registry/live-
-observation modules; a filesystem tripwire proves projection construction
-performs no observation I/O or mutation.
+A pure ADR-0104 sibling-effect boundary now binds that exact admission. Its
+production `colima-live-provider-effect-v1` contract digest is
+`e57ab31606d0cf6e33a0fd45cc86335a6ca1288d9beb28839aeb45225f24df63`;
+the class-separated fixture digest is
+`c0ec4548243b1e65ca71babb822290afb1650f2801be4e0da7a25c8ea832c087`.
+Production uses `production-deny-only-no-invoker`, keeps every capability false
+and has no state, registry, lifecycle, executor or recovery importer.
+
+The earlier non-persisted prerequisite projection remains a separate inert
+review artifact with no action, operation kind or contract. It retains its own
+512-occurrence preflight and is consumed by neither state nor the pure effect
+grammar.
+
+The fixture-only grammar validates the distinct witness/marker, start authority
+and attempt, exact four-role causal graph, four authenticated endpoint/socket
+identities, Docker context, quiescence, two equal paged recursive inventories,
+trusted v5 baseline descriptors, intra-namespace hard-link closure, exact
+directory capacity, derived cleanup, terminal receipt and marker retirement.
+Six closed histories and 24 deterministic tests cover success, residual,
+uncertain and pre-attempt branches without invoking filesystem observation,
+process or network execution. This in-memory event fixture is distinct from the
+earlier four-process causal fixture.
+
+Receipt v6 and `mutation-journal-v7-sibling-effect-only` are grammar names only;
+the current receipt v5, slot v6, recovery/root v5, close v7 and ADR-0103 v1
+no-spawn evidence remain unchanged. No effect witness is persisted, no provider
+process is invoked and no recovery API exists. This is pure contract evidence,
+not state integration, execution, recovery, platform or readiness evidence.
 
 The current state generation adds one deterministic cooperative reservation and
 still performs no provider process action. A v6 slot precedes a private fsynced

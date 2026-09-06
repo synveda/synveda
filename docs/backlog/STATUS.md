@@ -270,27 +270,31 @@ contract now pins official Colima 0.10.3, Lima 2.2.0 and Colima-core 0.10.4
 disk artifacts, the upstream-correct release guest-agent/default-template and
 private network layout, exact staged and dynamically observed helper
 identities, the non-activating gRPC-forwarder command, closed private environment,
-host build/boot inputs and a distinct receipt-owned disk copy. Six whole
-receipt-owned mutation namespaces isolate Colima cache/home, Docker config,
-Lima home, `HOME`, and temp. `HOME` is an empty private namespace; each bounded
-top-level inventory is no-follow sampled twice and HMAC-projected as pristine
-or collision. The canonical physical provider root is capped at 21 UTF-8 bytes,
+host build/boot inputs and a distinct receipt-owned disk copy. Six receipt-owned
+mutation namespaces isolate Colima cache/home, Docker config, Lima home,
+`HOME`, and temp. `HOME` is an empty private namespace; Lima home has exactly
+the `_config` and `_config/networks.yaml` baseline descendants. Each exact
+baseline is recursively no-follow sampled twice under a 64-descendant aggregate
+bound and projected only as keyed opaque identities, descriptor digests and a
+set HMAC. Raw names, paths, targets and content remain private; unexpected
+descendants are opaque collisions and are not adopted. The canonical physical
+provider root is capped at 21 UTF-8 bytes,
 keeping the closed `/l` layout plus pinned longest Lima socket at 103 bytes and
 below Darwin's 104-byte refusal threshold; lexical and resolved physical paths
 are both checked before traversal. `/bin/sh` and `/usr/sbin/ioreg` are declared
-OS-build-bound but not yet individually observed. Its v4 production
+OS-build-bound but not yet individually observed. Its v5 production
 requirements digest is
-`f08813ed481d42a6ac5f20ff19dffb812efc53705b3d5f73206ee0cccf118aa4`;
+`157bd8b6eaef32ffb57e733bc66420038594f5bb093ede40dcda0cae4770d6a6`;
 the exact v3 predecessor digest
 `409bfc2fa03c57d151812c69c395d75c4cf7454f1262d2369f47c97646ebf265`
 is retained only as the legacy binding;
 all execution, lifecycle and finalization authorizations remain false. The
 observer has no process-execution or receipt/finalizer surface and no lifecycle
-target; the plan boundary consumes only its revalidated digest. V1 through v3
-requirements, observations and root observations plus old or falsely
-relabelled two-target evidence are refused; public projection is generated only
-as v4. Twenty-four deterministic preparation tests pass, including exact
-21-byte ASCII and non-ASCII roots, lexical and physical overflow, alias refusal
+target; the plan boundary consumes only its revalidated digest. V1 through v4
+requirements, observations, root observations and public projections plus
+falsely relabelled two-target evidence are refused; only v5 is generated.
+Twenty-six deterministic preparation tests pass, including recursive baseline
+mutation, exact 21-byte ASCII and non-ASCII roots, lexical and physical overflow, alias refusal
 and serialized over-budget evidence. The fixture allocator is not a production
 root allocator or reservation. A separate pure registry now reserves distinct live
 create/cleanup operation and
@@ -360,26 +364,42 @@ This remains a cooperative same-UID protocol and no hostile-principal boundary.
 It grants reservation recovery only; process, adapter, root, provider-effect
 recovery, receipt/environment/provider/runtime/evidence publication, cleanup,
 lifecycle and finalization remain false. No supported command exposes the seam,
-and no Docker, Colima or Lima process ran. ADR-0104 is accepted as the next
-CPR-45 state boundary; its effect generation is not implemented. A
-deterministic, non-persisted read-only prerequisite projection now binds the
-exact deny-only admission
-to the accepted sibling predecessor, fixed marker, distinct-witness rule and
-future atomic receipt v6/slot v7/recovery/root v6/close v8 cut. It keeps every
-authority false and defines no action, operation kind, contract, state
-artifact, publisher, executor, recovery API or production importer. The named
-future versions are unmet requirements; current persisted versions and
-ADR-0103's v1 evidence remain unchanged. Caller-held projection bytes are not
-state provenance or branch selection.
-Its exact upstream validation transitively loads the current plan/registry/
-live-observation modules, but projection construction performs no observation
-I/O or mutation.
-Before that validation or any freeze, a descriptor-only iterative preflight
-rejects proxies without invoking traps, cycles, depth above 16, more than 512
-value occurrences, more than 64 entries per container, and canonical UTF-8
-above 64 KiB including its newline. Repeated acyclic aliases remain valid and
-count per occurrence. Refusals are typed and content-free, while valid
-projection digests remain unchanged. These bounds add no authority.
+and no Docker, Colima or Lima process ran. ADR-0104's pure sibling-effect
+grammar is now implemented; persisted effect generation is not. Production
+operation kind `colima-live-provider-effect-v1` is pinned to contract digest
+`e57ab31606d0cf6e33a0fd45cc86335a6ca1288d9beb28839aeb45225f24df63`.
+Its authority model is `production-deny-only-no-invoker`, every capability is
+false, and no state, registry, lifecycle, executor or recovery module imports
+it. The class-separated fixture-only contract is pinned to
+`c0ec4548243b1e65ca71babb822290afb1650f2801be4e0da7a25c8ea832c087`.
+
+The earlier read-only prerequisite projection is retained separately as an
+inert review artifact. It defines no action, operation kind or contract, keeps
+every authority false, retains its independent 512-occurrence preflight and is
+consumed by neither state nor the pure effect grammar.
+
+The fixture grammar binds the distinct witness and fixed marker, one start
+authority and attempt, four authenticated roles, four causal edges at depth
+two, four endpoint/socket identities plus the private Docker-context identity
+and bytes, quiescence, two
+equal paged recursive inventories over all six namespaces, trusted v5 baseline
+descriptors, intra-namespace hard-link closure, exact directory-scaffolding
+capacity, derived cleanup, paged progress, terminal receipt and marker
+retirement. Six closed histories and 24 deterministic tests exercise every
+event/descriptor field, paging, alias, capacity and terminal branch. The
+boundary-owned module has no direct filesystem, process, network, state or
+executor import, and a tripwire proves construction and validation invoke no
+observation I/O.
+
+The grammar names receipt v6 and
+`mutation-journal-v7-sibling-effect-only`, but the numbered persisted cut does
+not exist. Current receipt v5, slot v6, recovery/root v5, close v7 and
+ADR-0103's v1 evidence remain unchanged. No effect witness is published, no
+process or provider is invoked, and no recovery API or supported lifecycle
+exists. Caller-held pure bytes are not state provenance or branch selection.
+The closed-data preflight rejects proxies without invoking traps, cycles, depth
+above 16, more than 1,024 value occurrences, more than 64 entries per container
+and canonical UTF-8 above 64 KiB. These bounds add no production authority.
 
 The accepted branch starts after the completed start decision, not as a
 successor to ADR-0103's terminal no-spawn completion. It uses a distinct

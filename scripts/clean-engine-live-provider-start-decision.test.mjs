@@ -74,13 +74,13 @@ test("production and fixture process-start contracts are exact, inert and unregi
       contract: COLIMA_LIVE_PROVIDER_START_DECISION_OPERATION_CONTRACT,
       digest: COLIMA_LIVE_PROVIDER_START_DECISION_OPERATION_CONTRACT_SHA256,
       expectedDigest:
-        "a56c5d8da00a45d6ba5b910fd1aeae73cb418dca08fde9442c0d5f33c89fcdf7",
+        "09a4ffc67a1a94c62317f115c1f8432a8d21967b4192fc893c9b126d155cd69b",
       evidenceClass: "production-pinned",
       fixtureOnly: false,
       intentCompletionSchema:
         "synveda.clean-engine.colima-live-provider-intent-completion.v1",
       intentContractSha256:
-        "55b4bdc166aa75b6877bf84c8b7667deb571732fdffc3463bd1c09ad6fbb38e0",
+        "737a474bebc1ceb956586a19e848eb7a300ae5fb8ba2750352a2f84dfc59125f",
       intentKind: "colima-live-provider-intent-publication-v1",
       kind: COLIMA_LIVE_PROVIDER_START_DECISION_OPERATION_KIND,
     },
@@ -90,13 +90,13 @@ test("production and fixture process-start contracts are exact, inert and unregi
       digest:
         COLIMA_LIVE_FIXTURE_PROVIDER_START_DECISION_OPERATION_CONTRACT_SHA256,
       expectedDigest:
-        "2f34c46886ee2a9e0756b3b0df054ff0c3e8ec99309d59c7ea9b4082a15eece1",
+        "ea9726aef040dafb8ea8a330961894fbbb19b9141ef7d8c3c5ae680ec0513b15",
       evidenceClass: "fixture-only",
       fixtureOnly: true,
       intentCompletionSchema:
         "synveda.clean-engine.colima-live-fixture-provider-intent-completion.v1",
       intentContractSha256:
-        "d4586c20e632337fed3c91e7ec8159a721d5d1a3b8164d4ebd91ec3152a7cdd1",
+        "25537c0d763a1df7a088cfbba2bcda001683f03e7190157a09b1c1d7a3f1370e",
       intentKind: "colima-live-fixture-provider-intent-publication-v1",
       kind: COLIMA_LIVE_FIXTURE_PROVIDER_START_DECISION_OPERATION_KIND,
     },
@@ -357,6 +357,15 @@ test("fresh namespace and admission shapes fail closed on every authority bindin
   for (const fixtureOnly of [false, true]) {
     const fixture = cleanEngineLiveProviderStartFreshAdmissionFixture(fixtureOnly);
     const root = fixture.rootObservation;
+    const changedObservedRoot = (index, values) => ({
+      ...root,
+      root_observations: root.root_observations.map((entry, entryIndex) =>
+        entryIndex === index ? { ...entry, ...values } : entry,
+      ),
+    });
+    const baselineRoot = root.root_observations.findIndex(
+      (entry) => entry.role === "lima-home-namespace",
+    );
     const rootMutations = [
       { ...root, schema: "other" },
       {
@@ -405,8 +414,107 @@ test("fresh namespace and admission shapes fail closed on every authority bindin
           ...root.root_observations.slice(1),
         ],
       },
+      changedObservedRoot(0, {
+        baseline_descriptor_set_hmac_sha256: "0".repeat(64),
+      }),
+      changedObservedRoot(baselineRoot, {
+        baseline_descriptors: "not-an-array",
+      }),
+      changedObservedRoot(baselineRoot, {
+        baseline_descriptors: [
+          {
+            ...root.root_observations[baselineRoot].baseline_descriptors[0],
+            descriptor_sha256: "0".repeat(64),
+          },
+          root.root_observations[baselineRoot].baseline_descriptors[1],
+        ],
+      }),
+      changedObservedRoot(baselineRoot, {
+        baseline_descriptors: [
+          root.root_observations[baselineRoot].baseline_descriptors[0],
+        ],
+      }),
+      changedObservedRoot(baselineRoot, {
+        baseline_descriptors: [
+          root.root_observations[baselineRoot].baseline_descriptors[1],
+          root.root_observations[baselineRoot].baseline_descriptors[0],
+        ],
+      }),
+      changedObservedRoot(baselineRoot, {
+        baseline_descriptors:
+          root.root_observations[baselineRoot].baseline_descriptors.map(
+            (descriptor) => ({
+              ...descriptor,
+              descriptor_sha256:
+                root.root_observations[baselineRoot].baseline_descriptors[0]
+                  .descriptor_sha256,
+            }),
+          ),
+      }),
+      changedObservedRoot(0, {
+        baseline_relative_identity_hmac_sha256: "not-an-array",
+      }),
+      changedObservedRoot(baselineRoot, {
+        baseline_relative_identity_hmac_sha256: ["z".repeat(64)],
+      }),
+      changedObservedRoot(baselineRoot, {
+        baseline_relative_identity_hmac_sha256: [
+          root.root_observations[baselineRoot]
+            .baseline_relative_identity_hmac_sha256[0],
+          root.root_observations[baselineRoot]
+            .baseline_relative_identity_hmac_sha256[0],
+        ],
+      }),
+      changedObservedRoot(baselineRoot, {
+        baseline_relative_identity_hmac_sha256: [
+          ...root.root_observations[baselineRoot]
+            .baseline_relative_identity_hmac_sha256,
+        ].reverse(),
+      }),
+      changedObservedRoot(0, {
+        baseline_descriptors: [
+          {
+            descriptor_sha256: digest("duplicate-cross-role-baseline"),
+            relative_identity_hmac_sha256:
+              root.root_observations[baselineRoot]
+                .baseline_relative_identity_hmac_sha256[0],
+          },
+        ],
+        baseline_relative_identity_hmac_sha256: [
+          root.root_observations[baselineRoot]
+            .baseline_relative_identity_hmac_sha256[0],
+        ],
+      }),
+      changedObservedRoot(baselineRoot, {
+        baseline_relative_identity_hmac_sha256: [
+          root.root_observations[baselineRoot]
+            .namespace_identity_hmac_sha256,
+        ],
+      }),
+      changedObservedRoot(baselineRoot, {
+        baseline_relative_identity_hmac_sha256: Array.from(
+          { length: 65 },
+          (_, index) => (index + 1).toString(16).padStart(64, "0"),
+        ),
+      }),
       { ...root, ignored: true },
     ];
+    const oversizedRoots = root.root_observations.map((entry, rootIndex) => {
+      const identities = Array.from({ length: 11 }, (_, entryIndex) =>
+        digest(`oversized-baseline-${rootIndex}-${entryIndex}`),
+      ).sort();
+      return {
+        ...entry,
+        baseline_descriptors: identities.map((identity, entryIndex) => ({
+          descriptor_sha256: digest(
+            `oversized-descriptor-${rootIndex}-${entryIndex}`,
+          ),
+          relative_identity_hmac_sha256: identity,
+        })),
+        baseline_relative_identity_hmac_sha256: identities,
+      };
+    });
+    rootMutations.push({ ...root, root_observations: oversizedRoots });
     const missingRoot = { ...root };
     delete missingRoot.requirements_sha256;
     rootMutations.push(missingRoot);

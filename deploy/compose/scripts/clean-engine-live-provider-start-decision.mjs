@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 import { createHash } from "node:crypto";
 import {
+  COLIMA_LIVE_BASELINE_DESCRIPTOR_BINDING_FIELDS,
   COLIMA_LIVE_FIXTURE_PRE_EFFECT_ROOT_OBSERVATION_SCHEMA,
+  COLIMA_LIVE_MAX_BASELINE_DESCENDANTS,
   COLIMA_LIVE_MUTATION_SURFACE_ROLES,
   COLIMA_LIVE_PRE_EFFECT_ROOT_OBSERVATION_SCHEMA,
 } from "./clean-engine-colima-live-schemas.mjs";
@@ -78,6 +80,9 @@ const ROOT_OBSERVATION_FIELDS = Object.freeze([
   "schema",
 ]);
 const ROOT_FIELDS = Object.freeze([
+  "baseline_descriptor_set_hmac_sha256",
+  "baseline_descriptors",
+  "baseline_relative_identity_hmac_sha256",
   "disposition",
   "namespace_identity_hmac_sha256",
   "observed_entry_set_hmac_sha256",
@@ -194,6 +199,60 @@ function nonzeroSha256(value) {
     /^[0-9a-f]+$/u.test(value) &&
     value !== ZERO_SHA256
   );
+}
+
+function validateBaselineDescriptorBindings(root, label) {
+  if (
+    !Array.isArray(root.baseline_relative_identity_hmac_sha256) ||
+    !Array.isArray(root.baseline_descriptors) ||
+    root.baseline_descriptors.length !==
+      root.baseline_relative_identity_hmac_sha256.length ||
+    root.baseline_descriptors.length > COLIMA_LIVE_MAX_BASELINE_DESCENDANTS
+  ) {
+    fail(`${label} baseline descriptors were refused`, 69);
+  }
+  for (const descriptor of root.baseline_descriptors) {
+    exactKeys(
+      descriptor,
+      COLIMA_LIVE_BASELINE_DESCRIPTOR_BINDING_FIELDS,
+      `${label} baseline descriptor`,
+    );
+    if (
+      !nonzeroSha256(descriptor.descriptor_sha256) ||
+      !nonzeroSha256(descriptor.relative_identity_hmac_sha256)
+    ) {
+      fail(`${label} baseline descriptor was refused`, 69);
+    }
+  }
+  if (
+    new Set(
+      root.baseline_descriptors.map((entry) => entry.descriptor_sha256),
+    ).size !== root.baseline_descriptors.length ||
+    canonical(
+      root.baseline_descriptors.map(
+        (entry) => entry.relative_identity_hmac_sha256,
+      ),
+    ) !== canonical(root.baseline_relative_identity_hmac_sha256)
+  ) {
+    fail(`${label} baseline descriptors were refused`, 69);
+  }
+}
+
+function validateBaselineIdentitySet(roots, label) {
+  const identities = roots.flatMap(
+    (root) => root.baseline_relative_identity_hmac_sha256,
+  );
+  const namespaceIdentities = new Set(
+    roots.map((root) => root.namespace_identity_hmac_sha256),
+  );
+  if (
+    identities.length > COLIMA_LIVE_MAX_BASELINE_DESCENDANTS ||
+    new Set(identities).size !== identities.length ||
+    namespaceIdentities.size !== roots.length ||
+    identities.some((identity) => namespaceIdentities.has(identity))
+  ) {
+    fail(`${label} baseline identity set was refused`, 69);
+  }
 }
 
 function variant(fixtureOnly) {
@@ -413,10 +472,25 @@ function validateRootObservation(value, source) {
   }
   for (const [index, root] of value.root_observations.entries()) {
     exactKeys(root, ROOT_FIELDS, "live provider fresh root");
+    validateBaselineDescriptorBindings(root, "live provider fresh root");
     if (
       root.role !== roles[index] ||
       !new Set(["foreign-collision", "observed-pristine"]).has(
         root.disposition,
+      ) ||
+      !nonzeroSha256(root.baseline_descriptor_set_hmac_sha256) ||
+      !Array.isArray(root.baseline_relative_identity_hmac_sha256) ||
+      root.baseline_relative_identity_hmac_sha256.length >
+        COLIMA_LIVE_MAX_BASELINE_DESCENDANTS ||
+      root.baseline_relative_identity_hmac_sha256.some(
+        (identity) => !nonzeroSha256(identity),
+      ) ||
+      new Set(root.baseline_relative_identity_hmac_sha256).size !==
+        root.baseline_relative_identity_hmac_sha256.length ||
+      canonical(root.baseline_relative_identity_hmac_sha256) !==
+        canonical([...root.baseline_relative_identity_hmac_sha256].sort()) ||
+      root.baseline_relative_identity_hmac_sha256.includes(
+        root.namespace_identity_hmac_sha256,
       ) ||
       !nonzeroSha256(root.namespace_identity_hmac_sha256) ||
       !nonzeroSha256(root.observed_entry_set_hmac_sha256)
@@ -424,6 +498,10 @@ function validateRootObservation(value, source) {
       fail("live provider fresh root was refused", 69);
     }
   }
+  validateBaselineIdentitySet(
+    value.root_observations,
+    "live provider fresh root observation",
+  );
   const disposition = value.root_observations.some(
     (root) => root.disposition === "foreign-collision",
   )

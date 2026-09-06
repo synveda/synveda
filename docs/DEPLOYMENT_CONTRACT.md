@@ -311,7 +311,7 @@ must not be reported as clean-Engine, Docker, Colima or browser evidence.
 
 ### Live-provider preparation input
 
-The separate `synveda.clean-engine.colima-live-requirements.v4` contract is the
+The separate `synveda.clean-engine.colima-live-requirements.v5` contract is the
 only repository-owned candidate input for a later macOS/arm64 Colima/VZ
 provider. It pins Colima 0.10.3, Lima 2.2.0, their selected extracted runtime
 files and the Colima-core 0.10.4 arm64 Docker disk image by exact release URL,
@@ -330,12 +330,12 @@ Lexically overlong input is refused before filesystem access, the resolved
 physical path is checked again before traversal, and a short symlink alias
 cannot bypass either the byte budget or the existing canonical-path check. The
 canonical production requirements digest is
-`f08813ed481d42a6ac5f20ff19dffb812efc53705b3d5f73206ee0cccf118aa4`.
+`157bd8b6eaef32ffb57e733bc66420038594f5bb093ede40dcda0cae4770d6a6`.
 It binds the exact v3 predecessor digest
 `409bfc2fa03c57d151812c69c395d75c4cf7454f1262d2369f47c97646ebf265`
 as `legacy_preparation_contract_sha256` rather than treating it as current.
 
-`synveda.clean-engine.colima-live-observation.v4` is private per-run evidence.
+`synveda.clean-engine.colima-live-observation.v5` is private per-run evidence.
 It binds exact file and parent identities, a toolchain-only `PATH`, exact host
 build/boot inputs and distinct source and receipt-owned disk files. Its private
 root contains six dedicated mutation namespaces: Colima cache, Colima home,
@@ -343,35 +343,42 @@ Docker config, Lima home, `HOME`, and temporary files. `HOME` is exactly the
 receipt-owned `h` directory and is empty at admission. It is not serialized as
 an environment variable; the private observation binds its directory path and
 identity plus an HMAC, while root and public projections expose no raw private
-`HOME` path. Lima home has only the staged `_config` baseline; the other five
-namespaces are empty. Colima cache and private `HOME` are expected not to be
-written; Colima home, Docker config, Lima home and temp are expected owned
-mutation surfaces. The pre-effect root-observation v4 contract samples each
-complete bounded top-level inventory twice with no-follow metadata, accepting
-at most 64 entries whose names are at most 255 bytes. It returns only namespace
-and complete-entry-set HMACs plus `observed-pristine` or `foreign-collision`.
-It accepts only a local preselected disk and performs bounded streaming hashes;
-it neither downloads nor executes a process. Raw
-private provider/component/`HOME` paths and fixture/profile identity are absent
-from public projection v4; the declared `/bin/sh` and `/usr/sbin/ioreg` paths
-remain non-private OS-build-bound metadata. Host fields remain preparation
-inputs, not live probes or VZ admission evidence. V1 through v3 requirements,
-observations and root observations plus old or falsely relabelled two-target
-root evidence are refused; the public projection regenerates only as v4.
-Downstream v1-named contracts retain their names but reject every superseded
-digest chain.
+`HOME` path. Lima home has the exact two-descendant `_config` and
+`_config/networks.yaml` baseline; the other five namespaces are empty. Colima
+cache and private `HOME` are expected not to be written; Colima home, Docker
+config, Lima home and temp are expected owned mutation surfaces.
+
+The pre-effect root-observation v5 contract recursively samples the exact six-
+namespace baseline twice without following links. It admits at most 64
+descendants in aggregate, 64 entries per directory and depth 32, with bounded
+names, relative identities, symlink targets, per-file and aggregate hashed
+bytes, and elapsed time. Each private descriptor binds type, identity,
+ownership, mode, size, link count, timestamps, depth, parent, directory count
+and content or raw-link-target digest. Public evidence contains only a keyed
+relative-identity-to-descriptor-digest mapping, its sorted identifier set and
+set HMAC; it exposes no raw name, path, target or content. Any unexpected or
+replaced descendant is an opaque `foreign-collision` and is never adopted.
+The observer accepts only a local preselected disk and performs bounded
+streaming hashes; it neither downloads nor executes a process. Raw private
+provider/component/`HOME` paths and fixture/profile identity are absent from
+public projection v5; the declared `/bin/sh` and `/usr/sbin/ioreg` paths remain
+non-private OS-build-bound metadata. Host fields remain preparation inputs, not
+live probes or VZ admission evidence. V1 through v4 requirements, observations,
+root observations and public projections, including falsely relabelled
+two-target evidence, are refused. Downstream v1-named contracts retain their
+names but reject every superseded digest chain.
 
 The closed provider-adapter registry reserves two fresh operation contracts:
 
 - `colima-vz-docker-live-create-v1`, contract digest
-  `619f87ed88836eebca0fd38cb7dfb91fb661297df4cc347c9765a0b72d0d099a`;
+  `0039cdbb343dea4de86efd63a4cf6e160d3b4167b46339db201f89a219a61196`;
 - `colima-vz-docker-live-cleanup-v1`, contract digest
-  `5253347dd61e28a0ce6dc8f0e697a98f2ad47cf66a7c667a04d0bd98b95d4793`.
+  `d11c5cbdd517c8c99967179c36321a4858452aaf94d8d4a9e2441fb6e42bf1d2`.
 
 Their evidence schema names are distinct from every deterministic and
 controlled-background fake schema. Cleanup binds the exact create-contract
 digest, and both contracts bind the production requirements digest. Registry
-digest `f4663054dc637b4b8511b4877e548dc3d5c9f4b95beb7e4b0ef3a241f122aec6`
+digest `78ac3e6d877db749eb090660090042ffefb41a3788419f3a1edec09802b18a1b`
 selects only an exact action, operation kind, operation-contract digest and
 `colima-vz-docker-live` provider-class tuple.
 
@@ -427,18 +434,19 @@ plan, projection, candidate, prefix, requirements or checkpoints. It validates
 state/source and reconstructs the full production observation twice in
 `S1/O1/S2/O2` order. Both state snapshots and both observation values must be
 identical. The observer pins and revalidates each of the six private namespace
-directories, then no-follow samples every bounded top-level entry. The exact
-baseline is `observed-pristine`; every additional file, directory, hard link,
-socket or symlink is an opaque foreign collision and suppresses
-candidate/prefix construction. No entry is traversed or adopted.
+directories, then no-follow recursively samples the exact bounded baseline
+descriptors. The exact baseline is `observed-pristine`; every additional or
+replaced file, directory, hard link, socket or symlink is an opaque foreign
+collision and suppresses candidate/prefix construction. No collision is
+adopted.
 
 The state owner can durably publish that request only through the distinct
 `provider-intent` successor. Production operation kind
 `colima-live-provider-intent-publication-v1` has contract digest
-`55b4bdc166aa75b6877bf84c8b7667deb571732fdffc3463bd1c09ad6fbb38e0`;
+`737a474bebc1ceb956586a19e848eb7a300ae5fb8ba2750352a2f84dfc59125f`;
 the deterministic fixture uses a different operation kind, schema, evidence
 class and contract digest
-`d4586c20e632337fed3c91e7ec8159a721d5d1a3b8164d4ebd91ec3152a7cdd1`.
+`25537c0d763a1df7a088cfbba2bcda001683f03e7190157a09b1c1d7a3f1370e`.
 Neither contract is a provider-adapter entry. Both grant only inert state
 publication through `mutation-journal-v6-inert-intent-only`; effect execution,
 receipt publication, provider-effect recovery, cleanup, finalization and
@@ -468,9 +476,9 @@ and the supported lifecycle remains `plan|status|verify`.
 The successor process-start decision is also durable and inert. Production
 operation kind
 `colima-live-provider-start-decision-publication-v1` has contract digest
-`a56c5d8da00a45d6ba5b910fd1aeae73cb418dca08fde9442c0d5f33c89fcdf7`;
+`09a4ffc67a1a94c62317f115c1f8432a8d21967b4192fc893c9b126d155cd69b`;
 the fixture-only domain has digest
-`2f34c46886ee2a9e0756b3b0df054ff0c3e8ec99309d59c7ea9b4082a15eece1`.
+`ea9726aef040dafb8ea8a330961894fbbb19b9141ef7d8c3c5ae680ec0513b15`.
 Their production and fixture publication-plan schemas are v2. They bind the
 completed intent slot, close, publication-plan and completed-plan
 projection digests. An `observed-pristine` namespace observation derives only
@@ -521,19 +529,48 @@ and fixture schemas remain distinct. The value grants nothing, the explicit
 authorization function always refuses it, and no operation kind, contract
 digest, registry entry, receipt, state slot or persistent artifact is added.
 
-A deterministic, non-persisted read-only effect-generation prerequisite projection consumes only that exact
-deny-only admission. It binds the accepted sibling-effect predecessor, terminal
-no-spawn exclusion, fixed marker, distinct-witness rule and unmet one-shot
-attempt, complete bounded causal graph, authenticated endpoint, recursive
-filesystem inventory and exact-retirement requirements. It names receipt v6,
-slot v7, recovery/root
-v6 and close v8 only as one future atomic cut. Every authority remains false;
-there is no action, operation kind, contract, state artifact, publisher,
-executor, recovery API or production importer. Current receipt v5, slot v6,
-recovery/root v5, close v7 and ADR-0103 v1 records remain unchanged. Serialized
-projection bytes do not carry state provenance or select a branch.
-Exact validation transitively loads the current plan/registry/live-observation
-modules, but projection construction invokes no observation I/O or mutation.
+The earlier non-persisted effect-generation prerequisite projection is retained
+as a separate inert review artifact. Its production and fixture projections are
+pinned to `ae3d98ae3d4eee54ef0094874d73fb63f75b817a9a4005868ee22074d12202e7`
+and `58241bcd4d95b5f74968fdca1880becd0c6bee1a10a060d49e553e950dc7e853`.
+It defines no action, operation kind or operation contract, keeps every
+authority false and is consumed by neither state nor the pure effect grammar.
+Its closed-data preflight retains its own 512-occurrence bound. It is not a
+compatibility or execution path.
+
+A pure sibling-effect boundary now consumes only that exact deny-only admission.
+Its production `colima-live-provider-effect-v1` operation contract is pinned to
+`e57ab31606d0cf6e33a0fd45cc86335a6ca1288d9beb28839aeb45225f24df63`.
+Every production capability remains false, its authority model is
+`production-deny-only-no-invoker`, and no state, registry, lifecycle, executor
+or recovery module imports it. A separate fixture-only contract is pinned to
+`c0ec4548243b1e65ca71babb822290afb1650f2801be4e0da7a25c8ea832c087`;
+it cannot be relabelled as production evidence.
+
+The pure fixture grammar binds the distinct effect witness and fixed marker,
+one start authority and attempt, exactly four authenticated roles, four causal
+edges at depth two, four endpoint/socket identities plus the private Docker-
+context identity and bytes, a quiescence fence, and two identical paged recursive
+inventories over all six mutation namespaces. Those inventories must preserve
+the trusted v5 baseline descriptor map, close physical aliases and hard-link
+groups within one namespace, and leave enough exact directory scaffolding
+capacity for every reserved endpoint and observed resource. Cleanup actions
+are derived from the accepted frontier, recorded through bounded paged
+progress, and bind cleanup settlement, terminal receipt and marker retirement.
+Six closed histories cover pre-attempt retirement, authority-only retirement,
+attempted residual cleanup, uncertain start, normal retirement and a rich
+paged/hard-link retirement. The boundary-owned module has no direct filesystem,
+process or network-executor import, and a tripwire proves construction and
+validation invoke no observation I/O. This in-memory event fixture is distinct
+from the earlier four-process causal fixture.
+
+The operation contract names receipt v6 and
+`mutation-journal-v7-sibling-effect-only` as the intended atomic integration,
+but does not persist either. Current receipt v5, slot v6, recovery/root v5,
+close v7 and ADR-0103 v1 records remain unchanged. There is still no state
+effect slot, effect-witness publisher, process invocation, recovery API,
+registry entry, lifecycle exposure or live provider evidence. Serialized pure
+values do not carry state provenance or select a branch.
 
 ### Cooperative no-spawn reservation
 

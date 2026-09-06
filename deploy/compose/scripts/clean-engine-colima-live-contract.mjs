@@ -7,12 +7,16 @@ import {
   lstatSync,
   openSync,
   opendirSync,
+  readlinkSync,
   readSync,
   realpathSync,
 } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import {
+  COLIMA_LIVE_BASELINE_DESCRIPTOR_BINDING_FIELDS,
+  COLIMA_LIVE_BASELINE_DESCRIPTOR_FIELDS,
   COLIMA_LIVE_FIXTURE_PRE_EFFECT_ROOT_OBSERVATION_SCHEMA,
+  COLIMA_LIVE_MAX_BASELINE_DESCENDANTS,
   COLIMA_LIVE_MUTATION_SURFACE_ROLES,
   COLIMA_LIVE_OBSERVATION_SCHEMA,
   COLIMA_LIVE_PRE_EFFECT_ROOT_OBSERVATION_SCHEMA,
@@ -22,7 +26,10 @@ import {
 } from "./clean-engine-colima-live-schemas.mjs";
 
 export {
+  COLIMA_LIVE_BASELINE_DESCRIPTOR_BINDING_FIELDS,
+  COLIMA_LIVE_BASELINE_DESCRIPTOR_FIELDS,
   COLIMA_LIVE_FIXTURE_PRE_EFFECT_ROOT_OBSERVATION_SCHEMA,
+  COLIMA_LIVE_MAX_BASELINE_DESCENDANTS,
   COLIMA_LIVE_MUTATION_SURFACE_ROLES,
   COLIMA_LIVE_OBSERVATION_SCHEMA,
   COLIMA_LIVE_PRE_EFFECT_ROOT_OBSERVATION_SCHEMA,
@@ -36,6 +43,13 @@ const MAX_COMPONENTS = 16;
 const HASH_CHUNK_BYTES = 1024 * 1024;
 const MAX_MUTATION_SURFACE_ENTRY_NAME_BYTES = 255;
 const MAX_MUTATION_SURFACE_ENTRIES = 64;
+const MAX_BASELINE_DESCENDANTS = COLIMA_LIVE_MAX_BASELINE_DESCENDANTS;
+const MAX_BASELINE_RECURSIVE_DEPTH = 32;
+const MAX_BASELINE_RELATIVE_PATH_BYTES = 8_191;
+const MAX_BASELINE_HASHED_FILE_BYTES = 16 * 1024 * 1024;
+const MAX_BASELINE_TOTAL_HASHED_BYTES = 256 * 1024 * 1024;
+const MAX_BASELINE_SYMLINK_TARGET_BYTES = 4 * 1024;
+const MAX_BASELINE_OBSERVATION_ELAPSED_MILLISECONDS = 900_000;
 const DARWIN_UNIX_SOCKET_REFUSAL_THRESHOLD_BYTES = 104;
 const LIMA_LONGEST_SOCKET_FROM_HOME_BYTES = 80;
 
@@ -185,6 +199,19 @@ const MUTATION_SURFACE_NAMESPACES = Object.freeze([
     role: "temporary-namespace",
   }),
 ]);
+
+const BASELINE_OBSERVATION_BOUNDS = Object.freeze({
+  baseline_descendants_total: MAX_BASELINE_DESCENDANTS,
+  directory_entries: MAX_MUTATION_SURFACE_ENTRIES,
+  elapsed_milliseconds: MAX_BASELINE_OBSERVATION_ELAPSED_MILLISECONDS,
+  entry_name_bytes: MAX_MUTATION_SURFACE_ENTRY_NAME_BYTES,
+  hashed_file_bytes: MAX_BASELINE_HASHED_FILE_BYTES,
+  namespace_roots: COLIMA_LIVE_MUTATION_SURFACE_ROLES.length,
+  recursive_depth: MAX_BASELINE_RECURSIVE_DEPTH,
+  relative_path_bytes: MAX_BASELINE_RELATIVE_PATH_BYTES,
+  symlink_target_bytes: MAX_BASELINE_SYMLINK_TARGET_BYTES,
+  total_hashed_bytes: MAX_BASELINE_TOTAL_HASHED_BYTES,
+});
 
 const SYSTEM_EXECUTABLES = Object.freeze([
   Object.freeze({
@@ -462,7 +489,8 @@ export const COLIMA_LIVE_REQUIREMENTS = deepFreeze({
     "409bfc2fa03c57d151812c69c395d75c4cf7454f1262d2369f47c97646ebf265",
   mutation_surface: {
     admission_observation:
-      "bounded-no-follow-whole-top-level-namespace-hmac-v2",
+      "bounded-no-follow-recursive-baseline-namespace-hmac-v3",
+    baseline_observation_bounds: BASELINE_OBSERVATION_BOUNDS,
     derived_child_environment: Object.freeze({
       LIMA_SSH_PORT_FORWARDER: "false",
     }),
@@ -644,6 +672,7 @@ function validateRequirementShape(value) {
     value.mutation_surface,
     [
       "admission_observation",
+      "baseline_observation_bounds",
       "derived_child_environment",
       "maximum_entry_name_bytes",
       "maximum_top_level_entries",
@@ -656,7 +685,9 @@ function validateRequirementShape(value) {
   );
   if (
     value.mutation_surface.admission_observation !==
-      "bounded-no-follow-whole-top-level-namespace-hmac-v2" ||
+      "bounded-no-follow-recursive-baseline-namespace-hmac-v3" ||
+    canonical(value.mutation_surface.baseline_observation_bounds) !==
+      canonical(BASELINE_OBSERVATION_BOUNDS) ||
     canonical(value.mutation_surface.derived_child_environment) !==
       canonical({ LIMA_SSH_PORT_FORWARDER: "false" }) ||
     value.mutation_surface.maximum_entry_name_bytes !==
@@ -1224,10 +1255,430 @@ function recordedDirectoryMatches(metadata, recorded) {
   );
 }
 
-function captureAdmissionNamespace(parent, namespace) {
+function baselineObservationWithinTime(context, label, phase) {
+  const now = context.now(phase);
+  if (
+    !Number.isSafeInteger(context.startedAt) ||
+    !Number.isSafeInteger(now) ||
+    now < context.startedAt ||
+    now - context.startedAt >
+      MAX_BASELINE_OBSERVATION_ELAPSED_MILLISECONDS
+  ) {
+    fail(`${label} baseline observation exceeded its elapsed bound`, 69);
+  }
+}
+
+function baselineEntryNameBytes(name, label) {
+  const bytes = Buffer.from(name, "utf8");
+  if (
+    typeof name !== "string" ||
+    name.length < 1 ||
+    bytes.length > MAX_MUTATION_SURFACE_ENTRY_NAME_BYTES ||
+    bytes.toString("utf8") !== name ||
+    name.includes(sep) ||
+    name === "." ||
+    name === ".."
+  ) {
+    fail(`${label} baseline entry name was refused`, 69);
+  }
+  return bytes;
+}
+
+function baselineRelativeIdentityHmac(
+  input,
+  schema,
+  role,
+  parentIdentityHmac,
+  depth,
+  nameBytes,
+) {
+  return admissionHmac(
+    input.binding_key,
+    input.fixture_id,
+    role,
+    "baseline-relative-identity",
+    schema,
+    {
+      depth,
+      name_base64: nameBytes.toString("base64"),
+      parent_identity_hmac_sha256: parentIdentityHmac,
+    },
+  );
+}
+
+function baselineDescriptorMetadata(
+  metadata,
+  {
+    contentDisposition,
+    contentSha256,
+    depth,
+    directoryEntryCount,
+    nameBytes,
+    parentIdentityHmac,
+    relativeIdentityHmac,
+    symlinkTargetSha256,
+    type,
+  },
+) {
+  const descriptor = {
+    content_disposition: contentDisposition,
+    content_sha256: contentSha256,
+    ctime_nanoseconds: String(metadata.ctimeNs),
+    depth,
+    device: String(metadata.dev),
+    directory_entry_count: directoryEntryCount,
+    inode: String(metadata.ino),
+    links: String(metadata.nlink),
+    mode: mode(metadata),
+    mtime_nanoseconds: String(metadata.mtimeNs),
+    name_bytes: nameBytes.length,
+    parent_identity_hmac_sha256: parentIdentityHmac,
+    relative_identity_hmac_sha256: relativeIdentityHmac,
+    size: String(metadata.size),
+    symlink_target_sha256: symlinkTargetSha256,
+    type,
+    uid: String(metadata.uid),
+  };
+  if (
+    canonical(Object.keys(descriptor).sort()) !==
+    canonical([...COLIMA_LIVE_BASELINE_DESCRIPTOR_FIELDS].sort())
+  ) {
+    fail("Colima live baseline descriptor fields were refused", 70);
+  }
+  return Object.freeze(descriptor);
+}
+
+function validateBaselineMetadata(metadata, namespaceIdentity, label) {
+  const permissions = metadata.mode & 0o7777n;
+  // Unix symlink mode bits are commonly fixed at 0777 and do not authorize
+  // target access; the no-follow branch binds the raw target and its owner.
+  if (
+    metadata.dev !== BigInt(namespaceIdentity.device) ||
+    metadata.uid !== BigInt(namespaceIdentity.uid) ||
+    (!metadata.isSymbolicLink() && (permissions & 0o022n) !== 0n)
+  ) {
+    fail(`${label} baseline identity was refused`, 69);
+  }
+}
+
+function captureBaselineEntry(
+  path,
+  relativePath,
+  name,
+  parentIdentityHmac,
+  depth,
+  namespace,
+  namespaceIdentity,
+  input,
+  schema,
+  context,
+) {
+  const label = `Colima live ${namespace.role}`;
+  baselineObservationWithinTime(context, label, "entry-start");
+  if (
+    depth > MAX_BASELINE_RECURSIVE_DEPTH ||
+    Buffer.byteLength(relativePath, "utf8") >
+      MAX_BASELINE_RELATIVE_PATH_BYTES ||
+    context.totalDescriptors >= MAX_BASELINE_DESCENDANTS
+  ) {
+    fail(`${label} baseline traversal exceeded its bound`, 69);
+  }
+  const nameBytes = baselineEntryNameBytes(name, label);
+  const relativeIdentityHmac = baselineRelativeIdentityHmac(
+    input,
+    schema,
+    namespace.role,
+    parentIdentityHmac,
+    depth,
+    nameBytes,
+  );
+  const namedBefore = lstatSync(path, { bigint: true });
+  baselineObservationWithinTime(context, label, "after-entry-lstat");
+  validateBaselineMetadata(namedBefore, namespaceIdentity, label);
+  context.totalDescriptors += 1;
+  if (namedBefore.isDirectory() && !namedBefore.isSymbolicLink()) {
+    assertNoSymlinkComponents(path, `${label} baseline directory`);
+    let descriptor;
+    let completed = false;
+    try {
+      descriptor = openSync(
+        path,
+        constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
+      );
+      const openedBefore = fstatSync(descriptor, { bigint: true });
+      baselineObservationWithinTime(context, label, "after-directory-open");
+      if (!admissionMetadataEqual(namedBefore, openedBefore)) {
+        fail(`${label} baseline directory identity was refused`, 69);
+      }
+      const namesBefore = boundedDirectoryEntries(
+        path,
+        MAX_MUTATION_SURFACE_ENTRIES,
+        `${label} baseline directory`,
+      ).sort((left, right) =>
+        Buffer.compare(Buffer.from(left, "utf8"), Buffer.from(right, "utf8")),
+      );
+      baselineObservationWithinTime(
+        context,
+        label,
+        "after-directory-inventory-before",
+      );
+      const record = baselineDescriptorMetadata(namedBefore, {
+        contentDisposition: "metadata-only",
+        contentSha256: ZERO_SHA256,
+        depth,
+        directoryEntryCount: namesBefore.length,
+        nameBytes,
+        parentIdentityHmac,
+        relativeIdentityHmac,
+        symlinkTargetSha256: ZERO_SHA256,
+        type: "directory",
+      });
+      context.descriptors.push(record);
+      for (const childName of namesBefore) {
+        const childRelativePath = `${relativePath}/${childName}`;
+        captureBaselineEntry(
+          join(path, childName),
+          childRelativePath,
+          childName,
+          relativeIdentityHmac,
+          depth + 1,
+          namespace,
+          namespaceIdentity,
+          input,
+          schema,
+          context,
+        );
+      }
+      baselineObservationWithinTime(
+        context,
+        label,
+        "after-directory-descendants",
+      );
+      const namesAfter = boundedDirectoryEntries(
+        path,
+        MAX_MUTATION_SURFACE_ENTRIES,
+        `${label} baseline directory`,
+      ).sort((left, right) =>
+        Buffer.compare(Buffer.from(left, "utf8"), Buffer.from(right, "utf8")),
+      );
+      const openedAfter = fstatSync(descriptor, { bigint: true });
+      const namedAfter = lstatSync(path, { bigint: true });
+      baselineObservationWithinTime(
+        context,
+        label,
+        "after-directory-revalidation",
+      );
+      if (
+        !admissionMetadataEqual(namedBefore, openedAfter) ||
+        !admissionMetadataEqual(namedBefore, namedAfter) ||
+        canonical(namesBefore) !== canonical(namesAfter)
+      ) {
+        fail(`${label} baseline directory changed`, 73);
+      }
+      completed = true;
+      return;
+    } finally {
+      if (descriptor !== undefined) {
+        closeSync(descriptor);
+        if (completed) {
+          baselineObservationWithinTime(
+            context,
+            label,
+            "after-directory-close",
+          );
+        }
+      }
+    }
+  }
+  if (namedBefore.isFile() && !namedBefore.isSymbolicLink()) {
+    assertNoSymlinkComponents(path, `${label} baseline file`);
+    let descriptor;
+    let completed = false;
+    try {
+      if (
+        namedBefore.nlink !== 1n ||
+        namedBefore.size > BigInt(MAX_BASELINE_HASHED_FILE_BYTES)
+      ) {
+        fail(`${label} baseline file identity was refused`, 69);
+      }
+      descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+      const openedBefore = fstatSync(descriptor, { bigint: true });
+      baselineObservationWithinTime(context, label, "after-file-open");
+      if (!admissionMetadataEqual(namedBefore, openedBefore)) {
+        fail(`${label} baseline file identity was refused`, 69);
+      }
+      const hash = createHash("sha256");
+      const buffer = Buffer.allocUnsafe(HASH_CHUNK_BYTES);
+      let offset = 0;
+      for (;;) {
+        const count = readSync(descriptor, buffer, 0, buffer.length, offset);
+        baselineObservationWithinTime(context, label, "after-file-read");
+        if (count === 0) break;
+        hash.update(buffer.subarray(0, count));
+        offset += count;
+        if (
+          offset > MAX_BASELINE_HASHED_FILE_BYTES ||
+          context.totalHashedBytes + offset >
+            MAX_BASELINE_TOTAL_HASHED_BYTES
+        ) {
+          fail(`${label} baseline content exceeded its bound`, 69);
+        }
+      }
+      const openedAfter = fstatSync(descriptor, { bigint: true });
+      const namedAfter = lstatSync(path, { bigint: true });
+      baselineObservationWithinTime(
+        context,
+        label,
+        "after-file-revalidation",
+      );
+      if (
+        !admissionMetadataEqual(namedBefore, openedAfter) ||
+        !admissionMetadataEqual(namedBefore, namedAfter) ||
+        BigInt(offset) !== namedBefore.size
+      ) {
+        fail(`${label} baseline file changed`, 73);
+      }
+      context.totalHashedBytes += offset;
+      context.descriptors.push(
+        baselineDescriptorMetadata(namedBefore, {
+          contentDisposition: "hashed",
+          contentSha256: hash.digest("hex"),
+          depth,
+          directoryEntryCount: 0,
+          nameBytes,
+          parentIdentityHmac,
+          relativeIdentityHmac,
+          symlinkTargetSha256: ZERO_SHA256,
+          type: "regular",
+        }),
+      );
+      completed = true;
+      return;
+    } finally {
+      if (descriptor !== undefined) {
+        closeSync(descriptor);
+        if (completed) {
+          baselineObservationWithinTime(
+            context,
+            label,
+            "after-file-close",
+          );
+        }
+      }
+    }
+  }
+  if (namedBefore.isSymbolicLink()) {
+    if (namedBefore.nlink !== 1n) {
+      fail(`${label} baseline symlink identity was refused`, 69);
+    }
+    const targetBefore = readlinkSync(path, { encoding: "buffer" });
+    const namedAfter = lstatSync(path, { bigint: true });
+    const targetAfter = readlinkSync(path, { encoding: "buffer" });
+    baselineObservationWithinTime(
+      context,
+      label,
+      "after-symlink-revalidation",
+    );
+    if (
+      !Buffer.isBuffer(targetBefore) ||
+      !Buffer.isBuffer(targetAfter) ||
+      targetBefore.length > MAX_BASELINE_SYMLINK_TARGET_BYTES ||
+      !admissionMetadataEqual(namedBefore, namedAfter) ||
+      !targetBefore.equals(targetAfter)
+    ) {
+      fail(`${label} baseline symlink changed`, 73);
+    }
+    context.descriptors.push(
+      baselineDescriptorMetadata(namedBefore, {
+        contentDisposition: "target-hashed-no-follow",
+        contentSha256: ZERO_SHA256,
+        depth,
+        directoryEntryCount: 0,
+        nameBytes,
+        parentIdentityHmac,
+        relativeIdentityHmac,
+        symlinkTargetSha256: createHash("sha256")
+          .update(targetBefore)
+          .digest("hex"),
+        type: "symlink",
+      }),
+    );
+    baselineObservationWithinTime(context, label, "symlink-finish");
+    return;
+  }
+  fail(`${label} baseline entry type was refused`, 69);
+}
+
+function captureBaselineDescriptors(
+  parent,
+  namespace,
+  namespaceIdentity,
+  namespaceIdentityHmac,
+  input,
+  schema,
+  sharedContext,
+) {
+  const context = {
+    descriptors: [],
+    now: sharedContext.now,
+    get startedAt() {
+      return sharedContext.startedAt;
+    },
+    get totalDescriptors() {
+      return sharedContext.totalDescriptors;
+    },
+    set totalDescriptors(value) {
+      sharedContext.totalDescriptors = value;
+    },
+    get totalHashedBytes() {
+      return sharedContext.totalHashedBytes;
+    },
+    set totalHashedBytes(value) {
+      sharedContext.totalHashedBytes = value;
+    },
+  };
+  const names = [...namespace.baseline_entries].sort((left, right) =>
+    Buffer.compare(Buffer.from(left, "utf8"), Buffer.from(right, "utf8")),
+  );
+  for (const name of names) {
+    captureBaselineEntry(
+      join(parent.path, name),
+      name,
+      name,
+      namespaceIdentityHmac,
+      1,
+      namespace,
+      namespaceIdentity,
+      input,
+      schema,
+      context,
+    );
+  }
+  baselineObservationWithinTime(
+    context,
+    `Colima live ${namespace.role}`,
+    "baseline-descriptors-finish",
+  );
+  return Object.freeze([...context.descriptors]);
+}
+
+function captureAdmissionNamespace(
+  parent,
+  namespace,
+  input,
+  schema,
+  sharedBaselineContext,
+) {
   const { baseline_entries: baselineEntries, role } = namespace;
+  const label = `Colima live ${role}`;
+  baselineObservationWithinTime(
+    sharedBaselineContext,
+    label,
+    "namespace-start",
+  );
   assertNoSymlinkComponents(parent.path, `Colima live ${role}`);
   let descriptor;
+  let completed = false;
   try {
     const namedBefore = lstatSync(parent.path, { bigint: true });
     descriptor = openSync(
@@ -1235,6 +1686,11 @@ function captureAdmissionNamespace(parent, namespace) {
       constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
     );
     const openedBefore = fstatSync(descriptor, { bigint: true });
+    baselineObservationWithinTime(
+      sharedBaselineContext,
+      label,
+      "after-namespace-open",
+    );
     if (
       !admissionMetadataEqual(namedBefore, openedBefore) ||
       !recordedDirectoryMatches(openedBefore, parent) ||
@@ -1267,6 +1723,11 @@ function captureAdmissionNamespace(parent, namespace) {
       const metadata = lstatSync(join(parent.path, name), { bigint: true });
       return Object.freeze({ name, ...admissionEntryIdentity(metadata) });
     });
+    baselineObservationWithinTime(
+      sharedBaselineContext,
+      label,
+      "after-namespace-inventory-before",
+    );
     const inventoryAfter = boundedDirectoryEntries(
       parent.path,
       MAX_MUTATION_SURFACE_ENTRIES,
@@ -1280,6 +1741,11 @@ function captureAdmissionNamespace(parent, namespace) {
     }));
     const openedAfter = fstatSync(descriptor, { bigint: true });
     const namedAfter = lstatSync(parent.path, { bigint: true });
+    baselineObservationWithinTime(
+      sharedBaselineContext,
+      label,
+      "after-namespace-inventory-after",
+    );
     if (
       !admissionMetadataEqual(namedBefore, openedAfter) ||
       !admissionMetadataEqual(namedBefore, namedAfter) ||
@@ -1291,41 +1757,92 @@ function captureAdmissionNamespace(parent, namespace) {
     const residualEntries = entryIdentities.filter(
       (entry) => !baselineEntries.includes(entry.name),
     );
-    return Object.freeze({
+    const namespaceIdentity = Object.freeze({
+      path: parent.path,
+      role,
+      ...admissionEntryIdentity(openedBefore),
+    });
+    const namespaceIdentityHmac = admissionHmac(
+      input.binding_key,
+      input.fixture_id,
+      role,
+      "namespace-identity",
+      schema,
+      namespaceIdentity,
+    );
+    const baselineDescriptors = captureBaselineDescriptors(
+      parent,
+      namespace,
+      namespaceIdentity,
+      namespaceIdentityHmac,
+      input,
+      schema,
+      sharedBaselineContext,
+    );
+    baselineObservationWithinTime(
+      sharedBaselineContext,
+      label,
+      "after-baseline-descriptors",
+    );
+    const result = Object.freeze({
+      baselineDescriptors,
       disposition:
         residualEntries.length === 0
           ? "observed-pristine"
           : "foreign-collision",
       inventory: Object.freeze([...inventoryBefore]),
-      namespaceIdentity: Object.freeze({
-        path: parent.path,
-        role,
-        ...admissionEntryIdentity(openedBefore),
-      }),
+      namespaceIdentity,
       observedEntries: Object.freeze(entryIdentities),
       residualEntries: Object.freeze(residualEntries),
       role,
     });
+    completed = true;
+    return result;
   } catch (error) {
     if (error instanceof ColimaLiveContractFailure) throw error;
     fail(`Colima live ${role} observation was unavailable`, 69);
   } finally {
-    if (descriptor !== undefined) closeSync(descriptor);
+    if (descriptor !== undefined) {
+      closeSync(descriptor);
+      if (completed) {
+        baselineObservationWithinTime(
+          sharedBaselineContext,
+          label,
+          "after-namespace-close",
+        );
+      }
+    }
   }
 }
 
-function captureAdmissionRoots(observation) {
+function captureAdmissionRoots(observation, input, schema, baselineClock) {
   const directories = new Map(
     observation.directories.map((entry) => [entry.role, entry]),
   );
-  return Object.freeze(
+  const now = baselineClock ?? (() => Date.now());
+  const sharedBaselineContext = {
+    now,
+    startedAt: now("pass-start"),
+    totalDescriptors: 0,
+    totalHashedBytes: 0,
+  };
+  const roots = Object.freeze(
     MUTATION_SURFACE_NAMESPACES.map((namespace) =>
       captureAdmissionNamespace(
         directories.get(namespace.directory_role),
         namespace,
+        input,
+        schema,
+        sharedBaselineContext,
       ),
     ),
   );
+  baselineObservationWithinTime(
+    sharedBaselineContext,
+    "Colima live root set",
+    "pass-finish",
+  );
+  return roots;
 }
 
 function admissionInventory(value) {
@@ -1367,7 +1884,43 @@ function admissionRootProjection(root, input, schema) {
     schema,
     root.observedEntries,
   );
+  const baselineRelativeIdentityHmacSha256 = root.baselineDescriptors
+    .map((descriptor) => descriptor.relative_identity_hmac_sha256)
+    .sort();
+  const baselineDescriptors = root.baselineDescriptors
+    .map((descriptor) => ({
+      descriptor_sha256: colimaLiveDigest(colimaLiveBytes(descriptor)),
+      relative_identity_hmac_sha256:
+        descriptor.relative_identity_hmac_sha256,
+    }))
+    .sort((left, right) =>
+      left.relative_identity_hmac_sha256 <
+      right.relative_identity_hmac_sha256
+        ? -1
+        : left.relative_identity_hmac_sha256 >
+            right.relative_identity_hmac_sha256
+          ? 1
+          : 0,
+    );
+  const baselineDescriptorSetHmac = admissionHmac(
+    input.binding_key,
+    input.fixture_id,
+    root.role,
+    "baseline-descriptor-set",
+    schema,
+    {
+      bounds: BASELINE_OBSERVATION_BOUNDS,
+      descriptors: root.baselineDescriptors,
+      namespace_identity_hmac_sha256: namespaceIdentityHmac,
+      schema: "synveda.clean-engine.colima-live-baseline-descriptor-set.v1",
+    },
+  );
   return Object.freeze({
+    baseline_descriptor_set_hmac_sha256: baselineDescriptorSetHmac,
+    baseline_descriptors: deepFreeze(baselineDescriptors),
+    baseline_relative_identity_hmac_sha256: Object.freeze(
+      baselineRelativeIdentityHmacSha256,
+    ),
     disposition: root.disposition,
     namespace_identity_hmac_sha256: namespaceIdentityHmac,
     observed_entry_set_hmac_sha256: observedEntrySetHmac,
@@ -1379,13 +1932,19 @@ function observePreEffectRoots(
   requirements,
   value,
   input,
-  { evidenceClass, markerDisposition = "absent", schema, testCheckpoint },
+  {
+    baselineClock,
+    evidenceClass,
+    markerDisposition = "absent",
+    schema,
+    testCheckpoint,
+  },
 ) {
   validateObservationShape(value, requirements);
   validateBuildInput(input, requirements);
   validateObservationInputBinding(value, input);
   exactProviderRootEntries(input.provider_root, markerDisposition);
-  const first = captureAdmissionRoots(value);
+  const first = captureAdmissionRoots(value, input, schema, baselineClock);
   if (testCheckpoint !== undefined) {
     testCheckpoint("after-first-root-sample");
   }
@@ -1401,7 +1960,7 @@ function observePreEffectRoots(
     fail("Colima live observation changed during pre-effect revalidation", 73);
   }
   exactProviderRootEntries(input.provider_root, markerDisposition);
-  const second = captureAdmissionRoots(value);
+  const second = captureAdmissionRoots(value, input, schema, baselineClock);
   const firstProjection = first.map((root) =>
     admissionRootProjection(root, input, schema),
   );
@@ -1466,7 +2025,7 @@ function observeProviderReservationRoots(
     "Colima live provider reservation state run",
     { privateDirectory: true, revealPath: false },
   );
-  const physicalRoots = captureAdmissionRoots(value);
+  const physicalRoots = captureAdmissionRoots(value, input, options.schema);
   const physicalProjection = physicalRoots.map((root) =>
     admissionRootProjection(root, input, options.schema),
   );
@@ -2277,11 +2836,16 @@ export function observeColimaLivePreEffectRootsForTest(
   value,
   input,
   testCheckpoint = undefined,
+  baselineClock = undefined,
 ) {
   if (testCheckpoint !== undefined && typeof testCheckpoint !== "function") {
     fail("Colima live fixture checkpoint was refused", 64);
   }
+  if (baselineClock !== undefined && typeof baselineClock !== "function") {
+    fail("Colima live fixture baseline clock was refused", 64);
+  }
   return observePreEffectRoots(requirements, value, input, {
+    baselineClock,
     evidenceClass: "fixture-only",
     schema: COLIMA_LIVE_FIXTURE_PRE_EFFECT_ROOT_OBSERVATION_SCHEMA,
     testCheckpoint,

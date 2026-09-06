@@ -462,7 +462,7 @@ eligibility or start authority.
 
 A separate, non-executing live-provider preparation contract is authoritative
 for the next input boundary. Requirements schema
-`synveda.clean-engine.colima-live-requirements.v4` pins the official
+`synveda.clean-engine.colima-live-requirements.v5` pins the official
 Colima 0.10.3 Darwin/arm64 release, Lima 2.2.0 Darwin/arm64 archive and extracted
 wrapper/`limactl` bytes, release guest agent at
 `share/lima/lima-guestagent.Linux-aarch64.gz`, release default template at
@@ -472,10 +472,10 @@ disk image by exact size and digest. The private Lima network baseline is mode
 `--activate=false` and `--port-forwarder grpc`, with
 `LIMA_SSH_PORT_FORWARDER=false` as the derived child setting. Its current
 canonical digest is
-`f08813ed481d42a6ac5f20ff19dffb812efc53705b3d5f73206ee0cccf118aa4`.
+`157bd8b6eaef32ffb57e733bc66420038594f5bb093ede40dcda0cae4770d6a6`.
 It retains the exact v3 digest
 `409bfc2fa03c57d151812c69c395d75c4cf7454f1262d2369f47c97646ebf265`
-only as `legacy_preparation_contract_sha256`. The private observation v4 schema
+only as `legacy_preparation_contract_sha256`. The private observation v5 schema
 binds exact staged paths, bytes, modes,
 parents, the dynamically selected Docker CLI, SSH helpers, state-owner closure
 and macOS probes, a closed environment, exact host build/boot inputs and
@@ -491,25 +491,30 @@ UTF-8 bytes: the root, closed two-byte `/l` segment and pinned longest 80-byte
 Lima Unix-socket suffix total 103 bytes, below Darwin's 104-byte refusal
 threshold. Lexically overlong input is refused before filesystem access and the
 resolved physical path is checked again before traversal; a short alias cannot
-bypass the bound or canonical-path requirement. Pre-effect root observation v4
-no-follow samples each
-complete bounded top-level inventory twice. Its public result exposes only
-namespace and complete-entry-set HMACs plus `observed-pristine` or
-`foreign-collision`; no entry is traversed or adopted. The source disk is a
-preselected local file; the observer downloads nothing and imports no
-process-execution API. Its host record is preparation input, not a live probe
-or admission fact. Public projection v4 contains no raw private provider,
-component or `HOME` path and no fixture or profile identity; the declared OS
-executable paths remain non-private OS-build-bound metadata. V1 through v3
-requirements, observations and root observations plus old or falsely relabelled
-two-target evidence are refused; public projection is generated only as v4.
+bypass the bound or canonical-path requirement. Pre-effect root observation v5
+no-follow recursively samples the exact six-namespace baseline twice. Lima
+home has exactly two baseline descendants, `_config` and
+`_config/networks.yaml`; the other five roots have none. The traversal admits
+at most 64 descendants in aggregate, depth 32 and 64 entries per directory,
+with bounded names, relative identities, link targets, hashed bytes and elapsed
+time. Its public result exposes only each baseline-set HMAC, sorted keyed opaque
+relative identities and descriptor-digest/identity pairs plus
+`observed-pristine` or `foreign-collision`; it exposes no raw name, path,
+target or content. Unexpected descendants are opaque and are never adopted.
+The source disk is a preselected local file; the observer downloads nothing
+and imports no process-execution API. Its host record is preparation input, not
+a live probe or admission fact. Public projection v5 contains no raw private
+provider, component or `HOME` path and no fixture or profile identity; the
+declared OS executable paths remain non-private OS-build-bound metadata. V1
+through v4 requirements, observations, root observations and public projections
+plus falsely relabelled two-target evidence are refused; only v5 is generated.
 
 All three capability bits remain false: preparation cannot authorize execution,
 lifecycle exposure or finalization. The module is not registered with mutation
 state, receipts, cleanup, a lifecycle target or the environment finalizer. Its
 fixture-only seams permit small deterministic files instead of committing the
 official disk image; any future state adapter must accept only the production
-requirements digest. Twenty-four deterministic preparation tests cover
+requirements digest. Twenty-six deterministic preparation tests cover
 pin/schema/generation drift, canonical UTF-8 root-length boundaries, lexical
 and physical overflow, alias refusal, whole-namespace collisions, bounded
 inventory, role/path/environment/HOME/host/file/disk replacement, private
@@ -526,10 +531,10 @@ A new pure provider-adapter registry reserves
 `colima-vz-docker-live-create-v1` and
 `colima-vz-docker-live-cleanup-v1` plus distinct live evidence schema names. The
 create operation contract digest is
-`619f87ed88836eebca0fd38cb7dfb91fb661297df4cc347c9765a0b72d0d099a`;
-cleanup is `5253347dd61e28a0ce6dc8f0e697a98f2ad47cf66a7c667a04d0bd98b95d4793`
+`0039cdbb343dea4de86efd63a4cf6e160d3b4167b46339db201f89a219a61196`;
+cleanup is `d11c5cbdd517c8c99967179c36321a4858452aaf94d8d4a9e2441fb6e42bf1d2`
 and binds the create digest. Registry digest
-`f4663054dc637b4b8511b4877e548dc3d5c9f4b95beb7e4b0ef3a241f122aec6`
+`78ac3e6d877db749eb090660090042ffefb41a3788419f3a1edec09802b18a1b`
 accepts only an exact action, operation kind, operation-contract digest and
 provider-class tuple. It compares all fields after the content-addressed key,
 cannot select either fake class and returns only closed metadata. Create grants
@@ -653,16 +658,16 @@ The state owner projects only content-free slot, close, plan and observation
 digests. Intent candidates remain `provider-create`/
 `requested-not-authorized` with a zero-entry logical prefix. Production intent
 operation kind `colima-live-provider-intent-publication-v1` now has contract
-digest `55b4bdc166aa75b6877bf84c8b7667deb571732fdffc3463bd1c09ad6fbb38e0`;
+digest `737a474bebc1ceb956586a19e848eb7a300ae5fb8ba2750352a2f84dfc59125f`;
 the separate fixture digest is
-`d4586c20e632337fed3c91e7ec8159a721d5d1a3b8164d4ebd91ec3152a7cdd1`.
+`25537c0d763a1df7a088cfbba2bcda001683f03e7190157a09b1c1d7a3f1370e`.
 They authorize only `mutation-journal-v6-inert-intent-only` publication.
 
 The successor `provider-start-decision` uses production operation kind
 `colima-live-provider-start-decision-publication-v1` with contract digest
-`a56c5d8da00a45d6ba5b910fd1aeae73cb418dca08fde9442c0d5f33c89fcdf7`;
+`09a4ffc67a1a94c62317f115c1f8432a8d21967b4192fc893c9b126d155cd69b`;
 the distinct fixture digest is
-`2f34c46886ee2a9e0756b3b0df054ff0c3e8ec99309d59c7ea9b4082a15eece1`.
+`ea9726aef040dafb8ea8a330961894fbbb19b9141ef7d8c3c5ae680ec0513b15`.
 Its publication plan is schema v2 and authorizes only
 `mutation-journal-v6-inert-start-decision-only`. Both contracts bind the exact
 completed intent and allow only `requested-not-executed-not-authorized` from an
@@ -757,26 +762,53 @@ not a PID, PGID, ownership or liveness fact.
 ### Immediate next slice
 
 [ADR-0104](../adr/adr-0104-indivisible-live-provider-effect-generation.md) is
-accepted as the next atomic state design; no process-effect state generation or
-authority exists in the current tree. A deterministic, non-persisted read-only prerequisite projection binds the exact
-deny-only post-decision admission to the accepted sibling-effect predecessor,
-fixed marker and distinct-witness constraints. It records the future atomic
-receipt v6, slot v7, recovery/root v6 and close v8 cut plus the still-unmet
-attempt, complete bounded causal graph, endpoint, recursive filesystem
-inventory and retirement requirements.
-Every authority flag is false; it defines no action, operation kind, contract,
-persisted artifact, publisher, executor, recovery API or production importer.
-Current persisted versions and ADR-0103's terminal v1 no-spawn evidence are
-unchanged, and caller-held projection bytes carry no state provenance.
-Exact source validation transitively loads the current plan/registry/live-
-observation modules, but building the projection performs no observation I/O
-or mutation and creates no new registry authority.
-An iterative descriptor-only preflight completes before upstream validation or
-freezing. It rejects proxies without invoking traps, cycles, depth above 16,
-more than 512 value occurrences, more than 64 entries in one container, and
-canonical UTF-8 above 64 KiB including the newline. Shared acyclic aliases are
-permitted and counted per occurrence. All such failures are typed and
-content-free; existing valid projection digests remain unchanged.
+accepted as the next atomic state design. Its pure sibling-effect boundary is
+now implemented, but no process-effect state generation or production
+authority exists. Production operation kind
+`colima-live-provider-effect-v1` has contract digest
+`e57ab31606d0cf6e33a0fd45cc86335a6ca1288d9beb28839aeb45225f24df63`.
+Its authority model is `production-deny-only-no-invoker`, every capability is
+false, and it is absent from state, registry, lifecycle, executor, recovery and
+finalizer modules. The separate fixture-only contract digest is
+`c0ec4548243b1e65ca71babb822290afb1650f2801be4e0da7a25c8ea832c087`;
+the two operation kinds, schemas and evidence classes cannot cross.
+
+The earlier non-persisted prerequisite projection remains a separate inert
+review artifact. Its production/fixture digests are
+`ae3d98ae3d4eee54ef0094874d73fb63f75b817a9a4005868ee22074d12202e7`
+and `58241bcd4d95b5f74968fdca1880becd0c6bee1a10a060d49e553e950dc7e853`.
+It defines no action, operation kind or contract, retains its independent
+512-occurrence preflight, and is consumed by neither state nor the pure effect
+grammar. It is not a compatibility or execution path.
+
+The pure fixture grammar binds the exact completed decision and trusted v5
+recursive baseline through a distinct witness, fixed marker, start authority
+and one-shot attempt. It closes four authenticated roles, four causal edges at
+depth two, four endpoint/socket identities plus the private Docker-context
+identity and bytes, a
+quiescence fence, two byte-equal paged recursive inventories across all six
+namespaces, intra-namespace hard-link groups, exact directory-scaffolding
+capacity, derived cleanup, paged progress, cleanup settlement, terminal receipt
+and marker retirement. Six closed histories cover pre-attempt, authority-only,
+attempted residual, uncertain, normal and rich paged/hard-link outcomes. The 24
+deterministic tests mutate every event and descriptor field, exercise duplicate
+dispatch-like prefixes, paging, alias and maximum-shape failures. The boundary-
+owned module has no direct filesystem, process, network, state or executor
+import, and a tripwire proves construction and validation invoke no observation
+I/O.
+
+An iterative closed-data preflight runs before validation or freezing. It
+rejects proxies without invoking traps, cycles, depth above 16, more than 1,024
+value occurrences, more than 64 entries in one container, and canonical UTF-8
+above 64 KiB including the newline. Shared acyclic aliases are permitted and
+counted per occurrence. Refusals are typed and content-free.
+
+The grammar names receipt v6 and
+`mutation-journal-v7-sibling-effect-only`, but these are not persisted
+generations. Current receipt v5, slot v6, recovery/root v5, close v7 and
+ADR-0103's terminal v1 no-spawn evidence are unchanged. No effect witness is
+published, no process or provider is invoked, no recovery entry point exists,
+and caller-held pure bytes carry no state provenance or branch selection.
 
 A standalone deterministic preparation fixture validates
 the closed four-role causal shape with four repository-owned Node processes:
@@ -793,27 +825,23 @@ the six-namespace inventory, crash recovery or any Colima/Lima/SSH/Engine
 evidence. The recorded execution is Darwin-only; Linux execution remains an
 open evidence requirement.
 
-Implement ADR-0104's sibling effect branch directly after the exact completed
-start decision, never after ADR-0103's terminal no-spawn completion.
-Treat the read-only prerequisite projection only as a closed review input; it does
-not select the branch or authorize publication.
-Use a distinct effect witness published at the fixed provider-root marker
-basename; never reuse the generic mutation-slot inode, ADR-0103's retired marker
-inode or its immutable no-spawn witness. The mutation slot remains journal
-authority and the effect witness is only one-to-one-bound physical exclusion
-evidence.
+Next implement the production-unreachable, state-owned sibling generation
+directly after the exact completed start decision, never after ADR-0103's
+terminal no-spawn completion. It is one indivisible persisted-state hard cut:
+receipt v5 to v6, mutation slot v6 to v7, recovery/root v5 to v6, close v7 to
+v8, and every dependent envelope and digest. Begin with the exact pre-attempt
+owner/recovery path: effect slot, distinct witness, fixed-marker CAS,
+start-authority/attempt fences and zero-receipt retirement. Do not land or read
+a mixed generation.
 
-Keep the marker held across the durable single-use start-attempt fence, sole
-invocation, four-role causal identity, authenticated endpoint evidence,
-complete bounded recursive inventory, exact owned retirement, cleanup
-settlement and its bound terminal receipt. After a possible start, recovery
-never replays invocation or downgrades the generation to not-started. Land the
-receipt, slot, recovery, close, envelope and dependent-digest hard cut
-atomically. Keep the provider unregistered and lifecycle-unexposed until create,
-uncertain-start recovery and complete cleanup all pass. Do not branch through,
-relabel or import the class-closed controlled-background v5 fake. Finalization
-remains blocked until a separately reviewed live environment-manifest schema
-exists.
+Keep the production effect contract deny-only, absent from the adapter registry
+and lifecycle-unexposed. Do not invoke Docker, Colima, Lima or a provider
+process until state publication, physical witness handling, post-attempt
+recovery, cleanup and terminal-receipt paths are complete and independently
+reviewed. Never reuse the generic mutation-slot inode, ADR-0103's retired marker
+inode or its immutable no-spawn witness, and do not branch through, relabel or
+import the class-closed controlled-background v5 fake. Finalization remains
+blocked until a separately reviewed live environment-manifest schema exists.
 
 The first real invocation must use the closed helper `PATH`, explicit provider
 roots, `--mount none`, the receipt-owned disk copy and receipt-private `HOME`.

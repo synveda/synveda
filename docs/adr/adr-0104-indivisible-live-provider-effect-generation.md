@@ -216,12 +216,14 @@ distinct effect-witness, start-authority, start-attempt, role-identity,
 endpoint, recursive-inventory, create-settlement, cleanup-plan,
 cleanup-progress, cleanup-settlement and completion schemas.
 
-The non-authorizing live requirements v4 remain unchanged unless their fields
-or command actually change; a changed requirements contract and every
-dependent digest MUST join the same cut. Every older mixed state is refused
-with reset-and-regenerate guidance. There is no translator, dual reader,
-relabelled evidence or controlled-background compatibility path. This does not
-change Postgres schema epoch 3.
+The non-authorizing live requirements advanced from v4 to v5 because trusted
+pre-effect ownership now binds the exact bounded recursive baseline descriptor
+set rather than only a top-level inventory. Every dependent non-effect contract
+and digest advanced with it. V1 through v4 inputs and old dependent chains are
+refused with reset-and-regenerate guidance. There is no translator, dual
+reader, relabelled evidence or controlled-background compatibility path. This
+does not consume the future persisted-state generation or change Postgres
+schema epoch 3.
 
 This decision grants the live effect no present process execution,
 Docker/Colima/Lima effect, provider-effect recovery, registry capability,
@@ -233,25 +235,46 @@ fixture evidence only. It MUST NOT import or relabel the class-closed
 controlled-background v5 fake, and it cannot establish live provider support
 without separate environment and platform evidence plus independent review.
 
-A deterministic, non-persisted read-only prerequisite projection now binds the exact deny-only
-post-decision admission to this accepted branch shape. It records the terminal
-no-spawn sibling, fixed marker, distinct-witness rule, future one-shot attempt,
-complete bounded causal graph, endpoint, recursive filesystem inventory and
-retirement requirements, and names the
-future receipt v6, slot v7, recovery/root v6 and close v8 schemas as one unmet
-atomic cut. Every authority flag is false. The projection defines no action,
-operation kind, operation contract, persisted artifact, publisher, executor or
-recovery entry point and has no production importer. It does not consume or
-implement the numbered generation: the current receipt v5, slot v6,
-recovery/root v5, close v7 and ADR-0103 v1 no-spawn evidence remain unchanged.
-Caller-held projection bytes are replayable prerequisite data, not state
-provenance or branch selection.
-Its direct dependencies are the schema leaf and the existing process-start
-validator. Exact upstream validation transitively loads the current
-plan/registry/live-observation modules, but the projection build invokes no
-observation I/O or mutation and creates no new registry or effect authority.
+A pure sibling-effect contract now binds the exact deny-only post-decision
+admission to this branch shape. The production
+`colima-live-provider-effect-v1` contract uses
+`production-deny-only-no-invoker` and is pinned to
+`e57ab31606d0cf6e33a0fd45cc86335a6ca1288d9beb28839aeb45225f24df63`;
+every capability is false, event publication is refused, and no state,
+registry, lifecycle, executor or recovery module imports it. A separate
+fixture-only contract, pinned to
+`c0ec4548243b1e65ca71babb822290afb1650f2801be4e0da7a25c8ea832c087`,
+uses a distinct operation kind, schema and evidence class; it exercises the
+pure event grammar and cannot be relabelled as production.
 
-The standalone fixture uses four repository-owned Node processes to exercise
+That fixture grammar closes the distinct witness and fixed marker, one start
+authority and attempt, exactly four authenticated roles and four causal edges
+at depth two, four endpoint/socket identities plus the private Docker-context
+identity and bytes,
+quiescence, two equal paged recursive inventories over the six namespaces,
+the trusted v5 baseline descriptor map, intra-namespace hard-link closure,
+exact directory-scaffolding capacity, derived cleanup, paged progress,
+settlement, terminal receipt and marker retirement. Its six closed histories
+cover pre-attempt, authority-only, residual, uncertain, normal and rich paged
+retirement. The boundary-owned module has no direct filesystem, process or
+network-executor import, and a tripwire proves construction and validation
+invoke no observation I/O.
+
+The pure operation contract names receipt v6 and
+`mutation-journal-v7-sibling-effect-only`, but does not consume or implement
+those persisted generations. Current receipt v5, slot v6, recovery/root v5,
+close v7 and ADR-0103 v1 no-spawn evidence remain unchanged. No effect witness
+is published, no process or provider is invoked, and no recovery entry point is
+implemented. Caller-held pure bytes are replayable contract data, not state
+provenance or branch selection.
+
+The earlier non-persisted prerequisite projection remains a separate inert
+review artifact. It defines no action, operation kind or operation contract,
+retains its own 512-occurrence preflight, and is consumed by neither state nor
+the pure effect grammar. It is not a compatibility or execution path.
+
+The earlier standalone process fixture is separate from the pure event fixture.
+It uses four repository-owned Node processes to exercise
 fsynced pre-spawn causal edges, inherited-IPC-only HMAC keys, fresh private
 endpoint challenges, a recursive durable quiescence fence, actual hostagent
 detach/outer exit, a changed authenticated parent observation and cooperative

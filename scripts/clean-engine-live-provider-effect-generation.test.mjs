@@ -147,7 +147,7 @@ test("production and fixture prerequisite projections are exact and non-authoriz
       evidenceClass: "production-pinned",
       fixtureOnly: false,
       projectionDigest:
-        "1502c4bf0ef93336f2d6c887ed588bd363d1a5b9210508ce496b42a583831853",
+        "ae3d98ae3d4eee54ef0094874d73fb63f75b817a9a4005868ee22074d12202e7",
       schema:
         COLIMA_LIVE_PROVIDER_EFFECT_GENERATION_PREREQUISITE_PROJECTION_SCHEMA,
     },
@@ -155,7 +155,7 @@ test("production and fixture prerequisite projections are exact and non-authoriz
       evidenceClass: "fixture-only",
       fixtureOnly: true,
       projectionDigest:
-        "d9b0745d63b2954296e8e8d4ec38f8e6a69e2f0f60316e708fba650ed8728b20",
+        "58241bcd4d95b5f74968fdca1880becd0c6bee1a10a060d49e553e950dc7e853",
       schema:
         COLIMA_LIVE_FIXTURE_PROVIDER_EFFECT_GENERATION_PREREQUISITE_PROJECTION_SCHEMA,
     },

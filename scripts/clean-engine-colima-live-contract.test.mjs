@@ -141,23 +141,23 @@ test("production live requirements are exact, pinned and execution-disabled", ()
   assert.equal(COLIMA_LIVE_REQUIREMENTS.schema, COLIMA_LIVE_REQUIREMENTS_SCHEMA);
   assert.equal(
     COLIMA_LIVE_REQUIREMENTS_SCHEMA,
-    "synveda.clean-engine.colima-live-requirements.v4",
+    "synveda.clean-engine.colima-live-requirements.v5",
   );
   assert.equal(
     COLIMA_LIVE_OBSERVATION_SCHEMA,
-    "synveda.clean-engine.colima-live-observation.v4",
+    "synveda.clean-engine.colima-live-observation.v5",
   );
   assert.equal(
     COLIMA_LIVE_PUBLIC_PROJECTION_SCHEMA,
-    "synveda.clean-engine.colima-live-public-projection.v4",
+    "synveda.clean-engine.colima-live-public-projection.v5",
   );
   assert.equal(
     COLIMA_LIVE_FIXTURE_PRE_EFFECT_ROOT_OBSERVATION_SCHEMA,
-    "synveda.clean-engine.colima-live-fixture-pre-effect-root-observation.v4",
+    "synveda.clean-engine.colima-live-fixture-pre-effect-root-observation.v5",
   );
   assert.equal(
     COLIMA_LIVE_PRE_EFFECT_ROOT_OBSERVATION_SCHEMA,
-    "synveda.clean-engine.colima-live-pre-effect-root-observation.v4",
+    "synveda.clean-engine.colima-live-pre-effect-root-observation.v5",
   );
   assert.equal(COLIMA_LIVE_REQUIREMENTS.authorizations.execution_authorized, false);
   assert.equal(COLIMA_LIVE_REQUIREMENTS.authorizations.lifecycle_exposure_authorized, false);
@@ -170,6 +170,25 @@ test("production live requirements are exact, pinned and execution-disabled", ()
       (entry) => entry.role,
     ),
     COLIMA_LIVE_MUTATION_SURFACE_ROLES,
+  );
+  assert.equal(
+    COLIMA_LIVE_REQUIREMENTS.mutation_surface.admission_observation,
+    "bounded-no-follow-recursive-baseline-namespace-hmac-v3",
+  );
+  assert.deepEqual(
+    COLIMA_LIVE_REQUIREMENTS.mutation_surface.baseline_observation_bounds,
+    {
+      baseline_descendants_total: 64,
+      directory_entries: 64,
+      elapsed_milliseconds: 900_000,
+      entry_name_bytes: 255,
+      hashed_file_bytes: 16 * 1024 * 1024,
+      namespace_roots: 6,
+      recursive_depth: 32,
+      relative_path_bytes: 8_191,
+      symlink_target_bytes: 4 * 1024,
+      total_hashed_bytes: 256 * 1024 * 1024,
+    },
   );
   assert.deepEqual(
     COLIMA_LIVE_REQUIREMENTS.mutation_surface.namespaces.map((entry) => [
@@ -275,7 +294,7 @@ test("production live requirements are exact, pinned and execution-disabled", ()
   );
   assert.equal(
     COLIMA_LIVE_REQUIREMENTS_SHA256,
-    "f08813ed481d42a6ac5f20ff19dffb812efc53705b3d5f73206ee0cccf118aa4",
+    "157bd8b6eaef32ffb57e733bc66420038594f5bb093ede40dcda0cae4770d6a6",
   );
   assert.equal(validateColimaLiveRequirements(COLIMA_LIVE_REQUIREMENTS), COLIMA_LIVE_REQUIREMENTS);
   assert.ok(Object.isFrozen(COLIMA_LIVE_REQUIREMENTS));
@@ -350,14 +369,14 @@ test("pinned requirements refuse field, provenance, release and authorization dr
   }
 });
 
-test("superseded v1 through v3 preparation generations are refused", (t) => {
-  for (const version of ["v1", "v2", "v3"]) {
+test("superseded v1 through v4 preparation generations are refused", (t) => {
+  for (const version of ["v1", "v2", "v3", "v4"]) {
     const requirements = clone(COLIMA_LIVE_REQUIREMENTS);
     requirements.schema = `synveda.clean-engine.colima-live-requirements.${version}`;
     expectRefusal(() => validateColimaLiveRequirements(requirements));
   }
   const state = fixture(t);
-  for (const version of ["v1", "v2", "v3"]) {
+  for (const version of ["v1", "v2", "v3", "v4"]) {
     const observation = clone(build(state));
     observation.schema = `synveda.clean-engine.colima-live-observation.${version}`;
     expectRefusal(() =>
@@ -667,6 +686,9 @@ test("pre-effect observation binds all six complete mutation namespaces", (t) =>
   );
   for (const entry of result.root_observations) {
     assert.deepEqual(Object.keys(entry).sort(), [
+      "baseline_descriptor_set_hmac_sha256",
+      "baseline_descriptors",
+      "baseline_relative_identity_hmac_sha256",
       "disposition",
       "namespace_identity_hmac_sha256",
       "observed_entry_set_hmac_sha256",
@@ -674,8 +696,46 @@ test("pre-effect observation binds all six complete mutation namespaces", (t) =>
     ]);
     assert.match(entry.namespace_identity_hmac_sha256, /^[0-9a-f]{64}$/u);
     assert.match(entry.observed_entry_set_hmac_sha256, /^[0-9a-f]{64}$/u);
+    assert.match(entry.baseline_descriptor_set_hmac_sha256, /^[0-9a-f]{64}$/u);
+    assert.equal(
+      entry.baseline_relative_identity_hmac_sha256.length,
+      entry.role === "lima-home-namespace" ? 2 : 0,
+    );
+    assert.equal(
+      entry.baseline_descriptors.length,
+      entry.baseline_relative_identity_hmac_sha256.length,
+    );
+    assert.equal(
+      new Set(entry.baseline_relative_identity_hmac_sha256).size,
+      entry.baseline_relative_identity_hmac_sha256.length,
+    );
+    assert.deepEqual(
+      entry.baseline_relative_identity_hmac_sha256,
+      [...entry.baseline_relative_identity_hmac_sha256].sort(),
+    );
+    for (const identity of entry.baseline_relative_identity_hmac_sha256) {
+      assert.match(identity, /^[0-9a-f]{64}$/u);
+    }
+    assert.deepEqual(
+      entry.baseline_descriptors.map(
+        (descriptor) => descriptor.relative_identity_hmac_sha256,
+      ),
+      entry.baseline_relative_identity_hmac_sha256,
+    );
+    for (const descriptor of entry.baseline_descriptors) {
+      assert.deepEqual(Object.keys(descriptor).sort(), [
+        "descriptor_sha256",
+        "relative_identity_hmac_sha256",
+      ]);
+      assert.match(descriptor.descriptor_sha256, /^[0-9a-f]{64}$/u);
+      assert.notEqual(descriptor.descriptor_sha256, "0".repeat(64));
+      assert.ok(Object.isFrozen(descriptor));
+    }
+    assert.notEqual(entry.baseline_descriptor_set_hmac_sha256, "0".repeat(64));
     assert.notEqual(entry.namespace_identity_hmac_sha256, "0".repeat(64));
     assert.notEqual(entry.observed_entry_set_hmac_sha256, "0".repeat(64));
+    assert.ok(Object.isFrozen(entry.baseline_descriptors));
+    assert.ok(Object.isFrozen(entry.baseline_relative_identity_hmac_sha256));
     assert.ok(Object.isFrozen(entry));
   }
   assert.ok(Object.isFrozen(result));
@@ -693,8 +753,145 @@ test("pre-effect observation binds all six complete mutation namespaces", (t) =>
     "PID",
     "PGID",
     "socket",
+    "_config",
+    "networks.yaml",
   ]) {
     assert.equal(serialized.includes(forbidden), false, forbidden);
+  }
+});
+
+test("recursive baseline commitments are keyed, exact and no-follow", (t) => {
+  const keyed = fixture(t);
+  const first = observeColimaLivePreEffectRootsForTest(
+    keyed.requirements,
+    build(keyed),
+    keyed.input,
+  );
+  const reboundInput = cloneInput(keyed.input);
+  reboundInput.binding_key = randomBytes(32);
+  const rebound = observeColimaLivePreEffectRootsForTest(
+    keyed.requirements,
+    buildColimaLiveObservationForTest(keyed.requirements, reboundInput),
+    reboundInput,
+  );
+  for (const [index, root] of first.root_observations.entries()) {
+    const changed = rebound.root_observations[index];
+    assert.notEqual(
+      root.baseline_descriptor_set_hmac_sha256,
+      changed.baseline_descriptor_set_hmac_sha256,
+    );
+    assert.notEqual(
+      root.namespace_identity_hmac_sha256,
+      changed.namespace_identity_hmac_sha256,
+    );
+    if (root.role === "lima-home-namespace") {
+      assert.notDeepEqual(
+        root.baseline_relative_identity_hmac_sha256,
+        changed.baseline_relative_identity_hmac_sha256,
+      );
+    }
+  }
+
+  const mutations = [
+    {
+      name: "nested-addition",
+      mutate(state) {
+        writePrivate(
+          join(state.input.environment.LIMA_HOME, "_config", "unexpected"),
+          Buffer.from("unexpected\n", "utf8"),
+          0o600,
+        );
+      },
+    },
+    {
+      name: "baseline-removal",
+      mutate(state, networkPath) {
+        unlinkSync(networkPath);
+      },
+    },
+    {
+      name: "content-change",
+      mutate(_state, networkPath) {
+        writeFileSync(networkPath, Buffer.from("changed\n", "utf8"));
+      },
+    },
+    {
+      name: "inode-replacement",
+      mutate(state, networkPath) {
+        const bytes = state.componentBytes.get("lima-network-config");
+        unlinkSync(networkPath);
+        writePrivate(networkPath, bytes, 0o600);
+      },
+    },
+    {
+      name: "hard-link-replacement",
+      mutate(state, networkPath) {
+        const source = join(state.external, "network-hard-link-source");
+        writePrivate(
+          source,
+          state.componentBytes.get("lima-network-config"),
+          0o600,
+        );
+        unlinkSync(networkPath);
+        linkSync(source, networkPath);
+      },
+    },
+    {
+      name: "symlink-replacement",
+      mutate(state, networkPath) {
+        const source = join(state.external, "protected-network-target");
+        writePrivate(source, Buffer.from("must-not-be-read\n", "utf8"), 0o600);
+        chmodSync(source, 0o000);
+        unlinkSync(networkPath);
+        symlinkSync(source, networkPath);
+      },
+    },
+  ];
+  for (const mutation of mutations) {
+    const state = fixture(t);
+    const observation = build(state);
+    const networkPath = state.input.component_paths["lima-network-config"];
+    mutation.mutate(state, networkPath);
+    expectRefusal(
+      () =>
+        observeColimaLivePreEffectRootsForTest(
+          state.requirements,
+          observation,
+          state.input,
+        ),
+      undefined,
+    );
+    if (mutation.name === "symlink-replacement") {
+      assert.equal(lstatSync(networkPath).isSymbolicLink(), true);
+    }
+  }
+});
+
+test("recursive baseline elapsed bounds cover final operations and the pass", (t) => {
+  const cases = [
+    { phase: "after-file-close", value: 900_001 },
+    { phase: "pass-finish", value: 900_001 },
+    { phase: "pass-finish", value: -1 },
+  ];
+  for (const example of cases) {
+    const state = fixture(t);
+    const observation = build(state);
+    assert.throws(
+      () =>
+        observeColimaLivePreEffectRootsForTest(
+          state.requirements,
+          observation,
+          state.input,
+          undefined,
+          (phase) => (phase === example.phase ? example.value : 0),
+        ),
+      (error) => {
+        assert.ok(error instanceof ColimaLiveContractFailure);
+        assert.equal(error.exitStatus, 69);
+        assert.match(error.message, /baseline observation exceeded/u);
+        return true;
+      },
+    );
   }
 });
 
@@ -1019,6 +1216,24 @@ test("the preparation observer imports no process execution surface", () => {
     namespaceSource,
     /\b(?:readFileSync|readlinkSync|realpathSync|statSync)\s*\(/u,
   );
+  const baselineStart = source.indexOf("function captureBaselineEntry");
+  const baselineEnd = source.indexOf(
+    "function captureBaselineDescriptors",
+    baselineStart,
+  );
+  assert.ok(baselineStart >= 0 && baselineEnd > baselineStart);
+  const baselineSource = source.slice(baselineStart, baselineEnd);
+  assert.doesNotMatch(
+    baselineSource,
+    /\b(?:readFileSync|realpathSync|statSync)\s*\(/u,
+  );
+  assert.doesNotMatch(
+    baselineSource,
+    /\b(?:chmod|link|mkdir|rename|rm|rmdir|symlink|unlink|writeFile)Sync\s*\(/u,
+  );
+  assert.match(baselineSource, /constants\.O_NOFOLLOW/u);
+  assert.match(baselineSource, /\breadSync\s*\(/u);
+  assert.match(baselineSource, /\breadlinkSync\s*\(/u);
 });
 
 test("input paths, profile and closed environment refuse ambient drift", (t) => {

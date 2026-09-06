@@ -273,7 +273,7 @@ changes, final-name removal, capture failures, and stable validation or
 reconciliation failures still fail closed.
 
 The live-provider preparation module is a separate deny-by-construction input
-boundary, not an extension of the fake. Its v4 production record pins official
+boundary, not an extension of the fake. Its v5 production record pins official
 Colima/Lima/disk bytes, the release guest-agent and default-template layout,
 the private user-v2 network baseline, the non-activating gRPC-forwarder command,
 staged paths, file modes, dynamic helper roles, the exact environment and host
@@ -285,9 +285,12 @@ real `HOME` is exactly an empty receipt-private namespace and is not serialized
 as an environment variable. The private observation binds its directory path
 and identity plus a keyed HMAC; root and public projections expose no raw
 private `HOME` path. Along with Colima cache/home, Docker config, Lima home and
-temp, its complete bounded top-level
-inventory is no-follow sampled twice. The separate root-observation result
-exposes only namespace and entry-set HMACs plus pristine/collision disposition.
+temp, its exact baseline is recursively no-follow sampled twice. Lima home has
+the `_config` and `_config/networks.yaml` descendants; the other five roots are
+empty. The aggregate is bounded to 64 descendants. Public root evidence exposes
+only keyed opaque relative identities, descriptor digests and a set HMAC plus
+the pristine/collision disposition; raw names, paths, targets and content stay
+private.
 The canonical physical provider root is capped at 21 UTF-8 bytes so the closed
 `/l` segment plus the pinned longest Lima Unix-socket suffix totals 103 bytes,
 below Darwin's 104-byte refusal threshold. Overlong lexical input is rejected
@@ -299,9 +302,9 @@ The `/bin/sh` and `/usr/sbin/ioreg` paths are declared exact-OS-build
 trusted-boundary inputs but lack
 individual live identity evidence. Host data remains caller-supplied
 preparation evidence and cannot attest VZ or authorize a process. The observer
-imports no child-process API, refuses v1 through v3 requirements, observations
-and root observations plus old or falsely relabelled two-target evidence, and
-regenerates the public projection only as v4. Every execution, lifecycle and finalization
+imports no child-process API, refuses v1 through v4 requirements, observations,
+root observations and public projections plus falsely relabelled two-target
+evidence, and regenerates only v5. Every execution, lifecycle and finalization
 capability is false.
 
 The live provider-adapter registry is a separate pure selection boundary. It
@@ -344,11 +347,13 @@ projection internally and accepts no caller-supplied plan, projection,
 candidate, prefix, requirements or test hook. It validates state/source,
 rebuilds the full private production observation, revalidates state/source, and
 rebuilds the observation again. The two state snapshots and two observation
-results must match. It no-follow samples all six receipt-owned mutation
-namespaces and their complete bounded top-level inventories. Only the declared
-empty or Lima `_config` baseline is pristine; every additional entry is an
-opaque foreign collision that is neither traversed nor adopted and yields no
-intent or prefix.
+results must match. It recursively samples the exact six receipt-owned
+mutation-namespace baselines without following links, subject to the contract's
+aggregate descendant, per-directory, depth, name, byte and elapsed-time bounds.
+Five namespaces must be empty; Lima home must contain exactly `_config` and
+`_config/networks.yaml`. Every unexpected or replaced descendant is an opaque
+foreign collision that is neither followed nor adopted and yields no intent or
+prefix.
 
 The publisher obtains every admission internally. It first establishes a
 canonical pristine-namespace baseline, then requires exact equality immediately
@@ -391,28 +396,41 @@ foreign collision produces no candidate. Its logical supervisor label is not a
 PID or PGID. The admission is not persisted, has no operation kind or registry
 entry, and the only exposed authorization function unconditionally refuses it.
 
-The successor effect-generation prerequisite projection is deterministic,
-non-persisted, read-only and non-authorizing. It binds the exact admission to the accepted
-sibling branch, terminal no-spawn exclusion, fixed marker, distinct future
-witness and unmet atomic generation/attempt/complete-causal-graph/endpoint/
-filesystem-inventory/retirement requirements. Every authority flag is false. It exposes no action, operation
-kind, operation contract, publisher, executor or recovery entry point, and no
-production authority surface imports it. The future receipt v6, slot v7,
-recovery/root v6 and close v8 names are requirements only; current state
-versions and ADR-0103 v1 evidence remain unchanged. Serialized projection bytes
-are replayable data and never state provenance.
-Exact validation transitively loads the current plan/registry/live-observation
-modules. A filesystem tripwire proves projection construction invokes none of
-the observation module's file operations; no mutation or new registry
-authority is created.
+A pure sibling-effect boundary now binds the exact admission to ADR-0104's
+accepted branch. Production operation kind `colima-live-provider-effect-v1`
+uses `production-deny-only-no-invoker`: every capability is false, event
+publication is refused, and no production state, registry, lifecycle, executor
+or recovery surface imports it. The separate fixture-only operation kind cannot
+be relabelled across that boundary.
+
+The fixture grammar binds the fixed marker and distinct witness, start authority
+and attempt, exact four-role causal graph, four endpoint/socket identities and
+Docker context, quiescence, two equal paged recursive inventories over the six
+namespaces, trusted v5 baseline descriptors, intra-namespace hard-link closure,
+exact directory-scaffolding capacity, derived cleanup, terminal receipt and
+marker retirement. The boundary-owned module has no direct filesystem,
+process, network, state or executor import, and a tripwire proves construction
+and validation invoke no observation I/O. This in-memory event fixture is
+distinct from the earlier four-process causal fixture.
+
+Receipt v6 and `mutation-journal-v7-sibling-effect-only` are grammar names only;
+current receipt v5, slot v6, recovery/root v5, close v7 and ADR-0103 v1 evidence
+remain unchanged. No effect witness is persisted, no provider process is
+invoked and no recovery API exists. Serialized pure bytes are replayable data,
+never state provenance or branch selection.
+
+The earlier non-persisted prerequisite projection remains a separate inert
+review artifact. It defines no action, operation kind or contract, retains its
+own 512-occurrence preflight, and is consumed by neither state nor the pure
+effect grammar.
 
 Before upstream validation or freezing, an iterative descriptor-only preflight
 rejects every root or nested proxy without invoking its traps, rejects ancestor
-cycles, and bounds the graph to depth 16 from root depth zero, 512 value
+cycles, and bounds the graph to depth 16 from root depth zero, 1,024 value
 occurrences, 64 entries per container and 64 KiB of canonical UTF-8 including
 the terminal newline. Repeated acyclic aliases remain valid but count once per
 occurrence. Every refusal is a content-free typed configuration failure; valid
-projection bytes and digests are unchanged. These input-safety bounds grant no
+closed values retain their canonical bytes and digests. These input-safety bounds grant no
 state or effect authority.
 
 The successor no-spawn reservation is a cooperative same-UID exclusion

@@ -3,6 +3,9 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
+  colimaLiveLimaNetworkConfigBytesForTest,
+} from "../deploy/compose/scripts/clean-engine-colima-live-contract.mjs";
+import {
   COLIMA_LIVE_COMPLETED_PROVIDER_START_DECISION_PROJECTION_SCHEMA,
   COLIMA_LIVE_FIXTURE_COMPLETED_PROVIDER_START_DECISION_PROJECTION_SCHEMA,
   COLIMA_LIVE_FIXTURE_PROCESS_START_EFFECT_CANDIDATE_SCHEMA,
@@ -21,6 +24,7 @@ import {
   validateColimaLiveProviderProcessStartEffectFreshAdmissionStructure,
 } from "../deploy/compose/scripts/clean-engine-live-provider-process-start.mjs";
 import {
+  cleanEngineLiveBaselineNetworkConfigBytesFixture,
   cleanEngineLiveProviderProcessStartFreshAdmissionFixture,
   cleanEngineLiveProviderProcessStartRootObservationFixture,
   cleanEngineLiveProviderProcessStartSourceFixture,
@@ -53,26 +57,30 @@ function candidateExpectation(fixture) {
 }
 
 test("production and fixture post-decision admissions are exact and deny only", () => {
+  assert.deepEqual(
+    cleanEngineLiveBaselineNetworkConfigBytesFixture(),
+    colimaLiveLimaNetworkConfigBytesForTest(),
+  );
   const variants = [
     {
       admissionDigest:
-        "0b0bd8f1fc99cf810d95b3479ac27ebd0634c8e51b33e29298d9c5839c44330d",
+        "ff50b902b7760a847432e7b3e2b94b564f20626c564474c27ee05e3b235d6683",
       candidateDigest:
-        "c4ac51178f790474757272b3db135909115e6cfd8a5350d95a5d279b81509f04",
+        "a44975399650ccd041c48f2736e5d5f673bcb5cfab44c3aa858e967d847b6fa6",
       evidenceClass: "production-pinned",
       fixture: cleanEngineLiveProviderProcessStartFreshAdmissionFixture(false),
       projectionDigest:
-        "76dda56f784424638e364c9166d344b8096c010958c9925bc3129ef5a27d12cc",
+        "4a3d70d1e314591dad65a36269e098ca853d0d7471e542637930018578d11fc5",
     },
     {
       admissionDigest:
-        "79b8e2155a2ad2b23c273c062eab575d3883756773b1dfb36600471660d7b68c",
+        "ab23074b61cc7fd6ecc9474a6db5bd260bbae771581915bfe6a2a513ae19aba6",
       candidateDigest:
-        "7d72b09204afa05eb399dbf79460802e2c08f5d7accaa83293ec7a010d74b301",
+        "37b4424cde612cead877c1b9d0893d2d65b303c3fbefbf7d08f6b2b0ecad4c49",
       evidenceClass: "fixture-only",
       fixture: cleanEngineLiveProviderProcessStartFreshAdmissionFixture(true),
       projectionDigest:
-        "9e86655821cbeb346997a63b9579f530b53bd28c435ad5547f39837822b1054f",
+        "4e0ecbb120403b408d7eb9c8c19fa904cd81007cbae4b9724bf4f34c10e4b009",
     },
   ];
   assert.equal(
@@ -235,6 +243,21 @@ test("fresh pristine namespaces yield only a false-authority candidate", () => {
       cleanEngineLiveProviderProcessStartFreshAdmissionFixture(fixtureOnly);
     const expected = candidateExpectation(fixture);
     const candidate = fixture.admission.process_start_effect_candidate;
+    const changedRootObservation = clone(fixture.rootObservation);
+    const limaRoot = changedRootObservation.root_observations.find(
+      (root) => root.role === "lima-home-namespace",
+    );
+    limaRoot.baseline_descriptors[0].descriptor_sha256 = "0".repeat(64);
+    assert.throws(
+      () =>
+        buildColimaLiveProviderProcessStartEffectFreshAdmissionStructure({
+          completedStartDecisionProjection:
+            fixture.completedStartDecisionProjection,
+          rootObservation: changedRootObservation,
+          source: fixture.source,
+        }),
+      /baseline descriptor was refused/u,
+    );
     const falseFields = Object.keys(candidate).filter((field) =>
       field.endsWith("_authorized") || field === "lifecycle_exposed",
     );

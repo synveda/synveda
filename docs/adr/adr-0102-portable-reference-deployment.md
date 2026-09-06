@@ -220,18 +220,21 @@ controller/host-agent fixture ancestry, controlled environment and private
 root layout. Its module exports no `COLIMA_LIVE_*` contract, host validator or
 live-start authorizer, so the two-role fake cannot be substituted for a live
 provider boundary. A separate
-`synveda.clean-engine.colima-live-requirements.v4` record now pins
+`synveda.clean-engine.colima-live-requirements.v5` record now pins
 the official Darwin/arm64 release bytes, selected extracted Lima runtime files
 and Colima-core 0.10.4 arm64 Docker disk image. The staged closure uses Lima's
 release guest-agent and default-template locations, a mode-0600 user-v2 network
 baseline with gateway `192.168.5.2`, `--activate=false` and the gRPC port
-forwarder. Its private observation v4 closes staged and dynamic helper
+forwarder. Its private observation v5 closes staged and dynamic helper
 identities, a toolchain-only environment, exact host build/boot inputs, command
 expansion and distinct source/receipt-owned disk files. Six receipt-owned
 mutation namespaces isolate Colima cache/home, Docker config, Lima home,
 `HOME`, and temporary files. `HOME` is the empty private `h` namespace; Lima
-home has only `_config`. Each complete bounded top-level inventory is sampled
-twice with no-follow metadata and HMAC-projected as pristine or collision.
+home has the exact `_config` and `_config/networks.yaml` baseline descendants.
+Each exact baseline is recursively sampled twice without following links under
+a 64-descendant aggregate bound. Public evidence contains only keyed opaque
+relative identities, descriptor digests and a set HMAC; raw names, paths,
+targets and content remain private.
 The canonical physical provider root is limited to 21 UTF-8 bytes. Together
 with the closed two-byte `/l` segment and pinned longest 80-byte Lima socket
 suffix, this stays at 103 bytes and below Darwin's 104-byte refusal threshold.
@@ -239,9 +242,9 @@ The lexical input is bounded before filesystem access and the resolved physical
 path is bounded again before traversal; a symlink alias remains noncanonical.
 `/bin/sh` and `/usr/sbin/ioreg` remain explicit exact-OS-build trusted inputs,
 not live per-file observations. It performs no process execution, and its host
-data is preparation input rather than a live probe. V1 through v3 requirements,
-observations and root observations plus old or falsely relabelled two-target
-evidence are refused; public projection is generated only as v4. Execution,
+data is preparation input rather than a live probe. V1 through v4 requirements,
+observations, root observations and public projections plus falsely relabelled
+two-target evidence are refused; only v5 is generated. Execution,
 lifecycle exposure and
 finalization remain false, and no receipt, lifecycle or finalizer path accepts
 it. Neither contract is Docker, Colima or supported lifecycle evidence.

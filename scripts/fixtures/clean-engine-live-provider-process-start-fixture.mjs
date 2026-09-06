@@ -7,9 +7,12 @@ import {
   buildColimaLiveProviderProcessStartEffectFreshAdmissionStructure,
 } from "../../deploy/compose/scripts/clean-engine-live-provider-process-start.mjs";
 import {
+  cleanEngineLiveBaselineNetworkConfigBytesFixture,
   cleanEngineLiveProviderStartFreshAdmissionFixture,
   cleanEngineLiveProviderStartFreshRootObservationFixture,
 } from "./clean-engine-live-provider-start-decision-fixture.mjs";
+
+export { cleanEngineLiveBaselineNetworkConfigBytesFixture };
 
 export function cleanEngineLiveProviderProcessStartSourceFixture(
   fixtureOnly = false,

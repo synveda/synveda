@@ -34,11 +34,11 @@ import {
 } from "../deploy/compose/scripts/clean-engine-colima-live-contract.mjs";
 
 const CREATE_CONTRACT_SHA256 =
-  "619f87ed88836eebca0fd38cb7dfb91fb661297df4cc347c9765a0b72d0d099a";
+  "0039cdbb343dea4de86efd63a4cf6e160d3b4167b46339db201f89a219a61196";
 const CLEANUP_CONTRACT_SHA256 =
-  "5253347dd61e28a0ce6dc8f0e697a98f2ad47cf66a7c667a04d0bd98b95d4793";
+  "d11c5cbdd517c8c99967179c36321a4858452aaf94d8d4a9e2441fb6e42bf1d2";
 const REGISTRY_SHA256 =
-  "f4663054dc637b4b8511b4877e548dc3d5c9f4b95beb7e4b0ef3a241f122aec6";
+  "78ac3e6d877db749eb090660090042ffefb41a3788419f3a1edec09802b18a1b";
 
 function clone(value) {
   return structuredClone(value);
