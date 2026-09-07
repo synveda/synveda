@@ -1,0 +1,19 @@
+x-synveda-browser-build-proxy-closure: &synveda-browser-build-proxy-closure
+  HTTP_PROXY: ""
+  http_proxy: ""
+  HTTPS_PROXY: ""
+  https_proxy: ""
+  NO_PROXY: ""
+  no_proxy: ""
+  FTP_PROXY: ""
+  ftp_proxy: ""
+  ALL_PROXY: ""
+  all_proxy: ""
+
+services:
+  browser-acceptance:
+    build:
+      context: ../..
+      dockerfile: deploy/compose/browser/Dockerfile
+      args:
+        <<: *synveda-browser-build-proxy-closure

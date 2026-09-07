@@ -533,6 +533,8 @@ function environment(state, extra = {}) {
           SYNVEDA_POSTGRES_IMAGE: `registry.lifecycle.example/synveda/postgres@${DIGEST}`,
           SYNVEDA_KEYCLOAK_IMAGE: `registry.lifecycle.example/synveda/keycloak@${DIGEST}`,
           SYNVEDA_CADDY_IMAGE: `registry.lifecycle.example/synveda/proxy@${DIGEST}`,
+          SYNVEDA_BROWSER_IMAGE:
+            `registry.lifecycle.example/synveda/browser-acceptance@${DIGEST}`,
         }
       : {}),
     ...extra,
@@ -943,7 +945,7 @@ test("acceptance up proves initial absence atomically and ordinary up stays reru
   }
 });
 
-test("acceptance up refuses present assets before build and is development-only", () => {
+test("acceptance up refuses present assets and reference absence remains browser-scoped", () => {
   const state = fixture();
   try {
     const present = run(
@@ -965,7 +967,10 @@ test("acceptance up refuses present assets before build and is development-only"
     prepareReferenceFixture(reference);
     const refused = run(reference, "up", {}, ["--initial-assets", "absent"]);
     assert.equal(refused.status, 64, refused.stderr);
-    assert.match(refused.stderr, /restricted to suffixed development acceptance projects/);
+    assert.match(
+      refused.stderr,
+      /initial absence requires a suffixed development or reference browser-acceptance project/,
+    );
     assert.equal(existsSync(reference.log), false);
   } finally {
     rmSync(reference.scratch, { recursive: true, force: true });
@@ -1014,6 +1019,39 @@ test("browser acceptance is a clean one-shot whose exact result gates startup", 
   }
 });
 
+test("reference browser acceptance is pull-only and gates smoke after exact success", () => {
+  const state = fixture("reference");
+  try {
+    prepareReferenceFixture(state);
+    const result = run(
+      state,
+      "up",
+      { SYNVEDA_COMPOSE_PROFILES: "demo,browser-acceptance" },
+      ["--initial-assets", "absent"],
+    );
+    assert.equal(result.status, 0, result.stderr);
+    const calls = readFileSync(state.log, "utf8");
+    const absent = calls.indexOf("<--state> <absent>");
+    const up = calls.indexOf(" <up> <--no-build>");
+    const browserUp = calls.indexOf(" <up> <--no-build>", up + 1);
+    const wait = calls.indexOf("docker <container> <wait>", browserUp);
+    const converged = calls.indexOf("<--state> <converged>", wait);
+    const smoke = calls.indexOf("check-runtime-smoke.mjs", converged);
+    assert.ok(
+      absent >= 0 && up > absent && browserUp > up && wait > browserUp &&
+        converged > wait && smoke > converged,
+      calls,
+    );
+    assert.match(calls, /compose\.browser-acceptance\.yaml/);
+    assert.doesNotMatch(calls, /compose\.browser-acceptance\.dev\.yaml/);
+    assert.doesNotMatch(calls, / <build>|docker <context> <show>|docker <buildx>/);
+    assert.match(calls, /<--runtime> <reference>/);
+    assert.match(calls, /<--browser> <true>/);
+  } finally {
+    rmSync(state.scratch, { recursive: true, force: true });
+  }
+});
+
 test("browser acceptance rejects unsafe selectors before Docker mutation", () => {
   const cases = [
     {
@@ -1033,7 +1071,22 @@ test("browser acceptance rejects unsafe selectors before Docker mutation", () =>
         SYNVEDA_COMPOSE_PROFILES: "demo,browser-acceptance",
         SYNVEDA_COMPOSE_PROJECT_SUFFIX: "",
       },
-      diagnostic: /initial absence is restricted to suffixed development acceptance projects/,
+      diagnostic:
+        /initial absence requires a suffixed development or reference browser-acceptance project/,
+    },
+    {
+      extra: {
+        SYNVEDA_COMPOSE_PROFILES: "demo,browser-acceptance",
+        SYNVEDA_POSTGRES_MODE: "external",
+      },
+      diagnostic: /demo profile requires bundled PostgreSQL and bundled OIDC/,
+    },
+    {
+      extra: {
+        SYNVEDA_COMPOSE_PROFILES: "demo,browser-acceptance",
+        SYNVEDA_OIDC_MODE: "external",
+      },
+      diagnostic: /demo profile requires bundled PostgreSQL and bundled OIDC/,
     },
   ];
   for (const testCase of cases) {
@@ -1062,15 +1115,20 @@ test("browser acceptance rejects unsafe selectors before Docker mutation", () =>
 
   const reference = fixture("reference");
   try {
+    prepareReferenceFixture(reference);
     const refused = run(
       reference,
       "up",
-      { SYNVEDA_COMPOSE_PROFILES: "demo,browser-acceptance" },
+      {
+        SYNVEDA_COMPOSE_PROFILES: "demo,browser-acceptance",
+        SYNVEDA_BROWSER_IMAGE: "synveda/browser-acceptance:1.62.1-dev",
+      },
       ["--initial-assets", "absent"],
     );
     assert.equal(refused.status, 64, refused.stderr);
-    assert.match(refused.stderr, /requires development with bundled PostgreSQL and bundled OIDC/);
-    assert.equal(existsSync(reference.log), false);
+    assert.match(refused.stderr, /reference browser acceptance image must use an OCI sha256 digest/);
+    const calls = readFileSync(reference.log, "utf8");
+    assert.doesNotMatch(calls, / <build>| <up>| <down>|docker <volume> <rm>/);
   } finally {
     rmSync(reference.scratch, { recursive: true, force: true });
   }

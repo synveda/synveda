@@ -466,9 +466,8 @@ if [ "$browser_acceptance_profile" = true ]; then
         echo "compose: browser acceptance requires exactly the demo,browser-acceptance profiles" >&2
         exit 64
     }
-    [ "$runtime" = development ] && [ "$postgres_mode" = bundled ] && \
-        [ "$oidc_mode" = bundled ] || {
-        echo "compose: browser acceptance requires development with bundled PostgreSQL and bundled OIDC" >&2
+    [ "$postgres_mode" = bundled ] && [ "$oidc_mode" = bundled ] || {
+        echo "compose: browser acceptance requires bundled PostgreSQL and bundled OIDC" >&2
         exit 64
     }
     case "$action" in
@@ -523,15 +522,22 @@ if [ -n "$suffix" ]; then
     esac
     project=$project-$suffix
 fi
-if [ "$initial_asset_state" = absent ] && {
-    [ "$runtime" != development ] || [ -z "$suffix" ];
-}; then
-    echo "compose: initial absence is restricted to suffixed development acceptance projects" >&2
-    exit 64
+if [ "$initial_asset_state" = absent ]; then
+    [ -n "$suffix" ] || {
+        echo "compose: initial absence requires a suffixed development or reference browser-acceptance project" >&2
+        exit 64
+    }
+    case "$runtime:$browser_acceptance_profile" in
+        development:*|reference:true) ;;
+        *)
+            echo "compose: initial absence requires a suffixed development or reference browser-acceptance project" >&2
+            exit 64
+            ;;
+    esac
 fi
 if [ "$browser_acceptance_profile" = true ]; then
     [ -n "$suffix" ] || {
-        echo "compose: browser acceptance requires a suffixed development acceptance project" >&2
+        echo "compose: browser acceptance requires a suffixed acceptance project" >&2
         exit 64
     }
     if [ "$action" = up ] && [ "$initial_asset_state" != absent ]; then
@@ -1566,6 +1572,12 @@ if [ "$runtime" = reference ]; then
         echo "compose: reference proxy image must use an OCI sha256 digest" >&2
         exit 64
     }
+    if [ "$browser_acceptance_profile" = true ]; then
+        digest_image "$browser_image" || {
+            echo "compose: reference browser acceptance image must use an OCI sha256 digest" >&2
+            exit 64
+        }
+    fi
 fi
 digest_image "$otel_image" || {
     echo "compose: Collector image must use an OCI sha256 digest" >&2
@@ -1758,6 +1770,9 @@ if [ "$demo_profile" = true ]; then
 fi
 if [ "$browser_acceptance_profile" = true ]; then
     set -- "$@" -f "$compose_dir/compose.browser-acceptance.yaml"
+    if [ "$runtime" = development ]; then
+        set -- "$@" -f "$compose_dir/compose.browser-acceptance.dev.yaml"
+    fi
 fi
 old_ifs=$IFS
 IFS=,

@@ -476,10 +476,10 @@ refused rather than migrated or relabelled.
 The manual browser ceremony below remains usable for fixture development but
 cannot be labelled a clean-Engine result.
 
-The dedicated development browser fixture is deliberately a fresh-project
-one-shot, not an ordinary smoke extension. The hosts manager owns at most one
-global block, and ownership includes the exact Compose project. The ordinary
-project and a suffixed acceptance project therefore cannot coexist in that
+The development browser ceremony uses the fixture as a deliberately
+fresh-project one-shot, not an ordinary smoke extension. The hosts manager owns
+at most one global block, and ownership includes the exact Compose project. The
+ordinary project and a suffixed acceptance project therefore cannot coexist in that
 block. First stop the ordinary project, then remove its mapping (or prove it
 already absent):
 
@@ -521,8 +521,8 @@ SYNVEDA_COMPOSE_IPV4_POOL=10.231.45.0/24 \
 
 The target fixes the selected profiles to exactly `demo,browser-acceptance`
 and invokes `up --initial-assets absent`. It refuses the unsuffixed project,
-reference/external-provider modes, every pre-existing exact project container,
-network or volume, and every additional profile. After the normal bundled
+external-provider modes, every pre-existing exact project container, network
+or volume, and every additional profile. After the normal bundled
 graph is healthy, a sandboxed non-root Playwright 1.62.1 container completes
 one authorization-code/PKCE S256 administrator admission and logout. The
 wrapper waits for that exact container to exit zero before the ordinary
@@ -532,7 +532,38 @@ credentials, codes, tokens or cookies. Its sole secret is the mounted demo
 administrator password, which is read through a bounded no-follow descriptor;
 the mutable read and return buffers are zeroed, and the value is never logged
 or captured. A live run must still prove the effective secret uid/mode on each
-supported Docker platform. The target leaves the fresh project running for
+supported Docker platform.
+
+Initial absence covers Docker containers, networks and volumes only. The
+`--if-missing` input generators may reuse already present project-scoped host
+secrets and authority files; operators must review those inputs independently.
+
+The same target can select the reference HTTPS graph. Prepare operator DNS,
+certificate files and all digest-addressed product, PostgreSQL, Keycloak and
+proxy images using the reference procedure below, but set the disposable
+suffix before generating that project's secrets. Also supply the matching
+prebuilt browser image by digest:
+
+```sh
+export SYNVEDA_COMPOSE_RUNTIME=reference
+export SYNVEDA_COMPOSE_PROJECT_SUFFIX=acceptance-browser
+export SYNVEDA_COMPOSE_IPV4_POOL=10.231.45.0/24
+export SYNVEDA_BROWSER_IMAGE="registry.example.invalid/synveda/browser-acceptance@sha256:${BROWSER_IMAGE_SHA256:?set BROWSER_IMAGE_SHA256}"
+make compose-browser-acceptance
+```
+
+The repository does not yet publish a provenance-backed reference browser image
+or completed environment manifest. Those remain prerequisites for a live run,
+not evidence supplied by this selector.
+
+Reference selection never installs a hosts-file block and never selects a
+source build. Replace the documentation-only registry and host values, and do
+not run the command until the exact suffix's secret directory contains the
+browser-trusted reference certificate and key described below. Deterministic
+rendering and fake-lifecycle tests do not prove DNS, TLS, image provenance,
+Keycloak exchange, Chromium execution, or Linux/Docker Desktop parity.
+
+The target leaves the fresh project running for
 inspection. Teardown and disposal must repeat the exact suffix, pool and
 profiles selected by the target:
 
@@ -563,6 +594,12 @@ SYNVEDA_COMPOSE_PROJECT_SUFFIX=acceptance-browser \
 Reinstall the ordinary project's mapping before returning to its default
 lifecycle. A refusal during any handoff requires recovery or inspection; do
 not override it or install a second block manually.
+
+For a reference acceptance project, use the same `compose-down` and confirmed
+`compose-reset` selections with `SYNVEDA_COMPOSE_RUNTIME=reference` and confirm
+`synveda-reference-acceptance-browser`. There is no hosts mapping to remove.
+Never rename, promote or reuse demo-admission volumes as an ordinary reference
+deployment: the successful flow can persist a Synveda administrator grant.
 
 Neither `compose-down` nor confirmed `compose-reset` removes the host-wide
 mapping. For the ordinary unsuffixed project, remove only the helper-owned
@@ -655,8 +692,9 @@ Asset state is explicit: `existing` permits an absent or partial exact project
 so recovery can proceed, `converged` requires every rendered container, network
 and volume plus the closed runtime proxy environment, and `stopped` requires
 containers and networks to be absent. `absent` is narrower: it is accepted only
-for a suffixed development acceptance project and requires all exact project
-containers, networks and volumes to be missing before the first build. A
+for a suffixed development acceptance project or the exact reference
+browser-acceptance selection, and requires all exact project containers,
+networks and volumes to be missing before the first build or pull-only start. A
 deterministic post-create contract
 refusal releases the lifecycle lock so the exact project can be taken down or
 force-recreated; an unavailable, timed-out or otherwise uncertain inspection
@@ -744,7 +782,8 @@ The wrapper owns file and profile selection in this order:
 7. external-provider egress fragments when selected;
 8. `compose.demo.yaml` when `demo` is selected;
 9. `compose.browser-acceptance.yaml` only for the exact fresh browser fixture;
-10. the remaining optional profile fragments.
+10. `compose.browser-acceptance.dev.yaml` for that fixture in development only;
+11. the remaining optional profile fragments.
 
 `make compose-config` runs the complete deterministic matrix without starting
 or pulling images. The accepted profile vocabulary is `semantic`,
@@ -752,7 +791,9 @@ or pulling images. The accepted profile vocabulary is `semantic`,
 `browser-acceptance`; profiles without an implemented service remain
 configuration-only. The demo profile requires both bundled providers, and
 `browser-acceptance` is a fixture-only profile valid only together with `demo`
-under the fresh-project command above.
+under the fresh-project development or reference command above. The common
+browser fragment is build-free; development alone adds
+`compose.browser-acceptance.dev.yaml`.
 
 Bundled PostgreSQL with external OIDC uses the same product image and requires
 an operator-supplied, mode-0600 issuer file plus `SYNVEDA_OIDC_ISSUER`. The

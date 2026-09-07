@@ -262,10 +262,10 @@ test("initial-absence state requires every exact project asset to be absent", ()
   }
 });
 
-test("initial-absence state is restricted to suffixed development acceptance projects", () => {
+test("initial-absence state accepts only suffixed development or reference browser projects", () => {
   const state = fixture();
   try {
-    for (const project of ["synveda-development", "synveda-reference", "synveda-reference-acceptance-assets"]) {
+    for (const project of ["synveda-development", "synveda-reference"]) {
       const refused = run(
         state,
         { FAKE_ASSET_STATE: "none", FAKE_VOLUME_STATE: "none" },
@@ -275,6 +275,20 @@ test("initial-absence state is restricted to suffixed development acceptance pro
       assert.equal(refused.status, 64, refused.stderr);
       assert.match(refused.stderr, /initial absence is restricted/);
     }
+
+    const referenceProject = "synveda-reference-acceptance-assets";
+    const referenceConfig = JSON.parse(readFileSync(state.config, "utf8"));
+    referenceConfig.name = referenceProject;
+    referenceConfig.networks["app-backend"].name = `${referenceProject}_app-backend`;
+    referenceConfig.volumes["postgres-data"].name = `${referenceProject}_postgres-data`;
+    writeFileSync(state.config, JSON.stringify(referenceConfig));
+    const accepted = run(
+      state,
+      { FAKE_ASSET_STATE: "none", FAKE_VOLUME_STATE: "none" },
+      "absent",
+      referenceProject,
+    );
+    assert.equal(accepted.status, 0, accepted.stderr);
   } finally {
     rmSync(state.scratch, { recursive: true, force: true });
   }

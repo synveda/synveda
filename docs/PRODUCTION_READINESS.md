@@ -73,7 +73,11 @@ no live-readiness criterion. Current source does add a pinned, sandboxed,
 non-root Playwright 1.62.1 one-shot with a no-capture route/secret boundary,
 exact PKCE request and callback checks, administrator admission/logout, and a
 fresh-project initial-asset absence gate. Deterministic model, lifecycle and
-injected-browser tests pass; the browser container has not executed and its
+injected-browser tests now select both development HTTP and reference HTTPS;
+the reference row binds exact certificate and digest-image inputs and contains
+no source build. This remains rendered-model and fake-lifecycle evidence: it
+proves no DNS, TLS, container, Keycloak exchange or browser trust and closes no
+readiness criterion. The browser container has not executed and its
 effective mounted-secret ownership has not been proved on a supported Docker
 platform. The source now requires one running embedded `docker` builder at the
 default endpoint and can publish/revalidate a canonical content-free candidate

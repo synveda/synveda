@@ -209,7 +209,7 @@ test("external provider rows reject bundled provider residue", () => {
   );
 });
 
-test("browser acceptance is an exact successful one-shot in its development topology", () => {
+test("browser acceptance is an exact successful one-shot in either bundled runtime", () => {
   const browserRows = [
     ...healthyRows(),
     { Service: "browser-acceptance", State: "exited", ExitCode: 0, Health: "" },
@@ -234,13 +234,17 @@ test("browser acceptance is an exact successful one-shot in its development topo
     ),
   );
 
-  const invalid = smokeArguments(
+  const reference = smokeArguments(
     "reference",
     "https://app.reference.example",
     "https://auth.reference.example/realms/synveda",
   );
-  invalid[invalid.indexOf("false")] = "true";
-  assert.equal(parseArguments(invalid), undefined);
+  reference[reference.indexOf("false")] = "true";
+  assert.ok(parseArguments(reference));
+
+  const external = [...reference];
+  external[external.indexOf("bundled")] = "external";
+  assert.equal(parseArguments(external), undefined);
 });
 
 test("public response bodies are bounded before parsing", async () => {

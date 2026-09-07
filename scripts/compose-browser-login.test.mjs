@@ -51,14 +51,12 @@ const SETTINGS = validateSettings(
   "http://auth.synveda.test:8080/realms/synveda",
 );
 
-function authorizationUrl(overrides = {}, extra = []) {
-  const url = new URL(
-    "http://auth.synveda.test:8080/realms/synveda/protocol/openid-connect/auth",
-  );
+function authorizationUrl(overrides = {}, extra = [], settings = SETTINGS) {
+  const url = new URL(`${settings.issuerOrigin}${settings.authorizationPath}`);
   const values = {
     response_type: "code",
     client_id: "synveda",
-    redirect_uri: "http://app.synveda.test:8080/auth/callback",
+    redirect_uri: settings.callback,
     scope: "openid profile email",
     state: STATE,
     nonce: NONCE,
@@ -73,11 +71,11 @@ function authorizationUrl(overrides = {}, extra = []) {
   return url.href;
 }
 
-function callbackUrl(overrides = {}, extra = []) {
-  const url = new URL("http://app.synveda.test:8080/auth/callback");
+function callbackUrl(overrides = {}, extra = [], settings = SETTINGS) {
+  const url = new URL(settings.callback);
   const values = {
     code: "opaque-code",
-    iss: SETTINGS.issuer,
+    iss: settings.issuer,
     session_state: SESSION_STATE,
     state: STATE,
     ...overrides,
@@ -211,6 +209,31 @@ test("callback, settings and request-origin contracts are exact", () => {
     ["https://app.example:443", "https://auth.example:443/other"],
     ["https://user@app.example", "https://auth.example/realms/synveda"],
   ]) contractFailure(() => validateSettings(app, issuer), "configuration");
+});
+
+test("the same browser contract accepts exact reference HTTPS origins", () => {
+  const settings = validateSettings(
+    "https://app.reference.example",
+    "https://auth.reference.example/realms/synveda",
+  );
+  const authorization = authorizationUrl({}, [], settings);
+  const callback = callbackUrl({}, [], settings);
+  assert.equal(validateAuthorizationUrl(authorization, settings), STATE);
+  assert.equal(validateCallbackUrl(callback, settings, STATE), true);
+  assert.equal(allowedRequest("https://app.reference.example/console/", settings), true);
+  assert.equal(
+    allowedRequest(
+      "https://auth.reference.example/realms/synveda/login-actions/authenticate?session_code=opaque",
+      settings,
+    ),
+    true,
+  );
+  for (const refused of [
+    "http://app.reference.example/console/",
+    "https://app.reference.example:8443/console/",
+    "https://other.reference.example/console/",
+    "https://auth.reference.example/realms/other/login-actions/authenticate",
+  ]) assert.equal(allowedRequest(refused, settings), false);
 });
 
 test("the demo password reader is bounded, no-follow and ownership strict", () => {

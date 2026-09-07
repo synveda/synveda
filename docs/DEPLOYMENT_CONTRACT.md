@@ -37,6 +37,7 @@ compose.keycloak.yaml    bundled Keycloak, isolated database bootstrap and realm
 compose.keycloak-postgres.yaml             bundled shared-cluster ordering/secret bridge
 compose.demo.yaml       optional secret-file-backed target-realm demo identities
 compose.browser-acceptance.yaml             fresh-project no-capture browser PKCE fixture
+compose.browser-acceptance.dev.yaml         development-only browser fixture build
 compose.external-postgres.yaml             external Synveda database egress bridge
 compose.keycloak-external-postgres.yaml    external Keycloak database egress bridge
 compose.external.yaml    external-provider labels, no provider services
@@ -83,10 +84,12 @@ external OIDC omits Keycloak and its database bootstrap entirely.
 
 Optional services use only these profiles: `semantic`, `observability`,
 `apalis-board`, `demo`, `backup-test` and the fixture-only
-`browser-acceptance`. The browser profile is valid only for development with
-both bundled providers, exactly the `demo,browser-acceptance` profile set, a
-suffixed acceptance project and proved initial asset absence; it is not a
-reference runtime service. Apalis execution is activated by the
+`browser-acceptance`. The browser profile is selectable only with both bundled
+providers, exactly the `demo,browser-acceptance` profile set, a suffixed
+acceptance project and proved initial asset absence. Development selects its
+reviewed source build; reference selects a digest-qualified browser image and
+no development build fragment. It is a disposable acceptance client, never a
+core reference service. Apalis execution is activated by the
 explicit `compose.apalis.yaml` fragment, not a profile: that fragment atomically
 changes the one per-kind routing key and starts its dispatcher/executor. The
 configuration gate rejects a routed kind without its services or those
@@ -819,12 +822,15 @@ product processes and Keycloak -> Collector -> optional visibility/external OTLP
 The current additive checkpoint implements the bundled database bootstrap,
 tenant convergence, fail-closed realm convergence, issuer diagnostic and the
 bounded `up`, `smoke`, gateway-only `restart-gateway`, `down` and
-exact-confirmation `reset` lifecycle. It also implements one fresh-project
-browser-acceptance selection that proves every exact project asset absent,
-builds and starts the normal bundled graph, waits for one sandboxed browser
-container to exit zero and then runs the ordinary runtime smoke. Its
-deterministic and injected-flow tests are implementation evidence, not a live
-clean-start/browser acceptance. The external-PostgreSQL bootstrap path
+exact-confirmation `reset` lifecycle. It also implements fresh-project
+browser-acceptance selections for development HTTP and reference HTTPS. Each
+proves every exact project asset absent, starts the normal bundled graph, waits
+for one sandboxed browser container to exit zero and then runs ordinary runtime
+smoke; only development builds from source. Deterministic tests bind the exact
+public and issuer origins, reference certificate and immutable image inputs,
+and the build-free reference graph. They do not execute Docker, DNS, TLS,
+Keycloak or Chromium and are not live clean-start/browser acceptance. The
+external-PostgreSQL bootstrap path
 deliberately stops before runtime startup until authenticated TLS and
 pre-provisioned-provider acceptance are implemented.
 
@@ -871,9 +877,10 @@ requires exactly one empty `NAME=` entry for each name in every container's
 `Config.Env`. Missing, non-empty, malformed and duplicate entries fail with a
 content-free diagnostic. `existing` remains recovery-compatible with an absent
 or partial exact project, while `stopped` requires containers and networks to
-be absent. The separate `absent` state is valid only for a suffixed development
-acceptance project and requires every exact project container, network and
-volume to be missing before the first build.
+be absent. The separate `absent` state is valid for a suffixed development
+acceptance project or the exact reference browser-acceptance selection. It
+requires every exact project container, network and volume to be missing before
+the first build or pull-only reference start.
 
 Development source builds have a separate host-control boundary. A present
 ambient BuildKit, Buildx or Bake selector is refused before any helper or lock,

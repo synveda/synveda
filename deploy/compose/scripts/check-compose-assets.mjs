@@ -115,9 +115,9 @@ if (!/^synveda-(development|reference)(-acceptance-[a-z0-9][a-z0-9-]{0,23})?$/.t
 }
 if (
   args.state === "absent" &&
-  !/^synveda-development-acceptance-[a-z0-9][a-z0-9-]{0,23}$/.test(args.project)
+  !/^synveda-(development|reference)-acceptance-[a-z0-9][a-z0-9-]{0,23}$/.test(args.project)
 ) {
-  fail("initial absence is restricted to a suffixed development acceptance project", 64);
+  fail("initial absence is restricted to a suffixed acceptance project", 64);
 }
 let rawConfig;
 try {

@@ -134,9 +134,7 @@ export function parseArguments(argv) {
   if (!["true", "false"].includes(selection.browser)) return undefined;
   if (
     selection.browser === "true" &&
-    (selection.runtime !== "development" ||
-      selection.postgres !== "bundled" ||
-      selection.oidc !== "bundled")
+    (selection.postgres !== "bundled" || selection.oidc !== "bundled")
   ) return undefined;
   try {
     const app = new URL(selection["app-url"]);

@@ -1476,6 +1476,77 @@ test("browser acceptance renders one sandboxed secret-minimal fixture", () => {
   }
 });
 
+test("reference browser acceptance is HTTPS, digest-only and build-free", () => {
+  const fixture = makeComposeFixture();
+  try {
+    const output = join(fixture.scratch, "reference-browser-acceptance.json");
+    const digest = `sha256:${"1".repeat(64)}`;
+    const browserImage = `registry.compose.example/synveda/browser-acceptance@${digest}`;
+    const result = spawnSync(WRAPPER, ["config", "--output", output], {
+      cwd: ROOT,
+      env: composeEnvironment(fixture, {
+        SYNVEDA_COMPOSE_RUNTIME: "reference",
+        SYNVEDA_POSTGRES_MODE: "bundled",
+        SYNVEDA_OIDC_MODE: "bundled",
+        SYNVEDA_COMPOSE_PROFILES: "demo,browser-acceptance",
+        SYNVEDA_COMPOSE_PROJECT_SUFFIX: "acceptance-browser-test",
+        SYNVEDA_PUBLIC_SCHEME: "https",
+        SYNVEDA_APP_HOST: "app.compose.example",
+        SYNVEDA_AUTH_HOST: "auth.compose.example",
+        SYNVEDA_PRODUCT_IMAGE: `registry.compose.example/synveda/product@${digest}`,
+        SYNVEDA_POSTGRES_IMAGE: `registry.compose.example/synveda/postgres@${digest}`,
+        SYNVEDA_KEYCLOAK_IMAGE: `registry.compose.example/synveda/keycloak@${digest}`,
+        SYNVEDA_CADDY_IMAGE: `registry.compose.example/synveda/proxy@${digest}`,
+        SYNVEDA_BROWSER_IMAGE: browserImage,
+      }),
+      encoding: "utf8",
+    });
+    assert.equal(result.status, 0, result.stderr);
+    const model = JSON.parse(readFileSync(output, "utf8"));
+    const browser = model.services["browser-acceptance"];
+    const expected = {
+      runtime: "reference",
+      postgres: "bundled",
+      oidc: "bundled",
+      demo: true,
+      root: ROOT,
+      runtimeUser: `${fixture.uid}:${fixture.gid}`,
+      browserImage,
+      browserSeccompProfile: realpathSync(
+        join(COMPOSE, "browser/seccomp_profile.json"),
+      ),
+      appUrl: "https://app.compose.example",
+      issuer: "https://auth.compose.example/realms/synveda",
+    };
+    assert.deepEqual(browserAcceptanceFindings(browser, expected), []);
+    assert.equal(model.name, "synveda-reference-acceptance-browser-test");
+    assert.ok(
+      Object.values(model.services).every((service) => service.build === undefined),
+    );
+    assert.deepEqual(model.services.proxy.ports, [
+      { mode: "ingress", target: 80, published: "80", protocol: "tcp" },
+      { mode: "ingress", target: 443, published: "443", protocol: "tcp" },
+    ]);
+
+    const sourceBuild = structuredClone(browser);
+    sourceBuild.build = {
+      context: ROOT,
+      dockerfile: "deploy/compose/browser/Dockerfile",
+      args: { ...CLOSED_CONTAINER_PROXY_ENVIRONMENT },
+    };
+    assert.ok(
+      browserAcceptanceFindings(sourceBuild, expected).includes(
+        "browser acceptance reference row contains a source build",
+      ),
+    );
+    const tagged = structuredClone(browser);
+    tagged.image = "synveda/browser-acceptance:1.62.1-dev";
+    assert.ok(browserAcceptanceFindings(tagged, expected).length > 0);
+  } finally {
+    rmSync(fixture.scratch, { recursive: true, force: true });
+  }
+});
+
 test("Keycloak convergence publishes only after bounded proof and cleanup", () => {
   const source = readFileSync(KEYCLOAK_CONVERGENCE, "utf8");
   assert.deepEqual(keycloakConvergenceFindings(source), []);

@@ -1113,8 +1113,9 @@ function normalizedByteSize(value) {
 
 export function browserAcceptanceFindings(browser, expected) {
   const findings = [];
+  const developmentBuild = expected.runtime === "development";
   const expectedKeys = sorted([
-    "build",
+    ...(developmentBuild ? ["build"] : []),
     "cap_drop",
     "command",
     "cpus",
@@ -1138,7 +1139,7 @@ export function browserAcceptanceFindings(browser, expected) {
     "user",
   ]);
   if (
-    expected.runtime !== "development" ||
+    !["development", "reference"].includes(expected.runtime) ||
     expected.postgres !== "bundled" ||
     expected.oidc !== "bundled" ||
     expected.demo !== true
@@ -1180,13 +1181,17 @@ export function browserAcceptanceFindings(browser, expected) {
     JSON.stringify(browser.tmpfs) !==
       JSON.stringify(["/tmp:rw,noexec,nosuid,nodev,mode=1777,size=64m"])
   ) findings.push("browser acceptance sandbox or resource boundary drifted");
-  if (
-    !sameJson(browser.build, {
-      context: expected.root,
-      dockerfile: "deploy/compose/browser/Dockerfile",
-      args: Object.fromEntries(CONTAINER_PROXY_ENVIRONMENT.map((name) => [name, ""])),
-    })
-  ) findings.push("browser acceptance build boundary drifted");
+  if (developmentBuild) {
+    if (
+      !sameJson(browser.build, {
+        context: expected.root,
+        dockerfile: "deploy/compose/browser/Dockerfile",
+        args: Object.fromEntries(CONTAINER_PROXY_ENVIRONMENT.map((name) => [name, ""])),
+      })
+    ) findings.push("browser acceptance development build boundary drifted");
+  } else if (browser.build !== undefined) {
+    findings.push("browser acceptance reference row contains a source build");
+  }
   if (
     JSON.stringify(secretBindings(browser)) !==
       JSON.stringify(["keycloak_demo_admin_password:keycloak_demo_admin_password"]) ||
@@ -3580,6 +3585,7 @@ export function canonicalComposeFindings(model, expected) {
       "migrate",
       "tenant-convergence",
     ]);
+    if (expected.browser === true) oneShot.add("browser-acceptance");
     for (const [name, service] of Object.entries(services)) {
       if (!oneShot.has(name) && service.restart !== "unless-stopped") {
         findings.push(`${name} lacks the reference restart policy`);
@@ -3825,7 +3831,9 @@ function render(fixture, expected) {
     : "synveda/proxy:2.11.4-dev";
   expected.otelCollectorImage =
     "otel/opentelemetry-collector-contrib:0.159.0@sha256:1f2c54a30e713fac6b3ae77a1ec84010c2007e29ced8ec666214fc2f6739c1cc";
-  expected.browserImage = "synveda/browser-acceptance:1.62.1-dev";
+  expected.browserImage = reference
+    ? `registry.compose.example/synveda/browser-acceptance@${DIGEST}`
+    : "synveda/browser-acceptance:1.62.1-dev";
   expected.browserSeccompProfile = realpathSync(
     join(COMPOSE, "browser/seccomp_profile.json"),
   );
@@ -3941,6 +3949,7 @@ function checkStaticInputs() {
     "compose.keycloak-external-postgres.yaml",
     "compose.demo.yaml",
     "compose.browser-acceptance.yaml",
+    "compose.browser-acceptance.dev.yaml",
     "compose.external.yaml",
     "compose.external-postgres.yaml",
   ].map((name) => readFileSync(join(COMPOSE, name), "utf8"));
@@ -4218,28 +4227,30 @@ export function main() {
       [],
       `development/demo: ${demoFindings.join("; ")}`,
     );
-    const browserExpected = {
-      runtime: "development",
-      postgres: "bundled",
-      oidc: "bundled",
-      demo: true,
-      browser: true,
-    };
-    const browser = render(fixture, browserExpected);
-    const browserFindings = canonicalComposeFindings(browser, browserExpected);
-    assert.deepEqual(
-      browserFindings,
-      [],
-      `development/browser-acceptance: ${browserFindings.join("; ")}`,
-    );
-    assert.deepEqual(
-      render(fixture, browserExpected),
-      browser,
-      "development/browser-acceptance render is not deterministic",
-    );
+    for (const runtime of ["development", "reference"]) {
+      const browserExpected = {
+        runtime,
+        postgres: "bundled",
+        oidc: "bundled",
+        demo: true,
+        browser: true,
+      };
+      const browser = render(fixture, browserExpected);
+      const browserFindings = canonicalComposeFindings(browser, browserExpected);
+      assert.deepEqual(
+        browserFindings,
+        [],
+        `${runtime}/browser-acceptance: ${browserFindings.join("; ")}`,
+      );
+      assert.deepEqual(
+        render(fixture, browserExpected),
+        browser,
+        `${runtime}/browser-acceptance render is not deterministic`,
+      );
+    }
     console.log(
       `canonical Compose static shape validates: ${rows}/8 deterministic provider/runtime rows, ` +
-        "one bundled demo profile, one sandboxed browser-acceptance row, one exact custom development issuer port, role-scoped file secrets, " +
+        "one bundled demo profile, two sandboxed browser-acceptance rows, one exact custom development issuer port, role-scoped file secrets, " +
         "isolated networks, reverse-proxy-only host ports and closed runtime/build proxy injection; " +
         "live clean-start and browser acceptance execution remain pending",
     );

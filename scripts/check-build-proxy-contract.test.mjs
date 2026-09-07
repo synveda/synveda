@@ -323,7 +323,7 @@ test("every deployment Compose build supplies the exact empty proxy arguments", 
   assert.deepEqual(
     files.map(({ path }) => path),
     [
-      "deploy/compose/compose.browser-acceptance.yaml",
+      "deploy/compose/compose.browser-acceptance.dev.yaml",
       "deploy/compose/compose.db-test.yaml",
       "deploy/compose/compose.dev.yaml",
       "deploy/compose/compose.keycloak.dev.yaml",
