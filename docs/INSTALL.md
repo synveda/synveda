@@ -1079,14 +1079,15 @@ not current executable behavior.
 
 `make compose-config` and `make check-deploy` prove static Compose/Helm and
 release-package contracts. The latter includes `make check-release-parity`,
-which rejects unsafe release versions before path construction, packages the
-chart twice and renders the version-matched public product/CloudNativePG image
-pair without a daemon or network. The installer applies the same version
-vocabulary before downloads or temporary paths. `make db-test` proves exact
+which rejects unsafe release versions before path construction, proves the
+exact native five-image workflow plan, packages the chart twice and renders
+the version-matched GHCR product/CloudNativePG pair without a daemon or
+network. The installer applies the same version vocabulary before downloads or
+temporary paths. `make db-test` proves exact
 database bootstrap, preflight, migration, forced RLS and authority drift
-behavior against fresh PostgreSQL fixtures. These checks do not prove artifact
-publication or pulls, a browser login, clean canonical Compose lifecycle,
-backup/restore, upgrade or desktop/Linux parity.
+behavior against fresh PostgreSQL fixtures. These checks do not build an image
+or prove artifact publication or pulls, a browser login, clean canonical
+Compose lifecycle, backup/restore, upgrade or desktop/Linux parity.
 
 The Docker reference may be called validated only after
 `make compose-acceptance`, `make compose-backup`,

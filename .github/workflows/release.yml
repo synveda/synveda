@@ -12,8 +12,8 @@
 #   profile    the transitional, unaccepted Compose artifact retained during
 #              the CPR-45 cutover
 #   chart      version-matched Helm chart archive
-#   images     ghcr.io/synveda/{gateway,postgres,enterprise-postgres},
-#              multi-arch, public
+#   images     ghcr.io/synveda/{gateway,postgres,enterprise-postgres,keycloak,
+#              proxy}, multi-architecture publication targets
 #   SHA256SUMS over every asset above
 #
 # Two targets rather than four: ADR-0065 decision 7. Adding one is a matrix
@@ -259,7 +259,7 @@ jobs:
     timeout-minutes: 60
     env:
       # `docker/build-push-action` uploads a `.dockerbuild` build record as a
-      # workflow artifact per build — six of them across this matrix. They
+      # workflow artifact per build — ten of them across this matrix. They
       # are for the Actions build summary UI and nothing here reads them,
       # but `publish` downloads artifacts and one of these is what failed
       # its first run. Not produced at all is better than filtered later.
@@ -314,6 +314,31 @@ jobs:
           tags: ghcr.io/synveda/enterprise-postgres:${{ needs.version.outputs.version }}-${{ matrix.arch }}
           cache-from: type=gha,scope=enterprise-postgres-${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=enterprise-postgres-${{ matrix.arch }}
+      - name: Bundled Keycloak
+        # The canonical bundled provider is the optimized production-mode
+        # image, including only the reviewed Synveda projection/convergence
+        # helpers. Provider identity remains generic OIDC at the product seam.
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/compose/keycloak/Dockerfile
+          platforms: ${{ matrix.platform }}
+          push: ${{ needs.version.outputs.publish == 'true' }}
+          tags: ghcr.io/synveda/keycloak:${{ needs.version.outputs.version }}-${{ matrix.arch }}
+          cache-from: type=gha,scope=keycloak-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=keycloak-${{ matrix.arch }}
+      - name: Reference proxy
+        # This is not a cosmetic wrapper around Caddy: its Dockerfile removes
+        # the upstream file capability before switching to the reference UID.
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/compose/proxy/Dockerfile
+          platforms: ${{ matrix.platform }}
+          push: ${{ needs.version.outputs.publish == 'true' }}
+          tags: ghcr.io/synveda/proxy:${{ needs.version.outputs.version }}-${{ matrix.arch }}
+          cache-from: type=gha,scope=proxy-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=proxy-${{ matrix.arch }}
 
   publish:
     needs: [version, binaries, bundles, images]
@@ -379,7 +404,7 @@ jobs:
         run: |
           set -euo pipefail
           version="${{ needs.version.outputs.version }}"
-          for image in gateway postgres enterprise-postgres; do
+          for image in gateway postgres enterprise-postgres keycloak proxy; do
             docker buildx imagetools create \
               --tag "ghcr.io/synveda/$image:$version" \
               "ghcr.io/synveda/$image:$version-amd64" \
@@ -420,6 +445,9 @@ jobs:
           Images: \`ghcr.io/synveda/gateway:${{ needs.version.outputs.version }}\`,
           \`ghcr.io/synveda/postgres:${{ needs.version.outputs.version }}\`, and
           \`ghcr.io/synveda/enterprise-postgres:${{ needs.version.outputs.version }}\`.
+          The bundled reference dependencies are
+          \`ghcr.io/synveda/keycloak:${{ needs.version.outputs.version }}\` and
+          \`ghcr.io/synveda/proxy:${{ needs.version.outputs.version }}\`.
           Helm chart: \`synveda-${{ needs.version.outputs.version }}.tgz\`.
 
           See [docs/INSTALL.md](https://github.com/${{ github.repository }}/blob/${GITHUB_REF_NAME}/docs/INSTALL.md).

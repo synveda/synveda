@@ -8,7 +8,9 @@ import {
   composeImageReferences,
   dockerfileBaseImages,
   helmComputedImageReferences,
+  isDigestPinnedExternalImage,
   parseComposeDefaults,
+  releaseWorkflowImageReferences,
   resolveComposeImage,
 } from "./chart-image-discovery.mjs";
 
@@ -161,5 +163,47 @@ test("Dockerfile base discovery sees lowercase, indented and argument-backed sta
   );
   assert.throws(() =>
     dockerfileBaseImages("# escape=`\nFROM example.invalid/base:1\n"),
+  );
+});
+
+test("external Dockerfile bases require a readable tag and full digest", () => {
+  const digest = "a".repeat(64);
+  assert.equal(
+    isDigestPinnedExternalImage(`registry.example/team/base:1.2.3@sha256:${digest}`),
+    true,
+  );
+  for (const reference of [
+    "registry.example/team/base:1.2.3",
+    `registry.example/team/base@sha256:${digest}`,
+    `registry.example/team/base:1.2.3@sha256:${"a".repeat(63)}`,
+    `registry.example/team/base:1.2.3@sha256:${"A".repeat(64)}`,
+    `registry.example/team/base:1.2.3@sha512:${digest}`,
+  ]) {
+    assert.equal(isDigestPinnedExternalImage(reference), false, reference);
+  }
+});
+
+test("release workflow image discovery sees the closed versioned set", () => {
+  const source = ["gateway", "postgres", "enterprise-postgres", "keycloak", "proxy"]
+    .map(
+      (name) =>
+        `          tags: ghcr.io/synveda/${name}:\${{ needs.version.outputs.version }}-\${{ matrix.arch }}`,
+    )
+    .join("\n");
+  assert.deepEqual(releaseWorkflowImageReferences(source), [
+    "ghcr.io/synveda/gateway:<version>",
+    "ghcr.io/synveda/postgres:<version>",
+    "ghcr.io/synveda/enterprise-postgres:<version>",
+    "ghcr.io/synveda/keycloak:<version>",
+    "ghcr.io/synveda/proxy:<version>",
+  ]);
+  assert.deepEqual(
+    releaseWorkflowImageReferences(source.replace("matrix.arch", "matrix.platform")),
+    [
+      "ghcr.io/synveda/postgres:<version>",
+      "ghcr.io/synveda/enterprise-postgres:<version>",
+      "ghcr.io/synveda/keycloak:<version>",
+      "ghcr.io/synveda/proxy:<version>",
+    ],
   );
 });

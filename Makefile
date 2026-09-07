@@ -367,9 +367,10 @@ check-chart-images:
 	node --test scripts/check-chart-images.test.mjs
 	node scripts/check-chart-images.mjs
 
-# CPR-45 / PR-01: validates the release-version boundary, packages the chart
-# twice and renders its exact public product/CNPG image pair. It uses no Docker,
-# registry, cluster or network and therefore makes no pullability claim.
+# CPR-45 / PR-01: validates the release-version boundary and exact five-image
+# workflow plan, packages the chart twice and renders its GHCR product/CNPG
+# pair. It uses no Docker, registry, cluster or network and therefore makes no
+# build or pullability claim.
 check-release-parity:
 	node --test scripts/check-release-parity.test.mjs
 	node scripts/check-release-parity.mjs
@@ -388,7 +389,7 @@ chart-lint:
 # are one runtime; a repeat package cannot retain a removed asset. CPR-44's
 # scratch-HOME test keeps the local KEK exactly when this deployment keeps its
 # volumes, and proves the explicit purge and dry-run paths separately.
-check-deploy: check-release-parity
+check-deploy: check-release-parity check-chart-images
 	node --test scripts/check-deploy-convergence.test.mjs
 	node --test scripts/uninstall.test.mjs
 	node --test scripts/generate-compose-issuer.test.mjs

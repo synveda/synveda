@@ -84,8 +84,8 @@ configuration is not lifecycle support.
 
 The current top-level gaps are deliberately explicit:
 
-- the release workflow does not publish the chart and CNPG-compatible image
-  pair named by Helm as one signed artefact set;
+- no tagged release has published and pull-verified the chart plus the
+  five-image Compose/Helm artifact set; none is signed;
 - no production backup, WAL archive, PITR, restore drill, RPO or RTO exists;
 - Helm can now reference an externally owned local key Secret, but custody,
   KEK rotation and joint database/key restore have not passed a production

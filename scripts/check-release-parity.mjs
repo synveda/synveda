@@ -51,7 +51,7 @@ export function chartParityFindings(cargo, chart, values, helpers, cluster, inst
   }
   const image = topLevelYamlBlock(values, "image");
   if (!image.includes("  repository: ghcr.io/synveda/gateway\n")) {
-    findings.push("chart product image does not use the public GHCR repository");
+    findings.push("chart product image does not use the GHCR publication repository");
   }
   if (!image.includes('  tag: ""\n')) {
     findings.push("chart product image tag does not default to appVersion");
@@ -91,6 +91,20 @@ export function releaseWorkflowFindings(source) {
   }
   const imagesJob = source.slice(source.indexOf("  images:\n"), source.indexOf("\n  publish:\n"));
   const publishJob = source.slice(source.indexOf("  publish:\n"));
+  if (!imagesJob.startsWith("  images:\n    needs: version\n")) {
+    findings.push("release image plan does not depend exactly on resolved version");
+  }
+  if (!publishJob.startsWith("  publish:\n    needs: [version, binaries, bundles, images]\n")) {
+    findings.push("release publication does not await the exact artifact producers");
+  }
+  if (
+    /^    continue-on-error:/m.test(imagesJob) ||
+    /^    continue-on-error:/m.test(publishJob) ||
+    /^    if:/m.test(imagesJob) ||
+    /^    if:/m.test(publishJob)
+  ) {
+    findings.push("release image or publication job may mask a failed prerequisite");
+  }
   if (!imagesJob.includes("    permissions:\n      contents: read\n      packages: write\n")) {
     findings.push("image job lacks scoped package-write permission");
   }
@@ -120,26 +134,140 @@ export function releaseWorkflowFindings(source) {
   if (!source.includes("            synveda-*.tgz\n")) {
     findings.push("chart archive is absent from uploaded bundle artifacts");
   }
-  const cnpg = stepBlock(source, "CloudNativePG PostgreSQL");
-  for (const marker of [
-    "          context: .\n",
-    "          file: deploy/helm/postgres/Dockerfile\n",
-    "          platforms: ${{ matrix.platform }}\n",
-    "          push: ${{ needs.version.outputs.publish == 'true' }}\n",
-    "          tags: ghcr.io/synveda/enterprise-postgres:${{ needs.version.outputs.version }}-${{ matrix.arch }}\n",
-  ]) {
-    if (!cnpg.includes(marker)) {
-      findings.push(`CNPG release build is missing ${marker.trim()}`);
+  const nativeArchitectures = [
+    "          - arch: amd64\n            platform: linux/amd64\n            runs-on: ubuntu-latest\n",
+    "          - arch: arm64\n            platform: linux/arm64\n            runs-on: ubuntu-24.04-arm\n",
+  ];
+  if ((imagesJob.match(/^          - arch:/gm) ?? []).length !== nativeArchitectures.length) {
+    findings.push("release image matrix is not the exact two-architecture contract");
+  }
+  for (const architecture of nativeArchitectures) {
+    if (!imagesJob.includes(architecture)) {
+      findings.push(`release image matrix is missing ${architecture.trim().split("\n")[0]}`);
     }
   }
-  if (!source.includes("for image in gateway postgres enterprise-postgres; do")) {
-    findings.push("multi-architecture manifest join omits a release image");
+  if (
+    !imagesJob.includes("    runs-on: ${{ matrix.runs-on }}\n") ||
+    imagesJob.includes("docker/setup-qemu-action")
+  ) {
+    findings.push("release image matrix is not bound to native runners");
+  }
+  const releaseImages = [
+    ["The product image", "deploy/compose/gateway/Dockerfile", "gateway", null],
+    ["Postgres", "deploy/compose/postgres/Dockerfile", "postgres", "reference"],
+    [
+      "CloudNativePG PostgreSQL",
+      "deploy/helm/postgres/Dockerfile",
+      "enterprise-postgres",
+      null,
+    ],
+    ["Bundled Keycloak", "deploy/compose/keycloak/Dockerfile", "keycloak", null],
+    ["Reference proxy", "deploy/compose/proxy/Dockerfile", "proxy", null],
+  ];
+  if (source.split("uses: docker/build-push-action@v6").length - 1 !== releaseImages.length) {
+    findings.push("release image build set is not the exact five-image contract");
+  }
+  for (const [name, dockerfile, repository, target] of releaseImages) {
+    if (imagesJob.split(`      - name: ${name}\n`).length - 1 !== 1) {
+      findings.push(`${name} release build is not declared exactly once`);
+    }
+    const block = stepBlock(imagesJob, name);
+    const stepKeys = [
+      ...block.matchAll(/^        ([a-z][a-z0-9-]*):[ \t]*(.*?)[ \t]*$/gm),
+    ];
+    if (
+      stepKeys.length !== 2 ||
+      stepKeys[0][1] !== "uses" ||
+      stepKeys[0][2] !== "docker/build-push-action@v6" ||
+      stepKeys[1][1] !== "with" ||
+      stepKeys[1][2] !== ""
+    ) {
+      findings.push(`${name} release build does not use the exact build action boundary`);
+    }
+    const semanticInputs = new Map([
+      ["context", "."],
+      ["file", dockerfile],
+      ...(target === null ? [] : [["target", target]]),
+      ["platforms", "${{ matrix.platform }}"],
+      ["push", "${{ needs.version.outputs.publish == 'true' }}"],
+      [
+        "tags",
+        `ghcr.io/synveda/${repository}:\${{ needs.version.outputs.version }}-\${{ matrix.arch }}`,
+      ],
+    ]);
+    const allowedInputs = new Set([
+      ...semanticInputs.keys(),
+      "cache-from",
+      "cache-to",
+    ]);
+    const actualInputs = [
+      ...block.matchAll(/^          ([a-z][a-z0-9-]*):[ \t]*(.*?)[ \t]*$/gm),
+    ];
+    const actualKeys = actualInputs.map(([, key]) => key);
+    if (
+      actualKeys.some((key) => !allowedInputs.has(key)) ||
+      new Set(actualKeys).size !== actualKeys.length
+    ) {
+      findings.push(`${name} release build has an unexpected or duplicate input`);
+    }
+    for (const [key, value] of semanticInputs) {
+      const matches = actualInputs.filter(([, actualKey]) => actualKey === key);
+      if (matches.length !== 1 || matches[0][2] !== value) {
+        findings.push(`${name} release build has invalid ${key}`);
+      }
+    }
+  }
+  const join = stepBlock(source, "Join the per-architecture image tags");
+  const expectedJoin = [
+    "      - name: Join the per-architecture image tags",
+    "        if: needs.version.outputs.publish == 'true'",
+    "        run: |",
+    "          set -euo pipefail",
+    '          version="${{ needs.version.outputs.version }}"',
+    "          for image in gateway postgres enterprise-postgres keycloak proxy; do",
+    "            docker buildx imagetools create \\",
+    '              --tag "ghcr.io/synveda/$image:$version" \\',
+    '              "ghcr.io/synveda/$image:$version-amd64" \\',
+    '              "ghcr.io/synveda/$image:$version-arm64"',
+    '            docker buildx imagetools inspect "ghcr.io/synveda/$image:$version"',
+    "          done",
+  ].join("\n");
+  if (
+    publishJob.split("      - name: Join the per-architecture image tags\n").length - 1 !== 1 ||
+    join !== expectedJoin
+  ) {
+    findings.push("multi-architecture manifest join is not the exact publish-bound plan");
   }
   if (!source.includes("sha256sum synveda-*.tar.gz synveda-*.tgz > SHA256SUMS")) {
     findings.push("release checksums omit the Helm chart");
   }
   if (!source.includes('"synveda-$version.tgz"; do') || !source.includes("all six assets present")) {
     findings.push("release asset inventory omits the Helm chart");
+  }
+  const release = stepBlock(source, "Publish");
+  const releaseKeys = [
+    ...release.matchAll(/^        ([a-z][a-z0-9-]*):[ \t]*(.*?)[ \t]*$/gm),
+  ];
+  const continuation = String.fromCharCode(92);
+  const releaseCommand = [
+    '          gh release create "${GITHUB_REF_NAME}" ' + continuation,
+    '            --title "Synveda ${GITHUB_REF_NAME}" ' + continuation,
+    "            --notes-file notes.md " + continuation,
+    "            assets/*",
+  ].join("\n");
+  if (
+    publishJob.split("      - name: Publish\n").length - 1 !== 1 ||
+    releaseKeys.length !== 3 ||
+    releaseKeys[0][1] !== "if" ||
+    releaseKeys[0][2] !== "needs.version.outputs.publish == 'true'" ||
+    releaseKeys[1][1] !== "env" ||
+    releaseKeys[1][2] !== "" ||
+    releaseKeys[2][1] !== "run" ||
+    releaseKeys[2][2] !== "|" ||
+    !release.includes("          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}\n") ||
+    !release.trimEnd().endsWith(releaseCommand)
+  ) {
+    findings.push("GitHub Release publication is not the exact failure-propagating boundary");
   }
   return findings;
 }
@@ -342,7 +470,7 @@ export function main() {
   }
   packageAndRenderChart(version);
   console.log(
-    `ok: release version ${version}, chart package and GHCR product/CNPG defaults form one deterministic release plan`,
+    `ok: release version ${version}, five-image workflow, chart package and GHCR product/CNPG defaults form one deterministic release plan`,
   );
 }
 

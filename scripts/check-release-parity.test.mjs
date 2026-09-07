@@ -147,26 +147,101 @@ test("invalid versions are refused before packager or installer mutation", () =>
   }
 });
 
-test("release workflow scopes authority and includes the chart and CNPG image", () => {
+test("release workflow scopes authority and binds the chart plus five images", () => {
   const current = read(".github/workflows/release.yml");
   assert.deepEqual(releaseWorkflowFindings(current), []);
-  for (const mutant of [
+  for (const [index, mutant] of [
     current.replace('version="$INPUT_VERSION"', 'version="${{ inputs.version }}"'),
     current.replace('sh scripts/release-version.sh "$version"', "true"),
     current.replace("permissions:\n  contents: read\n\njobs:", "permissions:\n  contents: write\n\njobs:"),
     current.replace("file: deploy/helm/postgres/Dockerfile", "file: deploy/compose/postgres/Dockerfile"),
     current.replace(
-      "for image in gateway postgres enterprise-postgres; do",
-      "for image in gateway postgres; do",
+      "file: deploy/compose/keycloak/Dockerfile",
+      "file: deploy/compose/gateway/Dockerfile",
+    ),
+    current.replace(
+      "tags: ghcr.io/synveda/proxy:${{ needs.version.outputs.version }}-${{ matrix.arch }}",
+      "tags: ghcr.io/synveda/keycloak:${{ needs.version.outputs.version }}-${{ matrix.arch }}",
+    ),
+    current.replace("- name: Bundled Keycloak", "- name: Omitted Keycloak"),
+    current.replace(
+      "for image in gateway postgres enterprise-postgres keycloak proxy; do",
+      "for image in gateway postgres enterprise-postgres keycloak; do",
+    ),
+    current.replace(
+      "          - arch: arm64\n            platform: linux/arm64\n            runs-on: ubuntu-24.04-arm\n",
+      "",
+    ),
+    current.replace("platform: linux/arm64", "platform: linux/amd64"),
+    current.replace(
+      "          file: deploy/compose/keycloak/Dockerfile\n          platforms:",
+      "          file: deploy/compose/keycloak/Dockerfile\n          target: builder\n          platforms:",
+    ),
+    current.replace(
+      "          file: deploy/compose/gateway/Dockerfile\n          platforms:",
+      "          file: deploy/compose/gateway/Dockerfile\n          target: build\n          platforms:",
+    ),
+    current.replace(
+      "          file: deploy/helm/postgres/Dockerfile\n          platforms:",
+      "          file: deploy/helm/postgres/Dockerfile\n          build-args: CNPG_BASE=evil.example/postgres:latest\n          platforms:",
+    ),
+    current.replace(
+      "      - name: Bundled Keycloak\n",
+      "      - name: Bundled Keycloak\n        if: false\n",
+    ),
+    current.replace("  images:\n    needs: version\n", "  images:\n"),
+    current.replace(
+      "  images:\n    needs: version\n",
+      "  images:\n    needs: version\n    continue-on-error: true\n",
+    ),
+    current.replace(
+      "  images:\n    needs: version\n",
+      "  images:\n    needs: version\n    if: false\n",
+    ),
+    current.replace(
+      "    needs: [version, binaries, bundles, images]",
+      "    needs: [version, binaries, bundles]",
+    ),
+    current.replace(
+      "  publish:\n    needs: [version, binaries, bundles, images]\n",
+      "  publish:\n    needs: [version, binaries, bundles, images]\n    if: always()\n",
+    ),
+    current.replace(
+      "      - name: Join the per-architecture image tags\n        if: needs.version.outputs.publish == 'true'\n",
+      "      - name: Join the per-architecture image tags\n",
+    ),
+    current.replace(
+      '          version="${{ needs.version.outputs.version }}"\n          for image in gateway postgres enterprise-postgres keycloak proxy; do',
+      "          version=latest\n          for image in gateway postgres enterprise-postgres keycloak proxy; do",
+    ),
+    current.replace(
+      '          version="${{ needs.version.outputs.version }}"\n          for image in gateway postgres enterprise-postgres keycloak proxy; do',
+      '          version="${{ needs.version.outputs.version }}"\n          version=latest\n          for image in gateway postgres enterprise-postgres keycloak proxy; do',
+    ),
+    current.replace(
+      '--tag "ghcr.io/synveda/$image:$version"',
+      '--tag "ghcr.io/synveda/$image:latest"',
+    ),
+    current.replace(
+      '"ghcr.io/synveda/$image:$version-arm64"',
+      '"ghcr.io/synveda/$image:$version-amd64"',
     ),
     current.replace("sha256sum synveda-*.tar.gz synveda-*.tgz", "sha256sum synveda-*.tar.gz"),
     current.replace('"synveda-$version.tgz"; do', '"synveda-plugin-$version.tar.gz"; do'),
-  ]) {
-    assert.ok(releaseWorkflowFindings(mutant).length > 0);
+    current.replace(
+      "      - name: Publish\n        if: needs.version.outputs.publish == 'true'\n",
+      "      - name: Publish\n        if: false\n",
+    ),
+    current.replace(
+      '          gh release create "${GITHUB_REF_NAME}" ',
+      "          true ",
+    ),
+  ].entries()) {
+    assert.ok(releaseWorkflowFindings(mutant).length > 0, `mutant ${index}`);
   }
 });
 
-test("workspace and chart default to one versioned public image pair", () => {
+test("workspace and chart default to one versioned GHCR image pair", () => {
   const current = currentChartInputs();
   assert.equal(workspaceVersion(current[0]), "0.2.0");
   assert.deepEqual(chartParityFindings(...current), []);

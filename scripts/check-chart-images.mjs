@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Asserts that every container image we ship or use for a deployment fixture
 // — the canonical Compose graph's, the Helm chart's, the released single-node
-// profile's, and every base image in deployment Dockerfiles — appears in
-// deploy/helm/IMAGES.md, tag included.
+// profile's, the release workflow's, and every base image in deployment
+// Dockerfiles — appears in deploy/helm/IMAGES.md, tag included.
 // Writes nothing, ever.
 //
 // The release profile joined the chart as a surface with OPS-8 (ADR-0065
@@ -33,7 +33,9 @@ import {
   composeImageReferences,
   dockerfileBaseImages,
   helmComputedImageReferences,
+  isDigestPinnedExternalImage,
   parseComposeDefaults,
+  releaseWorkflowImageReferences,
 } from "./chart-image-discovery.mjs";
 
 const INVENTORY = "deploy/helm/IMAGES.md";
@@ -45,6 +47,7 @@ const COMPOSE_DIRECTORY = "deploy/compose";
 const COMPOSE_DEFAULTS = `${COMPOSE_DIRECTORY}/.env.example`;
 const LEGACY_COMPOSE = `${COMPOSE_DIRECTORY}/docker-compose.yml`;
 const CLEAN_ENGINE_STATE = `${COMPOSE_DIRECTORY}/scripts/clean-engine-state.mjs`;
+const RELEASE_WORKFLOW = ".github/workflows/release.yml";
 // The per-architecture TEI pins. They are declared here, in the one place
 // that resolves them, and `synveda init` carries the same table for an
 // installed operator who has no Makefile — so this is where the inventory
@@ -177,11 +180,22 @@ for (const path of DOCKERFILES) {
   const text = read(path);
   try {
     for (const ref of dockerfileBaseImages(text)) {
+      if (!isDigestPinnedExternalImage(ref)) {
+        fail(`${path}: external base image ${ref} is not pinned by tag and full SHA-256 digest`);
+      }
       found.set(ref, `${path} (FROM)`);
     }
   } catch (error) {
     fail(`${path}: ${error?.code ?? "base image could not be resolved"}`);
   }
+}
+
+const releaseWorkflowImages = releaseWorkflowImageReferences(read(RELEASE_WORKFLOW));
+if (releaseWorkflowImages.length !== 5) {
+  fail(`${RELEASE_WORKFLOW}: expected exactly five versioned first-party image builds`);
+}
+for (const ref of releaseWorkflowImages) {
+  found.set(ref, `${RELEASE_WORKFLOW} (tags:)`);
 }
 
 // The clean-Engine registry is a fixture outside the canonical Compose graph,
@@ -221,4 +235,4 @@ if (problems.length) {
   console.error(`\n${problems.length} problem(s); the deployment image surface is not fully inventoried.`);
   process.exit(1);
 }
-console.log(`ok: ${found.size} image reference(s) across canonical Compose, the chart, the release profile and deployment Dockerfiles, all inventoried in ${INVENTORY}.`);
+console.log(`ok: ${found.size} image reference(s) across canonical Compose, the chart, the release profile, the release workflow and deployment Dockerfiles, all inventoried in ${INVENTORY}.`);

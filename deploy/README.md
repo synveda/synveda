@@ -28,9 +28,10 @@ freshness or Skill/Tool advertisement.
   Deployments from the same image, CloudNativePG, optional TEI, ingress and
   external IdP/secret wiring. The CloudNativePG operator is deliberately a
   separately installed cluster dependency. The source release workflow now
-  packages this chart and builds its product and CloudNativePG image
-  coordinates at one application version; no tagged candidate has yet proved
-  publication, authenticated pulls or installation from those artifacts.
+  packages this chart and has one versioned build plan for the product,
+  single-host and CloudNativePG PostgreSQL, optimized Keycloak and reference
+  proxy images. No tagged candidate has yet proved publication, authenticated
+  pulls or installation from those artifacts.
 
 ## Bootstrap boundary
 
@@ -83,10 +84,12 @@ uses `restart: unless-stopped` so a deliberate non-zero critical-task exit is
 visible and restarted. Helm derives its termination grace as the configured
 worker join plus ten seconds.
 
-`make check-release-parity` validates the closed release-version boundary,
-packages the Helm chart twice and renders the exact version-matched public
-product/CloudNativePG image pair without contacting Docker or a registry.
-`make check-deploy` includes that gate, renders both transitional Compose
+`make check-release-parity` validates the closed release-version boundary and
+exact five-image workflow plan, packages the Helm chart twice and renders the
+version-matched GHCR product/CloudNativePG pair without contacting Docker or
+a registry. `make check-chart-images` requires every external deployment-image
+base to carry a readable tag and full SHA-256 digest.
+`make check-deploy` includes both gates, renders both transitional Compose
 manifests and Helm, asserts distinct process commands/credentials and private
 worker probes, packages the release twice and checks the upgrade-shaped
 replacement. The

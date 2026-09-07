@@ -350,8 +350,9 @@ closed assertion before their first RUN and refuse a non-empty upper/lower
 HTTP, HTTPS, NO, FTP or ALL proxy build argument. Recursive image inventory now
 interprets Docker global build arguments and stage aliases in declaration
 order, refuses noncanonical Compose image/build keys and Dockerfile parser
-directives, and covers all deployment Dockerfiles and Compose build callers,
-including the fixture-only pinned
+directives, rejects every external deployment base without a readable tag and
+full SHA-256 digest, and covers all deployment Dockerfiles and Compose build
+callers, including the fixture-only pinned
 Playwright/Chromium 1.62.1 base and its Apache-2.0 package, licence and reviewed
 default-deny sandbox profile.
 
@@ -378,10 +379,14 @@ the mounted secret's effective uid/mode is deployment evidence.
 Release/Helm parity preparation now rejects an unsafe or noncanonical release
 version before it can enter workflow shell source, an archive path, a download
 path or a substitution. The release workflow packages the existing chart and
-is wired to build the CloudNativePG-compatible image alongside the product and
-single-host PostgreSQL images; Helm resolves the product and CloudNativePG
-defaults from the same application version. A daemon-free gate packages the
-chart twice and renders that exact public image pair. No tag, registry, OCI
+has one closed native amd64/arm64 plan for exactly five first-party images:
+product, single-host PostgreSQL, CloudNativePG-compatible PostgreSQL, optimized
+bundled Keycloak and the capability-stripped reference proxy. Helm resolves the
+product and CloudNativePG defaults from the same application version. The
+Playwright image remains a fixture and the Collector an exact upstream input.
+Daemon-free gates prove the five workflow image/Dockerfile/tag tuples, require
+tag-plus-full-digest external Dockerfile bases, package the chart twice and
+render the Helm image pair. No image was built and no tag, registry, OCI
 descriptor, environment manifest, authenticated pull or live Helm install was
 produced, so the release-parity P0 remains open.
 

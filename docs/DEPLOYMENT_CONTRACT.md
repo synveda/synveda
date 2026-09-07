@@ -120,15 +120,19 @@ digest, OCI index digest and accepted platform digests.
 Release versions use one bounded, Kubernetes-label- and OCI-safe SemVer-shaped
 vocabulary and are validated before they can enter a path, substitution,
 download or workflow output. The source release workflow packages the chart
-and is wired to build the product, single-host PostgreSQL and
-CloudNativePG-compatible PostgreSQL
-images under that version. Helm defaults its product and CloudNativePG images
-to the matching public GHCR coordinates and `Chart.appVersion`.
-`make check-release-parity` packages the chart twice and renders the exact
-product/CloudNativePG pair without Docker or network access. This static gate
-does not create the required environment manifest, capture OCI descriptors,
-publish an artifact or prove that an authenticated client can pull or install
-one.
+and has one closed five-image build plan: product, single-host PostgreSQL,
+CloudNativePG-compatible PostgreSQL, optimized bundled Keycloak and the
+capability-stripped reference proxy. Playwright remains an acceptance fixture,
+and the Collector remains an exact upstream dependency rather than a Synveda
+release image. Helm defaults its product and CloudNativePG images to the
+matching GHCR publication coordinates and `Chart.appVersion`.
+`make check-release-parity` proves the five workflow image/Dockerfile/tag
+tuples, packages the chart twice and renders the exact product/CloudNativePG
+pair without Docker or network access. `make check-chart-images` additionally
+rejects any external deployment Dockerfile base that lacks both a readable tag
+and a full SHA-256 digest. These static gates do not create the required
+environment manifest, capture OCI descriptors, build or publish an artifact,
+or prove that an authenticated client can pull or install one.
 
 The clean-Engine development fixture has a narrower pre-mutation candidate
 manifest. Schema version 1 is canonical JSON under a mode-0700 state root

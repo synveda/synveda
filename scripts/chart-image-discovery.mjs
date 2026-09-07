@@ -109,6 +109,24 @@ export function helmComputedImageReferences(source) {
   return references;
 }
 
+export function releaseWorkflowImageReferences(source) {
+  return [
+    ...source.matchAll(
+      /^\s*tags:\s+(ghcr\.io\/synveda\/[a-z0-9]+(?:[._-][a-z0-9]+)*):\$\{\{ needs\.version\.outputs\.version \}\}-\$\{\{ matrix\.arch \}\}\s*$/gm,
+    ),
+  ].map(([, repository]) => `${repository}:<version>`);
+}
+
+export function isDigestPinnedExternalImage(reference) {
+  if (typeof reference !== "string" || /\s/.test(reference)) return false;
+  const match = reference.match(/^([^@]+)@sha256:([0-9a-f]{64})$/);
+  if (match === null) return false;
+  const named = match[1];
+  const slash = named.lastIndexOf("/");
+  const colon = named.lastIndexOf(":");
+  return colon > slash && colon < named.length - 1;
+}
+
 export function dockerfileBaseImages(source) {
   const defaults = new Map();
   const stages = new Set();
@@ -142,12 +160,12 @@ export function dockerfileBaseImages(source) {
     sawFrom = true;
     const [, raw, alias] = from;
     if (!stages.has(raw.toLowerCase())) {
-    const resolved = raw.replace(
-      /\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g,
-      (whole, name) => defaults.get(name) ?? whole,
-    );
-    if (resolved.includes("$")) refuse("dockerfile-base-default-missing");
-    references.push(resolved);
+      const resolved = raw.replace(
+        /\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g,
+        (whole, name) => defaults.get(name) ?? whole,
+      );
+      if (resolved.includes("$")) refuse("dockerfile-base-default-missing");
+      references.push(resolved);
     }
     if (alias !== undefined) {
       const canonicalAlias = alias.toLowerCase();
