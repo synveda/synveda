@@ -15,7 +15,7 @@
 # Carries the gateway, core worker and `synveda` CLI. The install job and an
 # operator's `kubectl exec` use that same immutable artefact (ADR-0102).
 image:
-  repository: synveda/gateway
+  repository: ghcr.io/synveda/gateway
   # Empty means Chart.appVersion — the chart deploys the release it names.
   tag: ""
   pullPolicy: IfNotPresent
@@ -119,8 +119,11 @@ ingress:
 # renders a Cluster for an operator that is already there.
 postgres:
   # Built from deploy/helm/postgres/Dockerfile: the CNPG base plus pgvector.
+  # Empty means ghcr.io/synveda/enterprise-postgres:<Chart.appVersion>, so the
+  # product and database images are one release unit. An operator may still
+  # supply an exact registry reference (preferably a digest) explicitly.
   # Epoch 3 has no queue or graph-extension dependency.
-  image: synveda/enterprise-postgres:17
+  image: ""
   instances: 3
   storage:
     size: 100Gi

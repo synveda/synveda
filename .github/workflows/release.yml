@@ -1,7 +1,7 @@
 # Release (OPS-8, ADR-0065) — turns a tag into something somebody else can
-# install. Everything here is downloaded by `scripts/install.sh`; nothing
-# here is used by `make ci`, which is what makes this the one workflow that
-# can break without a red build to say so.
+# install. `make check-release-parity` validates its version, chart and image
+# plan without a daemon; native image builds, registry joins and publication
+# remain tag/workflow evidence that ordinary CI cannot manufacture.
 #
 # On `v*`:
 #
@@ -11,7 +11,9 @@
 #   console    the CNSL-1 bundle carried by product artifacts
 #   profile    the transitional, unaccepted Compose artifact retained during
 #              the CPR-45 cutover
-#   images     ghcr.io/synveda/{gateway,postgres}, multi-arch, public
+#   chart      version-matched Helm chart archive
+#   images     ghcr.io/synveda/{gateway,postgres,enterprise-postgres},
+#              multi-arch, public
 #   SHA256SUMS over every asset above
 #
 # Two targets rather than four: ADR-0065 decision 7. Adding one is a matrix
@@ -34,8 +36,7 @@ on:
         default: "0.0.0-dev"
 
 permissions:
-  contents: write   # the release and its assets
-  packages: write   # ghcr.io
+  contents: read
 
 jobs:
   version:
@@ -46,17 +47,26 @@ jobs:
       publish: ${{ steps.pick.outputs.publish }}
     steps:
       - uses: actions/checkout@v4
-      - id: pick
-        name: Resolve the version, and refuse a tag the crates disagree with
+      - name: Resolve the version, and refuse a tag the crates disagree with
+        id: pick
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_VERSION: ${{ inputs.version }}
+          TRIGGER_SHA: ${{ github.sha }}
         run: |
           set -euo pipefail
-          if [ "${{ github.event_name }}" = "push" ]; then
+          test "$(git rev-parse HEAD)" = "$TRIGGER_SHA" || {
+            echo "checkout does not match the workflow trigger SHA" >&2
+            exit 1
+          }
+          if [ "$EVENT_NAME" = "push" ]; then
             version="${GITHUB_REF_NAME#v}"
             publish=true
           else
-            version="${{ inputs.version }}"
+            version="$INPUT_VERSION"
             publish=false
           fi
+          sh scripts/release-version.sh "$version"
           # Binaries and profile artifacts are one versioned release contract,
           # even while the profile lifecycle is withdrawn. A tag that disagrees
           # with the workspace would make the artifact set internally
@@ -148,6 +158,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      - uses: azure/setup-helm@v4
+        with:
+          version: v4.2.3
       - run: corepack enable
       - name: The console bundle
         # CNSL-1's static assets. The image has carried them since ADR-0056;
@@ -174,6 +187,8 @@ jobs:
           tar -tzf "synveda-console-$version.tar.gz" | sed -n '1,3p'
       - name: The profile bundle
         run: scripts/package-release.sh "${{ needs.version.outputs.version }}" .
+      - name: The Helm chart
+        run: sh scripts/package-chart.sh "${{ needs.version.outputs.version }}" .
       - name: The Claude Code plugin
         # A marketplace, not a plugin directory — that is the unit Claude
         # Code installs, and dropping a plugin under `~/.claude/plugins/`
@@ -204,7 +219,9 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: bundles
-          path: synveda-*.tar.gz
+          path: |
+            synveda-*.tar.gz
+            synveda-*.tgz
           if-no-files-found: error
 
   # One architecture per **native** runner, never QEMU.
@@ -225,6 +242,9 @@ jobs:
   # `ubuntu-24.04-arm` is free for public repositories, which this is.
   images:
     needs: version
+    permissions:
+      contents: read
+      packages: write
     strategy:
       fail-fast: false
       matrix:
@@ -239,7 +259,7 @@ jobs:
     timeout-minutes: 60
     env:
       # `docker/build-push-action` uploads a `.dockerbuild` build record as a
-      # workflow artifact per build — four of them across this matrix. They
+      # workflow artifact per build — six of them across this matrix. They
       # are for the Actions build summary UI and nothing here reads them,
       # but `publish` downloads artifacts and one of these is what failed
       # its first run. Not produced at all is better than filtered later.
@@ -281,9 +301,25 @@ jobs:
           tags: ghcr.io/synveda/postgres:${{ needs.version.outputs.version }}-${{ matrix.arch }}
           cache-from: type=gha,scope=postgres-${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=postgres-${{ matrix.arch }}
+      - name: CloudNativePG PostgreSQL
+        # The chart data plane is a distinct image contract: CloudNativePG's
+        # base plus the same pgvector/bootstrap surface. It shares the release
+        # version, never the single-host image implementation.
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: deploy/helm/postgres/Dockerfile
+          platforms: ${{ matrix.platform }}
+          push: ${{ needs.version.outputs.publish == 'true' }}
+          tags: ghcr.io/synveda/enterprise-postgres:${{ needs.version.outputs.version }}-${{ matrix.arch }}
+          cache-from: type=gha,scope=enterprise-postgres-${{ matrix.arch }}
+          cache-to: type=gha,mode=max,scope=enterprise-postgres-${{ matrix.arch }}
 
   publish:
     needs: [version, binaries, bundles, images]
+    permissions:
+      contents: write
+      packages: write
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -304,12 +340,12 @@ jobs:
           set -euo pipefail
           cd assets
           ls -lh
-          sha256sum synveda-*.tar.gz > SHA256SUMS
+          sha256sum synveda-*.tar.gz synveda-*.tgz > SHA256SUMS
           cat SHA256SUMS
-      - name: Every asset install.sh asks for is present
-        # The installer fetches three archives by exact name. A release
-        # missing one fails on a tester's laptop, which is the last place
-        # anybody should find out.
+      - name: Every release asset is present
+        # The cross-platform installer set contains five archives; the chart
+        # is a sixth release asset for an operator. Missing either class must
+        # fail before publish.
         run: |
           set -euo pipefail
           version="${{ needs.version.outputs.version }}"
@@ -318,10 +354,11 @@ jobs:
             "synveda-$version-linux-x86_64.tar.gz" \
             "synveda-console-$version.tar.gz" \
             "synveda-profile-$version.tar.gz" \
-            "synveda-plugin-$version.tar.gz"; do
+            "synveda-plugin-$version.tar.gz" \
+            "synveda-$version.tgz"; do
             test -f "assets/$asset" || { echo "missing asset: $asset" >&2; exit 1; }
           done
-          echo "all five assets present"
+          echo "all six assets present"
       # The multi-arch tag, joined from the per-architecture ones `images`
       # pushed. A step here rather than a job of its own: a job would be
       # skipped on a dry run, and a `publish` that needed it would be
@@ -342,7 +379,7 @@ jobs:
         run: |
           set -euo pipefail
           version="${{ needs.version.outputs.version }}"
-          for image in gateway postgres; do
+          for image in gateway postgres enterprise-postgres; do
             docker buildx imagetools create \
               --tag "ghcr.io/synveda/$image:$version" \
               "ghcr.io/synveda/$image:$version-amd64" \
@@ -380,8 +417,10 @@ jobs:
           The binaries are **unsigned and not notarized** — the checksums prove
           a download arrived intact, not who built it (ADR-0065 decision 8).
 
-          Images: \`ghcr.io/synveda/gateway:${{ needs.version.outputs.version }}\`
-          and \`ghcr.io/synveda/postgres:${{ needs.version.outputs.version }}\`.
+          Images: \`ghcr.io/synveda/gateway:${{ needs.version.outputs.version }}\`,
+          \`ghcr.io/synveda/postgres:${{ needs.version.outputs.version }}\`, and
+          \`ghcr.io/synveda/enterprise-postgres:${{ needs.version.outputs.version }}\`.
+          Helm chart: \`synveda-${{ needs.version.outputs.version }}.tgz\`.
 
           See [docs/INSTALL.md](https://github.com/${{ github.repository }}/blob/${GITHUB_REF_NAME}/docs/INSTALL.md).
           NOTES

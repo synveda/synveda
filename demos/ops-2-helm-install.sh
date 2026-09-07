@@ -40,8 +40,8 @@ FIXTURES=demos/fixtures/ops-2
 # The chart's own appVersion, never a copy of it. `values.yaml` leaves
 # `image.tag` empty so `_helpers.tpl` resolves it from appVersion, and this
 # demo builds the image the chart will then ask for by name — with
-# `pullPolicy: Never`, since nothing is published to a registry the kind
-# cluster can reach.
+# `pullPolicy: Never`, since the exact public-coordinate images are loaded
+# directly into kind rather than pulled from a registry.
 #
 # It was `IMAGE_TAG=0.1.0`, hardcoded, and the first version bump after that
 # broke this demo rather than the chart: the pod stayed on
@@ -50,6 +50,8 @@ FIXTURES=demos/fixtures/ops-2
 # artefact, and the failure surfaces ten minutes downstream of the typo.
 IMAGE_TAG=$(awk -F'"' '/^appVersion:/{print $2; exit}' deploy/helm/synveda/Chart.yaml)
 [ -n "$IMAGE_TAG" ] || { echo "no appVersion in deploy/helm/synveda/Chart.yaml" >&2; exit 1; }
+PRODUCT_IMAGE="ghcr.io/synveda/gateway:$IMAGE_TAG"
+CNPG_IMAGE="ghcr.io/synveda/enterprise-postgres:$IMAGE_TAG"
 KEEP=${KEEP:-0}
 REUSE=${REUSE:-0}
 SECRET_SCRATCH=""
@@ -118,11 +120,11 @@ kubectl config use-context "kind-$CLUSTER" >/dev/null
 # around a CI-compiled binary: the point of this test is that *this*
 # artefact serves (ADR-0062 decision 9).
 echo "==> building the product image (this is the slow part; layers cache)"
-docker build -t "synveda/gateway:$IMAGE_TAG" -f deploy/compose/gateway/Dockerfile .
+docker build -t "$PRODUCT_IMAGE" -f deploy/compose/gateway/Dockerfile .
 echo "==> building the enterprise Postgres image (CNPG base + pgvector)"
-docker build -t synveda/enterprise-postgres:17 -f deploy/helm/postgres/Dockerfile .
+docker build -t "$CNPG_IMAGE" -f deploy/helm/postgres/Dockerfile .
 echo "==> loading both into the cluster"
-kind load docker-image --name "$CLUSTER" "synveda/gateway:$IMAGE_TAG" synveda/enterprise-postgres:17
+kind load docker-image --name "$CLUSTER" "$PRODUCT_IMAGE" "$CNPG_IMAGE"
 # Two multi-stage Rust builds leave a build cache the size of the images
 # themselves, on a runner that then has to hold a Postgres cluster's
 # volumes. Reclaiming it is free here and is the difference between a

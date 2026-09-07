@@ -17,7 +17,7 @@ metadata:
     {{- include "synveda.labels" . | nindent 4 }}
 spec:
   instances: {{ .Values.postgres.instances }}
-  imageName: {{ .Values.postgres.image }}
+  imageName: {{ include "synveda.postgresImage" . }}
   enableSuperuserAccess: true
 
   bootstrap:

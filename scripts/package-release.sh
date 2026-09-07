@@ -21,6 +21,10 @@ cd "$(dirname "$0")/.."
 version="${1:?usage: package-release.sh <version> <output-dir>}"
 outdir="${2:?usage: package-release.sh <version> <output-dir>}"
 
+# This value becomes a directory name, an archive name and a sed replacement.
+# Refuse traversal and metacharacters before deriving any of those paths.
+sh scripts/release-version.sh "$version"
+
 # The compose file is the artefact this profile *is*, so a placeholder that
 # survived substitution, or a build stanza that crept in from the dev file,
 # has to fail here rather than on a tester's laptop.

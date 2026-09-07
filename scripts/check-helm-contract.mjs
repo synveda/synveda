@@ -1,12 +1,16 @@
 #!/usr/bin/env node
 
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const chart = "deploy/helm/synveda";
 const values = `${chart}/ci/lint-values.yaml`;
+const appVersion = readFileSync(`${chart}/Chart.yaml`, "utf8").match(
+  /^appVersion:\s*"?([^"\s]+)"?/m,
+)?.[1];
+if (!appVersion) throw new Error("chart appVersion is missing");
 
 function render(extraArgs = []) {
   return spawnSync(
@@ -197,7 +201,7 @@ if (
 }
 
 requireMarkers("database bootstrap", bootstrap, [
-  "image: synveda/enterprise-postgres:17",
+  `image: ghcr.io/synveda/enterprise-postgres:${appVersion}`,
   'command: ["/bin/sh", "-ec"]',
   "source=/run/bootstrap-projection/$secret",
   "destination=/run/secrets/$secret",

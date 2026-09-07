@@ -117,6 +117,19 @@ relies on list append order.
 Every release environment manifest records the source SHA, deployment-file
 digest, OCI index digest and accepted platform digests.
 
+Release versions use one bounded, Kubernetes-label- and OCI-safe SemVer-shaped
+vocabulary and are validated before they can enter a path, substitution,
+download or workflow output. The source release workflow packages the chart
+and is wired to build the product, single-host PostgreSQL and
+CloudNativePG-compatible PostgreSQL
+images under that version. Helm defaults its product and CloudNativePG images
+to the matching public GHCR coordinates and `Chart.appVersion`.
+`make check-release-parity` packages the chart twice and renders the exact
+product/CloudNativePG pair without Docker or network access. This static gate
+does not create the required environment manifest, capture OCI descriptors,
+publish an artifact or prove that an authenticated client can pull or install
+one.
+
 The clean-Engine development fixture has a narrower pre-mutation candidate
 manifest. Schema version 1 is canonical JSON under a mode-0700 state root
 outside the repository. The candidate binds the exact commit/tree and both the

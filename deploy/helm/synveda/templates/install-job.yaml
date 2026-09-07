@@ -44,7 +44,7 @@ spec:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       initContainers:
         - name: database-bootstrap
-          image: {{ .Values.postgres.image }}
+          image: {{ include "synveda.postgresImage" . }}
           securityContext:
             {{- toYaml .Values.securityContext | nindent 12 }}
           # Kubernetes' atomic Secret writer exposes projected keys as

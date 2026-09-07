@@ -99,8 +99,8 @@ selection for deterministic packaging evidence only.
 
 | Image | Where | Licence | Why it is here |
 |---|---|---|---|
-| `synveda/gateway:<appVersion>` | `image.repository` | ours | The product. Both binaries: the gateway serves, the CLI migrates and issues SCIM credentials. Built from `deploy/compose/gateway/Dockerfile`. |
-| `synveda/enterprise-postgres:17` | `postgres.image` | ours (see bases) | Postgres for CloudNativePG plus pgvector and the shared content-free database bootstrap command. Built from the repository root with `deploy/helm/postgres/Dockerfile`; its schema and role contract match the Compose reference. |
+| `ghcr.io/synveda/gateway:<appVersion>` | `image.repository` | ours | The product. Both binaries: the gateway serves, the CLI migrates and issues SCIM credentials. Built from `deploy/compose/gateway/Dockerfile`; the release workflow joins its native amd64/arm64 builds under this versioned public coordinate. |
+| `ghcr.io/synveda/enterprise-postgres:<appVersion>` | default `postgres.image` | ours (see bases) | Postgres for CloudNativePG plus pgvector and the shared content-free database bootstrap command. Built from the repository root with `deploy/helm/postgres/Dockerfile`; the release workflow joins its native amd64/arm64 builds under the same application version. |
 | `ghcr.io/huggingface/text-embeddings-inference:cpu-1.8.1` | `tei.image`, optional | **read on every bump** | The embedder, when `embedder: tei` and `tei.enabled`. Serves BAAI/bge-m3, whose weights are a separate licence from the server's. |
 
 ## Base images we build on

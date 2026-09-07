@@ -21,7 +21,7 @@ cannot honour. ADR-0062.
 {{- end -}}
 
 {{- define "synveda.labels" -}}
-helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
+helm.sh/chart: {{ printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimAll "-._" }}
 {{ include "synveda.selectorLabels" . }}
 app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
@@ -34,6 +34,10 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 
 {{- define "synveda.image" -}}
 {{- printf "%s:%s" .Values.image.repository (default .Chart.AppVersion .Values.image.tag) -}}
+{{- end -}}
+
+{{- define "synveda.postgresImage" -}}
+{{- default (printf "ghcr.io/synveda/enterprise-postgres:%s" .Chart.AppVersion) .Values.postgres.image -}}
 {{- end -}}
 
 {{- define "synveda.serviceAccountName" -}}

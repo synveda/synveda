@@ -7,6 +7,7 @@ import {
   canonicalComposeFiles,
   composeImageReferences,
   dockerfileBaseImages,
+  helmComputedImageReferences,
   parseComposeDefaults,
   resolveComposeImage,
 } from "./chart-image-discovery.mjs";
@@ -83,6 +84,33 @@ test("Compose image selector mutants cannot hide a missing or ambient value", ()
     'services: {fixture: { ? "image" : "evil.example/fixture:1" }}\n',
     'services: {fixture: { !!str image : "evil.example/fixture:1" }}\n',
   ]) assert.throws(() => composeImageReferences(source, defaults));
+});
+
+test("Helm computed image defaults resolve only from Chart.appVersion", () => {
+  const helper = `{{- define "synveda.postgresImage" -}}
+{{- default (printf "ghcr.io/synveda/enterprise-postgres:%s" .Chart.AppVersion) .Values.postgres.image -}}
+{{- end -}}
+`;
+  assert.deepEqual(helmComputedImageReferences(helper), [
+    "ghcr.io/synveda/enterprise-postgres:<appVersion>",
+  ]);
+  assert.deepEqual(
+    helmComputedImageReferences(
+      helper.replace(".Chart.AppVersion", '"latest"'),
+    ),
+    [],
+  );
+  for (const repository of [
+    "UPPER.example/synveda/postgres",
+    "ghcr.io/synveda/postgres@sha256",
+    "\${AMBIENT}/synveda/postgres",
+  ]) {
+    assert.throws(() =>
+      helmComputedImageReferences(
+        helper.replace("ghcr.io/synveda/enterprise-postgres", repository),
+      ),
+    );
+  }
 });
 
 test("Dockerfile base discovery sees lowercase, indented and argument-backed stages", () => {

@@ -82,6 +82,33 @@ export function canonicalComposeFiles(entries) {
     .sort();
 }
 
+export function helmComputedImageReferences(source) {
+  const references = [];
+  const definitions = [
+    ...source.matchAll(
+      /\{\{- define "[A-Za-z0-9.]+" -\}\}([\s\S]*?)\{\{- end -\}\}/g,
+    ),
+  ];
+  for (const [, body] of definitions) {
+    const computed = body.match(
+      /default \(printf "([^"\s]+):%s" \.Chart\.AppVersion\) \.Values\.[A-Za-z0-9.]+/,
+    );
+    if (computed === null) continue;
+    const repository = computed[1];
+    if (
+      repository.includes("$") ||
+      repository.includes("@") ||
+      !/^[a-z0-9]+(?:[._-][a-z0-9]+)*(?:\/[a-z0-9]+(?:[._-][a-z0-9]+)*)+$/.test(
+        repository,
+      )
+    ) {
+      refuse("helm-computed-image-repository");
+    }
+    references.push(`${repository}:<appVersion>`);
+  }
+  return references;
+}
+
 export function dockerfileBaseImages(source) {
   const defaults = new Map();
   const stages = new Set();

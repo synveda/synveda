@@ -30,6 +30,9 @@ cd "$(dirname "$0")/.."
 version="${1:?usage: package-plugin.sh <version> <output-dir>}"
 outdir="${2:?usage: package-plugin.sh <version> <output-dir>}"
 
+# Validate before the version can become an archive path or manifest value.
+sh scripts/release-version.sh "$version"
+
 adapter="adapters/claude-code"
 [ -f "$adapter/dist/hook.mjs" ] || {
   echo "package-plugin: $adapter/dist is not built." >&2

@@ -375,6 +375,16 @@ pool and profiles through down, confirmed reset and mapping removal. No Docker
 command has run in this slice, so neither a live exchange nor
 the mounted secret's effective uid/mode is deployment evidence.
 
+Release/Helm parity preparation now rejects an unsafe or noncanonical release
+version before it can enter workflow shell source, an archive path, a download
+path or a substitution. The release workflow packages the existing chart and
+is wired to build the CloudNativePG-compatible image alongside the product and
+single-host PostgreSQL images; Helm resolves the product and CloudNativePG
+defaults from the same application version. A daemon-free gate packages the
+chart twice and renders that exact public image pair. No tag, registry, OCI
+descriptor, environment manifest, authenticated pull or live Helm install was
+produced, so the release-parity P0 remains open.
+
 The deterministic clean-Engine preparation publishes one immutable
 canonical candidate and plan receipt under a user-owned external state root.
 The candidate binds the clean commit/tree, stage-zero tracked index, actual

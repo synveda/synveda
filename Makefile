@@ -19,7 +19,7 @@ export SYNVEDA_TEI_IMAGE
 # and skip when it is unset — CI runs without a database.
 DATABASE_URL ?= postgres://synveda:synveda-dev@localhost:5432/synveda
 
-.PHONY: fmt lint test build deny check-deps check-adr-status check-adapters check-api-types check-backlog check-benchmarks check-chart-images check-compose-contract check-context-hard-cut check-context-security check-corpus-licences check-demos check-deploy check-docs check-npm-licences check-product-eval chart-lint compose-config compose-secrets compose-issuer compose-hosts-plan compose-hosts-status compose-hosts-install compose-hosts-remove compose-resolver-check compose-clean-engine-plan compose-clean-engine-status compose-clean-engine-verify compose-up compose-browser-acceptance compose-smoke compose-restart-gateway compose-down compose-reset ts-build ts-test ci dev-up dev-down smoke db-test claude-acceptance claude-acceptance-live eval eval-check eval-product eval-judge eval-read eval-longmemeval eval-longmemeval-full eval-longmemeval-judged eval-extraction-live eval-retrieval eval-security
+.PHONY: fmt lint test build deny check-deps check-adr-status check-adapters check-api-types check-backlog check-benchmarks check-chart-images check-compose-contract check-context-hard-cut check-context-security check-corpus-licences check-demos check-deploy check-docs check-npm-licences check-product-eval check-release-parity chart-lint compose-config compose-secrets compose-issuer compose-hosts-plan compose-hosts-status compose-hosts-install compose-hosts-remove compose-resolver-check compose-clean-engine-plan compose-clean-engine-status compose-clean-engine-verify compose-up compose-browser-acceptance compose-smoke compose-restart-gateway compose-down compose-reset ts-build ts-test ci dev-up dev-down smoke db-test claude-acceptance claude-acceptance-live eval eval-check eval-product eval-judge eval-read eval-longmemeval eval-longmemeval-full eval-longmemeval-judged eval-extraction-live eval-retrieval eval-security
 
 dev-up:
 	$(COMPOSE) up --build --detach --wait
@@ -367,6 +367,13 @@ check-chart-images:
 	node --test scripts/check-chart-images.test.mjs
 	node scripts/check-chart-images.mjs
 
+# CPR-45 / PR-01: validates the release-version boundary, packages the chart
+# twice and renders its exact public product/CNPG image pair. It uses no Docker,
+# registry, cluster or network and therefore makes no pullability claim.
+check-release-parity:
+	node --test scripts/check-release-parity.test.mjs
+	node scripts/check-release-parity.mjs
+
 # The enterprise chart renders, in both of the shapes CI covers: the
 # minimum a real install must state, and every optional path at once.
 # Needs helm. The chart's defaults deliberately do not render — five values
@@ -381,7 +388,7 @@ chart-lint:
 # are one runtime; a repeat package cannot retain a removed asset. CPR-44's
 # scratch-HOME test keeps the local KEK exactly when this deployment keeps its
 # volumes, and proves the explicit purge and dry-run paths separately.
-check-deploy:
+check-deploy: check-release-parity
 	node --test scripts/check-deploy-convergence.test.mjs
 	node --test scripts/uninstall.test.mjs
 	node --test scripts/generate-compose-issuer.test.mjs

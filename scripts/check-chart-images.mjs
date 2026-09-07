@@ -32,12 +32,14 @@ import {
   canonicalComposeFiles,
   composeImageReferences,
   dockerfileBaseImages,
+  helmComputedImageReferences,
   parseComposeDefaults,
 } from "./chart-image-discovery.mjs";
 
 const INVENTORY = "deploy/helm/IMAGES.md";
 const CHART = "deploy/helm/synveda/Chart.yaml";
 const VALUES = "deploy/helm/synveda/values.yaml";
+const HELPERS = "deploy/helm/synveda/templates/_helpers.tpl";
 const RELEASE_COMPOSE = "deploy/release/docker-compose.yml";
 const COMPOSE_DIRECTORY = "deploy/compose";
 const COMPOSE_DEFAULTS = `${COMPOSE_DIRECTORY}/.env.example`;
@@ -94,6 +96,7 @@ const found = new Map(); // ref → where it came from
 const values = read(VALUES);
 // `image: repo:tag` — a scalar, never the mapping key of the same name.
 for (const [, ref] of values.matchAll(/^\s*image:\s+(\S+)\s*$/gm)) {
+  if (ref === '""' || ref === "''") continue;
   found.set(ref, `${VALUES} (image:)`);
 }
 // The product image is split across repository/tag, and an empty tag means
@@ -102,6 +105,9 @@ const repository = values.match(/^\s*repository:\s*(\S+)\s*$/m)?.[1];
 if (repository) {
   const tag = values.match(/^\s*tag:\s*"(.*)"\s*$/m)?.[1] ?? "";
   found.set(`${repository}:${tag === "" ? "<appVersion>" : tag}`, `${VALUES} (image.repository)`);
+}
+for (const ref of helmComputedImageReferences(read(HELPERS))) {
+  found.set(ref, `${HELPERS} (Chart.appVersion default)`);
 }
 
 // ── What the released single-node profile runs ───────────────────────────

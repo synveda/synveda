@@ -27,7 +27,10 @@ freshness or Skill/Tool advertisement.
 - `helm/` is the Kubernetes infrastructure: separate gateway and worker
   Deployments from the same image, CloudNativePG, optional TEI, ingress and
   external IdP/secret wiring. The CloudNativePG operator is deliberately a
-  separately installed cluster dependency.
+  separately installed cluster dependency. The source release workflow now
+  packages this chart and builds its product and CloudNativePG image
+  coordinates at one application version; no tagged candidate has yet proved
+  publication, authenticated pulls or installation from those artifacts.
 
 ## Bootstrap boundary
 
@@ -80,9 +83,13 @@ uses `restart: unless-stopped` so a deliberate non-zero critical-task exit is
 visible and restarted. Helm derives its termination grace as the configured
 worker join plus ten seconds.
 
-`make check-deploy` renders both transitional Compose manifests and Helm,
-asserts distinct process commands/credentials and private worker probes,
-packages the release twice and checks the upgrade-shaped replacement. The
+`make check-release-parity` validates the closed release-version boundary,
+packages the Helm chart twice and renders the exact version-matched public
+product/CloudNativePG image pair without contacting Docker or a registry.
+`make check-deploy` includes that gate, renders both transitional Compose
+manifests and Helm, asserts distinct process commands/credentials and private
+worker probes, packages the release twice and checks the upgrade-shaped
+replacement. The
 CPR-36 database acceptance test also proves a runtime login with no tenant GUC
 cannot read tenant data. The kind acceptance script is written to assert the
 worker role before a governed round trip and repeat private readiness after
@@ -131,4 +138,6 @@ BGE-M3 download is about 2.3 GB.
   references; rendered diagnostics must not contain values.
 - Release binaries are unsigned and un-notarized; shipped binaries are macOS
   arm64 and Linux x86_64 only. There is no Windows build, zero-downtime gateway
-  upgrade guarantee or old-schema translator.
+  upgrade guarantee or old-schema translator. The release workflow has no
+  completed tagged run for the aligned chart/image set, captured OCI
+  descriptors or versioned environment manifest.

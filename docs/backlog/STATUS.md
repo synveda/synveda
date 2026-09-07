@@ -194,7 +194,14 @@ development-HTTP and reference-HTTPS selectors bind the same Keycloak
 authorization-code/PKCE S256 administrator login and logout before ordinary
 smoke; reference requires digest-qualified images and selects no source build.
 Deterministic contract, fake-lifecycle and injected-flow tests pass, but neither
-browser container has run. The next
+browser container has run. Release/Helm parity preparation now validates one
+bounded release version before workflow output, archive/download paths or
+substitution; packages the existing chart; wires the matching
+CloudNativePG-compatible image into the release build; and makes Helm resolve
+the public product/CloudNativePG pair from one application version. Its
+daemon-free gate packages and renders the chart, but no tag, OCI descriptor,
+environment manifest, authenticated pull or live Helm install exists; PR-01
+remains P0. The next
 slice now has an immutable canonical candidate/plan receipt binding the clean
 tracked index, actual effective Docker context, deployment inputs and exact
 fixture selection plus a private non-secret synthetic proxy template. Its

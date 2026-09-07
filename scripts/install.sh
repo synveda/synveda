@@ -47,6 +47,37 @@ say()  { printf '%s\n' "$*"; }
 step() { printf '==> %s\n' "$*"; }
 die()  { printf 'install: %s\n' "$*" >&2; exit 1; }
 
+release_version_is_valid() {
+  candidate=$1
+  [ -n "$candidate" ] && [ "${#candidate}" -le 63 ] || return 1
+  case "$candidate" in
+    *[!0-9A-Za-z.-]* | *[!0-9A-Za-z]) return 1 ;;
+  esac
+  # Nineteen core digits are always inside Helm's unsigned parser range.
+  LC_ALL=C printf '%s\n' "$candidate" | LC_ALL=C grep -Eq \
+    '^(0|[1-9][0-9]{0,18})\.(0|[1-9][0-9]{0,18})\.(0|[1-9][0-9]{0,18})(-(0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(\.(0|[1-9][0-9]*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*)?$'
+}
+
+select_release_version() {
+  requested=$1
+  case "$requested" in
+    v*) selected_plain=${requested#v} ;;
+    *) selected_plain=$requested ;;
+  esac
+  release_version_is_valid "$selected_plain" || die \
+    "invalid release version; expected a label-safe vMAJOR.MINOR.PATCH or MAJOR.MINOR.PATCH with an optional SemVer prerelease"
+  plain=$selected_plain
+  version="v$plain"
+}
+
+# An explicitly supplied version is untrusted input. Validate and normalize it
+# before platform probes, downloads, temporary paths or filesystem mutation.
+version="${SYNVEDA_VERSION:-}"
+plain=""
+if [ -n "$version" ]; then
+  select_release_version "$version"
+fi
+
 # ── The platform ─────────────────────────────────────────────────────────
 #
 # Refused by name rather than guessed at (ADR-0065 decision 7). An installer
@@ -97,7 +128,6 @@ fi
 command -v tar >/dev/null 2>&1 || die "tar is not on PATH"
 
 # ── The release ──────────────────────────────────────────────────────────
-version="${SYNVEDA_VERSION:-}"
 if [ -z "$version" ]; then
   [ -z "${SYNVEDA_BASE_URL:-}" ] || die "SYNVEDA_BASE_URL needs SYNVEDA_VERSION too —
   a directory of assets cannot be asked which release is the latest."
@@ -106,10 +136,10 @@ if [ -z "$version" ]; then
     | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -n 1)"
   [ -n "$version" ] || die "could not determine the latest release of $REPO.
   Pick one explicitly:  SYNVEDA_VERSION=v0.2.0 sh install.sh"
+  select_release_version "$version"
 fi
-# Assets are named by the version without its leading `v`, matching the
-# workspace crate version carried by the matching artifacts.
-plain="${version#v}"
+# Assets are named by the normalized plain version; GitHub tags retain one
+# canonical leading `v`.
 base="${SYNVEDA_BASE_URL:-https://github.com/$REPO/releases/download/$version}"
 
 work="$(mktemp -d)"

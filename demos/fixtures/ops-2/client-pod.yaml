@@ -29,7 +29,7 @@ spec:
         defaultMode: 493
   containers:
     - name: client
-      image: synveda/gateway:__IMAGE_TAG__
+      image: ghcr.io/synveda/gateway:__IMAGE_TAG__
       imagePullPolicy: Never
       command: ["/bin/sh", "/scripts/client.sh"]
       env:
