@@ -1621,7 +1621,14 @@ test("competing cleanup owners publish one operation slot and one close", async 
     const [loserStatus, loserSignal] = await loser.closeWithin();
     assert.equal(loserStatus, 73, loser.stderr());
     assert.equal(loserSignal, null, loser.stderr());
-    assert.equal(loser.stderr(), "another clean-engine mutation is active\n");
+    assert.equal(loser.stderr(), "background cleanup slot authority changed\n");
+    const activeAfterLoser = activeRun(state);
+    assert.equal(
+      readdirSync(activeAfterLoser).some((name) =>
+        name.startsWith(".mutation-stage-"),
+      ),
+      false,
+    );
     await winner.release();
     const [winnerStatus, winnerSignal] = await winner.closeWithin();
     assert.equal(winner.stderr(), "");

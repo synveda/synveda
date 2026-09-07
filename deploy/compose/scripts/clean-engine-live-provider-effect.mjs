@@ -4518,6 +4518,69 @@ function terminalReceiptResult(
   };
 }
 
+export function buildColimaLiveProviderEffectTerminalReceipt(input) {
+  exactKeys(
+    input,
+    [
+      "history",
+      "publicationPlan",
+      "publisherAuthorityChain",
+      "publisherAuthoritySha256",
+      "source",
+      "witness",
+    ],
+    "live provider effect terminal receipt input",
+  );
+  const {
+    history,
+    publicationPlan,
+    publisherAuthorityChain,
+    publisherAuthoritySha256,
+    source,
+    witness,
+  } = input;
+  validateColimaLiveProviderEffectPublicationPlan(publicationPlan, source);
+  validateColimaLiveProviderEffectWitness(witness, {
+    publicationPlan,
+    source,
+  });
+  const validatedHistory = validateHistoryInternal(
+    history,
+    {
+      publicationPlan,
+      publisherAuthorityChain,
+      source,
+      witness,
+    },
+    { allowNextAuthority: true },
+  );
+  if (
+    validatedHistory.at(-1)?.event_kind !== "cleanup-settlement" ||
+    publisherAuthoritySha256 !==
+      publisherAuthorityAt(
+        validatedHistory.length,
+        publisherAuthorityChain,
+        witness,
+      )
+  ) {
+    fail("live provider effect terminal receipt frontier was refused", 69);
+  }
+  return deepFreeze({
+    fixture_id: publicationPlan.fixture_id,
+    outcome: "passed",
+    phase: "provider-effect-retired",
+    previous_sha256: publicationPlan.receipt_previous_sha256,
+    result: terminalReceiptResult(
+      validatedHistory,
+      publicationPlan,
+      publisherAuthoritySha256,
+      witness,
+    ),
+    schema: TERMINAL_RECEIPT_SCHEMA,
+    sequence: publicationPlan.receipt_sequence,
+  });
+}
+
 function validateTerminalReceipt(
   evidence,
   { history, publicationPlan, publisherAuthoritySha256, witness },

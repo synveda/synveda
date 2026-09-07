@@ -36,6 +36,10 @@ const ALLOWED_PATHS = new Set([
     ROOT,
     "scripts/clean-engine-live-provider-effect-fixture-blueprint.test.mjs",
   ),
+  join(
+    ROOT,
+    "scripts/clean-engine-live-provider-effect-fixture-adapter.test.mjs",
+  ),
   join(ROOT, "scripts/fixtures/cpr-45-four-role/harness.mjs"),
   join(ROOT, "scripts/fixtures/cpr-45-four-role/protocol.mjs"),
   join(ROOT, "scripts/fixtures/cpr-45-four-role/role.mjs"),

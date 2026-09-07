@@ -569,24 +569,55 @@ recovery/root v6 and close v8 as one hard cut. Fixture-only seams persist a
 sequence-bound physical stage, inode-derived effect witness, fixed external
 marker and exact effect events. Before any process attempt they may either
 retire the marker and close with no receipt, or publish a durable attempt fence
-and stop without invocation. Fixture recovery proves the slot owner and newest
-recoverer absent, accepts only forward physical/event transitions, and never
-crosses an attempt fence. Multiple dead recoverers at one frontier are retained
-and only the newest may publish or close. The generic receipt API refuses the
-state-owned `provider-effect-retired` phase before slot acquisition. There is
-no production effect publisher, registry entry, lifecycle exposure, process
-invocation or live-provider evidence; serialized pure values alone do not
-carry state provenance or select a branch.
+and stop without delivery. One exact process-free fixture adapter may instead
+return `conclusive-not-created`, after which state publishes the ordered
+`start-authority`, `start-attempt`, `launch-edge`, `delivery-result`,
+`create-settlement`, `cleanup-plan-page`, `cleanup-plan`, `cleanup-progress`,
+`cleanup-settlement`, `terminal-receipt`, `completion` history. The staged
+receipt bytes are canonical-byte-identical to the receipt embedded in the
+terminal event. The final receipt path is hard-linked from that staged inode;
+after directory fsync and stage retirement, the one-link final receipt is
+durable before marker unlink, bound provider-root fsync, completion and close.
+Mutation close remains last. The generic receipt API refuses the state-owned
+`provider-effect-retired` phase before slot acquisition.
+
+Fixture recovery proves the slot owner and newest recoverer absent and accepts
+only forward physical/event transitions. Recovery never calls the adapter
+executor; state exact-byte loads the module and recovery validates the durable
+result. Before exact durable delivery, an attempt fence is operator-blocked.
+After delivery, recovery revalidates the adapter result, opaque
+proposed-outer-node identity commitment, source/component/blueprint binding,
+provider root, all six namespaces and the event prefix before resuming only the
+missing suffix. Pending receipt reconciliation binds exact bytes and observed
+inode. Multiple dead recoverers at one frontier are retained and only the
+newest may publish or close.
+Receipt-first, marker-first, mismatch, malformed/crossed evidence and physical
+drift fail closed. There is no production effect publisher, registry entry,
+lifecycle exposure, process invocation or live-provider evidence; serialized
+pure values alone do not carry state provenance or select a branch.
 
 The fixture plan is assembled through
 `clean-engine-live-provider-effect-fixture-blueprint.mjs`, a process-free pure
-leaf. Its existing-plan projection binds the fixed Node/protocol/role bytes,
-closed child environment, exact role argv/cwd, four role public identities,
-four endpoint paths, Docker-context path/content commitments and the planned
-attempt/quiescence values. State performs no-follow descriptor hashing and
-re-proves those component bytes before authority and attempt publication.
-Private role seeds and path/challenge commitments derive from the private
-observation binding key; no key or raw path is serialized. This adds no image,
+leaf at schema v2. Its fourth component is the
+`conclusive-adapter`, pinned to contract digest
+`f97fef2c614db9e656a0cb9ed7ad79a5ce4eae314103670c57c988f8c707c6f2`.
+The projection also binds fixed Node/protocol/role bytes, closed child
+environment, exact role argv/cwd, four role public identities, four endpoint
+paths, Docker-context path/content commitments and the planned
+attempt/quiescence values. State descriptor-reads and source-digest-pins the
+adapter before evaluating those exact bytes, then requires the later component
+manifest to match. All components are opened with no-follow checks and
+re-proved through event, receipt, marker-retirement, close and recovery
+boundaries. Private role seeds and path/challenge commitments derive from the
+private observation binding key; no key or raw path is serialized. No
+persisted receipt/journal generation advances: receipt v6, slot v7,
+recovery/root v6 and close v8 remain unchanged. The process-free blueprint
+advances to v2; new adapter contract/result and private tail-observation
+domains start at v1. Operation-contract digests remain unchanged.
+
+The adapter has no filesystem, network, process, provider or
+runtime-publication capability and returns only a zero child handle,
+`effect_possible: false` and safe code `not-created`. This adds no image,
 command, port, secret file, persistent volume or supported lifecycle surface.
 It is not runtime endpoint evidence and does not consume the standalone
 four-process harness.

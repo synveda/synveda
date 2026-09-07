@@ -11,12 +11,16 @@ import {
 import { once } from "node:events";
 import {
   chmodSync,
+  closeSync,
+  constants,
   copyFileSync,
   existsSync,
+  fsyncSync,
   lstatSync,
   linkSync,
   mkdirSync,
   mkdtempSync,
+  openSync,
   readFileSync,
   readlinkSync,
   realpathSync,
@@ -55,6 +59,7 @@ import {
   publishColimaLiveProviderIntentForExecutor,
   publishColimaLiveProviderIntentForTest,
   publishColimaLiveProviderEffectAttemptFenceForTest,
+  publishColimaLiveProviderEffectConclusiveNotCreatedForTest,
   publishColimaLiveProviderEffectPreAttemptForTest,
   publishColimaLiveProviderReservationForTest,
   publishColimaLiveProviderStartDecisionForExecutor,
@@ -135,6 +140,10 @@ import {
 } from "./fixtures/clean-engine-colima-live-observation-fixture.mjs";
 
 const stateTool = resolve("deploy/compose/scripts/clean-engine-state.mjs");
+const FIXTURE_EFFECT_ADAPTER_CONTRACT_SHA256 =
+  "f97fef2c614db9e656a0cb9ed7ad79a5ce4eae314103670c57c988f8c707c6f2";
+const FIXTURE_EFFECT_ADAPTER_RESULT_SCHEMA =
+  "synveda.clean-engine.colima-live-fixture-provider-effect-conclusive-adapter-result.v1";
 
 function command(binary, args, options = {}) {
   return spawnSync(binary, args, {
@@ -281,6 +290,18 @@ function assertPrivate(path, mode, directory = false, links = 1) {
   assert.equal(metadata.uid, process.getuid());
 }
 
+function fsyncDirectoryForTest(path) {
+  const descriptor = openSync(
+    path,
+    constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW,
+  );
+  try {
+    fsyncSync(descriptor);
+  } finally {
+    closeSync(descriptor);
+  }
+}
+
 function snapshotTree(root) {
   const snapshot = [];
   function visit(path, relativePath) {
@@ -417,6 +438,21 @@ function fixtureEffectPrivateHmac(bindingKey, fixtureId, purpose, value) {
     .update("\0", "ascii")
     .update(liveProviderEffectBytes(value))
     .digest("hex");
+}
+
+function fixtureEffectAdapterObservation(input, result) {
+  return sha256(
+    canonicalBytes({
+      adapter_contract_sha256: input.adapter_contract_sha256,
+      domain: FIXTURE_EFFECT_ADAPTER_RESULT_SCHEMA,
+      fixture_id: input.fixture_id,
+      operation_contract_sha256: input.operation_contract_sha256,
+      operation_kind: input.operation_kind,
+      planned_start_attempt_sha256: input.planned_start_attempt_sha256,
+      result,
+      schema: FIXTURE_EFFECT_ADAPTER_RESULT_SCHEMA,
+    }),
+  );
 }
 
 function fixtureEffectRoleKey(bindingKey, fixtureId, role) {
@@ -1038,7 +1074,7 @@ async function crashLiveProviderEffectAt(
   });
   try {
     const readyPath = `${releasePath}.ready-${child.pid}`;
-    const deadline = Date.now() + 12_000;
+    const deadline = Date.now() + 90_000;
     while (!existsSync(readyPath)) {
       assert.equal(inputWriteError, undefined);
       assert.equal(child.exitCode, null, stderr);
@@ -1052,6 +1088,53 @@ async function crashLiveProviderEffectAt(
   } finally {
     if (child.exitCode === null && child.signalCode === null) {
       child.kill(terminationSignal);
+    }
+  }
+}
+
+async function releaseLiveProviderEffectCheckpoint(
+  state,
+  { action = "conclusive", checkpoint, input, mutate, releaseName },
+) {
+  const helper = resolve(
+    "scripts/fixtures/clean-engine-live-provider-effect-process.mjs",
+  );
+  const releasePath = join(state.root, releaseName);
+  const child = spawn(
+    process.execPath,
+    [helper, action, state.repo, state.state, checkpoint, releasePath],
+    {
+      env: { PATH: process.env.PATH, LANG: "C", LC_ALL: "C" },
+      stdio: ["pipe", "pipe", "pipe"],
+    },
+  );
+  let inputWriteError;
+  child.stdin.on("error", (error) => {
+    inputWriteError = error;
+  });
+  child.stdin.end(JSON.stringify(input));
+  child.stdout.resume();
+  let stderr = "";
+  child.stderr.setEncoding("utf8");
+  child.stderr.on("data", (chunk) => {
+    stderr += chunk;
+  });
+  try {
+    const readyPath = `${releasePath}.ready-${child.pid}`;
+    const deadline = Date.now() + 90_000;
+    while (!existsSync(readyPath)) {
+      assert.equal(inputWriteError, undefined);
+      assert.equal(child.exitCode, null, stderr);
+      assert.ok(Date.now() < deadline, stderr);
+      await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
+    }
+    mutate();
+    writeFileSync(releasePath, "release\n", { flag: "wx", mode: 0o600 });
+    const [status, signal] = await once(child, "close");
+    return { signal, status, stderr };
+  } finally {
+    if (child.exitCode === null && child.signalCode === null) {
+      child.kill("SIGKILL");
     }
   }
 }
@@ -1528,6 +1611,7 @@ test("fixture intent publication commits one inert state-only successor", () => 
         "before-slot-stage",
         "before-slot-link:after-first-admission-observation",
         "after-slot-authority-reassertion",
+        "before-slot-link:after-first-admission-observation",
         "after-slot-link",
         "after-slot-acquisition:after-first-admission-observation",
         "after-slot-acquisition",
@@ -2219,6 +2303,7 @@ test("fixture start decision publication commits one inert completed successor",
       "before-slot-stage",
       "before-slot-link:after-first-process-start-admission-observation",
       "after-slot-authority-reassertion",
+      "before-slot-link:after-first-process-start-admission-observation",
       "after-slot-link",
       "after-slot-acquisition:after-first-process-start-admission-observation",
       "after-slot-acquisition",
@@ -3616,7 +3701,16 @@ test("the fixture provider effect attempt fence is durable and process-free", ()
       publicationPlan.invocation_binding.executable_sha256,
       componentManifest[0].sha256,
     );
-    const rolePath = componentPaths.at(-1);
+    const rolePath = componentPaths[
+      COLIMA_LIVE_PROVIDER_EFFECT_FIXTURE_BLUEPRINT_COMPONENT_LOCATORS.findIndex(
+        (component) => component.kind === "role",
+      )
+    ];
+    const adapterComponent = componentManifest.find(
+      (component) => component.kind === "conclusive-adapter",
+    );
+    assert.notEqual(rolePath, undefined);
+    assert.notEqual(adapterComponent, undefined);
     for (const [sequence, roleContract] of
       publicationPlan.planned_role_contracts.entries()) {
       const expectedArgv = [
@@ -3744,7 +3838,12 @@ test("the fixture provider effect attempt fence is durable and process-free", ()
         preparation.input.binding_key,
         publicationPlan.fixture_id,
         "start-attempt",
-        { fixture_id: publicationPlan.fixture_id },
+        {
+          adapter_component_sha256: adapterComponent.sha256,
+          adapter_contract_sha256:
+            FIXTURE_EFFECT_ADAPTER_CONTRACT_SHA256,
+          fixture_id: publicationPlan.fixture_id,
+        },
       ),
     );
     assert.equal(
@@ -3758,6 +3857,8 @@ test("the fixture provider effect attempt fence is durable and process-free", ()
     );
     const blueprint =
       buildColimaLiveProviderEffectFixtureBlueprintStructure({
+        adapter_contract_sha256:
+          FIXTURE_EFFECT_ADAPTER_CONTRACT_SHA256,
         architecture: process.arch,
         component_manifest: componentManifest,
         endpoint_bindings: publicationPlan.planned_endpoint_contracts.map(
@@ -3861,6 +3962,1537 @@ test("the fixture provider effect attempt fence is durable and process-free", ()
       rmSync(preparation.root, { recursive: true, force: true });
     }
     rmSync(state.root, { recursive: true, force: true });
+  }
+});
+
+test("the state owner retires one conclusive fixture attempt through an exact receipt", () => {
+  const state = fixture();
+  let preparation;
+  try {
+    const prepared = prepareCompletedLiveProviderStartDecisionFixture(state);
+    preparation = prepared.preparation;
+    const checkpoints = [];
+    const argumentsValue = fixtureStartAdmissionArguments(
+      state,
+      preparation,
+      (checkpoint) => {
+        checkpoints.push(checkpoint);
+      },
+    );
+    const completion =
+      publishColimaLiveProviderEffectConclusiveNotCreatedForTest(
+        argumentsValue,
+      );
+    assert.equal(completion.event_kind, "completion");
+    assert.equal(completion.event_sequence, 10);
+    assert.equal(completion.evidence.variant, "attempted-effect-retired");
+    assert.equal(completion.evidence.marker_present, false);
+    assert.equal(completion.evidence.witness_link_count, 1);
+
+    const eventNames = readdirSync(prepared.active)
+      .filter((name) => /^\.provider-effect-event-03-\d{3}$/u.test(name))
+      .sort();
+    assert.equal(eventNames.length, 11);
+    const events = eventNames.map((name) =>
+      parse(join(prepared.active, name)),
+    );
+    assert.deepEqual(
+      events.map((event) => event.event_kind),
+      [
+        "start-authority",
+        "start-attempt",
+        "launch-edge",
+        "delivery-result",
+        "create-settlement",
+        "cleanup-plan-page",
+        "cleanup-plan",
+        "cleanup-progress",
+        "cleanup-settlement",
+        "terminal-receipt",
+        "completion",
+      ],
+    );
+    const slot = parse(join(prepared.active, ".mutation-slot-03"));
+    const witnessValue = parse(
+      join(prepared.active, ".provider-effect-witness-03"),
+    );
+    for (const [index, event] of events.entries()) {
+      assert.equal(event.event_sequence, index);
+      assert.equal(
+        event.parent_sha256,
+        index === 0
+          ? sha256(canonicalBytes(witnessValue))
+          : sha256(canonicalBytes(events[index - 1])),
+      );
+      assert.equal(
+        event.publisher_authority_sha256,
+        sha256(canonicalBytes(slot)),
+      );
+    }
+    const delivery = events[3];
+    assert.deepEqual(Object.keys(delivery.evidence).sort(), [
+      "attempt_event_sha256",
+      "child_handle_identity_sha256",
+      "delivery_disposition",
+      "driver_contract_sha256",
+      "effect_possible",
+      "observation_sha256",
+      "outer_launch_edge_sha256",
+      "safe_error_code",
+    ]);
+    assert.equal(delivery.evidence.delivery_disposition, "conclusive-not-created");
+    assert.equal(delivery.evidence.child_handle_identity_sha256, "0".repeat(64));
+    assert.equal(delivery.evidence.effect_possible, false);
+    assert.equal(delivery.evidence.safe_error_code, "not-created");
+
+    const createSettlement = events[4].evidence;
+    assert.equal(createSettlement.variant, "exact-attempted-residual");
+    assert.equal(createSettlement.residual_basis, "conclusive-not-created");
+    assert.equal(createSettlement.causal_edge_count, 1);
+    assert.equal(createSettlement.causal_node_count, 0);
+    assert.equal(
+      createSettlement.endpoint_set_sha256,
+      "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+    );
+    assert.equal(
+      createSettlement.role_identity_set_sha256,
+      "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+    );
+    assert.equal(createSettlement.inventory_set_sha256, "0".repeat(64));
+    assert.equal(createSettlement.quiescence_fence_sha256, "0".repeat(64));
+
+    const pageActions = events[5].evidence.actions;
+    assert.equal(pageActions.length, 7);
+    assert.deepEqual(
+      pageActions.map((action) => action.action_kind),
+      [
+        "prove-process-subtree-absent",
+        ...Array(6).fill("prove-namespace-baseline"),
+      ],
+    );
+    assert.deepEqual(
+      pageActions.map((action) => action.namespace_role),
+      [
+        "none",
+        "temporary-namespace",
+        "private-home-namespace",
+        "lima-home-namespace",
+        "docker-config-namespace",
+        "colima-home-namespace",
+        "colima-cache-namespace",
+      ],
+    );
+    assert.equal(events[6].evidence.action_count, 7);
+    assert.equal(events[7].evidence.outcomes.length, 7);
+    assert.deepEqual(
+      events[7].evidence.outcomes.map((outcome) => outcome.disposition),
+      Array(7).fill("completed-exact"),
+    );
+
+    const terminal = events[9];
+    const receipt = terminal.evidence.receipt;
+    assert.equal(receipt.phase, "provider-effect-retired");
+    assert.equal(terminal.evidence.receipt_sha256, sha256(canonicalBytes(receipt)));
+    const receiptPath = join(prepared.active, receiptFileName(receipt));
+    assertPrivate(receiptPath, 0o600);
+    assert.deepEqual(readFileSync(receiptPath), canonicalBytes(receipt));
+    assert.equal(existsSync(join(prepared.active, ".receipt-publish")), false);
+
+    const marker = join(
+      preparation.providerRoot,
+      ".synveda-clean-engine-provider-reservation",
+    );
+    const witness = join(prepared.active, ".provider-effect-witness-03");
+    assert.equal(existsSync(marker), false);
+    assertPrivate(witness, 0o600, false, 1);
+    const close = parse(join(prepared.active, ".mutation-close-03"));
+    assert.equal(close.disposition, "completed");
+    assert.equal(close.authority, "owner");
+    assert.equal(close.result_sequence, slot.source_sequence + 1);
+    assert.equal(close.result_head_sha256, sha256(canonicalBytes(receipt)));
+    assert.equal(close.operation_evidence_sha256, sha256(canonicalBytes(completion)));
+    assert.equal(run(state, "status").status, 0);
+    assert.equal(run(state, "verify").status, 0);
+
+    const persisted = Buffer.concat([
+      ...eventNames.map((name) => readFileSync(join(prepared.active, name))),
+      readFileSync(receiptPath),
+    ]).toString("utf8");
+    for (const forbidden of [
+      preparation.input.binding_key.toString("hex"),
+      preparation.providerRoot,
+      ...Object.values(preparation.input.environment).filter(
+        (value) => typeof value === "string" && value.startsWith("/"),
+      ),
+      "conclusive-adapter-result.v1",
+    ]) {
+      assert.equal(persisted.includes(forbidden), false, forbidden);
+    }
+    assert.ok(
+      checkpoints.indexOf(
+        "after-terminal-receipt-publication-stage-directory-sync",
+      ) <
+        checkpoints.indexOf("after-marker-unlink"),
+    );
+    assert.ok(
+      checkpoints.indexOf("after-marker-unlink") <
+        checkpoints.indexOf("after-completion"),
+    );
+    const completedState = snapshotTree(state.root);
+    assert.deepEqual(
+      publishColimaLiveProviderEffectConclusiveNotCreatedForTest(
+        argumentsValue,
+      ),
+      completion,
+    );
+    assert.deepEqual(snapshotTree(state.root), completedState);
+  } finally {
+    if (preparation !== undefined) {
+      rmSync(preparation.root, { recursive: true, force: true });
+    }
+    rmSync(state.root, { recursive: true, force: true });
+  }
+});
+
+test("recovery never replays a conclusive canary without a durable delivery event", async () => {
+  for (const [checkpoint, eventCount] of [
+    ["after-start-attempt", 2],
+    ["after-launch-edge", 3],
+    ["before-conclusive-fixture-adapter", 3],
+    ["after-conclusive-fixture-adapter", 3],
+    ["after-delivery-result-stage", 3],
+  ]) {
+    const state = fixture();
+    let preparation;
+    try {
+      const prepared = prepareCompletedLiveProviderStartDecisionFixture(state);
+      preparation = prepared.preparation;
+      await crashLiveProviderEffectAt(state, {
+        action: "conclusive",
+        checkpoint,
+        input: {
+          observation: preparation.observation,
+          observationInput: preparation.input,
+          requirements: preparation.requirements,
+        },
+        releaseName: `conclusive-blocked-${checkpoint}`,
+      });
+      const events = readdirSync(prepared.active).filter((name) =>
+        /^\.provider-effect-event-03-\d{3}$/u.test(name),
+      );
+      assert.equal(events.length, eventCount, checkpoint);
+      const before = snapshotTree(state.root);
+      const recoveryArguments = {
+        observation: preparation.observation,
+        observationInput: preparation.input,
+        repoRoot: state.repo,
+        requirements: preparation.requirements,
+        stateBase: state.state,
+      };
+      assert.throws(
+        () =>
+          liveProviderFixtureEffectRecoveryConfirmationForTest(
+            recoveryArguments,
+          ),
+        /attempt fence requires operator resolution/u,
+      );
+      assert.deepEqual(snapshotTree(state.root), before);
+      if (checkpoint === "after-delivery-result-stage") {
+        const stageNames = readdirSync(prepared.active).filter((name) =>
+          name.startsWith(".mutation-stage-"),
+        );
+        assert.equal(stageNames.length, 1);
+        assertPrivate(join(prepared.active, stageNames[0]), 0o600);
+        const durableEvents = readdirSync(prepared.active)
+          .filter((name) => /^\.provider-effect-event-03-\d{3}$/u.test(name))
+          .sort()
+          .map((name) => {
+            const path = join(prepared.active, name);
+            const metadata = lstatSync(path, { bigint: true });
+            return {
+              bytes: readFileSync(path),
+              device: metadata.dev,
+              inode: metadata.ino,
+              name,
+            };
+          });
+        const marker = join(
+          preparation.providerRoot,
+          ".synveda-clean-engine-provider-reservation",
+        );
+        const markerBytes = readFileSync(marker);
+        const markerIdentity = lstatSync(marker, { bigint: true });
+        assert.throws(
+          () =>
+            publishColimaLiveProviderEffectConclusiveNotCreatedForTest(
+              fixtureStartAdmissionArguments(state, preparation),
+            ),
+          /fixture provider effect start decision was unavailable/u,
+        );
+        assert.equal(existsSync(join(prepared.active, stageNames[0])), false);
+        assert.equal(durableEvents.length, 3);
+        for (const event of durableEvents) {
+          const path = join(prepared.active, event.name);
+          const metadata = lstatSync(path, { bigint: true });
+          assert.equal(metadata.dev, event.device);
+          assert.equal(metadata.ino, event.inode);
+          assert.deepEqual(readFileSync(path), event.bytes);
+        }
+        const markerAfter = lstatSync(marker, { bigint: true });
+        assert.equal(markerAfter.dev, markerIdentity.dev);
+        assert.equal(markerAfter.ino, markerIdentity.ino);
+        assert.equal(markerAfter.nlink, 2n);
+        assert.deepEqual(readFileSync(marker), markerBytes);
+        assert.throws(
+          () =>
+            liveProviderFixtureEffectRecoveryConfirmationForTest(
+              recoveryArguments,
+            ),
+          /attempt fence requires operator resolution/u,
+        );
+      } else {
+        const beforeRetry = snapshotTree(state.root);
+        assert.throws(
+          () =>
+            publishColimaLiveProviderEffectConclusiveNotCreatedForTest(
+              fixtureStartAdmissionArguments(state, preparation),
+            ),
+          /start decision was unavailable|explicit recovery/u,
+        );
+        assert.deepEqual(snapshotTree(state.root), beforeRetry);
+      }
+      assert.equal(existsSync(join(prepared.active, ".mutation-close-03")), false);
+      assert.equal(
+        readdirSync(prepared.active).some((name) =>
+          name.includes("provider-effect-retired"),
+        ),
+        false,
+      );
+      assert.equal(run(state, "verify").status, 0);
+    } finally {
+      if (preparation !== undefined) {
+        rmSync(preparation.root, { recursive: true, force: true });
+      }
+      rmSync(state.root, { recursive: true, force: true });
+    }
+  }
+});
+
+test("recovery completes the exact suffix after a durable conclusive delivery", async () => {
+  const state = fixture();
+  let preparation;
+  try {
+    const prepared = prepareCompletedLiveProviderStartDecisionFixture(state);
+    preparation = prepared.preparation;
+    await crashLiveProviderEffectAt(state, {
+      action: "conclusive",
+      checkpoint: "after-delivery-result-link",
+      input: {
+        observation: preparation.observation,
+        observationInput: preparation.input,
+        requirements: preparation.requirements,
+      },
+      releaseName: "conclusive-delivery-durable",
+    });
+    const recoveryArguments = {
+      observation: preparation.observation,
+      observationInput: preparation.input,
+      repoRoot: state.repo,
+      requirements: preparation.requirements,
+      stateBase: state.state,
+    };
+    const confirmation =
+      liveProviderFixtureEffectRecoveryConfirmationForTest(
+        recoveryArguments,
+      );
+    const completion = recoverColimaLiveProviderEffectForTest({
+      ...recoveryArguments,
+      confirmation,
+      testCheckpoint() {},
+    });
+    assert.equal(completion.event_kind, "completion");
+    assert.equal(completion.event_sequence, 10);
+    assert.equal(completion.evidence.variant, "attempted-effect-retired");
+    const eventNames = readdirSync(prepared.active)
+      .filter((name) => /^\.provider-effect-event-03-\d{3}$/u.test(name))
+      .sort();
+    assert.equal(eventNames.length, 11);
+    const events = eventNames.map((name) => parse(join(prepared.active, name)));
+    assert.deepEqual(
+      events.map((event) => event.event_kind),
+      [
+        "start-authority",
+        "start-attempt",
+        "launch-edge",
+        "delivery-result",
+        "create-settlement",
+        "cleanup-plan-page",
+        "cleanup-plan",
+        "cleanup-progress",
+        "cleanup-settlement",
+        "terminal-receipt",
+        "completion",
+      ],
+    );
+    const terminal = events[9];
+    assert.deepEqual(
+      readFileSync(join(prepared.active, receiptFileName(terminal.evidence.receipt))),
+      canonicalBytes(terminal.evidence.receipt),
+    );
+    assert.equal(parse(join(prepared.active, ".mutation-close-03")).authority, "recovery");
+    assert.equal(run(state, "verify").status, 0);
+  } finally {
+    if (preparation !== undefined) {
+      rmSync(preparation.root, { recursive: true, force: true });
+    }
+    rmSync(state.root, { recursive: true, force: true });
+  }
+});
+
+test("only the newest same-frontier conclusive recoverer publishes the suffix", async () => {
+  const state = fixture();
+  let preparation;
+  try {
+    const prepared = prepareCompletedLiveProviderStartDecisionFixture(state);
+    preparation = prepared.preparation;
+    const serialized = {
+      observation: preparation.observation,
+      observationInput: preparation.input,
+      requirements: preparation.requirements,
+    };
+    await crashLiveProviderEffectAt(state, {
+      action: "conclusive",
+      checkpoint: "after-delivery-result",
+      input: serialized,
+      releaseName: "conclusive-same-frontier-owner",
+    });
+    const recoveryArguments = {
+      ...serialized,
+      repoRoot: state.repo,
+      stateBase: state.state,
+    };
+    for (let sequence = 0; sequence < 2; sequence += 1) {
+      const confirmation =
+        liveProviderFixtureEffectRecoveryConfirmationForTest(
+          recoveryArguments,
+        );
+      await crashLiveProviderEffectAt(state, {
+        action: "recover",
+        checkpoint: "after-recovery-claim",
+        input: { ...serialized, confirmation },
+        releaseName: `conclusive-same-frontier-recoverer-${sequence}`,
+        signal: sequence === 0 ? "SIGTERM" : "SIGKILL",
+      });
+    }
+    const confirmation =
+      liveProviderFixtureEffectRecoveryConfirmationForTest(
+        recoveryArguments,
+      );
+    const completion = recoverColimaLiveProviderEffectForTest({
+      ...recoveryArguments,
+      confirmation,
+      testCheckpoint() {},
+    });
+    assert.equal(completion.evidence.variant, "attempted-effect-retired");
+    const claimNames = readdirSync(prepared.active)
+      .filter((name) => /^\.mutation-recovery-03-\d{2}$/u.test(name))
+      .sort();
+    assert.deepEqual(claimNames, [
+      ".mutation-recovery-03-00",
+      ".mutation-recovery-03-01",
+      ".mutation-recovery-03-02",
+    ]);
+    const claims = claimNames.map((name) => ({
+      bytes: readFileSync(join(prepared.active, name)),
+      value: parse(join(prepared.active, name)),
+    }));
+    for (const [index, claim] of claims.entries()) {
+      assert.equal(claim.value.observed_evidence_stage, "attempt-fenced");
+      assert.equal(
+        claim.value.parent_sha256,
+        index === 0 ? "0".repeat(64) : sha256(claims[index - 1].bytes),
+      );
+      assert.equal(
+        claim.value.observed_evidence_head_sha256,
+        claims[0].value.observed_evidence_head_sha256,
+      );
+      assert.equal(
+        claim.value.observed_evidence_prefix_sha256,
+        claims[0].value.observed_evidence_prefix_sha256,
+      );
+      assert.equal(
+        claim.value.observed_residual_sha256,
+        claims[0].value.observed_residual_sha256,
+      );
+      assert.equal(
+        claim.value.source_head_sha256,
+        claims[0].value.source_head_sha256,
+      );
+    }
+    const slotAuthority = sha256(
+      readFileSync(join(prepared.active, ".mutation-slot-03")),
+    );
+    const newestAuthority = sha256(claims.at(-1).bytes);
+    const events = readdirSync(prepared.active)
+      .filter((name) => /^\.provider-effect-event-03-\d{3}$/u.test(name))
+      .sort()
+      .map((name) => parse(join(prepared.active, name)));
+    assert.equal(events.length, 11);
+    assert.deepEqual(
+      events.map((event) => event.publisher_authority_sha256),
+      [
+        ...Array(4).fill(slotAuthority),
+        ...Array(7).fill(newestAuthority),
+      ],
+    );
+    assert.equal(
+      events[9].evidence.receipt.result.publisher_authority_sha256,
+      newestAuthority,
+    );
+    const close = parse(join(prepared.active, ".mutation-close-03"));
+    assert.equal(close.authority, "recovery");
+    assert.equal(close.authority_sha256, newestAuthority);
+    assert.equal(
+      close.operation_evidence_sha256,
+      sha256(canonicalBytes(events[10])),
+    );
+    assert.equal(run(state, "verify").status, 0);
+  } finally {
+    if (preparation !== undefined) {
+      rmSync(preparation.root, { recursive: true, force: true });
+    }
+    rmSync(state.root, { recursive: true, force: true });
+  }
+});
+
+test("a linked conclusive recovery close reconciles without new authority", async () => {
+  const state = fixture();
+  let preparation;
+  try {
+    const prepared = prepareCompletedLiveProviderStartDecisionFixture(state);
+    preparation = prepared.preparation;
+    const serialized = {
+      observation: preparation.observation,
+      observationInput: preparation.input,
+      requirements: preparation.requirements,
+    };
+    await crashLiveProviderEffectAt(state, {
+      action: "conclusive",
+      checkpoint: "after-completion",
+      input: serialized,
+      releaseName: "conclusive-linked-recovery-close-owner",
+    });
+    const recoveryArguments = {
+      ...serialized,
+      repoRoot: state.repo,
+      stateBase: state.state,
+    };
+    const confirmation =
+      liveProviderFixtureEffectRecoveryConfirmationForTest(
+        recoveryArguments,
+      );
+    await crashLiveProviderEffectAt(state, {
+      action: "recover",
+      checkpoint: "after-recovery-close-link",
+      input: { ...serialized, confirmation },
+      releaseName: "conclusive-linked-recovery-close-recoverer",
+      signal: "SIGTERM",
+    });
+    const stageNames = readdirSync(prepared.active).filter((name) =>
+      /^\.mutation-stage-[0-9a-f]{32}$/u.test(name),
+    );
+    assert.equal(stageNames.length, 1);
+    const stagePath = join(prepared.active, stageNames[0]);
+    const closePath = join(prepared.active, ".mutation-close-03");
+    const completionPath = join(
+      prepared.active,
+      ".provider-effect-event-03-010",
+    );
+    const terminal = parse(
+      join(prepared.active, ".provider-effect-event-03-009"),
+    );
+    const receiptPath = join(
+      prepared.active,
+      receiptFileName(terminal.evidence.receipt),
+    );
+    const claimPath = join(
+      prepared.active,
+      ".mutation-recovery-03-00",
+    );
+    const artifacts = [closePath, completionPath, receiptPath, claimPath].map(
+      (path) => {
+        const metadata = lstatSync(path, { bigint: true });
+        return {
+          bytes: readFileSync(path),
+          device: metadata.dev,
+          inode: metadata.ino,
+          path,
+        };
+      },
+    );
+    const stageIdentity = lstatSync(stagePath, { bigint: true });
+    const closeIdentity = lstatSync(closePath, { bigint: true });
+    assert.equal(stageIdentity.nlink, 2n);
+    assert.equal(closeIdentity.nlink, 2n);
+    assert.equal(stageIdentity.dev, closeIdentity.dev);
+    assert.equal(stageIdentity.ino, closeIdentity.ino);
+    assert.deepEqual(readFileSync(stagePath), readFileSync(closePath));
+    assert.throws(
+      () =>
+        liveProviderFixtureEffectRecoveryConfirmationForTest(
+          recoveryArguments,
+        ),
+      /no abandoned provider mutation was available/u,
+    );
+    const claimNamesBefore = readdirSync(prepared.active)
+      .filter((name) => name.startsWith(".mutation-recovery-03-"))
+      .sort();
+    const completion =
+      publishColimaLiveProviderEffectConclusiveNotCreatedForTest(
+        fixtureStartAdmissionArguments(state, preparation),
+      );
+    assert.equal(completion.evidence.variant, "attempted-effect-retired");
+    assert.equal(existsSync(stagePath), false);
+    for (const artifact of artifacts) {
+      const metadata = lstatSync(artifact.path, { bigint: true });
+      assert.equal(metadata.dev, artifact.device);
+      assert.equal(metadata.ino, artifact.inode);
+      assert.deepEqual(readFileSync(artifact.path), artifact.bytes);
+    }
+    assert.equal(lstatSync(closePath, { bigint: true }).nlink, 1n);
+    assert.deepEqual(
+      readdirSync(prepared.active)
+        .filter((name) => name.startsWith(".mutation-recovery-03-"))
+        .sort(),
+      claimNamesBefore,
+    );
+    const close = parse(closePath);
+    assert.equal(close.authority, "recovery");
+    assert.equal(close.authority_sha256, sha256(readFileSync(claimPath)));
+    assert.equal(run(state, "verify").status, 0);
+  } finally {
+    if (preparation !== undefined) {
+      rmSync(preparation.root, { recursive: true, force: true });
+    }
+    rmSync(state.root, { recursive: true, force: true });
+  }
+});
+
+test("conclusive recovery preserves every semantic tail publication frontier", async () => {
+  const expectedKinds = [
+    "start-authority",
+    "start-attempt",
+    "launch-edge",
+    "delivery-result",
+    "create-settlement",
+    "cleanup-plan-page",
+    "cleanup-plan",
+    "cleanup-progress",
+    "cleanup-settlement",
+    "terminal-receipt",
+    "completion",
+  ];
+  const checkpoints = [
+    "after-create-settlement",
+    "after-cleanup-plan-page",
+    "after-cleanup-plan-stage",
+    "after-cleanup-plan-link",
+    "after-cleanup-progress",
+    "after-cleanup-settlement",
+    "after-terminal-receipt",
+    "after-terminal-receipt-publication-stage",
+    "after-terminal-receipt-publication-link",
+    "after-terminal-receipt-publication-directory-sync",
+    "after-marker-unlink",
+    "after-completion-link",
+    "after-effect-close-link",
+  ];
+  for (const [index, checkpoint] of checkpoints.entries()) {
+    const state = fixture();
+    let preparation;
+    try {
+      const prepared = prepareCompletedLiveProviderStartDecisionFixture(state);
+      preparation = prepared.preparation;
+      const serialized = {
+        observation: preparation.observation,
+        observationInput: preparation.input,
+        requirements: preparation.requirements,
+      };
+      await crashLiveProviderEffectAt(state, {
+        action: "conclusive",
+        checkpoint,
+        input: serialized,
+        releaseName: `conclusive-tail-${checkpoint}`,
+        signal: index % 2 === 0 ? "SIGKILL" : "SIGTERM",
+      });
+      const durablePrefix = readdirSync(prepared.active)
+        .filter((name) => /^\.provider-effect-event-03-\d{3}$/u.test(name))
+        .sort()
+        .map((name) => {
+          const path = join(prepared.active, name);
+          const metadata = lstatSync(path, { bigint: true });
+          return {
+            bytes: readFileSync(path),
+            device: metadata.dev,
+            inode: metadata.ino,
+            name,
+          };
+        });
+      const recoveryArguments = {
+        ...serialized,
+        repoRoot: state.repo,
+        stateBase: state.state,
+      };
+      let completion;
+      if (checkpoint === "after-effect-close-link") {
+        completion =
+          publishColimaLiveProviderEffectConclusiveNotCreatedForTest(
+            fixtureStartAdmissionArguments(state, preparation),
+          );
+      } else {
+        const confirmation =
+          liveProviderFixtureEffectRecoveryConfirmationForTest(
+            recoveryArguments,
+          );
+        completion = recoverColimaLiveProviderEffectForTest({
+          ...recoveryArguments,
+          confirmation,
+          testCheckpoint() {},
+        });
+      }
+      assert.equal(completion.event_kind, "completion", checkpoint);
+      assert.equal(completion.event_sequence, 10, checkpoint);
+      assert.equal(
+        completion.evidence.variant,
+        "attempted-effect-retired",
+        checkpoint,
+      );
+      for (const prefix of durablePrefix) {
+        const path = join(prepared.active, prefix.name);
+        const metadata = lstatSync(path, { bigint: true });
+        assert.equal(metadata.dev, prefix.device, checkpoint);
+        assert.equal(metadata.ino, prefix.inode, checkpoint);
+        assert.deepEqual(readFileSync(path), prefix.bytes, checkpoint);
+      }
+      const eventNames = readdirSync(prepared.active)
+        .filter((name) => /^\.provider-effect-event-03-\d{3}$/u.test(name))
+        .sort();
+      const events = eventNames.map((name) =>
+        parse(join(prepared.active, name)),
+      );
+      assert.deepEqual(
+        events.map((event) => event.event_kind),
+        expectedKinds,
+        checkpoint,
+      );
+      const slot = parse(join(prepared.active, ".mutation-slot-03"));
+      const ownerAuthority = sha256(canonicalBytes(slot));
+      const claimNames = readdirSync(prepared.active)
+        .filter((name) => /^\.mutation-recovery-03-\d{2}$/u.test(name))
+        .sort();
+      if (checkpoint === "after-effect-close-link") {
+        assert.deepEqual(claimNames, [], checkpoint);
+        assert.deepEqual(
+          events.map((event) => event.publisher_authority_sha256),
+          Array(events.length).fill(ownerAuthority),
+          checkpoint,
+        );
+      } else {
+        assert.deepEqual(claimNames, [".mutation-recovery-03-00"], checkpoint);
+        const recoveryAuthority = sha256(
+          readFileSync(join(prepared.active, claimNames[0])),
+        );
+        const firstRecovered = events.findIndex(
+          (event) => event.publisher_authority_sha256 === recoveryAuthority,
+        );
+        assert.equal(
+          events.every(
+            (event, eventIndex) =>
+              event.publisher_authority_sha256 ===
+              (firstRecovered === -1 || eventIndex < firstRecovered
+                ? ownerAuthority
+                : recoveryAuthority),
+          ),
+          true,
+          checkpoint,
+        );
+        assert.equal(
+          events.every((event) =>
+            new Set([ownerAuthority, recoveryAuthority]).has(
+              event.publisher_authority_sha256,
+            ),
+          ),
+          true,
+          checkpoint,
+        );
+      }
+      const terminal = events[9];
+      const receipt = terminal.evidence.receipt;
+      assert.equal(
+        receipt.result.publisher_authority_sha256,
+        terminal.publisher_authority_sha256,
+        checkpoint,
+      );
+      assert.deepEqual(
+        readFileSync(join(prepared.active, receiptFileName(receipt))),
+        canonicalBytes(receipt),
+        checkpoint,
+      );
+      assert.equal(existsSync(join(prepared.active, ".receipt-publish")), false);
+      assert.equal(
+        readdirSync(prepared.active).some((name) =>
+          name.startsWith(".mutation-stage-"),
+        ),
+        false,
+        checkpoint,
+      );
+      assert.equal(
+        existsSync(
+          join(
+            preparation.providerRoot,
+            ".synveda-clean-engine-provider-reservation",
+          ),
+        ),
+        false,
+        checkpoint,
+      );
+      assertPrivate(
+        join(prepared.active, ".provider-effect-witness-03"),
+        0o600,
+        false,
+        1,
+      );
+      const close = parse(join(prepared.active, ".mutation-close-03"));
+      assert.equal(
+        close.authority,
+        checkpoint === "after-effect-close-link" ? "owner" : "recovery",
+        checkpoint,
+      );
+      assert.equal(
+        close.operation_evidence_sha256,
+        sha256(canonicalBytes(events[10])),
+        checkpoint,
+      );
+      assert.equal(close.result_sequence, slot.source_sequence + 1, checkpoint);
+      assert.equal(
+        close.result_head_sha256,
+        sha256(canonicalBytes(receipt)),
+        checkpoint,
+      );
+      assert.equal(run(state, "verify").status, 0, checkpoint);
+    } finally {
+      if (preparation !== undefined) {
+        rmSync(preparation.root, { recursive: true, force: true });
+      }
+      rmSync(state.root, { recursive: true, force: true });
+    }
+  }
+});
+
+test("receipt-first, marker-first, and mismatched conclusive retirement are refused", async () => {
+  for (const testCase of [
+    {
+      checkpoint: "after-terminal-receipt-stage",
+      name: "receipt-first",
+    },
+    {
+      checkpoint: "after-terminal-receipt",
+      name: "marker-first",
+    },
+    {
+      checkpoint:
+        "after-terminal-receipt-publication-stage-directory-sync",
+      name: "receipt-mismatch",
+    },
+  ]) {
+    const state = fixture();
+    let preparation;
+    try {
+      const prepared = prepareCompletedLiveProviderStartDecisionFixture(state);
+      preparation = prepared.preparation;
+      const serialized = {
+        observation: preparation.observation,
+        observationInput: preparation.input,
+        requirements: preparation.requirements,
+      };
+      await crashLiveProviderEffectAt(state, {
+        action: "conclusive",
+        checkpoint: testCase.checkpoint,
+        input: serialized,
+        releaseName: `conclusive-order-${testCase.name}`,
+      });
+      const marker = join(
+        preparation.providerRoot,
+        ".synveda-clean-engine-provider-reservation",
+      );
+      let expectedError;
+      let restore = () => {};
+      if (testCase.name === "receipt-first") {
+        const stageNames = readdirSync(prepared.active).filter((name) =>
+          name.startsWith(".mutation-stage-"),
+        );
+        assert.equal(stageNames.length, 1);
+        const stagedEvent = parse(join(prepared.active, stageNames[0]));
+        assert.equal(stagedEvent.event_kind, "terminal-receipt");
+        assert.equal(
+          existsSync(join(prepared.active, ".provider-effect-event-03-009")),
+          false,
+        );
+        const receipt = stagedEvent.evidence.receipt;
+        const receiptPath = join(prepared.active, receiptFileName(receipt));
+        writeFileSync(receiptPath, canonicalBytes(receipt), {
+          flag: "wx",
+          mode: 0o600,
+        });
+        fsyncDirectoryForTest(prepared.active);
+        expectedError =
+          "clean-engine: open mutation slot did not cover the receipt head\n";
+      } else if (testCase.name === "marker-first") {
+        const terminal = parse(
+          join(prepared.active, ".provider-effect-event-03-009"),
+        );
+        assert.equal(
+          existsSync(
+            join(prepared.active, receiptFileName(terminal.evidence.receipt)),
+          ),
+          false,
+        );
+        unlinkSync(marker);
+        fsyncDirectoryForTest(preparation.providerRoot);
+        expectedError =
+          "clean-engine: live provider effect retired receipt was refused\n";
+      } else {
+        const terminal = parse(
+          join(prepared.active, ".provider-effect-event-03-009"),
+        );
+        const receiptPath = join(
+          prepared.active,
+          receiptFileName(terminal.evidence.receipt),
+        );
+        const original = readFileSync(receiptPath);
+        const changed = JSON.parse(original.toString("utf8"));
+        changed.result.publisher_authority_sha256 = "f".repeat(64);
+        assert.notDeepEqual(canonicalBytes(changed), original);
+        writeFileSync(receiptPath, canonicalBytes(changed), { mode: 0o600 });
+        restore = () => writeFileSync(receiptPath, original, { mode: 0o600 });
+        expectedError =
+          "clean-engine: open mutation slot did not cover the receipt head\n";
+      }
+      const invalid = snapshotTree(state.root);
+      for (const action of ["status", "verify"]) {
+        const refused = run(state, action);
+        assert.equal(refused.status, 78, testCase.name);
+        assert.equal(refused.stderr, expectedError, testCase.name);
+        assert.deepEqual(snapshotTree(state.root), invalid, testCase.name);
+      }
+      assert.equal(
+        existsSync(join(prepared.active, ".mutation-close-03")),
+        false,
+        testCase.name,
+      );
+      if (testCase.name === "receipt-mismatch") {
+        restore();
+        restore = () => {};
+        assert.equal(run(state, "status").status, 0);
+        const recoveryArguments = {
+          ...serialized,
+          repoRoot: state.repo,
+          stateBase: state.state,
+        };
+        const confirmation =
+          liveProviderFixtureEffectRecoveryConfirmationForTest(
+            recoveryArguments,
+          );
+        const completion = recoverColimaLiveProviderEffectForTest({
+          ...recoveryArguments,
+          confirmation,
+          testCheckpoint() {},
+        });
+        assert.equal(completion.evidence.variant, "attempted-effect-retired");
+        assert.equal(run(state, "verify").status, 0);
+      } else {
+        assert.equal(existsSync(marker), testCase.name === "receipt-first");
+      }
+    } finally {
+      if (preparation !== undefined) {
+        rmSync(preparation.root, { recursive: true, force: true });
+      }
+      rmSync(state.root, { recursive: true, force: true });
+    }
+  }
+});
+
+test("conclusive recovery preserves pending receipt inode and embedded bytes", async () => {
+  for (const [index, checkpoint] of [
+    "after-terminal-receipt-publication-stage",
+    "after-terminal-receipt-publication-directory-sync",
+  ].entries()) {
+    const state = fixture();
+    let preparation;
+    try {
+      const prepared = prepareCompletedLiveProviderStartDecisionFixture(state);
+      preparation = prepared.preparation;
+      const serialized = {
+        observation: preparation.observation,
+        observationInput: preparation.input,
+        requirements: preparation.requirements,
+      };
+      await crashLiveProviderEffectAt(state, {
+        action: "conclusive",
+        checkpoint,
+        input: serialized,
+        releaseName: `conclusive-pending-receipt-${index}`,
+        signal: index === 0 ? "SIGKILL" : "SIGTERM",
+      });
+      const terminalPath = join(
+        prepared.active,
+        ".provider-effect-event-03-009",
+      );
+      const terminal = parse(terminalPath);
+      const expectedBytes = canonicalBytes(terminal.evidence.receipt);
+      const stagePath = join(prepared.active, ".receipt-publish");
+      const receiptPath = join(
+        prepared.active,
+        receiptFileName(terminal.evidence.receipt),
+      );
+      const stageIdentity = lstatSync(stagePath, { bigint: true });
+      assert.equal(stageIdentity.nlink, BigInt(index + 1), checkpoint);
+      assert.deepEqual(readFileSync(stagePath), expectedBytes, checkpoint);
+      if (index === 0) {
+        assert.equal(existsSync(receiptPath), false, checkpoint);
+      } else {
+        const linked = lstatSync(receiptPath, { bigint: true });
+        assert.equal(linked.dev, stageIdentity.dev, checkpoint);
+        assert.equal(linked.ino, stageIdentity.ino, checkpoint);
+        assert.deepEqual(readFileSync(receiptPath), expectedBytes, checkpoint);
+      }
+      const prefix = readdirSync(prepared.active)
+        .filter((name) => /^\.provider-effect-event-03-\d{3}$/u.test(name))
+        .sort()
+        .map((name) => {
+          const path = join(prepared.active, name);
+          const metadata = lstatSync(path, { bigint: true });
+          return {
+            bytes: readFileSync(path),
+            device: metadata.dev,
+            inode: metadata.ino,
+            name,
+          };
+        });
+      const beforeObservation = snapshotTree(state.root);
+      assert.equal(run(state, "status").status, 0, checkpoint);
+      assert.equal(run(state, "verify").status, 0, checkpoint);
+      assert.deepEqual(snapshotTree(state.root), beforeObservation, checkpoint);
+      const recoveryArguments = {
+        ...serialized,
+        repoRoot: state.repo,
+        stateBase: state.state,
+      };
+      const confirmation =
+        liveProviderFixtureEffectRecoveryConfirmationForTest(
+          recoveryArguments,
+        );
+      const completion = recoverColimaLiveProviderEffectForTest({
+        ...recoveryArguments,
+        confirmation,
+        testCheckpoint() {},
+      });
+      assert.equal(completion.evidence.variant, "attempted-effect-retired");
+      assert.equal(existsSync(stagePath), false, checkpoint);
+      const receiptIdentity = lstatSync(receiptPath, { bigint: true });
+      assert.equal(receiptIdentity.dev, stageIdentity.dev, checkpoint);
+      assert.equal(receiptIdentity.ino, stageIdentity.ino, checkpoint);
+      assert.equal(receiptIdentity.nlink, 1n, checkpoint);
+      assert.deepEqual(readFileSync(receiptPath), expectedBytes, checkpoint);
+      for (const event of prefix) {
+        const path = join(prepared.active, event.name);
+        const metadata = lstatSync(path, { bigint: true });
+        assert.equal(metadata.dev, event.device, checkpoint);
+        assert.equal(metadata.ino, event.inode, checkpoint);
+        assert.deepEqual(readFileSync(path), event.bytes, checkpoint);
+      }
+      assert.equal(
+        parse(join(prepared.active, ".mutation-close-03")).authority,
+        "recovery",
+        checkpoint,
+      );
+      assert.equal(run(state, "verify").status, 0, checkpoint);
+    } finally {
+      if (preparation !== undefined) {
+        rmSync(preparation.root, { recursive: true, force: true });
+      }
+      rmSync(state.root, { recursive: true, force: true });
+    }
+  }
+});
+
+test("conclusive recovery refuses a same-byte pending receipt inode replacement", async () => {
+  const state = fixture();
+  let preparation;
+  try {
+    const prepared = prepareCompletedLiveProviderStartDecisionFixture(state);
+    preparation = prepared.preparation;
+    const serialized = {
+      observation: preparation.observation,
+      observationInput: preparation.input,
+      requirements: preparation.requirements,
+    };
+    await crashLiveProviderEffectAt(state, {
+      action: "conclusive",
+      checkpoint: "after-terminal-receipt-publication-stage",
+      input: serialized,
+      releaseName: "conclusive-pending-receipt-replacement-owner",
+    });
+    const terminal = parse(
+      join(prepared.active, ".provider-effect-event-03-009"),
+    );
+    const stagePath = join(prepared.active, ".receipt-publish");
+    const receiptPath = join(
+      prepared.active,
+      receiptFileName(terminal.evidence.receipt),
+    );
+    const expectedBytes = readFileSync(stagePath);
+    const originalIdentity = lstatSync(stagePath, { bigint: true });
+    const recoveryArguments = {
+      ...serialized,
+      repoRoot: state.repo,
+      stateBase: state.state,
+    };
+    const confirmation =
+      liveProviderFixtureEffectRecoveryConfirmationForTest(
+        recoveryArguments,
+      );
+    const displacedPath = join(
+      state.root,
+      "original-conclusive-pending-receipt",
+    );
+    const result = await releaseLiveProviderEffectCheckpoint(state, {
+      action: "recover",
+      checkpoint: "after-terminal-receipt-reconciliation-observation",
+      input: { ...serialized, confirmation },
+      mutate() {
+        renameSync(stagePath, displacedPath);
+        writeFileSync(stagePath, expectedBytes, {
+          flag: "wx",
+          mode: 0o600,
+        });
+        fsyncDirectoryForTest(prepared.active);
+      },
+      releaseName: "conclusive-pending-receipt-replacement-recovery",
+    });
+    assert.equal(result.signal, null);
+    assert.equal(result.status, 73);
+    assert.match(
+      result.stderr,
+      /pending receipt publication identity changed/u,
+    );
+    const replacementIdentity = lstatSync(stagePath, { bigint: true });
+    assert.notEqual(replacementIdentity.ino, originalIdentity.ino);
+    assert.deepEqual(readFileSync(stagePath), expectedBytes);
+    assert.equal(existsSync(receiptPath), false);
+    assert.equal(
+      existsSync(
+        join(
+          preparation.providerRoot,
+          ".synveda-clean-engine-provider-reservation",
+        ),
+      ),
+      true,
+    );
+    assert.equal(
+      existsSync(join(prepared.active, ".mutation-close-03")),
+      false,
+    );
+  } finally {
+    if (preparation !== undefined) {
+      rmSync(preparation.root, { recursive: true, force: true });
+    }
+    rmSync(state.root, { recursive: true, force: true });
+  }
+});
+
+test("recovery binds conclusive delivery to the exact canary and private outer identity", async () => {
+  const state = fixture();
+  let preparation;
+  try {
+    const prepared = prepareCompletedLiveProviderStartDecisionFixture(state);
+    preparation = prepared.preparation;
+    await crashLiveProviderEffectAt(state, {
+      action: "conclusive",
+      checkpoint: "after-delivery-result",
+      input: {
+        observation: preparation.observation,
+        observationInput: preparation.input,
+        requirements: preparation.requirements,
+      },
+      releaseName: "conclusive-delivery-binding",
+    });
+    const edgePath = join(
+      prepared.active,
+      ".provider-effect-event-03-002",
+    );
+    const deliveryPath = join(
+      prepared.active,
+      ".provider-effect-event-03-003",
+    );
+    const originalEdgeBytes = readFileSync(edgePath);
+    const originalDeliveryBytes = readFileSync(deliveryPath);
+    const originalDelivery = JSON.parse(originalDeliveryBytes);
+    writeFileSync(
+      deliveryPath,
+      canonicalBytes({
+        ...originalDelivery,
+        evidence: {
+          ...originalDelivery.evidence,
+          observation_sha256: "f".repeat(64),
+        },
+      }),
+      { mode: 0o600 },
+    );
+    const invalidCanary = run(state, "status");
+    assert.equal(invalidCanary.status, 70);
+    assert.match(invalidCanary.stderr, /conclusive canary evidence was refused/u);
+    writeFileSync(deliveryPath, originalDeliveryBytes, { mode: 0o600 });
+    assert.equal(run(state, "status").status, 0);
+
+    const changedEdge = {
+      ...JSON.parse(originalEdgeBytes),
+      evidence: {
+        ...JSON.parse(originalEdgeBytes).evidence,
+        child_node_identity_sha256: "e".repeat(64),
+      },
+    };
+    const changedEdgeSha256 = sha256(canonicalBytes(changedEdge));
+    const changedDelivery = {
+      ...originalDelivery,
+      parent_sha256: changedEdgeSha256,
+      evidence: {
+        ...originalDelivery.evidence,
+        outer_launch_edge_sha256: changedEdgeSha256,
+      },
+    };
+    const { observation_sha256: _observationSha256, ...fixedResult } =
+      changedDelivery.evidence;
+    changedDelivery.evidence.observation_sha256 =
+      fixtureEffectAdapterObservation(
+        {
+          adapter_contract_sha256:
+            FIXTURE_EFFECT_ADAPTER_CONTRACT_SHA256,
+          attempt_event_sha256:
+            changedDelivery.evidence.attempt_event_sha256,
+          driver_contract_sha256:
+            changedDelivery.evidence.driver_contract_sha256,
+          fixture_id: changedDelivery.fixture_id,
+          operation_contract_sha256:
+            changedDelivery.operation_contract_sha256,
+          operation_kind: changedDelivery.operation_kind,
+          outer_launch_edge_sha256: changedEdgeSha256,
+          planned_start_attempt_sha256: parse(
+            join(prepared.active, ".mutation-slot-03"),
+          ).operation_plan.planned_start_attempt_sha256,
+        },
+        {
+          ...fixedResult,
+          outer_launch_edge_sha256: changedEdgeSha256,
+        },
+      );
+    writeFileSync(edgePath, canonicalBytes(changedEdge), { mode: 0o600 });
+    writeFileSync(deliveryPath, canonicalBytes(changedDelivery), {
+      mode: 0o600,
+    });
+    assert.equal(run(state, "status").status, 0);
+    const recoveryArguments = {
+      observation: preparation.observation,
+      observationInput: preparation.input,
+      repoRoot: state.repo,
+      requirements: preparation.requirements,
+      stateBase: state.state,
+    };
+    assert.throws(
+      () =>
+        liveProviderFixtureEffectRecoveryConfirmationForTest(
+          recoveryArguments,
+        ),
+      /outer identity was refused/u,
+    );
+    writeFileSync(edgePath, originalEdgeBytes, { mode: 0o600 });
+    writeFileSync(deliveryPath, originalDeliveryBytes, { mode: 0o600 });
+    const confirmation =
+      liveProviderFixtureEffectRecoveryConfirmationForTest(
+        recoveryArguments,
+      );
+    const completion = recoverColimaLiveProviderEffectForTest({
+      ...recoveryArguments,
+      confirmation,
+      testCheckpoint() {},
+    });
+    assert.equal(completion.evidence.variant, "attempted-effect-retired");
+    assert.equal(run(state, "verify").status, 0);
+  } finally {
+    if (preparation !== undefined) {
+      rmSync(preparation.root, { recursive: true, force: true });
+    }
+    rmSync(state.root, { recursive: true, force: true });
+  }
+});
+
+test("physical drift cannot cross event, marker-retirement, or close publication", async () => {
+  for (const [checkpoint, driftKind, markerPresent] of [
+    ["after-cleanup-settlement-stage", "source", true],
+    ["after-cleanup-progress-stage", "observation-component", true],
+    [
+      "before-cleanup-temporary-namespace-parent-fsync",
+      "namespace-swap",
+      true,
+    ],
+    [
+      "after-terminal-receipt-publication-stage-directory-sync",
+      "namespace",
+      true,
+    ],
+    ["after-terminal-receipt-publication-stage", "source", true],
+    [
+      "before-marker-retirement-provider-root-fsync",
+      "provider-root-swap",
+      false,
+    ],
+    ["after-completion", "source", false],
+  ]) {
+    const state = fixture();
+    let preparation;
+    let restore = () => {};
+    try {
+      const prepared = prepareCompletedLiveProviderStartDecisionFixture(state);
+      preparation = prepared.preparation;
+      const result = await releaseLiveProviderEffectCheckpoint(state, {
+        checkpoint,
+        input: {
+          observation: preparation.observation,
+          observationInput: preparation.input,
+          requirements: preparation.requirements,
+        },
+        mutate() {
+          if (driftKind === "source") {
+            const sourcePath = join(state.repo, "source.txt");
+            writeFileSync(sourcePath, "source drift during publication\n", {
+              mode: 0o600,
+            });
+            restore = () => {
+              writeFileSync(sourcePath, "fixture source\n", { mode: 0o600 });
+            };
+          } else if (driftKind === "observation-component") {
+            const componentPath =
+              preparation.input.component_paths["docker-cli-binary"];
+            const original = readFileSync(componentPath);
+            const changed = Buffer.from(original);
+            changed[0] ^= 0xff;
+            chmodSync(componentPath, 0o700);
+            writeFileSync(componentPath, changed);
+            chmodSync(componentPath, 0o500);
+            restore = () => {
+              chmodSync(componentPath, 0o700);
+              writeFileSync(componentPath, original);
+              chmodSync(componentPath, 0o500);
+            };
+          } else if (driftKind === "namespace") {
+            const driftPath = join(
+              preparation.input.environment.COLIMA_HOME,
+              "late-publication-drift",
+            );
+            writePrivateColimaLiveFixtureFile(
+              driftPath,
+              Buffer.from("late namespace drift\n", "utf8"),
+              0o600,
+            );
+            restore = () => unlinkSync(driftPath);
+          } else {
+            const originalPath =
+              driftKind === "namespace-swap"
+                ? preparation.input.environment.TMPDIR
+                : preparation.providerRoot;
+            const displacedPath = `${originalPath}-displaced`;
+            renameSync(originalPath, displacedPath);
+            symlinkSync(displacedPath, originalPath);
+            restore = () => {
+              unlinkSync(originalPath);
+              renameSync(displacedPath, originalPath);
+            };
+          }
+        },
+        releaseName: `conclusive-drift-${driftKind}-${checkpoint}`,
+      });
+      assert.equal(result.signal, null);
+      assert.equal(
+        result.status,
+        73,
+      );
+      assert.match(
+        result.stderr,
+        /source changed|tail authority changed|root observation changed|root observation was refused|blueprint changed|identity changed/u,
+      );
+      const marker = join(
+        preparation.providerRoot,
+        ".synveda-clean-engine-provider-reservation",
+      );
+      assert.equal(existsSync(marker), markerPresent, checkpoint);
+      if (checkpoint === "after-terminal-receipt-publication-stage") {
+        const terminal = parse(
+          join(prepared.active, ".provider-effect-event-03-009"),
+        );
+        assert.equal(
+          existsSync(
+            join(prepared.active, receiptFileName(terminal.evidence.receipt)),
+          ),
+          false,
+          checkpoint,
+        );
+        assert.equal(
+          existsSync(join(prepared.active, ".receipt-publish")),
+          true,
+          checkpoint,
+        );
+      }
+      assert.equal(
+        existsSync(join(prepared.active, ".mutation-close-03")),
+        false,
+      );
+      restore();
+      restore = () => {};
+      const recoveryArguments = {
+        observation: preparation.observation,
+        observationInput: preparation.input,
+        repoRoot: state.repo,
+        requirements: preparation.requirements,
+        stateBase: state.state,
+      };
+      if (driftKind === "namespace" || driftKind === "namespace-swap") {
+        assert.throws(
+          () =>
+            liveProviderFixtureEffectRecoveryConfirmationForTest(
+              recoveryArguments,
+            ),
+          /root observation changed/u,
+        );
+        assert.equal(existsSync(marker), true, checkpoint);
+        assert.equal(
+          existsSync(join(prepared.active, ".mutation-close-03")),
+          false,
+        );
+        assert.equal(run(state, "verify").status, 0, checkpoint);
+        continue;
+      }
+      const confirmation =
+        liveProviderFixtureEffectRecoveryConfirmationForTest(
+          recoveryArguments,
+        );
+      const completion = recoverColimaLiveProviderEffectForTest({
+        ...recoveryArguments,
+        confirmation,
+        testCheckpoint() {},
+      });
+      assert.equal(completion.evidence.variant, "attempted-effect-retired");
+      assert.equal(run(state, "verify").status, 0);
+    } finally {
+      restore();
+      if (preparation !== undefined) {
+        rmSync(preparation.root, { recursive: true, force: true });
+      }
+      rmSync(state.root, { recursive: true, force: true });
+    }
+  }
+});
+
+test("conclusive recovery revalidates every admitted namespace", async () => {
+  for (const environmentKey of [
+    "TMPDIR",
+    "HOME",
+    "LIMA_HOME",
+    "DOCKER_CONFIG",
+    "COLIMA_HOME",
+    "COLIMA_CACHE_HOME",
+  ]) {
+    const state = fixture();
+    let preparation;
+    let driftPath;
+    try {
+      const prepared = prepareCompletedLiveProviderStartDecisionFixture(state);
+      preparation = prepared.preparation;
+      const serialized = {
+        observation: preparation.observation,
+        observationInput: preparation.input,
+        requirements: preparation.requirements,
+      };
+      await crashLiveProviderEffectAt(state, {
+        action: "conclusive",
+        checkpoint: "after-delivery-result",
+        input: serialized,
+        releaseName: `conclusive-namespace-${environmentKey.toLowerCase()}`,
+      });
+      driftPath = join(
+        preparation.input.environment[environmentKey],
+        `recovery-drift-${environmentKey.toLowerCase()}`,
+      );
+      writePrivateColimaLiveFixtureFile(
+        driftPath,
+        Buffer.from("namespace recovery drift\n", "utf8"),
+        0o600,
+      );
+      const stateBefore = snapshotTree(state.root);
+      assert.throws(
+        () =>
+          liveProviderFixtureEffectRecoveryConfirmationForTest({
+            ...serialized,
+            repoRoot: state.repo,
+            stateBase: state.state,
+          }),
+        /root observation changed/u,
+        environmentKey,
+      );
+      assert.deepEqual(snapshotTree(state.root), stateBefore, environmentKey);
+      assert.equal(
+        readdirSync(prepared.active).filter((name) =>
+          /^\.provider-effect-event-03-\d{3}$/u.test(name),
+        ).length,
+        4,
+        environmentKey,
+      );
+      assert.equal(
+        readdirSync(prepared.active).some((name) =>
+          name.startsWith(".mutation-recovery-03-"),
+        ),
+        false,
+        environmentKey,
+      );
+      assert.equal(
+        existsSync(join(prepared.active, ".mutation-close-03")),
+        false,
+        environmentKey,
+      );
+      assertPrivate(
+        join(prepared.active, ".provider-effect-witness-03"),
+        0o600,
+        false,
+        2,
+      );
+      assertPrivate(
+        join(
+          preparation.providerRoot,
+          ".synveda-clean-engine-provider-reservation",
+        ),
+        0o600,
+        false,
+        2,
+      );
+      unlinkSync(driftPath);
+      driftPath = undefined;
+      assert.equal(run(state, "verify").status, 0, environmentKey);
+    } finally {
+      if (driftPath !== undefined) unlinkSync(driftPath);
+      if (preparation !== undefined) {
+        rmSync(preparation.root, { recursive: true, force: true });
+      }
+      rmSync(state.root, { recursive: true, force: true });
+    }
   }
 });
 
@@ -7281,6 +8913,7 @@ test("the post-decision effect observer has no provider-effect control surface",
     "observeColimaLiveProviderStartEffectFreshAdmissionForExecutor",
     "observeColimaLiveProviderStartEffectFreshAdmissionForTest",
     "publishColimaLiveProviderEffectAttemptFenceForTest",
+    "publishColimaLiveProviderEffectConclusiveNotCreatedForTest",
     "publishColimaLiveProviderEffectPreAttemptForTest",
     "recoverColimaLiveProviderEffectForTest",
   ];
@@ -7296,6 +8929,7 @@ test("the post-decision effect observer has no provider-effect control surface",
   );
   assert.deepEqual(effectMutators, [
     "publishColimaLiveProviderEffectAttemptFenceForTest",
+    "publishColimaLiveProviderEffectConclusiveNotCreatedForTest",
     "publishColimaLiveProviderEffectPreAttemptForTest",
     "recoverColimaLiveProviderEffectForTest",
   ]);
@@ -7391,9 +9025,56 @@ test("the post-decision effect observer has no provider-effect control surface",
     effectPublicationStart >= 0 && effectPublicationEnd > effectPublicationStart,
   );
   assert.ok(effectRecoveryStart >= 0 && effectRecoveryEnd > effectRecoveryStart);
+  const effectPublicationSource = stateSource.slice(
+    effectPublicationStart,
+    effectPublicationEnd,
+  );
+  const effectRecoverySource = stateSource.slice(
+    effectRecoveryStart,
+    effectRecoveryEnd,
+  );
+  assert.equal(
+    [
+      ...effectPublicationSource.matchAll(
+        /executeColimaLiveProviderEffectFixtureConclusiveAdapter\s*\(/gu,
+      ),
+    ].length,
+    1,
+  );
+  assert.doesNotMatch(
+    effectRecoverySource,
+    /executeColimaLiveProviderEffectFixtureConclusiveAdapter\s*\(/u,
+  );
+  const reproofSlices = [
+    ["function publishLiveProviderEffectEvent", "function retireLiveProviderEffectMarker"],
+    ["function retireLiveProviderEffectMarker", "function liveProviderEffectPreAttemptCompletionEvidence"],
+    ["const closed = closeMutationLease(", "export function publishColimaLiveProviderEffectPreAttemptForTest"],
+    ["function validateLiveProviderEffectRecoveryPhysicalState", "export function liveProviderFixtureEffectRecoveryConfirmationForTest"],
+  ].map(([startMarker, endMarker]) => {
+    const start = stateSource.indexOf(startMarker, effectPublicationStart);
+    const end = stateSource.indexOf(endMarker, start);
+    assert.ok(start >= 0 && end > start, startMarker);
+    return stateSource.slice(start, end);
+  });
+  for (const source of reproofSlices) {
+    assert.match(source, /reproveLiveProviderEffectFixtureBlueprint\s*\(/u);
+  }
+  const boundSyncStart = stateSource.indexOf(
+    "function syncLiveProviderEffectBoundDirectory",
+  );
+  const boundSyncEnd = stateSource.indexOf(
+    "function liveProviderEffectNamespaceTarget",
+    boundSyncStart,
+  );
+  assert.ok(boundSyncStart >= 0 && boundSyncEnd > boundSyncStart);
+  const boundSyncSource = stateSource.slice(boundSyncStart, boundSyncEnd);
+  assert.match(boundSyncSource, /constants\.O_NOFOLLOW/u);
+  assert.match(boundSyncSource, /exactFstat\(descriptor\)/u);
+  assert.match(boundSyncSource, /sameMetadata\(openedBeforeSync, openedAfterSync\)/u);
+  assert.match(boundSyncSource, /sameMetadata\(openedAfterSync, namedAfterSync\)/u);
   for (const source of [
-    stateSource.slice(effectPublicationStart, effectPublicationEnd),
-    stateSource.slice(effectRecoveryStart, effectRecoveryEnd),
+    effectPublicationSource,
+    effectRecoverySource,
   ]) {
     assert.doesNotMatch(
       source,
@@ -7404,6 +9085,18 @@ test("the post-decision effect observer has no provider-effect control surface",
       /\b(?:execFile|execFileSync|execSync|fork|spawn|spawnSync)\s*\(/u,
     );
   }
+  const processHelper = readFileSync(
+    resolve("scripts/fixtures/clean-engine-live-provider-effect-process.mjs"),
+    "utf8",
+  );
+  assert.match(
+    processHelper,
+    /new Set\(\["attempt", "collision", "conclusive", "publish", "recover"\]\)/u,
+  );
+  assert.match(
+    processHelper,
+    /action === "conclusive"[\s\S]*publishColimaLiveProviderEffectConclusiveNotCreatedForTest/u,
+  );
 
   const lifecycle = readFileSync(
     new URL(

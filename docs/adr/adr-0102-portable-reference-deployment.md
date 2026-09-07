@@ -354,12 +354,17 @@ the no-spawn reservation held across start authority and effect. That
 continuation model is superseded by the amendment above: ADR-0104 instead owns
 a sibling generation with a distinct effect witness. Its production-unreachable
 fixture state now persists the physical stage/witness/marker prefix, a
-zero-receipt pre-attempt completion, an attempt fence and crash recovery through
-receipt v6, slot v7, recovery/root v6 and close v8. It invokes no process and
-cannot recover across the attempt fence. Complete recursive settlement and
-causal ownership/recovery for the outer process, detached Lima hostagent,
-usernet and SSH ControlMaster remain open, as do live macOS proxy observation
-and per-file OS executable identity.
+zero-receipt pre-attempt completion, an attempt fence and one bounded attempted
+tail driven by the process-free conclusively-not-created adapter through
+receipt v6, slot v7, recovery/root v6 and close v8. Blueprint v2 binds the
+fourth `conclusive-adapter` component. Recovery never calls that adapter's
+executor; state exact-byte loads the module and recovery validates the durable
+result. It remains operator-blocked before exact durable delivery and may
+resume only the missing create-settlement/cleanup/receipt/marker/completion/
+close suffix after delivery. Complete live
+recursive settlement and causal ownership/recovery for the outer process,
+detached Lima hostagent, usernet and SSH ControlMaster remain open, as do live
+macOS proxy observation and per-file OS executable identity.
 
 ## Options considered
 

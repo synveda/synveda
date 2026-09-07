@@ -38,6 +38,7 @@ const {
   LiveProviderEffectFailure,
   buildColimaLiveProviderEffectEvent,
   buildColimaLiveProviderEffectPublicationPlan,
+  buildColimaLiveProviderEffectTerminalReceipt,
   buildColimaLiveProviderEffectWitness,
   colimaLiveProviderEffectProofBytes,
   deriveColimaLiveFixtureProviderEffectCleanupActions,
@@ -576,6 +577,7 @@ test("the public effect boundary is exact, class-separated and recursively froze
     "LiveProviderEffectFailure",
     "buildColimaLiveProviderEffectEvent",
     "buildColimaLiveProviderEffectPublicationPlan",
+    "buildColimaLiveProviderEffectTerminalReceipt",
     "buildColimaLiveProviderEffectWitness",
     "colimaLiveProviderEffectProofBytes",
     "deriveColimaLiveFixtureProviderEffectCleanupActions",
@@ -2527,6 +2529,49 @@ test("terminal receipt fields remain source-derived after digest recomputation",
   }
 });
 
+test("the terminal receipt builder closes the exact cleanup-settlement frontier", () => {
+  const fixture = prepared("residual");
+  const terminalIndex = eventIndex(fixture, "terminal-receipt");
+  const input = {
+    history: fixture.events.slice(0, terminalIndex),
+    publicationPlan: fixture.publicationPlan,
+    publisherAuthorityChain: fixture.publisherAuthorityChain,
+    publisherAuthoritySha256: fixture.publisherAuthoritySha256,
+    source: fixture.source,
+    witness: fixture.witness,
+  };
+  const receipt = buildColimaLiveProviderEffectTerminalReceipt(input);
+  assert.deepEqual(
+    receipt,
+    fixture.events[terminalIndex].evidence.receipt,
+  );
+  assertRecursivelyFrozen(receipt);
+  expectRefusal(
+    () =>
+      buildColimaLiveProviderEffectTerminalReceipt({
+        ...input,
+        publisherAuthoritySha256: digest("wrong authority"),
+      }),
+    /terminal receipt frontier/u,
+  );
+  expectRefusal(
+    () =>
+      buildColimaLiveProviderEffectTerminalReceipt({
+        ...input,
+        history: input.history.slice(0, -1),
+      }),
+    /terminal receipt frontier/u,
+  );
+  expectRefusal(
+    () =>
+      buildColimaLiveProviderEffectTerminalReceipt({
+        ...input,
+        extra: true,
+      }),
+    /terminal receipt input/u,
+  );
+});
+
 test("paged event prefixes refuse short nonterminal pages", () => {
   const fixture = prepared("rich-retired");
 
@@ -3168,6 +3213,10 @@ test("the pure boundary has no executor imports and its joint maxima fit the eve
       REPO_ROOT,
       "scripts/clean-engine-live-provider-effect-fixture-blueprint.test.mjs",
     ),
+    resolve(
+      REPO_ROOT,
+      "scripts/clean-engine-live-provider-effect-fixture-adapter.test.mjs",
+    ),
     resolve(REPO_ROOT, "scripts/clean-engine-state.test.mjs"),
   ]);
   const observedConsumers = [];
@@ -3193,6 +3242,7 @@ test("the pure boundary has no executor imports and its joint maxima fit the eve
   assert.deepEqual(observedConsumers.sort(), [
     "deploy/compose/scripts/clean-engine-receipts.mjs",
     "deploy/compose/scripts/clean-engine-state.mjs",
+    "scripts/clean-engine-live-provider-effect-fixture-adapter.test.mjs",
     "scripts/clean-engine-live-provider-effect-fixture-blueprint.test.mjs",
     "scripts/clean-engine-receipts.test.mjs",
     "scripts/clean-engine-state.test.mjs",

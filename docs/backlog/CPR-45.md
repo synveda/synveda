@@ -27,7 +27,9 @@ a user can install, sign in, use, back up, restore or upgrade the product.
 architecture. [ADR-0103](../adr/adr-0103-cooperative-live-provider-reservation.md)
 locks the implemented terminal no-spawn reservation. Accepted
 [ADR-0104](../adr/adr-0104-indivisible-live-provider-effect-generation.md)
-defines the still-absent sibling effect generation. [The deployment
+defines the sibling generation; its fixture-only pre-attempt and bounded
+conclusive-not-created attempted branch is implemented, while every
+provider-process/live-identity branch remains absent. [The deployment
 contract](../DEPLOYMENT_CONTRACT.md) fixes the provider-neutral commands,
 configuration and external dependency seams.
 
@@ -779,18 +781,17 @@ It defines no action, operation kind or contract, retains its independent
 512-occurrence preflight, and is consumed by neither state nor the pure effect
 grammar. It is not a compatibility or execution path.
 
-The pure fixture grammar still binds the exact completed decision, trusted v5
+The pure fixture grammar binds the exact completed decision, trusted v5
 recursive baseline, witness/marker, causal graph, endpoints, inventories,
 cleanup, terminal receipt and retirement without observation I/O. The state
-owner now persists the fixture-only pre-attempt prefix using receipt v6,
-mutation slot v7, recovery/root v6 and close v8. A sequence-bound private stage
-derives its witness from the physical inode before the fixed marker CAS. It may
-retire before attempt with no receipt, or publish a durable attempt fence and
-stop without invoking a process. Recovery proves the original owner and newest
-recoverer absent, preserves repeated same-frontier claims, advances only a
-valid forward topology and refuses the attempt fence. Partial stages, foreign
-markers and interrupted marker retirement fail closed or recover without
-adopting/deleting foreign evidence.
+owner persists both the fixture-only pre-attempt branch and one bounded
+attempted branch using receipt v6, mutation slot v7, recovery/root v6 and close
+v8. A sequence-bound private stage derives its witness from the physical inode
+before the fixed marker CAS. It may retire before attempt with no receipt, stop
+at an attempt fence without delivery, or consume the exact process-free
+conclusive adapter result described below. Partial stages, foreign markers and
+interrupted marker or receipt publication fail closed without adopting or
+deleting foreign evidence.
 
 An iterative closed-data preflight runs before validation or freezing. It
 rejects proxies without invoking traps, cycles, depth above 16, more than 1,024
@@ -798,31 +799,66 @@ value occurrences, more than 64 entries in one container, and canonical UTF-8
 above 64 KiB including the newline. Shared acyclic aliases are permitted and
 counted per occurrence. Refusals are typed and content-free.
 
-The generic receipt API rejects `provider-effect-retired` before slot
-acquisition; receipt v6 reserves that phase for the future state-owned attempted
-tail. The current pre-attempt completion publishes no receipt. All effect
-mutation/recovery APIs are fixture-only, ADR-0103's completed no-spawn branch
-remains terminal, and caller-held pure bytes carry no state provenance or
-branch selection.
+The generic receipt API still rejects `provider-effect-retired` before slot
+acquisition. Only the exact current fixture owner or newest recovery authority
+publishes that reserved phase; the pre-attempt completion publishes no
+receipt. All effect mutation/recovery APIs are fixture-only, ADR-0103's
+completed no-spawn branch remains terminal, and caller-held pure bytes carry no
+state provenance or branch selection.
 
-The persisted fixture plan now comes from one closed, process-free launch
-blueprint rather than label-derived synthetic commitments. The blueprint is a
-pure leaf with only Node crypto/type imports. It fixes the state-owner-to-outer
-four-role topology, four planned endpoint kinds and bounded runtime envelope,
-then projects exact invocation, role, endpoint, start-attempt and quiescence
-commitments into the existing effect plan without adding a persisted field or
-schema generation. The state seam opens Node, protocol and role bytes with
+The persisted fixture plan now comes from the closed process-free blueprint v2
+rather than label-derived synthetic commitments. Its fourth component is the
+`conclusive-adapter`, whose v1 contract digest is
+`f97fef2c614db9e656a0cb9ed7ad79a5ce4eae314103670c57c988f8c707c6f2`.
+The blueprint fixes the state-owner-to-outer four-role topology, four planned
+endpoint kinds and bounded runtime envelope, then projects exact invocation,
+role, endpoint, adapter, start-attempt and quiescence commitments into the
+existing effect plan. State opens Node, protocol, role and adapter bytes with
 `O_NOFOLLOW`, compares descriptor identity before and after hashing, and
-re-proves those bytes before start authority and the attempt fence. Role-key,
-challenge and private-path commitments are domain-separated HMACs under the
-unpersisted observation binding key; only Ed25519 SPKI digests and opaque
-commitments enter the slot, witness and event chain. The closed Darwin child
-environment is also bound. No raw key, path or environment value is persisted.
+re-proves the exact source/component/blueprint binding at the authority,
+attempt, event, marker-retirement and close boundaries. Role-key, challenge and
+private-path commitments are domain-separated HMACs under the unpersisted
+observation binding key. Public Ed25519 SPKI material plus content-free hashes
+and opaque commitments enter durable state; no private key, raw path,
+environment or adapter-private value is persisted.
 
-This is preparation evidence only. It does not invoke a process, prove that the
-planned endpoints exist, retain a launch capability or make the standalone
+The adapter is a pure state-owned fixture seam. For one closed input it returns
+only `conclusive-not-created`, a zero child-handle identity,
+`effect_possible: false` and safe error code `not-created`. It has no
+filesystem, network, process, provider or runtime-publication capability. The
+attempted owner path publishes exactly `start-authority`, `start-attempt`,
+`launch-edge`, `delivery-result`, `create-settlement`, `cleanup-plan-page`,
+`cleanup-plan`, `cleanup-progress`, `cleanup-settlement`, `terminal-receipt`
+and `completion`. The terminal event embeds the receipt; the global receipt is
+published byte-identically and durably before the exact marker is unlinked and
+its bound provider-root descriptor fsynced. Completion and mutation close are
+last.
+
+Once the attempt fence exists, recovery is operator-blocked until an exact
+durable conclusive delivery event exists. Recovery never calls the adapter
+executor; state exact-byte loads the module and recovery validates the durable
+result. After that event it revalidates the adapter result,
+source/component/blueprint binding, opaque proposed-outer-node identity
+commitment, provider root, all six namespace identities and the accepted event
+prefix, then resumes only the missing suffix under the newest recovery claim.
+Receipt-first, marker-first, embedded/global receipt mismatch,
+malformed/crossed evidence and physical drift fail closed. Pending one- or
+two-link receipt publication is reconciled only from canonical bytes matching
+the embedded receipt and the observed staged inode. Repeated same-frontier
+recoverers are retained. Existing durable prefix events and staged receipt
+bytes retain their original publisher and identity; among recoverers only the
+newest recovery authority may publish new suffix state, reconcile the receipt,
+retire the marker or close.
+
+This remains deterministic preparation and conclusive-not-created retirement
+evidence only. It does not launch or adopt a provider process, prove that a
+planned endpoint exists, retain a launch capability or make the standalone
 four-process fixture an effect executor. That fixture deliberately retains its
-truthful `fixture-supervisor` ancestry and imports no deployment module.
+truthful `fixture-supervisor` ancestry and imports no deployment module. No
+persisted receipt/journal generation advances: receipt v6, slot v7,
+recovery/root v6 and close v8 remain unchanged. The process-free blueprint
+advances to v2; new adapter contract/result and private tail-observation
+domains start at v1. Both operation-contract digests remain unchanged.
 
 A standalone deterministic preparation fixture validates
 the closed four-role causal shape with four repository-owned Node processes:
@@ -839,16 +875,12 @@ the six-namespace inventory, crash recovery or any Colima/Lima/SSH/Engine
 evidence. The recorded execution is Darwin-only; Linux execution remains an
 open evidence requirement.
 
-Next add a dedicated state-owned, phaseful fixture adapter that consumes the
-same in-memory private preparation and can satisfy the persisted blueprint; do
-not import or relabel the standalone fixture as state-owned evidence. Land the
-first attempted tail as the bounded conclusively-not-created residual branch,
-then add authenticated role/endpoint/quiescence/inventory evidence. Persist the
-post-attempt cleanup events, exact terminal receipt and close through the
-already hard-cut generation. Cover uncertain acknowledgement, duplicate
-dispatch, every crash boundary, cleanup retry and attempt-fence operator
-resolution before considering a production invoker. No Docker, Colima or Lima
-belongs in that fixture step.
+Next add authenticated live-role, endpoint, quiescence and recursive inventory
+evidence without changing this process-free adapter into an executor. Define
+the explicit operator resolution for an attempt whose delivery was not made
+durable, then cover uncertain acknowledgement and live cleanup retry before
+considering a production invoker. No production registration or supported
+lifecycle may precede independently reviewed platform evidence.
 
 Keep the production effect contract deny-only, absent from the adapter registry
 and lifecycle-unexposed. Never reuse the generic mutation-slot inode,

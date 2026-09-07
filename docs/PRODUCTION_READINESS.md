@@ -231,39 +231,59 @@ and attempt, exact four-role causal graph, four authenticated endpoint/socket
 identities, Docker context, quiescence, two equal paged recursive inventories,
 trusted v5 baseline descriptors, intra-namespace hard-link closure, exact
 directory capacity, derived cleanup, terminal receipt and marker retirement.
-Six closed histories and 24 deterministic tests cover success, residual,
-uncertain and pre-attempt branches without invoking filesystem observation,
-process or network execution. This in-memory event fixture is distinct from the
-earlier four-process causal fixture.
+Its closed-history and pure-effect suites cover success, residual, uncertain
+and pre-attempt branches without invoking filesystem observation, process or
+network execution. This in-memory event fixture is distinct from the earlier
+four-process causal fixture.
 
-Receipt v6, slot v7, recovery/root v6 and close v8 now form one persisted hard
-cut. A test-only state seam publishes a sequence-bound stage, inode-derived
-witness, fixed marker and pre-attempt events. It can close after verified
-zero-receipt retirement, or stop at an unrecoverable attempt fence without
-invoking a process. Fixture recovery proves the owner and newest recoverer
-absent, handles partial and interrupted physical transitions, and never crosses
-the attempt fence. This is deterministic fixture state/recovery evidence, not
-live process, provider, platform or readiness evidence.
+Receipt v6, slot v7, recovery/root v6 and close v8 form one persisted hard cut.
+A test-only state seam publishes a sequence-bound stage, inode-derived witness,
+fixed marker and exact events. It can close after verified zero-receipt
+pre-attempt retirement, stop at an attempt fence without delivery, or consume
+one exact process-free `conclusive-not-created` adapter result. That attempted
+branch publishes, in order, `start-authority`, `start-attempt`, `launch-edge`,
+`delivery-result`, `create-settlement`, `cleanup-plan-page`, `cleanup-plan`,
+`cleanup-progress`, `cleanup-settlement`, `terminal-receipt` and `completion`.
+The staged receipt bytes are canonical-byte-identical to the receipt embedded
+in the terminal event. The final receipt path is hard-linked from that staged
+inode; after directory fsync and stage retirement, the one-link final receipt
+is durable before marker unlink, bound provider-root fsync, completion and
+close. Mutation close is last.
 
-The fixture state publisher now derives its existing plan projection through a
-separate process-free launch blueprint rather than synthetic labels. Exact
-Node/protocol/role hashes are read with no-follow descriptor checks and
-re-proved before authority/attempt publication; the closed environment, role
-argv/cwd, Ed25519 public identities, endpoint paths and attempt/quiescence
-commitments are bound without persisting private key or path material. This
-changes no effect/receipt schema or digest and remains deterministic
-pre-execution evidence only. It closes neither live process/endpoint evidence
-nor the production-provider gap.
+The fixture state publisher derives its plan through process-free blueprint v2.
+Its fourth component binds a state-owned `conclusive-adapter` with contract
+digest `f97fef2c614db9e656a0cb9ed7ad79a5ce4eae314103670c57c988f8c707c6f2`.
+Exact Node/protocol/role/adapter hashes are read through no-follow descriptors;
+the loaded adapter source is snapshotted at module initialization and must equal
+the later component manifest. The closed environment, role argv/cwd, Ed25519
+public identities, endpoint paths and attempt/quiescence commitments remain
+bound without persisting private keys or paths. The adapter returns only
+`conclusive-not-created`, a zero child handle, `effect_possible: false` and
+safe code `not-created`; it has no filesystem, network, process, provider or
+runtime-publication capability.
 
-The current state generation adds one deterministic cooperative reservation and
-still performs no provider process action. A v7 slot precedes a private fsynced
-witness. One fixed no-replace provider-root hard-link CAS binds the exact state
-run and all six namespace identities on one device. While the exact two-link
-marker/witness inode remains held, a bracketed fresh namespace observation must
-match the plan before immutable retirement authorization is published. The
-exact marker is then retired, its parent fsynced, the one-link witness proved
-and close v8 bound to the settlement digest. Receipt, environment, provider,
-runtime and evidence state remain unchanged.
+Attempted recovery remains operator-blocked before an exact durable delivery
+event. Recovery never calls the adapter executor; state exact-byte loads the
+module and recovery validates the durable result. After delivery it revalidates
+the adapter result, opaque proposed-outer-node identity commitment,
+source/component/blueprint binding, provider root, all six namespaces and the
+event prefix, then publishes only the missing suffix under the newest claim. A
+pending receipt's canonical bytes matching the embedded receipt and its
+observed staged inode are preserved; receipt-first, marker-first,
+embedded/global mismatch, malformed or crossed evidence and
+physical drift fail closed. This is deterministic fixture state/recovery
+evidence, not live process, provider, platform or readiness evidence.
+
+Separately, ADR-0103's mutually exclusive terminal no-spawn sibling adds one
+deterministic cooperative reservation and performs no provider process action.
+A v7 slot precedes a private fsynced witness. One fixed no-replace provider-root
+hard-link CAS binds the exact state run and all six namespace identities on one
+device. While the exact two-link marker/witness inode remains held, a bracketed
+fresh namespace observation must match the plan before immutable retirement
+authorization is published. The exact marker is then retired, its parent
+fsynced, the one-link witness proved and close v8 bound to the settlement
+digest. Receipt, environment, provider, runtime and evidence state remain
+unchanged in that sibling.
 
 Dedicated v6 recovery can retire an inert stage, complete partial witness
 publication, or relink an exact standalone witness before settlement. Recovery
@@ -275,14 +295,19 @@ tamper tests are deterministic no-spawn evidence only. The marker coordinates
 cooperative same-UID owners and is not protection against hostile same-UID
 code. `reservation_recovery_authorized` does not grant provider-effect recovery.
 
-Process execution remains blocked on ADR-0104's indivisible sibling generation,
-which branches directly from the exact completed start decision and must not
-extend this terminal no-spawn reservation or reuse its evidence. The sibling
-must hold its distinct effect witness across process authorization and effect,
-complete recursive post-start settlement, and causal identity/recovery for the
-outer process, detached Lima hostagent, usernet and SSH ControlMaster. Live
+Real process execution remains blocked. ADR-0104's sibling generation branches
+directly from the exact completed start decision and must not extend the
+terminal no-spawn reservation or reuse its evidence. The fixture now proves
+only the conclusively-not-created attempted tail. Authenticated live causal
+identity/recovery for the outer process, detached Lima hostagent, usernet and
+SSH ControlMaster, recursive post-start inventory, endpoint/quiescence evidence
+and explicit operator resolution for uncertain delivery remain open. Live
 macOS proxy observation and individual OS-executable identity evidence also
-remain open.
+remain open. No persisted receipt/journal generation advances: receipt v6,
+slot v7, recovery/root v6 and close v8 remain unchanged. The process-free
+blueprint advances to v2; new adapter contract/result and private
+tail-observation domains start at v1. Both operation-contract digests remain
+unchanged.
 
 Live Linux/provider CI and a current Docker Desktop/provider run remain absent.
 Consequently this evidence improves the boundary without changing readiness.

@@ -2,6 +2,7 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   publishColimaLiveProviderEffectAttemptFenceForTest,
+  publishColimaLiveProviderEffectConclusiveNotCreatedForTest,
   publishColimaLiveProviderEffectPreAttemptForTest,
   recoverColimaLiveProviderEffectForTest,
 } from "../../deploy/compose/scripts/clean-engine-state.mjs";
@@ -35,7 +36,9 @@ const values = process.argv.slice(2);
 const [action, repoRoot, stateBase, checkpoint, releasePath] = values;
 if (
   values.length !== 5 ||
-  !new Set(["attempt", "collision", "publish", "recover"]).has(action) ||
+  !new Set(["attempt", "collision", "conclusive", "publish", "recover"]).has(
+    action,
+  ) ||
   [repoRoot, stateBase, checkpoint, releasePath].some(
     (value) => typeof value !== "string" || value.length === 0,
   )
@@ -73,6 +76,10 @@ if (
       publishColimaLiveProviderEffectPreAttemptForTest(argumentsValue);
     } else if (action === "attempt") {
       publishColimaLiveProviderEffectAttemptFenceForTest(argumentsValue);
+    } else if (action === "conclusive") {
+      publishColimaLiveProviderEffectConclusiveNotCreatedForTest(
+        argumentsValue,
+      );
     } else {
       recoverColimaLiveProviderEffectForTest(argumentsValue);
     }

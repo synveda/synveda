@@ -418,25 +418,65 @@ state module exposes fixture-only publication and recovery seams: it creates a
 private random stage, derives the witness from that inode, binds the fixed
 provider-root marker by no-replace hard link and publishes authority only after
 the exact topology is durable. A pre-attempt retirement has a zero receipt
-delta. An attempt fence keeps the marker/witness at two links, invokes no
-process and refuses automatic recovery. Recovery requires the original owner
-and newest recoverer to be absent, advances only a validated physical/event
-frontier, and fsyncs marker retirement before completion. Foreign markers,
-unexpected links, malformed witnesses and crossed production/fixture tuples
-fail closed. These seams are test-only; no supported lifecycle or production
-effect invoker exists.
+delta. An attempt fence keeps the marker/witness at two links and launches or
+adopts no provider process. The sole attempted exception consumes an exact
+process-free
+`conclusive-not-created` adapter result, then publishes the 11-event
+authority/attempt/delivery/settlement/cleanup/receipt/completion history. The
+staged receipt bytes are canonical-byte-identical to the receipt embedded in
+the terminal event. The final receipt path is hard-linked from that staged
+inode; after directory fsync and stage retirement, the one-link final receipt
+is durable before marker unlink, bound provider-root fsync, completion and
+close.
 
-The fixture attempt plan uses a pure, process-free launch blueprint. Runtime
+Recovery requires the original owner and newest recoverer to be absent.
+Recovery never calls the adapter executor; state exact-byte loads the module
+and recovery validates the durable result. An attempt without exact durable
+delivery remains operator-blocked. After delivery, recovery revalidates the
+fixed adapter result, opaque proposed-outer-node identity commitment,
+source/component/blueprint binding, provider root, all six namespace identities
+and the accepted event prefix, then resumes only the missing suffix. Pending
+receipt reconciliation preserves the observed staged inode and exact embedded
+bytes. Receipt-first, marker-first, embedded/global mismatch, foreign markers,
+unexpected links, malformed witnesses, physical drift and crossed
+production/fixture tuples fail closed. These seams are test-only; no supported
+lifecycle or production effect invoker exists.
+
+The fixture attempt plan uses pure, process-free blueprint v2. Runtime
 component files are opened with `O_NOFOLLOW`, hashed through their descriptors
-and checked against pre/post path identity; the hashes are re-proved at the
-start-authority and attempt boundaries. Domain-separated HMAC under the
-unpersisted observation binding key derives Ed25519 role seeds, role/endpoint
-challenges and private-path identities. Durable artifacts contain only public
-SPKI hashes and opaque commitments, never the binding key, private key bytes or
-raw component/provider paths. The Darwin child environment is closed and
-digest-bound. These are planned commitments only: no process or endpoint is
-observed, and the standalone HMAC process fixture remains a separate
-non-authoritative test.
+and checked against pre/post path identity. Its fourth component is the
+`conclusive-adapter`, pinned by source and contract digest. State removes the
+ordinary static-import race by descriptor-reading and source-digest-checking
+the adapter before evaluating those exact bytes, then requires every later
+blueprint manifest to equal that loaded digest. Component, source and physical
+bindings are re-proved at event, receipt, marker-retirement, close and recovery
+boundaries; cleanup separately opens and fsyncs the exact bound descriptor for
+each of the six namespace parents.
+
+Domain-separated HMAC under the unpersisted observation binding key derives
+Ed25519 role seeds, role/endpoint challenges, private-path identities and the
+opaque proposed-outer-node identity commitment. Durable artifacts contain
+public SPKI material plus content-free hashes and opaque commitments, never the
+binding key, private key bytes, raw component/provider paths, adapter result
+schema or environment values. Only the closed content-free delivery fields
+enter the event chain. The Darwin child
+environment is closed and digest-bound. The adapter can report only
+`conclusive-not-created`, zero child handle, `effect_possible: false` and safe
+code `not-created`; it has no filesystem, network, process, provider or runtime
+publication capability. These are planned commitments and deterministic
+retirement evidence only: no provider process is launched or adopted and no
+live endpoint is contacted or authenticated. The standalone HMAC process
+fixture remains a separate non-authoritative test.
+
+The provider-root and namespace protocols coordinate cooperating same-UID
+processes. They do not protect against hostile same-UID code that can mutate
+private files between syscalls; exact descriptor/inode checks and bracketed
+reproofs make such interference fail closed when observed but do not create a
+new principal boundary. No persisted receipt/journal generation advances:
+receipt v6, slot v7, recovery/root v6 and close v8 remain unchanged. The
+process-free blueprint advances to v2; new adapter contract/result and private
+tail-observation domains start at v1. The operation-contract digests remain
+unchanged.
 
 The earlier non-persisted prerequisite projection remains a separate inert
 review artifact. It defines no action, operation kind or contract, retains its
@@ -452,7 +492,7 @@ occurrence. Every refusal is a content-free typed configuration failure; valid
 closed values retain their canonical bytes and digests. These input-safety bounds grant no
 state or effect authority.
 
-The successor no-spawn reservation is a cooperative same-UID exclusion
+The separate terminal no-spawn sibling is a cooperative same-UID exclusion
 protocol, not a hostile-principal boundary. Its v7 slot precedes filesystem
 mutation. A private fsynced mode-0600 witness binds the exact state run,
 provider root and all six namespace identities and inventories. Those eight

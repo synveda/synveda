@@ -34,6 +34,8 @@ import {
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const ZERO_SHA256 = "0".repeat(64);
+const ADAPTER_CONTRACT_SHA256 =
+  "f97fef2c614db9e656a0cb9ed7ad79a5ce4eae314103670c57c988f8c707c6f2";
 const AUTHORITY_ROOTS = [
   ".claude",
   ".github",
@@ -76,10 +78,13 @@ const BLUEPRINT_STATIC_IMPORTERS = new Set([
   ),
   join(ROOT, "scripts/clean-engine-state.test.mjs"),
 ]);
-const BLUEPRINT_REFERENCE_ONLY = join(
-  ROOT,
-  "scripts/check-cpr-45-four-role-boundary.test.mjs",
-);
+const BLUEPRINT_REFERENCE_ONLY = new Set([
+  join(ROOT, "scripts/check-cpr-45-four-role-boundary.test.mjs"),
+  join(
+    ROOT,
+    "scripts/clean-engine-live-provider-effect-fixture-adapter.test.mjs",
+  ),
+]);
 const BLUEPRINT_FORBIDDEN_AUTHORITY_SURFACES = [
   "deploy/compose/scripts/clean-engine-acceptance.sh",
   "deploy/compose/scripts/clean-engine-provider-adapter-registry.mjs",
@@ -99,6 +104,7 @@ function valueDigest(value) {
 
 function inputFixture() {
   return {
+    adapter_contract_sha256: ADAPTER_CONTRACT_SHA256,
     architecture: "arm64",
     component_manifest:
       COLIMA_LIVE_PROVIDER_EFFECT_FIXTURE_BLUEPRINT_COMPONENTS.map(
@@ -220,6 +226,15 @@ test("the fixture launch blueprint is one closed process-free public projection"
     blueprint.schema,
     COLIMA_LIVE_PROVIDER_EFFECT_FIXTURE_BLUEPRINT_SCHEMA,
   );
+  assert.equal(
+    blueprint.schema,
+    "synveda.clean-engine.colima-live-fixture-provider-effect-blueprint.v2",
+  );
+  assert.equal(
+    liveProviderEffectFixtureBlueprintDigest(blueprint),
+    "6c9c9c543890cc9053d72281211dc0a36531316a45b634bbedf75296fb957b7d",
+  );
+  assert.equal(blueprint.adapter_contract_sha256, ADAPTER_CONTRACT_SHA256);
   assert.equal(blueprint.authority, "none-process-free-public-projection-only");
   assert.equal(blueprint.evidence_class, "fixture-only");
   assert.equal(
@@ -287,11 +302,23 @@ test("the fixture launch blueprint is one closed process-free public projection"
         kind: "role",
         module_path: "../../../scripts/fixtures/cpr-45-four-role/role.mjs",
       },
+      {
+        kind: "conclusive-adapter",
+        module_path: "./clean-engine-live-provider-effect-fixture-adapter.mjs",
+      },
     ],
   );
   assert.equal(
     blueprint.invocation_binding.toolchain_sha256,
     blueprint.role_contracts[0].toolchain_sha256,
+  );
+  assert.equal(
+    blueprint.invocation_binding.toolchain_sha256,
+    "745f5b0c88a28d91245772f6bca18a8f2b8b9ed4a56d58db0a295e8741d59719",
+  );
+  assert.equal(
+    blueprint.driver_contract_sha256,
+    "159b8389002aa2e789cbcb70362f186ec182be16e1f2d253526516500b5e0c9e",
   );
   assert.equal(
     new Set(
@@ -328,6 +355,7 @@ test("every public driver commitment is bound and class confusion is refused", (
     [["architecture"], "x64"],
     [["platform"], "linux"],
     [["fixture_id"], "b".repeat(32)],
+    [["adapter_contract_sha256"], digest("other-adapter-contract")],
     [["planned_start_attempt_sha256"], digest("other-attempt")],
     [
       ["planned_quiescence_fence_sha256"],
@@ -335,6 +363,7 @@ test("every public driver commitment is bound and class confusion is refused", (
     ],
     [["environment_sha256"], digest("other-environment")],
     [["component_manifest", 1, "sha256"], digest("other-blueprint")],
+    [["component_manifest", 3, "sha256"], digest("other-adapter")],
     [["role_bindings", 2, "argv_sha256"], digest("other-argv")],
     [["role_bindings", 3, "public_key_spki_sha256"], digest("other-key")],
     [
@@ -356,6 +385,7 @@ test("every public driver commitment is bound and class confusion is refused", (
     [["operation_kind"], "colima-live-provider-effect-v1"],
     [["operation_contract_sha256"], digest("production-contract")],
     [["component_manifest", 0, "kind"], "provider-binary"],
+    [["component_manifest", 3, "kind"], "provider-adapter"],
     [["role_bindings", 0, "role"], "hostagent"],
     [["role_bindings", 0, "uid"], "-1"],
     [["role_bindings", 1, "uid"], "502"],
@@ -454,6 +484,7 @@ test("the blueprint module has no observation, executor or authority imports", (
   assert.deepEqual(references.map((candidate) => relative(ROOT, candidate)).sort(), [
     "deploy/compose/scripts/clean-engine-state.mjs",
     "scripts/check-cpr-45-four-role-boundary.test.mjs",
+    "scripts/clean-engine-live-provider-effect-fixture-adapter.test.mjs",
     "scripts/clean-engine-live-provider-effect-fixture-blueprint.test.mjs",
     "scripts/clean-engine-state.test.mjs",
   ]);
@@ -473,11 +504,13 @@ test("the blueprint module has no observation, executor or authority imports", (
       assert.doesNotMatch(importerSource, pattern, importer);
     }
   }
-  const referenceOnlySource = readFileSync(BLUEPRINT_REFERENCE_ONLY, "utf8");
-  assert.match(referenceOnlySource, quotedBlueprint);
-  assert.doesNotMatch(referenceOnlySource, staticBlueprintImport);
-  for (const pattern of nonStaticBlueprintImports) {
-    assert.doesNotMatch(referenceOnlySource, pattern);
+  for (const referenceOnly of BLUEPRINT_REFERENCE_ONLY) {
+    const referenceOnlySource = readFileSync(referenceOnly, "utf8");
+    assert.match(referenceOnlySource, quotedBlueprint);
+    assert.doesNotMatch(referenceOnlySource, staticBlueprintImport);
+    for (const pattern of nonStaticBlueprintImports) {
+      assert.doesNotMatch(referenceOnlySource, pattern);
+    }
   }
   for (const boundary of BLUEPRINT_FORBIDDEN_AUTHORITY_SURFACES) {
     assert.doesNotMatch(

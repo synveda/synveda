@@ -356,32 +356,58 @@ hard cut. A test-only state publisher creates a sequence-bound private stage,
 derives its witness identity from the physical inode, acquires the fixed marker
 by hard-link CAS and publishes events only after the marker/witness topology is
 durable. It can retire before attempt with no receipt, or stop at a durable
-attempt fence without invoking a process. Fixture recovery proves both the
-original owner and latest recoverer absent, resumes only forward pre-attempt
-topologies and never crosses an attempt fence. The generic receipt path cannot
-publish `provider-effect-retired`. No supported lifecycle, production effect
-entry point, Docker/Colima/Lima invocation or readiness claim follows.
+attempt fence without delivery. One exact process-free fixture adapter may
+return only `conclusive-not-created`, zero child-handle identity,
+`effect_possible: false` and safe code `not-created`. The state owner then
+publishes the exact 11-event authority/attempt/delivery/settlement/cleanup/
+receipt/completion history. The staged receipt bytes are
+canonical-byte-identical to the receipt embedded in the terminal event. The
+final receipt path is hard-linked from that staged inode; after directory fsync
+and stage retirement, the one-link final receipt is durable before marker
+unlink, bound provider-root fsync, completion and close.
 
-The fixture effect plan is now projected by a closed process-free blueprint.
-It hashes the fixed Node/protocol/role bytes through no-follow descriptors,
-binds the closed child environment and exact planned role/endpoint topology,
-and derives Ed25519 public identities plus private-path/challenge commitments
-from the unpersisted fixture binding key. State re-proves the component bytes
-before start-authority and attempt publication. Only public/opaque digests are
-durable. The blueprint invokes no process, observes no endpoint and does not
-turn the separate standalone four-process harness into deployment evidence.
+Fixture recovery proves both the original owner and latest recoverer absent.
+Recovery never calls the adapter executor; state exact-byte loads the module
+and recovery validates the durable result. It is operator-blocked after an
+attempt until exact durable delivery exists. It may then revalidate the fixed
+result, opaque proposed-outer-node identity commitment,
+source/component/blueprint binding, provider root, all six namespaces and event
+prefix, and resume only the missing suffix under the newest claim. A pending
+receipt's canonical bytes matching the embedded receipt and its observed
+staged inode are preserved; receipt-first, marker-first, mismatch, physical
+drift and crossed evidence fail closed. The generic receipt path
+cannot publish `provider-effect-retired`. No supported lifecycle, production
+effect entry point, Docker/Colima/Lima invocation or readiness claim follows.
+
+The fixture effect plan is projected by closed process-free blueprint v2. Its
+fourth component is `conclusive-adapter`, whose contract digest is
+`f97fef2c614db9e656a0cb9ed7ad79a5ce4eae314103670c57c988f8c707c6f2`.
+State descriptor-reads and source-digest-pins the adapter before evaluating the
+same bytes, requires the later manifest to match, and re-proves it with the
+fixed Node/protocol/role components at event, receipt, marker-retirement, close
+and recovery boundaries. The blueprint binds the closed child environment and
+exact planned role/endpoint topology and derives Ed25519 public identities plus
+private-path/challenge commitments from the unpersisted fixture binding key.
+Public SPKI material plus content-free hashes and opaque commitments are
+durable; no private key, raw path or environment value is serialized. No
+persisted receipt/journal generation advances: receipt v6, slot v7,
+recovery/root v6 and close v8 remain unchanged. The process-free blueprint
+advances to v2; new adapter contract/result and private tail-observation
+domains start at v1. Operation-contract digests remain unchanged. This launches
+or adopts no provider process, contacts no endpoint and does not turn the
+separate standalone four-process harness into deployment evidence.
 
 The earlier non-persisted prerequisite projection remains a separate inert
 review artifact. It defines no action, operation kind or contract, retains its
 own 512-occurrence preflight, and is consumed by neither state nor the pure
 effect grammar.
 
-The internal state/test seam may then publish one cooperative no-spawn
-reservation generation. A v7 slot is durable before a private mode-0600 witness
-stage is written and fsynced. Its immutable plan binds one canonical provider
-root, all six fixed namespace identities and inventories, and one private state
-run. The eight directories must have distinct identities, retain current-UID
-private modes and share one device. A no-replace hard link at the fixed
+Separately, ADR-0103's mutually exclusive terminal no-spawn sibling may publish
+one cooperative reservation generation. A v7 slot is durable before a private
+mode-0600 witness stage is written and fsynced. Its immutable plan binds one
+canonical provider root, all six fixed namespace identities and inventories,
+and one private state run. The eight directories must have distinct identities,
+retain current-UID private modes and share one device. A no-replace hard link at the fixed
 `.synveda-clean-engine-provider-reservation` basename is the sole CAS. Exact
 marker/stage/witness bytes, device, inode, UID, mode, size and link counts are
 checked throughout durable state-witness publication.
@@ -404,14 +430,14 @@ topology and namespace drift block without adoption. This coordinates only
 cooperative same-UID owners; hostile same-UID code can ignore, unlink or replace
 the marker. It grants reservation recovery only, not provider-effect recovery.
 
-Before execution can be enabled, ADR-0104's indivisible sibling generation must
-branch directly from the exact completed start decision and must not extend
-this terminal no-spawn reservation or reuse its evidence. The sibling must hold
-its distinct effect witness across process authorization and effect, complete
-recursive post-start settlement, and establish causal identity and recovery
-for the outer process, detached Lima hostagent, usernet and SSH ControlMaster.
-Live macOS proxy observation and per-file OS-executable identity also remain
-open.
+Before provider-process execution can be enabled, ADR-0104's indivisible
+sibling generation must branch directly from the exact completed start
+decision and must not extend this terminal no-spawn reservation or reuse its
+evidence. The sibling must hold its distinct effect witness across process
+authorization and effect, complete recursive post-start settlement, and
+establish causal identity and recovery for the outer process, detached Lima
+hostagent, usernet and SSH ControlMaster. Live macOS proxy observation and
+per-file OS-executable identity also remain open.
 
 No supported lifecycle target exposes a plan, live-intent, start-decision or
 reservation fixture seam; there is no live provider execution, supported or

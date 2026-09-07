@@ -3,13 +3,14 @@ import { createHash } from "node:crypto";
 import { isProxy } from "node:util/types";
 
 export const COLIMA_LIVE_PROVIDER_EFFECT_FIXTURE_BLUEPRINT_SCHEMA =
-  "synveda.clean-engine.colima-live-fixture-provider-effect-blueprint.v1";
+  "synveda.clean-engine.colima-live-fixture-provider-effect-blueprint.v2";
 
 export const COLIMA_LIVE_PROVIDER_EFFECT_FIXTURE_BLUEPRINT_COMPONENTS =
   Object.freeze([
     "node-runtime",
     "protocol",
     "role",
+    "conclusive-adapter",
   ]);
 
 export const COLIMA_LIVE_PROVIDER_EFFECT_FIXTURE_BLUEPRINT_COMPONENT_LOCATORS =
@@ -22,6 +23,10 @@ export const COLIMA_LIVE_PROVIDER_EFFECT_FIXTURE_BLUEPRINT_COMPONENT_LOCATORS =
     Object.freeze({
       kind: "role",
       module_path: "../../../scripts/fixtures/cpr-45-four-role/role.mjs",
+    }),
+    Object.freeze({
+      kind: "conclusive-adapter",
+      module_path: "./clean-engine-live-provider-effect-fixture-adapter.mjs",
     }),
   ]);
 
@@ -99,6 +104,8 @@ export const COLIMA_LIVE_PROVIDER_EFFECT_FIXTURE_ENDPOINT_TOPOLOGY =
 const FIXTURE_OPERATION_KIND = "colima-live-fixture-provider-effect-v1";
 const FIXTURE_OPERATION_CONTRACT_SHA256 =
   "2926b334f9f63a665fc3648e32e3438627bff04a9dd90d1fed9b71e3d23aeae8";
+const CONCLUSIVE_ADAPTER_CONTRACT_SHA256 =
+  "f97fef2c614db9e656a0cb9ed7ad79a5ce4eae314103670c57c988f8c707c6f2";
 const EFFECT_STATE_INTEGRATION = "mutation-journal-v7-sibling-effect-only";
 const ROLES = Object.freeze([
   "outer",
@@ -113,6 +120,7 @@ const ENDPOINTS = Object.freeze([
   "engine-api",
 ]);
 const INPUT_FIELDS = Object.freeze([
+  "adapter_contract_sha256",
   "architecture",
   "component_manifest",
   "endpoint_bindings",
@@ -126,6 +134,7 @@ const INPUT_FIELDS = Object.freeze([
   "role_bindings",
 ]);
 const BLUEPRINT_FIELDS = Object.freeze([
+  "adapter_contract_sha256",
   "architecture",
   "authority",
   "bounds",
@@ -462,6 +471,7 @@ function validateInput(input) {
   liveProviderEffectFixtureBlueprintBytes(input);
   exactKeys(input, INPUT_FIELDS, "live provider effect fixture blueprint input");
   if (
+    input.adapter_contract_sha256 !== CONCLUSIVE_ADAPTER_CONTRACT_SHA256 ||
     !new Set(["arm64", "x64"]).has(input.architecture) ||
     !new Set(["darwin", "linux"]).has(input.platform) ||
     !/^[0-9a-f]{32}$/u.test(input.fixture_id) ||
@@ -630,6 +640,7 @@ function blueprintFor(input) {
     sequence,
   }));
   return {
+    adapter_contract_sha256: input.adapter_contract_sha256,
     architecture: input.architecture,
     authority: "none-process-free-public-projection-only",
     bounds: { ...COLIMA_LIVE_PROVIDER_EFFECT_FIXTURE_BLUEPRINT_BOUNDS },

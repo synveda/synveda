@@ -383,53 +383,78 @@ consumed by neither state nor the pure effect grammar.
 The fixture grammar binds the distinct witness and fixed marker, one start
 authority and attempt, four authenticated roles, four causal edges at depth
 two, four endpoint/socket identities plus the private Docker-context identity
-and bytes, quiescence, two
-equal paged recursive inventories over all six namespaces, trusted v5 baseline
-descriptors, intra-namespace hard-link closure, exact directory-scaffolding
-capacity, derived cleanup, paged progress, terminal receipt and marker
-retirement. Six closed histories and 24 deterministic tests exercise every
-event/descriptor field, paging, alias, capacity and terminal branch. The
-boundary-owned module has no direct filesystem, process, network, state or
-executor import, and a tripwire proves construction and validation invoke no
-observation I/O.
+and bytes, quiescence, two equal paged recursive inventories over all six
+namespaces, trusted v5 baseline descriptors, intra-namespace hard-link closure,
+exact directory-scaffolding capacity, derived cleanup, paged progress,
+terminal receipt and marker retirement. Its closed-history and pure-effect
+suites exercise every event/descriptor field, paging, alias, capacity and
+terminal branch without maintaining a volatile test count. The boundary-owned
+module has no direct filesystem, process, network, state or executor import,
+and a tripwire proves construction and validation invoke no observation I/O.
 
 The test-only state publisher persists a sequence-bound private stage,
 inode-derived effect witness, fixed marker and exact event history directly
 after the completed fixture decision. It may retire before attempt with no
-receipt, or publish an attempt fence and stop without process invocation.
-Fixture recovery requires the original owner and newest recoverer to be absent,
-advances only validated forward topologies, retains repeated same-frontier
-claims and refuses the attempt fence. Partial stages, marker collision,
-interrupted retirement and transitive recovery are deterministic evidence. The
-generic receipt API rejects the state-owned `provider-effect-retired` phase
-before acquiring a slot. All mutation/recovery exports are test-only, and
-caller-held pure bytes are not state provenance or branch selection.
+receipt, stop at an attempt fence without delivery, or consume the one exact
+process-free `conclusive-not-created` adapter result. That bounded attempted
+tail publishes 11 events in order: `start-authority`, `start-attempt`,
+`launch-edge`, `delivery-result`, `create-settlement`, `cleanup-plan-page`,
+`cleanup-plan`, `cleanup-progress`, `cleanup-settlement`, `terminal-receipt`
+and `completion`. The staged receipt bytes are canonical-byte-identical to the
+receipt embedded in the terminal event. The final receipt path is hard-linked
+from that staged inode; after directory fsync and stage retirement, the
+one-link final receipt is durable before marker unlink, bound provider-root
+fsync, completion and close. The generic receipt API rejects the state-owned
+`provider-effect-retired` phase before acquiring a slot. All mutation/recovery
+exports remain test-only, and caller-held pure bytes are not state provenance
+or branch selection.
 
-That state plan now consumes a closed process-free launch blueprint instead of
-synthetic label commitments. It binds descriptor-stable hashes of the fixed
-Node/protocol/role runtime, exact planned argv/cwd/closed environment, four
-roles and four endpoints. Ed25519 public-key identities, challenges, endpoint
-paths, the start attempt and quiescence fence derive from the unpersisted
-fixture binding key; only opaque digests are durable. Component bytes are
-re-opened with no-follow descriptor checks at authority boundaries. Receipt v6,
-slot v7, recovery/root v6, close v8 and both effect-contract digests are
-unchanged. This remains pre-execution evidence: it invokes no process, proves
-no endpoint and grants no production, registry, recovery or lifecycle
+That state plan now consumes the closed process-free launch blueprint v2
+instead of synthetic label commitments. The fourth component is a
+`conclusive-adapter` pinned to contract digest
+`f97fef2c614db9e656a0cb9ed7ad79a5ce4eae314103670c57c988f8c707c6f2`.
+Together with descriptor-stable hashes of the fixed Node/protocol/role bytes,
+it binds exact planned argv/cwd/closed environment, four roles and four
+endpoints. The adapter returns only `conclusive-not-created`, a zero child
+handle, `effect_possible: false` and safe code `not-created`; it has no
+filesystem, network, process, provider or runtime-publication capability.
+Ed25519 public identities and private-path/challenge commitments derive from
+the unpersisted fixture binding key. Public SPKI material plus content-free
+hashes and opaque commitments are durable; no private key, raw path or
+environment value is serialized. State re-opens the exact source/component
+bytes with no-follow descriptor checks at event, marker-retirement, close and
+recovery boundaries. No persisted receipt/journal generation advances:
+receipt v6, slot v7, recovery/root v6 and close v8 remain unchanged. The
+process-free blueprint advances to v2; new adapter contract/result and private
+tail-observation domains start at v1. Both effect-contract digests remain
+unchanged.
+
+Attempted recovery remains operator-blocked before an exact durable delivery
+event. Recovery never calls the adapter executor; state exact-byte loads the
+module and recovery validates the durable result. After that event, it
+revalidates the fixed adapter result, opaque proposed-outer-node identity
+commitment, source/component/blueprint binding, provider root, all six
+namespace identities and event prefix, then resumes only the missing suffix
+under the newest claim. Receipt-first, marker-first, embedded/global mismatch,
+malformed or crossed evidence and physical drift fail closed. A pending
+receipt's canonical bytes matching the embedded receipt and its observed
+staged inode can be reconciled, and repeated same-frontier recoverers are
+retained while only the newest may publish. This is deterministic
+conclusive-not-created retirement evidence: it launches or adopts no provider
+process, proves no endpoint and grants no production, registry or lifecycle
 authority.
 
 The accepted branch starts after the completed start decision, not as a
 successor to ADR-0103's terminal no-spawn completion. It uses a distinct
-effect-witness inode
-at the same fixed provider-root CAS and leaves ADR-0103's one-link
-`not-started` witness and retired-marker semantics unchanged. It requires a
-durable single-use start-attempt fence, causal identity for the outer Colima
-process, detached Lima hostagent, usernet and SSH ControlMaster, authenticated
-Engine/socket/context evidence, a complete bounded recursive post-start
-inventory, no-replay recovery and exact leaf-first retirement. The live create
+effect-witness inode at the same fixed provider-root CAS and leaves ADR-0103's
+one-link `not-started` witness and retired-marker semantics unchanged. The
+fixture now proves the bounded conclusively-not-created attempted tail, but
+real causal identity for the outer Colima process, detached Lima hostagent,
+usernet and SSH ControlMaster, authenticated Engine/socket/context evidence and
+a complete bounded recursive post-start inventory remain open. The live create
 tuple remains planning-only, cleanup deny-only, the supported lifecycle remains
-`plan|status|verify`, and no process, provider, receipt, environment, runtime,
-finalization or readiness authority follows until the complete atomic hard cut
-is implemented and independently reviewed.
+`plan|status|verify`, and no process, provider, environment, runtime,
+finalization or readiness authority follows from this slice.
 The controlled-background contract is separately class-closed at v5: it names
 only repository-owned Node controller/host-agent fixture ancestry and exports
 no live preparation, host-validation or start-authority API. It cannot satisfy

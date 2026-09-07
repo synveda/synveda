@@ -265,29 +265,55 @@ close v8 as one hard cut. After the exact completed fixture start decision, a
 test-only publisher commits a sequence-bound physical stage, inode-derived
 witness and fixed external marker before any authority event. It may either
 retire the marker and publish a zero-receipt pre-attempt completion, or publish
-an attempt fence and stop with the marker/witness inode held at two links. The
-attempt fence invokes no process and is not recoverable automatically.
+an attempt fence and stop with the marker/witness inode held at two links, or
+consume the exact process-free `conclusive-not-created` result and retire the
+attempt through the complete bounded tail. The attempted event order is
+`start-authority`, `start-attempt`, `launch-edge`, `delivery-result`,
+`create-settlement`, `cleanup-plan-page`, `cleanup-plan`, `cleanup-progress`,
+`cleanup-settlement`, `terminal-receipt`, `completion`. The byte-identical
+global receipt is linked from its exact staged inode and durable before marker
+unlink and bound provider-root fsync; close remains last.
 
-The fixture plan is now produced by a closed process-free launch blueprint.
-Without changing any persisted generation, it projects descriptor-stable
-Node/protocol/role component hashes, exact planned invocation/role/endpoint
-contracts and binding-key-derived Ed25519 public identities into the existing
-plan, slot and witness. The binding key and derived private key material are not
-persisted. State re-proves component bytes before authority and attempt
-publication. This precursor is not process or endpoint evidence and does not
-make the separate standalone four-role harness a state-owned executor.
+The fixture plan is produced by closed process-free launch blueprint v2. Its
+fourth component is `conclusive-adapter`, with v1 contract digest
+`f97fef2c614db9e656a0cb9ed7ad79a5ce4eae314103670c57c988f8c707c6f2`.
+Without changing a persisted state generation, it projects descriptor-stable
+Node/protocol/role/adapter component hashes, exact planned
+invocation/role/endpoint contracts and binding-key-derived Ed25519 public
+identities into the existing plan, slot and witness. State snapshots the loaded
+adapter source before any user checkpoint and requires all later descriptor
+hashes to match. The adapter can return only `conclusive-not-created`, zero
+child-handle identity, `effect_possible: false` and safe code `not-created`; it
+has no filesystem, network, process, provider or runtime-publication
+capability. Binding/private key and raw path material are not persisted.
 
 Fixture-only recovery proves the original owner and newest prior recoverer are
 absent, binds every claim to the observed physical/event frontier, supports
-crash-safe forward completion before attempt, and never crosses an attempt
-fence. Multiple claims at one frontier are legal because a recoverer can die
-immediately after its claim; only the newest claim can publish or close. The
-generic receipt path refuses `provider-effect-retired` before acquiring a slot.
-Receipt v6 reserves that exact state-owned terminal phase for the future
-attempted-effect tail, while the implemented pre-attempt completion changes no
-receipt. No process or provider is invoked, and all effect mutation/recovery
-exports remain test-only. Caller-held pure bytes are replayable contract data,
-not state provenance or branch selection.
+crash-safe forward completion before attempt, and remains operator-blocked at
+an attempt fence until the exact durable conclusive delivery event exists. It
+never calls the adapter executor; state exact-byte loads the module and
+recovery validates the durable result. After that event, recovery revalidates
+the fixed result, opaque proposed-outer-node identity commitment,
+source/component/blueprint binding, provider root, all six namespaces and the
+event prefix, then resumes only the missing suffix. Receipt-first,
+marker-first, embedded/global mismatch, malformed or crossed evidence and
+physical drift fail closed. A pending receipt is reconciled only with exact
+bytes and the observed staged inode. Multiple claims at one
+frontier are legal because a recoverer can die immediately after its claim;
+only the newest claim can publish or close. The generic receipt path refuses
+`provider-effect-retired` before acquiring a slot; only the exact fixture owner
+or recoverer publishes that reserved phase. No provider process is launched or
+adopted, and all effect mutation/recovery exports remain test-only. Caller-held
+pure bytes are replayable contract data, not state provenance or branch
+selection.
+
+No persisted receipt/journal generation advances in this amendment slice:
+receipt v6, slot v7, recovery/root v6 and close v8 remain unchanged. The
+process-free blueprint advances to v2; new adapter contract/result and private
+tail-observation domains start at v1. The production and fixture operation
+contract digests remain unchanged. This is conclusive-not-created retirement
+evidence, not a live process, endpoint, provider, platform, lifecycle,
+finalization or readiness result.
 
 The earlier non-persisted prerequisite projection remains a separate inert
 review artifact. It defines no action, operation kind or operation contract,
